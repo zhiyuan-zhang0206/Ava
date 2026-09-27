@@ -18,7 +18,7 @@ from uuid import uuid4
 
 import pytest
 
-from cli.commands import cluster as cluster_cmd
+from cli.commands.cluster import control as cluster_cmd
 from shared.cluster.authority import channel, unit
 
 _ENDPOINT = "postgresql://ava@10.0.0.7:6433/ava"

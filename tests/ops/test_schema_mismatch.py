@@ -10,7 +10,7 @@ from typing import NoReturn, cast
 import psycopg
 import pytest
 
-from cli.commands.cluster import _schema_mismatch_banner
+from cli.commands.cluster.control import _schema_mismatch_banner
 from ops import schema_mismatch
 from ops.cluster_status import ClusterStatus
 from shared import migration_layout

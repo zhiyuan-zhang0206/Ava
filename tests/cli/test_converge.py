@@ -7,8 +7,9 @@ from typing import cast
 
 import pytest
 
-from cli.commands import _converge_frontend_env as _fe_env
-from cli.commands import _converge_steps, converge
+from cli.commands.converge import _frontend_env as _fe_env
+from cli.commands.converge import _steps
+from cli.commands.converge import host as converge_host
 
 
 @pytest.fixture
@@ -19,7 +20,7 @@ def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
 
 def _ctx(repo: Path, ava_home: Path, roles=None):
-    return converge.ConvergeCtx(repo=repo, ava_home=ava_home, roles=roles)  # pyright: ignore[reportUnknownArgumentType]
+    return converge_host.ConvergeCtx(repo=repo, ava_home=ava_home, roles=roles)  # pyright: ignore[reportUnknownArgumentType]
 
 
 def test_ensure_ava_symlink_creates_and_is_idempotent(home, tmp_path: Path):
@@ -28,12 +29,12 @@ def test_ensure_ava_symlink_creates_and_is_idempotent(home, tmp_path: Path):
     (repo / ".venv" / "bin" / "ava").write_text("#!/bin/sh\n")
     ctx = _ctx(repo, home)  # pyright: ignore[reportUnknownArgumentType]
 
-    converge._ensure_ava_symlink(ctx)
+    converge_host._ensure_ava_symlink(ctx)
     link = home / ".local" / "bin" / "ava"
     assert link.is_symlink()  # pyright: ignore[reportUnknownMemberType]
     assert link.readlink() == repo / ".venv" / "bin" / "ava"  # pyright: ignore[reportUnknownMemberType]
 
-    converge._ensure_ava_symlink(ctx)  # second run must not raise
+    converge_host._ensure_ava_symlink(ctx)  # second run must not raise
     assert link.readlink() == repo / ".venv" / "bin" / "ava"  # pyright: ignore[reportUnknownMemberType]
 
 
@@ -48,7 +49,7 @@ def test_ensure_ava_symlink_repoints_stale_link(home, tmp_path: Path):
     (repo / ".venv" / "bin").mkdir(parents=True)
     (repo / ".venv" / "bin" / "ava").write_text("#!/bin/sh\n")
 
-    converge._ensure_ava_symlink(_ctx(repo, home))  # pyright: ignore[reportUnknownArgumentType]
+    converge_host._ensure_ava_symlink(_ctx(repo, home))  # pyright: ignore[reportUnknownArgumentType]
 
     assert link.readlink() == repo / ".venv" / "bin" / "ava"  # pyright: ignore[reportUnknownMemberType]
 
@@ -58,18 +59,18 @@ def test_ensure_local_bin_on_path_block_is_idempotent(home, tmp_path: Path):
     rc = home / ".zshrc"
     rc.write_text("export FOO=1\n")  # pyright: ignore[reportUnknownMemberType]
 
-    converge._ensure_local_bin_on_path(ctx)
-    converge._ensure_local_bin_on_path(ctx)
+    converge_host._ensure_local_bin_on_path(ctx)
+    converge_host._ensure_local_bin_on_path(ctx)
 
     text = rc.read_text()  # pyright: ignore[reportUnknownMemberType]
-    assert text.count(converge._PATH_BEGIN) == 1  # pyright: ignore[reportUnknownMemberType]
+    assert text.count(converge_host._PATH_BEGIN) == 1  # pyright: ignore[reportUnknownMemberType]
     assert "export FOO=1" in text
     assert str(home / ".local" / "bin") in text  # pyright: ignore[reportUnknownArgumentType]
 
 
 def test_ensure_ava_home_dirs(home, tmp_path: Path):
     ava_home = tmp_path / "avahome"
-    converge._ensure_ava_home_dirs(_ctx(tmp_path, ava_home))
+    converge_host._ensure_ava_home_dirs(_ctx(tmp_path, ava_home))
     for sub in ("logs", "configs", "secrets"):
         assert (ava_home / sub).is_dir()
     # Spotlight exclusion marker: the logs dir holds high-churn rotating logs
@@ -91,7 +92,7 @@ def test_ensure_ava_home_dirs_recursively_converges_private_data_trees(home, tmp
         for parent in (target.parent, target.parent.parent):
             parent.chmod(0o755)
 
-    converge._ensure_ava_home_dirs(_ctx(tmp_path, ava_home))
+    converge_host._ensure_ava_home_dirs(_ctx(tmp_path, ava_home))
 
     for target in targets:
         assert stat.S_IMODE(target.stat().st_mode) == 0o600
@@ -120,7 +121,7 @@ def test_ensure_ava_home_dirs_survives_a_workspace_socket(tmp_path: Path):
         socket_path = socket_dir / "app.sock"
         server.bind(str(socket_path))
 
-        converge._ensure_ava_home_dirs(_ctx(root, ava_home))
+        converge_host._ensure_ava_home_dirs(_ctx(root, ava_home))
 
         assert stat.S_ISSOCK(socket_path.lstat().st_mode)  # left in place
         assert stat.S_IMODE((ava_home / "workspaces").stat().st_mode) == 0o700
@@ -138,7 +139,7 @@ def test_ensure_ava_home_dirs_rejects_logs_symlink_before_writing_marker(home, t
     (ava_home / "logs").symlink_to(outside, target_is_directory=True)
 
     with pytest.raises(RuntimeError, match=r"logs.*symlink"):
-        converge._ensure_ava_home_dirs(_ctx(tmp_path, ava_home))
+        converge_host._ensure_ava_home_dirs(_ctx(tmp_path, ava_home))
 
     assert not (outside / ".metadata_never_index").exists()
 
@@ -146,24 +147,26 @@ def test_ensure_ava_home_dirs_rejects_logs_symlink_before_writing_marker(home, t
 def test_converge_host_runs_universal_and_skips_unit_state_when_role_none(home, tmp_path: Path):
     calls: list[str] = []
     steps = (
-        converge.ConvergeStep("wiring", lambda _: calls.append("wiring")),
-        converge.ConvergeStep("unit", lambda _: calls.append("unit"), requires_unit_config=True),
+        converge_host.ConvergeStep("wiring", lambda _: calls.append("wiring")),
+        converge_host.ConvergeStep(
+            "unit", lambda _: calls.append("unit"), requires_unit_config=True
+        ),
     )
-    converge.converge_host(tmp_path, None, ava_home=home, steps=steps)  # pyright: ignore[reportUnknownArgumentType]
+    converge_host.converge_host(tmp_path, None, ava_home=home, steps=steps)  # pyright: ignore[reportUnknownArgumentType]
     assert calls == ["wiring"]  # unit-state deferred when role is None
 
 
 def test_converge_host_filters_by_role(home, tmp_path: Path):
     calls: list[str] = []
     steps = (
-        converge.ConvergeStep(
+        converge_host.ConvergeStep(
             "cp-only",
             lambda _: calls.append("cp"),
             roles=frozenset({"gateway"}),
         ),
-        converge.ConvergeStep("both", lambda _: calls.append("both")),
+        converge_host.ConvergeStep("both", lambda _: calls.append("both")),
     )
-    converge.converge_host(tmp_path, frozenset({"agent-runner"}), ava_home=home, steps=steps)  # pyright: ignore[reportUnknownArgumentType]
+    converge_host.converge_host(tmp_path, frozenset({"agent-runner"}), ava_home=home, steps=steps)  # pyright: ignore[reportUnknownArgumentType]
     assert calls == ["both"]  # gateway-only step skipped on agent-runner
 
 
@@ -172,13 +175,15 @@ def test_converge_host_skips_host_global_for_dev_cluster(
 ):
     """A dev (non-default-home) cluster must NOT run host-global wiring (the symlink /
     shell-rc edit) — those belong to the host's prod install, not a worktree."""
-    monkeypatch.setattr(converge, "is_default_home", lambda _h: False)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(converge_host, "is_default_home", lambda _h: False)  # pyright: ignore[reportUnknownArgumentType]
     calls: list[str] = []
     steps = (
-        converge.ConvergeStep("hostwide", lambda _: calls.append("hostwide"), host_global=True),
-        converge.ConvergeStep("percluster", lambda _: calls.append("percluster")),
+        converge_host.ConvergeStep(
+            "hostwide", lambda _: calls.append("hostwide"), host_global=True
+        ),
+        converge_host.ConvergeStep("percluster", lambda _: calls.append("percluster")),
     )
-    converge.converge_host(tmp_path, frozenset({"gateway"}), ava_home=home, steps=steps)  # pyright: ignore[reportUnknownArgumentType]
+    converge_host.converge_host(tmp_path, frozenset({"gateway"}), ava_home=home, steps=steps)  # pyright: ignore[reportUnknownArgumentType]
     assert calls == ["percluster"]  # host-global skipped
 
 
@@ -186,13 +191,15 @@ def test_converge_host_runs_host_global_for_default_cluster(
     home, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
     """The prod default home (~/.ava, non-worktree repo) DOES run host-global wiring."""
-    monkeypatch.setattr(converge, "is_default_home", lambda _h: True)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(converge_host, "is_default_home", lambda _h: True)  # pyright: ignore[reportUnknownArgumentType]
     calls: list[str] = []
     steps = (
-        converge.ConvergeStep("hostwide", lambda _: calls.append("hostwide"), host_global=True),
-        converge.ConvergeStep("percluster", lambda _: calls.append("percluster")),
+        converge_host.ConvergeStep(
+            "hostwide", lambda _: calls.append("hostwide"), host_global=True
+        ),
+        converge_host.ConvergeStep("percluster", lambda _: calls.append("percluster")),
     )
-    converge.converge_host(tmp_path, frozenset({"gateway"}), ava_home=home, steps=steps)  # pyright: ignore[reportUnknownArgumentType]
+    converge_host.converge_host(tmp_path, frozenset({"gateway"}), ava_home=home, steps=steps)  # pyright: ignore[reportUnknownArgumentType]
     assert calls == ["hostwide", "percluster"]
 
 
@@ -214,7 +221,7 @@ def test_host_wiring_leaves_existing_editable_install_unchanged(
     def default_home(_home: Path) -> bool:
         return True
 
-    monkeypatch.setattr(converge, "is_default_home", default_home)
+    monkeypatch.setattr(converge_host, "is_default_home", default_home)
 
     def no_reinstall(*_args: object, **_kwargs: object) -> None:
         pytest.fail("host convergence cannot reinstall an editable package")
@@ -222,10 +229,10 @@ def test_host_wiring_leaves_existing_editable_install_unchanged(
     monkeypatch.setattr("cli.python_install.install", no_reinstall)
     steps = tuple(
         step
-        for step in converge.CONVERGE_STEPS
-        if step.host_global and step.apply.__module__ == _converge_steps.__name__
+        for step in converge_host.CONVERGE_STEPS
+        if step.host_global and step.apply.__module__ == _steps.__name__
     )
-    converge.converge_host(source, None, ava_home=home, steps=steps, services=frozenset())
+    converge_host.converge_host(source, None, ava_home=home, steps=steps, services=frozenset())
     assert {path: path.read_bytes() for path in files} == files
     assert {path: stat.S_IMODE(path.stat().st_mode) for path in modes} == modes
     assert not (scripts / "ava").exists()
@@ -240,15 +247,17 @@ def test_converge_host_skips_host_global_in_worktree_even_if_cluster_default(
     ~/.ava (the default home), but a repo under .worktrees/ or .claude/worktrees/
     is a dev worktree — host-global must still be skipped so a bare
     `ava start`/`converge` in a worktree never repoints the prod symlink."""
-    monkeypatch.setattr(converge, "is_default_home", lambda _h: True)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(converge_host, "is_default_home", lambda _h: True)  # pyright: ignore[reportUnknownArgumentType]
     wt_repo = tmp_path / worktree_parent / "feat-x"
     wt_repo.mkdir(parents=True)  # pyright: ignore[reportUnknownMemberType]
     calls: list[str] = []
     steps = (
-        converge.ConvergeStep("hostwide", lambda _: calls.append("hostwide"), host_global=True),
-        converge.ConvergeStep("percluster", lambda _: calls.append("percluster")),
+        converge_host.ConvergeStep(
+            "hostwide", lambda _: calls.append("hostwide"), host_global=True
+        ),
+        converge_host.ConvergeStep("percluster", lambda _: calls.append("percluster")),
     )
-    converge.converge_host(wt_repo, frozenset({"gateway"}), ava_home=home, steps=steps)  # pyright: ignore[reportUnknownArgumentType]
+    converge_host.converge_host(wt_repo, frozenset({"gateway"}), ava_home=home, steps=steps)  # pyright: ignore[reportUnknownArgumentType]
     assert calls == ["percluster"]  # host-global skipped despite cluster == default
 
 
@@ -259,7 +268,7 @@ def _capable_helper_ctx(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     ava_home = tmp_path / "avahome"
     ava_home.mkdir()
     (ava_home / ".env").write_text("")
-    monkeypatch.setattr(converge.sys, "platform", "darwin")
+    monkeypatch.setattr(converge_host.sys, "platform", "darwin")
     monkeypatch.setattr("shared.platform_probes.permissions_helper_incapability", lambda: None)
     monkeypatch.setattr(settings.services, "permissions_helper_enabled", True)
     return _ctx(tmp_path, ava_home)
@@ -278,7 +287,7 @@ def test_permissions_helper_step_refuses_when_this_process_cannot_sign(
 
     monkeypatch.setattr("services.permissions_helper.converge", cannot_sign)
     with pytest.raises(PermissionsHelperSigningUnavailableError, match="keychain"):
-        converge._ensure_permissions_helper(ctx)
+        converge_host._ensure_permissions_helper(ctx)
 
 
 def test_permissions_helper_step_still_aborts_on_a_real_build_defect(
@@ -296,25 +305,25 @@ def test_permissions_helper_step_still_aborts_on_a_real_build_defect(
     monkeypatch.setattr("services.permissions_helper.converge", _boom)
 
     with pytest.raises(PermissionsHelperBuildError, match="swiftc failed"):
-        converge._ensure_permissions_helper(ctx)
+        converge_host._ensure_permissions_helper(ctx)
 
 
 def test_converge_host_fail_fast_reraises(home, tmp_path: Path):
     def boom(ctx):
         raise RuntimeError("nope")
 
-    steps = (converge.ConvergeStep("boom", boom),)  # pyright: ignore[reportUnknownArgumentType]
+    steps = (converge_host.ConvergeStep("boom", boom),)  # pyright: ignore[reportUnknownArgumentType]
     with pytest.raises(RuntimeError, match="nope"):
-        converge.converge_host(tmp_path, frozenset({"gateway"}), ava_home=home, steps=steps)  # pyright: ignore[reportUnknownArgumentType]
+        converge_host.converge_host(tmp_path, frozenset({"gateway"}), ava_home=home, steps=steps)  # pyright: ignore[reportUnknownArgumentType]
 
 
 def test_converge_host_runs_in_order(home, tmp_path: Path):
     calls: list[str] = []
     steps = (
-        converge.ConvergeStep("first", lambda _: calls.append("first")),
-        converge.ConvergeStep("second", lambda _: calls.append("second")),
+        converge_host.ConvergeStep("first", lambda _: calls.append("first")),
+        converge_host.ConvergeStep("second", lambda _: calls.append("second")),
     )
-    converge.converge_host(tmp_path, frozenset({"gateway"}), ava_home=home, steps=steps)  # pyright: ignore[reportUnknownArgumentType]
+    converge_host.converge_host(tmp_path, frozenset({"gateway"}), ava_home=home, steps=steps)  # pyright: ignore[reportUnknownArgumentType]
     assert calls == ["first", "second"]
 
 
@@ -352,7 +361,7 @@ def test_cmd_converge_unconfigured_returns_zero(
 
     # host-global wiring (the ava symlink) is prod-install only, so this test must
     # run as the default home, not the suite's ambient tmpfs home.
-    monkeypatch.setattr(converge, "is_default_home", lambda _h: True)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(converge_host, "is_default_home", lambda _h: True)  # pyright: ignore[reportUnknownArgumentType]
 
     # Unconfigured converge must defer helper ancestry until identity exists.
     # Record that boundary explicitly; reaching it would be a contract failure.
@@ -360,7 +369,7 @@ def test_cmd_converge_unconfigured_returns_zero(
     monkeypatch.setattr(
         "services.permissions_helper.converge", lambda: helper_calls.append("helper")
     )
-    rc = converge.cmd_converge()
+    rc = converge_host.cmd_converge()
     assert rc == 0
     assert helper_calls == []
     assert (home / ".local" / "bin" / "ava").is_symlink()  # pyright: ignore[reportUnknownMemberType]
@@ -437,7 +446,7 @@ def test_next_public_keys_absent_file_is_empty(tmp_path: Path):
 def _pgbouncer_ctx(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, db_url: str | None, enabled: bool
 ):
-    """Wire _ensure_pgbouncer_step's deps: a default-home record (no pgbouncer key
+    """Wire ensure_pgbouncer_step's deps: a default-home record (no pgbouncer key
     → derived pooler 6433 / pg 5433), settings reflecting the toggle, and an
     optional existing .env carrying the pre-cutover AVA_DB_URL."""
     from shared import cluster
@@ -452,7 +461,7 @@ def _pgbouncer_ctx(
     # This record predates the pgbouncer slot; treat its home as the default home
     # so record_pgbouncer_port derives the fixed legacy 6433.
     monkeypatch.setattr(cluster, "is_default_home", lambda _h: True)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(converge.settings.data_plane, "pgbouncer_enabled", enabled)
+    monkeypatch.setattr(converge_host.settings.data_plane, "pgbouncer_enabled", enabled)
     ctx = _ctx(tmp_path / "repo", tmp_path)
     if db_url is not None:
         (tmp_path / ".env").write_text(f"AVA_DB_URL={db_url}\nAVA_PGBOUNCER_PORT=6433\n")
@@ -470,7 +479,7 @@ def test_ensure_pgbouncer_step_migrates_direct_url_to_pooler_when_enabled(
     the direct pg port; with the toggle on (default), converge rewrites it to the
     pooler port and drops the retired AVA_PGBOUNCER_PORT key."""
     ctx = _pgbouncer_ctx(tmp_path, monkeypatch, db_url=_DIRECT_URL, enabled=True)
-    converge._ensure_pgbouncer_step(ctx)
+    converge_host.ensure_pgbouncer_step(ctx)
     env = (tmp_path / ".env").read_text()
     assert "AVA_DB_URL=" + _POOLED_URL in env  # main's derived legacy pooler 6433
     assert "AVA_PGBOUNCER_PORT" not in env
@@ -489,9 +498,9 @@ def test_ensure_pgbouncer_step_leaves_remote_url_untouched(
         db_url=remote_url,
         enabled=True,  # the pooler toggle is meaningless for a remote plane
     )
-    monkeypatch.setattr(converge.settings.data_plane, "db_url", remote_url)
-    monkeypatch.setattr(converge.settings.data_plane, "redis_url", "rediss://10.9.8.7:6380/0")
-    converge._ensure_pgbouncer_step(ctx)
+    monkeypatch.setattr(converge_host.settings.data_plane, "db_url", remote_url)
+    monkeypatch.setattr(converge_host.settings.data_plane, "redis_url", "rediss://10.9.8.7:6380/0")
+    converge_host.ensure_pgbouncer_step(ctx)
     env = (tmp_path / ".env").read_text()
     assert "AVA_DB_URL=" + remote_url in env, "the remote URL must pass through byte-identical"
     # The pooler port normalization (and the retired-key cleanup) is skipped
@@ -504,7 +513,7 @@ def test_ensure_pgbouncer_step_rewrites_pooler_url_back_to_direct_when_disabled(
     """The kill-switch: toggle off + restart -> the pooler never starts and the
     URL is rewritten to the direct pg port."""
     ctx = _pgbouncer_ctx(tmp_path, monkeypatch, db_url=_POOLED_URL, enabled=False)
-    converge._ensure_pgbouncer_step(ctx)
+    converge_host.ensure_pgbouncer_step(ctx)
     env = (tmp_path / ".env").read_text()
     assert "AVA_DB_URL=" + _DIRECT_URL in env
     assert "AVA_PGBOUNCER_PORT" not in env
@@ -516,7 +525,7 @@ def test_ensure_pgbouncer_step_leaves_matching_url_untouched(
     """A URL that already matches the toggle is not rewritten — no snapshot churn
     every start — but the retired key is still dropped."""
     ctx = _pgbouncer_ctx(tmp_path, monkeypatch, db_url=_POOLED_URL, enabled=True)
-    converge._ensure_pgbouncer_step(ctx)
+    converge_host.ensure_pgbouncer_step(ctx)
     env = (tmp_path / ".env").read_text()
     assert "AVA_DB_URL=" + _POOLED_URL in env
     assert "AVA_PGBOUNCER_PORT" not in env
@@ -530,7 +539,7 @@ def test_ensure_pgbouncer_step_leaves_operator_standin_untouched(
     ctx = _pgbouncer_ctx(
         tmp_path, monkeypatch, db_url="postgresql://ava:dev@localhost:5432/ava", enabled=True
     )
-    converge._ensure_pgbouncer_step(ctx)
+    converge_host.ensure_pgbouncer_step(ctx)
     env = (tmp_path / ".env").read_text()
     assert "AVA_DB_URL=postgresql://ava:dev@localhost:5432/ava" in env
     assert "AVA_PGBOUNCER_PORT" not in env
@@ -542,7 +551,7 @@ def test_ensure_pgbouncer_step_without_env_writes_nothing(
     """No .env (a fresh home converge runs before birth materializes URLs): the
     step is a no-op, not a crash."""
     ctx = _pgbouncer_ctx(tmp_path, monkeypatch, db_url=None, enabled=True)
-    converge._ensure_pgbouncer_step(ctx)
+    converge_host.ensure_pgbouncer_step(ctx)
     assert not (tmp_path / ".env").exists()
 
 
@@ -589,7 +598,7 @@ def test_screen_capture_step_records_the_helpers_answer(
     )
     monkeypatch.setattr("services.permissions_helper.client.check_screen_capture", lambda: status)
 
-    converge._ensure_screen_capture(_ctx(tmp_path, tmp_path))
+    converge_host._ensure_screen_capture(_ctx(tmp_path, tmp_path))
 
     written = read_status()
     assert written is not None
@@ -614,7 +623,7 @@ def test_screen_capture_step_clears_a_stale_file_when_the_grant_is_back(
         lambda: ScreenCaptureStatus(state=ScreenCaptureState.AVAILABLE),
     )
 
-    converge._ensure_screen_capture(_ctx(tmp_path, tmp_path))
+    converge_host._ensure_screen_capture(_ctx(tmp_path, tmp_path))
     assert read_status() is None
 
 
@@ -643,7 +652,7 @@ def test_screen_capture_step_skips_hosts_with_no_helper(
 
     monkeypatch.setattr("services.permissions_helper.client.check_screen_capture", boom)
 
-    converge._ensure_screen_capture(_ctx(tmp_path, tmp_path))
+    converge_host._ensure_screen_capture(_ctx(tmp_path, tmp_path))
     assert read_status() is None
 
 
@@ -678,7 +687,7 @@ def test_accessibility_step_records_the_helpers_answer(
     )
     monkeypatch.setattr("services.permissions_helper.client.check_accessibility", lambda: status)
 
-    converge._ensure_accessibility(_ctx(tmp_path, tmp_path))
+    converge_host._ensure_accessibility(_ctx(tmp_path, tmp_path))
 
     written = read_status()
     assert written is not None
@@ -703,7 +712,7 @@ def test_accessibility_step_clears_a_stale_file_when_the_grant_is_back(
         lambda: AccessibilityStatus(state=AccessibilityState.GRANTED),
     )
 
-    converge._ensure_accessibility(_ctx(tmp_path, tmp_path))
+    converge_host._ensure_accessibility(_ctx(tmp_path, tmp_path))
     assert read_status() is None
 
 
@@ -733,12 +742,12 @@ def test_accessibility_step_skips_hosts_with_no_helper(
 
     monkeypatch.setattr("services.permissions_helper.client.check_accessibility", boom)
 
-    converge._ensure_accessibility(_ctx(tmp_path, tmp_path))
+    converge_host._ensure_accessibility(_ctx(tmp_path, tmp_path))
     assert read_status() is None
 
 
 def test_accessibility_step_follows_the_screen_capture_step():
-    steps = list(converge.CONVERGE_STEPS)
+    steps = list(converge_host.CONVERGE_STEPS)
     screen_index = next(
         i for i, step in enumerate(steps) if step.name == "screen capture availability"
     )
@@ -746,7 +755,7 @@ def test_accessibility_step_follows_the_screen_capture_step():
     accessibility_step = steps[screen_index + 1]
 
     assert accessibility_step.name == "accessibility availability"
-    assert accessibility_step.apply is converge._ensure_accessibility
+    assert accessibility_step.apply is converge_host._ensure_accessibility
     assert accessibility_step.roles == screen_step.roles
     assert accessibility_step.requires_unit_config == screen_step.requires_unit_config
 
@@ -761,7 +770,7 @@ class TestWarnUntrackedMigrations:
             "shared.migrations.untracked_migration_files",
             lambda: ["20260808T010000_add-foo.sql"],
         )
-        converge._warn_untracked_migrations(_ctx(tmp_path, tmp_path))
+        converge_host._warn_untracked_migrations(_ctx(tmp_path, tmp_path))
         out = capsys.readouterr().out
         assert "untracked" in out
         assert "20260808T010000_add-foo.sql" in out
@@ -771,11 +780,13 @@ class TestWarnUntrackedMigrations:
         self, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
         monkeypatch.setattr("shared.migrations.untracked_migration_files", list)
-        converge._warn_untracked_migrations(_ctx(tmp_path, tmp_path))
+        converge_host._warn_untracked_migrations(_ctx(tmp_path, tmp_path))
         assert capsys.readouterr().out == ""
 
     def test_registered_gateway_only(self) -> None:
         """The warning is wired into CONVERGE_STEPS with gateway-only roles: the
         gateway is the single schema writer, so only its console should carry it."""
-        step = next(s for s in converge.CONVERGE_STEPS if s.name == "untracked migrations warning")
+        step = next(
+            s for s in converge_host.CONVERGE_STEPS if s.name == "untracked migrations warning"
+        )
         assert step.roles == frozenset({"gateway"})

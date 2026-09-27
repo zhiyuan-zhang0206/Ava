@@ -14,7 +14,7 @@ Notice — own table, own UI section, own IM channel; nothing here touches
 `agent_notices`. Grafana's embedded Alertmanager evaluates the alert rules
 (`deploy/lgtm/config/grafana/provisioning/alerting/rules.yml` as code) and delivers the Alertmanager
 standard webhook payload to the gateway; this router is the other half of
-the loop. The cluster health probe (`cli/commands/_health_alerts.py`) posts
+the loop. The cluster health probe (`cli/commands/cluster/health_alerts.py`) posts
 its time-graded health alerts through the same endpoint with
 `source="health-probe"`, and the heartbeat liveness pass
 (`services/heartbeat/liveness.py`) writes its machine offline/online edges

@@ -55,25 +55,25 @@ def _h_status(_args: argparse.Namespace) -> int:
 
 
 def _h_converge(_args: argparse.Namespace) -> int:
-    from cli.commands.converge import cmd_converge
+    from cli.commands.converge.host import cmd_converge
 
     return cmd_converge()
 
 
 def _h_firewall_status(_args: argparse.Namespace) -> int:
-    from cli.commands.firewall import cmd_firewall_status
+    from cli.commands.converge.firewall_command import cmd_firewall_status
 
     return cmd_firewall_status()
 
 
 def _h_firewall_sync(_args: argparse.Namespace) -> int:
-    from cli.commands.firewall import cmd_firewall_sync
+    from cli.commands.converge.firewall_command import cmd_firewall_sync
 
     return cmd_firewall_sync()
 
 
 def _h_trace_ship(args: argparse.Namespace) -> int:
-    from cli.commands.trace import cmd_trace_ship
+    from cli.commands.observability.trace import cmd_trace_ship
 
     return cmd_trace_ship(since=args.since, until=args.until, dry_run=args.dry_run)
 
@@ -311,14 +311,14 @@ def _add_firewall_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser
 
 
 def _h_lgtm(args: argparse.Namespace) -> int:
-    from cli.commands.lgtm import cmd_lgtm_off, cmd_lgtm_on, cmd_lgtm_status
+    from cli.commands.observability.lgtm import cmd_lgtm_off, cmd_lgtm_on, cmd_lgtm_status
 
     if args.lgtm_cmd == "on":
         return cmd_lgtm_on()
     if args.lgtm_cmd == "off":
         return cmd_lgtm_off()
     if args.lgtm_cmd == "render":
-        from cli.commands.grafana_render import cmd_grafana_render
+        from cli.commands.observability.grafana_render import cmd_grafana_render
 
         return cmd_grafana_render(force=args.force, repo_only=args.repo_only)
     return cmd_lgtm_status()

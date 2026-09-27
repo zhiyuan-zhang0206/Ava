@@ -24,9 +24,9 @@ import pytest
 from dotenv import dotenv_values
 from psycopg import sql
 
-from cli.commands import _data_plane as data_plane
-from cli.commands import cluster_instance as ci
-from cli.commands import pgbouncer as pooler
+from cli.commands.data_plane import bringup
+from cli.commands.data_plane import cluster_instance as ci
+from cli.commands.data_plane import pgbouncer as pooler
 from cli.commands.migrations import cmd_migrations_apply
 from scripts import cutover_db_authority as cutover
 from shared import cluster
@@ -237,7 +237,7 @@ def test_converts_a_legacy_home_and_closes_every_legacy_session(legacy: Legacy) 
     assert env["AVA_CLUSTER_SECRET"] == _BEARER
     with legacy.admin() as conn:
         authority.check_invariant(
-            conn, legacy.home, database="ava", readonly_grantees=data_plane.READONLY_GRANTEES
+            conn, legacy.home, database="ava", readonly_grantees=bringup.READONLY_GRANTEES
         )
 
 
@@ -261,12 +261,12 @@ def test_repeat_is_a_verified_no_op(legacy: Legacy) -> None:
 def test_a_crash_resumes_with_the_same_generation(
     legacy: Legacy, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    real = data_plane.prove_generation_logins
+    real = bringup.prove_generation_logins
 
     def crash(home: Path, generation: authority.Generation, endpoint: str) -> None:
         raise RuntimeError("injected crash before activation")
 
-    monkeypatch.setattr(data_plane, "prove_generation_logins", crash)
+    monkeypatch.setattr(bringup, "prove_generation_logins", crash)
     with pytest.raises(RuntimeError, match="injected crash"):
         cutover.convert_db(legacy.home, legacy.record, execute=True)
     assert cutover.read_journal(legacy.home) == {"db": "converting"}
@@ -276,7 +276,7 @@ def test_a_crash_resumes_with_the_same_generation(
     # The legacy `.env` is rewritten only after activation and the invariant.
     assert "AVA_DB_ADMIN_PASSWORD" in dotenv_values(legacy.home / ".env")
 
-    monkeypatch.setattr(data_plane, "prove_generation_logins", real)
+    monkeypatch.setattr(bringup, "prove_generation_logins", real)
     assert "converted" in cutover.convert_db(legacy.home, legacy.record, execute=True)
     ledger = authority.require_ledger(legacy.home)
     assert ledger.active is not None and ledger.counter == 0

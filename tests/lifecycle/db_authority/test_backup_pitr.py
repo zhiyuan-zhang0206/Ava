@@ -30,8 +30,8 @@ from langgraph.checkpoint.base import empty_checkpoint
 from langgraph.checkpoint.postgres import PostgresSaver
 from psycopg.conninfo import conninfo_to_dict
 
-from cli.commands import cluster_instance as ci
-from cli.commands import pgbouncer as pooler
+from cli.commands.data_plane import cluster_instance as ci
+from cli.commands.data_plane import pgbouncer as pooler
 from services import backup
 from services.pitr import store_factory
 from shared import cluster
@@ -146,7 +146,7 @@ def test_scheduled_backup_dumps_as_the_owner_and_restores(
 
 
 def test_pre_activation_snapshot_dumps_the_frozen_owner_target(maintenance: Born) -> None:
-    from cli.commands import pitr_activation as activation
+    from cli.commands.data_plane import pitr_activation as activation
     from services.gateway_side.backup import snapshot
 
     state = activation.read_pg_state()
@@ -215,7 +215,7 @@ print(json.dumps({"user": row[0], "system": row[1], "agents": agents[0]}))
 def test_pitr_probes_dial_the_home_authority(
     maintenance: Born, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from cli.commands import _pitr_activation_config as activation_config
+    from cli.commands.data_plane import _pitr_activation_config as activation_config
     from services.pitr import activation_runtime, base_candidate, base_operation_runtime
     from services.pitr.base_candidate import BaseCandidateError
     from services.pitr.restore_postgres import _live_identity

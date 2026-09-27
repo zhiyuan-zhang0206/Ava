@@ -1,4 +1,4 @@
-"""Provider account guard — health-probe checks 9-10 (`cli/commands/_provider_guard.py`).
+"""Provider account guard — health-probe checks 9-10 (`cli/commands/cluster/_provider_guard.py`).
 
 Two invariants shape these tests:
 
@@ -21,7 +21,7 @@ from typing import Any
 import pytest
 from pydantic import SecretStr
 
-from cli.commands import _provider_guard
+from cli.commands.cluster import _provider_guard
 from shared.config import settings
 
 

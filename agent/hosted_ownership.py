@@ -2,6 +2,7 @@
 
 import asyncio
 import os
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Never
@@ -26,6 +27,7 @@ from shared.incarnation_resources import (
     ResourceProcess,
     decode_resources,
 )
+from shared.lifecycle_acceptance import terminate_kills_shell_sessions
 from shared.live_announce import publish_agent_updated
 from shared.log import logger
 from shared.paths import ava_home
@@ -65,18 +67,10 @@ async def _record_admission_refusal(
     outcome: AdmissionOutcome,
     detail: str | None = None,
 ) -> None:
-    """Keep an older, delayed refusal from replacing a later successful claim.
-
-    A refusal carrying a detail is durable row state an operator must resolve
-    (e.g. resources awaiting cutover reconciliation), so it is logged loudly.
-    """
+    """Keep an older, delayed refusal from replacing a later successful claim; a
+    detail is durable row state an operator must resolve, so it is logged loudly."""
     if detail is not None:
-        logger.warning(
-            "hosted admission of agent {agent_id} refused ({outcome}): {detail}",
-            agent_id=agent_id,
-            outcome=outcome.value,
-            detail=detail,
-        )
+        logger.warning("agent {} admission refused ({}): {}", agent_id, outcome.value, detail)
     async with async_write_transaction(pool) as conn:
         await conn.execute(
             "UPDATE agents_meta SET last_admission_outcome=%s, "
@@ -96,7 +90,10 @@ async def _admission_attempt_at(pool: AsyncConnectionPool) -> datetime:
 
 
 async def apply_hosted_lifecycle(
-    pool: AsyncConnectionPool, incarnation: RuntimeIncarnation
+    pool: AsyncConnectionPool,
+    incarnation: RuntimeIncarnation,
+    *,
+    kill_shell_sessions: Callable[[int], None] | None = None,
 ) -> str | None:
     """Apply after the existing single-flight continuation has safely ended.
 
@@ -105,6 +102,11 @@ async def apply_hosted_lifecycle(
     successor admission must create a new incarnation before observing it.
     Termination is observed in this same transaction: the caller has already
     returned from the real continuation and dropped its non-authoritative cache.
+
+    When a terminate asked to take the agent's shell sessions with it, the
+    host's `kill_shell_sessions(agent_id)` (must not raise) runs under the row
+    lock before the `terminated` write: the last step is over, and a crash
+    cannot commit the death without the kill — the retry kills again.
     """
     from shared.turn_identity import hosted_resources_settled
 
@@ -147,6 +149,10 @@ async def apply_hosted_lifecycle(
                 (incarnation.agent_id,),
             )
         elif lifecycle_kind == "terminate":
+            if await terminate_kills_shell_sessions(conn, incarnation.agent_id):
+                if kill_shell_sessions is None:
+                    raise RuntimeError("shell-session kill requested but no killer is bound")
+                await asyncio.to_thread(kill_shell_sessions, incarnation.agent_id)
             await conn.execute(
                 "UPDATE agents_meta SET status='terminated',termination_source='user',"
                 "lease_expires_at=NULL,runtime_protocol_version=0 WHERE id=%s",

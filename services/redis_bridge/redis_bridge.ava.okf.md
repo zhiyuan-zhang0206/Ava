@@ -16,7 +16,7 @@ the machine's declared private-network address at the cluster Redis port and
 forwards bytes to the loopback listener. Redis authentication remains end to
 end because the bridge does not terminate or interpret RESP.
 
-`cli.commands._converge_redis_bridge` is the authority for installation. The
+`cli.commands.converge.redis_bridge` is the authority for installation. The
 prod gateway converge copies `services/redis_bridge/relay.py` to the stable home
 path, writes `com.ava.redis-bridge.plist`, and reloads the launchd job only when
 the source or desired job changes. A remote-managed data plane, a loopback-only
@@ -47,7 +47,7 @@ not arm code rollback because a host listener failure is infrastructure state.
 
 - `services/redis_bridge/relay.py:serve_forever()` — listener lifecycle and
   per-connection forwarding
-- `cli/commands/_converge_redis_bridge.py:ensure_redis_bridge()` — installed
+- `cli/commands/converge/redis_bridge.py:ensure_redis_bridge()` — installed
   source and launchd desired state
-- `cli/commands/_converge_redis_bridge.py:probe_redis_bridge()` — authenticated
+- `cli/commands/converge/redis_bridge.py:probe_redis_bridge()` — authenticated
   end-to-end probe plus supervisor observation

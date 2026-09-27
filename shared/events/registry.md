@@ -24,8 +24,8 @@ generated from it and never hand-synced. event_names that violate the naming rul
 | mechanism | table/channel | registered event_names | destination |
 |------|------|-------------|------|
 | audit (category=audit) | `events` | 25 | event stream |
-| telemetry (category=telemetry) | `events` | 222 | event stream |
-| log (category=log) | `events` | 13 | event stream |
+| telemetry (category=telemetry) | `events` | 221 | event stream |
+| log (category=log) | `events` | 12 | event stream |
 | file-only (destination=file) | file log | 1 | file only (not the stream) |
 | SSE live | Redis → frontend (not persisted) | 30 role | live projection |
 
@@ -92,7 +92,7 @@ Emit sites and consumers: see the comments at each emit point.
 | `computer_session_end` | computer-use task session closed (idle timeout) | business | task_id, action_count, first_action_at, last_action_at, outcome | events |
 | `mcp_tool_call` | MCP tool invoked through the gateway /mcp endpoint (client-scoped, args redacted) | business | — | events |
 
-## 3. Telemetry events (category=telemetry, 222)
+## 3. Telemetry events (category=telemetry, 221)
 
 Telemetry-side event name resolution (`shared/log.py`): **explicit `event=` →
 `label=` fallback → default `"log"`**. Payload = logger extra fields + `msg`
@@ -224,7 +224,6 @@ consumers: see the comments at each emit point.
 | `page_restore_notified` | page restore notified | noise | — | — | events |
 | `agent_spawned` | agent process started | observation | spawner, forked_from | — | events |
 | `agent_resurrected` | agent resurrected | observation | — | — | events |
-| `agent_reopened` | an explicit resurrect cleared a closed agent's durable closure marker (closed_at) — the WARNING-level operator-side marker that the agent is out of the never-auto-resurrect closure (task #4165) | observation | — | — | events |
 | `billing_resurrect_run` | billing batch recovery run finished | observation | — | — | events |
 | `auto_resurrect_refused` | an automatic resurrect of a terminated agent was refused (e.g. runtime_cutover_required); the triggering inbound stays queued until an operator resolves the named reason | anomaly | — | — | events |
 | `auto_resurrect_failed` | an automatic resurrect failed for a possibly transient reason; the triggering inbound stays queued for a later or manual resurrect | observation | — | — | events |
@@ -340,7 +339,6 @@ consumers: see the comments at each emit point.
 | `page_proxy_504` | the gateway reverse proxy timed out dialing a registered page server; attributes carry trace_id, agent_id, page, host, port, exc_type, exc_message | anomaly | — | events |
 | `shell_ttl_expired` | the gateway TTL reaper killed a persistent shell whose declared TTL passed; attributes carry agent_id, session_id, mode | observation | — | events |
 | `chrome_page_ttl_expired` | the browser-mcp TTL sweep closed a Chrome page whose hard deadline passed; attributes carry page_id, url, agent_id (None when no affinity slot still named the page) | observation | — | events |
-| `watcher_reaped` | the gateway TTL reaper reclaimed a watcher session — its deadline passed, or its owner agent is terminated for good; attributes carry agent_id, session_id, mode (killed / absent / machine_absent) | observation | — | events |
 | `lifecycle_pointer_done_torn` | the gateway TTL reaper's scan found lifecycle command(s) sitting at done while agents_meta.lifecycle_command_id still pointed at them (an out-of-band torn write, task #3678) — every resurrect of the named agent(s) defers until settled; attributes carry count and samples | anomaly | — | events |
 | `lifecycle_fences_settled_absent_machine` | the gateway TTL reaper settled applied-but-unobserved force-terminate command(s) whose agent's home machine is absent from the machines registry (a decommissioned machine never runs the boot recovery that would observe its fences, task #4143); attributes carry count and samples | observation | — | events |
 

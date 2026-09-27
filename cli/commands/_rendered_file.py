@@ -1,6 +1,6 @@
 """Converge-rendered file writes with content-hash user-modification protection.
 
-Precedent: the web-sources converge protection (cli/commands/_converge_skills.py)
+Precedent: the web-sources converge protection (cli/commands/extensions/skills_sync.py)
 — a converge-managed copy whose destination hash no longer matches the recorded
 hash was hand-edited by the user, so converge warns and preserves it instead of
 overwriting. Used by the LGTM provisioning renderer and the otel-collector

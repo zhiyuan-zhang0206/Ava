@@ -305,7 +305,7 @@ def test_restart_handler_forwards_the_parsed_config_overlay(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The restart parser keeps the JSON string intact for its HTTP command."""
-    from cli.commands import agents as agents_commands
+    from cli.commands.agents import control as agents_commands
 
     calls: list[tuple[int, str | None, str | None]] = []
 
@@ -722,7 +722,7 @@ if sys.argv[1] == 'parser':
     args = parser.parse_args(['cluster', 'update', '--prepared', '/unused/request'])
     assert args.prepared == '/unused/request'
 elif sys.argv[1] == 'config':
-    import cli.commands.config
+    import cli.commands.management.config
 assert 'shared.config' not in sys.modules
 """
     result = subprocess.run(  # noqa: S603 — fixed interpreter, isolated import-only program.

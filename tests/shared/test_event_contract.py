@@ -222,12 +222,15 @@ def test_category_projection_matches_telemetry_whitelist() -> None:
     # (task #4728's parked orphan settlement) raises it to 220; the backup/PITR
     # operation custody alert (backup_operation_custody) raises it to 221.
     # The recovery wake pacing pair (task #4722: host_recovery_wake_started /
-    # host_recovery_wake_released) raises it to 222. Retiring the source-tree
-    # repair (its source_tree_reset audit had no emitter left) lowers it by one
-    # to 220; the auto-resurrect outcome pair (auto_resurrect_refused /
-    # auto_resurrect_failed) raises it to 222, the current total asserted below.
+    # host_recovery_wake_released) raises it to 222. The lifecycle retires the
+    # source-tree repair (its source_tree_reset audit had no emitter left) and
+    # adds the auto-resurrect outcome pair (auto_resurrect_refused /
+    # auto_resurrect_failed); retiring the closed-agent concept
+    # (decisions/2026-09-27-terminate-has-no-closed-state.md: no agent_reopened)
+    # lowers the total by one, to the count asserted below.
     assert "restart_cas_lost" not in _TELEMETRY_KINDS
-    assert len(_TELEMETRY_KINDS) == 222
+    assert "agent_reopened" not in _TELEMETRY_KINDS
+    assert len(_TELEMETRY_KINDS) == 221
     assert payload_keys("debt_sweep_daily") == (
         "day",
         "scan_status",

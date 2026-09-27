@@ -11,7 +11,7 @@ from __future__ import annotations
 import inspect
 import re
 
-from cli.commands import pgbouncer
+from cli.commands.data_plane import pgbouncer
 
 
 def test_render_ini_is_transaction_scram_and_socket_server() -> None:

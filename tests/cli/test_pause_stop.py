@@ -113,7 +113,7 @@ def test_full_stop_closes_real_idle_terminal_after_drain(
     monkeypatch.setitem(os.environ, "AVA_HOME", str(home))
     monkeypatch.setenv("AVA_HOME_OVERRIDE", "1")
     monkeypatch.setenv("HOME", str(home))
-    from cli.commands import maintenance_stop as strict
+    from cli.commands import service_stop as strict
 
     terminal = PtySessionBackend()
     monkeypatch.setattr(strict, "get_shell_backend", lambda: terminal)

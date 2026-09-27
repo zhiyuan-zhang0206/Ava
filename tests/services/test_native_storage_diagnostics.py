@@ -11,8 +11,8 @@ from unittest.mock import Mock
 import pytest
 import redis
 
-from cli.commands import cluster_instance as instance
-from cli.commands._pooler_stop import OwnedPooler
+from cli.commands.data_plane import cluster_instance as instance
+from cli.commands.data_plane._pooler_stop import OwnedPooler
 from services.ava_root.health import ProbeRunner
 from services.ava_root_glue import diagnostic_probes as probes
 from shared import cluster

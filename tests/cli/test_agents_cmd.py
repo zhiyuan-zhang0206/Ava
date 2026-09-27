@@ -13,7 +13,7 @@ from pathlib import Path
 import httpx
 import pytest
 
-from cli.commands import agents as _agents
+from cli.commands.agents import control as _agents
 
 
 class _FakeResp:
@@ -260,23 +260,51 @@ def test_agents_terminate_is_graceful(
     assert "terminate" in capsys.readouterr().out
 
 
-def test_agents_terminate_final_sends_the_closure_flag(
+def test_agents_terminate_kill_all_shell_sessions_sends_the_option(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    seen = _patch_post(monkeypatch, {"status": "enqueued"})
-    assert _agents.cmd_agents_terminate(7, final=True) == 0
+    seen = _patch_post(
+        monkeypatch,
+        {"status": "enqueued", "shell_sessions": {"when": "at_exit", "killed": []}},
+    )
+    assert _agents.cmd_agents_terminate(7, kill_all_shell_sessions=True) == 0
     assert seen["url"] == "http://gw:8000/api/agents/7/terminate"
-    assert seen["json"] == {"force": False, "final": True}
-    assert "terminate" in capsys.readouterr().out
+    assert seen["json"] == {"force": False, "kill_all_shell_sessions": True}
+    assert "shell sessions are killed when it exits" in capsys.readouterr().out
 
 
-def test_agents_kill_final_sends_the_closure_flag(
+def test_agents_kill_kill_all_shell_sessions_sends_the_option(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    seen = _patch_post(monkeypatch, {"status": "enqueued"})
-    assert _agents.cmd_agents_kill(7, final=True) == 0
+    seen = _patch_post(
+        monkeypatch,
+        {"status": "enqueued", "shell_sessions": {"when": "now", "killed": [0, 3]}},
+    )
+    assert _agents.cmd_agents_kill(7, kill_all_shell_sessions=True) == 0
     assert seen["url"] == "http://gw:8000/api/agents/7/terminate"
-    assert seen["json"] == {"force": True, "final": True}
+    assert seen["json"] == {"force": True, "kill_all_shell_sessions": True}
+    assert "killed 2 shell session(s): 0, 3" in capsys.readouterr().out
+
+
+def test_agents_parser_wires_kill_all_shell_sessions(monkeypatch: pytest.MonkeyPatch) -> None:
+    from cli.parsers import build_parser
+
+    seen: dict[str, object] = {}
+
+    def _record(agent_id: int, *, source: str | None, kill_all_shell_sessions: bool) -> int:
+        seen[str(agent_id)] = kill_all_shell_sessions
+        return 0
+
+    monkeypatch.setattr("cli.commands.agents.control.cmd_agents_terminate", _record)
+    monkeypatch.setattr("cli.commands.agents.control.cmd_agents_kill", _record)
+    for argv in (
+        ["agents", "terminate", "7", "--kill-all-shell-sessions"],
+        ["agents", "kill", "8", "--kill-all-shell-sessions"],
+        ["agents", "terminate", "9"],
+    ):
+        args = build_parser().parse_args(argv)
+        assert args.func(args) == 0
+    assert seen == {"7": True, "8": True, "9": False}
 
 
 def test_agents_kill_forces(
@@ -501,21 +529,25 @@ def test_agents_send_degrades_to_unkeyed_when_outbox_fails(
     assert "Idempotency-Key" not in headers
 
 
-def test_agents_terminate_renders_the_closure_state(
+def test_agents_terminate_renders_the_shell_session_kill(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """`closed` from the runner is rendered; absence (older runner) stays silent."""
-    _patch_post(monkeypatch, {"status": "already_terminated", "closed": True})
-    assert _agents.cmd_agents_terminate(7, final=True) == 0
-    assert "— closed" in capsys.readouterr().out
+    """The kill report is rendered; a requested kill with no report (a runner
+    that predates the option) is called out; no request stays silent."""
+    _patch_post(
+        monkeypatch,
+        {"status": "already_terminated", "shell_sessions": {"when": "now", "killed": []}},
+    )
+    assert _agents.cmd_agents_terminate(7, kill_all_shell_sessions=True) == 0
+    assert "no shell sessions to kill" in capsys.readouterr().out
 
-    _patch_post(monkeypatch, {"status": "enqueued", "closed": False})
-    assert _agents.cmd_agents_terminate(7) == 0
-    assert "— not closed" in capsys.readouterr().out
+    _patch_post(monkeypatch, {"status": "enqueued"})
+    assert _agents.cmd_agents_terminate(7, kill_all_shell_sessions=True) == 0
+    assert "shell sessions NOT killed" in capsys.readouterr().out
 
-    _patch_post(monkeypatch, {"status": "enqueued"})  # older runner: absent
+    _patch_post(monkeypatch, {"status": "enqueued", "shell_sessions": None})
     assert _agents.cmd_agents_terminate(7) == 0
-    assert "closed" not in capsys.readouterr().out
+    assert "shell" not in capsys.readouterr().out
 
 
 def test_agents_compact_posts_to_the_compact_route(

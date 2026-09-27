@@ -61,7 +61,7 @@ from agent.hosted_ownership import settle_stale_running_rows
 from services._pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
 from services.agent_host import boot_defer
 from services.agent_host.dispatcher import InboundWakeDispatcher, TurnScheduler
-from services.agent_host.host import AgentHost
+from services.agent_host.host import AgentHost, kill_terminating_agent_shells
 from services.agent_host.pooled_checkpoint import PooledPostgresSaver
 from services.agent_host.pools import build_control_pool, build_shared_pool
 from services.agent_host.stdout_log import _rotate_stdout_log_forever
@@ -386,7 +386,9 @@ async def _recover_hosted_forces_at_boot(
     control_pool: AsyncConnectionPool[psycopg.AsyncConnection], machine: str
 ) -> None:
     """Recover only resource-free predecessor forces before scheduling starts."""
-    recovered, deferred = await recover_orphaned_hosted_forces(control_pool, machine)
+    recovered, deferred = await recover_orphaned_hosted_forces(
+        control_pool, machine, kill_shell_sessions=kill_terminating_agent_shells
+    )
     logger.info("hosted boot recovery: observed {n} orphaned force(s)", n=len(recovered))
     streaks = boot_defer.record_deferrals(deferred)
     for agent_id, evidence in deferred.items():
@@ -412,11 +414,6 @@ async def _recover_hosted_forces_at_boot(
                 evidence="; ".join(entry.describe() for entry in evidence),
                 hint=disposition_hint(agent_id),
             )
-
-
-async def _schedule_watcher_recovery(host: AgentHost) -> None:
-    """Once per host boot, arm watcher owners for the paced pending scan."""
-    await host.watcher_boot_wakes()
 
 
 async def _open_host_pools(
@@ -530,7 +527,6 @@ async def run() -> None:
         # no per-agent page_reconcile_loop (loop.py:main() is process-only).
         background = _spawn_background_tasks(workload_pool)
         try:
-            await _schedule_watcher_recovery(host)
             # Settled reap rows need one admission each: the cold build's
             # reconcile re-delivers the claimed ordinary work the reap cut
             # short, and the dangling-tool repair closes the truncated turn.

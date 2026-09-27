@@ -28,10 +28,10 @@ from shared.paths import prod_service_checkout_error
 def _ensure_gateway_data_plane() -> int:
     """Bring up this cluster's data plane — local instance or remote probe.
 
-    The implementation lives in `cli/commands/_data_plane.py` (this module's
+    The implementation lives in `cli/commands/data_plane/bringup.py` (this module's
     line budget); the wrapper keeps the name tests and callers patch.
     """
-    from cli.commands._data_plane import ensure_gateway_data_plane
+    from cli.commands.data_plane.bringup import ensure_gateway_data_plane
 
     return ensure_gateway_data_plane()
 
@@ -112,7 +112,7 @@ def _prepare_cold_start(
 ) -> int:
     """Prepare storage/configuration only with no prior live application root."""
     import cli.commands._repo as _repo_commands
-    import cli.commands.converge as _converge_commands
+    import cli.commands.converge.host as converge_host
 
     # 1) converge host state (symlink / PATH / $AVA_HOME dirs / plugin config
     # images). Memory initialization is explicit (`ava memory init`). A retained
@@ -120,7 +120,7 @@ def _prepare_cold_start(
     retained = runtime is not None and runtime.release is not None
     try:
         if not retained:
-            _converge_commands.converge_host(
+            converge_host.converge_host(
                 repo, roles, services=frozenset(spec.session for spec in roster)
             )
     except Exception as e:
@@ -135,7 +135,7 @@ def _prepare_cold_start(
         rc = _ensure_gateway_data_plane()
         if rc != 0:
             return rc
-        from cli.commands._data_plane import prepare_gateway_schema
+        from cli.commands.data_plane.bringup import prepare_gateway_schema
 
         if not retained:
             prepare_gateway_schema()
@@ -147,7 +147,7 @@ def _prepare_cold_start(
         return rc
 
     if "gateway" in roles:
-        from cli.commands._data_plane import complete_gateway_data_plane
+        from cli.commands.data_plane.bringup import complete_gateway_data_plane
 
         if retained:
             complete_gateway_data_plane(refresh_schema=False)
@@ -164,7 +164,7 @@ def _prepare_cold_start(
     # data plane is up and known-current, which is the precondition
     # materialization actually has. Reports and continues on failure — a machine
     # that is behind catches up on the next start.
-    from cli.commands._converge_extensions import (
+    from cli.commands.extensions.materialize import (
         adopt_local_extensions,
         materialize_cluster_extensions,
     )

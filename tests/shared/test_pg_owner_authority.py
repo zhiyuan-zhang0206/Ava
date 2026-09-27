@@ -29,8 +29,8 @@ from langgraph.checkpoint.postgres import PostgresSaver
 from psycopg import sql
 from psycopg.conninfo import conninfo_to_dict, make_conninfo
 
-from cli.commands import cluster_instance as ci
-from cli.commands._data_plane import prepare_memory_vectors
+from cli.commands.data_plane import cluster_instance as ci
+from cli.commands.data_plane.bringup import prepare_memory_vectors
 from cli.commands.migrations import cmd_migrations_apply
 from services.memory_indexer.backends.pgvector import prepare_table
 from services.memory_indexer.embeddings.factory import get_provider

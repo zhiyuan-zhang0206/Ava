@@ -20,7 +20,7 @@ from shared.daemon_health import DaemonProbe
 def test_pooler_protocol_requires_native_custody_and_both_listeners(
     monkeypatch: pytest.MonkeyPatch, loopback: bool, public: bool, expected: str
 ) -> None:
-    from cli.commands import pgbouncer as pooler
+    from cli.commands.data_plane import pgbouncer as pooler
     from services.ava_root_glue import diagnostic_probes
     from services.healthchecks import owned_service
     from shared.cluster import ownership

@@ -104,7 +104,7 @@ PG_STATEMENT_TIMEOUT_OPTIONS = "-c statement_timeout=60000"
 # therefore holds because every sanctioned pooled entry point restores the
 # baseline session on use (see _restore_pooled_session).
 # `connect()` / `pool()` issue it on every pooled dial/borrow;
-# `cli/commands/pgbouncer.py` also runs it as the pooler's `connect_query` so
+# `cli/commands/data_plane/pgbouncer.py` also runs it as the pooler's `connect_query` so
 # every pooled backend is bounded at birth regardless of the client's code path.
 PG_STATEMENT_TIMEOUT_SET_SQL = "SET statement_timeout = 60000"
 # The full kwargs the sanctioned entry points pass to psycopg, exported so the

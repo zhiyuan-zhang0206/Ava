@@ -1,6 +1,6 @@
 # OTel Collector sidecar — one per machine, the ONLY OTLP entry Ava agents see.
 #
-# Generated at converge from this template (cli/commands/_otel_collector.py):
+# Generated at converge from this template (cli/commands/observability/otel_collector.py):
 # the dollar placeholders below are baked from this unit's settings, so the file
 # is static at runtime — no env substitution dependency on the session env.
 #

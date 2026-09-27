@@ -42,7 +42,7 @@ Ava code participates and a box with no agents running still reports.
   which is also its `requirepass`. A pure agent-runner's URLs point at the
   GATEWAY's data plane, so rendering those receivers there would only duplicate
   the gateway's series — `_data_plane_receivers` in
-  `cli/commands/_otel_collector.py` omits them, and the rendered config is 0600
+  `cli/commands/observability/otel_collector.py` omits them, and the rendered config is 0600
   because it carries the Redis admin password (and, on split units, the
   telemetry token).
 

@@ -31,7 +31,7 @@ def partial_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
             {"AVA_MACHINE_NAME": "partial"},
         )
     )
-    monkeypatch.setattr("cli.commands.maintenance_stop.require_no_terminals", lambda: None)
+    monkeypatch.setattr("cli.commands.service_stop.require_no_terminals", lambda: None)
     return home
 
 

@@ -7,9 +7,9 @@ from pathlib import Path
 
 import pytest
 
-from cli.commands import _converge_redis_bridge as bridge
-from cli.commands import converge
-from cli.commands._converge_spec import ConvergeCtx
+from cli.commands.converge import host as converge_host
+from cli.commands.converge import redis_bridge as bridge
+from cli.commands.converge.spec import ConvergeCtx
 from services.redis_bridge import relay
 
 
@@ -354,7 +354,7 @@ def test_probe_reports_unconfigured_when_registry_record_is_missing(
 def test_bridge_step_is_gateway_prod_host_only() -> None:
     step = next(
         candidate
-        for candidate in converge.CONVERGE_STEPS
+        for candidate in converge_host.CONVERGE_STEPS
         if candidate.name == "Redis private-network bridge"
     )
 

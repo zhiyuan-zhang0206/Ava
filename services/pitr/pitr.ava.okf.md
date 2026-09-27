@@ -28,7 +28,7 @@ mandatory.
 - `services/pitr/base_scheduler_daemon.py` — separately gated weekly scheduler for physical base candidates and generation-pinned restore proofs; both gates default off and it never deletes remote data
 - `services/pitr/retention_planner.py` — the default-off local dry-run planner (see *Remote retention* below)
 - `services/pitr/logical_dump_names.py` — the shared managed-name grammar the daily backup writer and the retention classifier both parse, so a name the writer emits is exactly a name the planner may ever delete
-- `cli/commands/pitr.py` — read-only `ava pitr retention inspect` view of the latest durable local plan, with per-surface (physical/logical) counts and the weak-evidence count
+- `cli/commands/data_plane/pitr.py` — read-only `ava pitr retention inspect` view of the latest durable local plan, with per-surface (physical/logical) counts and the weak-evidence count
 
 ## Gates and layers
 

@@ -9,7 +9,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from cli.commands import cluster_lifecycle as lifecycle
+from cli.commands.cluster import registry as lifecycle
 from shared import cluster
 from shared.cluster.ports import ClusterPorts
 from shared.port_block import PORT_OFFSETS
@@ -131,7 +131,7 @@ def test_down_uses_target_home_environment(home: Path, monkeypatch: pytest.Monke
 
     monkeypatch.setattr(lifecycle.subprocess, "run", run)
     # cmd_cluster_down projects the child env straight from the live os.environ
-    # (cli/commands/cluster_lifecycle.py), not the Settings singleton, so the raw-env
+    # (cli/commands/cluster/registry.py), not the Settings singleton, so the raw-env
     # seam (not monkeypatch.setenv) is what the code under test actually strips.
     monkeypatch.setitem(os.environ, "AVA_DB_URL", "postgresql://foreign.invalid/foreign")
     assert lifecycle.cmd_cluster_down(path=str(home)) == 0

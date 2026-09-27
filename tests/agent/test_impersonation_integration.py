@@ -507,6 +507,79 @@ async def test_handoff_checkpoint_failure_keeps_gate_and_retry_flushes_receipt(
         assert history.resolve(owner.agent_id, 0)["handoff_applied_at"] is not None
 
 
+async def test_control_db_hiccup_still_lands_handoff_and_runner_replay_completes(
+    db_conn: psycopg.Connection[Any],
+    aops_pool: AsyncConnectionPool[Any],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Save-first ordering: a control-DB hiccup degrades to pending, the runner certifies later."""
+    import httpx
+    from psycopg_pool import PoolTimeout
+
+    from agent.impersonation_handoff import deliver_handoff
+    from ava import impersonation_replay as recorded
+    from services.agent_host.impersonation_events import reconcile_one
+    from shared.agents.impersonation import impersonation_history as history
+    from shared.config import settings
+
+    monkeypatch.setattr(settings.general, "impersonation_event_manifest_enabled", True)
+    monkeypatch.setattr(
+        settings.general,
+        "impersonation_event_manifest_certification_secret",
+        "platform-handoff-certification-secret-0001",
+    )
+    graph, saver, ctx, config, reset, owner, requested, _calls = await _prepare_graph(
+        db_conn, aops_pool, monkeypatch, automatic=True
+    )
+    monkeypatch.setattr(impersonation, "establish_relay", _relay_ready)
+
+    def workspace_for_agent(_agent_id: int) -> Path:
+        return tmp_path
+
+    monkeypatch.setattr(history, "workspace_dir", workspace_for_agent)
+    real_consume = recorded.consume_recorded_events
+    monkeypatch.setattr(recorded, "consume_recorded_events", _no_events)
+    with bind_turn_identity(owner.agent_id, incarnation=owner):
+        await graph.ainvoke(reset, config, context=ctx)
+        await flush_checkpoint(saver, owner.agent_id)
+        assert await settle_checkpoint(graph, owner.agent_id)
+        leases.release(requested["id"], attested_caller(requested), "Done; please continue")
+        lease = history.resolve(owner.agent_id, 0)
+
+        def hiccup(_session: dict[str, Any]) -> None:
+            raise PoolTimeout("control DB pool exhausted")
+
+        monkeypatch.setattr(recorded, "consume_recorded_events", hiccup)
+        await deliver_handoff(graph, lease, owner)
+
+        landed = history.resolve(owner.agent_id, 0)
+        assert landed["handoff_path"] is not None
+        assert landed["handoff_applied_at"] is not None
+        assert landed["events_completed_at"] is None
+        assert landed["handoff_document"]["statistics"]["event_delivery"]["state"] == "pending"
+        assert (tmp_path / "impersonation" / "0.json").exists()
+
+    # The runner's reconcile pass completes the accounting once the DB is healthy.
+    monkeypatch.setattr(recorded, "consume_recorded_events", real_consume)
+
+    def get(_path: str, *, params: dict[str, Any]) -> httpx.Response:
+        del params
+        return httpx.Response(
+            200,
+            request=httpx.Request("GET", "http://manifest.test/api/events"),
+            json={"items": [], "meta": {"has_more": False}},
+        )
+
+    monkeypatch.setattr(recorded, "_get", get)
+    reconcile_one()
+    after = history.resolve(owner.agent_id, 0)
+    assert after["events_completed_at"] is not None
+    assert after["event_delivery_pending_reason"] is None
+    assert after["handoff_document"]["statistics"]["event_delivery"]["state"] == "complete"
+    assert '"state": "complete"' in (tmp_path / "impersonation" / "0.json").read_text()
+
+
 def _assert_resume_note_delivery_contract(content: str) -> None:
     """Check that pending delivery cannot be read as no SDK activity."""
     assert "External work complete" in content

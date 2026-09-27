@@ -53,7 +53,7 @@ def venv() -> DaemonProbe:
 
 
 def redis_acl() -> DaemonProbe:
-    from cli.commands import cluster_instance as instance
+    from cli.commands.data_plane import cluster_instance as instance
     from services.healthchecks import owned_service
     from services.healthchecks import redis_acl as check
     from shared.cluster import ownership
@@ -105,7 +105,7 @@ def redis_acl() -> DaemonProbe:
 
 
 def pgbouncer() -> DaemonProbe:
-    from cli.commands import pgbouncer as pooler
+    from cli.commands.data_plane import pgbouncer as pooler
     from services.healthchecks import owned_service
     from shared.cluster import get_record, ownership, record_pgbouncer_port
     from shared.cluster.authority import AuthorityRefusedError, read_pooler_admin

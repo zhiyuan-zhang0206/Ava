@@ -13,9 +13,9 @@ from pathlib import Path
 
 import pytest
 
-from cli.commands.mcp import cmd_mcp_install, cmd_mcp_upgrade
-from cli.commands.plugins import cmd_plugins_install
-from cli.commands.skill import cmd_skill_install
+from cli.commands.extensions.mcp import cmd_mcp_install, cmd_mcp_upgrade
+from cli.commands.extensions.plugins import cmd_plugins_install
+from cli.commands.extensions.skill import cmd_skill_install
 from shared import install_registry as reg
 
 # Every test here installs a package, which records `local:<machine>` provenance
@@ -70,7 +70,7 @@ def fake_uv_sync(monkeypatch: pytest.MonkeyPatch) -> None:
         py.write_text("#!/bin/sh\n", encoding="utf-8")
         py.chmod(0o755)
 
-    monkeypatch.setattr("cli.commands.mcp._uv_sync", _fake)
+    monkeypatch.setattr("cli.commands.extensions.mcp._uv_sync", _fake)
 
 
 # ─── ava mcp install ───────────────────────────────────────────────────

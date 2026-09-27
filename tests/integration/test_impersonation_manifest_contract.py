@@ -612,7 +612,7 @@ def test_cli_impersonate_send_outbox_retry_certifies_exactly_once(
     import httpx
 
     from ava import impersonation_replay as reader
-    from cli.commands.impersonation import _send
+    from cli.commands.agents.impersonation import _send
     from services.agent_host.impersonation_events import reconcile_one
     from shared.agents.messages import delivery_outbox as outbox
 

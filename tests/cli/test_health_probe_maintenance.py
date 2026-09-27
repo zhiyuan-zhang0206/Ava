@@ -8,7 +8,8 @@ from pathlib import Path
 import psycopg
 import pytest
 
-from cli.commands import _health_alerts, cluster_health
+from cli.commands.cluster import health as cluster_health
+from cli.commands.cluster import health_alerts as cluster_health_alerts
 from shared import pause_owner, service_selection
 
 
@@ -51,7 +52,7 @@ def alerts(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, object]]:
     def ingest(**kwargs: object) -> None:
         emitted.append(kwargs)
 
-    monkeypatch.setattr(_health_alerts, "_ingest_alert", ingest)
+    monkeypatch.setattr(cluster_health_alerts, "_ingest_alert", ingest)
     return emitted
 
 

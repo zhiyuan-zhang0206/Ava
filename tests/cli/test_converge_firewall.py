@@ -17,9 +17,9 @@ from pathlib import Path
 
 import pytest
 
-import cli.commands._converge_firewall as cfw
-import cli.commands.converge as cv
-import cli.commands.firewall as firewall_cmd
+import cli.commands.converge.firewall as cfw
+import cli.commands.converge.firewall_command as firewall_cmd
+import cli.commands.converge.host as cv
 from shared import macos_firewall as fw
 from shared.macos_firewall import FirewallAudit, FirewallVerdict
 

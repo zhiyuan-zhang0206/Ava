@@ -97,3 +97,7 @@ An explicitly triggered batch-resurrect entry, dry-run by default:
   entry (the migration's paired down migration drops the column).
 - The per-agent `ava agents resurrect` contract is unchanged and remains the
   manual rescue path for user-terminated and closed rows.
+
+Partly superseded by: decisions/2026-09-27-terminate-has-no-closed-state.md (the
+closed-agent clause: the whitelist no longer reads `closed_at`, and the
+row-locked guard has no `closed` refusal).

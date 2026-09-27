@@ -13,9 +13,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from cli.commands import cluster_instance as _ci
 from cli.commands import start as _start
-from cli.commands._converge_spec import ConvergeCtx
+from cli.commands.converge.spec import ConvergeCtx
+from cli.commands.data_plane import cluster_instance as _ci
 from shared import cluster
 from shared.config import settings
 
@@ -265,7 +265,8 @@ class _Plane:
 @pytest.fixture
 def plane(monkeypatch: pytest.MonkeyPatch) -> _Plane:
     """Every effect of `complete_gateway_data_plane`, recorded in order."""
-    from cli.commands import _data_plane, _health_preflight
+    from cli.commands import _health_preflight
+    from cli.commands.data_plane import bringup
     from shared.cluster import authority
 
     recorded = _Plane()
@@ -282,12 +283,12 @@ def plane(monkeypatch: pytest.MonkeyPatch) -> _Plane:
     def admin(*_a: object) -> Generator[str]:
         yield "admin-connection"
 
-    monkeypatch.setattr(_data_plane, "prepare_memory_vectors", record("memory-vectors"))
-    monkeypatch.setattr(_data_plane, "admin_session", admin)
-    monkeypatch.setattr(_data_plane, "db_endpoint", lambda: "postgresql://ava@127.0.0.1:6433/ava")
-    monkeypatch.setattr(_data_plane, "_ensure_pooler", record("pooler"))
-    monkeypatch.setattr(_data_plane, "prove_generation_logins", record("prove-logins"))
-    monkeypatch.setattr(_data_plane, "adopt_gateway_login", record("adopt"))
+    monkeypatch.setattr(bringup, "prepare_memory_vectors", record("memory-vectors"))
+    monkeypatch.setattr(bringup, "admin_session", admin)
+    monkeypatch.setattr(bringup, "db_endpoint", lambda: "postgresql://ava@127.0.0.1:6433/ava")
+    monkeypatch.setattr(bringup, "_ensure_pooler", record("pooler"))
+    monkeypatch.setattr(bringup, "prove_generation_logins", record("prove-logins"))
+    monkeypatch.setattr(bringup, "adopt_gateway_login", record("adopt"))
     monkeypatch.setattr(cluster, "get_record", lambda _home: _rec())  # pyright: ignore[reportUnknownArgumentType] — test double or third-party stubs
     monkeypatch.setattr(settings.data_plane, "db_url", "postgresql://ava@127.0.0.1:6433/ava")
     monkeypatch.setattr(settings.data_plane, "redis_url", "redis://127.0.0.1:6380/0")
@@ -327,7 +328,7 @@ def plane(monkeypatch: pytest.MonkeyPatch) -> _Plane:
 
 
 def test_ordinary_start_regrants_sweeps_and_checks_before_the_pooler(plane: _Plane) -> None:
-    from cli.commands._data_plane import complete_gateway_data_plane
+    from cli.commands.data_plane.bringup import complete_gateway_data_plane
 
     complete_gateway_data_plane()
     assert plane.calls == [
@@ -347,7 +348,7 @@ def test_ordinary_start_regrants_sweeps_and_checks_before_the_pooler(plane: _Pla
 
 
 def test_birth_mints_generation_zero_and_activates_after_the_pooler_proof(plane: _Plane) -> None:
-    from cli.commands._data_plane import complete_gateway_data_plane
+    from cli.commands.data_plane.bringup import complete_gateway_data_plane
 
     plane.state["birth"] = True
     complete_gateway_data_plane()
@@ -372,7 +373,7 @@ def test_birth_mints_generation_zero_and_activates_after_the_pooler_proof(plane:
 
 
 def test_release_readiness_performs_no_schema_or_grant_writes(plane: _Plane) -> None:
-    from cli.commands._data_plane import complete_gateway_data_plane
+    from cli.commands.data_plane.bringup import complete_gateway_data_plane
 
     complete_gateway_data_plane(refresh_schema=False)
     assert plane.calls == [
@@ -390,7 +391,7 @@ def test_release_readiness_performs_no_schema_or_grant_writes(plane: _Plane) -> 
 def test_invariant_violation_never_starts_pooler_or_marks_provisioned(
     plane: _Plane, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from cli.commands._data_plane import complete_gateway_data_plane
+    from cli.commands.data_plane.bringup import complete_gateway_data_plane
     from shared.cluster import authority
 
     def fail(*_a: object, **_kw: object) -> None:
@@ -419,7 +420,7 @@ def test_memory_vectors_prepared_as_owner_only_for_pgvector(
 ) -> None:
     """The pgvector table is start-time DDL through the owner authority at the
     provider's dimension; any other backend dials nothing."""
-    from cli.commands._data_plane import prepare_memory_vectors
+    from cli.commands.data_plane.bringup import prepare_memory_vectors
     from services.memory_indexer.backends import pgvector
     from services.memory_indexer.embeddings import factory
     from shared import pg_admin
@@ -448,7 +449,7 @@ def test_remote_plane_prepares_memory_vectors_through_its_provider_url(
     """A remote-managed plane has no local owner authority; its provider URL
     carries the table DDL, exactly as it carries the plane's migrations."""
     import shared.db
-    from cli.commands._data_plane import prepare_memory_vectors
+    from cli.commands.data_plane.bringup import prepare_memory_vectors
     from services.memory_indexer.backends import pgvector
     from services.memory_indexer.embeddings import factory
     from shared import pg_admin

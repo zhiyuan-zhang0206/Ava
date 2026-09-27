@@ -1,4 +1,4 @@
-"""cli.commands._otel_collector — binary install + config generation tests.
+"""cli.commands.observability.otel_collector — binary install + config generation tests.
 
 No network: the download is monkeypatched; the config render and the
 idempotence marker are the logic under test. The data-plane receivers
@@ -18,7 +18,7 @@ from urllib.parse import urlsplit
 import pytest
 import yaml
 
-from cli.commands import _otel_collector as oc
+from cli.commands.observability import otel_collector as oc
 from shared import collector_artifact as artifact
 from shared import resilience
 

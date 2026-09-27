@@ -65,7 +65,7 @@ class LaunchOutcome(NamedTuple):
 
 def _service_extra_env(spec: ServiceSpec) -> dict[str, str]:
     """Bind profile, database login and API token to one service, never its parent."""
-    from cli.commands._data_plane import api_delivery, db_delivery
+    from cli.commands.data_plane.bringup import api_delivery, db_delivery
     from shared.lgtm_local import BACKENDS, service_environment
 
     extra = service_environment(spec.session) if spec.session in BACKENDS else {}

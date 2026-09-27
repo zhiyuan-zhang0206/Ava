@@ -451,12 +451,14 @@ class TestWatcherEntries:
         monkeypatch.setattr(
             _watcher,
             "_spawn",
-            lambda _code, _ttl, name, **kw: seen.update(name=name, **kw) or 1,  # pyright: ignore[reportUnknownArgumentType]
+            lambda code, _ttl, name, **kw: seen.update(name=name, code=code, **kw) or 1,  # pyright: ignore[reportUnknownArgumentType]
         )  # pyright: ignore[reportUnknownArgumentType]
 
         _watcher.at(("2030-01-01T00:00:00+08:00",), ("stand up",), name=("standup",))  # pyright: ignore[reportArgumentType]
         assert seen["name"] == "standup"
-        assert "stand up" in str(seen.get("message", ""))
+        # `message` is no longer passed to `_spawn` (ava/watcher.py) — it is
+        # baked into the generated script by `build_at_script` instead.
+        assert "stand up" in seen["code"]
 
     def test_launch_unwraps_timeout(self, monkeypatch: pytest.MonkeyPatch) -> None:
         seen: dict[str, Any] = {}

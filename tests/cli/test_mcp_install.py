@@ -14,7 +14,12 @@ from pathlib import Path
 import pytest
 
 from ava.mcp_config import installed_mcp_dir, load_mcp_config
-from cli.commands.mcp import cmd_mcp_install, cmd_mcp_list, cmd_mcp_uninstall, cmd_mcp_upgrade
+from cli.commands.extensions.mcp import (
+    cmd_mcp_install,
+    cmd_mcp_list,
+    cmd_mcp_uninstall,
+    cmd_mcp_upgrade,
+)
 from shared import install_registry as reg
 
 
@@ -71,7 +76,7 @@ def fake_uv_sync(monkeypatch: pytest.MonkeyPatch) -> None:
         py.write_text("#!/bin/sh\n", encoding="utf-8")
         py.chmod(0o755)
 
-    monkeypatch.setattr("cli.commands.mcp._uv_sync", _fake)
+    monkeypatch.setattr("cli.commands.extensions.mcp._uv_sync", _fake)
 
 
 # ─── install ─────────────────────────────────────────────────────────────
@@ -399,7 +404,7 @@ def test_install_real_uv_sync_builds_venv(unit_home: Path, tmp_path: Path) -> No
 def test_acquire_dead_local_path_raises_clear_error(tmp_path: Path) -> None:
     """A recorded source that is neither a git URL nor an existing dir must
     name the problem instead of falling into a confusing git clone failure."""
-    from cli.commands._pkg_source import SourcePathNotFoundError, acquire_source
+    from cli.commands.extensions._pkg_source import SourcePathNotFoundError, acquire_source
 
     dead = tmp_path / "gone" / "mcp"
     with pytest.raises(SourcePathNotFoundError, match="no such local directory"):

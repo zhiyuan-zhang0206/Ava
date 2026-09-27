@@ -31,12 +31,12 @@ are specified in [[cluster-isolation.ava.okf.md|Telemetry cluster isolation]].
   the sidecar's `/v1/traces`; the sidecar's file exporter writes the OTLP/JSON
   mirror. Producer timeout, circuit-breaker, shedding, and synchronous-flush
   bounds live in [[export-backpressure.ava.okf.md|OTLP export backpressure]].
-- `ava trace ship` (`cli/commands/trace.py`) — recovery replay that bypasses
+- `ava trace ship` (`cli/commands/observability/trace.py`) — recovery replay that bypasses
   the local sidecar (replaying through it would loop the mirror watermark).
   Gateway/single-box units dial loopback Tempo; pure runners dial the gateway
   collector's authenticated receiver with the telemetry token.
 - The sidecar also **scrapes** the traditional SRE layer — host, Postgres,
-  Redis — into the same metrics fan-out, with no producer code involved:
+  Redis — into the same metrics fan-out:
   [[infra-metrics.ava.okf.md|Infrastructure metrics]].
 
 ## Core responsibilities
@@ -77,8 +77,8 @@ The LGTM consumers are documented separately:
 
 **Flag semantics** — `AVA_TELEMETRY_OTLP_ENABLED` /
 `AVA_TELEMETRY_OTLP_ENDPOINT` (default `http://127.0.0.1:4318` — the standard
-local OTLP HTTP port, derived from `AVA_TELEMETRY_OTLP_PORT`'s default, the
-single ingress-port source) are startup-applied
+local OTLP HTTP port, derived from `AVA_TELEMETRY_OTLP_PORT`'s default) are
+startup-applied
 (`restart_required=all`); `shared/config` has no live-reload — flip +
 restart applies changes. Off leaves only the JSONL event sink: Loki/Prometheus
 and their read surfaces stop advancing, with no Postgres fallback. Converge
@@ -104,11 +104,11 @@ single-box hosts collapse to the local receiver even when their secret is set.
 - `shared/config/observability.py` — the producer-local `telemetry_otlp_*`
   settings plus gateway-local backend read/write URLs.
 - `shared/collector_artifact.py` — pinned downloader shared by release prep and
-  `cli/commands/_otel_collector.py` converge. Converge and
+  `cli/commands/observability/otel_collector.py` converge. Converge and
   `deploy/otel-collector/otel-collector.yaml` implement cluster filtering and
   the credential-free (peer, monitoring role) Postgres receiver. Root health: `ops/spec.py`
   (`ava-otel-collector`) + `services/healthchecks/otel_collector.py`.
-- `shared/trace.py` + `cli/commands/trace.py` + `cli/parsers/host.py` — the
+- `shared/trace.py` + `cli/commands/observability/trace.py` + `cli/parsers/host.py` — the
   mirror `ava trace ship` replays, and the ship command.
 
 ## Entry points
@@ -118,7 +118,7 @@ single-box hosts collapse to the local receiver even when their secret is set.
   seam / process exit
 - `shared/telemetry/emitter.py:_export_otlp` — the drain-thread call site
   (suppress-guarded, deferred import)
-- `cli/commands/trace.py:cmd_trace_ship` — `ava trace ship
+- `cli/commands/observability/trace.py:cmd_trace_ship` — `ava trace ship
   [--since/--until] [--dry-run]`
 
 ## Notes

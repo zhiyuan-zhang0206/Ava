@@ -19,73 +19,73 @@ def _h_cluster_update(args: argparse.Namespace) -> int:
 
 
 def _h_cluster_status(_args: argparse.Namespace) -> int:
-    from cli.commands.cluster import cmd_cluster_status
+    from cli.commands.cluster.control import cmd_cluster_status
 
     return cmd_cluster_status()
 
 
 def _h_cluster_mark_staging(args: argparse.Namespace) -> int:
-    from cli.commands.cluster import cmd_cluster_mark_staging
+    from cli.commands.cluster.control import cmd_cluster_mark_staging
 
     return cmd_cluster_mark_staging(name=args.name, is_staging=args.is_staging)
 
 
 def _h_cluster_pause(args: argparse.Namespace) -> int:
-    from cli.commands.cluster import cmd_cluster_pause
+    from cli.commands.cluster.control import cmd_cluster_pause
 
     return cmd_cluster_pause(name=args.name, reason=args.reason)
 
 
 def _h_cluster_resume(args: argparse.Namespace) -> int:
-    from cli.commands.cluster import cmd_cluster_resume
+    from cli.commands.cluster.control import cmd_cluster_resume
 
     return cmd_cluster_resume(name=args.name)
 
 
 def _h_cluster_recover(_args: argparse.Namespace) -> int:
-    from cli.commands.cluster_recover import cmd_cluster_recover
+    from cli.commands.cluster.recover import cmd_cluster_recover
 
     return cmd_cluster_recover()
 
 
 def _h_cluster_pitr_activate(args: argparse.Namespace) -> int:
-    from cli.commands.pitr_activation import cmd_pitr_activate
+    from cli.commands.data_plane.pitr_activation import cmd_pitr_activate
 
     return cmd_pitr_activate(origin=args.origin)
 
 
 def _h_cluster_pitr_status(_args: argparse.Namespace) -> int:
-    from cli.commands.pitr_activation import cmd_pitr_status
+    from cli.commands.data_plane.pitr_activation import cmd_pitr_status
 
     return cmd_pitr_status()
 
 
 def _h_cluster_pitr_rollback(_args: argparse.Namespace) -> int:
-    from cli.commands.pitr_activation import cmd_pitr_rollback
+    from cli.commands.data_plane.pitr_activation import cmd_pitr_rollback
 
     return cmd_pitr_rollback()
 
 
 def _h_cluster_ls(_args: argparse.Namespace) -> int:
-    from cli.commands.cluster_lifecycle import cmd_cluster_ls
+    from cli.commands.cluster.registry import cmd_cluster_ls
 
     return cmd_cluster_ls()
 
 
 def _h_cluster_down(args: argparse.Namespace) -> int:
-    from cli.commands.cluster_lifecycle import cmd_cluster_down
+    from cli.commands.cluster.registry import cmd_cluster_down
 
     return cmd_cluster_down(path=args.path)
 
 
 def _h_cluster_destroy(args: argparse.Namespace) -> int:
-    from cli.commands.cluster_lifecycle import cmd_cluster_destroy
+    from cli.commands.cluster.registry import cmd_cluster_destroy
 
     return cmd_cluster_destroy(path=args.path, drop_db=args.drop_db)
 
 
 def _h_cluster_health_probe(args: argparse.Namespace) -> int:
-    from cli.commands.cluster_health import cmd_health_probe
+    from cli.commands.cluster.health import cmd_health_probe
 
     return cmd_health_probe(
         agent_min=args.agent_min,
@@ -97,7 +97,7 @@ def _h_cluster_health_probe(args: argparse.Namespace) -> int:
 
 
 def _h_cluster_health_probe_register(args: argparse.Namespace) -> int:
-    from cli.commands.cluster_cron import cmd_cron_register
+    from cli.commands.cluster.cron import cmd_cron_register
 
     return cmd_cron_register(
         interval_s=args.interval,
@@ -105,7 +105,7 @@ def _h_cluster_health_probe_register(args: argparse.Namespace) -> int:
 
 
 def _h_cluster_health_probe_unregister(_args: argparse.Namespace) -> int:
-    from cli.commands.cluster_cron import cmd_cron_unregister
+    from cli.commands.cluster.cron import cmd_cron_unregister
 
     return cmd_cron_unregister()
 
@@ -144,7 +144,7 @@ def _h_cluster_release_status(args: argparse.Namespace) -> int:
 
 
 def _h_cluster_db_authority_issue_unit(args: argparse.Namespace) -> int:
-    from cli.commands.cluster import cmd_db_authority_issue_unit
+    from cli.commands.cluster.control import cmd_db_authority_issue_unit
 
     return cmd_db_authority_issue_unit(
         machine=args.machine, home=args.home, out=args.out, ttl_hours=args.ttl_hours
@@ -152,13 +152,13 @@ def _h_cluster_db_authority_issue_unit(args: argparse.Namespace) -> int:
 
 
 def _h_cluster_db_authority_rotate_enrollment(args: argparse.Namespace) -> int:
-    from cli.commands.cluster import cmd_db_authority_rotate_enrollment
+    from cli.commands.cluster.control import cmd_db_authority_rotate_enrollment
 
     return cmd_db_authority_rotate_enrollment(machine=args.machine, home=args.home)
 
 
 def _h_cluster_db_authority_revoke_enrollment(args: argparse.Namespace) -> int:
-    from cli.commands.cluster import cmd_db_authority_revoke_enrollment
+    from cli.commands.cluster.control import cmd_db_authority_revoke_enrollment
 
     return cmd_db_authority_revoke_enrollment(machine=args.machine, home=args.home)
 

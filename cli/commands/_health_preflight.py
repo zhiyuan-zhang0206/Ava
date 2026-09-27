@@ -38,7 +38,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
-from cli.commands._converge_spec import ConvergeCtx
+from cli.commands.converge.spec import ConvergeCtx
 from shared.cluster import port_free
 from shared.config import settings
 from shared.deploy.git.gitenv import git_env

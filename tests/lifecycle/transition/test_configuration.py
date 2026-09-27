@@ -61,7 +61,7 @@ def _forbid_runtime_imports(monkeypatch: pytest.MonkeyPatch) -> None:
             "shared.os_boot_unit",
             "shared",
             "cli.commands.maintenance",
-            "cli.commands.maintenance_stop",
+            "cli.commands.service_stop",
             "cli.release_transition.root_service",
         }:
             raise AssertionError(f"changed configuration reached runtime import: {name}")

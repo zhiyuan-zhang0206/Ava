@@ -10,7 +10,7 @@ candidate is fenced the same way before its predecessor gets a new number.
 The home's ledger is the authority; the journal records intent before each
 ledger transition and the non-secret receipt after it
 (`authority_evidence.py`), both under the home operation lock. The data-plane
-effects are `cli.commands.maintenance_data_plane`'s. A retry continues the
+effects are `cli.commands.data_plane.write_generation`'s. A retry continues the
 recorded generation or holds; it never mints a second pair or skips a fence.
 
 The finite executor itself dials the home's owner-only socket as the OS-user
@@ -76,7 +76,7 @@ def adopt_executor_authority(home: Path) -> None:
 
 def preflight() -> None:
     """Read-only: the home holds exactly one admitted generation to fence."""
-    from cli.commands.maintenance_data_plane import preflight_write_authority
+    from cli.commands.data_plane.write_generation import preflight_write_authority
 
     preflight_write_authority()
 
@@ -138,7 +138,7 @@ def fence(journal: Journal) -> None:
     `revoking`; the closure receipt follows the ledger's `closed`. A closed
     receipt is final: a retry only checks the ledger agrees.
     """
-    from cli.commands.maintenance_data_plane import fence_write_generation
+    from cli.commands.data_plane.write_generation import fence_write_generation
 
     operation = journal.operation
     authority = _authority(operation)
@@ -207,7 +207,7 @@ def authorize(journal: Journal, target: ReleaseRef) -> None:
     ledger's `pending`; the authorized receipt follows the ledger's `active`.
     A retry reconciles exactly the recorded number and never allocates another.
     """
-    from cli.commands.maintenance_data_plane import admit_write_generation
+    from cli.commands.data_plane.write_generation import admit_write_generation
 
     operation = journal.operation
     authority = _authority(operation)
@@ -269,7 +269,7 @@ def require_issued(operation: Operation) -> None:
 
 def verify_active(operation: Operation) -> None:
     """After readiness: exactly the issued generation writes and nothing older can."""
-    from cli.commands.maintenance_data_plane import verify_write_generation
+    from cli.commands.data_plane.write_generation import verify_write_generation
 
     record = _issued(operation)
     generation = record.generation

@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from cli.commands import lgtm
+from cli.commands.observability import lgtm
 from shared.service_selection import ServiceSelection
 
 

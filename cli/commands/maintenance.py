@@ -15,7 +15,7 @@ from datetime import UTC, datetime
 
 from cli.commands._maintenance_probe import host_identity_or_none, ops_quiescent
 from cli.commands._pause_resume import exclusive_resources
-from cli.commands.maintenance_stop import (
+from cli.commands.service_stop import (
     deadline_after,
     remaining,
     require_no_terminals,

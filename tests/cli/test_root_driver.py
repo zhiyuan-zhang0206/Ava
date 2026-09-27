@@ -333,7 +333,7 @@ def test_linux_root_launch_never_consults_a_helper(
 def test_selected_stop_preserves_exact_home_qualified_names(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from cli.commands.maintenance_stop import stop_services
+    from cli.commands.service_stop import stop_services
 
     captured: list[frozenset[str]] = []
 

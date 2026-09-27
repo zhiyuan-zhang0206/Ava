@@ -17,33 +17,41 @@ subcommand builders and `_h_*` handlers); `cli/main.py` composes it and
 dispatches via `set_defaults(func=)` to the module's `cmd_*` handler — there is
 no registry or plugin mechanism, the wiring is the parser.
 
-Most command modules follow these two naming groups:
+`cli/commands/__init__.py` is an empty package door: no import work and no
+re-exports, so `import cli.commands` loads nothing else, Settings included.
+Each command module is its own door; `cli.parsers` handlers lazy-import
+`cmd_*` from the module that defines it, and test seams patch there. Seven
+subpackages hold the leaf domains, each an independent package door:
 
-- **public** (`start.py`, `stop.py`, `status.py`, `logs.py`,
-  `cluster.py`, `agents.py`, `config.py`, `plugins.py`, `skill.py`, `mcp.py`, `pitr.py`,
-  `memory.py`, `presets.py`, `pty.py`, `schedules.py`, `trace.py`, `migrations.py`,
-  `cluster_lifecycle.py`, `agent_timeline.py`, `impersonation.py`,
-  `impersonation_relay.py`, `converge.py`, `firewall.py`, `lgtm.py`, `grafana_render.py`,
-  `cluster_health.py`, `cluster_cron.py`, `cluster_recover.py`, `pitr_activation.py`) —
-  reachable from the command line; `cli/parsers/` imports each `cmd_*` from its
-  defining module, so every module a parser reaches has a public name.
-- **internal** (`_`-prefixed) — steps host commands call, never dispatched
-  directly: `_converge_spec` (the step contract) /
-  `_converge_steps` (early host and data-plane wiring) / `_converge_os_jobs`
-  (the OS-scheduled jobs) / `_converge_skills` / `_converge_firewall` (idempotent host wiring) /
-  `_converge_redis_bridge` (idempotent host wiring),
-  `_probe`, `_setup`, `_repo`,
-  `_start_gui_chain` (the macOS GUI-chain warning), `_ownership_preflight`,
-  `_pkg_source`, `_claude_code_plugin`
-  (`cluster_instance.py`, `pgbouncer.py`, `root_driver.py`, `maintenance_stop.py`,
-  `maintenance_data_plane.py` and `start_generation.py` are internal steps under
-  public names because other packages, such as the release transition, reach them).
+- `agents/` — lifecycle control, notices, timelines, external-agent
+  impersonation, the pty/computer-use daemons
+- `management/` — gateway-managed config, presets, schedules
+- `extensions/` — plugins, skills, packages, MCP servers, memory; owns its
+  converge steps (`materialize.py`, `skills_sync.py`, `external_skills.py`)
+- `observability/` — native LGTM desired state, the OTel collector, trace
+  shipping, logs; owns its converge steps (`lgtm_native.py`, `otel_collector.py`)
+- `data_plane/` — per-cluster Postgres/Redis/PgBouncer bring-up, their verified
+  maintenance stop (`maintenance_stop.py`), a release's write-generation
+  effects (`write_generation.py`), PITR; owns its converge steps
+  (`pgbouncer.py`, `pitr_foundation.py`)
+- `cluster/` — whole-cluster verbs, the health probe, cron, the registry
+- `converge/` — the orchestrator (`host.py`), the step contract (`spec.py`),
+  and host-wiring steps owned by no other domain (firewall, Redis bridge, OS
+  jobs).
+
+`start.py` / `stop.py` / `status.py` / `maintenance.py` / `migrations.py` and
+the `_`-prefixed steps host commands call (`_probe`, `_setup`, `_repo`,
+`_start_gui_chain`, `_ownership_preflight`, ...) stay directly under
+`cli/commands/`. `root_driver.py`, `service_stop.py` and `start_generation.py`
+are internal steps under public names because other packages, such as the
+release transition, reach them.
 
 `stop.py` exposes `pause` and `stop` through `_temporary_stop`; restart reuses
 its native drain. `ops.agent_pause` and `ops.agent_pause_probe`
-own prepare/drain and runtime capability checks; `maintenance_stop` and
-`maintenance_data_plane` verify resource exits, and `maintenance_data_plane`
-performs a release's write-generation fence and admission. `_pooler_stop.OwnedPooler` owns
+own prepare/drain and runtime capability checks; `service_stop` and
+`data_plane/maintenance_stop` verify resource exits, and
+`data_plane/write_generation` performs a release's write-generation fence and
+admission. `data_plane/_pooler_stop.OwnedPooler` owns
 ordinary pooler stop admission for maintenance and startup recovery: exact native
 birth and listener proof precede a durable stop intent and the first SIGINT
 (`WAIT_FOR_SERVERS`). Retries and already-closed listeners only wait; PgBouncer
@@ -64,8 +72,9 @@ releases normal startup admission only after readiness.
 They reuse the [durable maintenance journal](../../shared/maintenance/maintenance.ava.okf.md).
 See [the coordinated operator procedure](../../conventions/graceful-maintenance.md).
 
-Gateway data-plane startup (`cluster_instance`, `_data_plane`, `pgbouncer`):
-[[cli/commands/data-plane-startup.ava.okf.md|Gateway data-plane startup]].
+Gateway data-plane startup (`data_plane/cluster_instance`, `data_plane/bringup`,
+`data_plane/pgbouncer`):
+[[cli/commands/data_plane/data-plane-startup.ava.okf.md|Gateway data-plane startup]].
 
 `cli/commands/migrations.py:cmd_migrations_apply` is deliberately not a user-facing verb —
 it runs as a step of `ava start`, so any restart crossing a
@@ -77,11 +86,11 @@ schema change catches the DB up on its own.
   root downtime includes its entry port; it has no separate OS job or detached
   launcher. See [[services/gate/gate.ava.okf.md|Fleet UI Gate]].
 
-- `agent_timeline.py` exposes the existing timeline API as `ava agents timeline`
-  and its exact `context` alias. `impersonation.py` manages explicit external
+- `agents/timeline.py` exposes the existing timeline API as `ava agents timeline`
+  and its exact `context` alias. `agents/impersonation.py` manages explicit external
   requests, leases, inbox acknowledgments, local Python SDK attachment, and the
   one attested send (`send` — task #4102).
-  `impersonation_relay.py` forwards inbound availability to the owning external
+  `agents/impersonation_relay.py` forwards inbound availability to the owning external
   model session; `--codex-remote` routes to the app server holding a Codex thread
   without waiting for its external queue-store scan.
   Usage: [External agent impersonation](../../conventions/agent-impersonation.md).
@@ -91,12 +100,9 @@ schema change catches the DB up on its own.
 - What `ava start` treats as already-up, what it waits for, and when an unready
   service becomes exit code 4 are one subject, in [[start-readiness.ava.okf.md]].
 - Prepared release transitions are owned by [[cli/release_transition/release_transition.ava.okf.md]].
-  The command package is a docstring-only marker, so importing one command module
-  never loads Settings; callers import actual definitions and tests patch each
-  seam at its defining module. There are no updater shell chains,
-  bootstrap/continuation commands, or re-export facade.
+  There are no updater shell chains or bootstrap/continuation commands.
 - Host-level Application Firewall and Redis bridge wiring are one subject:
-  [[converge-host-wiring.ava.okf.md]].
+  [[converge/converge-host-wiring.ava.okf.md]].
 - Explicit editable-install inspection and write-window primitives are described
   in [[editable-install-guard.ava.okf.md]]. Ordinary start and converge never
   repair or reinstall a separate production virtualenv; retained images are
@@ -106,8 +112,8 @@ schema change catches the DB up on its own.
 - `cli/mcp_server.py` is the third top-level module a verb routes to
   (`ava mcp serve`) rather than a `commands/` module: it is a long-running
   stdio server, not a command that renders and exits, and it pulls in the mcp
-  SDK that no other verb needs. See [[cli/commands/packages/packages.ava.okf.md]].
-- [[pitr.ava.okf.md]] defines the PITR inspection surface and the archive →
+  SDK that no other verb needs. See [[cli/commands/extensions/packages.ava.okf.md]].
+- [[cli/commands/data_plane/pitr.ava.okf.md]] defines the PITR inspection surface and the archive →
   verify → retire guard for finite migration rollback snapshots.
 - [[ownership_preflight.ava.okf.md]] names the warning-only ownership repair
   guard that runs before converge writes later host state.

@@ -1,1 +1,1 @@
-"""Watcher and schedule primitives — registry, timing, and completion notices."""
+"""Watcher and schedule primitives — timing, script generation, and completion notices."""

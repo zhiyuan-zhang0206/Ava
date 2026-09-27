@@ -363,7 +363,6 @@ def wired(monkeypatch: pytest.MonkeyPatch, host_plugin: None) -> _Build:
         return _Model(turn_settings.lm.llm_model)
 
     monkeypatch.setattr(host_mod, "boot_agent_scope", _fake_boot_agent_scope)
-    monkeypatch.setattr(host_mod, "reconcile_agent_watchers", AsyncMock(return_value=True))
 
     def _allow_model_config(*, model: str | None = None) -> None:
         """Keep fake host tests independent of installed provider credentials."""
@@ -385,7 +384,7 @@ def wired(monkeypatch: pytest.MonkeyPatch, host_plugin: None) -> _Build:
 
     monkeypatch.setattr(host_mod, "release_hosted_owner", _noop_reconcile)
 
-    async def _apply_lifecycle(_pool: object, _incarnation: object) -> str:
+    async def _apply_lifecycle(_pool: object, _incarnation: object, **_kwargs: object) -> str:
         """Host orchestration fake; real durable effects use the PG contract tests."""
         return "terminate"
 
@@ -988,7 +987,7 @@ class TestTurnLoop:
             {1: [{"exit_requested": False, "turn_idle": False, "restart_requested": True}]},
         )
 
-        async def apply(pool: object, incarnation: RuntimeIncarnation) -> str:
+        async def apply(pool: object, incarnation: RuntimeIncarnation, **_kwargs: object) -> str:
             await _flip(pool, incarnation.agent_id, "idling", expected_from="running")
             return "restart"
 
@@ -1032,7 +1031,7 @@ class TestTurnLoop:
 
         notified: list[int] = []
 
-        async def apply(_pool: object, incarnation: RuntimeIncarnation) -> str:
+        async def apply(_pool: object, incarnation: RuntimeIncarnation, **_kwargs: object) -> str:
             notified.append(incarnation.agent_id)
             return "terminate"
 
@@ -1063,7 +1062,7 @@ class TestTurnLoop:
 
         notified: list[int] = []
 
-        async def apply(_pool: object, incarnation: RuntimeIncarnation) -> str:
+        async def apply(_pool: object, incarnation: RuntimeIncarnation, **_kwargs: object) -> str:
             assert incarnation.agent_id not in host._runtimes
             assert len(graph.observations) == 1
             notified.append(incarnation.agent_id)

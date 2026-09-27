@@ -119,7 +119,8 @@ def _custody(home: Path) -> DataStop:
 def test_db_down_stop_continuation_uses_persisted_native_receipt_without_sql_drain(
     pitr_request: PitrRequest, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from cli.commands import maintenance_data_plane, root_driver
+    from cli.commands import root_driver
+    from cli.commands.data_plane import maintenance_stop
     from shared import maintenance
 
     receipt = _custody(Path(pitr_request.home))
@@ -143,7 +144,7 @@ def test_db_down_stop_continuation_uses_persisted_native_receipt_without_sql_dra
     def close_custody(value: DataStop, _timeout: float) -> None:
         observed.append(value)
 
-    monkeypatch.setattr(maintenance_data_plane, "stop_captured", close_custody)
+    monkeypatch.setattr(maintenance_stop, "stop_captured", close_custody)
 
     def no_database(*_args: Any, **_kwargs: Any) -> None:
         raise AssertionError("offline continuation attempted database access")
@@ -282,7 +283,8 @@ def test_data_capture_refuses_postgres_replacement_before_any_data_signal(
     pitr_request: PitrRequest, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from cli.commands import maintenance as maintenance_commands
-    from cli.commands import maintenance_data_plane, root_driver
+    from cli.commands import root_driver
+    from cli.commands.data_plane import maintenance_stop
     from shared import maintenance
 
     journal.create(pitr_request)
@@ -303,7 +305,7 @@ def test_data_capture_refuses_postgres_replacement_before_any_data_signal(
     )
     monkeypatch.setattr(maintenance_commands, "stop", _constant(None))
     monkeypatch.setattr(root_driver, "require_root_absent", _constant(None))
-    monkeypatch.setattr(maintenance_data_plane, "capture_custody", _constant(receipt))
+    monkeypatch.setattr(maintenance_stop, "capture_custody", _constant(receipt))
     with journal.exclusive(pitr_request.path) as handle:
         handle.advance("provisioning")
         handle.provisioned(_seal(pitr_request, "f" * 64))

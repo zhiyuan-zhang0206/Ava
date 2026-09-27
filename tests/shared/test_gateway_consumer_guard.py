@@ -529,7 +529,7 @@ def test_agent_host_launches_under_the_agent_profile(monkeypatch: pytest.MonkeyP
 
     # The launcher binds the database login next to the marker; that delivery
     # is not under test, so keep it independent of this host's home.
-    monkeypatch.setattr("cli.commands._data_plane.db_delivery", delivery)
+    monkeypatch.setattr("cli.commands.data_plane.bringup.db_delivery", delivery)
     agent_host = next(spec for spec in build_services() if spec.session == "agent-host")
     profile = root_driver._service_extra_env(agent_host)["AVA_PROCESS_PROFILE"]
     assert profile in PROCESS_PROFILES, f"{profile} is not a process profile"

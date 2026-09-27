@@ -132,7 +132,7 @@ def _windows_terminal(name: str, cwd: Path) -> Path:
 @pytest.fixture
 def windows_run_dir(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     """Maintenance stop on Windows: terminals are the root-brokered records."""
-    from cli.commands import maintenance_stop as stop
+    from cli.commands import service_stop as stop
 
     monkeypatch.setattr(paths, "run_dir", lambda: tmp_path)
     monkeypatch.setattr(stop, "run_dir", lambda: tmp_path)
@@ -143,7 +143,7 @@ def windows_run_dir(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
 def test_windows_terminal_scan_does_not_mistake_services_for_shells(
     windows_run_dir: Path,
 ) -> None:
-    from cli.commands import maintenance_stop as stop
+    from cli.commands import service_stop as stop
 
     for index, name in enumerate(["ava-agent-host", "ava-schedule-indexer"]):
         SessionRecord(900000 + index, 1.0, "fixture", str(windows_run_dir), 1.0).write(
@@ -159,8 +159,8 @@ def test_windows_terminal_scan_does_not_mistake_services_for_shells(
 def test_keep_windows_terminals_excludes_them_from_the_root_service_stop(
     windows_run_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from cli.commands import maintenance_stop as stop
     from cli.commands import root_driver
+    from cli.commands import service_stop as stop
 
     terminals = {
         name: _windows_terminal(name, windows_run_dir)

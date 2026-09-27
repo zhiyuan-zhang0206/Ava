@@ -32,7 +32,7 @@ mutations are retried with bounded, non-interactive `sudo -n`; if that also
 fails, converge reports the exact manual command (or points at the popup, for
 identifier-colliding families) and continues rather than blocking unattended
 startup.
-`cli/commands/_converge_firewall.py` uses the reconciler proactively, and
+`cli/commands/converge/firewall.py` uses the reconciler proactively, and
 `ava firewall status` / `sync` run the same audit on demand — see
 [[cli/commands/commands.ava.okf.md]].
 

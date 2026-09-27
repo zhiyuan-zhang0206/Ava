@@ -2,13 +2,13 @@
 
 The explicit post-outage entry: enumerate the billing-class halt victims, check
 the provider balance, resurrect each through the versioned billing-guarded
-action (`resurrect-billing-v1`). Pinned here: the whitelist is exact (closed /
-non-billing / user- and integrity-terminated / alive rows are never picked up),
-the halted-but-alive survey is exact and report-only (never dispatched),
-dry-run writes nothing, the balance gate fails closed, the per-agent CAS makes
-a repeat an audited no-op, the run-level lock refuses a concurrent run, and the
-row-locked guard refuses a closed row or a non-billing halt while the explicit
-single resurrect keeps its reopen contract.
+action (`resurrect-billing-v1`). Pinned here: the whitelist is exact
+(non-billing / user- and integrity-terminated / alive rows are never picked up;
+a `closed_at` stamp left by the retired closed-agent concept no longer
+excludes a row), the halted-but-alive survey is exact and report-only (never
+dispatched), dry-run writes nothing, the balance gate fails closed, the
+per-agent CAS makes a repeat an audited no-op, the run-level lock refuses a
+concurrent run, and the row-locked guard refuses a non-billing halt.
 """
 
 from __future__ import annotations
@@ -59,16 +59,20 @@ def _halt(
     reason: str | None = PERMANENT_REJECT_REASON_BILLING,
     source: str | None = "reaper",
     status: str = "terminated",
-    closed: bool = False,
+    legacy_closed: bool = False,
 ) -> None:
-    """Seed a hosted incarnation's death shape (the incident signature by default)."""
+    """Seed a hosted incarnation's death shape (the incident signature by default).
+
+    `legacy_closed` stamps the `closed_at` column the retired closed-agent
+    concept wrote (decisions/2026-09-27-terminate-has-no-closed-state.md);
+    no gate reads it any more."""
     conn.execute(
         "UPDATE agents_meta SET status=%s, termination_source=%s, "
         "runtime_kind='hosted', runtime_generation=gen_random_uuid(), "
         "runtime_owner=gen_random_uuid(), "
         "permanent_reject_streak=%s, last_permanent_reject_reason=%s, "
         "closed_at=CASE WHEN %s THEN now() ELSE NULL END WHERE id=%s",
-        (status, source, streak, reason, closed, agent_id),
+        (status, source, streak, reason, legacy_closed, agent_id),
     )
     conn.commit()
 
@@ -163,9 +167,10 @@ def _dispatch_through_the_op(monkeypatch: pytest.MonkeyPatch) -> list[int]:
 def test_whitelist_is_exact(db_conn: psycopg.Connection) -> None:
     keep = _agent(db_conn)
     _halt(db_conn, keep)
+    legacy_closed = _agent(db_conn)
+    _halt(db_conn, legacy_closed, legacy_closed=True)
     excluded: list[int] = []
     kws: list[dict[str, Any]] = [
-        {"closed": True},
         {"streak": 1},
         {"reason": "auth"},
         {"reason": None},
@@ -180,7 +185,7 @@ def test_whitelist_is_exact(db_conn: psycopg.Connection) -> None:
 
     candidates = enumerate_candidates(db_conn)
     ids = [c.agent_id for c in candidates]
-    assert keep in ids
+    assert keep in ids and legacy_closed in ids
     assert not any(aid in ids for aid in excluded)
     kept = next(c for c in candidates if c.agent_id == keep)
     assert kept.streak == 2
@@ -194,9 +199,10 @@ def test_halted_alive_survey_is_exact(db_conn: psycopg.Connection) -> None:
     _halt(db_conn, running, status="running")
     terminated = _agent(db_conn)
     _halt(db_conn, terminated)
+    legacy_closed = _agent(db_conn)
+    _halt(db_conn, legacy_closed, status="idling", legacy_closed=True)
     excluded: list[int] = []
     kws: list[dict[str, Any]] = [
-        {"status": "idling", "closed": True},
         {"status": "idling", "streak": 1},
         {"status": "idling", "reason": "auth"},
         {"status": "idling", "reason": None},
@@ -209,7 +215,7 @@ def test_halted_alive_survey_is_exact(db_conn: psycopg.Connection) -> None:
 
     survey = enumerate_halted_alive(db_conn)
     ids = [a.agent_id for a in survey]
-    assert parked in ids and running in ids
+    assert parked in ids and running in ids and legacy_closed in ids
     assert terminated not in ids
     assert not any(aid in ids for aid in excluded)
     assert next(a for a in survey if a.agent_id == parked).streak == 2
@@ -341,16 +347,18 @@ def test_run_lock_admits_one_holder(pool: ConnectionPool) -> None:
     billing_recovery._release_run_lock(pool, conn_after)
 
 
-def test_runner_refuses_closed_and_keeps_the_marker(db_conn: psycopg.Connection) -> None:
+def test_runner_resurrects_a_billing_halt_with_a_legacy_closure_stamp(
+    db_conn: psycopg.Connection,
+) -> None:
+    """No closure gate: the row-locked guard adjudicates the billing halt only,
+    and leaves the retired column as it found it."""
     aid = _agent(db_conn)
-    _halt(db_conn, aid, closed=True)
+    _halt(db_conn, aid, legacy_closed=True)
 
-    with pytest.raises(ResurrectRefused) as excinfo:
-        resurrect_agent(aid, resurrected_by="user", billing_recovery=True)
+    resurrect_agent(aid, resurrected_by="user", billing_recovery=True)
 
-    assert excinfo.value.reason == "closed"
     row = _row(db_conn, aid)
-    assert row[0] == "terminated" and row[1] is not None
+    assert row[0] == "idling" and row[1] is not None
 
 
 def test_runner_refuses_a_non_billing_halt(db_conn: psycopg.Connection) -> None:
@@ -379,19 +387,19 @@ def test_runner_resurrects_a_billing_halt_and_marks_the_via_payload(
     assert resurrect_events and resurrect_events[-1]["payload"] == {"via": "billing_recovery"}
 
 
-def test_explicit_resurrect_still_reopens_a_closed_agent(
+def test_explicit_resurrect_neither_reopens_nor_clears_a_legacy_closure_stamp(
     db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     aid = _agent(db_conn)
-    _halt(db_conn, aid, closed=True)
+    _halt(db_conn, aid, legacy_closed=True)
     events = _capture_resurrect_events(monkeypatch)
 
     resurrect_agent(aid, resurrected_by="user")
 
     row = _row(db_conn, aid)
-    assert row[0] == "idling" and row[1] is None
+    assert row[0] == "idling" and row[1] is not None
     resurrect_events = [e for e in events if e["event_type"] == "resurrect"]
-    assert resurrect_events and resurrect_events[-1]["payload"] == {"reopened": True}
+    assert resurrect_events and resurrect_events[-1]["payload"] == {}
 
 
 class _FakeResponse:

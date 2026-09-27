@@ -54,7 +54,7 @@ def parse_skill_frontmatter(content: str) -> tuple[dict[str, str], str]:
     fields on top of the shared structural parser.
 
     The ONE strict parse behind every skill surface: the index (below), the
-    CLI skill tooling (cli/commands/{skill,plugins,_skill_package,_claude_code_plugin}.py
+    CLI skill tooling (cli/commands/extensions/{skill,plugins,skill_package,_claude_code_plugin}.py
     import it as `ava.skills._parse_frontmatter`), and the repo lint. Raises
     SkillFormatError on malformed frontmatter or a missing required field.
     """

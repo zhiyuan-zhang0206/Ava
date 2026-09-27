@@ -21,9 +21,9 @@ import psutil
 import psycopg
 import pytest
 
-from cli.commands import maintenance_data_plane as maintenance
-from cli.commands import pgbouncer as pooler
-from cli.commands._pooler_stop import OwnedPooler, _native_birth
+from cli.commands.data_plane import maintenance_stop
+from cli.commands.data_plane import pgbouncer as pooler
+from cli.commands.data_plane._pooler_stop import OwnedPooler, _native_birth
 from shared.cluster import ownership
 from shared.config import settings
 from shared.native_process.ownership import OwnedProcess
@@ -177,7 +177,7 @@ def test_repeated_normal_stop_preserves_waiting_transaction(
                 if _attempt and compensation_retry:
                     pooler.stop_pgbouncer()
                 else:
-                    maintenance.stop(0.5)
+                    maintenance_stop.stop(0.5)
             except (RuntimeError, TimeoutError) as exc:
                 failure = exc
             assert custodian.identity.live(), "retry must not immediately abort the waiting pooler"

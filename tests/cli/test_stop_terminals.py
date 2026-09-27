@@ -33,10 +33,10 @@ from uuid import uuid4
 import psutil
 import pytest
 
-from cli.commands import maintenance_stop as strict
+from cli.commands import service_stop as strict
 from cli.commands import stop as entry
 from cli.commands._maintenance_stop_report import StopIncompleteError
-from cli.commands.maintenance_stop import OwnedProcess
+from cli.commands.service_stop import OwnedProcess
 from ops import pty_close_notices
 from shared import maintenance
 from shared.session_backend import PtySessionBackend

@@ -13,7 +13,7 @@ from datetime import datetime
 import psutil
 
 from cli.commands._repo import _repo_root, build_services, session_name
-from cli.commands.maintenance_stop import (
+from cli.commands.service_stop import (
     OwnedProcess,
     capture_tree,
     close_terminals,
@@ -282,8 +282,8 @@ def _services_phase_action(*, preserved: frozenset[str], deadline: float) -> Cal
 
 def _require_unstarted_initialization() -> bool:
     """Positive first-start evidence that no application could have admitted work."""
-    from cli.commands.maintenance_stop import require_no_terminals
     from cli.commands.root_driver import require_root_absent
+    from cli.commands.service_stop import require_no_terminals
     from cli.start_identity import read_intent
     from shared.paths import ava_home, root_manifests_path
 

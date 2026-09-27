@@ -13,7 +13,7 @@ from typing import cast
 
 import pytest
 
-from cli.commands import cluster_instance as _ci
+from cli.commands.data_plane import cluster_instance as _ci
 from shared.config import settings
 
 
@@ -439,7 +439,7 @@ def test_force_stop_shuts_redis_down_as_admin_not_runtime_user(
     )
     monkeypatch.setattr(settings.data_plane, "redis_admin_password", "admin-pw")
     monkeypatch.setattr(_ci.owned_postgres, "stop", lambda _data: None)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr("cli.commands.pgbouncer.stop_pgbouncer", lambda: None)
+    monkeypatch.setattr("cli.commands.data_plane.pgbouncer.stop_pgbouncer", lambda: None)
     monkeypatch.setattr(_ci, "_redis_cli_bin", lambda: "redis-cli")
     shutdowns: list[tuple[list[str], str]] = []
 

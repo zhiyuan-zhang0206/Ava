@@ -16,7 +16,7 @@ import httpx
 import psycopg
 import pytest
 
-from cli.commands import schedules as _sched
+from cli.commands.management import schedules as _sched
 from cli.main import _build_parser
 
 
@@ -440,7 +440,7 @@ def test_update_requires_at_least_one_field_at_parse_time(
 def test_update_passes_the_parse_gate_with_one_field(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from cli.commands import schedules as _schedules
+    from cli.commands.management import schedules as _schedules
 
     def fake(_args: object) -> int:
         return 0

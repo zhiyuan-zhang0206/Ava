@@ -62,7 +62,7 @@ class LocalTransition:
 
     def stop(self, operation: Operation) -> None:
         from cli.commands import maintenance as maintenance_commands
-        from cli.commands import maintenance_stop
+        from cli.commands import service_stop
         from cli.commands.root_driver import require_root_absent
         from cli.release_transition import root_macos
         from ops import pty_close_notices
@@ -82,14 +82,14 @@ class LocalTransition:
                 holder, at, hold, MaintenanceHold.decode(hold.encode() | {"phase": "stopping"})
             )
         # Observation only: in-flight terminal work may still need root.
-        busy = maintenance_stop.await_terminal_work(_TERMINAL_WORK_S)
+        busy = service_stop.await_terminal_work(_TERMINAL_WORK_S)
         darwin = helper_root(operation.launch)
         if darwin:
             # The stop request goes only to the authenticated recorded helper.
             root_macos.verified_helper(operation)
         # Root first: its reconcilers (schedules, pages) would re-arm a session.
         maintenance_commands.stop(holder, at, 90, gateway_last=True, keep_terminals=True)
-        closed = maintenance_stop.close_release_terminals(
+        closed = service_stop.close_release_terminals(
             holder,
             at,
             grace_s=_TERMINAL_GRACE_S,
@@ -138,8 +138,8 @@ class LocalTransition:
         return self.candidate if operation.direction == "candidate" else self.previous
 
     def select(self, operation: Operation) -> None:
-        from cli.commands.maintenance_stop import live_terminals
         from cli.commands.root_driver import require_root_absent
+        from cli.commands.service_stop import live_terminals
 
         self.preflight()
         require_root_absent()

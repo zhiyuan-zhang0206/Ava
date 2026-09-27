@@ -1,11 +1,11 @@
 """Stale-inbound dead-letter sweeps — delivery watchdog job 4.
 
-Split out of `daemon.py` when the closure guard pushed that module at its line
-budget. Each sweep closes only rows whose consumer is gone: a stale claimed
-chat of a terminated/idling owner (boot reconcile cannot finalize it), a
-pending resurrect whose wake was abandoned, a one-shot lifecycle notice of a
-terminated owner, or a pending chat past the G4 resurrect-retry age gate
-(issue #2049 — the retry selector and this sweep share that gate, in lockstep).
+Split out of `daemon.py` at its line budget. Each sweep closes only rows
+whose consumer is gone: a stale claimed chat of a terminated/idling owner
+(boot reconcile cannot finalize it), a pending resurrect whose wake was
+abandoned, a one-shot lifecycle notice of a terminated owner, or a pending
+chat past the G4 resurrect-retry age gate (issue #2049 — the retry selector
+and this sweep share that gate, in lockstep).
 """
 
 from psycopg_pool import ConnectionPool

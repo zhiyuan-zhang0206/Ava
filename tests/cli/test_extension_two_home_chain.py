@@ -31,7 +31,7 @@ from pathlib import Path
 
 import psycopg
 
-from cli.commands.skill import cmd_skill_install
+from cli.commands.extensions.skill import cmd_skill_install
 from shared import extension_materialize as mat
 from shared import extension_registry as reg
 from shared import paths

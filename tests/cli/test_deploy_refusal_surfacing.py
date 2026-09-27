@@ -27,7 +27,7 @@ def test_recover_clears_a_dead_holders_lock(
     after it, so a crashed orchestration still blocks every deploy until its TTL
     expires — up to 30 minutes on the strength of a dead process."""
     import ops.ops_cluster as _ops
-    from cli.commands import cluster_recover
+    from cli.commands.cluster import recover
     from shared.cluster_lock import (
         acquire_update_lock,
         update_lock_holder,
@@ -44,7 +44,7 @@ def test_recover_clears_a_dead_holders_lock(
         monkeypatch.setattr(_ops, "updater_lease_live", lambda: False)
         monkeypatch.setattr(_ops, "unpause_local_cluster", lambda: None)
 
-        assert cluster_recover.cmd_cluster_recover() == 0
+        assert recover.cmd_cluster_recover() == 0
         assert update_lock_holder() is None  # deployable again
         out = capsys.readouterr().out
         assert "gateway-host:pid81319" in out  # names what it cleared
@@ -59,7 +59,7 @@ def test_recover_refuses_while_the_holder_is_alive(
     """The override must not become a way to stomp a rollout that is running fine —
     that would reintroduce the collision the deploy window exists to prevent."""
     import ops.ops_cluster as _ops
-    from cli.commands import cluster_recover
+    from cli.commands.cluster import recover
     from shared.cluster_lock import (
         acquire_update_lock,
         update_lock_holder,
@@ -74,7 +74,7 @@ def test_recover_refuses_while_the_holder_is_alive(
             lambda _h, **_kw: True,  # pyright: ignore[reportUnknownArgumentType]
         )  # still running  # pyright: ignore[reportUnknownArgumentType]
 
-        assert cluster_recover.cmd_cluster_recover() == 1
+        assert recover.cmd_cluster_recover() == 1
         assert update_lock_holder() == "gateway-host:pid81319"  # untouched
         assert "live process" in capsys.readouterr().err
     finally:

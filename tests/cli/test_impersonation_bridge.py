@@ -19,7 +19,7 @@ from uuid import UUID
 
 import pytest
 
-from cli.commands import impersonation_relay as relay
+from cli.commands.agents import impersonation_relay as relay
 
 
 def _public_relay_session(*_args: object, **_kwargs: object) -> dict[str, int]:
@@ -584,7 +584,7 @@ def test_claude_envelope_truncates_long_content_but_keeps_the_ack_line() -> None
 def test_codex_requires_a_control_endpoint_without_queueing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from cli.commands import codex_app_server
+    from cli.commands.agents import codex_app_server
 
     monkeypatch.setattr(codex_app_server, "default_control_endpoint", lambda: None)
     with pytest.raises(RuntimeError, match=r"Steer.*--codex-remote"):
@@ -614,7 +614,7 @@ def test_codex_refusal_never_falls_back_to_pending(
 def test_codex_emitter_delivers_literal_input_to_the_owning_server(
     monkeypatch: pytest.MonkeyPatch, explicit: bool
 ) -> None:
-    from cli.commands import codex_app_server
+    from cli.commands.agents import codex_app_server
 
     attempts: list[tuple[str, str, str]] = []
     endpoint = "unix:///tmp/ava-codex.sock"
@@ -714,7 +714,7 @@ def test_agent_mismatch_refuses_inbox_before_subscription(monkeypatch: pytest.Mo
 
 
 def test_command_passes_remote_to_steer(monkeypatch: pytest.MonkeyPatch) -> None:
-    from cli.commands import impersonation
+    from cli.commands.agents import impersonation
     from cli.parsers import build_parser
 
     remote = "unix:///private/tmp/ava-codex.sock"
@@ -782,7 +782,7 @@ def test_codex_relay_caps_content_and_preserves_inbox_on_steer_failure(
     refuse: bool,
 ) -> None:
     """Bound host context and leave failed messages for the native handoff."""
-    from cli.commands import impersonation
+    from cli.commands.agents import impersonation
     from cli.parsers import build_parser
 
     args = build_parser().parse_args(

@@ -60,7 +60,7 @@ def _require_pg_cluster(before: dict[str, str], after: dict[str, str]) -> None:
 
 def observe_postgres(operation: Operation) -> None:
     """Require actual new native birth and owned archive settings after restart."""
-    from cli.commands import pitr_activation as activation
+    from cli.commands.data_plane import pitr_activation as activation
     from services.pitr.activation_runtime import archive_settings, settings_digest
 
     progress = operation.pitr
@@ -142,7 +142,7 @@ class PitrTransition:
 
     def provision(self, journal: Journal) -> bool:
         """Return true only when a fresh interpreter must enter the sealed phase."""
-        from cli.commands import pitr_activation as activation
+        from cli.commands.data_plane import pitr_activation as activation
         from services.pitr.activation_state import lock_path
         from shared.cluster_lock import acquire_update_lock, release_update_lock
         from shared.platform import file_lock
@@ -178,7 +178,7 @@ class PitrTransition:
         return True
 
     def _data_down(self, operation: Operation) -> bool:
-        from cli.commands.maintenance_data_plane import capture_postgres
+        from cli.commands.data_plane.maintenance_stop import capture_postgres
 
         return (
             operation.pitr is not None
@@ -187,7 +187,7 @@ class PitrTransition:
         )
 
     def _offline_rollback(self, journal: Journal, record: ActivationRecord) -> ActivationRecord:
-        from cli.commands.maintenance_data_plane import stop_captured
+        from cli.commands.data_plane.maintenance_stop import stop_captured
         from cli.commands.root_driver import require_root_absent
         from services.pitr.activation_runtime import restore_exact_file, settings_digest
         from shared import maintenance
@@ -254,7 +254,7 @@ class PitrTransition:
         return record
 
     def _seal(self, journal: Journal, record: ActivationRecord, *, data_stopped: bool) -> None:
-        from cli.commands import pitr_activation as activation
+        from cli.commands.data_plane import pitr_activation as activation
         from services.pitr.activation_runtime import archive_settings, settings_digest
         from shared.start_inputs import configuration_digest
 
@@ -308,13 +308,13 @@ class PitrTransition:
 
     def stop_apps(self, journal: Journal) -> None:
         from cli.commands import maintenance as maintenance_commands
-        from cli.commands.maintenance_data_plane import capture_custody
-        from cli.commands.maintenance_stop import (
+        from cli.commands.data_plane.maintenance_stop import capture_custody
+        from cli.commands.root_driver import require_root_absent
+        from cli.commands.service_stop import (
             await_terminal_work,
             close_release_terminals,
             require_no_terminals,
         )
-        from cli.commands.root_driver import require_root_absent
         from ops import pty_close_notices
         from shared import maintenance, pause_owner
         from shared.maintenance_state import MaintenanceHold
@@ -365,7 +365,7 @@ class PitrTransition:
             journal.record_pitr(progress.model_copy(update={"data_stop": receipt}))
 
     def stop_data(self, operation: Operation) -> None:
-        from cli.commands.maintenance_data_plane import stop_captured
+        from cli.commands.data_plane.maintenance_stop import stop_captured
         from cli.commands.root_driver import require_root_absent
         from shared import maintenance
 
@@ -417,7 +417,7 @@ class PitrTransition:
         maintenance_commands.resume(str(self.request.id), self.at, cancel=False)
 
     def prove(self, journal: Journal) -> None:
-        from cli.commands import pitr_activation as activation
+        from cli.commands.data_plane import pitr_activation as activation
         from services.pitr.activation_state import lock_path
         from shared.cluster_lock import acquire_update_lock, release_update_lock
         from shared.platform import file_lock

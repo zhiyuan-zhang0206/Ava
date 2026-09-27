@@ -265,7 +265,7 @@ def _station_ingress_url() -> str:
 
     `http://<reachable_host()>:<OTLP ingress port>` — the station's
     bearer-authenticated OTLP ingress (the collector's `otlp/remote`
-    receiver, `cli/commands/_otel_collector.py`), the one station address
+    receiver, `cli/commands/observability/otel_collector.py`), the one station address
     remote consumers dial. The port follows `AVA_TELEMETRY_OTLP_PORT`
     (single source, task #1945), so the advertisement and the listener can
     never drift apart. Loopback falls through when the station has no

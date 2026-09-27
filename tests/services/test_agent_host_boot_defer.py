@@ -74,7 +74,9 @@ async def test_recovery_deferral_escalates_on_the_third_consecutive_boot(
 ) -> None:
     deferred = {_AGENT: (_evidence(_AGENT),)}
 
-    async def recover(_pool: Any, _machine: str) -> tuple[list[int], dict[int, tuple[Any, ...]]]:
+    async def recover(
+        _pool: Any, _machine: str, **_kwargs: Any
+    ) -> tuple[list[int], dict[int, tuple[Any, ...]]]:
         return [], deferred
 
     monkeypatch.setattr(daemon, "recover_orphaned_hosted_forces", recover)
@@ -108,7 +110,9 @@ async def test_a_boot_with_no_deferral_clears_the_streak(
 ) -> None:
     """Recovery ends the streak: the count restarts from the next deferral."""
 
-    async def settle_all(_pool: Any, _machine: str) -> tuple[list[int], dict[int, tuple[Any, ...]]]:
+    async def settle_all(
+        _pool: Any, _machine: str, **_kwargs: Any
+    ) -> tuple[list[int], dict[int, tuple[Any, ...]]]:
         return [_AGENT], {}
 
     monkeypatch.setattr(daemon, "recover_orphaned_hosted_forces", settle_all)

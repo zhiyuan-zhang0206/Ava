@@ -14,8 +14,8 @@ import pytest
 import redis
 from redis.asyncio import Redis as AsyncRedis
 
-from cli.commands import cluster_instance as instance
-from cli.commands import pgbouncer as pooler
+from cli.commands.data_plane import cluster_instance as instance
+from cli.commands.data_plane import pgbouncer as pooler
 from shared.cluster import ownership
 from shared.cluster import postgres as pg
 from shared.native_process.ownership import OwnedProcess
@@ -126,7 +126,7 @@ def test_postmaster_pidfile_cannot_supply_missing_native_receipt(tmp_path: Path)
 def test_redis_maintenance_reconnect_cannot_shutdown_another_connection(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from cli.commands import maintenance_data_plane as plane
+    from cli.commands.data_plane import maintenance_stop as plane
     from shared.config import settings
 
     monkeypatch.setattr(plane, "capture_postgres", lambda: None)
@@ -396,7 +396,7 @@ def test_real_owned_postgres_resume_and_fast_stop(
     """The ordinary producer supplies all custody; no test-only receipt adoption."""
     import psycopg
 
-    from cli.commands import maintenance_data_plane as plane
+    from cli.commands.data_plane import maintenance_stop as plane
 
     data, port = _private_pg_configuration(tmp_path, monkeypatch)
     try:
@@ -437,7 +437,7 @@ def test_pg_native_signal_failure_is_not_reported_as_stopped(
 ) -> None:
     import asyncio
 
-    from cli.commands import maintenance_data_plane as plane
+    from cli.commands.data_plane import maintenance_stop as plane
     from tests._containers import _free_port
 
     owner = OwnedProcess(123, 100.0, 456)

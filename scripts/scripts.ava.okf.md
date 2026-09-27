@@ -69,7 +69,7 @@ immediately.
 
 ## Key Dependencies
 
-- [[../cli/cli.ava.okf.md]] — `ava start` owns cluster identity and service readiness; `converge.py` applies host wiring and plugin scaffolds.
+- [[../cli/cli.ava.okf.md]] — `ava start` owns cluster identity and service readiness; `converge/host.py` applies host wiring and plugin scaffolds.
 - [[../tests/tests.ava.okf.md]] — many lint scripts have corresponding `tests/test_lint_*.py`
 
 ## Notes

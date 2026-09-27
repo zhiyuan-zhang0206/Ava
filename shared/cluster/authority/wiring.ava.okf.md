@@ -106,7 +106,7 @@ and the coordinator channel's authentication:
   `machine_units` row -> Redis admin rotation -> one `issue_bundle` per
   included unit (after `api`, so bundles carry the rotated telemetry token).
 - **Monitoring** is not delivered: the collector's PostgreSQL receiver
-  (`cli/commands/_otel_collector.py`) dials the owner-only socket as
+  (`cli/commands/observability/otel_collector.py`) dials the owner-only socket as
   `ava_monitor` by `peer`, so its rendered config names no credential and a
   rollout leaves it working.
 - **Release** (`cli/release_transition/authority.py`, under the home operation

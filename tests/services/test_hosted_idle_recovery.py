@@ -107,9 +107,6 @@ async def _assert_recovered_without_a_model_call(
     assert db_conn.execute(
         "SELECT count(*) FROM inbound_messages WHERE agent_id=%s", (agent,)
     ).fetchone() == (0,)
-    assert db_conn.execute(
-        "SELECT count(*) FROM agent_watchers WHERE agent_id=%s", (agent,)
-    ).fetchone() == (0,)
     state = await graph.aget_state(config)
     assert [message.content for message in state.values["messages"]] == [
         message.content for message in messages

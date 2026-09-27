@@ -58,7 +58,7 @@ def dial(monkeypatch: pytest.MonkeyPatch) -> dict[str, list[tuple]]:
 
 
 def test_list_passes_include_awaiting(dial: dict[str, list[tuple]]) -> None:
-    from cli.commands.notices import cmd_notices_list
+    from cli.commands.agents.notices import cmd_notices_list
 
     assert cmd_notices_list(agent_id=None, priority=None, type_filter=None) == 0
     url, kw = dial["get"][0]
@@ -67,7 +67,7 @@ def test_list_passes_include_awaiting(dial: dict[str, list[tuple]]) -> None:
 
 
 def test_list_filters_by_agent_and_type(monkeypatch: pytest.MonkeyPatch) -> None:
-    from cli.commands.notices import cmd_notices_list
+    from cli.commands.agents.notices import cmd_notices_list
 
     def fake_get(url: str, **kw: Any) -> _Resp:
         return _Resp(
@@ -88,7 +88,7 @@ def test_list_filters_by_agent_and_type(monkeypatch: pytest.MonkeyPatch) -> None
 
 
 def test_resolve_requires_reply_for_answer() -> None:
-    from cli.commands.notices import cmd_notices_resolve
+    from cli.commands.agents.notices import cmd_notices_resolve
 
     assert cmd_notices_resolve(notice_id=1, agent_id=7, action="answer", reply=None) == 2
 
@@ -96,7 +96,7 @@ def test_resolve_requires_reply_for_answer() -> None:
 def test_resolve_posts_action(
     dial: dict[str, list[tuple]], capsys: pytest.CaptureFixture[str]
 ) -> None:
-    from cli.commands.notices import cmd_notices_resolve
+    from cli.commands.agents.notices import cmd_notices_resolve
 
     assert cmd_notices_resolve(notice_id=5, agent_id=7, action="read", reply=None) == 0
     url, kw = dial["post"][0]
@@ -106,7 +106,7 @@ def test_resolve_posts_action(
 
 
 def test_clear_resolves_each_open(monkeypatch: pytest.MonkeyPatch) -> None:
-    from cli.commands.notices import cmd_notices_clear
+    from cli.commands.agents.notices import cmd_notices_clear
 
     posted: list[dict] = []
 
@@ -137,7 +137,7 @@ def test_clear_resolves_each_open(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_list_stale_filters_terminated(monkeypatch: pytest.MonkeyPatch) -> None:
     """--stale keeps only notices whose agent is terminated (Task #1149)."""
-    from cli.commands.notices import cmd_notices_list
+    from cli.commands.agents.notices import cmd_notices_list
 
     calls: list[str] = []
 
@@ -169,7 +169,7 @@ def test_list_stale_filters_terminated(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_clear_stale_resolves_only_terminated(monkeypatch: pytest.MonkeyPatch) -> None:
     """--stale clears terminated agents' notices, leaves live agents' alone."""
-    from cli.commands.notices import cmd_notices_clear
+    from cli.commands.agents.notices import cmd_notices_clear
 
     posted: list[tuple[str, dict[str, object]]] = []
 
@@ -203,7 +203,7 @@ def test_clear_stale_resolves_only_terminated(monkeypatch: pytest.MonkeyPatch) -
 
 
 def test_clear_stale_rejects_agent(monkeypatch: pytest.MonkeyPatch) -> None:
-    from cli.commands.notices import cmd_notices_clear
+    from cli.commands.agents.notices import cmd_notices_clear
 
     monkeypatch.setattr("shared.machine.gateway_api_base", lambda: "http://gw")
     monkeypatch.setattr("shared.machine.gateway_auth_headers", dict)
@@ -213,7 +213,7 @@ def test_clear_stale_rejects_agent(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_stale_lookup_deduplicates_only_agents_in_filtered_notices(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from cli.commands.notices import cmd_notices_list
+    from cli.commands.agents.notices import cmd_notices_list
 
     calls: list[str] = []
 
@@ -235,7 +235,7 @@ def test_stale_lookup_deduplicates_only_agents_in_filtered_notices(
 
 
 def test_stale_empty_notice_queue_never_reads_directory(dial: dict[str, list[tuple]]) -> None:
-    from cli.commands.notices import cmd_notices_clear, cmd_notices_list
+    from cli.commands.agents.notices import cmd_notices_clear, cmd_notices_list
 
     assert cmd_notices_list(agent_id=None, priority=None, type_filter=None, stale=True) == 0
     assert cmd_notices_clear(agent_id=None, force=True, stale=True) == 0
@@ -245,7 +245,7 @@ def test_stale_empty_notice_queue_never_reads_directory(dial: dict[str, list[tup
 def test_stale_clear_keeps_notices_of_missing_agents(
     monkeypatch: pytest.MonkeyPatch, dial: dict[str, list[tuple]]
 ) -> None:
-    from cli.commands.notices import cmd_notices_clear
+    from cli.commands.agents.notices import cmd_notices_clear
 
     def fake_get(url: str, **kw: Any) -> _Resp:
         if url == "http://gw/api/agents/7":

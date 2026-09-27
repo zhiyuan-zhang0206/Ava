@@ -303,7 +303,7 @@ DECISIONS: dict[str, Decision] = {
                 "probes an installed unit capability's own runner login at the served "
                 "endpoint, the credential under test"
             ),
-            "cli/commands/cluster_instance.py": (
+            "cli/commands/data_plane/cluster_instance.py": (
                 "proves the running postmaster demands a password by dialing a role "
                 "that cannot exist, with no credential"
             ),

@@ -304,7 +304,7 @@ rebuilt audit line.
 Postgres and Redis run as native processes (no Docker — the binaries come from brew's
 `redis@8.2` keg on macOS / apt on Linux, but Ava drives them directly via `pg_ctl` + `redis-server`,
 not `brew services`/launchd/systemd). Every cluster — including `main` — brings up its
-OWN pair under `$AVA_HOME` on its per-cluster ports (`cli/commands/cluster_instance.py`):
+OWN pair under `$AVA_HOME` on its per-cluster ports (`cli/commands/data_plane/cluster_instance.py`):
 `initdb` into `$AVA_HOME/pg` (template-cached through a host-level dir beside the
 registry, so a new cluster / a test spins up by directory copy rather than a fresh
 multi-second init), plus `redis-server` with its data dir under `$AVA_HOME/redis`.
@@ -378,8 +378,10 @@ sequence USAGE), SELECT/UPDATE on `agents_meta` (status/liveness), SELECT/UPDATE
 `inbound_messages` (claim AND the agent-side self-lifecycle inbounds), UPDATE on
 `agents` (`ava.self.set_label`), INSERT/UPDATE/SELECT on `machine_units` + INSERT/UPDATE
 on `machines` and `host_deploy_state`, INSERT/UPDATE/DELETE on `api_idempotency`,
-INSERT/UPDATE on `agent_tasks`, INSERT/UPDATE/DELETE on `agent_watchers`, UPDATE on
-`agent_pages`, the shell TTL rows, and full CRUD on the LangGraph checkpoint tables.
+INSERT/UPDATE on `agent_tasks`, INSERT/UPDATE/DELETE on `agent_watchers` (unused since
+2026-09-27 — a watcher is a plain shell session with no registry row; the grant and the
+table are follow-up debt for one contract migration), UPDATE on `agent_pages`, the shell
+TTL rows, and full CRUD on the LangGraph checkpoint tables.
 `agents` INSERT, `agents_meta` INSERT, notices writes, the cluster deploy-state tables and
 any DDL fail under it by construction. Each write generation is one `ava_g<n>_gateway` and
 one `ava_g<n>_runner` login inheriting its group (`INHERIT TRUE, SET FALSE, ADMIN
@@ -441,7 +443,7 @@ targets the same cluster no matter where you run it. Invoke the checkout's
 `ava start`. That global `ava` always means prod. For dev, run
 `.venv/bin/ava` inside the worktree (which resolves the worktree's own `ava`).
 
-The converge phase (`cli/commands/converge.py:converge_host`) is idempotent — run
+The converge phase (`cli/commands/converge/host.py:converge_host`) is idempotent — run
 by every source `cmd_start`. Run it standalone with `ava converge`. It covers the
 prod `ava` symlink, `~/.local/bin` on PATH, the `$AVA_HOME` dir skeleton, and one prod-host integration for
 external agents: when `~/.codex` and/or `~/.claude` already exists, it copies only
@@ -556,7 +558,7 @@ nodes co-located with their code:
 | `$AVA_HOME` layout, what derives from the home | `shared/paths/paths.ava.okf.md` |
 | plugin enable config (`plugins_config.json`) | `shared/plugins_config.ava.okf.md` |
 | `installed.json` schema, installable shapes, the scanner gate | `shared/install_registry/install_registry.ava.okf.md` |
-| `ava plugins` / `skill` / `mcp` verbs, MCP merge layers, secret channel | `cli/commands/packages/packages.ava.okf.md` |
+| `ava plugins` / `skill` / `mcp` verbs, MCP merge layers, secret channel | `cli/commands/extensions/packages.ava.okf.md` |
 | machine name, capability set, `machines` table, spawn-target 400 invariant | `shared/machine.ava.okf.md` |
 | which services each capability contributes | `services/services.ava.okf.md` |
 
@@ -603,7 +605,7 @@ supervisor socket for agent shells / watchers).
 | `labeler`                | `.venv/bin/python -m services.labeler.daemon` (auto label generation) | `services.healthchecks.labeler` (`/healthz` :8103) |
 | `im-bridge`              | `.venv/bin/python -m services.im_bridge.daemon` (IM frontends: Telegram; WeChat iLink / Feishu adapters shipped but **production-disabled since 2026-08-06** — `AVA_IM_DISABLED_ADAPTERS=weixin,feishu`) | `services.healthchecks.im_bridge` (`/healthz` :8111) |
 | `heartbeat` (gateway only) | `.venv/bin/python -m services.heartbeat.daemon` (every `AVA_HEARTBEAT_INTERVAL_SECONDS`, default 15 min, scans `idling` agents past `AVA_HEARTBEAT_IDLE_THRESHOLD_SECONDS` that have not called `ava.self.pause_heartbeat()` and INSERTs a `heartbeat` check-in inbound; cluster-wide — the inbound-insert trigger wakes the agent on any machine, so it runs once on the gateway, not per agent-runner) | `services.healthchecks.heartbeat` (`/healthz` :8107) |
-| `delivery-watchdog` (gateway only) | `.venv/bin/python -m services.delivery_watchdog.daemon` (six jobs on one fast tick, default 0.5s per `AVA_DELIVERY_WATCHDOG_INTERVAL_SECONDS`: **(1) wake dispatch** — re-publishes the Redis wake (with the wake-key breadcrumb) for every `pending` inbound of an `idling` owner older than `AVA_DELIVERY_WATCHDOG_DISPATCH_THRESHOLD_SECONDS` (default 1s), collapsing the lost-publish recovery from the claim loop's 30s recheck to ~1.5s; constant ~2 qps load, independent of fleet size; **(2) stall alerting** — WARNINGs chat inbounds still `pending` past `AVA_DELIVERY_WATCHDOG_THRESHOLD_SECONDS` (default 30s) whose owner is `idling`/`terminated`, once per row while stuck, with a `delivery_stalled` event emitted to the unified `events` stream; **(3) terminated-owner resurrect retry** — re-runs `resurrect_if_terminated` for each terminated owner holding a post-death `pending` chat younger than `AVA_DELIVERY_WATCHDOG_STALE_CLAIMED_THRESHOLD_SECONDS` (default 24h; Task #689 G4) — including the corpse reaper's committed crash-recovery wake (task #4039), excluding closed agents (`agents_meta.closed_at` set by `terminate --final` — closure outranks every automatic channel), with per-agent in-flight/cooldown maps and the escalating `resurrect_failed` wake-suppression ladder (30-minute exponential window capped at 24 h, after five consecutive failed attempts); **(4) stale-inbound dead-letter sweeps** — every 30s flips `claimed` then `pending` chat rows of terminated owners past the same stale threshold to `done` (Tasks #654/#2049), so the sweep and the G4 trigger share one age gate; **(5) stalled crash-marked recovery request** — escalates a chat still `pending` past the stall threshold whose owner is a crash-marked idling corpse over the internal `recover-crash-marked-v2` path (one request per owner, 60s cooldown, `delivery_recovery_decision` per decision, gated by `AVA_DELIVERY_STALLED_RECOVERY_ENABLED`; Task #3618); **(6) hosted-turn liveness recovery** — confirms any hosted `running` agent whose DB activity is older than the 2400 s wedged-agent budget (`wedged_agent_inbound_age_seconds`) against the agent-host's 15 s Redis progress heartbeat (missing heartbeats or stale per-turn marks = wedged), then force-terminates the incarnation and queues the marked `hosted_turn_recovery` chat so guarded resurrection survives restarts (a closed owner's marked chat queues but reaches no dispatch — the closure guard refuses the revive); one attempt per agent per 10-minute cooldown, `host_turn_stall_detected` evidence (Task #1712). `running` owners are never dispatched or alerted (mid-turn queues are normal). Gate cluster-level on/off with `AVA_DELIVERY_WATCHDOG_ENABLED`) | `services.healthchecks.delivery_watchdog` (`/healthz` :8110) |
+| `delivery-watchdog` (gateway only) | `.venv/bin/python -m services.delivery_watchdog.daemon` (six jobs on one fast tick, default 0.5s per `AVA_DELIVERY_WATCHDOG_INTERVAL_SECONDS`: **(1) wake dispatch** — re-publishes the Redis wake (with the wake-key breadcrumb) for every `pending` inbound of an `idling` owner older than `AVA_DELIVERY_WATCHDOG_DISPATCH_THRESHOLD_SECONDS` (default 1s), collapsing the lost-publish recovery from the claim loop's 30s recheck to ~1.5s; constant ~2 qps load, independent of fleet size; **(2) stall alerting** — WARNINGs chat inbounds still `pending` past `AVA_DELIVERY_WATCHDOG_THRESHOLD_SECONDS` (default 30s) whose owner is `idling`/`terminated`, once per row while stuck, with a `delivery_stalled` event emitted to the unified `events` stream; **(3) terminated-owner resurrect retry** — re-runs `resurrect_if_terminated` for each terminated owner holding a post-death `pending` chat younger than `AVA_DELIVERY_WATCHDOG_STALE_CLAIMED_THRESHOLD_SECONDS` (default 24h; Task #689 G4) — including the corpse reaper's committed crash-recovery wake (task #4039), with per-agent in-flight/cooldown maps and the escalating `resurrect_failed` wake-suppression ladder (30-minute exponential window capped at 24 h, after five consecutive failed attempts); **(4) stale-inbound dead-letter sweeps** — every 30s flips `claimed` then `pending` chat rows of terminated owners past the same stale threshold to `done` (Tasks #654/#2049), so the sweep and the G4 trigger share one age gate; **(5) stalled crash-marked recovery request** — escalates a chat still `pending` past the stall threshold whose owner is a crash-marked idling corpse over the internal `recover-crash-marked-v2` path (one request per owner, 60s cooldown, `delivery_recovery_decision` per decision, gated by `AVA_DELIVERY_STALLED_RECOVERY_ENABLED`; Task #3618); **(6) hosted-turn liveness recovery** — confirms any hosted `running` agent whose DB activity is older than the 2400 s wedged-agent budget (`wedged_agent_inbound_age_seconds`) against the agent-host's 15 s Redis progress heartbeat (missing heartbeats or stale per-turn marks = wedged), then force-terminates the incarnation and queues the marked `hosted_turn_recovery` chat so guarded resurrection survives restarts; one attempt per agent per 10-minute cooldown, `host_turn_stall_detected` evidence (Task #1712). `running` owners are never dispatched or alerted (mid-turn queues are normal). Gate cluster-level on/off with `AVA_DELIVERY_WATCHDOG_ENABLED`) | `services.healthchecks.delivery_watchdog` (`/healthz` :8110) |
 | `task-maintenance` (gateway only; **registered by the `ava_fleet` plugin**, not core — see `ava_builtins/plugins/ava_fleet/services.py`) | `.venv/bin/python -m ava_builtins.plugins.ava_fleet.task_maintenance.daemon` (every `AVA_TASK_MAINTENANCE_INTERVAL_SECONDS`, default 5 min, reminds owners of overdue in-progress tasks past their `remind_interval_seconds` window via a `chat` inbound; after `AVA_TASK_ESCALATE_N` (default 3) unanswered reminders, notifies the parent task's owner. Cluster-wide, runs once on the gateway. Discovered whenever the `ava_fleet` plugin code is present; gate its cluster-level on/off with `AVA_TASK_MAINTENANCE_ENABLED`) | `ava_builtins.plugins.ava_fleet.task_maintenance.healthcheck` (`/healthz` :8108) |
 | `events-maintenance` (gateway only) | `.venv/bin/python -m services.events_maintenance.daemon` (every `AVA_EVENTS_MAINTENANCE_INTERVAL_SECONDS`, default 1h. Each pass incrementally maintains the Since-Birth day-grain rollups — `agent_metrics_daily` / `agent_model_tokens_daily` (the durable token+cost ledger) — from **Loki** (the unified event stream's live store): one union-family count probe compares retained candidate days with `rollup_day_state`; missing, failed, count-changed, and the latest `AVA_EVENTS_ROLLUP_LATE_WRITE_LOOKBACK_DAYS` (default 1) get a full-day overwrite, while clean days avoid the fourteen aggregate queries. The scan clamps to Loki's 84h retention floor (an outage longer than retention loses those days' Loki aggregates — logged loudly; the filtered `events-YYYYMMDD.rollup.jsonl` mirror (90-day retention by default, tunable via `AVA_EVENTS_JSONL_ROLLUP_RETENTION_DAYS`) then automatically repairs older ledger-watermark gaps: zero-known-row files fail loudly and are not counted as replayed, missing files remain unrecoverable; pre-LGTM history was backfilled once by the llm-cost-rollup-columns migration from the frozen PG archive), uses its own capacity-one Loki budget, and stops between days at `AVA_EVENTS_ROLLUP_PASS_DEADLINE_S` (default 1200), leaving untouched/failed state for the next pass. Today is served live by the readers (whole-life cost = ledger + Loki tail from the watermark). Full-day overwrite upsert keyed on the PK ⇒ idempotent; a zero-row indexed slice preserves existing ledger rows and marks the day failed for retry. Cluster-wide, runs once on the gateway — it owns the data plane. The rollup, JSONL replay, blob vacuum and hourly checkpoint size sample are unconditional — the PG `events` archive slices (partition rolling, retention, index governance) were removed with the task #1281/#1823 cleanup. The current baseline omits that archive. The daemon also hosts the per-thread checkpoint pruner (every 60s, newest three regardless of liveness; parked by default since the never-delete ruling — `AVA_EVENTS_MAINTENANCE_CHECKPOINT_TRIM_ENABLED=true` is an explicit opt-in that deletes history) and the blob vacuum) | `services.healthchecks.events_maintenance` (`/healthz` :8109) |
 | `milvus`                 | `.venv/bin/python -m services.milvus.daemon` (`milvus-lite server` gRPC :19530, data dir `~/.ava/milvus-data/`) | `services.healthchecks.milvus` (TCP probe :19530) |
@@ -925,13 +927,15 @@ The boundary has a deliberate reconciliation effect at **freeze**, not at
 resume. The allocation command does not directly kill an existing PTY, but the
 next ScheduleManager tick (about five seconds) reaps every schedule PTY from
 the preceding generation, interrupts any open schedule run, and leaves the
-enabled schedule as the current desired state for a later replacement. The
-next agent boot reaps every preceding-generation watcher row and retains it as
-`reaped` history; its prior watcher cron declaration is not automatically
-restored and must be declared again. A reaped `at` or `launch` one-shot sends
-the owner a missed notification. This applies to an inspection-only freeze too:
-it is not safe to assume that existing desired-state sessions keep running after
-the freeze acknowledgement.
+enabled schedule as the current desired state for a later replacement. A
+watcher session (`ava.watcher.at/cron/launch`) is NOT part of this
+reconciliation at all — it has no desired-state record and nothing rebuilds or
+reaps it by generation (decisions/2026-09-27-watchers-are-never-restarted.md);
+a preceding-generation watcher session simply keeps running (or not) exactly
+as it would without the freeze, subject only to its own TTL deadline, an
+explicit kill, or `ava stop`. This applies to an inspection-only freeze too:
+it is not safe to assume that existing desired-state sessions (schedules)
+keep running after the freeze acknowledgement.
 
 Resume with the exact token printed by the freeze that this operator owns:
 
@@ -944,12 +948,13 @@ local host operations and remain usable while the gateway, Postgres, or Redis
 is unavailable. A malformed marker fails closed; inspect the marker path shown
 by `ava pty status` and perform an audited manual repair rather than treating
 corruption as an implicit resume. Do **not** delete the marker: that changes the
-current generation to `None` and can make the next watcher reconcile reap every
-generation-bound declaration. Recover the original generation UUID from any
-known-live PTY session record, rebuild a valid marker with that exact UUID, and
-only then allow reconciliation to resume. If no record establishes the UUID,
-leave the marker fail-closed and restore desired state only after an operator
-has made the boundary explicit.
+current generation to `None` and can make the next ScheduleManager tick reap
+every generation-bound schedule declaration (watchers are unaffected — they
+have no generation-bound declaration to reap). Recover the original generation
+UUID from any known-live PTY session record, rebuild a valid marker with that
+exact UUID, and only then allow reconciliation to resume. If no record
+establishes the UUID, leave the marker fail-closed and restore desired state
+only after an operator has made the boundary explicit.
 
 For a bounded host cleanup, keep the order explicit:
 
@@ -1435,8 +1440,8 @@ ava agents resurrect-billing --execute  # balance gate -> resurrect each candida
 ```
 
 The preview itself is the identification tool: it lists the billing-class halt
-victims (terminated, not closed, streak at the halt threshold, reason
-`billing`, and not `user` / `integrity`-terminated), the halted-but-alive rows
+victims (terminated, streak at the halt threshold, reason `billing`, and not
+`user` / `integrity`-terminated), the halted-but-alive rows
 (report-only — no action is needed; the halt clears on their next successful
 turn), and the live provider balance readout. `--execute` refuses (exit 1)
 unless the balance endpoint reports the account available above
@@ -1445,10 +1450,9 @@ fix the account or the `AVA_BILLING_RECOVERY_*` config and rerun. The run is
 idempotent: the candidate set self-clears, a rerun is an audited no-op, and a
 concurrent second run is refused by the run-level single-flight lock.
 
-Boundaries: closed agents (`terminate --final`), `user` / `integrity`-
-terminated rows, and halted-but-alive agents are never actioned — the last
-recover on their next inbound; the others stay a per-agent human decision
-(`ava agents resurrect <id>`). Audit lands on the `billing_resurrect` event
+Boundaries: `user` / `integrity`-terminated rows and halted-but-alive agents
+are never actioned — the latter recover on their next inbound; the former stay
+a per-agent human decision (`ava agents resurrect <id>`). Audit lands on the `billing_resurrect` event
 (balance readout + candidate / resurrected / refused / deferred / failed sets)
 plus `billing_resurrect_run` telemetry; each resurrected agent's own
 `resurrect` event carries `via='billing_recovery'`. Rationale and rejected
@@ -1756,7 +1760,7 @@ and user systemd units on Linux amd64 run Loki, Prometheus (GOMEMLIMIT
 2GiB / 1GiB), and Grafana. Unit names include the home slug; Linux ownership
 also checks the loaded unit file and exact executable. Explicit host listen
 ports permit isolated homes; defaults remain 3100/9090/3003 plus Loki gRPC
-9095. See [native lifecycle](../cli/commands/lgtm.ava.okf.md). Tempo is configured per cluster; prod's host-scope
+9095. See [native lifecycle](../cli/commands/observability/lgtm.ava.okf.md). Tempo is configured per cluster; prod's host-scope
 override targets the remote WSL Tempo. No
 service lifecycle depends on a container backend. The backend is required while the gateway serves /ops
 and the inspect endpoints (consumers: the gateway Loki/Prometheus read paths,
@@ -1819,7 +1823,7 @@ loop. Both the trace precheck and event exporter retry every five minutes; the
 event exporter records disabled/recovered attempts as real events in the JSONL
 mirror that survives the outage.
 
-**Ship** — `ava trace ship` (`cli/commands/trace.py`). Recovery replay reads
+**Ship** — `ava trace ship` (`cli/commands/observability/trace.py`). Recovery replay reads
 the mirror and bypasses the LOCAL sidecar, because replaying through it would
 write the replayed lines back into the mirror (watermark loop). A gateway or
 single-box unit POSTs straight to loopback

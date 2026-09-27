@@ -22,7 +22,7 @@ a release ([decision](../../decisions/2026-09-27-fleet-release-and-cutover-polic
 item 2). While root still serves them, the phase waits a bounded time for
 their jobs to finish, signalling nothing. It then stops root, keeping
 terminals, so no reconciler re-arms a session. `close_release_terminals`
-(`cli/commands/maintenance_stop.py`) captures every recorded shell, job and PTY
+(`cli/commands/service_stop.py`) captures every recorded shell, job and PTY
 host birth, records the `ava stop` closure notice for each busy session's
 owner (naming the release, before any signal), HUPs shells and TERMs jobs,
 and after a grace SIGKILLs only those captured births still live. Closure is
@@ -54,7 +54,7 @@ processes do not inherit it.
 
 Every direction runs on a fresh database write generation
 ([[shared/cluster/authority/authority.ava.okf.md|write-generation authority]]);
-`authority.py` orchestrates it and `cli/commands/maintenance_data_plane.py`
+`authority.py` orchestrates it and `cli/commands/data_plane/write_generation.py`
 performs the data-plane effects. The home ledger is the authority; the journal
 (`authority_evidence.py`) carries one `Fence` and one `Issue` per direction:
 intent before each ledger transition, a non-secret receipt after it.

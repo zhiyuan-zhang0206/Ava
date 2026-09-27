@@ -95,10 +95,10 @@ the rest of the `_`-prefixed steps are enumerated in
 
 - `cli/main.py:main()` — argparse entrypoint; `cli/parsers/` — the settings-free command tree.
 - `cli/start_intent.py:run_start()` — first-start inputs and full home lifecycle lock; `cli/start_identity.py` — durable initialization journal.
-- `cli/commands/cluster_lifecycle.py` — `ls/down/destroy` (`--path` addressed), exact cleanup before registry release; `start.py` / `status.py` / `cluster_instance.py` — runtime operations.
+- `cli/commands/cluster/registry.py` — `ls/down/destroy` (`--path` addressed), exact cleanup before registry release; `start.py` / `status.py` / `data_plane/cluster_instance.py` — runtime operations.
 
 ## Notes
 
 - Prod `ava` = `~/.local/bin/ava` → symlink to the prod checkout, acting on `~/.ava`; in a dev worktree, `.venv/bin/ava` acts on that worktree's cluster (via the `.ava_home` pointer).
 - Each cluster has its own pg/redis; isolation is home-directory isolation (instances under `$AVA_HOME` + port blocks), not db names / redis indexes in a shared instance.
-- Children: [[cli/cluster.ava.okf.md]] (the `ava cluster` verb group) · [[cli/start_identity.ava.okf.md]] (idempotent cluster start) · [[cli/commands/commands.ava.okf.md]] (the module split) · [[cli/commands/packages/packages.ava.okf.md]] (the plugins / skill / mcp package surface) · [[cli/mcp_server.ava.okf.md]] (`ava mcp serve` — this cluster AS an MCP server).
+- Children: [[cli/cluster.ava.okf.md]] (the `ava cluster` verb group) · [[cli/start_identity.ava.okf.md]] (idempotent cluster start) · [[cli/commands/commands.ava.okf.md]] (the module split) · [[cli/commands/extensions/packages.ava.okf.md]] (the plugins / skill / mcp package surface) · [[cli/mcp_server.ava.okf.md]] (`ava mcp serve` — this cluster AS an MCP server).

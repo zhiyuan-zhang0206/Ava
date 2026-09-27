@@ -2,7 +2,7 @@
 
 A single-box home born by the real start steps (`test_single_box.born`, empty
 cluster secret) runs a real release journal through `authority.fence` and
-`authority.authorize`: the effects are the real `maintenance_data_plane` ones
+`authority.authorize`: the effects are the real `write_generation` ones
 (revoke + sweep, pooler stop with escalation, termination census, prune, mint,
 pooler restart, pooled proof, activate). Old writers are held across the fence
 the ways stale code holds them. A process death is injected after every
@@ -27,10 +27,9 @@ from uuid import uuid4
 import psycopg
 import pytest
 
-from cli.commands import _data_plane as data_plane
-from cli.commands import cluster_instance as ci
-from cli.commands import maintenance_data_plane
-from cli.commands import pgbouncer as pooler
+from cli.commands.data_plane import bringup, write_generation
+from cli.commands.data_plane import cluster_instance as ci
+from cli.commands.data_plane import pgbouncer as pooler
 from cli.release_transition import authority as release_authority
 from cli.release_transition.journal import Operation, create, exclusive, read_operation
 from cli.release_transition.request import ReleaseRef, Request
@@ -135,17 +134,17 @@ def _pooler_birth() -> Any:
 
 
 def test_preflight_admits_exactly_one_served_generation(born: Born) -> None:
-    assert maintenance_data_plane.preflight_write_authority().number == 0
+    assert write_generation.preflight_write_authority().number == 0
     userlist = born.home / "pgbouncer" / "userlist.txt"
     served = userlist.read_bytes()
     userlist.write_bytes(served.splitlines(keepends=True)[0])
     with pytest.raises(authority.AuthorityRefusedError, match="does not serve exactly"):
-        maintenance_data_plane.preflight_write_authority()
+        write_generation.preflight_write_authority()
     userlist.write_bytes(served)
     with born.admin() as conn:
         conn.execute("CREATE ROLE stray_writer LOGIN PASSWORD 'stray-password' IN ROLE ava_runner")
     with pytest.raises(authority.CatalogRefusedError, match="stray_writer"):
-        maintenance_data_plane.preflight_write_authority()
+        write_generation.preflight_write_authority()
 
 
 @contextmanager
@@ -258,7 +257,7 @@ def test_the_admitted_generation_is_the_only_writer_behind_a_fresh_pooler(
         _refused_everywhere(born, login)
     with psycopg.connect(born.dsn("gateway"), prepare_threshold=None, autocommit=True) as conn:
         assert conn.execute("SELECT count(*) FROM agents WHERE id = 930002").fetchone() == (0,)
-    maintenance_data_plane.verify_write_generation(1, issue.generation.credential_digest)
+    write_generation.verify_write_generation(1, issue.generation.credential_digest)
 
 
 def test_failed_candidate_is_fenced_and_the_predecessor_runs_on_a_new_generation(
@@ -326,8 +325,8 @@ _FENCE_DEATHS = {
 }
 _ISSUE_DEATHS = {
     "minted": _dies_after(authority, "mint_generation"),
-    "pooler-serving": _dies_after(data_plane, "_ensure_pooler"),
-    "proven": _dies_after(data_plane, "prove_generation_logins"),
+    "pooler-serving": _dies_after(bringup, "_ensure_pooler"),
+    "proven": _dies_after(bringup, "prove_generation_logins"),
     "activated": _dies_after(authority, "activate"),
 }
 
@@ -362,7 +361,7 @@ def test_death_after_each_boundary_continues_the_same_generation(
     )
     for login in old.values():
         _refused_everywhere(born, login)
-    maintenance_data_plane.verify_write_generation(1, issue.generation.credential_digest)
+    write_generation.verify_write_generation(1, issue.generation.credential_digest)
 
 
 def test_a_changed_verifier_after_a_death_holds_instead_of_minting_again(
@@ -469,7 +468,7 @@ def test_observation_refuses_a_surviving_fenced_session(born: Born, release: Req
     issue = admitted.issue("candidate")
     assert issue is not None and issue.generation is not None
     digest = issue.generation.credential_digest
-    maintenance_data_plane.verify_write_generation(1, digest)
+    write_generation.verify_write_generation(1, digest)
     with born.admin() as conn:
         conn.execute("CREATE ROLE lingering LOGIN PASSWORD 'lingering-password-xyz'")
     with psycopg.connect(
@@ -483,7 +482,7 @@ def test_observation_refuses_a_surviving_fenced_session(born: Born, release: Req
         with born.admin() as conn:
             conn.execute("ALTER ROLE lingering NOLOGIN PASSWORD NULL")
         with pytest.raises(authority.AuthorityRefusedError, match="sessions of fenced roles"):
-            maintenance_data_plane.verify_write_generation(1, digest)
+            write_generation.verify_write_generation(1, digest)
         assert lingering.execute("SELECT 1").fetchone() == (1,)  # observed, never terminated
 
 

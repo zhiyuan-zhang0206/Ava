@@ -12,7 +12,7 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
-from cli.commands import cluster_instance as instance
+from cli.commands.data_plane import cluster_instance as instance
 from shared.config import settings
 
 
@@ -49,7 +49,7 @@ def _probe(home: Path, system_bin: Path, *, inherited: str = "") -> dict[str, An
     }
     code = """
 import json, subprocess
-from cli.commands import cluster_instance as instance
+from cli.commands.data_plane import cluster_instance as instance
 from shared.config import settings
 instance.is_macos = lambda: False
 tools = [instance._redis_server_bin(), instance._redis_cli_bin()]
@@ -153,7 +153,7 @@ def test_config_is_local_writable_and_not_a_runner_bootstrap_fact() -> None:
 def test_local_config_write_only_changes_target_home(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    from cli.commands import config as config_cli
+    from cli.commands.management import config as config_cli
     from shared import runtime_config
 
     selected = _tools(tmp_path / "bin", "selected-8")

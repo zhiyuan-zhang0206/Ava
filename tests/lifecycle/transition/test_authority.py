@@ -22,7 +22,7 @@ from uuid import uuid4
 import pytest
 from pydantic import ValidationError
 
-from cli.commands import maintenance_data_plane
+from cli.commands.data_plane import write_generation
 from cli.release_transition import authority
 from cli.release_transition.authority_evidence import (
     Fence,
@@ -115,7 +115,7 @@ class DataPlane:
             self.crash_after = ""
             raise ControllerLost(name)
 
-    def fence(self, operation_authority: OperationAuthority) -> maintenance_data_plane.WriteFence:
+    def fence(self, operation_authority: OperationAuthority) -> write_generation.WriteFence:
         self.calls.append("fence")
         self._boundary("fence-effect")
         revoking = begin_revoke(self.home, operation_authority)
@@ -132,7 +132,7 @@ class DataPlane:
         pending = [entry.number for entry in require_ledger(self.home).revoked if not entry.dropped]
         record_drops(self.home, operation_authority, dict.fromkeys(pending))
         self._boundary("pruned")
-        return maintenance_data_plane.WriteFence(pooler="stopped", closure=closure)
+        return write_generation.WriteFence(pooler="stopped", closure=closure)
 
     def admit(self, operation_authority: OperationAuthority) -> object:
         self.calls.append("admit")
@@ -198,8 +198,8 @@ class Transition(LocalTransition):
 @pytest.fixture
 def plane(request_record: Request, monkeypatch: pytest.MonkeyPatch) -> Iterator[DataPlane]:
     fake = DataPlane(Path(request_record.home))
-    monkeypatch.setattr(maintenance_data_plane, "fence_write_generation", fake.fence)
-    monkeypatch.setattr(maintenance_data_plane, "admit_write_generation", fake.admit)
+    monkeypatch.setattr(write_generation, "fence_write_generation", fake.fence)
+    monkeypatch.setattr(write_generation, "admit_write_generation", fake.admit)
     yield fake
 
 
@@ -436,8 +436,8 @@ def test_death_after_a_receipt_does_not_repeat_the_effect(
     with pytest.raises(ControllerLost):
         _drive(request_record)
     monkeypatch.undo()
-    monkeypatch.setattr(maintenance_data_plane, "fence_write_generation", plane.fence)
-    monkeypatch.setattr(maintenance_data_plane, "admit_write_generation", plane.admit)
+    monkeypatch.setattr(write_generation, "fence_write_generation", plane.fence)
+    monkeypatch.setattr(write_generation, "admit_write_generation", plane.admit)
     final = _drive(request_record)
     assert final.terminal
     assert plane.calls == ["fence", "admit"]
@@ -452,7 +452,7 @@ def test_an_uncertain_fence_holds_and_never_selects(
     def refused(_authority: OperationAuthority) -> None:
         raise AuthorityRefusedError("closure not proven: sessions survived termination")
 
-    monkeypatch.setattr(maintenance_data_plane, "fence_write_generation", refused)
+    monkeypatch.setattr(write_generation, "fence_write_generation", refused)
     with pytest.raises(AuthorityRefusedError, match="closure not proven"):
         _drive(request_record)
     held = read_operation(request_record.path)

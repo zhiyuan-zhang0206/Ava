@@ -19,7 +19,7 @@ from typing import cast
 
 import pytest
 
-from cli.commands.packages_refresh import (
+from cli.commands.extensions.packages_refresh import (
     effective_interval_seconds,
     is_due,
     parse_duration,
@@ -229,7 +229,7 @@ def test_refresh_apply_then_apply_with_installed_hash(core_repo: Path) -> None:
     change is not misread as a local edit. The guard prefers `installed_hash`
     (converge owns `content_hash` on installed-plugin rows), so a stale value
     would freeze every later apply and falsely refuse rollback (QA MF-1)."""
-    from cli.commands.packages import cmd_packages_rollback
+    from cli.commands.extensions.packages import cmd_packages_rollback
 
     c1 = _head(core_repo)
     _seed(core_repo, "foo", applied_rev=c1)
@@ -375,7 +375,7 @@ def test_refresh_records_error_and_backs_off_when_offline(
     assert (reg.load().channels["core"].last_result or "").startswith("error")
 
     # the job retries only after the backoff: same run parameters, not due now
-    monkeypatch.setattr("cli.commands.packages_refresh.os_jobs_enabled", lambda: True)
+    monkeypatch.setattr("cli.commands.extensions.packages_refresh.os_jobs_enabled", lambda: True)
     report = run_refresh(repo=core_repo, from_job=True)
     assert report.ran and report.items == ()
     assert report.counts.get("skipped_not_due") == 2
@@ -432,7 +432,7 @@ def test_from_job_gates(core_repo: Path, monkeypatch: pytest.MonkeyPatch) -> Non
     report = run_refresh(repo=core_repo, from_job=True)
     assert not report.ran and "OS jobs disabled" in (report.skip_reason or "")
 
-    monkeypatch.setattr("cli.commands.packages_refresh.os_jobs_enabled", lambda: True)
+    monkeypatch.setattr("cli.commands.extensions.packages_refresh.os_jobs_enabled", lambda: True)
     monkeypatch.setattr(settings.packages, "refresh_enabled", False)
     report = run_refresh(repo=core_repo, from_job=True)
     assert not report.ran and "refresh disabled" in (report.skip_reason or "")
@@ -471,7 +471,7 @@ def test_only_reports_a_skip_reason_for_untracked_names(core_repo: Path) -> None
 
 
 def test_rollback_restores_the_previous_tree(core_repo: Path) -> None:
-    from cli.commands.packages import cmd_packages_rollback
+    from cli.commands.extensions.packages import cmd_packages_rollback
 
     c1 = _head(core_repo)
     _seed(core_repo, "foo", applied_rev=c1)
@@ -494,7 +494,7 @@ def test_rollback_restores_the_previous_tree(core_repo: Path) -> None:
 
 
 def test_rollback_without_a_previous_tree_refuses(core_repo: Path) -> None:
-    from cli.commands.packages import cmd_packages_rollback
+    from cli.commands.extensions.packages import cmd_packages_rollback
 
     c1 = _head(core_repo)
     _seed(core_repo, "foo", applied_rev=c1)
@@ -502,7 +502,7 @@ def test_rollback_without_a_previous_tree_refuses(core_repo: Path) -> None:
 
 
 def test_policy_verb_writes_explicit_values(core_repo: Path) -> None:
-    from cli.commands.packages import cmd_packages_policy
+    from cli.commands.extensions.packages import cmd_packages_policy
 
     c1 = _head(core_repo)
     _seed(core_repo, "foo", applied_rev=c1)
@@ -617,7 +617,7 @@ def test_refresh_cmd_json_shape(
     core_repo: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     import shared.paths as paths_mod
-    from cli.commands.packages import cmd_packages_refresh
+    from cli.commands.extensions.packages import cmd_packages_refresh
 
     monkeypatch.setattr(paths_mod, "repo_root", lambda: core_repo)
     c1 = _head(core_repo)
@@ -637,7 +637,7 @@ def test_second_run_checks_but_does_not_fetch(
 ) -> None:
     """Acceptance #6: consecutive runs are cheap — once the head is applied and
     the objects are present, a pass does `ls-remote` only, never a fetch."""
-    import cli.commands.packages_refresh as refresh_mod
+    import cli.commands.extensions.packages_refresh as refresh_mod
 
     c1 = _head(core_repo)
     _seed(core_repo, "foo", applied_rev=c1)

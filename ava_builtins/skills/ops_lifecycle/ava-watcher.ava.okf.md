@@ -1,7 +1,7 @@
 ---
 type: doc
 title: ava-watcher skill — Background wake-up; don't poll inside your turn
-description: Launch a small background program that sends you a message and wakes you when a condition is met (custom condition / specific time / cron) — you write the condition, the watcher waits for you, no turns burned polling. Timeout is mandatory (bounded lifetime); on stop, always sends an exit notification.
+description: Launch a small background program that sends you a message and wakes you when a condition is met (custom condition / specific time / cron) — you write the condition, the watcher waits for you, no turns burned polling. Timeout is mandatory (bounded lifetime); sends an exit notification when it stops on its own or is TTL-reclaimed — not when force-stopped, on Windows, or on a crashed host.
 tags:
 - extensions
 - agent-instruction
@@ -17,7 +17,7 @@ A watcher is a small Python program that runs in the background, independent of 
 - **Specific time** — `ava.watcher.at(when, message, name=...)` one-shot wake-up.
 - **cron** — `ava.watcher.cron(expr, message, name=...)` periodic wake-up until end_time.
 
-`timeout` **is mandatory**: watchers are always bounded; even if you forget one, it won't run forever. On stop **every watcher sends an exit notification** (exit code + full output pointer + output tail).
+`timeout` **is mandatory**: watchers are always bounded; even if you forget one, it won't run forever. **A watcher that stops on its own sends an exit notification** (exit code + full output pointer + output tail); the platform's own reclaim paths do too for a TTL deadline or a normal `ava stop`/update, but not for `ava stop --force`, a Windows unit, or a crashed host (see [[ava/watcher.ava.okf.md|ava.watcher]]).
 
 ## Key Dependencies
 - [[ava_builtins/skills/ops_lifecycle/ops_lifecycle.ava.okf.md|Ops, Scheduling & Lifecycle Skills]] — parent functional group

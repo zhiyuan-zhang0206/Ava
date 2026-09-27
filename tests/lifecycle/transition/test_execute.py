@@ -354,14 +354,14 @@ def test_selection_requires_terminal_closure_evidence_before_the_selector_moves(
     request_record: Request, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A terminal alive after the stop phase's closure holds selection."""
-    from cli.commands import maintenance_stop, root_driver
+    from cli.commands import root_driver, service_stop
 
     create(request_record)
     transition = object.__new__(LocalTransition)
     transition.request, transition.home = request_record, Path(request_record.home)
     monkeypatch.setattr(transition, "preflight", lambda: None)
     monkeypatch.setattr(root_driver, "require_root_absent", lambda: None)
-    monkeypatch.setattr(maintenance_stop, "live_terminals", lambda: ["ava-agent-1-shell-9"])
+    monkeypatch.setattr(service_stop, "live_terminals", lambda: ["ava-agent-1-shell-9"])
 
     def selector_moved(*_args: object, **_kwargs: object) -> None:
         pytest.fail("selector moved")

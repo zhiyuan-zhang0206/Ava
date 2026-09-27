@@ -116,7 +116,7 @@ checkout it belongs to**, not by the current directory. Production start converg
 symlinks its checkout's `ava` onto PATH at
 `~/.local/bin`, so a bare `ava` always means prod; dev work runs
 `.venv/bin/ava` inside the worktree. Host wiring + each plugin's `scaffold()`
-are applied by the source-start converge phase (`cli/commands/converge.py`;
+are applied by the source-start converge phase (`cli/commands/converge/host.py`;
 standalone: `ava converge`). Retained-image startup verifies its captured home
 and prepared artifacts; it does not install packages, migrate or scaffold plugins.
 

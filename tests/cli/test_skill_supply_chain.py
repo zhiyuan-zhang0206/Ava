@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from cli.commands.skill import (
+from cli.commands.extensions.skill import (
     cmd_skill_install,
     cmd_skill_register,
     cmd_skill_scan,
@@ -136,7 +136,7 @@ def test_register_and_enable_fold_the_typed_name_onto_the_real_directory(
     typing the canonical dash form has to reach a directory still spelled with
     underscores — and the row must be written under the DIRECTORY's spelling,
     since that is what the loader reads back."""
-    from cli.commands.skill import cmd_skill_disable, cmd_skill_enable
+    from cli.commands.extensions.skill import cmd_skill_disable, cmd_skill_enable
 
     _write(unit_home / "skills" / "wechat_ocr", "wechat_ocr", _BENIGN)
 
@@ -201,7 +201,7 @@ def test_converge_stamps_repo_skills_builtin_and_leaves_a_review_alone(
 ) -> None:
     """Converge owns the builtin stamp for content out of the checkout; a
     human's `reviewed` promotion on a third-party package survives it."""
-    from cli.commands._converge_skills import converge_skills
+    from cli.commands.extensions.skills_sync import converge_skills
 
     repo = tmp_path / "repo"
     _write(repo / "ava_builtins" / "skills" / "ava-goal", "ava-goal", _BENIGN)
@@ -218,7 +218,7 @@ def test_converge_stamps_repo_skills_builtin_and_leaves_a_review_alone(
 def test_trust_refuses_to_hand_edit_a_builtin_tier(unit_home: Path, tmp_path: Path) -> None:
     """Builtin means "this came out of the checkout" — a fact converge owns, not
     an opinion a user holds."""
-    from cli.commands._converge_skills import converge_skills
+    from cli.commands.extensions.skills_sync import converge_skills
 
     repo = tmp_path / "repo"
     _write(repo / "ava_builtins" / "skills" / "ava-goal", "ava-goal", _BENIGN)

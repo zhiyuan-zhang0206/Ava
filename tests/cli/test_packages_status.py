@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from cli.commands.packages import cmd_packages_status
+from cli.commands.extensions.packages import cmd_packages_status
 from shared import install_registry as reg
 
 

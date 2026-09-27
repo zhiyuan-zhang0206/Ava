@@ -24,7 +24,7 @@ import pytest
 from fastapi.testclient import TestClient
 from starlette.requests import Request
 
-from cli.commands import _data_plane as data_plane
+from cli.commands.data_plane import bringup
 from gateway.request_principal import cluster_credential
 from gateway.routers._webhook_auth import authenticate_webhook
 from ops.service_spec import ServiceSpec, api_access
@@ -340,19 +340,19 @@ def test_launch_delivers_the_class_token_only_while_authenticated(
 ) -> None:
     tokens = _tokens(gateway).api
     monkeypatch.setattr("shared.bootstrap.config_source_is_local", lambda: True)
-    assert data_plane.api_delivery("gateway") == {api.API_TOKEN_ENV: tokens.gateway}
-    assert data_plane.api_delivery("runner") == {api.API_TOKEN_ENV: tokens.runner}
+    assert bringup.api_delivery("gateway") == {api.API_TOKEN_ENV: tokens.gateway}
+    assert bringup.api_delivery("runner") == {api.API_TOKEN_ENV: tokens.runner}
     monkeypatch.setattr(settings.data_plane, "cluster_secret", "")
-    assert data_plane.api_delivery("runner") == {}
+    assert bringup.api_delivery("runner") == {}
 
 
 def test_a_pure_runner_launch_delivers_its_capability_token(
     gateway: Path, runner_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr("shared.bootstrap.config_source_is_local", lambda: False)
-    assert data_plane.api_delivery("runner") == {api.API_TOKEN_ENV: _tokens(gateway).api.runner}
+    assert bringup.api_delivery("runner") == {api.API_TOKEN_ENV: _tokens(gateway).api.runner}
     with pytest.raises(RuntimeError, match="cannot launch a gateway-class"):
-        data_plane.api_delivery("gateway")
+        bringup.api_delivery("gateway")
 
 
 def test_api_class_follows_the_login_class_else_the_single_capability() -> None:

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-import cli.commands.cluster as _cluster_commands
+import cli.commands.cluster.control as cluster_control
 from tests.cli._commands_helpers import _fake_session_backends as _fake_session_backends
 from tests.cli._commands_helpers import _FakeResponse
 from tests.cli._commands_helpers import _hermetic_gateway_base as _hermetic_gateway_base
@@ -15,7 +15,7 @@ from tests.cli._commands_helpers import _noop_start_prechecks as _noop_start_pre
 
 def test_code_cell_matches_checkout() -> None:
     """running_sha == head_sha → the short SHA with no drift marker."""
-    from cli.commands.cluster import _code_cell
+    from cli.commands.cluster.control import _code_cell
 
     assert _code_cell(running_sha="abc1234def", head_sha="abc1234def") == "abc1234"
 
@@ -23,14 +23,14 @@ def test_code_cell_matches_checkout() -> None:
 def test_code_cell_drift_marks_stale_process() -> None:
     """running_sha != head_sha → ⚠ + running short SHA (process running stale code
     vs its checkout)."""
-    from cli.commands.cluster import _code_cell
+    from cli.commands.cluster.control import _code_cell
 
     assert _code_cell(running_sha="999888777", head_sha="abc1234def") == "⚠ 9998887"
 
 
 def test_code_cell_unknown_running_sha() -> None:
     """No running_sha recorded → em dash."""
-    from cli.commands.cluster import _code_cell
+    from cli.commands.cluster.control import _code_cell
 
     assert _code_cell(running_sha=None, head_sha="abc1234def") == "—"
 
@@ -40,7 +40,7 @@ def test_status_cell_identity_mismatch_outranks_online() -> None:
     wrong-identity responder is never shown as a plain online host."""
     from datetime import UTC, datetime
 
-    from cli.commands.cluster import _status_cell
+    from cli.commands.cluster.control import _status_cell
 
     stopped = datetime(2026, 6, 1, 6, 0, tzinfo=UTC)
     assert _status_cell(online=True, identity_mismatch=True, stopped_at=None) == "MISMATCH"
@@ -74,7 +74,7 @@ def test_cmd_cluster_status_renders_identity_mismatch_and_code_drift(
         ),
     ]
     _patch_roster_get(monkeypatch, roster)
-    rc = _cluster_commands.cmd_cluster_status()
+    rc = cluster_control.cmd_cluster_status()
     assert rc == 0
     out = capsys.readouterr().out
     assert "code" in out  # new column header
@@ -107,7 +107,7 @@ def test_cmd_cluster_status_renders_role_column_without_a_pin_verdict(
         ),
     ]
     _patch_roster_get(monkeypatch, roster)
-    rc = _cluster_commands.cmd_cluster_status()
+    rc = cluster_control.cmd_cluster_status()
     assert rc == 0
     out = capsys.readouterr().out
     header = out.splitlines()[0].split()
@@ -146,7 +146,7 @@ def test_cmd_cluster_status_role_column_shows_observability_station(
         ),
     ]
     _patch_roster_get(monkeypatch, roster)
-    rc = _cluster_commands.cmd_cluster_status()
+    rc = cluster_control.cmd_cluster_status()
     assert rc == 0
     out = capsys.readouterr().out
     station_line = next(line for line in out.splitlines() if line.startswith("station-a"))
@@ -164,10 +164,10 @@ def test_cmd_status_gateway_cluster_serves_line_shows_station(
 ) -> None:
     """`ava status`'s gateway cluster-status supplement renders the station
     capability in the serves: line when the gateway snapshot carries it
-    (the function imports _fetch_gateway_cluster_status at call time, so the
+    (the function imports fetch_gateway_cluster_status at call time, so the
     module attribute patch is the rebind that takes effect)."""
     monkeypatch.setattr(
-        "cli.commands.cluster._fetch_gateway_cluster_status",
+        "cli.commands.cluster.control.fetch_gateway_cluster_status",
         lambda: {
             "machine_name": "station-a",
             "serve_gateway": False,
@@ -203,7 +203,7 @@ def test_cmd_cluster_status_read_timeout_reports_friendly(
         raise httpx.ReadTimeout("timed out", request=None)
 
     monkeypatch.setattr("httpx.get", _slow_get)  # pyright: ignore[reportUnknownArgumentType]
-    rc = _cluster_commands.cmd_cluster_status()
+    rc = cluster_control.cmd_cluster_status()
     assert rc == 1
     err = capsys.readouterr().err
     assert "did not respond within" in err
@@ -223,7 +223,7 @@ def test_cmd_cluster_status_connect_error_reports_friendly(
         raise httpx.ConnectError("connection refused", request=None)
 
     monkeypatch.setattr("httpx.get", _refused_get)  # pyright: ignore[reportUnknownArgumentType]
-    rc = _cluster_commands.cmd_cluster_status()
+    rc = cluster_control.cmd_cluster_status()
     assert rc == 1
     err = capsys.readouterr().err
     assert "gateway unreachable" in err
@@ -245,7 +245,7 @@ def test_cmd_cluster_status_http_error_reports_status(
         return httpx.Response(500, request=request)
 
     monkeypatch.setattr("httpx.get", _server_error_get)  # pyright: ignore[reportUnknownArgumentType]
-    rc = _cluster_commands.cmd_cluster_status()
+    rc = cluster_control.cmd_cluster_status()
     assert rc == 1
     err = capsys.readouterr().err
     assert "HTTP 500" in err
@@ -262,7 +262,7 @@ def test_cmd_cluster_status_unresolvable_gateway_reports_friendly(
         "shared.machine.gateway_api_base",
         lambda: (_ for _ in ()).throw(GatewayApiBaseMissing("AVA_GATEWAY_URL unset")),
     )
-    rc = _cluster_commands.cmd_cluster_status()
+    rc = cluster_control.cmd_cluster_status()
     assert rc == 1
     err = capsys.readouterr().err
     assert "cannot resolve gateway URL" in err
@@ -314,7 +314,7 @@ def test_cmd_cluster_status_empty_roster_prints_hint(
 ) -> None:
     """Empty roster from the gateway -> hint + exit 0."""
     calls = _patch_roster_get(monkeypatch, [])
-    rc = _cluster_commands.cmd_cluster_status()
+    rc = cluster_control.cmd_cluster_status()
     assert rc == 0
     assert calls == ["http://gw:8000/api/cluster/roster"]
     assert "machines table empty" in capsys.readouterr().out
@@ -337,7 +337,7 @@ def test_cmd_cluster_status_renders_online_stopped_offline(
         _machine_row(name="corp", online=False, paused=None, stopped_at=None),
     ]
     _patch_roster_get(monkeypatch, roster)
-    rc = _cluster_commands.cmd_cluster_status()
+    rc = cluster_control.cmd_cluster_status()
     assert rc == 0
     out = capsys.readouterr().out
     assert "test-host" in out and "online" in out
@@ -358,7 +358,7 @@ def test_cmd_cluster_status_renders_the_deploy_hold_banner_without_a_hold_column
         _machine_row(name="wsl", deploy_hold=hold),
     ]
     _patch_roster_get(monkeypatch, roster)
-    rc = _cluster_commands.cmd_cluster_status()
+    rc = cluster_control.cmd_cluster_status()
     assert rc == 0
     out = capsys.readouterr().out.splitlines()
     assert out[0] == f"deploy hold: {hold}"
@@ -376,7 +376,7 @@ def test_cmd_cluster_status_prints_no_banner_when_no_hold(
     cluster is free (host-local maintenance takes no cluster lease), so the roster
     does not claim it is."""
     _patch_roster_get(monkeypatch, [_machine_row(name="test-host")])
-    rc = _cluster_commands.cmd_cluster_status()
+    rc = cluster_control.cmd_cluster_status()
     assert rc == 0
     out = capsys.readouterr().out
     assert "deploy hold" not in out
@@ -390,7 +390,7 @@ def test_cmd_cluster_status_fails_fast_on_http_error(
     silent fallback, and no unhandled traceback (#219)."""
     monkeypatch.setattr("shared.machine.gateway_api_base", lambda: "http://gw:8000")
     monkeypatch.setattr("httpx.get", lambda *_a, **_kw: _FakeResponse([], status_code=503))  # pyright: ignore[reportUnknownArgumentType]
-    rc = _cluster_commands.cmd_cluster_status()
+    rc = cluster_control.cmd_cluster_status()
     assert rc == 1
     err = capsys.readouterr().err
     assert "HTTP 503" in err
@@ -400,7 +400,7 @@ def test_cmd_cluster_status_without_held_hosts_has_no_banner(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     _patch_roster_get(monkeypatch, [_machine_row(name="wsl")])
-    rc = _cluster_commands.cmd_cluster_status()
+    rc = cluster_control.cmd_cluster_status()
     assert rc == 0
     assert "host left held" not in capsys.readouterr().out
 
@@ -426,7 +426,7 @@ def test_cmd_cluster_resume_checklist_names_only_commands_that_parse(
         "shared.http_dial.post",
         lambda *_a, **_kw: _FakeResponse({"name": "wsl", "resumed": True}),  # pyright: ignore[reportUnknownArgumentType]
     )
-    assert _cluster_commands.cmd_cluster_resume("wsl") == 0
+    assert cluster_control.cmd_cluster_resume("wsl") == 0
     out = capsys.readouterr().out
     commands = re.findall(r"`(ava [^`]+)`", out)
     assert commands, out
@@ -464,7 +464,7 @@ def test_pause_names_what_a_paused_machine_is_hidden_from(
             "reassigned_tasks": 0,
         },
     )
-    assert _cluster_commands.cmd_cluster_pause("wsl") == 0
+    assert cluster_control.cmd_cluster_pause("wsl") == 0
     out = capsys.readouterr().out
     assert "hidden from roster/probe/fan-out/spawn until resumed" in out
     assert "rollout" not in out
@@ -474,7 +474,7 @@ def test_resume_names_what_is_restored(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     _post_returns(monkeypatch, {"name": "wsl", "resumed": True})
-    assert _cluster_commands.cmd_cluster_resume("wsl") == 0
+    assert cluster_control.cmd_cluster_resume("wsl") == 0
     out = capsys.readouterr().out
     assert "wsl: resumed — probing / roster / fan-out / spawn restored" in out
     assert "rollout" not in out
@@ -484,5 +484,5 @@ def test_unmark_staging_names_the_fan_out_target_set(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     _post_returns(monkeypatch, {"deleted": True})
-    assert _cluster_commands.cmd_cluster_mark_staging("wsl", is_staging=False) == 0
+    assert cluster_control.cmd_cluster_mark_staging("wsl", is_staging=False) == 0
     assert capsys.readouterr().out == "wsl: unmarked staging (now a fan-out target)\n"

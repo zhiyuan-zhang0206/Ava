@@ -24,7 +24,7 @@ from dotenv import dotenv_values
 from redis.backoff import NoBackoff
 from redis.retry import Retry
 
-from cli.commands import cluster_instance as instance
+from cli.commands.data_plane import cluster_instance as instance
 from scripts import cutover_db_authority as cutover
 from shared.config import settings
 from tests._containers import _free_port, redis_server

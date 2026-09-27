@@ -125,7 +125,7 @@ named-PTY rule covers `<name>.{out,host}.log` without traversing any subtree.
 `shared/session_backend.PtySessionBackend` (`get_shell_backend()` on POSIX)
 — mutating ops via CLI subprocess, enumeration via the in-process record
 scan. Above it: `ava.shell.sessions`, `ava.watcher`, the gateway
-ScheduleManager, the page-server daemon, `ops.ops_cluster.capture_shell`, and
+ScheduleManager, the page-server daemon, `ops.cluster_status` capture/kill, and
 `ava stop`'s shell reap. Every creation path crosses the same host lock.
 
 ## Boundaries
@@ -139,6 +139,6 @@ ScheduleManager, the page-server daemon, `ops.ops_cluster.capture_shell`, and
 - Session records carry the generation under which their host was admitted.
   A desired-state owner may rebuild a missing record only when its persisted
   desired generation is current; superseded exact records are reaped instead.
-- A machine reboot ends every session (hosts are processes, not state);
-  the watcher registry ([[shared/daemon/schedules/watcher_registry.ava.okf.md]])
-  guides watcher rebuilds; page servers recover via heartbeat.
+  A reboot ends every session; the ScheduleManager rebuilds its own, page
+  servers recover via heartbeat, and a watcher — no desired-state record —
+  rebuilds nothing (decisions/2026-09-27-watchers-are-never-restarted.md).

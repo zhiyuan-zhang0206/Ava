@@ -10,7 +10,7 @@ from types import SimpleNamespace
 import pytest
 
 from cli import main as _main
-from cli.commands import pitr as pitr_commands
+from cli.commands.data_plane import pitr as pitr_commands
 from cli.parsers import pitr
 
 

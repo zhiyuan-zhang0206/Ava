@@ -11,9 +11,9 @@ from __future__ import annotations
 
 import pytest
 
-from cli.commands import _data_plane as dp
-from cli.commands import cluster_instance as ci
 from cli.commands import start as start_mod
+from cli.commands.data_plane import bringup as dp
+from cli.commands.data_plane import cluster_instance as ci
 from shared.config import settings
 
 _FOREIGN_DB = "postgresql://ava:pw@10.9.8.7:5432/ava"

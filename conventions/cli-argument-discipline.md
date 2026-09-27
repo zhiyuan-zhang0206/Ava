@@ -43,7 +43,7 @@ the cron payload, the display bound, the safe mode.
 
 The worktree override deliberately stays environment-only:
 
-- The worktree override in `cli/commands/_converge_skills.py` — the default is
+- The worktree override in `cli/commands/extensions/skills_sync.py` — the default is
   the protection (never sync a worktree checkout's sources into a production
   home); the environment switch is the deliberate escape hatch for a caller
   that means it.

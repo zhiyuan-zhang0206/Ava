@@ -153,7 +153,7 @@ class DaemonSettings(
     host_agent_cache_size: int = Field(
         default=32,
         alias="AVA_HOST_AGENT_CACHE_SIZE",
-        description="Hosted agent-runner: how many agents' prepared runtimes (chat model + the boot reconcile already done for them) the host keeps warm, evicted least-recently-used. A cold entry costs one model build plus this agent's startup reconcile on its next wake; an unbounded cache would let a fleet-wide wake burst hold one per local agent forever.",
+        description="Hosted agent-runner: how many agents' prepared runtimes (chat model + this agent's startup housekeeping already done for them) the host keeps warm, evicted least-recently-used. A cold entry costs one model build plus this agent's startup housekeeping on its next wake; an unbounded cache would let a fleet-wide wake burst hold one per local agent forever.",
         json_schema_extra={
             "capability": "agent-runner",
             "restart_required": "all",

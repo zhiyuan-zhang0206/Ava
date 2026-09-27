@@ -1,0 +1,172 @@
+"""Observatory-station URL derivation for the LGTM consumers.
+
+Two-state on AVA_OBSERVABILITY_URL (task #1791, A3+A4): empty (default) keeps
+every consumer on its current local loopback endpoint; non-empty switches the
+Grafana Loki/Prometheus datasources, the alert webhook target, and the
+otel-collector gateway fan-out to the remote observatory station (the PG
+datasource stays on the cluster's data plane — it never follows the
+observatory, #3606). Split out of lgtm_native.py so the URL contract has
+one home shared by the native renderer and the collector.
+"""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+from urllib.parse import urlparse
+
+from shared.atomic_io import write_text_atomic
+from shared.config import settings
+
+
+def _observability_datasource_urls() -> tuple[str, str, str]:
+    """The (loki, prometheus, pg) datasource URLs for the rendered Grafana tree.
+
+    Two-state on AVA_OBSERVABILITY_URL: empty (default) keeps the current
+    loopback endpoints (from the per-service settings, which default to this
+    host's native backends); non-empty points Loki/Prometheus at the remote
+    observatory station (base URL + the service's own port). PG keeps its
+    scheme-less host:port form but NEVER follows the observatory — it is the
+    CLUSTER's own database (#3606) and stays on the data plane (its host
+    derives from the runner's db_url; task #1752 moves PG on its own track).
+    """
+
+    obs = settings.observability
+    base = validated_observability_base(obs.observability_url)
+    pg = _pg_datasource_host_port(remote_observatory=bool(base))
+    if base:
+        return f"{base}:3100", f"{base}:9090", pg
+    return (
+        obs.telemetry_loki_url.rstrip("/"),
+        obs.telemetry_prometheus_url.rstrip("/"),
+        pg,
+    )
+
+
+def _host_port(host: str, port: int | str) -> str:
+    """Format one TCP authority, including brackets around IPv6 literals."""
+    host = host.removeprefix("[").removesuffix("]")
+    return f"[{host}]:{port}" if ":" in host else f"{host}:{port}"
+
+
+def _pg_datasource_host_port(*, remote_observatory: bool) -> str:
+    """The cluster's own PG host:port for the rendered Grafana SQL datasource.
+
+    PG externalization (#1752) is an independent track from the observatory
+    (stage C moves the observatory while PG stays on the gateway), so the
+    datasource host must derive from the data plane, not from
+    AVA_OBSERVABILITY_URL. The existing direct_db_url derivation resolves a
+    local registry's pooler port to its actual Postgres port. libpq parsing
+    preserves query-string host/port settings; a Unix socket uses the local
+    TCP listener for Grafana. No database credentials enter the result. A
+    db_url that still names loopback under a remote observatory renders a
+    loopback datasource (only correct when Grafana runs on the PG host
+    itself) — warn loudly, same pattern as the Tempo topology warning.
+    """
+    from psycopg.conninfo import conninfo_to_dict
+
+    from shared.db import direct_db_url
+
+    connection = conninfo_to_dict(direct_db_url())
+    host = str(connection.get("host") or "127.0.0.1")
+    if host.startswith("/"):
+        host = "127.0.0.1"
+    port = connection.get("port") or "5432"
+    if remote_observatory and host in ("127.0.0.1", "localhost", "::1"):
+        print(
+            "lgtm native: AVA_OBSERVABILITY_URL is set but the data-plane db_url "
+            f"still names {host} — the rendered PG datasource will dial the "
+            "Grafana host's own loopback; point db_url at the cluster's "
+            "data-plane host (task #1752) for a remote observatory.",
+            file=sys.stderr,
+        )
+    return _host_port(host, port)
+
+
+def validated_observability_base(observability_url: str) -> str:
+    """Return the observatory base URL when well-formed, else "" after a warning.
+
+    The setting's contract is ``scheme://host`` with no port and no path (each
+    consumer appends its own port). A malformed value would silently render
+    broken datasource URLs on every converge, so validate once and warn — the
+    same pattern as the Tempo topology warning in _render_configs. A malformed
+    value falls back to local loopback (the safe default) instead of rendering
+    garbage URLs.
+    """
+    base = observability_url.strip().rstrip("/")
+    if not base:
+        return ""
+    parsed = urlparse(base)
+    problems: list[str] = []
+    if parsed.scheme not in ("http", "https"):
+        problems.append(f"scheme must be http/https (got {parsed.scheme!r})")
+    if not parsed.hostname:
+        problems.append("missing host")
+    if parsed.port is not None:
+        problems.append("port must be omitted (consumers append their own)")
+    if parsed.path not in ("", "/"):
+        problems.append(f"path must be omitted (got {parsed.path!r})")
+    if problems:
+        print(
+            "lgtm native: AVA_OBSERVABILITY_URL "
+            f"{observability_url!r} is malformed ({'; '.join(problems)}) — "
+            "falling back to local loopback endpoints",
+            file=sys.stderr,
+        )
+        return ""
+    return base
+
+
+def _alerts_webhook_url() -> str:
+    """The Grafana alert webhook target — the GATEWAY's own reachable address.
+
+    Deliberately NOT derived from observability_url: the alert ingest endpoint
+    lives on this cluster's gateway, wherever the observatory is. Two-state:
+    empty observability_url (local observatory) uses loopback and the actual
+    gateway bind port. A remote observatory uses the configured gateway base
+    URL, including its scheme, port and optional proxy path; a legacy empty
+    base uses reachable_host and the same bind port. Self-dialing a tailnet IP
+    from the gateway host can hit VPN hairpin filtering (pgbouncer probe incident), which is
+    exactly why the loopback form is kept when no remote observatory is set.
+    """
+    from shared.machine import reachable_host
+
+    port = settings.gateway.gateway_port
+    if settings.observability.observability_url:
+        base = settings.gateway.gateway_url.strip().rstrip("/")
+        if base:
+            parsed = urlparse(base)
+            if (
+                parsed.scheme not in ("http", "https")
+                or not parsed.hostname
+                or parsed.username is not None
+                or parsed.password is not None
+                or parsed.query
+                or parsed.fragment
+            ):
+                raise ValueError(
+                    "Grafana alert webhook requires a credential-free gateway base URL"
+                )
+        else:
+            base = f"http://{_host_port(reachable_host(), port)}"
+        print(
+            "lgtm native: alert webhook will point at the gateway's reachable "
+            f"address {base} — this presumes a REMOTE observatory "
+            "Grafana consumes the rendered contact.yml (delivery lands with the "
+            "observatory deployment, stage B). With a local Grafana consumer, "
+            "self-dialing a tailnet address can hit VPN hairpin filtering; keep "
+            "AVA_OBSERVABILITY_URL empty until the remote mechanism exists.",
+            file=sys.stderr,
+        )
+        return f"{base}/api/alerts"
+    return f"http://127.0.0.1:{port}/api/alerts"
+
+
+def _atomic_write(path: Path, content: str) -> None:
+    """Replace ``path`` with ``content`` atomically (mkstemp + rename).
+
+    Grafana's provisioning watcher may read a file mid-write; a torn render
+    would provision a half file. The temp file is written fully before the
+    rename publishes it.
+    """
+    write_text_atomic(path, content, encoding="utf-8", suffix="")

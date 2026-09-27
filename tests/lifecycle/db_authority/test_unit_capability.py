@@ -28,9 +28,9 @@ import pytest
 from dotenv import dotenv_values
 
 from cli import start_intent
-from cli.commands import _data_plane as data_plane
-from cli.commands import cluster_instance as ci
-from cli.commands import pgbouncer as pooler
+from cli.commands.data_plane import bringup
+from cli.commands.data_plane import cluster_instance as ci
+from cli.commands.data_plane import pgbouncer as pooler
 from cli.commands.start_generation import _write_generation
 from scripts import cutover_db_authority as cutover
 from shared import bootstrap, config, dotenv_boot
@@ -342,18 +342,18 @@ def test_a_pure_runners_launcher_delivers_the_installed_capability(
 ) -> None:
     monkeypatch.setattr(settings.general, "ava_home", str(runner_home))
     monkeypatch.setattr("shared.bootstrap.config_source_is_local", lambda: False)
-    assert data_plane.db_delivery("runner") == {
+    assert bringup.db_delivery("runner") == {
         "AVA_DB_URL": runner_boot.dsn,
         authority.GENERATION_ENV: "0",
     }
     with pytest.raises(RuntimeError, match="cannot launch a gateway-class"):
-        data_plane.db_delivery("gateway")
+        bringup.db_delivery("gateway")
     # The launch digest binds the capability's non-secret reference.
     assert _write_generation(runner_home) == runner_boot.reference
     unit.unit_capability_path(runner_home).unlink()
     assert _write_generation(runner_home) is None
     with pytest.raises(unit.UnitCapabilityError, match="holds no database capability"):
-        data_plane.db_delivery("runner")
+        bringup.db_delivery("runner")
 
 
 # ── real PostgreSQL + PgBouncer + Redis: the gateway fixture ────────────────
@@ -391,7 +391,7 @@ def _runner_args(bundle: Path) -> Any:
 def test_issued_bundle_starts_a_runner_that_connects_as_the_generation_login(
     born: Born, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    from cli.commands.cluster import cmd_db_authority_issue_unit
+    from cli.commands.cluster.control import cmd_db_authority_issue_unit
 
     _serve_on_loopback(monkeypatch, born)
     # The gateway's API is authenticated: the bundle carries the unit's API admission.
@@ -447,7 +447,7 @@ def test_issued_bundle_starts_a_runner_that_connects_as_the_generation_login(
     with monkeypatch.context() as scoped:
         scoped.setattr(settings.general, "ava_home", str(runner))
         scoped.setattr("shared.bootstrap.config_source_is_local", lambda: False)
-        assert data_plane.db_delivery("runner") == {
+        assert bringup.db_delivery("runner") == {
             "AVA_DB_URL": capability.dsn,
             authority.GENERATION_ENV: "0",
         }
@@ -485,12 +485,12 @@ def _rotate(born: Born) -> None:
     restart the pooler serving only the new pair."""
     operation = authority.OperationAuthority(operation=uuid4(), direction="candidate")
     pooler.stop_pgbouncer(force=True)
-    with data_plane.admin_session(born.record, "ava") as conn:
+    with bringup.admin_session(born.record, "ava") as conn:
         authority.revoke(conn, born.home, operation)
         authority.close_revoked(conn, born.home, operation)
         verified = authority.mint_generation(conn, born.home, operation)
     authority.activate(born.home, operation, verified)
-    data_plane._ensure_pooler(born.record, "ava", born.home, authority.active_generation(born.home))
+    bringup._ensure_pooler(born.record, "ava", born.home, authority.active_generation(born.home))
 
 
 def test_a_revoked_generations_bundle_never_installs(

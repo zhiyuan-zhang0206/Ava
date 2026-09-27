@@ -8,8 +8,8 @@ from pathlib import Path
 
 import pytest
 
-from cli.commands._converge_spec import ConvergeCtx
-from cli.commands._converge_steps import _ensure_pg_binaries_step
+from cli.commands.converge._steps import _ensure_pg_binaries_step
+from cli.commands.converge.spec import ConvergeCtx
 from shared import pg_runtime, runtime_binaries
 from shared.config import settings
 

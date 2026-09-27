@@ -10,7 +10,7 @@ import pytest
 import cli.commands._probe as _probe_commands
 import cli.commands._repo as _repo_commands
 import cli.commands._setup as _setup_commands
-import cli.commands.converge as _converge_commands
+import cli.commands.converge.host as converge_host
 import cli.commands.root_driver as _root_driver_commands
 import cli.commands.start as _start_commands
 from cli.commands import start
@@ -69,16 +69,17 @@ def _hermetic_start(
         return serving_root.runtime
 
     monkeypatch.setattr("cli.start_runtime.StartRuntime.identity", fixture_runtime)
-    from cli.commands import _converge_extensions, _data_plane
+    from cli.commands.data_plane import bringup
+    from cli.commands.extensions import materialize
     from shared import service_selection
 
     monkeypatch.setattr(service_selection, "selection_path", lambda: tmp_path / "selection.json")
     monkeypatch.setattr(start, "prod_service_checkout_error", _ignoring_args(lambda: None))
     monkeypatch.setattr(start, "_ensure_gateway_data_plane", lambda: 0)
-    monkeypatch.setattr(_data_plane, "prepare_gateway_schema", lambda: None)
-    monkeypatch.setattr(_data_plane, "complete_gateway_data_plane", _ignoring_args(lambda: None))
-    monkeypatch.setattr(_converge_extensions, "adopt_local_extensions", lambda: None)
-    monkeypatch.setattr(_converge_extensions, "materialize_cluster_extensions", lambda: None)
+    monkeypatch.setattr(bringup, "prepare_gateway_schema", lambda: None)
+    monkeypatch.setattr(bringup, "complete_gateway_data_plane", _ignoring_args(lambda: None))
+    monkeypatch.setattr(materialize, "adopt_local_extensions", lambda: None)
+    monkeypatch.setattr(materialize, "materialize_cluster_extensions", lambda: None)
     monkeypatch.setattr(start, "cmd_migrations_apply", _ignoring_args(list[str]))
     monkeypatch.setattr(start, "_refuse_occupied_health_ports", _ignoring_args(lambda: 0))
     monkeypatch.setattr(start, "_record_running_sha", _ignoring_args(lambda: None))
@@ -99,7 +100,7 @@ def _hermetic_start(
         ),
     )
     monkeypatch.setattr(_root_driver_commands, "admit_live_start", _ignoring_args(lambda: False))
-    monkeypatch.setattr(_converge_commands, "converge_host", _ignoring_args(lambda: None))
+    monkeypatch.setattr(converge_host, "converge_host", _ignoring_args(lambda: None))
     monkeypatch.setattr(_repo_commands, "_register_machine_or_die", _ignoring_args(lambda: 0))
     monkeypatch.setattr(_repo_commands, "_assert_schema_current_or_die", lambda: 0)
     monkeypatch.setattr(_repo_commands, "_probe_gateway_or_die", _ignoring_args(lambda: 0))
@@ -212,7 +213,7 @@ def test_changed_live_generation_refuses_before_selection_or_converge(
 
     monkeypatch.setattr(_root_driver_commands, "admit_live_start", changed)
     monkeypatch.setattr(
-        _converge_commands,
+        converge_host,
         "converge_host",
         _ignoring_args(lambda: pytest.fail("must refuse before converge")),
     )
@@ -266,7 +267,7 @@ def test_cold_preparation_receives_candidate_selection_before_publication(
         assert not service_selection.selection_path().exists()
         prepared.append(services)
 
-    monkeypatch.setattr(_converge_commands, "converge_host", prepare)
+    monkeypatch.setattr(converge_host, "converge_host", prepare)
     assert _start_commands.cmd_start(only_services=("gateway",)) == 0
     assert prepared == [frozenset({"gateway"})]
     assert service_selection.read_selection().names == frozenset({"gateway"})
@@ -303,18 +304,18 @@ def test_invalid_selection_never_launches(monkeypatch: pytest.MonkeyPatch) -> No
 def test_storage_schema_migration_grants_pooler_precede_application(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from cli.commands import _data_plane
+    from cli.commands.data_plane import bringup
 
     steps: list[str] = []
     monkeypatch.setattr(start, "_ensure_gateway_data_plane", lambda: steps.append("storage") or 0)
     monkeypatch.setattr(
-        _data_plane, "prepare_gateway_schema", lambda: steps.append("baseline-checkpoints")
+        bringup, "prepare_gateway_schema", lambda: steps.append("baseline-checkpoints")
     )
     monkeypatch.setattr(
         start, "cmd_migrations_apply", _ignoring_args(lambda: steps.append("migrate") or ["delta"])
     )
     monkeypatch.setattr(
-        _data_plane,
+        bringup,
         "complete_gateway_data_plane",
         _ignoring_args(lambda: steps.append("grants-pooler-consumer")),
     )

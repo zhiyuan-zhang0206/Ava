@@ -131,7 +131,7 @@ def test_release_writer_boundary_admits_terminals_its_stop_phase_closes(
     import shared.cluster
     import shared.db
     import shared.machine
-    from cli.commands import maintenance_stop
+    from cli.commands import service_stop
     from cli.release_transition.identity import require_local_writers
     from shared.config import settings
 
@@ -143,7 +143,7 @@ def test_release_writer_boundary_admits_terminals_its_stop_phase_closes(
     monkeypatch.setattr(settings.data_plane, "cluster_secret", "")
     monkeypatch.setattr(settings.data_plane, "data_plane_host", "")
     monkeypatch.setattr(shared.db, "connect", lambda: _Units(prepared.home))
-    monkeypatch.setattr(maintenance_stop, "require_no_terminals", _live_terminal)
+    monkeypatch.setattr(service_stop, "require_no_terminals", _live_terminal)
     require_local_writers(prepared)
 
 
@@ -153,7 +153,7 @@ def test_pitr_preflight_admits_terminals_its_stop_phase_closes(
     """A live terminal is no longer a PITR refusal either: production always
     has schedules and PTYs, and `stop_apps` closes them like a release's stop
     phase (decisions/2026-09-27-unit-join-pitr-closure-fleet-policy.md item 2)."""
-    from cli.commands import maintenance_stop
+    from cli.commands import service_stop
     from cli.release_transition import identity
     from cli.release_transition.pitr import transition
     from shared import runtime_release
@@ -172,5 +172,5 @@ def test_pitr_preflight_admits_terminals_its_stop_phase_closes(
 
     monkeypatch.setattr(runtime_release, "current_pointer", selected)
     monkeypatch.setattr(identity, "require_local_writers", one_host)
-    monkeypatch.setattr(maintenance_stop, "require_no_terminals", _live_terminal)
+    monkeypatch.setattr(service_stop, "require_no_terminals", _live_terminal)
     driver.preflight()

@@ -49,9 +49,10 @@ boundaries, already carried by codegen, and not debt.
    public module names (`cluster_instance`, `maintenance`, `packages_refresh`,
    `pgbouncer`, `observatory_urls`, `release_inventory` — each still defines
    no `cmd_*` of its own; the release transition likewise reaches
-   `root_driver`, `pitr_activation`, `maintenance_stop`,
-   `maintenance_data_plane` and `start_generation` by public names), plus 4
-   `cluster_lifecycle` test-seam wrappers and 8 `services.pitr` names promoted
+   `root_driver`, `data_plane/pitr_activation`, `service_stop`,
+   `data_plane/maintenance_stop`, `data_plane/write_generation` and
+   `start_generation` by public names), plus 4
+   `cluster/registry` test-seam wrappers and 8 `services.pitr` names promoted
    (`activation_runtime`'s env-field table, archive/desired-archive settings,
    file evidence, settings digest, shadow-pg gate and service-enable, plus
    `base_manifest.lsn`).

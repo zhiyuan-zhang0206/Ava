@@ -259,8 +259,8 @@ async def _shutdown_unauthenticated(port: int, data_dir: Path, deadline: float) 
     from redis.asyncio import Redis as AsyncRedis
     from redis.asyncio.retry import Retry as AsyncRetry
 
-    from cli.commands.maintenance_data_plane import _request_stop
-    from cli.commands.maintenance_stop import remaining, wait_for_exit
+    from cli.commands.data_plane.maintenance_stop import _request_stop
+    from cli.commands.service_stop import remaining, wait_for_exit
     from shared.cluster import ownership
     from shared.native_process.ownership import capture_tree
 
@@ -341,8 +341,8 @@ def _verify(port: int, env: RedisEnv, data_dir: Path) -> None:
 
 def convert_redis(home: Path, port: int, *, execute: bool) -> str:
     """Convert (or verify) this home's Redis; return a one-line outcome."""
-    from cli.commands import cluster_instance as instance
-    from cli.commands.maintenance_stop import deadline_after
+    from cli.commands.data_plane import cluster_instance as instance
+    from cli.commands.service_stop import deadline_after
 
     state = read_journal(home).get("redis")
     env = RedisEnv.read(home)
@@ -440,7 +440,7 @@ def _refuse_superuser_owner(record: ClusterRecord, env: DbEnv) -> None:
     postmaster defers the same refusal to `retire_legacy_logins`."""
     import psycopg
 
-    from cli.commands import cluster_instance as instance
+    from cli.commands.data_plane import cluster_instance as instance
     from shared.cluster import record_postgres_port
 
     port = record_postgres_port(record)
@@ -471,15 +471,15 @@ def _convert_db(home: Path, record: ClusterRecord, env: DbEnv) -> int:
     """Every effect of the db step, each idempotent; returns the active number."""
     from functools import partial
 
-    from cli.commands import cluster_instance as instance
-    from cli.commands._data_plane import (
+    from cli.commands.data_plane import cluster_instance as instance
+    from cli.commands.data_plane.bringup import (
         READONLY_GRANTEES,
         _ensure_pooler,
         admin_session,
         prove_generation_logins,
     )
+    from cli.commands.data_plane.pgbouncer import stop_pgbouncer
     from cli.commands.migrations import cmd_migrations_apply
-    from cli.commands.pgbouncer import stop_pgbouncer
     from shared.cluster import authority, record_postgres_port
     from shared.envfile import remove_env
 
@@ -542,7 +542,7 @@ def convert_db(home: Path, record: ClusterRecord, *, execute: bool) -> str:
 
 def convert_api(home: Path, record: ClusterRecord, *, execute: bool) -> str:
     """Rotate the human bearer once on a networked home (step `api`)."""
-    from cli.commands import cluster_instance as instance
+    from cli.commands.data_plane import cluster_instance as instance
     from scripts import rotate_cluster_secret as bearer
     from shared.cluster import record_postgres_port
 
@@ -593,7 +593,7 @@ class UnitPlan:
 
 def _remote_inventory(record: ClusterRecord, database: str, home: Path) -> tuple[Units, Units]:
     """(remote units, units of paused machines) from the gateway's own tables."""
-    from cli.commands._data_plane import admin_session
+    from cli.commands.data_plane.bringup import admin_session
     from shared.machine import machine_name
 
     with admin_session(record, database) as conn:
@@ -637,7 +637,7 @@ def _pending_admin(home: Path) -> str:
 
 def _rotate_redis_admin(home: Path, port: int) -> None:
     """Replace the Redis admin password every runner home may hold a copy of."""
-    from cli.commands import cluster_instance as instance
+    from cli.commands.data_plane import cluster_instance as instance
 
     env = RedisEnv.read(home)
     pending = _pending_admin(home)
@@ -687,7 +687,7 @@ def convert_remote_units(
     home: Path, record: ClusterRecord, plan: UnitPlan, *, execute: bool
 ) -> str:
     """Classify the remote units, rotate Redis admin and issue their bundles."""
-    from cli.commands import cluster_instance as instance
+    from cli.commands.data_plane import cluster_instance as instance
     from shared.cluster import record_postgres_port
 
     state = read_journal(home).get("remote-units")
@@ -724,8 +724,8 @@ def convert_remote_units(
 def admitted_record(home: Path) -> ClusterRecord:
     """`home`'s registry record, only when it is this checkout's quiescent local
     gateway home: no application root, terminals or active release operation."""
-    from cli.commands.maintenance_stop import require_no_terminals
     from cli.commands.root_driver import require_root_absent
+    from cli.commands.service_stop import require_no_terminals
     from shared.release_operation import require_configuration_write_authorized
 
     if home != ava_home().resolve():

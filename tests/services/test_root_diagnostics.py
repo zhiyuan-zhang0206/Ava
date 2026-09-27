@@ -272,7 +272,7 @@ def test_browser_canary_runs_only_inside_owned_endpoint_probe(
 
 
 def test_pooler_requires_native_custody_before_protocol(monkeypatch: pytest.MonkeyPatch) -> None:
-    from cli.commands import pgbouncer
+    from cli.commands.data_plane import pgbouncer
     from shared.cluster import ownership
 
     def registered(_home: object) -> object:

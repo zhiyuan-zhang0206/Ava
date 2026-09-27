@@ -16,7 +16,7 @@ import pytest
 
 from cli.commands import _maintenance_stop_report as report
 from cli.commands import _temporary_stop as command
-from cli.commands import maintenance_stop as stop
+from cli.commands import service_stop as stop
 from shared import lifecycle_status
 from shared.native_process import ownership
 from shared.native_process.ownership import OwnedProcess

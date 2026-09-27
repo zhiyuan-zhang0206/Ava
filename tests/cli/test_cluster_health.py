@@ -15,12 +15,13 @@ from typing import Any
 
 import pytest
 
-from cli.commands import _health_alerts, _provider_guard, cluster_health
+from cli.commands.cluster import _provider_guard, health_alerts
+from cli.commands.cluster import health as cluster_health
 
 # Captured at import, before the autouse `_sent_alerts` fixture stubs the module
 # attributes — the handles the unit tests use to reach the real send/ingest
 # paths.
-_REAL_NOTIFY_OWNER = cluster_health._notify_owner
+_REAL_NOTIFY_OWNER = cluster_health.notify_owner
 _REAL_INGEST_ALERT = cluster_health._ingest_alert
 
 
@@ -43,7 +44,7 @@ def _freeze_alert_clock(monkeypatch: pytest.MonkeyPatch, initial: datetime) -> l
             assert tz is UTC
             return clock[0]
 
-    monkeypatch.setattr(_health_alerts, "datetime", _FixedDatetime)
+    monkeypatch.setattr(health_alerts, "datetime", _FixedDatetime)
     return clock
 
 
@@ -229,7 +230,7 @@ def _sent_alerts(monkeypatch: pytest.MonkeyPatch) -> list[str]:
 
     The probe's edge alerts now flow through `_ingest_alert` (W16); the
     captured value is the stamped summary the ingest payload would carry, so
-    assertions on wording keep working. `_notify_owner` is NOT stubbed here —
+    assertions on wording keep working. `notify_owner` is NOT stubbed here —
     its own unit tests below reach the real send path via `_REAL_NOTIFY_OWNER`,
     and the fallback tests stub it explicitly where they need to."""
     sent: list[str] = []
@@ -237,7 +238,7 @@ def _sent_alerts(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     def _capture(*, status: str, message: str, starts_at: object, severity: str = "error") -> None:
         sent.append(cluster_health._alert_summary(recovered=status == "resolved", message=message))
 
-    monkeypatch.setattr(_health_alerts, "_ingest_alert", _capture)
+    monkeypatch.setattr(health_alerts, "_ingest_alert", _capture)
     return sent
 
 
@@ -741,7 +742,7 @@ def test_notify_owner_stamps_home_label(
     cluster is talking — a preview cluster's alert must not read like a prod
     incident. Stamping in the single send point covers every alert uniformly.
 
-    Calls the real `_notify_owner` (the autouse `_sent_alerts` fixture stubs the
+    Calls the real `notify_owner` (the autouse `_sent_alerts` fixture stubs the
     module attribute, so the captured `_REAL_NOTIFY_OWNER` is used to reach the
     actual send path). It POSTs to the im_bridge daemon's health-port `/send`
     RPC — stub `httpx.post` to capture the request."""
@@ -787,7 +788,7 @@ def test_notify_owner_failed_send_does_not_leak_secret(
 ) -> None:
     """A failed send must not write the cluster secret to the log. The secret
     rides in the Authorization header; httpx embeds the request (but never its
-    headers) in the exception repr, so `_notify_owner` must never format the
+    headers) in the exception repr, so `notify_owner` must never format the
     exception itself."""
 
     import httpx
@@ -935,7 +936,7 @@ def test_dark_gate_fails_the_probe_without_arming_rollback(
 
 
 def _redis_bridge(**kw: object) -> object:
-    import cli.commands._converge_redis_bridge as bridge
+    import cli.commands.converge.redis_bridge as bridge
 
     fields: dict[str, object] = {
         "required": True,
@@ -952,8 +953,8 @@ def test_redis_bridge_probe_reports_running_but_dead_listener(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A loaded launchd job cannot hide a relay whose PING path is dead."""
-    import cli.commands._converge_redis_bridge as bridge
     import cli.commands._repo as _repo_commands
+    import cli.commands.converge.redis_bridge as bridge
 
     monkeypatch.setattr(_repo_commands, "_roles_or_none", lambda: frozenset({"gateway"}))
     monkeypatch.setattr(
@@ -993,7 +994,7 @@ def test_crash_loop_counts_audit_resurrect_only(monkeypatch: pytest.MonkeyPatch)
 
     import httpx
 
-    from cli.commands.cluster_health import _crash_loop_detection
+    from cli.commands.cluster.health import _crash_loop_detection
 
     def _fake_get(url: str, **kw: Any) -> httpx.Response:
         # The LogQL query filters category=audit server-side; the fake answer
@@ -1123,7 +1124,7 @@ def test_ingest_alert_posts_health_probe_payload(monkeypatch: pytest.MonkeyPatch
 
     monkeypatch.setattr(settings.data_plane, "cluster_secret", "test-secret")
     monkeypatch.setattr(shared.machine, "gateway_api_base", lambda: "http://127.0.0.1:8123")
-    monkeypatch.setattr(_health_alerts, "_alert_summary", lambda **_: "SUMMARY")  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(health_alerts, "_alert_summary", lambda **_: "SUMMARY")  # pyright: ignore[reportUnknownArgumentType]
 
     sent: list[tuple[str, dict[str, Any], dict[str, str]]] = []
 
@@ -1178,7 +1179,7 @@ def test_ingest_alert_unreachable_gateway_falls_back(
 
     monkeypatch.setattr(settings.data_plane, "cluster_secret", "s")
     monkeypatch.setattr(shared.machine, "gateway_api_base", lambda: "http://127.0.0.1:8123")
-    monkeypatch.setattr(_health_alerts, "_alert_summary", lambda **_: "SUMMARY")  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(health_alerts, "_alert_summary", lambda **_: "SUMMARY")  # pyright: ignore[reportUnknownArgumentType]
 
     def _post(*_a: object, **_k: object) -> None:
         raise httpx.ConnectError("connection refused")
@@ -1197,7 +1198,7 @@ def test_ingest_alert_unreachable_gateway_falls_back(
             )
         )
 
-    monkeypatch.setattr(_health_alerts, "_ingest_alert_fallback", _fallback)
+    monkeypatch.setattr(health_alerts, "_ingest_alert_fallback", _fallback)
 
     starts_at = datetime(2026, 8, 5, 0, 10, tzinfo=UTC)
     _REAL_INGEST_ALERT(
@@ -1223,13 +1224,13 @@ def test_ingest_alert_http_error_falls_back_without_leaking_secret(
     secret = "SUPERSECRET"  # noqa: S105 — test fixture
     monkeypatch.setattr(settings.data_plane, "cluster_secret", secret)
     monkeypatch.setattr(shared.machine, "gateway_api_base", lambda: "http://127.0.0.1:8123")
-    monkeypatch.setattr(_health_alerts, "_alert_summary", lambda **_: "SUMMARY")  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(health_alerts, "_alert_summary", lambda **_: "SUMMARY")  # pyright: ignore[reportUnknownArgumentType]
 
     req = httpx.Request("POST", "http://127.0.0.1:8123/api/alerts")
     resp = httpx.Response(401, request=req, json={"detail": "unauthorized webhook caller"})
     monkeypatch.setattr(httpx, "post", lambda *_a, **_k: resp)  # pyright: ignore[reportUnknownArgumentType]
     called: list[object] = []
-    monkeypatch.setattr(_health_alerts, "_ingest_alert_fallback", lambda **kw: called.append(kw))  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(health_alerts, "_ingest_alert_fallback", lambda **kw: called.append(kw))  # pyright: ignore[reportUnknownArgumentType]
 
     _REAL_INGEST_ALERT(status="firing", message="FAIL", starts_at=datetime(2026, 8, 5, tzinfo=UTC))
     assert len(called) == 1
@@ -1352,7 +1353,7 @@ def test_ingest_alert_fallback_direct_im_when_db_down(
 
     monkeypatch.setattr(shared.db, "connect", _boom)
     direct: list[str] = []
-    monkeypatch.setattr(_health_alerts, "_notify_owner", direct.append)
+    monkeypatch.setattr(health_alerts, "notify_owner", direct.append)
 
     cluster_health._ingest_alert_fallback(
         status="firing", message="FAIL: x", starts_at=datetime(2026, 8, 5, tzinfo=UTC)
@@ -1372,9 +1373,9 @@ def test_alert_failure_tracks_unfired_episode_in_three_line_state(
     monkeypatch.setattr(settings.alerts, "transition_warning_seconds", 180.0)
     monkeypatch.setattr(settings.alerts, "transition_error_seconds", 600.0)
     edges: list[dict[str, object]] = []
-    monkeypatch.setattr(_health_alerts, "_ingest_alert", lambda **kw: edges.append(kw))  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(health_alerts, "_ingest_alert", lambda **kw: edges.append(kw))  # pyright: ignore[reportUnknownArgumentType]
 
-    _health_alerts._alert_failure(_home, "FAIL: gateway liveness")
+    health_alerts._alert_failure(_home, "FAIL: gateway liveness")
 
     assert (_home / cluster_health.ALERT_STATE_FILE).read_text().split("\n") == [
         "FAIL: gateway liveness",
@@ -1394,14 +1395,14 @@ def test_alert_failure_warns_then_escalates_once(
     monkeypatch.setattr(settings.alerts, "transition_warning_seconds", 180.0)
     monkeypatch.setattr(settings.alerts, "transition_error_seconds", 600.0)
     edges: list[dict[str, object]] = []
-    monkeypatch.setattr(_health_alerts, "_ingest_alert", lambda **kw: edges.append(kw))  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(health_alerts, "_ingest_alert", lambda **kw: edges.append(kw))  # pyright: ignore[reportUnknownArgumentType]
 
-    _health_alerts._alert_failure(_home, "FAIL: gateway liveness")
+    health_alerts._alert_failure(_home, "FAIL: gateway liveness")
     clock[0] = started_at + timedelta(seconds=180)
-    _health_alerts._alert_failure(_home, "FAIL: gateway liveness")
+    health_alerts._alert_failure(_home, "FAIL: gateway liveness")
     clock[0] = started_at + timedelta(seconds=600)
-    _health_alerts._alert_failure(_home, "FAIL: gateway liveness")
-    _health_alerts._alert_failure(_home, "FAIL: gateway liveness")
+    health_alerts._alert_failure(_home, "FAIL: gateway liveness")
+    health_alerts._alert_failure(_home, "FAIL: gateway liveness")
 
     assert [(edge["severity"], edge["starts_at"]) for edge in edges] == [
         ("warning", started_at),
@@ -1418,9 +1419,9 @@ def test_unfired_episode_recovers_without_resolve(
         f"FAIL: gateway liveness\n{started_at.isoformat()}\n"
     )
     edges: list[dict[str, object]] = []
-    monkeypatch.setattr(_health_alerts, "_ingest_alert", lambda **kw: edges.append(kw))  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(health_alerts, "_ingest_alert", lambda **kw: edges.append(kw))  # pyright: ignore[reportUnknownArgumentType]
 
-    _health_alerts._alert_recovery(_home)
+    health_alerts._alert_recovery(_home)
 
     assert edges == []
     assert not (_home / cluster_health.ALERT_STATE_FILE).exists()
@@ -1435,9 +1436,9 @@ def test_fired_episode_recovery_reuses_start_and_severity(
         f"FAIL: gateway liveness\n{started_at.isoformat()}\nwarning"
     )
     edges: list[dict[str, object]] = []
-    monkeypatch.setattr(_health_alerts, "_ingest_alert", lambda **kw: edges.append(kw))  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(health_alerts, "_ingest_alert", lambda **kw: edges.append(kw))  # pyright: ignore[reportUnknownArgumentType]
 
-    _health_alerts._alert_recovery(_home)
+    health_alerts._alert_recovery(_home)
 
     assert edges == [
         {
@@ -1487,9 +1488,9 @@ def test_fired_episode_recovery_replays_open_row_fingerprint(
 
     monkeypatch.setattr(shared.db, "connect", _Connection)
     edges: list[dict[str, object]] = []
-    monkeypatch.setattr(_health_alerts, "_ingest_alert", lambda **kw: edges.append(kw))  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(health_alerts, "_ingest_alert", lambda **kw: edges.append(kw))  # pyright: ignore[reportUnknownArgumentType]
 
-    _health_alerts._alert_recovery(_home)
+    health_alerts._alert_recovery(_home)
 
     assert len(queries) == 1
     assert "labels->>'alertname' = 'cluster health'" in queries[0][0]
@@ -1542,9 +1543,9 @@ def test_legacy_two_line_recovery_replays_open_row_fingerprint(
 
     monkeypatch.setattr(shared.db, "connect", _Connection)
     edges: list[dict[str, object]] = []
-    monkeypatch.setattr(_health_alerts, "_ingest_alert", lambda **kw: edges.append(kw))  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(health_alerts, "_ingest_alert", lambda **kw: edges.append(kw))  # pyright: ignore[reportUnknownArgumentType]
 
-    _health_alerts._alert_recovery(_home)
+    health_alerts._alert_recovery(_home)
 
     assert len(queries) == 1
     assert "labels->>'alertname' = 'cluster health'" in queries[0]
@@ -1569,14 +1570,14 @@ def test_deploy_explanation_preserves_episode_start_for_later_grade(
     monkeypatch.setattr(settings.alerts, "transition_warning_seconds", 180.0)
     monkeypatch.setattr(settings.alerts, "transition_error_seconds", 600.0)
     edges: list[dict[str, object]] = []
-    monkeypatch.setattr(_health_alerts, "_ingest_alert", lambda **kw: edges.append(kw))  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(health_alerts, "_ingest_alert", lambda **kw: edges.append(kw))  # pyright: ignore[reportUnknownArgumentType]
 
-    _health_alerts._alert_failure(_home, "FAIL: gateway liveness", deploy_explains=True)
+    health_alerts._alert_failure(_home, "FAIL: gateway liveness", deploy_explains=True)
     clock[0] = started_at + timedelta(seconds=600)
-    _health_alerts._alert_failure(_home, "FAIL: gateway liveness", deploy_explains=True)
+    health_alerts._alert_failure(_home, "FAIL: gateway liveness", deploy_explains=True)
     assert edges == []
 
-    _health_alerts._alert_failure(_home, "FAIL: gateway liveness", deploy_explains=False)
+    health_alerts._alert_failure(_home, "FAIL: gateway liveness", deploy_explains=False)
     assert [(edge["severity"], edge["starts_at"]) for edge in edges] == [("error", started_at)]
 
 
@@ -1603,7 +1604,7 @@ def test_alert_recovery_reuses_the_firing_instance(
     row and the firing one would stay 'unresolved' forever."""
     edges: list[tuple[str, object]] = []
     monkeypatch.setattr(
-        _health_alerts,
+        health_alerts,
         "_ingest_alert",
         lambda **kw: edges.append((kw["status"], kw["starts_at"])),  # pyright: ignore[reportUnknownArgumentType]
     )
@@ -1627,9 +1628,9 @@ def test_alert_recovery_pre_w16_state_file_goes_direct(
     row exists — the recovery is IM'd directly, like the firing was back then."""
     (_home / cluster_health.ALERT_STATE_FILE).write_text("FAIL: old-style")
     direct: list[str] = []
-    monkeypatch.setattr(_health_alerts, "_notify_owner", direct.append)
+    monkeypatch.setattr(health_alerts, "notify_owner", direct.append)
     ingest_calls: list[object] = []
-    monkeypatch.setattr(_health_alerts, "_ingest_alert", lambda **kw: ingest_calls.append(kw))  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(health_alerts, "_ingest_alert", lambda **kw: ingest_calls.append(kw))  # pyright: ignore[reportUnknownArgumentType]
 
     assert cluster_health.run_health_probe() == 0
     assert ingest_calls == []
@@ -1646,9 +1647,9 @@ def test_alert_recovery_legacy_two_line_state_resolves(
         f"FAIL: old persisted alert\n{started_at.isoformat()}"
     )
     edges: list[dict[str, object]] = []
-    monkeypatch.setattr(_health_alerts, "_ingest_alert", lambda **kw: edges.append(kw))  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(health_alerts, "_ingest_alert", lambda **kw: edges.append(kw))  # pyright: ignore[reportUnknownArgumentType]
 
-    _health_alerts._alert_recovery(_home)
+    health_alerts._alert_recovery(_home)
 
     assert edges == [
         {
@@ -1675,9 +1676,9 @@ def test_ingest_recovery_self_heals_when_instance_never_persisted(
 
     monkeypatch.setattr(settings.data_plane, "cluster_secret", "s")
     monkeypatch.setattr(shared.machine, "gateway_api_base", lambda: "http://127.0.0.1:8123")
-    monkeypatch.setattr(_health_alerts, "_alert_summary", lambda **_: "SUMMARY")  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(health_alerts, "_alert_summary", lambda **_: "SUMMARY")  # pyright: ignore[reportUnknownArgumentType]
     direct: list[str] = []
-    monkeypatch.setattr(_health_alerts, "_notify_owner", direct.append)
+    monkeypatch.setattr(health_alerts, "notify_owner", direct.append)
 
     class _Resp:
         def __init__(self, body: dict[str, int]) -> None:
@@ -1782,7 +1783,7 @@ def test_agent_min_defaults_to_settings_when_unset(
         seen.append(minimum)
         return True
 
-    from cli.commands import cluster_health
+    from cli.commands.cluster import health as cluster_health
     from shared.config import settings
 
     monkeypatch.setattr(cluster_health, "_agent_population", _fake_population)
@@ -1802,7 +1803,7 @@ def test_agent_min_explicit_overrides_settings(
         seen.append(minimum)
         return True
 
-    from cli.commands import cluster_health
+    from cli.commands.cluster import health as cluster_health
     from shared.config import settings
 
     monkeypatch.setattr(cluster_health, "_agent_population", _fake_population)

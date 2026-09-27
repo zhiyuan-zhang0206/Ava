@@ -12,8 +12,8 @@ from types import SimpleNamespace
 import pytest
 from psycopg.conninfo import conninfo_to_dict
 
-from cli.commands import _pitr_activation_config as activation_config
-from cli.commands import pitr_activation as activation
+from cli.commands.data_plane import _pitr_activation_config as activation_config
+from cli.commands.data_plane import pitr_activation as activation
 from services.gateway_side.backup import snapshot as _snapshot
 from services.pitr import activation_runtime
 from services.pitr.activation_observability import refusal_message, save_error
@@ -1221,7 +1221,7 @@ def test_frozen_pg_state_contract_with_real_reader(
             lambda _home: SimpleNamespace(ports={"postgres": port}, gateway_home=str(tmp_path)),
         )
         monkeypatch.setattr(
-            "cli.commands.cluster_instance.pg_admin_url",
+            "cli.commands.data_plane.cluster_instance.pg_admin_url",
             lambda _pg_port: f"postgresql://ava@127.0.0.1:{port}/postgres",
         )
 

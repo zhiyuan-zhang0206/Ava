@@ -310,8 +310,9 @@ def test_release_cold_start_uses_same_storage_readiness_without_source_or_schema
     import importlib
 
     import cli.commands._repo as _repo_commands
-    import cli.commands.converge as _converge_commands
-    from cli.commands import _converge_extensions, _data_plane
+    import cli.commands.converge.host as converge_host
+    from cli.commands.data_plane import bringup
+    from cli.commands.extensions import materialize
 
     start = importlib.import_module("cli.commands.start")
     runtime = _admit(image)
@@ -332,14 +333,14 @@ def test_release_cold_start_uses_same_storage_readiness_without_source_or_schema
         calls.append("schema-readback")
         return 0
 
-    monkeypatch.setattr(_converge_commands, "converge_host", forbidden)
+    monkeypatch.setattr(converge_host, "converge_host", forbidden)
     monkeypatch.setattr(_repo_commands, "_assert_schema_current_or_die", schema)
     monkeypatch.setattr(start, "_ensure_gateway_data_plane", native_storage)
     monkeypatch.setattr(start, "cmd_migrations_apply", forbidden)
-    monkeypatch.setattr(_data_plane, "prepare_gateway_schema", forbidden)
-    monkeypatch.setattr(_data_plane, "complete_gateway_data_plane", pooler)
-    monkeypatch.setattr(_converge_extensions, "adopt_local_extensions", forbidden)
-    monkeypatch.setattr(_converge_extensions, "materialize_cluster_extensions", forbidden)
+    monkeypatch.setattr(bringup, "prepare_gateway_schema", forbidden)
+    monkeypatch.setattr(bringup, "complete_gateway_data_plane", pooler)
+    monkeypatch.setattr(materialize, "adopt_local_extensions", forbidden)
+    monkeypatch.setattr(materialize, "materialize_cluster_extensions", forbidden)
     assert (
         start._prepare_cold_start(
             runtime.code_root,
@@ -394,7 +395,8 @@ def test_operation_preflight_checks_actual_roster_without_selection_or_effects(
     monkeypatch: pytest.MonkeyPatch,
     foreign_executable: bool,
 ) -> None:
-    from cli.commands import _data_plane, _repo
+    from cli.commands import _repo
+    from cli.commands.data_plane import bringup
     from cli.release_transition import stage
     from ops import spec as ops_spec
     from shared import machine
@@ -444,8 +446,8 @@ def test_operation_preflight_checks_actual_roster_without_selection_or_effects(
     # The roster preflight is under test here; per-service database and API
     # token delivery (write generation or unit capability) is covered by the
     # db-authority tests.
-    monkeypatch.setattr(_data_plane, "db_delivery", no_delivery)
-    monkeypatch.setattr(_data_plane, "api_delivery", no_delivery)
+    monkeypatch.setattr(bringup, "db_delivery", no_delivery)
+    monkeypatch.setattr(bringup, "api_delivery", no_delivery)
     before = {path: path.read_bytes() for path in home.rglob("*") if path.is_file()}
     if foreign_executable:
         with pytest.raises((ReleaseRejectedError, FileNotFoundError)):

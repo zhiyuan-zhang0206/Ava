@@ -378,7 +378,7 @@ class PluginUpdateResult(BaseModel):
 def update_all_disk_images() -> PluginUpdateResult:
     """Scan all plugins, auto-merge disk-image schema diff, return structured result.
 
-    Driven by the `ava plugins update` CLI (`cli/commands/plugins.py`); the
+    Driven by the `ava plugins update` CLI (`cli/commands/extensions/plugins.py`); the
     `ava start` converge step runs the same path. There is no gateway endpoint
     for it. Each plugin goes through
     `shared.plugin_config_registry.merge_disk_image_schema(name, Cls)`:

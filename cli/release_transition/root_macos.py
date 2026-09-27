@@ -133,7 +133,7 @@ def _require_pinned(image: VerifiedRelease, keeper: client.RootStatus, root: Own
 
 def _data_plane() -> dict[str, OwnedProcess]:
     """Live local data-plane births; the whole local data plane must be up."""
-    from cli.commands.maintenance_data_plane import capture_custody
+    from cli.commands.data_plane.maintenance_stop import capture_custody
 
     receipt = capture_custody(30)
     return {name: owner.identity for name, owner in receipt.owners().items()}

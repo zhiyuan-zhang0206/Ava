@@ -87,7 +87,7 @@ def test_operations_verbs_parse() -> None:
 
 
 def _drill_cli(monkeypatch: pytest.MonkeyPatch, captured: dict[str, Any]) -> None:
-    from cli.commands import pitr as commands
+    from cli.commands.data_plane import pitr as commands
     from services.pitr import base_operation_runtime as runtime
     from tests.services.test_pitr_base_scheduler import _candidate
 
@@ -124,7 +124,7 @@ def _drill_cli(monkeypatch: pytest.MonkeyPatch, captured: dict[str, Any]) -> Non
 def test_relative_scratch_means_the_operator_cwd_and_output_omits_rows(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    from cli.commands.pitr import cmd_pitr_drill
+    from cli.commands.data_plane.pitr import cmd_pitr_drill
 
     captured: dict[str, Any] = {}
     _drill_cli(monkeypatch, captured)
@@ -154,7 +154,7 @@ def test_operations_retire_previews_then_releases_a_proven_kind(
 
     import psutil
 
-    from cli.commands import pitr as commands
+    from cli.commands.data_plane import pitr as commands
     from services.pitr import operation_custody as custody
     from shared.native_process import native_boot_id
 
@@ -180,7 +180,7 @@ def test_operations_discard_candidate_clears_a_stale_weekly_capture(
 ) -> None:
     """A leftover weekly `.ready` blocks activation's forced candidate; the
     operator clears it explicitly, never while an operation still owns it."""
-    from cli.commands import pitr as commands
+    from cli.commands.data_plane import pitr as commands
 
     monkeypatch.setattr(commands, "ava_home", lambda: tmp_path)
     root, chain = tmp_path / "physical-backup", "20260920T030000Z"

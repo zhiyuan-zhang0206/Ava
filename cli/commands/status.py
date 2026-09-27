@@ -16,7 +16,6 @@ from __future__ import annotations
 from contextlib import suppress
 from pathlib import Path
 
-from cli.commands._converge_redis_bridge import print_redis_bridge_status
 from cli.commands._probe import (
     _detect_prod_source_drift,
     _print_service_row,
@@ -27,7 +26,8 @@ from cli.commands._repo import (
     build_services,
     session_name,
 )
-from cli.commands.cluster_instance import print_data_plane_status
+from cli.commands.converge.redis_bridge import print_redis_bridge_status
+from cli.commands.data_plane.cluster_instance import print_data_plane_status
 from ops.service_spec import ServiceSpec
 from shared import service_selection
 from shared.machine import MachineRoles
@@ -109,7 +109,7 @@ def cmd_status() -> int:
     # shown only on the host the operator designated via the $AVA_HOME/lgtm-host
     # marker (a host singleton, not a per-cluster service, so the marker — not
     # the role — decides).
-    from cli.commands.lgtm import is_lgtm_host, print_lgtm_status
+    from cli.commands.observability.lgtm import is_lgtm_host, print_lgtm_status
 
     if is_lgtm_host():
         print("\nlgtm (observability backend):")
@@ -236,7 +236,7 @@ def _print_gateway_cluster_status() -> None:
     """
     import httpx
 
-    from cli.commands.cluster import _fetch_gateway_cluster_status
+    from cli.commands.cluster.control import fetch_gateway_cluster_status
     from ops.cluster_status import ClusterStatus
     from shared.machine import (
         GatewayApiBaseMissing,
@@ -247,7 +247,7 @@ def _print_gateway_cluster_status() -> None:
 
     print("\ngateway cluster status (GET /api/cluster/status):")
     try:
-        body = _fetch_gateway_cluster_status()
+        body = fetch_gateway_cluster_status()
     except httpx.HTTPError as e:
         print(f"  ✗ gateway unreachable: {e}")
         return

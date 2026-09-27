@@ -31,13 +31,13 @@ import pytest
 def test_materialization_is_not_a_converge_step() -> None:
     """Converge runs before the data plane is up (`ava start` step 1 vs step 2),
     so nothing in `CONVERGE_STEPS` may require the cluster database."""
-    from cli.commands.converge import CONVERGE_STEPS
+    from cli.commands.converge.host import CONVERGE_STEPS
 
     offenders = [s.name for s in CONVERGE_STEPS if "extension" in s.name.lower()]
     assert not offenders, (
         f"{offenders} is a converge STEP, but converge runs before this cluster's "
         "Postgres is started and before migrations apply. Call it from the start "
-        "sequence after the schema check instead — see cli/commands/_converge_extensions.py:"
+        "sequence after the schema check instead — see cli/commands/extensions/materialize.py:"
         "materialize_cluster_extensions."
     )
 
@@ -48,11 +48,12 @@ def _instrument_cold_start_seams(monkeypatch: pytest.MonkeyPatch, calls: list[st
     `test_release_cold_start_uses_same_storage_readiness_without_source_or_schema_writes`
     in `tests/cli/test_start_runtime.py` rather than inspecting source text."""
     import cli.commands._repo as _repo_commands
-    import cli.commands.converge as _converge_commands
+    import cli.commands.converge.host as converge_host
     import cli.commands.start as _start_commands
-    from cli.commands import _converge_extensions, _data_plane
+    from cli.commands.data_plane import bringup
+    from cli.commands.extensions import materialize
 
-    def converge_host(*_args: object, **_kwargs: object) -> None:
+    def skip_converge(*_args: object, **_kwargs: object) -> None:
         return None
 
     def ensure_gateway_data_plane() -> int:
@@ -74,17 +75,17 @@ def _instrument_cold_start_seams(monkeypatch: pytest.MonkeyPatch, calls: list[st
     def adopt() -> None:
         calls.append("adopt")
 
-    def materialize() -> None:
+    def record_materialize() -> None:
         calls.append("materialize")
 
-    monkeypatch.setattr(_converge_commands, "converge_host", converge_host)
+    monkeypatch.setattr(converge_host, "converge_host", skip_converge)
     monkeypatch.setattr(_start_commands, "_ensure_gateway_data_plane", ensure_gateway_data_plane)
-    monkeypatch.setattr(_data_plane, "prepare_gateway_schema", prepare_gateway_schema)
+    monkeypatch.setattr(bringup, "prepare_gateway_schema", prepare_gateway_schema)
     monkeypatch.setattr(_start_commands, "cmd_migrations_apply", migrate)
-    monkeypatch.setattr(_data_plane, "complete_gateway_data_plane", complete_gateway_data_plane)
+    monkeypatch.setattr(bringup, "complete_gateway_data_plane", complete_gateway_data_plane)
     monkeypatch.setattr(_repo_commands, "_assert_schema_current_or_die", schema_check)
-    monkeypatch.setattr(_converge_extensions, "adopt_local_extensions", adopt)
-    monkeypatch.setattr(_converge_extensions, "materialize_cluster_extensions", materialize)
+    monkeypatch.setattr(materialize, "adopt_local_extensions", adopt)
+    monkeypatch.setattr(materialize, "materialize_cluster_extensions", record_materialize)
 
 
 def test_start_materializes_after_the_schema_check(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -120,18 +121,18 @@ def test_standalone_converge_materializes_too() -> None:
     """`ava converge` is run against a cluster that is already up, so it has the
     precondition the start path has to wait for — and an operator running it
     expects the machine to end up caught up."""
-    from cli.commands.converge import cmd_converge
+    from cli.commands.converge.host import cmd_converge
 
     assert "materialize_cluster_extensions()" in inspect.getsource(cmd_converge)
 
 
 def test_the_materializer_lives_beside_its_siblings() -> None:
-    """`_converge_extensions.py`, next to `_converge_skills.py` — a subsystem
-    reader, not another entry in `converge.py`'s host-state roster. Extracting
-    it is also what kept `converge.py` under the 800-line ceiling."""
-    from cli.commands import _converge_extensions
+    """`extensions/materialize.py`, next to `extensions/skills_sync.py` — a subsystem
+    reader, not another entry in `converge/host.py`'s host-state roster. Extracting
+    it is also what kept `converge/host.py` under the 800-line ceiling."""
+    from cli.commands.extensions import materialize
 
-    assert hasattr(_converge_extensions, "materialize_cluster_extensions")
+    assert hasattr(materialize, "materialize_cluster_extensions")
 
 
 def test_start_adopts_before_it_materializes(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -157,6 +158,6 @@ def test_start_adopts_before_it_materializes(monkeypatch: pytest.MonkeyPatch) ->
 def test_standalone_converge_adopts_too() -> None:
     """`ava converge` is what an operator runs to make a machine correct without
     restarting it, and a machine holding un-adopted installs is not correct."""
-    from cli.commands.converge import cmd_converge
+    from cli.commands.converge.host import cmd_converge
 
     assert "adopt_local_extensions()" in inspect.getsource(cmd_converge)

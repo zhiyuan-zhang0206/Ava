@@ -145,9 +145,8 @@ def finish(message: str) -> bool:
             )
         summary = f"wake delivery failed after {attempts} attempts — cause: {cause}; {fallback}"
         print(summary, flush=True)
-        # The generated watcher boot may log a registry-cleanup traceback after
-        # this script exits. Repeat the summary last so --tail-file includes
-        # both the absolute fallback path and cause in the shell exit notice.
+        # Repeat the summary last so --tail-file includes both the absolute
+        # fallback path and cause in the shell exit notice.
         if __name__ == "__main__":
             atexit.register(print, summary, flush=True)
     return delivered

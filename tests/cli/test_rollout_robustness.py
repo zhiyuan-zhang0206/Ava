@@ -33,7 +33,7 @@ from shared.exit_codes import RESTART_DECLINED_EXIT_CODE
 def test_roster_flags_a_live_host_that_carries_a_stop_marker() -> None:
     """`online` here is what hid the exclusion: the roster's own source of truth
     (a live probe) contradicted the fan-out's (the marker) with nothing to see."""
-    from cli.commands.cluster import _status_cell
+    from cli.commands.cluster.control import _status_cell
 
     stopped = datetime(2026, 7, 28, 12, 0, tzinfo=UTC)
     assert _status_cell(online=True, identity_mismatch=False, stopped_at=stopped) == "STALE-STOP"

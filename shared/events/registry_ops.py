@@ -523,12 +523,6 @@ _EVENTS_OPS: dict[str, EventSpec] = {
         "Chrome page TTL deadline renewed via the renew_page tool; attributes carry page_id, ttl_s, new_expires_at",
         tier="observation",
     ),
-    "watcher_reaped": EventSpec(
-        name="watcher_reaped",
-        category="log",
-        tier="observation",
-        doc="the gateway TTL reaper reclaimed a watcher session — its deadline passed, or its owner agent is terminated for good; attributes carry agent_id, session_id, mode (killed / absent / machine_absent)",
-    ),
     "lifecycle_pointer_done_torn": EventSpec(
         name="lifecycle_pointer_done_torn",
         category="log",

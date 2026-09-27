@@ -27,7 +27,6 @@ class CronExprError(Exception):
 __all__ = [
     "AT_SESSION_TTL_GRACE_SECONDS",
     "DEFAULT_STANDING_CRON_MAX_SECONDS",
-    "TEMPLATE_VERSION",
     "CronExprError",
     "build_at_script",
     "build_cron_script",
@@ -43,9 +42,9 @@ __all__ = [
 # Standing cron cap (user ruling 2026-09-09, task #2617): a cron registered
 # without an explicit end_time lives at most this long, counted from
 # registration — `ava.watcher.cron` defaults `end_time` to now + this. A longer
-# schedule must pass an explicit end_time. Re-registering the same standing
-# schedule renews it (see ava/watcher.py::cron and shared/watcher_registry.
-# register_cron_renewal).
+# schedule must pass an explicit end_time. Calling `cron()` again with the same
+# expression starts another, independent session (see ava/watcher.py::cron) —
+# it does not renew or replace the earlier one.
 DEFAULT_STANDING_CRON_MAX_SECONDS = 7 * 24 * 3600
 
 # The one-shot (`at`) session's hard-deadline grace (user ruling 2026-09-14,
@@ -56,24 +55,6 @@ DEFAULT_STANDING_CRON_MAX_SECONDS = 7 * 24 * 3600
 # itself is never extended: an at watcher still wakes at `fires_at` or not
 # at all.
 AT_SESSION_TTL_GRACE_SECONDS = 300
-
-# Template version: bumped whenever a generated watcher script's loop
-# semantics change (issue #1330). The registry stores the version a session was
-# spawned with; the boot reconcile rebuilds a live cron watcher whose version is
-# behind, so a template fix reaches watchers that were already running when it
-# landed (the generated script is frozen at launch — a rollout does not rewrite
-# it). v1 = pre-#182 loop (no rollback guard); v2 = #182 loop (_last guard +
-# boundary re-check); v3 = schedule-state announcement prints (a healthy cron
-# watcher sleeping toward its next fire was indistinguishable from a stuck one —
-# 2026-08-25 false alarm, task #1620); v4 = orphan guard (a watcher child
-# hard-exits within seconds of its pty host dying — task #1726, 49/85 watchers
-# were multi-generation orphans still firing cron/at); v5 = standing-cron cap
-# (the reconcile rebuilds live standing crons so the SDK's now+7d default end
-# replaces their NULL end — task #2617); v6 = wake retry (a gateway restart at
-# a fire raised out of the bare `_wake` call and killed a live cron watcher —
-# 2026-09-15 evidence, task #3525; `_wake` now retries with bounded backoff and
-# logs a final failure instead of raising).
-TEMPLATE_VERSION = 6
 
 
 # Cron
@@ -253,12 +234,13 @@ def session_deadline(
 ) -> _dt.datetime | None:
     """The moment a watcher's session must be reclaimed — its target deadline.
 
-    One derivation for every surface of the lifecycle (user ruling
-    2026-09-14, task #3411: a watcher session's shell TTL IS its target
-    deadline, one system — never the registry and the TTL disagreeing). The
-    spawn write path (`ava.watcher._spawn`, which folds the remaining TTL on
-    every (re)mount), the boot reconcile (rebuild vs reaped), and the
-    gateway reaper (deadline-data validation) all derive through THIS function:
+    One derivation for the lifecycle (user ruling 2026-09-14, task #3411: a
+    watcher session's shell TTL IS its target deadline). `ava.watcher._spawn`
+    calls this once, at spawn, to fold the deadline into the session's shell
+    TTL — the only place it is derived any more: the gateway TTL reaper
+    (`gateway/ttl_reaper.py`) reclaims every session, watcher or not, purely
+    from its `agent_shell_ttls` deadline and no longer reads this function or
+    any watcher-specific data:
 
     - ``launch`` — ``created_at + timeout_secs`` (the watchdog horizon; the
       session is created with its watchdog, so created_at is the launch);
@@ -337,7 +319,6 @@ def _wake(message):
 
 _AT_TEMPLATE = """\
 # Auto-generated time watcher (one-shot). Do not edit manually.
-_TEMPLATE_VERSION = {template_version}
 import datetime as _dt
 import time as _time
 
@@ -370,7 +351,6 @@ _wake(_MESSAGE)
 
 _CRON_TEMPLATE = """\
 # Auto-generated time watcher (recurring cron). Do not edit manually.
-_TEMPLATE_VERSION = {template_version}
 import datetime as _dt
 import time as _time
 from zoneinfo import ZoneInfo
@@ -444,7 +424,6 @@ def build_at_script(
     when_iso: str,
     message: str,
     timezone: str | None,
-    template_version: int = TEMPLATE_VERSION,
 ) -> str:
     """Build a one-shot time-watcher script that sleeps until ``when_iso`` (an
     ISO-8601 UTC string) then wakes the launching agent once and exits.
@@ -468,7 +447,6 @@ def build_at_script(
         message=message,
         tz_setup=tz_setup,
         announce=announce,
-        template_version=template_version,
     )
 
 
@@ -478,7 +456,6 @@ def build_cron_script(
     message: str,
     timezone: str,
     end_time_iso: str | None,
-    template_version: int = TEMPLATE_VERSION,
 ) -> str:
     """Build a recurring cron-watcher script that wakes the launching agent on
     each cron fire, evaluated in ``timezone``, stopping after ``end_time_iso``
@@ -489,5 +466,4 @@ def build_cron_script(
         message=message,
         timezone=timezone,
         end_time_iso=end_time_iso,
-        template_version=template_version,
     )

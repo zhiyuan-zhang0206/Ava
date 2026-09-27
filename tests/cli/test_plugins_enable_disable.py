@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from cli.commands.plugins import cmd_plugins_disable, cmd_plugins_enable
+from cli.commands.extensions.plugins import cmd_plugins_disable, cmd_plugins_enable
 
 
 @pytest.fixture(autouse=True)
@@ -13,7 +13,7 @@ def _isolate(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Keep every plugin write in this test's tmp dir, never the worker-shared
     session home (tests ambient-state audit H-1): a discoverable plugin or a
     plugins_config.json left in `$AVA_HOME` changes what later tests in the same
-    worker see. Same redirection `test_converge_plugins.py` uses."""
+    worker see. Same redirection `test_plugin_scaffold.py` uses."""
     from shared import paths
     from shared.config import settings
 

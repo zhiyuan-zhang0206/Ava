@@ -23,7 +23,7 @@ on:
       - 'shared/windows_terminal/**'
       - 'shared/root_control/**'
       - 'cli/commands/_temporary_stop.py'
-      - 'cli/commands/maintenance_stop.py'
+      - 'cli/commands/service_stop.py'
       - 'cli/commands/stop.py'
       - 'tests/lifecycle/native_root/**'
       - 'tests/services/test_ava_root_daemon.py'

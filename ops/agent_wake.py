@@ -48,11 +48,6 @@ def _transition_terminated_to_unclaimed_idling(
 
     `incarnation` None is a fresh hosted birth: the CAS re-proves, under the
     row lock, that no runtime identity exists and the birth marker is intact.
-    The automatic (trigger) branch refuses a closed agent — the closure marker
-    re-checked under the row lock, so a close landing while a wake was in
-    flight still wins. The explicit branch clears the closure marker: reopening
-    a closed agent is exactly the manual resurrect's contract, and the caller
-    reports it on the resurrect event.
     """
     base_params = (
         AgentStatus.IDLING,
@@ -64,7 +59,6 @@ def _transition_terminated_to_unclaimed_idling(
     )
     if trigger_inbound_id is not None:
         from shared.lifecycle_acceptance import (
-            CLOSED_AGENT,
             FAILED_RESTART_FOR_CURRENT_TARGET,
             SYSTEM_REAPED_CRASH_ROW,
         )
@@ -84,7 +78,6 @@ def _transition_terminated_to_unclaimed_idling(
                 "AND (agents_meta.wake_suppressed_until IS NULL "
                 "     OR agents_meta.wake_suppressed_until < now()) "
                 "AND {} "
-                "AND NOT {} "
                 "AND EXISTS ("
                 "  SELECT 1 FROM inbound_messages m "
                 "  WHERE m.id = %s AND m.agent_id = agents_meta.id "
@@ -96,7 +89,6 @@ def _transition_terminated_to_unclaimed_idling(
                 sql.SQL(_RESURRECTION_TARGET),
                 sql.SQL(FAILED_RESTART_FOR_CURRENT_TARGET),
                 sql.SQL(RECOVERY_BREAKER_CLEAR),
-                sql.SQL(CLOSED_AGENT),
                 sql.SQL(SYSTEM_REAPED_CRASH_ROW),
             ),
             (*base_params, trigger_inbound_id, trigger_inbound_kind),
@@ -105,7 +97,7 @@ def _transition_terminated_to_unclaimed_idling(
         cur.execute(
             sql.SQL(
                 "UPDATE agents_meta SET status = %s, pid = NULL, started_at = NULL, "
-                "termination_source = NULL, closed_at = NULL, lease_expires_at = NULL, "
+                "termination_source = NULL, lease_expires_at = NULL, "
                 "last_turn_fatal_at = NULL, "
                 "runtime_generation = NULL, runtime_owner = NULL, runtime_kind = NULL, "
                 "runtime_protocol_version = 0 "
@@ -132,7 +124,7 @@ def _transition_terminated_to_unclaimed_idling(
         raise ResurrectTriggerStaleError(
             f"agent {agent_id} trigger work no longer qualifies for its current "
             "termination; UPDATE affected 0 rows (stale work, suppressed automatic "
-            "wakes, a tripped recovery breaker, or a closed agent)"
+            "wakes, or a tripped recovery breaker)"
         )
     raise ResurrectAlreadyAlive(
         f"agent {agent_id} was concurrently modified after SELECT; UPDATE affected 0 rows"
@@ -176,18 +168,14 @@ def _prepare_resurrect_attempt(
     trigger_inbound_id: int | None,
     trigger_inbound_kind: Literal["chat", "compact_request", "system_note"] | None,
     billing_recovery: bool = False,
-) -> tuple[bool, telemetry.Event]:
+) -> telemetry.Event:
     """Commit resurrection and its optional prompt before waking the host.
-
-    Returns whether this call reopened a closed agent (the explicit branch
-    cleared `closed_at`), so the caller can record it on the resurrect event
-    and the `agent_reopened` warning line.
 
     `billing_recovery=True` (the versioned `resurrect-billing-v1` action, task
     #3919) re-checks the billing-victim contract under the same row lock: a
-    closed row or a row that is not a billing-class recovery-breaker halt is
-    refused (`ResurrectRefused`) — the batch entry never crosses the closure
-    marker and only reinstates the recorded billing cohort.
+    row that is not a billing-class recovery-breaker halt is refused
+    (`ResurrectRefused`) — the batch entry only reinstates the recorded
+    billing cohort.
     """
     from shared.agents.messages.envelope import reject_unnegotiated_caller
     from shared.exec_owner_recovery import recover_local_resources
@@ -198,7 +186,7 @@ def _prepare_resurrect_attempt(
     with write_transaction() as conn, conn.cursor() as cur:
         latched_machine = _lock_active_home_machine(cur, agent_id)
         cur.execute(
-            "SELECT status,machine,closed_at,permanent_reject_streak,last_permanent_reject_reason,"
+            "SELECT status,machine,permanent_reject_streak,last_permanent_reject_reason,"
             "runtime_kind,runtime_generation,runtime_owner,pid,incarnation_resources "
             "FROM agents_meta WHERE id = %s FOR UPDATE",
             (agent_id,),
@@ -209,13 +197,12 @@ def _prepare_resurrect_attempt(
         if row[1] != latched_machine:
             raise ResurrectTriggerStaleError("resurrection placement changed after pause latch")
         current = AgentStatus(row[0])
-        reopened = trigger_inbound_id is None and row[2] is not None
         if current is not AgentStatus.TERMINATED:
             raise ResurrectAlreadyAlive(
                 f"agent {agent_id} is in {current.value!r} state, not 'terminated'"
             )
         incarnation = hosted_resurrection_target(
-            agent_id, kind=row[5], generation=row[6], owner=row[7], pid=row[8], resources=row[9]
+            agent_id, kind=row[4], generation=row[5], owner=row[6], pid=row[7], resources=row[8]
         )
         if billing_recovery:
             from shared.recovery_breaker import (
@@ -223,11 +210,9 @@ def _prepare_resurrect_attempt(
                 PERMANENT_REJECT_REASON_BILLING,
             )
 
-            if row[2] is not None:
-                raise ResurrectRefused("closed")
             if (
-                row[3] < HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS
-                or row[4] != PERMANENT_REJECT_REASON_BILLING
+                row[2] < HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS
+                or row[3] != PERMANENT_REJECT_REASON_BILLING
             ):
                 raise ResurrectRefused("not_billing_halted")
         if resurrected_by == "system":
@@ -278,14 +263,13 @@ def _prepare_resurrect_attempt(
             agent_id,
             resurrected_by,
             prompt,
-            reopened=reopened,
             billing_recovery=billing_recovery,
             origin_id=int(resurrect_row[0]),
         )
         conn.commit()
         publish_agent_updated_sync(agent_id)
     publish_inbound_wake(agent_id, "0")
-    return reopened, prepared_event
+    return prepared_event
 
 
 def _stage_resurrect_event(
@@ -294,14 +278,11 @@ def _stage_resurrect_event(
     resurrected_by: str,
     prompt: str | None,
     *,
-    reopened: bool,
     billing_recovery: bool,
     origin_id: int,
 ) -> telemetry.Event:
     """Stage the exact resurrection audit fact inside the owning transaction."""
     payload: dict[str, object] = {"prompt": prompt} if prompt else {}
-    if reopened:
-        payload["reopened"] = True
     if billing_recovery:
         payload["via"] = "billing_recovery"
     event = prepare_event_log(
@@ -337,21 +318,16 @@ def resurrect_agent(
     (`SYSTEM_REAPED_CRASH_ROW`) — work that predates the termination still
     qualifies: a reaper death is not an operator's decision. The automatic
     trigger additionally requires clear automatic wakes (no suppression window,
-    `RECOVERY_BREAKER_CLEAR`) and an open agent (no closure marker); explicit
-    manual resurrection passes no trigger and keeps its explicit reopen
-    contract — it reopens a closed agent (clearing `closed_at`), the audit
-    event carries `"reopened": true`, and a WARNING-level `agent_reopened` log
-    line marks the reopen for operator-side visibility. The versioned billing
-    batch-recovery
-    action (`billing_recovery=True`) is the one explicit caller that must not
-    reopen: it refuses a closed row and any non-billing-class halt
-    (`ResurrectRefused`), and marks the resurrect event payload with
+    `RECOVERY_BREAKER_CLEAR`); explicit manual resurrection passes no trigger
+    and keeps its unconditional contract. The versioned billing batch-recovery
+    action (`billing_recovery=True`) refuses any non-billing-class halt
+    (`ResurrectRefused`) and marks the resurrect event payload with
     `via='billing_recovery'`. The host resumes the existing checkpoint after
     the transaction commits.
     """
     if (trigger_inbound_id is None) != (trigger_inbound_kind is None):
         raise ValueError("trigger inbound id and kind must be provided together")
-    reopened, prepared_event = _prepare_resurrect_attempt(
+    prepared_event = _prepare_resurrect_attempt(
         agent_id,
         resurrected_by=resurrected_by,
         prompt=prompt,
@@ -359,16 +335,6 @@ def resurrect_agent(
         trigger_inbound_kind=trigger_inbound_kind,
         billing_recovery=billing_recovery,
     )
-    if reopened:
-        # LOUD operator-side audit: clearing the durable closure marker must be
-        # findable without reading the resurrect event's payload — one distinct
-        # WARNING line rides the existing log/event pipelines (no new surface).
-        logger.warning(
-            "closed agent {agent_id} reopened by explicit resurrect ({resurrected_by})",
-            event="agent_reopened",
-            agent_id=agent_id,
-            resurrected_by=resurrected_by,
-        )
     telemetry.emit_prepared(prepared_event)
     logger.info(
         "agent {agent_id} resurrected by {resurrected_by}",

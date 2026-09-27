@@ -27,9 +27,9 @@ import psycopg
 import pytest
 from psycopg import sql
 
-from cli.commands import _data_plane as data_plane
-from cli.commands import cluster_instance as ci
-from cli.commands import pgbouncer as pooler
+from cli.commands.data_plane import bringup
+from cli.commands.data_plane import cluster_instance as ci
+from cli.commands.data_plane import pgbouncer as pooler
 from cli.commands.migrations import cmd_migrations_apply
 from shared import cluster
 from shared.cluster import authority, ownership
@@ -161,10 +161,10 @@ def _configure(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Born:
 
 
 def _birth(born: Born) -> None:
-    assert data_plane.ensure_gateway_data_plane() == 0
-    data_plane.prepare_gateway_schema()
+    assert bringup.ensure_gateway_data_plane() == 0
+    bringup.prepare_gateway_schema()
     cmd_migrations_apply()
-    data_plane.complete_gateway_data_plane()
+    bringup.complete_gateway_data_plane()
 
 
 @pytest.fixture
@@ -216,7 +216,7 @@ def test_fresh_birth_mints_generation_zero_behind_nologin_owner(born: Born) -> N
         ).fetchall()
         assert groups == [("ava_gateway",), ("ava_runner",)]
         authority.check_invariant(
-            conn, born.home, database="ava", readonly_grantees=data_plane.READONLY_GRANTEES
+            conn, born.home, database="ava", readonly_grantees=bringup.READONLY_GRANTEES
         )
     # The start process adopted the delivered gateway login for its own dials.
     assert settings.data_plane.db_url == born.dsn("gateway")
@@ -304,7 +304,7 @@ def test_pooler_restart_revokes_a_removed_user_a_reload_would_keep(born: Born) -
 
 def test_unchanged_userlist_reloads_without_restart(born: Born) -> None:
     before = ownership.pooler(pooler.ini_path(), pooler.pidfile_path())
-    data_plane.complete_gateway_data_plane()
+    bringup.complete_gateway_data_plane()
     after = ownership.pooler(pooler.ini_path(), pooler.pidfile_path())
     assert before is not None and after is not None and before.pid == after.pid
 
@@ -314,7 +314,7 @@ def test_ordinary_start_sweeps_a_stale_login_and_keeps_the_generation(born: Born
         conn.execute(
             "CREATE ROLE ava_g7_runner LOGIN PASSWORD 'stale-password-xyz' IN ROLE ava_runner"
         )
-    data_plane.complete_gateway_data_plane()
+    bringup.complete_gateway_data_plane()
     with born.admin() as conn:
         assert conn.execute(
             "SELECT rolcanlogin FROM pg_roles WHERE rolname = 'ava_g7_runner'"
@@ -331,7 +331,7 @@ def test_ordinary_start_holds_on_an_invariant_violation(born: Born) -> None:
         conn.execute("CREATE ROLE foreign_writer LOGIN PASSWORD 'foreign-password'")
         conn.execute("GRANT INSERT ON agents TO foreign_writer")
     with pytest.raises(authority.CatalogRefusedError, match="foreign_writer"):
-        data_plane.complete_gateway_data_plane()
+        bringup.complete_gateway_data_plane()
 
 
 def test_ordinary_start_refuses_a_home_without_a_ledger_before_any_effect(
@@ -340,30 +340,30 @@ def test_ordinary_start_refuses_a_home_without_a_ledger_before_any_effect(
     intent = json.loads((configured.home / "start-intent.json").read_text())
     intent["phase"] = "provisioned"
     (configured.home / "start-intent.json").write_text(json.dumps(intent))
-    assert data_plane.ensure_gateway_data_plane() == 1
+    assert bringup.ensure_gateway_data_plane() == 1
     assert "cutover_db_authority.py" in capsys.readouterr().err
     assert not (configured.home / "pg").exists()
     with pytest.raises(RuntimeError, match="cutover_db_authority"):
-        data_plane.complete_gateway_data_plane()
+        bringup.complete_gateway_data_plane()
 
 
 def test_interrupted_birth_retries_to_the_same_generation(
     configured: Born, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     calls: list[int] = []
-    real = data_plane.prove_generation_logins
+    real = bringup.prove_generation_logins
 
     def failing(home: Path, generation: authority.Generation, endpoint: str) -> None:
         calls.append(generation.number)
         raise RuntimeError("injected crash before activation")
 
-    monkeypatch.setattr(data_plane, "prove_generation_logins", failing)
+    monkeypatch.setattr(bringup, "prove_generation_logins", failing)
     with pytest.raises(RuntimeError, match="injected crash"):
         _birth(configured)
     ledger = authority.require_ledger(configured.home)
     assert ledger.active is None and ledger.pending is not None and ledger.pending.number == 0
-    monkeypatch.setattr(data_plane, "prove_generation_logins", real)
-    data_plane.complete_gateway_data_plane()
+    monkeypatch.setattr(bringup, "prove_generation_logins", real)
+    bringup.complete_gateway_data_plane()
     ledger = authority.require_ledger(configured.home)
     assert calls == [0] and ledger.active is not None and ledger.active.number == 0
     assert ledger.counter == 0
@@ -413,7 +413,7 @@ def test_revoked_generation_login_is_not_resurrected_by_start(born: Born) -> Non
                 "CREATE ROLE {} LOGIN PASSWORD 'restored-old-login' IN ROLE ava_gateway"
             ).format(sql.Identifier("ava_g5_gateway"))
         )
-    data_plane.complete_gateway_data_plane()
+    bringup.complete_gateway_data_plane()
     _refused(
         host="127.0.0.1",
         port=born.pg_port,
@@ -431,7 +431,7 @@ def _collector_postgres_receiver(born: Born, monkeypatch: pytest.MonkeyPatch) ->
     text carries no credential of the data plane."""
     import yaml
 
-    from cli.commands import _otel_collector as oc
+    from cli.commands.observability import otel_collector as oc
 
     monkeypatch.setattr(settings.observability, "telemetry_otlp_enabled", True)
     monkeypatch.setattr("shared.machine.machine_name", lambda: "test-machine")
@@ -532,7 +532,7 @@ def test_collector_postgres_receiver_keeps_no_credential_and_survives_rollover(
         # The fence closed the old generation, not the monitoring session.
         assert scraping.execute("SELECT session_user").fetchone() == (authority.MONITOR_ROLE,)
         authority.check_invariant(
-            conn, born.home, database="ava", readonly_grantees=data_plane.READONLY_GRANTEES
+            conn, born.home, database="ava", readonly_grantees=bringup.READONLY_GRANTEES
         )
     assert authority.active_generation(born.home).number == 1
     _refused(

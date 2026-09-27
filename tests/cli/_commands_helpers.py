@@ -10,7 +10,7 @@ import pytest
 import cli.commands._probe as _probe_commands
 import cli.commands._repo as _repo_commands
 import cli.commands._setup as _setup_commands
-import cli.commands.converge as _converge_commands
+import cli.commands.converge.host as converge_host
 import cli.commands.root_driver as _root_driver_commands
 from shared.start_serving import RootBirth
 
@@ -174,7 +174,7 @@ def _noop_start_prechecks(serving_root: RootBirth, monkeypatch: pytest.MonkeyPat
 
     monkeypatch.setattr(_setup_commands, "_collect_setup_values", _fake_collect)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_root_driver_commands, "admit_live_start", lambda *_a, **_kw: False)  # pyright: ignore[reportUnknownArgumentType] — untyped test double
-    monkeypatch.setattr(_converge_commands, "converge_host", lambda *_a, **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(converge_host, "converge_host", lambda *_a, **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
     # The per-cluster pg/redis bring-up (`_ensure_gateway_data_plane`) starts a real
     # native instance under $AVA_HOME. These tests assert session/stop/status call
     # shapes, not infra, so stub it to a noop — keeping them hermetic regardless of
@@ -182,8 +182,11 @@ def _noop_start_prechecks(serving_root: RootBirth, monkeypatch: pytest.MonkeyPat
     from cli.commands import start as _start_mod
 
     monkeypatch.setattr(_start_mod, "_ensure_gateway_data_plane", lambda: 0)
-    monkeypatch.setattr("cli.commands._data_plane.prepare_gateway_schema", lambda: None)
-    monkeypatch.setattr("cli.commands._data_plane.complete_gateway_data_plane", lambda **_kw: None)  # pyright: ignore[reportUnknownArgumentType] — untyped test double
+    monkeypatch.setattr("cli.commands.data_plane.bringup.prepare_gateway_schema", lambda: None)
+    monkeypatch.setattr(
+        "cli.commands.data_plane.bringup.complete_gateway_data_plane",
+        lambda **_kw: None,  # pyright: ignore[reportUnknownArgumentType] — untyped test double
+    )
     from cli.commands.root_driver import LaunchOutcome
 
     monkeypatch.setattr(

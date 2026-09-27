@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 
-from cli.commands import cluster_health
+from cli.commands.cluster import health as cluster_health
 from tests.cli.test_cluster_health import (
     _all_checks_pass as _all_checks_pass,
 )
@@ -88,7 +88,7 @@ def test_parser_rejects_removed_release_policy_flags(arguments: list[str]) -> No
 def test_health_probe_dispatch_preserves_observation_options(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import cli.commands.cluster_health as _cluster_health_commands
+    import cli.commands.cluster.health as _cluster_health_commands
     from cli.main import _build_parser
 
     received: list[dict[str, object]] = []
