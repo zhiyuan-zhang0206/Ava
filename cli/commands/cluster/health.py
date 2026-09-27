@@ -442,7 +442,7 @@ def _gate_probe() -> str | None:
     roles = _repo._roles_or_none()
     if roles is None or "gateway" not in roles:
         return None
-    from cli.commands._converge_gate import probe_gate
+    from cli.commands.converge.gate import probe_gate
 
     status = probe_gate()
     if not status.serving:
@@ -469,7 +469,7 @@ def _redis_bridge_probe() -> str | None:
     roles = _repo._roles_or_none()
     if roles is None or "gateway" not in roles:
         return None
-    from cli.commands._converge_redis_bridge import probe_redis_bridge
+    from cli.commands.converge.redis_bridge import probe_redis_bridge
 
     status = probe_redis_bridge()
     if not status.required:

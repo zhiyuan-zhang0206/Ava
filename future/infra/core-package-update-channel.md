@@ -51,13 +51,13 @@ Source of requirements: the user's 2026-09-11 request (task #2915).
 
 | Piece | What exists | Where |
 |---|---|---|
-| Single skills load dir | `$AVA_HOME/skills/`; converge syncs repo built-ins + plugin-carried skills into it; user installs land directly | `cli/commands/_converge_skills.py`, `okf/skills/load-directory-sync.ava.okf.md` |
+| Single skills load dir | `$AVA_HOME/skills/`; converge syncs repo built-ins + plugin-carried skills into it; user installs land directly | `cli/commands/extensions/skills_sync.py`, `okf/skills/load-directory-sync.ava.okf.md` |
 | Install registry (per machine) | origin (`repo`/`plugin`/`user`), trust tier, `content_hash` / `installed_hash` (R5 edit guards), `enabled`, schema `version` field as a migration anchor | `shared/install_registry.py` |
 | Explicit update verbs | `ava skill update [name...] [--force]` (repo-native), `ava skill upgrade <name>` (git-sourced), `ava plugins upgrade <name> [--force]`, `ava mcp upgrade` — all with the R5 conflict contract and staged/atomic replacement | `cli/commands/extensions/skill.py`, `plugins.py`, `mcp.py` |
-| Atomic apply patterns | stage `.<name>.new` → move `.trash`; `_atomic_plugin_replace`; dot-prefixed residue ignored by discovery | `_converge_skills.py`, `plugins.py`, `shared/plugins_config.py` |
+| Atomic apply patterns | stage `.<name>.new` → move `.trash`; `_atomic_plugin_replace`; dot-prefixed residue ignored by discovery | `cli/commands/extensions/skills_sync.py`, `plugins.py`, `shared/plugins_config.py` |
 | Supply-chain gate | `shared/packages/skills/skill_scan.py` on every ingest (critical → refuse, `--accept-risk` recorded, trust never auto-promoted) | `shared/packages/skills/skill_scan.py`, `shared/install_registry.py` |
 | Manifest + host-compat gate | `ava-plugin.json` validator, range algebra, `engines.ava` vs the checkout's `pyproject.toml` version | `shared/plugin_manifest.py`, `conventions/plugin-spec-v2.md` |
-| Per-machine OS jobs | launchd / crontab / schtasks registrars, idempotent, converge-registered (health probe, watchdog, autostart, logs), test switch `AVA_OS_JOBS_ENABLED=false` | `shared/os_*.py`, `cli/commands/_converge_os_jobs.py` |
+| Per-machine OS jobs | launchd / crontab / schtasks registrars, idempotent, converge-registered (health probe, watchdog, autostart, logs), test switch `AVA_OS_JOBS_ENABLED=false` | `shared/os_*.py`, `cli/commands/converge/_os_jobs.py` |
 | Cluster extension registry (S2, in progress) | `extensions` / `extension_blobs` tables; install writes row+blob; converge/boot materialize; adoption sweep; content-addressed by tree hash; trust rises only | `shared/extension_registry.py`, `shared/extension_materialize.py` |
 | Update coordination | cluster-wide DB update lock + in-flight detection; source-tree guard (reset to installed commit + clean) | `shared/cluster_lock.py`, `cli/commands/status.py:_update_in_flight`, `shared/source_tree_guard.py` |
 | Existing boundaries | four-layer modification model; extension ownership (cluster/machine/agent); CLI scope convention; CLI-only updates | `decisions/2026-08-19-four-layer-modification-model.md`, `decisions/2026-08-21-extension-ownership-three-tiers.md`, `2026-08-02-cli-scope-convention.md`, `2026-08-05-cli-only-updates.md` |
@@ -395,13 +395,13 @@ Each phase is independently landable and reversible; nothing in P0/P1 changes co
 
 ## Appendix A — current-state evidence (for reviewers)
 
-- Load dir sync + R5 bootstrap-only: `cli/commands/_converge_skills.py` docstring; `okf/skills/load-directory-sync.ava.okf.md`.
+- Load dir sync + R5 bootstrap-only: `cli/commands/extensions/skills_sync.py` docstring; `okf/skills/load-directory-sync.ava.okf.md`.
 - Explicit update verbs + conflicts: `cli/commands/extensions/skill.py` (`cmd_skill_update` L423+, `cmd_skill_upgrade` L510+), `cli/commands/extensions/plugins.py` (`cmd_plugins_upgrade` L390+), `cli/commands/extensions/mcp.py`.
 - Rollout skill refresh legs: `cli/commands/_update_local.py:85` (`_refresh_builtin_skills`), `cli/commands/_update_agent_runner.py:250`.
 - Registry model: `shared/install_registry.py` (`InstalledPackage`, `Registry.version`, `tree_hash`, `copy_changed`).
 - Plugin discovery + loaders: `shared/plugins_config.py:_discover_plugins`, `agent/_extensions.py:load_extensions`, `shared/lm/_plugin_providers.py`; roots: `shared/paths.py:repo_plugins_dir/plugins_dir`, `shared/runtime_interpreter.py:external_plugin_read_root`.
 - Manifest/engines gate: `shared/plugin_manifest.py` (`host_version_from_repo`, `check_host_engine`), `conventions/plugin-spec-v2.md`.
-- OS jobs: `shared/os_cron.py` (5-min health tick as the registrar template), `cli/commands/_converge_os_jobs.py`, `AVA_OS_JOBS_ENABLED`.
+- OS jobs: `shared/os_cron.py` (5-min health tick as the registrar template), `cli/commands/converge/_os_jobs.py`, `AVA_OS_JOBS_ENABLED`.
 - Update coordination: `shared/cluster_lock.py`, `cli/commands/status.py:_update_in_flight` L58, `shared/source_tree_guard.py` (reset --hard + clean -fd; skip while update in flight); objects-only fetch precedent: `shared/cluster_drift.py:prod_source_fetch`.
 - Extension ownership S1/S2: `decisions/2026-08-21-extension-ownership-three-tiers.md`, `future/infra/extension-ownership.md`, `shared/extension_registry.py`, `shared/extension_materialize.py`.
 - Four-layer model / builtin-plugin ruling: `decisions/2026-08-19-four-layer-modification-model.md` (revised in part: builtin plugins stay *authored* in the kernel but are *delivered* via the content channel).

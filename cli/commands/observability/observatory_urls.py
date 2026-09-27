@@ -5,7 +5,7 @@ every consumer on its current local loopback endpoint; non-empty switches the
 Grafana Loki/Prometheus datasources, the alert webhook target, and the
 otel-collector gateway fan-out to the remote observatory station (the PG
 datasource stays on the cluster's data plane — it never follows the
-observatory, #3606). Split out of _lgtm_native.py so the URL contract has
+observatory, #3606). Split out of lgtm_native.py so the URL contract has
 one home shared by the native renderer and the collector.
 """
 

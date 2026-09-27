@@ -29,7 +29,7 @@ from urllib.parse import urlparse
 import yaml
 from dotenv import dotenv_values
 
-from cli.commands._converge_spec import ConvergeCtx
+from cli.commands.converge.spec import ConvergeCtx
 from shared.log import logger
 from shared.loki_index_labels import validate_loki_deploy_config
 from shared.resilience import Policy, retry

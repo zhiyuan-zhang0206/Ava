@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 from cli.commands import start as _start
-from cli.commands._converge_spec import ConvergeCtx
+from cli.commands.converge.spec import ConvergeCtx
 from cli.commands.data_plane import cluster_instance as _ci
 from shared import cluster
 from shared.config import settings

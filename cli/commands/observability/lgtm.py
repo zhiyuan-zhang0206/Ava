@@ -13,7 +13,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from cli.commands._converge_spec import ConvergeCtx
+from cli.commands.converge.spec import ConvergeCtx
 from services.healthchecks.lgtm import (
     is_lgtm_host,
     lgtm_deploy_dir,
@@ -94,14 +94,14 @@ def cmd_lgtm_on() -> int:
     from cli.commands import _repo
     from shared.paths import ava_home
 
-    from . import lgtm_native as _lgtm_native
+    from . import lgtm_native
 
     marker = lgtm_host_marker()
     if not marker.exists():
         marker.touch()
         print(f"✓ marker written: {marker}")
     repo = _repo._repo_root()
-    _lgtm_native.ensure_lgtm_native(repo, ava_home())
+    lgtm_native.ensure_lgtm_native(repo, ava_home())
     result = _start_stack(repo, ava_home())
     if result != 0:
         print(f"✗ deploy/lgtm/start.sh exited {result}", file=sys.stderr)

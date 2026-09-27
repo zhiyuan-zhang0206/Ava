@@ -1,13 +1,13 @@
 """Land the cluster's extensions on this machine — the converge-side reader.
 
-A sibling of `_converge_skills.py` (repo/plugin skills from the checkout) and
-`_converge_plugins.py`, for the content the CLUSTER owns: whatever arrived by
+A sibling of `skills_sync.py` (repo/plugin skills from the checkout) and
+`_plugin_scaffold.py`, for the content the CLUSTER owns: whatever arrived by
 `ava skill install` on any machine (`future/infra/extension-ownership.md` S2,
 model in `decisions/2026-08-21-extension-ownership-three-tiers.md`).
 
-Its own module rather than another function in `_converge.py` because it is not
-a converge STEP — see the docstring below — and because `_converge.py` is a
-roster of host-state steps, not a place for a subsystem's reader.
+Its own module rather than another function in `converge/host.py` because it is
+not a converge STEP — see the docstring below — and because `converge/host.py`
+is a roster of host-state steps, not a place for a subsystem's reader.
 """
 
 from __future__ import annotations

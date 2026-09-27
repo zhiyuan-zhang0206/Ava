@@ -217,7 +217,7 @@ def test_macos_bootstrap_failure_and_repeated_unregister(
 
 
 def test_converge_registers_logs_maintenance(monkeypatch: pytest.MonkeyPatch) -> None:
-    from cli.commands._converge_os_jobs import ensure_logs_maintenance
+    from cli.commands.converge._os_jobs import ensure_logs_maintenance
 
     calls: list[str] = []
     monkeypatch.setattr(job, "register_logs_job", lambda: calls.append("register"))

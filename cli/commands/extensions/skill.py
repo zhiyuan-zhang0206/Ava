@@ -23,7 +23,7 @@ matched", which is why `trust` is a separate verb a person runs.
 Removing a package is `ava plugins uninstall`; `ava plugins install` is the
 sibling entry point for a Claude Code *plugin* bundle (agents / commands /
 `.mcp.json`, of which skills are one part). The converge that populates the
-load dir from repo + plugin sources is `cli/commands/_converge_skills.py`.
+load dir from repo + plugin sources is `cli/commands/extensions/skills_sync.py`.
 """
 
 from __future__ import annotations
@@ -33,7 +33,7 @@ import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
-from cli.commands._converge_skills import _Source
+from cli.commands.extensions.skills_sync import _Source
 from shared import install_registry as reg
 from shared.config import settings
 
@@ -300,8 +300,8 @@ def _repo_native_sources(repo: Path | None = None) -> list[_Source]:
     reach agents through the project-local mount, not the load dir; issue
     #146). Installed-plugin skills are excluded too (they update via
     `ava plugins upgrade`)."""
-    from cli.commands._converge_skills import iter_sources
     from cli.commands._repo import _repo_root
+    from cli.commands.extensions.skills_sync import iter_sources
 
     sources, _conflicts = iter_sources(repo or _repo_root())
     return [s for s in sources if s.bootstrap_only]
@@ -318,7 +318,7 @@ def _land_repo_copy(
     """Land / overwrite `skills_root/<name>` from the source and (re)track it
     as repo-native. Returns the package name (the caller files it under the
     outcome it already knows)."""
-    from cli.commands._converge_skills import _copy_tree
+    from cli.commands.extensions.skills_sync import _copy_tree
     from shared.install_registry import InstalledPackage, tree_hash
 
     dest = skills_root / s.name
@@ -474,8 +474,8 @@ def cmd_skill_update(
     """
     from datetime import UTC, datetime
 
-    from cli.commands._converge_skills import assert_repo_source_bound
     from cli.commands._repo import _repo_root
+    from cli.commands.extensions.skills_sync import assert_repo_source_bound
     from shared import install_registry as reg
     from shared import paths
 

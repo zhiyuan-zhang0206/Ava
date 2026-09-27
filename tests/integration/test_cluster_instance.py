@@ -24,8 +24,8 @@ import psycopg
 import pytest
 import redis
 
-from cli.commands._converge_spec import ConvergeCtx
-from cli.commands._converge_steps import _ensure_redis_url_identity_step
+from cli.commands.converge._steps import _ensure_redis_url_identity_step
+from cli.commands.converge.spec import ConvergeCtx
 from cli.commands.data_plane import cluster_instance as ci
 from cli.commands.data_plane.admin_secrets import ensure_data_plane_admin_secrets
 from cli.commands.data_plane.bringup import ensure_gateway_data_plane
@@ -143,7 +143,7 @@ def test_per_cluster_instance_bringup(isolated_cluster: tuple[int, int]) -> None
     assert rc == 0
 
     # Provision the role + db + schema against the cluster's own instance (over its
-    # local socket, trust) — exactly what cluster_lifecycle.provision does. The
+    # local socket, trust) — exactly what cluster.registry.provision does. The
     # identifier is passed as data.
     provision_database(
         "ava_tinst", base_admin_url=ci.pg_admin_url(pg_port), db_admin_password=_DB_ADMIN
@@ -347,7 +347,7 @@ def test_bringup_with_pgbouncer_enabled(
     )
     assert rc == 0
 
-    # Provision role+db+schema (direct, socket superuser) — as cluster_lifecycle.provision does.
+    # Provision role+db+schema (direct, socket superuser) — as cluster.registry.provision does.
     provision_database(
         "ava_tinst", base_admin_url=ci.pg_admin_url(pg_port), db_admin_password=_DB_ADMIN
     )
@@ -507,7 +507,7 @@ def test_fresh_install_migrations_apply_no_secret(
     pg_port, redis_port = isolated_cluster
     secret = ""
 
-    # install-time birth (cluster_lifecycle._birth): ambient settings carry the
+    # install-time birth (cli.install_cluster._birth): ambient settings carry the
     # fixture's foreign secret — the bring-up must follow the passed "".
     rc = ci.ensure_cluster_instance(
         pg_port=pg_port,

@@ -9,7 +9,7 @@ harness-specific machinery that does not hold in Ava, so we copy, strip, rewire
 to `ava.*` idioms, and own the sync cost.
 
 Anything landed here is stamped `trust="builtin"` by converge
-(`cli/commands/_converge_skills.py`) and bypasses the install-time supply-chain
+(`cli/commands/extensions/skills_sync.py`) and bypasses the install-time supply-chain
 scanner — so a vendored pack must be **read in full before it is committed**,
 not merely copied.
 

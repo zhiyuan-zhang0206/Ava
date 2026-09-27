@@ -1,7 +1,7 @@
 from pathlib import Path
 
-from cli.commands._converge_pitr import converge_pitr_foundation
-from cli.commands._converge_spec import ConvergeCtx
+from cli.commands.converge.spec import ConvergeCtx
+from cli.commands.data_plane.pitr_foundation import converge_pitr_foundation
 
 
 def test_converge_publishes_self_contained_private_shim(tmp_path: Path) -> None:

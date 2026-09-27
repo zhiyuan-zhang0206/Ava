@@ -10,7 +10,7 @@ tags:
 
 # External-agent operator skill bridge
 
-`cli/commands/_converge_external_agent_skills.py` is a dedicated host-global
+`cli/commands/extensions/external_skills.py` is a dedicated host-global
 converge step. It reads
 `<repo>/.agents/skills/operating-ava-cluster` and considers exactly two client
 homes: `~/.codex` and `~/.claude`. A missing client home is a no-op; the step
@@ -75,4 +75,4 @@ fleet-wide runtime source again.
 
 - [[okf/skills/project-local.ava.okf.md]] — the normal visibility path for the repo skill family
 - [[okf/skills/load-directory-sync.ava.okf.md]] — Ava's distinct runtime load-directory contract
-- `cli/commands/_converge.py` — prod/default-home and worktree gate
+- `cli/commands/converge/host.py` — prod/default-home and worktree gate

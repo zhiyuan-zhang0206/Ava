@@ -39,7 +39,7 @@ from pathlib import Path
 
 from loguru import logger
 
-from cli.commands._converge_skills import _Source, iter_sources
+from cli.commands.extensions.skills_sync import _Source, iter_sources
 from shared import host_version, install_registry, paths, plugin_manifest
 from shared.config import settings
 from shared.deploy.git.gitenv import git_env

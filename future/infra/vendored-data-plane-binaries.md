@@ -3,7 +3,7 @@
 **Status: Postgres leg landed (pgvector injection included); Redis leg is the only remaining work.**
 `shared/runtime_binaries.py` fetches the pinned relocatable zonky distribution into
 `~/.ava/runtime/pg/` and injects the pinned pgvector extension into it (a
-`cli/commands/_converge.py` step), and
+`cli/commands/converge/host.py` step), and
 `shared/pg_tools.py:pg_tool()` prefers it over brew/apt. So `brew install
 postgresql@17` is no longer a prerequisite. Redis defaults to brew/PATH
 (`cli/commands/data_plane/cluster_instance.py`); the unit-local `redis_bin_dir` setting can
@@ -98,7 +98,7 @@ infra this introduces.
 
 ## Fetch mechanism
 
-A `cli/commands/_converge.py` step (`ensure_pg_binaries`) downloads + extracts +
+A `cli/commands/converge/host.py` step (`ensure_pg_binaries`) downloads + extracts +
 checksums on first install or when the runtime tree is missing (idempotent, like the
 rest of converge). Not committed to git (the PG tree is tens of MB). A download
 failure is fatal with a clear message (fail fast — no silent fall-through to a

@@ -17,7 +17,7 @@ from typing import cast
 import pytest
 import yaml
 
-from cli.commands.observability import lgtm_native as _lgtm_native
+from cli.commands.observability import lgtm_native
 from shared import lgtm_systemd
 from shared.config import settings
 from shared.lgtm_local import BACKENDS, HEALTH_PATHS, backend_urls, binary_path
@@ -108,13 +108,13 @@ def test_native_listener_ports_are_independent_of_external_query_urls(
         monkeypatch.setattr(settings.observability, f"lgtm_{name}_port", port)
     monkeypatch.setattr(settings.observability, "telemetry_loki_url", "https://query.example/loki")
     repo = Path(__file__).resolve().parents[2]
-    _lgtm_native._render_configs(repo, native, home)
+    lgtm_native._render_configs(repo, native, home)
     loki = yaml.safe_load((native / "config/loki.yaml").read_text())
     assert loki["server"]["http_listen_port"] == 53100
     assert loki["server"]["grpc_listen_port"] == 59095
     assert "http_port = 53003" in (native / "config/grafana.ini").read_text()
     assert "GRAFANA_ROOT_URL:-http://localhost:53003}" in (native / "grafana/run.sh").read_text()
-    argv, _ = _lgtm_native._service_invocation("prometheus", native, home)
+    argv, _ = lgtm_native._service_invocation("prometheus", native, home)
     assert "--web.listen-address=127.0.0.1:59090" in argv
     assert backend_urls() == {
         "loki": "http://127.0.0.1:53100",
@@ -369,9 +369,9 @@ def test_matching_versions_from_another_platform_are_downloaded_again(
     home = tmp_path / "home"
     native = home / "lgtm/native"
     native.mkdir(parents=True)
-    monkeypatch.setattr(_lgtm_native, "platform_tag", lambda: "linux_amd64")
+    monkeypatch.setattr(lgtm_native, "platform_tag", lambda: "linux_amd64")
     repo = Path(__file__).resolve().parents[2]
-    assets = _lgtm_native._load_versions(repo)
+    assets = lgtm_native._load_versions(repo)
     for name, asset in assets.items():
         (native / f"version-{name}").write_text(asset["version"])
         (native / f"platform-{name}").write_text("darwin_arm64")
@@ -383,10 +383,10 @@ def test_matching_versions_from_another_platform_are_downloaded_again(
             assert "linux-amd64" in asset["member"]
         downloads.append(name)
 
-    monkeypatch.setattr(_lgtm_native, "_download_and_verify", download)
+    monkeypatch.setattr(lgtm_native, "_download_and_verify", download)
     monkeypatch.setattr(lgtm_systemd, "register", _yes)
     monkeypatch.setattr(lgtm_systemd, "restart_running", _noop)
-    _lgtm_native.ensure_lgtm_native(repo, home)
+    lgtm_native.ensure_lgtm_native(repo, home)
     assert downloads == list(BACKENDS)
 
 

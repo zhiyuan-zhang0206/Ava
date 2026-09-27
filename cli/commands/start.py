@@ -341,7 +341,8 @@ def _cmd_start_body(  # noqa: PLR0915 — cohesive linear start sequence (conver
     printed cross; the module docstring holds which callers turn it off and why.
     """
     # Each seam lives at the module that defines it — the test-patch target.
-    from cli.commands import _converge, _probe, _repo, _root_driver, _setup
+    from cli.commands import _probe, _repo, _root_driver, _setup
+    from cli.commands.converge import host as converge_host
     from shared import maintenance
 
     maintenance.require_start_allowed()
@@ -362,7 +363,7 @@ def _cmd_start_body(  # noqa: PLR0915 — cohesive linear start sequence (conver
         return 1
 
     # Legacy checkout repair remains below admission, never a release fallback.
-    from cli.commands._converge_source_tree import reset_prod_source_tree
+    from cli.commands.converge.source_tree import reset_prod_source_tree
 
     reset_prod_source_tree(repo)
 
@@ -435,7 +436,7 @@ def _cmd_start_body(  # noqa: PLR0915 — cohesive linear start sequence (conver
     # runs during start or rollback. `ava cluster update` inherits this via its
     # trailing cmd_start, so one gateway update converges the whole fleet.
     try:
-        _converge.converge_host(repo, roles)
+        converge_host.converge_host(repo, roles)
     except Exception as e:
         print(f"  ✗ converge failed: {e}", file=sys.stderr)
         return 1
@@ -558,7 +559,7 @@ def _cmd_start_body(  # noqa: PLR0915 — cohesive linear start sequence (conver
     # data plane is up and known-current, which is the precondition
     # materialization actually has. Reports and continues on failure — a machine
     # that is behind catches up on the next start.
-    from cli.commands._converge_extensions import (
+    from cli.commands.extensions.materialize import (
         adopt_local_extensions,
         materialize_cluster_extensions,
     )

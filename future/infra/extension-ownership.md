@@ -134,7 +134,7 @@ does **not** move into these tables: it is already cluster-consistent via
 commit-pinned code rollout, and its trust story is the checkout itself. The
 registry owns what arrives by *install*, not by *release*.
 `extensions.source = 'repo'` is therefore not a blob-backed row; repo sources
-keep converging from the checkout exactly as `cli/commands/_converge_skills.py`
+keep converging from the checkout exactly as `cli/commands/extensions/skills_sync.py`
 does today. What changes for them is only that enablement (today
 `plugins_config.json` / registry `enabled` bits) becomes the cluster
 `default_enabled` column.
@@ -254,7 +254,7 @@ this cluster's Postgres up as step 2 and applies migrations as step 2.5, so a
 `CONVERGE_STEPS` entry would read the registry before the database is up on a
 single box, and before the `extensions` table exists on the rollout that creates
 it (this doc originally described it as a step; #201 shipped it that way and the
-correction is `cli/commands/_converge.py:materialize_cluster_extensions`, called
+correction is `cli/commands/converge/host.py:materialize_cluster_extensions`, called
 from `ava start` after the schema-current check and from the end of standalone
 `ava converge`). The materializer itself pulls the enabled rows for this machine,
 lands missing/stale trees from blobs (verified against `content_hash`), and

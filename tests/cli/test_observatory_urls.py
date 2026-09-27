@@ -18,15 +18,14 @@ import pytest
 from dotenv import dotenv_values
 from psycopg.conninfo import conninfo_to_dict
 
-from cli.commands.observability import lgtm_native as _lgtm_native
-from cli.commands.observability import observatory_urls
+from cli.commands.observability import lgtm_native, observatory_urls
 from shared import cluster
 from shared.config import settings
 
 
 def _render(tmp_path: Path) -> dict[str, str | None]:
     native = tmp_path / "native"
-    _lgtm_native._render_configs(Path(__file__).resolve().parents[2], native, tmp_path)
+    lgtm_native._render_configs(Path(__file__).resolve().parents[2], native, tmp_path)
     return dotenv_values(native / "config/runtime.env")
 
 
@@ -139,7 +138,7 @@ def test_real_grafana_launcher_preserves_webhook_url_literal(
     monkeypatch.setattr(settings.observability, "observability_url", "http://observatory.test")
     monkeypatch.setattr(settings.gateway, "gateway_url", base)
     native = tmp_path / "lgtm/native"
-    _lgtm_native._render_configs(Path(__file__).resolve().parents[2], native, tmp_path)
+    lgtm_native._render_configs(Path(__file__).resolve().parents[2], native, tmp_path)
     executable = native / "grafana-home/bin/grafana"
     executable.parent.mkdir(parents=True)
     executable.write_text(

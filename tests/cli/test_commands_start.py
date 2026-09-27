@@ -554,12 +554,13 @@ def test_start_arg_writes_to_file_for_persistence(
 def test_retired_service_failure_prevents_start_converge_and_migrations(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from cli.commands import _converge, start
+    from cli.commands import start
+    from cli.commands.converge import host as converge_host
 
     retired = MagicMock(side_effect=TimeoutError("retired service is still running"))
     converge, migrate = MagicMock(), MagicMock()
     monkeypatch.setattr("cli.commands._retired_services.stop_retired_services", retired)
-    monkeypatch.setattr(_converge, "converge_host", converge)
+    monkeypatch.setattr(converge_host, "converge_host", converge)
     monkeypatch.setattr(start, "cmd_migrations_apply", migrate)
     assert _cli.cmd_start() == 1
     retired.assert_called_once()

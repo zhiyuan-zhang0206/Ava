@@ -114,7 +114,7 @@ def _prod_checkout_problem(repo: Path) -> str | None:
 def _machine_roles() -> MachineRoles | None:
     """Resolve this host's roles via the canonical read-only accessor.
 
-    `_roles_or_none` is the same helper `stop` / `status` / `_firewall` use
+    `_roles_or_none` is the same helper `stop` / `status` / `converge/firewall_command.py` use
     (read the persisted capability set; None when the identity is not
     resolvable). None here means the caller skips the port checks: the probe
     gate that runs just before this one already refuses on that condition, so
@@ -142,8 +142,8 @@ def _port_findings(repo: Path, home: Path, roles: MachineRoles) -> tuple[list[st
     be the thing that takes the host down.
     """
     from cli.commands import _probe, _session_lifecycle
-    from cli.commands._converge_spec import ConvergeCtx
     from cli.commands._port_preflight import collect_port_conflicts
+    from cli.commands.converge.spec import ConvergeCtx
     from shared import cluster
     from shared.disabled_services import resolve_launch_skip
     from shared.port_preflight import env_port_drift

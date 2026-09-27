@@ -487,7 +487,7 @@ def test_off_box_detail_names_the_firewall_repair_when_the_audit_finds_it(
     An operator reading a failed rollout should not have to go find the runbook: the
     two `sudo` commands and the follow-up restart are the whole remedy.
     """
-    import cli.commands._converge_firewall as cfw
+    import cli.commands.converge.firewall as cfw
     from shared.macos_firewall import FirewallAudit, FirewallVerdict
 
     missing = Path("/uv/cpython-3.12.11/bin/python3.12")
@@ -514,7 +514,7 @@ def test_off_box_detail_rules_the_firewall_out_when_it_is_innocent(
     trains an operator to check it first even on hosts where it filters nothing, and
     the real cause (AVA_GATEWAY_URL / AVA_MACHINE_HOST) goes unexamined.
     """
-    import cli.commands._converge_firewall as cfw
+    import cli.commands.converge.firewall as cfw
     from shared.macos_firewall import FirewallAudit, FirewallVerdict
 
     monkeypatch.setattr(
@@ -533,7 +533,7 @@ def test_off_box_detail_rules_the_firewall_out_when_it_is_innocent(
 def test_a_broken_audit_still_yields_a_diagnosis(monkeypatch: pytest.MonkeyPatch) -> None:
     """The caller is already explaining a failure; an exception here would replace a
     real diagnosis with a stack trace and lose the verdict entirely."""
-    import cli.commands._converge_firewall as cfw
+    import cli.commands.converge.firewall as cfw
 
     def boom(roles: object) -> object:
         raise RuntimeError("socketfilterfw vanished")

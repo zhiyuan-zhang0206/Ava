@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-import cli.commands._converge as cv
-import cli.commands._converge_legacy_permission_watcher as clpw
+import cli.commands.converge._legacy_permission_watcher as clpw
+import cli.commands.converge.host as cv
 
 _LABEL = "com.ava.permission-watcher"
 

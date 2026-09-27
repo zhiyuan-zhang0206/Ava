@@ -6,9 +6,9 @@ from pathlib import Path
 
 import pytest
 
-from cli.commands import _converge
 from cli.commands import _ownership_preflight as _ownership
-from cli.commands._converge_spec import ConvergeCtx
+from cli.commands.converge import host as converge_host
+from cli.commands.converge.spec import ConvergeCtx
 
 
 def _ctx(tmp_path: Path) -> ConvergeCtx:
@@ -112,7 +112,7 @@ def test_ownership_preflight_never_fails_converge_when_its_scan_errors(
 
 
 def test_ownership_preflight_is_a_file_only_converge_step() -> None:
-    step = _converge.CONVERGE_STEPS[0]
+    step = converge_host.CONVERGE_STEPS[0]
 
     assert step.name == "$AVA_HOME ownership preflight"
     assert step.apply is _ownership.ensure_ownership_preflight

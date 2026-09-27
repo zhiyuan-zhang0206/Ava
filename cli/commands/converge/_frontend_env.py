@@ -1,6 +1,6 @@
 """Converge step: block NEXT_PUBLIC_* build-time overrides that poison the bundle.
 
-Split out of ``_converge.py`` (step-module pattern, like ``_converge_firewall``)
+Split out of ``host.py`` (step-module pattern, like ``firewall``)
 to keep the aggregator under the file-size ceiling.
 """
 
@@ -14,7 +14,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from cli.commands._converge_spec import ConvergeCtx
+from cli.commands.converge.spec import ConvergeCtx
 
 _FORBIDDEN_FRONTEND_ENV_FILES = (".env", ".env.local", ".env.production", ".env.production.local")
 

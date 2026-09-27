@@ -1,9 +1,9 @@
 """The converge step contract — the types every converge step is written against.
 
-Split out of ``_converge.py`` so the step implementations can live in more than
+Split out of ``host.py`` so the step implementations can live in more than
 one module without an import cycle: a step module imports this, and
-``_converge.py`` imports the step modules. ``_converge`` re-exports these names,
-so ``from cli.commands._converge import ConvergeCtx`` keeps working.
+``host.py`` imports the step modules. ``host`` re-exports these names,
+so ``from cli.commands.converge.host import ConvergeCtx`` keeps working.
 """
 
 from __future__ import annotations

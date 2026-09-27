@@ -13,7 +13,7 @@
                           `agents/` become one orchestrator skill, its bundled
                           `.mcp.json` is carried over for the MCP loader, and its
                           skills are synced into `~/.ava/skills/<name>/` by an
-                          immediate converge pass (`_converge_skills`). `--path`
+                          immediate converge pass (`skills_sync`). `--path`
                           selects a subdir of the source repo.
 - `uninstall <name>`    — remove an installed package + its registry entry
                           (a plugin's converged skills copy included).
@@ -116,8 +116,8 @@ def _sync_skills_load_dir() -> None:
     """Run the skills converge pass so a just-(un)installed plugin's skills
     land in / leave `~/.ava/skills/` now, keeping the "active on the next
     skill scan, no restart" promise. Idempotent."""
-    from cli.commands._converge_skills import converge_skills
     from cli.commands._repo import _repo_root
+    from cli.commands.extensions.skills_sync import converge_skills
     from shared.config import settings
 
     result = converge_skills(_repo_root(), Path(settings.general.ava_home).expanduser())

@@ -190,7 +190,7 @@ def test_gate_macos_stops_home_label(monkeypatch: pytest.MonkeyPatch, tmp_path: 
 
     monkeypatch.setattr("cli.commands._stop_extras.stop_launchd", stopped)
     stop_gate_service(timeout_s=7)
-    from cli.commands._converge_gate import gate_label
+    from cli.commands.converge.gate import gate_label
 
     assert calls == [(gate_label(home), False, 7)]
 
@@ -215,7 +215,7 @@ def _posix_gate(
 
 def test_gate_posix_pidfile(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     home, killed = _posix_gate(monkeypatch, tmp_path, "1234")
-    monkeypatch.setattr("cli.commands._converge_gate.gate_pid_is_ours", lambda _pid, _repo: True)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("cli.commands.converge.gate.gate_pid_is_ours", lambda _pid, _repo: True)  # pyright: ignore[reportUnknownArgumentType]
     stop_gate_service()
     assert killed == [1234]
     assert not (home / "run/gate.pid").exists()
@@ -231,7 +231,7 @@ def test_gate_refusal_retains_pidfile(monkeypatch: pytest.MonkeyPatch, tmp_path:
 
 def test_gate_timeout_retains_pidfile(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     home, _ = _posix_gate(monkeypatch, tmp_path, "1234")
-    monkeypatch.setattr("cli.commands._converge_gate.gate_pid_is_ours", lambda _pid, _repo: True)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("cli.commands.converge.gate.gate_pid_is_ours", lambda _pid, _repo: True)  # pyright: ignore[reportUnknownArgumentType]
 
     def timeout(pid: int, *, force: bool, timeout_s: float) -> None:
         raise TimeoutError("still alive")

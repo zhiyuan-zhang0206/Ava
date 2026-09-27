@@ -93,7 +93,7 @@ def save_record(rec: ClusterRecord) -> None:
     """Insert/update a cluster's record — self-serializing: the registry
     read-modify-write runs under registry_lock() internally, so a caller that
     does NOT hold the lock cannot clobber a concurrent birth (audit 2026-08-08
-    P2: _converge_gate._ensure_app_port called save_record without the lock,
+    P2: converge.gate._ensure_app_port called save_record without the lock,
     and a lost update resurrected/dropped records mid-race). Callers that
     already hold the lock (a birth's allocate+save critical section) use
     save_record_locked."""

@@ -155,7 +155,7 @@ def test_status_shows_the_gate_entry_row(monkeypatch: pytest.MonkeyPatch, capsys
     """The fleet UI entry port is on the status screen. On 2026-08-01 a converge
     killed the gate and failed to reinstall it: every service row stayed green
     (they probe the app slot BEHIND the gate) while :3000 answered nothing."""
-    import cli.commands._converge_gate as cg
+    import cli.commands.converge.gate as cg
     from cli.commands import _probe, _repo, _session_lifecycle
 
     monkeypatch.setattr(_repo, "_roles_or_none", lambda: frozenset({"gateway"}))

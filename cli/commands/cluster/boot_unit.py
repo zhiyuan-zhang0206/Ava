@@ -1,7 +1,7 @@
 """`ava cluster boot-unit install|uninstall|status` -- the Linux systemd boot unit.
 
 Thin CLI wrappers that delegate to `shared.os_boot_unit`, mirroring
-`_cluster_cron.py` for the health-probe cron job. The unit is the Linux host's
+`cluster/cron.py` for the health-probe cron job. The unit is the Linux host's
 boot owner once enabled: `install` renders + installs the unit and its
 convergence script (`--no-enable` stages the files without switching),
 `uninstall` removes both, and `status` reports the unit, script, proxy wait,

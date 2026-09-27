@@ -156,7 +156,7 @@ def otel_collector_dir() -> Path:
     Owns the pinned otelcol-contrib binary, the generated config.yaml (from
     the repo template, baked at converge) and the file_storage persistent
     queue directory. One sidecar per machine — see
-    `cli/commands/_converge.py:_ensure_otel_collector_step`."""
+    `cli/commands/converge/host.py:_ensure_otel_collector_step`."""
     target = ava_home() / "otel-collector"
     target.mkdir(parents=True, exist_ok=True)
     return target

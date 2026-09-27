@@ -51,7 +51,7 @@ import time
 from pathlib import Path
 
 import shared.port_preflight
-from cli.commands._converge_spec import ConvergeCtx
+from cli.commands.converge.spec import ConvergeCtx
 from cli.commands.data_plane.cluster_instance import (
     _BIND_WAIT_TIMEOUT_S,
     _bind_addrs,

@@ -3,7 +3,7 @@
 `_verify_snapshot_artifact` decrypts a managed dump and proves it carries a
 non-empty `pg_restore` table of contents before anything is stopped — a dump
 that cannot be listed is not recovery evidence. The snapshot entry points in
-`_update_git` run it while the backup lock is still held; `_pitr_activation`
+`_update_git` run it while the backup lock is still held; `data_plane.pitr_activation`
 re-verifies an existing artifact.
 
 Split out of `cli.commands._update_git` (task #3442) to keep that module inside

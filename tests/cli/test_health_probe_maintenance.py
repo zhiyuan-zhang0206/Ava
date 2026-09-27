@@ -7,8 +7,8 @@ from pathlib import Path
 import psycopg
 import pytest
 
-from cli.commands.cluster import health as _cluster_health
-from cli.commands.cluster import health_alerts as _health_alerts
+from cli.commands.cluster import health as cluster_health
+from cli.commands.cluster import health_alerts as cluster_health_alerts
 from shared import disabled_services, pause_owner
 
 
@@ -19,12 +19,12 @@ def probe_home(
     """Keep the real DB/count/journal paths; intercept only external side effects."""
     assert db_conn.execute("SELECT count(*) FROM agents_meta").fetchone() == (0,)
     monkeypatch.setattr("shared.paths.ava_home", lambda: tmp_path)
-    monkeypatch.setattr(_cluster_health, "_gateway_liveness_with_retry", lambda: True)
-    monkeypatch.setattr(_cluster_health, "_deploy_suppression", lambda: None)
-    (tmp_path / _cluster_health.FAILURE_COUNT_FILE).write_text(
+    monkeypatch.setattr(cluster_health, "_gateway_liveness_with_retry", lambda: True)
+    monkeypatch.setattr(cluster_health, "_deploy_suppression", lambda: None)
+    (tmp_path / cluster_health.FAILURE_COUNT_FILE).write_text(
         f"2\ncode\nprevious low population\n{datetime.now(UTC).isoformat()}"
     )
-    (tmp_path / _cluster_health.PENDING_LKG_PASSES_FILE).write_text("candidate\n1")
+    (tmp_path / cluster_health.PENDING_LKG_PASSES_FILE).write_text("candidate\n1")
     return tmp_path
 
 
@@ -37,7 +37,7 @@ def rollbacks(monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
         calls.append(command)
         return subprocess.CompletedProcess(command, 1)
 
-    monkeypatch.setattr(_health_alerts.subprocess, "run", run)
+    monkeypatch.setattr(cluster_health_alerts.subprocess, "run", run)
     return calls
 
 
@@ -48,7 +48,7 @@ def alerts(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, object]]:
     def ingest(**kwargs: object) -> None:
         emitted.append(kwargs)
 
-    monkeypatch.setattr(_health_alerts, "_ingest_alert", ingest)
+    monkeypatch.setattr(cluster_health_alerts, "_ingest_alert", ingest)
     return emitted
 
 
@@ -70,19 +70,19 @@ def test_expected_low_population_does_not_rollback_or_promote(
     # An aged incident would normally alert immediately on this probe.
     started_at = datetime.now(UTC) - timedelta(minutes=20)
     message = "FAIL: agent population — fewer than 1 agent(s) running/idling"
-    (probe_home / _cluster_health.ALERT_STATE_FILE).write_text(
+    (probe_home / cluster_health.ALERT_STATE_FILE).write_text(
         f"{message}\n{started_at.isoformat()}\n"
     )
 
-    assert _cluster_health._agent_population(1) is False
-    assert _cluster_health.run_health_probe(auto_rollback=True, threshold=3) == 1
+    assert cluster_health._agent_population(1) is False
+    assert cluster_health.run_health_probe(auto_rollback=True, threshold=3) == 1
 
     assert rollbacks == []
     assert len(alerts) == 1  # Local intent cannot hide a real global population outage.
     assert alerts[0]["status"] == "firing"
     assert marker.read_bytes() == intent_before
-    assert (probe_home / _cluster_health.FAILURE_COUNT_FILE).read_text().splitlines()[0] == "0"
-    assert not (probe_home / _cluster_health.PENDING_LKG_PASSES_FILE).exists()
+    assert (probe_home / cluster_health.FAILURE_COUNT_FILE).read_text().splitlines()[0] == "0"
+    assert not (probe_home / cluster_health.PENDING_LKG_PASSES_FILE).exists()
     assert "maintenance" in capsys.readouterr().err
 
 
@@ -108,23 +108,23 @@ def test_unexpected_low_population_still_rolls_back(
         marker.parent.mkdir(parents=True, exist_ok=True)
         marker.write_text("invalid journal")
 
-    assert _cluster_health.run_health_probe(auto_rollback=True, threshold=3) == 1
+    assert cluster_health.run_health_probe(auto_rollback=True, threshold=3) == 1
     assert len(rollbacks) == 1
     assert rollbacks[0][1:] == ["cluster", "rollback", "--yes"]
-    assert (probe_home / _cluster_health.FAILURE_COUNT_FILE).read_text().splitlines()[0] == "3"
+    assert (probe_home / cluster_health.FAILURE_COUNT_FILE).read_text().splitlines()[0] == "3"
 
 
 def test_reenabled_host_restores_population_failure_counting(
     probe_home: Path, rollbacks: list[list[str]], alerts: list[dict[str, object]]
 ) -> None:
     disabled_services.write_skipped({"agent-host"})
-    assert _cluster_health.run_health_probe(auto_rollback=True, threshold=1) == 1
+    assert cluster_health.run_health_probe(auto_rollback=True, threshold=1) == 1
     assert rollbacks == []
 
     disabled_services.write_skipped(set())
-    assert _cluster_health.run_health_probe(auto_rollback=True, threshold=1) == 1
+    assert cluster_health.run_health_probe(auto_rollback=True, threshold=1) == 1
     assert len(rollbacks) == 1
-    assert (probe_home / _cluster_health.FAILURE_COUNT_FILE).read_text().splitlines()[0] == "1"
+    assert (probe_home / cluster_health.FAILURE_COUNT_FILE).read_text().splitlines()[0] == "1"
 
 
 def test_disabled_host_does_not_explain_gateway_code_failure(
@@ -134,10 +134,10 @@ def test_disabled_host_does_not_explain_gateway_code_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     disabled_services.write_skipped({"agent-host"})
-    monkeypatch.setattr(_cluster_health, "_gateway_liveness_with_retry", lambda: False)
-    monkeypatch.setattr(_cluster_health, "_data_plane_abnormal", lambda: False)
+    monkeypatch.setattr(cluster_health, "_gateway_liveness_with_retry", lambda: False)
+    monkeypatch.setattr(cluster_health, "_data_plane_abnormal", lambda: False)
 
-    assert _cluster_health.run_health_probe(auto_rollback=True, threshold=3) == 1
+    assert cluster_health.run_health_probe(auto_rollback=True, threshold=3) == 1
     assert len(rollbacks) == 1
 
 
@@ -153,7 +153,7 @@ def test_maintenance_does_not_turn_db_failure_into_an_expected_population(
         raise ConnectionError("private test data plane unavailable")
 
     monkeypatch.setattr("shared.db.connect", down)
-    assert _cluster_health._agent_population_failure_class(1) == "environment"
-    assert _cluster_health.run_health_probe(auto_rollback=True, threshold=3) == 1
+    assert cluster_health._agent_population_failure_class(1) == "environment"
+    assert cluster_health.run_health_probe(auto_rollback=True, threshold=3) == 1
     assert rollbacks == []
-    assert (probe_home / _cluster_health.FAILURE_COUNT_FILE).read_text().splitlines()[0] == "2"
+    assert (probe_home / cluster_health.FAILURE_COUNT_FILE).read_text().splitlines()[0] == "2"

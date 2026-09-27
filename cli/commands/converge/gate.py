@@ -45,7 +45,7 @@ import time
 from pathlib import Path
 from typing import NamedTuple
 
-from cli.commands._converge_spec import ConvergeCtx
+from cli.commands.converge.spec import ConvergeCtx
 from shared.config import settings
 from shared.envfile import upsert_env
 from shared.platform_backend import get_backend
@@ -60,7 +60,7 @@ logger = logging.getLogger("cli.converge.gate")
 _GATE_LABEL_PREFIX = "com.ava.gate"
 
 # This module's sleeps, bound at import so a test can replace THIS throttle and
-# nothing else. Patching `cli.commands._converge_gate.time.sleep` would resolve
+# nothing else. Patching `cli.commands.converge.gate.time.sleep` would resolve
 # `time` to the stdlib module object and disable sleeping process-wide — the seam
 # rule `cli.commands._probe._poll_sleep` states in full, and the incident behind it.
 _sleep = time.sleep

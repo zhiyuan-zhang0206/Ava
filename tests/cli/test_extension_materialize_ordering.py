@@ -28,13 +28,13 @@ import inspect
 def test_materialization_is_not_a_converge_step() -> None:
     """Converge runs before the data plane is up (`ava start` step 1 vs step 2),
     so nothing in `CONVERGE_STEPS` may require the cluster database."""
-    from cli.commands._converge import CONVERGE_STEPS
+    from cli.commands.converge.host import CONVERGE_STEPS
 
     offenders = [s.name for s in CONVERGE_STEPS if "extension" in s.name.lower()]
     assert not offenders, (
         f"{offenders} is a converge STEP, but converge runs before this cluster's "
         "Postgres is started and before migrations apply. Call it from the start "
-        "sequence after the schema check instead — see cli/commands/_converge_extensions.py:"
+        "sequence after the schema check instead — see cli/commands/extensions/materialize.py:"
         "materialize_cluster_extensions."
     )
 
@@ -70,18 +70,18 @@ def test_standalone_converge_materializes_too() -> None:
     """`ava converge` is run against a cluster that is already up, so it has the
     precondition the start path has to wait for — and an operator running it
     expects the machine to end up caught up."""
-    from cli.commands._converge import cmd_converge
+    from cli.commands.converge.host import cmd_converge
 
     assert "materialize_cluster_extensions()" in inspect.getsource(cmd_converge)
 
 
 def test_the_materializer_lives_beside_its_siblings() -> None:
-    """`_converge_extensions.py`, next to `_converge_skills.py` — a subsystem
-    reader, not another entry in `_converge.py`'s host-state roster. Extracting
-    it is also what kept `_converge.py` under the 800-line ceiling."""
-    from cli.commands import _converge_extensions
+    """`extensions/materialize.py`, next to `extensions/skills_sync.py` — a subsystem
+    reader, not another entry in `converge/host.py`'s host-state roster. Extracting
+    it is also what kept `converge/host.py` under the 800-line ceiling."""
+    from cli.commands.extensions import materialize
 
-    assert hasattr(_converge_extensions, "materialize_cluster_extensions")
+    assert hasattr(materialize, "materialize_cluster_extensions")
 
 
 def test_start_adopts_before_it_materializes() -> None:
@@ -102,6 +102,6 @@ def test_start_adopts_before_it_materializes() -> None:
 def test_standalone_converge_adopts_too() -> None:
     """`ava converge` is what an operator runs to make a machine correct without
     restarting it, and a machine holding un-adopted installs is not correct."""
-    from cli.commands._converge import cmd_converge
+    from cli.commands.converge.host import cmd_converge
 
     assert "adopt_local_extensions()" in inspect.getsource(cmd_converge)

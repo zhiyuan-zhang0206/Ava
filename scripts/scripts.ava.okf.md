@@ -67,7 +67,7 @@ immediately.
 
 ## Key Dependencies
 
-- [[../cli/cli.ava.okf.md]] — `_converge.py` **re-implements** host wiring in Python, **does not call** `install.sh` (replace/absorb relationship, not reuse); the one calling provision scripts is `install.sh` itself
+- [[../cli/cli.ava.okf.md]] — `converge/host.py` **re-implements** host wiring in Python, **does not call** `install.sh` (replace/absorb relationship, not reuse); the one calling provision scripts is `install.sh` itself
 - [[../tests/tests.ava.okf.md]] — many lint scripts have corresponding `tests/test_lint_*.py`
 
 ## Notes
