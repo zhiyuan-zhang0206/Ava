@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import subprocess
 from collections.abc import Iterable
 from pathlib import Path
 
@@ -91,6 +92,7 @@ def test_gateway_local_update_starts_in_fresh_process(
     pending migrations itself early in boot — there is no separate migrate step.
     Order: stop -> force-checkout target_sha -> uv sync -> grafana provisioning
     sync (new-tree venv subprocess) -> `ava start`."""
+    from cli.commands import _update_local
     from cli.commands import update as _up
 
     repo = tmp_path
@@ -135,7 +137,7 @@ def test_gateway_local_update_starts_in_fresh_process(
     monkeypatch.setattr(_update_uv_sync, "editable_import_gate", _passing_import_gate)
     monkeypatch.setattr(_up.subprocess, "run", _fake_run)  # pyright: ignore[reportUnknownArgumentType]
 
-    rc = _up._run_gateway_local_update(
+    rc = _update_local._run_gateway_local_update(
         repo,
         target_sha="bbbbbbb",
         pull_recover=("aaaaaaa", {"00000000T000000_baseline"}, None),
@@ -189,7 +191,7 @@ def test_update_local_runs_in_process_orchestration(monkeypatch: pytest.MonkeyPa
         calls.append("orchestration")
         return 0
 
-    monkeypatch.setattr(_cli, "_run_gateway_orchestration", _orch)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_up_mod, "_run_gateway_orchestration", _orch)  # pyright: ignore[reportUnknownArgumentType]
 
     rc = _cli.cmd_update(local=True)
     assert rc == 0
@@ -205,7 +207,7 @@ def test_cmd_start_returns_this_host_to_idle_posture(
     calls: list[str] = []
     monkeypatch.setattr("shared.host_deploy_state.set_posture", calls.append)
     monkeypatch.setattr(
-        _cli.subprocess,
+        subprocess,
         "run",
         _git_aware(lambda *_a, **_kw: _FakeResult(returncode=0)),  # pyright: ignore[reportUnknownArgumentType]
     )
@@ -227,6 +229,7 @@ def test_cmd_start_finalizes_a_paused_deploy_journal(
     refused."""
     from datetime import UTC, datetime
 
+    from cli.commands import _probe
     from shared import pause_owner
 
     owner_path = tmp_path / "deploy-pause-owner.json"
@@ -238,7 +241,7 @@ def test_cmd_start_finalizes_a_paused_deploy_journal(
         lambda _p: None,  # pyright: ignore[reportUnknownArgumentType]
     )
     monkeypatch.setattr(
-        _cli.subprocess,
+        subprocess,
         "run",
         _git_aware(lambda *_a, **_kw: _FakeResult(returncode=0)),  # pyright: ignore[reportUnknownArgumentType]
     )
@@ -246,11 +249,11 @@ def test_cmd_start_finalizes_a_paused_deploy_journal(
     acquired = datetime(2026, 8, 26, 14, 14, 42, tzinfo=UTC)
     pause_owner.mark_paused("macmini:pid65276", acquired)
 
-    def ready(*_args: object, **_kwargs: object) -> _cli.ReadinessWait:
+    def ready(*_args: object, **_kwargs: object) -> _probe.ReadinessWait:
         assert pause_owner.read().status == "paused", "finalize must wait for readiness"
-        return _cli.ReadinessWait((), 0.0, sessions_gone=False)
+        return _probe.ReadinessWait((), 0.0, sessions_gone=False)
 
-    monkeypatch.setattr(_cli, "_wait_for_services_ready", ready)
+    monkeypatch.setattr(_probe, "_wait_for_services_ready", ready)
     assert _cli.cmd_start() == 0
 
     snapshot = pause_owner.read()
@@ -301,7 +304,7 @@ def test_rollout_child_start_does_not_finalize_the_pause_journal(
     )
     monkeypatch.setattr(start_mod, "cmd_status", lambda: 0)
     monkeypatch.setattr(
-        _cli.subprocess,
+        subprocess,
         "run",
         _git_aware(lambda *_a, **_kw: _FakeResult(returncode=0)),  # pyright: ignore[reportUnknownArgumentType]
     )
@@ -352,7 +355,7 @@ def test_rollout_child_keeps_converging_before_parent_readiness(
     )
     monkeypatch.setattr(start_mod, "cmd_status", lambda: 0)
     monkeypatch.setattr(
-        _cli.subprocess,
+        subprocess,
         "run",
         _git_aware(lambda *_a, **_kw: _FakeResult(returncode=0)),  # pyright: ignore[reportUnknownArgumentType]
     )
@@ -400,7 +403,7 @@ def test_handoff_capable_rollout_child_may_commit_credential_transition(
     )
     monkeypatch.setattr(start_mod, "cmd_status", lambda: 0)
     monkeypatch.setattr(
-        _cli.subprocess,
+        subprocess,
         "run",
         _git_aware(lambda *_a, **_kw: _FakeResult(returncode=0)),  # pyright: ignore[reportUnknownArgumentType]
     )
@@ -439,7 +442,7 @@ def test_phase_b_pure_runner_restores_idle_posture_and_agent_host(
     monkeypatch.setattr("shared.host_deploy_state.set_posture", postures.append)
     monkeypatch.setattr(start_mod, "cmd_status", lambda: 0)
     monkeypatch.setattr(
-        _cli.subprocess,
+        subprocess,
         "run",
         _git_aware(lambda *_a, **_kw: _FakeResult(returncode=0)),  # pyright: ignore[reportUnknownArgumentType]
     )
@@ -521,7 +524,7 @@ def test_pending_credential_transition_replays_before_migrations(
     monkeypatch.setattr(start_mod, "cmd_status", lambda: 0)
     monkeypatch.setattr("shared.cluster_lock.read_update_lease", lambda: None)
     monkeypatch.setattr(
-        _cli.subprocess,
+        subprocess,
         "run",
         _git_aware(lambda *_a, **_kw: _FakeResult(returncode=0)),  # pyright: ignore[reportUnknownArgumentType]
     )
@@ -551,6 +554,7 @@ def test_machine_description_setup_field_writes_file(
 def test_fan_out_classifies_dispatch_outcomes(monkeypatch: pytest.MonkeyPatch) -> None:
     """_dispatch_one_and_wait maps direct-dial outcomes to the (ok / fatal /
     unreachable) triplet that upstream print/abort logic still depends on."""
+    from cli.commands import _update_fanout
     from ops import cluster_rpc as cr
 
     async def _ok(*_a, **_kw):
@@ -564,18 +568,22 @@ def test_fan_out_classifies_dispatch_outcomes(monkeypatch: pytest.MonkeyPatch) -
 
     # ok
     monkeypatch.setattr(cr, "dispatch_to_machine", _ok)  # pyright: ignore[reportUnknownArgumentType]
-    name, status, _ = asyncio.run(_cli._dispatch_one_and_wait("wsl", "cluster_stop", 5.0))
+    name, status, _ = asyncio.run(_update_fanout._dispatch_one_and_wait("wsl", "cluster_stop", 5.0))
     assert (name, status) == ("wsl", "ok")
 
     # unreachable ops server
     monkeypatch.setattr(cr, "dispatch_to_machine", _unreachable)  # pyright: ignore[reportUnknownArgumentType]
-    name, status, detail = asyncio.run(_cli._dispatch_one_and_wait("wsl", "cluster_stop", 5.0))
+    name, status, detail = asyncio.run(
+        _update_fanout._dispatch_one_and_wait("wsl", "cluster_stop", 5.0)
+    )
     assert (name, status) == ("wsl", "unreachable")
     assert "unreachable" in detail
 
     # op ran but failed -> fatal
     monkeypatch.setattr(cr, "dispatch_to_machine", _fail)  # pyright: ignore[reportUnknownArgumentType]
-    name, status, detail = asyncio.run(_cli._dispatch_one_and_wait("wsl", "cluster_stop", 5.0))
+    name, status, detail = asyncio.run(
+        _update_fanout._dispatch_one_and_wait("wsl", "cluster_stop", 5.0)
+    )
     assert (name, status) == ("wsl", "fatal")
     assert "agent-runner blew up" in detail
 
@@ -587,6 +595,8 @@ def test_cmd_update_gateway_default_posts_rollout(
     no local spawn branch (user ruling 2026-08-21, issue #216). The gateway
     answers by starting the detached rollout; the CLI just prints the
     session/log it is told about."""
+    from cli.commands import update as _up_mod
+
     monkeypatch.setattr("shared.machine.gateway_api_base", lambda: "http://gw:8000")
     monkeypatch.setattr("shared.machine.machine_role", lambda: frozenset({"gateway"}))
 
@@ -595,7 +605,7 @@ def test_cmd_update_gateway_default_posts_rollout(
             "foreground `ava cluster update` must not run the in-process orchestration"
         )
 
-    monkeypatch.setattr(_cli, "_run_gateway_orchestration", _no_local)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_up_mod, "_run_gateway_orchestration", _no_local)  # pyright: ignore[reportUnknownArgumentType]
     from typing import cast
 
     calls: list[tuple[str, dict[str, object]]] = []
@@ -636,7 +646,7 @@ def test_cmd_update_local_forces_in_process_orchestration(monkeypatch: pytest.Mo
     monkeypatch.setattr("httpx.post", _no_post)  # pyright: ignore[reportUnknownArgumentType]
     ran: list[bool] = []
     monkeypatch.setattr(
-        _cli,
+        _up_mod,
         "_run_gateway_orchestration",
         lambda *_a, **_kw: ran.append(True) or 0,  # pyright: ignore[reportUnknownArgumentType]
     )

@@ -325,7 +325,7 @@ def _classify_rollout(repo: Path, *, restart_only: bool, origin: str) -> tuple[i
     `restart_frontend` says whether the full orchestration rebuilds ava-frontend
     (only when the frontend changed too). `restart_only` skips classification and
     always bounces (rebuild frontend; no pull)."""
-    import cli.commands as _ns
+    from cli.commands import _update_git, _update_local, _update_preflight
 
     if restart_only:
         # A restart always bounces; rebuild the frontend too (a config change can
@@ -353,7 +353,7 @@ def _classify_rollout(repo: Path, *, restart_only: bool, origin: str) -> tuple[i
     # Classify before touching anything. On a git error, fall back to a full
     # restart (restart_frontend=True) — never under-restart on a fetch hiccup.
     try:
-        paths = _ns._changed_paths_vs_origin()
+        paths = _update_preflight._changed_paths_vs_origin()
     except GitPullFailed as e:
         print(f"  ⚠ could not classify change ({e}); doing a full restart", file=sys.stderr)
         return None, True
@@ -362,7 +362,7 @@ def _classify_rollout(repo: Path, *, restart_only: bool, origin: str) -> tuple[i
         print("\n→ no code change (docs-only / already up to date) — pull only, no restart")
         print("\n→ git pull origin main")
         try:
-            pull = _ns.git_pull_main()
+            pull = _update_git.git_pull_main()
         except Exception as e:
             print(f"  ✗ {e}", file=sys.stderr)
             return 1, True
@@ -375,7 +375,7 @@ def _classify_rollout(repo: Path, *, restart_only: bool, origin: str) -> tuple[i
         _persist_cluster_pin(pull.to_sha, origin=origin, advance_known_good=False)
         return 0, True
     if frontend and not backend:
-        return _ns._run_frontend_only_update(repo, origin), True
+        return _update_local._run_frontend_only_update(repo, origin), True
     return None, frontend  # backend changed; rebuild frontend only if it changed too
 
 
@@ -439,10 +439,10 @@ def _resolve_fanout_targets(*, clear_stale_markers: bool = True) -> list[tuple[s
     The count line is printed unconditionally, including the all-clear case: a
     silent count is what made the exclusion invisible.
     """
-    import cli.commands as _ns
     import shared.machines
+    from cli.commands import _update_fanout
 
-    targets = _ns._list_agent_runners()
+    targets = _update_fanout._list_agent_runners()
     stopped = shared.machines.list_stopped_agent_runners()
     known = len(targets) + len(stopped)
     if not stopped:

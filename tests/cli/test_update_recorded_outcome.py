@@ -33,6 +33,8 @@ from cli.commands._update_fanout import ClusterOpPayload
 def _orchestration_seams(monkeypatch: pytest.MonkeyPatch, stub_deploy_lease_identity: None) -> None:
     """Everything between the preflight and the `finally`, stubbed to nothing: these
     tests are about what reaches `finalize_rollout`, not about the rollout."""
+    from cli.commands import _update_orchestration as orchestration
+
     monkeypatch.setattr(_up, "acquire_update_lock", lambda _holder, **_kw: True)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_up, "release_update_lock", lambda _holder: None)  # pyright: ignore[reportUnknownArgumentType]
     # The record's own write is stubbed at `shared.last_update`, not at
@@ -40,7 +42,7 @@ def _orchestration_seams(monkeypatch: pytest.MonkeyPatch, stub_deploy_lease_iden
     monkeypatch.setattr("shared.last_update.begin_update", lambda **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_up, "_run_preflight_fetch", lambda *_a, **_kw: False)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_up, "_stop_the_world", lambda _runners, **_kw: (set(), True))  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_resolve_fanout_targets", lambda **_kw: [])  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(orchestration, "_resolve_fanout_targets", lambda **_kw: [])  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr("ops.cluster.unpause_local_cluster", lambda *_a, **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
 
 
@@ -58,12 +60,14 @@ def _capture_finalize(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
 def _run_with_local_rc(
     monkeypatch: pytest.MonkeyPatch, rc: int, *, restart_only: bool = False
 ) -> dict[str, Any]:
+    from cli.commands import _update_local
+
     monkeypatch.setattr(
         _up,
         "_rollout_preflight",
         lambda *_a, **_kw: (None, False, "PINNEDSHA1234567"),  # pyright: ignore[reportUnknownArgumentType]
     )
-    monkeypatch.setattr(_cli, "_run_gateway_local_update", lambda *_a, **_kw: rc)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_update_local, "_run_gateway_local_update", lambda *_a, **_kw: rc)  # pyright: ignore[reportUnknownArgumentType]
     captured = _capture_finalize(monkeypatch)
     _up._run_gateway_orchestration(Path("/unused"), origin="test-origin", restart_only=restart_only)
     return captured
@@ -167,12 +171,14 @@ def test_the_orchestration_stamps_the_log_it_was_handed_onto_the_record(
 ) -> None:
     """`--rollout-log` exists so the record names THE log rather than the newest
     `rollout-*.log` a reader would otherwise have to guess at."""
+    from cli.commands import _update_local
+
     monkeypatch.setattr(
         _up,
         "_rollout_preflight",
         lambda *_a, **_kw: (None, False, "PINNEDSHA1234567"),  # pyright: ignore[reportUnknownArgumentType]
     )
-    monkeypatch.setattr(_cli, "_run_gateway_local_update", lambda *_a, **_kw: 0)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_update_local, "_run_gateway_local_update", lambda *_a, **_kw: 0)  # pyright: ignore[reportUnknownArgumentType]
     _capture_finalize(monkeypatch)
     opened: dict[str, Any] = {}
     monkeypatch.setattr(_up, "_begin_update_record", lambda sha, **kw: opened.update(kw, sha=sha))  # pyright: ignore[reportUnknownArgumentType]
@@ -191,6 +197,8 @@ def test_local_dispatch_stamps_the_detached_rollout_log_onto_the_record(
 ) -> None:
     """The detached session enters through `cmd_update --local`; every dispatch
     seam between that entry and the record opener must preserve its log path."""
+    from cli.commands import _update_local
+
     monkeypatch.setattr(_up, "_repo_root", lambda: Path("/unused"))
     monkeypatch.setattr(_up, "ava_home", lambda: Path("/home/ava/.ava"))
     monkeypatch.setattr(_up, "get_record", lambda _home: None)  # pyright: ignore[reportUnknownArgumentType]
@@ -200,7 +208,7 @@ def test_local_dispatch_stamps_the_detached_rollout_log_onto_the_record(
         "_rollout_preflight",
         lambda *_a, **_kw: (None, False, "PINNEDSHA1234567"),  # pyright: ignore[reportUnknownArgumentType]
     )
-    monkeypatch.setattr(_cli, "_run_gateway_local_update", lambda *_a, **_kw: 0)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_update_local, "_run_gateway_local_update", lambda *_a, **_kw: 0)  # pyright: ignore[reportUnknownArgumentType]
     _capture_finalize(monkeypatch)
     opened: dict[str, Any] = {}
     monkeypatch.setattr(_up, "_begin_update_record", lambda sha, **kw: opened.update(kw, sha=sha))  # pyright: ignore[reportUnknownArgumentType]
@@ -336,7 +344,7 @@ def test_pin_behind_schema_forces_full_rollout_even_with_no_new_commit(
     monkeypatch.setattr("shared.source_integrity.get", lambda: "a" * 40)
     monkeypatch.setattr("shared.source_integrity.installed_sha_needs_replay", no_replay)
     monkeypatch.setattr(
-        "cli.commands._changed_paths_vs_origin",
+        "cli.commands._update_preflight._changed_paths_vs_origin",
         lambda: (_ for _ in ()).throw(AssertionError("docs-only fast path must not run")),
     )
     assert orchestration._classify_rollout(Path("/unused"), restart_only=False, origin="test") == (

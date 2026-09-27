@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import pytest
 
-from cli import commands as _cli
 from tests.cli._commands_helpers import _fake_session_backends as _fake_session_backends
 from tests.cli._commands_helpers import _hermetic_gateway_base as _hermetic_gateway_base
 from tests.cli._commands_helpers import _noop_start_prechecks as _noop_start_prechecks
@@ -16,6 +15,7 @@ def test_poll_until_unpaused_returns_ok_when_agent_runner_unpauses(
     """A ready process on the checkout still waits for its DB posture to become idle."""
     from datetime import UTC, datetime
 
+    from cli.commands import _update_phase_b
     from ops import cluster_rpc as cr
     from shared.host_deploy_state import HostDeployState
 
@@ -41,10 +41,10 @@ def test_poll_until_unpaused_returns_ok_when_agent_runner_unpauses(
 
     monkeypatch.setattr(cr, "dispatch_to_machine", _reachable)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr("cli.commands._update_phase_b.read", _fake_read)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_POLL_TIMEOUT_S", 5.0)
-    monkeypatch.setattr(_cli, "_POLL_INTERVAL_S", 0.01)
+    monkeypatch.setattr(_update_phase_b, "_POLL_TIMEOUT_S", 5.0)
+    monkeypatch.setattr(_update_phase_b, "_POLL_INTERVAL_S", 0.01)
 
-    out = _cli._poll_until_unpaused([("wsl", "http://unused")])
+    out = _update_phase_b._poll_until_unpaused([("wsl", "http://unused")])
     assert {n: v.status for n, v in out.items()} == {"wsl": "ok"}
     assert calls["wsl"] >= 2
 
@@ -57,6 +57,7 @@ def test_poll_until_unpaused_marks_converging_after_deadline(
     The live lease is the evidence it is still working (R1, Task #1021)."""
     from datetime import UTC, datetime, timedelta
 
+    from cli.commands import _update_phase_b
     from ops import cluster_rpc as cr
     from shared.host_deploy_state import HostDeployState
 
@@ -73,11 +74,11 @@ def test_poll_until_unpaused_marks_converging_after_deadline(
 
     monkeypatch.setattr(cr, "dispatch_to_machine", _reachable)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr("cli.commands._update_phase_b.read", _fake_read)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_POLL_TIMEOUT_S", 0.05)
-    monkeypatch.setattr(_cli, "_POLL_INTERVAL_S", 0.01)
+    monkeypatch.setattr(_update_phase_b, "_POLL_TIMEOUT_S", 0.05)
+    monkeypatch.setattr(_update_phase_b, "_POLL_INTERVAL_S", 0.01)
 
-    out = _cli._poll_until_unpaused([("wsl", "http://unused")])
-    assert {n: v.status for n, v in out.items()} == {"wsl": _cli.POLL_CONVERGING}
+    out = _update_phase_b._poll_until_unpaused([("wsl", "http://unused")])
+    assert {n: v.status for n, v in out.items()} == {"wsl": _update_phase_b.POLL_CONVERGING}
 
 
 def test_poll_gives_up_at_once_on_a_host_that_provably_stopped(
@@ -94,6 +95,7 @@ def test_poll_gives_up_at_once_on_a_host_that_provably_stopped(
     """
     from datetime import UTC, datetime
 
+    from cli.commands import _update_phase_b
     from ops import cluster_rpc as cr
     from shared.host_deploy_state import HostDeployState
 
@@ -115,11 +117,11 @@ def test_poll_gives_up_at_once_on_a_host_that_provably_stopped(
     monkeypatch.setattr("cli.commands._update_phase_b.read", _fake_read)  # pyright: ignore[reportUnknownArgumentType]
     # A bound this generous would take ~an hour to reach; the assertion is that the
     # verdict does NOT wait for it.
-    monkeypatch.setattr(_cli, "_POLL_TIMEOUT_S", 3600.0)
-    monkeypatch.setattr(_cli, "_POLL_INTERVAL_S", 0.01)
+    monkeypatch.setattr(_update_phase_b, "_POLL_TIMEOUT_S", 3600.0)
+    monkeypatch.setattr(_update_phase_b, "_POLL_INTERVAL_S", 0.01)
 
-    out = _cli._poll_until_unpaused([("air", "http://unused")])
-    assert {n: v.status for n, v in out.items()} == {"air": _cli.POLL_STALLED}
+    out = _update_phase_b._poll_until_unpaused([("air", "http://unused")])
+    assert {n: v.status for n, v in out.items()} == {"air": _update_phase_b.POLL_STALLED}
     # Two consecutive confirmations, not one: a single contrary reading is a
     # spawn/teardown race, not evidence.
     assert probes["n"] == 2
@@ -138,6 +140,7 @@ def test_a_previous_updates_uncleared_lease_is_not_this_ones_stall(
     window waiting on it."""
     from datetime import UTC, datetime, timedelta
 
+    from cli.commands import _update_phase_b
     from ops import cluster_rpc as cr
     from shared.host_deploy_state import UPDATER_LEASE_TTL_S, HostDeployState
 
@@ -160,11 +163,11 @@ def test_a_previous_updates_uncleared_lease_is_not_this_ones_stall(
 
     monkeypatch.setattr(cr, "dispatch_to_machine", _reachable)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr("cli.commands._update_phase_b.read", _fake_read)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_POLL_TIMEOUT_S", 0.05)
-    monkeypatch.setattr(_cli, "_POLL_INTERVAL_S", 0.01)
+    monkeypatch.setattr(_update_phase_b, "_POLL_TIMEOUT_S", 0.05)
+    monkeypatch.setattr(_update_phase_b, "_POLL_INTERVAL_S", 0.01)
 
-    out = _cli._poll_until_unpaused([("win", "http://unused")])
-    assert {n: v.status for n, v in out.items()} == {"win": _cli.POLL_CONVERGING}
+    out = _update_phase_b._poll_until_unpaused([("win", "http://unused")])
+    assert {n: v.status for n, v in out.items()} == {"win": _update_phase_b.POLL_CONVERGING}
 
 
 def test_poll_gives_up_on_a_written_verdict_the_stale_lease_contradicts(
@@ -178,6 +181,7 @@ def test_poll_gives_up_on_a_written_verdict_the_stale_lease_contradicts(
     said it finished, and the posture row says it did not converge."""
     from datetime import UTC, datetime, timedelta
 
+    from cli.commands import _update_phase_b
     from ops import cluster_rpc as cr
     from shared.host_deploy_state import HostDeployState
 
@@ -205,12 +209,12 @@ def test_poll_gives_up_on_a_written_verdict_the_stale_lease_contradicts(
 
     monkeypatch.setattr(cr, "dispatch_to_machine", _reachable)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr("cli.commands._update_phase_b.read", _fake_read)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_POLL_TIMEOUT_S", 3600.0)
-    monkeypatch.setattr(_cli, "_POLL_INTERVAL_S", 0.01)
+    monkeypatch.setattr(_update_phase_b, "_POLL_TIMEOUT_S", 3600.0)
+    monkeypatch.setattr(_update_phase_b, "_POLL_INTERVAL_S", 0.01)
 
-    out = _cli._poll_until_unpaused([("win", "http://unused")])
+    out = _update_phase_b._poll_until_unpaused([("win", "http://unused")])
 
-    assert {n: v.status for n, v in out.items()} == {"win": _cli.POLL_STALLED}
+    assert {n: v.status for n, v in out.items()} == {"win": _update_phase_b.POLL_STALLED}
     assert probes["n"] == 2  # the same two confirmations, not one
     assert out["win"].updater is not None
     assert out["win"].updater["rc"] == 1
@@ -225,6 +229,7 @@ def test_a_live_lease_with_no_written_ending_still_keeps_polling(
     would trade a slow rollout for a broken host."""
     from datetime import UTC, datetime, timedelta
 
+    from cli.commands import _update_phase_b
     from ops import cluster_rpc as cr
     from shared.host_deploy_state import HostDeployState
 
@@ -241,11 +246,11 @@ def test_a_live_lease_with_no_written_ending_still_keeps_polling(
 
     monkeypatch.setattr(cr, "dispatch_to_machine", _reachable)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr("cli.commands._update_phase_b.read", _fake_read)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_POLL_TIMEOUT_S", 0.05)
-    monkeypatch.setattr(_cli, "_POLL_INTERVAL_S", 0.01)
+    monkeypatch.setattr(_update_phase_b, "_POLL_TIMEOUT_S", 0.05)
+    monkeypatch.setattr(_update_phase_b, "_POLL_INTERVAL_S", 0.01)
 
-    out = _cli._poll_until_unpaused([("win", "http://unused")])
-    assert {n: v.status for n, v in out.items()} == {"win": _cli.POLL_CONVERGING}
+    out = _update_phase_b._poll_until_unpaused([("win", "http://unused")])
+    assert {n: v.status for n, v in out.items()} == {"win": _update_phase_b.POLL_CONVERGING}
 
 
 def test_a_live_lease_with_stuck_stage_evidence_is_no_progress(
@@ -260,6 +265,7 @@ def test_a_live_lease_with_stuck_stage_evidence_is_no_progress(
     claim."""
     from datetime import UTC, datetime, timedelta
 
+    from cli.commands import _update_phase_b
     from ops import cluster_rpc as cr
     from shared.host_deploy_state import HostDeployState
 
@@ -287,13 +293,13 @@ def test_a_live_lease_with_stuck_stage_evidence_is_no_progress(
 
     monkeypatch.setattr(cr, "dispatch_to_machine", _stuck)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr("cli.commands._update_phase_b.read", _fake_read)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_POLL_TIMEOUT_S", 3600.0)
-    monkeypatch.setattr(_cli, "_POLL_INTERVAL_S", 0.01)
-    monkeypatch.setattr(_cli, "_STAGE_NO_PROGRESS_S", 600.0)
+    monkeypatch.setattr(_update_phase_b, "_POLL_TIMEOUT_S", 3600.0)
+    monkeypatch.setattr(_update_phase_b, "_POLL_INTERVAL_S", 0.01)
+    monkeypatch.setattr(_update_phase_b, "_STAGE_NO_PROGRESS_S", 600.0)
 
-    out = _cli._poll_until_unpaused([("win", "http://unused")])
+    out = _update_phase_b._poll_until_unpaused([("win", "http://unused")])
 
-    assert {n: v.status for n, v in out.items()} == {"win": _cli.POLL_NO_PROGRESS}
+    assert {n: v.status for n, v in out.items()} == {"win": _update_phase_b.POLL_NO_PROGRESS}
     assert probes["n"] == 2  # the same two confirmations, not one
     assert out["win"].updater is not None
     assert out["win"].updater["current_stage"] == "uv"
@@ -309,6 +315,7 @@ def test_other_hosts_converged_while_one_is_stuck_in_a_stage(
     host."""
     from datetime import UTC, datetime, timedelta
 
+    from cli.commands import _update_phase_b
     from ops import cluster_rpc as cr
     from shared.host_deploy_state import HostDeployState
 
@@ -344,18 +351,18 @@ def test_other_hosts_converged_while_one_is_stuck_in_a_stage(
 
     monkeypatch.setattr(cr, "dispatch_to_machine", _probe)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr("cli.commands._update_phase_b.read", _fake_read)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_POLL_TIMEOUT_S", 3600.0)
-    monkeypatch.setattr(_cli, "_POLL_INTERVAL_S", 0.01)
-    monkeypatch.setattr(_cli, "_STAGE_NO_PROGRESS_S", 600.0)
+    monkeypatch.setattr(_update_phase_b, "_POLL_TIMEOUT_S", 3600.0)
+    monkeypatch.setattr(_update_phase_b, "_POLL_INTERVAL_S", 0.01)
+    monkeypatch.setattr(_update_phase_b, "_STAGE_NO_PROGRESS_S", 600.0)
 
-    out = _cli._poll_until_unpaused(
+    out = _update_phase_b._poll_until_unpaused(
         [("air", "http://unused"), ("mini", "http://unused"), ("win", "http://unused")]
     )
 
     assert {n: v.status for n, v in out.items()} == {
-        "air": _cli.POLL_OK,
-        "mini": _cli.POLL_OK,
-        "win": _cli.POLL_NO_PROGRESS,
+        "air": _update_phase_b.POLL_OK,
+        "mini": _update_phase_b.POLL_OK,
+        "win": _update_phase_b.POLL_NO_PROGRESS,
     }
     # The stuck host ends the poll on its own verdict; the converged hosts needed
     # exactly one probe each and the stuck one its two confirmations.
@@ -373,6 +380,7 @@ def test_stage_evidence_that_advances_keeps_polling(
     and the poll's own deadline remains the patience."""
     from datetime import UTC, datetime, timedelta
 
+    from cli.commands import _update_phase_b
     from ops import cluster_rpc as cr
     from shared.host_deploy_state import HostDeployState
 
@@ -397,12 +405,12 @@ def test_stage_evidence_that_advances_keeps_polling(
 
     monkeypatch.setattr(cr, "dispatch_to_machine", _young_stage)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr("cli.commands._update_phase_b.read", _fake_read)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_POLL_TIMEOUT_S", 0.05)
-    monkeypatch.setattr(_cli, "_POLL_INTERVAL_S", 0.01)
-    monkeypatch.setattr(_cli, "_STAGE_NO_PROGRESS_S", 600.0)
+    monkeypatch.setattr(_update_phase_b, "_POLL_TIMEOUT_S", 0.05)
+    monkeypatch.setattr(_update_phase_b, "_POLL_INTERVAL_S", 0.01)
+    monkeypatch.setattr(_update_phase_b, "_STAGE_NO_PROGRESS_S", 600.0)
 
-    out = _cli._poll_until_unpaused([("win", "http://unused")])
-    assert {n: v.status for n, v in out.items()} == {"win": _cli.POLL_CONVERGING}
+    out = _update_phase_b._poll_until_unpaused([("win", "http://unused")])
+    assert {n: v.status for n, v in out.items()} == {"win": _update_phase_b.POLL_CONVERGING}
 
 
 def test_continuous_progress_past_the_converging_bound_hands_the_host_to_settle(
@@ -416,6 +424,7 @@ def test_continuous_progress_past_the_converging_bound_hands_the_host_to_settle(
     branching)."""
     from datetime import UTC, datetime, timedelta
 
+    from cli.commands import _update_phase_b
     from ops import cluster_rpc as cr
     from shared.host_deploy_state import HostDeployState
 
@@ -445,13 +454,13 @@ def test_continuous_progress_past_the_converging_bound_hands_the_host_to_settle(
     monkeypatch.setattr("cli.commands._update_phase_b.read", _fake_read)  # pyright: ignore[reportUnknownArgumentType]
     # A generous absolute deadline, so the ONLY thing that can end the poll is the
     # converging bound — the assertion is that the poll does NOT wait it out.
-    monkeypatch.setattr(_cli, "_POLL_TIMEOUT_S", 3600.0)
-    monkeypatch.setattr(_cli, "_CONVERGING_TIMEOUT_S", 0.05)
-    monkeypatch.setattr(_cli, "_POLL_INTERVAL_S", 0.01)
-    monkeypatch.setattr(_cli, "_STAGE_NO_PROGRESS_S", 600.0)
+    monkeypatch.setattr(_update_phase_b, "_POLL_TIMEOUT_S", 3600.0)
+    monkeypatch.setattr(_update_phase_b, "_CONVERGING_TIMEOUT_S", 0.05)
+    monkeypatch.setattr(_update_phase_b, "_POLL_INTERVAL_S", 0.01)
+    monkeypatch.setattr(_update_phase_b, "_STAGE_NO_PROGRESS_S", 600.0)
 
-    out = _cli._poll_until_unpaused([("wsl", "http://unused")])
-    assert {n: v.status for n, v in out.items()} == {"wsl": _cli.POLL_CONVERGING}
+    out = _update_phase_b._poll_until_unpaused([("wsl", "http://unused")])
+    assert {n: v.status for n, v in out.items()} == {"wsl": _update_phase_b.POLL_CONVERGING}
     # ~6 probes at 0.01 s intervals reach the 0.05 s bound; the early exit must
     # not spend anything like the 3600 s deadline. (Tight bounds would flake on
     # monotonic drift, so assert the order of magnitude.)

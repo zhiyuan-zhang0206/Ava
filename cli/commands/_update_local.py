@@ -123,17 +123,20 @@ def _restart_frontend_session(repo: Path) -> bool:
     only alternative to a retry on this path is failing a whole rollout over a
     momentary backend hiccup.
     """
-    import cli.commands as _ns
     from cli.commands._repo import _ensure_frontend_deps, build_services
-    from cli.commands._session_lifecycle import _relaunch_once
+    from cli.commands._session_lifecycle import (
+        _graceful_kill_session,
+        _new_session,
+        _relaunch_once,
+    )
 
     with _stage_telemetry("frontend_build"):
         spec = next(s for s in build_services() if s.session == _FRONTEND_SESSION)
         sess = session_name(spec.session)
         print(f"\n→ restart {sess} (rebuild ~30-60s)")
-        _ns._graceful_kill_session(sess, expected=True)
+        _graceful_kill_session(sess, expected=True)
         _ensure_frontend_deps(repo)
-        if _ns._new_session(sess, spec.cmd, repo):
+        if _new_session(sess, spec.cmd, repo):
             return True
         return _relaunch_once(sess, spec.cmd, repo, None)
 

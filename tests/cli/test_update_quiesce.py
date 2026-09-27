@@ -5,7 +5,6 @@ from unittest.mock import MagicMock
 
 import pytest
 
-import cli.commands as _cli
 from cli.commands import update as _up
 from ops import agent_pause
 from shared.config import settings
@@ -21,10 +20,12 @@ def test_every_update_mode_uses_native_pause(monkeypatch: pytest.MonkeyPatch, mo
 
 
 def test_timeout_is_not_force_authorization(monkeypatch: pytest.MonkeyPatch) -> None:
+    from cli.commands import _session_lifecycle
+
     pause = MagicMock(side_effect=TimeoutError("still flushing"))
     reap = MagicMock()
     monkeypatch.setattr(agent_pause, "pause_agents", pause)
-    monkeypatch.setattr(_cli, "_kill_session", reap)
+    monkeypatch.setattr(_session_lifecycle, "_kill_session", reap)
     with pytest.raises(TimeoutError, match="still flushing"):
         _up._quiesce_all_agents(0.1)
     reap.assert_not_called()
@@ -32,11 +33,12 @@ def test_timeout_is_not_force_authorization(monkeypatch: pytest.MonkeyPatch) -> 
 
 @pytest.mark.parametrize("status", ["fatal", "unreachable"])
 def test_any_missing_remote_drain_aborts(monkeypatch: pytest.MonkeyPatch, status: str) -> None:
+    from cli.commands import _update_fanout
     from cli.commands._update_pause import _run_phase_a
     from tests.agent.test_maintenance import WHEN
 
     monkeypatch.setattr(
-        _cli, "_fan_out", MagicMock(return_value=[("runner", status, "no receipt")])
+        _update_fanout, "_fan_out", MagicMock(return_value=[("runner", status, "no receipt")])
     )
     assert (
         _run_phase_a(
@@ -51,10 +53,11 @@ def test_any_missing_remote_drain_aborts(monkeypatch: pytest.MonkeyPatch, status
 
 
 def test_unreachable_fetch_cannot_skip_a_live_runner(monkeypatch: pytest.MonkeyPatch) -> None:
+    from cli.commands import _update_fanout
     from cli.commands._update_preflight import _run_preflight_fetch
 
     monkeypatch.setattr(
-        _cli, "_fan_out", MagicMock(return_value=[("runner", "unreachable", "offline")])
+        _update_fanout, "_fan_out", MagicMock(return_value=[("runner", "unreachable", "offline")])
     )
     assert _run_preflight_fetch([("runner", "http://unused")], restart_only=False)
 
@@ -67,35 +70,47 @@ def test_orchestration_quiesces_after_phase_a_before_local_update(
     update (which migrates) — no old-code agent may be live during the migration.
     Local host admission closes before remote fan-out, so no new local turn
     can start while the remote barrier is still pending."""
+    from cli.commands import (
+        _update_fanout,
+        _update_local,
+        _update_phase_b,
+        _update_preflight,
+        _update_quiesce,
+    )
+
     order: list[str] = []
 
     # backend change → full orchestration (avoid a real git fetch in the test)
-    monkeypatch.setattr(_cli, "_changed_paths_vs_origin", lambda: ["gateway/app.py"])
+    monkeypatch.setattr(_update_preflight, "_changed_paths_vs_origin", lambda: ["gateway/app.py"])
     # This test asserts quiesce ordering, not the migration-layout vet; stub the vet
     # so it does not git-ls-tree the real origin/main (whose layout is orthogonal here).
     monkeypatch.setattr(_up, "_vet_rollout_target", lambda _sha: None)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_list_agent_runners", lambda: [("wsl", "http://unused")])
+    monkeypatch.setattr(_update_fanout, "_list_agent_runners", lambda: [("wsl", "http://unused")])
 
     def _fan_out(_hosts, path, _timeout, payload=None):
         order.append(f"fan_out:{path}")
         return [("wsl", "ok", "")]
 
-    monkeypatch.setattr(_cli, "_fan_out", _fan_out)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_update_fanout, "_fan_out", _fan_out)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr("ops.cluster.pause_local_cluster", lambda: order.append("pause_local"))
-    monkeypatch.setattr(_cli, "_quiesce_all_agents", lambda **_: order.append("quiesce") or True)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(
+        _update_quiesce,
+        "_quiesce_all_agents",
+        lambda **_: order.append("quiesce") or True,  # pyright: ignore[reportUnknownArgumentType]
+    )
 
     def _local(_repo, **_kw):
         order.append("local_update")
         return 0
 
-    monkeypatch.setattr(_cli, "_run_gateway_local_update", _local)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_update_local, "_run_gateway_local_update", _local)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(
-        _cli,
+        _update_phase_b,
         "_poll_until_unpaused",
         lambda _hosts, **_unused: order.append("poll") or {},  # pyright: ignore[reportUnknownArgumentType]
     )
 
-    rc = _cli._run_gateway_orchestration(Path("/unused"), origin="test-origin")
+    rc = _up._run_gateway_orchestration(Path("/unused"), origin="test-origin")
     assert rc == 0
 
     a_idx = order.index("fan_out:/api/cluster/stop")
@@ -113,24 +128,30 @@ def test_orchestration_quiesces_even_without_agent_runners(
     """Single-host path (no agent-runners registered) pauses the local restarter,
     then quiesces local agents before migrating — the local restarter must not
     respawn quiesced agents while the gateway is updating."""
+    from cli.commands import _update_fanout, _update_local, _update_preflight, _update_quiesce
+
     order: list[str] = []
 
-    monkeypatch.setattr(_cli, "_changed_paths_vs_origin", lambda: ["gateway/app.py"])
+    monkeypatch.setattr(_update_preflight, "_changed_paths_vs_origin", lambda: ["gateway/app.py"])
     monkeypatch.setattr(
         _up,
         "_vet_rollout_target",
         lambda _sha: None,  # pyright: ignore[reportUnknownArgumentType]
     )  # ordering test, not the vet  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_list_agent_runners", list)
+    monkeypatch.setattr(_update_fanout, "_list_agent_runners", list)
     monkeypatch.setattr("ops.cluster.pause_local_cluster", lambda: order.append("pause_local"))
-    monkeypatch.setattr(_cli, "_quiesce_all_agents", lambda **_: order.append("quiesce") or True)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(
-        _cli,
+        _update_quiesce,
+        "_quiesce_all_agents",
+        lambda **_: order.append("quiesce") or True,  # pyright: ignore[reportUnknownArgumentType]
+    )
+    monkeypatch.setattr(
+        _update_local,
         "_run_gateway_local_update",
         lambda _repo, **_kw: order.append("local_update") or 0,  # pyright: ignore[reportUnknownArgumentType]
     )
 
-    rc = _cli._run_gateway_orchestration(Path("/unused"), origin="test-origin")
+    rc = _up._run_gateway_orchestration(Path("/unused"), origin="test-origin")
     assert rc == 0
     assert order == ["pause_local", "quiesce", "local_update"]
 
@@ -151,7 +172,7 @@ def test_orchestration_aborts_when_update_lock_held(monkeypatch: pytest.MonkeyPa
 
     assert acquire_update_lock("other-holder") is True
     try:
-        rc = _cli._run_gateway_orchestration(Path("/unused"), origin="test-origin")
+        rc = _up._run_gateway_orchestration(Path("/unused"), origin="test-origin")
         assert rc == 1
         assert ran == []  # inner orchestration never ran
     finally:
@@ -163,6 +184,7 @@ def test_local_and_remote_phase_a_share_one_deploy_generation(
 ) -> None:
     from datetime import datetime
 
+    from cli.commands import _update_fanout, _update_quiesce
     from cli.commands._update_pause import _stop_the_world
     from ops import ops_cluster
     from shared import maintenance, pause_owner
@@ -191,8 +213,8 @@ def test_local_and_remote_phase_a_share_one_deploy_generation(
     monkeypatch.setattr(ops_cluster, "pause_local_cluster", drain)
     monkeypatch.setattr(ops_cluster, "_require_executing_deploy", MagicMock())
     monkeypatch.setattr(ops_cluster, "release_local_db_pools", dict)
-    monkeypatch.setattr(_cli, "_quiesce_all_agents", MagicMock(return_value=True))
-    monkeypatch.setattr(_cli, "_fan_out", fanout)
+    monkeypatch.setattr(_update_quiesce, "_quiesce_all_agents", MagicMock(return_value=True))
+    monkeypatch.setattr(_update_fanout, "_fan_out", fanout)
     acked, drained_all = _stop_the_world(
         [("local", None), ("remote", None)],
         deploy_capability={"deploy_holder": "deployment", "deploy_acquired_at": WHEN.isoformat()},

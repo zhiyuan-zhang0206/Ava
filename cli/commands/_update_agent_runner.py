@@ -376,13 +376,18 @@ def _run_agent_runner_self_update_inner(  # noqa: PLR0915 — the self-update's 
     before handing off. Every new-tree import begins in ``post_checkout=True`` so
     a module cached before checkout cannot skew a newly imported dependency.
     """
-    # Lazy `cli.commands` for `_do_stop` (and so tests can stub it); avoids a
-    # top-level cycle (cli.commands imports this module via update.py's re-export).
+    # Lazy imports of the modules that own each seam (`_repo`, `stop`,
+    # `_start_readiness_preflight`, `_update_quiesce`) avoid a top-level cycle
+    # (cli.commands imports this module via update.py's re-export) and let
+    # tests monkeypatch each one directly.
     #
-    # This imports the old command namespace before checkout for the pre-exec leg;
-    # after checkout it is used only to build the exec argv. The post-checkout image
-    # imports its own command namespace from the new tree before it reaches stop.
-    import cli.commands as _ns
+    # This imports the old tree's modules before checkout for the pre-exec leg;
+    # after checkout they are used only to build the exec argv. The post-checkout
+    # image imports its own modules from the new tree before it reaches stop.
+    from cli.commands import _repo
+    from cli.commands import stop as _stop_mod
+    from cli.commands._start_readiness_preflight import preflight_start_readiness
+    from cli.commands._update_quiesce import _quiesce_local_agents
 
     sha: str | None = None
     if restart_only:
@@ -493,7 +498,7 @@ def _run_agent_runner_self_update_inner(  # noqa: PLR0915 — the self-update's 
     #    leave the host in "services dead, can't start" after the stop below.
     #    On failure the host keeps serving — abort without stopping.
     print("\n→ preflight probes (validate-before-kill)")
-    rc = _ns._preflight_probes()
+    rc = _repo._preflight_probes()
     if rc != 0:
         print(
             "  ✗ refusing self-update: preflight probes failed — host still serving",
@@ -501,7 +506,7 @@ def _run_agent_runner_self_update_inner(  # noqa: PLR0915 — the self-update's 
         )
         # Same contract as `ava restart`: a refusal before the stop is reported as
         # RESTART_DECLINED so a caller can tell "still serving" from "may be down".
-        _ns._release_self_heal_pause()
+        _stop_mod._release_self_heal_pause()
         return RESTART_DECLINED_EXIT_CODE
 
     # 3.1) start-readiness preflight: the read-only local checks of `ava start`
@@ -514,13 +519,13 @@ def _run_agent_runner_self_update_inner(  # noqa: PLR0915 — the self-update's 
     #    like the probes above: nothing was stopped. No revert — the target tree
     #    is not at fault (contrast 2.5, where it is and reverting is the repair).
     print("\n→ start readiness preflight (validate-before-kill, local state)")
-    if _ns._preflight_start_readiness(repo) != 0:
+    if preflight_start_readiness(repo) != 0:
         print(
             "  ✗ refusing self-update: a stop now could leave this host unable to "
             "start again — host still serving",
             file=sys.stderr,
         )
-        _ns._release_self_heal_pause()
+        _stop_mod._release_self_heal_pause()
         return RESTART_DECLINED_EXIT_CODE
 
     # 3.5) resolve + vet the `ava` launcher BEFORE the stop, for the same reason
@@ -555,7 +560,7 @@ def _run_agent_runner_self_update_inner(  # noqa: PLR0915 — the self-update's 
 
     # Verify the same pause used by standalone restart and the gateway Phase A.
     with updater_stage("quiesce"):
-        if not _ns._quiesce_local_agents(mode):
+        if not _quiesce_local_agents(mode):
             return 1
     force_reap_agents = force_reap or mode == "force"
 
@@ -580,7 +585,7 @@ def _run_agent_runner_self_update_inner(  # noqa: PLR0915 — the self-update's 
 
     stop_episode = stop_recovery.capture_stop_episode()
     with updater_stage("stop"):
-        stop_rc = _ns._do_stop(
+        stop_rc = _stop_mod._do_stop(
             repo,
             graceful=True,
             require_confirmation=False,

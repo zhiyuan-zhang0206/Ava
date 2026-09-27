@@ -31,7 +31,8 @@ def _run_phase_a(
     acks of its own — which is what the gateway-readiness bail-out needs to decide who
     the deploy lease should be held for.
     """
-    import cli.commands as _ns
+    # Lazy so tests can monkeypatch `cli.commands._update_fanout._fan_out`.
+    from cli.commands._update_fanout import _fan_out
 
     if not agent_runners:
         print("\n→ Phase A: no agent-runner registered, single-host path")
@@ -39,7 +40,7 @@ def _run_phase_a(
     print(f"\n→ Phase A: pause {len(agent_runners)} agent-runner(s)")
     from shared.config import settings
 
-    results = _ns._fan_out(
+    results = _fan_out(
         agent_runners,
         "/api/cluster/stop",
         max(_PHASE_A_TIMEOUT_S, settings.gateway.update_quiesce_timeout_seconds + 10),
@@ -67,7 +68,6 @@ def _stop_the_world(
     Every acknowledgement includes actual flush and hosted continuation exit. Failure
     aborts; no timeout is converted to force authorization.
     """
-    import cli.commands as _ns
     from ops.cluster import pause_local_cluster
 
     # Bind the local drain to the same generation as the fan-out (whose roster
@@ -94,7 +94,8 @@ def _stop_the_world(
     # Each remote acknowledgement includes final flush and continuation exit.
     # Re-verify the local hold before any source/schema change.
     from cli.commands import update as _up_mod
+    from cli.commands._update_quiesce import _quiesce_all_agents
 
     with _stage_telemetry("quiesce_drain"):
-        all_quiesced = _ns._quiesce_all_agents(timeout_s=_up_mod._quiesce_timeout_s(mode))
+        all_quiesced = _quiesce_all_agents(timeout_s=_up_mod._quiesce_timeout_s(mode))
     return paused_names, all_quiesced

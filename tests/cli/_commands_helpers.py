@@ -7,7 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from cli import commands as _cli
+from cli.commands import _probe
+from cli.commands import _repo as _repo_mod
 
 # Explicit shared surface: every name the split test modules import from here.
 __all__ = [
@@ -35,11 +36,11 @@ def _sess(service: str) -> str:
 # _noop_start_prechecks (autouse) monkey-patches _register_machine_or_die on the
 # _cli module. Keep a reference to the real implementation so tests can exercise
 # its actual behaviour.
-_real_register_machine_or_die = _cli._register_machine_or_die
+_real_register_machine_or_die = _repo_mod._register_machine_or_die
 # Likewise for _wait_for_services_ready: the autouse fixture noops it on the _cli
 # namespace (so the start-path tests don't stall on real probes), so the tests
 # that exercise the wait itself must call the captured real implementation.
-_real_wait_for_services_ready = _cli._wait_for_services_ready
+_real_wait_for_services_ready = _probe._wait_for_services_ready
 
 
 class _FakeResult:
@@ -155,8 +156,11 @@ def _noop_start_prechecks(monkeypatch: pytest.MonkeyPatch) -> None:
     orthogonal to setup. Setup behavior itself is left to shared/test_machine.py + the setup-ergonomics tests in `test_commands_start.py`.
 
     Default role="gateway" (full service set). To test secondary, explicitly override:
-        monkeypatch.setattr(_cli, "_roles_or_none", lambda: frozenset({"agent-runner"}))
-        monkeypatch.setattr(_cli, "_collect_setup_values", lambda _a: (..., []))"""
+        monkeypatch.setattr(_repo_mod, "_roles_or_none", lambda: frozenset({"agent-runner"}))
+        monkeypatch.setattr(_setup, "_collect_setup_values", lambda _a: (..., []))"""
+
+    from cli.commands import _converge, _probe, _setup
+    from cli.commands import _repo as _repo_mod
 
     def _fake_collect(_args: dict[str, str | None]) -> tuple[dict[str, str], list]:
         return {
@@ -166,8 +170,8 @@ def _noop_start_prechecks(monkeypatch: pytest.MonkeyPatch) -> None:
             "gateway_url": "http://test-gateway:8000",
         }, []
 
-    monkeypatch.setattr(_cli, "_collect_setup_values", _fake_collect)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "converge_host", lambda *_a, **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_setup, "_collect_setup_values", _fake_collect)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_converge, "converge_host", lambda *_a, **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
     # The per-cluster pg/redis bring-up (`_ensure_gateway_data_plane`) starts a real
     # native instance under $AVA_HOME. These tests assert session/stop/status call
     # shapes, not infra, so stub it to a noop — keeping them hermetic regardless of
@@ -187,16 +191,16 @@ def _noop_start_prechecks(monkeypatch: pytest.MonkeyPatch) -> None:
     # no file → empty/Missing. Pin both to gateway so the default path is the
     # full-service gateway box, deterministic regardless of the dev host's
     # machine_serve_* files. Agent-runner tests override machine_role explicitly.
-    monkeypatch.setattr(_cli, "_roles_or_none", lambda: frozenset({"gateway"}))
+    monkeypatch.setattr(_repo_mod, "_roles_or_none", lambda: frozenset({"gateway"}))
     monkeypatch.setattr("shared.machine.machine_role", lambda: frozenset({"gateway"}))
     # register_self goes to central DB UPSERT; test does not need real writes. cmd_start goes
     # through _register_machine_or_die which internally imports register_self, directly patch the helper to return 0.
-    monkeypatch.setattr(_cli, "_register_machine_or_die", lambda _resolved, _role: 0)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_repo_mod, "_register_machine_or_die", lambda _resolved, _role: 0)  # pyright: ignore[reportUnknownArgumentType]
     # secondary path will run _probe_gateway_or_die; primary does not call it, adding here
     # ensures secondary tests can also reuse the default noop.
-    monkeypatch.setattr(_cli, "_probe_gateway_or_die", lambda _url: 0)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_repo_mod, "_probe_gateway_or_die", lambda _url: 0)  # pyright: ignore[reportUnknownArgumentType]
     # _assert_schema_current_or_die truly calls DB; tests don't need real schema query, directly patch.
-    monkeypatch.setattr(_cli, "_assert_schema_current_or_die", lambda: 0)
+    monkeypatch.setattr(_repo_mod, "_assert_schema_current_or_die", lambda: 0)
     # The start path now polls launched services' probes before the status
     # snapshot. These tests stub subprocess, so the real probes (milvus tcp /
     # watchdog pidfile) would report not-ready and stall the wait to its timeout.
@@ -205,9 +209,9 @@ def _noop_start_prechecks(monkeypatch: pytest.MonkeyPatch) -> None:
     # start path's readiness gate satisfied. tests/cli/test_start_readiness_gate.py is
     # where a non-empty verdict and the exit code it produces are exercised.
     monkeypatch.setattr(
-        _cli,
+        _probe,
         "_wait_for_services_ready",
-        lambda *_a, **_kw: _cli.ReadinessWait((), 0.0, sessions_gone=False),  # pyright: ignore[reportUnknownArgumentType]
+        lambda *_a, **_kw: _probe.ReadinessWait((), 0.0, sessions_gone=False),  # pyright: ignore[reportUnknownArgumentType]
     )
     # `_launch_sessions`' idempotence guard asks the service's probe as well as
     # the session (issue #1015: a live session with a dead daemon behind it must be
@@ -216,7 +220,7 @@ def _noop_start_prechecks(monkeypatch: pytest.MonkeyPatch) -> None:
     # running" session would be torn down and relaunched — a call-shape assertion
     # would then be measuring the husk path instead. That path has its own tests in
     # tests/cli/test_start_husk_session.py.
-    monkeypatch.setattr(_cli, "_husk_session_reason", lambda _spec: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_probe, "_husk_session_reason", lambda _spec: None)  # pyright: ignore[reportUnknownArgumentType]
     # _ensure_frontend_deps shells out to `npm ci` when frontend deps are stale;
     # these tests assert session call shape, not dep install, and must stay hermetic
     # regardless of whether this checkout happens to have ui/web/node_modules.

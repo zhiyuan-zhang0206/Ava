@@ -18,7 +18,6 @@ from types import SimpleNamespace
 
 import pytest
 
-import cli.commands as _cli
 from cli.commands import _update_agent_runner as _runner
 from shared.deploy_timing import UV_SYNC_TIMEOUT_S
 
@@ -127,6 +126,8 @@ def test_updater_hands_off_to_fresh_interpreter_after_sync(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """Checkout/sync must exec before any preflight, quiesce, or stop import."""
+    from cli.commands import stop
+
     _patch_wrapper_lifecycle(monkeypatch)
     handoff_argv: list[list[str]] = []
     stopped: list[bool] = []
@@ -151,7 +152,7 @@ def test_updater_hands_off_to_fresh_interpreter_after_sync(
         "_exec_post_checkout",
         lambda argv: handoff_argv.append(argv) or (_ for _ in ()).throw(SystemExit(0)),  # pyright: ignore[reportUnknownArgumentType]
     )
-    monkeypatch.setattr(_cli, "_do_stop", lambda *_args, **_kwargs: stopped.append(True) or 0)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(stop, "_do_stop", lambda *_args, **_kwargs: stopped.append(True) or 0)  # pyright: ignore[reportUnknownArgumentType]
 
     with pytest.raises(SystemExit, match="0"):
         _runner._run_agent_runner_self_update(
@@ -211,6 +212,8 @@ def test_post_checkout_leg_runs_validate_to_start(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """The fresh image owns every new-tree step through the fresh start child."""
+    from cli.commands import _repo as _repo_mod
+    from cli.commands import _start_readiness_preflight, _update_quiesce, stop
     from shared import host_deploy_state, updater_handoff
 
     steps: list[str] = []
@@ -253,18 +256,18 @@ def test_post_checkout_leg_runs_validate_to_start(
     )
     monkeypatch.setattr(_runner, "platform_backend", _Backend)
     monkeypatch.setattr(_runner, "_refresh_builtin_skills", lambda *_args: steps.append("skills"))  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_preflight_probes", lambda: steps.append("preflight") or 0)
+    monkeypatch.setattr(_repo_mod, "_preflight_probes", lambda: steps.append("preflight") or 0)
     monkeypatch.setattr(
-        _cli,
-        "_preflight_start_readiness",
+        _start_readiness_preflight,
+        "preflight_start_readiness",
         lambda *_args, **_kwargs: steps.append("readiness") or 0,  # pyright: ignore[reportUnknownArgumentType]
     )
     monkeypatch.setattr(
-        _cli,
+        _update_quiesce,
         "_quiesce_local_agents",
         lambda _mode: steps.append("quiesce") or True,  # pyright: ignore[reportUnknownArgumentType]
     )
-    monkeypatch.setattr(_cli, "_do_stop", lambda *_args, **_kwargs: steps.append("stop") or 0)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(stop, "_do_stop", lambda *_args, **_kwargs: steps.append("stop") or 0)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(
         _runner.subprocess,
         "run",

@@ -245,13 +245,13 @@ def test_blocked_event_is_a_registered_audit_name() -> None:
 
 def _stub_orchestration(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     """Reach the end of a real (non-dry-run) rollout without a live cluster."""
-    from cli import commands as _cli
+    from cli.commands import _update_local, _update_orchestration
     from cli.commands import update as _up
 
     stopped: list[str] = []
     monkeypatch.setattr(_up, "_rollout_preflight", lambda _repo, **_kw: (None, False, "target-sha"))  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_up, "_begin_update_record", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_resolve_fanout_targets", lambda **_kw: [])  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_update_orchestration, "_resolve_fanout_targets", lambda **_kw: [])  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_up, "_run_preflight_fetch", lambda *_a, **_k: False)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_up, "dry_run_checks", lambda *_a, **_k: [])  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_up, "estimate_maintenance_window", lambda: 130.0)
@@ -261,7 +261,7 @@ def _stub_orchestration(monkeypatch: pytest.MonkeyPatch) -> list[str]:
         "_stop_the_world",
         lambda *_a, **_k: stopped.append("stop") or (set[str](), True),  # pyright: ignore[reportUnknownArgumentType]
     )
-    monkeypatch.setattr(_cli, "_run_gateway_local_update", lambda *_a, **_k: 0)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_update_local, "_run_gateway_local_update", lambda *_a, **_k: 0)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_up, "refresh_data_plane_settings", lambda: None)
     monkeypatch.setattr(_up, "_persist_cluster_pin", lambda _sha, **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr("cli.commands._update_finalize._unpause_local_via_tree", lambda _repo: True)  # pyright: ignore[reportUnknownArgumentType]
@@ -559,8 +559,10 @@ def test_active_rollout_refuses_at_the_collect_position(monkeypatch: pytest.Monk
     _stub_orchestration_to_phase_b(monkeypatch, stub_collect=False)
     commit_calls: list[None] = []
     monkeypatch.setattr(
-        _up, "_commit_managed_writer_publication", lambda: commit_calls.append(None) or 0
-    )  # pyright: ignore[reportUnknownArgumentType]
+        _up,
+        "_commit_managed_writer_publication",
+        lambda: commit_calls.append(None) or 0,  # pyright: ignore[reportUnknownArgumentType]
+    )
     recorded: dict[str, object] = {}
 
     def _capture(_hosts: object, _fan_out: object, _timeout: object, **kwargs: object) -> None:
@@ -589,8 +591,10 @@ def test_restart_only_rollout_skips_the_collect_position(monkeypatch: pytest.Mon
     )
     commit_calls: list[None] = []
     monkeypatch.setattr(
-        _up, "_commit_managed_writer_publication", lambda: commit_calls.append(None) or 0
-    )  # pyright: ignore[reportUnknownArgumentType]
+        _up,
+        "_commit_managed_writer_publication",
+        lambda: commit_calls.append(None) or 0,  # pyright: ignore[reportUnknownArgumentType]
+    )
 
     assert _run_inner(restart_only=True) == 0
     assert calls == [] and commit_calls == []
@@ -614,8 +618,10 @@ def test_collect_never_runs_on_a_non_clean_outcome(monkeypatch: pytest.MonkeyPat
     )
     commit_calls: list[None] = []
     monkeypatch.setattr(
-        _up, "_commit_managed_writer_publication", lambda: commit_calls.append(None) or 0
-    )  # pyright: ignore[reportUnknownArgumentType]
+        _up,
+        "_commit_managed_writer_publication",
+        lambda: commit_calls.append(None) or 0,  # pyright: ignore[reportUnknownArgumentType]
+    )
 
     assert _run_inner() == 1
     assert calls == [] and commit_calls == []
@@ -742,7 +748,7 @@ def _stub_orchestration_to_phase_b(
     phase_input: ManagedWriterPhaseInput | None = None,
 ) -> None:
     """Extend `_stub_orchestration` to reach the post-Phase-B publication window."""
-    from cli import commands as _cli
+    from cli.commands import _update_orchestration
     from cli.commands import update as _up
 
     _stub_orchestration(monkeypatch)
@@ -756,7 +762,11 @@ def _stub_orchestration_to_phase_b(
     monkeypatch.setattr(_up, "_begin_managed_writer_publication", lambda _sha: (0, phase_input))  # pyright: ignore[reportUnknownArgumentType]
     if stub_collect:
         monkeypatch.setattr(_up, "_collect_managed_writer_publication", lambda _phase_input: 0)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_resolve_fanout_targets", lambda **_kw: [("host-b", None)])  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(
+        _update_orchestration,
+        "_resolve_fanout_targets",
+        lambda **_kw: [("host-b", None)],  # pyright: ignore[reportUnknownArgumentType]
+    )
     # The stale-marker reconcile dials the live roster; only the commit step
     # under test may borrow the fake transaction.
     monkeypatch.setattr(_up, "_clear_stale_stop_marker", lambda _name: None)  # pyright: ignore[reportUnknownArgumentType]

@@ -15,7 +15,6 @@ from typing import Literal
 
 import pytest
 
-from cli import commands as _cli
 from cli.commands import _update_orchestration as _orch
 from cli.commands import update as _up
 
@@ -80,6 +79,8 @@ def test_classify_rollout_replays_only_when_installed_is_ahead(
 ) -> None:
     """A fast-path pull advances running code; only the reverse is interrupted."""
 
+    from cli.commands import _update_git, _update_preflight
+
     def _relation(_pin: str, _head: str, *, repo: Path | None = None) -> Literal["ahead", "behind"]:
         return relation
 
@@ -89,8 +90,8 @@ def test_classify_rollout_replays_only_when_installed_is_ahead(
     monkeypatch.setattr("shared.source_integrity.get", lambda: installed_sha)
     monkeypatch.setattr("shared.running_sha.get", lambda: running_sha)
     monkeypatch.setattr("shared.cluster_drift.prod_source_pin_relation", _relation)
-    monkeypatch.setattr(_cli, "_changed_paths_vs_origin", list)
-    monkeypatch.setattr(_cli, "git_pull_main", lambda: _up.GitPullResult("a", "b", 1))
+    monkeypatch.setattr(_update_preflight, "_changed_paths_vs_origin", list)
+    monkeypatch.setattr(_update_git, "git_pull_main", lambda: _up.GitPullResult("a", "b", 1))
     monkeypatch.setattr(_orch, "_persist_cluster_pin", _persist)
 
     assert (
@@ -102,6 +103,8 @@ def test_classify_rollout_replays_only_when_installed_is_ahead(
 def test_frontend_only_takes_fast_path(monkeypatch: pytest.MonkeyPatch) -> None:
     """frontend-only change → _run_frontend_only_update; Phase A / quiesce /
     local update never run."""
+    from cli.commands import _update_fanout, _update_local, _update_preflight, _update_quiesce
+
     called: list[str] = []
     # This unit owns path classification, not preflight recovery. Pin matching
     # source/running bookmarks and a clear schema result so parallel DB state
@@ -109,22 +112,26 @@ def test_frontend_only_takes_fast_path(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("shared.source_integrity.get", lambda: "same")
     monkeypatch.setattr("shared.running_sha.get", lambda: "same")
     monkeypatch.setattr("ops.controllers.schema_mismatch.detect", lambda: None)
-    monkeypatch.setattr(_cli, "_changed_paths_vs_origin", lambda: ["ui/web/src/app/page.tsx"])
     monkeypatch.setattr(
-        _cli,
+        _update_preflight, "_changed_paths_vs_origin", lambda: ["ui/web/src/app/page.tsx"]
+    )
+    monkeypatch.setattr(
+        _update_local,
         "_run_frontend_only_update",
         lambda _repo, _origin: called.append("fe") or 0,  # pyright: ignore[reportUnknownArgumentType]
     )
     monkeypatch.setattr(
-        _cli, "_list_agent_runners", lambda: pytest.fail("must not reach Phase A on frontend-only")
+        _update_fanout,
+        "_list_agent_runners",
+        lambda: pytest.fail("must not reach Phase A on frontend-only"),
     )
     monkeypatch.setattr(
-        _cli,
+        _update_quiesce,
         "_quiesce_all_agents",
         lambda **_: pytest.fail("must not quiesce on frontend-only"),  # pyright: ignore[reportUnknownArgumentType]
     )
 
-    rc = _cli._run_gateway_orchestration(Path("/unused"), origin="test-origin")
+    rc = _up._run_gateway_orchestration(Path("/unused"), origin="test-origin")
     assert rc == 0
     assert called == ["fe"]
 
@@ -134,16 +141,18 @@ def test_backend_only_runs_full_flow_without_frontend_restart(
 ) -> None:
     """backend-only change → full orchestration, but local update is told NOT to
     restart the frontend (UI source unchanged)."""
+    from cli.commands import _update_fanout, _update_local, _update_preflight, _update_quiesce
+
     captured: dict[str, object] = {}
-    monkeypatch.setattr(_cli, "_changed_paths_vs_origin", lambda: ["gateway/app.py"])
-    monkeypatch.setattr(_cli, "_list_agent_runners", list)
+    monkeypatch.setattr(_update_preflight, "_changed_paths_vs_origin", lambda: ["gateway/app.py"])
+    monkeypatch.setattr(_update_fanout, "_list_agent_runners", list)
     monkeypatch.setattr(
-        _cli,
+        _update_quiesce,
         "_quiesce_all_agents",
         lambda **_: captured.setdefault("quiesced", True),  # pyright: ignore[reportUnknownArgumentType]
     )
     monkeypatch.setattr(
-        _cli,
+        _update_local,
         "_run_frontend_only_update",
         lambda _repo, _origin: pytest.fail("not a frontend-only change"),  # pyright: ignore[reportUnknownArgumentType]
     )
@@ -162,21 +171,23 @@ def test_backend_only_runs_full_flow_without_frontend_restart(
         captured["pull"] = pull
         return 0
 
-    monkeypatch.setattr(_cli, "_run_gateway_local_update", _local)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_update_local, "_run_gateway_local_update", _local)  # pyright: ignore[reportUnknownArgumentType]
 
-    rc = _cli._run_gateway_orchestration(Path("/unused"), origin="test-origin")
+    rc = _up._run_gateway_orchestration(Path("/unused"), origin="test-origin")
     assert rc == 0
     assert captured["quiesced"] is True
     assert captured["restart_frontend"] is False
 
 
 def test_both_changed_restarts_frontend_too(monkeypatch: pytest.MonkeyPatch) -> None:
+    from cli.commands import _update_fanout, _update_local, _update_preflight, _update_quiesce
+
     captured: dict[str, object] = {}
     monkeypatch.setattr(
-        _cli, "_changed_paths_vs_origin", lambda: ["ui/web/x.tsx", "gateway/app.py"]
+        _update_preflight, "_changed_paths_vs_origin", lambda: ["ui/web/x.tsx", "gateway/app.py"]
     )
-    monkeypatch.setattr(_cli, "_list_agent_runners", list)
-    monkeypatch.setattr(_cli, "_quiesce_all_agents", lambda **_: True)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_update_fanout, "_list_agent_runners", list)
+    monkeypatch.setattr(_update_quiesce, "_quiesce_all_agents", lambda **_: True)  # pyright: ignore[reportUnknownArgumentType]
 
     def _local(
         _repo: Path,
@@ -192,14 +203,16 @@ def test_both_changed_restarts_frontend_too(monkeypatch: pytest.MonkeyPatch) -> 
         captured["pull"] = pull
         return 0
 
-    monkeypatch.setattr(_cli, "_run_gateway_local_update", _local)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_update_local, "_run_gateway_local_update", _local)  # pyright: ignore[reportUnknownArgumentType]
 
-    rc = _cli._run_gateway_orchestration(Path("/unused"), origin="test-origin")
+    rc = _up._run_gateway_orchestration(Path("/unused"), origin="test-origin")
     assert rc == 0
     assert captured["restart_frontend"] is True
 
 
 def test_docs_only_pulls_and_restarts_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
+    from cli.commands import _update_fanout, _update_git, _update_local, _update_preflight
+
     pulled: list[str] = []
     pinned: list[tuple[str, str]] = []
     # This unit owns path classification, not preflight recovery. Pin matching
@@ -208,9 +221,13 @@ def test_docs_only_pulls_and_restarts_nothing(monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.setattr("shared.source_integrity.get", lambda: "same")
     monkeypatch.setattr("shared.running_sha.get", lambda: "same")
     monkeypatch.setattr("ops.controllers.schema_mismatch.detect", lambda: None)
-    monkeypatch.setattr(_cli, "_changed_paths_vs_origin", lambda: ["conventions/runbook.md"])
     monkeypatch.setattr(
-        _cli, "git_pull_main", lambda: pulled.append("pull") or _up.GitPullResult("a", "b", 1)
+        _update_preflight, "_changed_paths_vs_origin", lambda: ["conventions/runbook.md"]
+    )
+    monkeypatch.setattr(
+        _update_git,
+        "git_pull_main",
+        lambda: pulled.append("pull") or _up.GitPullResult("a", "b", 1),
     )
     monkeypatch.setattr(
         _orch,
@@ -218,15 +235,17 @@ def test_docs_only_pulls_and_restarts_nothing(monkeypatch: pytest.MonkeyPatch) -
         lambda sha, *, origin, **_kw: pinned.append((sha, origin)),  # pyright: ignore[reportUnknownArgumentType]
     )
     monkeypatch.setattr(
-        _cli, "_list_agent_runners", lambda: pytest.fail("docs-only must not restart anything")
+        _update_fanout,
+        "_list_agent_runners",
+        lambda: pytest.fail("docs-only must not restart anything"),
     )
     monkeypatch.setattr(
-        _cli,
+        _update_local,
         "_run_frontend_only_update",
         lambda _repo, _origin: pytest.fail("docs-only is not frontend"),  # pyright: ignore[reportUnknownArgumentType]
     )
 
-    rc = _cli._run_gateway_orchestration(Path("/unused"), origin="test-origin")
+    rc = _up._run_gateway_orchestration(Path("/unused"), origin="test-origin")
     assert rc == 0
     assert pulled == ["pull"]
     # The pull moved HEAD → the standing pin must advance to the pulled sha,
@@ -256,15 +275,23 @@ def test_restart_only_skips_classify_pulls_nothing_and_fans_out_restart(
 ) -> None:
     """`--restart-only` must not classify/fetch, must call local update with pull=False
     and restart_frontend=True, and fan Phase B out with restart_only payload."""
+    from cli.commands import (
+        _update_fanout,
+        _update_local,
+        _update_phase_b,
+        _update_preflight,
+        _update_quiesce,
+    )
+
     captured: dict[str, object] = {}
     monkeypatch.setattr(
-        _cli,
+        _update_preflight,
         "_changed_paths_vs_origin",
         lambda: pytest.fail("restart-only must not classify"),
     )
-    monkeypatch.setattr(_cli, "_list_agent_runners", lambda: [("wsl", "http://unused")])
+    monkeypatch.setattr(_update_fanout, "_list_agent_runners", lambda: [("wsl", "http://unused")])
     monkeypatch.setattr(
-        _cli,
+        _update_quiesce,
         "_quiesce_all_agents",
         lambda **_: captured.setdefault("quiesced", True),  # pyright: ignore[reportUnknownArgumentType]
     )
@@ -273,11 +300,11 @@ def test_restart_only_skips_classify_pulls_nothing_and_fans_out_restart(
         captured.setdefault("fan", []).append((path, payload))  # type: ignore[union-attr]
         return [("wsl", "ok", "")]
 
-    monkeypatch.setattr(_cli, "_fan_out", _fan_out)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_update_fanout, "_fan_out", _fan_out)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(
-        _cli,
+        _update_phase_b,
         "_poll_until_unpaused",
-        lambda _hosts, **_unused: {"wsl": _cli.PollVerdict("ok")},  # pyright: ignore[reportUnknownArgumentType]
+        lambda _hosts, **_unused: {"wsl": _update_phase_b.PollVerdict("ok")},  # pyright: ignore[reportUnknownArgumentType]
     )
 
     def _local(
@@ -294,9 +321,9 @@ def test_restart_only_skips_classify_pulls_nothing_and_fans_out_restart(
         captured["pull"] = pull
         return 0
 
-    monkeypatch.setattr(_cli, "_run_gateway_local_update", _local)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_update_local, "_run_gateway_local_update", _local)  # pyright: ignore[reportUnknownArgumentType]
 
-    rc = _cli._run_gateway_orchestration(Path("/unused"), restart_only=True, origin="test-origin")
+    rc = _up._run_gateway_orchestration(Path("/unused"), restart_only=True, origin="test-origin")
     assert rc == 0
     assert captured["quiesced"] is True
     assert captured["pull"] is False
@@ -308,14 +335,16 @@ def test_restart_only_skips_classify_pulls_nothing_and_fans_out_restart(
 def test_classify_failure_falls_back_to_full_restart(monkeypatch: pytest.MonkeyPatch) -> None:
     """A git error during classification must not under-restart: fall back to the
     full flow (restart_frontend=True)."""
+    from cli.commands import _update_fanout, _update_local, _update_preflight, _update_quiesce
+
     captured: dict[str, object] = {}
 
     def _boom() -> list[str]:
         raise _up.GitPullFailed("fetch failed")
 
-    monkeypatch.setattr(_cli, "_changed_paths_vs_origin", _boom)
-    monkeypatch.setattr(_cli, "_list_agent_runners", list)
-    monkeypatch.setattr(_cli, "_quiesce_all_agents", lambda **_: True)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_update_preflight, "_changed_paths_vs_origin", _boom)
+    monkeypatch.setattr(_update_fanout, "_list_agent_runners", list)
+    monkeypatch.setattr(_update_quiesce, "_quiesce_all_agents", lambda **_: True)  # pyright: ignore[reportUnknownArgumentType]
 
     def _local(
         _repo: Path,
@@ -331,8 +360,8 @@ def test_classify_failure_falls_back_to_full_restart(monkeypatch: pytest.MonkeyP
         captured["pull"] = pull
         return 0
 
-    monkeypatch.setattr(_cli, "_run_gateway_local_update", _local)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_update_local, "_run_gateway_local_update", _local)  # pyright: ignore[reportUnknownArgumentType]
 
-    rc = _cli._run_gateway_orchestration(Path("/unused"), origin="test-origin")
+    rc = _up._run_gateway_orchestration(Path("/unused"), origin="test-origin")
     assert rc == 0
     assert captured["restart_frontend"] is True

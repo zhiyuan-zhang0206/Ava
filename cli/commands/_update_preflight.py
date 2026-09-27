@@ -16,9 +16,10 @@ rollout with the cluster untouched:
 - `_rollout_preflight` — classify the imminent change + pin the target; returns
   an early rc for the docs-only / frontend-only fast paths.
 
-Re-imported by `cli/commands/update.py` (and re-exported through `cli.commands`)
-so `cli.commands(.update)._changed_paths_vs_origin` / `._rollout_preflight` /
-`.git_pull_main` seams keep resolving for tests.
+Re-imported by `cli/commands/update.py` for its own use; the patch seam for
+tests is each name's own defining module — this module for
+`_changed_paths_vs_origin` / `._rollout_preflight`, `_update_git` for
+`git_pull_main`, `_update_fanout` for `_fan_out`.
 
 """
 
@@ -121,7 +122,8 @@ def _run_preflight_fetch(
     execution: its native agents may still have database connectivity. Failure
     aborts before anyone pauses or any schema change begins.
     """
-    import cli.commands as _ns
+    # Lazy so tests can monkeypatch `cli.commands._update_fanout._fan_out`.
+    from cli.commands._update_fanout import _fan_out
     from shared.config import settings
 
     if not agent_runners or restart_only:
@@ -133,7 +135,7 @@ def _run_preflight_fetch(
             "  central fetch (fetch_via_gateway): the gateway fetched GitHub; runners "
             "must fetch from the gateway source (a wall-source origin is refused)"
         )
-    fetch_results = _ns._fan_out(
+    fetch_results = _fan_out(
         agent_runners,
         "/api/cluster/fetch",
         _PREFLIGHT_FETCH_TIMEOUT_S,

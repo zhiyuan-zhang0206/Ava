@@ -6,9 +6,11 @@ named sessions. These tests cover the fork, the ensure/reconcile semantics,
 the readiness contract on the root's status surface, and the stop mapping —
 all against fakes: nothing here launches a real daemon.
 
-The conftest readiness guard stubs both waits at the `cli.commands` namespace;
-the unit tests below call the root wait directly (not through the guard's
-name), and the integration tests re-pin the names they assert on.
+The conftest readiness guard stubs both waits at their defining modules
+(`cli.commands._probe._wait_for_services_ready` /
+`cli.commands._root_driver._wait_for_root_services_ready`) — the same names
+this module's unit tests call directly and its integration tests re-pin — so
+the whole module opts out of the guard (`real_service_readiness_gate`).
 """
 
 from __future__ import annotations
@@ -27,6 +29,8 @@ from cli.commands._repo import ServiceSpec
 from cli.commands._session_lifecycle import LaunchOutcome
 from ops.service_spec import _GATEWAY
 from shared.exit_codes import SERVICES_NOT_READY_EXIT_CODE
+
+pytestmark = pytest.mark.real_service_readiness_gate
 
 
 def _spec(service: str) -> ServiceSpec:
@@ -533,11 +537,13 @@ def _stub_start_preconditions(monkeypatch: pytest.MonkeyPatch) -> None:
     import subprocess
 
     import shared.session_backend as _sb
+    from cli.commands import _converge, _setup
+    from cli.commands import _repo as _repo_mod
     from cli.commands import _session_lifecycle as _session_mod
     from cli.commands import start as _start_mod
 
     monkeypatch.setattr(
-        _cli,
+        _setup,
         "_collect_setup_values",
         lambda _a: (  # pyright: ignore[reportUnknownArgumentType]
             {
@@ -549,11 +555,11 @@ def _stub_start_preconditions(monkeypatch: pytest.MonkeyPatch) -> None:
             [],
         ),
     )
-    monkeypatch.setattr(_cli, "converge_host", lambda *_a, **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_register_machine_or_die", lambda _r, _role: 0)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_probe_gateway_or_die", lambda _url: 0)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_assert_schema_current_or_die", lambda: 0)
-    monkeypatch.setattr(_cli, "_roles_or_none", lambda: frozenset({"gateway"}))
+    monkeypatch.setattr(_converge, "converge_host", lambda *_a, **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_repo_mod, "_register_machine_or_die", lambda _r, _role: 0)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_repo_mod, "_probe_gateway_or_die", lambda _url: 0)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_repo_mod, "_assert_schema_current_or_die", lambda: 0)
+    monkeypatch.setattr(_repo_mod, "_roles_or_none", lambda: frozenset({"gateway"}))
     monkeypatch.setattr("shared.machine.machine_role", lambda: frozenset({"gateway"}))
     monkeypatch.setattr("shared.machine.gateway_api_base", lambda: "http://gw:8000")
     monkeypatch.setattr(_start_mod, "_ensure_gateway_data_plane", lambda: 0)
@@ -568,6 +574,9 @@ def _stub_start_preconditions(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_start_switch_off_uses_the_session_path(monkeypatch: pytest.MonkeyPatch) -> None:
+    from cli.commands import _probe
+    from cli.commands import _session_lifecycle as _session_mod
+
     _stub_start_preconditions(monkeypatch)
 
     session_calls: list[object] = []
@@ -576,14 +585,14 @@ def test_start_switch_off_uses_the_session_path(monkeypatch: pytest.MonkeyPatch)
         session_calls.append((roles, skip, repo))
         return LaunchOutcome((), ())
 
-    monkeypatch.setattr(_cli, "_launch_sessions", _fake_launch)
+    monkeypatch.setattr(_session_mod, "_launch_sessions", _fake_launch)
     monkeypatch.setattr(
-        _cli,
+        _root_mod,
         "_ensure_root_service_tree",
         lambda *_a, **_k: pytest.fail("the root path must not run with the switch off"),  # pyright: ignore[reportUnknownArgumentType]
     )
     monkeypatch.setattr(
-        _cli,
+        _probe,
         "_wait_for_services_ready",
         lambda *_a, **_k: ReadinessWait((), 0.0, sessions_gone=False),  # pyright: ignore[reportUnknownArgumentType]
     )
@@ -595,10 +604,12 @@ def test_start_switch_off_uses_the_session_path(monkeypatch: pytest.MonkeyPatch)
 
 
 def test_start_switch_on_uses_the_root_legs(monkeypatch: pytest.MonkeyPatch) -> None:
+    from cli.commands import _session_lifecycle as _session_mod
+
     _stub_start_preconditions(monkeypatch)
     from shared import launch_failures
 
-    monkeypatch.setattr(_cli, "_root_driven_enabled", lambda: True)
+    monkeypatch.setattr(_root_mod, "_root_driven_enabled", lambda: True)
     root_calls: list[dict[str, object]] = []
 
     def _fake_root(
@@ -607,15 +618,15 @@ def test_start_switch_on_uses_the_root_legs(monkeypatch: pytest.MonkeyPatch) -> 
         root_calls.append({"roster": roster_arg, "reconcile": reconcile})
         return LaunchOutcome(roster_arg, ("ava-gateway",))
 
-    monkeypatch.setattr(_cli, "_ensure_root_service_tree", _fake_root)
+    monkeypatch.setattr(_root_mod, "_ensure_root_service_tree", _fake_root)
     monkeypatch.setattr(
-        _cli,
+        _session_mod,
         "_launch_sessions",
         lambda *_a, **_k: pytest.fail("the session path must not run with the switch on"),  # pyright: ignore[reportUnknownArgumentType]
     )
     wait_calls: list[tuple[object, float]] = []
     monkeypatch.setattr(
-        _cli,
+        _root_mod,
         "_wait_for_root_services_ready",
         lambda specs, timeout_s: (  # pyright: ignore[reportUnknownArgumentType]
             wait_calls.append((specs, timeout_s)),  # pyright: ignore[reportUnknownArgumentType]

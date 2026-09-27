@@ -233,10 +233,9 @@ def _run_in_process(
         )
         return 2
 
-    import cli.commands as _ns
     from shared.machine import machine_name
 
-    return _ns._run_gateway_orchestration(
+    return _up_mod._run_gateway_orchestration(
         repo,
         restart_only=restart_only,
         origin=origin or f"cli:{machine_name()}",

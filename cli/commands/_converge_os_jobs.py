@@ -101,10 +101,10 @@ def ensure_watchdog_probe(ctx: ConvergeCtx) -> None:
     gateway-only host carries one job, an agent-runner-only host one, a single
     box two, and an unknown token none. Delegates to `shared.os_watchdog_probe`;
     idempotent either way."""
-    import cli.commands as _ns
+    from cli.commands import _root_driver
 
     carried = ctx.roles or frozenset()
-    if _ns._root_driven_enabled():
+    if _root_driver._root_driven_enabled():
         from shared.os_watchdog_probe import unregister_watchdog_probe
 
         for role in CAPABILITY_ORDER:
@@ -137,9 +137,9 @@ def ensure_hold_watchdog(_ctx: ConvergeCtx) -> None:
     wherever registration is forbidden too.
 
     Delegates to `shared.os_hold_watchdog`; idempotent either way."""
-    import cli.commands as _ns
+    from cli.commands import _root_driver
 
-    if _ns._root_driven_enabled():
+    if _root_driver._root_driven_enabled():
         from shared.os_hold_watchdog import unregister_hold_watchdog
 
         unregister_hold_watchdog()

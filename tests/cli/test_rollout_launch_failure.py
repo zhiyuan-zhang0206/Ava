@@ -32,7 +32,6 @@ from pathlib import Path
 
 import pytest
 
-import cli.commands as _cli
 from cli.commands import _update_recover as _rec
 from cli.commands import update as _up
 from cli.commands._repo import ServiceSpec
@@ -65,6 +64,8 @@ def test_transient_launch_failure_is_retried_once_and_recovers(
     """One failed `new-session` is not a verdict. The retry clears the name first,
     because a first attempt that failed after claiming it would make the second fail
     on the duplicate and bury the real cause."""
+    from cli.commands import _session_lifecycle as _session_mod
+
     attempts: list[str] = []
     killed: list[str] = []
 
@@ -72,12 +73,12 @@ def test_transient_launch_failure_is_retried_once_and_recovers(
         attempts.append(session)
         return len(attempts) > 1
 
-    monkeypatch.setattr(_cli, "_has_session", lambda _s: False)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_new_session", _new)
-    monkeypatch.setattr(_cli, "_kill_session", lambda s, **_kw: killed.append(s) or True)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_session_mod, "_has_session", lambda _s: False)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_session_mod, "_new_session", _new)
+    monkeypatch.setattr(_session_mod, "_kill_session", lambda s, **_kw: killed.append(s) or True)  # pyright: ignore[reportUnknownArgumentType]
     _roster(monkeypatch, "gateway")
 
-    launch = _cli._launch_sessions(frozenset({"gateway"}), set(), tmp_path)
+    launch = _session_mod._launch_sessions(frozenset({"gateway"}), set(), tmp_path)
 
     assert attempts == ["ava-gateway", "ava-gateway"]
     assert killed == ["ava-gateway"], "the retry must clear the name it is about to claim"
@@ -88,12 +89,14 @@ def test_persistent_launch_failure_is_returned_not_discarded(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys
 ) -> None:
     """Two refusals in a row is the answer, and it reaches the caller."""
-    monkeypatch.setattr(_cli, "_has_session", lambda _s: False)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_new_session", lambda *_a, **_kw: False)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_kill_session", lambda *_a, **_kw: True)  # pyright: ignore[reportUnknownArgumentType]
+    from cli.commands import _session_lifecycle as _session_mod
+
+    monkeypatch.setattr(_session_mod, "_has_session", lambda _s: False)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_session_mod, "_new_session", lambda *_a, **_kw: False)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_session_mod, "_kill_session", lambda *_a, **_kw: True)  # pyright: ignore[reportUnknownArgumentType]
     _roster(monkeypatch, "gateway", "labeler")
 
-    launch = _cli._launch_sessions(frozenset({"gateway"}), set(), tmp_path)
+    launch = _session_mod._launch_sessions(frozenset({"gateway"}), set(), tmp_path)
 
     assert launch.failed == ("ava-gateway", "ava-labeler")
     assert [s.session for s in launch.started] == ["gateway", "labeler"]
@@ -148,16 +151,22 @@ def test_restart_frontend_session_retries_before_giving_up(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """The fast path's own relaunch gets the same one retry the roster launch does."""
+    from cli.commands import _session_lifecycle as _session_mod
+
     attempts: list[str] = []
-    monkeypatch.setattr(_cli, "_graceful_kill_session", lambda *_a, **_kw: (True, "graceful"))  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_kill_session", lambda *_a, **_kw: True)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(
+        _session_mod,
+        "_graceful_kill_session",
+        lambda *_a, **_kw: (True, "graceful"),  # pyright: ignore[reportUnknownArgumentType]
+    )
+    monkeypatch.setattr(_session_mod, "_kill_session", lambda *_a, **_kw: True)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr("cli.commands._repo._ensure_frontend_deps", lambda _repo: None)  # pyright: ignore[reportUnknownArgumentType]
 
     def _new(session: str, _cmd: str, _cwd: Path, **_kw: object) -> bool:
         attempts.append(session)
         return len(attempts) > 1
 
-    monkeypatch.setattr(_cli, "_new_session", _new)
+    monkeypatch.setattr(_session_mod, "_new_session", _new)
 
     assert _up._restart_frontend_session(tmp_path) is True
     assert attempts == ["ava-frontend", "ava-frontend"]
@@ -192,20 +201,27 @@ def test_local_launch_failure_downgrades_the_rollout_without_aborting_it(
     The gateway landed and every agent-runner converged, so Phase B still has to run —
     aborting would leave the fleet on old code over one local session. What changes is
     the verdict: `INCOMPLETE`, rc 1, and the session named in the aftermath block."""
+    from cli.commands import (
+        _update_fanout,
+        _update_local,
+        _update_phase_b,
+        _update_preflight,
+        _update_quiesce,
+    )
     from shared import launch_failures
 
     monkeypatch.setattr(_up, "git_resolve_origin_main", lambda: "TARGETSHA")
     monkeypatch.setattr(_up, "acquire_update_lock", lambda _holder, **_kw: True)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_up, "release_update_lock", lambda _holder: None)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_up, "_vet_rollout_target", lambda _sha: None)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_changed_paths_vs_origin", lambda: ["gateway/app.py"])
-    monkeypatch.setattr(_cli, "_list_agent_runners", lambda: [("wsl", "http://unused")])
-    monkeypatch.setattr(_cli, "_quiesce_all_agents", lambda **_: True)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_update_preflight, "_changed_paths_vs_origin", lambda: ["gateway/app.py"])
+    monkeypatch.setattr(_update_fanout, "_list_agent_runners", lambda: [("wsl", "http://unused")])
+    monkeypatch.setattr(_update_quiesce, "_quiesce_all_agents", lambda **_: True)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_up, "_persist_cluster_pin", lambda *_a, **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(
-        _cli,
+        _update_phase_b,
         "_poll_until_unpaused",
-        lambda _hosts, **_unused: {"wsl": _cli.PollVerdict("ok")},  # pyright: ignore[reportUnknownArgumentType]
+        lambda _hosts, **_unused: {"wsl": _update_phase_b.PollVerdict("ok")},  # pyright: ignore[reportUnknownArgumentType]
     )
 
     fanned: list[str] = []
@@ -214,7 +230,7 @@ def test_local_launch_failure_downgrades_the_rollout_without_aborting_it(
         fanned.append(path)  # pyright: ignore[reportUnknownArgumentType]
         return [("wsl", "ok", "")]
 
-    monkeypatch.setattr(_cli, "_fan_out", _fan_out)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_update_fanout, "_fan_out", _fan_out)  # pyright: ignore[reportUnknownArgumentType]
 
     def _local(_repo: Path, **_kw: object) -> int:
         # what the child `ava start` left behind: the leg itself succeeded (rc 0),
@@ -222,9 +238,9 @@ def test_local_launch_failure_downgrades_the_rollout_without_aborting_it(
         launch_failures.record(["ava-frontend"])
         return 0
 
-    monkeypatch.setattr(_cli, "_run_gateway_local_update", _local)
+    monkeypatch.setattr(_update_local, "_run_gateway_local_update", _local)
 
-    rc = _cli._run_gateway_orchestration(Path("/unused"), origin="test-origin")
+    rc = _up._run_gateway_orchestration(Path("/unused"), origin="test-origin")
 
     assert rc == 1, "a rollout short a local service is not a clean rollout"
     assert "/api/cluster/update" in fanned, "Phase B must still run — the fleet needs the update"

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -29,20 +30,30 @@ def test_cmd_restart_succeeds_non_interactively(monkeypatch: pytest.MonkeyPatch)
     like cmd_start, it needs no tty."""
     import sys as _sys
 
+    from cli.commands import _start_readiness_preflight
+    from cli.commands import stop as stop_mod
+
     monkeypatch.setattr(_sys.stdin, "isatty", lambda: False)
     monkeypatch.setattr(
-        _cli.subprocess,
+        subprocess,
         "run",
         _git_aware(lambda *_a, **_kw: _FakeResult(returncode=0)),  # pyright: ignore[reportUnknownArgumentType]
     )
-    monkeypatch.setattr(_cli, "_do_stop", MagicMock(return_value=0))
-    monkeypatch.setattr(_cli, "_preflight_start_readiness", lambda *_a, **_k: 0)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(stop_mod, "_do_stop", MagicMock(return_value=0))
+    monkeypatch.setattr(
+        _start_readiness_preflight,
+        "preflight_start_readiness",
+        lambda *_a, **_k: 0,  # pyright: ignore[reportUnknownArgumentType]
+    )
     rc = _cli.cmd_restart()
     assert rc == 0
 
 
 def test_cmd_restart_calls_stop_then_start(monkeypatch: pytest.MonkeyPatch) -> None:
     """cmd_restart invokes stop (require_confirmation=False) then _cmd_start_body in order."""
+    from cli.commands import _start_readiness_preflight, start
+    from cli.commands import stop as stop_mod
+
     order: list[str] = []
 
     def fake_do_stop(
@@ -62,9 +73,13 @@ def test_cmd_restart_calls_stop_then_start(monkeypatch: pytest.MonkeyPatch) -> N
         order.append("start")
         return 0
 
-    monkeypatch.setattr(_cli, "_do_stop", fake_do_stop)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_cmd_start_body", fake_cmd_start_body)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_preflight_start_readiness", lambda *_a, **_k: 0)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(stop_mod, "_do_stop", fake_do_stop)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(start, "_cmd_start_body", fake_cmd_start_body)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(
+        _start_readiness_preflight,
+        "preflight_start_readiness",
+        lambda *_a, **_k: 0,  # pyright: ignore[reportUnknownArgumentType]
+    )
     rc = _cli.cmd_restart()
     assert order == ["stop", "start"]
     assert rc == 0
@@ -77,6 +92,8 @@ def test_cmd_restart_records_its_full_wall_time_as_an_updater_stage(
     ladder's first nested marker, which otherwise records only the preflight lead-in."""
     from contextlib import contextmanager
 
+    from cli.commands import _repo as _repo_mod
+    from cli.commands import _start_readiness_preflight, start
     from cli.commands import stop as stop_mod
 
     seen: list[str] = []
@@ -87,10 +104,14 @@ def test_cmd_restart_records_its_full_wall_time_as_an_updater_stage(
         yield
 
     monkeypatch.setattr(stop_mod, "updater_stage", _stage)
-    monkeypatch.setattr(_cli, "_preflight_probes", lambda: 0)
-    monkeypatch.setattr(_cli, "_preflight_start_readiness", lambda *_a, **_k: 0)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_do_stop", lambda *_args, **_kwargs: 0)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_cmd_start_body", lambda **_kwargs: 0)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_repo_mod, "_preflight_probes", lambda: 0)
+    monkeypatch.setattr(
+        _start_readiness_preflight,
+        "preflight_start_readiness",
+        lambda *_a, **_k: 0,  # pyright: ignore[reportUnknownArgumentType]
+    )
+    monkeypatch.setattr(stop_mod, "_do_stop", lambda *_args, **_kwargs: 0)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(start, "_cmd_start_body", lambda **_kwargs: 0)  # pyright: ignore[reportUnknownArgumentType]
 
     assert _cli.cmd_restart() == 0
     assert seen[0] == "restart"
@@ -101,12 +122,19 @@ def test_cmd_restart_finishes_the_journal_only_when_it_owns_it(
 ) -> None:
     """An outer operation's still-running journal is never closed by the nested
     restart — the owns_journal guard _temporary_stop keeps (task #2898)."""
+    from cli.commands import _repo as _repo_mod
+    from cli.commands import _start_readiness_preflight, start
+    from cli.commands import stop as stop_mod
     from shared import lifecycle_status
 
-    monkeypatch.setattr(_cli, "_preflight_probes", lambda: 0)
-    monkeypatch.setattr(_cli, "_preflight_start_readiness", lambda *_a, **_k: 0)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_do_stop", lambda *_args, **_kwargs: 0)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_cmd_start_body", lambda **_kwargs: 0)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_repo_mod, "_preflight_probes", lambda: 0)
+    monkeypatch.setattr(
+        _start_readiness_preflight,
+        "preflight_start_readiness",
+        lambda *_a, **_k: 0,  # pyright: ignore[reportUnknownArgumentType]
+    )
+    monkeypatch.setattr(stop_mod, "_do_stop", lambda *_args, **_kwargs: 0)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(start, "_cmd_start_body", lambda **_kwargs: 0)  # pyright: ignore[reportUnknownArgumentType]
     finished: list[int] = []
     monkeypatch.setattr(
         lifecycle_status,
@@ -133,10 +161,13 @@ def test_cmd_restart_finishes_the_journal_only_when_it_owns_it(
 
 def test_cmd_restart_short_circuits_on_stop_failure(monkeypatch: pytest.MonkeyPatch) -> None:
     """If stop returns non-zero, cmd_restart propagates without calling start."""
+    from cli.commands import start
+    from cli.commands import stop as stop_mod
+
     start_called: list[bool] = []
 
-    monkeypatch.setattr(_cli, "_do_stop", lambda *_a, **_kw: 1)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_cmd_start_body", lambda **_kw: start_called.append(True) or 0)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(stop_mod, "_do_stop", lambda *_a, **_kw: 1)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(start, "_cmd_start_body", lambda **_kw: start_called.append(True) or 0)  # pyright: ignore[reportUnknownArgumentType]
     rc = _cli.cmd_restart()
     assert rc == 1
     assert start_called == [], "start must not run when stop fails"
@@ -146,15 +177,18 @@ def test_cmd_restart_aborts_when_preflight_fails(monkeypatch: pytest.MonkeyPatch
     """When preflight probes fail, cmd_restart aborts without stopping — and says so
     with its OWN exit code, since "nothing was stopped, host still serving" is what
     the detached updater must not run `ava start` over."""
+    from cli.commands import _repo as _repo_mod
+    from cli.commands import start
+    from cli.commands import stop as stop_mod
     from shared.exit_codes import RESTART_DECLINED_EXIT_CODE
 
     stopped: list[bool] = []
     start_called: list[bool] = []
 
-    monkeypatch.setattr(_cli, "_preflight_probes", lambda: 1)  # simulate failure
-    monkeypatch.setattr(_cli, "_do_stop", lambda *_a, **_kw: stopped.append(True) or 0)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_cmd_start_body", lambda **_kw: start_called.append(True) or 0)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_release_self_heal_pause", lambda: None)
+    monkeypatch.setattr(_repo_mod, "_preflight_probes", lambda: 1)  # simulate failure
+    monkeypatch.setattr(stop_mod, "_do_stop", lambda *_a, **_kw: stopped.append(True) or 0)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(start, "_cmd_start_body", lambda **_kw: start_called.append(True) or 0)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(stop_mod, "_release_self_heal_pause", lambda: None)
 
     rc = _cli.cmd_restart()
     assert rc == RESTART_DECLINED_EXIT_CODE, "preflight failure must propagate non-zero"
@@ -168,6 +202,9 @@ def test_cmd_restart_aborts_when_start_readiness_fails(monkeypatch: pytest.Monke
     probes gate, with stop and start neither run. The gate is called with
     `check_launcher=False`: this start is in-process and never execs
     `.venv/bin/ava`."""
+    from cli.commands import _repo as _repo_mod
+    from cli.commands import _start_readiness_preflight, start
+    from cli.commands import stop as stop_mod
     from shared.exit_codes import RESTART_DECLINED_EXIT_CODE
 
     stopped: list[bool] = []
@@ -178,11 +215,11 @@ def test_cmd_restart_aborts_when_start_readiness_fails(monkeypatch: pytest.Monke
         gate_calls.append(kwargs)
         return 1
 
-    monkeypatch.setattr(_cli, "_preflight_probes", lambda: 0)
-    monkeypatch.setattr(_cli, "_preflight_start_readiness", _gate)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_do_stop", lambda *_a, **_kw: stopped.append(True) or 0)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_cmd_start_body", lambda **_kw: start_called.append(True) or 0)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_release_self_heal_pause", lambda: None)
+    monkeypatch.setattr(_repo_mod, "_preflight_probes", lambda: 0)
+    monkeypatch.setattr(_start_readiness_preflight, "preflight_start_readiness", _gate)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(stop_mod, "_do_stop", lambda *_a, **_kw: stopped.append(True) or 0)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(start, "_cmd_start_body", lambda **_kw: start_called.append(True) or 0)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(stop_mod, "_release_self_heal_pause", lambda: None)
 
     rc = _cli.cmd_restart()
 
@@ -199,13 +236,15 @@ def test_cmd_restart_aborts_when_start_readiness_fails(monkeypatch: pytest.Monke
 
 def test_stop_aborts_on_no(monkeypatch: pytest.MonkeyPatch) -> None:
     """stdin input not y → abort, no kill / down commands called."""
-    monkeypatch.setattr(_cli, "_has_session", lambda _s: False)  # pyright: ignore[reportUnknownArgumentType]
+    from cli.commands import _session_lifecycle
+
+    monkeypatch.setattr(_session_lifecycle, "_has_session", lambda _s: False)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr("builtins.input", lambda _prompt: "n")  # pyright: ignore[reportUnknownArgumentType]
 
     def fake_run(args, **_kwargs):
         raise AssertionError(f"subprocess.run should not be called: {args}")
 
-    monkeypatch.setattr(_cli.subprocess, "run", fake_run)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(subprocess, "run", fake_run)  # pyright: ignore[reportUnknownArgumentType]
     rc = _cli.cmd_stop(force=True)
     assert rc == 0
 
@@ -215,10 +254,12 @@ def test_stop_proceeds_on_yes(
     _fake_session_backends: tuple[_FakeSessionBackend, _FakeSessionBackend],
 ) -> None:
     """stdin y → call the session kill (both backends) + stop shared pg/redis."""
+    from cli.commands import _session_lifecycle
+
     gateway_sess = _sess("gateway")
     service, _shell = _fake_session_backends
     service.alive.add(gateway_sess)
-    monkeypatch.setattr(_cli, "_has_session", lambda s: s == gateway_sess)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_session_lifecycle, "_has_session", lambda s: s == gateway_sess)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr("builtins.input", lambda _prompt: "y")  # pyright: ignore[reportUnknownArgumentType]
 
     # This cluster's own pg/redis teardown lives behind `stop_cluster_instance`
@@ -300,11 +341,14 @@ def test_do_stop_keep_infra_skips_infra_teardown(
     apply_pending_migrations would immediately get connect refused (verified in
     2026-05-19 prod incident).
     """
+    from cli.commands import _repo as _repo_mod
+    from cli.commands import _session_lifecycle
+
     gateway_sess = _sess("gateway")
     service, _shell = _fake_session_backends
     service.alive.add(gateway_sess)
-    monkeypatch.setattr(_cli, "_has_session", lambda s: s == gateway_sess)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_roles_or_none", lambda: frozenset({"gateway"}))
+    monkeypatch.setattr(_session_lifecycle, "_has_session", lambda s: s == gateway_sess)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_repo_mod, "_roles_or_none", lambda: frozenset({"gateway"}))
 
     infra_stops: list[int] = []
     monkeypatch.setattr(
@@ -324,15 +368,23 @@ def test_do_stop_keep_infra_skips_infra_teardown(
 def test_do_stop_keeps_browser_by_default(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """An in-place stop / update leaves the headed browser session running so the
     login Chrome is not bounced (keep_browser defaults True)."""
-    monkeypatch.setattr(_cli, "_roles_or_none", lambda: frozenset({"gateway", "agent-runner"}))
-    monkeypatch.setattr(_cli, "_has_session", lambda _s: True)  # pyright: ignore[reportUnknownArgumentType]
+    from cli.commands import _repo as _repo_mod
+    from cli.commands import _session_lifecycle
+    from cli.commands import stop as stop_mod
+
+    monkeypatch.setattr(_repo_mod, "_roles_or_none", lambda: frozenset({"gateway", "agent-runner"}))
+    monkeypatch.setattr(_session_lifecycle, "_has_session", lambda _s: True)  # pyright: ignore[reportUnknownArgumentType]
     killed: list[str] = []
-    monkeypatch.setattr(_cli, "_kill_session", lambda s, **_kw: killed.append(s) or True)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(
+        _session_lifecycle,
+        "_kill_session",
+        lambda s, **_kw: killed.append(s) or True,  # pyright: ignore[reportUnknownArgumentType]
+    )
 
     monkeypatch.setattr("cli.commands.cluster_instance.stop_cluster_instance", lambda: 0)
 
     reaps: list[int] = []
-    monkeypatch.setattr(_cli, "_reap_cluster_chrome", lambda: reaps.append(1))
+    monkeypatch.setattr(stop_mod, "_reap_cluster_chrome", lambda: reaps.append(1))
 
     rc = _force_stop(tmp_path, require_confirmation=False)
     assert rc == 0
@@ -346,16 +398,28 @@ def test_do_stop_stop_browser_kills_it(monkeypatch: pytest.MonkeyPatch, tmp_path
     session down too, AND sweeps a Chrome that left that session on a SingletonLock
     handoff — a destroyed cluster must not leave an orphan headed Chrome holding
     the cluster's CDP port."""
-    monkeypatch.setattr(_cli, "_roles_or_none", lambda: frozenset({"gateway", "agent-runner"}))
-    monkeypatch.setattr(_cli, "_has_session", lambda _s: True)  # pyright: ignore[reportUnknownArgumentType]
+    from cli.commands import _repo as _repo_mod
+    from cli.commands import _session_lifecycle
+    from cli.commands import stop as stop_mod
+
+    monkeypatch.setattr(_repo_mod, "_roles_or_none", lambda: frozenset({"gateway", "agent-runner"}))
+    monkeypatch.setattr(_session_lifecycle, "_has_session", lambda _s: True)  # pyright: ignore[reportUnknownArgumentType]
     killed: list[str] = []
-    monkeypatch.setattr(_cli, "_kill_session", lambda s, **_kw: killed.append(s) or True)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(
+        _session_lifecycle,
+        "_kill_session",
+        lambda s, **_kw: killed.append(s) or True,  # pyright: ignore[reportUnknownArgumentType]
+    )
 
     monkeypatch.setattr("cli.commands.cluster_instance.stop_cluster_instance", lambda: 0)
 
     order: list[str] = []
-    monkeypatch.setattr(_cli, "_kill_session", lambda s, **_kw: (killed.append(s), order.append(s)))  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_reap_cluster_chrome", lambda: order.append("reap"))
+    monkeypatch.setattr(
+        _session_lifecycle,
+        "_kill_session",
+        lambda s, **_kw: (killed.append(s), order.append(s)),  # pyright: ignore[reportUnknownArgumentType]
+    )
+    monkeypatch.setattr(stop_mod, "_reap_cluster_chrome", lambda: order.append("reap"))
 
     rc = _force_stop(tmp_path, require_confirmation=False, keep_browser=False)
     assert rc == 0
@@ -415,8 +479,10 @@ def test_cmd_stop_stop_browser_flag_threads_through(
 
 def test_graceful_kill_session_noop_when_missing(monkeypatch: pytest.MonkeyPatch) -> None:
     """session does not exist → (True, 'noop'), idempotent."""
-    monkeypatch.setattr(_cli, "_has_session", lambda _s: False)  # pyright: ignore[reportUnknownArgumentType]
-    ok, mode = _cli._graceful_kill_session("ava-missing", timeout_s=0.5)
+    from cli.commands import _session_lifecycle
+
+    monkeypatch.setattr(_session_lifecycle, "_has_session", lambda _s: False)  # pyright: ignore[reportUnknownArgumentType]
+    ok, mode = _session_lifecycle._graceful_kill_session("ava-missing", timeout_s=0.5)
     assert ok
     assert mode == "noop"
 
@@ -427,11 +493,13 @@ def test_graceful_kill_session_forwards_to_the_backend(
 ) -> None:
     """The cli seam forwards a graceful kill to the service backend and reports
     its mode."""
+    from cli.commands import _session_lifecycle
+
     service, _shell = _fake_session_backends
     # noop precheck (cli layer) sees the session alive → proceed to the graceful kill
-    monkeypatch.setattr(_cli, "_has_session", lambda _s: True)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_session_lifecycle, "_has_session", lambda _s: True)  # pyright: ignore[reportUnknownArgumentType]
 
-    ok, mode = _cli._graceful_kill_session("ava-gateway", timeout_s=10.0)
+    ok, mode = _session_lifecycle._graceful_kill_session("ava-gateway", timeout_s=10.0)
     assert ok
     assert mode == "graceful"
     assert ("ava-gateway", True) in service.killed
@@ -443,11 +511,13 @@ def test_graceful_kill_session_forced_fallback_is_reported(
 ) -> None:
     """The backend's graceful-then-force escalation is surfaced as (True, 'forced')
     — the cli seam passes the mode through, it does not decide it."""
+    from cli.commands import _session_lifecycle
+
     service, _shell = _fake_session_backends
     service.graceful_result = (True, "forced")
-    monkeypatch.setattr(_cli, "_has_session", lambda _s: True)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_session_lifecycle, "_has_session", lambda _s: True)  # pyright: ignore[reportUnknownArgumentType]
 
-    ok, mode = _cli._graceful_kill_session("ava-gateway", timeout_s=0.01)
+    ok, mode = _session_lifecycle._graceful_kill_session("ava-gateway", timeout_s=0.01)
     assert ok
     assert mode == "forced"
     assert ("ava-gateway", True) in service.killed
@@ -473,9 +543,10 @@ def test_force_stop_ends_controllers_before_dependents(
 def test_stop_sessions_force_path_reports_failure(monkeypatch, capsys) -> None:
     """The explicit force path (`ava stop --force`) also stops printing ✓ for a kill that was
     not confirmed: `_kill_session` answering False is ✗."""
+    from cli.commands import _session_lifecycle
     from cli.commands.stop import _stop_sessions
 
-    monkeypatch.setattr(_cli, "_kill_session", lambda _s, **_kw: False)  # pyright: ignore[reportUnknownMemberType]
+    monkeypatch.setattr(_session_lifecycle, "_kill_session", lambda _s, **_kw: False)  # pyright: ignore[reportUnknownMemberType]
 
     with pytest.raises(RuntimeError, match="force stop"):
         _stop_sessions(["ava-gateway"])
@@ -523,8 +594,11 @@ def test_stop_scope_is_empty_when_no_session_on_either_backend(
 def _patch_stop_teardown(monkeypatch: pytest.MonkeyPatch, events: list[str]) -> None:
     """Run the real `_do_stop` with its side effects stubbed: no live sessions
     to kill, gateway-role host, data-plane teardown recorded into `events`."""
-    monkeypatch.setattr(_cli, "_has_session", lambda _s: False)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_roles_or_none", lambda: frozenset({"gateway", "agent-runner"}))
+    from cli.commands import _repo as _repo_mod
+    from cli.commands import _session_lifecycle
+
+    monkeypatch.setattr(_session_lifecycle, "_has_session", lambda _s: False)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_repo_mod, "_roles_or_none", lambda: frozenset({"gateway", "agent-runner"}))
     monkeypatch.setattr("cli.commands.stop._repo_root", lambda: Path("/repo"))
     monkeypatch.setattr(
         "cli.commands.cluster_instance.stop_cluster_instance",

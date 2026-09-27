@@ -7,7 +7,7 @@ from typing import cast
 
 import pytest
 
-from cli import commands as _cli
+from cli.commands import _repo
 from cli.commands._setup import SetupValues
 from tests.cli._commands_helpers import _fake_session_backends as _fake_session_backends
 from tests.cli._commands_helpers import _hermetic_gateway_base as _hermetic_gateway_base
@@ -17,9 +17,11 @@ from tests.cli._commands_helpers import _real_register_machine_or_die
 # ─── probe gateway via HTTP, not relying on pidfile ───────────────────────────────────
 
 
-def _spec_by_service(service: str) -> _cli.ServiceSpec:
+def _spec_by_service(service: str) -> _repo.ServiceSpec:
     """Look up a ServiceSpec by bare service name."""
-    for spec in _cli.build_services():
+    from cli.commands import _repo
+
+    for spec in _repo.build_services():
         if spec.session == service:
             return spec
     raise AssertionError(f"no ServiceSpec service={service!r}")
@@ -44,9 +46,11 @@ def test_probe_gateway_takes_the_identity_path(monkeypatch: pytest.MonkeyPatch) 
     The gateway declares one (`probe_home` — 2xx AND this unit's `$AVA_HOME`), so
     the operator surface and the watchdog ask the same question of the same port.
     A plain 2xx would still be satisfied by another cluster's gateway."""
+    from cli.commands import _probe
+
     spec = _spec_by_service("gateway")
     monkeypatch.setattr(
-        _cli,
+        _probe,
         "_curl_ok",
         lambda _u: pytest.fail("gateway must not fall back to a bare 2xx"),  # pyright: ignore[reportUnknownArgumentType]
     )
@@ -56,7 +60,7 @@ def test_probe_gateway_takes_the_identity_path(monkeypatch: pytest.MonkeyPatch) 
         "shared.daemon_health._probe_home",
         lambda *_a, **_kw: DaemonProbe.up("home /x"),  # pyright: ignore[reportUnknownArgumentType]
     )
-    probe = _cli._probe_service(spec)
+    probe = _probe._probe_service(spec)
     assert probe.alive is True
     assert probe.label == "identity"
 
@@ -65,6 +69,8 @@ def test_probe_gateway_reports_which_fact_failed(monkeypatch: pytest.MonkeyPatch
     """A ✗ carries the reason. "down" and "answering, but it is another cluster's
     home" call for completely different actions, and this row is where an operator
     learns which one they have."""
+    from cli.commands import _probe
+
     spec = _spec_by_service("gateway")
     from shared.daemon_health import DaemonProbe
 
@@ -72,7 +78,7 @@ def test_probe_gateway_reports_which_fact_failed(monkeypatch: pytest.MonkeyPatch
         "shared.daemon_health._probe_home",
         lambda *_a, **_kw: DaemonProbe.port_taken("identity mismatch: home='/home/ava/.ava'"),  # pyright: ignore[reportUnknownArgumentType]
     )
-    probe = _cli._probe_service(spec)
+    probe = _probe._probe_service(spec)
     assert probe.alive is False
     assert "/home/ava/.ava" in probe.detail
 
@@ -87,11 +93,13 @@ def test_probe_survives_an_identity_probe_that_raises() -> None:
     cost that plugin's row and nothing else."""
     import dataclasses
 
+    from cli.commands import _probe
+
     def _boom() -> object:
         raise RuntimeError("no socket for you")
 
     spec = dataclasses.replace(_spec_by_service("gateway"), identity_probe=_boom)
-    probe = _cli._probe_service(spec)
+    probe = _probe._probe_service(spec)
     assert probe.alive is False
     assert probe.label == "identity"
     # The type AND the message: "the probe is broken" and "the daemon is down" are

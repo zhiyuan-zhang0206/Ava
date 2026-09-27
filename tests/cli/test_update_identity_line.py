@@ -40,7 +40,7 @@ def runner_env(monkeypatch: pytest.MonkeyPatch) -> None:
     """
     monkeypatch.setattr(_update, "_repo_root", lambda: _REPO)
     monkeypatch.setattr(_update, "ava_home", lambda: _HOME)
-    monkeypatch.setattr(_cli, "_run_gateway_orchestration", lambda *_a, **_kw: 0)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_update, "_run_gateway_orchestration", lambda *_a, **_kw: 0)  # pyright: ignore[reportUnknownArgumentType]
 
 
 def test_identity_line_prints_home_and_registry_name(
