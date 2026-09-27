@@ -485,3 +485,56 @@ def test_observation_refuses_a_surviving_fenced_session(born: Born, release: Req
         with pytest.raises(authority.AuthorityRefusedError, match="sessions of fenced roles"):
             maintenance_data_plane.verify_write_generation(1, digest)
         assert lingering.execute("SELECT 1").fetchone() == (1,)  # observed, never terminated
+
+
+def test_preview_stale_writer_probe_proves_the_fence(born: Born, release: Request) -> None:
+    """The preview A/B/A's probe (scripts/preview/release_generation.py) on a real
+    fence: a writer outside root custody holding generation 0 is terminated, its
+    transaction aborts, it never commits again, and every generation-0 login is
+    refused over TCP, the owner-only socket and the pooler."""
+    from scripts.preview import release_generation
+
+    run = born.home.parent
+    (run / "config.json").write_text(
+        json.dumps({"ports": {"postgres": born.pg_port, "pgbouncer": born.pooler_port}})
+    )
+    context = release_generation.Context(run)
+    fenced_logins = _logins(born)
+    try:
+        release_generation.capture(context, "ab")
+        assert (run / "generation-ab.json").stat().st_mode & 0o077 == 0
+        release_generation.probe(context, "ab")
+        _fence(release)
+        _authorize(release, _CANDIDATE)
+        release_generation.fenced(context, "ab")
+    finally:
+        release_generation.stop(context, "all")
+    report = json.loads((run / "fence-ab.json").read_text())
+    assert report["result"] == "passed" and report["generation"] == 0
+    assert report["probe"]["held_transaction"] == "aborted"
+    assert report["probe"]["refused_reconnects"] >= 1
+    assert sorted(report["refused"]) == sorted(
+        f"{cls}/{route}" for cls in ("gateway", "runner") for route in ("tcp", "socket", "pooler")
+    )
+    assert not (run / "generation-ab.json").exists()
+    written = (run / "fence-ab.json").read_text() + (run / "stale-writer-ab.jsonl").read_text()
+    assert all(login.password not in written for login in fenced_logins.values())
+
+
+def test_preview_observer_reads_stored_agents_as_the_administrator_across_rotations(
+    born: Born, release: Request
+) -> None:
+    """The preview observer runs from the source checkout, which is not the
+    admitted runtime once a release image is selected: it reads the retained
+    agents over the owner-only socket, before and after a rotation."""
+    from scripts.preview import linux_observer
+
+    run = born.home.parent
+    ports = {"postgres": born.pg_port, "pgbouncer": born.pooler_port}
+    with psycopg.connect(born.dsn("gateway"), prepare_threshold=None, autocommit=True) as conn:
+        conn.execute("INSERT INTO agents (id) VALUES (950001)")
+    (run / "smoke-release-a.json").write_text(json.dumps({"agent": 950001}))
+    assert linux_observer._stored_agents(run, ports) == [950001]
+    _fence(release)
+    _authorize(release, _CANDIDATE)
+    assert linux_observer._stored_agents(run, ports) == [950001]

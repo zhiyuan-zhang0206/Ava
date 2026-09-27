@@ -23,6 +23,7 @@ from urllib.parse import urlsplit
 import psutil
 from dotenv import dotenv_values
 
+from scripts.preview import release_generation
 from scripts.preview.linux_runtime import ExpectedRuntime, environment_digest, expected_runtime
 from scripts.preview.linux_terminals import (
     observe_terminals,
@@ -165,20 +166,21 @@ def _data_births(home: Path, ports: dict[str, int]) -> Births:
 
 
 def _stored_agents(run: Path, ports: dict[str, int]) -> list[int]:
-    import psycopg
+    from psycopg.conninfo import make_conninfo
 
-    from shared.config import settings
+    from shared.pg_admin import connect, pg_admin_url
 
     agents = sorted(
         {int(json.loads(path.read_text())["agent"]) for path in run.glob("smoke-*.json")}
     )
-    _require_private_endpoint(settings.data_plane.db_url, ports["pgbouncer"])
-    with psycopg.connect(
-        settings.data_plane.db_url,
-        connect_timeout=5,
-    ) as connection:
-        # PgBouncer ignores libpq options. Set the transaction posture on the
-        # actual borrowed backend; the deadline disappears with this transaction.
+    # The OS-user administrator over the owner-only socket (peer): once a
+    # release image is selected, this source checkout is not the home's
+    # admitted runtime and receives no write-generation login.
+    url = make_conninfo(
+        pg_admin_url(ports["postgres"]), dbname=release_generation.Context(run).database()
+    )
+    with connect(url, expected_data_dir=run / "home" / "pg", connect_timeout=5) as connection:
+        # A read-only transaction with its own deadline, gone with it.
         connection.read_only = True
         connection.execute("SET LOCAL statement_timeout = '5s'")
         present = [
@@ -326,6 +328,7 @@ def _observe_running(
     observe_terminals(home, result)
     result["data_births"] = _data_births(home, ports)
     result["stored_agents"] = _stored_agents(run, ports)
+    result["write_generation"] = release_generation.observe(home)
     _require(
         result["registry_contains_home"] and result["hashes"]["source/.ava_home"],
         "running preview lost its registry or checkout pointer",

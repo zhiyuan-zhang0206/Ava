@@ -236,14 +236,16 @@ executor dials the owner-only socket as the administrator acting as the
 gateway group
 ([release execution](../../cli/release_transition/execution.ava.okf.md#write-generations)).
 A recovery fences the failed candidate's generation before the predecessor
-gets a new one.
+gets a new one. The Linux preview's release A/B/A records the generation
+sequence and proves each fence with a stale writer outside root custody
+(`scripts/preview/release_generation.py`).
 
-Remaining: a release A/B/A on real images in the disposable Linux preview
-recording the generation sequence, old-login refusal and a stale-writer probe;
-the coordinator listener on the reserved port, the handoff's `receipt` and
-`preflight` entries, and the automated per-operation capability exchange,
-without which networked rollouts keep refusing; per-generation API machine
-tokens and runners that stop holding the human bearer.
+Remaining: running that A/B/A on real images in a disposable Linux preview,
+plus a candidate-failure variant; the coordinator listener on the reserved
+port, the handoff's `receipt` and `preflight` entries, and the automated
+per-operation capability exchange, without which networked rollouts keep
+refusing; per-generation API machine tokens and runners that stop holding the
+human bearer.
 
 ## Remaining: qualify PITR custody and restart recovery
 

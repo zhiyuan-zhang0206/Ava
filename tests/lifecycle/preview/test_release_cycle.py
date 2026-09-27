@@ -95,14 +95,19 @@ def test_transition_requires_closed_success_before_retirement_and_immediate_smok
 
     def observe(_label: str, **_kwargs: object) -> dict[str, Any]:
         events.append("observe")
-        return {}
+        return {"write_generation": {"number": 1}}
 
     monkeypatch.setattr(cycle, "adapter", adapter)
+
+    def generation(action: str, _label: str) -> None:
+        events.append(f"generation-{action}")
+
+    monkeypatch.setattr(cycle, "generation", generation)
 
     def smoke(_label: str) -> None:
         events.append("smoke")
 
-    def preserved(*_args: object) -> None:
+    def preserved(*_args: object, **_kwargs: object) -> None:
         pass
 
     monkeypatch.setattr(cycle, "smoke", smoke)
@@ -111,13 +116,16 @@ def test_transition_requires_closed_success_before_retirement_and_immediate_smok
     if failed_wait:
         with pytest.raises(RuntimeError, match="executor failed"):
             cycle.transition("ab", "b", {})
-        assert events == ["submit", "wait"]
+        assert events == ["generation-capture", "generation-probe", "submit", "wait"]
     else:
-        cycle.transition("ab", "b", {})
+        cycle.transition("ab", "b", {"write_generation": {}})
         assert events == [
+            "generation-capture",
+            "generation-probe",
             "submit",
             "wait",
             "closed",
+            "generation-fenced",
             "smoke",
             "submit",
             "retired",
@@ -176,32 +184,78 @@ def test_each_command_rebuilds_its_clean_environment(
     assert observations[0]["AVA_HOME"] == str(cycle.preview.home)
 
 
+def _birth(pid: int) -> dict[str, int]:
+    return {"pid": pid, "birth": pid, "starttime": pid * 10}
+
+
+_GENERATION: dict[str, Any] = {
+    "number": 3,
+    "credential_digest": "d" * 64,
+    "roles": ["ava_g3_gateway"],
+}
+
+
 @pytest.mark.parametrize(
-    "changed", [None, "ports", "hashes", "data_births", "births", "service_path"]
+    "changed",
+    [None, "ports", "hashes", "data_births", "pooler", "births", "service_path", "generation"],
 )
+@pytest.mark.parametrize("fenced", [False, True])
 def test_image_replacement_keeps_home_state_and_data_but_replaces_app_births(
-    changed: str | None,
+    changed: str | None, *, fenced: bool
 ) -> None:
-    before = {
+    """PostgreSQL and Redis survive every release; the pooler and the write
+    generation are replaced exactly when the release fenced, never otherwise."""
+    data = {"postgres": _birth(2), "redis": _birth(3), "pgbouncer": _birth(4)}
+    before: dict[str, Any] = {
         "ports": {"gateway": 5000},
         "hashes": {"home/.env": "same"},
-        "data_births": {"postgres": {"pid": 2, "birth": 1, "starttime": 10}},
-        "births": {"root": {"pid": 4, "birth": 1, "starttime": 11}},
+        "data_births": data,
+        "births": {"root": _birth(5)},
         "service_path": {"declared": "/usr/bin", "root_path": "/A/bin:/usr/bin"},
+        "write_generation": _GENERATION,
     }
-    after = before | {
-        "births": {"root": {"pid": 5, "birth": 2, "starttime": 20}},
+    advanced: dict[str, Any] = {
+        "number": 4,
+        "credential_digest": "e" * 64,
+        "roles": ["ava_g4_gateway"],
+    }
+    after: dict[str, Any] = before | {
+        "births": {"root": _birth(6)},
         "service_path": {"declared": "/usr/bin", "root_path": "/B/bin:/usr/bin"},
+        "data_births": data | {"pgbouncer": _birth(7)} if fenced else data,
+        "write_generation": advanced if fenced else _GENERATION,
     }
     if changed == "births":
-        after[changed] = before[changed]
+        after["births"] = before["births"]
+    elif changed == "data_births":
+        after["data_births"] = after["data_births"] | {"postgres": _birth(8)}
+    elif changed == "pooler":
+        # A kept pooler across a fence, or a replaced one without a release.
+        after["data_births"] = data if fenced else data | {"pgbouncer": _birth(9)}
+    elif changed == "generation":
+        after["write_generation"] = _GENERATION if fenced else advanced
     elif changed is not None:
         after[changed] = {"declared": "wrong"} if changed == "service_path" else {"wrong": 0}
     if changed:
         with pytest.raises(RuntimeError):
-            release_cycle.ReleaseCycle.preserved(before, after)
+            release_cycle.ReleaseCycle.preserved(before, after, fenced=fenced)
     else:
-        release_cycle.ReleaseCycle.preserved(before, after)
+        release_cycle.ReleaseCycle.preserved(before, after, fenced=fenced)
+
+
+@pytest.mark.parametrize(
+    "after",
+    [
+        {"number": 5, "credential_digest": "e" * 64, "roles": ["ava_g5_gateway"]},
+        {"number": 4, "credential_digest": "d" * 64, "roles": ["ava_g4_gateway"]},
+        {"number": 4, "credential_digest": "e" * 64, "roles": ["ava_g3_gateway"]},
+    ],
+)
+def test_a_release_admits_exactly_the_next_generation_with_new_logins(
+    after: dict[str, Any],
+) -> None:
+    with pytest.raises(RuntimeError, match="next write generation"):
+        release_cycle.write_generations(_GENERATION, after, fenced=True)
 
 
 def test_prior_app_survivor_blocks_new_smoke_before_retirement(
@@ -217,8 +271,13 @@ def test_prior_app_survivor_blocks_new_smoke_before_retirement(
     def smoke(_label: str) -> None:
         pytest.fail("new workload must not precede prior app closure")
 
+    def generation(action: str, _label: str) -> None:
+        events.append(f"generation-{action}")
+
     monkeypatch.setattr(cycle, "adapter", action)
+    monkeypatch.setattr(cycle, "generation", generation)
     monkeypatch.setattr(cycle, "smoke", smoke)
     with pytest.raises(RuntimeError, match="prior app"):
         cycle.transition("ab", "b", {})
-    assert events == ["submit", "wait", "closed"]
+    # The fence evidence is never judged while the prior application lives.
+    assert events == ["generation-capture", "generation-probe", "submit", "wait", "closed"]

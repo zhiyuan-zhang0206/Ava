@@ -53,6 +53,25 @@ class CapturedReceipt:
             raise RuntimeError("captured preparation receipt changed before effect preflight")
 
 
+def _data(observation: dict[str, Any], names: tuple[str, ...]) -> dict[str, Any]:
+    return {"data_births": {name: observation["data_births"][name] for name in names}}
+
+
+def write_generations(before: dict[str, Any], after: dict[str, Any], *, fenced: bool) -> None:
+    """A release admits the next write generation with new logins and
+    credentials; anything else keeps the observed generation exactly."""
+    if not fenced:
+        if after != before:
+            raise RuntimeError(f"write generation changed without a release: {before} -> {after}")
+        return
+    if (
+        after["number"] != before["number"] + 1
+        or after["credential_digest"] == before["credential_digest"]
+        or set(after["roles"]) & set(before["roles"])
+    ):
+        raise RuntimeError(f"a release must admit the next write generation: {before} -> {after}")
+
+
 class ReleaseCycle:
     def __init__(
         self, preview: local.Preview, previous: CapturedReceipt, candidate: CapturedReceipt
@@ -83,6 +102,9 @@ class ReleaseCycle:
                 "production",
             ],
             "phases": {},
+            # Source birth and image adoption keep generation n; A->B admits
+            # n+1, B->A n+2 (non-secret identities only).
+            "write_generations": {},
             "effects_started": False,
             "result": "running",
         }
@@ -129,6 +151,21 @@ class ReleaseCycle:
 
     def cli(self, name: str, args: list[str]) -> None:
         self.command(name, [self.python, "-m", "cli.main", *args])
+
+    def generation(self, action: str, label: str) -> None:
+        """Write-generation evidence (scripts/preview/release_generation.py)."""
+        self.command(
+            f"generation-{action}-{label}",
+            [
+                self.python,
+                "-m",
+                "scripts.preview.release_generation",
+                str(self.preview.run),
+                action,
+                "--label",
+                label,
+            ],
+        )
 
     def observe(
         self, label: str, *, receipt: Path | None = None, destroyed: bool = False
@@ -197,11 +234,12 @@ class ReleaseCycle:
         local.write_json(self.path, self.proof)
         self.adapter("freeze", "--label", "source")
         observed = self.observe("release-source")
+        self.proof["write_generations"]["source"] = observed["write_generation"]
         self.adapter("capture", "--label", "source")
         return observed
 
     @staticmethod
-    def preserved(first: dict[str, Any], second: dict[str, Any]) -> None:
+    def preserved(first: dict[str, Any], second: dict[str, Any], *, fenced: bool = False) -> None:
         # PATH's runtime prefix must change with the image. The observer checks
         # that exact new prefix; immutable home/configuration hashes cannot change.
         for field in ("ports", "hashes"):
@@ -209,8 +247,12 @@ class ReleaseCycle:
                 raise RuntimeError(f"release transition changed {field}")
         if first["service_path"]["declared"] != second["service_path"]["declared"]:
             raise RuntimeError("release transition changed the admitted host PATH")
-        births(first, second, "data_births", same=True)
+        # PostgreSQL and Redis survive every release. A release's write-generation
+        # fence replaces the pooler (a reload never revokes); adoption keeps it.
+        for names, same in ((("postgres", "redis"), True), (("pgbouncer",), not fenced)):
+            births(_data(first, names), _data(second, names), "data_births", same=same)
         births(first, second, "births", same=False)
+        write_generations(first["write_generation"], second["write_generation"], fenced=fenced)
 
     def image_a(self, initial: dict[str, Any]) -> dict[str, Any]:
         self.cli("release-source-stop", ["stop", "-y", "--stop-browser", "--keep-infra"])
@@ -224,15 +266,21 @@ class ReleaseCycle:
         self.smoke("a")
         observed = self.observe("release-a", receipt=self.previous)
         self.preserved(initial, observed)
+        self.proof["write_generations"]["a"] = observed["write_generation"]
         self.adapter("state", "--label", "a")
         self.adapter("freeze", "--label", "a")
         self.adapter("capture", "--label", "a")
         return observed
 
     def transition(self, label: str, target: str, previous: dict[str, Any]) -> dict[str, Any]:
+        # The generation this release fences, and a stale writer holding it
+        # from outside root custody across the whole transition.
+        self.generation("capture", label)
+        self.generation("probe", label)
         self.adapter("submit", "--label", label)
         self.adapter("wait", "--label", label)
         self.adapter("closed", "--label", "a" if label == "ab" else "b")
+        self.generation("fenced", label)
         smoke_label = "b" if target == "b" else "a-return"
         self.smoke(smoke_label)
         self.adapter("submit", "--label", label)  # Completed-only public retirement.
@@ -240,7 +288,8 @@ class ReleaseCycle:
         observed = self.observe(
             f"release-{smoke_label}", receipt=self.candidate if target == "b" else self.previous
         )
-        self.preserved(previous, observed)
+        self.preserved(previous, observed, fenced=True)
+        self.proof["write_generations"][smoke_label] = observed["write_generation"]
         self.adapter("state", "--label", smoke_label)
         self.adapter("freeze", "--label", smoke_label)
         self.adapter("capture", "--label", smoke_label)
@@ -252,6 +301,8 @@ class ReleaseCycle:
         # A finite executor is a live mutation authority. Never destroy its home
         # until its exact native job/cgroup is closed; no controller retry here.
         self.adapter("settle")
+        # A stale-writer probe left by a failed transition is a writer too.
+        self.generation("stop", "all")
         try:
             self.cli("release-stop", ["stop", "-y", "--stop-browser"])
             self.cli("release-destroy", ["cluster", "destroy", "--path", str(self.preview.home)])

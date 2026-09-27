@@ -236,18 +236,31 @@ cannot count as a passing transition.
 
 The first post-readiness action is real message/code-execution smoke, followed
 by the explicit-image native observer. Ports, persisted home/configuration,
-agent state and data-process births must remain identical; application births
+agent state and PostgreSQL/Redis births must remain identical; application births
 must change. The exact prior application tree is captured after fixture closure;
 every captured native birth must be closed before new business smoke. Unknown
 native identity is a failure, even if later cleanup succeeds. This proves
 completed-work same-schema replacement and return,
 not in-flight recovery, schema migration, fleet rollout or provider behavior.
 
+Every transition also runs on a fresh database write generation
+(`release_generation.py`). The observer records the active generation (number,
+logins, credential digest) and requires the pooler to serve exactly it: source
+birth and the initial image adoption keep generation n, A→B admits n+1 behind a
+new pooler birth, B→A n+2. Before each transition the controller captures the
+current generation's logins (0600, deleted afterwards) and starts a stale writer
+outside root custody that holds an open transaction over direct TCP, then keeps
+reconnecting. After it, `fence-LABEL.json` must show the writer's transaction
+aborted, no later commit, and every captured login refused over TCP, the
+owner-only socket and the pooler. The observer reads stored agents as the
+OS-user administrator: the source checkout is no admitted runtime once an image
+is selected.
+
 `release-cycle-proof.json` records phase timings and receipt paths;
 `release-inputs.json` records captured image identities and request hashes.
 `release-*-completion.json`, `release-*-retired.json`, `release-frozen-*.json`,
-`release-state-*.json`, `release-apps-*.json`, `smoke-release-*.json` and
-`cycle-release-*.json` retain
+`release-state-*.json`, `release-apps-*.json`, `smoke-release-*.json`,
+`fence-*.json`, `stale-writer-*.jsonl` and `cycle-release-*.json` retain
 native, journal, workload and independent observer evidence. Every command has
 its own timed run log. A failure remains failed even if ordinary cleanup passes.
 Cleanup refuses destruction while an attempted executor has live or unknown
