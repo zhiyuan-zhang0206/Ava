@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import importlib.util
 import sys
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from pathlib import Path
 from types import ModuleType
 
@@ -151,28 +151,6 @@ def test_a_resumed_worker_reopens_its_session_and_is_told_it_was_interrupted(
     assert f"exec codex resume {_SESSION} --dangerously-bypass" in sent[0]
     assert sent[1].startswith("This session was interrupted")
     assert "continue from where you stopped" in sent[1]
-
-
-def test_resume_refuses_to_adopt_a_live_generation(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    owner = replace(_owner(tmp_path), status="active")
-    workspace = Path(owner.key.workspace)
-
-    def _adopt(*_args: object, **_kwargs: object) -> coding_session_owner.CodingSessionClaim:
-        return coding_session_owner.CodingSessionClaim(action="adopt", owner=owner)
-
-    monkeypatch.setattr(codex, "claim_canonical", _adopt)
-
-    with pytest.raises(RuntimeError, match="a takeover or a resume needs a fresh"):
-        codex.launch(
-            workspace,
-            workspace / "tasks.md",
-            workspace / "work.md",
-            3600,
-            reference_dir=_REFERENCE,
-            resume=_SESSION,
-        )
 
 
 # --- Claude: the id is chosen up front, --resume reopens it --------------------

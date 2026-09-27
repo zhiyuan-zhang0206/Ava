@@ -24,9 +24,7 @@ before relying on push delivery. Run it from your own workspace —
 usually the best choice for a takeover: spawn the takeover under your
 workspace and pass that directory as the spawn workspace argument, so the
 workspace is directly the impersonator's working directory (other locations
-are not forbidden; this is the recommended default). A workspace that already
-carries a live canonical generation is refused (`--cancel-generation` it
-first). Both launch paths are live: `spawn_claude.py --impersonate-self` takes
+are not forbidden; this is the recommended default). Both launch paths are live: `spawn_claude.py --impersonate-self` takes
 the same inline `--brief`; its relay starts automatically with the session (the
 bundled `ava-relay` plugin, resident mode — no `timeout_ms` arming; the request
 output names the credential stub and the manual fallback). `--no-relay-resident`

@@ -273,9 +273,8 @@ Launch it from your own execution context, briefing inline:
   --impersonation-name 'Fix login' --brief '<the full briefing text>'
 ```
 
-`--brief` is required; `--tasks-file`/`--work-file` are refused. The workspace
-must not carry a live canonical generation (`--cancel-generation` it first),
-and no file watcher runs for a takeover. The same command works with
+`--brief` is required; `--tasks-file`/`--work-file` are refused, and no file
+watcher runs for a takeover. The same command works with
 `spawn_claude.py` and `spawn_dsh.py` ([DeepSeek Harness](reference/deepseek_harness.md),
 takeover-only). The full procedure is [Let the coding agent take over your
 identity](reference/impersonate_self.md); the executor's own manual is the

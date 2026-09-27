@@ -1,22 +1,22 @@
 # Canonical Codex ownership
 
-Read this reference before launching Codex. `spawn_codex.py` owns one active
-generation keyed by `(resolved cluster home, resolved workspace path, codex)`.
-A workspace basename is only a display label. Concurrent callers have one
-winner; later callers, including another Ava agent, wait for and adopt the live
-record instead of stacking another Codex process.
+Read this reference before launching Codex. Every `spawn_codex.py` launch owns
+a generation of its own under `(resolved cluster home, resolved workspace path,
+codex)`. Several can share a workspace, and a workspace basename is only a
+display label.
 
-An expired, crashed, or terminated-owner record — and a supervised record whose
-supervisor died — transfers to a fresh generation only after the old Codex PTY
-and private state are reclaimed; a live takeover record is instead adopted
-(its coding session is its whole liveness). After PTY allocation, the launcher
-publishes its active handle before waiting for Codex startup and bootstrap. A
-launching record that exceeds its spawn grace remains busy while a matching PTY
-is live.
+Before creating its own generation, a launch reclaims the dead ones in that
+workspace. It stops their PTYs and removes their private state:
+- a generation that expired, crashed, or whose owner agent was terminated;
+- a launch that stalled past its spawn grace with no live PTY;
+- a supervised generation whose supervisor died (nobody would close it on `DONE`).
+
+Live generations are left alone, takeovers included (a takeover's coding session
+is its whole liveness). After PTY allocation, the launcher publishes its active
+handle before waiting for Codex startup and bootstrap.
 Each successful command prints the core file handles plus these Codex fields:
 
 ```text
-adopted=<true|false>
 status=<launching|active|terminal>
 generation=<opaque generation>
 owner_agent_id=<id>
@@ -30,19 +30,17 @@ codex_session=<uuid>
 ```
 
 `codex_session` is Codex's own session id, read from its `/status` card: the id
-`--resume` takes after an interruption (an adopted record prints none; the
-launch that started it did).
+`--resume` takes after an interruption.
 
 A takeover generation (`--impersonate-self`) prints no `supervisor_*`,
 `tasks_file`, or `work_file` line: it runs file- and supervisor-less, its
 briefing inlined in the launch message, and its coding session alone is its
 liveness signal.
 
-The numeric ids remain scoped to `owner_agent_id`. A different Ava agent that
-adopts the record must not pass those ids to its own `ava.shell.sessions`
-methods; it should use the canonical status/cancel commands or coordinate with
-the recorded owner. Full names are the host identities used by lifecycle
-cleanup.
+The numeric ids remain scoped to `owner_agent_id`. Another Ava agent must not
+pass those ids to its own `ava.shell.sessions` methods; it should use the
+status/cancel commands or coordinate with the recorded owner. Full names are
+the host identities used by lifecycle cleanup.
 
 Codex runs on the host user's own `~/.codex`, exactly as in a person's own
 terminal, so its conversation outlives the shell. Nothing is written to that
@@ -78,10 +76,11 @@ started supervisor closes and terminalizes the exact generation on current
 `DONE` or final `HANDOFF`, explicit cancel, owner termination, Codex death,
 stalled launch, work-file deletion, or expiry. Its notifications never
 resurrect a terminated owner. A takeover generation starts no supervisor:
-explicit cancel and expiry are its stop paths, and the next launch reclaims a
-dead takeover record before rebuilding.
+explicit cancel and expiry are its stop paths, and the next launch in the
+workspace reclaims a dead takeover record.
 
-Inspect or cancel with the exact printed generation:
+`--status` prints every generation recorded for the workspace (blank-line
+separated). Cancel exactly one of them by its printed generation:
 
 ```bash
 .venv/bin/python reference/spawn_codex.py <workspace-dir> --status
@@ -89,7 +88,7 @@ Inspect or cancel with the exact printed generation:
   --cancel-generation <generation>
 ```
 
-A stale cancel token cannot stop a replacement. For a full handoff, let the old
+A cancel names exactly one generation and never touches another. For a full handoff, let the old
 generation reach `HANDOFF`, launch the same workspace again, and use the newly
 printed owner and handles; never reuse the old numeric PTY id. A handoff starts
 a fresh session on purpose — resume is for an interruption, not a handoff.

@@ -205,12 +205,12 @@ def test_failed_early_publish_kills_codex_session_before_startup(
         tasks_file: Path,
         work_file: Path,
         ttl_seconds: float,
-    ) -> coding_session_owner.CodingSessionClaim:
+    ) -> coding_session_owner.CodingSessionOwner:
         assert tasks_file.name == "tasks.md"
         assert work_file.name == "work.md"
         assert ttl_seconds == 3600
         events.append("claim")
-        return coding_session_owner.CodingSessionClaim(action="launch", owner=launching)
+        return launching
 
     def _launch_supervisor(
         _owner: coding_session_owner.CodingSessionOwner,
@@ -270,7 +270,7 @@ def test_failed_early_publish_kills_codex_session_before_startup(
         assert reason == "launch-failed"
         return False
 
-    monkeypatch.setattr(codex, "claim_canonical", _claim)
+    monkeypatch.setattr(codex, "new_generation", _claim)
     monkeypatch.setattr(codex, "_launch_supervisor", _launch_supervisor)
     monkeypatch.setattr(codex.coding_session_owner, "attach_supervisor", _attach)
     monkeypatch.setattr(codex.ava.shell.sessions, "new", _new)
@@ -319,11 +319,11 @@ def test_takeover_launch_inlines_brief_without_files_or_supervisor(
         tasks_file: Path | None,
         work_file: Path | None,
         ttl_seconds: float,
-    ) -> coding_session_owner.CodingSessionClaim:
+    ) -> coding_session_owner.CodingSessionOwner:
         assert tasks_file is None and work_file is None
         assert ttl_seconds == 3600
         events.append("claim")
-        return coding_session_owner.CodingSessionClaim(action="launch", owner=launching)
+        return launching
 
     def _unexpected(*_args: object, **_kwargs: object) -> None:
         raise AssertionError("a takeover launch must not create files or start a supervisor")
@@ -361,7 +361,7 @@ def test_takeover_launch_inlines_brief_without_files_or_supervisor(
         events.append("publish")
         return replace(launching, status="active", session_id=7, session_name=session_name)
 
-    monkeypatch.setattr(codex, "claim_canonical", _claim)
+    monkeypatch.setattr(codex, "new_generation", _claim)
     monkeypatch.setattr(codex, "init_file", _unexpected)
     monkeypatch.setattr(codex, "_launch_supervisor", _unexpected)
     monkeypatch.setattr(codex.coding_session_owner, "attach_supervisor", _unexpected)
@@ -397,37 +397,6 @@ def test_takeover_launch_inlines_brief_without_files_or_supervisor(
     assert "take over Ava agent 41" in sent[2]
     assert brief in sent[2]
     assert "tasks.md" not in sent[2] and "work.md" not in sent[2]
-
-
-def test_takeover_launch_refuses_a_workspace_with_a_live_generation(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    record = _owner(tmp_path)
-
-    def _claim(
-        _key: coding_session_owner.CodingSessionKey,
-        *,
-        tasks_file: Path | None,
-        work_file: Path | None,
-        ttl_seconds: float,
-    ) -> coding_session_owner.CodingSessionClaim:
-        assert tasks_file is None and work_file is None
-        return coding_session_owner.CodingSessionClaim(action="adopt", owner=record)
-
-    monkeypatch.setattr(codex, "claim_canonical", _claim)
-
-    with pytest.raises(RuntimeError, match="fresh coding workspace"):
-        codex.launch(
-            Path(record.key.workspace),
-            None,
-            None,
-            3600,
-            None,
-            "Fix login",
-            "the briefing",
-            reference_dir=_REFERENCE,
-        )
 
 
 @pytest.mark.parametrize(
@@ -533,7 +502,7 @@ def test_canonical_watch_terminalizes_before_exit(
         )
     calls: list[tuple[str, str]] = []
 
-    def _read(_key: coding_session_owner.CodingSessionKey) -> Any:
+    def _read(_key: coding_session_owner.CodingSessionKey, _generation: str) -> Any:
         return record
 
     def _terminalize(

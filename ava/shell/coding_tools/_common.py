@@ -1,11 +1,11 @@
-"""Launch plumbing both coding-tool launchers share: workspace paths, the
-canonical owner claim, and where the impersonator guide lives."""
+"""Launch plumbing both coding-tool launchers share: workspace paths, a new
+owner generation, owner-record status and cancel, and where the impersonator
+guide lives."""
 
 from __future__ import annotations
 
 import argparse
 import sys
-import time
 import uuid
 from collections.abc import Callable
 from pathlib import Path
@@ -100,34 +100,22 @@ def owner_terminated(agent_id: int) -> bool:
         return False
 
 
-def claim_canonical(
+def new_generation(
     key: coding_session_owner.CodingSessionKey,
     *,
     tasks_file: Path | None,
     work_file: Path | None,
     ttl_seconds: float,
-) -> coding_session_owner.CodingSessionClaim:
-    """Create or adopt, waiting through another claimant's bounded launch."""
-    previous = coding_session_owner.read(key)
-    terminated_generation = None
-    if (
-        previous.generation is not None
-        and previous.owner_agent_id is not None
-        and owner_terminated(previous.owner_agent_id)
-    ):
-        terminated_generation = previous.generation
-    while True:
-        result = coding_session_owner.claim(
-            key,
-            owner_agent_id=ava.self.AGENT_ID,
-            tasks_file=tasks_file,
-            work_file=work_file,
-            ttl_seconds=ttl_seconds,
-            terminated_generation=terminated_generation,
-        )
-        if result.action != "busy":
-            return result
-        time.sleep(0.25)
+) -> coding_session_owner.CodingSessionOwner:
+    """A fresh generation of our own; dead siblings under ``key`` are reclaimed first."""
+    return coding_session_owner.launch_generation(
+        key,
+        owner_agent_id=ava.self.AGENT_ID,
+        tasks_file=tasks_file,
+        work_file=work_file,
+        ttl_seconds=ttl_seconds,
+        owner_terminated=owner_terminated,
+    )
 
 
 OwnerPrinter = Callable[[coding_session_owner.CodingSessionOwner], None]
@@ -139,16 +127,21 @@ def cancel(
     """Stop and terminalize exactly ``generation``; a stale token is refused."""
     stopped = coding_session_owner.terminate_generation(key, generation, reason="explicit-cancel")
     if not stopped:
-        print("cancel refused: generation is not the current canonical owner", file=sys.stderr)
+        print(f"cancel refused: no generation {generation} is recorded here", file=sys.stderr)
         return 1
-    print_owner(coding_session_owner.read(key))
+    print_owner(coding_session_owner.read(key, generation))
     return 0
 
 
 def status(key: coding_session_owner.CodingSessionKey, print_owner: OwnerPrinter) -> int:
-    """Print the canonical owner record; exit 1 when it is invalid."""
-    owner = coding_session_owner.read(key)
-    print_owner(owner)
-    if owner.error:
-        print(f"error={owner.error}", file=sys.stderr)
-    return 1 if owner.status == "invalid" else 0
+    """Print every generation recorded for the workspace; exit 1 when one is invalid."""
+    owners = coding_session_owner.list_generations(key)
+    if not owners:
+        print("status=inactive")
+    for index, owner in enumerate(owners):
+        if index:
+            print()
+        print_owner(owner)
+        if owner.error:
+            print(f"error={owner.error}", file=sys.stderr)
+    return 1 if any(owner.status == "invalid" for owner in owners) else 0

@@ -37,12 +37,12 @@ locates the impersonator guide.
 ## Modules
 
 - `claude` — the Claude Code launcher. A supervised worker is not registered
-  and supervises through the skill's `watch_work.py`. A takeover is a canonical
-  generation keyed by `(cluster, workspace, claude)`. Its relay starts with the
+  and supervises through the skill's `watch_work.py`. A takeover is a generation
+  of its own under `(cluster, workspace, claude)`. Its relay starts with the
   session through the resident plugin, unless the executor-armed flow is
   requested.
-- `codex` — the Codex launcher. Every launch is a canonical generation keyed by
-  `(cluster, workspace, codex)`. It adds an automatic supervisor for the
+- `codex` — the Codex launcher. Every launch is a generation of its own under
+  `(cluster, workspace, codex)`, so several can share a workspace. It adds an automatic supervisor for the
   supervised mode and, for a takeover, the shared app server the TUI and the
   relay both use. Codex runs on the user's own `~/.codex` with per-session
   `-c` overrides (workspace trust, no startup update check).
@@ -55,11 +55,11 @@ locates the impersonator guide.
   never parks on one.
 - `_common` — shared by both launchers:
   - workspace path resolution;
-  - the canonical owner claim, which adopts a live record and waits through
-    another claimant's launch;
-  - owner-record status and cancel.
+  - a new owner generation for each launch, after the workspace's dead ones are
+    reclaimed;
+  - owner-record status (every generation of the workspace) and cancel.
 
 ## Key dependencies
 - [[ava/shell/shell.ava.okf.md|ava.shell]] — the session primitives every launch drives
-- [[shared/coding-session-owner.ava.okf.md]] — canonical generation admission, adoption, transfer, and cleanup
+- [[shared/coding-session-owner.ava.okf.md]] — per-launch generations, the dead-sibling sweep, and exact cleanup
 - [[ava_builtins/skills/orchestration/ava-use-other-agents.ava.okf.md]] — the skill whose scripts are the command-line entries

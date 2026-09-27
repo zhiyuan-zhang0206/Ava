@@ -1,13 +1,13 @@
-"""Create, adopt, inspect, or stop the canonical Codex workspace generation.
+"""Launch, inspect, or stop Codex sessions in persistent shells.
 
-The active identity is ``(cluster, canonical workspace, codex)``. A launch
-publishes one generation-owned record. Codex runs on the user's own
-``~/.codex`` with per-session ``-c`` overrides, so every session stays
-resumable by the id the launch prints. A supervised worker also starts an automatic lifecycle
-supervisor (the skill's ``watch_work.py``); a takeover (``impersonation_name``)
-runs file- and supervisor-less with its briefing inlined in the launch message.
-A concurrent or cross-agent caller adopts the live record instead of stacking
-another Codex process. A takeover also wires the explicit shared app-server
+Every launch owns a generation of its own under ``(cluster, workspace,
+codex)``; several may share a workspace, and a launch first reclaims its dead
+siblings. Codex runs on the user's own ``~/.codex`` with per-session ``-c``
+overrides, so every session stays resumable by the id the launch prints. A
+supervised worker also starts an automatic lifecycle supervisor (the skill's
+``watch_work.py``); a takeover (``impersonation_name``) runs file- and
+supervisor-less with its briefing inlined in the launch message. A takeover
+also wires the explicit shared app-server
 topology: a private ``codex app-server --listen`` socket, the TUI connected to
 it with ``--remote``, and the endpoint carried into the launch message so the
 request records it (``--codex-remote``) and the relay delivers into the same
@@ -34,7 +34,7 @@ import ava
 from shared import coding_session_owner
 
 from ._common import cancel as _cancel_generation
-from ._common import claim_canonical, impersonator_guide, init_file, worker_bootstrap
+from ._common import impersonator_guide, init_file, new_generation, worker_bootstrap
 from ._common import resolve_dir as resolve_dir
 from ._common import resolve_file as resolve_file
 from ._common import session_uuid as session_uuid
@@ -369,8 +369,7 @@ def _takeover_bootstrap_message(
     return bootstrap_message(agent_id, name, "codex", brief, guide, codex_remote=codex_remote)
 
 
-def _print_owner(owner: coding_session_owner.CodingSessionOwner, *, adopted: bool) -> None:
-    print(f"adopted={'true' if adopted else 'false'}")
+def _print_owner(owner: coding_session_owner.CodingSessionOwner) -> None:
     print(f"status={owner.status}")
     if owner.generation is not None:
         print(f"generation={owner.generation}")
@@ -391,19 +390,19 @@ def _print_owner(owner: coding_session_owner.CodingSessionOwner, *, adopted: boo
 
 
 def status(workspace: Path) -> int:
-    """Print the canonical owner record."""
+    """Print every generation recorded for the workspace."""
     return _owner_status(
         coding_session_owner.canonical_key(workspace, tool="codex"),
-        lambda owner: _print_owner(owner, adopted=False),
+        _print_owner,
     )
 
 
 def cancel(workspace: Path, generation: str) -> int:
-    """Stop and terminalize exactly this canonical generation."""
+    """Stop and terminalize exactly this generation."""
     return _cancel_generation(
         coding_session_owner.canonical_key(workspace, tool="codex"),
         generation,
-        lambda owner: _print_owner(owner, adopted=False),
+        _print_owner,
     )
 
 
@@ -508,7 +507,7 @@ def _start_generation(
         or owner.state_dir is None
         or owner.owner_agent_id is None
     ):
-        raise RuntimeError("new canonical owner is missing launch fields")
+        raise RuntimeError("new owner generation is missing launch fields")
     generation = owner.generation
     expected_suffix = owner.expected_suffix
     owner_agent_id = owner.owner_agent_id
@@ -536,9 +535,9 @@ def _start_generation(
         )
         remote, codex_session = _start_codex(sid, key, owner, generation, owner_agent_id, request)
     except BaseException:
-        # A replacement may own the canonical record by now, so its generation
-        # CAS cannot reclaim this PTY. The old launcher still owns the numeric id
-        # and must reclaim it directly before rolling back its record.
+        # Another launch's sweep may have reclaimed this generation's record by
+        # now, so its CAS cannot reclaim this PTY. The launcher still owns the
+        # numeric id and must reclaim it directly before rolling back its record.
         if sid is not None:
             with contextlib.suppress(Exception):
                 ava.shell.sessions.kill(sid)
@@ -564,7 +563,7 @@ def launch(
     reference_dir: Path,
     resume: str | None = None,
 ) -> int:
-    """Launch or adopt a supervised worker, or a takeover when ``impersonation_name`` is set.
+    """Launch a supervised worker, or a takeover when ``impersonation_name`` is set.
 
     ``reference_dir`` is the calling skill's reference directory: it holds the
     collaboration contract and the supervisor script, and locates the
@@ -591,24 +590,11 @@ def launch(
         init_file(tasks_file, "")
         init_file(work_file, "STATUS: WORKING\n\n## Log\n\n")
     key = coding_session_owner.canonical_key(workspace, tool="codex")
-    claim = claim_canonical(
-        key,
-        tasks_file=tasks_file,
-        work_file=work_file,
-        ttl_seconds=ttl_seconds,
-    )
-    if claim.action == "adopt":
-        if impersonation_name is not None or resume is not None:
-            raise RuntimeError(
-                "a takeover or a resume needs a fresh coding workspace; this workspace already "
-                "has a live generation - cancel it with --cancel-generation first"
-            )
-        _print_owner(claim.owner, adopted=True)
-        return 0
-    active, remote, codex_session = _start_generation(key, claim.owner, request)
+    owner = new_generation(key, tasks_file=tasks_file, work_file=work_file, ttl_seconds=ttl_seconds)
+    active, remote, codex_session = _start_generation(key, owner, request)
     print(f"ready. name={active.expected_suffix} workspace={workspace}")
     if remote is not None:
         print(f"codex_app_server={remote}")
-    _print_owner(active, adopted=False)
+    _print_owner(active)
     print(f"codex_session={codex_session}")
     return 0
