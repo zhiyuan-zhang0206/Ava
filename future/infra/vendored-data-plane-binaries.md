@@ -6,7 +6,7 @@
 `cli/commands/_converge.py` step), and
 `shared/pg_tools.py:pg_tool()` prefers it over brew/apt. So `brew install
 postgresql@17` is no longer a prerequisite. Redis defaults to brew/PATH
-(`cli/commands/_cluster_instance.py`); the unit-local `redis_bin_dir` setting can
+(`cli/commands/cluster_instance.py`); the unit-local `redis_bin_dir` setting can
 select an already-installed server/CLI pair. Automatic Redis download remains
 unimplemented, so fresh provisioning still needs a package manager or an
 operator-supplied build.
@@ -89,7 +89,7 @@ infra this introduces.
 - **Resolution:** `shared/pg_tools.py:pg_tool()` prefers `~/.ava/runtime/pg/` when
   present, else falls back to brew/apt — so existing dev boxes keep working
   unchanged and a clean machine uses the vendored copy. The redis bin resolver
-  (`cli/commands/_cluster_instance.py`) currently uses the unit's explicit
+  (`cli/commands/cluster_instance.py`) currently uses the unit's explicit
   `redis_bin_dir` or the brew/PATH default. A future vendored default must preserve
   an explicit per-unit selection rather than overriding it with a host-wide copy.
 - **Version pinning:** the PG major must match across `initdb` and the data dir it
@@ -111,11 +111,11 @@ half-present runtime). The redis leg reuses this step.
    fetched by the converge step, which then injects the pinned pgvector files
    (see the subsection above); `pg_tool()` prefers the vendored tree, falling
    back to brew/apt when absent. Every cluster instance
-   (`_cluster_instance.py`) `initdb`s and serves via `pg_ctl` directly, so the
+   (`cluster_instance.py`) `initdb`s and serves via `pg_ctl` directly, so the
    pg half of the per-cluster data plane is brew-free, pgvector included.
 2. **Redis vendoring — remaining.** The CI build-and-publish pipeline (per-platform
    `redis-server`, `BUILD_TLS=no`, published as a release asset) + the download +
-   the prefer-vendored resolution in `_cluster_instance.py`.
+   the prefer-vendored resolution in `cluster_instance.py`.
 
 Split because the two have different risk: PG reuses an existing third-party
 artifact (download only); redis stands up our own build-publish pipeline. That is

@@ -513,7 +513,7 @@ def _cmd_start_body(  # noqa: PLR0915 — cohesive linear start sequence (conver
     # extension provisioning belongs to its owner.
 
     if "gateway" in roles and not settings.data_plane.is_remote:
-        from cli.commands._cluster_instance import pg_admin_url
+        from cli.commands.cluster_instance import pg_admin_url
         from shared.cluster import db_identity, get_record
         from shared.cluster.provision import ensure_pgvector_extension
         from shared.paths import ava_home

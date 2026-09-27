@@ -27,7 +27,7 @@ def ensure_gateway_data_plane() -> int:
     derived for records saved before the slot existed (record_pgbouncer_port). A
     REMOTE-managed data plane (URLs naming a foreign host — Task #1752) skips the
     local instance entirely and probes the URLs instead."""
-    from cli.commands._cluster_instance import ensure_cluster_instance
+    from cli.commands.cluster_instance import ensure_cluster_instance
     from shared.cluster import (
         db_identity,
         get_record,
@@ -182,7 +182,7 @@ def warn_orphaned_local_instance() -> None:
         # The signal is a live process answering on this cluster's own instance
         # ports — whatever it is, it is not the remote-managed plane and not
         # something this cluster will ever manage again.
-        from cli.commands._cluster_instance import _pg_running, _redis_running
+        from cli.commands.cluster_instance import _pg_running, _redis_running
 
         if _pg_running(rec.ports["postgres"], "127.0.0.1"):
             leftovers.append("postgres")

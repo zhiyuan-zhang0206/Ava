@@ -29,7 +29,7 @@ from psycopg import sql
 from psycopg.conninfo import make_conninfo
 
 from cli.commands import _update_bootstrap as hop
-from cli.commands._release_inventory import prepare_unit_inventory
+from cli.commands.release_inventory import prepare_unit_inventory
 from services.agent_ops.bootstrap import ObserverProjection, PreparedObservation
 from shared import updater_handoff
 from shared.managed_writer_barrier import RolloutIdentity

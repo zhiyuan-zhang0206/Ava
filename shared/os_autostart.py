@@ -31,7 +31,7 @@ session is a one-line manual step printed below, not something converge does.
 
 Only ONE boot-ordering hazard is handled inside `ava start` itself: a routable
 bind address not up yet when this cluster's Postgres, PgBouncer or Linux Redis starts
-(`cli/commands/_cluster_instance.py` waits for the reachable address before
+(`cli/commands/cluster_instance.py` waits for the reachable address before
 binding Postgres; PgBouncer and authenticated Linux Redis use the same wait).
 macOS Redis remains loopback-only. That covers a LOCAL address only. An enrolled agent-runner's
 start also depends on a REMOTE gateway — its Settings build fetches

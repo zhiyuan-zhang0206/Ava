@@ -52,13 +52,13 @@ def noop_infra(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
     monkeypatch.setattr(
         gw,
-        "_ensure_cluster_instance",
+        "ensure_cluster_instance",
         lambda _rec, _secret, _identity, **_kw: 0,  # pyright: ignore[reportUnknownArgumentType]
     )
-    monkeypatch.setattr(gw, "_provision", lambda _name, **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(gw, "provision", lambda _name, **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(
         gw,
-        "_ensure_pgvector_extension",
+        "ensure_pgvector_extension",
         lambda _name, **_kw: None,  # pyright: ignore[reportUnknownArgumentType]
     )
     # The runner-role provisioning steps are real SQL against the cluster's pg —
@@ -151,7 +151,7 @@ def test_worktree_birth_idempotent_keeps_secret(
     calls: list[str] = []
     monkeypatch.setattr(
         gw,
-        "_ensure_cluster_instance",
+        "ensure_cluster_instance",
         lambda _rec, _secret, _identity: calls.append("instance") or 0,  # pyright: ignore[reportUnknownArgumentType]
     )
     assert _install(home) == 0
@@ -450,7 +450,7 @@ def test_provision_failure_rolls_back_created_record(
     def _boom(_name: str, **_kw: object) -> None:
         raise RuntimeError("pg unreachable mid-provision")
 
-    monkeypatch.setattr(gw, "_provision", _boom)
+    monkeypatch.setattr(gw, "provision", _boom)
     home = tmp_path / ".ava-doomed"
     with pytest.raises(RuntimeError):
         _install(home)
@@ -478,7 +478,7 @@ def test_repair_run_on_existing_record_never_rolls_it_back(
     def _boom(_identity: str, **_kw: object) -> None:
         raise RuntimeError("transient db error on repair re-install")
 
-    monkeypatch.setattr(gw, "_provision", _boom)
+    monkeypatch.setattr(gw, "provision", _boom)
     with pytest.raises(RuntimeError):
         _install(home)
     assert get_record(home) == rec, "an existing record must survive a failed repair run"
@@ -505,7 +505,7 @@ def test_incomplete_birth_retry_carries_repair_not_database_creation_authority(
     def existing_database(_identity: str, **_kwargs: object) -> bool:
         return False
 
-    monkeypatch.setattr(gw, "_provision", existing_database)
+    monkeypatch.setattr(gw, "provision", existing_database)
 
     def capture_checkpoint_authority(*_args: object, **kwargs: object) -> None:
         captured.update(kwargs)
@@ -605,7 +605,7 @@ def test_instance_failure_rolls_back_created_record(
 
     monkeypatch.setattr(
         gw,
-        "_ensure_cluster_instance",
+        "ensure_cluster_instance",
         lambda _rec, _secret, _identity, **_kw: 1,  # pyright: ignore[reportUnknownArgumentType]
     )
     home = tmp_path / ".ava-nodb"

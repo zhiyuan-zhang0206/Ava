@@ -39,7 +39,7 @@ def _stop_data_plane(*, skip_infra: bool, runner_only: bool) -> None:
     elif skip_infra:
         print("\n→ stop pg/redis: kept up (keep_infra — migrate/start needs DB)")
     else:
-        from cli.commands._cluster_instance import stop_cluster_instance
+        from cli.commands.cluster_instance import stop_cluster_instance
 
         stop_cluster_instance()
 

@@ -77,7 +77,7 @@ class _Legs:
 def legs(monkeypatch: pytest.MonkeyPatch) -> _Legs:
     """Fake the three legs and the outcome write; record the call order."""
     import shared.host_deploy_state as hds
-    from cli.commands import _maintenance as maint
+    from cli.commands import maintenance as maint
     from cli.commands import stop
 
     rec = _Legs()
@@ -145,7 +145,7 @@ def test_a_failed_resume_leg_fails_the_attempt(
     def _boom(*_args: object, **_kwargs: object) -> None:
         raise RuntimeError("resume refused")
 
-    monkeypatch.setattr("cli.commands._maintenance._resume", _boom)
+    monkeypatch.setattr("cli.commands.maintenance._resume", _boom)
     assert hr.run(_HOLDER, _AT) == 1
     assert legs.notes[0].startswith("failed at resume: RuntimeError('resume refused'")
 

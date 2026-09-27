@@ -112,7 +112,7 @@ model: every cluster owns its instance, and `uses_own_instance` is simply
 At the time, `cli/commands/_compose.py` already managed native pg/redis lifecycle:
 cold-start `initdb`, start/stop, config rendering. This change **re-scoped** that
 management from per-host-shared to per-`$AVA_HOME` (it now lives in
-`cli/commands/_cluster_instance.py`; `_compose.py` is gone). It was not a
+`cli/commands/cluster_instance.py`; `_compose.py` is gone). It was not a
 from-scratch supervision lift.
 
 - **Data dir moves under `$AVA_HOME`.** `_pg_data()` / `_redis_conf_*()` resolve
@@ -202,7 +202,7 @@ bridge facts describe macOS:
   data plane; moving the LGTM backends (stage C) does not move Redis, so the
   bridge keeps its exact role (gateway-host relay for off-box consumers). The
   station's Grafana never dials Redis; its PG datasource comes from the
-  data-plane URL (see `_observatory_urls._pg_datasource_host_port`), not the
+  data-plane URL (see `observatory_urls._pg_datasource_host_port`), not the
   bridge.
 - **Tailnet semantics** — the relay target is the host's reachable private
   (tailnet) address, so the bridge is what makes `redis://<tailnet-ip>:6380`

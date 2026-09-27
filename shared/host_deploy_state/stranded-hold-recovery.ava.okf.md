@@ -75,7 +75,7 @@ window.
   itself runs (`cli.commands.stop._do_stop` with `keep_infra` / terminals /
   browser retained, this home's declared services only — which is why the
   recovery session and the browser survive it); then `maintenance start`
-  (`cli.commands._maintenance._start`); then `maintenance resume` (`_resume`).
+  (`cli.commands.maintenance._start`); then `maintenance resume` (`_resume`).
 
 ## Boundaries
 

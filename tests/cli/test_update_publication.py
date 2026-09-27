@@ -4,7 +4,7 @@ The seats' only non-pure steps are their compare-and-set transitions on the
 real `deployment_state` row (same reasoning as
 `tests/shared/test_managed_writer_publication.py`: mocking the CAS tests
 nothing). Prepared receipts and candidate plans are constructed directly —
-their producers (`_release_inventory`, `_release_services`) are covered by
+their producers (`release_inventory`, `release_services`) are covered by
 their own prove scripts — so every refusal is pinned to exactly the fact under
 test. One structural test pins the seats' importers by name; the final wiring
 slice (task #4128 E2-e) lands the completion declaration in the module.

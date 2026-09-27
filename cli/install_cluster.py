@@ -275,7 +275,7 @@ def _birth(*, home: Path, secret: str) -> int:
     from shared import cluster as cl
     from shared.envfile import upsert_env
 
-    rec, created = lifecycle._ensure_record(home)
+    rec, created = lifecycle.ensure_record(home)
     home.mkdir(parents=True, exist_ok=True)
 
     env_path = home / ".env"
@@ -283,7 +283,7 @@ def _birth(*, home: Path, secret: str) -> int:
     db_admin_password, redis_admin_password, redis_password = _resolve_data_plane_passwords(
         env_path, secret=secret
     )
-    rc = lifecycle._ensure_cluster_instance(
+    rc = lifecycle.ensure_cluster_instance(
         rec,
         secret,
         cl.DATA_PLANE_IDENTITY,
@@ -299,11 +299,11 @@ def _birth(*, home: Path, secret: str) -> int:
         )
         return rc
     try:
-        from cli.commands._cluster_instance import pg_admin_url
+        from cli.commands.cluster_instance import pg_admin_url
 
         base_admin_url = pg_admin_url(rec.ports["postgres"])
         base_db_url, base_redis_url = cl.per_cluster_base_urls(rec)
-        database_created = lifecycle._provision(
+        database_created = lifecycle.provision(
             cl.DATA_PLANE_IDENTITY,
             base_admin_url=base_admin_url,
             db_admin_password=db_admin_password,
@@ -313,7 +313,7 @@ def _birth(*, home: Path, secret: str) -> int:
         # install it themselves); a silent no-op when this Postgres lacks the
         # extension binaries. Routed through the lifecycle wrapper so unit tests
         # stub it with the other birth-side provisioning steps.
-        lifecycle._ensure_pgvector_extension(
+        lifecycle.ensure_pgvector_extension(
             cl.DATA_PLANE_IDENTITY,
             base_admin_url=base_admin_url,
         )

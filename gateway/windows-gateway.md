@@ -18,10 +18,10 @@ Not a rough port — an absent one.
 - `shared/runtime_binaries.py` vendors Postgres for `darwin` and
   `linux-x86_64`; `_platform_key()` raises for Windows. Redis is not vendored on
   any platform yet ("a prebuilt we publish — not here yet").
-- `_redis_server_bin()` / `_redis_cli_bin()` (`cli/commands/_cluster_instance.py`)
+- `_redis_server_bin()` / `_redis_cli_bin()` (`cli/commands/cluster_instance.py`)
   resolve the `redis@8.2` brew keg on macOS and a bare `redis-server` elsewhere. No `.exe`, no
   Memurai branch.
-- `_start_redis` passes `--daemonize yes`. Windows redis forks do not implement
+- `start_redis` passes `--daemonize yes`. Windows redis forks do not implement
   it.
 
 Three possible directions, none of them started: vendor a Windows redis build,
@@ -71,7 +71,7 @@ unconditionally in the Windows start roster and fails every time.
 
 ### 4. PgBouncer is POSIX-only and on by default
 
-`cli/commands/_pgbouncer.py` signals with `os.kill(pid, SIGHUP)` /
+`cli/commands/pgbouncer.py` signals with `os.kill(pid, SIGHUP)` /
 `os.kill(pid, 0)`. On Windows `os.kill(pid, 0)` **terminates** the target — the
 hazard `shared/proc.py` documents and routes around. PgBouncer is enabled by
 default (`shared/config/data_plane.py`) and is part of `ensure_cluster_instance`.
@@ -88,7 +88,7 @@ default (`shared/config/data_plane.py`) and is part of `ensure_cluster_instance`
   Windows Postgres supports none of it.
 - **`_pg_bin()`** has no Windows branch and yields the Linux path;
   `PG_BIN_WINDOWS` exists in `shared/pg_tools.py` but is only reachable through
-  `platform_backend.pg_binary_path`, which `_cluster_instance` never calls.
+  `platform_backend.pg_binary_path`, which `cluster_instance` never calls.
 - **`memory-indexer`** registers a `SIGTERM` handler for graceful shutdown that
   never fires on Windows, and cold-starts against milvus.
 - **Teardown symmetry.** `stop_cluster_instance()` calls `pg_ctl` / `redis-cli`
@@ -124,7 +124,7 @@ implementation are not:
    `ALTER ROLE … LOGIN NOSUPERUSER` against. Irreversible: no role is left that
    can grant superuser back.
 2. **The redis ACL user is never created.** `_ensure_redis_acl` is reachable
-   only through `_start_redis`, and the container branch returns before it —
+   only through `start_redis`, and the container branch returns before it —
    while the generated `AVA_REDIS_URL` authenticates as that user.
 3. **`stop_docker_data_plane()` passes no `env=`**, so compose resolves the
    container names to their defaults and stops the wrong containers (or fails

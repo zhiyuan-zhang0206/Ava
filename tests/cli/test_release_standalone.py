@@ -26,9 +26,9 @@ from pydantic import SecretStr
 from cli.commands import _managed_writer_mode as mode_mod
 from cli.commands import _update_normal_release as normal
 from cli.commands import _update_normal_release_standalone as standalone
-from cli.commands._release_selector import read_selector, selector_bytes
-from cli.commands._release_services import PreparedService
 from cli.commands._update_bootstrap import BootstrapHopRequest
+from cli.commands.release_selector import read_selector, selector_bytes
+from cli.commands.release_services import PreparedService
 from services.agent_ops.bootstrap import ObserverProjection, PreparedObservation
 from shared import spawn_receipt, ui_update_state, updater_handoff
 from shared.cluster import session_name

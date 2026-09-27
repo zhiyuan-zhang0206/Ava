@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from cli.commands import _pgbouncer as pgbouncer
+from cli.commands import pgbouncer as pgbouncer
 from shared import port_preflight
 
 _SECRET = "s3cr3t"  # noqa: S105 — test fixture, not a real credential

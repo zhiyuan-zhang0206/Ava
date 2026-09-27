@@ -16,7 +16,6 @@ from __future__ import annotations
 
 from contextlib import suppress
 
-from cli.commands._cluster_instance import print_data_plane_status
 from cli.commands._converge_gate import print_gate_status
 from cli.commands._converge_redis_bridge import print_redis_bridge_status
 from cli.commands._probe import (
@@ -30,6 +29,7 @@ from cli.commands._repo import (
     build_services,
     session_name,
 )
+from cli.commands.cluster_instance import print_data_plane_status
 from shared.cluster_drift import prod_source_pin_relation
 
 # Cluster-pin line marks, keyed by `prod_source_pin_relation`. "ahead" means HEAD

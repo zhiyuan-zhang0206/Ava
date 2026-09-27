@@ -55,7 +55,7 @@ The probe is not the only place a healthcheck can lose its restart — the rule 
 
 ## The documented exceptions: the two data-plane repairs
 
-`redis_acl.check` raises on purpose when the **repair** path fails — `_start_redis`
+`redis_acl.check` raises on purpose when the **repair** path fails — `start_redis`
 returned non-zero, admin auth was rejected, or the repaired Redis still cannot
 authenticate the cluster identity. Its PING distinguishes a reachable Redis that
 lost its in-memory ACL from a dead local Redis; the latter reuses the same

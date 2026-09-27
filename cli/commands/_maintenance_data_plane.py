@@ -29,8 +29,8 @@ from redis.asyncio.retry import Retry
 from redis.backoff import NoBackoff
 from redis.exceptions import RedisError
 
-from cli.commands import _cluster_instance as instance
-from cli.commands import _pgbouncer as pooler
+from cli.commands import cluster_instance as instance
+from cli.commands import pgbouncer as pooler
 from cli.commands._maintenance_stop import (
     OwnedProcess,
     capture_tree,

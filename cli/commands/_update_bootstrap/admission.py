@@ -3,7 +3,7 @@
 import hashlib
 from pathlib import Path
 
-from cli.commands._release_inventory import _regular_bytes
+from cli.commands.release_inventory import _regular_bytes
 from services.agent_ops.bootstrap import PreparedObservation
 from shared import updater_handoff
 from shared.managed_writer_observation import ExpectedProcess, ExpectedSession, ExpectedUnitWriters

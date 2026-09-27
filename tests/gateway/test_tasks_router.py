@@ -489,7 +489,7 @@ class TestTimestampOffset:
     `updated_at` with a bare `.isoformat()` on the value psycopg3 read back —
     the offset it carries is whatever the PG SESSION timezone was, not a
     fixed one. Pinning that session timezone to UTC (shared/pg_tools.py:
-    pg_tz_args, cli/commands/_cluster_instance.py) is what makes this `+00:00`
+    pg_tz_args, cli/commands/cluster_instance.py) is what makes this `+00:00`
     instead of drifting with the host OS timezone."""
 
     def test_get_created_at_has_utc_offset(self, db_conn: psycopg.Connection) -> None:

@@ -20,7 +20,7 @@ import pytest
 
 from cli.commands import _maintenance_data_plane as plane
 from cli.commands import _maintenance_stop as stop
-from cli.commands import _pgbouncer as pb
+from cli.commands import pgbouncer as pb
 from shared.config import settings
 from shared.session_backend import PosixProcSessionBackend, PtySessionBackend
 from shared.session_record import SessionRecord, pid_starttime_ticks

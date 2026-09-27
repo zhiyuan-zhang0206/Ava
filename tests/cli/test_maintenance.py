@@ -11,7 +11,7 @@ from uuid import uuid4
 
 import pytest
 
-from cli.commands import _maintenance as command
+from cli.commands import maintenance as command
 from cli.commands._maintenance_probe import HostIdentity
 from ops.agent_pause_probe import host_identity_or_none as real_host_identity_or_none
 from shared import hold_driver, maintenance, pause_owner, start_serving

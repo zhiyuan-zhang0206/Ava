@@ -38,17 +38,17 @@ from services.pitr.activation_lease import run_while_renewing
 from services.pitr.activation_observability import refusal_message
 from services.pitr.activation_observability import save_error as _save_error
 from services.pitr.activation_runtime import (
-    _PITR_ENV_FIELDS as _PITR_ENV_FIELDS,
+    PITR_ENV_FIELDS as PITR_ENV_FIELDS,
 )
 from services.pitr.activation_runtime import (
-    _archive_settings,
-    _desired_archive_settings,
-    _file_evidence,
-    _settings_digest,
-    _shadow_pg_gate,
+    archive_settings,
     capture_pitr_env_baseline,
+    desired_archive_settings,
+    file_evidence,
     probe_switch_privilege,
     rollback_effect_state,
+    settings_digest,
+    shadow_pg_gate,
 )
 from services.pitr.activation_runtime import (
     forced_candidate as _forced_candidate,
@@ -196,7 +196,7 @@ def _validate_secrets() -> dict[str, str]:
 
 
 def _read_pg_state() -> dict[str, str]:
-    from cli.commands._cluster_instance import pg_admin_url
+    from cli.commands.cluster_instance import pg_admin_url
     from shared.cluster import db_identity, get_record, record_postgres_port
 
     if (record := get_record(ava_home())) is None:
@@ -302,7 +302,7 @@ def _shadow_readiness() -> ShadowReadiness:
         )
     probe_switch_privilege()
     current = _read_pg_state()
-    if not _shadow_pg_gate(current):
+    if not shadow_pg_gate(current):
         raise RuntimeError("shadow readiness requires archive_mode=off and no archive_command")
     return ShadowReadiness(pg=current, credentials=credential_evidence)
 
@@ -428,7 +428,7 @@ def _restart_ready(record: ActivationRecord, desired: dict[str, str]) -> bool:
     return (
         before is not None
         and current["postmaster_started_at"] != before["postmaster_started_at"]
-        and _archive_settings(current) == desired
+        and archive_settings(current) == desired
     )
 
 
@@ -452,20 +452,20 @@ def _advance_activation(home: Path, record: ActivationRecord, holder: str) -> Ac
         _validate_snapshot(record)
         record = record.advance("wal_config_pending", error=None)
         write_record(home, record)
-    desired = _desired_archive_settings(home)
+    desired = desired_archive_settings(home)
     if record.phase == "wal_config_pending":
         require_inactive_gate_posture("the pre-activation baseline")
         _validate_snapshot(record)
         _require_same_pre_mutation_state(record)
-        before = _archive_settings(_read_pg_state())
+        before = archive_settings(_read_pg_state())
         env_b64, env_digest, env_baseline = capture_pitr_env_baseline(home / ".env")
-        auto_b64, auto_digest = _file_evidence(home / "pg" / "postgresql.auto.conf")
+        auto_b64, auto_digest = file_evidence(home / "pg" / "postgresql.auto.conf")
         record = _persist_transition(
             home,
             record,
             "wal_config_applying",
-            wal_config_before_digest=_settings_digest(before),
-            wal_config_desired_digest=_settings_digest(desired),
+            wal_config_before_digest=settings_digest(before),
+            wal_config_desired_digest=settings_digest(desired),
             pre_activation_pitr_env=env_baseline,
             pre_activation_pg_auto_conf=_pg_auto_conf_baseline(home, before),
             pre_activation_env_b64=env_b64,
@@ -562,9 +562,9 @@ def _rollback_record(home: Path, record: ActivationRecord) -> ActivationRecord:
             expected = record.pre_activation_pg_settings or {}
             if current[
                 "postmaster_started_at"
-            ] == record.rollback_postmaster_started_at or _archive_settings(
+            ] == record.rollback_postmaster_started_at or archive_settings(
                 current
-            ) != _archive_settings(expected):
+            ) != archive_settings(expected):
                 return record
             if _pg_auto_conf_baseline(home, current) != record.pre_activation_pg_auto_conf:
                 raise RuntimeError("PostgreSQL ALTER SYSTEM ownership differs after rollback")
@@ -589,7 +589,7 @@ def _rollback_record(home: Path, record: ActivationRecord) -> ActivationRecord:
                 home,
                 record,
                 "rollback_pending",
-                wal_config_before_digest=_settings_digest(_archive_settings(before)),
+                wal_config_before_digest=settings_digest(archive_settings(before)),
                 restart_handoff=handoff,
                 restart_orchestration=orchestration,
                 rollback_postmaster_started_at=current["postmaster_started_at"],
@@ -607,7 +607,7 @@ def _rollback_record(home: Path, record: ActivationRecord) -> ActivationRecord:
             record.rollback_expected_auto_conf_digest,
         }:
             raise RuntimeError("rollback has no exact config byte ownership evidence")
-        current_auto_digest = _file_evidence(home / "pg" / "postgresql.auto.conf")[1]
+        current_auto_digest = file_evidence(home / "pg" / "postgresql.auto.conf")[1]
         try:
             rollback_effect_state(
                 current=current_auto_digest,
@@ -628,7 +628,7 @@ def _rollback_record(home: Path, record: ActivationRecord) -> ActivationRecord:
         if baseline is None:
             raise RuntimeError("rollback lacks PostgreSQL owned-field baseline")
         record = restore_archive_settings(home, record, baseline)
-        restored_digest = _file_evidence(home / "pg" / "postgresql.auto.conf")[1]
+        restored_digest = file_evidence(home / "pg" / "postgresql.auto.conf")[1]
         return _persist_transition(
             home,
             record,
@@ -738,7 +738,7 @@ def cmd_pitr_activate(*, origin: str) -> int:
         print(f"PITR activation refused: {refusal_message(exc)}", file=sys.stderr)
         return 1
     if record.phase == "wal_restart_pending" and not _restart_ready(
-        record, _desired_archive_settings(home)
+        record, desired_archive_settings(home)
     ):
         try:
             record = _dispatch_restart_handoff(home, record)

@@ -67,7 +67,7 @@ class PreparedUnitPublication:
     ``receipt`` is the sealed prepared-inventory receipt (``closure="unknown"``,
     expected-only). ``prepared_receipt_digest`` is the sha256 of that receipt's
     exact bytes — the caller must have re-checked it against the sealed file
-    (as ``_release_selector.verify_unit_image`` and ``prepared_update._image``
+    (as ``release_selector.verify_unit_image`` and ``prepared_update._image``
     do); this dataclass re-reads no filesystem. ``artifact_digest`` and
     ``manifest_digest`` name the candidate image those facts were verified
     against. ``candidate`` is the unit's normal-service plan when the release

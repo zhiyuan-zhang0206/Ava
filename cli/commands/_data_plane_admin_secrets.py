@@ -16,7 +16,7 @@ from typing import cast
 
 from dotenv import dotenv_values
 
-from cli.commands._cluster_instance import pg_admin_url
+from cli.commands.cluster_instance import pg_admin_url
 from shared.cluster import (
     ensure_cluster_redis_acl,
     ensure_cluster_role,
@@ -257,7 +257,7 @@ def _ensure_data_plane_admin_secrets_unlocked(*, allow_legacy_upgrade: bool) -> 
     )
 
     if settings.data_plane.pgbouncer_enabled:
-        from cli.commands._pgbouncer import ensure_pgbouncer, runner_password_from_env
+        from cli.commands.pgbouncer import ensure_pgbouncer, runner_password_from_env
 
         rc = ensure_pgbouncer(
             pg_port=pg_port,

@@ -1,7 +1,7 @@
 """Two-cluster isolation: ports (including each cluster's own pg/redis instance).
 
 Simulates two sequential install-time cluster births on a single host (via the
-real `_ensure_record`) and asserts the core isolation guarantee: the two
+real `ensure_record`) and asserts the core isolation guarantee: the two
 home-keyed records are completely disjoint — distinct port blocks, so distinct
 pg/redis instances. (There are no per-cluster db names to compare: every
 cluster's own single-tenant instance uses the fixed `ava` identifier, carried by
@@ -17,7 +17,7 @@ from typing import cast
 
 import pytest
 
-from cli.commands.cluster_lifecycle import _ensure_record
+from cli.commands.cluster_lifecycle import ensure_record
 from shared import cluster
 from shared.port_block import BLOCK_SIZE
 
@@ -34,8 +34,8 @@ def test_two_clusters_disjoint_ports_db(monkeypatch: pytest.MonkeyPatch, tmp_pat
     )
 
     h1, h2 = tmp_path / ".ava-t1", tmp_path / ".ava-t2"
-    r1, created1 = _ensure_record(h1)
-    r2, created2 = _ensure_record(h2)
+    r1, created1 = ensure_record(h1)
+    r2, created2 = ensure_record(h2)
     assert created1 and created2
     p1 = cast("dict[str, int]", r1.ports)
     p2 = cast("dict[str, int]", r2.ports)

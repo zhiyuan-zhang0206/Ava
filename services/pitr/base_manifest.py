@@ -96,7 +96,7 @@ class CandidateManifest:
         if self.wal_ranges[-1].end_lsn != self.end_lsn:
             raise ValueError("candidate end LSN differs from its WAL ranges")
         for previous, current in zip(self.wal_ranges, self.wal_ranges[1:], strict=False):
-            if _lsn(previous.end_lsn) != _lsn(current.start_lsn):
+            if lsn(previous.end_lsn) != lsn(current.start_lsn):
                 raise ValueError("candidate WAL ranges contain a gap")
 
     def to_json(self) -> str:
@@ -148,7 +148,7 @@ def base_object_from_ack(
     )
 
 
-def _lsn(value: str) -> int:
+def lsn(value: str) -> int:
     try:
         high, low = value.split("/", 1)
         return (int(high, 16) << 32) | int(low, 16)

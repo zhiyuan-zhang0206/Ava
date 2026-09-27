@@ -27,8 +27,8 @@ def cmd_ensure_db_role() -> int:
     record is missing, or Postgres is not reachable (the role lives in pg, so a
     stopped cluster must be started first).
     """
-    from cli.commands._cluster_instance import _pg_running, pg_admin_url
-    from cli.commands._pgbouncer import _running_pid, ensure_pgbouncer
+    from cli.commands.cluster_instance import _pg_running, pg_admin_url
+    from cli.commands.pgbouncer import _running_pid, ensure_pgbouncer
     from shared import cluster as cl
     from shared.config import settings
     from shared.envfile import upsert_env
@@ -151,7 +151,7 @@ def refresh_runner_grants_after_migration() -> None:
 
     from dotenv import dotenv_values
 
-    from cli.commands._cluster_instance import pg_admin_url
+    from cli.commands.cluster_instance import pg_admin_url
     from shared import cluster as cl
     from shared.config import settings
     from shared.paths import ava_home

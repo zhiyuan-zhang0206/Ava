@@ -97,7 +97,7 @@ def test_unreachable_server_is_restarted_and_verified(monkeypatch: pytest.Monkey
 
     monkeypatch.setattr(redis_acl, "_ping", _mock_ping)
     monkeypatch.setattr(
-        "cli.commands._cluster_instance._start_redis",
+        "cli.commands.cluster_instance.start_redis",
         _start,
         raising=True,
     )
@@ -119,7 +119,7 @@ def test_failed_redis_restart_raises(monkeypatch: pytest.MonkeyPatch) -> None:
         return 1
 
     monkeypatch.setattr(redis_acl, "_ping", _dead_ping)
-    monkeypatch.setattr("cli.commands._cluster_instance._start_redis", _failed_start, raising=True)
+    monkeypatch.setattr("cli.commands.cluster_instance.start_redis", _failed_start, raising=True)
 
     with pytest.raises(RuntimeError, match="rc=1"):
         _check("redis://ava_feat_x@127.0.0.1:16380/0", "redis://127.0.0.1:16380/0")
@@ -224,7 +224,7 @@ def test_main_without_secret_runs_the_liveness_check(monkeypatch: pytest.MonkeyP
 
 
 def test_no_secret_unreachable_server_is_restarted(monkeypatch: pytest.MonkeyPatch) -> None:
-    """No-secret mode skips the ACL branch but still uses `_start_redis` to restore
+    """No-secret mode skips the ACL branch but still uses `start_redis` to restore
     the message bus after its local listener disappears."""
     pings: list[Exception | None] = [ConnectionError("connection refused"), None]
     starts: list[tuple[int, str, str, str, str]] = []
@@ -245,7 +245,7 @@ def test_no_secret_unreachable_server_is_restarted(monkeypatch: pytest.MonkeyPat
 
     monkeypatch.setattr(redis_acl, "_ping", _mock_ping)
     monkeypatch.setattr(
-        "cli.commands._cluster_instance._start_redis",
+        "cli.commands.cluster_instance.start_redis",
         _start,
         raising=True,
     )

@@ -719,7 +719,7 @@ def rollback_schema_to(keep: set[str], *, local_admin: bool = False) -> list[str
     if local_admin:
         import psycopg
 
-        from cli.commands._cluster_instance import pg_admin_url
+        from cli.commands.cluster_instance import pg_admin_url
         from shared.cluster import _swap_db, get_record, record_postgres_port
         from shared.paths import ava_home
 
