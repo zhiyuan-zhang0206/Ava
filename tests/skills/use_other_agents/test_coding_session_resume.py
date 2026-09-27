@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import importlib.util
 import sys
-from dataclasses import replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from types import ModuleType
 
@@ -36,9 +36,44 @@ def _load(name: str) -> ModuleType:
     return module
 
 
+@dataclass
+class _FakeShell:
+    """A typed stand-in for ``ava.shell.sessions`` that records what was sent."""
+
+    screen: str = ""
+    screen_after_enter: str | None = None
+    sent: list[str] = field(default_factory=list[str])
+    keys: list[str] = field(default_factory=list[str])
+
+    def send(self, _sid: int, text: str) -> None:
+        self.sent.append(text)
+
+    def send_keys(self, _sid: int, *keys: str) -> None:
+        self.keys.extend(keys)
+        if self.screen_after_enter is not None:
+            self.screen = self.screen_after_enter
+
+    def capture(self, _sid: int, **_kwargs: object) -> str:
+        return self.screen
+
+    def install(self, monkeypatch: pytest.MonkeyPatch) -> _FakeShell:
+        monkeypatch.setattr(codex.ava.shell.sessions, "send", self.send)
+        monkeypatch.setattr(codex.ava.shell.sessions, "send_keys", self.send_keys)
+        monkeypatch.setattr(codex.ava.shell.sessions, "capture", self.capture)
+        return self
+
+
+def _no_wait(_seconds: float) -> None:
+    return None
+
+
+def _nothing(_sid: int) -> None:
+    return None
+
+
 @pytest.fixture
 def _no_sleep(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(codex.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(codex.time, "sleep", _no_wait)
 
 
 # --- Codex: the session id comes from its own /status card ---------------------
@@ -47,32 +82,21 @@ def _no_sleep(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_codex_session_id_is_read_from_the_status_card(
     monkeypatch: pytest.MonkeyPatch, _no_sleep: None
 ) -> None:
-    sent: list[str] = []
-    monkeypatch.setattr(codex.ava.shell.sessions, "send", lambda _sid, text: sent.append(text))
-    monkeypatch.setattr(codex.ava.shell.sessions, "capture", lambda _sid, **_kw: _STATUS_CARD)
+    shell = _FakeShell(screen=_STATUS_CARD).install(monkeypatch)
 
     assert codex._read_session_id(7) == _SESSION
-    assert sent == ["/status"]
+    assert shell.sent == ["/status"]
 
 
 def test_a_parked_status_gets_one_enter(monkeypatch: pytest.MonkeyPatch, _no_sleep: None) -> None:
-    keys: list[str] = []
-    monkeypatch.setattr(codex.ava.shell.sessions, "send", lambda _sid, _text: None)
-    monkeypatch.setattr(codex.ava.shell.sessions, "send_keys", lambda _sid, key: keys.append(key))
-    monkeypatch.setattr(
-        codex.ava.shell.sessions,
-        "capture",
-        lambda _sid, **_kw: _STATUS_CARD if keys else "› /status",
-    )
+    shell = _FakeShell(screen="› /status", screen_after_enter=_STATUS_CARD).install(monkeypatch)
 
     assert codex._read_session_id(7, timeout=0.02) == _SESSION
-    assert keys == ["Enter"]
+    assert shell.keys == ["Enter"]
 
 
 def test_no_session_id_fails_the_launch(monkeypatch: pytest.MonkeyPatch, _no_sleep: None) -> None:
-    monkeypatch.setattr(codex.ava.shell.sessions, "send", lambda _sid, _text: None)
-    monkeypatch.setattr(codex.ava.shell.sessions, "send_keys", lambda _sid, _key: None)
-    monkeypatch.setattr(codex.ava.shell.sessions, "capture", lambda _sid, **_kw: "› /status")
+    _FakeShell(screen="› /status").install(monkeypatch)
 
     with pytest.raises(RuntimeError, match="could not read the Codex session id"):
         codex._read_session_id(7, timeout=0.02)
@@ -108,11 +132,14 @@ def test_a_resumed_worker_reopens_its_session_and_is_told_it_was_interrupted(
 ) -> None:
     owner = _owner(tmp_path)
     workspace = Path(owner.key.workspace)
-    sent: list[str] = []
-    monkeypatch.setattr(codex.ava.shell.sessions, "send", lambda _sid, text: sent.append(text))
-    monkeypatch.setattr(codex, "_wait_for_ready", lambda _sid: None)
-    monkeypatch.setattr(codex, "_read_session_id", lambda _sid: opened)
-    monkeypatch.setattr(codex, "_verify_submitted", lambda _sid: None)
+    sent = _FakeShell().install(monkeypatch).sent
+
+    def _opened(_sid: int) -> str:
+        return opened
+
+    monkeypatch.setattr(codex, "_wait_for_ready", _nothing)
+    monkeypatch.setattr(codex, "_read_session_id", _opened)
+    monkeypatch.setattr(codex, "_verify_submitted", _nothing)
 
     request = _request(workspace, _SESSION)
     if opened != _SESSION:
@@ -131,11 +158,11 @@ def test_resume_refuses_to_adopt_a_live_generation(
 ) -> None:
     owner = replace(_owner(tmp_path), status="active")
     workspace = Path(owner.key.workspace)
-    monkeypatch.setattr(
-        codex,
-        "claim_canonical",
-        lambda *_a, **_k: coding_session_owner.CodingSessionClaim(action="adopt", owner=owner),
-    )
+
+    def _adopt(*_args: object, **_kwargs: object) -> coding_session_owner.CodingSessionClaim:
+        return coding_session_owner.CodingSessionClaim(action="adopt", owner=owner)
+
+    monkeypatch.setattr(codex, "claim_canonical", _adopt)
 
     with pytest.raises(RuntimeError, match="a takeover or a resume needs a fresh"):
         codex.launch(
@@ -169,7 +196,10 @@ def test_claude_launch_names_its_session(
         seen.append((str(args[-1]), resume))
         return 0
 
-    monkeypatch.setattr(claude, "_preset_claude_first_run", lambda: None)
+    def _no_first_run() -> None:
+        return None
+
+    monkeypatch.setattr(claude, "_preset_claude_first_run", _no_first_run)
     monkeypatch.setattr(claude, "_run_supervised_launch", _supervised)
 
     claude.launch(
@@ -187,7 +217,10 @@ def test_claude_launch_names_its_session(
 def test_a_resumed_transcript_needs_one_more_bootstrap_to_count(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    def _home() -> Path:
+        return tmp_path
+
+    monkeypatch.setattr(Path, "home", _home)
     transcript = tmp_path / ".claude" / "projects" / "-ws" / f"{_SESSION}.jsonl"
     transcript.parent.mkdir(parents=True)
     transcript.write_text('{"text": "You will take over Ava agent 41"}\n', encoding="utf-8")
@@ -225,8 +258,7 @@ def test_a_pasted_bootstrap_is_followed_by_the_operators_own_words(
     pasted: bool, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Claude Code will not act on instructions that arrive only inside a paste."""
-    sent: list[str] = []
-    monkeypatch.setattr(claude.ava.shell.sessions, "send", lambda _sid, text: sent.append(text))
+    sent = _FakeShell().install(monkeypatch).sent
     message = "take over Ava agent 41. " * (80 if pasted else 1)
 
     _claude_checks._send_bootstrap(7, message)
