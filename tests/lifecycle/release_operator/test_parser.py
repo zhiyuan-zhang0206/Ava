@@ -28,8 +28,8 @@ def _release_choices() -> dict[str, argparse.ArgumentParser]:
     return cast("dict[str, argparse.ArgumentParser]", release_cmd.choices)
 
 
-def test_release_group_has_all_four_verbs() -> None:
-    assert set(_release_choices()) == {"prepare", "request", "adopt", "status"}
+def test_release_group_has_all_five_verbs() -> None:
+    assert set(_release_choices()) == {"prepare", "request", "adopt", "exclude", "status"}
 
 
 def test_every_release_leaf_binds_a_handler_from_cli_parsers_cluster() -> None:
@@ -83,6 +83,37 @@ def test_request_requires_commit_and_out_and_defaults_exclude_empty() -> None:
     )
     assert args.exclude == []
     assert args.reason is None
+    assert (args.receipt, args.watch_s) == (None, None)
+
+
+def test_request_accepts_an_explicit_receipt_and_watch_window() -> None:
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "cluster",
+            "release",
+            "request",
+            "--commit",
+            "a" * 40,
+            "--out",
+            "/x/out.json",
+            "--receipt",
+            "/x/receipt.json",
+            "--watch-s",
+            "60",
+        ]
+    )
+    assert (args.receipt, args.watch_s) == ("/x/receipt.json", 60)
+
+
+def test_exclude_requires_operation_unit_and_reason() -> None:
+    parser = build_parser()
+    with pytest.raises(SystemExit):
+        parser.parse_args(["cluster", "release", "exclude", "--operation", "x", "--unit", "m:/h"])
+    args = parser.parse_args(
+        ["cluster", "release", "exclude", "--operation", "x", "--unit", "m:/h", "--reason", "gone"]
+    )
+    assert (args.operation, args.unit, args.reason) == ("x", "m:/h", "gone")
 
 
 def test_request_accepts_repeated_exclude() -> None:
@@ -131,6 +162,7 @@ def test_handlers_are_defined_in_cluster_parsers_module() -> None:
         "_h_cluster_release_prepare",
         "_h_cluster_release_request",
         "_h_cluster_release_adopt",
+        "_h_cluster_release_exclude",
         "_h_cluster_release_status",
     ):
         assert hasattr(cluster_parsers, name)

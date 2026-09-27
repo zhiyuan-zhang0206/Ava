@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Release operator surface
-description: Thin single-host `ava cluster release prepare/request/adopt/status` verbs wired onto the existing release-prepare and release-transition machinery.
+description: Thin `ava cluster release prepare/request/adopt/exclude/status` verbs over release preparation and the fleet release transition.
 tags:
 - cluster-lifecycle
 - release
@@ -9,19 +9,11 @@ tags:
 
 # Release operator surface
 
-`ava cluster release prepare / request / adopt / status` are operator verbs
-over the existing release machinery for **one host**. None of them add or
-change release semantics; each is a thin wrapper that resolves paths under
-`$AVA_HOME` and calls the same functions `python -m cli.release_prepare`, the
-release-cycle preview, and `ava cluster update --prepared` already call.
-
-There is no fleet model on this branch yet (slice FC-7: `FleetRequest`, a
-coordinator, per-unit journals); `cli/release_fleet/` so far holds only the
-pure workload policy it will call ([[cli/release_fleet/release_fleet.ava.okf.md]]).
-`release request`'s `--exclude`/`--reason` name a multi-host fleet exclusion
-and always refuse —
-this slice closes the fleet-and-cutover plan's gap 4 ("no operator Request
-builder") for exactly one host, not for a fleet.
+`ava cluster release prepare / request / adopt / exclude / status` are operator
+verbs over the release machinery. None of them decides a release: each
+resolves paths under `$AVA_HOME` and calls release preparation or the fleet
+release transition ([[cli/release_fleet/release_fleet.ava.okf.md]]), where the
+coordinator decides.
 
 ## `prepare`
 
@@ -54,24 +46,31 @@ again by commit alone.
 ## `request`
 
 ```bash
-ava cluster release request --commit FULL_COMMIT_SHA --out REQUEST_JSON
+ava cluster release request --commit FULL_COMMIT_SHA --out REQUEST_JSON \
+  [--receipt RECEIPT_JSON] [--exclude MACHINE:HOME ... --reason R] [--watch-s S]
 ```
 
-Builds one `cli.release_transition.request.Request`
-([[cli/release_transition/release_transition.ava.okf.md]]): `previous` is
-this home's currently selected release, discovered read-only from the release
-store and fully re-verified (`cli.release_operator.current`, never a
-release-transition concept — `ReleaseRef` is always caller-supplied
-elsewhere); `candidate` is read from the `prepare` receipt at
-`$AVA_HOME/releases/work/<commit>/receipt.json`. `verify_pair` (unchanged)
-still refuses a schema-changing transition — that needs the fleet migration
-barrier, not this verb.
+Builds the gateway home's `FleetRequest`: `previous` is this home's currently
+selected release, discovered read-only from the release store and fully
+re-verified (`cli.release_operator.current`); `candidate` is read from the
+`prepare` receipt at `$AVA_HOME/releases/work/<commit>/receipt.json` (or an
+explicit `--receipt` naming that commit). Every other registered unit
+(`machine_units`, read with the operator's gateway login) must be accounted
+for: a paused machine's units become exclusions (reason `paused`),
+`--exclude` with `--reason` excludes a unit (reason `operator`, recorded
+with the operator's user name), and any other unit would take part, which
+refuses naming slice dbgen-8 (its receipt and capability travel over the
+handoff and the coordinator channel). A single box is a fleet of one.
+`--watch-s` shortens the captured watch window; every other policy bound
+keeps its `FleetPolicy` default. `verify_pair` still refuses a
+schema-changing transition.
 
-The written file is meant to be handed straight to the existing
-`ava cluster update --prepared REQUEST_JSON`; nothing here submits or
-dispatches it. Refuses if `--out` already exists, if there is no prepared
-receipt for the commit, if this home has no active selection yet (run
-`adopt` first), or if the candidate is already the active release.
+The written file is handed to `ava cluster update --prepared REQUEST_JSON`;
+nothing here submits or dispatches it. Refuses if `--out` already exists, if
+there is no prepared receipt for the commit, if this home has no active
+selection yet (run `adopt` first), or if the candidate is already the active
+release. The builder runs in the home's admitted runtime (the only operator
+process that receives a database login); the candidate consumes its output.
 
 ## `adopt`
 
@@ -93,14 +92,30 @@ existing release operation (`cli.release_transition.root_macos`); there is no
 macOS root-seed-from-image action to adopt onto yet (`macos-release-start`).
 A macOS host refuses here by design rather than approximating one.
 
+## `exclude`
+
+```bash
+ava cluster release exclude --operation OPERATION_ID --unit MACHINE:HOME --reason R
+```
+
+A recorded operator decision in the fleet journal, taken under the home
+operation lock (so it refuses while a coordinator runs). An included unit is
+excluded only while the operation is held; a unit the coordinator marked
+`failed` or `unknown` at any time. The unit never returns to the operation:
+the coordinator orders it to close and stay closed, it stays stale in the
+published release state, and it rejoins only through a converge operation.
+
 ## `status`
 
 ```bash
 ava cluster release status [--operation OPERATION_ID] [--json]
 ```
 
-Read-only. Reports the currently selected release (if any) and, by default,
-this home's active operation journal (`$AVA_HOME/updates/active`); an
-explicit `--operation` reads that operation's journal directly instead. No
-lock is taken and nothing is written — `read_operation` only validates bytes
-already on disk.
+Read-only. Reports the currently selected release (if any), the published
+cluster release state (`releases/fleet-state.json`: current release,
+last-known-good, stale units, rejections) and, by default, this home's active
+operation journal (`$AVA_HOME/updates/active`): the fleet journal's phase,
+decisions, verdicts, every unit's inclusion, last instruction and answer, and
+alerts with their deliveries, or a remote unit's instruction and answer. An
+explicit `--operation` reads that journal directly. No lock is taken and
+nothing is written.

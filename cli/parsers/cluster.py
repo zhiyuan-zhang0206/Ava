@@ -128,7 +128,15 @@ def _h_cluster_release_request(args: argparse.Namespace) -> int:
         out=Path(args.out),
         exclude=tuple(args.exclude),
         reason=args.reason,
+        receipt=Path(args.receipt) if args.receipt is not None else None,
+        watch_s=args.watch_s,
     )
+
+
+def _h_cluster_release_exclude(args: argparse.Namespace) -> int:
+    from cli.release_operator.exclude import cmd_release_exclude
+
+    return cmd_release_exclude(operation=args.operation, unit=args.unit, reason=args.reason)
 
 
 def _h_cluster_release_adopt(args: argparse.Namespace) -> int:
@@ -219,8 +227,8 @@ def _add_db_authority_parser(
 def _add_release_parser(cluster_sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     release_p = cluster_sub.add_parser(
         "release",
-        help="[cluster] single-host release-operator verbs: thin wiring over "
-        "cli.release_prepare / cli.release_transition (no fleet model yet — see FC-7)",
+        help="[cluster] release-operator verbs: prepare an image, build the fleet release "
+        "request, adopt a first image, exclude a unit, read the release status",
     )
     release_sub = release_p.add_subparsers(dest="release_cmd", required=True)
 
@@ -245,28 +253,46 @@ def _add_release_parser(cluster_sub: argparse._SubParsersAction[argparse.Argumen
 
     request_p = release_sub.add_parser(
         "request",
-        help="[cluster release] build one single-host release Request from this home's "
-        "current selection and a prepared receipt; write it for `ava cluster update`",
+        help="[cluster release] on the gateway home: build the fleet release request from "
+        "this home's current selection, its prepared receipt and every registered unit; "
+        "write it for `ava cluster update --prepared`",
     )
     request_p.add_argument(
         "--commit", required=True, help="candidate commit with an existing prepared receipt"
     )
     request_p.add_argument(
-        "--out", required=True, help="path to write the Request JSON (0600; refuses if it exists)"
+        "--receipt",
+        default=None,
+        help="explicit PreparationReceipt JSON (default: this home's receipt for --commit)",
+    )
+    request_p.add_argument(
+        "--out", required=True, help="path to write the request JSON (0600; refuses if it exists)"
     )
     request_p.add_argument(
         "--exclude",
         action="append",
         default=[],
         metavar="MACHINE:HOME",
-        help="fleet-only unit exclusion; always refused on this single-host slice (FC-7)",
+        help="leave this registered unit out (it stays stale until it converges); repeatable",
     )
+    request_p.add_argument("--reason", default=None, help="the recorded reason for every --exclude")
     request_p.add_argument(
-        "--reason",
+        "--watch-s",
+        type=int,
         default=None,
-        help="fleet-only exclusion reason; always refused on this single-host slice (FC-7)",
+        help="the post-resume watch window in seconds (default: the fleet policy's)",
     )
     request_p.set_defaults(func=_h_cluster_release_request)
+
+    exclude_p = release_sub.add_parser(
+        "exclude",
+        help="[cluster release] on the gateway home: leave one unit out of a held fleet "
+        "operation, or out of one that marked it failed or unknown (recorded)",
+    )
+    exclude_p.add_argument("--operation", required=True, help="the fleet operation id")
+    exclude_p.add_argument("--unit", required=True, metavar="MACHINE:HOME", help="the unit")
+    exclude_p.add_argument("--reason", required=True, help="the recorded reason")
+    exclude_p.set_defaults(func=_h_cluster_release_exclude)
 
     adopt_p = release_sub.add_parser(
         "adopt",
@@ -281,8 +307,8 @@ def _add_release_parser(cluster_sub: argparse._SubParsersAction[argparse.Argumen
 
     status_p = release_sub.add_parser(
         "status",
-        help="[cluster release] read-only view of this home's current release selection "
-        "and release operation journal",
+        help="[cluster release] read-only view of this home's current release selection, "
+        "the published fleet release state and the fleet or unit operation journal",
     )
     status_p.add_argument(
         "--operation",

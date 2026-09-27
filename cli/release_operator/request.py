@@ -1,28 +1,37 @@
-"""`ava cluster release request` — build one single-host release `Request`.
+"""`ava cluster release request` — build the fleet's release request on the gateway home.
 
-This closes the fleet-and-cutover plan's gap 4 ("no operator Request
-builder") for exactly one host: it builds the same
-`cli.release_transition.request.Request` that
-`scripts/preview/release_cycle_runtime.py::prepare` used to build only for
-the preview's own private use, from a real home's currently selected release
-and a real `ava cluster release prepare` receipt. The written file is meant
-to be handed straight to the existing `ava cluster update --prepared`.
+The gateway unit's own images: `previous` is this home's selected release,
+re-verified (`cli.release_operator.current`); `candidate` is the `prepare`
+receipt for `--commit` (at `$AVA_HOME/releases/work/<commit>/receipt.json`, or
+an explicit `--receipt`). Every other registered unit (`machine_units`) is
+accounted for, read-only:
 
-`--exclude`/`--reason` name a multi-host fleet exclusion. There is no fleet
-request model yet (`cli/release_fleet/`, slice FC-7); this verb refuses
-rather than approximate one.
+- a paused machine's units are excluded (reason `paused`);
+- `--exclude MACHINE:HOME --reason R` excludes one unit (reason `operator`);
+- any other unit would take part, which needs its receipt collected through
+  the image-exec handoff and its capability delivered over the coordinator
+  channel: networked releases wait for slice dbgen-8, and the refusal names it.
+
+A single box is a fleet of one. `--watch-s` shortens the captured watch
+window (the preview's cycle uses it); every other policy bound keeps its
+`FleetPolicy` default. The written file is handed to `ava cluster update
+--prepared`; nothing here submits or dispatches it.
 """
 
 from __future__ import annotations
 
+import getpass
 import json
 import os
 import sys
+from collections.abc import Collection
 from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
 
-from cli.release_fleet.request import FleetRequest
+from cli.release_fleet.inventory import NETWORKED_REFUSAL, check_inventory, registered_units
+from cli.release_fleet.policy import FleetPolicy, UnitKey
+from cli.release_fleet.request import Exclusion, FleetRequest
 from cli.release_operator.current import current_release
 from cli.release_operator.layout import receipt_path, require_commit_shape
 from cli.release_prepare.models import PreparationReceipt
@@ -30,8 +39,8 @@ from cli.release_transition.request import ReleaseRef, verify_pair
 from shared.verified_file import regular_bytes
 
 
-def _candidate_from_receipt(home: Path, commit: str) -> ReleaseRef:
-    path = receipt_path(home, commit)
+def _candidate_from_receipt(home: Path, commit: str, receipt: Path | None) -> ReleaseRef:
+    path = receipt_path(home, commit) if receipt is None else receipt
     try:
         encoded = regular_bytes(path)
     except FileNotFoundError:
@@ -39,31 +48,79 @@ def _candidate_from_receipt(home: Path, commit: str) -> ReleaseRef:
             f"no prepared receipt at {path} — run "
             f"`ava cluster release prepare --commit {commit}` on this host first"
         ) from None
-    receipt = PreparationReceipt.model_validate_json(encoded)
-    if receipt.source.source_commit != commit:
+    prepared = PreparationReceipt.model_validate_json(encoded)
+    if prepared.source.source_commit != commit:
         raise ValueError("prepared receipt names a different commit than requested")
     return ReleaseRef(
-        artifact_digest=receipt.image.artifact_digest,
-        manifest_digest=receipt.image.manifest_digest,
-        schema_digest=receipt.image.schema_digest,
-        source_commit=receipt.source.source_commit,
+        artifact_digest=prepared.image.artifact_digest,
+        manifest_digest=prepared.image.manifest_digest,
+        schema_digest=prepared.image.schema_digest,
+        source_commit=prepared.source.source_commit,
     )
 
 
-def _build_request(*, commit: str, exclude: tuple[str, ...], reason: str | None) -> FleetRequest:
+def parse_unit(value: str) -> UnitKey:
+    """`MACHINE:HOME`; the home keeps any later colon (a Windows `C:\\...` home)."""
+    machine, sep, home = value.partition(":")
+    if not sep:
+        raise ValueError(f"a unit is MACHINE:HOME, not {value!r}")
+    return UnitKey(machine=machine, home=home)
+
+
+def _exclusions(
+    gateway: UnitKey,
+    registered: Collection[tuple[str, str]],
+    paused: Collection[str],
+    exclude: tuple[str, ...],
+    reason: str | None,
+) -> tuple[Exclusion, ...]:
+    if bool(exclude) != (reason is not None):
+        raise ValueError("--exclude and --reason are given together")
+    chosen = {parse_unit(value).order for value in exclude}
+    if strangers := sorted(chosen - set(registered)):
+        raise ValueError(f"excluded units are not registered: {strangers}")
+    if gateway.order in chosen:
+        raise ValueError("the gateway home runs the release; it cannot be excluded")
+    exclusions: list[Exclusion] = []
+    for machine, home in sorted(set(registered) - {gateway.order}):
+        unit = UnitKey(machine=machine, home=home)
+        if unit.order in chosen:
+            recorded_by = f"operator:{getpass.getuser()}"
+            exclusions.append(
+                Exclusion(
+                    unit=unit, reason="operator", recorded_by=recorded_by, detail=reason or ""
+                )
+            )
+        elif machine in paused:
+            exclusions.append(
+                Exclusion(
+                    unit=unit, reason="paused", recorded_by="request", detail="paused machine"
+                )
+            )
+        else:
+            raise ValueError(
+                f"registered unit {unit.label} would take part: {NETWORKED_REFUSAL}; "
+                f"exclude it with --exclude {unit.label} --reason ..."
+            )
+    return tuple(exclusions)
+
+
+def _build_request(
+    *,
+    commit: str,
+    receipt: Path | None,
+    exclude: tuple[str, ...],
+    reason: str | None,
+    watch_s: int | None,
+) -> FleetRequest:
     from shared.cluster import registry_path
     from shared.machine import machine_name
     from shared.paths import ava_home
     from shared.start_inputs import configuration_digest
 
-    if exclude or reason is not None:
-        raise ValueError(
-            "--exclude/--reason name a multi-host fleet exclusion; this single-host "
-            "slice builds no FleetRequest — see FC-7 (fleet-core)"
-        )
     require_commit_shape(commit)
     home = ava_home()
-    candidate = _candidate_from_receipt(home, commit)
+    candidate = _candidate_from_receipt(home, commit, receipt)
     found = current_release(home)
     if found is None:
         raise ValueError(
@@ -72,17 +129,23 @@ def _build_request(*, commit: str, exclude: tuple[str, ...], reason: str | None)
     previous, _ = found
     if previous.selector == candidate.selector:
         raise ValueError("the prepared candidate is already this home's active release")
+    gateway = UnitKey(machine=machine_name(), home=str(home))
+    registered, _machines, paused = registered_units()
+    policy = FleetPolicy() if watch_s is None else FleetPolicy(watch_s=watch_s)
     request = FleetRequest(
         id=uuid4(),
         home=str(home),
         registry=str(registry_path()),
         created_at=datetime.now(UTC),
-        machine=machine_name(),
+        machine=gateway.machine,
         previous=previous,
         candidate=candidate,
         executor=candidate,
         configuration_digest=configuration_digest(home),
+        excluded=_exclusions(gateway, registered, paused, exclude, reason),
+        policy=policy,
     )
+    check_inventory(request, registered, paused)
     verify_pair(request)
     return request
 
@@ -100,16 +163,31 @@ def _write_request(out: Path, request: FleetRequest) -> None:
 
 
 def cmd_release_request(
-    *, commit: str, out: Path, exclude: tuple[str, ...], reason: str | None
+    *,
+    commit: str,
+    out: Path,
+    exclude: tuple[str, ...],
+    reason: str | None,
+    receipt: Path | None = None,
+    watch_s: int | None = None,
 ) -> int:
     try:
-        request = _build_request(commit=commit, exclude=exclude, reason=reason)
+        request = _build_request(
+            commit=commit, receipt=receipt, exclude=exclude, reason=reason, watch_s=watch_s
+        )
         _write_request(out, request)
     except (ValueError, OSError, RuntimeError) as exc:
         sys.stderr.write(f"release request refused: {exc}\n")
         return 2
     sys.stdout.write(
-        json.dumps({"request": str(out), "operation": str(request.path), "id": str(request.id)})
+        json.dumps(
+            {
+                "request": str(out),
+                "operation": str(request.path),
+                "id": str(request.id),
+                "excluded": [entry.unit.label for entry in request.excluded],
+            }
+        )
         + "\n"
     )
     return 0

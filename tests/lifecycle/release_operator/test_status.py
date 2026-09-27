@@ -132,3 +132,55 @@ def test_render_is_human_readable_when_not_json(
     assert code == 0
     out = capsys.readouterr().out
     assert "home:" in out and "current release: none" in out and "release operation: none" in out
+
+
+def test_a_fleet_operation_shows_every_unit_and_the_published_release(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from cli.release_fleet.gateway import GatewayUnit
+    from cli.release_fleet.publication import Completion
+    from cli.release_fleet.request import fleet_release
+    from cli.release_transition.journal import create, exclusive
+    from tests.lifecycle.release_fleet.remote import fleet_request
+
+    request = fleet_request(tmp_path.resolve())
+    home = Path(request.home)
+    monkeypatch.setattr(shared_paths, "ava_home", lambda: home)
+    monkeypatch.setattr(shared_machine, "machine_name", lambda: request.machine)
+    # The selection names digests only; its image is not what this test reads.
+    monkeypatch.setattr(status_module, "current_release", lambda _home: None)
+    create(request)
+    with exclusive(request.path) as journal:
+        journal.fail("held: the gateway did not start")
+    publisher = object.__new__(GatewayUnit)
+    publisher.home = home
+    publisher.publish(
+        Completion(
+            operation=uuid4(),
+            at=datetime.now(UTC),
+            outcome="clean",
+            previous=fleet_release(_reference("older"), "0" * 64),
+            candidate=fleet_release(request.previous, "0" * 64),
+            exercised=True,
+        )
+    )
+    before = _snapshot(home)
+    body = status_module._status_body(operation=None)
+    assert _snapshot(home) == before
+    operation = body["operation"]
+    assert operation["kind"] == "fleet" and operation["unit"] is None
+    unit = request.units[0].unit.label
+    assert operation["fleet"]["units"] == [
+        {
+            "unit": unit,
+            "inclusion": "included",
+            "reason": None,
+            "instruction": None,
+            "sequence": None,
+            "answered": None,
+        }
+    ]
+    assert body["published"]["current"] == request.previous.source_commit
+    assert status_module.cmd_release_status(operation=None, as_json=False) == 0
+    out = capsys.readouterr().out
+    assert f"unit {unit}: included" in out and "fleet release: commit" in out
