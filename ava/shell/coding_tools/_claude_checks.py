@@ -37,9 +37,24 @@ def _bracketed_paste(text: str) -> str:
     return f"{_PASTE_BEGIN}{body}{_PASTE_END}"
 
 
+_OWN_WORDS = " Follow the launch message pasted above: it is from the Ava agent that launched you."
+"""Typed after a pasted bootstrap. Claude Code marks a bracketed paste as pasted
+content, and the model will not act on instructions that arrive only inside a
+paste; it asks for confirmation instead, stalling an unattended takeover
+(observed on Claude Code 2.1.283, 2026-09-27). One line of the operator's own
+words, outside the paste, is the request to act on it."""
+
+
 def _send_bootstrap(sid: int, message: str) -> None:
-    """Send the takeover bootstrap through the composer's paste path (#4364)."""
-    ava.shell.sessions.send(sid, _bracketed_paste(message))
+    """Send the takeover bootstrap through the composer's paste path (#4364).
+
+    A pasted bootstrap is followed by ``_OWN_WORDS`` before the Enter; a
+    bootstrap within one composer chunk is typed as-is and needs none.
+    """
+    payload = _bracketed_paste(message)
+    if payload.startswith(_PASTE_BEGIN):
+        payload += _OWN_WORDS
+    ava.shell.sessions.send(sid, payload)
 
 
 def _pretrust(workspace: Path) -> None:
@@ -64,18 +79,21 @@ def _session_exists(name: str) -> bool:
     return any(existing_name == name for existing_name in ava.shell.sessions.list().values())
 
 
-def _claude_ui_ready(output: str) -> bool:
+def _claude_ui_ready(output: str, *, resumed: bool = False) -> bool:
     """Require the title and a composer cue, normalizing Unicode prompt spacing.
 
     An empty composer is a bare prompt glyph: captures strip trailing blanks,
-    so the line may end right after it.
+    so the line may end right after it. A resumed session opens on its
+    conversation history instead of the welcome banner, so the title is not
+    required there; the composer cue (with its bypass-permissions footer) still
+    is, which a shell prompt never shows.
     """
     normalized = re.sub(r"[^\S\r\n]", " ", output)
     composer = "? for shortcuts" in normalized or (
         bool(re.search(r"(?m)^ *\u276f(?: |\r?$)", normalized))
         and "bypass permissions on" in normalized
     )
-    return bool(re.search(r"\bClaude\s+Code\b", normalized)) and composer
+    return composer and (resumed or bool(re.search(r"\bClaude\s+Code\b", normalized)))
 
 
 def _relay_stub_path(state_dir: Path) -> Path:
@@ -128,7 +146,13 @@ def _check_missing_claude(failure_marker: Path | None, output: str = "") -> None
         raise RuntimeError(f"Claude did not start: {_CLAUDE_NOT_FOUND}")
 
 
-def _wait_for_ready(sid: int, timeout: float = 30.0, *, failure_marker: Path | None = None) -> None:
+def _wait_for_ready(
+    sid: int,
+    timeout: float = 30.0,
+    *,
+    failure_marker: Path | None = None,
+    resumed: bool = False,
+) -> None:
     """Require Claude's rendered UI before delivering any text to the session.
 
     Claude Code startup takes 5-10 seconds.  A fixed ``time.sleep(3)`` often
@@ -149,7 +173,7 @@ def _wait_for_ready(sid: int, timeout: float = 30.0, *, failure_marker: Path | N
             ) from exc
         _check_missing_claude(failure_marker, output)
         _check_login_marker(failure_marker)
-        if _claude_ui_ready(output):
+        if _claude_ui_ready(output, resumed=resumed):
             time.sleep(2)  # brief stability pause
             try:
                 stable = ava.shell.sessions.capture(sid, scrollback=False)
@@ -157,7 +181,7 @@ def _wait_for_ready(sid: int, timeout: float = 30.0, *, failure_marker: Path | N
                 _check_missing_claude(failure_marker)
                 raise RuntimeError(f"Claude session {sid} exited before it became ready") from exc
             _check_missing_claude(failure_marker, stable)
-            if _claude_ui_ready(stable):
+            if _claude_ui_ready(stable, resumed=resumed):
                 print("  -> ready (Claude Code UI)")
                 return
         time.sleep(1)

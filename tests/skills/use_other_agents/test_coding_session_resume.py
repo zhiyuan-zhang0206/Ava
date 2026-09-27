@@ -201,6 +201,42 @@ def test_a_resumed_transcript_needs_one_more_bootstrap_to_count(
     assert _claude_checks._bootstrap_count(_SESSION) > baseline
 
 
+_RESUMED_PANEL = (
+    "\u23fa takeover active\n"
+    "\u273b Crunched for 59s\n"
+    "\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n"
+    "\u276f \n"
+    "\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n"
+    "  \u23f5\u23f5 bypass permissions on (shift+tab to cycle) \u00b7 \u2190 for agents\n"
+)
+
+
+def test_a_resumed_panel_is_ready_without_the_welcome_banner() -> None:
+    """A resumed session opens on its history; a shell prompt is never ready."""
+    shell = "host:cl-b user$ exec claude --dangerously-skip-permissions --resume x\n"
+
+    assert not _claude_checks._claude_ui_ready(_RESUMED_PANEL)
+    assert _claude_checks._claude_ui_ready(_RESUMED_PANEL, resumed=True)
+    assert not _claude_checks._claude_ui_ready(shell, resumed=True)
+
+
+@pytest.mark.parametrize("pasted", [False, True])
+def test_a_pasted_bootstrap_is_followed_by_the_operators_own_words(
+    pasted: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Claude Code will not act on instructions that arrive only inside a paste."""
+    sent: list[str] = []
+    monkeypatch.setattr(claude.ava.shell.sessions, "send", lambda _sid, text: sent.append(text))
+    message = "take over Ava agent 41. " * (80 if pasted else 1)
+
+    _claude_checks._send_bootstrap(7, message)
+
+    if pasted:
+        assert sent == [f"\x1b[200~{message}\x1b[201~{_claude_checks._OWN_WORDS}"]
+    else:
+        assert sent == [message]
+
+
 # --- both: the message, the flag ------------------------------------------------
 
 

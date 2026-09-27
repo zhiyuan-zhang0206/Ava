@@ -42,9 +42,10 @@ def _launch_takeover(workspace: Path, brief: str) -> int:
 
 
 def _unwrap_paste(text: str) -> str:
+    """The pasted bootstrap body; the operator's own words must follow the paste."""
     assert text.startswith(_claude_checks._PASTE_BEGIN)
-    assert text.endswith(_claude_checks._PASTE_END)
-    return text[len(_claude_checks._PASTE_BEGIN) : -len(_claude_checks._PASTE_END)]
+    assert text.endswith(_claude_checks._PASTE_END + _claude_checks._OWN_WORDS)
+    return text[len(_claude_checks._PASTE_BEGIN) : text.index(_claude_checks._PASTE_END)]
 
 
 def _owner(tmp_path: Path) -> coding_session_owner.CodingSessionOwner:
@@ -333,7 +334,8 @@ def test_resident_launch_scopes_the_credential_stub_to_its_generation(
     def _send(_sid: int, content: str) -> None:
         sent.append(content)
 
-    def _ready(_sid: int, *, failure_marker: Path) -> None:
+    def _ready(_sid: int, *, failure_marker: Path, resumed: bool) -> None:
+        assert not resumed
         assert failure_marker.parent.is_dir()
 
     def _receipt(_sid: int, _rebuild: Callable[[], str], _submitted: object) -> None:
@@ -792,5 +794,5 @@ def test_start_receipt_resend_wraps_a_multi_chunk_rebuilt_bootstrap(
     rebuilt = "b" * (_claude_checks._PASTE_WRAP_THRESHOLD_CHARS + 1)
     _claude_checks._verify_start_receipt(7, lambda: rebuilt, transcript_evidence, timeout=0.0)
 
-    assert resend == [f"\x1b[200~{rebuilt}\x1b[201~"]
+    assert resend == [f"\x1b[200~{rebuilt}\x1b[201~{_claude_checks._OWN_WORDS}"]
     assert "start-receipt=submitted after rebuild resend" in capsys.readouterr().out

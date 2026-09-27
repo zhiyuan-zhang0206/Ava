@@ -195,7 +195,7 @@ def _run_supervised_launch(
                 ),
             )
             print(f"+ persistent shell session: {sid} ({session_name})")
-            _wait_for_ready(sid, failure_marker=marker)
+            _wait_for_ready(sid, failure_marker=marker, resumed=resume)
 
         ava.shell.sessions.send(
             sid, worker_bootstrap(contract, workspace, tasks_file, work_file, resumed=resume)
@@ -283,7 +283,7 @@ def _run_takeover_launch(
                     resume=resume,
                 ),
             )
-            _wait_for_ready(sid, failure_marker=marker)
+            _wait_for_ready(sid, failure_marker=marker, resumed=resume)
         guide = impersonator_guide(reference_dir)
         message = _takeover_bootstrap_message(
             owner_agent_id,
