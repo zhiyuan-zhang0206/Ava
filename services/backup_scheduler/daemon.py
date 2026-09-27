@@ -19,7 +19,6 @@ from datetime import UTC, datetime, timedelta
 from datetime import time as clock_time
 from functools import partial
 
-from services._pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
 from services.backup import _cluster_tz, is_due, run_backup
 from services.backup_scheduler.recovery_drill import (
     load_local_dump_restore_success,
@@ -27,6 +26,7 @@ from services.backup_scheduler.recovery_drill import (
     record_local_dump_restore_success,
 )
 from services.backup_scheduler.worker import run_job
+from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
 from shared import telemetry
 from shared.config import settings
 from shared.daemon_health import health_port, start_health_server, stop_health_server

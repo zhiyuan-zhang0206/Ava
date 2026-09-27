@@ -50,7 +50,7 @@ import psycopg
 from psycopg_pool import ConnectionPool
 
 import shared.db
-from services._pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
+from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
 from shared import telemetry
 from shared.config import settings
 from shared.daemon_health import (

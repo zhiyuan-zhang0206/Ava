@@ -26,8 +26,8 @@ from loguru import logger
 from psycopg_pool import ConnectionPool
 
 import shared.db
-from services._pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
 from services.labeler.labeler import generate_label_async
+from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
 from shared.config import settings
 from shared.daemon_health import Liveness, health_port, start_health_server, stop_health_server
 from shared.daemon_shutdown import cancel_and_drain, install_graceful_shutdown

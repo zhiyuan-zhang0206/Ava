@@ -12,7 +12,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-from services._pidfile import acquire_pidfile, remove_pidfile
+from services.pidfile import acquire_pidfile, remove_pidfile
 from services.pitr.object_store import PermanentObjectStoreError, TransientObjectStoreError
 from services.pitr.state import ArchiveHealth, health_state
 from services.pitr.store_factory import get_store_group
