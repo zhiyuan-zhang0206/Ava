@@ -1,0 +1,423 @@
+"""The races around a PTY session kill (`shared/sessions/pty/session_tree.py`, `host.py`).
+
+Each test pins a window the #3521 review found: a kill that orphans a stopped
+process group and lets the kernel SIGCONT a frozen member; a member that keeps
+forking while the kill runs; a kill that raises with members still frozen; a
+host that exits while its own kill op still holds members frozen; and a
+member the caller may not signal, which must not turn a finished kill into an
+error that loses the owner's interruption notice.
+
+Every process a test starts carries the test's tmp dir on argv (it runs a
+script from there), so `pty_reaper` reaps whatever a failing kill leaves.
+"""
+
+from __future__ import annotations
+
+import os
+import signal
+import subprocess
+import sys
+import threading
+import time
+from collections.abc import Callable
+from pathlib import Path
+from typing import Any
+
+import psutil
+import pytest
+
+from shared.platform import IS_WINDOWS
+from shared.proc_tree import OwnedProcess, stable_create_time
+from shared.session_record import SessionRecord, pid_starttime_ticks
+from shared.sessions.pty import cli as pty_cli
+from shared.sessions.pty import host as pty_host
+from shared.sessions.pty import session_tree
+from tests.cli.conftest import PtyReaper
+from tests.cli.conftest import pty_reaper as pty_reaper
+
+pytestmark = pytest.mark.skipif(IS_WINDOWS, reason="pty sessions are POSIX-only")
+
+_WRITE_PID = """\
+import os, sys
+def write(name, pid):
+    path = os.path.join(sys.argv[1], name)
+    open(path + ".tmp", "w").write(str(pid))
+    os.rename(path + ".tmp", path + ".pid")
+"""
+
+# The review's layout, all in one POSIX session led by this script: a job P in
+# its own group with a child C, and O, double-forked out of P's tree (parent:
+# init) but still in P's group. O ignores HUP and logs every SIGCONT it gets.
+_ORPHANED_GROUP = (
+    _WRITE_PID
+    + """\
+import signal, time
+def o_main():
+    signal.signal(signal.SIGHUP, signal.SIG_IGN)
+    def on_cont(*_):
+        with open(os.path.join(sys.argv[1], "cont.log"), "a") as log:
+            log.write("cont\\n")
+    signal.signal(signal.SIGCONT, on_cont)
+    write("o", os.getpid())
+    while True:
+        time.sleep(0.001)
+def p_main():
+    os.setpgid(0, 0)
+    if os.fork() == 0:
+        write("c", os.getpid())
+        while True:
+            time.sleep(1)
+    mid = os.fork()
+    if mid == 0:
+        if os.fork() == 0:
+            o_main()
+        os._exit(0)
+    os.waitpid(mid, 0)
+    write("p", os.getpid())
+    while True:
+        time.sleep(1)
+if os.fork() == 0:
+    p_main()
+while True:
+    time.sleep(1)
+"""
+)
+
+# A session whose member R keeps forking sleeping children (bounded, so a
+# failing kill cannot fork-bomb the box).
+_RESPAWNER = (
+    _WRITE_PID
+    + """\
+import time
+if os.fork() == 0:
+    write("r", os.getpid())
+    for _ in range(400):
+        if os.fork() == 0:
+            while True:
+                time.sleep(1)
+        time.sleep(0.002)
+    while True:
+        time.sleep(1)
+while True:
+    time.sleep(1)
+"""
+)
+
+# A leader with one sleeping child, the child's pid published.
+_LEADER_WITH_CHILD = (
+    _WRITE_PID
+    + """\
+import time
+if os.fork() == 0:
+    write("child", os.getpid())
+    while True:
+        time.sleep(1)
+while True:
+    time.sleep(1)
+"""
+)
+
+
+def _wait(predicate: Callable[[], bool], timeout: float = 10.0) -> bool:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if predicate():
+            return True
+        time.sleep(0.02)
+    return predicate()
+
+
+def _exited(pid: int) -> bool:
+    """Reaped, or a zombie awaiting its parent's reap: it can no longer run."""
+    try:
+        return psutil.Process(pid).status() == psutil.STATUS_ZOMBIE
+    except psutil.NoSuchProcess:
+        return True
+
+
+def _launch(tmp_path: Path, body: str, reaper: PtyReaper) -> subprocess.Popen[bytes]:
+    """Run `body` as its own session leader (the stand-in shell)."""
+    script = tmp_path / "leader.py"
+    script.write_text(body, encoding="utf-8")
+    leader = subprocess.Popen(  # noqa: S603 — the test's own interpreter and tmp script
+        [sys.executable, str(script), str(tmp_path)], start_new_session=True
+    )
+    reaper.track(psutil.Process(leader.pid))
+    return leader
+
+
+def _pid(tmp_path: Path, name: str, reaper: PtyReaper) -> int:
+    path = tmp_path / f"{name}.pid"
+    assert _wait(path.exists), f"{name}.pid was never written"
+    pid = int(path.read_text(encoding="utf-8"))
+    reaper.track(psutil.Process(pid))
+    return pid
+
+
+def _identity(pid: int) -> OwnedProcess:
+    return OwnedProcess.capture(psutil.Process(pid))
+
+
+def _reap(leader: subprocess.Popen[bytes]) -> None:
+    """Collect the leader (the test's own child) once it has been killed."""
+    if _wait(lambda: _exited(leader.pid)):
+        leader.wait(timeout=10)
+
+
+def test_kill_never_wakes_a_member_whose_group_it_orphans(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, pty_reaper: PtyReaper
+) -> None:
+    """O shares job P's group but left the tree. Were P killed first, P's exit
+    would orphan the group while O is still stopped, and the kernel would
+    SIGHUP+SIGCONT O awake. O dies before P, and a slow liveness probe (a
+    loaded box) no longer sits between two SIGKILLs."""
+    leader = _launch(tmp_path, _ORPHANED_GROUP, pty_reaper)
+    orphan, job, child = (_pid(tmp_path, name, pty_reaper) for name in ("o", "p", "c"))
+    assert os.getpgid(orphan) == job and os.getsid(orphan) == leader.pid
+    assert psutil.Process(orphan).ppid() != job, "precondition: O left P's tree"
+    real_live = session_tree._live
+
+    def slow_live(identity: OwnedProcess) -> bool:
+        time.sleep(0.005)
+        return real_live(identity)
+
+    monkeypatch.setattr(session_tree, "_live", slow_live)
+
+    result = session_tree.kill_session_tree(_identity(leader.pid), wait_s=3.0)
+
+    assert result.survivors == ()
+    assert all(_wait(lambda pid=pid: _exited(pid)) for pid in (orphan, job, child, leader.pid))
+    assert not (tmp_path / "cont.log").exists(), "a frozen member was SIGCONTed awake"
+    _reap(leader)
+
+
+def test_kill_takes_what_a_running_member_forks_during_the_kill(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    pty_reaper: PtyReaper,
+    loguru_records: list[dict[str, Any]],
+) -> None:
+    """A member whose stop never lands keeps forking through the freeze passes
+    and the kill. With the shell still frozen its session id still names only
+    this session, so a second closure takes every child the member forked
+    before it died; running out of freeze passes is logged, never silent."""
+    leader = _launch(tmp_path, _RESPAWNER, pty_reaper)
+    respawner = _pid(tmp_path, "r", pty_reaper)
+    assert _wait(lambda: len(psutil.Process(respawner).children()) >= 5)
+    real_freeze, real_live = session_tree._freeze, session_tree._live
+
+    def unfreezable(process: psutil.Process) -> bool:
+        return False if process.pid == respawner else real_freeze(process)
+
+    def slow_live(identity: OwnedProcess) -> bool:
+        time.sleep(0.001)
+        return real_live(identity)
+
+    monkeypatch.setattr(session_tree, "_freeze", unfreezable)
+    monkeypatch.setattr(session_tree, "_live", slow_live)
+    monkeypatch.setattr(session_tree, "_MAX_FREEZE_PASSES", 2)
+
+    session_tree.kill_session_tree(_identity(leader.pid), wait_s=3.0)
+
+    def left() -> list[int]:
+        return [
+            process.pid
+            for process in psutil.process_iter(["cmdline"])
+            if str(tmp_path) in (process.info["cmdline"] or ()) and not _exited(process.pid)
+        ]
+
+    assert _wait(lambda: not left(), timeout=3.0), f"forked during the kill, left alive: {left()}"
+    assert any(
+        "freeze passes" in record["message"] and str(leader.pid) in record["message"]
+        for record in loguru_records
+    ), "running out of freeze passes must be logged"
+    _reap(leader)
+
+
+def test_kill_that_raises_leaves_no_member_stopped(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, pty_reaper: PtyReaper
+) -> None:
+    """Members are SIGSTOPped before the kill decides anything; a kill that
+    raises midway must not leave them stopped with nobody to resume them."""
+    leader = _launch(tmp_path, _LEADER_WITH_CHILD, pty_reaper)
+    child = _pid(tmp_path, "child", pty_reaper)
+    real_capture = session_tree._capture_pass
+    calls: list[int] = []
+
+    def failing_capture(*args: Any, **kwargs: Any) -> bool:
+        calls.append(1)
+        if len(calls) == 2:
+            raise RuntimeError("injected fault after the first freeze pass")
+        return real_capture(*args, **kwargs)
+
+    monkeypatch.setattr(session_tree, "_capture_pass", failing_capture)
+
+    with pytest.raises(RuntimeError, match="injected fault"):
+        session_tree.kill_session_tree(_identity(leader.pid), wait_s=3.0)
+
+    assert _wait(lambda: _exited(child), timeout=5.0), "a frozen member was left stopped"
+    assert _wait(lambda: _exited(leader.pid), timeout=5.0), "the frozen leader was left stopped"
+    _reap(leader)
+
+
+def test_host_tree_kill_that_raises_leaves_the_host_not_stopped(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, pty_reaper: PtyReaper
+) -> None:
+    """The host is frozen before its sessions are killed; a session kill that
+    raises must not leave it stopped."""
+    host = _launch(tmp_path, _LEADER_WITH_CHILD, pty_reaper)
+    _pid(tmp_path, "child", pty_reaper)
+
+    def failing_kill(*_args: Any, **_kwargs: Any) -> session_tree.TreeKill:
+        raise RuntimeError("injected session-kill fault")
+
+    monkeypatch.setattr(session_tree, "kill_session_tree", failing_kill)
+
+    with pytest.raises(RuntimeError, match="injected session-kill fault"):
+        session_tree.kill_host_tree(psutil.Process(host.pid), wait_s=3.0)
+
+    assert _wait(lambda: _exited(host.pid), timeout=5.0), "the frozen host was left stopped"
+    _reap(host)
+
+
+def _session(tmp_path: Path, shell_pid: int) -> tuple[pty_host.PtySession, int]:
+    """A host-side session carrying a real shell stand-in; returns it and the
+    master pipe's write end (held open, so the master never reads EOF)."""
+    read_end, write_end = os.pipe()
+    process = psutil.Process(shell_pid)
+    record = SessionRecord(
+        pid=shell_pid,
+        create_time=stable_create_time(process),
+        cmd="",
+        cwd="",
+        started_at=0.0,
+        starttime=pid_starttime_ticks(shell_pid),
+    )
+    session = pty_host.PtySession(
+        "ava-test-race-1",
+        shell_pid,
+        read_end,
+        80,
+        24,
+        record,
+        tmp_path / "session.json",
+        tmp_path / "session.out.log",
+    )
+    return session, write_end
+
+
+def test_host_exit_waits_for_its_in_flight_kill(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, pty_reaper: PtyReaper
+) -> None:
+    """A graceful kill's TERM ends the shell, and the reader's teardown
+    schedules the host's exit while the kill op is still sweeping (and holds
+    members frozen). The host must exit only after the op answered."""
+    shell = _launch(tmp_path, "import time\ntime.sleep(60)\n", pty_reaper)
+    session, write_end = _session(tmp_path, shell.pid)
+    exits: list[float] = []
+    exited = threading.Event()
+
+    def record_exit(_code: int) -> None:
+        exits.append(time.monotonic())
+        exited.set()
+
+    real_kill = session_tree.kill_session_tree
+
+    def slow_kill(*args: Any, **kwargs: Any) -> session_tree.TreeKill:
+        time.sleep(pty_host._EXIT_DRAIN_S + 0.7)  # the sweep outlasts the exit drain
+        return real_kill(*args, **kwargs)
+
+    monkeypatch.setattr(pty_host.os, "_exit", record_exit)
+    monkeypatch.setattr(session_tree, "kill_session_tree", slow_kill)
+
+    def reader() -> None:
+        os.waitpid(shell.pid, 0)
+        pty_host._finish(session, tmp_path / "session.sock")
+
+    thread = threading.Thread(target=reader, daemon=True)
+    thread.start()
+    try:
+        response = pty_host._op_kill(session, {"graceful": True})
+        answered = time.monotonic()
+        # Wait for the exit either way, so no exit thread outlives the patch.
+        assert exited.wait(10), "the host never exited"
+    finally:
+        os.close(write_end)
+    thread.join(10)
+    assert response["ok"], response
+    assert exits[0] >= answered, "the host exited while its kill op was still running"
+
+
+def test_kill_with_only_unsignallable_survivors_answers_interrupted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, pty_reaper: PtyReaper
+) -> None:
+    """The shell and everything this user may signal are gone; a member it may
+    not signal (a root `sudo` on the pty) survives. The session is over and
+    its work was cut short: `ok`, `interrupted`, and the survivor named — an
+    error here would make the TTL reaper retry into `absent` and drop the
+    owner's interruption notice."""
+    leader = _launch(tmp_path, _LEADER_WITH_CHILD, pty_reaper)
+    member = _pid(tmp_path, "child", pty_reaper)
+    session, write_end = _session(tmp_path, leader.pid)
+    real_suspend, real_kill = psutil.Process.suspend, psutil.Process.kill
+
+    def suspend(self: psutil.Process) -> None:
+        if self.pid == member:
+            raise psutil.AccessDenied(self.pid)
+        real_suspend(self)
+
+    def kill(self: psutil.Process) -> None:
+        if self.pid == member:
+            raise psutil.AccessDenied(self.pid)
+        real_kill(self)
+
+    monkeypatch.setattr(pty_host, "_KILL_FORCE_WAIT_S", 0.5)
+
+    def reader() -> None:
+        os.waitpid(leader.pid, 0)
+        session.begin_finish()
+
+    thread = threading.Thread(target=reader, daemon=True)
+    thread.start()
+    try:
+        # A scoped patch: undone before teardown SIGKILLs the member.
+        with pytest.MonkeyPatch.context() as patch:
+            patch.setattr(psutil.Process, "suspend", suspend)
+            patch.setattr(psutil.Process, "kill", kill)
+            response = pty_host._op_kill(session, {})
+    finally:
+        os.kill(member, signal.SIGKILL)
+        os.close(write_end)
+        os.close(session.master_fd)
+        os.close(session._log_fd)
+    thread.join(10)
+    assert response["ok"], response
+    assert response["data"] == {"mode": "forced", "interrupted": True, "survivors": [member]}
+
+
+def test_cli_kill_names_the_unsignallable_survivors(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The CLI turns that answer into a successful, interrupted kill, and says
+    which processes were left for their owner to end."""
+    answer = {
+        "ok": True,
+        "code": 0,
+        "data": {"mode": "forced", "interrupted": True, "survivors": [4242]},
+        "error": None,
+    }
+
+    def session_request(_name: str, _req: dict[str, Any]) -> dict[str, Any]:
+        return answer
+
+    def reap_orphaned_hosts(*_args: object, **_kwargs: object) -> None:
+        return None
+
+    monkeypatch.setattr(pty_cli, "session_request", session_request)
+    monkeypatch.setattr(pty_cli, "_reap_orphaned_hosts", reap_orphaned_hosts)
+
+    assert pty_cli._op_kill("ava-test-race-2", []) == 0
+
+    captured = capsys.readouterr()
+    assert captured.out == "interrupted\n"
+    assert "[4242]" in captured.err

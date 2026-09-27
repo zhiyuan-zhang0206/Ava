@@ -212,7 +212,6 @@
     "cli/commands/release_services.py::observe_normal_service": 26,
     "cli/commands/_root_driver.py::_wait_for_root_services_ready": 25,
     "cli/commands/_session_lifecycle.py::_launch_sessions": 15,
-    "cli/commands/_temporary_stop.py::_stop_terminals": 20,
     "cli/commands/_temporary_stop.py::stop": 22,
     "cli/commands/_update_agent_runner.py::_run_agent_runner_self_update": 39,
     "cli/commands/_update_agent_runner.py::_run_agent_runner_self_update_inner": 27,

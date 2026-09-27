@@ -160,6 +160,7 @@ class PtySession:
         self._log_cap = log_cap
         self._lock = threading.Lock()
         self._dead = False
+        self._kills = 0  # kill ops in flight; the host never exits under one
         self._cond = threading.Condition(self._lock)
 
     def feed(self, data: bytes) -> None:
@@ -231,6 +232,29 @@ class PtySession:
         with self._cond:
             self._cond.wait_for(lambda: self._dead, timeout)
             return self._dead
+
+    def begin_kill(self) -> bool:
+        """Register an in-flight kill op; False when the teardown was already claimed.
+
+        The count shares the teardown claim's lock: a kill either registers
+        before `_finish` claims the session, and the host's exit then waits
+        for it, or finds the session dead and answers the noop.
+        """
+        with self._cond:
+            if self._dead:
+                return False
+            self._kills += 1
+            return True
+
+    def end_kill(self) -> None:
+        with self._cond:
+            self._kills -= 1
+            self._cond.notify_all()
+
+    def wait_kills(self) -> None:
+        """Block until no kill op is in flight."""
+        with self._cond:
+            self._cond.wait_for(lambda: self._kills == 0)
 
     def pid_matches(self) -> bool:
         """True when this shell's pid has not been recycled."""
@@ -328,8 +352,9 @@ def _finish(session: PtySession, sock_file: Path) -> None:
     answering socket, so it can never adopt this dying host as its success.
     Only then the slow parts run: reap the child (bounded polls), close the
     master (hangs up the slave's foreground group), close the log, and —
-    after a short drain so an in-flight kill's response reaches its caller —
-    exit the host. Idempotent against a concurrent kill; one caller runs it.
+    once every in-flight kill op answered (it may hold members frozen), after
+    a short drain so its response reaches the caller — exit the host.
+    Idempotent against a concurrent kill; one caller runs it.
     """
     if not session.begin_finish():
         return  # another thread won the teardown
@@ -345,6 +370,9 @@ def _finish(session: PtySession, sock_file: Path) -> None:
     logger.info("pty session ended: {name} (pid={pid})", name=session.name, pid=session.pid)
 
     def _exit_soon() -> None:
+        # A kill op still running may hold session members SIGSTOPped: exiting
+        # under it would leave them stopped with nobody to kill or resume them.
+        session.wait_kills()
         time.sleep(_EXIT_DRAIN_S)
         os._exit(0)
 
@@ -426,10 +454,18 @@ def _op_kill(session: PtySession, req: dict[str, Any]) -> dict[str, Any]:
 
     Job control gives each job its own process group, so a group signal never
     reaches `cmd &`; the membership rule and its boundary (a setsid'd process
-    that left the tree is sovereign) live in `session_tree`.
+    that left the tree is sovereign) live in `session_tree`. The op counts as
+    in flight until it answers, so the host outlives it (`_finish`).
     """
-    if session.dead:
+    if not session.begin_kill():
         return ok({"mode": "noop", "interrupted": False})  # idempotent, like posixproc
+    try:
+        return _kill_session(session, req)
+    finally:
+        session.end_kill()
+
+
+def _kill_session(session: PtySession, req: dict[str, Any]) -> dict[str, Any]:
     if not session.pid_matches():
         # The shell died but the reader has not finished yet; the reader's
         # own reap check will run _finish within one poll — report the noop.
@@ -456,14 +492,24 @@ def _op_kill(session: PtySession, req: dict[str, Any]) -> dict[str, Any]:
     result = session_tree.kill_session_tree(shell, also=members, wait_s=_KILL_FORCE_WAIT_S)
     if result.killed:
         mode = "forced"
-    if result.survivors:
-        pids = sorted(identity.pid for identity in result.survivors)
+    if result.stuck:
+        pids = sorted(identity.pid for identity in result.stuck)
         return err(1, f"session {session.name}: processes survived the kill: {pids}")
     if session.wait_dead(_KILL_FORCE_WAIT_S):
-        return ok({"mode": mode, "interrupted": interrupted})
+        return ok(_verdict(result, mode=mode, interrupted=interrupted))
     # The kill did not take — keep the record so the caller can see the
     # survivor (posixproc's #1015 lesson), and report failure.
     return err(1, f"session {session.name} survived the kill")
+
+
+def _verdict(result: session_tree.TreeKill, *, mode: str, interrupted: bool) -> dict[str, object]:
+    """A finished kill's answer. Survivors left at this point are only processes
+    this user may not signal (a root `sudo` on the pty): the session is over,
+    and it cut short the work they did — `interrupted`, with them named."""
+    if not result.survivors:
+        return {"mode": mode, "interrupted": interrupted}
+    survivors = sorted(identity.pid for identity in result.survivors)
+    return {"mode": mode, "interrupted": True, "survivors": survivors}
 
 
 _OPS: dict[str, Callable[[PtySession, dict[str, Any]], dict[str, Any]]] = {
