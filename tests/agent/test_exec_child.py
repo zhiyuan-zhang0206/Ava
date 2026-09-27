@@ -445,7 +445,7 @@ print("process cwd stable:", Path.cwd() == process_cwd)
 
 
 def test_child_lifecycle_envelope(tmp_path: Path) -> None:
-    """A `_LifecycleExit` raised by agent code becomes a lifecycle outcome with
+    """A `LifecycleExit` raised by agent code becomes a lifecycle outcome with
     the class name — the parent reconstructs the exception from it."""
     proc, _request, result = _spawn(
         tmp_path, "from shared.lifecycle import AgentRestart\nraise AgentRestart()"

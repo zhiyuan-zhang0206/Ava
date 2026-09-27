@@ -35,7 +35,7 @@ from agent.graph._exec_result import (
 from agent.graph._exec_stream import ExecOutputChunkPublisher
 from agent.graph._exec_subprocess import _run_in_subprocess
 from shared.config import settings
-from shared.lifecycle import AgentRestart, AgentTermination, _SystemHalt
+from shared.lifecycle import AgentRestart, AgentTermination, SystemHalt
 from shared.paths import logs_dir
 from shared.proc import kill_process_tree
 from tests._test_env_file import rewrite_line
@@ -514,7 +514,7 @@ async def test_subprocess_self_compact_lifecycle_and_inbound(tmp_path: Path) -> 
     result = await _run(tmp_path, "import ava; ava.self.compact('audit e2e summary')")
 
     assert isinstance(result, _ExecLifecycle)
-    assert isinstance(result.exc, _SystemHalt)
+    assert isinstance(result.exc, SystemHalt)
     content, kind, _source = _self_inbound_row()
     assert kind == "compact_summary"
     assert content == "audit e2e summary"
@@ -524,8 +524,8 @@ async def test_subprocess_unknown_lifecycle_class_crashes(tmp_path: Path) -> Non
     result = await _run(
         tmp_path,
         (
-            "from shared.lifecycle import _LifecycleExit\n"
-            "class _MysteryLifecycle(_LifecycleExit):\n"
+            "from shared.lifecycle import LifecycleExit\n"
+            "class _MysteryLifecycle(LifecycleExit):\n"
             "    def __init__(self):\n"
             "        super().__init__(0)\n"
             "raise _MysteryLifecycle()\n"

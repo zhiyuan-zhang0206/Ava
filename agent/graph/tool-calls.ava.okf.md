@@ -21,7 +21,7 @@ Ava agent's tool invocation and code execution layer—including normalization o
 
 ### Code Execution (`_exec.py`)
 - **Disposable subprocess**: `_run_in_subprocess` spawns one child (`python -I -X utf8 -m agent.exec_child`) per exec; isolated mode prevents the inherited process cwd or `PYTHON*` environment from shadowing the trusted `agent.exec_child` entry, while explicit UTF-8 mode keeps text portable after `-I` ignores `PYTHONUTF8` / `PYTHONIOENCODING`. The child OS cwd is not changed by `ava.cwd`. The parent polls liveness/cancel/deadline every 50ms. POSIX sends a signal then closes the process group after a grace period; Windows immediately closes a `KILL_ON_JOB_CLOSE` Job Object. Windows gates child entry until Job attach completes. A non-reaping root-exit observer, one domain-close owner, one direct-child reap, and a bounded pipe-reader join form the teardown barrier
-- **Lifecycle exits**: Agent code raises `AgentTermination` / `AgentRestart` / `_SystemHalt` → the child reports the exception name in the result envelope → exec_node recognizes and writes halted + marker
+- **Lifecycle exits**: Agent code raises `AgentTermination` / `AgentRestart` / `SystemHalt` → the child reports the exception name in the result envelope → exec_node recognizes and writes halted + marker
 - **Streaming output**: the child writes stdout/stderr line-buffered onto the pipe; the parent drains into `StreamingTextIO` and pushes to Redis every 50ms (frontend streaming display), preserving timing order
 - **Result type**: `_run_in_subprocess` returns the sum type (`_ExecDone | _ExecCancelled | _ExecTimedOut | _ExecLifecycle | _ExecCrashed`) plus the raw child envelope, dispatched by exec_node via `match`
 

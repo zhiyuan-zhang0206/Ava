@@ -767,9 +767,9 @@ class TestSelfEntries:
         import shared.audit_events as _audit
 
         monkeypatch.setattr(_audit, "insert_event_log", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType]
-        from shared.lifecycle import _SystemHalt
+        from shared.lifecycle import SystemHalt
 
-        with pytest.raises(_SystemHalt):
+        with pytest.raises(SystemHalt):
             self_mod.compact(("summary",))  # pyright: ignore[reportArgumentType]
         assert seen["params"] == (900001, "summary")
 
