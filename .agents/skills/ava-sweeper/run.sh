@@ -4,9 +4,9 @@
 # zero-agent.
 #
 # Add to crontab to periodically scan for tech debt. This script runs only the
-# 5 greppable / tool-checkable debt classes (deps, fail-fast, inline-marker,
-# dead-code, docstring-budget detection) of the 8 in SKILL.md and writes a
-# report to stdout. The other 3
+# 6 greppable / tool-checkable debt classes (deps, fail-fast, inline-marker,
+# dead-code, docstring-budget detection, locality) of the 11 in SKILL.md and
+# writes a report to stdout. The other
 # reasoned classes (docs-aging, boundary, skill-desc) need agent judgment and
 # are intentionally omitted here. (import-lint graduated to a blocking pre-commit
 # hook, `lint-imports`, so it is no longer a sweeper class.) It does NOT open a
@@ -41,56 +41,56 @@ SCAN_DIRS="ava/ ava_builtins/ agent/ gateway/ cli/ ops/ schedules/ services/ sha
 # ------------------------------------------------------------------
 # Class 1: outdated deps
 # ------------------------------------------------------------------
-echo "--- [1/5] deps: uv pip list --outdated ---"
+echo "--- [1/6] deps: uv pip list --outdated ---"
 uv pip list --outdated 2>&1 || echo "(uv pip list failed)"
 echo ""
 
 if [ -d ui/web/node_modules ]; then
-    echo "--- [1/5] deps: npm outdated (frontend) ---"
+    echo "--- [1/6] deps: npm outdated (frontend) ---"
     (cd ui/web && npm outdated --json 2>&1) || echo "(npm outdated failed)"
     echo ""
 else
-    echo "--- [1/5] deps: npm outdated SKIPPED (no node_modules) ---"
+    echo "--- [1/6] deps: npm outdated SKIPPED (no node_modules) ---"
     echo ""
 fi
 
 # ------------------------------------------------------------------
 # Class 3: fail-fast anti-patterns
 # ------------------------------------------------------------------
-echo "--- [2/5] fail-fast: .get(k) or {} ---"
+echo "--- [2/6] fail-fast: .get(k) or {} ---"
 rg -n '\.get\([^)]*\)\s+or\s+\{' $SCAN_DIRS 2>&1 || echo "(none found)"
 echo ""
 
-echo "--- [2/5] fail-fast: case _: defaults ---"
+echo "--- [2/6] fail-fast: case _: defaults ---"
 rg -n 'case\s+_\s*:' $SCAN_DIRS 2>&1 || echo "(none found)"
 echo ""
 
-echo "--- [2/5] fail-fast: rare / shouldn't happen / almost never comments ---"
+echo "--- [2/6] fail-fast: rare / shouldn't happen / almost never comments ---"
 rg -n -i "(rare|shouldn't happen|almost never)" $SCAN_DIRS 2>&1 || echo "(none found)"
 echo ""
 
-echo "--- [2/5] fail-fast: except Exception: pass ---"
+echo "--- [2/6] fail-fast: except Exception: pass ---"
 rg -n 'except\s+Exception\s*:\s*pass' $SCAN_DIRS 2>&1 || echo "(none found)"
 echo ""
 
 # ------------------------------------------------------------------
 # Class 4: inline markers (TODO/FIXME/XXX/HACK)
 # ------------------------------------------------------------------
-echo "--- [3/5] inline-marker: TODO|FIXME|XXX|HACK ---"
+echo "--- [3/6] inline-marker: TODO|FIXME|XXX|HACK ---"
 rg -n 'TODO|FIXME|XXX|HACK' $SCAN_DIRS 2>&1 || echo "(none found)"
 echo ""
 
 # ------------------------------------------------------------------
 # Class 5: dead code (vulture)
 # ------------------------------------------------------------------
-echo "--- [4/5] dead-code: vulture ---"
+echo "--- [4/6] dead-code: vulture ---"
 uvx vulture $SCAN_DIRS --min-confidence 80 2>&1 || echo "(vulture failed or not installed)"
 echo ""
 
 # ------------------------------------------------------------------
 # Class 8: docstring-budget (detection half — judgement happens in the sweep)
 # ------------------------------------------------------------------
-echo "--- [5/5] docstring-budget: Raises sections + soft-zone lengths ---"
+echo "--- [5/6] docstring-budget: Raises sections + soft-zone lengths ---"
 .venv/bin/python - <<'PY' 2>&1 || echo "(docstring-budget scan failed)"
 import ast
 from pathlib import Path
@@ -140,6 +140,16 @@ for f in sorted(root.rglob("*.py")):
 if not hits:
     print("(none found)")
 PY
+echo ""
+
+# ------------------------------------------------------------------
+# Class 11: locality (whole-repo) — per-commit spread + cross-package
+# co-change index, defaults (90-day window on main, min-support 8,
+# min-confidence 0.6). Detection only; findings + ledger entries need
+# agent judgement (SKILL.md).
+# ------------------------------------------------------------------
+echo "--- [6/6] locality: cochange.py (spread + co-change index) ---"
+.venv/bin/python scripts/structure/cochange.py 2>&1 || echo "(cochange scan failed)"
 echo ""
 
 echo "=== Scan complete $(date -u +%Y-%m-%dT%H:%M:%SZ) ==="

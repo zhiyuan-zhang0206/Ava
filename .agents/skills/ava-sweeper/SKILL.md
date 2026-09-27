@@ -15,7 +15,7 @@ asks for:
 
 - **Tracker file:** `future/tech-debt/ledger.md` (the single living "open
   debt" view).
-- **Debt classes:** the 10 below.
+- **Debt classes:** the 11 below.
 
 A standalone mechanical runner for the greppable/tool-checkable subset lives at
 `.agents/skills/ava-sweeper/run.sh` (cron-friendly, zero-agent — it scans and
@@ -228,3 +228,47 @@ several. The framework's `check-merge-conflict` hook runs at pre-commit;
 structural CI repeats it over all files, including after a rebase. The
 [pre-push stage](../../../conventions/runbook.md#git-hooks-pre-commit--pre-push)
 carries the heavy static checks.
+
+### 11. locality (whole-repo)
+
+Debt no single commit creates: a fix that has to touch many packages at once,
+or two files in different packages that always change together — either one
+means a decision has no single owner or door. Detection needs a rolling
+window of history (not one commit) and the fix needs judgement (which side
+becomes the owner), so [lint-vs-sweeper](../../../conventions/lint-vs-sweeper.md)'s
+graduation test puts this here, split from Rule 4 (package doors) the way
+`skill-desc` splits from its own lint: `scripts/structure/cochange.py`
+reuses Rule 4's own package resolution (`scripts.structure.locality._package_of`),
+so "package" here means exactly what the pre-commit gate means by it.
+
+Run `.venv/bin/python scripts/structure/cochange.py` (defaults: 90-day
+rolling first-parent window on `main`, min-support 8, min-confidence 0.6;
+`--days N` / `--commits N` to change the window, `--json` for machine
+output). Read the two metrics:
+
+- **Metric A (spread)** — the number of distinct packages a commit touches,
+  reported as p50/p90 by conventional-commit type, the share of `fix`
+  commits with spread >= 3, and the 10 widest `fix` commits. A wide `fix` is
+  a symptom that names *where* to look, not a finding on its own.
+- **Metric B (co-change)** — file pairs in different packages whose
+  co-occurrence count and confidence both clear the threshold: two files
+  that keep moving together across commits, over a window where declared
+  cross-process contract boundaries (`_CONTRACT_BOUNDARIES` in
+  `cochange.py`, e.g. `gateway/schemas/` <-> `ui/web/`, carried by codegen)
+  are already excluded.
+
+A **finding** names the **leaked decision** — the one thing both sides of a
+Metric B pair must agree on (a schema shape, a registry key, a shared
+constant) — verified by reading at least 2 of the co-changing commits
+(`git show <sha>`) to confirm the same decision keeps recurring, not
+coincidence. **Evidence bar:** the pair's `c` / confidence from the report,
+plus the 2+ commit SHAs and a one-line statement of the shared decision.
+
+Each confirmed leak lands as one `future/tech-debt/ledger.md` entry, class
+`locality`, fingerprint `locality:<file-a>:<file-b>`, in the engine's entry
+format (see `ava.skills.sweeper`).
+
+**Graduation path:** once a leaked decision gets a single owning module, add
+it to `DECISIONS` in `scripts/structure/locality.py` (Rule 5) — the
+pre-commit gate then guards it going forward, and the ledger entry is
+resolved (deleted, not archived, per the tracker's own rule).
