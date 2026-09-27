@@ -14,7 +14,7 @@ import psycopg
 import pytest
 
 from ava import impersonation_replay as reader
-from cli.commands import _release_services as release_services
+from cli.commands import release_services as release_services
 from ops.spec import ServiceSpec
 from shared.agents import impersonation as leases
 from shared.agents.impersonation import impersonation_history as history

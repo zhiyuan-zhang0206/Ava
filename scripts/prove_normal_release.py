@@ -67,12 +67,12 @@ from psycopg import sql
 from psycopg.conninfo import make_conninfo
 from psycopg.types.json import Jsonb
 
-from cli.commands import _release_services as release_services
 from cli.commands import _update_normal_release as normal
-from cli.commands._release_inventory import prepare_unit_inventory
-from cli.commands._release_selector import pending_transaction, selector_bytes
-from cli.commands._release_services import PreparedService, normal_spawn_command
+from cli.commands import release_services as release_services
 from cli.commands._update_bootstrap import bootstrap_command
+from cli.commands.release_inventory import prepare_unit_inventory
+from cli.commands.release_selector import pending_transaction, selector_bytes
+from cli.commands.release_services import PreparedService, normal_spawn_command
 from ops.service_spec import ServiceSpec
 from services.agent_ops.bootstrap import (
     ObserverProjection,

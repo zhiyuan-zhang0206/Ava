@@ -92,7 +92,7 @@ def _complete_stop() -> None:
 
 def _start_leg(holder: str, acquired_at: datetime) -> None:
     """Bring the unit back up under its hold (`maintenance start`)."""
-    from cli.commands._maintenance import _start
+    from cli.commands.maintenance import _start
 
     rc = _start(holder, acquired_at)
     if rc != 0:
@@ -101,7 +101,7 @@ def _start_leg(holder: str, acquired_at: datetime) -> None:
 
 def _resume_leg(holder: str, acquired_at: datetime) -> None:
     """Release the hold and return the posture to idle (`maintenance resume`)."""
-    from cli.commands._maintenance import _resume
+    from cli.commands.maintenance import _resume
 
     _resume(holder, acquired_at, cancel=False)
 

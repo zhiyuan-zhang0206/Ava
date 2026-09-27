@@ -10,22 +10,22 @@ from __future__ import annotations
 import inspect
 import re
 
-from cli.commands import _pgbouncer
+from cli.commands import pgbouncer
 
 
 def test_render_userlist_quotes_role_and_secret() -> None:
-    line = _pgbouncer._render_userlist("ava_main", "s3cr3t")
+    line = pgbouncer._render_userlist("ava_main", "s3cr3t")
     # PgBouncer double-quotes both fields; scram client auth derives from the plaintext.
     assert line == '"ava_main" "s3cr3t"\n'
 
 
 def test_render_userlist_escapes_embedded_quote() -> None:
-    line = _pgbouncer._render_userlist("ava_main", 'a"b')
+    line = pgbouncer._render_userlist("ava_main", 'a"b')
     assert line == '"ava_main" "a""b"\n'
 
 
 def test_render_ini_is_transaction_scram_and_socket_server() -> None:
-    ini = _pgbouncer._render_ini(
+    ini = pgbouncer._render_ini(
         pg_port=5433,
         listen_port=6433,
         db_name="ava_main",
@@ -36,7 +36,7 @@ def test_render_ini_is_transaction_scram_and_socket_server() -> None:
     assert "pool_mode = transaction" in ini
     # Client auth is scram against the userlist; the pooled front door needs the secret.
     assert "auth_type = scram-sha-256" in ini
-    assert f"auth_file = {_pgbouncer._userlist_path()}" in ini
+    assert f"auth_file = {pgbouncer._userlist_path()}" in ini
     assert "listen_port = 6433" in ini
     # The [databases] entry keys on the cluster db and forwards to the local pg over
     # its trust unix socket (host=<socket dir>), so the server hop needs no credential.
@@ -79,7 +79,7 @@ def test_render_ini_is_transaction_scram_and_socket_server() -> None:
 def test_render_ini_is_trust_without_secret() -> None:
     """A no-secret cluster has no credential for scram — the pooled front door
     must not demand one (the cluster's whole posture is unauthenticated)."""
-    ini = _pgbouncer._render_ini(
+    ini = pgbouncer._render_ini(
         pg_port=5433,
         listen_port=6433,
         db_name="ava_main",
@@ -91,7 +91,7 @@ def test_render_ini_is_trust_without_secret() -> None:
 
 
 def test_render_ini_binds_loopback_never_all_interfaces() -> None:
-    ini = _pgbouncer._render_ini(
+    ini = pgbouncer._render_ini(
         pg_port=5433,
         listen_port=6433,
         db_name="ava_main",

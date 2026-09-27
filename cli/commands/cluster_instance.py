@@ -435,7 +435,7 @@ def _write_redis_conf(data: Path, redis_admin_password: str) -> Path:
     return conf
 
 
-def _start_redis(
+def start_redis(
     redis_port: int,
     redis_admin_password: str,
     runtime_password: str,
@@ -550,7 +550,7 @@ def _start_pgbouncer(
     install birth — the .env does not exist yet then — and resolved from the
     home's .env file on every later bring-up (the userlist carries an
     `ava_runner` entry only once the cluster has a runner credential)."""
-    from cli.commands._pgbouncer import ensure_pgbouncer, runner_password_from_env
+    from cli.commands.pgbouncer import ensure_pgbouncer, runner_password_from_env
 
     return ensure_pgbouncer(
         pg_port=pg_port,
@@ -580,7 +580,7 @@ def ensure_cluster_instance(
 ) -> int:
     """Bring up this cluster's own Postgres + Redis (+ PgBouncer when enabled) on its
     allocated ports (idempotent). Returns 0 on success. The Postgres role/db/schema
-    are provisioned separately by cluster_lifecycle._provision against pg_admin_url().
+    are provisioned separately by cluster_lifecycle.provision against pg_admin_url().
 
     `identity` is the Postgres db/role identifier; `redis_user` is the independent
     Redis ACL user. Existing clusters read each from its respective `.env` URL;
@@ -618,7 +618,7 @@ def ensure_cluster_instance(
     if (rc := _start_pg(pg_port, cluster_secret)) != 0:
         return rc
     if (
-        rc := _start_redis(
+        rc := start_redis(
             redis_port, redis_admin_password, redis_password, cluster_secret, redis_user
         )
     ) != 0:
@@ -717,7 +717,7 @@ def print_data_plane_status() -> None:
         f"redis ({redis_host}:{redis_port})"
     )
     if settings.data_plane.pgbouncer_enabled:
-        from cli.commands._pgbouncer import pgbouncer_reachable
+        from cli.commands.pgbouncer import pgbouncer_reachable
         from shared.cluster import db_identity, get_record, record_pgbouncer_port
 
         # The pooler LISTENS on the registry-derived port (`ensure_cluster_instance`
@@ -774,7 +774,7 @@ def stop_cluster_instance() -> int:
     print("\n→ stopping per-cluster data plane")
     # Stop the pooler first (best-effort, no-op if it was never enabled) so clients
     # are disconnected before Postgres goes down.
-    from cli.commands._pgbouncer import stop_pgbouncer
+    from cli.commands.pgbouncer import stop_pgbouncer
 
     stop_pgbouncer()
     if (data / "PG_VERSION").exists():

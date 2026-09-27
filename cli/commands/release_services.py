@@ -22,8 +22,8 @@ from urllib.parse import urlsplit
 import psutil
 import psycopg
 
-from cli.commands._release_selector import pending_transaction, verify_unit_image
 from cli.commands._session_lifecycle import _service_extra_env
+from cli.commands.release_selector import pending_transaction, verify_unit_image
 from ops.spec import ServiceSpec, services_for_capabilities_annotated
 from services.agent_ops.bootstrap import PreparedObservation
 from shared import spawn_receipt

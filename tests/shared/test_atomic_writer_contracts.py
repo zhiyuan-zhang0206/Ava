@@ -12,7 +12,7 @@ from threading import Barrier
 
 import pytest
 
-from cli.commands import _grafana_render, _observatory_urls, _otel_collector
+from cli.commands import _grafana_render, _otel_collector, observatory_urls
 from ops import pty_close_notices
 from shared import (
     atomic_io,
@@ -125,7 +125,7 @@ def test_marker_replace_failure_keeps_old_content_and_cleans_temps(
     assert sorted(tmp_path.iterdir()) == [path]
 
 
-@pytest.mark.parametrize("writer", [_observatory_urls._atomic_write, _otel_collector._atomic_write])
+@pytest.mark.parametrize("writer", [observatory_urls._atomic_write, _otel_collector._atomic_write])
 def test_cli_writer_commits_utf8_without_directory_sync(
     writer: Callable[[Path, str], None], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

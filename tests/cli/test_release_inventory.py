@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from cli.commands import _release_inventory as inventory
+from cli.commands import release_inventory as inventory
 from shared.managed_writer_observation import (
     ExcludedRegistration,
     ExpectedLauncher,

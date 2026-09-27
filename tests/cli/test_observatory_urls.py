@@ -18,7 +18,7 @@ import pytest
 from dotenv import dotenv_values
 from psycopg.conninfo import conninfo_to_dict
 
-from cli.commands import _lgtm_native, _observatory_urls
+from cli.commands import _lgtm_native, observatory_urls
 from shared import cluster
 from shared.config import settings
 
@@ -113,7 +113,7 @@ def test_webhook_uses_local_bind_or_reachable_gateway(
     monkeypatch.setattr(settings.gateway, "gateway_url", gateway_url)
     monkeypatch.setattr(settings.gateway, "gateway_port", port)
     monkeypatch.setattr("shared.machine.reachable_host", lambda: "10.0.0.10")
-    assert _observatory_urls._alerts_webhook_url() == expected
+    assert observatory_urls._alerts_webhook_url() == expected
 
 
 def test_webhook_rejects_url_credentials_without_reporting_them(
@@ -124,7 +124,7 @@ def test_webhook_rejects_url_credentials_without_reporting_them(
         settings.gateway, "gateway_url", "https://user:synthetic-secret@gateway.test"
     )
     with pytest.raises(ValueError, match="credential-free") as error:
-        _observatory_urls._alerts_webhook_url()
+        observatory_urls._alerts_webhook_url()
     captured = capsys.readouterr()
     assert "synthetic-secret" not in str(error.value) + captured.out + captured.err
 

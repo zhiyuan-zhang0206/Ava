@@ -25,11 +25,6 @@ from typing import Literal
 import psutil
 import psycopg
 
-from cli.commands._release_inventory import (
-    _regular_bytes,
-    revalidate_bootstrap_inventory,
-    revalidate_prepared_inventory,
-)
 from cli.commands._update_bootstrap import native
 from cli.commands._update_bootstrap.admission import (
     retained_handoff,
@@ -38,6 +33,11 @@ from cli.commands._update_bootstrap.admission import (
     verify_retained_contexts,
 )
 from cli.commands._update_bootstrap.readback import verify_image_binding, verify_runtime_binding
+from cli.commands.release_inventory import (
+    _regular_bytes,
+    revalidate_bootstrap_inventory,
+    revalidate_prepared_inventory,
+)
 from services.agent_ops.bootstrap import (
     BootstrapRuntimeIdentity,
     ObserverProjection,

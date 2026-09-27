@@ -225,7 +225,7 @@ def test_stop_proceeds_on_yes(
     # (pg_ctl stop + redis shutdown for its private instance) — track the call here.
     infra_stops: list[int] = []
     monkeypatch.setattr(
-        "cli.commands._cluster_instance.stop_cluster_instance",
+        "cli.commands.cluster_instance.stop_cluster_instance",
         lambda: infra_stops.append(1) or 0,
     )
 
@@ -308,7 +308,7 @@ def test_do_stop_keep_infra_skips_infra_teardown(
 
     infra_stops: list[int] = []
     monkeypatch.setattr(
-        "cli.commands._cluster_instance.stop_cluster_instance",
+        "cli.commands.cluster_instance.stop_cluster_instance",
         lambda: infra_stops.append(1) or 0,
     )
 
@@ -329,7 +329,7 @@ def test_do_stop_keeps_browser_by_default(monkeypatch: pytest.MonkeyPatch, tmp_p
     killed: list[str] = []
     monkeypatch.setattr(_cli, "_kill_session", lambda s, **_kw: killed.append(s) or True)  # pyright: ignore[reportUnknownArgumentType]
 
-    monkeypatch.setattr("cli.commands._cluster_instance.stop_cluster_instance", lambda: 0)
+    monkeypatch.setattr("cli.commands.cluster_instance.stop_cluster_instance", lambda: 0)
 
     reaps: list[int] = []
     monkeypatch.setattr(_cli, "_reap_cluster_chrome", lambda: reaps.append(1))
@@ -351,7 +351,7 @@ def test_do_stop_stop_browser_kills_it(monkeypatch: pytest.MonkeyPatch, tmp_path
     killed: list[str] = []
     monkeypatch.setattr(_cli, "_kill_session", lambda s, **_kw: killed.append(s) or True)  # pyright: ignore[reportUnknownArgumentType]
 
-    monkeypatch.setattr("cli.commands._cluster_instance.stop_cluster_instance", lambda: 0)
+    monkeypatch.setattr("cli.commands.cluster_instance.stop_cluster_instance", lambda: 0)
 
     order: list[str] = []
     monkeypatch.setattr(_cli, "_kill_session", lambda s, **_kw: (killed.append(s), order.append(s)))  # pyright: ignore[reportUnknownArgumentType]
@@ -527,7 +527,7 @@ def _patch_stop_teardown(monkeypatch: pytest.MonkeyPatch, events: list[str]) -> 
     monkeypatch.setattr(_cli, "_roles_or_none", lambda: frozenset({"gateway", "agent-runner"}))
     monkeypatch.setattr("cli.commands.stop._repo_root", lambda: Path("/repo"))
     monkeypatch.setattr(
-        "cli.commands._cluster_instance.stop_cluster_instance",
+        "cli.commands.cluster_instance.stop_cluster_instance",
         lambda: events.append("infra") or 0,
     )
 

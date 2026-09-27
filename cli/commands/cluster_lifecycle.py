@@ -2,7 +2,7 @@
 
 Identity is the home path (path-only): a cluster is born by
 `scripts/install.sh` -> `python -m cli.install_cluster` (which calls
-`_ensure_record` / the data-plane bring-up / provision), and `ava start` is a
+`ensure_record` / the data-plane bring-up / provision), and `ava start` is a
 pure bring-up — the settings-free `cli.preflight.require_installed_home` gate
 (run by `cli.main` before any settings-loading import) fail-fasts an
 uninstalled home with a role-appropriate pointer instead of birthing anything.
@@ -27,7 +27,7 @@ def _repo_root() -> Path:
     return Path(__file__).resolve().parents[2]
 
 
-def _provision(identity: str, *, base_admin_url: str, db_admin_password: str) -> bool:
+def provision(identity: str, *, base_admin_url: str, db_admin_password: str) -> bool:
     """Thin wrapper around cluster.provision_database for monkeypatching in tests."""
     from shared import cluster as cl
 
@@ -36,9 +36,9 @@ def _provision(identity: str, *, base_admin_url: str, db_admin_password: str) ->
     )
 
 
-def _ensure_pgvector_extension(identity: str, *, base_admin_url: str) -> None:
+def ensure_pgvector_extension(identity: str, *, base_admin_url: str) -> None:
     """Thin wrapper around cluster.ensure_pgvector_extension for monkeypatching
-    in tests (same seam as `_provision` — birth-side provisioning steps are
+    in tests (same seam as `provision` — birth-side provisioning steps are
     stubbed together). A remote-managed plane is skipped here (no local admin
     socket; its extension provisioning belongs to its owner) — the same guard
     the `ava start` call site carries."""
@@ -49,7 +49,7 @@ def _ensure_pgvector_extension(identity: str, *, base_admin_url: str) -> None:
     cl.ensure_pgvector_extension(identity, base_admin_url=base_admin_url)
 
 
-def _ensure_cluster_instance(
+def ensure_cluster_instance(
     rec: Any,
     cluster_secret: str,
     identity: str,
@@ -60,15 +60,16 @@ def _ensure_cluster_instance(
     redis_password: str = "",
 ) -> int:
     """Thin wrapper around the per-cluster Postgres+Redis bring-up (for
-    monkeypatching in tests, like `_provision`). `identity` is the data-plane
-    db/role/ACL identifier, names-as-data (see ensure_cluster_instance).
-    `runner_password` (the gateway .env AVA_RUNNER_DB_PASSWORD) is threaded at
-    install birth, when the .env does not exist yet; a later bring-up resolves
-    it from the file itself."""
-    from cli.commands._cluster_instance import ensure_cluster_instance
+    monkeypatching in tests, like `provision`). `identity` is the data-plane
+    db/role/ACL identifier, names-as-data (see
+    `cli.commands.cluster_instance.ensure_cluster_instance`, the real bring-up
+    this wrapper calls). `runner_password` (the gateway .env
+    AVA_RUNNER_DB_PASSWORD) is threaded at install birth, when the .env does
+    not exist yet; a later bring-up resolves it from the file itself."""
+    from cli.commands.cluster_instance import ensure_cluster_instance as _bring_up
     from shared.cluster import record_pgbouncer_port
 
-    return ensure_cluster_instance(
+    return _bring_up(
         pg_port=rec.ports["postgres"],
         redis_port=rec.ports["redis"],
         cluster_secret=cluster_secret,
@@ -114,7 +115,7 @@ def _subprocess_env(*, gateway_home: Path) -> dict[str, str]:
     return env
 
 
-def _ensure_record(home: Path) -> tuple[Any, bool]:
+def ensure_record(home: Path) -> tuple[Any, bool]:
     """Read-allocate-save the cluster's registry record under the host registry
     lock, so concurrent births serialize and never claim the same port block.
     Keyed by the home path — the cluster's identity.

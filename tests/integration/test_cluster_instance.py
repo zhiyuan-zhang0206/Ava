@@ -1,6 +1,6 @@
 """Real bring-up of a per-cluster Postgres+Redis instance.
 
-Exercises cli.commands._cluster_instance end to end: initdb a fresh per-cluster
+Exercises cli.commands.cluster_instance end to end: initdb a fresh per-cluster
 Postgres under a temp $AVA_HOME, start it on an ephemeral port with the
 socket-trust / TCP-scram posture, start a per-cluster Redis with requirepass =
 an independent Redis-admin password, provision the role+db+schema, then connect over the runtime
@@ -24,12 +24,12 @@ import psycopg
 import pytest
 import redis
 
-from cli.commands import _cluster_instance as ci
+from cli.commands import cluster_instance as ci
 from cli.commands._converge_spec import ConvergeCtx
 from cli.commands._converge_steps import _ensure_redis_url_identity_step
 from cli.commands._data_plane import ensure_gateway_data_plane
 from cli.commands._data_plane_admin_secrets import ensure_data_plane_admin_secrets
-from cli.commands._pgbouncer import pgbouncer_bin, stop_pgbouncer
+from cli.commands.pgbouncer import pgbouncer_bin, stop_pgbouncer
 from shared import cluster
 from shared.cluster import provision_database
 from shared.config import settings
@@ -143,7 +143,7 @@ def test_per_cluster_instance_bringup(isolated_cluster: tuple[int, int]) -> None
     assert rc == 0
 
     # Provision the role + db + schema against the cluster's own instance (over its
-    # local socket, trust) — exactly what cluster_lifecycle._provision does. The
+    # local socket, trust) — exactly what cluster_lifecycle.provision does. The
     # identifier is passed as data.
     provision_database(
         "ava_tinst", base_admin_url=ci.pg_admin_url(pg_port), db_admin_password=_DB_ADMIN
@@ -347,7 +347,7 @@ def test_bringup_with_pgbouncer_enabled(
     )
     assert rc == 0
 
-    # Provision role+db+schema (direct, socket superuser) — as cluster_lifecycle._provision does.
+    # Provision role+db+schema (direct, socket superuser) — as cluster_lifecycle.provision does.
     provision_database(
         "ava_tinst", base_admin_url=ci.pg_admin_url(pg_port), db_admin_password=_DB_ADMIN
     )
@@ -357,7 +357,7 @@ def test_bringup_with_pgbouncer_enabled(
     # clears the state so subsequent pooled connections open fresh server links.
     import time as _time
 
-    from cli.commands._pgbouncer import ensure_pgbouncer as _ensure_pgb
+    from cli.commands.pgbouncer import ensure_pgbouncer as _ensure_pgb
 
     stop_pgbouncer()
     _time.sleep(0.2)

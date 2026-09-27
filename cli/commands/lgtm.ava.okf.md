@@ -34,7 +34,7 @@ are host-scoped configuration; the regular cluster port block does not assign
 them. Separate homes therefore need explicit non-overlapping ports, including
 Loki's gRPC listener.
 
-`_observatory_urls.py` derives Grafana's PostgreSQL host/port through the
+`observatory_urls.py` derives Grafana's PostgreSQL host/port through the
 existing direct database URL helper, including a local registry's pooler-to-PG
 port mapping. It does not follow the observatory address or assume port 5433.
 A remote pooler cannot be resolved from another machine's registry; the

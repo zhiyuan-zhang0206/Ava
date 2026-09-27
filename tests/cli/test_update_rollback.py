@@ -118,7 +118,7 @@ def test_rollback_schema_to_local_admin_bypasses_stale_runtime_password(
     this cluster's passwordless local Postgres admin socket."""
     import psycopg
 
-    from cli.commands import _cluster_instance
+    from cli.commands import cluster_instance
     from shared import cluster
     from shared import migrations as _mig
     from shared.config import settings
@@ -160,7 +160,7 @@ def test_rollback_schema_to_local_admin_bypasses_stale_runtime_password(
         "postgresql://ava:stale-password@127.0.0.1:16432/ava_history",
     )
     monkeypatch.setattr(cluster, "get_record", _record)
-    monkeypatch.setattr(_cluster_instance, "pg_admin_url", _admin_url)
+    monkeypatch.setattr(cluster_instance, "pg_admin_url", _admin_url)
     monkeypatch.setattr(psycopg, "connect", _connect)
     monkeypatch.setattr(_mig, "rollback_to", _rollback_to)
 

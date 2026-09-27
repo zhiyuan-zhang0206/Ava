@@ -191,7 +191,7 @@ def spawn_attempt_dir(home: Path, generation: str) -> Path:
 
     Deliberately NOT under ``run/sessions``: the release inventory scan refuses
     any member of that directory that is not a session ``.json`` record, so
-    receipts and gates would break it (_release_inventory.py). The home must be
+    receipts and gates would break it (release_inventory.py). The home must be
     absolute: a relative home would silently resolve the receipt path against
     the helper's cwd instead of the unit's.
     """

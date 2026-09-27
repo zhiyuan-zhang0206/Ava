@@ -73,7 +73,7 @@ def _write_env(home: Path, **values: str) -> None:
 def _calls(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, str, str]]:
     """Record `ensure_runner_role` calls instead of touching a real Postgres."""
     import shared.cluster as cl
-    from cli.commands import _cluster_instance
+    from cli.commands import cluster_instance
 
     seen: list[tuple[str, str, str]] = []
 
@@ -88,7 +88,7 @@ def _calls(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, str, str]]:
 
     monkeypatch.setattr(cl, "ensure_runner_role", _fake)
     monkeypatch.setattr(cl, "get_record", _record)
-    monkeypatch.setattr(_cluster_instance, "pg_admin_url", _admin_url)
+    monkeypatch.setattr(cluster_instance, "pg_admin_url", _admin_url)
     return seen
 
 

@@ -32,7 +32,7 @@ def _observability_datasource_urls() -> tuple[str, str, str]:
     """
 
     obs = settings.observability
-    base = _validated_observability_base(obs.observability_url)
+    base = validated_observability_base(obs.observability_url)
     pg = _pg_datasource_host_port(remote_observatory=bool(base))
     if base:
         return f"{base}:3100", f"{base}:9090", pg
@@ -83,7 +83,7 @@ def _pg_datasource_host_port(*, remote_observatory: bool) -> str:
     return _host_port(host, port)
 
 
-def _validated_observability_base(observability_url: str) -> str:
+def validated_observability_base(observability_url: str) -> str:
     """Return the observatory base URL when well-formed, else "" after a warning.
 
     The setting's contract is ``scheme://host`` with no port and no path (each

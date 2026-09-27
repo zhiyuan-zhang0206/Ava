@@ -32,7 +32,7 @@ import pytest
 from psycopg.conninfo import conninfo_to_dict
 from psycopg_pool import AsyncConnectionPool, ConnectionPool
 
-from cli.commands._pgbouncer import pgbouncer_bin
+from cli.commands.pgbouncer import pgbouncer_bin
 from tests._containers import _free_port, _wait_port, postgres
 
 _SECRET = "pgbouncerwiretestsecret"  # noqa: S105 — test fixture, not a real credential
@@ -53,7 +53,7 @@ def _pgbouncer_in_front(
     pg_url: str, listen_addr: str = "127.0.0.1", pool_size: int = 2
 ) -> Generator[str]:
     """Start a transaction-pooling PgBouncer in front of the throwaway Postgres at
-    `pg_url`; yield the pooled connection URL. Config mirrors cli/commands/_pgbouncer,
+    `pg_url`; yield the pooled connection URL. Config mirrors cli/commands/pgbouncer,
     but the server hop is TCP loopback (the throwaway's trust posture) rather than the
     prod unix socket — behaviourally the same credential-less trust hop.
 
@@ -87,7 +87,7 @@ def _pgbouncer_in_front(
         "\n".join(
             [
                 "[databases]",
-                # Mirrors cli/commands/_pgbouncer._render_ini: every pooled
+                # Mirrors cli/commands/pgbouncer._render_ini: every pooled
                 # backend is born with the statement ceiling via connect_query.
                 f"{dbname} = host=127.0.0.1 port={pg_port} dbname={dbname} "
                 f"connect_query='{PG_STATEMENT_TIMEOUT_SET_SQL}'",
@@ -502,7 +502,7 @@ def test_admin_probe_reaches_the_bound_address_only() -> None:
     skip there."""
     import sys
 
-    from cli.commands._pgbouncer import _admin_reachable
+    from cli.commands.pgbouncer import _admin_reachable
 
     if sys.platform == "darwin":
         pytest.skip("127.0.0.2 needs an lo0 alias on macOS")

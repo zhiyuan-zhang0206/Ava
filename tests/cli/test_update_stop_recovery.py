@@ -28,7 +28,7 @@ import pytest
 from cli.commands import _update_agent_runner as runner_mod
 from cli.commands import _update_normal_release as normal
 from cli.commands import _update_stop_recovery as stop_recovery
-from cli.commands._release_services import PreparedService
+from cli.commands.release_services import PreparedService
 from shared import spawn_receipt
 from shared.managed_writer_activation import UnitActivationReadback
 from shared.managed_writer_observation import ExpectedProcess, ProcessVerdict

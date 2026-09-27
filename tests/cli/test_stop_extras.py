@@ -27,8 +27,8 @@ from pathlib import Path
 import psutil
 import pytest
 
-from cli.commands._pgbouncer import _terminate_verified
 from cli.commands._stop_extras import stop_gate_service, stop_permissions_helper
+from cli.commands.pgbouncer import _terminate_verified
 
 # -- _terminate_verified ------------------------------------------------------
 
@@ -145,9 +145,9 @@ def test_terminate_verified_survivor_is_never_reported_as_stopped(
         def _never_gone(_pid: int) -> bool:
             return True
 
-        # Patched where it is looked up: `_pgbouncer` imports the name at module
+        # Patched where it is looked up: `pgbouncer` imports the name at module
         # scope, so patching `shared.proc` would leave that binding untouched.
-        monkeypatch.setattr("cli.commands._pgbouncer.process_alive", _never_gone)
+        monkeypatch.setattr("cli.commands.pgbouncer.process_alive", _never_gone)
         assert _terminate_verified(pid, label="pgbouncer", timeout_s=0.1) is False
         assert "survived the force kill" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
     finally:
@@ -162,9 +162,9 @@ def test_terminate_verified_uses_no_raw_posix_signal_calls() -> None:
     `shared.proc` is where each already has a working twin."""
     import inspect
 
-    from cli.commands import _pgbouncer
+    from cli.commands import pgbouncer
 
-    source = inspect.getsource(_pgbouncer._terminate_verified)
+    source = inspect.getsource(pgbouncer._terminate_verified)
     body = source.split('"""')[-1]  # the docstring names them to explain them
     for spelling in ("os.kill", "SIGKILL", "SIGTERM"):
         assert spelling not in body, f"{spelling} is back on the stop path"

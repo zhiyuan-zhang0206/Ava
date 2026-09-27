@@ -28,7 +28,7 @@ _log = logging.getLogger("ops.strand_hold")
 AUTO_RELEASE_S = 1800.0
 
 # The pre-stop phases whose `resume --cancel` is legal (mirrors
-# `cli.commands._maintenance._resume` and `ops.cluster_pause._hold_refusal`).
+# `cli.commands.maintenance._resume` and `ops.cluster_pause._hold_refusal`).
 PRE_STOP_PHASES = frozenset({"preparing", "draining", "drained"})
 
 

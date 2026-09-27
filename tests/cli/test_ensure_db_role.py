@@ -18,7 +18,7 @@ import psycopg
 import pytest
 from dotenv import dotenv_values
 
-from cli.commands import _cluster_instance as ci
+from cli.commands import cluster_instance as ci
 from cli.commands import cmd_ensure_db_role
 from shared import cluster as cl
 from shared import paths

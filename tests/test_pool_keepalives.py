@@ -106,7 +106,7 @@ def test_prepare_threshold_survives_the_merge() -> None:
     """`prepare_threshold=None` is what makes the pooled URL safe to point at
     PgBouncer: psycopg3 never prepares server-side statements, so a statement made
     on one backend never has to exist on the next one a transaction pooler hands
-    out (cli/commands/_pgbouncer.py). Adding the keepalives must not displace it,
+    out (cli/commands/pgbouncer.py). Adding the keepalives must not displace it,
     and no keepalive key may collide with it."""
     pool = db.pool()
     try:

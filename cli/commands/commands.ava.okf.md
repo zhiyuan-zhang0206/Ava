@@ -25,7 +25,7 @@ Most command modules follow these two naming groups:
   `cluster_lifecycle.py`, `agent_timeline.py`, `impersonation.py`,
   `impersonation_relay.py`) — reachable from the command line.
 - **internal** (`_`-prefixed) — steps `start` / `update` call, never dispatched
-  directly: `_cluster_instance` (per-cluster pg+redis bring-up), `_converge`
+  directly: `_converge`
   (step-table aggregation and execution) / `_converge_spec` (the step contract) /
   `_converge_steps` (early host and data-plane wiring) / `_converge_os_jobs`
   (the OS-scheduled jobs) / `_converge_skills` / `_converge_firewall` (idempotent host wiring) /
@@ -40,9 +40,10 @@ Most command modules follow these two naming groups:
   `_gateway_ready` (the staged upgrade), `_probe`, `_setup`, `_session_lifecycle`, `_repo`,
   `_start_gui_chain` (the macOS GUI-chain warning) / `_start_gui_handover` (the
   GUI-domain handover it guards), `_ownership_preflight`,
-  `_pkg_source`, `_pgbouncer`, `_lgtm`,
+  `_pkg_source`, `_lgtm`,
   `_claude_code_plugin`, `_cluster_health` /
-  `_cluster_rollback` / `_cluster_cron` / `_cluster_watchdog_probe`.
+  `_cluster_rollback` / `_cluster_cron` / `_cluster_watchdog_probe`
+  (`cluster_instance.py` and `pgbouncer.py` are two more, under public names).
 
 `stop.py` exposes `pause` and `stop` through `_temporary_stop`; update and
 restart reuse its native drain. `ops.agent_pause` and `ops.agent_pause_probe`
@@ -58,11 +59,11 @@ leaving the unit dark; the stop report and journal record the outcome (issue
 `_stop_supervised` stop home-owned Gate/helper/native LGTM. `_pause_resume`
 releases normal startup admission only after readiness.
 `cli/parsers/maintenance.py` retains explicit intermediate steps through
-`_maintenance.py` and `_maintenance_probe`.
+`cli/commands/maintenance.py` and `_maintenance_probe`.
 They reuse the [durable maintenance journal](../../shared/maintenance/maintenance.ava.okf.md).
 See [the coordinated operator procedure](../../conventions/graceful-maintenance.md).
 
-Gateway data-plane startup passes separate URL identities to `_cluster_instance`:
+Gateway data-plane startup passes separate URL identities to `cluster_instance`:
 Postgres db/role comes from `db_identity()`, Redis ACL user from `redis_identity()`.
 `_data_plane_admin_secrets` preserves that distinction during credential splitting.
 Installation supplies the same birth identifier for both before `.env` exists.

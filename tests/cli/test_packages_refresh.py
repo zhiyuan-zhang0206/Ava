@@ -19,7 +19,7 @@ from typing import cast
 
 import pytest
 
-from cli.commands._packages_refresh import (
+from cli.commands.packages_refresh import (
     effective_interval_seconds,
     is_due,
     parse_duration,
@@ -375,7 +375,7 @@ def test_refresh_records_error_and_backs_off_when_offline(
     assert (reg.load().channels["core"].last_result or "").startswith("error")
 
     # the job retries only after the backoff: same run parameters, not due now
-    monkeypatch.setattr("cli.commands._packages_refresh.os_jobs_enabled", lambda: True)
+    monkeypatch.setattr("cli.commands.packages_refresh.os_jobs_enabled", lambda: True)
     report = run_refresh(repo=core_repo, from_job=True)
     assert report.ran and report.items == ()
     assert report.counts.get("skipped_not_due") == 2
@@ -432,7 +432,7 @@ def test_from_job_gates(core_repo: Path, monkeypatch: pytest.MonkeyPatch) -> Non
     report = run_refresh(repo=core_repo, from_job=True)
     assert not report.ran and "OS jobs disabled" in (report.skip_reason or "")
 
-    monkeypatch.setattr("cli.commands._packages_refresh.os_jobs_enabled", lambda: True)
+    monkeypatch.setattr("cli.commands.packages_refresh.os_jobs_enabled", lambda: True)
     monkeypatch.setattr(settings.packages, "refresh_enabled", False)
     report = run_refresh(repo=core_repo, from_job=True)
     assert not report.ran and "refresh disabled" in (report.skip_reason or "")
@@ -637,7 +637,7 @@ def test_second_run_checks_but_does_not_fetch(
 ) -> None:
     """Acceptance #6: consecutive runs are cheap — once the head is applied and
     the objects are present, a pass does `ls-remote` only, never a fetch."""
-    import cli.commands._packages_refresh as refresh_mod
+    import cli.commands.packages_refresh as refresh_mod
 
     c1 = _head(core_repo)
     _seed(core_repo, "foo", applied_rev=c1)

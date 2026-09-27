@@ -5,7 +5,7 @@ Channel A of task #4129 (design: `managed-writer-dispatch-design-20260920.md`
 loaded from the image it reports — and produces the unit's expected-inventory
 facts before any stop effect:
 
-- seals the prepared inventory receipt (`_release_inventory.prepare_unit_inventory`);
+- seals the prepared inventory receipt (`release_inventory.prepare_unit_inventory`);
 - derives the candidate normal-start plan (`prepare_normal_services`);
 - reads the current selector for the later hop projection's predecessor binding.
 
@@ -39,9 +39,9 @@ from pathlib import Path
 
 import psycopg
 
-from cli.commands._release_inventory import prepare_unit_inventory
-from cli.commands._release_selector import read_selector, selector_bytes
-from cli.commands._release_services import prepare_normal_services
+from cli.commands.release_inventory import prepare_unit_inventory
+from cli.commands.release_selector import read_selector, selector_bytes
+from cli.commands.release_services import prepare_normal_services
 from ops.rpc_prepare_facts import ImageRef, RestrictedHopMaterial
 from shared.machine import MachineRoleMissing
 from shared.managed_writer_barrier import ManagedWriterBarrierError, RolloutIdentity, lock_rollout

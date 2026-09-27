@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from services.pitr.activation_evidence import stored_digest_matches
-from services.pitr.base_manifest import CandidateManifest, WalRange, _lsn
+from services.pitr.base_manifest import CandidateManifest, WalRange, lsn
 from services.pitr.checksums import CRC32C, KNOWN_CHECKSUM_ALGOS
 from services.pitr.uploader import ack_manifest_from_raw
 
@@ -88,11 +88,11 @@ class ProtectedManifest:
             raise ValueError("protected base differs from the candidate")
         if self.base.pin_token != self.candidate.base_object.pin_token:
             raise ValueError("protected base pin token differs from the candidate")
-        if _lsn(self.target_lsn) < _lsn(self.candidate.end_lsn):
+        if lsn(self.target_lsn) < lsn(self.candidate.end_lsn):
             raise ValueError("restore proof did not reach the candidate target")
         if self.proof.target_lsn != self.target_lsn:
             raise ValueError("restore proof target differs from the protected manifest")
-        if _lsn(self.proof.achieved_lsn) < _lsn(self.target_lsn):
+        if lsn(self.proof.achieved_lsn) < lsn(self.target_lsn):
             raise ValueError("restore proof did not achieve its target LSN")
         if self.wal_segment_size != self.candidate.wal_segment_size:
             raise ValueError("protected WAL segment size differs from the candidate")
@@ -177,9 +177,9 @@ def required_archive_names(ranges: tuple[WalRange, ...], segment_size: int) -> t
         if item.timeline > 1 and item.timeline not in seen_timelines:
             names.append(f"{item.timeline:08X}.history")
         seen_timelines.add(item.timeline)
-        start = _lsn(item.start_lsn) // segment_size
-        end_value = _lsn(item.end_lsn)
-        if end_value <= _lsn(item.start_lsn):
+        start = lsn(item.start_lsn) // segment_size
+        end_value = lsn(item.end_lsn)
+        if end_value <= lsn(item.start_lsn):
             raise ValueError("WAL range must advance")
         end = (end_value - 1) // segment_size
         for segment in range(start, end + 1):
