@@ -52,9 +52,19 @@ for your own feature branch:
 git push --force-with-lease
 ```
 
-**Merge method is squash.** The Trunk queue squashes each PR into one
-commit on `main` (user ruling: keep squash). The branch keeps its own commit
-structure for review; `main` gets one commit per PR.
+**Merge method is rebase (mandatory, user ruling 2026-09-27).** The Trunk
+queue rebase-merges each PR: every commit on the branch lands on `main` as is,
+so each commit must stand on its own — a conventional subject, a body that
+says why, and green on its own tree as far as you know. GitHub allows rebase
+merges only, and the Trunk queue's merge method (app.trunk.io queue settings)
+is Rebase; the two must change together.
+
+**Stacked PRs.** Because commits land individually, a stack lands as one queue
+submission: rebase the whole stack onto `main`, retarget the TOP PR to `main`,
+and submit only that one — every layer's commits land in order, one CI and one
+queue round instead of one per layer. Then close the lower PRs with a comment
+naming the PR they landed through. Submitting a lower layer on its own is fine
+too; the next layer's rebase onto `main` drops the already-applied commits.
 
 ### Merge queue (mandatory)
 
@@ -72,7 +82,7 @@ still requires a delta re-review before the label is (re)applied. Submitting is
 queue to land the PR). Trunk batches queued PRs into one test draft
 verification: a `trunk-merge/pr-<n>/...` branch carrying the combined tree,
 CI running on it via the normal `pull_request` event (ci.yml's draft-skip
-exempts that branch prefix). On green every PR in the batch lands (squash
+exempts that branch prefix). On green every PR in the batch lands (rebase
 merge); a red batch auto-bisects to evict the culprit. **You no longer
 rebase-and-repoll when `main` moves**: the queue verifies the combined tree
 that actually lands.

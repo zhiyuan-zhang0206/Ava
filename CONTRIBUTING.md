@@ -38,8 +38,9 @@ Standard fork-and-PR — use whatever local git setup you like:
    manual stage invocation and targeted frontend verification.
 3. Open a PR with a clear **what + why**. Rebase onto latest `main` before
    pushing (see [`.agents/skills/ship-a-change/SKILL.md`](.agents/skills/ship-a-change/SKILL.md)). CI must
-   be green; the PR then merges through the Trunk queue as a squash merge
-   (linear history — no merge commits).
+   be green; the PR then merges through the Trunk queue as a rebase merge
+   (linear history, every commit kept — no merge commits, no squash), so
+   make each commit stand on its own.
 
 ### Merge gate: `qa-approved` label
 
