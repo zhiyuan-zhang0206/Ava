@@ -28,7 +28,7 @@ files + signals:
 Identity: `ava.agent_identity.establish(agent_id, owns_loop=True)` — owns_loop stays
 True so `ava.self.terminate/restart/compact` keep working exactly as they do
 in the agent process (their inbound INSERTs go to the same database over
-`ava.DB`); the resulting `_LifecycleExit` is caught here and reported as a
+`ava.DB`); the resulting `LifecycleExit` is caught here and reported as a
 lifecycle outcome. The parent reconstructs the exception from the name
 (`agent.graph._exec_result.lifecycle_exception_from_name`).
 
@@ -360,9 +360,9 @@ def _run_code(code: str, payload: Any) -> None:
         with sdk_telemetry.recording() as tally:
             exec(compile(code, "<agent_code>", "exec"), fresh_globals)
     except BaseException as exc:
-        from shared.lifecycle import _LifecycleExit
+        from shared.lifecycle import LifecycleExit
 
-        if isinstance(exc, _LifecycleExit):
+        if isinstance(exc, LifecycleExit):
             # Lifecycle (terminate/restart/compact): SDK already INSERTed the
             # inbound; no traceback (not an error).
             payload.kind = "lifecycle"
@@ -483,7 +483,7 @@ def _run(request_path: str, result_path: str) -> None:
     if _apply_overlay_scope(birth, overlay, scope="framework"):
         # Per-agent sdk_disable additions ride the overlay; re-apply on top of
         # the env baseline (idempotent — only new entries take effect).
-        from agent._process_boot import _apply_per_agent_sdk_disable
+        from agent.process_boot import _apply_per_agent_sdk_disable
 
         _apply_per_agent_sdk_disable()
     # A text-only agent gets no attach contract anywhere in its SDK docs —
@@ -497,7 +497,7 @@ def _run(request_path: str, result_path: str) -> None:
     # — the child start stays off the agent runtime either way (task #3633).
     ava.ensure_plugins_loaded()
     _apply_overlay_scope(birth, overlay, scope="plugin")
-    from agent._process_boot import _apply_per_agent_eval_isolation
+    from agent.process_boot import _apply_per_agent_eval_isolation
 
     _apply_per_agent_eval_isolation()
     _build_state_slot(request)

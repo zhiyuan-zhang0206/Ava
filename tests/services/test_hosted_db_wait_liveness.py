@@ -12,7 +12,7 @@ import psycopg
 import pytest
 from psycopg_pool import AsyncConnectionPool, ConnectionPool
 
-from agent import _turn_progress as progress
+from agent import turn_progress as progress
 from services.agent_host import daemon, db_recovery
 from services.agent_host.dispatcher import InboundWakeDispatcher, PendingInboundWake, TurnScheduler
 from services.agent_host.host import AgentHost

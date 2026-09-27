@@ -25,7 +25,7 @@ The three systems are decoupled — plugins don't need skills, skills don't depe
 - [[agents-contract.ava.okf.md]] — contracts for plugin context and configuration registration
 
 ## Entry Points
-- `shared/plugins_config.py:_discover_plugins()` — scans builtin + external plugin directories; `installed_plugin_dirs()` = plugins present on this machine (for service discovery, judged by presence regardless of enable state)
+- `shared/plugins_config.py:discover_plugins()` — scans builtin + external plugin directories; `installed_plugin_dirs()` = plugins present on this machine (for service discovery, judged by presence regardless of enable state)
 - `plugins/<name>/services.py:services()` + `ops/spec.py:_plugin_services()` — hook for plugin registering ops background services + the discovery side
 - `shared/plugin_config_registry.py:register_plugin_config()` — plugin Config class registration
 - `agent/hooks/_registry.py:register_before_llm()` — hook registration

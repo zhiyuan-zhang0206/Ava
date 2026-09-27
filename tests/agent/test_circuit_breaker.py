@@ -25,7 +25,6 @@ import pytest
 from langchain_core.messages import AIMessageChunk, AnyMessage, HumanMessage, SystemMessage
 from psycopg_pool import AsyncConnectionPool
 
-from agent._runloop import _handle_fatal_llm_error
 from agent.graph import claim_node, llm_node
 from agent.graph.llm_errors import FatalLLMStreamError, FatalProviderError
 from agent.hooks.compact import (
@@ -35,6 +34,7 @@ from agent.hooks.compact import (
     compose_summary_message,
     emergency_compact_summary,
 )
+from agent.runloop import _handle_fatal_llm_error
 from agent.state import AgentState, CircuitState
 from shared.config import settings
 from shared.context import AvaContext
@@ -237,7 +237,7 @@ async def test_permanent_provider_error_reports_metadata_to_nearest_alive_ancest
             f"{child_id} is blocked after a permanent provider rejection. "
             "error_class=permanent vendor=deepseek provider=anthropic status=400 reason=bad_request "
             "timestamp=2026-09-03T08:00:00+00:00 "
-            "where=agent._runloop._handle_fatal_llm_error",
+            "where=agent.runloop._handle_fatal_llm_error",
             "system_note",
             "system",
             {"note_tag": "agent_reply"},
@@ -674,7 +674,7 @@ async def test_host_persists_provider_failure_before_releasing_turn(
     from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
     from langgraph.graph import END, START, StateGraph
 
-    from agent.startup import _wrap_saver_writes_with_nstep_interval
+    from agent.startup import wrap_saver_writes_with_nstep_interval
     from services.agent_host.host import AgentHost
     from shared.config import settings
 
@@ -697,7 +697,7 @@ async def test_host_persists_provider_failure_before_releasing_turn(
     builder.add_edge(START, "reject")
     builder.add_edge("reject", END)
     async with AsyncPostgresSaver.from_conn_string(settings.data_plane.db_url) as saver:
-        _wrap_saver_writes_with_nstep_interval(saver, 100)
+        wrap_saver_writes_with_nstep_interval(saver, 100)
         graph = builder.compile(checkpointer=saver)  # pyright: ignore[reportUnknownMemberType]
         host = AgentHost(pool=aops_pool, checkpointer=saver, graph=graph, machine="test")
         assert not (await host._invoke_until_done(agent_id, _breaker_ctx())).exited

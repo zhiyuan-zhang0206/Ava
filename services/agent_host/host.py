@@ -47,10 +47,6 @@ from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.graph.state import CompiledStateGraph
 from psycopg_pool import AsyncConnectionPool, PoolTimeout
 
-from agent._process_boot import boot_agent_scope
-from agent._runloop import PendingTurnFailure, _emit_error_event, _graph_config, settle_turn_failure
-from agent._trace_checkpoint import attach_trace_checkpoint_ref
-from agent._turn_progress import reset_turn_progress
 from agent.corpse_reap import reap_crash_corpses
 from agent.graph.llm_errors import FatalLLMStreamError, FatalProviderError
 from agent.graph.node_log import flush_node_exit_aggregate
@@ -70,11 +66,15 @@ from agent.impersonation import (
     settle_checkpoint,
     supervise_relay,
 )
+from agent.process_boot import boot_agent_scope
+from agent.runloop import PendingTurnFailure, emit_error_event, graph_config, settle_turn_failure
 from agent.startup import (
-    _reconcile_claimed_inbounds_at_startup,
-    _repair_dangling_tool_use_at_startup,
+    reconcile_claimed_inbounds_at_startup,
+    repair_dangling_tool_use_at_startup,
 )
 from agent.state import BaseAgentState
+from agent.trace_checkpoint import attach_trace_checkpoint_ref
+from agent.turn_progress import reset_turn_progress
 from services.agent_host import maintenance as maintenance_receipts
 from services.agent_host.admission import TurnAdmission
 from services.agent_host.crash_recovery import recover_reaped_corpses
@@ -517,8 +517,8 @@ class AgentHost:
 
     async def _build_runtime(self, agent_id: int, fingerprint: str) -> _AgentRuntime:
         """Repair checkpoint/inbound state, then prepare the model."""
-        await _reconcile_claimed_inbounds_at_startup(self._pool, self._checkpointer, agent_id)
-        await _repair_dangling_tool_use_at_startup(self._graph, agent_id)
+        await reconcile_claimed_inbounds_at_startup(self._pool, self._checkpointer, agent_id)
+        await repair_dangling_tool_use_at_startup(self._graph, agent_id)
         llm = await boot_agent_scope(agent_id)
         return _AgentRuntime(fingerprint=fingerprint, llm=llm)
 
@@ -639,7 +639,7 @@ class AgentHost:
         """
         tags = ["ava", f"agent-{agent_id}", "hosted"]
         metadata: dict[str, object] = {"agent_id": agent_id, "hosted": True}
-        config: RunnableConfig = _graph_config(agent_id, tags, metadata)
+        config: RunnableConfig = graph_config(agent_id, tags, metadata)
         turn = 0
         pending_failure: PendingTurnFailure | None = None
         while True:
@@ -734,7 +734,7 @@ class AgentHost:
                 if ended is not None:
                     self.drop_agent(agent_id)
                     return ended
-                _emit_error_event(
+                emit_error_event(
                     ctx, agent_id, f"{type(exc).__name__}: {exc}", error_class=type(exc).__name__
                 )
                 raise

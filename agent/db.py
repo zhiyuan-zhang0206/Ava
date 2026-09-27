@@ -165,7 +165,7 @@ class ClaimedInbound(NamedTuple):
 
 
 _MAX_SPAWNER_ANCESTOR_DEPTH = 32
-_FATAL_PROVIDER_REPORT_LOCATION = "agent._runloop._handle_fatal_llm_error"
+_FATAL_PROVIDER_REPORT_LOCATION = "agent.runloop._handle_fatal_llm_error"
 
 
 async def enqueue_fatal_provider_report_to_nearest_alive_ancestor(
@@ -554,7 +554,7 @@ async def pending_interrupt_reason(
 
     Self-initiated lifecycle (`source='self'`, i.e. `ava.self.terminate()` /
     restart from inside the agent's own exec) is EXCLUDED: that path already
-    raises `_LifecycleExit` inside the exec child, which the exec node handles
+    raises `LifecycleExit` inside the exec child, which the exec node handles
     directly, so the watcher must not also fire on the agent's own row — doing
     so would race the clean lifecycle exit with an external cancel. Only
     external interrupts (user / admin / peer / reap) need

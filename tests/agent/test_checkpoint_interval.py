@@ -25,7 +25,7 @@ from psycopg_pool import AsyncConnectionPool
 from typing_extensions import TypedDict
 
 from agent.messages_guard import guarded_delta_reducer
-from agent.startup import _wrap_saver_writes_with_nstep_interval
+from agent.startup import wrap_saver_writes_with_nstep_interval
 from shared.config.agent_runtime import AgentRuntimeSettings
 
 
@@ -79,7 +79,7 @@ class _DeltaState(TypedDict):
 
 
 def _wrap(saver: _StubSaver, interval: int | Callable[[], int]) -> None:
-    _wrap_saver_writes_with_nstep_interval(cast(AsyncPostgresSaver, saver), interval)
+    wrap_saver_writes_with_nstep_interval(cast(AsyncPostgresSaver, saver), interval)
 
 
 def _stored_thread_ids(saver: _StubSaver) -> list[str]:
@@ -636,7 +636,7 @@ async def test_nstep_wrapper_delta_readback_matches_unwrapped_control(
     )
 
     wrapped_saver = AsyncPostgresSaver(aops_pool)
-    _wrap_saver_writes_with_nstep_interval(wrapped_saver, 4)
+    wrap_saver_writes_with_nstep_interval(wrapped_saver, 4)
     wrapped = build(wrapped_saver)
     await wrapped.ainvoke(  # pyright: ignore[reportUnknownMemberType]
         {"messages": [], "n": 0, "target": 12}, wrapped_config, recursion_limit=200

@@ -18,7 +18,7 @@ Core mechanisms:
     plugin state-update delta and drained security findings ride the result
     envelope back and are validated here.
   - Halt signal uses exception type rather than exit code: agent code raising
-    `_LifecycleExit` (AgentTermination / AgentRestart / _SystemHalt) → captured
+    `LifecycleExit` (AgentTermination / AgentRestart / SystemHalt) → captured
     in result_holder["lifecycle"] → exec_node decides halted + writes marker
     based on isinstance.
   - The child writes stdout/stderr line-buffered onto the pipe (both
@@ -79,7 +79,7 @@ from shared.config import settings
 from shared.config.turn_view import current_agent_config_pins
 from shared.context import AvaContext, agent_id_from_config
 from shared.exit_codes import IDLE_EXIT_CODE, SYSTEM_HALT_EXIT_CODE
-from shared.lifecycle import AgentImpersonation, AgentRestart, AgentTermination, _SystemHalt
+from shared.lifecycle import AgentImpersonation, AgentRestart, AgentTermination, SystemHalt
 from shared.live_events import Cancelled, ExecOutput, ExecStart
 from shared.log import logger
 from shared.plugin_config_view import current_agent_plugin_pins
@@ -313,7 +313,7 @@ def _dispatch_exec_result(
     # report the true produced length and to stop calling the archive complete.
     stream_cap = result.stream_cap
     match result:
-        case _ExecLifecycle(output=output, exc=_SystemHalt()):
+        case _ExecLifecycle(output=output, exc=SystemHalt()):
             # ava.self.compact already INSERTed compact_summary inbound; append
             # "[system halt]" at the end (agent's real output comes first).
             halted = True
@@ -343,12 +343,12 @@ def _dispatch_exec_result(
                 body=f"lifecycle {type(exc).__name__}",
             )
         case _ExecLifecycle(exc=other_exc):
-            # Exhaustive fallthrough: future _LifecycleExit subclass not handled
+            # Exhaustive fallthrough: future LifecycleExit subclass not handled
             # in the two cases above falls here and raises — safer than silently
             # taking the "ordinary exception" halted=False path. Implements
             # CLAUDE.md "enum dispatch must be exhaustive".
             raise TypeError(
-                f"Unrecognized _LifecycleExit subclass: {type(other_exc).__name__!r} — "
+                f"Unrecognized LifecycleExit subclass: {type(other_exc).__name__!r} — "
                 f"dispatch ladder missed update"
             )
         case _ExecCancelled(output=output, reason=reason):
@@ -508,9 +508,9 @@ async def _exec_node_impl(
     # child-drained findings from the result envelope in execution order.
     findings = parent_findings + envelope_findings
 
-    # Compact path (_SystemHalt): write nothing back — claim REMOVE_ALLs the
+    # Compact path (SystemHalt): write nothing back — claim REMOVE_ALLs the
     # whole history this turn, so ToolMessage/notes would be wiped anyway.
-    compact_halt = isinstance(result, _ExecLifecycle) and isinstance(result.exc, _SystemHalt)
+    compact_halt = isinstance(result, _ExecLifecycle) and isinstance(result.exc, SystemHalt)
     if not compact_halt:
         # The UI shows exactly what the agent sees in exec output — same blob
         # fed back to the LLM below (ExecOutput shares item_id with the chunk).

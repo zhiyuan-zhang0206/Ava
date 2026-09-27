@@ -74,7 +74,7 @@ def inventory_read_op() -> InventoryReadResult:
     from ava.mcp_config import load_mcp_config, server_capability
 
     _assert_agent_runner()
-    discovered = plugins_config._discover_plugins()
+    discovered = plugins_config.discover_plugins()
     cfg = plugins_config.load_for_runtime(set(discovered))
     plugins: dict[str, InventoryReadItem] = {}
     for name, plugin_dir in discovered.items():
@@ -127,7 +127,7 @@ def inventory_write_op(
     from ava.mcp_config import load_mcp_config, server_capability
 
     _assert_agent_runner()
-    discovered = set(plugins_config._discover_plugins())
+    discovered = set(plugins_config.discover_plugins())
     plugin_results: dict[str, FieldWriteResult] = {}
     for name in plugins:
         if name not in discovered:

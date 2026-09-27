@@ -210,7 +210,7 @@ def test_projection_failure_keeps_jsonl_and_otlp_and_never_emits_recursively(
     monkeypatch.setattr(metrics, "_failures", 0)
     monkeypatch.setattr(metrics, "write_observations", Mock(side_effect=RuntimeError("DB down")))
     diagnostic = Mock()
-    monkeypatch.setattr(telemetry, "_report_no_pipeline", diagnostic)
+    monkeypatch.setattr(telemetry, "report_no_pipeline", diagnostic)
     emitted = Mock(side_effect=AssertionError("diagnostics must bypass emitter"))
     monkeypatch.setattr(telemetry, "emit", emitted)
     exported = Mock()
@@ -232,7 +232,7 @@ def test_one_malformed_fact_does_not_discard_other_supported_rows(
     write = Mock(return_value=1)
     report = Mock()
     monkeypatch.setattr(metrics, "write_observations", write)
-    monkeypatch.setattr(telemetry, "_report_no_pipeline", report)
+    monkeypatch.setattr(telemetry, "report_no_pipeline", report)
     metrics.project_events(
         [
             _event("turn_end", duration_seconds="invalid", ok=True),

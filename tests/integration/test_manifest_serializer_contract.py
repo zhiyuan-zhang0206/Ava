@@ -28,7 +28,7 @@ def otlp_backend(monkeypatch: pytest.MonkeyPatch) -> Any:
         providers=(logs, MeterProvider(metric_readers=[InMemoryMetricReader()]))
     )
     monkeypatch.setattr("shared.config.settings.observability.telemetry_otlp_enabled", True)
-    monkeypatch.setattr(telemetry_otlp, "_observability_export_allowed", lambda: True)
+    monkeypatch.setattr(telemetry_otlp, "observability_export_allowed", lambda: True)
     monkeypatch.setattr(telemetry_otlp, "backend", backend)
     yield backend, exporter
     backend.shutdown()

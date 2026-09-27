@@ -35,7 +35,7 @@ The agent's sole tool—`execute_code(code: str)`—executes Python code in a di
 
 ### In-memory system-note injection (`_exec_notes.py`, user ruling 2026-08-11)
 - AGENTS.md / CLAUDE.md context notes (ava_code plugin) and prompt-injection security findings (ava.security) are delivered **inside the exec's own messages delta** — no side-channel file
-- `agent/graph/_exec_notes.py:merge_exec_notes()` appends both after the exec-result ToolMessage: the Anthropic-compat wire contract requires `tool_use` to be immediately followed by `tool_result` (verified against the DeepSeek anthropic endpoint 2026-08-11), so notes must not be sandwiched between the AIMessage and its ToolMessage; the compact path (`_SystemHalt`) drops both (history is REMOVE_ALL'd anyway)
+- `agent/graph/_exec_notes.py:merge_exec_notes()` appends both after the exec-result ToolMessage: the Anthropic-compat wire contract requires `tool_use` to be immediately followed by `tool_result` (verified against the DeepSeek anthropic endpoint 2026-08-11), so notes must not be sandwiched between the AIMessage and its ToolMessage; the compact path (`SystemHalt`) drops both (history is REMOVE_ALL'd anyway)
 
 ## Key Dependencies
 

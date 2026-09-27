@@ -3,14 +3,14 @@
 
 This is framework API for the agent kernel, not the agent SDK: it carries a
 public name — reached across the `ava` package boundary by `agent/extensions.py`
-and `agent/_process_boot.py` — but stays out of the agent's `ava.help()` view
+and `agent/process_boot.py` — but stays out of the agent's `ava.help()` view
 because it is absent from `ava.__all_for_ava__`.
 
 Every production load path shares the primitives here — `load_plugin_module`
 (the by-path import contract: dotted name, synthetic parent packages,
 `sys.modules` registration before execution, reload-in-place) and
 `safe_load_plugin_module` (the fail-soft wrapper). `scan_and_load` is the
-external-only loader `agent/_process_boot.py` calls at host boot;
+external-only loader `agent/process_boot.py` calls at host boot;
 `agent/graph/_build.py:load_extensions` drives the same primitives, so a
 plugin sees the same module name, `__package__`, and `sys.modules` identity
 whichever production path imports it. Both wrap the import in
@@ -192,7 +192,7 @@ def scan_and_load(
         enabled: explicit set of enabled names. Empty set = load none
             (distinct from `None`); `None` (default) loads all valid plugins
             under plugin_dir — for tests and explicit full loads. The
-            production caller (`agent/_process_boot.py:load_process_extensions`)
+            production caller (`agent/process_boot.py:load_process_extensions`)
             passes the per-machine enable set from `plugins_config.json`, so a
             disabled plugin is never imported by the host-boot path either.
 

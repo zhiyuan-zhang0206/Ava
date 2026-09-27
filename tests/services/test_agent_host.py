@@ -355,8 +355,8 @@ def wired(monkeypatch: pytest.MonkeyPatch, host_plugin: None) -> _Build:
     async def _noop_reconcile(*_a: object, **_k: object) -> None:
         return None
 
-    monkeypatch.setattr(host_mod, "_reconcile_claimed_inbounds_at_startup", _noop_reconcile)
-    monkeypatch.setattr(host_mod, "_repair_dangling_tool_use_at_startup", _noop_reconcile)
+    monkeypatch.setattr(host_mod, "reconcile_claimed_inbounds_at_startup", _noop_reconcile)
+    monkeypatch.setattr(host_mod, "repair_dangling_tool_use_at_startup", _noop_reconcile)
     monkeypatch.setattr(host_mod, "publish_agent_updated", _noop_reconcile)
 
     async def _fake_boot_agent_scope(_agent_id: int) -> _Model:
@@ -1106,7 +1106,7 @@ class TestTurnLoop:
         recovery turn it just scheduled."""
         import time as _time
 
-        from agent._turn_progress import _PROGRESS, turn_progress_age_s
+        from agent.turn_progress import _PROGRESS, turn_progress_age_s
 
         host, _, _ = wired({11: _Row(overlay={"llm_model": "model-for-11"})})
         # A stale entry as a long-ago turn would leave behind...
@@ -1127,7 +1127,7 @@ class TestTurnLoop:
         """
         import time as _time
 
-        from agent._turn_progress import _PROGRESS, turn_progress_age_s
+        from agent.turn_progress import _PROGRESS, turn_progress_age_s
 
         host, _, _ = wired({11: _Row(status="terminated")})
         _PROGRESS[11] = [_time.monotonic() - 99999.0]
@@ -1187,7 +1187,7 @@ class TestTurnStallGuard:
         def _record_error(_ctx: object, _agent_id: int, content: str) -> None:
             errors.append(content)
 
-        monkeypatch.setattr(guard_mod, "_emit_error_event", _record_error)
+        monkeypatch.setattr(guard_mod, "emit_error_event", _record_error)
 
         with pytest.raises(TurnStallTimeoutError):
             await asyncio.wait_for(host.run_turn(11), timeout=30.0)
@@ -1201,7 +1201,7 @@ class TestTurnStallGuard:
         self, wired: _Build, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         import services.agent_host.stall_guard as guard_mod
-        from agent._turn_progress import mark_turn_progress
+        from agent.turn_progress import mark_turn_progress
 
         await self._stall_settings(monkeypatch)
         host, _, _ = wired({11: _Row(overlay={"llm_model": "model-for-11"})})
@@ -1212,7 +1212,7 @@ class TestTurnStallGuard:
         def _record_error(_ctx: object, _agent_id: int, content: str) -> None:
             errors.append(content)
 
-        monkeypatch.setattr(guard_mod, "_emit_error_event", _record_error)
+        monkeypatch.setattr(guard_mod, "emit_error_event", _record_error)
 
         async def _keep_stepping() -> None:
             while not graph.release.is_set():

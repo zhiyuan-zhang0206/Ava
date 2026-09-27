@@ -1,6 +1,6 @@
 """Trace recording — OTLP/HTTP export to the local OTel Collector sidecar.
 
-**Record** (this module): called once per process during `agent/_process_boot.py:init_process_scope`.
+**Record** (this module): called once per process during `agent/process_boot.py:init_process_scope`.
 When `trace_enabled` (default on), OpenLLMetry (traceloop-sdk) auto-instruments
 the Anthropic/OpenAI/Google SDKs + LangChain/LangGraph, and every span is
 exported over OTLP/HTTP (protobuf wire format) to the local OTel Collector
@@ -35,7 +35,7 @@ local recovery copy. A gap present in the mirror can be replayed with
   the whole OTLP surface (with the sidecar architecture this also stops
   recording, since recording IS the OTLP export).
 
-turn_span() in agent/_runloop.py wraps each graph.ainvoke — one invocation =
+turn_span() in agent/runloop.py wraps each graph.ainvoke — one invocation =
 one agent TURN — in a native OTel root span so every LLM/tool child span of
 that turn nests under it. The root is a PLACEHOLDER: ended (and thus
 exported) at turn START, so a trace always has its root even when the process
@@ -80,8 +80,8 @@ from shared.observability import cluster_label
 from shared.paths import traces_dir
 from shared.telemetry.otlp.telemetry_otlp import (
     COLLECTOR_RETRY_INTERVAL_S,
-    _observability_export_allowed,
     endpoint_reachable,
+    observability_export_allowed,
 )
 from shared.trace_mirror import (
     _disk_usage,
@@ -608,7 +608,7 @@ def initialize_tracing() -> None:
         return
     if not settings.observability.trace_enabled:
         return
-    if not _observability_export_allowed():
+    if not observability_export_allowed():
         return
 
     # Bounded disk FIRST — before the watermark guard, so the relief valves

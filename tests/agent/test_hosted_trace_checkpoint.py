@@ -14,7 +14,7 @@ from opentelemetry.sdk.trace import TracerProvider
 from psycopg_pool import AsyncConnectionPool
 
 from agent.impersonation import flush_checkpoint
-from agent.startup import _wrap_saver_writes_with_nstep_interval
+from agent.startup import wrap_saver_writes_with_nstep_interval
 from agent.state import BaseAgentState
 from services.agent_host import host as host_module
 from shared.agents.history.checkpoint import load_checkpoint_messages_by_trace
@@ -55,7 +55,7 @@ async def test_host_trace_reads_final_messages_after_nstep_flush(
     builder.add_edge("finish", END)
     config: RunnableConfig = {"configurable": {"thread_id": str(agent_id)}}
     async with AsyncPostgresSaver.from_conn_string(settings.data_plane.db_url) as saver:
-        _wrap_saver_writes_with_nstep_interval(saver, 100)
+        wrap_saver_writes_with_nstep_interval(saver, 100)
         graph = builder.compile(checkpointer=saver)  # pyright: ignore[reportUnknownMemberType]
         await graph.aupdate_state(
             config, {"messages": [HumanMessage(content="prior question", id="prior")]}

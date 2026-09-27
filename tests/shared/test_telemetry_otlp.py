@@ -32,12 +32,10 @@ def _production_process_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
 @pytest.fixture(autouse=True)
 def _fresh_observability_export_gate() -> Any:
     """The production gate is process-cached; tests model fresh processes."""
-    gate = getattr(telemetry_otlp, "_observability_export_allowed", None)
-    if gate is not None:
-        gate.cache_clear()
+    gate = telemetry_otlp.observability_export_allowed
+    gate.cache_clear()
     yield
-    if gate is not None:
-        gate.cache_clear()
+    gate.cache_clear()
 
 
 def _event(
@@ -624,7 +622,7 @@ def test_gateway_export_gate_requires_lgtm_marker_or_explicit_endpoint(
         )
     else:
         monkeypatch.delitem(os.environ, "AVA_TELEMETRY_OTLP_ENDPOINT", raising=False)
-    telemetry_otlp._observability_export_allowed.cache_clear()
+    telemetry_otlp.observability_export_allowed.cache_clear()
 
     assert telemetry_otlp._OtlpBackend._enabled() is expected
 
@@ -671,7 +669,7 @@ def test_pure_runner_export_relay_is_not_gated(
     monkeypatch.setattr("shared.paths.ava_home", lambda: home)
     monkeypatch.delitem(os.environ, "AVA_TELEMETRY_OTLP_ENDPOINT", raising=False)
     monkeypatch.setattr("shared.config.settings.observability.telemetry_otlp_enabled", True)
-    telemetry_otlp._observability_export_allowed.cache_clear()
+    telemetry_otlp.observability_export_allowed.cache_clear()
 
     assert telemetry_otlp._OtlpBackend._enabled() is True
 
@@ -691,7 +689,7 @@ def test_unconfigured_machine_role_does_not_disable_export(
     monkeypatch.setattr(machine, "machine_name", lambda: "macmini")
     monkeypatch.setattr("shared.paths.ava_home", lambda: tmp_path / ".ava")
     monkeypatch.setattr("shared.config.settings.observability.telemetry_otlp_enabled", True)
-    telemetry_otlp._observability_export_allowed.cache_clear()
+    telemetry_otlp.observability_export_allowed.cache_clear()
 
     assert telemetry_otlp._OtlpBackend._enabled() is True
 
@@ -1209,7 +1207,7 @@ def test_real_otel_sdk_queue_overflow_is_observed_without_log_recursion(
         LogRecordExportResult,
     )
 
-    from shared import telemetry_loss
+    from shared.telemetry import loss
 
     entered, release = threading.Event(), threading.Event()
 
@@ -1227,7 +1225,7 @@ def test_real_otel_sdk_queue_overflow_is_observed_without_log_recursion(
 
     sdk_logger = logging.getLogger("opentelemetry.sdk._shared_internal")
     old_filters = list(sdk_logger.filters)
-    telemetry_loss.install_exporter_drop_observer()
+    loss.install_exporter_drop_observer()
     reports: list[Event] = []
     monkeypatch.setattr(telemetry, "_append_jsonl", reports.extend)
     provider = LoggerProvider()

@@ -12,7 +12,7 @@ tags:
 `agent/extensions.py:load_extensions()` imports every enabled plugin's
 `plugin.py` (plus its optional `agent_runtime.py` face on the full form) by
 path, and `ava.sdk_surface.plugin_loader.scan_and_load()` does the same for the external
-plugins at host boot (`agent/_process_boot.py:load_process_extensions`). The
+plugins at host boot (`agent/process_boot.py:load_process_extensions`). The
 agent-launched child enters through the same loader (`ava.ensure_plugins_loaded`);
 its stateless form loads surfaces only ([[okf/plugins/module-loading/two-faces.ava.okf.md]]).
 All drive the same primitives (`ava/sdk_surface/plugin_loader.py`), so a plugin sees the same

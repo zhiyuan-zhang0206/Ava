@@ -8,7 +8,7 @@ from ava.attachment_transport import attach as attach
 from ava.sdk_validation import coerce_str, coerce_typed
 from shared.config import settings
 from shared.config.turn_view import turn_settings
-from shared.lifecycle import AgentRestart, AgentTermination, _SystemHalt
+from shared.lifecycle import AgentRestart, AgentTermination, SystemHalt
 
 # Deliberately NOT in __all_for_ava__ (importable, but out of the rendered SDK
 # docs): AgentRestart / AgentTermination are framework control-flow exceptions
@@ -311,7 +311,7 @@ def compact(summary: str) -> NoReturn:
             source="self",
             payload={"compact_kind": "summary", "length": len(summary)},
         )
-    # Best-effort: a publish failure must not stop the wake + _SystemHalt below.
+    # Best-effort: a publish failure must not stop the wake + SystemHalt below.
     # The durable compact_summary inbound is already committed; if this live-UI
     # event is lost the frontend recovers on its next fetch. Routed through the
     # never-raise primitive so redis can never interrupt this lifecycle exit.
@@ -331,7 +331,7 @@ def compact(summary: str) -> NoReturn:
     # Also wake the claim node via Redis pub/sub (redundant for same-process
     # but ensures cross-process scenarios also receive the wake).
     _publish_self_inbound_wake()
-    raise _SystemHalt
+    raise SystemHalt
 
 
 def update() -> NoReturn:

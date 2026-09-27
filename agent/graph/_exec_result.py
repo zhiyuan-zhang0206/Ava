@@ -31,8 +31,8 @@ from shared.lifecycle import (
     AgentImpersonation,
     AgentRestart,
     AgentTermination,
-    _LifecycleExit,
-    _SystemHalt,
+    LifecycleExit,
+    SystemHalt,
 )
 
 from ._exec_stream import StreamCap
@@ -81,12 +81,12 @@ class _ExecTimedOut:
 @dataclass(frozen=True)
 class _ExecLifecycle:
     """Agent actively called `ava.self.{terminate,restart,compact}`, raising a
-    `_LifecycleExit` subclass inside the child — lifecycle takes priority over
+    `LifecycleExit` subclass inside the child — lifecycle takes priority over
     cancel/timeout. The exception is reconstructed parent-side from the
     envelope's `lifecycle_type` name (fixed three-class map)."""
 
     output: str
-    exc: _LifecycleExit  # _SystemHalt | AgentTermination | AgentRestart
+    exc: LifecycleExit  # SystemHalt | AgentTermination | AgentRestart
     stream_cap: StreamCap | None = None
 
 
@@ -115,18 +115,18 @@ type _ExecResult = _ExecDone | _ExecCancelled | _ExecTimedOut | _ExecLifecycle |
 
 # The fixed set of lifecycle classes the child can report by name. The subprocess
 # parent turns a missing name into an ExecChildError crash; the dispatcher's
-# exhaustive TypeError separately guards any in-process `_LifecycleExit` callers.
-_LIFECYCLE_BY_NAME: dict[str, type[_LifecycleExit]] = {
-    cls.__name__: cls for cls in (AgentTermination, AgentRestart, AgentImpersonation, _SystemHalt)
+# exhaustive TypeError separately guards any in-process `LifecycleExit` callers.
+_LIFECYCLE_BY_NAME: dict[str, type[LifecycleExit]] = {
+    cls.__name__: cls for cls in (AgentTermination, AgentRestart, AgentImpersonation, SystemHalt)
 }
 
 
-def lifecycle_exception_from_name(name: str) -> _LifecycleExit | None:
+def lifecycle_exception_from_name(name: str) -> LifecycleExit | None:
     """Instantiate the lifecycle exception a child reported by name.
 
     Return None for an unknown class name so the subprocess parent can surface
     a protocol crash. The dispatcher's exhaustive TypeError remains the guard
-    for in-process callers carrying an unknown `_LifecycleExit` subclass.
+    for in-process callers carrying an unknown `LifecycleExit` subclass.
     """
     cls = _LIFECYCLE_BY_NAME.get(name)
     return cls() if cls is not None else None
@@ -150,7 +150,7 @@ def _construct_exec_result(
     `code_reached` rides the crash variant only (see `_ExecCrashed`): the
     child's envelope reports whether the agent-authored code ever started.
     """
-    if isinstance(exc, _LifecycleExit):
+    if isinstance(exc, LifecycleExit):
         return _ExecLifecycle(output=output, exc=exc, stream_cap=stream_cap)
     if cancelled:
         return _ExecCancelled(output=output, stream_cap=stream_cap)

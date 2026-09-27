@@ -225,14 +225,14 @@ def test_a_different_file_under_the_same_name_gets_a_fresh_module(
 
 
 def test_duplicate_plugin_name_raises(monkeypatch: pytest.MonkeyPatch):
-    """Same-named plugin in two locations -> _discover_plugins raises DuplicatePlugin."""
-    from shared.plugins_config import DuplicatePlugin, _discover_plugins
+    """Same-named plugin in two locations -> discover_plugins raises DuplicatePlugin."""
+    from shared.plugins_config import DuplicatePlugin, discover_plugins
 
     _make_plugin("dup")
     _make_external_plugin("dup")
 
     with pytest.raises(DuplicatePlugin, match="dup"):
-        _discover_plugins()
+        discover_plugins()
 
 
 def test_clear_plugin_registrations_keeps_framework_sections():
@@ -419,7 +419,7 @@ def test_dot_prefixed_dirs_are_not_discovered(monkeypatch: pytest.MonkeyPatch) -
     """Atomic-install residue (.name.staging / .name.backup-<pid>) must never
     surface as ghost plugins — a hard kill between rename steps would
     otherwise have the loader import a half-installed tree as a plugin."""
-    from shared.plugins_config import _discover_plugins
+    from shared.plugins_config import discover_plugins
 
     _make_plugin("real")
     _make_external_plugin("ext")
@@ -430,4 +430,4 @@ def test_dot_prefixed_dirs_are_not_discovered(monkeypatch: pytest.MonkeyPatch) -
         ghost.mkdir()
         (ghost / "plugin.py").write_text("__description__ = 'ghost'\n", encoding="utf-8")
 
-    assert set(_discover_plugins()) == {"real", "ext"}
+    assert set(discover_plugins()) == {"real", "ext"}

@@ -14,8 +14,8 @@ from psycopg_pool import AsyncConnectionPool, PoolTimeout
 from agent.impersonation import flush_checkpoint
 from agent.inbound_ownership import RuntimeOwnershipLostError
 from agent.startup import (
-    _reconcile_claimed_inbounds_at_startup,
-    _repair_dangling_tool_use_at_startup,
+    reconcile_claimed_inbounds_at_startup,
+    repair_dangling_tool_use_at_startup,
 )
 from services.agent_host.recovery_interrupt import RecoveryInterrupt
 from shared.agents.history.delta_read_compat import (
@@ -266,7 +266,7 @@ async def recover_database(
                 phase = "inbound_reconciliation"
                 await _run_bounded_stage(
                     waiting,
-                    lambda: _reconcile_claimed_inbounds_at_startup(
+                    lambda: reconcile_claimed_inbounds_at_startup(
                         pool, checkpointer, incarnation.agent_id
                     ),
                     phase=phase,
@@ -284,7 +284,7 @@ async def recover_database(
                 phase = "tool_state_repair"
                 await _run_bounded_stage(
                     waiting,
-                    lambda: _repair_dangling_tool_use_at_startup(graph, incarnation.agent_id),
+                    lambda: repair_dangling_tool_use_at_startup(graph, incarnation.agent_id),
                     phase=phase,
                     agent_id=incarnation.agent_id,
                     attempt=attempt,

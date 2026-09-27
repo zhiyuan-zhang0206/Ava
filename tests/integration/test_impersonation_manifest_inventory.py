@@ -17,8 +17,8 @@ _AUDIT_HELPERS = frozenset(
 )
 _DIRECT_AUDIT_EMITTERS = frozenset({"emit", "prepare_event"})
 _INVENTORY: dict[str, str] = {
-    "agent/_runloop.py::_record_permanent_reject_outcome": "ineligible",
-    "agent/_runloop.py::_handle_fatal_llm_error": "ineligible",
+    "agent/runloop.py::_record_permanent_reject_outcome": "ineligible",
+    "agent/runloop.py::_handle_fatal_llm_error": "ineligible",
     "agent/corpse_reap.py::reap_crash_corpses": "ineligible",
     "agent/corpse_reap.py::reap_recrashed_corpse": "ineligible",
     "agent/hooks/compact.py::auto_compact_for_llm": "ineligible",

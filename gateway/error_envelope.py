@@ -16,7 +16,7 @@ from shared.agents import ErrorReason
 
 def _trace_id(request: Request) -> str:
     """Return the active OTel trace id or this request's generated correlation id."""
-    trace_id, _span_id = telemetry._capture_trace_ids()
+    trace_id, _span_id = telemetry.capture_trace_ids()
     if trace_id is not None:
         return trace_id
     trace_id = getattr(request.state, "trace_id", None)
