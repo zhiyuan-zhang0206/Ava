@@ -53,7 +53,7 @@ Both write one JSON record per run to `$AVA_HOME/self_evolution/dataset/<this-mo
 Each record holds the task prompt, complete transcript (see Data source), tools called, objective
 signals (turns, exec failures, compactions, delivery breach, user re-prompts,
 user corrections, peer agent feedback), skills it touched, and a rule-based
-`label` of **ok / fumbled / failed** (see `reference/label.py`). The script
+`label` of **ok / fumbled / failed** (see `ava_builtins/skill_support/self_evolution/label.py`). The script
 prints the run counts.
 
 **Correction signals** (two new data sources since 2026-07):
@@ -192,7 +192,7 @@ The report tells the user what regressed. The evaluation loop goes further: it
 
 ```
 dataset  = training data      (real tasks + traces)
-rubric   = loss function      (completion + efficiency, in reference/rubric.py)
+rubric   = loss function      (completion + efficiency, in ava_builtins/skill_support/self_evolution/rubric.py)
 skill    = the weights        (the SKILL.md text under test)
 iterate  = backpropagation    (measure -> propose edit -> re-measure -> keep the best)
 ```

@@ -30,20 +30,13 @@ with `--assume-mode`.
 from __future__ import annotations
 
 import argparse
-import importlib.util
 import json
 import re
 import time
 from pathlib import Path
 from typing import Any
 
-_WEBCHAT_PATH = Path(__file__).resolve().parents[2] / "reference" / "webchat.py"
-_spec = importlib.util.spec_from_file_location("webchat", _WEBCHAT_PATH)
-if _spec is None or _spec.loader is None:
-    raise RuntimeError(f"cannot load shared driver at {_WEBCHAT_PATH}")
-webchat = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(webchat)
-
+from ava_builtins.skill_support.web_ai import webchat
 
 # Per-site Deep Research knobs. Buttons are matched by VISIBLE TEXT (via
 # webchat.click_by_text), which survives redesigns far better than CSS selectors

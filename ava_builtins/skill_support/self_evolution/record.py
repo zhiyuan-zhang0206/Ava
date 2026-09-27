@@ -9,19 +9,14 @@ from __future__ import annotations
 
 import ast
 import contextlib
-import os
-import sys
 import warnings
 from collections import Counter
 from typing import Any
 
-# PYTHONSAFEPATH=1 keeps the script's own directory off sys.path — restore
-# it for sibling imports (the reference dir is a script dir, not a package).
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # noqa: PTH100, PTH120
-from audit import LeakPaths, invalidated, scan
-from label import label  # sibling script, resolved via sys.path[0]
 from pydantic import ValidationError
 
+from ava_builtins.skill_support.self_evolution.audit import LeakPaths, invalidated, scan
+from ava_builtins.skill_support.self_evolution.label import label
 from shared.agents.history.checkpoint import CheckpointReadError, load_checkpoint_messages_full
 from shared.audit_events import SkillInvokedPayload
 

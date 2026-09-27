@@ -9,7 +9,6 @@ window plus each agent's first-ever chat message (the task prompt, which may
 predate the window for long-running agents).
 """
 
-import importlib.util
 import json
 import sys
 from datetime import datetime, timedelta
@@ -21,29 +20,13 @@ import psycopg
 import pytest
 from langchain_core.messages import HumanMessage
 
-REF_DIR = (
-    Path(__file__).resolve().parents[2]
-    / "ava_builtins"
-    / "skills"
-    / "ava-self-evolution"
-    / "reference"
-)
+from ava_builtins.skill_support.self_evolution import collect as collect_module
 
 
 @pytest.fixture(scope="module")
 def collect_mod() -> Any:
-    """Load the reference script as a module — it is a script, not a package
-    (the skill directory name has a hyphen), so import via spec + sys.path."""
-    sys.path.insert(0, str(REF_DIR))
-    try:
-        spec = importlib.util.spec_from_file_location("self_ev_collect", REF_DIR / "collect.py")
-        assert spec is not None and spec.loader is not None
-        mod = importlib.util.module_from_spec(spec)
-        sys.modules["self_ev_collect"] = mod
-        spec.loader.exec_module(mod)
-        return mod
-    finally:
-        sys.path.pop(0)
+    """The collection logic module (a real package now — no path loading)."""
+    return collect_module
 
 
 def _insert_agent(cur: psycopg.Cursor, agent_id: int) -> None:

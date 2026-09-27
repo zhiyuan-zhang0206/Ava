@@ -22,21 +22,13 @@ of the others.
 from __future__ import annotations
 
 import argparse
-import importlib.util
 import json
 import re
 import sys
 from pathlib import Path
 from typing import Any
 
-# Load the shared driver (skills/web-ai/reference/webchat.py) by path, so this
-# runs the same whatever the cwd. parents[2] is the web-ai skill root.
-_WEBCHAT_PATH = Path(__file__).resolve().parents[2] / "reference" / "webchat.py"
-_spec = importlib.util.spec_from_file_location("webchat", _WEBCHAT_PATH)
-if _spec is None or _spec.loader is None:
-    raise RuntimeError(f"cannot load shared driver at {_WEBCHAT_PATH}")
-webchat = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(webchat)
+from ava_builtins.skill_support.web_ai import webchat
 
 _DEFAULT_MODELS = ["chatgpt", "gemini", "claude"]
 
