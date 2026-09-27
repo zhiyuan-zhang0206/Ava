@@ -2,15 +2,13 @@
 
 from __future__ import annotations
 
-import importlib
-import sys
 from pathlib import Path
+
+from ava_builtins.skill_support.self_evolution import audit as _audit_mod
 
 
 def _audit_module():
-    path = Path(".agents/skills/ava-self-evolution/reference")
-    sys.path.insert(0, str(path))
-    return importlib.import_module("audit")
+    return _audit_mod
 
 
 def _paths(tmp_path: Path):

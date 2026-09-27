@@ -9,7 +9,6 @@ PR #356 (``shared/telemetry.event_id``), matching
 ``collect._fetch_events_window``'s None-id handling.
 """
 
-import importlib.util
 import json
 import os
 import sys
@@ -20,34 +19,16 @@ from typing import Any
 
 import pytest
 
-REF_DIR = (
-    Path(__file__).resolve().parents[2]
-    / "ava_builtins"
-    / "skills"
-    / "ava-self-evolution"
-    / "reference"
-)
+from ava_builtins.skill_support.self_evolution import mirror_backfill as backfill_module
 
 
 @pytest.fixture(scope="module")
 def backfill_mod() -> Any:
-    """Load the reference script as a module — it is a script, not a package
-    (the skill directory name has a hyphen), so import via spec + sys.path.
-    Importing is itself the syntax regression lock: the prod runtime copy
-    shipped with an unterminated string literal from 2026-08-21 to 08-26 and
-    never compiled (no .pyc), so it silently stopped being the fallback."""
-    sys.path.insert(0, str(REF_DIR))
-    try:
-        spec = importlib.util.spec_from_file_location(
-            "self_ev_mirror_backfill", REF_DIR / "mirror_backfill.py"
-        )
-        assert spec is not None and spec.loader is not None
-        mod = importlib.util.module_from_spec(spec)
-        sys.modules["self_ev_mirror_backfill"] = mod
-        spec.loader.exec_module(mod)
-        return mod
-    finally:
-        sys.path.pop(0)
+    """The backfill logic module. Importing it at collection time is itself a
+    syntax regression lock: the prod runtime copy once shipped with an
+    unterminated string literal (2026-08-21 to 08-26) and never compiled (no
+    .pyc), so it silently stopped being the fallback."""
+    return backfill_module
 
 
 def _row(i: int, ts: str, agent_id: int = 7, category: str = "telemetry") -> dict[str, Any]:
