@@ -3,7 +3,7 @@
 Generic use wakes the launching Ava agent on actionable status or a stall.
 Canonical Codex use additionally owns terminal cleanup: DONE, HANDOFF, owner
 termination, process death, expiry, or work-file deletion closes the recorded
-PTY and reclaims its generation-private ``CODEX_HOME`` before this process exits.
+PTY and reclaims its generation state directory before this process exits.
 
 Delivery survives a restart window: each wake send retries with doubling gaps
 (10s to a 160s cap, ~10.5 min in total) because a gateway / agent restart
@@ -257,7 +257,7 @@ def watch(
 
         if canonical_context is not None:
             key, expected_generation, canonical_owner = canonical_context
-            owner = coding_session_owner.read(key)
+            owner = coding_session_owner.read(key, expected_generation)
             if owner.generation != expected_generation or owner.status in (
                 "inactive",
                 "terminal",

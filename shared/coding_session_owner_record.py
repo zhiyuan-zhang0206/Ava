@@ -1,4 +1,10 @@
-"""Validated, atomic persistence for canonical coding-session owner records."""
+"""Validated, atomic persistence for coding-session owner records.
+
+One record per launch generation: ``coding-session-owners/<key digest>/<generation>.json``,
+where the key is ``(cluster, workspace, tool)``. Several generations may share a
+workspace. The single-slot layout that came before (``<key digest>.json``) is
+still readable so a launch can reclaim what it left behind.
+"""
 
 from __future__ import annotations
 
@@ -122,12 +128,35 @@ def _host_owner_dir() -> Path:
     return root
 
 
-def state_path(key: CodingSessionKey) -> Path:
-    return _host_owner_dir() / f"{key_digest(key)}.json"
+def _key_dir(key: CodingSessionKey) -> Path:
+    directory = _host_owner_dir() / key_digest(key)
+    directory.mkdir(mode=0o700, exist_ok=True)
+    return directory
+
+
+def state_path(key: CodingSessionKey, generation: str) -> Path:
+    """The record of exactly one launch generation."""
+    return _key_dir(key) / f"{generation}.json"
 
 
 def lock_path(key: CodingSessionKey) -> Path:
+    """One transition lock per key, shared by all of its generations.
+
+    Transitions are short file writes (plus a sibling's cleanup), and the path
+    is the one the single-slot layout used, so a process still running that
+    code serializes with this one.
+    """
     return _host_owner_dir() / f"{key_digest(key)}.lock"
+
+
+def legacy_state_path(key: CodingSessionKey) -> Path:
+    """The single-slot record of the layout before per-generation records."""
+    return _host_owner_dir() / f"{key_digest(key)}.json"
+
+
+def generations(key: CodingSessionKey) -> list[str]:
+    """Every generation that has a record under ``key``."""
+    return sorted(path.stem for path in _key_dir(key).glob("*.json"))
 
 
 def generation_state_dir(key: CodingSessionKey, generation: str) -> Path:
@@ -317,14 +346,37 @@ def _parse(key: CodingSessionKey, value: object) -> CodingSessionOwner:
     )
 
 
-def read_unlocked(key: CodingSessionKey) -> CodingSessionOwner:
+def _read_path(key: CodingSessionKey, path: Path, generation: str | None) -> CodingSessionOwner:
     try:
-        value = json.loads(state_path(key).read_text(encoding="utf-8"))
-        return _parse(key, value)
+        owner = _parse(key, json.loads(path.read_text(encoding="utf-8")))
     except FileNotFoundError:
-        return CodingSessionOwner(key=key, status="inactive")
+        return CodingSessionOwner(key=key, status="inactive", generation=generation)
     except (OSError, TypeError, ValueError) as exc:
-        return CodingSessionOwner(key=key, status="invalid", error=str(exc))
+        return CodingSessionOwner(key=key, status="invalid", generation=generation, error=str(exc))
+    if generation is not None and owner.generation != generation:
+        return CodingSessionOwner(
+            key=key,
+            status="invalid",
+            generation=generation,
+            error="record generation does not match its file name",
+        )
+    return owner
+
+
+def read_unlocked(key: CodingSessionKey, generation: str) -> CodingSessionOwner:
+    """One generation's record; ``inactive`` when it has none."""
+    return _read_path(key, state_path(key, generation), generation)
+
+
+def read_legacy_unlocked(key: CodingSessionKey) -> CodingSessionOwner:
+    """The single-slot record of the earlier layout, if one is left."""
+    return _read_path(key, legacy_state_path(key), None)
+
+
+def remove_unlocked(key: CodingSessionKey, generation: str | None) -> None:
+    """Drop a generation's record (``None``: the legacy single-slot record)."""
+    path = legacy_state_path(key) if generation is None else state_path(key, generation)
+    path.unlink(missing_ok=True)
 
 
 def _payload(owner: CodingSessionOwner) -> dict[str, object]:
@@ -359,7 +411,9 @@ def _fsync_parent(path: Path) -> None:
 
 
 def write_unlocked(owner: CodingSessionOwner) -> None:
-    path = state_path(owner.key)
+    if owner.generation is None:
+        raise ValueError("an owner record is written under its generation")
+    path = state_path(owner.key, owner.generation)
     write_text_atomic(
         path,
         json.dumps(_payload(owner), separators=(",", ":"), sort_keys=True),

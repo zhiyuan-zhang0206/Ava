@@ -1121,18 +1121,20 @@ python ava_builtins/skills/ava-use-other-agents/reference/spawn_codex.py \
   --status
 ```
 
-A live record is adopted across agent changes instead of launching a duplicate.
-A record is either a supervised worker (task/work files plus an automatic
+Every launch owns a generation record of its own, so several Codex sessions can
+share a workspace; `--status` lists them all, and a launch first reclaims the
+workspace's dead generations (expired, crashed, unsupervised, or owned by a
+terminated agent). A record is either a supervised worker (task/work files plus an automatic
 supervisor) or a file-less takeover (no files, no supervisor; the coding
 session alone is its liveness signal).
 Each ownership generation has a private
 `$AVA_HOME/run/coding-tools/codex/<workspace-key>/<generation>/` state
-directory and a fresh numeric PTY identity. `CODEX_HOME` points there and is
-seeded only with the required authentication and configuration snapshot; no
-mutable Codex database, session log, or transcript is shared between
-generations. A rebuilt supervised worker derives context from the workspace
-task file, work log, collaboration contract, and Git state; a takeover rebuilds
-from the briefing inlined in its launch message.
+directory (a takeover's app-server log) and a fresh numeric PTY identity.
+Codex itself runs on the host user's `~/.codex` with per-session `-c`
+overrides, and every launch prints its `codex_session`: after a full stop
+closed the shell, `--resume <codex_session>` reopens that conversation, while a
+rebuilt generation without it starts fresh from the task file, work log,
+collaboration contract and Git state (a takeover from its inline briefing).
 
 For a supervised generation the launcher starts a quiet supervisor. It closes
 the full Codex PTY and terminalizes the record when `work.md` reaches `DONE` or

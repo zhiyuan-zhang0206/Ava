@@ -43,6 +43,11 @@ prompts in a PTY. Inspect or stop the generation like the other launchers:
 The executor's own manual is the `impersonator-guide` skill and its
 [DeepSeek Harness host guide](../../../../.agents/skills/impersonator-guide/reference/deepseek_harness.md).
 
+`spawn_dsh.py` has no `--resume`: its relay plugin opens a new dsh session on
+every launch. After an interruption, launch a fresh takeover whose brief is
+built from the handoff JSON ([Resume after an
+interruption](resume_after_interruption.md)).
+
 ## Watching a takeover
 
 dsh records the session under `$DSH_HOME/sessions/`, grouped by workspace.

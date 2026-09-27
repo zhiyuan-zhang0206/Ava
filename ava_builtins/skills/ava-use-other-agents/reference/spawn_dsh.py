@@ -7,10 +7,9 @@ shipped ``headless`` profile with the Ava relay plugin patched in
 (``ava-relay-dsh/ava-relay.mjs``). The plugin stands in for the one-shot
 headless runner: it opens one persistent session, submits the launch message,
 echoes the session to the PTY, and starts the Ava relay from the credential
-stub ``ava impersonate request --provider dsh`` writes. The generation-owned
-record under ``(cluster, canonical workspace, dsh)`` refuses a second launcher
-for the same workspace; ``--status`` / ``--cancel-generation`` inspect or stop
-it.
+stub ``ava impersonate request --provider dsh`` writes. Each launch owns a
+generation record of its own under ``(cluster, workspace, dsh)``;
+``--status`` / ``--cancel-generation`` inspect or stop them.
 
 Usage::
 
@@ -25,7 +24,7 @@ Codex and Claude launchers. The launch message and the patch live in the
 generation's private state directory; the plugin deletes the message once read.
 dsh runs under the PTY shell, so a failed boot is reported with its output.
 
-Output: owner-record fields (``adopted`` / ``session_id`` / ``generation`` …),
+Output: owner-record fields (``status`` / ``session_id`` / ``generation`` …),
 one ``key=value`` per line.
 """
 
@@ -146,8 +145,7 @@ def _owner_terminated(agent_id: int) -> bool:
         return False
 
 
-def _print_owner(owner: coding_session_owner.CodingSessionOwner, *, adopted: bool) -> None:
-    print(f"adopted={'true' if adopted else 'false'}")
+def _print_owner(owner: coding_session_owner.CodingSessionOwner) -> None:
     print(f"status={owner.status}")
     for field in ("generation", "owner_agent_id", "session_id", "session_name", "state_dir"):
         value = getattr(owner, field)
@@ -156,50 +154,38 @@ def _print_owner(owner: coding_session_owner.CodingSessionOwner, *, adopted: boo
 
 
 def _status(key: coding_session_owner.CodingSessionKey) -> int:
-    owner = coding_session_owner.read(key)
-    _print_owner(owner, adopted=False)
-    if owner.error:
-        print(f"error={owner.error}", file=sys.stderr)
-    return 1 if owner.status == "invalid" else 0
+    owners = coding_session_owner.list_generations(key)
+    if not owners:
+        print("status=inactive")
+    for index, owner in enumerate(owners):
+        if index:
+            print()
+        _print_owner(owner)
+        if owner.error:
+            print(f"error={owner.error}", file=sys.stderr)
+    return 1 if any(owner.status == "invalid" for owner in owners) else 0
 
 
 def _cancel(key: coding_session_owner.CodingSessionKey, generation: str) -> int:
     if not coding_session_owner.terminate_generation(key, generation, reason="explicit-cancel"):
-        print("cancel refused: generation is not the current canonical owner", file=sys.stderr)
+        print(f"cancel refused: no generation {generation} is recorded here", file=sys.stderr)
         return 1
-    _print_owner(coding_session_owner.read(key), adopted=False)
+    _print_owner(coding_session_owner.read(key, generation))
     return 0
 
 
-def _claim(
+def _new_generation(
     key: coding_session_owner.CodingSessionKey, ttl_seconds: float
 ) -> coding_session_owner.CodingSessionOwner:
-    """Claim a fresh generation, waiting through another claimant's bounded launch."""
-    previous = coding_session_owner.read(key)
-    terminated = None
-    if (
-        previous.generation is not None
-        and previous.owner_agent_id is not None
-        and _owner_terminated(previous.owner_agent_id)
-    ):
-        terminated = previous.generation
-    while True:
-        result = coding_session_owner.claim(
-            key,
-            owner_agent_id=ava.self.AGENT_ID,
-            tasks_file=None,
-            work_file=None,
-            ttl_seconds=ttl_seconds,
-            terminated_generation=terminated,
-        )
-        if result.action == "adopt":
-            raise RuntimeError(
-                "a takeover needs a fresh coding workspace; this workspace already has a live "
-                "generation - cancel it with --cancel-generation first"
-            )
-        if result.action != "busy":
-            return result.owner
-        time.sleep(0.25)
+    """A fresh generation of our own; dead siblings in the workspace are reclaimed first."""
+    return coding_session_owner.launch_generation(
+        key,
+        owner_agent_id=ava.self.AGENT_ID,
+        tasks_file=None,
+        work_file=None,
+        ttl_seconds=ttl_seconds,
+        owner_terminated=_owner_terminated,
+    )
 
 
 def _launch(workspace: Path, name: str, brief: str, ttl_seconds: float) -> int:
@@ -207,14 +193,14 @@ def _launch(workspace: Path, name: str, brief: str, ttl_seconds: float) -> int:
     if not _PLUGIN.is_file():
         raise RuntimeError(f"the dsh relay plugin is missing: {_PLUGIN}")
     key = coding_session_owner.canonical_key(workspace, tool="dsh")
-    owner = _claim(key, ttl_seconds)
+    owner = _new_generation(key, ttl_seconds)
     if (
         owner.generation is None
         or owner.expected_suffix is None
         or owner.owner_agent_id is None
         or owner.state_dir is None
     ):
-        raise RuntimeError("new canonical owner is missing launch fields")
+        raise RuntimeError("new owner generation is missing launch fields")
     generation = owner.generation
     sid: int | None = None
     try:
@@ -244,7 +230,7 @@ def _launch(workspace: Path, name: str, brief: str, ttl_seconds: float) -> int:
         raise
     print(f"ready. name={active.expected_suffix} workspace={workspace}")
     print(f"dsh_session={dsh_session}")
-    _print_owner(active, adopted=False)
+    _print_owner(active)
     return 0
 
 
@@ -261,11 +247,13 @@ def main() -> int:
         help="Hard expiry of the shell session, up to one day (default: %(default)s).",
     )
     action = parser.add_mutually_exclusive_group()
-    action.add_argument("--status", action="store_true", help="Print the canonical owner record.")
+    action.add_argument(
+        "--status", action="store_true", help="Print every owner record of the workspace."
+    )
     action.add_argument(
         "--cancel-generation",
         metavar="GENERATION",
-        help="Stop and terminalize exactly this canonical generation.",
+        help="Stop and terminalize exactly this generation.",
     )
     parser.add_argument(
         "--impersonate-self", action="store_true", help="replace the launching Ava agent"
