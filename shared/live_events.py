@@ -317,7 +317,7 @@ class LLMDone(_Base):
 
 class TimelineSnapshot(_Base):
     """Timeline snapshot, published by the agent at each graph node
-    **enter** (`agent/graph/_node_log.node_lifecycle`), rendered from the
+    **enter** (`agent.graph.node_log.node_lifecycle`), rendered from the
     node's in-memory state.messages. The gateway forwards it unchanged; the
     frontend merges it via mergeSnapshotWithStreaming.
 

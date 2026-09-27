@@ -209,7 +209,7 @@ def make_hook_runner(
     # hook container node is part of the graph; death observability same as
     # claim/llm/exec; `hook_name` matches NodeName (before_llm / before_exec /
     # after_exec), used directly as the node name to emit.
-    from agent.graph._node_log import (
+    from agent.graph.node_log import (
         node_lifecycle,  # local import to avoid top-level cycle (graph→hooks→graph)
     )
 

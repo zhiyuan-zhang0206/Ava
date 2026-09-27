@@ -20,8 +20,8 @@ from psycopg_pool import AsyncConnectionPool
 from pydantic import BaseModel, Field
 
 from agent import impersonation
-from agent.graph._exec_protocol import read_request, write_request
 from agent.graph._exec_result import lifecycle_exception_from_name
+from agent.graph.exec_protocol import read_request, write_request
 from agent.state import BaseAgentState
 from shared.context import AvaContext
 from shared.lifecycle import AgentImpersonation

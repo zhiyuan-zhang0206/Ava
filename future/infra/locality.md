@@ -54,12 +54,11 @@ boundaries, already carried by codegen, and not debt.
    file evidence, settings digest, shadow-pg gate and service-enable, plus
    `base_manifest.lsn`).
    Highest yield next: the most reached-into privates
-   (`shared.agents.impersonation._impersonation_store`,
-   `agent.graph._exec_protocol`, `agent._turn_progress`) each get a verdict:
-   contract (export it) or internal (route callers through a door). (`shared.lm`'s
-   own most-reached-into privates already got the contract verdict — promoted
-   to public module names alongside the rest of the package's de-facto-public
-   modules.)
+   (`shared.agents.impersonation._impersonation_store`, `agent._turn_progress`)
+   each get a verdict: contract (export it) or internal (route callers through
+   a door). (`shared.lm`'s and `agent.graph`'s most reached-into privates
+   already got the contract verdict: promoted to public module names
+   alongside the rest of each package's de-facto-public modules.)
    `ava` carries no frozen reach-ins any more: agent visibility there is the
    `__all_for_ava__` whitelist (which `lint_agent_docstrings` keys on too), not
    the underscore, so every framework module or name another package needs took

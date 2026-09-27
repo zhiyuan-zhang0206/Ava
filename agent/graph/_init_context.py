@@ -1,7 +1,7 @@
 """The `init_context` node — sole owner of the agent's standing message head.
 
 The head is the SystemMessage plus the ordered context notes
-(`_context_notes.context_notes`), rendered in the rank order that module
+(`context_notes.context_notes`), rendered in the rank order that module
 documents — exec timeout, the shared memory index, the agent id, the per-agent
 memory index, any preloaded skills, then whatever else plugins register (the
 two memory indexes when `ava_memory` is enabled). It has to
@@ -24,7 +24,7 @@ head is the whole message list.
 
 A fork is deliberately NOT routed here: it inherits the source agent's full
 history, so its context is not established from empty. It grafts
-`_context_notes.fork_notes()` onto that history instead (see `_claim`).
+`context_notes.fork_notes()` onto that history instead (see `_claim`).
 """
 
 from __future__ import annotations
@@ -40,10 +40,10 @@ from agent.state import CapabilitiesState, ContextReset
 from shared.context import AvaContext, agent_id_from_config
 from shared.log import logger
 
-from ._capabilities import indexed_skill_identifiers
-from ._context_notes import context_notes
-from ._node_log import node_lifecycle
-from ._system_prompt import build_system_prompt
+from .capabilities import indexed_skill_identifiers
+from .context_notes import context_notes
+from .node_log import node_lifecycle
+from .system_prompt import build_system_prompt
 
 
 async def init_context_node(

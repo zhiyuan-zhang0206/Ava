@@ -22,7 +22,7 @@ The agent **does not need to actively call `ava.memory.search()`**—relevant me
 | Mechanism | Trigger | Injected content | Quantity |
 |---|---|---|---|
 | **Memory Injection** (`notes.py`, laid down by the `init_context` node) | Whenever the context window is established (cold start / after compaction) | MEMORY.md index (shared pool + per-agent) | Fixed (full index text) |
-| **Memory Recall** (`_memory_recall.py` + `_memory_filter.py`) | Every new inbound message (user / agent / schedule / system — watcher & shell wake-ups skipped) | Memory pool notes the filter listed as worth seeing | Retrieve 100 → inject ≤3, or none |
+| **Memory Recall** (`memory_recall.py` + `_memory_filter.py`) | Every new inbound message (user / agent / schedule / system — watcher & shell wake-ups skipped) | Memory pool notes the filter listed as worth seeing | Retrieve 100 → inject ≤3, or none |
 
 The two are complementary: injection gives the agent a "memory directory", while recall pushes relevant content automatically during conversation.
 

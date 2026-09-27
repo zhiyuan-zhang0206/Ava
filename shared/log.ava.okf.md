@@ -70,7 +70,7 @@ aggregates alive across the retirement.
 ## Notes
 
 - `agent-{N}.log` is the only file co-written by two processes (kernel + exec subprocess use O_APPEND atomic append, single-line JSONL < PIPE_BUF 4KB won't interleave); `enqueue=False` is deliberate (see semaphore leak above).
-- Agent graph `node_enter` / `node_exit` / timeline snapshot logging in `agent/graph/_node_log.py` (agent domain) are merely consumers of this module's logger.
+- Agent graph `node_enter` / `node_exit` / timeline snapshot logging in `agent/graph/node_log.py` (agent domain) are merely consumers of this module's logger.
 
 ## Key Dependencies
 

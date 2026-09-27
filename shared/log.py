@@ -411,7 +411,7 @@ def _event_pipeline_filter(record: loguru.Record) -> bool:
       - the emitter's own failure reports (records carrying the `_no_emitter`
         marker, see `shared/telemetry/emitter.py`): a mirror-down process would
         otherwise loop failure → warning → emit → failure forever;
-      - `node_enter` (agent/graph/_node_log.py): a pure write-amplification
+      - `node_enter` (agent/graph/node_log.py): a pure write-amplification
         event — zero consumers in the event stream (agent_inspect reads
         `node_exit` only; death analysis reads the node_enter trail from the
         log files), yet ~15% of the stream's rows. Kept in the log files, out

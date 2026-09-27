@@ -13,7 +13,7 @@ Two halves, deliberately different in kind:
   its import called the entry point, not because someone wrote it down.
 
 Reading the second half requires the plugins to be loaded, and loading them is
-importing them — the catalog runs `_load_extensions()` in the calling process,
+importing them — the catalog runs `load_extensions()` in the calling process,
 exactly as an agent boot does. A DISABLED plugin is therefore listed with its
 enable-state and nothing else: nothing imported it, so there is no registration
 fact to report, and inventing one from its source would be the docs-drift this
@@ -136,7 +136,7 @@ SURFACES: tuple[Surface, ...] = (
     ),
     Surface(
         id="systemPromptSections",
-        entry_points=("agent.graph._system_prompt:register_system_prompt_section",),
+        entry_points=("agent.graph.system_prompt:register_system_prompt_section",),
         manifest_key="systemPromptSections",
         protocol="section() -> str",
         note=(
@@ -146,7 +146,7 @@ SURFACES: tuple[Surface, ...] = (
     ),
     Surface(
         id="contextNotes",
-        entry_points=("agent.graph._context_notes:register_context_note",),
+        entry_points=("agent.graph.context_notes:register_context_note",),
         manifest_key=None,
         protocol="note() -> HumanMessage | None",
         note=(
@@ -313,9 +313,9 @@ def build_catalog() -> Catalog:
     config is bound from disk. Call it from a short-lived process (the CLI), not
     from one that must keep a pristine `ava`.
     """
-    from agent.graph._build import _load_extensions
+    from agent.extensions import load_extensions
 
-    config = _load_extensions()
+    config = load_extensions()
     discovered = plugins_config.installed_plugin_dirs()
     repo_plugins = _repo_plugins_dir()
 

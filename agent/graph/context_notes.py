@@ -7,7 +7,7 @@ the turn after any compaction — so a note is written once here rather than at
 each of those call sites.
 
 Registration mirrors `_SYSTEM_PROMPT_SECTIONS`: framework notes register at
-import of this module, plugins append theirs when `_load_extensions` imports
+import of this module, plugins append theirs when `load_extensions` imports
 them, and `clear_plugin_registrations` truncates back to
 `_FRAMEWORK_NOTE_COUNT` so a plugin reload drops only the plugin tail.
 
@@ -364,7 +364,7 @@ def preloaded_skills_note() -> HumanMessage | None:
     skills (its own `skills_to_expand_at_start`); the fork grafts the new
     agent's own set after `_handle_fork` strips the inherited note — exactly
     one copy, owned by the agent reading it (issue #1320)."""
-    from agent.graph._capabilities import resolve_prompt_skills
+    from agent.graph.capabilities import resolve_prompt_skills
 
     skills = resolve_prompt_skills(
         turn_settings.agent.skills_to_expand_at_start,
@@ -437,7 +437,7 @@ def fork_tail_skills_note(names: list[str]) -> HumanMessage | None:
     """
     if not names:
         return None
-    from agent.graph._capabilities import resolve_prompt_skills
+    from agent.graph.capabilities import resolve_prompt_skills
 
     skills = resolve_prompt_skills(list(names), config_field="fork_tail_skills")
     rendered = _render_skill_bodies(skills, label="fork-tail-skills")
@@ -452,7 +452,7 @@ def fork_tail_skills_note(names: list[str]) -> HumanMessage | None:
 
 # Count of framework-owned notes, snapshotted after the registrations above (all
 # at module import). Everything appended later comes from a plugin via
-# `_load_extensions`; `clear_plugin_context_notes` truncates back to this count
+# `load_extensions`; `clear_plugin_context_notes` truncates back to this count
 # so a plugin reload drops only the plugin tail — the framework notes are never
 # re-registered in-process, so clearing them would lose them for the rest of the run.
 _FRAMEWORK_NOTE_COUNT = len(_CONTEXT_NOTES)

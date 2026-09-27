@@ -248,7 +248,7 @@ def workspace_dir_readonly(agent_id: int) -> Path:
 
 def exec_run_dir() -> Path:
     """Per-unit exec-subprocess scratch dir ($AVA_HOME/run/exec) — request /
-    result envelopes for one execute_code run each (agent/graph/_exec_protocol.py),
+    result envelopes for one execute_code run each (agent/graph/exec_protocol.py),
     pruned per agent subdir. Create if missing."""
     target = run_dir() / "exec"
     target.mkdir(parents=True, exist_ok=True)

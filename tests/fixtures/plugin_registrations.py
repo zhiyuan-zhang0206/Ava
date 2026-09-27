@@ -1,7 +1,7 @@
 """Per-test isolation for plugin registrations on the process-global singletons.
 
-A full plugin load (`agent/_extensions.load_extensions`, reached through
-`_build._load_extensions()`, the plugin catalog, or a lazy `ava.*` miss) fills
+A full plugin load (`agent.extensions.load_extensions`, reached through
+`_build.load_extensions()`, the plugin catalog, or a lazy `ava.*` miss) fills
 process-global registries at once: prompt sections, `ava.<namespace>`
 surfaces and members, hooks, state fields. Nothing used to put them back, so
 one plugin-loading test left the whole set in its xdist worker. A later test
@@ -18,8 +18,9 @@ registration together, so sections and their namespaces can never go out of
 step. Metering is uninstalled first, because it sits outermost over plugin
 wraps. A test that starts with registrations already present (for example from
 a module-level plugin import) is left alone: there is no empty state to return
-to. Modules are read from `sys.modules` rather than imported, so a test
-process that never loaded the agent layer does not load it here.
+to. The check only runs once `agent.state` is already in `sys.modules`, so a
+test process that never loaded the agent layer does not load it here; past that
+gate the registries are imported for real, so a rename fails loudly.
 """
 
 from __future__ import annotations
@@ -37,7 +38,7 @@ def plugin_registrations_present() -> bool:
 
     The prompt-section and context-note checks use a real `importlib.import_module` (not
     `sys.modules.get`) once the agent layer is known to be loaded, so a future rename of
-    `agent.graph._system_prompt` / `agent.graph._context_notes` fails this check loudly
+    `agent.graph.system_prompt` / `agent.graph.context_notes` fails this check loudly
     (ImportError) instead of the string lookup silently returning None and this guard going
     permanently green.
     """
@@ -46,8 +47,8 @@ def plugin_registrations_present() -> bool:
         return False
     state = importlib.import_module("agent.state")
     surface = sys.modules.get("ava.sdk_surface.plugins")
-    system_prompt = importlib.import_module("agent.graph._system_prompt")
-    context_notes = importlib.import_module("agent.graph._context_notes")
+    system_prompt = importlib.import_module("agent.graph.system_prompt")
+    context_notes = importlib.import_module("agent.graph.context_notes")
     return bool(
         system_prompt.plugin_system_prompt_sections()
         or context_notes.plugin_context_notes()

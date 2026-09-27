@@ -9,7 +9,7 @@ tags:
 # Plugin Module Loading
 
 ## One loader contract, three production call sites
-`agent/_extensions.py:load_extensions()` imports every enabled plugin's
+`agent/extensions.py:load_extensions()` imports every enabled plugin's
 `plugin.py` (plus its optional `agent_runtime.py` face on the full form) by
 path, and `ava.sdk_surface.plugin_loader.scan_and_load()` does the same for the external
 plugins at host boot (`agent/_process_boot.py:load_process_extensions`). The
@@ -117,5 +117,5 @@ In full: [[okf/plugins/module-loading/reload-semantics.ava.okf.md]].
 
 ## Key Dependencies
 - [[okf/plugins/plugins.ava.okf.md]] — the injection surfaces the import registers into
-- [[agent/graph/graph.ava.okf.md]] — `build_graph()` calls the loader (`agent/_extensions.load_extensions`) before wiring nodes
+- [[agent/graph/graph.ava.okf.md]] — `build_graph()` calls the loader (`agent.extensions.load_extensions`) before wiring nodes
 - [[extensions.ava.okf.md]] — the `ava.extend.wrap` layer a reload re-installs from a pristine core

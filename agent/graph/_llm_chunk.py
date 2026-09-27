@@ -18,7 +18,7 @@ from langchain_core.messages import AIMessage, AIMessageChunk, message_chunk_to_
 from shared.lm.content import content_blocks
 from shared.log import logger
 
-from ._llm_errors import (
+from .llm_errors import (
     LLMStreamCorruptedError,
     LLMStreamTruncatedError,
     LLMStreamUnexpectedStopReasonError,

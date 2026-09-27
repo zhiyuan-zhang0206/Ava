@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import pytest
 
-from agent.graph._context_notes import exec_timeout_note
+from agent.graph.context_notes import exec_timeout_note
 from shared.config import settings
 from shared.message_kwargs import NoteTag
 from shared.turn_identity import bind_turn_identity

@@ -1,7 +1,7 @@
 """plugins_config.load_for_runtime — dangling config entries degrade, never raise.
 
 QA nit 2 from PR #878: `load()` stayed fail-fast at every consumer other than
-`_load_extensions`. `load_for_runtime` is the shared runtime wrapper those
+`load_extensions`. `load_for_runtime` is the shared runtime wrapper those
 consumers use; strict `load()` (interactive CLI paths) keeps raising. Dangling
 names route through the one canonical reporter (`shared.plugin_load_report`,
 once per process) — the 2026-09-11 macmini incident ran for days on a plain

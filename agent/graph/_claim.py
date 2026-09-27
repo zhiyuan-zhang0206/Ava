@@ -57,7 +57,7 @@ from agent.graph._claim_decide import decide
 from agent.graph._claim_dispatch import _BatchState, dispatch_batch
 from agent.graph._claim_present import publish_end_timeline_snapshot, publish_inbound_committed
 from agent.graph._claim_routing import ClaimGoto, resolve_routing
-from agent.graph._node_log import flush_node_exit_aggregate, node_lifecycle
+from agent.graph.node_log import flush_node_exit_aggregate, node_lifecycle
 from agent.impersonation import claim_gate
 from agent.impersonation_handoff import resume_note_pending
 from agent.inbound_ownership import RuntimeOwnershipLostError

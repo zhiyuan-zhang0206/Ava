@@ -1,7 +1,7 @@
 """Agent-runtime face of the ava_silent_idle plugin — the silent-idle continue hook.
 
 A before_llm hook that injects a Continue nudge after a silent-idle turn.
-Loaded only in the agent process: `agent._extensions` imports this
+Loaded only in the agent process: `agent.extensions` imports this
 module after `plugin.py` on the full path (host boot / graph build); the
 surface module carries only the description (task #3633).
 """

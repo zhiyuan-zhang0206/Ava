@@ -67,7 +67,7 @@ from shared.log import logger
 from shared.paths import exec_run_dir, quarantined_exec_requests_dir
 from shared.runtime_incarnation import RuntimeIncarnation
 
-# The envelope protocol's own ceiling (agent/graph/_exec_protocol.py). The
+# The envelope protocol's own ceiling (agent/graph/exec_protocol.py). The
 # typed state snapshot rides as one base64 field, so a legitimate envelope is
 # parsed whole; anything larger is refused as unattributable evidence.
 _MAX_ENVELOPE_BYTES = 64 * 1024 * 1024

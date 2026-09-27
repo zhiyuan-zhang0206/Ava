@@ -1,6 +1,6 @@
 """Agent-runtime face of the ava_code plugin — state field, prompt sections, hooks.
 
-Loaded only in the agent process: `agent._extensions` imports this module after
+Loaded only in the agent process: `agent.extensions` imports this module after
 `plugin.py` on the full path (host boot / graph build). The plugin's SDK
 **surface** — the `cwd` namespace, the file/shell/understand/ui wraps, and the
 context-file injection — lives in `plugin.py`, which agent-launched children
@@ -29,7 +29,7 @@ from pydantic import BaseModel, Field
 
 import ava
 import ava.agent_identity as _ava_identity
-from agent.graph._system_prompt import register_system_prompt_section
+from agent.graph.system_prompt import register_system_prompt_section
 from agent.hooks import Hook, register_after_exec, register_after_init
 from agent.messages import NoteTag, system_note_message
 from agent.state import AgentState, register_plugin_state
@@ -137,7 +137,7 @@ def _coding_tools_section() -> str:
     already; the preamble conventions below still apply and are always
     rendered. With the default config every promoted module is expanded, so
     this section reduces to the preamble."""
-    from agent.graph._system_prompt import effective_sdk_expand
+    from agent.graph.system_prompt import effective_sdk_expand
 
     expanded = set(effective_sdk_expand())
     pieces: list[str] = []

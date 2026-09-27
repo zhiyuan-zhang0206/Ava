@@ -26,7 +26,7 @@ import pytest
 from langchain_core.messages import AIMessage
 
 from agent.graph._llm_chunk import _validate_stop_reason
-from agent.graph._llm_errors import (
+from agent.graph.llm_errors import (
     LLMStreamCorruptedError,
     LLMStreamError,
     LLMStreamTruncatedError,

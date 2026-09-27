@@ -2,7 +2,7 @@
 
 The in-flight node watches for a pending cancel/terminate inbound via a short
 DB poll (the watcher deliberately does NOT share the agent's Redis inbound
-listener with the claim node's idle wait — see `agent/graph/_interrupt.py` for
+listener with the claim node's idle wait — see `agent/graph/interrupt.py` for
 the lost-wake incident that motivated the decoupling), so a signal is never
 dropped: a cancel that lands while no node is interruptible stays a pending
 row, caught by the next claim pass (covered in test_claim) — and one that
@@ -17,7 +17,7 @@ from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
 
 from agent.db import has_pending_interrupt, pending_interrupt_reason
-from agent.graph._interrupt import subscribe_interrupt
+from agent.graph.interrupt import subscribe_interrupt
 from shared.agents.messages.inbound import InterruptReason
 from shared.db import create_agent
 from shared.machine import machine_name
@@ -290,7 +290,7 @@ class TestWatcherDecoupledFromSharedListener:
         that orphaned watchers in the shared-listener design), the stop belt
         terminates the watcher at its next loop check — and because it holds
         no shared resource, a lingering survivor is inert."""
-        from agent.graph import _interrupt as mod
+        from agent.graph import interrupt as mod
 
         real = mod.pending_interrupt_reason
         entered = asyncio.Event()
@@ -334,7 +334,7 @@ class TestWatcherDecoupledFromSharedListener:
         and the `if not stop.is_set()` guard must keep it from firing the
         event after the node's turn already ended (a spurious interrupt would
         inject a KeyboardInterrupt into the next action)."""
-        from agent.graph import _interrupt as mod
+        from agent.graph import interrupt as mod
 
         real = mod.pending_interrupt_reason
         recorded_events: list[asyncio.Event] = []
@@ -397,7 +397,7 @@ class TestWatcherExitBounded:
     ):
         """A watcher whose cancellation cleanup never unwinds → exit returns
         within the bounded window and logs the abandonment."""
-        from agent.graph import _interrupt as mod
+        from agent.graph import interrupt as mod
 
         release = asyncio.Event()
 
@@ -438,7 +438,7 @@ class TestWatcherExitBounded:
     ):
         """The normal path is unchanged: a healthy watcher unwinds on cancel
         immediately and no abandonment is logged."""
-        from agent.graph import _interrupt as mod
+        from agent.graph import interrupt as mod
 
         async def _healthy(*_a: object, **_k: object) -> None:
             await asyncio.sleep(3600)
@@ -468,7 +468,7 @@ async def test_auto_compaction_cancels_at_llm_node_without_replacing_context(
     from shared.lm.context_budget import ContextBudget
 
     tid = create_agent(db_conn)
-    monkeypatch.setattr("agent.graph._interrupt._INTERRUPT_POLL_S", 0.01)
+    monkeypatch.setattr("agent.graph.interrupt._INTERRUPT_POLL_S", 0.01)
 
     def small_budget(_model: str) -> ContextBudget:
         return ContextBudget(
@@ -534,7 +534,7 @@ async def test_auto_compaction_cancels_at_llm_node_without_replacing_context(
 
 
 async def test_model_completion_and_cancel_same_tick_discards_result() -> None:
-    from agent.graph._interrupt import ModelInterruptedError, interruptible_model
+    from agent.graph.interrupt import ModelInterruptedError, interruptible_model
 
     interrupted = asyncio.Event()
     interrupted.set()

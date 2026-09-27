@@ -408,7 +408,7 @@ class NodeExitEntry(TypedDict):
 
 
 class NodeExit(TypedDict):
-    """`node_exit` payload — one aggregated event per graph turn (agent/graph/_node_log.py)."""
+    """`node_exit` payload — one aggregated event per graph turn (agent/graph/node_log.py)."""
 
     count: int
     nodes: list[NodeExitEntry]

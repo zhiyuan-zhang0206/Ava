@@ -19,7 +19,7 @@ from agent import db as agent_db
 from agent import state as states
 from agent._runloop import PendingTurnFailure, settle_turn_failure
 from agent.graph._claim import claim_node
-from agent.graph._llm_errors import FatalProviderError
+from agent.graph.llm_errors import FatalProviderError
 from agent.hooks.compact import COMPACT_MAX_ATTEMPTS
 from agent.impersonation import flush_checkpoint
 from agent.startup import _wrap_saver_writes_with_nstep_interval

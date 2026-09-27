@@ -17,7 +17,7 @@ from shared import paths
 from shared.config import settings
 from shared.plugins_config import write_local
 
-# Every dotted name `_load_extensions` can register a plugin module under.
+# Every dotted name `load_extensions` can register a plugin module under.
 _PLUGIN_MODULE_PREFIXES = ("ava_builtins.plugins.", "plugins.")
 
 
@@ -94,7 +94,7 @@ def test_only_enabled_plugins_are_imported(monkeypatch: pytest.MonkeyPatch):
 
     monkeypatch.setattr(importlib.util, "spec_from_file_location", spy)  # pyright: ignore[reportUnknownArgumentType]
 
-    _build._load_extensions()
+    _build.load_extensions()
 
     assert any("compact" in n for n in loaded)
     assert any("syntax_fix" in n for n in loaded)
@@ -128,14 +128,14 @@ def test_external_plugin_also_loaded(monkeypatch: pytest.MonkeyPatch):
 
     monkeypatch.setattr(importlib.util, "spec_from_file_location", spy)  # pyright: ignore[reportUnknownArgumentType]
 
-    _build._load_extensions()
+    _build.load_extensions()
 
     assert any("audit" in n for n in loaded)
     assert not any("compact" in n for n in loaded)
 
 
 def test_load_extensions_installs_sdk_metering(monkeypatch: pytest.MonkeyPatch):
-    """_load_extensions must install the SDK-usage recorder over the final ava.*
+    """load_extensions must install the SDK-usage recorder over the final ava.*
     surface (after plugins load), so every agent's SDK calls get metered."""
     from agent.graph import _build
     from ava import sdk_metering
@@ -143,7 +143,7 @@ def test_load_extensions_installs_sdk_metering(monkeypatch: pytest.MonkeyPatch):
     installed: list[bool] = []
     monkeypatch.setattr(sdk_metering, "install", lambda: installed.append(True))
 
-    _build._load_extensions()
+    _build.load_extensions()
 
     assert installed == [True]
 
@@ -151,7 +151,7 @@ def test_load_extensions_installs_sdk_metering(monkeypatch: pytest.MonkeyPatch):
 def test_a_repeat_load_reuses_the_module_object_so_a_patch_still_lands(
     monkeypatch: pytest.MonkeyPatch,
 ):
-    """Issue #147: a second `_load_extensions()` re-executes the plugin module
+    """Issue #147: a second `load_extensions()` re-executes the plugin module
     already registered in `sys.modules` — it must not bind a new one.
 
     Replacing it forks the module identity. Whoever imported the plugin before
@@ -177,12 +177,12 @@ def test_a_repeat_load_reuses_the_module_object_so_a_patch_still_lands(
 
     from agent.graph import _build
 
-    _build._load_extensions()
+    _build.load_extensions()
     dotted = "ava_builtins.plugins.demo.plugin"
     first = sys.modules[dotted]
     stale_probe = first.probe  # the reference an earlier importer would be holding
 
-    _build._load_extensions()
+    _build.load_extensions()
 
     assert sys.modules[dotted] is first
     # The consequence that actually bites: a callable captured before the reload
@@ -208,7 +208,7 @@ def test_a_different_file_under_the_same_name_gets_a_fresh_module(
 
     from agent.graph import _build
 
-    _build._load_extensions()
+    _build.load_extensions()
     dotted = "ava_builtins.plugins.demo.plugin"
     first = sys.modules[dotted]
     assert first.GHOST == "first file"
@@ -218,7 +218,7 @@ def test_a_different_file_under_the_same_name_gets_a_fresh_module(
     monkeypatch.setattr(paths, "repo_plugins_dir", lambda: other_repo)
     _make_plugin("demo", "__description__ = 'demo'\n")
 
-    _build._load_extensions()
+    _build.load_extensions()
 
     assert sys.modules[dotted] is not first
     assert not hasattr(sys.modules[dotted], "GHOST")
@@ -241,7 +241,7 @@ def test_clear_plugin_registrations_keeps_framework_sections():
     Otherwise a plugin reload silently strips e.g. the always-on skill index for
     the rest of the process — which is exactly how it used to break the system
     prompt snapshot when another test cleared registrations first."""
-    from agent.graph._system_prompt import (
+    from agent.graph.system_prompt import (
         _FRAMEWORK_SECTION_COUNT,
         _SYSTEM_PROMPT_SECTIONS,
         register_system_prompt_section,
@@ -317,7 +317,7 @@ def test_broken_external_plugin_skipped_and_others_load(
 
     events = _capture_plugin_load_events(monkeypatch)
 
-    _build._load_extensions()  # must not raise
+    _build.load_extensions()  # must not raise
 
     # the healthy plugin loaded
     assert "plugins.audit.plugin" in sys.modules
@@ -345,7 +345,7 @@ def test_broken_builtin_plugin_skipped_and_others_load(
 
     from agent.graph import _build
 
-    _build._load_extensions()  # must not raise
+    _build.load_extensions()  # must not raise
 
     assert "ava_builtins.plugins.compact.plugin" in sys.modules
     assert "ava_builtins.plugins.syntax_fix.plugin" not in sys.modules
@@ -382,7 +382,7 @@ def test_external_plugin_relative_import_resolves_when_plugins_prefix_is_shadowe
 
     from agent.graph import _build
 
-    _build._load_extensions()  # must not raise
+    _build.load_extensions()  # must not raise
 
     assert sys.modules["plugins.ava_ledger.plugin"].MARK == 7
     assert sys.modules["plugins.ava_ledger"].__path__ == [str(pdir)]
@@ -407,7 +407,7 @@ def test_dangling_config_entry_reported_and_skipped(
 
     events = _capture_plugin_load_events(monkeypatch)
 
-    config = _build._load_extensions()  # must not raise
+    config = _build.load_extensions()  # must not raise
 
     assert "plugins.audit.plugin" in sys.modules
     assert "vanished" not in config.plugins
