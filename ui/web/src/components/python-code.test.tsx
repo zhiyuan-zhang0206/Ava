@@ -1,10 +1,15 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { beforeEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
 const copy = vi.hoisted(() => vi.fn().mockResolvedValue(true));
 vi.mock("@/lib/clipboard", () => ({ copyToClipboard: copy }));
 
-import { PythonCode, __resetHighlighterCacheForTests, preloadPythonCodeHighlighter } from "./python-code";
+import {
+  PythonCode,
+  __resetHighlighterCacheForTests,
+  __setHighlighterImportForTests,
+  preloadPythonCodeHighlighter,
+} from "./python-code";
 
 // python-code.tsx caches the highlighter chunk in module-level state
 // (resolvedHighlight / highlightPromise) so a real prefetch survives
@@ -17,6 +22,13 @@ import { PythonCode, __resetHighlighterCacheForTests, preloadPythonCodeHighlight
 // as a second, partially initialized copy that crashes when rendered.)
 beforeEach(() => {
   __resetHighlighterCacheForTests();
+});
+
+// Every test that installs a stub import must restore the real one — a leak
+// would poison every later test in this file with a permanently-rejecting
+// (or stale-resolving) dynamic import.
+afterEach(() => {
+  __setHighlighterImportForTests(null);
 });
 
 it("highlights immediately when the chunk was already prefetched", async () => {
@@ -71,4 +83,65 @@ it("falls back to plain text, then highlights once an un-prefetched chunk resolv
   // The copy control survives the swap and still copies the current source.
   fireEvent.click(screen.getByRole("button", { name: "Copy code" }));
   await waitFor(() => expect(copy).toHaveBeenCalledWith(code));
+});
+
+// Regression coverage for the P1 adversarial-review finding on Ava #3463: a
+// rejected dynamic import (chunk-load failure) used to be cached forever by
+// `highlightPromise ??= ...` with no `.catch`, permanently bricking syntax
+// highlighting after one transient failure and raising an unhandled
+// rejection at every later call site. loadHighlight() now clears its cache on
+// rejection, and every call site attaches a rejection handler.
+it("a rejected import falls back to plain text without an unhandled rejection", async () => {
+  const unhandled: unknown[] = [];
+  const onUnhandledRejection = (reason: unknown) => unhandled.push(reason);
+  process.on("unhandledRejection", onUnhandledRejection);
+
+  try {
+    __setHighlighterImportForTests(() => Promise.reject(new Error("chunk load failed")));
+
+    const code = 'print("<pending>")';
+    const { container } = render(<PythonCode code={code} streaming />);
+
+    // Cold render, chunk load fails: stays on the plain-text fallback rather
+    // than throwing or rendering nothing.
+    expect(container.querySelector("pre")?.textContent).toBe(code);
+    expect(container.querySelector("pre .token")).toBeNull();
+
+    // Give the rejected promise's microtask chain (loadHighlight's .catch,
+    // the effect's second .then handler) a full turn to run.
+    await waitFor(() => {
+      expect(container.querySelector("pre")?.textContent).toBe(code);
+    });
+    // A macrotask turn too — Node schedules the unhandledRejection check
+    // after the microtask queue drains, so this is where an unfixed version
+    // of loadHighlight would actually report it.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(container.querySelector("pre .token")).toBeNull();
+  } finally {
+    process.off("unhandledRejection", onUnhandledRejection);
+  }
+
+  expect(unhandled).toEqual([]);
+});
+
+it("retries and highlights on the next call after a prior rejection", async () => {
+  __setHighlighterImportForTests(() => Promise.reject(new Error("chunk load failed")));
+
+  const code = 'print("<pending>")';
+  const first = render(<PythonCode code={code} streaming />);
+  await waitFor(() => {
+    expect(first.container.querySelector("pre")?.textContent).toBe(code);
+  });
+  expect(first.container.querySelector("pre .token")).toBeNull();
+  first.unmount();
+
+  // The failure above must have cleared the module-level cache (not just
+  // left `highlightPromise` pointing at a dead, permanently-rejected
+  // promise) — restoring the real import and retrying now succeeds.
+  __setHighlighterImportForTests(null);
+  await preloadPythonCodeHighlighter();
+
+  const retry = render(<PythonCode code={code} streaming />);
+  expect(retry.container.querySelector("pre .token.string")?.textContent).toBe('"<pending>"');
 });
