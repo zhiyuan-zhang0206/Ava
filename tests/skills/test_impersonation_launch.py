@@ -46,7 +46,7 @@ def test_self_takeover_bootstrap_inlines_brief_and_links_real_guide(
     assert "--agent 42" in message and "--name 'Fix login'" in message
     # The request command spells out its former defaults (task #4102: the CLI
     # defaults are gone).
-    assert "--ttl 3600" in message and "--batch-window 0" in message
+    assert "--ttl 1800" in message and "--batch-window 0" in message
     assert str(guide) in message and brief in message
     assert "work.md" not in message and "tasks.md" not in message and "work file" not in message
     assert "ava impersonate say" in message
@@ -60,6 +60,21 @@ def test_self_takeover_bootstrap_inlines_brief_and_links_real_guide(
         assert "Monitor relay with --session" in message
         assert "as the request output instructs" in message
         assert "--codex-remote" not in message
+
+
+@pytest.mark.parametrize(
+    ("provider", "host_guide"),
+    [("codex", "codex.md"), ("claude", "claude_code.md"), ("dsh", "deepseek_harness.md")],
+)
+def test_bootstrap_names_the_executors_own_host_guide(provider: str, host_guide: str) -> None:
+    """The general guide covers every host; relay startup and traps are per host."""
+    guide = _REFERENCE.parents[3] / ".agents/skills/impersonator-guide/SKILL.md"
+    path = guide.parent / "reference" / host_guide
+    assert path.is_file()
+    message = bootstrap_message(42, "Fix login", provider, "brief", guide)
+    assert f"host guide at {path}." in message
+    others = {"codex.md", "claude_code.md", "deepseek_harness.md"} - {host_guide}
+    assert not any(f"reference/{other}" in message for other in others)
 
 
 def test_codex_bootstrap_carries_the_shared_app_server_endpoint() -> None:

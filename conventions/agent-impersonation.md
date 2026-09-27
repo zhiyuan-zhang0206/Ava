@@ -17,7 +17,7 @@ Use the executable and interpreter belonging to the intended checkout; bare
 
 ```bash
 ava impersonate request --agent 405 --name 'Fix login' --as 'Codex: login helper' \
-  --provider codex --thread-id CODEX_SESSION_UUID --ttl 3600 --batch-window 0 \
+  --provider codex --thread-id CODEX_SESSION_UUID --ttl 1800 --batch-window 0 \
   --reason 'Implement the login fix and return verification results'
 ```
 
@@ -135,7 +135,7 @@ only the work you actually handled, then acknowledge it:
 ```bash
 ava impersonate ack 0 123 124 --agent 405
 ava impersonate inbox 0 --agent 405 --limit 100
-ava impersonate renew 0 --agent 405 --ttl 3600
+ava impersonate renew 0 --agent 405 --ttl 1800
 ```
 
 Inbox reads do not ACK. Each lease snapshots the configured ACK window and

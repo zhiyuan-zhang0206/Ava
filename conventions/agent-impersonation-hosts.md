@@ -7,6 +7,10 @@ an already-open host conversation, in self-contained envelopes that carry the
 message ids and the exact ACK command; the external agent processes messages
 as they arrive and ACKs by id.
 
+This page is the operator and mechanism side. The executor's side of each host
+is its host guide under `.agents/skills/impersonator-guide/reference/`
+(`claude_code.md`, `codex.md`, `deepseek_harness.md`).
+
 The relay is part of the takeover, not a manual step. The request records the
 relay endpoint on the lease row (`--provider`, `--thread-id`, `--codex-remote`).
 For codex, the accepting runtime provisions the relay's scoped credential,

@@ -6,13 +6,15 @@ from pathlib import Path
 
 # The generated request command spells out both former defaults because the CLI
 # takes neither as an implicit default (user ruling 2026-09-20, task #4102).
-# --ttl: the lease's recovery deadline — one hour was the request's effective
-# value before the ruling; the executor extends it deliberately from renewal
-# reminders, never on a timer (impersonator guide). --batch-window 0: deliver
-# immediately — no coalescing of routine arrivals, the former effective value.
-_TAKEOVER_TTL_SECONDS = 3600
+# --ttl: the lease's recovery deadline, estimated short as the impersonator
+# guide asks (about 30 minutes, extended in steps); the executor renews
+# deliberately from renewal reminders, never on a timer. --batch-window 0:
+# deliver immediately — no coalescing of routine arrivals.
+_TAKEOVER_TTL_SECONDS = 1800
 _TAKEOVER_BATCH_WINDOW_SECONDS = 0
 _EXECUTOR_LABELS = {"codex": "Codex", "claude": "Claude", "dsh": "DeepSeek Harness"}
+# The impersonator guide's host-specific half, beside its SKILL.md.
+_HOST_GUIDES = {"codex": "codex.md", "claude": "claude_code.md", "dsh": "deepseek_harness.md"}
 
 
 def bootstrap_message(
@@ -86,7 +88,8 @@ def bootstrap_message(
     return (
         f"You will take over Ava agent {agent_id}, the agent that launched you. "
         f"The briefing:\n{brief}\n\n"
-        f"Read the impersonator guide at {guide}. "
+        f"Read the impersonator guide at {guide} and its {_EXECUTOR_LABELS[provider]} host "
+        f"guide at {guide.parent / 'reference' / _HOST_GUIDES[provider]}. "
         f"Start the named impersonation with: {command}\n{routing}\n"
         "No controller credential is issued: control commands (say/inbox/ack/renew/release) run "
         "under this session's id and are pinned to this process tree. Wait for status active "
