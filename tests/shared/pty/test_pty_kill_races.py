@@ -21,6 +21,7 @@ import threading
 import time
 from collections.abc import Callable
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import psutil
@@ -31,7 +32,7 @@ from shared.proc_tree import OwnedProcess, stable_create_time
 from shared.session_record import SessionRecord, pid_starttime_ticks
 from shared.sessions.pty import cli as pty_cli
 from shared.sessions.pty import host as pty_host
-from shared.sessions.pty import session_tree
+from shared.sessions.pty import orphan_reaper, session_tree
 from tests.cli.conftest import PtyReaper
 from tests.cli.conftest import pty_reaper as pty_reaper
 
@@ -371,7 +372,10 @@ def test_kill_with_only_unsignallable_survivors_answers_interrupted(
             raise psutil.AccessDenied(self.pid)
         real_kill(self)
 
-    monkeypatch.setattr(pty_host, "_KILL_FORCE_WAIT_S", 0.5)
+    # Nothing signalled the unsignallable member, so waiting for it cannot
+    # change its fate: the op answers without spending this wait on it (the
+    # TTL reaper's dispatch budget is 5 s end to end).
+    monkeypatch.setattr(pty_host, "_KILL_FORCE_WAIT_S", 5.0)
 
     def reader() -> None:
         os.waitpid(leader.pid, 0)
@@ -384,7 +388,9 @@ def test_kill_with_only_unsignallable_survivors_answers_interrupted(
         with pytest.MonkeyPatch.context() as patch:
             patch.setattr(psutil.Process, "suspend", suspend)
             patch.setattr(psutil.Process, "kill", kill)
+            started = time.monotonic()
             response = pty_host._op_kill(session, {})
+            elapsed = time.monotonic() - started
     finally:
         os.kill(member, signal.SIGKILL)
         os.close(write_end)
@@ -393,6 +399,7 @@ def test_kill_with_only_unsignallable_survivors_answers_interrupted(
     thread.join(10)
     assert response["ok"], response
     assert response["data"] == {"mode": "forced", "interrupted": True, "survivors": [member]}
+    assert elapsed < 2.5, f"the op waited {elapsed:.2f}s for a member it could not signal"
 
 
 def test_cli_kill_names_the_unsignallable_survivors(
@@ -421,3 +428,31 @@ def test_cli_kill_names_the_unsignallable_survivors(
     captured = capsys.readouterr()
     assert captured.out == "interrupted\n"
     assert "[4242]" in captured.err
+
+
+def test_orphan_reap_passes_when_only_unsignallable_processes_survive(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A force-reap whose only survivors are processes this user may not signal
+    killed everything it could — the host included — so it succeeds; a
+    survivor it could signal still fails it. The same `stuck` verdict as the
+    host's kill op and the record kill."""
+    denied = OwnedProcess(4242, 1.0, None)
+    stuck = OwnedProcess(4343, 1.0, None)
+    host = SimpleNamespace(pid=4141)
+    verdicts = iter(
+        [session_tree.TreeKill((), (denied,), (denied,)), session_tree.TreeKill((), (stuck,))]
+    )
+
+    def orphaned(*_args: object, **_kwargs: object) -> list[SimpleNamespace]:
+        return [host]
+
+    def kill_host_tree(*_args: object, **_kwargs: object) -> session_tree.TreeKill:
+        return next(verdicts)
+
+    monkeypatch.setattr(orphan_reaper, "_orphaned_host_processes", orphaned)
+    monkeypatch.setattr(orphan_reaper, "kill_host_tree", kill_host_tree)
+
+    assert orphan_reaper._reap_orphaned_hosts("ava-test-race-3") == 1
+    with pytest.raises(RuntimeError, match="survived force-reap: pids=\\[4343\\]"):
+        orphan_reaper._reap_orphaned_hosts("ava-test-race-3")
