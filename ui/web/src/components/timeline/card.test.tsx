@@ -606,6 +606,15 @@ describe("CardHeader sticky header (task #3136)", () => {
     expect(btn.className).toContain("z-10");
     expect(btn.getAttribute("data-stuck")).toBe("false");
     expect(btn.className).not.toContain("backdrop-blur-md");
+    // The pane's `::before` box stays present (same content/geometry/
+    // transition as the stuck state) even while resting — only its
+    // background/blur value differs — so the first stick transitions from a
+    // real prior frame instead of popping in (a `content` toggle between "no
+    // box" and "a box" can't be interpolated by a CSS transition).
+    expect(btn.className).toContain("before:content-['']");
+    expect(btn.className).toContain("before:bg-transparent");
+    expect(btn.className).toContain("before:backdrop-blur-none");
+    expect(btn.className).toContain("before:transition-[background-color,backdrop-filter]");
   });
 
   it("collapsed sticky card does not pin (the rest position stays in flow)", () => {
@@ -631,19 +640,20 @@ describe("CardHeader sticky header (task #3136)", () => {
     );
     const btn = container.querySelector("button")!;
     expect(btn.getAttribute("data-stuck")).toBe("true");
-    expect(btn.className).toContain("backdrop-blur-md");
-    // The right-gutter seal rides on box-shadow (#3224); the bottom mask is
-    // a paint-only ::after band with the separator line at its bottom
-    // (#3536) — no element border and no height compensation, so a
-    // stuck/unstuck flip stays layout-neutral by construction (the old +1px
-    // border/-mb-px pair drove the ResizeObserver pin loop, user report
-    // 2026-09-12).
-    expect(btn.className).toContain("shadow-[");
+    expect(btn.className).toContain("hover:bg-transparent");
+    expect(btn.className).not.toContain("hover:bg-accent/30");
+    expect(btn.className).toContain("before:backdrop-blur-md");
+    expect(btn.className).toContain("before:bg-background/95");
+    expect(btn.className).toContain("hover:before:bg-accent/30");
+    expect(btn.className).toContain("before:bottom-0");
+    expect(btn.className).toContain("before:-z-10");
+    // All edge treatments are paint-only; nested pin geometry stays stable.
     expect(btn.className).toContain("16px_0_0_0_var(--background)");
-    expect(btn.className).toContain("after:border-b");
-    expect(btn.className).toContain("after:top-full");
+    expect(btn.className).toContain("before:-top-[2px]");
+    expect(btn.className).toContain("after:bottom-0");
+    expect(btn.className).toContain("after:h-px");
+    expect(btn.className).not.toContain("after:top-full");
     expect(btn.className).not.toContain("-mb-px");
-    expect(btn.className).not.toContain("0_2px_0_0_var(--background)");
     expect(btn.className).toContain("motion-reduce:transition-none");
   });
 

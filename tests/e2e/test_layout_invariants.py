@@ -27,6 +27,7 @@ iOS-Chrome popover test).
 from __future__ import annotations
 
 import os
+import time
 from pathlib import Path
 
 import pytest
@@ -473,3 +474,140 @@ def test_keyboard_edges_leave_the_shell_intact(
         assert _shell_height_style(page) == ""
     finally:
         ctx.close()
+
+
+# Pinned message masking and edge continuity.
+_STICKY_SURFACE = """el => {
+  const style = getComputedStyle(el);
+  const top = getComputedStyle(el, '::before');
+  const line = getComputedStyle(el, '::after');
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = 1;
+  const ctx = canvas.getContext('2d');
+  const alpha = color => {
+    ctx.clearRect(0, 0, 1, 1);
+    ctx.fillStyle = color;
+    ctx.fillRect(0, 0, 1, 1);
+    return ctx.getImageData(0, 0, 1, 1).data[3];
+  };
+  return {
+    rect: el.getBoundingClientRect().toJSON(),
+    alpha: alpha(style.backgroundColor),
+    paneAlpha: alpha(top.backgroundColor),
+    paneBlur: top.backdropFilter,
+    paneZ: top.zIndex,
+    paneBottom: parseFloat(top.bottom),
+    topStart: parseFloat(top.top),
+    lineBottom: parseFloat(line.bottom),
+    lineHeight: parseFloat(line.height),
+  };
+}"""
+
+
+_PANE_BEFORE_COLOR = "el => getComputedStyle(el, '::before').backgroundColor"
+_PANE_BEFORE_TRANSITION_MS = (
+    "el => parseFloat(getComputedStyle(el, '::before').transitionDuration) * 1000"
+)
+
+
+def _wait_for_pane_settled(page: Page, header_selector: str, *, poll_ms: int = 20) -> None:
+    """Wait for the frosted pane's ``::before`` background-color transition to finish.
+
+    `STUCK_HEADER_CLS` / `UNSTUCK_HEADER_CLS` (card.tsx) put a
+    `before:transition-[background-color,backdrop-filter]` on the pane so the
+    frosted look fades in/out instead of snapping between stuck and unstuck
+    (and between resting and hovered). `_assert_sticky_sealed` reads that
+    background color right after triggering the flip (a `data-stuck` change
+    or a hover), which can land mid-transition — the CI flake behind #3464
+    (run 36331070328: dark-390 read `abs(130-242)=112`, a value straight out
+    of the fade rather than the settled one).
+
+    Two phases, both timed off the element's own live `transition-duration`
+    (read here, never hardcoded):
+
+    1. A mandatory wait of one full transition duration. This has to come
+       first and unconditionally: a poll-for-stability loop that starts
+       comparing reads immediately after the trigger races the *start* of the
+       transition too, not just its end — on a hover trigger, back-to-back
+       reads taken before the browser has repainted even once still agree
+       (both still show the pre-hover color), so a naive "two reads match"
+       check can return before the color has moved at all.
+    2. A short poll-for-stability tail, bounded by a further safety margin
+       for CI paint lag, confirming the color has actually landed rather than
+       trusting the nominal duration alone.
+
+    A genuine product regression that never settles still fails fast at the
+    phase-2 deadline instead of hanging the suite.
+    """
+    locator = page.locator(header_selector)
+    duration_ms = locator.evaluate(_PANE_BEFORE_TRANSITION_MS)
+    page.wait_for_timeout(duration_ms)
+    deadline = time.monotonic() + (duration_ms * 2 + 500) / 1000
+    previous = locator.evaluate(_PANE_BEFORE_COLOR)
+    while time.monotonic() < deadline:
+        page.wait_for_timeout(poll_ms)
+        current = locator.evaluate(_PANE_BEFORE_COLOR)
+        if current == previous:
+            return
+        previous = current
+
+
+def _assert_sticky_sealed(
+    page: Page, header_selector: str, *, hovered: bool = False
+) -> dict[str, float]:
+    surface = page.locator(header_selector).evaluate(_STICKY_SURFACE)
+    assert surface["alpha"] == 0, "button background flattens the frosted pane"
+    expected_alpha = 77 if hovered else 242
+    assert abs(surface["paneAlpha"] - expected_alpha) <= 1, "glass tint changed"
+    assert surface["paneBlur"] == "blur(12px)", "backdrop blur is missing"
+    assert surface["paneZ"] == "-10", "pane must stay behind the label"
+    assert surface["topStart"] <= -1 and surface["paneBottom"] == 0
+    assert surface["lineBottom"] == 0, "separator is detached from the header edge"
+    assert surface["lineHeight"] == 1
+    return surface["rect"]
+
+
+@pytest.mark.parametrize("width", [390, 1280])
+@pytest.mark.parametrize("theme", ["light", "dark"])
+def test_pinned_message_seal(
+    width: int, theme: str, playwright_browser: Browser, frontend_target: str
+) -> None:
+    context = new_context(playwright_browser, width)
+    try:
+        page = open_page(
+            context,
+            frontend_target,
+            "/",
+            stub_api=not OVERRIDE_BASE_URL,
+            reconnect_sse=False,
+        )
+        wait_layout_settled(page)
+        # A transient DOM theme for CSS coverage, without changing stored preferences.
+        page.evaluate(
+            "theme => document.documentElement.classList.toggle('dark', theme === 'dark')", theme
+        )
+        row = page.locator('[data-item-id="1.2"]')
+        expect(row).to_be_visible()
+        header_selector = '[data-item-id="1.2"] [data-testid="card-toggle"]'
+        header = page.locator(header_selector)
+        if header.get_attribute("aria-expanded") == "false":
+            header.click()
+        row.evaluate("""el => {
+          const viewport = el.closest('[data-radix-scroll-area-viewport]');
+          viewport.scrollTop += el.getBoundingClientRect().top
+            - viewport.getBoundingClientRect().top + 100;
+        }""")
+        expect(header).to_have_attribute("data-stuck", "true")
+        page.mouse.move(1, 1)
+        _wait_for_pane_settled(page, header_selector)
+        resting = _assert_sticky_sealed(page, header_selector)
+        bar = page.locator('[data-testid="timeline-surface"] header').bounding_box()
+        assert bar is not None
+        assert abs(resting["top"] - (bar["y"] + bar["height"])) < 0.5
+        header.hover()
+        _wait_for_pane_settled(page, header_selector)
+        assert _assert_sticky_sealed(page, header_selector, hovered=True) == resting, (
+            "hover changed pin geometry"
+        )
+    finally:
+        context.close()

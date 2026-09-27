@@ -14,6 +14,16 @@ tags:
 
 During streaming each line is memoized `TimelineRow` + `React.memo` PythonCode/ChatMarkdown to suppress unchanged-row renders. Grouping is reused while the items reference is unchanged; nested sticky geometry is measured only inside the selected top-level turn. Sticky bottom auto-scroll + last-item fork.
 
+## Pinned headers
+
+Message, work-block, and nested detail headers share one frosted-glass pane.
+It keeps the 95% background tint, 30% accent tint on hover, and backdrop blur.
+The pane spans the header and its paint-only 2px top overlap so the title-bar/
+parent-header seam receives the same blur and tint. The button itself stays
+transparent to avoid doubling the tint. The right shadow covers the scrollbar
+gutter and the 1px separator sits inside the bottom edge. Pinning changes no
+box dimensions or nested-header offsets.
+
 ## Segments and dividers
 
 Historical ranks group separately; localized dividers never enter items or anchor counts — the rank-0 dashed divider labels the live boundary into the current post-compact segment ("Context compacted", task #3698), while the other historical ranks carry the scroll-back label (original history before compact); the rule carries long dashes at a 1:1 ratio and a demoted tone, and a plain label carries no arrow glyph (user feedback 2026-09-17, task #3870). The dividers are pure labels — no load-earlier control exists (paging is driven by reaching the top; task #4186).
