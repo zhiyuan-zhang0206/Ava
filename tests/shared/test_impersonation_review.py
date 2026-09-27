@@ -10,7 +10,6 @@ from uuid import uuid4
 import httpx
 import psycopg
 import pytest
-from psycopg_pool import PoolTimeout
 
 from ava import impersonation_replay as recorded
 from shared import telemetry
@@ -180,64 +179,18 @@ def test_recipient_statistics_follow_real_chat_event_direction(
     assert document["statistics"]["message_recipients"] == {str(recipient): 1}
 
 
-def test_gateway_transport_outage_leaves_accounting_pending_and_delivers_handoff(
+def test_deliver_handoff_leaves_foreground_replay_to_the_runner(
     session: dict[str, Any], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from agent import impersonation_handoff as handoff
-    from ava import _gateway_transport as transport
+    """The handoff never replays events inline; the runner's loop owns replay.
 
-    leases.release(str(session["id"]), attested_caller(session), "Completed external work")
-    lease = history.resolve(session["agent_id"], session["session_id"])
-
-    def unavailable(request: httpx.Request) -> httpx.Response:
-        raise httpx.ConnectError("Event gateway is unavailable", request=request)
-
-    # Exercise the real SDK transport's exception conversion. Replacing _get
-    # with an HTTPError would miss GatewayUnavailable after retry exhaustion.
-    with httpx.Client(base_url="http://test", transport=httpx.MockTransport(unavailable)) as client:
-        monkeypatch.setattr(transport, "_client_singleton", lambda: client)
-        monkeypatch.setattr(transport, "_MAX_RETRIES", 1)
-        save_document = Mock(return_value=("Done", "/test/0.json"))
-        receipt = Mock()
-        monkeypatch.setattr(handoff, "_save_document", save_document)
-        monkeypatch.setattr(handoff, "_receipt", receipt)
-        graph = SimpleNamespace(
-            checkpointer=object(),
-            aget_state=AsyncMock(
-                return_value=SimpleNamespace(
-                    values={
-                        "impersonation_handoff_id": f"{session['agent_id']}:{session['session_id']}"
-                    }
-                )
-            ),
-        )
-        owner = RuntimeIncarnation(session["agent_id"], uuid4(), uuid4())
-        asyncio.run(handoff.deliver_handoff(graph, lease, owner))
-
-    save_document.assert_called_once_with(lease, owner)
-    receipt.assert_called_once_with(lease, owner)
-    assert (
-        history.resolve(session["agent_id"], session["session_id"])["events_completed_at"] is None
-    )
-
-
-@pytest.mark.parametrize(
-    "failure",
-    [
-        PoolTimeout("control DB pool exhausted"),
-        psycopg.OperationalError("statement timeout while replaying events"),
-    ],
-    ids=["pool-timeout", "operational-error"],
-)
-def test_control_db_hiccup_leaves_accounting_pending_and_delivers_handoff(
-    session: dict[str, Any], monkeypatch: pytest.MonkeyPatch, failure: Exception
-) -> None:
-    """A transient control-DB failure during replay must not block the handoff.
-
-    Regression (platform incident 2026-09-27): deliver_handoff awaited event
-    accounting before saving the document and degraded only on transport
-    failures, so a PoolTimeout left every handoff_path null and blocked the
-    resume. The save now runs first and DB hiccups degrade like transport ones.
+    Regression (platform incident 2026-09-27, second fix): #3519 moved the save
+    ahead of the event accounting, but `consume_recorded_events` still ran
+    (awaited) in the handoff foreground, so a large audit replay could keep
+    eating the envelope. Replay is owned solely by the runner's background
+    reconcile loop (`services.agent_host.impersonation_events.reconcile_forever`);
+    delivery itself finishes save -> read -> note -> flush -> receipt -> wake
+    without touching the replay path, leaving truthful pending semantics.
     """
     from agent import impersonation_handoff as handoff
     from ava import impersonation_replay as recorded
@@ -245,10 +198,11 @@ def test_control_db_hiccup_leaves_accounting_pending_and_delivers_handoff(
     leases.release(str(session["id"]), attested_caller(session), "Completed external work")
     lease = history.resolve(session["agent_id"], session["session_id"])
 
-    def hiccup(_session: dict[str, Any]) -> None:
-        raise failure
+    def forbidden(_session: dict[str, Any]) -> None:
+        raise AssertionError("the handoff must not replay events in the foreground")
 
-    monkeypatch.setattr(recorded, "consume_recorded_events", hiccup)
+    replay_spy = Mock(side_effect=forbidden)
+    monkeypatch.setattr(recorded, "consume_recorded_events", replay_spy)
     save_document = Mock(return_value=("Done", "/test/0.json"))
     receipt = Mock()
     monkeypatch.setattr(handoff, "_save_document", save_document)
@@ -266,6 +220,7 @@ def test_control_db_hiccup_leaves_accounting_pending_and_delivers_handoff(
     owner = RuntimeIncarnation(session["agent_id"], uuid4(), uuid4())
     asyncio.run(handoff.deliver_handoff(graph, lease, owner))
 
+    assert replay_spy.call_count == 0
     save_document.assert_called_once_with(lease, owner)
     receipt.assert_called_once_with(lease, owner)
     assert (
