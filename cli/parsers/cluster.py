@@ -110,6 +110,39 @@ def _h_cluster_health_probe_unregister(_args: argparse.Namespace) -> int:
     return cmd_cron_unregister()
 
 
+def _h_cluster_release_prepare(args: argparse.Namespace) -> int:
+    from cli.release_operator.prepare import cmd_release_prepare
+
+    return cmd_release_prepare(
+        commit=args.commit,
+        inputs=Path(args.inputs),
+        repo=Path(args.repo) if args.repo is not None else None,
+    )
+
+
+def _h_cluster_release_request(args: argparse.Namespace) -> int:
+    from cli.release_operator.request import cmd_release_request
+
+    return cmd_release_request(
+        commit=args.commit,
+        out=Path(args.out),
+        exclude=tuple(args.exclude),
+        reason=args.reason,
+    )
+
+
+def _h_cluster_release_adopt(args: argparse.Namespace) -> int:
+    from cli.release_operator.adopt import cmd_release_adopt
+
+    return cmd_release_adopt(receipt=Path(args.receipt))
+
+
+def _h_cluster_release_status(args: argparse.Namespace) -> int:
+    from cli.release_operator.status import cmd_release_status
+
+    return cmd_release_status(operation=args.operation, as_json=args.json)
+
+
 def _h_cluster_db_authority_issue_unit(args: argparse.Namespace) -> int:
     from cli.commands.cluster import cmd_db_authority_issue_unit
 
@@ -143,6 +176,85 @@ def _add_db_authority_parser(
         "--ttl-hours", type=float, default=24.0, help="bundle lifetime in hours (default: 24)"
     )
     issue_unit_p.set_defaults(func=_h_cluster_db_authority_issue_unit)
+
+
+def _add_release_parser(cluster_sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+    release_p = cluster_sub.add_parser(
+        "release",
+        help="[cluster] single-host release-operator verbs: thin wiring over "
+        "cli.release_prepare / cli.release_transition (no fleet model yet — see FC-7)",
+    )
+    release_sub = release_p.add_subparsers(dest="release_cmd", required=True)
+
+    prepare_p = release_sub.add_parser(
+        "prepare",
+        help="[cluster release] build one inactive image on this host from an already "
+        "acquired LocalInputs document; no outage",
+    )
+    prepare_p.add_argument("--commit", required=True, help="exact committed source SHA")
+    prepare_p.add_argument(
+        "--inputs",
+        required=True,
+        help="explicit LocalInputs JSON (see cli.release_prepare.acquire, or CI); this "
+        "verb does not auto-discover build inputs",
+    )
+    prepare_p.add_argument(
+        "--repo",
+        default=None,
+        help="source repository root (default: this checkout's own repo root)",
+    )
+    prepare_p.set_defaults(func=_h_cluster_release_prepare)
+
+    request_p = release_sub.add_parser(
+        "request",
+        help="[cluster release] build one single-host release Request from this home's "
+        "current selection and a prepared receipt; write it for `ava cluster update`",
+    )
+    request_p.add_argument(
+        "--commit", required=True, help="candidate commit with an existing prepared receipt"
+    )
+    request_p.add_argument(
+        "--out", required=True, help="path to write the Request JSON (0600; refuses if it exists)"
+    )
+    request_p.add_argument(
+        "--exclude",
+        action="append",
+        default=[],
+        metavar="MACHINE:HOME",
+        help="fleet-only unit exclusion; always refused on this single-host slice (FC-7)",
+    )
+    request_p.add_argument(
+        "--reason",
+        default=None,
+        help="fleet-only exclusion reason; always refused on this single-host slice (FC-7)",
+    )
+    request_p.set_defaults(func=_h_cluster_release_request)
+
+    adopt_p = release_sub.add_parser(
+        "adopt",
+        help="[cluster release] first image selection for a source-run home "
+        "(activate_release(expected_current=None) + the steady boot action); "
+        "requires a stopped root, Linux only",
+    )
+    adopt_p.add_argument(
+        "--receipt", required=True, help="PreparationReceipt JSON from `release prepare`"
+    )
+    adopt_p.set_defaults(func=_h_cluster_release_adopt)
+
+    status_p = release_sub.add_parser(
+        "status",
+        help="[cluster release] read-only view of this home's current release selection "
+        "and release operation journal",
+    )
+    status_p.add_argument(
+        "--operation",
+        default=None,
+        help="explicit operation id (default: this home's active operation, if any)",
+    )
+    status_p.add_argument(
+        "--json", action="store_true", default=False, help="machine-readable output"
+    )
+    status_p.set_defaults(func=_h_cluster_release_status)
 
 
 def _add_cluster_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
@@ -232,6 +344,7 @@ def _add_cluster_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]
         p_.set_defaults(func=_h_cluster_pause if verb == "pause" else _h_cluster_resume)
 
     _add_db_authority_parser(cluster_sub)
+    _add_release_parser(cluster_sub)
 
     cluster_update_p = cluster_sub.add_parser(
         "update",

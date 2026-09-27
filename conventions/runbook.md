@@ -1251,6 +1251,30 @@ use `ava start --serve-agent-runner --no-serve-gateway --gateway-url URL
 database credential; the runner's login is that unit-bound capability. Memory checkout initialization remains
 explicit through `ava memory init`.
 
+**Release-operator verbs (single host).** `ava cluster release prepare` /
+`request` / `adopt` / `status` are thin operator wiring over the same
+release-prepare and release-transition machinery, for exactly one host — there
+is no fleet model yet:
+
+```bash
+ava cluster release prepare --commit FULL_COMMIT_SHA --inputs LOCAL_INPUTS_JSON [--repo REPO]
+ava cluster release request --commit FULL_COMMIT_SHA --out /absolute/path/to/request.json
+ava cluster release adopt --receipt /absolute/path/to/receipt.json
+ava cluster release status [--operation OPERATION_ID] [--json]
+```
+
+`prepare` builds one inactive image under `$AVA_HOME/releases/work/<commit>`;
+no outage. It takes an already-acquired `LocalInputs` document — this verb
+does not acquire build inputs online. `request` reads that receipt plus this
+home's currently selected release and writes the `Request` JSON `ava cluster
+update --prepared` consumes, replacing hand-building that request. `adopt` is
+this home's first-ever image selection
+(`activate_release(expected_current=None)` plus the steady boot action, Linux
+only); every later transition goes through `request` then `update`. `status`
+is read-only. `request`'s `--exclude`/`--reason` name a multi-host fleet
+exclusion and always refuse — see
+[release operator surface](../cli/release_operator/release_operator.ava.okf.md).
+
 Release preparation completes before maintenance. The prepared request captures
 exact previous/candidate/executor image identities, home/registry, configuration
 and operation generation:
@@ -1274,7 +1298,9 @@ remaining writer barrier, recovery policy, PITR restart integration and
 platform proof are tracked in the
 [lifecycle plan](../future/infra/unified-cluster-lifecycle.md). The preparation and
 execution contracts live in [release preparation](../cli/release_prepare/release_prepare.ava.okf.md)
-and [release transition](../cli/release_transition/release_transition.ava.okf.md).
+and [release transition](../cli/release_transition/release_transition.ava.okf.md); the operator
+verbs above are documented in
+[release operator surface](../cli/release_operator/release_operator.ava.okf.md).
 
 **Health observations and release decisions.** `ava cluster health-probe` retries
 gateway liveness three times, 30 seconds apart, before declaring it unhealthy.
