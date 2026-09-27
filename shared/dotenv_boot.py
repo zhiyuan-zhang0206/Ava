@@ -29,8 +29,10 @@ default home `~/.ava` belongs to the prod source alone — resolving there made 
 ad-hoc `import shared.config` on a production agent-runner load that unit's
 `.env`, dial its gateway with its cluster bearer and rewrite its bootstrap
 snapshot (2026-09-27). So case 4 resolves to a per-process scratch path under
-the system temp dir (`_unanchored_home`, created only if something writes to
-it) and boots BARE, exactly like a CI checkout: no `.env` / `mirror.env` is
+the system temp dir (`_unanchored_home`; not created there, but
+`shared.paths.ava_home()` creates it on first access — including a read-only
+command, not only one that writes — so most CLI verbs leave it behind) and
+boots BARE, exactly like a CI checkout: no `.env` / `mirror.env` is
 read, the config source decision never fetches and the bootstrap transport
 refuses to dial (shared/config/_lite.py, shared/bootstrap.py), and
 `load_ava_env` plants `UNANCHORED_DB_SENTINEL` as AVA_DB_URL (the same sentinel
@@ -60,11 +62,11 @@ from urllib.parse import urlsplit
 
 from dotenv import dotenv_values, load_dotenv
 
-# Planted as AVA_DB_URL when home resolution falls back to an unanchored dev
+# Planted as AVA_DB_URL when home resolution lands on an unanchored dev
 # checkout. A syntactically valid URL that can never reach a real database (port
 # 1 on loopback), so a stray connection fails loudly instead of silently hitting
 # the prod database the host .env points at. shared/db.connect() detects it and
-# raises an actionable error directing the operator to `ava start`.
+# raises an actionable error directing the operator to `install.sh --worktree`.
 UNANCHORED_DB_SENTINEL = "postgresql://unanchored-dev-checkout@127.0.0.1:1/run-ava-start-first"
 
 # Never-dialed Settings placeholder for AVA_REDIS_URL on a not-yet-born install
@@ -160,10 +162,13 @@ def _unanchored_home() -> Path:
 
     A path under the system temp dir with an unguessable suffix, never under
     `~/.ava` and never a registered cluster, so nothing another unit wrote can
-    be read from it. Not created here: a tool that never writes leaves nothing
-    behind. The boot pins it as AVA_HOME, and its name marks it
-    (`_is_unanchored_scratch`), so a re-resolution in this process and every
-    child that inherits it stay unanchored instead of reading an explicit claim.
+    be read from it. Not created here — this function only names the path. But
+    `shared.paths.ava_home()` creates it via `ensure_private_dir` the first time
+    anything resolves `$AVA_HOME`, which most CLI verbs do even on a read-only
+    run, so a purely read-only command still leaves this directory behind. The
+    boot pins it as AVA_HOME, and its name marks it (`_is_unanchored_scratch`),
+    so a re-resolution in this process and every child that inherits it stay
+    unanchored instead of reading an explicit claim.
     """
     return Path(tempfile.gettempdir()) / f"{_UNANCHORED_PREFIX}{secrets.token_hex(8)}"
 
@@ -319,7 +324,16 @@ def load_ava_env() -> None:
     (rule 4) loads NO file: its home is the process scratch, it boots bare like a
     CI checkout, and UNANCHORED_DB_SENTINEL stands in as AVA_DB_URL so a stray
     connection fails loudly. The authority pass still runs for it, so a cluster
-    value inherited from the parent shell is dropped rather than trusted.
+    value inherited from the parent shell that this unit's (nonexistent) `.env`
+    does not declare is dropped rather than trusted — EXCEPT the never-drop
+    identity exemptions (`_force_also`: AVA_CLUSTER_SECRET, AVA_GATEWAY_URL, the
+    health ports, ...), which the deliberate "explicit env wins" rule keeps.
+    This authority pass never gates `/api/bootstrap` itself either way — that
+    is `checkout_anchored()` / `fetch_bootstrap_config`'s separate job. So an
+    unanchored checkout's inherited AVA_CLUSTER_SECRET / AVA_GATEWAY_URL never
+    reaches the bootstrap fetch (blocked there), but still reaches an ordinary
+    CLI client's own gateway call (`cli/commands/management/config.py:
+    _gateway_base`), which reads explicit env by design.
 
     mirror.env loads last and, like .env, never overrides an already-set key, so
     precedence is: real environment > .env > mirror.env. It is a no-op when the

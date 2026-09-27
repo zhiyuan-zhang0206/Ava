@@ -108,9 +108,9 @@ _LITE_VERBS = frozenset(
 
 
 # Verbs that act on THIS checkout's own cluster and name no target. An unanchored
-# checkout resolves to the default home (production), so these must refuse rather than
-# reach it — `cli.preflight.require_anchored_home`. `start` is gated separately, by the
-# stricter installed-home check.
+# checkout resolves to a private per-process scratch home, not a real cluster, so
+# these must refuse rather than act on it — `cli.preflight.require_anchored_home`.
+# `start` is gated separately, by the stricter installed-home check.
 #
 # The membership rule is mechanical: a verb belongs here iff it acts on the current
 # home AND takes no explicit target. That is why `cluster down` / `cluster destroy` are
