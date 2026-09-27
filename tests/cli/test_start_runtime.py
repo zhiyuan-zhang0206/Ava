@@ -393,7 +393,7 @@ def test_operation_preflight_checks_actual_roster_without_selection_or_effects(
     monkeypatch: pytest.MonkeyPatch,
     foreign_executable: bool,
 ) -> None:
-    from cli.commands import _repo
+    from cli.commands import _data_plane, _repo
     from cli.release_transition import stage
     from ops import spec as ops_spec
     from shared import machine
@@ -437,6 +437,9 @@ def test_operation_preflight_checks_actual_roster_without_selection_or_effects(
     monkeypatch.setattr(_repo, "_services_for_roles_annotated", annotated)
     monkeypatch.setattr(root_driver, "root_child_env", environment)
     monkeypatch.setattr(root_driver, "_bring_up_root", forbidden)
+    # The roster preflight is under test here; per-service database delivery
+    # (write generation or unit capability) is covered by the db-authority tests.
+    monkeypatch.setattr(_data_plane, "db_delivery", lambda _cls: {})
     before = {path: path.read_bytes() for path in home.rglob("*") if path.is_file()}
     if foreign_executable:
         with pytest.raises((ReleaseRejectedError, FileNotFoundError)):
