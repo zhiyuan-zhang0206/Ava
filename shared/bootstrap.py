@@ -12,14 +12,16 @@ gateway-capable unit keeps the cluster's config in its own `$AVA_HOME/.env` and
 never fetches; which side a unit is on is derived from its serve flags (see
 `config_source_is_local` / `should_fetch_from_gateway`), not from an env var
 (AVA_CONFIG_SOURCE deleted). A bare checkout with no role flags (CI, lint
-scripts) and a not-yet-enrolled runner resolve locally with no fetch — the
-preflight gate refuses an unenrolled `ava start`, not the Settings import. The
+scripts), an unanchored checkout (no cluster of its own) and a not-yet-enrolled
+runner resolve locally with no fetch — the preflight gate refuses an unenrolled
+`ava start`, not the Settings import. The
 bytes travel the private network; when multi-host is on the gateway requires
 the cluster secret as a bearer token, which this presents from AVA_CLUSTER_SECRET.
 Intentionally imports nothing from shared.config (it runs DURING shared.config
-import) — only stdlib + shared.netutil at import; the httpx /
-shared.cluster_auth / shared.http_dial pieces load lazily at fetch time (all
-pure stdlib / config-free, so they're safe this early in boot).
+import) — only stdlib + shared.netutil at import; shared.dotenv_boot loads at
+the fetch decision and the httpx / shared.cluster_auth / shared.http_dial
+pieces lazily at fetch time (all config-free, so they're safe this early in
+boot).
 """
 
 from __future__ import annotations
@@ -161,13 +163,21 @@ def should_fetch_from_gateway() -> bool:
       not-yet-enrolled runner (flag on, no URL) construct Settings from their
       local env/.env with no fetch and no error — `ava start`'s preflight gate
       is what refuses an unenrolled runner, not the Settings import, so any
-      tool that imports shared.config keeps working on any machine.
+      tool that imports shared.config keeps working on any machine;
+    - an unanchored checkout (`shared.dotenv_boot.checkout_anchored()` False:
+      no AVA_HOME, not the prod source, no `.ava_home` pointer) never fetches,
+      whatever flags or gateway URL its environment carries — it owns no
+      cluster, so no gateway's config or bearer is its to use.
 
     Reads os.environ only: by the time shared.config calls this, load_ava_env
     has loaded (and `_enforce_cluster_env_authority` forced) the unit's .env,
     so the flag and the URL are both present in the environment when they
     exist on disk.
     """
+    from shared.dotenv_boot import checkout_anchored
+
+    if not checkout_anchored():
+        return False
     return _serve_flag("AVA_MACHINE_SERVE_AGENT_RUNNER", "machine_serve_agent_runner") and bool(
         os.environ.get("AVA_GATEWAY_URL")
     )
@@ -236,10 +246,22 @@ def fetch_bootstrap_config(
     Settings import.
 
     Raises:
+        BootstrapFetchError: this checkout is unanchored — it owns no cluster,
+            so it never dials a gateway or presents a bearer (the one transport
+            gate behind `should_fetch_from_gateway`'s decision).
         httpx.HTTPError: every attempt failed (gateway unreachable / non-2xx, e.g.
             401 when the cluster secret is missing or wrong).
         TypeError: the response body is not a flat ``{str: str}`` map.
     """
+    from shared.dotenv_boot import checkout_anchored
+
+    if not checkout_anchored():
+        raise BootstrapFetchError(
+            f"refusing GET {base_url.rstrip('/')}/api/bootstrap: this checkout claims "
+            "no cluster (no AVA_HOME, not the prod source, no .ava_home pointer), so "
+            "no gateway's config or bearer is its to use. Birth its own cluster first: "
+            "scripts/install.sh --worktree"
+        )
     import httpx
 
     from shared.cluster_auth import bearer_header

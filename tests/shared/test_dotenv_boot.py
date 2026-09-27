@@ -123,14 +123,14 @@ def test_resolve_prod_source_beats_a_planted_pointer(
 
 
 def test_resolve_unanchored_dev_checkout(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """A dev checkout with no explicit AVA_HOME and no pointer falls back to ~/.ava
-    but is flagged UNANCHORED — the one case that must not silently take the prod
-    database URL."""
+    """A dev checkout with no explicit AVA_HOME and no pointer claims no cluster:
+    UNANCHORED, on this process's private scratch home — never the default ~/.ava,
+    which belongs to the prod source alone (tests/shared/test_unanchored_checkout.py)."""
     monkeypatch.delitem(os.environ, "AVA_HOME", raising=False)
     monkeypatch.setattr(dotenv_boot, "_checkout_root", lambda: tmp_path)
     home, anchored = resolve_ava_home()
-    assert home == Path.home() / ".ava"
-    assert anchored is False
+    assert (home, anchored) == (dotenv_boot._unanchored_home(), False)
+    assert not home.is_relative_to(Path.home() / ".ava")
 
 
 def test_resolve_empty_pointer_is_unanchored(

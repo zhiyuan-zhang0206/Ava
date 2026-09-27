@@ -119,9 +119,9 @@ identity IS the gateway URL + secret it enrolled with (no name travels in the
 the 2026-08-01 config refactor every process on an enrolled runner fetches
 `GET /api/bootstrap` at startup (Settings build, `shared.bootstrap`), with
 fetched values authoritative over env/.env. A bare checkout with no role flags
-(CI, lint scripts) and a not-yet-enrolled runner construct Settings from local
-env/.env with no fetch — `ava start`'s preflight gate (AVA_GATEWAY_URL check)
-is what refuses the unenrolled runner. **Startup order: bring the gateway up first, then
+(CI, lint scripts), an unanchored checkout (rule 4 below) and a not-yet-enrolled
+runner construct Settings from local env/.env with no fetch — `ava start`'s
+preflight gate (AVA_GATEWAY_URL check) is what refuses the unenrolled runner. **Startup order: bring the gateway up first, then
 the runners** — a runner's `ava start` (and every daemon boot) fails fast until
 the gateway answers /api/bootstrap, and recovers on its own once it does (the
 boot policy retries `ava start`; the OS watchdog probe revives a daemon that
@@ -253,13 +253,20 @@ identical no matter where a bare script is launched. Precedence:
 3. `<checkout>/.ava_home` pointer file → the home it names. `ava start`
    writes this into a dev cluster's worktree (gitignored), so every later bare
    invocation from that worktree resolves to the cluster's own home.
-4. otherwise → `~/.ava`, but flagged **unanchored**: a dev checkout that was never
-   `ava start`'d and carries no explicit `AVA_HOME`. `load_ava_env` plants a
-   sentinel `AVA_DB_URL` (`UNANCHORED_DB_SENTINEL`, an unreachable loopback URL) so
-   a DB connection fails loud — `shared/db.connect`/`pool` raise `UnanchoredHomeError`
-   directing you to `ava start` — instead of silently writing to the prod
-   database the host `.env` points at. `pytest` is unaffected: `tests/conftest.py`
-   plants its own DB sentinel before import and the container fixtures override it.
+4. otherwise → **unanchored**: a checkout that claims no cluster (a dev worktree
+   that never ran `install.sh --worktree`, a fresh clone, CI) and carries no
+   explicit `AVA_HOME`. It never resolves to `~/.ava` — that home belongs to the
+   prod source alone. Its home is a private per-process scratch path under the
+   system temp dir, and it boots **bare**: no `.env` / `mirror.env` is read, the
+   config source never fetches from a gateway (so no bearer leaves the box and no
+   bootstrap snapshot is written), and `load_ava_env` plants a sentinel
+   `AVA_DB_URL` (`UNANCHORED_DB_SENTINEL`, an unreachable loopback URL) so a DB
+   connection fails loud — `shared/db.connect`/`pool` raise `UnanchoredHomeError`.
+   Lint scripts, codegen hooks and ad-hoc `python -c` imports keep working from
+   any checkout; every verb that acts on "this checkout's cluster" (`start`,
+   `stop`, `restart`, `converge`, `config` writes, `enroll`, service launches)
+   refuses and points at `install.sh --worktree`. `pytest` is unaffected:
+   `tests/conftest.py` sets its own `AVA_HOME` before import.
 
 Rule 1 only outranks rules 2-3 while they agree. When `AVA_HOME` names one home
 and the checkout claims another, resolution **refuses** with
