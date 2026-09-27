@@ -263,6 +263,9 @@ def test_new_rejects_invalid_name(_agent_row: int) -> None:
     for bad in ("Dev Server", "1abc", "-x", "a_b"):
         with pytest.raises(ValueError, match="lowercase slug"):
             shell.new(name=bad, ttl=120)
+    # `page-` names page-server sessions exactly, which a terminate's shell kill spares.
+    with pytest.raises(ValueError, match="reserved for pages"):
+        shell.new(name="page-preview", ttl=120)
 
 
 def test_resolve_does_not_conflate_id_prefixes(monkeypatch: pytest.MonkeyPatch) -> None:

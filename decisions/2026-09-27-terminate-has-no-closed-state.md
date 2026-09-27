@@ -13,9 +13,9 @@ resurrect reopened it (audited as `reopened` / `agent_reopened`).
 The user ruled on 2026-09-27: "Terminate is terminate." A terminated agent is
 one thing. The motivating case for closure was an agent being woken again by
 its own sessions, chiefly watchers. A watcher is just a shell session (a
-same-day ruling, separate PR: it is never restarted and has no database
-record), and its wake is an ordinary chat that resurrects a terminated owner
-like any other message. The way to stop an agent's own sessions from waking
+same-day ruling, decisions/2026-09-27-watchers-are-never-restarted.md: it is
+never restarted and has no database record), and its wake is an ordinary chat
+that resurrects a terminated owner like any other message. The way to stop an agent's own sessions from waking
 it is to end those sessions, not to add a lifecycle state that every
 resurrection path must consult.
 
@@ -37,8 +37,14 @@ resurrection path must consult.
   its home machine — explicit shells and watchers alike. The enumeration is
   the existing `ops.cluster_status.agent_shell_sessions` rule
   (`…-agent-<id>-shell-<sid>[-<name>]`), so another agent's sessions and the
-  agent's own process are never touched. It is an owner-level kill: no
-  per-session notice. Without the option, sessions are left alone as before.
+  agent's own process are never touched. `ava.ui.serve` page servers also run
+  in agent shells, labeled `page-<slug>`; the kill spares them (a page keeps
+  its own lifecycle). The label is one grammar with one owner,
+  `shared.sessions.page_session`: the page-server daemon builds the names
+  with it, and `ava.shell.sessions` now refuses the `page-` label for ordinary
+  shells so the label names page sessions exactly. It is an owner-level kill:
+  no per-session notice. Without the option, sessions are left alone as
+  before.
 - **Timing.**
   - A graceful terminate of a live agent writes the request into its
     terminate command's payload, in the same statement as the command, after
@@ -51,11 +57,16 @@ resurrection path must consult.
     the requested sessions still alive. Any unapplied terminate of the
     current life carrying the request counts, so the kill also rides a death
     that a different terminate (e.g. the agent's own) won acceptance for.
-  - A force terminate kills the sessions right after its fence commits. It
-    supersedes an unapplied graceful terminate together with that
-    terminate's kill request: a force kills only when asked itself (the
-    delivery watchdog's wedged-turn recovery forces and then resurrects the
-    agent, which must not cost it its sessions).
+  - A force terminate kills the sessions right after its fence commits. A
+    step still draining at that moment could create a new shell or watcher
+    afterwards, so the request is also recorded on the force command, and
+    the host sweeps again when it observes the force quiescent
+    (`shared.hosted_force.original_host_force`, or the boot recovery of an
+    orphaned force), before it records that observation. A force supersedes
+    an unapplied graceful terminate together with that terminate's kill
+    request: a force kills only when asked itself (the delivery watchdog's
+    wedged-turn recovery forces and then resurrects the agent, which must not
+    cost it its sessions).
   - A terminate that finds the agent already terminated (including one that
     becomes terminated while the request waits for the row lock) kills the
     sessions at once — the analogue of the removed already-terminated form of
@@ -113,8 +124,8 @@ resurrection path must consult.
   session: the force superseded the graceful request. Pass the option on the
   `kill` as well.
 - The kill covers shell sessions only. Page servers (`ava.ui.serve`) keep
-  their own lifecycle and are not affected.
-- Until the watcher-no-rebuild change lands, a killed watcher's registry row
-  stays `running`: a later resurrect's boot reconcile may rebuild it, and the
-  terminated-owner watcher pass may queue its reclamation notice. That
-  registry and both behaviors are being removed by that change.
+  their own lifecycle and are not affected. A user shell created before this
+  change with a `page-` name is spared like a page until it ends (a shell
+  session lives at most 24 hours).
+- A killed watcher stays dead: with no watcher registry, no boot reconcile
+  rebuilds it and no reclamation notice follows it.

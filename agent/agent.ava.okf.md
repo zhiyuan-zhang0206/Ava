@@ -41,9 +41,10 @@ Overview of the Agent subsystem.
   - **terminate / force** — graceful exit (deliver `kind='terminate'`, graph goes to END, process exits naturally)
     or request interruption of the active hosted turn when stuck (`force=true`, not available on `ava.self.terminate()`);
     `enqueued` confirms acceptance, not exit or completion of owned work. With `kill_all_shell_sessions`
-    every shell session the agent owns on its home machine (watchers included) is killed too, silently — right
-    before a graceful termination applies, or at once for force / an already-terminated agent — so none of them
-    can wake it again; the response's `shell_sessions` reports it.
+    every shell session the agent owns on its home machine (watchers included; `ava.ui.serve` page sessions
+    excepted) is killed too, silently — right before a graceful termination applies, or at once for force (swept
+    again when the host observes the force quiescent) / an already-terminated agent — so none of them can wake
+    it again; the response's `shell_sessions` reports it.
   - **heartbeat** — check-in for an idle agent; claim appends a system note unless a permanent-provider circuit breaker is open, in which case the heartbeat is consumed without growing the LLM context.
 
 ## Sub-concepts

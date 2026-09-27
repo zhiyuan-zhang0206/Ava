@@ -118,13 +118,15 @@ _HostGraph = CompiledStateGraph[BaseAgentState, AvaContext, BaseAgentState, Base
 _UNRUNNABLE_STATUSES = frozenset({"terminated", "restarting"})
 
 
-def _kill_terminating_agent_shells(agent_id: int) -> None:
+def kill_terminating_agent_shells(agent_id: int) -> None:
     """Kill every shell session a terminating agent owns on this machine.
 
     The at-exit half of `kill_all_shell_sessions`, bound into
-    `apply_hosted_lifecycle`, which calls it right before the termination
-    commits. Never raises: a failed kill must not turn a termination into a
-    crashed turn, so it is logged at ERROR and the termination still applies.
+    `apply_hosted_lifecycle` (right before a graceful termination commits) and
+    into the force settlements (`shared.hosted_force`: the sweep once a force
+    is observed quiescent, live or at boot). Never raises: a failed kill must
+    not turn a termination into a crashed turn, so it is logged at ERROR and
+    the termination still applies.
     """
     from ops.cluster_status import kill_agent_shells
 
@@ -237,7 +239,12 @@ class AgentHost:
                 self.drop_agent(agent_id)
             settlement = asyncio.create_task(
                 original_host_force(
-                    self._control_pool, agent_id, self._owner, self._machine, quiescent=True
+                    self._control_pool,
+                    agent_id,
+                    self._owner,
+                    self._machine,
+                    quiescent=True,
+                    kill_shell_sessions=kill_terminating_agent_shells,
                 )
             )
             while not settlement.done():
@@ -409,7 +416,7 @@ class AgentHost:
             kind = await apply_hosted_lifecycle(
                 self._control_pool,
                 incarnation,
-                kill_shell_sessions=_kill_terminating_agent_shells,
+                kill_shell_sessions=kill_terminating_agent_shells,
             )
             if kind is None:
                 await settle_hosted_runtime(self._control_pool, incarnation)
@@ -697,7 +704,7 @@ class AgentHost:
                         kind = await apply_hosted_lifecycle(
                             self._control_pool,
                             incarnation,
-                            kill_shell_sessions=_kill_terminating_agent_shells,
+                            kill_shell_sessions=kill_terminating_agent_shells,
                         )
                     logger.info(
                         "hosted lifecycle return settled",

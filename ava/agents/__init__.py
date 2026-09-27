@@ -477,8 +477,9 @@ def terminate(
     terminated agent wakes again on any new message, including one from its
     own shell sessions or watchers; `kill_all_shell_sessions=True` also kills
     every shell session it owns, watchers included, silently — right away
-    for `force=True` or an already-terminated agent, otherwise right before
-    it stops.
+    for `force=True` (and once more after it stops) or an already-terminated
+    agent, otherwise right before it stops. Pages opened with `ava.ui.serve`
+    keep running.
 
     The result compares as the status string (`== "enqueued"` works as before)
     and carries `open_tasks`: the tasks the agent still owns as it goes down

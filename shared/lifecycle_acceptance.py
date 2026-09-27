@@ -110,8 +110,15 @@ def is_system_notice_source(source: str, payload: Mapping[str, object] | None) -
 # command the runtime accepted may be a different one (a self-terminate that
 # won acceptance first), and the requester's kill still rides that death. A
 # force fence supersedes unapplied terminates and kills only when asked
-# itself. Assumes the unaliased `agents_meta` row, like the fragments above.
+# itself; its own request is swept again when the host observes the force
+# quiescent (`shared.hosted_force`). Assumes the unaliased `agents_meta` row,
+# like the fragments above.
 KILL_ALL_SHELL_SESSIONS = "kill_all_shell_sessions"
+
+# The same request read off one unaliased `inbound_messages` command row.
+COMMAND_KILLS_SHELL_SESSIONS: LiteralString = (
+    "COALESCE((payload -> 'kill_all_shell_sessions') = 'true'::jsonb, false)"
+)
 
 TERMINATE_KILLS_SHELL_SESSIONS: LiteralString = (
     "EXISTS(SELECT 1 FROM inbound_messages k WHERE k.agent_id=agents_meta.id "

@@ -34,7 +34,6 @@ from psycopg_pool import ConnectionPool
 import shared.db
 import shared.sessions.pty.cli
 from services._pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
-from shared.cluster import session_name
 from shared.config import settings
 from shared.daemon_health import Liveness, start_health_server, stop_health_server
 from shared.daemon_shutdown import cancel_and_drain, install_graceful_shutdown
@@ -44,6 +43,7 @@ from shared.log import init_gateway_process
 from shared.machine import machine_name, reachable_host
 from shared.session_backend import PtySessionBackend, SessionBackend, get_shell_backend
 from shared.session_record import SessionRecord
+from shared.sessions.page_session import page_session_name
 
 from .degradation import (
     _DegradedServeDir,
@@ -64,7 +64,6 @@ _SPAWN_VERIFY_TIMEOUT_S = 5.0
 # Cooldown after a failed launch or a foreign port occupant.
 _SPAWN_BACKOFF_S = 30.0
 _PAGE_SERVER_MODULE = "services.page_server.server"
-_PTY_NAME_RE = re.compile(r"[a-z][a-z0-9-]*")
 
 
 @dataclass
@@ -139,15 +138,6 @@ def _server_command(row: _PageRow) -> str:
     )
 
 
-def _page_session_name(agent_id: int, name: str, session_index: int) -> str:
-    """Build the agent-shell name assigned to one page row."""
-    slug = name.lower().replace("_", "-")
-    full = f"{session_name(f'agent-{agent_id}')}-shell-{session_index}-page-{slug}"
-    if _PTY_NAME_RE.fullmatch(full) is None:
-        raise ValueError(f"page session name {full!r} does not match the PTY name contract")
-    return full
-
-
 def _allocate_session_index(pool: ConnectionPool, agent_id: int) -> int:
     """Atomically allocate one shell id from the owning agent's shared counter."""
     with write_transaction(pool) as conn, conn.cursor() as cur:
@@ -193,7 +183,7 @@ def _create_page_session(
     """Create or recreate the shell for a page row and persist its name."""
     page_session = row.session_name
     if page_session is None:
-        page_session = _page_session_name(
+        page_session = page_session_name(
             row.agent_id, row.name, _allocate_session_index(pool, row.agent_id)
         )
     env = {**os.environ, "PAGE_SERVER_TOKEN": token}
