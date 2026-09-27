@@ -7,10 +7,10 @@ from typing import Any, cast
 
 import pytest
 
-from cli.commands import _converge
 from cli.commands import _converge_external_agent_skills as bridge
 from cli.commands import _external_agent_skill_cleanup as bridge_cleanup
 from cli.commands import _external_agent_skill_fs as bridge_fs
+from cli.commands.converge import host as _converge
 
 SKILL = "operating-ava-cluster"
 

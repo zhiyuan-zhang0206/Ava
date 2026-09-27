@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import sys
 
-from cli.commands._converge_spec import ConvergeCtx
+from cli.commands.converge.spec import ConvergeCtx
 from shared.brew_pin import unpinned_formulae
 from shared.platform import IS_MACOS
 

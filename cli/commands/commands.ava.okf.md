@@ -20,8 +20,8 @@ no registry or plugin mechanism, the wiring is the parser.
 `cli/commands/__init__.py` is the command door: it imports the `cmd_*` names
 `cli.parsers` handlers lazy-import from the door (a few parsers instead import
 a domain module directly, e.g. `cli.parsers.agents` reads `cmd_agents_ls` from
-`cli.commands.agents.control`). Six subpackages hold the leaf domains split out
-of the once-flat directory, each an independent package door:
+`cli.commands.agents.control`). Seven subpackages hold the leaf domains split
+out of the once-flat directory, each an independent package door:
 
 - `agents/` — lifecycle control, notices, timelines, external-agent
   impersonation, the pty/computer-use daemons
@@ -30,14 +30,19 @@ of the once-flat directory, each an independent package door:
 - `observability/` — native LGTM, the OTel collector, trace shipping, logs
 - `data_plane/` — per-cluster Postgres/Redis/PgBouncer, their verified maintenance stop, db roles, PITR
 - `cluster/` — whole-cluster verbs, the health probe, watchdogs, the registry
+- `converge/` — the orchestrator (`host.py`), the step contract (`spec.py`),
+  and host-wiring steps owned by no other domain (source tree, firewall,
+  Redis bridge, gate, OS jobs); a domain that owns its own step keeps it
+  there instead — `data_plane/pgbouncer.py`, `observability/lgtm.py`,
+  `observability/otel_collector.py`.
 
 Cross-version process entry points — run as `python -m cli.commands.X` by the
 ops server against a possibly different checkout — stay at the root and never
 move: `_update_agent_runner`, `_updater_stage`, `_updater_lease`,
 `_update_uv_sync`, `_installed_sha`, `_source_switch_marker`, `_hold_recover`,
-`_update_pitr`. The `_converge*` / `_update*` step families, `start.py` /
-`stop.py` / `status.py` / `update.py` / `migrations.py`, and the rest of the
-not-yet-split leaves stay directly under `cli/commands/` for now.
+`_update_pitr`. The `_update*` step families, `start.py` / `stop.py` /
+`status.py` / `update.py` / `migrations.py`, and the rest of the not-yet-split
+leaves stay directly under `cli/commands/` for now.
 
 `stop.py` exposes `pause` and `stop` through `_temporary_stop`; update and
 restart reuse its native drain. `ops.agent_pause` and `ops.agent_pause_probe`
@@ -100,11 +105,11 @@ schema change catches the DB up on its own.
   schedule terminals are retained, including their currently loaded code;
   an explicit schedule restart or full stop/start adopts new runner code.
 - Host-level Application Firewall and Redis bridge wiring are one subject:
-  [[converge-host-wiring.ava.okf.md]].
+  [[converge/converge-host-wiring.ava.okf.md]].
 - The prod editable-install assertion and update write window are one lifecycle
   guard: [[editable-install-guard.ava.okf.md]]; the prod source checkout's
   integrity (periodic reset + probe detection) is its sibling guard:
-  [[source-tree-guard.ava.okf.md]].
+  [[converge/source-tree-guard.ava.okf.md]].
 - `cli/enroll.py` and `cli/preflight.py` are routed **before** settings-gated
   imports in `main()`, so they work on a host with no usable config yet.
 - `cli/mcp_server.py` is the third top-level module a verb routes to

@@ -288,7 +288,7 @@ def _unregister_scheduled_jobs(home: Path) -> None:
     scheduler is unavailable, must still be destroyable — the registry slot is
     already freed by the time this runs.
     """
-    from cli.commands._converge_gate import unregister_gate
+    from cli.commands.converge.gate import unregister_gate
     from shared.os_autostart import unregister_autostart
     from shared.os_boot_unit import uninstall as uninstall_boot_unit
     from shared.os_cron import unregister_os_cron

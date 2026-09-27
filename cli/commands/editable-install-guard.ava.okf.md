@@ -25,7 +25,7 @@ callers.
 
 ## Lifecycle flow
 
-- `_converge` registers the prod assertion as a host-global step. It resolves
+- `converge/host.py` registers the prod assertion as a host-global step. It resolves
   the installed prod checkout, accepts that source plus explicitly allowlisted
   stable dev-clone roots, and repairs only an illegal or missing pointer. Legal
   records are byte-identical after the pass; repaired content is the prod source

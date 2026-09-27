@@ -159,8 +159,9 @@ def _noop_start_prechecks(monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(_repo_mod, "_roles_or_none", lambda: frozenset({"agent-runner"}))
         monkeypatch.setattr(_setup, "_collect_setup_values", lambda _a: (..., []))"""
 
-    from cli.commands import _converge, _probe, _setup
+    from cli.commands import _probe, _setup
     from cli.commands import _repo as _repo_mod
+    from cli.commands.converge import host as _converge
 
     def _fake_collect(_args: dict[str, str | None]) -> tuple[dict[str, str], list]:
         return {

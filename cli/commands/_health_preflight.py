@@ -42,7 +42,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
-from cli.commands._converge_spec import ConvergeCtx
+from cli.commands.converge.spec import ConvergeCtx
 from cli.commands.status import _update_in_flight
 from shared.cluster import _port_free
 from shared.cluster_drift import prod_source_pin_relation

@@ -151,7 +151,7 @@ above relies on.
     `chrome-devtools-mcp` (stdio) attaching via `--browserUrl`. So "machine scope"
     reduced to the existing long-running-session + converge primitives, not a new
     daemon. See `services/browser/daemon.py` + `cli/commands/_repo.py` (`browser`) +
-    `cli/commands/_converge.py:_ensure_browser` (writes/removes the attach plugin
+    `cli/commands/converge/host.py:_ensure_browser` (writes/removes the attach plugin
     `$AVA_HOME/plugins/ava_chrome/.mcp.json` gated on `AVA_BROWSER_ENABLED`, so the
     MCP is contributed only where the browser runs).
   - **Update (later): sharing the browser process was not enough — the *upstream*

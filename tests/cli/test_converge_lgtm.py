@@ -20,7 +20,7 @@ import pytest
 import yaml
 from pydantic import SecretStr
 
-from cli.commands._converge_spec import ConvergeCtx
+from cli.commands.converge.spec import ConvergeCtx
 from cli.commands.observability import lgtm, lgtm_native, observatory_urls
 
 # S104-flagged literal reused by the mismatch-warning parametrize — a config

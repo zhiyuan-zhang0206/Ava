@@ -7,7 +7,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from cli.commands._converge_spec import ConvergeCtx
+from cli.commands.converge.spec import ConvergeCtx
 from shared.config import settings
 from shared.private_storage import ensure_private_dir
 

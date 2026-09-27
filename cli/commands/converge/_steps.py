@@ -8,7 +8,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from cli.commands._converge_spec import ConvergeCtx
+from cli.commands.converge.spec import ConvergeCtx
 from shared.config import settings
 from shared.paths import repo_root
 from shared.platform_backend import get_backend

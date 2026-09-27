@@ -12,8 +12,10 @@ from typing import cast
 
 import pytest
 
-from cli.commands import _converge, _converge_steps, _update_uv_sync
-from cli.commands import _converge_frontend_env as _fe_env
+from cli.commands import _update_uv_sync
+from cli.commands.converge import _frontend_env as _fe_env
+from cli.commands.converge import _steps as _converge_steps
+from cli.commands.converge import host as _converge
 from shared import editable_install
 from shared.deploy_timing import UV_SYNC_TIMEOUT_S
 

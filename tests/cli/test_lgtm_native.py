@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from cli.commands._converge_spec import ConvergeCtx
+from cli.commands.converge.spec import ConvergeCtx
 from cli.commands.observability import lgtm_native as _lgtm_native
 from shared import resilience
 from shared.loki_index_labels import validate_loki_deploy_config

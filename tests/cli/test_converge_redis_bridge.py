@@ -7,9 +7,9 @@ from pathlib import Path
 
 import pytest
 
-from cli.commands import _converge
-from cli.commands import _converge_redis_bridge as bridge
-from cli.commands._converge_spec import ConvergeCtx
+from cli.commands.converge import host as _converge
+from cli.commands.converge import redis_bridge as bridge
+from cli.commands.converge.spec import ConvergeCtx
 from services.redis_bridge import relay
 
 

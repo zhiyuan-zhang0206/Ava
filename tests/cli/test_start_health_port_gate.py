@@ -200,7 +200,8 @@ def _hermetic_start(monkeypatch: pytest.MonkeyPatch) -> None:
     migrations, machine registration, the schema assertion) is stubbed to
     success, so what a non-zero rc can mean here is the gate and nothing else.
     """
-    from cli.commands import _converge, _repo, _setup
+    from cli.commands import _repo, _setup
+    from cli.commands.converge import host as _converge
 
     monkeypatch.setattr(
         _setup,

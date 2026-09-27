@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from cli.commands import _converge
+from cli.commands.converge import host as _converge
 
 SKILL_NAME = "operating-ava-cluster"
 MARKER_NAME = ".ava-managed.json"

@@ -36,7 +36,7 @@ detector and the fixer can never disagree about what is legal.
   failed) reports a distinct **"guard skipped"** alert instead of a clean
   pass: a broken git is exactly the state in which tampering becomes
   invisible, so the guard names itself as failing rather than looking clean.
-- **Repair** — `_converge` registers the "source tree reset + clean"
+- **Repair** — `host.py` registers the "source tree reset + clean"
   host-global step as the first converge step: `git reset --hard` to
   `installed_sha` and `git clean -fd` of untracked files outside the
   whitelist, at every `ava start` / `ava cluster update`. `ava start` also
@@ -89,7 +89,7 @@ the detector and `git clean -fd`, so they need no whitelist entry.
 
 ## Key dependencies
 
-- [[commands.ava.okf.md]] — command-module and lifecycle overview
-- [[editable-install-guard.ava.okf.md]] — the sibling guard for the prod
+- [[../commands.ava.okf.md]] — command-module and lifecycle overview
+- [[../editable-install-guard.ava.okf.md]] — the sibling guard for the prod
   venv's editable-install pointer (same probe-detects / converge-repairs shape)
 - [[cli/cli.ava.okf.md]] — public converge, start, and update surfaces

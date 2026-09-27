@@ -254,7 +254,7 @@ this cluster's Postgres up as step 2 and applies migrations as step 2.5, so a
 `CONVERGE_STEPS` entry would read the registry before the database is up on a
 single box, and before the `extensions` table exists on the rollout that creates
 it (this doc originally described it as a step; #201 shipped it that way and the
-correction is `cli/commands/_converge.py:materialize_cluster_extensions`, called
+correction is `cli/commands/converge/host.py:materialize_cluster_extensions`, called
 from `ava start` after the schema-current check and from the end of standalone
 `ava converge`). The materializer itself pulls the enabled rows for this machine,
 lands missing/stale trees from blobs (verified against `content_hash`), and

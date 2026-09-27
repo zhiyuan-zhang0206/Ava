@@ -29,7 +29,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from cli.commands._converge_spec import ConvergeCtx
+from cli.commands.converge.spec import ConvergeCtx
 from shared import macos_firewall as fw
 from shared.macos_firewall import FirewallAudit, FirewallVerdict, audit_allowlist
 

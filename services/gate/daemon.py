@@ -382,7 +382,7 @@ class _Handler(BaseHTTPRequestHandler):
 def entry_port() -> int:
     """The port the gate binds — the fleet UI entry (the `frontend` slot).
 
-    Public because the operator surfaces probe it (`cli.commands._converge_gate.
+    Public because the operator surfaces probe it (`cli.commands.converge.gate.
     probe_gate`), and a monitor that derives the entry port for itself is a second
     definition that can disagree with the one the gate binds.
     """

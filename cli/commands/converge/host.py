@@ -15,13 +15,17 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from cli.commands._converge_brew_pin import ensure_brew_pin
 from cli.commands._converge_external_agent_skills import converge_external_agent_skill
-from cli.commands._converge_firewall import ensure_firewall_allowlist
-from cli.commands._converge_frontend_env import ensure_no_frontend_env_overrides
-from cli.commands._converge_gate import ensure_gate
-from cli.commands._converge_legacy_permission_watcher import remove_legacy_permission_watcher
-from cli.commands._converge_os_jobs import (
+from cli.commands._converge_pitr import converge_pitr_foundation
+from cli.commands._health_preflight import ensure_health_preflight as _ensure_health_preflight
+from cli.commands._ownership_preflight import (
+    ensure_ownership_preflight as _ensure_ownership_preflight,
+)
+from cli.commands._port_preflight import ensure_port_preflight as _ensure_port_preflight
+from cli.commands.converge._brew_pin import ensure_brew_pin
+from cli.commands.converge._frontend_env import ensure_no_frontend_env_overrides
+from cli.commands.converge._legacy_permission_watcher import remove_legacy_permission_watcher
+from cli.commands.converge._os_jobs import (
     ensure_cluster_autostart,
     ensure_health_probe_cron,
     ensure_hold_watchdog,
@@ -30,21 +34,13 @@ from cli.commands._converge_os_jobs import (
     ensure_pr_flow_job,
     ensure_watchdog_probe,
 )
-from cli.commands._converge_pitr import converge_pitr_foundation
-from cli.commands._converge_redis_bridge import ensure_redis_bridge
-from cli.commands._converge_source_tree import ensure_source_tree_integrity
-
-# The step contract lives in _converge_spec so step implementations can span
-# modules without an import cycle; re-exported here because every caller and
-# test reaches for `cli.commands._converge.ConvergeCtx` / `ALL_ROLES`.
-from cli.commands._converge_spec import ALL_ROLES, ConvergeCtx, ConvergeStep
-from cli.commands._converge_steps import (
+from cli.commands.converge._steps import (
     _PATH_BEGIN as _PATH_BEGIN,
 )
-from cli.commands._converge_steps import (
+from cli.commands.converge._steps import (
     _PATH_END as _PATH_END,
 )
-from cli.commands._converge_steps import (
+from cli.commands.converge._steps import (
     _backfill_health_port_keys_step,
     _ensure_ava_home_dirs,
     _ensure_ava_symlink,
@@ -56,14 +52,18 @@ from cli.commands._converge_steps import (
     _ensure_redis_url_identity_step,
     ensure_local_git_hooks,
 )
-from cli.commands._converge_steps import (
+from cli.commands.converge._steps import (
     _shell_rc_path as _shell_rc_path,
 )
-from cli.commands._health_preflight import ensure_health_preflight as _ensure_health_preflight
-from cli.commands._ownership_preflight import (
-    ensure_ownership_preflight as _ensure_ownership_preflight,
-)
-from cli.commands._port_preflight import ensure_port_preflight as _ensure_port_preflight
+from cli.commands.converge.firewall import ensure_firewall_allowlist
+from cli.commands.converge.gate import ensure_gate
+from cli.commands.converge.redis_bridge import ensure_redis_bridge
+from cli.commands.converge.source_tree import ensure_source_tree_integrity
+
+# The step contract lives in spec.py so step implementations can span
+# modules without an import cycle; re-exported here because every caller and
+# test reaches for `cli.commands.converge.host.ConvergeCtx` / `ALL_ROLES`.
+from cli.commands.converge.spec import ALL_ROLES, ConvergeCtx, ConvergeStep
 from cli.commands.data_plane.pgbouncer import ensure_pgbouncer_step
 from cli.commands.observability.lgtm import ensure_lgtm_stack_step
 from cli.commands.observability.lgtm_native import ensure_lgtm_native_step

@@ -110,7 +110,8 @@ def _hermetic_start(monkeypatch: pytest.MonkeyPatch) -> None:
     real gateway. What is left un-stubbed on purpose is the wait itself and the
     status snapshot, because those are what these tests are about.
     """
-    from cli.commands import _converge, _setup
+    from cli.commands import _setup
+    from cli.commands.converge import host as _converge
 
     monkeypatch.setattr(
         _setup,

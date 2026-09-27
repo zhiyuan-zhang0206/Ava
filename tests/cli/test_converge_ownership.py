@@ -6,9 +6,9 @@ from pathlib import Path
 
 import pytest
 
-from cli.commands import _converge
 from cli.commands import _ownership_preflight as _ownership
-from cli.commands._converge_spec import ConvergeCtx
+from cli.commands.converge import host as _converge
+from cli.commands.converge.spec import ConvergeCtx
 
 
 def _ctx(tmp_path: Path) -> ConvergeCtx:

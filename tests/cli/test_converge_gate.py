@@ -24,7 +24,7 @@ from typing import cast
 
 import pytest
 
-from cli.commands import _converge_gate as cg
+from cli.commands.converge import gate as cg
 from shared.cluster import ClusterPorts, ClusterRecord
 
 # Captured at import, before the directory-wide `_gate_probe_offline` fixture stubs

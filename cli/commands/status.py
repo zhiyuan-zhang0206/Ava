@@ -16,8 +16,6 @@ from __future__ import annotations
 
 from contextlib import suppress
 
-from cli.commands._converge_gate import print_gate_status
-from cli.commands._converge_redis_bridge import print_redis_bridge_status
 from cli.commands._probe import (
     _cluster_pin_status,
     _detect_prod_source_drift,
@@ -29,6 +27,8 @@ from cli.commands._repo import (
     build_services,
     session_name,
 )
+from cli.commands.converge.gate import print_gate_status
+from cli.commands.converge.redis_bridge import print_redis_bridge_status
 from cli.commands.data_plane.cluster_instance import print_data_plane_status
 from shared.cluster_drift import prod_source_pin_relation
 

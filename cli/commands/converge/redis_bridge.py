@@ -19,7 +19,7 @@ import time
 from pathlib import Path
 from typing import NamedTuple
 
-from cli.commands._converge_spec import ConvergeCtx
+from cli.commands.converge.spec import ConvergeCtx
 from shared.config import settings
 from shared.netutil import is_loopback_host
 from shared.url_secret import url_with_host

@@ -269,7 +269,7 @@ def test_unregister_delegates_with_the_home_slug(
 
 
 def test_converge_registers_the_refresh_job(monkeypatch: pytest.MonkeyPatch) -> None:
-    from cli.commands._converge_os_jobs import ensure_packages_refresh_job
+    from cli.commands.converge._os_jobs import ensure_packages_refresh_job
 
     calls: list[str] = []
     monkeypatch.setattr(job, "register_packages_job", lambda: calls.append("register"))

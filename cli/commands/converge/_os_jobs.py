@@ -21,7 +21,7 @@ cluster that is down is worse than one that is up and loudly unsupervised.
 
 from __future__ import annotations
 
-from cli.commands._converge_spec import CAPABILITY_ORDER, ConvergeCtx
+from cli.commands.converge.spec import CAPABILITY_ORDER, ConvergeCtx
 
 
 def ensure_health_probe_cron(_ctx: ConvergeCtx) -> None:

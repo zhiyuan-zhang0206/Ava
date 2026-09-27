@@ -14,7 +14,7 @@ from cli.commands._stop_supervised import stop_detached, stop_launchd, stop_syst
 
 def stop_gate_service(*, force: bool = False, timeout_s: float = 30.0) -> None:
     """Stop this home's fleet UI gate, without changing its desired state."""
-    from cli.commands._converge_gate import gate_label, gate_pid_is_ours
+    from cli.commands.converge.gate import gate_label, gate_pid_is_ours
     from shared.paths import ava_home, repo_root
     from shared.platform import IS_MACOS
 
