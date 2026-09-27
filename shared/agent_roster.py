@@ -52,6 +52,12 @@ class AgentCard(AgentLineage):
     unread_notice_count: int
     heartbeat_paused_until: datetime | None
     open_impersonation_session_id: int | None
+    # Lease status for the open session above ("requested" | "accepted" |
+    # "active"), or None with no open lease. Only "active" means the agent is
+    # actually taken over — a requested/accepted lease still runs the native
+    # agent until activation at its next safe boundary (see
+    # shared/agents/impersonation/_impersonation_store.py's OPEN tuple).
+    open_impersonation_status: Literal["requested", "accepted", "active"] | None
 
 
 class AgentDirectoryPage(BaseModel):
@@ -80,7 +86,8 @@ _CARD_COLUMNS = """
     a.last_launch_failure_reason, a.last_launch_failure_at,
     attention.awaiting_response_count, attention.highest_notice_priority,
     fyi.unread_notice_count,
-    open_impersonation.session_id AS open_impersonation_session_id
+    open_impersonation.session_id AS open_impersonation_session_id,
+    open_impersonation.status AS open_impersonation_status
 """
 _CARD_FROM = """
     FROM selected s
@@ -102,7 +109,7 @@ _CARD_FROM = """
           AND created_at > now() - interval '30 days'
     ) fyi ON true
     LEFT JOIN LATERAL (
-        SELECT session_id FROM agent_impersonations
+        SELECT session_id, status FROM agent_impersonations
         WHERE agent_id = a.id AND status IN ('requested', 'accepted', 'active')
     ) open_impersonation ON true
 """

@@ -43,16 +43,20 @@ import { cn } from "@/lib/utils";
 // Status -> text-color class; the circle paints with fill="currentColor" so the
 // node palette stays identical to the sidebar's STATUS_DOT (same tokens, just
 // expressed as text-* so it resolves for SVG fill, incl. the theme `destructive`).
-// Raw lifecycle transitions are projected at graph ingest, so the canvas only
-// accepts the same three public states as the sidebar.
+// Raw lifecycle transitions are projected at graph ingest via
+// projectAgentStatusValue, which never yields `impersonated` (the fleet
+// graph's wire node carries no lease field) — the entry below exists only to
+// satisfy PublicAgentStatus's exhaustiveness, matching the sidebar's palette.
 const STATUS_TEXT: Record<PublicAgentStatus, string> = {
   running: "text-sky-500",
   idling: "text-emerald-500",
+  impersonated: "text-indigo-400",
   terminated: "text-destructive",
 };
 const STATUS_PULSE: Record<PublicAgentStatus, boolean> = {
   running: false,
   idling: false,
+  impersonated: false,
   terminated: false,
 };
 // Per-day decay constant for the edge weight (see the backend formula). Held as a
@@ -153,6 +157,7 @@ export function GraphView({
     () => ({
       running: t("running"),
       idling: t("idling"),
+      impersonated: t("impersonated"),
       terminated: t("terminated"),
     }),
     [t],

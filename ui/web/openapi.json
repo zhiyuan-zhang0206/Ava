@@ -6971,6 +6971,22 @@
               }
             ],
             "title": "Open Impersonation Session Id"
+          },
+          "open_impersonation_status": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "requested",
+                  "accepted",
+                  "active"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Open Impersonation Status"
           }
         },
         "type": "object",
@@ -6993,7 +7009,8 @@
           "highest_notice_priority",
           "unread_notice_count",
           "heartbeat_paused_until",
-          "open_impersonation_session_id"
+          "open_impersonation_session_id",
+          "open_impersonation_status"
         ],
         "title": "AgentCard",
         "description": "Scalar list state; selected-agent details and notice bodies are separate reads."

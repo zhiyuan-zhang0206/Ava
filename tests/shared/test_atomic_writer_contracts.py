@@ -48,7 +48,9 @@ def _marker_write(case: str, path: Path) -> None:
     elif case == "owner":
         key = coding_session_owner_record.CodingSessionKey("cluster", "workspace", "codex")
         coding_session_owner_record.write_unlocked(
-            coding_session_owner_record.CodingSessionOwner(key=key, status="inactive")
+            coding_session_owner_record.CodingSessionOwner(
+                key=key, status="inactive", generation="11111111-2222-4333-8444-555555555555"
+            )
         )
     elif case == "pause":
         pause_owner._write_atomic(path, payload)
@@ -112,7 +114,7 @@ def test_marker_replace_failure_keeps_old_content_and_cleans_temps(
         monkeypatch.setattr(start_serving, "state_path", lambda: path)
     elif case == "owner":
 
-        def owner_path(_key: coding_session_owner_record.CodingSessionKey) -> Path:
+        def owner_path(*_args: object) -> Path:
             return path
 
         monkeypatch.setattr(coding_session_owner_record, "state_path", owner_path)

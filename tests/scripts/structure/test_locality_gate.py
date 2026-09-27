@@ -42,6 +42,7 @@ def _baseline(
                 "nesting": nesting or {},
                 "private_imports": private_imports or {},
                 "owner_bypasses": owner_bypasses or {},
+                "path_imports": {},
             },
             indent=2,
             sort_keys=True,
