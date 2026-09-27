@@ -36,6 +36,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AgentSidebar } from "@/components/agent-sidebar";
 import { AgentAvailability } from "@/components/agent-availability";
 import { AlertsBadge } from "@/components/alerts-badge";
+import { CodeHighlighterPreloader } from "@/components/code-highlighter-preloader";
 import { ErrorBoundary } from "@/components/error-boundary";
 import { Composer } from "@/components/composer";
 import { ContentToggle } from "@/components/content-toggle";
@@ -89,6 +90,9 @@ export default function HomePage() {
     // surface — screen-reader landmark navigation needs it, and a future
     // skip-link targets #main-content.
     <main id="main-content" className={cn(FLEX, FLEX_1, MIN_H_0)}>
+      {/* Warms the syntax-highlighter chunk once idle, ahead of any code
+          block actually expanding — see python-code.tsx. */}
+      <CodeHighlighterPreloader />
       <HomeShell showError={showError} />
     </main>
   );

@@ -16,6 +16,9 @@ vi.mock("@/components/python-code", () => ({
   PythonCode: ({ code }: { code: string }) => (
     <pre data-testid="python-code">{code}</pre>
   ),
+  // The row's expand button calls this on pointer-enter/focus to warm the
+  // highlighter chunk ahead of expand (see python-code.tsx) — a no-op here.
+  preloadPythonCodeHighlighter: () => Promise.resolve(),
 }));
 
 import SchedulesPage from "./page";
