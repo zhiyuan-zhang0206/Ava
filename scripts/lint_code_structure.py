@@ -80,6 +80,21 @@ split, a move to another file, or a swap for a different private name cannot
 carry a frozen site — fix the site instead. Why locality:
 conventions/python-conventions.md.
 
+### Rule 6: no path imports under ava_builtins/ (package doors)
+
+`scripts/structure/path_imports.py`: a skill or plugin module may not edit
+`sys.path` (a mutating call, an assignment, a slice assignment), call
+`site.addsitedir`, or load a module by file path
+(`importlib.util.spec_from_file_location`, `importlib.machinery.SourceFileLoader`,
+`runpy.run_path`). A path import sidesteps the package doors: the script's
+directory becomes an unreviewed code package, and splitting an oversized script
+into path-imported siblings satisfies the line budget without restoring
+locality. Shared code goes into a governed package that the script imports
+normally, and the script stays a thin entry point. Today's sites are frozen in
+the `path_imports` section as `path::target -> site count`, matched exactly like
+Rules 4 and 5. There is no allowlist and no pairing: once the section exists at
+the base revision, any new key is a violation.
+
 ### Structure budgets: 800 lines per file, 20 direct entries per directory
 
 Budgets cover the governed packages in `_SCAN_DIRS`, plus tests/ and scripts/.
@@ -119,10 +134,12 @@ from pathlib import Path
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_REPO_ROOT))
 
-from scripts.structure import locality  # noqa: E402 — standalone script
+from scripts.structure import locality, path_imports  # noqa: E402 — standalone script
 from scripts.structure import quality_budget as quality  # noqa: E402 — standalone script
 
 _HARD_CEILING = 800
+# Baseline sections whose frozen `path::target` site counts must match reality exactly.
+_SITE_SECTIONS = (*locality.SECTIONS, path_imports.SECTION)
 _DIRECTORY_CEILING = 20
 _BASELINE_PATH = "scripts/structure/baseline.json"
 
@@ -367,14 +384,15 @@ def _budget_targets(targets: list[Path]) -> tuple[set[Path], set[Path]]:
 def _parse_baseline(text: str, *, allow_legacy: bool = False) -> dict[str, dict[str, int]]:
     baseline = json.loads(text)
     budgets = {"directories", "files", *quality.QUALITY_SECTIONS}
-    sections = budgets | set(locality.SECTIONS)
-    legacy = [budgets, {"directories", "files"}] if allow_legacy else []
+    sections = budgets | set(_SITE_SECTIONS)
+    before_path_imports = budgets | set(locality.SECTIONS)
+    legacy = [budgets, {"directories", "files"}, before_path_imports] if allow_legacy else []
     if not isinstance(baseline, dict) or set(baseline) not in [sections, *legacy]:
         raise ValueError(f"expected exactly the sections {sorted(sections)}")
     for kind in quality.QUALITY_SECTIONS:
         if kind in baseline:
             quality.validate_quality_entries(kind, baseline[kind], _STRUCTURE_DIRS)
-    for kind in locality.SECTIONS:
+    for kind in _SITE_SECTIONS:
         if kind in baseline:
             locality.validate_entries(kind, baseline[kind], _SCAN_DIRS)
     _validate_structure_entries(baseline)
@@ -622,6 +640,7 @@ def _collect_locality(
     scanned.add(rel)
     for kind, found in locality.measure(tree, rel, _SCAN_DIRS, _REPO_ROOT).items():
         sites[kind].update(found)
+    sites[path_imports.SECTION].update(path_imports.measure(tree, rel))
 
 
 def _check_ast_and_quality(
@@ -636,7 +655,7 @@ def _check_ast_and_quality(
     ast_files = _ast_rule_files(argv)
     locality.reset_caches()
     measurements: dict[str, dict[str, int]] = {kind: {} for kind in quality.QUALITY_SECTIONS}
-    sites: dict[str, locality.Sites] = {kind: {} for kind in locality.SECTIONS}
+    sites: dict[str, locality.Sites] = {kind: {} for kind in _SITE_SECTIONS}
     scanned: set[str] = set()
     errors: list[str] = []
     for path in sorted(files | ast_files):

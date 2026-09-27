@@ -172,7 +172,6 @@
     "ava_builtins/skills/ava-self-evolution/reference/mirror_backfill.py::collect_from_mirror": 19,
     "ava_builtins/skills/ava-self-evolution/reference/record.py::build_record": 57,
     "ava_builtins/skills/ava-use-other-agents/reference/spawn_claude.py::main": 19,
-    "ava_builtins/skills/ava-use-other-agents/reference/spawn_codex.py::_launch": 24,
     "ava_builtins/skills/ava-use-other-agents/reference/spawn_codex.py::main": 19,
     "ava_builtins/skills/ava-use-other-agents/reference/watch_work.py::watch": 34,
     "ava_builtins/skills/gmail/reference/_smtp.py::forward": 15,
@@ -778,5 +777,27 @@
     "shared/pg_foreground.py::postgres-dial": 1,
     "shared/pg_stall_watchdog.py::postgres-dial": 2,
     "shared/pg_tools.py::postgres-dial": 2
+  },
+  "path_imports": {
+    "ava_builtins/plugins/ava_memory/skills/scripts/arbiter_merge.py::sys.path": 1,
+    "ava_builtins/plugins/ava_memory/skills/scripts/consolidate.py::sys.path": 1,
+    "ava_builtins/plugins/ava_memory/skills/scripts/gen_indexes.py::sys.path": 1,
+    "ava_builtins/plugins/ava_memory/skills/scripts/rebuild_memory_index.py::sys.path": 1,
+    "ava_builtins/plugins/ava_memory/skills/scripts/steward.py::sys.path": 1,
+    "ava_builtins/skills/ava-self-evolution/reference/aggregate.py::sys.path": 1,
+    "ava_builtins/skills/ava-self-evolution/reference/collect.py::sys.path": 1,
+    "ava_builtins/skills/ava-self-evolution/reference/daily_scan.py::sys.path": 1,
+    "ava_builtins/skills/ava-self-evolution/reference/evaluate.py::sys.path": 1,
+    "ava_builtins/skills/ava-self-evolution/reference/mine.py::sys.path": 1,
+    "ava_builtins/skills/ava-self-evolution/reference/mirror_backfill.py::sys.path": 1,
+    "ava_builtins/skills/ava-self-evolution/reference/record.py::sys.path": 1,
+    "ava_builtins/skills/gmail/reference/feed.py::sys.path": 1,
+    "ava_builtins/skills/telegram-send-file/scripts/send_file.py::sys.path": 1,
+    "ava_builtins/skills/web-ai/console/reference/ask.py::importlib.util.spec_from_file_location": 1,
+    "ava_builtins/skills/web-ai/deep-research/reference/research.py::importlib.util.spec_from_file_location": 1,
+    "ava_builtins/skills/web-ai/media/reference/generate.py::importlib.util.spec_from_file_location": 1,
+    "ava_builtins/skills/web-ai/reference/webchat.py::sys.path": 1,
+    "ava_builtins/skills/web-sources/rss/reference/feed.py::importlib.util.spec_from_file_location": 1,
+    "ava_builtins/skills/web-sources/youtube/reference/feed.py::importlib.util.spec_from_file_location": 1
   }
 }

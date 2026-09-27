@@ -20,7 +20,9 @@ tags:
 
 ## Canonical Codex lifecycle
 
-`reference/spawn_codex.py` creates or adopts one generation keyed by resolved
+`reference/spawn_codex.py` is a thin command-line entry over
+[[ava/shell/coding_tools/coding-tools.ava.okf.md|ava.shell.coding_tools]] (so is
+`reference/spawn_claude.py`). It creates or adopts one generation keyed by resolved
 cluster home plus resolved workspace plus `codex`. The canonical record returns
 the current owner and full Persistent Shell handle across Ava-agent callers;
 workspace basename appears only in display suffixes. Launching is serialized by
@@ -48,3 +50,4 @@ use non-resurrecting system notes.
 - [[ava/shell/shell.ava.okf.md|ava.shell]] — `sessions` (new/send/send_keys/capture/kill) session primitive itself
 - [[ava/watcher.ava.okf.md|ava.watcher]] — wait for it to produce results when supervising long tasks
 - [[shared/coding-session-owner.ava.okf.md]] — canonical generation admission, adoption, transfer, and cleanup
+- [[ava/shell/coding_tools/coding-tools.ava.okf.md|ava.shell.coding_tools]] — the launch logic behind the Claude and Codex spawn scripts

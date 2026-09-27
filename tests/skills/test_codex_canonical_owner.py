@@ -6,6 +6,7 @@ import datetime as dt
 import importlib.util
 import json
 import os
+import shlex
 import sys
 import time
 from dataclasses import replace
@@ -16,6 +17,7 @@ from typing import Any
 
 import pytest
 
+from ava.shell.coding_tools import codex
 from shared import coding_session_owner
 from shared.platform import IS_WINDOWS
 
@@ -82,7 +84,7 @@ def test_codex_home_seeds_only_auth_and_config(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
 
-    spawn_codex._seed_codex_home(target, workspace, source_home=source)
+    codex._seed_codex_home(target, workspace, source_home=source)
 
     assert sorted(path.name for path in target.iterdir()) == ["auth.json", "config.toml"]
     assert (target / "auth.json").read_text() == '{"token":"test"}'
@@ -96,7 +98,7 @@ def test_codex_home_seeds_only_auth_and_config(tmp_path: Path) -> None:
 def test_launch_command_uses_isolated_home_without_sqlite_resume(tmp_path: Path) -> None:
     record = _owner(tmp_path)
 
-    command = spawn_codex._codex_command(record, Path(record.key.workspace))
+    command = codex._codex_command(record, Path(record.key.workspace))
 
     assert command.startswith(f"cd {record.key.workspace} && ")
     assert f"CODEX_HOME={record.state_dir}" in command
@@ -107,7 +109,7 @@ def test_launch_command_uses_isolated_home_without_sqlite_resume(tmp_path: Path)
 
 def test_launch_command_can_explicitly_declare_external_caller(tmp_path: Path) -> None:
     record = _owner(tmp_path)
-    command = spawn_codex._codex_command(record, Path(record.key.workspace), "run-42")
+    command = codex._codex_command(record, Path(record.key.workspace), "run-42")
     assert "AVA_CALLER_IDENTITY=" in command
     assert '"kind":"external_agent"' in command
     assert '"subject":"codex"' in command
@@ -124,18 +126,20 @@ def test_fresh_launch_publishes_full_handle_and_durable_context(tmp_path: Path) 
         coding_session_owner.full_session_name(41, 7, "codex-workspace-11111111")
         == "ava-agent-41-shell-7-codex-workspace-11111111"
     )
-    message = spawn_codex._bootstrap_message(workspace, tasks_file, work_file)
-    assert str(spawn_codex._contract_path()) in message
+    contract = _REFERENCE / "collaboration_protocol.md"
+    message = codex._bootstrap_message(contract, workspace, tasks_file, work_file)
+    assert str(contract) in message
     assert str(workspace) in message
     assert str(tasks_file) in message
     assert str(work_file) in message
 
 
 def test_supervisor_bootstrap_restores_owner_identity(tmp_path: Path) -> None:
-    code = spawn_codex._supervisor_code(_owner(tmp_path))
+    command = codex._supervisor_command(_owner(tmp_path), _REFERENCE / "watch_work.py")
 
-    assert "os.environ['AVA_AGENT_ID'] = '41'" in code
-    assert "['watch']" in code
+    argv = shlex.split(command)
+    assert argv[:3] == ["exec", "env", "AVA_AGENT_ID=41"]
+    assert argv[-2] == "-c" and "['watch']" in argv[-1]
 
 
 @pytest.mark.skipif(IS_WINDOWS, reason="PTY sessions require POSIX")
@@ -154,7 +158,7 @@ def test_codex_supervisor_uses_projected_session_environment(
     monkeypatch.setitem(os.environ, "AVA_HOME", str(unit_home))
     monkeypatch.setenv("HOME", str(unit_home))
     monkeypatch.setenv("VIRTUAL_ENV", str(unit_home / "foreign" / ".venv"))
-    monkeypatch.setattr(spawn_codex.ava.agent_identity, "_agent_id", 41)
+    monkeypatch.setattr(codex.ava.agent_identity, "_agent_id", 41)
     monkeypatch.setattr(sessions, "_next_session_index_from_db", lambda: 7)
     monkeypatch.setattr(sessions, "_shell_prefix", lambda: "ava-agent-41-shell-")
 
@@ -170,7 +174,7 @@ def test_codex_supervisor_uses_projected_session_environment(
 
     # Execute a probe in place of the long-running supervisor; session birth,
     # envfile transport, host fork, and shell command delivery remain real.
-    def supervisor_probe(_owner: coding_session_owner.CodingSessionOwner) -> str:
+    def supervisor_probe(_owner: coding_session_owner.CodingSessionOwner, _watcher: Path) -> str:
         return (
             "import json, os; from pathlib import Path; "
             f"report = Path({str(report)!r}); pending = report.with_suffix('.tmp'); "
@@ -178,10 +182,10 @@ def test_codex_supervisor_uses_projected_session_environment(
             "virtual_env=os.environ.get('VIRTUAL_ENV'), cwd=os.getcwd()))); pending.replace(report)"
         )
 
-    monkeypatch.setattr(spawn_codex, "_supervisor_code", supervisor_probe)
-    name = coding_session_owner.full_session_name(41, 7, spawn_codex._supervisor_name(owner))
+    monkeypatch.setattr(codex, "_supervisor_code", supervisor_probe)
+    name = coding_session_owner.full_session_name(41, 7, codex._supervisor_name(owner))
     try:
-        sid, actual_name = spawn_codex._launch_supervisor(owner, 120)
+        sid, actual_name = codex._launch_supervisor(owner, 120, _REFERENCE / "watch_work.py")
         assert (sid, actual_name) == (7, name)
         deadline = time.monotonic() + 15
         while not report.exists() and time.monotonic() < deadline:
@@ -220,6 +224,7 @@ def test_failed_early_publish_kills_codex_session_before_startup(
     def _launch_supervisor(
         _owner: coding_session_owner.CodingSessionOwner,
         _ttl_seconds: float,
+        _watcher: Path,
     ) -> tuple[int, str]:
         return 6, "ava-agent-41-shell-6-codex-owner-supervisor"
 
@@ -274,25 +279,26 @@ def test_failed_early_publish_kills_codex_session_before_startup(
         assert reason == "launch-failed"
         return False
 
-    monkeypatch.setattr(spawn_codex, "_claim_canonical", _claim)
-    monkeypatch.setattr(spawn_codex, "_seed_codex_home", _seed)
-    monkeypatch.setattr(spawn_codex, "_launch_supervisor", _launch_supervisor)
-    monkeypatch.setattr(spawn_codex.coding_session_owner, "attach_supervisor", _attach)
-    monkeypatch.setattr(spawn_codex.ava.shell.sessions, "new", _new)
-    monkeypatch.setattr(spawn_codex.ava.shell.sessions, "send", _send)
-    monkeypatch.setattr(spawn_codex, "_wait_for_ready", _ready)
-    monkeypatch.setattr(spawn_codex, "_verify_submitted", _verified)
-    monkeypatch.setattr(spawn_codex.coding_session_owner, "publish_active", _publish)
-    monkeypatch.setattr(spawn_codex.ava.shell.sessions, "kill", _kill)
-    monkeypatch.setattr(spawn_codex.coding_session_owner, "terminate_generation", _terminate)
+    monkeypatch.setattr(codex, "claim_canonical", _claim)
+    monkeypatch.setattr(codex, "_seed_codex_home", _seed)
+    monkeypatch.setattr(codex, "_launch_supervisor", _launch_supervisor)
+    monkeypatch.setattr(codex.coding_session_owner, "attach_supervisor", _attach)
+    monkeypatch.setattr(codex.ava.shell.sessions, "new", _new)
+    monkeypatch.setattr(codex.ava.shell.sessions, "send", _send)
+    monkeypatch.setattr(codex, "_wait_for_ready", _ready)
+    monkeypatch.setattr(codex, "_verify_submitted", _verified)
+    monkeypatch.setattr(codex.coding_session_owner, "publish_active", _publish)
+    monkeypatch.setattr(codex.ava.shell.sessions, "kill", _kill)
+    monkeypatch.setattr(codex.coding_session_owner, "terminate_generation", _terminate)
 
     workspace = Path(launching.key.workspace)
     with pytest.raises(coding_session_owner.CodingSessionGenerationChangedError):
-        spawn_codex._launch(
+        codex.launch(
             workspace,
             workspace / "tasks.md",
             workspace / "work.md",
             3600,
+            reference_dir=_REFERENCE,
         )
 
     assert events == ["claim", "attach", "new", "publish"]
@@ -364,21 +370,23 @@ def test_takeover_launch_inlines_brief_without_files_or_supervisor(
         events.append("publish")
         return replace(launching, status="active", session_id=7, session_name=session_name)
 
-    monkeypatch.setattr(spawn_codex, "_claim_canonical", _claim)
-    monkeypatch.setattr(spawn_codex, "_init_file", _unexpected)
-    monkeypatch.setattr(spawn_codex, "_launch_supervisor", _unexpected)
-    monkeypatch.setattr(spawn_codex.coding_session_owner, "attach_supervisor", _unexpected)
-    monkeypatch.setattr(spawn_codex, "_seed_codex_home", _seed)
-    monkeypatch.setattr(spawn_codex, "_wait_for_app_server", partial(_record_app_server, events))
-    monkeypatch.setattr(spawn_codex.ava.shell.sessions, "new", _new)
-    monkeypatch.setattr(spawn_codex.ava.shell.sessions, "send", _send)
-    monkeypatch.setattr(spawn_codex, "_wait_for_ready", _ready)
-    monkeypatch.setattr(spawn_codex, "_verify_submitted", _verified)
-    monkeypatch.setattr(spawn_codex.coding_session_owner, "publish_active", _publish)
+    monkeypatch.setattr(codex, "claim_canonical", _claim)
+    monkeypatch.setattr(codex, "init_file", _unexpected)
+    monkeypatch.setattr(codex, "_launch_supervisor", _unexpected)
+    monkeypatch.setattr(codex.coding_session_owner, "attach_supervisor", _unexpected)
+    monkeypatch.setattr(codex, "_seed_codex_home", _seed)
+    monkeypatch.setattr(codex, "_wait_for_app_server", partial(_record_app_server, events))
+    monkeypatch.setattr(codex.ava.shell.sessions, "new", _new)
+    monkeypatch.setattr(codex.ava.shell.sessions, "send", _send)
+    monkeypatch.setattr(codex, "_wait_for_ready", _ready)
+    monkeypatch.setattr(codex, "_verify_submitted", _verified)
+    monkeypatch.setattr(codex.coding_session_owner, "publish_active", _publish)
 
     workspace = Path(launching.key.workspace)
     brief = "Goal: replace the agent. The briefing is inline; read no files."
-    rc = spawn_codex._launch(workspace, None, None, 3600, None, "Fix login", brief)
+    rc = codex.launch(
+        workspace, None, None, 3600, None, "Fix login", brief, reference_dir=_REFERENCE
+    )
 
     assert rc == 0
     assert events == [
@@ -416,11 +424,18 @@ def test_takeover_launch_refuses_a_workspace_with_a_live_generation(
         assert tasks_file is None and work_file is None
         return coding_session_owner.CodingSessionClaim(action="adopt", owner=record)
 
-    monkeypatch.setattr(spawn_codex, "_claim_canonical", _claim)
+    monkeypatch.setattr(codex, "claim_canonical", _claim)
 
     with pytest.raises(RuntimeError, match="fresh coding workspace"):
-        spawn_codex._launch(
-            Path(record.key.workspace), None, None, 3600, None, "Fix login", "the briefing"
+        codex.launch(
+            Path(record.key.workspace),
+            None,
+            None,
+            3600,
+            None,
+            "Fix login",
+            "the briefing",
+            reference_dir=_REFERENCE,
         )
 
 
@@ -598,11 +613,11 @@ def test_submission_check_survives_a_dead_session_at_enter(
     def dead_keys(_sid: int, *_keys: str) -> None:
         raise ValueError("session 7 is not this agent's (no match for 'shell-7')")
 
-    monkeypatch.setattr(spawn_codex.time, "sleep", no_sleep)
-    monkeypatch.setattr(spawn_codex.ava.shell.sessions, "capture", idle_capture)
-    monkeypatch.setattr(spawn_codex.ava.shell.sessions, "send_keys", dead_keys)
+    monkeypatch.setattr(codex.time, "sleep", no_sleep)
+    monkeypatch.setattr(codex.ava.shell.sessions, "capture", idle_capture)
+    monkeypatch.setattr(codex.ava.shell.sessions, "send_keys", dead_keys)
 
-    spawn_codex._verify_submitted(7, Path("/nonexistent"), timeout=0.01)
+    codex._verify_submitted(7, Path("/nonexistent"), timeout=0.01)
     out = capsys.readouterr().out
     assert "WARNING" in out
     assert "Enter retry failed" in out
@@ -616,9 +631,9 @@ def test_submission_check_survives_a_dead_session_at_capture(
     def dead_capture(_sid: int, **_kwargs: object) -> str:
         raise ValueError("session 7 is not this agent's (no match for 'shell-7')")
 
-    monkeypatch.setattr(spawn_codex.ava.shell.sessions, "capture", dead_capture)
+    monkeypatch.setattr(codex.ava.shell.sessions, "capture", dead_capture)
 
-    spawn_codex._verify_submitted(7, Path("/nonexistent"), timeout=5.0)
+    codex._verify_submitted(7, Path("/nonexistent"), timeout=5.0)
     assert "capture failed" in capsys.readouterr().out
 
 
@@ -644,9 +659,9 @@ def test_submission_check_survives_a_dead_session_after_the_enter_retry(
     def keys(_sid: int, *_keys: str) -> None:
         entered["sent"] = True
 
-    monkeypatch.setattr(spawn_codex.time, "sleep", no_sleep)
-    monkeypatch.setattr(spawn_codex.ava.shell.sessions, "capture", capture)
-    monkeypatch.setattr(spawn_codex.ava.shell.sessions, "send_keys", keys)
+    monkeypatch.setattr(codex.time, "sleep", no_sleep)
+    monkeypatch.setattr(codex.ava.shell.sessions, "capture", capture)
+    monkeypatch.setattr(codex.ava.shell.sessions, "send_keys", keys)
 
-    spawn_codex._verify_submitted(7, Path("/nonexistent"), timeout=0.01)
+    codex._verify_submitted(7, Path("/nonexistent"), timeout=0.01)
     assert "capture failed" in capsys.readouterr().out
