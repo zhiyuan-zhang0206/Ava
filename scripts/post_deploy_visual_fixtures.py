@@ -45,6 +45,7 @@ AGENT_CARD: dict[str, object] = {
     "awaiting_response_count": 0,
     "highest_notice_priority": None,
     "open_impersonation_session_id": None,
+    "open_impersonation_status": None,
 }
 HEARTBEAT = {
     "interval_s": 300,

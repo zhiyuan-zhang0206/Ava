@@ -915,6 +915,34 @@ class TestRestart:
         assert resp.status_code == 404
 
 
+# Every field of an `/api/agents` directory card; detail-only fields stay off it.
+_DIRECTORY_CARD_KEYS = frozenset(
+    {
+        "agent_id",
+        "spawner",
+        "fork_source_agent_id",
+        "status",
+        "pid",
+        "spawned_at",
+        "started_at",
+        "last_active_at",
+        "last_inbound_at",
+        "label",
+        "machine",
+        "supports_vision",
+        "liveness_state",
+        "awaiting_response_count",
+        "highest_notice_priority",
+        "unread_notice_count",
+        "heartbeat_paused_until",
+        "open_impersonation_session_id",
+        "open_impersonation_status",
+        "observation",
+        "availability",
+    }
+)
+
+
 class TestList:
     def test_get_agents_returns_page_with_status_and_lineage(
         self, db_conn: psycopg.Connection
@@ -931,28 +959,7 @@ class TestList:
         assert page["next_cursor"] is None
         rows = page["agents"]
         assert len(rows) == 2
-        assert set(rows[0]) == {
-            "agent_id",
-            "spawner",
-            "fork_source_agent_id",
-            "status",
-            "pid",
-            "spawned_at",
-            "started_at",
-            "last_active_at",
-            "last_inbound_at",
-            "label",
-            "machine",
-            "supports_vision",
-            "liveness_state",
-            "awaiting_response_count",
-            "highest_notice_priority",
-            "unread_notice_count",
-            "heartbeat_paused_until",
-            "open_impersonation_session_id",
-            "observation",
-            "availability",
-        }
+        assert set(rows[0]) == _DIRECTORY_CARD_KEYS
         assert rows[0]["open_impersonation_session_id"] is None
         assert rows[0]["observation"]["runtime_owner"] == "unknown"
         by_id = {r["agent_id"]: r for r in rows}
@@ -1007,29 +1014,9 @@ class TestList:
 
         assert response.status_code == 200
         row = response.json()["agents"][0]
-        assert set(row) == {
-            "agent_id",
-            "spawner",
-            "fork_source_agent_id",
-            "status",
-            "pid",
-            "spawned_at",
-            "started_at",
-            "last_active_at",
-            "last_inbound_at",
-            "label",
-            "machine",
-            "supports_vision",
-            "liveness_state",
-            "awaiting_response_count",
-            "highest_notice_priority",
-            "unread_notice_count",
-            "heartbeat_paused_until",
-            "open_impersonation_session_id",
-            "observation",
-            "availability",
-        }
+        assert set(row) == _DIRECTORY_CARD_KEYS
         assert row["open_impersonation_session_id"] is None
+        assert row["open_impersonation_status"] is None
         assert row["observation"]["runtime_owner"] == "unknown"
         assert row["observation"]["machine_probe_at"] is None
         assert row["observation"]["machine_probe_valid_until"] is None

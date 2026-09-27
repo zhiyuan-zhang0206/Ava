@@ -77,8 +77,11 @@ from an old gateway during the update window.
 scope, label/ID search and a keyset cursor. `GET /api/agents/roster` returns
 live cards and their minimal ancestor closure in one database snapshot;
 unrelated terminated rows receive no per-agent enrichment. Cards carry
-attention counts/priority and an open impersonation session number, never notice
-bodies. Selected or bookmarked agents
+attention counts/priority and an open impersonation session number plus that
+lease's phase (`open_impersonation_status`: `requested` / `accepted` /
+`active`, or null), never notice bodies — only `active` means the agent is
+actually taken over, which the console projects to a distinct `impersonated`
+status. Selected or bookmarked agents
 use the independent ID detail endpoint. SDK, CLI and MCP consume the same
 page contract; no implicit list-all or field-projection compatibility modes
 remain.
