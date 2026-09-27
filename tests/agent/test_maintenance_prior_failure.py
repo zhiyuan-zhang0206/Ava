@@ -13,7 +13,7 @@ from psycopg_pool import AsyncConnectionPool
 
 from agent import state as states
 from agent.impersonation import flush_checkpoint
-from agent.startup import _wrap_saver_writes_with_nstep_interval
+from agent.startup import wrap_saver_writes_with_nstep_interval
 from services.agent_host import host as host_module
 from services.agent_host import runtime as runtime_module
 from services.agent_host.runtime import TurnOutcome
@@ -43,7 +43,7 @@ async def _failed_turn(
 
     saver = AsyncPostgresSaver(pool)
     await saver.setup()
-    _wrap_saver_writes_with_nstep_interval(saver, 100)
+    wrap_saver_writes_with_nstep_interval(saver, 100)
     builder: Any = StateGraph(states.AgentState, context_schema=AvaContext)
     builder.add_node("save", save)
     builder.add_node("fail", fail)

@@ -17,7 +17,7 @@ Usage:
    model build so OpenLLMetry can instrument it), `land_cluster_extensions` (the
    cluster's installed skills onto this machine), then `load_process_extensions`
    (the external-plugin load). Exactly once per process: see
-   `agent/_process_boot.py:load_process_extensions` for why repeating it is not
+   `agent/process_boot.py:load_process_extensions` for why repeating it is not
    an option, and issue #170 for the behavioural change that follows. The
    materialization is once per process for a milder reason — the skills
    directory belongs to the machine, not to any agent — but it lands here rather
@@ -56,8 +56,8 @@ from psycopg.rows import DictRow
 from psycopg_pool import AsyncConnectionPool
 
 import shared.redis_client
-from agent._turn_progress import turn_progress_age_s, turn_progress_snapshot
 from agent.hosted_ownership import settle_stale_running_rows
+from agent.turn_progress import turn_progress_age_s, turn_progress_snapshot
 from services._pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
 from services.agent_host import boot_defer
 from services.agent_host.dispatcher import InboundWakeDispatcher, TurnScheduler
@@ -360,8 +360,8 @@ async def _build_checkpointer(
     pointed at an unmigrated database.
     """
     from agent.startup import (
-        _wrap_saver_writes_with_loud_failure,
-        _wrap_saver_writes_with_nstep_interval,
+        wrap_saver_writes_with_loud_failure,
+        wrap_saver_writes_with_nstep_interval,
     )
     from agent.state import build_checkpoint_serde
     from shared.agents.history.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
@@ -369,8 +369,8 @@ async def _build_checkpointer(
 
     saver_pool = cast(AsyncConnectionPool[psycopg.AsyncConnection[DictRow]], pool)
     checkpointer = PooledPostgresSaver(conn=saver_pool, serde=build_checkpoint_serde())
-    _wrap_saver_writes_with_loud_failure(checkpointer)
-    _wrap_saver_writes_with_nstep_interval(
+    wrap_saver_writes_with_loud_failure(checkpointer)
+    wrap_saver_writes_with_nstep_interval(
         checkpointer,
         lambda: turn_settings.agent.checkpoint_interval,
     )
@@ -453,16 +453,15 @@ async def run() -> None:
         _log.info("[agent-host] could not acquire pidfile %s, exiting", _PIDFILE)
         sys.exit(1)
 
-    from agent._process_boot import (
-        init_process_scope,
-        land_cluster_extensions,
-        load_process_extensions,
-    )
-
     # langgraph types its checkpointer parameter with an unparameterized generic,
     # so the imported symbol reads as partially unknown; the return type — the
     # only part this module uses — is fully known.
     from agent.graph import build_graph  # pyright: ignore[reportUnknownVariableType]
+    from agent.process_boot import (
+        init_process_scope,
+        land_cluster_extensions,
+        load_process_extensions,
+    )
 
     init_process_scope()
     land_cluster_extensions()

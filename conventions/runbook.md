@@ -2045,7 +2045,7 @@ containers record to their ephemeral-FS mirror, which dies with the container
 with `instruments={ANTHROPIC, OPENAI, LANGCHAIN, GOOGLE_GENERATIVEAI}` —
 LangGraph nests through the LANGCHAIN instrumentor (its callback handler), so
 there is no separate LANGGRAPH instrument. Around each per-turn
-`graph.ainvoke`, `agent/_runloop.py` opens `turn_span(name="ava-agent-N",
+`graph.ainvoke`, `agent/runloop.py` opens `turn_span(name="ava-agent-N",
 session_id=str(agent_id), turn=N)`, a native OTel root span stamped with the
 neutral `session.id` (the viewer groups one agent's turns into a session by
 it) and `ava.turn`. One trace = one turn: the root span closes and exports

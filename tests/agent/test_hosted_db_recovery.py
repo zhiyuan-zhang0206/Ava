@@ -22,7 +22,7 @@ from agent import state as states
 from agent.db import claim_inbound_batch
 from agent.hosted_ownership import admit_hosted_runtime
 from agent.inbound_ownership import RuntimeOwnershipLostError
-from agent.startup import _wrap_saver_writes_with_nstep_interval
+from agent.startup import wrap_saver_writes_with_nstep_interval
 from ops.agent_spawn import create_agent_row
 from services.agent_host import db_recovery
 from services.agent_host.host import AgentHost
@@ -395,7 +395,7 @@ async def _seed_stalled_repair_scenario(
 
     saver = AsyncPostgresSaver(aops_pool)
     await saver.setup()
-    _wrap_saver_writes_with_nstep_interval(saver, 100)
+    wrap_saver_writes_with_nstep_interval(saver, 100)
     # Delta write model (#3180): fold delta-written messages on read (daemon parity).
     wrap_saver_reads_with_delta_reconstruction(saver)
     builder: Any = StateGraph(states.AgentState, context_schema=AvaContext)
@@ -460,8 +460,8 @@ async def test_healthy_stages_each_get_their_own_deadline(
         getattr(msg, "id", None) == "unfinished-tool" for msg in cold["channel_values"]["messages"]
     )
     events: list[tuple[str, str, float]] = []
-    reconcile = db_recovery._reconcile_claimed_inbounds_at_startup
-    repair = db_recovery._repair_dangling_tool_use_at_startup
+    reconcile = db_recovery.reconcile_claimed_inbounds_at_startup
+    repair = db_recovery.repair_dangling_tool_use_at_startup
 
     async def delay(stage: str) -> None:
         started = time.monotonic()
@@ -481,8 +481,8 @@ async def test_healthy_stages_each_get_their_own_deadline(
         await repair(compiled, agent)
         events.append(("repair", "done", 0))
 
-    monkeypatch.setattr(db_recovery, "_reconcile_claimed_inbounds_at_startup", slow_reconcile)
-    monkeypatch.setattr(db_recovery, "_repair_dangling_tool_use_at_startup", slow_repair)
+    monkeypatch.setattr(db_recovery, "reconcile_claimed_inbounds_at_startup", slow_reconcile)
+    monkeypatch.setattr(db_recovery, "repair_dangling_tool_use_at_startup", slow_repair)
     try:
         with bind_turn_identity(incarnation.agent_id, incarnation=incarnation):
             await asyncio.wait_for(
@@ -562,7 +562,7 @@ async def test_recovery_budget_abandons_at_attempt_boundary(
         clock[0] += stage_seconds
         raise error
 
-    monkeypatch.setattr(db_recovery, "_repair_dangling_tool_use_at_startup", failed_repair)
+    monkeypatch.setattr(db_recovery, "repair_dangling_tool_use_at_startup", failed_repair)
     with (
         bind_turn_identity(incarnation.agent_id, incarnation=incarnation),
         pytest.raises(db_recovery.DatabaseRecoveryBudgetExceededError, match="after 2 attempts"),
@@ -752,7 +752,7 @@ async def test_recovery_reuses_unchanged_checkpoint_across_retry(
 
     monkeypatch.setattr(saver, "aget_delta_channel_history", counted_history)
     monkeypatch.setattr(db_recovery, "flush_checkpoint", counted_flush)
-    monkeypatch.setattr(db_recovery, "_repair_dangling_tool_use_at_startup", flaky_repair)
+    monkeypatch.setattr(db_recovery, "repair_dangling_tool_use_at_startup", flaky_repair)
     with bind_turn_identity(incarnation.agent_id, incarnation=incarnation):
         await db_recovery.recover_database(
             pool=aops_pool, graph=graph, checkpointer=saver, incarnation=incarnation

@@ -19,7 +19,7 @@ from agent import state as states
 from agent.graph._claim import claim_node
 from agent.hooks.compact import COMPACT_MAX_ATTEMPTS
 from agent.impersonation import flush_checkpoint
-from agent.startup import _wrap_saver_writes_with_nstep_interval
+from agent.startup import wrap_saver_writes_with_nstep_interval
 from services.agent_host.host import AgentHost
 from services.agent_host.runtime import TurnOutcome
 from shared.agents.history.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
@@ -51,7 +51,7 @@ async def _prepare_graph(
 
     saver = AsyncPostgresSaver(pool)
     await saver.setup()
-    _wrap_saver_writes_with_nstep_interval(saver, interval)
+    wrap_saver_writes_with_nstep_interval(saver, interval)
     # Delta write model (#3180): fold delta-written messages on read (daemon parity).
     wrap_saver_reads_with_delta_reconstruction(saver)
     builder: Any = StateGraph(states.AgentState, context_schema=AvaContext)

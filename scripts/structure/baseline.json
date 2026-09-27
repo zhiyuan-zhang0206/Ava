@@ -136,7 +136,6 @@
     "tests/test_feishu_adapter.py": 1255
   },
   "complexity": {
-    "agent/_runloop.py::_handle_fatal_llm_error": 26,
     "agent/db.py::claim_inbound_batch": 15,
     "agent/exec_domain_owner.py::run": 28,
     "agent/graph/_claim_decide.py::decide": 35,
@@ -581,7 +580,8 @@
     "tests/shared/test_uvicorn_stdlib_intercept.py::test_gateway_uvicorn_run_passes_log_config_none": 23,
     "tests/shared/test_winproc_launch.py::test_new_session_spawns_a_control_steward_bound_to_the_record_identity": 21,
     "tests/skills/test_impersonation_launch.py::test_self_takeover_bootstrap_inlines_brief_and_links_real_guide": 17,
-    "tests/test_lint_marker_contract.py::test_system_note_writers_use_notetag_values": 15
+    "tests/test_lint_marker_contract.py::test_system_note_writers_use_notetag_values": 15,
+    "agent/runloop.py::_handle_fatal_llm_error": 26
   },
   "nesting": {
     "agent/hooks/_registry.py::make_hook_runner.<locals>.run": 7,
@@ -662,24 +662,7 @@
     "ops/publication_recovery.py::shared.managed_writer_publication._locked_publication": 1,
     "ops/strand_hold.py::ops.controllers.stranded_pause._executing_owner": 1,
     "ops/updater_reap.py::ops.controllers._heal_record": 2,
-    "services/agent_host/admission.py::agent._turn_progress": 1,
-    "services/agent_host/daemon.py::agent._process_boot": 1,
-    "services/agent_host/daemon.py::agent._turn_progress": 1,
-    "services/agent_host/daemon.py::agent.startup._wrap_saver_writes_with_loud_failure": 1,
-    "services/agent_host/daemon.py::agent.startup._wrap_saver_writes_with_nstep_interval": 1,
-    "services/agent_host/db_recovery.py::agent.startup._reconcile_claimed_inbounds_at_startup": 1,
-    "services/agent_host/db_recovery.py::agent.startup._repair_dangling_tool_use_at_startup": 1,
-    "services/agent_host/dispatcher.py::agent._turn_progress": 1,
-    "services/agent_host/host.py::agent._process_boot": 1,
-    "services/agent_host/host.py::agent._runloop": 1,
-    "services/agent_host/host.py::agent._trace_checkpoint": 1,
-    "services/agent_host/host.py::agent._turn_progress": 1,
-    "services/agent_host/host.py::agent.startup._reconcile_claimed_inbounds_at_startup": 1,
-    "services/agent_host/host.py::agent.startup._repair_dangling_tool_use_at_startup": 1,
     "services/agent_host/pools.py::shared.db._restore_pooled_session_async": 1,
-    "services/agent_host/settlement.py::agent.startup._reconcile_claimed_inbounds_at_startup": 1,
-    "services/agent_host/stall_guard.py::agent._runloop": 1,
-    "services/agent_host/stall_guard.py::agent._turn_progress": 1,
     "services/events_maintenance/jsonl_replay.py::shared.telemetry._is_rollup_source": 1,
     "services/healthchecks/im_bridge.py::shared.daemon_health._MAX_BODY_BYTES": 2,
     "services/healthchecks/im_bridge.py::shared.daemon_health._PROBE_TIMEOUT_S": 1,

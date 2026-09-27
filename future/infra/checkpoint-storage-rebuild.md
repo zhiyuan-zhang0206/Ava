@@ -58,7 +58,7 @@ counts or write volume). The write switch runs in the next user-supervised windo
   allowlist (`agent/state.py`). In production, every blob row is `type='msgpack'`.
 - Durability: default `"async"` — one checkpoint row per super-step
   (node boundary); a turn spans several super-steps.
-- N-step wrapper `_wrap_saver_writes_with_nstep_interval` (`agent/startup.py:212`,
+- N-step wrapper `wrap_saver_writes_with_nstep_interval` (`agent/startup.py:212`,
   interval = `AVA_CHECKPOINT_INTERVAL`, default 4):
   - retained steps (`step % 4 == 0`) and non-`loop`/`update` sources (input, fork) write;
     skipped steps write nothing.
@@ -82,7 +82,7 @@ counts or write volume). The write switch runs in the next user-supervised windo
 ### 1.2 Measured per-checkpoint volumes (scratch Postgres, real saver + wrapper code)
 
 Harness: local scratch cluster, `AsyncPostgresSaver` + `build_checkpoint_serde()` +
-`_wrap_saver_writes_with_nstep_interval` (imported from `agent/startup.py`), one message
+`wrap_saver_writes_with_nstep_interval` (imported from `agent/startup.py`), one message
 pair of known size appended per super-step (image case: one incompressible 25 MB payload).
 Byte counts are `octet_length` of inserted rows (raw; `pg_column_size` undercounts
 compressible content because TOAST pzips it).
@@ -469,7 +469,7 @@ re-evaluate the placement under the normal rule.
 
 - Scratch harness: local `initdb` cluster on port 55432 (never production), the real
   `AsyncPostgresSaver` + `build_checkpoint_serde()` + the real
-  `_wrap_saver_writes_with_nstep_interval` imported from `agent/startup.py`; a minimal
+  `wrap_saver_writes_with_nstep_interval` imported from `agent/startup.py`; a minimal
   StateGraph with `DeltaChannel` for the delta runs. Scripts and raw per-call JSON live with
   the author (#6095), beside the pre-cutover drill suite (behavioral matrix, crash replay,
   production-clone subset + closure check) and its raw outputs; the numbers above are

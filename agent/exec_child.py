@@ -483,7 +483,7 @@ def _run(request_path: str, result_path: str) -> None:
     if _apply_overlay_scope(birth, overlay, scope="framework"):
         # Per-agent sdk_disable additions ride the overlay; re-apply on top of
         # the env baseline (idempotent — only new entries take effect).
-        from agent._process_boot import _apply_per_agent_sdk_disable
+        from agent.process_boot import _apply_per_agent_sdk_disable
 
         _apply_per_agent_sdk_disable()
     # A text-only agent gets no attach contract anywhere in its SDK docs —
@@ -497,7 +497,7 @@ def _run(request_path: str, result_path: str) -> None:
     # — the child start stays off the agent runtime either way (task #3633).
     ava.ensure_plugins_loaded()
     _apply_overlay_scope(birth, overlay, scope="plugin")
-    from agent._process_boot import _apply_per_agent_eval_isolation
+    from agent.process_boot import _apply_per_agent_eval_isolation
 
     _apply_per_agent_eval_isolation()
     _build_state_slot(request)

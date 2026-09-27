@@ -26,7 +26,7 @@ from tests.services.daemon_shutdown_test_support import (
 
 def _exercise_shutdown(failure: str) -> None:
     """Run real signal/asyncio unwinding in a disposable child interpreter."""
-    from agent import _process_boot, graph
+    from agent import graph, process_boot
     from services.agent_host import daemon
 
     events: list[str] = []
@@ -85,7 +85,7 @@ def _exercise_shutdown(failure: str) -> None:
 
     with (
         patch.multiple(
-            _process_boot,
+            process_boot,
             init_process_scope=MagicMock(),
             land_cluster_extensions=MagicMock(),
             load_process_extensions=MagicMock(),

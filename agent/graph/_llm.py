@@ -57,11 +57,11 @@ from langgraph.types import Command
 # identity from RunnableConfig; SDK calls use the host's bound turn identity.
 import ava
 from agent import state as _state
-from agent._turn_progress import mark_turn_progress
 from agent.hooks.compact import auto_compact_for_llm
 from agent.nodes import AFTER_EXEC, BEFORE_EXEC
 from agent.observe import log_llm_usage
 from agent.state_channels import CircuitState
+from agent.turn_progress import mark_turn_progress
 from shared.config import settings
 from shared.config.turn_view import turn_settings
 from shared.context import AvaContext, agent_id_from_config
@@ -366,7 +366,7 @@ async def llm_node(
             # Do not publish Error here — this except is wrapped by langgraph retry
             # and runs on every failed attempt; sending the frontend N "errors" then
             # succeeding on retry would contradict. The Error event is published
-            # once by outer `agent/_runloop.py:_invoke_graph_with_lifecycle_logging`
+            # once by outer `agent/runloop.py:_invoke_graph_with_lifecycle_logging`
             # after retries are exhausted (Cancelled is still published by
             # _llm_node_impl itself).
             raise

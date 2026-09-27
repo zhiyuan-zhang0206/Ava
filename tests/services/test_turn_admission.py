@@ -8,7 +8,7 @@ contract:
    arrival-order FIFO service, and a completed turn's next request taken at the
    tail: no starvation, no overtaking.
 2. **Queued is not stalled** — the waiter is registered in
-   ``agent/_turn_progress.py`` BEFORE its acquire await and cleared on serve or
+   ``agent/turn_progress.py`` BEFORE its acquire await and cleared on serve or
    cancel; the dispatcher's fake-alive scan reads exactly this registry.
 3. **Observability** — depth, ages and served-wait counters for ``/stats``;
    one ``long_waiters`` report per wait episode.
@@ -26,7 +26,7 @@ from typing import cast
 
 import pytest
 
-from agent import _turn_progress as progress
+from agent import turn_progress as progress
 from services.agent_host.admission import TurnAdmission
 from services.agent_host.dispatcher import (
     InboundWakeDispatcher,

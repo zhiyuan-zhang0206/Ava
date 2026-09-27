@@ -54,7 +54,7 @@ boundaries, already carried by codegen, and not debt.
    file evidence, settings digest, shadow-pg gate and service-enable, plus
    `base_manifest.lsn`).
    Highest yield next: the most reached-into privates
-   (`shared.agents.impersonation._impersonation_store`, `agent._turn_progress`)
+   (`shared.agents.impersonation._impersonation_store`, `agent.turn_progress`)
    each get a verdict: contract (export it) or internal (route callers through
    a door). (`shared.lm`'s and `agent.graph`'s most reached-into privates
    already got the contract verdict: promoted to public module names

@@ -50,7 +50,7 @@ from langchain_core.messages import AIMessageChunk
 from langchain_core.messages.tool import ToolCallChunk
 from langchain_core.utils.json import parse_partial_json
 
-from agent._turn_progress import mark_turn_progress
+from agent.turn_progress import mark_turn_progress
 from shared.event_coalescer import DeltaCoalescer
 from shared.event_publisher import AgentEventPublisher
 from shared.live_events import (

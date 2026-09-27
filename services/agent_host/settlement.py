@@ -24,7 +24,7 @@ from psycopg_pool import AsyncConnectionPool
 from agent.corpse_reap import reap_recrashed_corpse
 from agent.hosted_ownership import TurnSettlement, settle_and_stamp_turn
 from agent.inbound_ownership import RuntimeOwnershipLostError
-from agent.startup import _reconcile_claimed_inbounds_at_startup
+from agent.startup import reconcile_claimed_inbounds_at_startup
 from services.agent_host.crash_recovery import recover_reaped_corpses
 from services.agent_host.db_recovery import database_phase
 from services.agent_host.runtime import TurnOutcome
@@ -171,7 +171,7 @@ async def reconcile_inbounds_after_abort(
     try:
         async with database_phase():
             with bind_turn_identity(agent_id, incarnation=incarnation):
-                await _reconcile_claimed_inbounds_at_startup(pool, checkpointer, agent_id)
+                await reconcile_claimed_inbounds_at_startup(pool, checkpointer, agent_id)
     except RuntimeOwnershipLostError:
         logger.warning(
             "host abort reconcile skipped: runtime ownership already replaced — "
@@ -237,7 +237,7 @@ async def reconcile_inbounds_after_turn(
     try:
         async with database_phase():
             with bind_turn_identity(agent_id, incarnation=incarnation):
-                await _reconcile_claimed_inbounds_at_startup(pool, checkpointer, agent_id)
+                await reconcile_claimed_inbounds_at_startup(pool, checkpointer, agent_id)
     except RuntimeOwnershipLostError:
         logger.warning(
             "turn inbound reconcile skipped: runtime ownership already replaced — "

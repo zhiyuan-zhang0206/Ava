@@ -10,7 +10,7 @@ the explicit human override.
 
 `agents_meta.permanent_reject_streak` is the durable count and the single
 source of truth for "halted": incremented when a turn ends with a
-permanent-class ``FatalProviderError`` (``agent/_runloop.py``), reset to 0 by
+permanent-class ``FatalProviderError`` (``agent/runloop.py``), reset to 0 by
 the completed-turn UPDATE that clears ``last_turn_fatal_at``
 (``agent/graph/_llm.py::_persist_last_active``). The latest rejection's
 reason class lives beside the count in ``agents_meta.last_permanent_reject_reason``
@@ -22,7 +22,7 @@ suppression column cannot carry an until-human halt.
 Tripping additionally writes ``wake_suppressed_until`` with
 ``SUPPRESS_REASON_PERMANENT_REJECT`` — the operator-visible reason, and the
 input to the suppression gates the automatic paths already consult — while the
-caller (``agent/_runloop.py``) reuses the metadata-only ancestor report plus a
+caller (``agent/runloop.py``) reuses the metadata-only ancestor report plus a
 blocked Error event for the honest UX.
 """
 
@@ -44,7 +44,7 @@ SUPPRESS_REASON_PERMANENT_REJECT = "permanent_provider_reject"
 HALT_SUPPRESSION_WINDOW_S = 3650 * 24 * 3600.0
 
 # The durable reject reason for an HTTP 402 billing rejection — the value
-# `agent._runloop._circuit_reason` maps 402 to (CIRCUIT_REASON_BILLING). The
+# `agent.runloop._circuit_reason` maps 402 to (CIRCUIT_REASON_BILLING). The
 # billing batch-recovery whitelist (task #3919) filters on exactly this
 # value; keep it in sync with CIRCUIT_REASON_BILLING (asserted by
 # tests/shared/test_recovery_breaker.py, same pattern as RECOVERY_BREAKER_CLEAR).
