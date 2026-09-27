@@ -9,7 +9,7 @@
     "gateway/routers": 62,
     "gateway/schemas": 27,
     "ops": 37,
-    "scripts": 115,
+    "scripts": 117,
     "services": 26,
     "services/healthchecks": 31,
     "services/pitr": 66,

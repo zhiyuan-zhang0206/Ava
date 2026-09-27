@@ -66,13 +66,17 @@ are not implementation requirements for this revision.
    `scripts/cutover_adopt_home.py`, after the read-only
    `scripts/cutover_inventory.py`
    ([procedure](../../conventions/cutover-home-adoption.md)).
+   The gateway's database records (pending publication, legacy deploy lease,
+   host postures, stale units, retired-shape incarnation rows) are inventoried
+   and repaired by the one-time `scripts/cutover_db_records.py`
+   ([procedure](../../conventions/cutover-db-records.md)).
    Cutover preconditions and one-time repairs:
    - Every cluster reads `deployment_state.managed_writer_evidence->'pending'
      IS NULL` before this release is admitted. The retired updater's checked
-     publication recovery is gone, and no command clears a recorded pending
-     publication. It keeps fencing every deploy-lease acquire, including PITR
-     provisioning, until an operator resolves it in the cutover record from its
-     retained evidence. The fence itself stays.
+     publication recovery is gone, and no runtime command clears a recorded
+     pending publication. It keeps fencing every deploy-lease acquire, including
+     PITR provisioning, until the operator resolves it with the database-records
+     repair, which clears only the exact recorded value. The fence itself stays.
    - `$AVA_HOME/installed_sha` has no reader or writer; the source-tree check
      alerts only on checkout edits of a source-run home. Delete the file in the
      cutover record.
@@ -158,9 +162,12 @@ requests={})` for the incarnation the retired value names, backed by that
 incarnation's existing predecessor receipt (the old drain's applied restart,
 or an observed terminate) and the machine's closure attestation recorded on
 the receipt. `shared.predecessor_closure.close_retired_predecessor` is the
-one-time library FC-4 calls; admission keeps `PREDECESSOR_RECEIPT` as its only
-rule. Unconverted rows refuse with `resource_fence` / `runtime_cutover_required`;
-NULL rows are untouched and stay protocol zero. Drain certification accepts
+one-time library `scripts/cutover_db_records.py` calls, with one closure
+attestation per machine (`scripts/cutover_inventory.py --attest`: recorded
+identities gone and the home census empty); admission keeps
+`PREDECESSOR_RECEIPT` as its only rule. Unconverted rows refuse with
+`resource_fence` / `runtime_cutover_required`; NULL rows are untouched and
+stay protocol zero. Drain certification accepts
 the complete empty recorded set of the released incarnation. A never-admitted
 row resurrects as a fresh birth only with its birth marker intact.
 

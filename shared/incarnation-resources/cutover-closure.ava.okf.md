@@ -17,16 +17,17 @@ the cause at WARNING, local recovery skips the value, and resurrection refuses
 with `runtime_cutover_required`.
 
 Only the one-time cutover replaces such a value, per row
-(`shared/predecessor_closure.py`, called by the cutover reconciler and deleted
-with it). The closed-predecessor form is the incarnation the retired value
-names, with no host identity, no freeze and an empty set. It is backed by that
-incarnation's existing predecessor receipt (the old drain's applied restart
-still held as the lifecycle pointer, or an applied and observed terminate) and
-by the machine's closure attestation, stored with the before image and the
-operator on the receipt. The conversion compares the exact before image, and
-refuses NULL, current-model values, a live or different runtime on the row, an
-unsettled command, another machine, or a receipt that already carries a
-closure. The ordinary predecessor rule then admits the form once: admission
+(`shared/predecessor_closure.py`, called by `scripts/cutover_db_records.py`
+and deleted with it). The closed-predecessor form is the incarnation the
+retired value names, with no host identity, no freeze and an empty set. It is
+backed by that incarnation's existing predecessor receipt (the old drain's
+applied restart still held as the lifecycle pointer, or an applied and
+observed terminate) and by the machine's closure attestation (its sha256; the
+document itself is kept in the cutover record), stored with the before image
+and the operator on the receipt. The conversion compares the exact before
+image, and refuses NULL, current-model values, a live or different runtime on
+the row, an unsettled command, another machine, or a receipt that already
+carries a closure. The ordinary predecessor rule then admits the form once: admission
 rewrites the set for its own incarnation and observes a restart receipt. A
 same-owner continuation refuses it because no host identity is recorded.
 

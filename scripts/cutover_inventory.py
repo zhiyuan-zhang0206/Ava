@@ -34,10 +34,14 @@ The verdict goes to stdout as JSON. Exit status: 0 when adoption could run now,
 2 when it would refuse (the reasons are in `refusals`), 1 on an error.
 
 `--attest ROWS.json` reads a JSON list of legacy process evidence rows
-(`{"machine": str, "pid": int, "birth": float, ...}`, as the database-records
-check exports them) and attests, for the rows of this machine, that no process
-with that pid and birth exists, or that the host booted after the birth. Extra
-row fields are echoed back. Exit status 0 when every row is absent, 2 otherwise.
+(`{"machine": str, "pid": int, "birth": float, ...}`, as
+`scripts/cutover_db_records.py --check --rows-out` exports them) and prints this
+machine's one closure attestation: for each of its rows, that no process with
+that pid and birth exists or that the host booted after the birth (extra row
+fields are echoed back), plus the home's process census and bound ports. The
+database-records repair stores the document verbatim and records its sha256
+as the machine's closure evidence (`load_attestation`). Exit status 0 when
+every row is absent and the census is empty, 2 otherwise.
 
 Both cutover scripts are one-time and are deleted after the cutover.
 """
@@ -48,13 +52,15 @@ import argparse
 import json
 import socket
 import sys
+from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 import psutil
 from dotenv import dotenv_values
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from scripts.cutover_legacy_jobs import Host, Jobs, discover
 from shared import cluster
@@ -571,8 +577,10 @@ def _journal_summary(journal: dict[str, Any] | None) -> dict[str, str] | None:
     return {name: step["state"] for name, step in journal["steps"].items()}
 
 
-def attest(rows: list[dict[str, Any]], machine: str) -> dict[str, Any]:
-    """For this machine's rows: is every recorded `(pid, birth)` provably gone?"""
+def attest(rows: list[dict[str, Any]], machine: str, facts: Facts) -> dict[str, Any]:
+    """This machine's closure attestation: is every recorded `(pid, birth)` of its
+    rows provably gone, and does the home's live census show no Ava process and
+    no bound port? One document per machine covers all of its rows."""
     boot = psutil.boot_time()
     attested: list[dict[str, Any]] = []
     for row in rows:
@@ -593,12 +601,81 @@ def attest(rows: list[dict[str, Any]], machine: str) -> dict[str, Any]:
     return {
         "version": VERSION,
         "machine": machine,
+        "home": str(facts.home),
         "boot_time": boot,
         "attested_at": datetime.now(UTC).isoformat(),
         "rows": attested,
         "other_machines": sum(1 for row in rows if row["machine"] != machine),
-        "all_absent": all(row["verdict"] in {"absent", "boot_changed"} for row in attested),
+        "all_absent": all(row["verdict"] in ABSENT_VERDICTS for row in attested),
+        "processes": facts.processes,
+        "listeners": facts.listeners,
+        "census_empty": _census_empty(facts.processes, facts.listeners),
     }
+
+
+ABSENT_VERDICTS = frozenset({"absent", "boot_changed"})
+
+
+def _census_empty(processes: Sequence[Mapping[str, Any]], listeners: Sequence[object]) -> bool:
+    return not listeners and all(proc["kind"] != "ava" for proc in processes)
+
+
+class AttestedRow(BaseModel):
+    """One recorded legacy process identity and its verdict (extra fields echoed)."""
+
+    model_config = ConfigDict(extra="allow", frozen=True)
+
+    machine: str
+    pid: int = Field(gt=0)
+    birth: float = Field(gt=0)
+    verdict: Literal["absent", "boot_changed", "alive", "unknown"]
+
+
+class Attestation(BaseModel):
+    """The `--attest` document, validated for the database-records repair."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    version: Literal[1]
+    machine: str = Field(min_length=1)
+    home: str = Field(min_length=1)
+    boot_time: float
+    attested_at: str
+    rows: tuple[AttestedRow, ...]
+    other_machines: int
+    all_absent: bool
+    processes: tuple[dict[str, Any], ...]
+    listeners: tuple[dict[str, Any], ...]
+    census_empty: bool
+
+    @model_validator(mode="after")
+    def consistent(self) -> Attestation:
+        if any(row.machine != self.machine for row in self.rows):
+            raise ValueError("an attested row names another machine")
+        if self.all_absent != all(row.verdict in ABSENT_VERDICTS for row in self.rows):
+            raise ValueError("all_absent contradicts the row verdicts")
+        if self.census_empty != _census_empty(self.processes, self.listeners):
+            raise ValueError("census_empty contradicts the recorded processes and listeners")
+        return self
+
+    @property
+    def proves_closure(self) -> bool:
+        """Every recorded process is gone and the home census is empty."""
+        return self.all_absent and self.census_empty
+
+    def absent(self) -> frozenset[tuple[int, float]]:
+        return frozenset(
+            (row.pid, row.birth) for row in self.rows if row.verdict in ABSENT_VERDICTS
+        )
+
+
+def load_attestation(path: Path) -> tuple[Attestation, bytes]:
+    """The validated document and its exact bytes (whose sha256 is the evidence)."""
+    raw = path.read_bytes()
+    try:
+        return Attestation.model_validate_json(raw), raw
+    except ValidationError as exc:
+        raise RefusedError(f"{path} is not a closure attestation: {exc}") from exc
 
 
 def own_checkout() -> Path:
@@ -616,16 +693,16 @@ def main(argv: list[str] | None = None, *, host: Host | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         home = canonical_home(args.home)
+        inputs = Inputs(args.service_path, args.retire_bearer, tuple(args.keep_secret))
+        registry = registry_path(home, args.registry)
+        facts = gather(home, registry, own_checkout(), host or Host.current(), inputs)
         if args.attest:
             from cli.start_intent import _stored
 
             rows = json.loads(Path(args.attest).read_text())
-            report = attest(rows, _stored(home)["AVA_MACHINE_NAME"])
+            report = attest(rows, _stored(home)["AVA_MACHINE_NAME"], facts)
             print(json.dumps(report, indent=2, sort_keys=True))
-            return 0 if report["all_absent"] else 2
-        inputs = Inputs(args.service_path, args.retire_bearer, tuple(args.keep_secret))
-        registry = registry_path(home, args.registry)
-        facts = gather(home, registry, own_checkout(), host or Host.current(), inputs)
+            return 0 if report["all_absent"] and report["census_empty"] else 2
         report = verdict(facts, inputs)
     except (RefusedError, RuntimeError, ValueError, OSError, KeyError) as exc:
         print(f"cutover inventory failed: {exc}", file=sys.stderr)

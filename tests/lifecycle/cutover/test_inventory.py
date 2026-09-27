@@ -175,6 +175,34 @@ def test_attestation_proves_absence_per_recorded_birth(
     assert code == 0 and report["all_absent"]
 
 
+def test_attestation_is_one_closure_document_with_the_home_census(
+    make_legacy: Make, capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    """A live Ava process of the home that no row records still denies closure;
+    the database-records repair accepts only a consistent, closing document."""
+    legacy = make_legacy()
+    birth = psutil.boot_time() - 60
+    rows = tmp_path / "rows.json"
+    rows.write_text(json.dumps([{"machine": "legacy-box", "pid": 12345, "birth": birth}]))
+    straggler = legacy.spawn("services.agent_host.daemon")
+    code, report, _raw = _report(legacy, capsys, "--attest", str(rows))
+    assert code == 2 and report["all_absent"] and not report["census_empty"]
+    assert [p["pid"] for p in report["processes"] if p["kind"] == "ava"] == [straggler.pid]
+    straggler.kill()
+    straggler.wait()
+
+    code, report, raw = _report(legacy, capsys, "--attest", str(rows))
+    assert code == 0 and report["census_empty"] and report["home"] == str(legacy.home)
+    document = tmp_path / "attestation.json"
+    document.write_text(raw)
+    attestation, data = inventory.load_attestation(document)
+    assert data == raw.encode()
+    assert attestation.proves_closure and attestation.absent() == {(12345, birth)}
+    document.write_text(json.dumps(json.loads(raw) | {"census_empty": False}))
+    with pytest.raises(inventory.RefusedError, match="census_empty contradicts"):
+        inventory.load_attestation(document)
+
+
 def test_non_canonical_home_is_refused(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     real = tmp_path.resolve() / "real"
     real.mkdir()

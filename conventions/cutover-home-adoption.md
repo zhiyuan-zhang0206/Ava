@@ -27,14 +27,17 @@ window: an ordinary start releases a standing maintenance hold after readiness.
    `AVA_SERVICE_PATH` from its `service_path_candidate` (virtualenv, home and
    injected directories already removed; review it), and run the adoption
    dry-run. Resolve every refusal before the window. `--attest ROWS.json`
-   attests, for this machine's rows, that recorded legacy `(pid, birth)` process
-   evidence is absent or predates the current boot.
+   prints this machine's one closure attestation for the database-records
+   repair: each of its recorded legacy `(pid, birth)` identities absent or
+   predating the current boot, plus the home census (no Ava process, no bound
+   port). Run it after the host's old stop, over the rows exported after the
+   W3 drain ([database records](cutover-db-records.md)).
 2. Disarm and stop with the old code (runbook W1 to W3). The adoption refuses
    while any Ava process of the home is alive or a data-plane port is bound.
 3. Gateway (W5): `--execute`, then the data-plane authority cutover
    (`scripts/cutover_db_authority.py`, see
    [convert an existing home](data-plane-secret-split.md#convert-an-existing-home)),
-   the database records repair, then `--start` (W8).
+   the [database records repair](cutover-db-records.md), then `--start` (W8).
 4. Each runner (W9): check out the new commit, `--execute`, then `--start`.
 5. At the go/no-go gate (W11), release each hold with the command `--start`
    prints: `ava maintenance resume --operation <holder> --acquired-at <time>`.
