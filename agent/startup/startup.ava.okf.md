@@ -8,7 +8,7 @@ tags: []
 # Agent Startup
 
 The host process starts once per runner. It initializes process-wide logging,
-schema/config checks and cluster extensions through `agent/_process_boot.py`,
+schema/config checks and cluster extensions through `agent/process_boot.py`,
 opens separate workload and control pools, builds the shared graph/checkpointer,
 and reconciles stale local running rows before serving wakes.
 

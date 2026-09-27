@@ -24,7 +24,7 @@ from psycopg_pool import AsyncConnectionPool
 from agent import state as states
 from agent.db import claim_inbound_batch
 from agent.inbound_ownership import RuntimeOwnershipLostError
-from agent.startup import _reconcile_claimed_inbounds_at_startup
+from agent.startup import reconcile_claimed_inbounds_at_startup
 from services.agent_host import settlement as settlement_mod
 from shared.agents.history.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
 from shared.context import AvaContext
@@ -131,7 +131,7 @@ async def test_boot_reconcile_after_the_abort_pass_changes_nothing(
     logged = [r for r in loguru_records if r["extra"].get("event") == "inbound_reconcile"]
 
     with bind_turn_identity(agent, incarnation=incarnation):
-        await _reconcile_claimed_inbounds_at_startup(aops_pool, saver, agent)
+        await reconcile_claimed_inbounds_at_startup(aops_pool, saver, agent)
 
     assert _statuses(db_conn, [committed, orphan]) == settled
     assert [r for r in loguru_records if r["extra"].get("event") == "inbound_reconcile"] == logged
@@ -158,7 +158,7 @@ async def test_replaced_incarnation_writes_nothing(
         bind_turn_identity(agent, incarnation=incarnation),
         pytest.raises(RuntimeOwnershipLostError),
     ):
-        await _reconcile_claimed_inbounds_at_startup(aops_pool, saver, agent)
+        await reconcile_claimed_inbounds_at_startup(aops_pool, saver, agent)
 
     assert _statuses(db_conn, [committed, orphan]) == {
         committed: "claimed",

@@ -1,12 +1,12 @@
 """One-shot startup helpers run before the graph loop begins.
 
-- `_wrap_saver_writes_with_loud_failure` — monkey-patch checkpointer aput
+- `wrap_saver_writes_with_loud_failure` — monkey-patch checkpointer aput
   / aput_writes to log every failure as `checkpoint_write_failed` before
   re-raising (LangGraph internally swallows aput failures otherwise)
-- `_wrap_saver_writes_with_nstep_interval` — throttle checkpoint writes to
+- `wrap_saver_writes_with_nstep_interval` — throttle checkpoint writes to
   every Nth super-step while keeping aput_writes in lockstep and exposing a
   final-state flush
-- `_reconcile_claimed_inbounds_at_startup` — the inbound reconcile: finalize
+- `reconcile_claimed_inbounds_at_startup` — the inbound reconcile: finalize
   any 'claimed' inbound rows the agent's last settled runtime step left
   behind (cold admission, database recovery, or a hosted abort settlement)
 - `_notify_desktop_permissions_at_startup` — surface broken Screen Recording
@@ -58,7 +58,7 @@ from agent.hooks.repair import dangling_tool_pairing_repairs
 from shared.log import logger
 
 
-def _wrap_saver_writes_with_loud_failure(
+def wrap_saver_writes_with_loud_failure(
     checkpointer: AsyncPostgresSaver, agent_id: int | None = None
 ) -> None:
     """Wrap aput / aput_writes to log every failure as a checkpoint_write_failed
@@ -202,7 +202,7 @@ def _versions_with_current_blobs(
     every referenced version stays readable by value.
 
     Delta channels never pass through this merge: a delta-bearing thread is not
-    throttled at all (see `_wrap_saver_writes_with_nstep_interval`), so every
+    throttled at all (see `wrap_saver_writes_with_nstep_interval`), so every
     version it references is persisted by upstream's own write path. A delta
     channel's non-snapshot steps deliberately have no blob row — readers
     reconstruct those values by replaying `checkpoint_writes` in chain order.
@@ -210,7 +210,7 @@ def _versions_with_current_blobs(
     return {**new_versions, **checkpoint["channel_versions"]}
 
 
-def _wrap_saver_writes_with_nstep_interval(
+def wrap_saver_writes_with_nstep_interval(
     checkpointer: AsyncPostgresSaver,
     interval: int | Callable[[], int],
 ) -> None:
@@ -365,7 +365,7 @@ def _wrap_saver_writes_with_nstep_interval(
     checkpointer._ava_nstep_flush = _flush_final  # type: ignore[attr-defined]
 
 
-async def _reconcile_claimed_inbounds_at_startup(
+async def reconcile_claimed_inbounds_at_startup(
     ops_pool: AsyncConnectionPool,
     checkpointer: AsyncPostgresSaver,
     agent_id: int,
@@ -413,7 +413,7 @@ async def _reconcile_claimed_inbounds_at_startup(
         )
 
 
-async def _repair_dangling_tool_use_at_startup(
+async def repair_dangling_tool_use_at_startup(
     graph: CompiledStateGraph[Any, Any, Any, Any],
     agent_id: int,
 ) -> None:

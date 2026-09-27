@@ -54,7 +54,7 @@ from datetime import UTC, datetime
 from functools import partial
 from typing import Protocol, cast
 
-from agent._turn_progress import (
+from agent.turn_progress import (
     admission_wait_age_s,
     turn_progress_age_s,
     turn_progress_snapshot,

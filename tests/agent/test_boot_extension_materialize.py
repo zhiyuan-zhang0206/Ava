@@ -17,7 +17,7 @@ from pathlib import Path
 import psycopg
 import pytest
 
-from agent._process_boot import land_cluster_extensions
+from agent.process_boot import land_cluster_extensions
 from shared import db, paths
 from shared import extension_registry as reg
 

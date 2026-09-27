@@ -82,7 +82,7 @@ def test_boot_loader_never_imports_a_disabled_plugin(loguru_records: list[dict[s
     _write_plugin(paths.plugins_dir(), "good", "LOADED = True\n")
     write_local({"plugins": {"codex_usage": {"enabled": False}, "good": {"enabled": True}}})
 
-    from agent._process_boot import load_process_extensions
+    from agent.process_boot import load_process_extensions
 
     load_process_extensions()  # must not raise: the disabled plugin is never imported
 
@@ -117,7 +117,7 @@ def test_boot_loader_contains_broken_plugins_and_keeps_going(
         }
     )
 
-    from agent._process_boot import load_process_extensions
+    from agent.process_boot import load_process_extensions
 
     load_process_extensions()  # must not raise
 
@@ -144,7 +144,7 @@ def test_both_loaders_agree_on_module_identity_and_relative_imports() -> None:
     )
     write_local({"plugins": {"codex_usage": {"enabled": True}}})
 
-    from agent._process_boot import load_process_extensions
+    from agent.process_boot import load_process_extensions
 
     load_process_extensions()
     boot_module = sys.modules["plugins.codex_usage.plugin"]
@@ -166,7 +166,7 @@ def test_host_boot_restart_loop_survives_a_broken_plugin(
     _write_plugin(paths.plugins_dir(), "codex_usage", "from . import refresh\n")
     write_local({"plugins": {"codex_usage": {"enabled": True}}})
 
-    from agent._process_boot import load_process_extensions
+    from agent.process_boot import load_process_extensions
 
     for _ in range(3):
         load_process_extensions()  # each call stands in for one host boot
