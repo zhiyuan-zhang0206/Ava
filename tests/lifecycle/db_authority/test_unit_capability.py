@@ -499,10 +499,13 @@ _MINI, _WIN = ("mini", "/Users/u/.ava"), ("win", "C:\\Users\\u\\.ava")
 
 
 @pytest.fixture
-def networked(born: Born, monkeypatch: pytest.MonkeyPatch) -> Born:
+def networked(
+    born: Born, monkeypatch: pytest.MonkeyPatch, set_machine_identity: Callable[..., None]
+) -> Born:
     """The gateway fixture with two remote units registered; `win` is paused."""
     _serve_on_loopback(monkeypatch, born)
-    monkeypatch.setattr(settings.general, "machine_name", "gw")
+    # At the identity source: an earlier test may already have cached a name.
+    set_machine_identity(role="gateway", name="gw")
     with born.admin() as conn:
         for machine, home in (("gw", str(born.home)), _MINI, _WIN):
             conn.execute(
@@ -578,8 +581,10 @@ def test_networked_cutover_rotates_redis_admin_and_issues_one_bundle_per_unit(
         )
 
 
-def test_a_single_box_has_no_remote_units(born: Born, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(settings.general, "machine_name", "gw")
+def test_a_single_box_has_no_remote_units(
+    born: Born, set_machine_identity: Callable[..., None]
+) -> None:
+    set_machine_identity(role="gateway", name="gw")
     with born.admin() as conn:
         conn.execute(
             "INSERT INTO machine_units (machine_name, home) VALUES ('gw', %s)", (str(born.home),)
