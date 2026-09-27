@@ -12,7 +12,7 @@ if TYPE_CHECKING:
     from langchain_core.language_models.chat_models import BaseChatModel
 from loguru import logger
 
-from shared.lm._effort import _clamp_effort
+from shared.lm.effort import clamp_effort
 from shared.lm.provider_api import (
     AttachPolicy,
     BuildContext,
@@ -63,7 +63,7 @@ def claude_extended_thinking_kwarg(
         return {"type": "enabled", "budget_tokens": budget_tokens}
     if reasoning_effort:
         levels = spec.effort_levels
-        if levels is not None and _clamp_effort(reasoning_effort, levels, target=model) != "none":
+        if levels is not None and clamp_effort(reasoning_effort, levels, target=model) != "none":
             return {"type": "enabled", "budget_tokens": _CLAUDE_EXTENDED_THINKING_DEFAULT_BUDGET}
     return None
 
@@ -87,7 +87,7 @@ def build(ctx: BuildContext) -> BaseChatModel:
     wire returns thinking text the timeline can render. Reasoning effort
     rides the `effort` field, gated per model.
     """
-    from shared.lm._anthropic_compat import ThinkingTokensChatAnthropic
+    from shared.lm.anthropic_compat import ThinkingTokensChatAnthropic
 
     # Fail fast on missing key — the same posture as every other provider
     # branch. Without it, ChatAnthropic reads ANTHROPIC_API_KEY from env
@@ -124,7 +124,7 @@ def build(ctx: BuildContext) -> BaseChatModel:
     effort = ctx.resolved_effort
     if effort and not thinking_disabled and not spec.extended_thinking_only:
         if spec.effort_levels is not None:
-            claude_kwargs["effort"] = _clamp_effort(effort, spec.effort_levels, target=ctx.model)
+            claude_kwargs["effort"] = clamp_effort(effort, spec.effort_levels, target=ctx.model)
         else:
             logger.warning(
                 f"{ctx.model} does not support reasoning effort; "

@@ -180,7 +180,7 @@ async def filter_candidates(query: str, candidates: list[Candidate]) -> list[str
 
     import asyncio
 
-    from shared.lm._effort import ReasoningEffort
+    from shared.lm.effort import ReasoningEffort
     from shared.lm.factory import build_chat_model
     from shared.lm.usage import log_usage_from_message
 

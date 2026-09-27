@@ -3,7 +3,7 @@
 
 `check_sources` loads the enabled provider plugins in-process first, so
 "already registered" and same-series supersession answer for the roster Ava
-actually runs (see `shared/lm/_plugin_providers.py`).
+actually runs (see `shared/lm/plugin_providers.py`).
 """
 
 from __future__ import annotations
@@ -27,7 +27,7 @@ from urllib3.connection import HTTPSConnection
 from urllib3.connectionpool import HTTPConnectionPool, HTTPSConnectionPool
 from urllib3.poolmanager import PoolManager
 
-from shared.lm._plugin_providers import ensure_provider_plugins_loaded
+from shared.lm.plugin_providers import ensure_provider_plugins_loaded
 from shared.lm.registry import MODELS
 from shared.paths import ava_home
 from shared.resilience import ExponentialBackoff, Policy, http_classifier, retry

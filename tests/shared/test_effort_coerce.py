@@ -1,4 +1,4 @@
-"""`shared/lm/_effort.coerce_effort` unit tests — the one public effort contract.
+"""`shared/lm/effort.coerce_effort` unit tests — the one public effort contract.
 
 The entry-point tests (test_web / test_understand) cover the same contract
 through the public APIs; these pin the shared function directly, including the
@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from shared.lm._effort import ReasoningEffort, coerce_effort
+from shared.lm.effort import ReasoningEffort, coerce_effort
 
 
 def test_coerce_effort_passes_none_through() -> None:

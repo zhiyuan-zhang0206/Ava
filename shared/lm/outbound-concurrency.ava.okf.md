@@ -1,7 +1,7 @@
 ---
 type: doc
 title: LLM Outbound Concurrency
-description: '`shared/lm/_concurrency.py` and `errors.py` — provider-call caps and the shared rate-limit signal.'
+description: '`shared/lm/concurrency.py` and `errors.py` — provider-call caps and the shared rate-limit signal.'
 tags:
 - shared
 - library

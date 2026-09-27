@@ -11,7 +11,7 @@ from unittest.mock import patch
 from agent.graph._build import _load_extensions
 from ops.spec import _plugin_services
 from shared import paths, plugins_config
-from shared.lm._plugin_providers import ensure_provider_plugins_loaded
+from shared.lm.plugin_providers import ensure_provider_plugins_loaded
 from shared.runtime_plugins import declared_plugins
 from shared.runtime_release import ReleaseRejectedError
 

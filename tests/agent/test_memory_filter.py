@@ -219,7 +219,7 @@ async def test_filter_model_is_built_with_reasoning_pinned_off(
     bound — every call timed out and recall silently injected the unfiltered
     top-3. The filter must pin reasoning off at the call site so a registry
     default change can never resurface that mode (review F1)."""
-    from shared.lm._effort import ReasoningEffort
+    from shared.lm.effort import ReasoningEffort
 
     seen: dict[str, object] = {}
 

@@ -11,7 +11,7 @@ tags:
 
 # Provider Plugin Mechanics
 
-`provider_api.py` is the shared extension contract and `_plugin_providers.py`
+`provider_api.py` is the shared extension contract and `plugin_providers.py`
 loads each enabled plugin's `provider.py` lazily, once, and under a lock.
 Discovery identity remains the sibling `plugin.py`, but provider loading does
 not import that agent-side module: gateway, labeler, and eval harness need the
@@ -32,7 +32,7 @@ retryable after the enable configuration is fixed.
   receive the same facts/price/effort validation. The derived
   `SUPPORTED_MODELS`, `MODEL_CONTEXT_WINDOW`, `MODEL_KNOWLEDGE_CUTOFF`, and
   `MODEL_IDENTITY` views rebuild in place, so existing import sites see the
-  plugin. Provider registration also invalidates `_concurrency`'s known-key
+  plugin. Provider registration also invalidates `concurrency`'s known-key
   cache.
 - Plugin rates are the runtime source for chat models. Registration removes an
   overlapping archive row from the in-memory catalog view; `rates_at` therefore
@@ -49,7 +49,7 @@ retryable after the enable configuration is fixed.
 - `build(ctx)` is a pure function of `BuildContext` (model, spec, thinking,
   resolved_effort, disable_streaming, timeout): no caller, agent, error
   history, or routing is exposed. The builder clamps `resolved_effort` with
-  `_clamp_effort`; `require_key(key_env)` fails at build time if the bootstrap
+  `clamp_effort`; `require_key(key_env)` fails at build time if the bootstrap
   environment lacks the key.
 - The spawn boundary reads a plugin key from the cluster `.env`; split runners
   receive enabled bindings' present keys through bootstrap plugin-secrets, and

@@ -15,13 +15,13 @@ import pytest
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 from shared.config import settings
-from shared.lm._plugin_providers import ensure_provider_plugins_loaded
 from shared.lm.context_budget import (
     UnknownModelWindowError,
     latest_input_tokens,
     resolve_context_budget,
 )
 from shared.lm.factory import MODEL_CONTEXT_WINDOW, SUPPORTED_MODELS
+from shared.lm.plugin_providers import ensure_provider_plugins_loaded
 
 
 @pytest.fixture(scope="module", autouse=True)

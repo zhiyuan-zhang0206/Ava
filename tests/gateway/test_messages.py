@@ -374,7 +374,7 @@ class TestMultimodalMessage:
         from dataclasses import replace
         from pathlib import Path
 
-        from shared.lm._plugin_providers import ensure_provider_plugins_loaded
+        from shared.lm.plugin_providers import ensure_provider_plugins_loaded
         from shared.lm.registry import MODELS
 
         ensure_provider_plugins_loaded()

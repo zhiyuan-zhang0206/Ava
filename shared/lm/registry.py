@@ -2,7 +2,7 @@
 default lives in one ``MODELS: dict[id, ModelSpec]`` table.
 
 Replaces the parallel per-model-id tables that had accumulated across
-``factory.py`` / ``_effort.py`` (``SUPPORTED_MODELS``,
+``factory.py`` / ``effort.py`` (``SUPPORTED_MODELS``,
 ``MODEL_CONTEXT_WINDOW``, ``MODEL_KNOWLEDGE_CUTOFF``, ``_MODEL_DEFAULT_STREAMING``,
 ``_CLAUDE_MAX_TOKENS``, ``_DEEPSEEK_MAX_TOKENS``, ``_CLAUDE_EFFORT_LEVELS``,
 ``_CLAUDE_EXTENDED_THINKING_ONLY``, ``_CLAUDE_EXTENDED_THINKING_EFFORT_LEVELS``)
@@ -55,7 +55,7 @@ from typing import Any
 from shared.lm._model_registry_types import DEFAULT_TUNING, ModelSpec, ModelTuning
 from shared.lm._model_specs_compatible import COMPATIBLE_MODELS
 from shared.lm._model_specs_primary import PRIMARY_MODELS
-from shared.lm._plugin_providers import ensure_provider_plugins_loaded
+from shared.lm.plugin_providers import ensure_provider_plugins_loaded
 
 MODELS: dict[str, ModelSpec] = {**PRIMARY_MODELS, **COMPATIBLE_MODELS}
 
@@ -387,7 +387,7 @@ def resolve_available_model(model: str) -> str:
     plugin-declared withdrawal resolves on the first call of a fresh process
     too (task #3212).
     """
-    from shared.lm._plugin_providers import ensure_provider_plugins_loaded
+    from shared.lm.plugin_providers import ensure_provider_plugins_loaded
 
     # Registry-consulting call: make it self-sufficient. MODELS starts empty
     # and is filled by the provider-plugin loader; without this, a process
