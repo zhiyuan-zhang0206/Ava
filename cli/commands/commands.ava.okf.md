@@ -20,8 +20,9 @@ no registry or plugin mechanism, the wiring is the parser.
 Most command modules follow these two naming groups:
 
 - **public** (`start.py`, `stop.py`, `status.py`, `logs.py`, `update.py`,
-  `cluster.py`, `agents/control.py`, `management/config.py`, `plugins.py`, `skill.py`, `mcp.py`, `pitr.py`,
-  `memory.py`, `management/presets.py`, `agents/pty.py`, `management/schedules.py`, `trace.py`, `migrations.py`,
+  `cluster.py`, `agents/control.py`, `management/config.py`, `extensions/plugins.py`, `extensions/skill.py`,
+  `extensions/mcp.py`, `pitr.py`, `extensions/memory.py`, `management/presets.py`, `agents/pty.py`,
+  `management/schedules.py`, `trace.py`, `migrations.py`,
   `cluster_lifecycle.py`, `agents/timeline.py`, `agents/impersonation.py`,
   `agents/impersonation_relay.py`) — reachable from the command line.
 - **internal** (`_`-prefixed) — steps `start` / `update` call, never dispatched
@@ -111,7 +112,7 @@ schema change catches the DB up on its own.
 - `cli/mcp_server.py` is the third top-level module a verb routes to
   (`ava mcp serve`) rather than a `commands/` module: it is a long-running
   stdio server, not a command that renders and exits, and it pulls in the mcp
-  SDK that no other verb needs. See [[cli/commands/packages/packages.ava.okf.md]].
+  SDK that no other verb needs. See [[cli/commands/extensions/packages.ava.okf.md]].
 - [[pitr.ava.okf.md]] defines the PITR inspection surface and the archive →
   verify → retire guard for finite migration rollback snapshots.
 - [[ownership_preflight.ava.okf.md]] names the warning-only ownership repair

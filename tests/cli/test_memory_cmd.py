@@ -9,7 +9,7 @@ import httpx
 import pytest
 
 from cli import main as _main
-from cli.commands import memory as _memory
+from cli.commands.extensions import memory as _memory
 
 
 class _FakeResp:

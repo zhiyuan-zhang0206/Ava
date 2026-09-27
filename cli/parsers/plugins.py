@@ -12,7 +12,7 @@ import argparse
 
 def _duration(value: str) -> str:
     """Argparse type for `--check-every`: validate the duration before any command runs."""
-    from cli.commands.packages_refresh import parse_duration
+    from cli.commands.extensions.packages_refresh import parse_duration
 
     try:
         parse_duration(value)
@@ -49,7 +49,7 @@ def _h_plugins_inspect(args: argparse.Namespace) -> int:
     # Imported from its own module rather than the `cli.commands` package: the
     # catalog reaches into the agent layer, and routing it through the package
     # export would pull `agent` into every other CLI verb's import.
-    from cli.commands.plugins_inspect import cmd_plugins_inspect
+    from cli.commands.extensions.plugins_inspect import cmd_plugins_inspect
 
     return cmd_plugins_inspect(args.name)
 

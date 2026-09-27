@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Package Commands (plugins / skill / mcp / packages)
-description: The operator surface for installing external skills, Claude Code plugins, and MCP servers on one machine — `cli/commands/plugins.py`, `skill.py`, `mcp.py`, `packages.py` (update policy + channels) — plus `ava mcp serve` (`cli/mcp_server.py`), which points the other way and exposes this cluster AS an MCP server. Installs are always local to the host the command runs on.
+description: The operator surface for installing external skills, Claude Code plugins, and MCP servers on one machine — `cli/commands/extensions/plugins.py`, `skill.py`, `mcp.py`, `packages.py` (update policy + channels) — plus `ava mcp serve` (`cli/mcp_server.py`), which points the other way and exposes this cluster AS an MCP server. Installs are always local to the host the command runs on.
 tags:
 - cli
 - tool

@@ -28,14 +28,14 @@ Two Ava-side notes for authors:
 - Ava's own repo-shipped skills are additionally held to an 80-unit `description` ceiling by `scripts/lint_skill_descriptions.py`. That is a house prompt-budget rule at merge time, not a load-time constraint on installed skills (the standard's cap is 1024 characters).
 
 ## Install Layouts
-`ava skill install <git-url-or-path> [--path SUBDIR] [--ref REF]` reads three source shapes (`cli/commands/_skill_package.py`), tried in order:
+`ava skill install <git-url-or-path> [--path SUBDIR] [--ref REF]` reads three source shapes (`cli/commands/extensions/skill_package.py`), tried in order:
 1. **bare skill** — SKILL.md at the source root; the tree is one package.
 2. **collection root** — `skills/`, then `.claude/skills/`, then `.agents/skills/`; first one that exists and holds a skill wins (a repo carrying two usually carries the same skills twice).
 3. **bare collection** — the root's visible child dirs are skill packages. Hidden dirs are skipped, so `.git` / `.github` never read as one.
 
 A tree matching none of the three is an error, not a no-op install. Each discovered package installs whole — sub-skills and bundled files included — under its frontmatter name, one registry entry each.
 
-Every install runs **two gates over all discovered packages** (`cli/commands/_skill_package.py`): destination collisions (fail fast) and a **security scan** (`shared.packages.skills.skill_scan.scan_package`) — critical findings block the install unless `--accept-risk` is passed; non-critical findings render as a report for the operator to read. The scan result is recorded in the registry entry (`scanned_at`), and `ava skill trust` promotion is a human judgment layered on top of a clean scan, not a substitute for reading it, so `ava skill enable` / `disable` stays per-skill. Destinations are pre-flighted before the first copy, so a collision aborts the whole install rather than half-populating the load dir. Unlike the runtime scan (which skip-warns past a broken third-party skill so one bad file cannot crash unrelated agents at system-prompt build), an explicit install refuses a malformed SKILL.md — the user is present to hear about it. A local path is read in place, never moved.
+Every install runs **two gates over all discovered packages** (`cli/commands/extensions/skill_package.py`): destination collisions (fail fast) and a **security scan** (`shared.packages.skills.skill_scan.scan_package`) — critical findings block the install unless `--accept-risk` is passed; non-critical findings render as a report for the operator to read. The scan result is recorded in the registry entry (`scanned_at`), and `ava skill trust` promotion is a human judgment layered on top of a clean scan, not a substitute for reading it, so `ava skill enable` / `disable` stays per-skill. Destinations are pre-flighted before the first copy, so a collision aborts the whole install rather than half-populating the load dir. Unlike the runtime scan (which skip-warns past a broken third-party skill so one bad file cannot crash unrelated agents at system-prompt build), an explicit install refuses a malformed SKILL.md — the user is present to hear about it. A local path is read in place, never moved.
 
 `ava plugins install` stays the entry point for a Claude Code **plugin** bundle (`.claude-plugin/plugin.json` with agents / commands / `.mcp.json`, of which skills are one part); its bare-skill case shares this module's copy + registry write.
 
@@ -45,8 +45,8 @@ Every install runs **two gates over all discovered packages** (`cli/commands/_sk
 - `shared/install_registry.py` — the per-machine origin/enabled registry each installed package lands in
 
 ## Entry Points
-- `cli/commands/_skill_package.py` — source-layout discovery + copy/register
-- `cli/commands/skill.py` — `ava skill install / enable / disable / register`
+- `cli/commands/extensions/skill_package.py` — source-layout discovery + copy/register
+- `cli/commands/extensions/skill.py` — `ava skill install / enable / disable / register`
 - `ava/skills.py` — `_parse_frontmatter` (required-field gate over the shared parser), `_mount` (folder tree → namespace tree)
 
 ## Notes

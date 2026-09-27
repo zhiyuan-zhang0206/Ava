@@ -147,7 +147,7 @@ capability decision lives in the installing agent, not a central table.
 
 ## Still open: hooks-only plugin bundles
 
-`cli/commands/_claude_code_plugin.py` materializes whatever a Claude Code plugin
+`cli/commands/extensions/_claude_code_plugin.py` materializes whatever a Claude Code plugin
 bundles — `skills/` copied verbatim, `agents/` into a generated orchestrator skill,
 `commands/` into composer `/`-commands, a root `.mcp.json` into the overlay MCP
 source — and **refuses a plugin that bundles none of those**, i.e. a hooks-only

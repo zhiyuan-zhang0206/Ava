@@ -73,11 +73,7 @@ from cli.commands.cluster_lifecycle import (
     cmd_cluster_ls,
 )
 from cli.commands.ensure_db_role import cmd_ensure_db_role
-from cli.commands.logs import (
-    cmd_logs_retention,
-    cmd_logs_rotate,
-)
-from cli.commands.mcp import (
+from cli.commands.extensions.mcp import (
     cmd_mcp_add,
     cmd_mcp_disable,
     cmd_mcp_enable,
@@ -87,11 +83,34 @@ from cli.commands.mcp import (
     cmd_mcp_uninstall,
     cmd_mcp_upgrade,
 )
-from cli.commands.packages import (
+from cli.commands.extensions.packages import (
     cmd_packages_policy,
     cmd_packages_refresh,
     cmd_packages_rollback,
     cmd_packages_status,
+)
+from cli.commands.extensions.plugins import (
+    cmd_plugins_disable,
+    cmd_plugins_enable,
+    cmd_plugins_install,
+    cmd_plugins_installed,
+    cmd_plugins_uninstall,
+    cmd_plugins_update,
+    cmd_plugins_upgrade,
+)
+from cli.commands.extensions.skill import (
+    cmd_skill_disable,
+    cmd_skill_enable,
+    cmd_skill_install,
+    cmd_skill_register,
+    cmd_skill_scan,
+    cmd_skill_trust,
+    cmd_skill_update,
+    cmd_skill_upgrade,
+)
+from cli.commands.logs import (
+    cmd_logs_retention,
+    cmd_logs_rotate,
 )
 from cli.commands.pitr import (
     cmd_pitr_drill,
@@ -105,25 +124,6 @@ from cli.commands.pitr import (
     cmd_pitr_snapshot_archive,
     cmd_pitr_snapshot_retire,
     cmd_pitr_snapshot_verify,
-)
-from cli.commands.plugins import (
-    cmd_plugins_disable,
-    cmd_plugins_enable,
-    cmd_plugins_install,
-    cmd_plugins_installed,
-    cmd_plugins_uninstall,
-    cmd_plugins_update,
-    cmd_plugins_upgrade,
-)
-from cli.commands.skill import (
-    cmd_skill_disable,
-    cmd_skill_enable,
-    cmd_skill_install,
-    cmd_skill_register,
-    cmd_skill_scan,
-    cmd_skill_trust,
-    cmd_skill_update,
-    cmd_skill_upgrade,
 )
 from cli.commands.start import cmd_start
 from cli.commands.status import cmd_status
