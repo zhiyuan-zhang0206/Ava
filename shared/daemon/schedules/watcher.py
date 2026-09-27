@@ -32,6 +32,7 @@ __all__ = [
     "build_cron_script",
     "next_fire",
     "normalize_when",
+    "parse_timeout",
     "previous_fire",
     "session_deadline",
     "validate_cron",
@@ -192,7 +193,7 @@ def normalize_when(when: _dt.datetime | _dt.timedelta | str) -> _dt.datetime:
 _DURATION_RE = _re.compile(r"^(\d+)([smhd])$")
 
 
-def _parse_timeout(timeout: float | _dt.timedelta | str) -> float:
+def parse_timeout(timeout: float | _dt.timedelta | str) -> float:
     """Coerce a timeout to a positive number of seconds.
 
     Accepts a number of seconds, a `timedelta`, or a `"<n>{s,m,h,d}"` duration

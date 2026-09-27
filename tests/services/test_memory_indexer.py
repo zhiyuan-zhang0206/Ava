@@ -43,7 +43,7 @@ from services.memory_indexer.embeddings.base import EmbeddingAPIError
 from shared import daemon_health
 from shared.config import settings
 from shared.daemon_health import Liveness
-from shared.resilience import _MAX_RETRY_AFTER_RESPECT_S, ExponentialBackoff
+from shared.resilience import MAX_RETRY_AFTER_RESPECT_S, ExponentialBackoff
 
 _DIM = 8
 _FP = "test:gemini:dim=8"
@@ -706,7 +706,7 @@ def test_liveness_timeout_covers_worst_embed_batch(monkeypatch: pytest.MonkeyPat
         policy = gemini._EMBED_POLICY
         worst_batch = policy.max_attempts * settings.services.memory_embed_timeout_seconds
         worst_batch += sum(
-            max(policy.backoff(attempt), _MAX_RETRY_AFTER_RESPECT_S) + 2 * policy.jitter_span
+            max(policy.backoff(attempt), MAX_RETRY_AFTER_RESPECT_S) + 2 * policy.jitter_span
             for attempt in range(policy.max_attempts - 1)
         )
         provider_budget = factory.worst_case_batch_seconds()
