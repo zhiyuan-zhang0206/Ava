@@ -175,6 +175,46 @@ async def _restore_pooled_session_async(conn: psycopg.AsyncConnection) -> None:
 # this long pass their own — see `pool`'s docstring.
 DEFAULT_POOL_TIMEOUT_S = 30.0
 
+# The administrator URL this process adopted explicitly (`adopt_administrator`);
+# in-process only, so no child inherits it.
+_administrator_url: str | None = None
+
+
+def adopt_administrator(url: str) -> None:
+    """Make `url`, the OS-user administrator over the home's owner-only socket,
+    this process's database authority for `connect()` / `pool()`.
+
+    Only the finite release executor adopts it: it runs the candidate image,
+    which the boot pass never admits to a write generation, and it fences the
+    generation it would otherwise dial. `url` is password-free (`peer`) and
+    names a socket directory; its own startup options (the executor acts as the
+    gateway group through `-c role=...`) survive the statement ceiling. A child
+    process runs its own boot pass and never inherits this authority.
+
+    Raises:
+        ValueError: `url` carries a password or does not name a socket directory.
+    """
+    global _administrator_url  # noqa: PLW0603 — per-process explicit authority
+    from psycopg.conninfo import conninfo_to_dict
+
+    parts = conninfo_to_dict(url)
+    host = parts.get("host")
+    if parts.get("password") or not isinstance(host, str) or not host.startswith("/"):
+        raise ValueError("administrator authority is a password-free owner-only socket URL")
+    _administrator_url = url
+    settings.data_plane.db_url = url
+
+
+def _statement_kwargs(url: str) -> dict[str, Any]:
+    """The statement ceiling, after any startup options `url` carries itself: a
+    psycopg keyword argument would otherwise replace the URL's `options`."""
+    from psycopg.conninfo import conninfo_to_dict
+
+    own = conninfo_to_dict(url).get("options")
+    if not own:
+        return PG_STATEMENT_TIMEOUT_KWARGS
+    return {**PG_STATEMENT_TIMEOUT_KWARGS, "options": f"{own} {PG_STATEMENT_TIMEOUT_OPTIONS}"}
+
 
 def _guard_db_url(url: str) -> str:
     """Refuse the unanchored sentinel and an undelivered credential-free endpoint;
@@ -184,7 +224,8 @@ def _guard_db_url(url: str) -> str:
     Raises:
         UnanchoredHomeError: url is the unanchored sentinel.
         NoDatabaseAuthorityError: this home keeps a write-generation ledger, no
-            login was delivered to this process, and url carries no password.
+            login was delivered to this process, url carries no password, and it
+            is not the administrator URL this process adopted.
     """
     if url == UNANCHORED_DB_SENTINEL:
         raise UnanchoredHomeError(
@@ -199,7 +240,7 @@ def _guard_db_url(url: str) -> str:
     from shared import dotenv_boot
 
     refusal = dotenv_boot.db_authority_refusal()
-    if refusal is not None:
+    if refusal is not None and url != _administrator_url:
         try:
             password = urlsplit(url).password
         except ValueError:
@@ -336,15 +377,15 @@ def connect(
     from shared.config.data_plane import sslmode_for_url
 
     dp = settings.data_plane
-    url = dp.db_url if not direct else direct_db_url()
+    url = _guard_db_url(dp.db_url if not direct else direct_db_url())
     sslmode = sslmode_for_url(url, dp.db_sslmode)
     conn = psycopg.connect(
-        _guard_db_url(url),
+        url,
         autocommit=autocommit,
         prepare_threshold=None,
         # sslmode only when the URL is silent (config is the fallback, never an override).
         **({"sslmode": sslmode} if sslmode else {}),
-        **({} if unbounded else PG_STATEMENT_TIMEOUT_KWARGS),
+        **({} if unbounded else _statement_kwargs(url)),
     )
     if not direct and not unbounded:
         # Pooled dial: PgBouncer dropped the `options` startup parameter above
@@ -405,7 +446,7 @@ def pool(
     from shared.config.data_plane import resolved_pool_size, sslmode_for_url
 
     dp = settings.data_plane
-    url = dp.db_url if not direct else direct_db_url()
+    url = _guard_db_url(dp.db_url if not direct else direct_db_url())
     min_size, max_size = resolved_pool_size(
         min_size, max_size, dp.db_pool_min_size, dp.db_pool_max_size
     )
@@ -413,14 +454,14 @@ def pool(
     connection_kwargs: dict[str, Any] = {
         "prepare_threshold": None,
         **({"sslmode": sslmode} if sslmode else {}),
-        **PG_STATEMENT_TIMEOUT_KWARGS,
+        **_statement_kwargs(url),
     }
     if autocommit:
         connection_kwargs["autocommit"] = True
     if row_factory is not None:
         connection_kwargs["row_factory"] = row_factory
     return ConnectionPool(
-        _guard_db_url(url),
+        url,
         min_size=min_size,
         max_size=max_size,
         open=True,

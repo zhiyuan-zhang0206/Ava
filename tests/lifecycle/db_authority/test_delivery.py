@@ -240,3 +240,45 @@ def test_a_home_without_a_ledger_is_untouched(boot: Path) -> None:
     assert os.environ["AVA_DB_URL"] == _ENDPOINT
     assert dotenv_boot.db_authority_refusal() is None
     assert _guard_db_url(_ENDPOINT) == _ENDPOINT
+
+
+# ── the finite executor's explicit administrator authority ───────────────────
+
+_ADMIN = "postgresql://osuser@/ava?host=/tmp/ava-pg-x&port=5433&options=-c%20role%3Dava_gateway"
+
+
+def test_only_the_adopted_administrator_url_passes_a_recorded_refusal(
+    boot: Path, seeded: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from shared import db_connections
+    from shared.config import settings
+
+    del seeded
+    _intent(boot, tmp_path / "candidate-image")
+    dotenv_boot._enforce_cluster_env_authority()
+    assert dotenv_boot.db_authority_refusal() is not None
+    monkeypatch.setattr(db_connections, "_administrator_url", None)
+    monkeypatch.setattr(settings.data_plane, "db_url", settings.data_plane.db_url)
+    with pytest.raises(NoDatabaseAuthorityError):
+        _guard_db_url(_ADMIN)
+    db_connections.adopt_administrator(_ADMIN)
+    assert settings.data_plane.db_url == _ADMIN
+    assert _guard_db_url(_ADMIN) == _ADMIN
+    with pytest.raises(NoDatabaseAuthorityError, match="credential-free"):
+        _guard_db_url(_ENDPOINT)
+    for refused in (
+        "postgresql://osuser:pw@/ava?host=/tmp/ava-pg-x&port=5433",
+        "postgresql://osuser@127.0.0.1:5433/ava",
+    ):
+        with pytest.raises(ValueError, match="password-free owner-only socket"):
+            db_connections.adopt_administrator(refused)
+
+
+def test_a_urls_own_startup_options_survive_the_statement_ceiling() -> None:
+    from shared.db_connections import PG_STATEMENT_TIMEOUT_KWARGS, _statement_kwargs
+
+    assert _statement_kwargs(_ENDPOINT) is PG_STATEMENT_TIMEOUT_KWARGS
+    assert _statement_kwargs(_ADMIN)["options"] == (
+        "-c role=ava_gateway -c statement_timeout=60000"
+    )
+    assert _statement_kwargs(_ADMIN)["connect_timeout"] == 5

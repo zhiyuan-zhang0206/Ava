@@ -46,6 +46,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from typing import Literal
 
 import psutil
 
@@ -63,6 +64,7 @@ from shared.cluster.authority import POOLER_ADMIN
 from shared.machine import reachable_host
 from shared.paths import ava_home
 from shared.pg_tools import brew_prefix, is_macos
+from shared.platform import LockTimeoutError
 from shared.proc import process_alive
 
 # Transaction-pooling defaults. max_client_conn
@@ -549,21 +551,36 @@ def pgbouncer_listener_reachable(listen_port: int, admin_password: str) -> bool:
     return _admin_reachable(listen_port, admin_password)
 
 
-def stop_pgbouncer(*, force: bool = False) -> None:
+PoolerStop = Literal["not-running", "stopped", "forced"]
+
+
+def stop_pgbouncer(*, force: bool = False) -> PoolerStop:
     """Stop this home's captured pooler; a previous drain is only waited on.
 
-    `force` escalates a pooler that ignored the safe shutdown to SIGKILL; only a
-    caller that owns an already-quiescent, already-revoked data plane passes it.
+    `force` escalates a pooler whose safe shutdown did not finish within its
+    bound to SIGKILL; only a caller that owns an already-quiescent,
+    already-revoked data plane passes it. Returns how the stop ended: no pooler
+    of this home was running, the safe shutdown completed, or force escalated.
     """
     pid = _running_pid()
     if pid is None:
-        return
+        return "not-running"
     owner = ownership.pooler(ini_path(), pidfile_path())
     if owner is None:
-        return
+        return "not-running"
     custodian = OwnedPooler.from_config(owner, ini_path())
-    if not custodian.stop(deadline=time.monotonic() + 5.0, force=force):
-        raise RuntimeError("PgBouncer stop incomplete; custody retained")
+    deadline = time.monotonic() + 5.0
+    try:
+        if custodian.stop(deadline=deadline):
+            return "stopped"
+    except (TimeoutError, LockTimeoutError):
+        if not force:
+            raise
+    # The safe shutdown's bound is spent, so a forced stop goes straight to its
+    # own settle wait; the recorded stop intent is never signalled twice.
+    if force and custodian.stop(deadline=deadline, force=True):
+        return "forced"
+    raise RuntimeError("PgBouncer stop incomplete; custody retained")
 
 
 def _ensure_pgbouncer_step(ctx: ConvergeCtx) -> None:

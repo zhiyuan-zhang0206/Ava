@@ -464,3 +464,23 @@ def test_prune_retry_after_crash_before_recording_the_drop(
     # The roles are already gone; the retry only records the completed effect.
     assert result.dropped == () and result.retained == ()
     assert require_ledger(cluster.home).revoked[0].dropped
+
+
+def test_stale_sessions_is_the_closure_census_without_termination(
+    authority_postgres: AuthorityCluster,
+) -> None:
+    from shared.cluster.authority import stale_sessions
+
+    cluster = authority_postgres
+    authority = _operation()
+    with cluster.connect_class("runner", autocommit=True) as held, cluster.admin() as conn:
+        assert stale_sessions(conn, cluster.home) == ()
+        revoke(conn, cluster.home, authority)
+        survivors = stale_sessions(conn, cluster.home)
+        assert [session.role for session in survivors] == ["ava_g0_runner"]
+        # Observation only: the stale session is still there to close.
+        assert stale_sessions(conn, cluster.home) == survivors
+        close_revoked(conn, cluster.home, authority)
+        assert stale_sessions(conn, cluster.home) == ()
+        with pytest.raises(psycopg.OperationalError):
+            held.execute("SELECT 1")

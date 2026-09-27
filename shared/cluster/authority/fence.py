@@ -124,6 +124,16 @@ def prove_closure(
     return ClosureEvidence(roles=names, terminated=terminated, rounds=attempt)
 
 
+def stale_sessions(conn: Conn, home: Path) -> tuple[SurvivingSession, ...]:
+    """Read-only census of every session a fence of ``home`` would close.
+
+    The same census ``prove_closure`` ends on, without terminating anything:
+    after a rollout it must be empty while the admitted generation serves.
+    """
+    require_admin(conn)
+    return _census(conn, fenced_roles(conn, home))
+
+
 def revoke(conn: Conn, home: Path, authority: OperationAuthority) -> SweepResult:
     """Record the unrevoked generation as revoking, then sweep it (retry-safe)."""
     require_admin(conn)

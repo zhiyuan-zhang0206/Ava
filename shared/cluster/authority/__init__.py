@@ -55,6 +55,9 @@ from shared.cluster.authority.fence import (
 from shared.cluster.authority.fence import (
     revoke as revoke,
 )
+from shared.cluster.authority.fence import (
+    stale_sessions as stale_sessions,
+)
 from shared.cluster.authority.groups import (
     VacuumSkippedError as VacuumSkippedError,
 )
