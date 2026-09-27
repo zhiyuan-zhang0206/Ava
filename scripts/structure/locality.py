@@ -17,6 +17,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import cast
 
+from scripts.structure import path_imports
+
 SECTIONS = ("private_imports", "owner_bypasses")
 _BASELINE_PATH = "scripts/structure/baseline.json"
 # White-box tests reach into privates by design; only test *directories* are
@@ -351,6 +353,8 @@ def _new_site_message(kind: str, target: str) -> str:
             "public name through the owner's package door (its __init__.py), or promote the "
             "name into the owner's contract deliberately (export it / drop the underscore)"
         )
+    if kind == path_imports.SECTION:
+        return f"imports by file path (`{target}`) — {path_imports.FIX}"
     return f"bypasses the single owner of `{target}` — {DECISIONS[target].fix}"
 
 
@@ -362,12 +366,15 @@ def site_errors(
     repo_root: Path,
     renames: dict[str, str] | None = None,
 ) -> list[str]:
-    """Frozen counts must match reality: growth is a violation, shrinkage a stale entry."""
+    """Frozen counts must match reality: growth is a violation, shrinkage a stale entry.
+
+    Covers every measured section: the two locality sections and `path_imports`.
+    """
     sources = {new: old for old, new in (renames or {}).items()}
     errors: list[str] = []
-    for kind in SECTIONS:
-        errors.extend(_growth_errors(kind, measured[kind], baseline[kind], sources))
-        errors.extend(_stale_errors(kind, measured[kind], baseline[kind], scanned, repo_root))
+    for kind, sites in measured.items():
+        errors.extend(_growth_errors(kind, sites, baseline[kind], sources))
+        errors.extend(_stale_errors(kind, sites, baseline[kind], scanned, repo_root))
     return errors
 
 
