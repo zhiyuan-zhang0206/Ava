@@ -337,10 +337,11 @@ def test_setup_env_keys_covers_pop_as_well_as_assignment() -> None:
 
 
 def test_setup_env_keys_matches_the_real_fixtures_body() -> None:
-    # Ties the primitive to the file it guards: the eleven keys the real body
+    # Ties the primitive to the file it guards: the twelve keys the real body
     # assigns (it was thirteen until the hibernation chain deletion dropped
-    # AVA_HIBERNATE_ENABLED — Task #1976 phase 2 — and twelve until the
-    # always-authenticated data plane retired AVA_RUNNER_DB_PASSWORD).
+    # AVA_HIBERNATE_ENABLED — Task #1976 phase 2 — twelve until the
+    # always-authenticated data plane retired AVA_RUNNER_DB_PASSWORD, and eleven
+    # until the direct-process stack started with an empty AVA_CLUSTER_SECRET).
     # The count is what keeps the `literal == declared` assertion below from passing
     # vacuously (both empty), so it tracks the fixture body — update it when the body
     # gains or drops an assignment, do not relax it.
@@ -348,7 +349,7 @@ def test_setup_env_keys_matches_the_real_fixtures_body() -> None:
         _E2E_CONFTEST.read_text(encoding="utf-8"), "_e2e_process_env"
     )
     assert dynamic == frozenset()
-    assert len(literal) == 11
+    assert len(literal) == 12
     tree = ast.parse(_E2E_CONFTEST.read_text(encoding="utf-8"))
     declared = {
         e.value
