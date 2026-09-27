@@ -30,7 +30,12 @@ first). Both launch paths are live: `spawn_claude.py --impersonate-self` takes
 the same inline `--brief`; its relay starts automatically with the session (the
 bundled `ava-relay` plugin, resident mode — no `timeout_ms` arming; the request
 output names the credential stub and the manual fallback). `--no-relay-resident`
-restores the executor-armed flow.
+restores the executor-armed flow. `spawn_dsh.py --impersonate-self` launches
+DeepSeek Harness the same way (takeover-only): it boots dsh's `headless`
+profile with the bundled `ava-relay-dsh` plugin, which opens one persistent
+session with the launch message and starts the relay from the stub the request
+writes — nothing to arm. dsh needs `node` and `dsh` on PATH and its own model
+credential; see the [host setup](../../../../conventions/agent-impersonation-hosts.md#deepseek-harness-dsh).
 
 The two states, and nothing else:
 

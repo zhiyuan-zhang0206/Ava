@@ -14,7 +14,11 @@ tags:
 Each agent allocates increasing integers starting at zero, through a database
 counter and allocation trigger, including when an older client inserts a row.
 The session `name` and free `executor_name` are separate from the CLI's observed
-process metadata (PID, name, executable, birth time and ancestors). `relay_provider`
+process metadata (PID, name, executable, birth time and ancestors). New CLI
+requests also record `invoked_python`, preserving the virtualenv path used to
+invoke the CLI; a request rejects a non-string or empty value. Renewal
+reminders use that path rather than assuming source is
+under the unit home; older sessions retain the machine-home fallback. `relay_provider`
 selects transport; no name or process observation proves a provider's identity.
 The former UUID remains a private compatibility reference for existing leases,
 checkpoint receipts and plugin journals. Public commands and file paths
@@ -32,7 +36,10 @@ native return, renewal, and operator closure.
 `shared/agents/impersonation/relay.py` owns relay credential provisioning and
 re-provisioning, relay reads, heartbeats, failure stamps, and aborting a lease
 when a component dies. The package door exposes this surface to callers through
-`shared.agents.impersonation`.
+`shared.agents.impersonation`. Providers: `codex` relays are spawned by the
+accepting runtime into the owning app server; `claude` and `dsh` relays run
+inside the controller session (`SESSION_RELAY_PROVIDERS`), so the request mints
+their credential and the activation gate only waits for a heartbeat.
 
 ## Bounded delivery
 

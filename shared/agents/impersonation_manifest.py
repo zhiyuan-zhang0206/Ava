@@ -558,8 +558,12 @@ def _source_actor(source: str) -> int | None:
     return int(raw)
 
 
+class ManifestNotSealedError(RuntimeError):
+    """A participant is open or failed; no immutable union may be declared."""
+
+
 def freeze_manifest(conn: psycopg.Connection, lease: dict[str, Any]) -> None:
-    """Freeze the sealed local and central union immediately before release."""
+    """Freeze the sealed union at release or during terminal-session replay."""
     if not is_protocol_v1(lease):
         return
     lease_id = lease["id"]
@@ -569,9 +573,9 @@ def freeze_manifest(conn: psycopg.Connection, lease: dict[str, Any]) -> None:
     ).fetchall()
     states = {_locked_receipt_state(conn, lease_id, key) for (key,) in source_keys}
     if "failed" in states:
-        raise RuntimeError("Impersonation event capture failed")
+        raise ManifestNotSealedError("Impersonation event capture failed")
     if "open" in states:
-        raise RuntimeError("Impersonation event participants have not sealed")
+        raise ManifestNotSealedError("Impersonation event participants have not sealed")
     items = frozen_items(conn, str(lease["id"]))
     digest = _aggregate_digest(items)
     floor = lease["activated_at"]

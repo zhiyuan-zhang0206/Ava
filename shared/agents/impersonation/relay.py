@@ -207,7 +207,9 @@ def abort_lease(
     bound relay stopped heartbeating"). The lease goes terminal ("expired")
     with ``rejection_reason`` recorded as ``aborted: <detail>`` — the request's
     own ``reason`` (its stated purpose) is preserved, and the resume chain
-    reads the prefixed marker back via ``aborted_detail``. A non-automatic
+    reads the prefixed marker back via ``aborted_detail``. Like expiry, a
+    protocol-v1 lease closes manifest admission so terminal replay can freeze
+    its sealed receipts. A non-automatic
     active lease also gets the legacy end note (the automatic note is delivered
     by the resume chain), and pending renewal reminders are dismissed.
     Idempotent: an already-terminal lease returns None. Every writer's lease
@@ -215,6 +217,7 @@ def abort_lease(
     trigger, so an abort that loses the race is a no-op here.
     """
     from shared.agents.impersonation import _wake
+    from shared.agents.impersonation_manifest import close_manifest_admission, is_protocol_v1
 
     detail = detail.strip()
     if not detail:
@@ -227,6 +230,8 @@ def abort_lease(
             raise ImpersonationError("Lease abort requires the native-held lease")
         if lease["status"] not in OPEN:
             return None
+        if is_protocol_v1(lease):
+            close_manifest_admission(conn, lease_id)
         inbound_id = None
         if lease["status"] == "active" and not lease["automatic"]:
             inbound_id = insert_handoff(

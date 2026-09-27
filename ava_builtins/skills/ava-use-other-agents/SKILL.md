@@ -1,9 +1,9 @@
 ---
-name: ava-use-claude-code-and-codex
-description: Drives Claude Code or Codex CLI as supervised long-running coding agents. Use when outsourcing multi-step implementation or review, choosing between the two CLIs, resuming a coding session, monitoring delegated coding work, or launching either CLI to impersonate the launching Ava agent.
+name: ava-use-other-agents
+description: Drives other coding agents — Claude Code or Codex CLI as supervised long-running workers, and Codex, Claude Code or DeepSeek Harness as a takeover that impersonates the launching Ava agent. Use when outsourcing multi-step implementation or review, choosing between the tools, resuming a coding session, monitoring delegated coding work, or launching a takeover.
 ---
 
-# Use Claude Code and Codex
+# Use other agents
 
 Both `claude` (Anthropic) and `codex` (OpenAI) are coding-agent CLIs you can hand
 a task to and let plan + execute. Treat either as "another agent". A session
@@ -283,9 +283,9 @@ a takeover reads no files. The workspace must not carry a live canonical
 generation (`--cancel-generation <generation>` first). The takeover generation
 is recorded without files or supervisor — its coding session alone is its
 liveness signal — so do not start `watch_work.py` or any other file watcher
-for it. The same command works with `spawn_claude.py` — its relay starts with
-the session via the bundled `ava-relay` plugin (resident; `--no-relay-resident`
-restores the executor-armed flow).
+for it. The same command works with `spawn_claude.py` (relay via the bundled
+`ava-relay` plugin; `--no-relay-resident` restores the executor-armed flow) and
+`spawn_dsh.py` (DeepSeek Harness, takeover-only; relay via `ava-relay-dsh`).
 
 The full procedure is [Let the coding agent take over your identity](reference/impersonate_self.md);
 the takeover process's own operating manual is the `impersonator-guide` skill.

@@ -10,9 +10,9 @@ as they arrive and ACKs by id.
 The relay is part of the takeover, not a manual step. The request records the
 relay endpoint on the lease row (`--provider`, `--thread-id`, `--codex-remote`).
 For codex, the accepting runtime provisions the relay's scoped credential,
-spawns the relay at activation and supervises it; for claude, the relay runs
-inside the controller session (see below) and the activation gate verifies its
-heartbeat. In both cases a relay that is not live when the takeover would
+spawns the relay at activation and supervises it; for claude and dsh, the relay
+runs inside the controller session (see below) and the activation gate verifies
+its heartbeat. In both cases a relay that is not live when the takeover would
 activate rolls the acceptance back loudly: the lease ends `rejected` with the
 reason, the native agent receives a system note and keeps running.
 
@@ -46,7 +46,7 @@ value, or supervisor-held credential to manage. The old
 `shell_snapshot` settings and presence check) is obsolete: a stale or unrelated
 process gets a classified refusal (no-anchor / anchor-dead / chain-mismatch)
 instead of a credential error. A control-orphaned lease stays parked until the
-native side ends it (restart/stop) or its TTL expires. The attestation anchor set is the supported controller ends — currently `codex` and `claude` (`shared/agents/impersonation/_impersonation_store.verify_caller`); claude's native install layout (`<install>/claude/versions/<version>`, whose process name is the version) is recognized as its controller. Extending support to a new controller CLI means extending that set and this list together.
+native side ends it (restart/stop) or its TTL expires. The attestation anchor set is the supported controller ends — currently `codex`, `claude` and `dsh` (`shared/agents/impersonation/_impersonation_store.verify_caller`); claude's native install layout (`<install>/claude/versions/<version>`, whose process name is the version) is recognized as its controller, and dsh — a Node program — is recognized as a `node` process whose script (recorded by `shared/proc_tree.process_metadata` for Node processes) is the `dsh` launcher or `@deepseek-ai/dsh/lib/bin.js`. Extending support to a new controller CLI means extending that set and this list together.
 
 ### One app server for TUI and relay
 
@@ -168,6 +168,47 @@ MCP Channels are another supported push mechanism, but require startup opt-in
 and custom-server preview configuration; this relay uses Monitor directly. See
 the [channel protocol](https://code.claude.com/docs/en/channels-reference).
 
+## DeepSeek Harness (dsh)
+
+[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (`npm
+install -g @deepseek-ai/dsh`; verified with 0.1.5-rc.3) has no external input
+channel into a live session, so its relay is a Cordis plugin inside the dsh
+process: `ava_builtins/skills/ava-use-other-agents/reference/ava-relay-dsh/ava-relay.mjs`
+(plain ESM on Node built-ins; dsh developer-preview APIs may change). Load it
+by absolute path with a patch file, either per launch (`dsh --profile web
+--patch ava-relay.patch.yml`; launcher flags precede the app's own) or for
+every profile in `$DSH_HOME/cordis.patch.yml`:
+
+```yaml
+- insert:
+    - id: ava-relay
+      name: /path/to/checkout/ava_builtins/skills/ava-use-other-agents/reference/ava-relay-dsh/ava-relay.mjs
+```
+
+The plugin exports `DSH_AVA_RELAY_STUB` — a per-session path in a private
+directory it owns — to every model shell command. `ava impersonate request
+--provider dsh`, run from that shell tool, refuses before creating a lease when
+the variable is missing, and otherwise writes the scoped relay credential and
+this checkout's interpreter to the stub (0600) instead of printing them: dsh
+uploads session logs with its model requests by default, so the credential
+never enters the model's context. The plugin polls its directory each second,
+consumes the stub once, and runs `ava impersonate relay --provider dsh` as a
+background job owned by that session (visible to `job_list`, stopped by
+`job_kill` or session disposal). The relay prints one JSON string per push; the
+plugin steers each into the session — an idle session starts a turn, a busy one
+takes it at its next step, the Steer semantics of the codex relay. There is
+nothing for the executor to arm; a missing heartbeat rejects the takeover like
+any controller-session relay, and a stale one stops it without re-provisioning.
+
+The executor's commands run from dsh's shell tool, a direct child of the `node`
+process, so the attestation anchor is always in reach. Under dsh's default
+`workspace-write` sandbox the control commands (request, say, ack, release)
+ran in verification; work that writes outside the workspace needs a wider
+permission preset. A self-takeover launched by `spawn_dsh.py` runs with
+`DSH_PERMISSION_MODE=danger-full-access` because nobody answers approval
+prompts in its PTY. dsh resolves its own model credential (environment,
+`$DSH_HOME/.credentials.yaml`, the working directory's `.env`, `$DSH_HOME/.env`).
+
 ## Process death → auto-stop
 
 A takeover stops when either of its two core components dies; a dead component
@@ -189,8 +230,8 @@ the stale window plus one scan interval (≈75 s).
   whose last beat predates this process's start, and only inside the
   fresh-start window (`AVA_IMPERSONATION_REPROVISION_WINDOW_SECONDS`, default
   120 s, 0 disables). That restart-shaped loss alone is re-provisioned and
-  respawned; a claude relay is never re-provisioned from the native side — its
-  stale heartbeat always stops the lease.
+  respawned; a claude or dsh relay is never re-provisioned from the native side —
+  its stale heartbeat always stops the lease.
 - **What stopping does.** The lease goes terminal (`expired`) with the cause
   recorded as `aborted: <detail>` in `rejection_reason` (the request's own
   `reason` is preserved), pending renewal reminders are dismissed, a relay
@@ -249,7 +290,7 @@ the stale window plus one scan interval (≈75 s).
   45 seconds counts as stale and stops the lease (see *Process death →
   auto-stop*), so messages never sit silently behind a dead relay. The one
   exception is a restart-shaped codex loss inside the fresh-start window,
-  which is re-provisioned; a claude relay is never re-provisioned.
+  which is re-provisioned; a claude or dsh relay is never re-provisioned.
 - Renewal reminders: five minutes before a lease expires, the gateway inserts
   a durable inbox row of `kind="reminder"` (one per expiry deadline; the payload carries
   the session linkage) that the relay pushes like any message. Release or expiry

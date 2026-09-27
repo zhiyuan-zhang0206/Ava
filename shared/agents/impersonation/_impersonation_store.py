@@ -73,6 +73,12 @@ _PROVIDER_ANCHOR_BASENAMES = frozenset({"codex", "claude"})
 # its name), so its controller node never matches the basename allowlist.
 _CLAUDE_NATIVE_VERSION = re.compile(r"\d+(?:\.\d+)+")
 
+# DeepSeek Harness is a Node program: its controller process is ``node`` with
+# the ``dsh`` launcher as its script (``node /opt/homebrew/bin/dsh web``), so
+# only the recorded script identifies it. ``process_metadata`` records that
+# script for Node processes.
+_DSH_SCRIPT_TAIL = ("@deepseek-ai", "dsh", "lib", "bin.js")
+
 
 def _basename(value: object) -> str:
     if not isinstance(value, str) or not value:
@@ -87,7 +93,9 @@ def _metadata_nodes(metadata: object) -> list[dict[str, Any]]:
     meta = cast("dict[str, Any]", metadata)
     nodes: list[dict[str, Any]] = []
     if meta.get("pid") is not None:
-        nodes.append({key: meta.get(key) for key in ("pid", "name", "executable", "created_at")})
+        nodes.append(
+            {key: meta.get(key) for key in ("pid", "name", "executable", "created_at", "script")}
+        )
     ancestors = meta.get("ancestors")
     if isinstance(ancestors, list):
         nodes.extend(
@@ -115,12 +123,27 @@ def _is_claude_native_executable(executable: object) -> bool:
     return _CLAUDE_NATIVE_VERSION.fullmatch(parts[-1]) is not None
 
 
+def _is_dsh_node(node: dict[str, Any]) -> bool:
+    """Whether a recorded node is a Node process running the DeepSeek Harness CLI.
+
+    The script is the ``dsh`` launcher (npm's bin link, npx's cache link) or the
+    package entry it links to. Like the other recognizers this is a shape gate
+    on recorded nodes; attestation stays pid + stable start time.
+    """
+    script = node.get("script")
+    if _basename(node.get("name")) != "node" or not isinstance(script, str):
+        return False
+    parts = tuple(part.lower() for part in script.rstrip("/").split("/"))
+    return parts[-1] == "dsh" or parts[-len(_DSH_SCRIPT_TAIL) :] == _DSH_SCRIPT_TAIL
+
+
 def _is_provider_node(node: dict[str, Any]) -> bool:
     executable = node.get("executable")
     return (
         _basename(node.get("name")) in _PROVIDER_ANCHOR_BASENAMES
         or _basename(executable) in _PROVIDER_ANCHOR_BASENAMES
         or _is_claude_native_executable(executable)
+        or _is_dsh_node(node)
     )
 
 
@@ -204,7 +227,8 @@ def verify_caller(lease: dict[str, Any], caller: object) -> None:
     The session id is the only control credential (user ruling 2026-09-16);
     this presence check replaces the deliverable token: a recorded provider
     anchor (codex / claude — claude's native ``claude/versions/<version>``
-    layout included) must appear among the caller's live ancestors with
+    layout included — / a Node process running dsh) must appear among the
+    caller's live ancestors with
     the same identity (pid + stable start time, with the 2.0s tolerance kept
     for records written before the stable key). Every failure is fail-closed
     and classified — no-anchor / anchor-dead / chain-mismatch — so the operator
@@ -385,7 +409,12 @@ def require_active_locked(conn: psycopg.Connection, lease: dict[str, Any], calle
     )
 
 
-RELAY_PROVIDERS = ("codex", "claude")
+RELAY_PROVIDERS = ("codex", "claude", "dsh")
+# Relays that run inside the controller's own session: the request mints their
+# scoped credential, the activation gate waits for their heartbeat, and the
+# native side never spawns or re-provisions them. codex's relay is spawned by
+# the accepting runtime instead.
+SESSION_RELAY_PROVIDERS = ("claude", "dsh")
 
 
 def validate_relay_spec(
@@ -396,14 +425,16 @@ def validate_relay_spec(
     rejected here so a malformed endpoint fails the request instead of the
     relay (review N4)."""
     if provider not in RELAY_PROVIDERS:
-        raise ValueError("Relay provider must be 'codex' or 'claude'")
+        raise ValueError("Relay provider must be 'codex', 'claude' or 'dsh'")
     if provider == "codex":
         if not thread_id:
             raise ValueError("Codex relay requires the existing session's thread id")
         if codex_remote is not None and not codex_remote.startswith(("unix://", "ws://")):
             raise ValueError("Codex remote must be a unix:// or ws:// endpoint")
     elif thread_id is not None or codex_remote is not None:
-        raise ValueError("Claude relay routes to its owner; thread id and remote are rejected")
+        raise ValueError(
+            f"The {provider} relay routes to its owner; thread id and remote are rejected"
+        )
 
 
 def authenticate_relay(lease: dict[str, Any], relay_token: str) -> None:
