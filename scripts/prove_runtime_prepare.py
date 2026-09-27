@@ -212,26 +212,35 @@ def prove_checkout_absent(  # noqa: PLR0915 — one guarded checkout-retirement 
                         path.unlink(missing_ok=True)
                     else:
                         path.write_bytes(body)
-            result = subprocess.run(  # noqa: S603 — CI-only native PG at the prepared image boundary.
-                [
-                    str(release.interpreter),
-                    "-I",
-                    "-B",
-                    str(migration),
-                    release.digest,
-                    release.manifest_digest,
-                    schema,
-                ],
-                cwd=root,
-                env=migration_env,
-                capture_output=True,
-                text=True,
-                check=False,
-                # Native PG initialization, full schema migration, and admission
-                # invariant rejection checks can take >180s under noisy runner I/O.
-                # 600s absorbs that noisy-runner variance without false flakes (task #3281).
-                timeout=600,
-            )
+            # The start-barrier proof needs a unit with no selected image; this
+            # proof's serving sentinel is not a pointer, so set it aside and put
+            # the exact bytes back for the unchanged-pointer checks below.
+            serving = root / "unit/releases/current-release"
+            sentinel = serving.read_bytes()
+            serving.unlink()
+            try:
+                result = subprocess.run(  # noqa: S603 — CI-only native PG at the prepared image boundary.
+                    [
+                        str(release.interpreter),
+                        "-I",
+                        "-B",
+                        str(migration),
+                        release.digest,
+                        release.manifest_digest,
+                        schema,
+                    ],
+                    cwd=root,
+                    env=migration_env,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    # Native PG initialization, full schema migration, and admission
+                    # invariant rejection checks can take >180s under noisy runner I/O.
+                    # 600s absorbs that noisy-runner variance without false flakes (task #3281).
+                    timeout=600,
+                )
+            finally:
+                serving.write_bytes(sentinel)
             if result.returncode:
                 # This child has only explicit CI scratch credentials, not the
                 # runner's ambient environment. Retain the actual admission error.
