@@ -893,7 +893,7 @@ async def test_exec_node_checkpoints_child_attachment(fake_cancel_event, tmp_pat
 async def test_exec_node_compact_path_drops_notes_and_clears_findings(
     fake_cancel_event, tmp_path: Path
 ):
-    """The compact path (_SystemHalt) writes nothing back — claim REMOVE_ALLs
+    """The compact path (SystemHalt) writes nothing back — claim REMOVE_ALLs
     the whole history — so notes must not leak into the update, and the
     findings buffer must still be cleared (never misattributed to a later
     turn)."""
@@ -911,8 +911,8 @@ async def test_exec_node_compact_path_drops_notes_and_clears_findings(
         "from langchain_core.messages import HumanMessage\n"
         "ava.state_update['messages'] = [HumanMessage(content='x')]\n"
         f"ava.self.attach({str(image)!r})\n"
-        "from shared.lifecycle import _SystemHalt\n"
-        "raise _SystemHalt()\n"
+        "from shared.lifecycle import SystemHalt\n"
+        "raise SystemHalt()\n"
     )
     state = BaseAgentState(
         messages=[_ai_message_with_code(code)],

@@ -1,4 +1,4 @@
-"""`ava.self.compact()` must reach its wake + `_SystemHalt` even if the
+"""`ava.self.compact()` must reach its wake + `SystemHalt` even if the
 CompactRequest publish fails — a redis outage must not interrupt this lifecycle
 exit (it used to be a bare `ava.REDIS.publish` that would raise past the wake).
 """
@@ -11,7 +11,7 @@ from redis.exceptions import ConnectionError as RedisConnectionError
 
 import ava
 from shared import redis_client
-from shared.lifecycle import _SystemHalt
+from shared.lifecycle import SystemHalt
 from tests.conftest import spawn_agent
 
 
@@ -30,7 +30,7 @@ def test_compact_survives_publish_failure(
     db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A throwing redis on the CompactRequest publish must not stop compact from
-    committing its compact_summary inbound and raising _SystemHalt."""
+    committing its compact_summary inbound and raising SystemHalt."""
     ava.agent_identity._agent_id = spawn_agent()  # self identity
 
     # Only the CompactRequest publish (publish_best_effort_sync → sync_redis) is
@@ -42,7 +42,7 @@ def test_compact_survives_publish_failure(
         lambda **_: _BoomSyncClient(RedisConnectionError("down")),  # pyright: ignore[reportUnknownArgumentType]
     )
 
-    with pytest.raises(_SystemHalt):
+    with pytest.raises(SystemHalt):
         ava.self.compact("Requests: (none)\nProgress: done\n")
 
     with db_conn.cursor() as cur:
