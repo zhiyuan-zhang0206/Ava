@@ -105,10 +105,9 @@ named-PTY rule covers `<name>.{out,host}.log` without traversing any subtree.
 - **death** — the reader reaps the child (waitpid on every pass) and on EOF
   or reap closes the master (hanging up the slave's foreground group),
   unlinks record + socket, and exits the process after a short drain.
-- **kill** — the host signals the shell's group AND the tty's foreground
-  group (`tcgetpgrp`), graceful SIGTERM first when asked, then SIGKILL +
-  psutil-walk backstop. A host that stops answering is killed straight from
-  the record (`_kill_by_record`), so `kill` stays authoritative.
+- **kill** — takes the shell's whole tree and POSIX session, frozen then
+  SIGKILLed ([[session-kill.ava.okf.md|session kill]]). A host that stops
+  answering is killed from the record, so `kill` stays authoritative.
 - **signals** — the host SIG_IGNs SIGHUP/SIGTERM/SIGPIPE: a stray hangup or
   a TERM aimed at the shell's tree must not take the session down; ending a
   session is the kill op's job. SIGKILL ends host + session.
