@@ -557,7 +557,7 @@ def test_local_set_refuses_unanchored_checkout(
     local_env_home: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """The --local write path is the same red-line class: an unanchored
-    checkout must not hand-edit the fallback home's .env."""
+    checkout owns no home, so it must not hand-edit its throwaway scratch."""
     (local_env_home / ".env").write_text("OTHER=kept\n")
     monkeypatch.setattr("shared.dotenv_boot.checkout_anchored", lambda: False)
 
