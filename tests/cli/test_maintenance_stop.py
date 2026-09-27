@@ -18,8 +18,8 @@ from typing import NoReturn
 import psutil
 import pytest
 
-from cli.commands import _maintenance_data_plane as plane
 from cli.commands import _maintenance_stop as stop
+from cli.commands.data_plane import maintenance_stop as plane
 from cli.commands.data_plane import pgbouncer as pb
 from shared.config import settings
 from shared.session_backend import PosixProcSessionBackend, PtySessionBackend
@@ -554,7 +554,7 @@ def test_real_redis_stops_owned_instance_only(
             client.save()  # pyright: ignore[reportUnknownMemberType] — redis stubs
             client.set("owned-test", "latest-unsaved")
         monkeypatch.setattr(settings.data_plane, "redis_url", url)
-        monkeypatch.setattr(plane.instance, "redis_data_dir", lambda: data)
+        monkeypatch.setattr(plane.instance, "_redis_data_dir", lambda: data)
         assert stop.stop_data_plane(3) == ["redis"]
         assert (
             not stop.OwnedProcess.capture(psutil.Process(pid)).live()
@@ -634,13 +634,13 @@ def test_real_postgres_fast_stop_disconnects_open_client(
     def binary(name: str) -> str:
         return str(pg_tool(name))
 
-    monkeypatch.setattr(plane.instance, "pg_bin", binary)
+    monkeypatch.setattr(plane.instance, "_pg_bin", binary)
     with throwaway_postgres() as url:
         with psycopg.connect(url, autocommit=True) as client:
             row = client.execute("SHOW data_directory").fetchone()
             assert row is not None
             data = Path(row[0])
-            monkeypatch.setattr(plane.instance, "pg_data_dir", lambda: data)
+            monkeypatch.setattr(plane.instance, "_pg_data_dir", lambda: data)
             assert stop.stop_data_plane(10) == ["postgres"]
             assert not (data / "postmaster.pid").exists()
             # The fast request disconnected the idle client rather than waiting
@@ -696,7 +696,7 @@ def test_redis_admin_credential_is_independent_of_runtime_url(
             settings.data_plane, "redis_url", url.replace("redis://", "redis://restricted:wrong@")
         )
         monkeypatch.setattr(settings.data_plane, "redis_admin_password", password)
-        monkeypatch.setattr(plane.instance, "redis_data_dir", lambda: Path(directory))
+        monkeypatch.setattr(plane.instance, "_redis_data_dir", lambda: Path(directory))
         assert stop.stop_data_plane(3) == ["redis"]
 
 
@@ -825,7 +825,7 @@ def test_missing_pooler_pidfile_does_not_mean_the_process_is_gone(
         yield process
 
     monkeypatch.setattr(plane.psutil, "process_iter", processes)
-    monkeypatch.setattr(plane.pooler, "pid_is_our_pooler", lambda _pid: True)  # pyright: ignore[reportUnknownArgumentType] — constant identity fixture
+    monkeypatch.setattr(plane.pooler, "_pid_is_our_pooler", lambda _pid: True)  # pyright: ignore[reportUnknownArgumentType] — constant identity fixture
     monkeypatch.setattr(plane, "_signal", forbidden)
     with pytest.raises(RuntimeError, match="unrecorded or replacement"):
         stop.stop_data_plane(1)
@@ -1001,16 +1001,16 @@ def _wait_pidfile(timeout: float = 5.0) -> int:
     """
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        if pb.pidfile_path().exists():
+        if pb._pidfile_path().exists():
             with contextlib.suppress(ValueError):
-                return int(pb.pidfile_path().read_text().strip())
+                return int(pb._pidfile_path().read_text().strip())
         time.sleep(0.05)
     raise AssertionError("the pooler never wrote its pidfile")
 
 
 def _pidfile_pid() -> set[int]:
     """The pid recorded in the (test-home) pooler pidfile, when readable."""
-    pidfile = pb.pidfile_path()
+    pidfile = pb._pidfile_path()
     if not pidfile.exists():
         return set()
     with contextlib.suppress(ValueError):

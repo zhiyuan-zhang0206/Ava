@@ -113,7 +113,7 @@ def isolated_cluster(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterato
         monkeypatch.setattr(settings.general, "ava_home", str(home))
         stop_pgbouncer()
         subprocess.run(  # noqa: S603
-            [ci.pg_bin("pg_ctl"), "-D", str(home / "pg"), "-m", "immediate", "stop"],
+            [ci._pg_bin("pg_ctl"), "-D", str(home / "pg"), "-m", "immediate", "stop"],
             check=False,
             capture_output=True,
         )

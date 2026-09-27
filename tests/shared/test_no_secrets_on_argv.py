@@ -343,7 +343,7 @@ def test_redis_bringup(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         return subprocess.CompletedProcess(args, returncode=0, stdout="PONG", stderr="")
 
     monkeypatch.setattr(ci.subprocess, "run", fake_run)
-    monkeypatch.setattr(ci, "redis_data_dir", lambda: tmp_path / "redis")
+    monkeypatch.setattr(ci, "_redis_data_dir", lambda: tmp_path / "redis")
     monkeypatch.setattr(ci, "_ensure_redis_acl", lambda *_a, **_k: 0)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(ci, "_bind_addrs", lambda _secret: ["127.0.0.1"])  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(ci, "print", lambda *_a, **_k: None, raising=False)  # pyright: ignore[reportUnknownArgumentType]

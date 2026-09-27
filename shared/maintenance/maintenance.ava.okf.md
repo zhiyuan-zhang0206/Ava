@@ -92,7 +92,7 @@ new ordinary ops admission and waits for admitted handlers and executor work bef
 signalling services. `ava pause` retains infrastructure and persistent PTYs;
 `ava stop` closes terminal jobs and shells and stops home-owned infrastructure
 unless explicitly preserved. `_maintenance_stop` verifies process identities
-and exits; `_maintenance_data_plane` saves Redis before its verified shutdown.
+and exits; `data_plane/maintenance_stop` saves Redis before its verified shutdown.
 `_stop_extras` covers home-owned Gate/helper/native LGTM outside the session
 roster, retaining desired configuration and data. None of these local checks
 proves that every remote or unregistered writer has stopped.
