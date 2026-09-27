@@ -30,7 +30,16 @@ a text summary on stdout.
 Gateway auth: `Authorization: Bearer <token>` — the process's machine API token
 (`AVA_API_TOKEN`, set in every launched service and agent), else
 `AVA_CLUSTER_SECRET` from the environment or `$AVA_HOME/.env` (the gateway
-home; no header when empty — a single-box no-auth cluster). The gateway
+home; no header when empty — a single-box no-auth cluster). `$AVA_HOME` is
+resolved the same checkout-anchored way every other Ava process resolves it
+(see `_source_root` / `shared.dotenv_boot.resolve_ava_home`), not guessed — an
+unanchored checkout (no AVA_HOME, not the prod source, no `.ava_home`
+pointer) never reads `.env` and never dials the gateway, so it cannot send a
+guessed home's secret to a guessed `http://localhost:8000` (2026-09-27: on a
+single-box deployment that default is the real production gateway). Only an
+explicit `AVA_CLUSTER_SECRET` env var lifts that refusal, and it is then the
+only bearer sent; an inherited `AVA_API_TOKEN` neither lifts it nor is sent,
+since it says nothing about which gateway this checkout may dial. The gateway
 listens on :8000.
 
 LLM span detection: span name ends with `.chat`, or attribute
@@ -44,8 +53,37 @@ import argparse
 import json
 import os
 import re
+import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+
+
+def _source_root() -> Path:
+    """The checkout / install root that holds the ``shared`` package.
+
+    The script is invoked from two places: the dev checkout (``.agents/
+    skills/...`` — walk up to the repo root) and the prod install
+    (``$AVA_HOME/skills/...`` — a converge copy; ``shared`` lives in
+    ``$AVA_HOME/source``). ``shared.dotenv_boot`` must be importable from
+    either, so the root is resolved before the import happens.
+    """
+
+    here = Path(__file__).resolve().parent
+    for cand in (here, *here.parents):
+        if (cand / "shared" / "__init__.py").is_file():
+            return cand
+    home = Path(os.environ.get("AVA_HOME", "~/.ava")).expanduser()
+    cand = home / "source"
+    if (cand / "shared" / "__init__.py").is_file():
+        return cand
+    raise RuntimeError(
+        f"cannot locate the Ava source root: no `shared` package above {here} and none at {cand}"
+    )
+
+
+sys.path.insert(0, str(_source_root()))
+
+from shared.dotenv_boot import resolve_ava_home  # noqa: E402 - after the sys.path setup above
 
 _AGENT_ATTR = "session.id"
 _CHECKPOINT_ATTR = "ava.checkpoint_id"
@@ -161,15 +199,23 @@ def _node_sequence(spans: list[dict], start_ns: int) -> list[dict]:
 # ── gateway joins ─────────────────────────────────────────────────────────────
 
 
-def _cluster_secret() -> str:
+def _cluster_secret(home: Path, anchored: bool) -> str:
+    """Bearer token for the gateway: the process's machine API token, else the
+    explicit env var, else the resolved home's `.env` — the token and the file
+    only when that home is one this checkout actually owns. An unanchored
+    checkout (`anchored` False) sends only an explicit `AVA_CLUSTER_SECRET`:
+    an inherited token is not its to use, and `home` is its private scratch,
+    which never holds a `.env`, but the explicit check keeps that true even if
+    a future caller passes a different path."""
+    env = os.environ.get("AVA_CLUSTER_SECRET")
+    if not anchored:
+        return env or ""
     token = os.environ.get("AVA_API_TOKEN")
     if token:
         return token  # a launched process's machine API token
-    env = os.environ.get("AVA_CLUSTER_SECRET")
     if env is not None:
         return env
-    ava_home = Path(os.environ.get("AVA_HOME", Path.home() / ".ava"))
-    env_file = ava_home / ".env"
+    env_file = home / ".env"
     if not env_file.exists():
         return ""
     for line in env_file.read_text(encoding="utf-8").splitlines():
@@ -185,8 +231,19 @@ def _gateway_get(gateway: str, path: str) -> dict:
     url = gateway.rstrip("/") + path
     if not url.startswith(("http://", "https://")):
         raise ValueError(f"refusing non-http(s) gateway URL: {url[:60]!r}")
+    home, anchored = resolve_ava_home()
+    explicit_secret = os.environ.get("AVA_CLUSTER_SECRET") is not None
+    if not anchored and not explicit_secret:
+        raise SystemExit(
+            f"refusing GET {url}: this checkout is unanchored (no AVA_HOME, not the "
+            "prod source, no .ava_home pointer) -- it owns no cluster, so no gateway's "
+            "config or bearer is its to use, and the default gateway URL may be another "
+            "cluster's (e.g. this host's production gateway). Anchor it first "
+            "(scripts/install.sh --worktree), or pass an explicit AVA_CLUSTER_SECRET if "
+            "you mean to dial this gateway anyway."
+        )
     headers = {}
-    secret = _cluster_secret()
+    secret = _cluster_secret(home, anchored)
     if secret:
         headers["Authorization"] = f"Bearer {secret}"
     req = urllib.request.Request(url, headers=headers)

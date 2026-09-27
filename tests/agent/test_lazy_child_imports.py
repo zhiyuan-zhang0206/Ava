@@ -2,7 +2,7 @@
 startup-path laziness work (task #3585).
 
 The exec child imports `agent.graph.exec_protocol` (request envelope),
-`agent._process_boot` (SDK helpers), and the media-gate resolution on
+`agent.process_boot` (SDK helpers), and the media-gate resolution on
 `shared.lm.registry` before any user code runs. Each probe runs in a clean
 subprocess (isolated interpreter, agent-launch env vars stripped, repo root
 prepended to `sys.path`) and reports the heavy modules the touch left in
@@ -13,7 +13,7 @@ prepended to `sys.path`) and reports the heavy modules the touch left in
   any langchain/langgraph module;
 - `read_request` on a state-less envelope must not pull the langgraph serde
   or `agent.state` (they load only when a state snapshot exists);
-- importing `agent._process_boot` must stay off the LM stack;
+- importing `agent.process_boot` must stay off the LM stack;
 - importing `shared.lm.registry` (the media-capability data leaf) must not
   pull `shared.lm.factory` / `shared.lm.provider_api`;
 - the provider-registration surface (`shared.lm.provider_api` plus the `lm_*`
@@ -141,7 +141,7 @@ def test_stateless_request_skips_the_serde() -> None:
 
 
 _PROCESS_BOOT_IMPORT = """
-import agent._process_boot  # noqa: F401
+import agent.process_boot  # noqa: F401
 
 loaded = sorted(
     name

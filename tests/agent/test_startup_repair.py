@@ -7,7 +7,7 @@ Anthropic-compat providers to reject every turn with 400 (agent 167 2026-06-06;
 agents 236/238 2026-07-13; agent 5333 2026-08-31).
 
 Covers `agent/hooks/repair.py` (shared helper + before_llm hook) and the boot
-pass wrapper `agent/startup.py:_repair_dangling_tool_use_at_startup`.
+pass wrapper `agent/startup.py:repair_dangling_tool_use_at_startup`.
 """
 
 from typing import Any, cast
@@ -26,7 +26,7 @@ from agent.hooks.repair import (
     dangling_tool_pairing_repairs,
     register_repair_hooks,
 )
-from agent.startup import _repair_dangling_tool_use_at_startup
+from agent.startup import repair_dangling_tool_use_at_startup
 
 
 def _ai_tool_use(*ids: str) -> AIMessage:
@@ -421,7 +421,7 @@ class _FakeGraph:
 
 async def test_startup_repair_rebuilds_tool_result_for_dangling() -> None:
     graph = _FakeGraph([_ai_tool_use("call_x")])
-    await _repair_dangling_tool_use_at_startup(graph, agent_id=167)  # type: ignore[arg-type]
+    await repair_dangling_tool_use_at_startup(graph, agent_id=167)  # type: ignore[arg-type]
     assert len(graph.updates) == 1
     repaired = graph.updates[0]["messages"]
     assert isinstance(repaired[0], RemoveMessage)
@@ -431,7 +431,7 @@ async def test_startup_repair_rebuilds_tool_result_for_dangling() -> None:
 
 async def test_startup_repair_rebuilds_for_buried_dangling() -> None:
     graph = _FakeGraph([_ai_tool_use("call_x"), HumanMessage(content="buried")])
-    await _repair_dangling_tool_use_at_startup(graph, agent_id=236)  # type: ignore[arg-type]
+    await repair_dangling_tool_use_at_startup(graph, agent_id=236)  # type: ignore[arg-type]
     assert len(graph.updates) == 1
     repaired = graph.updates[0]["messages"]
     assert isinstance(repaired[0], RemoveMessage)
@@ -442,7 +442,7 @@ async def test_startup_repair_drops_orphan_tool_result_with_rebuild() -> None:
     orphan = ToolMessage(content="lost result", tool_call_id="KaN9", id="t1")
     graph = _FakeGraph([HumanMessage(content="now restart", id="h1"), orphan])
 
-    await _repair_dangling_tool_use_at_startup(graph, agent_id=5333)  # type: ignore[arg-type]
+    await repair_dangling_tool_use_at_startup(graph, agent_id=5333)  # type: ignore[arg-type]
 
     assert len(graph.updates) == 1
     repaired = graph.updates[0]["messages"]
@@ -457,18 +457,18 @@ async def test_startup_repair_flushes_a_skipped_checkpoint_update() -> None:
     flush = AsyncMock()
     graph.checkpointer = type("_NstepSaver", (), {"_ava_nstep_flush": flush})()
 
-    await _repair_dangling_tool_use_at_startup(graph, agent_id=167)  # type: ignore[arg-type]
+    await repair_dangling_tool_use_at_startup(graph, agent_id=167)  # type: ignore[arg-type]
 
     flush.assert_awaited_once_with("167")
 
 
 async def test_startup_repair_is_noop_when_history_valid() -> None:
     graph = _FakeGraph([_ai_tool_use("c1"), ToolMessage(content="o", tool_call_id="c1")])
-    await _repair_dangling_tool_use_at_startup(graph, agent_id=1)  # type: ignore[arg-type]
+    await repair_dangling_tool_use_at_startup(graph, agent_id=1)  # type: ignore[arg-type]
     assert graph.updates == []
 
 
 async def test_startup_repair_is_noop_for_brand_new_agent() -> None:
     graph = _FakeGraph([])
-    await _repair_dangling_tool_use_at_startup(graph, agent_id=2)  # type: ignore[arg-type]
+    await repair_dangling_tool_use_at_startup(graph, agent_id=2)  # type: ignore[arg-type]
     assert graph.updates == []

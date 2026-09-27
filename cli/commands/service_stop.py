@@ -6,8 +6,10 @@ stop OS-managed extras. Ordinary stops never escalate to force. Persistent
 terminals close at their own boundary: `close_terminals` for `ava stop`, and
 `close_release_terminals` at a release or a PITR activation, where no terminal
 survives (decisions/2026-09-27-fleet-release-and-cutover-policies.md item 2;
-decisions/2026-09-27-unit-join-pitr-closure-fleet-policy.md item 2) and KILL
-reaches only identities captured from the terminal records.
+decisions/2026-09-27-unit-join-pitr-closure-fleet-policy.md item 2). Both take a
+session's whole membership as `shared.sessions.pty.session_tree` defines it —
+the recorded shell, its descendants and its POSIX session — and KILL reaches
+only identities captured from the terminal records' shells and hosts.
 """
 
 from __future__ import annotations
@@ -37,7 +39,7 @@ from shared.native_process.ownership import OwnedProcess, capture_tree, retain_p
 from shared.paths import run_dir
 from shared.session_backend import get_shell_backend
 from shared.session_record import SessionRecord
-from shared.sessions.pty import host_identity, host_starttime
+from shared.sessions.pty import host_identity, host_starttime, session_tree
 
 # How often the completed-work wait re-reads the terminal trees.
 _WORK_POLL_S = 0.5
@@ -124,8 +126,10 @@ def live_terminals() -> list[str]:
 class TerminalInventory:
     """Every live recorded terminal, captured before any signal.
 
-    `jobs` maps each captured descendant of a shell to its session; `hosts`
-    holds each session's recorded PTY host. A session is busy when it has a job.
+    `jobs` maps each captured member of a shell's session beyond the shell (its
+    descendants and its POSIX session, `session_tree.session_members`) to that
+    session; `hosts` holds each session's recorded PTY host. A session is busy
+    when it has a job.
     """
 
     shells: dict[str, OwnedProcess]
@@ -161,7 +165,12 @@ class TerminalInventory:
 
 
 def capture_terminals() -> TerminalInventory:
-    """Capture each live recorded session's shell, jobs and PTY host; signal nothing."""
+    """Capture each live recorded session's shell, jobs and PTY host; signal nothing.
+
+    A job is any live member of the shell's session: `cmd &` in its own
+    process group and a double-forked orphan that left the shell's tree count
+    the same as a foreground child.
+    """
     shells: dict[str, OwnedProcess] = {}
     jobs: dict[OwnedProcess, str] = {}
     hosts: dict[str, OwnedProcess] = {}
@@ -177,8 +186,9 @@ def capture_terminals() -> TerminalInventory:
         host = host_identity(path)
         if host is not None:
             hosts[name] = OwnedProcess(host[0], host[1], host_starttime(path))
-        for identity in capture_tree(shell) - {shell}:
-            jobs[identity] = name
+        for identity in session_tree.session_members(shell):
+            if identity != shell:
+                jobs[identity] = name
     return TerminalInventory(shells, jobs, hosts)
 
 
@@ -319,25 +329,28 @@ def close_release_terminals(
 
     Busy sessions' owner notices are recorded first, as the closure's intent,
     naming `reason` (`pty_close_notices.RELEASE_REASON` or `.PITR_REASON`). Then
-    the ordinary graceful close, bounded by `grace_s`; any identity still live
-    after it — a captured shell, job, re-captured descendant or recorded PTY
-    host whose birth still matches — gets SIGKILL. Closure is the kernel
-    observation, within `kill_s`, that every one is gone and no recorded
-    terminal remains live. A survivor, or a terminal born during closure,
-    fails with the process inventory and leaves the boundary unresolved.
+    the ordinary graceful close, bounded by `grace_s`; whatever is still live
+    after it dies by `_kill_terminals` (each session whole, then the recorded
+    PTY hosts). Closure is the kernel observation, within `kill_s`, that every
+    captured identity is gone and no recorded terminal remains live. A
+    survivor, or a terminal born during closure, fails with the process
+    inventory and leaves the boundary unresolved.
     """
     _require_pty_custody()
     inventory = capture_terminals()
     _record_close_notices(inventory.busy, operation, acquired_at, reason=reason)
     tracked = inventory.processes() | set(inventory.hosts.values())
     _cancel_terminals(inventory)
+    graceful = True
     try:
         wait_for_exit(tracked, deadline_after(grace_s))
     except TimeoutError:
-        for identity in sorted(tracked, key=lambda identity: identity.pid):
-            identity.send_signal(signal.SIGKILL)
+        graceful = False
+    kill_deadline = deadline_after(kill_s)
+    if not graceful:
+        _kill_terminals(inventory, tracked, kill_deadline)
     try:
-        wait_for_exit(tracked, deadline_after(kill_s))
+        wait_for_exit(tracked, kill_deadline)
     except TimeoutError as exc:
         survivors = inventory.survivors(live_identities(tracked))
         raise StopIncompleteError(
@@ -350,6 +363,29 @@ def close_release_terminals(
     if born:
         raise RuntimeError(f"terminals live after release closure: {born}")
     return inventory
+
+
+def _kill_terminals(
+    inventory: TerminalInventory, tracked: set[OwnedProcess], deadline: float
+) -> None:
+    """SIGKILL what the graceful close left, each session whole.
+
+    Every session dies through `session_tree.kill_session_tree`: frozen parents
+    first, killed children first with the shell last, rooted at the shell and
+    at each job captured before the cancel, so a job whose shell already exited
+    is still taken with its descendants. Every member that kill captured joins
+    `tracked` for the closure evidence. Whatever else is tracked and still live
+    — a recorded PTY host, a descendant re-captured during the grace wait —
+    then gets SIGKILL to its captured birth.
+    """
+    for name, shell in inventory.shells.items():
+        jobs = [job for job, owner in inventory.jobs.items() if owner == name]
+        result = session_tree.kill_session_tree(
+            shell, also=jobs, wait_s=max(0.0, deadline - time.monotonic())
+        )
+        tracked.update(result.killed, result.survivors)
+    for identity in sorted(tracked, key=lambda identity: identity.pid):
+        identity.send_signal(signal.SIGKILL)
 
 
 def _require_pty_custody() -> None:

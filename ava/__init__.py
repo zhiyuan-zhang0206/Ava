@@ -270,7 +270,7 @@ def __getattr__(name: str) -> Any:
 # `ava.sdk_surface.wraps` and `ava.sdk_surface.plugin_loader` are public names
 # (agent visibility is the `__all_for_ava__` whitelist below, not the
 # underscore) reached across the `ava` package boundary by the agent kernel
-# (`agent/state.py`, `agent/_process_boot.py`, `agent/extensions.py`).
+# (`agent/state.py`, `agent/process_boot.py`, `agent/extensions.py`).
 # `wraps`' curated plugin-author surface is assembled as `ava.extend` further
 # down.
 # ruff: noqa: E402 — submodule imports must come after DB/REDIS slot injection

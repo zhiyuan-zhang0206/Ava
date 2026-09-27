@@ -220,13 +220,13 @@ forbidden_modules = ["agent"]
 # that stops matching fails the run too — the list cannot rot in either
 # direction, and its diff is the review signal.
 ignore_imports = [
-    "services.agent_host.* -> agent._process_boot",
-    # agent/_turn_progress.py is a dependency-free leaf: the hosted runner's
+    "services.agent_host.* -> agent.process_boot",
+    # agent/turn_progress.py is a dependency-free leaf: the hosted runner's
     # stall guard (host.py) and its scan (dispatcher.py) both read the same
     # per-agent monotonic clock, and the graph kernel marks it (the same
     # one-way direction: agent -> nothing).
-    "services.agent_host.* -> agent._turn_progress",
-    "services.agent_host.* -> agent._runloop",
+    "services.agent_host.* -> agent.turn_progress",
+    "services.agent_host.* -> agent.runloop",
     "services.agent_host.* -> agent.db",
     "services.agent_host.* -> agent.graph",
     # The host catches native fatal errors to persist the halted/circuit state
@@ -235,7 +235,7 @@ ignore_imports = [
     # Compaction exhaustion is another expected native turn abort, handled by the host.
     "services.agent_host.host -> agent.hooks.compact",
     # The host owns the final durable checkpoint/trace link and the node-log tail.
-    "services.agent_host.host -> agent._trace_checkpoint",
+    "services.agent_host.host -> agent.trace_checkpoint",
     "services.agent_host.host -> agent.graph.node_log",
     # Database recovery retains and repairs the original fenced continuation.
     "services.agent_host.db_recovery -> agent.impersonation",

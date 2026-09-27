@@ -16,7 +16,7 @@ nothing the model can honestly observe; the interrupted turn is absent.
 
 Two repair passes share `dangling_tool_pairing_repairs`:
 
-- **Boot pass** (`agent/startup.py:_repair_dangling_tool_use_at_startup`, runs
+- **Boot pass** (`agent/startup.py:repair_dangling_tool_use_at_startup`, runs
   before the first ainvoke): catches dangling committed to the checkpoint
   before claim appends anything — including before a pending compact_request
   runs its Compaction LLM call over the history in the claim node.

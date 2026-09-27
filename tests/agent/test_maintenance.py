@@ -21,7 +21,7 @@ from agent.graph._claim import claim_node
 from agent.graph._exec import exec_node
 from agent.hosted_ownership import admit_hosted_runtime, settle_hosted_runtime
 from agent.impersonation import protect_native_hooks
-from agent.startup import _wrap_saver_writes_with_nstep_interval
+from agent.startup import wrap_saver_writes_with_nstep_interval
 from services.agent_host.host import AgentHost
 from services.agent_host.runtime import TurnOutcome
 from shared import maintenance, maintenance_cohort, pause_owner
@@ -119,7 +119,7 @@ async def _idle_hosted_host(
     """A real AgentHost over a minimal claim-only graph, with runtime mocks."""
     saver = AsyncPostgresSaver(aops_pool)
     await saver.setup()
-    _wrap_saver_writes_with_nstep_interval(saver, 100)
+    wrap_saver_writes_with_nstep_interval(saver, 100)
     builder: Any = StateGraph(states.AgentState, context_schema=AvaContext)
 
     async def route(_state: Any, _runtime: Any, _config: Any) -> Command[Any]:
@@ -240,7 +240,7 @@ async def test_admitted_model_finishes_real_exec_and_after_exec_before_drain_rec
 
     saver = AsyncPostgresSaver(aops_pool)
     await saver.setup()
-    _wrap_saver_writes_with_nstep_interval(saver, 100)
+    wrap_saver_writes_with_nstep_interval(saver, 100)
     builder: Any = StateGraph(states.AgentState, context_schema=AvaContext)
     builder.add_node("claim", claim_node, destinations=("before_llm", "__end__", "claim"))
     builder.add_node(

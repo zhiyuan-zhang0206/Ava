@@ -50,7 +50,7 @@ class _ReconcileSpy:
 @pytest.fixture
 def reconcile_spy(monkeypatch: pytest.MonkeyPatch) -> _ReconcileSpy:
     spy = _ReconcileSpy()
-    monkeypatch.setattr(settlement_mod, "_reconcile_claimed_inbounds_at_startup", spy)
+    monkeypatch.setattr(settlement_mod, "reconcile_claimed_inbounds_at_startup", spy)
     return spy
 
 

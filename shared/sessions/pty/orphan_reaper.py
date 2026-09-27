@@ -31,6 +31,7 @@ from shared.sessions.pty._paths import (
     record_path,
     socket_path,
 )
+from shared.sessions.pty.session_tree import kill_host_tree
 
 # Record-owner identity tolerance, module-scoped to the reaper (the same value
 # cli.py uses for its own record checks; deliberately not shared to keep this
@@ -45,20 +46,6 @@ _RECORD_OWNER_TOLERANCE_S = 2.0
 _ORPHAN_HOST_STARTUP_LEEWAY_S = 5.0
 _ORPHAN_HOST_KILL_WAIT_S = 3.0
 _PTY_HOST_MODULE = "shared.sessions.pty.host"
-
-
-def _host_is_live(proc: psutil.Process) -> bool:
-    """Whether `proc` is a live (non-zombie) host process.
-
-    A SIGKILLed/died host lingers as a zombie until init reaps it, and
-    ``is_running()`` stays True through that window. The force-reap contract
-    is "no LIVE host survives", so a zombie counts as reaped (the
-    exec-teardown #1044 lesson: judge by status, not by pid existence).
-    """
-    try:
-        return proc.is_running() and proc.status() != psutil.STATUS_ZOMBIE
-    except psutil.Error:
-        return False
 
 
 def _host_answers_ping(name: str) -> bool:
@@ -165,31 +152,24 @@ def _reap_orphaned_hosts(name: str, *, force_unresponsive: bool = False) -> int:
 
     A PTY host intentionally ignores SIGTERM, so this is a deliberately narrow
     SIGKILL-only escape hatch. Its argv and record-identity checks above are the
-    authorization boundary; the descendants are captured before the hosts die so
-    schedule runners cannot escape into their own process groups.
+    authorization boundary. Each host is frozen and its shell's whole session
+    (`session_tree`: the shell's tree and POSIX session) dies before the host,
+    so schedule runners cannot escape into their own process groups.
     """
     hosts = _orphaned_host_processes(name, force_unresponsive=force_unresponsive)
     if not hosts:
         return 0
-    processes: dict[int, psutil.Process] = {host.pid: host for host in hosts}
-    for host in hosts:
-        with contextlib.suppress(psutil.Error):
-            for child in host.children(recursive=True):
-                processes[child.pid] = child
-    _log_pids = sorted(processes)
     logger.warning(
-        "pty force-reaping orphan hosts for {name}: pids={pids}", name=name, pids=_log_pids
+        "pty force-reaping orphan hosts for {name}: pids={pids}",
+        name=name,
+        pids=sorted(host.pid for host in hosts),
     )
-    for proc in processes.values():
-        with contextlib.suppress(psutil.Error):
-            if _host_is_live(proc):
-                proc.kill()
-    deadline = time.monotonic() + _ORPHAN_HOST_KILL_WAIT_S
-    while time.monotonic() < deadline:
-        if not any(_host_is_live(proc) for proc in processes.values()):
-            return len(hosts)
-        time.sleep(0.05)
-    if not any(_host_is_live(proc) for proc in processes.values()):
-        return len(hosts)
-    survivors = sorted(proc.pid for proc in processes.values() if _host_is_live(proc))
-    raise RuntimeError(f"recordless pty host {name} survived force-reap: pids={survivors}")
+    survivors: list[int] = []
+    for host in hosts:
+        result = kill_host_tree(host, wait_s=_ORPHAN_HOST_KILL_WAIT_S)
+        survivors += [identity.pid for identity in result.survivors]
+    if survivors:
+        raise RuntimeError(
+            f"recordless pty host {name} survived force-reap: pids={sorted(survivors)}"
+        )
+    return len(hosts)

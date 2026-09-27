@@ -34,7 +34,7 @@
 > applies); the two-home fixture cannot see it, because it models two homes
 > sharing one connection identity, not two credentials.
 >
-> Process boot materializes too (`agent/_process_boot.py:land_cluster_extensions`,
+> Process boot materializes too (`agent/process_boot.py:land_cluster_extensions`,
 > and once per daemon in the hosted runner), which closes the window converge
 > cannot reach: a machine that was down during an install, or a long-lived host
 > that has been up since before it.

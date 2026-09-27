@@ -75,7 +75,7 @@ _SQL_OR_DYNAMIC_KINDS = frozenset(
         "editable_direct_url_repaired",  # shared/editable_install.py:repair_editable_direct_url
         "exec_editable_install_poisoned",  # shared/editable_install.py:guard_editable_install
         "lgtm_dashboard_render_failed",  # cli/commands/observability/_lgtm_provisioning.py:_render_ava_ops_dashboard telemetry.emit("telemetry", ...)
-        "event_log_drop",  # shared/telemetry_loss.py:loss_event constructs Event directly
+        "event_log_drop",  # shared/telemetry/loss.py:loss_event constructs Event directly
         "sdk_call",  # ava/sdk_metering.py recorder (via shared/sdk_telemetry)
         # shared/plugin_activation.py:emit binds event=PLUGIN_ACTIVATION_EVENT (a
         # module constant, like sdk_call), so the literal scan cannot see it.

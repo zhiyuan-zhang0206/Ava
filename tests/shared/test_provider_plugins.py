@@ -2,7 +2,7 @@
 
 A fixture plugin directory is written into the session's tmp AVA_HOME
 (tests/conftest.py redirects AVA_HOME), so these tests exercise the real
-discovery path (shared/plugins_config._discover_plugins) and the real loader
+discovery path (shared/plugins_config.discover_plugins) and the real loader
 (shared/lm/plugin_providers). Every test restores the module-level
 registration state it mutated: MODELS + derived views, provider_api bindings,
 plugin prices, stop vocabulary, the loader's once-flag, and the concurrency
@@ -246,7 +246,7 @@ def provider_plugin() -> Generator[Callable[..., None], None, None]:
 
 
 def test_repo_provider_plugins_are_the_exact_default_enabled_set() -> None:
-    discovered = plugins_config._discover_plugins()
+    discovered = plugins_config.discover_plugins()
     config = plugins_config.load_for_runtime(set(discovered))
     repo_root = paths.repo_plugins_dir().resolve()
     repo_provider_plugins = {
@@ -271,7 +271,7 @@ def test_zero_provider_plugins_fail_loud_and_remain_retryable(
     try:
         with monkeypatch.context() as isolated:
             isolated.setattr(provider_api.REGISTRY, "bindings", {})
-            isolated.setattr(plugins_config, "_discover_plugins", dict)
+            isolated.setattr(plugins_config, "discover_plugins", dict)
             _reset_loaded_for_tests()
 
             with pytest.raises(RuntimeError, match="no provider plugins enabled"):
@@ -339,7 +339,7 @@ def test_repo_plugin_prices_equal_archive_at_frozen_instant(
 
 
 def test_repo_deepseek_provider_is_enabled_and_registers_complete_contract() -> None:
-    discovered = plugins_config._discover_plugins()
+    discovered = plugins_config.discover_plugins()
     config = plugins_config.load_for_runtime(set(discovered))
 
     assert config.plugins["lm_deepseek"].enabled
@@ -362,7 +362,7 @@ def test_repo_deepseek_provider_is_enabled_and_registers_complete_contract() -> 
 
 
 def test_repo_google_provider_is_enabled_and_registers_complete_contract() -> None:
-    discovered = plugins_config._discover_plugins()
+    discovered = plugins_config.discover_plugins()
     config = plugins_config.load_for_runtime(set(discovered))
 
     assert config.plugins["lm_google"].enabled
@@ -402,7 +402,7 @@ def test_repo_google_provider_is_enabled_and_registers_complete_contract() -> No
 
 
 def test_repo_alibaba_provider_is_enabled_and_registers_complete_contract() -> None:
-    discovered = plugins_config._discover_plugins()
+    discovered = plugins_config.discover_plugins()
     config = plugins_config.load_for_runtime(set(discovered))
 
     assert config.plugins["lm_alibaba"].enabled
@@ -430,7 +430,7 @@ def test_repo_alibaba_provider_is_enabled_and_registers_complete_contract() -> N
 
 
 def test_repo_zhipu_provider_is_enabled_and_registers_complete_contract() -> None:
-    discovered = plugins_config._discover_plugins()
+    discovered = plugins_config.discover_plugins()
     config = plugins_config.load_for_runtime(set(discovered))
 
     assert config.plugins["lm_zhipu"].enabled
@@ -461,7 +461,7 @@ def test_repo_zhipu_provider_is_enabled_and_registers_complete_contract() -> Non
 
 
 def test_repo_moonshot_provider_is_enabled_and_registers_complete_contract() -> None:
-    discovered = plugins_config._discover_plugins()
+    discovered = plugins_config.discover_plugins()
     config = plugins_config.load_for_runtime(set(discovered))
 
     assert config.plugins["lm_moonshot"].enabled
@@ -491,7 +491,7 @@ def test_repo_moonshot_provider_is_enabled_and_registers_complete_contract() -> 
 
 
 def test_repo_xiaomi_provider_is_enabled_and_registers_complete_contract() -> None:
-    discovered = plugins_config._discover_plugins()
+    discovered = plugins_config.discover_plugins()
     config = plugins_config.load_for_runtime(set(discovered))
 
     assert config.plugins["lm_xiaomi"].enabled

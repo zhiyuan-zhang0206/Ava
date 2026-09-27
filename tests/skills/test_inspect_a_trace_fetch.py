@@ -1,17 +1,33 @@
-"""Hermetic unit tests for the inspect-a-trace fetch toolchain
-(.agents/skills/inspect-a-trace/scripts/fetch_trace.py).
+"""Hermetic unit tests for the inspect-a-trace toolchain
+(.agents/skills/inspect-a-trace/scripts/{fetch,read}_trace.py).
 
 Locks the PR #637 follow-up nits: a malformed sibling span must not abort
 the whole mirror scan, --trace-id validation must match its error text, and
 unpadded base64 ids (legacy OTLP JSON) must decode. Pure logic only — no
 network, no Tempo; the mirror walk uses tmp_path files.
+
+Also locks the 2026-09-27 "unanchored checkout reaches production" fix:
+`_mirror_dir` / `_cluster_secret` / `_gateway_get` resolve `$AVA_HOME` via
+`shared.dotenv_boot.resolve_ava_home` instead of guessing `~/.ava` — an
+unanchored checkout must never read a guessed home's `.env` or dial a
+guessed gateway with its secret (see `tests/shared/test_unanchored_checkout.py`
+for the same bug class against `shared.config` itself).
+
+AVA_CLUSTER_SECRET is also a `shared.config.Settings` field alias, but
+`read_trace.py` reads it straight from `os.environ` by design (the same
+Settings-free stance as the rest of this skill script) — `monkeypatch.
+setitem(os.environ, ...)` is used below instead of `monkeypatch.setenv` /
+`delenv` so `lint_no_os_environ.py`'s real Settings-singleton-no-op check
+stays meaningful for tests that DO exercise Settings.
 """
 
 from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import sys
+import urllib.request
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
@@ -19,19 +35,20 @@ from typing import Any
 
 import pytest
 
-_PATH = (
-    Path(__file__).parents[2]
-    / ".agents"
-    / "skills"
-    / "inspect-a-trace"
-    / "scripts"
-    / "fetch_trace.py"
-)
-_spec = importlib.util.spec_from_file_location("fetch_trace_under_test", _PATH)
-assert _spec and _spec.loader
-ft = importlib.util.module_from_spec(_spec)
-sys.modules[_spec.name] = ft
-_spec.loader.exec_module(ft)
+_SCRIPTS_DIR = Path(__file__).parents[2] / ".agents" / "skills" / "inspect-a-trace" / "scripts"
+
+
+def _load(name: str, filename: str):
+    spec = importlib.util.spec_from_file_location(name, _SCRIPTS_DIR / filename)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+ft = _load("fetch_trace_under_test", "fetch_trace.py")
+rt = _load("read_trace_under_test", "read_trace.py")
 
 _TRACE = "00112233445566778899aabbccddeeff"
 _OTHER = "ffeeddccbbaa99887766554433221100"
@@ -230,3 +247,209 @@ def test_fetch_from_mirror_merges_across_rotation_and_skips_bad_lines(
     capsys.readouterr()
 
     assert sorted(s["span_id"] for s in spans) == sorted([_SPAN_A, _SPAN_C, _SPAN_D])
+
+
+# --- _mirror_dir: checkout-anchored home resolution, not a guessed ~/.ava ---
+
+
+def test_mirror_dir_respects_explicit_override(tmp_path: Path) -> None:
+    override = tmp_path / "custom-traces"
+    args = SimpleNamespace(mirror_dir=str(override))
+
+    assert ft._mirror_dir(args) == override
+
+
+def test_mirror_dir_uses_resolve_ava_home_when_anchored(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    home = tmp_path / "dev-cluster-home"
+    monkeypatch.setattr(ft, "resolve_ava_home", lambda: (home, True))
+
+    assert ft._mirror_dir(SimpleNamespace(mirror_dir=None)) == home / "traces"
+
+
+def test_mirror_dir_never_guesses_the_default_home_when_unanchored(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The 2026-09-27 bug: no override, no anchored cluster -> the scratch
+    home from `resolve_ava_home`, never a hardcoded `~/.ava`."""
+    scratch = tmp_path / "ava-unanchored-deadbeefdeadbeef"
+    monkeypatch.setattr(ft, "resolve_ava_home", lambda: (scratch, False))
+
+    result = ft._mirror_dir(SimpleNamespace(mirror_dir=None))
+
+    assert result == scratch / "traces"
+    assert result != Path.home() / ".ava" / "traces"
+
+
+# --- _cluster_secret: explicit env wins; an unanchored home is never read ---
+
+
+@pytest.fixture(autouse=True)
+def _no_inherited_api_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A launched process's machine token outranks every other bearer; keep
+    one inherited from the test runner's environment out of these cases."""
+    monkeypatch.delitem(os.environ, "AVA_API_TOKEN", raising=False)
+
+
+def test_cluster_secret_prefers_explicit_env(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setitem(os.environ, "AVA_CLUSTER_SECRET", "explicit-secret")
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / ".env").write_text("AVA_CLUSTER_SECRET=file-secret\n")
+
+    assert rt._cluster_secret(home, True) == "explicit-secret"
+    assert rt._cluster_secret(home, False) == "explicit-secret"
+
+
+def test_cluster_secret_reads_the_anchored_homes_env_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delitem(os.environ, "AVA_CLUSTER_SECRET", raising=False)
+    home = tmp_path / "dev-cluster-home"
+    home.mkdir()
+    (home / ".env").write_text("AVA_CLUSTER_SECRET=dev-cluster-secret\n")
+
+    assert rt._cluster_secret(home, True) == "dev-cluster-secret"
+
+
+def test_cluster_secret_never_reads_an_unanchored_home(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The 2026-09-27 bug: a guessed `~/.ava` (planted here as `home`) must
+    never be read once the caller says this checkout does not own it."""
+    monkeypatch.delitem(os.environ, "AVA_CLUSTER_SECRET", raising=False)
+    home = tmp_path / "planted-prod-home"
+    home.mkdir()
+    (home / ".env").write_text("AVA_CLUSTER_SECRET=planted-prod-bearer\n")
+
+    assert rt._cluster_secret(home, False) == ""
+
+
+def test_cluster_secret_prefers_the_machine_api_token_when_anchored(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setitem(os.environ, "AVA_API_TOKEN", "machine-token")
+    monkeypatch.setitem(os.environ, "AVA_CLUSTER_SECRET", "explicit-secret")
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / ".env").write_text("AVA_CLUSTER_SECRET=file-secret\n")
+
+    assert rt._cluster_secret(home, True) == "machine-token"
+
+
+def test_cluster_secret_never_sends_an_inherited_token_when_unanchored(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An unanchored checkout sends only what the operator handed it
+    explicitly: an inherited machine token names no gateway it may dial."""
+    monkeypatch.setitem(os.environ, "AVA_API_TOKEN", "inherited-token")
+    monkeypatch.delitem(os.environ, "AVA_CLUSTER_SECRET", raising=False)
+    home = tmp_path / "scratch"
+    home.mkdir()
+
+    assert rt._cluster_secret(home, False) == ""
+    monkeypatch.setitem(os.environ, "AVA_CLUSTER_SECRET", "explicit-secret")
+    assert rt._cluster_secret(home, False) == "explicit-secret"
+
+
+# --- _gateway_get: an unanchored checkout dials nothing without an explicit secret ---
+
+
+class _NetworkDialedError(AssertionError):
+    """Raised by the network guard below if `_gateway_get` reaches the network."""
+
+
+def _forbid_network(monkeypatch: pytest.MonkeyPatch) -> None:
+    def _guard(*_args: object, **_kwargs: object) -> None:
+        raise _NetworkDialedError("_gateway_get dialed the network")
+
+    monkeypatch.setattr(urllib.request, "build_opener", _guard)
+
+
+class _FakeResponse:
+    def __init__(self, payload: dict[str, Any]) -> None:
+        self._body = json.dumps(payload).encode()
+
+    def read(self) -> bytes:
+        return self._body
+
+    def __enter__(self) -> _FakeResponse:
+        return self
+
+    def __exit__(self, *_exc: object) -> bool:
+        return False
+
+
+def _allow_network(monkeypatch: pytest.MonkeyPatch, seen_requests: list[Any]) -> None:
+    class _FakeOpener:
+        def open(self, req: Any, timeout: float | None = None) -> _FakeResponse:
+            seen_requests.append(req)
+            return _FakeResponse({"ok": True})
+
+    def _build_opener(*_args: object, **_kwargs: object) -> _FakeOpener:
+        return _FakeOpener()
+
+    monkeypatch.setattr(urllib.request, "build_opener", _build_opener)
+
+
+def test_gateway_get_refuses_when_unanchored_with_no_explicit_secret(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delitem(os.environ, "AVA_CLUSTER_SECRET", raising=False)
+    scratch = tmp_path / "ava-unanchored-deadbeefdeadbeef"
+    monkeypatch.setattr(rt, "resolve_ava_home", lambda: (scratch, False))
+    _forbid_network(monkeypatch)
+
+    with pytest.raises(SystemExit, match="unanchored"):
+        rt._gateway_get("http://localhost:8000", "/api/events")
+
+
+def test_gateway_get_refuses_when_unanchored_with_only_an_inherited_token(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setitem(os.environ, "AVA_API_TOKEN", "inherited-token")
+    monkeypatch.delitem(os.environ, "AVA_CLUSTER_SECRET", raising=False)
+    scratch = tmp_path / "ava-unanchored-deadbeefdeadbeef"
+    monkeypatch.setattr(rt, "resolve_ava_home", lambda: (scratch, False))
+    _forbid_network(monkeypatch)
+
+    with pytest.raises(SystemExit, match="unanchored"):
+        rt._gateway_get("http://localhost:8000", "/api/events")
+
+
+def test_gateway_get_proceeds_with_explicit_secret_even_when_unanchored(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The explicit-env escape valve: a caller that knows what it is doing can
+    still dial an unanchored checkout's gateway with its own secret."""
+    monkeypatch.setitem(os.environ, "AVA_CLUSTER_SECRET", "explicit-secret")
+    scratch = tmp_path / "ava-unanchored-deadbeefdeadbeef"
+    monkeypatch.setattr(rt, "resolve_ava_home", lambda: (scratch, False))
+    seen: list[Any] = []
+    _allow_network(monkeypatch, seen)
+
+    result = rt._gateway_get("http://localhost:8000", "/api/events")
+
+    assert result == {"ok": True}
+    assert len(seen) == 1
+    assert seen[0].get_header("Authorization") == "Bearer explicit-secret"
+
+
+def test_gateway_get_proceeds_when_anchored_using_the_homes_env_file_secret(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delitem(os.environ, "AVA_CLUSTER_SECRET", raising=False)
+    home = tmp_path / "dev-cluster-home"
+    home.mkdir()
+    (home / ".env").write_text("AVA_CLUSTER_SECRET=dev-cluster-secret\n")
+    monkeypatch.setattr(rt, "resolve_ava_home", lambda: (home, True))
+    seen: list[Any] = []
+    _allow_network(monkeypatch, seen)
+
+    result = rt._gateway_get("http://localhost:8000", "/api/events")
+
+    assert result == {"ok": True}
+    assert seen[0].get_header("Authorization") == "Bearer dev-cluster-secret"

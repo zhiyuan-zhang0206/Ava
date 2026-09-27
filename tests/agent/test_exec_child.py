@@ -458,7 +458,7 @@ print("process cwd stable:", Path.cwd() == process_cwd)
 
 
 def test_child_lifecycle_envelope(tmp_path: Path) -> None:
-    """A `_LifecycleExit` raised by agent code becomes a lifecycle outcome with
+    """A `LifecycleExit` raised by agent code becomes a lifecycle outcome with
     the class name — the parent reconstructs the exception from it."""
     proc, _request, result = _spawn(
         tmp_path, "from shared.lifecycle import AgentRestart\nraise AgentRestart()"
@@ -664,8 +664,8 @@ def test_child_overlay_phases_framework_then_plugin(
 
     monkeypatch.setattr(exec_protocol, "read_request", fake_read_request)
     monkeypatch.setattr(exec_child, "_init_logger", fake_init_logger)
-    monkeypatch.setattr("agent._process_boot._apply_per_agent_sdk_disable", fake_sdk_disable)
-    monkeypatch.setattr("agent._process_boot._apply_per_agent_eval_isolation", fake_eval_isolation)
+    monkeypatch.setattr("agent.process_boot._apply_per_agent_sdk_disable", fake_sdk_disable)
+    monkeypatch.setattr("agent.process_boot._apply_per_agent_eval_isolation", fake_eval_isolation)
     monkeypatch.setattr(exec_child, "_build_state_slot", fake_build_state_slot)
     monkeypatch.setattr(exec_child, "_run_code", fake_run_code)
     monkeypatch.setattr(exec_protocol, "write_result", fake_write_result)

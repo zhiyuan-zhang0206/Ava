@@ -3,7 +3,7 @@ structural: no pty service exists for any stop/update/watchdog path to kill,
 and the one-time reap of the retired supervisor daemon is registered.
 
 The behavioral end (a real session surviving its creators, host reparented to
-init, crash sweep) is tests/shared/test_pty_sessions_cli.py; this file pins
+init, crash sweep) is tests/shared/pty/test_pty_sessions_cli.py; this file pins
 the ABSENCE half — the roster, the stop scope, and the converge migration.
 """
 

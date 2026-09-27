@@ -17,7 +17,9 @@ only when capture or initial-command prompt detection needs it.
 On child death the reader immediately unlinks the record and socket before
 closing the master, preventing a dying host from being adopted by a concurrent
 same-name spawn. SIGHUP/SIGTERM/SIGPIPE are ignored; ending a session remains
-the ``kill`` op's responsibility. SIGKILL has one-session blast radius.
+the ``kill`` op's responsibility, and the kill takes the session's whole
+membership (``session_tree``), not just the shell's process group. SIGKILL
+has one-session blast radius.
 """
 
 from __future__ import annotations
@@ -45,8 +47,9 @@ import psutil
 
 from shared import session_log
 from shared.log import logger
-from shared.native_process.ownership import stable_create_time
+from shared.native_process.ownership import OwnedProcess, stable_create_time
 from shared.session_record import SessionRecord
+from shared.sessions.pty import session_tree
 from shared.sessions.pty._paths import (
     CAPTURE_MAX_LINES,
     RESIZE_MAX,
@@ -59,12 +62,12 @@ from shared.sessions.pty._paths import (
 # unrelated process after ours exits (mirrors posixproc).
 _CREATE_TIME_TOLERANCE_S = 2.0
 
-# Graceful kill: SIGTERM to the shell's group, wait this long for the reader
-# to observe the exit before escalating to SIGKILL.
+# Graceful kill: SIGTERM to every session member, wait this long for the
+# reader to observe the exit before the SIGKILL sweep.
 _KILL_WAIT_S = 5.0
 
-# After SIGKILL, how long to wait for the reader's cleanup before the tree
-# backstop (psutil walk) and before concluding the kill failed.
+# After SIGKILL, how long to wait for the members to exit and for the
+# reader's cleanup before concluding the kill failed.
 _KILL_FORCE_WAIT_S = 3.0
 
 # After a signal, how long to poll waitpid for the child to die into a
@@ -418,52 +421,15 @@ def _op_resize(session: PtySession, req: dict[str, Any]) -> dict[str, Any]:
     return ok()
 
 
-def _kill_target_groups(session: PtySession) -> set[int]:
-    """The process groups a kill must signal: the shell's own group and the
-    tty's current foreground group (the foreground job lives in its own pgrp).
-
-    The hangup-on-master-close only reaches the foreground job on some
-    platforms (macOS yes; Linux observed not), so the kill must signal it
-    explicitly — `os.tcgetpgrp` on the master answers who owns the tty.
-    """
-    groups = {session.pid}
-    try:
-        foreground = os.tcgetpgrp(session.master_fd)
-    except OSError:
-        foreground = -1  # no foreground group (tty already gone)
-    if foreground > 0:
-        groups.add(foreground)
-    return groups
-
-
-def _session_busy(session: PtySession) -> bool:
-    """Whether the session carries live work beyond its idle shell.
-
-    Idle = the shell sits at its prompt: no foreground job owns the tty (the
-    same signal `_kill_target_groups` uses) and no descendant survives. An
-    uninspectable shell answers busy (fail-open: cannot prove it idle)."""
-    if session.dead or not session.pid_matches():
-        return False
-    try:
-        foreground = os.tcgetpgrp(session.master_fd)
-    except OSError:
-        foreground = -1
-    if foreground > 0 and foreground != session.pid:
-        return True
-    try:
-        return bool(psutil.Process(session.pid).children(recursive=True))
-    except psutil.Error:
-        return True  # cannot inspect — assume the worst
-
-
 def _op_kill(session: PtySession, req: dict[str, Any]) -> dict[str, Any]:
+    """End the session: every process in the shell's tree and POSIX session.
+
+    Job control gives each job its own process group, so a group signal never
+    reaches `cmd &`; the membership rule and its boundary (a setsid'd process
+    that left the tree is sovereign) live in `session_tree`.
+    """
     if session.dead:
         return ok({"mode": "noop", "interrupted": False})  # idempotent, like posixproc
-    graceful = bool(req.get("graceful", False))
-    # The interrupted verdict is snapshotted HERE, in the same request that
-    # kills — a separate idle probe cannot close that TOCTOU either.
-    interrupted = _session_busy(session)
-
     if not session.pid_matches():
         # The shell died but the reader has not finished yet; the reader's
         # own reap check will run _finish within one poll — report the noop.
@@ -473,30 +439,27 @@ def _op_kill(session: PtySession, req: dict[str, Any]) -> dict[str, Any]:
             pid=session.pid,
         )
         return ok({"mode": "noop"})
-
+    graceful = bool(req.get("graceful", False))
+    shell = OwnedProcess(session.pid, session.record.create_time, session.record.starttime)
+    # The interrupted verdict is snapshotted HERE, in the same request that
+    # kills — a separate idle probe cannot close that TOCTOU. Any live member
+    # beyond the shell is running work; a shell that no longer verifies
+    # answers busy (fail-open: it cannot be proven idle).
+    members = session_tree.session_members(shell)
+    interrupted = len(members) != 1
     mode = "forced"
-    groups = _kill_target_groups(session)
     if graceful:
-        for grp in groups:
-            with contextlib.suppress(ProcessLookupError, OSError):
-                os.killpg(grp, signal.SIGTERM)
+        session_tree.terminate(members)
         if session.wait_dead(_KILL_WAIT_S):
             mode = "graceful"
-    if not session.dead:
-        # Escalate: SIGKILL the shell's group and the foreground job's group
-        # (independent pgrps), then any surviving descendants via a psutil
-        # walk — the tree must not leave orphans behind.
-        for grp in groups:
-            with contextlib.suppress(ProcessLookupError, OSError):
-                os.killpg(grp, signal.SIGKILL)
-        if not session.wait_dead(_KILL_FORCE_WAIT_S):
-            with contextlib.suppress(psutil.Error):
-                proc = psutil.Process(session.pid)
-                for child in [*proc.children(recursive=True), proc]:
-                    with contextlib.suppress(psutil.Error):
-                        child.kill()
-            session.wait_dead(_KILL_FORCE_WAIT_S)
-    if session.dead:
+    # Runs even after a graceful death: a TERM-ignoring job outlives its shell.
+    result = session_tree.kill_session_tree(shell, also=members, wait_s=_KILL_FORCE_WAIT_S)
+    if result.killed:
+        mode = "forced"
+    if result.survivors:
+        pids = sorted(identity.pid for identity in result.survivors)
+        return err(1, f"session {session.name}: processes survived the kill: {pids}")
+    if session.wait_dead(_KILL_FORCE_WAIT_S):
         return ok({"mode": mode, "interrupted": interrupted})
     # The kill did not take — keep the record so the caller can see the
     # survivor (posixproc's #1015 lesson), and report failure.

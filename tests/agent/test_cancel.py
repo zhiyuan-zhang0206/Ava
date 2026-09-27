@@ -549,20 +549,20 @@ async def test_exec_node_dispatch_system_halt(
     fake_cancel_event: asyncio.Event,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """_ExecLifecycle(_SystemHalt) → halted=True + NO output write-back.
+    """_ExecLifecycle(SystemHalt) → halted=True + NO output write-back.
 
     ava.self.compact commits the compact_summary inbound before raising
-    _SystemHalt, and the claim node applies it in the same turn — REMOVE_ALL
+    SystemHalt, and the claim node applies it in the same turn — REMOVE_ALL
     wipes the whole history. Writing the exec output back (ToolMessage +
     ExecOutput SSE) is dead weight: the ToolMessage would be wiped anyway, and
     the SSE event resurfaced as a ghost code_output item in the frontend after
     the compact refresh. So the compact path appends no ToolMessage and emits
     no ExecOutput (only the ExecStart placeholder, which the compact refresh
     clears)."""
-    from shared.lifecycle import _SystemHalt
+    from shared.lifecycle import SystemHalt
 
     async def _fake(code, agent_id, cancel_event, timeout=60.0, chunk_publisher=None, **kwargs):
-        return (_ExecLifecycle(output="user prep work\n", exc=_SystemHalt()), None)
+        return (_ExecLifecycle(output="user prep work\n", exc=SystemHalt()), None)
 
     emitter = MagicMock()
     monkeypatch.setattr("agent.graph._exec._run_in_subprocess", _fake)  # pyright: ignore[reportUnknownArgumentType]
@@ -665,12 +665,12 @@ async def test_exec_node_dispatch_unknown_lifecycle_subclass_raises(
     fake_cancel_event: asyncio.Event,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A future new _LifecycleExit subclass that is not handled in the match ladder
+    """A future new LifecycleExit subclass that is not handled in the match ladder
     → must fallthrough raise TypeError, not silently land on halted=False (CLAUDE.md
     enumeration dispatch must be exhaustive)."""
-    from shared.lifecycle import _LifecycleExit
+    from shared.lifecycle import LifecycleExit
 
-    class _MysteryLifecycle(_LifecycleExit):
+    class _MysteryLifecycle(LifecycleExit):
         def __init__(self) -> None:
             super().__init__(0)
 
@@ -681,5 +681,5 @@ async def test_exec_node_dispatch_unknown_lifecycle_subclass_raises(
     state = AgentState(messages=[_ai_with_code("...")], halted=False)
     runtime = _make_runtime()
 
-    with pytest.raises(TypeError, match="Unrecognized _LifecycleExit subclass"):
+    with pytest.raises(TypeError, match="Unrecognized LifecycleExit subclass"):
         await exec_node(state, runtime, _CONFIG)

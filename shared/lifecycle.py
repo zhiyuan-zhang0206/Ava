@@ -16,18 +16,18 @@ __all__ = [
     "AgentImpersonation",
     "AgentRestart",
     "AgentTermination",
-    "_LifecycleExit",
-    "_SystemHalt",
+    "LifecycleExit",
+    "SystemHalt",
 ]
 
 
-class _LifecycleExit(SystemExit):
-    """Private base for framework lifecycle signals — inherits SystemExit
+class LifecycleExit(SystemExit):
+    """Base for framework lifecycle signals — inherits SystemExit
     (not Exception), so broad try/except Exception won't accidentally
     swallow lifecycle transitions."""
 
 
-class AgentTermination(_LifecycleExit):
+class AgentTermination(LifecycleExit):
     """Raised on the success path of `terminate()`. Your process exits and
     has to be woken up by sending it a chat message (auto-resurrect)."""
 
@@ -35,7 +35,7 @@ class AgentTermination(_LifecycleExit):
         super().__init__(IDLE_EXIT_CODE)
 
 
-class AgentRestart(_LifecycleExit):
+class AgentRestart(LifecycleExit):
     """Raised on the success path of `restart()` and `update()`. Your
     process exits and a fresh one comes up under the same agent id."""
 
@@ -43,14 +43,14 @@ class AgentRestart(_LifecycleExit):
         super().__init__(IDLE_EXIT_CODE)
 
 
-class AgentImpersonation(_LifecycleExit):
+class AgentImpersonation(LifecycleExit):
     """Acceptance ends this exec; takeover waits for the durable turn boundary."""
 
     def __init__(self) -> None:
         super().__init__(IDLE_EXIT_CODE)
 
 
-class _SystemHalt(_LifecycleExit):
+class SystemHalt(LifecycleExit):
     """Raised by `compact()` — framework takes over history compaction. Agent doesn't raise directly."""
 
     def __init__(self) -> None:

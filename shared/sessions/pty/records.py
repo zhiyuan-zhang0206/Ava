@@ -11,15 +11,13 @@ scan — reads the same liveness definition from here.
 from __future__ import annotations
 
 import contextlib
-import os
-import signal
 from pathlib import Path
 
 import psutil
 
 from shared.log import logger
 from shared.native_process import pid_starttime_ticks
-from shared.native_process.ownership import stable_create_time
+from shared.native_process.ownership import OwnedProcess, stable_create_time
 from shared.platform import LockTimeoutError, file_lock
 from shared.session_record import SessionRecord
 from shared.sessions.pty._paths import (
@@ -30,6 +28,7 @@ from shared.sessions.pty._paths import (
     records_lock_path,
     socket_path,
 )
+from shared.sessions.pty.session_tree import kill_session_tree
 
 # Record liveness + enumeration (no process to dial — the records ARE the
 # session listing; a dead record is swept as it is discovered).
@@ -37,6 +36,9 @@ from shared.sessions.pty._paths import (
 
 # Legacy epoch identity tolerance (mirrors posixproc).
 _CREATE_TIME_TOLERANCE_S = 2.0
+
+# How long the sweep waits for a crashed host's SIGKILLed session to exit.
+_ORPHAN_SHELL_KILL_WAIT_S = 3.0
 
 
 def _host_is_alive(path: Path) -> bool:
@@ -131,28 +133,22 @@ _retained_warning_reasons: dict[str, str] = {}
 
 
 def _kill_recorded_shell(rec: SessionRecord) -> None:
-    """SIGKILL a record's shell after its host is provably gone.
+    """SIGKILL a record's shell and its whole session after its host is provably gone.
 
     The host owns the orderly teardown; with the host gone the shell is an
-    orphan that must not linger (it can hold the page server process). The
-    kill is identity-gated exactly like ``_kill_by_record``'s — a recycled
-    pid is never signalled.
+    orphan that must not linger (it can hold the page server process), and
+    neither may its jobs. The kill takes the same membership as the host's
+    (`session_tree`) and is identity-gated exactly like ``_kill_by_record``'s
+    — a recycled pid is never signalled.
     """
-    try:
-        proc = psutil.Process(rec.pid)
-        if not proc.is_running() or proc.status() == psutil.STATUS_ZOMBIE:
-            return
-        if rec.starttime is not None:
-            if rec.identifies(rec.pid) is not True:
-                return
-        elif abs(stable_create_time(proc) - rec.create_time) > _CREATE_TIME_TOLERANCE_S:
-            return
-    except psutil.Error:
-        return
-    with contextlib.suppress(ProcessLookupError, OSError):
-        os.killpg(rec.pid, signal.SIGKILL)
-    with contextlib.suppress(ProcessLookupError, OSError):
-        os.kill(rec.pid, signal.SIGKILL)
+    shell = OwnedProcess(rec.pid, rec.create_time, rec.starttime)
+    result = kill_session_tree(shell, wait_s=_ORPHAN_SHELL_KILL_WAIT_S)
+    if result.survivors:
+        logger.warning(
+            "pty orphan shell {pid}: processes survived the kill: {pids}",
+            pid=rec.pid,
+            pids=sorted(identity.pid for identity in result.survivors),
+        )
 
 
 _SWEEP_LOCK_TIMEOUT_S = 5.0

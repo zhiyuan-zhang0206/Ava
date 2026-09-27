@@ -13,6 +13,10 @@ no-op. These tests lock the two parts of the fix:
   spawning new jobs), then TERMs the captured jobs, and a survivor leaves the
   maintenance hold in place with a per-phase diagnostic — never a force.
 
+A captured job is any member of the shell's session (`session_tree`): a worker
+that double-forked out of the shell's tree is cancelled, and killed at a
+release, like a direct child.
+
 A release is different (decisions/2026-09-27-fleet-release-and-cutover-policies.md
 item 2): terminals get a bounded completed-work wait, then the same cancel,
 then SIGKILL over their captured births — none survives, and each busy owner
@@ -40,6 +44,7 @@ from cli.commands.service_stop import OwnedProcess
 from ops import pty_close_notices
 from shared import maintenance
 from shared.session_backend import PtySessionBackend
+from shared.sessions.pty import session_tree
 from tests.agent.test_maintenance import WHEN
 from tests.cli.conftest import PtyReaper
 from tests.cli.test_pause_stop import dependencies
@@ -59,6 +64,24 @@ _STUBBORN_JOB = (
 )
 
 _LOOP_SHELL = "bash -c 'while true; do sleep 1; done'"
+
+
+def _double_forked_job(pidfile: Path, *, ignore: tuple[str, ...]) -> str:
+    """A job whose worker double-forks out of the shell's tree: reparented to
+    init, the worker stays in the shell's POSIX session and ignores `ignore`."""
+    ignored = "".join(f"        signal.signal(signal.{sig}, signal.SIG_IGN)\n" for sig in ignore)
+    staged = f"{pidfile}.tmp"
+    return (
+        "import os,signal,time\n"
+        "if os.fork() == 0:\n"
+        "    if os.fork() == 0:\n"
+        f"{ignored}"
+        f"        open({staged!r}, 'w').write(str(os.getpid()))\n"
+        f"        os.rename({staged!r}, {str(pidfile)!r})\n"
+        "        while True: time.sleep(0.1)\n"
+        "    os._exit(0)\n"
+        "os.wait()\n"
+    )
 
 
 def _has_exited(process: psutil.Process) -> bool:
@@ -114,6 +137,20 @@ def _start_busy_session(
     script.write_text(job, encoding="utf-8")
     assert terminal.new_session(name, f"python3 -u {script}", home, env={"AVA_HOME": str(home)})
     return reaper.track_session(name)
+
+
+def _session_orphan(pidfile: Path, shell: OwnedProcess, reaper: PtyReaper) -> psutil.Process:
+    """Pin the double-forked worker once it has left the shell's tree."""
+    deadline = time.monotonic() + 15
+    while time.monotonic() < deadline and not pidfile.exists():
+        time.sleep(0.05)
+    orphan = psutil.Process(int(pidfile.read_text(encoding="utf-8")))
+    reaper.track(orphan)
+    while time.monotonic() < deadline and orphan in _shell_children(shell):
+        time.sleep(0.05)
+    assert orphan not in _shell_children(shell), "precondition: it left the shell's tree"
+    assert os.getsid(orphan.pid) == shell.pid, "precondition: it is in the shell's session"
+    return orphan
 
 
 def _started_jobs(shell: OwnedProcess, reaper: PtyReaper) -> list[psutil.Process]:
@@ -257,6 +294,25 @@ def test_stop_keeps_hold_when_job_ignores_termination(
     err = capsys.readouterr().err
     assert "terminals" in err, "the failure must name the phase that ran out"
     assert name in err, "the failure must name the owning session"
+
+
+@pytest.mark.flaky
+def test_stop_terminates_a_double_forked_job_outside_the_shell_tree(
+    home: Path, monkeypatch: pytest.MonkeyPatch, pty_reaper: PtyReaper
+) -> None:
+    """The cancel reaches the whole session: TERM finds a hangup-ignoring
+    worker that left the shell's tree through the shell's POSIX session."""
+    dependencies(monkeypatch)
+    terminal = PtySessionBackend()
+    _stop_env(monkeypatch, home, terminal)
+    name = "ava-agent-987-shell-2045-orphan"
+    pidfile = home / "orphan.pid"
+    job = _double_forked_job(pidfile, ignore=("SIGHUP",))
+    shell = _start_busy_session(terminal, home, name, job, pty_reaper)
+    orphan = _session_orphan(pidfile, shell, pty_reaper)
+
+    assert entry.cmd_stop(require_confirmation=False, keep_infra=True, timeout=15) == 0
+    assert _wait_exit(orphan.pid, timeout=1), "the stop left the session's worker running"
 
 
 def _notice_files(home: Path) -> list[Path]:
@@ -451,6 +507,46 @@ def test_release_closure_kills_a_job_that_ignores_the_cancel_and_notifies_owner(
     assert notice["reason"] == pty_close_notices.RELEASE_REASON
 
 
+def test_release_closure_kills_a_double_forked_job_outside_the_shell_tree(
+    home: Path, monkeypatch: pytest.MonkeyPatch, pty_reaper: PtyReaper
+) -> None:
+    """A worker that double-forked out of the shell's tree and ignores the
+    cancel is still the session's work: the session is busy, its owner gets the
+    notice, and the worker dies with the session (`session_tree`)."""
+    terminal = PtySessionBackend()
+    _stop_env(monkeypatch, home, terminal)
+    (home / "machine_name").write_text("test-host")
+    name = "ava-agent-987-shell-6006-orphan"
+    pidfile = home / "orphan.pid"
+    job = _double_forked_job(pidfile, ignore=("SIGTERM", "SIGHUP"))
+    shell = _start_busy_session(terminal, home, name, job, pty_reaper)
+    orphan = _session_orphan(pidfile, shell, pty_reaper)
+
+    closed = strict.close_release_terminals(
+        str(uuid4()), WHEN, grace_s=0.5, kill_s=10, reason=pty_close_notices.RELEASE_REASON
+    )
+    assert sorted(closed.busy) == [name], "the worker is the session's running work"
+    assert _wait_exit(orphan.pid, timeout=1), "closure returned with the worker alive"
+    assert strict.live_terminals() == []
+    [notice] = _release_notices(home)
+    assert notice["name"] == name
+
+
+def _withhold_sigkill(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Stand-in for an uninterruptible process: SIGKILL has no effect, whether
+    it comes from the session kill or to a captured birth."""
+    deliver = OwnedProcess.send_signal
+
+    def withheld_kill(identity: OwnedProcess, signum: int) -> bool:
+        return False if signum == signal.SIGKILL else deliver(identity, signum)
+
+    def withheld_sigkill(_process: psutil.Process) -> bool:
+        return True  # "signalled", yet the process lives on
+
+    monkeypatch.setattr(OwnedProcess, "send_signal", withheld_kill)
+    monkeypatch.setattr(session_tree, "_sigkill", withheld_sigkill)
+
+
 def test_release_closure_reports_a_sigkill_survivor_after_recording_its_notice(
     home: Path, monkeypatch: pytest.MonkeyPatch, pty_reaper: PtyReaper
 ) -> None:
@@ -463,13 +559,7 @@ def test_release_closure_reports_a_sigkill_survivor_after_recording_its_notice(
     shell = _start_busy_session(terminal, home, name, _STUBBORN_JOB, pty_reaper)
     jobs = _started_jobs(shell, pty_reaper)
     assert jobs, "the stubborn job never started"
-    deliver = OwnedProcess.send_signal
-
-    def withheld_kill(identity: OwnedProcess, signum: int) -> bool:
-        # Stand-in for an uninterruptible process: SIGKILL has no effect.
-        return False if signum == signal.SIGKILL else deliver(identity, signum)
-
-    monkeypatch.setattr(OwnedProcess, "send_signal", withheld_kill)
+    _withhold_sigkill(monkeypatch)
     with pytest.raises(StopIncompleteError) as caught:
         strict.close_release_terminals(
             str(uuid4()), WHEN, grace_s=0.3, kill_s=0.3, reason=pty_close_notices.RELEASE_REASON
@@ -550,12 +640,7 @@ def test_pitr_closure_reports_a_sigkill_survivor_after_recording_its_notice(
     shell = _start_busy_session(terminal, home, name, _STUBBORN_JOB, pty_reaper)
     jobs = _started_jobs(shell, pty_reaper)
     assert jobs, "the stubborn job never started"
-    deliver = OwnedProcess.send_signal
-
-    def withheld_kill(identity: OwnedProcess, signum: int) -> bool:
-        return False if signum == signal.SIGKILL else deliver(identity, signum)
-
-    monkeypatch.setattr(OwnedProcess, "send_signal", withheld_kill)
+    _withhold_sigkill(monkeypatch)
     with pytest.raises(StopIncompleteError) as caught:
         strict.close_release_terminals(
             str(uuid4()), WHEN, grace_s=0.3, kill_s=0.3, reason=pty_close_notices.PITR_REASON

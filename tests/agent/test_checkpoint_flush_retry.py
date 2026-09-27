@@ -14,7 +14,7 @@ from langgraph.graph import END, START, StateGraph
 from psycopg_pool import AsyncConnectionPool
 from typing_extensions import TypedDict
 
-from agent.startup import _wrap_saver_writes_with_nstep_interval
+from agent.startup import wrap_saver_writes_with_nstep_interval
 
 
 class _EffectState(TypedDict):
@@ -53,7 +53,7 @@ async def test_final_flush_retry_is_durable_and_idempotent(
     saver = _FaultSaver(aops_pool)
     saver.attempts = []
     await saver.setup()
-    _wrap_saver_writes_with_nstep_interval(saver, 4)
+    wrap_saver_writes_with_nstep_interval(saver, 4)
     flush = saver._ava_nstep_flush
     entered, release = asyncio.Event(), asyncio.Event()
     effect_file = tmp_path / "synthetic-effects"

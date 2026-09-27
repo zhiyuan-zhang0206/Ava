@@ -21,7 +21,7 @@ from agent.graph._claim import claim_node
 from agent.graph._exec import exec_node
 from agent.hosted_ownership import admit_hosted_runtime
 from agent.impersonation import flush_checkpoint, protect_native_hooks, settle_checkpoint
-from agent.startup import _wrap_saver_writes_with_nstep_interval
+from agent.startup import wrap_saver_writes_with_nstep_interval
 from ava.external_state import encode_plugin_delta
 from shared.agents import impersonation as leases
 from shared.agents.history.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
@@ -131,7 +131,7 @@ async def _prepare_graph(
 
     saver = AsyncPostgresSaver(aops_pool)
     await saver.setup()
-    _wrap_saver_writes_with_nstep_interval(saver, 100)
+    wrap_saver_writes_with_nstep_interval(saver, 100)
     # Delta write model (#3180): fold delta-written messages on read (daemon parity).
     wrap_saver_reads_with_delta_reconstruction(saver)
     # The registered plugin fields are a dynamically constructed state schema.

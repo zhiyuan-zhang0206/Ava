@@ -717,7 +717,7 @@ def _result_from_payload(
 
     The parent's cancel/timeout flags stay authoritative (same construction
     priority as the old thread loop); the child's kind is advisory except for
-    lifecycle — the envelope carries the `_LifecycleExit` class name, which the
+    lifecycle — the envelope carries the `LifecycleExit` class name, which the
     parent reconstructs for the dispatcher's isinstance match. A missing
     envelope with a non-zero exit (agent called os._exit) becomes a crash with
     an explanatory error.

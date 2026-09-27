@@ -64,7 +64,7 @@ separately loaded shared-layer module. It may import `shared` and installed
 LangChain packages, never `ava` or `agent`, because gateway, labeler, and eval
 processes load it without an agent runtime.
 
-`ensure_provider_plugins_loaded()` reuses `_discover_plugins()` and
+`ensure_provider_plugins_loaded()` reuses `discover_plugins()` and
 `load_for_runtime()`, imports enabled `provider.py` files in sorted-name order,
 and sets its once flag only after registration succeeds. The default config
 enables every discovered plugin, including the exact eight `lm_*` plugins

@@ -17,7 +17,7 @@ from shared.plugins_config import (
     PluginsConfig,
     PluginsConfigError,
     SchemaInvalid,
-    _discover_plugins,
+    discover_plugins,
     load,
     parse_description,
     update_all_disk_images,
@@ -168,12 +168,12 @@ def test_parse_description_empty_when_nothing(tmp_path: Path):
     assert parse_description(plugin_py) == ""
 
 
-# ── _discover_plugins ──
+# ── discover_plugins ──
 
 
 def test_discover_finds_repo_plugins(tmp_path: Path):
     _make_plugin_dir("myplugin", tmp_path)
-    discovered = _discover_plugins()
+    discovered = discover_plugins()
     assert "myplugin" in discovered
 
 
@@ -181,7 +181,7 @@ def test_discover_duplicate_raises(tmp_path: Path):
     _make_plugin_dir("dup", tmp_path)
     _make_external_plugin("dup")
     with pytest.raises(DuplicatePlugin, match="dup"):
-        _discover_plugins()
+        discover_plugins()
 
 
 # ── update_all_disk_images ──

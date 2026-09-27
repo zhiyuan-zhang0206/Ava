@@ -81,7 +81,7 @@ async def test_record_requires_the_agent_row(aops_pool: AsyncConnectionPool) -> 
 
 
 def test_billing_reason_literal_matches_the_circuit_reason() -> None:
-    """Anti-drift pin (task #3919): the durable value `_runloop` records for an
+    """Anti-drift pin (task #3919): the durable value `runloop` records for an
     HTTP 402 (CIRCUIT_REASON_BILLING) is exactly the value the billing
     batch-recovery whitelist filters on."""
     from agent.state_channels import CIRCUIT_REASON_BILLING

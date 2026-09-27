@@ -51,7 +51,7 @@ def test_eval_isolation_disables_network_and_result_sdk_surfaces() -> None:
         settings.agent.eval_isolation = True
         settings.agent.eval_network_allowlist = []
 
-        from agent._process_boot import _apply_per_agent_eval_isolation
+        from agent.process_boot import _apply_per_agent_eval_isolation
         _apply_per_agent_eval_isolation()
 
         assert not hasattr(ava, "web")
@@ -86,7 +86,7 @@ def test_eval_network_allowlist_preserves_explicitly_allowed_web() -> None:
         settings.agent.eval_isolation = True
         settings.agent.eval_network_allowlist = ["web"]
 
-        from agent._process_boot import _apply_per_agent_eval_isolation
+        from agent.process_boot import _apply_per_agent_eval_isolation
         _apply_per_agent_eval_isolation()
 
         assert hasattr(ava, "web")
@@ -108,7 +108,7 @@ def test_eval_isolation_off_leaves_sdk_and_memory_unchanged() -> None:
         original_path = ava.memory.PATH
         settings.agent.eval_isolation = False
 
-        from agent._process_boot import _apply_per_agent_eval_isolation
+        from agent.process_boot import _apply_per_agent_eval_isolation
         _apply_per_agent_eval_isolation()
 
         assert hasattr(ava, "web")

@@ -38,7 +38,7 @@ from .state_channels import (
 _RECURSION_LIMIT_INF = 2**31 - 1
 
 
-def _emit_error_event(
+def emit_error_event(
     ctx: AvaContext,
     agent_id: int,
     content: str,
@@ -216,7 +216,7 @@ async def _record_permanent_reject_outcome(
             agent_id=agent_id,
             exc_info=True,
         )
-    _emit_error_event(
+    emit_error_event(
         ctx,
         agent_id,
         f"{type(exc).__name__}: {exc} Automatic recovery is halted after "
@@ -291,7 +291,7 @@ async def _handle_fatal_llm_error(
         "wake-up once the underlying cause is resolved."
     )
     if emit_reports:
-        _emit_error_event(
+        emit_error_event(
             ctx,
             agent_id,
             content,
@@ -392,7 +392,7 @@ async def _handle_fatal_llm_error(
     return input_update
 
 
-def _graph_config(agent_id: int, tags: list[str], metadata: dict[str, object]) -> RunnableConfig:
+def graph_config(agent_id: int, tags: list[str], metadata: dict[str, object]) -> RunnableConfig:
     """LangGraph invoke config: thread_id + infinite recursion limit + the
     trace fields (run_name / metadata / tags) for backend filtering."""
     return {
@@ -440,7 +440,7 @@ async def settle_turn_failure(
                 event="compact_turn_aborted",
                 agent_id=agent_id,
             )
-            _emit_error_event(
+            emit_error_event(
                 ctx,
                 agent_id,
                 f"CompactionFailedError: {exc} The turn was aborted and conversation history "

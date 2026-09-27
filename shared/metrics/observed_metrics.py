@@ -305,7 +305,7 @@ _failures = 0
 def project_events(events: Sequence[Event]) -> None:
     """Best-effort emitter sink; diagnostics must never reenter the emitter."""
     global _failures  # noqa: PLW0603
-    from shared.telemetry import _report_no_pipeline
+    from shared.telemetry import report_no_pipeline
 
     observations: list[MetricObservation] = []
     rejected = 0
@@ -317,7 +317,7 @@ def project_events(events: Sequence[Event]) -> None:
         except Exception:
             rejected += 1
     if rejected:
-        _report_no_pipeline(
+        report_no_pipeline(
             "[observed-metrics] rejected {n} malformed measurement(s); collection is partial",
             n=rejected,
         )
@@ -326,7 +326,7 @@ def project_events(events: Sequence[Event]) -> None:
     except Exception as exc:
         _failures += 1
         if _failures == 1 or _failures % 50 == 0:
-            _report_no_pipeline(
+            report_no_pipeline(
                 "[observed-metrics] projection failed ({n} consecutive): {err}; "
                 "JSONL replay may repair observed rows, collection remains partial",
                 n=_failures,

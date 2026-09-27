@@ -27,10 +27,13 @@ a release ([decision](../../decisions/2026-09-27-fleet-release-and-cutover-polic
 item 2). While root still serves them, the phase waits the captured policy's
 `close_s` for their jobs to finish, signalling nothing. It then stops root, keeping
 terminals, so no reconciler re-arms a session. `close_release_terminals`
-(`cli/commands/service_stop.py`) captures every recorded shell, job and PTY
-host birth, records the `ava stop` closure notice for each busy session's
-owner (naming the release, before any signal), HUPs shells and TERMs jobs,
-and after the policy's `cancel_grace_s` SIGKILLs only those captured births
+(`cli/commands/service_stop.py`) captures every recorded shell, every other
+member of its session (`shared/sessions/pty/session_tree.py`: descendants and
+POSIX session, a double-forked job included) and each PTY host birth, records
+the `ava stop` closure notice for each busy session's owner (naming the
+release, before any signal), HUPs shells and TERMs jobs, and after the
+policy's `cancel_grace_s` kills each session whole through `session_tree`
+(frozen, children first, shell last), then SIGKILLs any other captured birth
 still live. Closure is
 the kernel observation that each is gone and no recorded terminal is live;
 selection checks that evidence again. A survivor fails the phase with its

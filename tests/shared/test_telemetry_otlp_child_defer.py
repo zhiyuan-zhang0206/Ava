@@ -33,12 +33,10 @@ def _production_process_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.fixture(autouse=True)
 def _fresh_observability_export_gate() -> Any:
-    gate = getattr(telemetry_otlp, "_observability_export_allowed", None)
-    if gate is not None:
-        gate.cache_clear()
+    gate = telemetry_otlp.observability_export_allowed
+    gate.cache_clear()
     yield
-    if gate is not None:
-        gate.cache_clear()
+    gate.cache_clear()
 
 
 def _event(**overrides: Any) -> Event:
