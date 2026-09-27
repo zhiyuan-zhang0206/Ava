@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from cli.commands.converge import host as _converge
+from cli.commands.converge import host as converge_host
 from cli.commands.extensions import memory
 from cli.commands.extensions._plugin_scaffold import ScaffoldResult, run_plugin_scaffolds
 from shared import memory_repo, paths, proc
@@ -98,11 +98,11 @@ def test_scaffold_execution_stays_fail_fast() -> None:
 
 def test_converge_steps_do_not_scaffold_plugins() -> None:
     """Changing this back would reintroduce memory-repository Git work to start."""
-    assert "plugin scaffolds" not in {step.name for step in _converge.CONVERGE_STEPS}
+    assert "plugin scaffolds" not in {step.name for step in converge_host.CONVERGE_STEPS}
 
     references = {
         step.name: inspect.getsource(step.apply)
-        for step in _converge.CONVERGE_STEPS
+        for step in converge_host.CONVERGE_STEPS
         if "run_plugin_scaffolds" in inspect.getsource(step.apply)
         or "scaffold" in inspect.getsource(step.apply)
     }
@@ -132,7 +132,7 @@ _HOST_INTEGRATION_STEP_NAMES = frozenset(
 )
 
 
-def _skip_host_integration(_ctx: _converge.ConvergeCtx) -> None:
+def _skip_host_integration(_ctx: converge_host.ConvergeCtx) -> None:
     return
 
 
@@ -149,9 +149,9 @@ def _stub_host_integrations() -> Generator[None]:
     listed steps can probe, install, or register host-wide infrastructure, so
     they are no-ops here to keep the regression test hermetic.
     """
-    originals: list[tuple[_converge.ConvergeStep, object]] = []
+    originals: list[tuple[converge_host.ConvergeStep, object]] = []
     try:
-        for step in _converge.CONVERGE_STEPS:
+        for step in converge_host.CONVERGE_STEPS:
             if step.name in _HOST_INTEGRATION_STEP_NAMES:
                 originals.append((step, step.apply))
                 object.__setattr__(step, "apply", _skip_host_integration)
@@ -216,14 +216,14 @@ def test_converge_ignores_a_dirty_wrong_branch_memory_pool(
     monkeypatch.setattr(proc, "run_bounded", _record_run_bounded)
     monkeypatch.setattr(memory_repo, "run_bounded", _record_run_bounded)
     monkeypatch.setattr(subprocess, "run", _record_subprocess_run)
-    monkeypatch.setattr(_converge, "is_default_home", _is_not_default_home)
+    monkeypatch.setattr(converge_host, "is_default_home", _is_not_default_home)
 
     with _stub_host_integrations():
-        _converge.converge_host(
+        converge_host.converge_host(
             tmp_path / "repo",
             frozenset({"agent-runner"}),
             ava_home=tmp_path,
-            steps=_converge.CONVERGE_STEPS,
+            steps=converge_host.CONVERGE_STEPS,
         )
 
     assert not [cwd for cwd in git_cwds if cwd.is_relative_to(memory_pool)]

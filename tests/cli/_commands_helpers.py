@@ -161,7 +161,7 @@ def _noop_start_prechecks(monkeypatch: pytest.MonkeyPatch) -> None:
 
     from cli.commands import _probe, _setup
     from cli.commands import _repo as _repo_mod
-    from cli.commands.converge import host as _converge
+    from cli.commands.converge import host as converge_host
 
     def _fake_collect(_args: dict[str, str | None]) -> tuple[dict[str, str], list]:
         return {
@@ -172,7 +172,7 @@ def _noop_start_prechecks(monkeypatch: pytest.MonkeyPatch) -> None:
         }, []
 
     monkeypatch.setattr(_setup, "_collect_setup_values", _fake_collect)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_converge, "converge_host", lambda *_a, **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(converge_host, "converge_host", lambda *_a, **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
     # The per-cluster pg/redis bring-up (`_ensure_gateway_data_plane`) starts a real
     # native instance under $AVA_HOME. These tests assert session/stop/status call
     # shapes, not infra, so stub it to a noop — keeping them hermetic regardless of

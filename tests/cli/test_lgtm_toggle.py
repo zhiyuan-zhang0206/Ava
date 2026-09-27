@@ -12,8 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from cli.commands.observability import lgtm as _lgtm
-from cli.commands.observability import lgtm_native as _lgtm_native
+from cli.commands.observability import lgtm, lgtm_native
 
 
 class _Result:
@@ -42,16 +41,16 @@ def _wire(
     marker.parent.mkdir(parents=True, exist_ok=True)
     deploy_dir = tmp_path / "repo" / "deploy" / "lgtm"
     deploy_dir.mkdir(parents=True, exist_ok=True)
-    monkeypatch.setattr(_lgtm, "lgtm_host_marker", lambda: marker)
-    monkeypatch.setattr(_lgtm.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(lgtm, "lgtm_host_marker", lambda: marker)
+    monkeypatch.setattr(lgtm.platform, "system", lambda: "Darwin")
     monkeypatch.setattr("shared.paths.ava_home", lambda: marker.parent)
-    monkeypatch.setattr(_lgtm, "lgtm_deploy_dir", lambda _repo: deploy_dir)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(lgtm, "lgtm_deploy_dir", lambda _repo: deploy_dir)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_repo_mod, "_repo_root", lambda: tmp_path / "repo")
 
     def noop_native(_repo: Path, _home: Path) -> None:
         return None
 
-    monkeypatch.setattr(_lgtm_native, "ensure_lgtm_native", noop_native)
+    monkeypatch.setattr(lgtm_native, "ensure_lgtm_native", noop_native)
 
     calls: list[tuple[list[str], Path]] = []
 
@@ -59,14 +58,14 @@ def _wire(
         calls.append((cmd, Path(str(kw["cwd"]))))
         return _Result()
 
-    monkeypatch.setattr(_lgtm.subprocess, "run", fake_run)
+    monkeypatch.setattr(lgtm.subprocess, "run", fake_run)
     return marker, calls
 
 
 def test_on_writes_marker_and_runs_start(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     marker, calls = _wire(monkeypatch, tmp_path)
 
-    assert _lgtm.cmd_lgtm_on() == 0
+    assert lgtm.cmd_lgtm_on() == 0
     assert marker.exists()
     assert [c[0] for c in calls] == [["bash", "start.sh"]]
     assert calls[0][1].name == "lgtm"
@@ -78,7 +77,7 @@ def test_on_is_idempotent_with_existing_marker(
     marker, calls = _wire(monkeypatch, tmp_path)
     marker.touch()
 
-    assert _lgtm.cmd_lgtm_on() == 0
+    assert lgtm.cmd_lgtm_on() == 0
     assert marker.exists()
     assert [c[0] for c in calls] == [["bash", "start.sh"]]
 
@@ -94,7 +93,7 @@ def test_on_installs_native_backends_before_starting(
         events.append(f"native:{repo}:{home}")
 
     monkeypatch.setattr(
-        _lgtm_native,
+        lgtm_native,
         "ensure_lgtm_native",
         record_native,
     )
@@ -103,10 +102,10 @@ def test_on_installs_native_backends_before_starting(
         events.append("start")
         return _Result()
 
-    monkeypatch.setattr(_lgtm.subprocess, "run", fake_run)
+    monkeypatch.setattr(lgtm.subprocess, "run", fake_run)
     monkeypatch.setattr("shared.paths.ava_home", lambda: native_home)
 
-    assert _lgtm.cmd_lgtm_on() == 0
+    assert lgtm.cmd_lgtm_on() == 0
     assert marker.exists()
     assert events == [f"native:{tmp_path / 'repo'}:{native_home}", "start"]
 
@@ -124,9 +123,9 @@ def test_off_removes_marker_then_stops(monkeypatch: pytest.MonkeyPatch, tmp_path
         assert home == marker.parent
         marker_present_at_stop.append(marker.exists())
 
-    monkeypatch.setattr(_lgtm_native, "bootout_native_jobs", stop)
+    monkeypatch.setattr(lgtm_native, "bootout_native_jobs", stop)
 
-    assert _lgtm.cmd_lgtm_off() == 0
+    assert lgtm.cmd_lgtm_off() == 0
     assert not marker.exists()
     assert not calls
     assert marker_present_at_stop == [False]
@@ -135,9 +134,9 @@ def test_off_removes_marker_then_stops(monkeypatch: pytest.MonkeyPatch, tmp_path
 def test_off_without_marker_still_stops(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     marker, calls = _wire(monkeypatch, tmp_path)
     stopped: list[Path] = []
-    monkeypatch.setattr(_lgtm_native, "bootout_native_jobs", stopped.append)
+    monkeypatch.setattr(lgtm_native, "bootout_native_jobs", stopped.append)
 
-    assert _lgtm.cmd_lgtm_off() == 0
+    assert lgtm.cmd_lgtm_off() == 0
     assert not calls
     assert stopped == [marker.parent]
 
@@ -148,7 +147,7 @@ def test_on_without_docker_starts_native_backends(
     marker, calls = _wire(monkeypatch, tmp_path)
     monkeypatch.setattr(shutil, "which", _fail_on_docker_query)
 
-    assert _lgtm.cmd_lgtm_on() == 0
+    assert lgtm.cmd_lgtm_on() == 0
     assert marker.exists()
     assert [command for command, _cwd in calls] == [["bash", "start.sh"]]
 
@@ -157,9 +156,9 @@ def test_status_without_marker_says_so(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     _wire(monkeypatch, tmp_path)
-    monkeypatch.setattr(_lgtm, "is_lgtm_host", lambda: False)
+    monkeypatch.setattr(lgtm, "is_lgtm_host", lambda: False)
 
-    assert _lgtm.cmd_lgtm_status() == 0
+    assert lgtm.cmd_lgtm_status() == 0
     assert "not the LGTM host" in capsys.readouterr().out
 
 
@@ -168,17 +167,17 @@ def test_status_reports_native_jobs_without_docker(
 ) -> None:
     """The native PID helper is the status source; no container query remains."""
     _wire(monkeypatch, tmp_path)
-    monkeypatch.setattr(_lgtm, "is_lgtm_host", lambda: True)
-    monkeypatch.setattr(_lgtm_native, "backend_pids", _fake_backend_pids)
+    monkeypatch.setattr(lgtm, "is_lgtm_host", lambda: True)
+    monkeypatch.setattr(lgtm_native, "backend_pids", _fake_backend_pids)
     monkeypatch.setattr(
-        _lgtm,
+        lgtm,
         "probe_statuses",
         lambda: [("loki", True), ("prometheus", True), ("grafana", False)],
     )
     monkeypatch.setattr(shutil, "which", _fail_on_docker_query)
-    monkeypatch.setattr(_lgtm.subprocess, "run", _fail_run)
+    monkeypatch.setattr(lgtm.subprocess, "run", _fail_run)
 
-    assert _lgtm.cmd_lgtm_status() == 0
+    assert lgtm.cmd_lgtm_status() == 0
     output = capsys.readouterr().out
     assert "com.ava.loki      101" in output
     assert "com.ava.prometheus not-running" in output

@@ -580,7 +580,7 @@ def ensure_cluster_instance(
 ) -> int:
     """Bring up this cluster's own Postgres + Redis (+ PgBouncer when enabled) on its
     allocated ports (idempotent). Returns 0 on success. The Postgres role/db/schema
-    are provisioned separately by cluster_lifecycle.provision against pg_admin_url().
+    are provisioned separately by cluster.registry.provision against pg_admin_url().
 
     `identity` is the Postgres db/role identifier; `redis_user` is the independent
     Redis ACL user. Existing clusters read each from its respective `.env` URL;

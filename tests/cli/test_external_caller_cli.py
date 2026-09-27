@@ -5,7 +5,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from cli.commands.agents import control as agents
+from cli.commands.agents import control as agents_control
 
 
 def _send_args(**overrides: object) -> argparse.Namespace:
@@ -39,18 +39,18 @@ def post(monkeypatch: pytest.MonkeyPatch) -> Mock:
 
 def test_send_carries_explicit_source(post: Mock, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("AVA_CALLER_IDENTITY")
-    agents.cmd_agents_send(42, "hello", "user")
+    agents_control.cmd_agents_send(42, "hello", "user")
     assert post.call_args.kwargs["json"]["source"] == "user"
 
 
 def test_send_honours_explicit_source_under_profile(post: Mock) -> None:
-    agents.cmd_agents_send(42, "hello", "user")
+    agents_control.cmd_agents_send(42, "hello", "user")
     assert post.call_args.kwargs["json"]["source"] == "user"
 
 
 def test_missing_send_source_is_not_compensated(post: Mock) -> None:
     with pytest.raises(ValueError, match="requires --source"):
-        agents.cmd_agents_send(42, "hello", None)
+        agents_control.cmd_agents_send(42, "hello", None)
     post.assert_not_called()
 
 
@@ -59,21 +59,21 @@ def test_missing_send_source_is_not_compensated(post: Mock) -> None:
 
 def test_lifecycle_takes_explicit_source(post: Mock, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("AVA_CALLER_IDENTITY")
-    agents.cmd_agents_restart(42, source="user")
+    agents_control.cmd_agents_restart(42, source="user")
     assert post.call_args.kwargs["json"] == {"source": "user"}
-    agents.cmd_agents_resurrect(42, source="user")
+    agents_control.cmd_agents_resurrect(42, source="user")
     assert post.call_args.kwargs["json"] == {"resurrected_by": "user"}
-    agents.cmd_agents_kill(42, source="shell:7")
+    agents_control.cmd_agents_kill(42, source="shell:7")
     assert post.call_args.kwargs["json"] == {"force": True, "source": "shell:7"}
 
 
 def test_lifecycle_never_reads_profile(post: Mock) -> None:
     # The profile stays set (fixture): an omitted --source claims nothing.
-    agents.cmd_agents_restart(42)
+    agents_control.cmd_agents_restart(42)
     assert "json" not in post.call_args.kwargs
-    agents.cmd_agents_resurrect(42)
+    agents_control.cmd_agents_resurrect(42)
     assert "json" not in post.call_args.kwargs
-    agents.cmd_agents_kill(42)
+    agents_control.cmd_agents_kill(42)
     assert post.call_args.kwargs["json"] == {"force": True}
 
 

@@ -1,6 +1,6 @@
 """Converge rendering of the Grafana provisioning tree (task #3697).
 
-Split out of ``_lgtm_native`` when the runtime-rendered dashboard (S3) pushed
+Split out of ``observability.lgtm_native`` when the runtime-rendered dashboard (S3) pushed
 that module over the per-file line ceiling. Every provisioning file is
 copied VERBATIM under the content-hash user-edit guard — except
 ``dashboards/ava-ops-main.json``, which is generated from the metric

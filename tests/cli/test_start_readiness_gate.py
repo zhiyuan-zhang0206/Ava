@@ -111,7 +111,7 @@ def _hermetic_start(monkeypatch: pytest.MonkeyPatch) -> None:
     status snapshot, because those are what these tests are about.
     """
     from cli.commands import _setup
-    from cli.commands.converge import host as _converge
+    from cli.commands.converge import host as converge_host
 
     monkeypatch.setattr(
         _setup,
@@ -126,7 +126,7 @@ def _hermetic_start(monkeypatch: pytest.MonkeyPatch) -> None:
             [],
         ),
     )
-    monkeypatch.setattr(_converge, "converge_host", lambda *_a, **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(converge_host, "converge_host", lambda *_a, **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_repo_mod, "_register_machine_or_die", lambda _r, _role: 0)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_repo_mod, "_probe_gateway_or_die", lambda _url: 0)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_repo_mod, "_assert_schema_current_or_die", lambda: 0)

@@ -1,4 +1,4 @@
-"""cli.commands._otel_collector — binary install + config generation tests.
+"""cli.commands.observability.otel_collector — binary install + config generation tests.
 
 No network: the download is monkeypatched; the config render and the
 idempotence marker are the logic under test. The data-plane receivers

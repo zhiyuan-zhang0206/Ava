@@ -79,9 +79,9 @@ def test_the_materializer_lives_beside_its_siblings() -> None:
     """`extensions/materialize.py`, next to `extensions/skills_sync.py` — a subsystem
     reader, not another entry in `converge/host.py`'s host-state roster. Extracting
     it is also what kept `converge/host.py` under the 800-line ceiling."""
-    from cli.commands.extensions import materialize as _converge_extensions
+    from cli.commands.extensions import materialize
 
-    assert hasattr(_converge_extensions, "materialize_cluster_extensions")
+    assert hasattr(materialize, "materialize_cluster_extensions")
 
 
 def test_start_adopts_before_it_materializes() -> None:

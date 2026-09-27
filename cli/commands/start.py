@@ -342,7 +342,7 @@ def _cmd_start_body(  # noqa: PLR0915 — cohesive linear start sequence (conver
     """
     # Each seam lives at the module that defines it — the test-patch target.
     from cli.commands import _probe, _repo, _root_driver, _setup
-    from cli.commands.converge import host as _converge
+    from cli.commands.converge import host as converge_host
     from shared import maintenance
 
     maintenance.require_start_allowed()
@@ -436,7 +436,7 @@ def _cmd_start_body(  # noqa: PLR0915 — cohesive linear start sequence (conver
     # runs during start or rollback. `ava cluster update` inherits this via its
     # trailing cmd_start, so one gateway update converges the whole fleet.
     try:
-        _converge.converge_host(repo, roles)
+        converge_host.converge_host(repo, roles)
     except Exception as e:
         print(f"  ✗ converge failed: {e}", file=sys.stderr)
         return 1
