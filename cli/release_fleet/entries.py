@@ -16,9 +16,10 @@ answers is always the candidate's, whatever image the unit currently runs.
   incomplete, and the installed enrollment is the one the request names.
   It prints `{"ready": true}`; any refusal exits 2 and changes nothing.
 
-The request builder has no way yet to learn a remote unit's candidate
-reference before asking for its receipt (a user ruling is open), and remote
-units wait for slice dbgen-8, so no production path calls these entries yet.
+The request builder learns a remote unit's candidate reference only once
+`prepare` publishes the unit's receipt to the gateway (slice FC-7b,
+decisions/2026-09-27-fleet-core-release-choices.md), and remote units wait
+for slice dbgen-8, so no production path calls these entries yet.
 """
 
 from __future__ import annotations

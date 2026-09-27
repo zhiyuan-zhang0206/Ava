@@ -75,11 +75,12 @@ Without its coordinator it holds its phase up to a 24 h lifetime.
   `authorizing` phase;
 - relaxing `require_topology` for units that hold an enrollment.
 
-## Open question for a user ruling
+## Candidate reference
 
 The ops kind needs a unit's candidate image reference before the gateway can
-ask for its receipt. Recommended: `ava cluster release prepare` on each unit
-publishes its receipt to the gateway (machine-token API), and the request
-builder verifies each through `release_image_exec(receipt)`. Alternative:
-the operator hands receipts to `ava cluster release request`. Until ruled,
-the builder refuses included remote units.
+ask for its receipt. Ruled on 2026-09-27
+([decision](../../decisions/2026-09-27-fleet-core-release-choices.md)):
+`ava cluster release prepare` on each unit publishes its receipt to the
+gateway over the machine-token API, and the request builder verifies each
+through `release_image_exec(receipt)` (slice FC-7b). Until then the builder
+refuses included remote units.

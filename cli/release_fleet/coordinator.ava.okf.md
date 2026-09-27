@@ -79,12 +79,19 @@ Alerts are journaled by key at first emission; each delivery (alert row,
 webhook, observer notice; `delivery.py`) is journaled once it lands and
 retried at the next boundary otherwise.
 
-## Choices awaiting a ruling
+## Recorded choices
+
+Ruled on 2026-09-27
+([decision](../../decisions/2026-09-27-fleet-core-release-choices.md)):
+failures at `resuming` hold rather than recover (admission may be open); a
+failed unit start is marked failed, with no automatic retry yet; a release
+moves between two distinct commits (a same-commit rebuild is `adopt`'s); the
+request builder runs in the admitted image until FC-7b.
+
+Still awaiting a ruling:
 
 1. `stopping` is the plan's `closing`; `starting` + `observing` its
    `starting_gateway`.
-2. Failures at `resuming` hold rather than recover (admission may be open).
-3. No automatic retry of a failed unit start yet; the unit is marked failed.
-4. Units' barrier deadlines are journaled in their instruction; a
+2. Units' barrier deadlines are journaled in their instruction; a
    continuation keeps the original deadline.
-5. An abort at `prepared` completes as `aborted` rather than refusing.
+3. An abort at `prepared` completes as `aborted` rather than refusing.
