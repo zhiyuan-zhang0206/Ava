@@ -7,7 +7,11 @@ and 5 (`scripts/lint_code_structure.py`, `scripts/structure/locality.py`); how t
 work with them is in [python-conventions](../../conventions/python-conventions.md).
 The principle itself lives in the serious-engineering skill
 (`principles/complexity-management`, "Locality is information hiding made
-observable"). This page tracks what is **left**.
+observable"). Two instruments complement the gate: contract snapshots of the
+core doors (`scripts/structure/contracts.py`, `lint-contract-snapshots`) make a
+contract change visible in review, and the sweeper's `locality` class
+(`scripts/structure/cochange.py`) indexes per-change package spread and
+cross-package co-change pairs. This page tracks what is **left**.
 
 ## Calibration snapshot (2026-09-26)
 
@@ -32,58 +36,50 @@ boundaries, already carried by codegen, and not debt.
 
 ## Left, in order
 
-1. **Postgres door burn-down** (`owner_bypasses`, 19 modules / 29 sites). Extend
-   `shared.db.connect()` / `pool()` so the door owns the transport posture while
-   the caller owns the target (an explicit URL for provisioning, PITR, and
-   restore drills), and add the async pool factory the agent host and eval
-   pools lack. Migrate the sites; genuine exceptions become reasoned `allowed`
-   entries. Collapse the three drifted `watch_idle.py` reference copies into
-   one. Then narrow `scripts/lint_pool_keepalives.py` to what Rule 5 does not
-   cover (`scripts/`, and any async pool left in `allowed`), or retire it if
-   nothing remains.
-2. **Reach-in burn-down** (`private_imports`, 114 keys / 124 sites / 74
-   files) — `cli/main.py`'s 121-key handler registry is gone: builders bind
-   their own module's `_h_*` handler directly, and tests patch the parser
-   module. Every `cli.*` / `services.pitr.*` target reached across a package
-   boundary is resolved too: 8 internal `cli/commands/_*.py` steps promoted to
-   public module names (`cluster_instance`, `maintenance`, `packages_refresh`,
-   `pgbouncer`, `observatory_urls`, `release_inventory` — each still defines
-   no `cmd_*` of its own; the release transition likewise reaches
-   `root_driver`, `data_plane/pitr_activation`, `service_stop`,
-   `data_plane/maintenance_stop`, `data_plane/write_generation` and
-   `start_generation` by public names), plus 4
-   `cluster/registry` test-seam wrappers and 8 `services.pitr` names promoted
-   (`activation_runtime`'s env-field table, archive/desired-archive settings,
-   file evidence, settings digest, shadow-pg gate and service-enable, plus
-   `base_manifest.lsn`).
-   Highest yield next: the most reached-into privates
-   (`shared.agents.impersonation._impersonation_store`, `agent.turn_progress`)
-   each get a verdict: contract (export it) or internal (route callers through
-   a door). (`shared.lm`'s and `agent.graph`'s most reached-into privates
-   already got the contract verdict: promoted to public module names
-   alongside the rest of each package's de-facto-public modules.)
-   `ava` carries no frozen reach-ins any more: agent visibility there is the
-   `__all_for_ava__` whitelist (which `lint_agent_docstrings` keys on too), not
-   the underscore, so every framework module or name another package needs took
-   a public name without entering the agent's view.
-3. **Locality sweeper class** — an index, not a wall: per-PR module spread and
-   cross-package co-change pairs over a rolling window, reusing the lint's
-   scanner per [lint-vs-sweeper](../../conventions/lint-vs-sweeper.md). Each
-   finding names the leaked decision and lands as a ledger entry.
-4. **Contract snapshot.** A public-API snapshot for the core doors
-   (`shared.db`, `shared.agents`, `shared.events`) next to the existing
-   `ui/web/openapi.json` and `db/schema.sql` snapshots. A snapshot diff needs an
-   explicit declaration in the PR; a `fix` that must change a contract is a
-   design bug and goes back to align rather than landing as an internal fix.
-5. **PR description locality note.** When a PR's source changes span three or
-   more modules, the description names the leaked decision and either closes
-   it or files a task (`write-a-pr-description` skill).
-6. **More single-owner decisions**, each added to `DECISIONS` only once its
-   owner exists: the process identity key (one fix touched 21 files; its
-   natural owner is `ava/agent_identity.py`, now a public module) is the
-   next candidate; `shared/config` as a registration hub needs a design pass
-   first.
-7. **Path-import burn-down** (`path_imports`, 20 sites in 20 files under
-   `ava_builtins/`: 15 `sys.path` guards, 5 `spec_from_file_location`
-   loads). Each skill's shared code moves into a governed package, as the
-   Claude/Codex launchers did (`ava/shell/coding_tools/`).
+Most of what remains sits in files the long-running unified-cluster-lifecycle
+branch (#3479) rewrites — its data-plane credentials, updater and process
+lifecycle; those items wait for it to land and are then designed on its code.
+
+1. **Postgres door burn-down** (`owner_bypasses`, 19 modules / 29 sites).
+   Extend `shared.db.connect()` / `pool()` so the door owns the transport
+   posture while the caller owns the target (an explicit URL for provisioning,
+   PITR, and restore drills), and add the async pool factory the agent host
+   and eval pools lack. Migrate the sites; genuine exceptions become reasoned
+   `allowed` entries. Collapse the three drifted `watch_idle.py` reference
+   copies into one. Then narrow `scripts/lint_pool_keepalives.py` to what
+   Rule 5 does not cover, or retire it. Waits for #3479, which rewrites
+   `shared/db_connections.py` (owner-admin, executor-admin and
+   generation-login dials) and most of the dialing modules — design the named
+   entry points on its version.
+2. **Reach-in burn-down** (`private_imports`, 23 keys / 25 sites / 20 files).
+   Every remaining key sits in a file #3479 rewrites. Highest yield once it
+   lands: `shared.agents.impersonation._impersonation_store` (5 sites), then
+   `shared.runtime_publication_input` and `shared.managed_writer_publication`
+   (3 each) — each gets a verdict: contract (export it) or internal (route
+   callers through a door). `ava` carries no frozen reach-ins: agent
+   visibility there is the `__all_for_ava__` whitelist (which
+   `lint_agent_docstrings` keys on too), not the underscore, so every
+   framework module or name another package needs took a public name without
+   entering the agent's view.
+3. **Directory budgets.** `cli/commands` is down to 86 entries: an empty
+   package door plus domain subpackages (`agents`, `management`, `extensions`,
+   `observability`, `data_plane`, `cluster`, `converge`), with converge steps
+   living beside the domain they converge. The remaining `lifecycle/` and
+   `update/` split waits for #3479, which deletes and renames most of those
+   modules; so does `shared/` (231), the largest over-budget directory. The
+   `python -m cli.commands._*` process entry points are a cross-version
+   contract (the ops server composes the command a possibly different checkout
+   runs) and do not move without an expand-contract step.
+4. **More single-owner decisions**, each added to `DECISIONS` only once its
+   owner exists: the OS process identity key (pid + kernel start time; one fix
+   touched 28 files across exec ownership, the updater, PITR and PTY sessions;
+   natural owner `shared/proc_tree.py`'s `OwnedProcess`) is the next
+   candidate — most of its readers sit in files #3479 rewrites.
+   `shared/config` as a registration hub needs a design pass first.
+5. **Path imports** (`path_imports`, 5 sites left): the `ava_memory` pool
+   scripts are deliberately portable — bare `python3` on a machine with only
+   the copied skill and the pool checkout, no Ava source tree — which is why
+   they still add their own directory to `sys.path`. Moving their helpers into
+   the plugin package would drop that property; keeping it as a reasoned
+   allowlist entry, or inlining the helpers, are the alternatives. Every other
+   built-in skill's shared code lives in `ava_builtins/skill_support/`.
