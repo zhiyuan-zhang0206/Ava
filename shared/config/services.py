@@ -14,7 +14,7 @@ from typing import Annotated, Any, Literal, cast
 from pydantic import Field, field_validator
 from pydantic_settings import NoDecode
 
-from shared.config._base import _unit_home
+from shared.config.base import _unit_home
 from shared.config.service_health_ports_fields import ServiceHealthPortFields
 from shared.config.service_runtime import _ServiceRuntimeSettings
 

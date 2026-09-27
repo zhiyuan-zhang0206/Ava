@@ -657,7 +657,6 @@
     "services/memory_indexer/embeddings/gemini.py::shared.resilience._MAX_RETRY_AFTER_RESPECT_S": 1,
     "shared/agents/impersonation_manifest.py::shared.agents.impersonation._impersonation_store": 1,
     "shared/cluster/derive.py::shared.config.data_plane._is_runner_db_url": 1,
-    "shared/config_registry.py::shared.config._base": 1,
     "shared/plugin_config_registry.py::shared.config.service_read._domain_model_classes": 1,
     "shared/port_preflight.py::shared.cluster._port_free": 1
   },

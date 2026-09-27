@@ -12,7 +12,7 @@ from urllib.parse import urlsplit
 
 from pydantic import Field, field_validator, model_validator
 
-from shared.config._base import EnvSettings, _unit_home
+from shared.config.base import EnvSettings, _unit_home
 from shared.dotenv_boot import UNANCHORED_DB_SENTINEL
 from shared.netutil import is_ipv4_literal, is_loopback_host
 from shared.url_secret import url_host, url_with_host, url_with_password, url_with_query_param

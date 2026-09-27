@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from shared.config._base import _unit_home
+from shared.config.base import _unit_home
 
 
 @pytest.fixture

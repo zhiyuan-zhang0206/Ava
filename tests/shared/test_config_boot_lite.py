@@ -130,7 +130,7 @@ def test_import_ava_stays_lite() -> None:
         "import shared.config as c\n"
         "st = c._boot_state()\n"
         "print('AVA', st['mode'], st['upgrades'], 'pydantic_settings' in sys.modules, "
-        "'shared.config._base' in sys.modules)\n"
+        "'shared.config.base' in sys.modules)\n"
     )
     assert proc.returncode == 0, proc.stderr
     assert proc.stdout.startswith("AVA lite 0 False False"), proc.stdout
