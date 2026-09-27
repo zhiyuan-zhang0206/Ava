@@ -89,8 +89,6 @@ def _h_impersonate_relay(args: argparse.Namespace) -> int:
 def _add_send_parser(commands: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     """The attested send verb: one message to another agent as the leased identity
     (task #4102) — the CLI form of the borrow the SDK attachment already stamps."""
-    from cli.main import _h_impersonate
-
     sender = commands.add_parser(
         "send",
         help="send a message to another agent as the leased identity",
@@ -115,8 +113,6 @@ def _add_send_parser(commands: argparse._SubParsersAction[argparse.ArgumentParse
 
 
 def _add_impersonation_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
-    from cli.main import _h_impersonate, _h_impersonate_relay
-
     group = sub.add_parser("impersonate", help="start and use named external sessions")
     commands = group.add_subparsers(dest="impersonation_cmd", required=True)
     request = commands.add_parser(

@@ -256,37 +256,6 @@ def _h_cluster_boot_unit_status(_args: argparse.Namespace) -> int:
 
 
 def _add_cluster_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:  # noqa: PLR0915
-    from cli.main import (
-        _h_cluster_boot_unit_install,
-        _h_cluster_boot_unit_status,
-        _h_cluster_boot_unit_uninstall,
-        _h_cluster_cancel,
-        _h_cluster_destroy,
-        _h_cluster_down,
-        _h_cluster_ensure_db_role,
-        _h_cluster_health_probe,
-        _h_cluster_health_probe_register,
-        _h_cluster_health_probe_unregister,
-        _h_cluster_hold_watchdog,
-        _h_cluster_hold_watchdog_register,
-        _h_cluster_hold_watchdog_unregister,
-        _h_cluster_ls,
-        _h_cluster_pause,
-        _h_cluster_pitr_activate,
-        _h_cluster_pitr_rollback,
-        _h_cluster_pitr_status,
-        _h_cluster_recover,
-        _h_cluster_recover_pending,
-        _h_cluster_restart,
-        _h_cluster_resume,
-        _h_cluster_rollback,
-        _h_cluster_status,
-        _h_cluster_update,
-        _h_cluster_watchdog_probe,
-        _h_cluster_watchdog_probe_register,
-        _h_cluster_watchdog_probe_unregister,
-    )
-
     # `ava cluster status` — list machines table + per-agent-runner status_probe op
     cluster_p = sub.add_parser(
         "cluster",

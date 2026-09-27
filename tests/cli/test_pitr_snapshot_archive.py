@@ -30,7 +30,7 @@ def test_pitr_snapshot_actions_bind_their_dedicated_handlers(
     )
 
     assert args.table == "agent_state_backfill_snapshot"
-    assert args.func is getattr(_main, handler_name)
+    assert args.func is getattr(pitr, handler_name)
 
 
 @pytest.mark.parametrize(

@@ -2,10 +2,12 @@
 
 `cli.main` imports this package at module level (settings-free: nothing here
 imports ``cli.commands`` / ``shared.config``, so ``ava --help`` builds the tree
-on a host with no .env), re-exports every ``_h_*`` handler as the test patch
-seam, and calls :func:`build_parser` from ``main()``. Handlers lazy-import
-their ``cmd_*`` implementation so the Settings load stays deferred to dispatch
-time — see the ``cli.main`` module docstring.
+on a host with no .env) and calls :func:`build_parser` from ``main()``. Each
+builder binds its own module's handler directly (``set_defaults(func=_h_x)``);
+a test that fakes a handler patches the parser module that defines it, before
+``build_parser()`` runs. Handlers lazy-import their ``cmd_*`` implementation so
+the Settings load stays deferred to dispatch time — see the ``cli.main``
+module docstring.
 
 One module per domain:
 
