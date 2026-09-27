@@ -22,10 +22,11 @@ waiting so you don't burn turns polling.
 - **A recurring schedule** — `ava.watcher.cron(expr, message, name="<slug>")`
   wakes you on a cron schedule until its `end_time` (or you kill its session).
   `end_time` defaults to **now + 7 days**: a standing schedule expires unless
-  renewed — re-registering the same expression + timezone replaces the old
-  watcher (fresh session, fresh end), never stacks a double-firing duplicate,
-  and a longer schedule must pass an explicit `end_time` (which also replaces
-  a standing twin).
+  you register it again before then — calling `cron()` again with the same
+  expression and timezone does NOT renew or replace anything, it starts a
+  second, independent session, so kill the old one yourself
+  (`ava.shell.sessions.kill`) if you don't want both running. A longer
+  schedule must pass an explicit `end_time`.
 
 ## Custom watcher
 
@@ -150,16 +151,29 @@ ava.watcher.cron("0 9 * * 1-5", "daily 9am check-in", timezone="America/Los_Ange
 ```
 
 A time watcher occupies one background session that sleeps until its target
-time. It does not survive a machine restart — if the host reboots, re-arm any
-watcher you still need (your own process is restarted by the framework, but
-watchers are not automatically rebuilt).
+time. It is just a shell session — nothing tracks it separately, and nothing
+ever restarts it automatically, for ANY reason (a crash, `ava stop`, a
+release closing terminals, a machine reboot). Write watcher scripts assuming
+they may be cut off at any moment and will not be re-run for you. What you
+learn about it depends on how its session ended:
+
+- It exits on its own (fired / timed out) — you get the usual completion
+  notice, and that's it.
+- You kill it yourself — no extra message; you already have the result.
+- The platform reclaims it at its TTL deadline, or force-closes it on
+  `ava stop` / an update — you get a message saying so.
+- Its pty host is killed with nothing to record it (an external SIGKILL, a
+  power loss) — no message; check `ava.shell.sessions.list()` if a watcher's
+  continued presence matters to you.
+
+None of these bring the watcher back. Decide whether to re-create it.
 
 A cron schedule without an explicit `end_time` stops after 7 days (the
-standing cap). Renew by calling `ava.watcher.cron(...)` with the same
-expression and timezone again — the old watcher is replaced, never stacked
-(an explicit `end_time` re-registration replaces a standing twin the same
-way). If your watcher was reclaimed while you were terminated, the reaper's
-notice tells you — re-register the schedule if you still need it.
+standing cap). Calling `ava.watcher.cron(...)` again with the same expression
+and timezone does **not** renew or replace the earlier watcher — it starts
+another, independent session. If you want exactly one live copy of a
+schedule, kill the old session yourself before (or after) registering the
+new one.
 
 ## See also
 

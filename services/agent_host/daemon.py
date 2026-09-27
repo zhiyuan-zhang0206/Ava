@@ -412,11 +412,6 @@ async def _recover_hosted_forces_at_boot(
             )
 
 
-async def _schedule_watcher_recovery(host: AgentHost) -> None:
-    """Once per host boot, arm watcher owners for the paced pending scan."""
-    await host.watcher_boot_wakes()
-
-
 async def _open_host_pools(
     workload_pool: AsyncConnectionPool[psycopg.AsyncConnection],
     control_pool: AsyncConnectionPool[psycopg.AsyncConnection],
@@ -528,7 +523,6 @@ async def run() -> None:
         # no per-agent page_reconcile_loop (loop.py:main() is process-only).
         background = _spawn_background_tasks(workload_pool)
         try:
-            await _schedule_watcher_recovery(host)
             # Settled reap rows need one admission each: the cold build's
             # reconcile re-delivers the claimed ordinary work the reap cut
             # short, and the dangling-tool repair closes the truncated turn.

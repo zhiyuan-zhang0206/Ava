@@ -96,38 +96,6 @@ def _own_sessions() -> builtins.list[str]:
     return [s for s in _list_all_sessions() if s.startswith(prefix)]
 
 
-def session_generation(session_id: int) -> str | None:
-    """Persisted generation of one live shell session, if the backend tracks it."""
-    try:
-        target = _resolve(session_id)
-    except ValueError:
-        return None
-    return get_shell_backend().session_generation(target)
-
-
-def current_session_generation() -> str | None:
-    """Host flip generation used to classify desired session records."""
-    from shared.sessions.pty.allocation_freeze import current_generation
-
-    return current_generation()
-
-
-def reap(session_id: int) -> bool:
-    """Reap one exact session without changing its desired-state record.
-
-    Desired-state reconcilers use this for a superseded generation, then retain
-    their own record as terminal history. Public ``kill()`` intentionally has
-    different semantics: a user cancellation deletes any watcher registry row
-    so it cannot be restored.
-    """
-    try:
-        target = _resolve(session_id)
-    except ValueError:
-        return False
-    ok, _mode = get_shell_backend().kill_session(target, graceful=False)
-    return ok
-
-
 def _resolve(session_id: int) -> str:
     # Resolve an int session id to its full session name. The id is unique
     # within the agent, so `…-shell-<id>` matches exactly one session whether
@@ -158,7 +126,7 @@ def _validate_ttl(ttl: float, *, system: bool = False) -> float:
     and is exempt from the sessions.new cap of 2026-09-01 — a 7-day standing
     cron is a normal watcher, not a user session. A non-finite or
     non-positive ttl is refused on every path: a session whose deadline has
-    already passed must never be created (the reconcile's no-rebuild guard).
+    already passed must never be created.
     """
     if not math.isfinite(ttl) or ttl <= 0:
         raise ValueError("ttl must be finite and greater than zero")
@@ -351,25 +319,6 @@ def kill(id: int) -> None:
     ok, _mode = backend.kill_session(_resolve(id), graceful=False)
     if not ok:
         raise RuntimeError(f"failed to kill session {id}")
-    # R1 (Task #1021): a deliberately killed watcher must not be rebuilt by the
-    # next boot reconcile — drop its registry row. A non-watcher session has no
-    # row, so this is a no-op there. Fail-soft: a registry blip must not make
-    # the kill itself fail — but it must not be silent either: a surviving row
-    # reads at the next boot reconcile as "killed, should exist" and rebuilds
-    # the very watcher this kill ended (the same visibility discipline the boot
-    # script's clean-exit delete follows).
-    try:
-        from ava import agent_identity
-        from shared.daemon.schedules.watcher_registry import delete_watcher
-
-        delete_watcher(agent_identity.require_agent_id(), id)
-    except Exception:
-        logger.warning(
-            "watcher registry row delete failed after killing session %s — "
-            "the next boot reconcile may rebuild the killed watcher",
-            id,
-            exc_info=True,
-        )
 
 
 # Not in __all_for_ava__, so never rendered into the SDK docs: a prefix-scoped
@@ -381,24 +330,6 @@ def kill_all() -> int:
     for name in sessions:
         with contextlib.suppress(RuntimeError):
             get_shell_backend().kill_session(name, graceful=False)
-    # Same deliberate-kill semantics as kill(): every watcher this agent just
-    # killed must not be resurrected by the next boot reconcile (Task #1825 —
-    # a kill path that left the registry row behind made a killed cron come
-    # back as a second live instance). Fail-soft: a registry blip must not
-    # make the cleanup itself fail — visible for the same reason as kill().
-    try:
-        from ava import agent_identity
-        from shared.daemon.schedules.watcher_registry import delete_watcher, watcher_session_ids
-
-        agent_id = agent_identity.require_agent_id()
-        for session_id in watcher_session_ids(agent_id=agent_id):
-            delete_watcher(agent_id, session_id)
-    except Exception:
-        logger.warning(
-            "watcher registry cleanup after kill_all failed — killed watchers "
-            "may be rebuilt at the next boot",
-            exc_info=True,
-        )
     return len(sessions)
 
 
@@ -407,10 +338,9 @@ def renew(id: int, *, ttl: float) -> datetime:
 
     The deadline moves to now + ttl — never stacked on the current deadline.
     `ttl` is required, capped at 24h per call; renewal has no lifetime cap.
-
-    Only this agent's live, not-yet-expired sessions can renew. Watcher
-    sessions are refused too — their shell TTL is the target deadline, so
-    re-register the schedule instead (`ava.watcher.cron` / `ava.watcher.at`).
+    Only this agent's live, not-yet-expired sessions can renew — a watcher
+    session renews exactly the same way (it is just a shell session; there is
+    no separate watcher deadline to desync from).
 
     Returns:
         The new deadline (DB clock).
@@ -420,15 +350,6 @@ def renew(id: int, *, ttl: float) -> datetime:
     # Not this agent's / not alive -> ValueError, same rule as send/capture.
     _resolve(id)
     agent_id = ava.agent_identity.require_agent_id()
-    from shared.daemon.schedules.watcher_registry import watcher_session_ids
-
-    if id in watcher_session_ids(agent_id):
-        raise ValueError(
-            f"session {id} is a watcher — its TTL is derived from the watcher's "
-            "target deadline (launch timeout / cron end / at moment), so renewal "
-            "would desync the TTL from that target; extend the schedule by "
-            "re-registering it (ava.watcher.cron/at), which re-mounts the session"
-        )
     return _record_renewal(agent_id, id, ttl)
 
 

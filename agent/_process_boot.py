@@ -10,16 +10,13 @@ for the SDK helpers — does not enter the LM stack (startup-path laziness,
 task #3585).
 """
 
-import asyncio
 import os
 from pathlib import Path
 from typing import Any
 
 import ava
 from ava.sdk_surface import plugin_loader, sdk_disable
-from ava.shell import sessions
 from shared.config.turn_view import turn_settings
-from shared.daemon.schedules.watcher import TEMPLATE_VERSION
 from shared.log import logger
 from shared.paths import workspace_dir
 
@@ -227,36 +224,3 @@ async def boot_agent_scope(agent_id: int) -> Any:
     from shared.lm.factory import build_chat_model
 
     return build_chat_model(turn_settings.lm.llm_model)
-
-
-async def reconcile_agent_watchers(agent_id: int) -> bool:
-    """Restore watcher intent under this turn's identity and configuration.
-
-    Reconcile is best effort and may return after a registry or spawn failure.
-    Keep boot recovery pending until the remaining desired rows actually have
-    current sessions; an action list alone is not proof of completion.
-    """
-    from shared.daemon.schedules.watcher_registry import watcher_rows  # deferred (task #3816)
-
-    def reconcile_and_verify() -> bool:
-        for action in ava.watcher.reconcile():
-            logger.info("watcher reconcile: {}", action, agent_id=agent_id)
-        running = [row for row in watcher_rows(agent_id) if row["status"] == "running"]
-        if not running:
-            return True
-        alive = sessions.list()
-        generation = sessions.current_session_generation()
-        return all(
-            row["generation"] == generation
-            and row["session_id"] in alive
-            and sessions.session_generation(row["session_id"]) == generation
-            and (row["kind"] != "cron" or (row["template_version"] or 0) >= TEMPLATE_VERSION)
-            for row in running
-        )
-
-    try:
-        # to_thread carries the host's admitted identity and config bindings.
-        return await asyncio.to_thread(reconcile_and_verify)
-    except Exception:
-        logger.opt(exception=True).warning("watcher recovery remains pending", agent_id=agent_id)
-        return False

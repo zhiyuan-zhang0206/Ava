@@ -38,7 +38,7 @@ tags:
 
 ### Liveness: registry × lease, one mechanism, many objects
 
-The registry×lease frame for every managed object, watcher rebuild, and the single `alive` predicate: [[okf/design/r1-state-liveness/liveness.ava.okf.md]].
+The registry×lease frame for every managed object and the single `alive` predicate: [[okf/design/r1-state-liveness/liveness.ava.okf.md]] (watchers were pulled back out of this frame 2026-09-27 — decisions/2026-09-27-watchers-are-never-restarted.md).
 
 ### Agent state machine: one matrix
 
