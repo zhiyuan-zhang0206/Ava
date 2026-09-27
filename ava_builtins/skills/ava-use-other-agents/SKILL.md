@@ -285,16 +285,16 @@ is recorded without files or supervisor — its coding session alone is its
 liveness signal — so do not start `watch_work.py` or any other file watcher
 for it. The same command works with `spawn_claude.py` (relay via the bundled
 `ava-relay` plugin; `--no-relay-resident` restores the executor-armed flow) and
-`spawn_dsh.py` (DeepSeek Harness, takeover-only; relay via `ava-relay-dsh`).
+`spawn_dsh.py` ([DeepSeek Harness](reference/deepseek_harness.md), takeover-only).
 
 The full procedure is [Let the coding agent take over your identity](reference/impersonate_self.md);
 the takeover process's own operating manual is the `impersonator-guide` skill.
 
 ## CLI reference
 
-Tool versions, models and flags drift — every claim still starts with
-`claude --help` / `codex exec --help` on the actual machine. The per-tool
+Flags drift — confirm with `--help` on the actual machine. The per-tool
 references carry the launch variants, auth traps and headless notes:
 
 - [Claude Code (`claude`)](reference/claude_code.md)
 - [OpenAI Codex (`codex`)](reference/codex.md)
+- [DeepSeek Harness (`dsh`)](reference/deepseek_harness.md)
