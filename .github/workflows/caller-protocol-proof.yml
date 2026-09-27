@@ -10,7 +10,7 @@ on:
       - 'gateway/mcp_endpoint.py'
       - 'gateway/routers/_delivery.py'
       - 'gateway/routers/agents*.py'
-      - 'cli/commands/agents.py'
+      - 'cli/commands/agents/control.py'
       - 'ops/rpc_schemas.py'
       - 'shared/audit_events.py'
       - 'shared/caller*.py'

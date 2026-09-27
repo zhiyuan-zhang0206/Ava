@@ -13,7 +13,7 @@ from pathlib import Path
 import httpx
 import pytest
 
-from cli.commands import agents as _agents
+from cli.commands.agents import control as _agents
 
 
 class _FakeResp:

@@ -214,7 +214,7 @@ def _send(args: argparse.Namespace) -> int:
     ``agent:<the leased agent>`` — the borrowed identity the SDK attachment
     stamps for ``ava.agents.send_message`` (task #4102).
     """
-    from cli.commands.agents import send_agent_message
+    from cli.commands.agents.control import send_agent_message
     from shared.agents import impersonation as control
     from shared.agents.impersonation import impersonation_sessions as sessions
     from shared.proc_tree import process_metadata
@@ -231,7 +231,7 @@ def _send(args: argparse.Namespace) -> int:
 
 def _request(args: argparse.Namespace) -> int:
     """`impersonate request` — create the lease, then hand its relay the credential."""
-    from cli.commands.codex_app_server import require_control_endpoint
+    from cli.commands.agents.codex_app_server import require_control_endpoint
     from shared.agents.impersonation import impersonation_sessions as sessions
     from shared.proc_tree import process_metadata
 

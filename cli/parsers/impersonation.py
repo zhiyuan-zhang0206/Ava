@@ -63,7 +63,7 @@ def _relay_spec_problem(
 
 
 def _h_impersonate(args: argparse.Namespace) -> int:
-    from cli.commands.impersonation import cmd_impersonate
+    from cli.commands.agents.impersonation import cmd_impersonate
 
     problem: str | None = None
     if args.impersonation_cmd == "request":
@@ -77,7 +77,7 @@ def _h_impersonate(args: argparse.Namespace) -> int:
 
 
 def _h_impersonate_relay(args: argparse.Namespace) -> int:
-    from cli.commands.impersonation_relay import cmd_relay
+    from cli.commands.agents.impersonation_relay import cmd_relay
 
     problem = _relay_spec_problem(args.provider, args.thread_id, args.codex_remote)
     if problem is not None:

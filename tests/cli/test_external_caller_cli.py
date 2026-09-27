@@ -5,7 +5,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from cli.commands import agents
+from cli.commands.agents import control as agents
 
 
 def _send_args(**overrides: object) -> argparse.Namespace:

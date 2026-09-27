@@ -20,10 +20,10 @@ no registry or plugin mechanism, the wiring is the parser.
 Most command modules follow these two naming groups:
 
 - **public** (`start.py`, `stop.py`, `status.py`, `logs.py`, `update.py`,
-  `cluster.py`, `agents.py`, `config.py`, `plugins.py`, `skill.py`, `mcp.py`, `pitr.py`,
-  `memory.py`, `presets.py`, `pty.py`, `schedules.py`, `trace.py`, `migrations.py`,
-  `cluster_lifecycle.py`, `agent_timeline.py`, `impersonation.py`,
-  `impersonation_relay.py`) — reachable from the command line.
+  `cluster.py`, `agents/control.py`, `config.py`, `plugins.py`, `skill.py`, `mcp.py`, `pitr.py`,
+  `memory.py`, `presets.py`, `agents/pty.py`, `schedules.py`, `trace.py`, `migrations.py`,
+  `cluster_lifecycle.py`, `agents/timeline.py`, `agents/impersonation.py`,
+  `agents/impersonation_relay.py`) — reachable from the command line.
 - **internal** (`_`-prefixed) — steps `start` / `update` call, never dispatched
   directly: `_converge`
   (step-table aggregation and execution) / `_converge_spec` (the step contract) /
@@ -82,11 +82,11 @@ schema change catches the DB up on its own.
   Full stop and destroy use that same home identity. See
   [Linux gate supervision](../../conventions/linux-gate-supervision.md).
 
-- `agent_timeline.py` exposes the existing timeline API as `ava agents timeline`
-  and its exact `context` alias. `impersonation.py` manages explicit external
+- `agents/timeline.py` exposes the existing timeline API as `ava agents timeline`
+  and its exact `context` alias. `agents/impersonation.py` manages explicit external
   requests, leases, inbox acknowledgments, local Python SDK attachment, and the
   one attested send (`send` — task #4102).
-  `impersonation_relay.py` forwards inbound availability to the owning external
+  `agents/impersonation_relay.py` forwards inbound availability to the owning external
   model session; `--codex-remote` routes to the app server holding a Codex thread
   without waiting for its external queue-store scan.
   Usage: [External agent impersonation](../../conventions/agent-impersonation.md).

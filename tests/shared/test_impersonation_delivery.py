@@ -246,7 +246,7 @@ async def test_real_relay_uses_snapshotted_config_across_restart(
 ) -> None:
     from uuid import UUID
 
-    from cli.commands import impersonation_relay as relay
+    from cli.commands.agents import impersonation_relay as relay
 
     lease, owner, mid = active
     window, attempts = lease["ack_window_seconds"], lease["max_delivery_attempts"]

@@ -24,7 +24,7 @@ from uuid import UUID
 from pydantic import BaseModel
 
 import shared.redis_listener
-from cli.commands.codex_app_server import live_submit, require_control_endpoint
+from cli.commands.agents.codex_app_server import live_submit, require_control_endpoint
 from shared.agents.impersonation import RELAY_HEARTBEAT_SECONDS
 from shared.agents.impersonation.impersonation_delivery import reserve_delivery
 from shared.config import settings
@@ -484,7 +484,7 @@ def cmd_relay(args: argparse.Namespace) -> int:
     runtime's readiness gate observes a live relay immediately. The relay
     never renews the lease; its credential reads, reserves delivery, and beats.
     """
-    from cli.commands import impersonation
+    from cli.commands.agents import impersonation
 
     try:
         from shared.agents.impersonation import relay_get
