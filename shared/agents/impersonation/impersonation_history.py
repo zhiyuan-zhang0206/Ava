@@ -45,14 +45,17 @@ _CONSUMED_EVENT_KINDS: tuple[str, ...] = ("sdk_call", "api_event")
 
 
 class ImpersonationMetadata(BaseModel):
-    """Declared identity and observed process facts on a rendered message."""
+    """Declared identity on a rendered message.
+
+    The observed process facts are captured once at request time and live on
+    the session record (``process_metadata``), not on every message.
+    """
 
     agent_id: int
     session_id: int
     name: str
     executor_name: str
     provider: str | None
-    process: dict[str, Any]
     anchor_item_id: str | None = None
     seq: int | None = None
 
@@ -64,7 +67,6 @@ def metadata(lease: dict[str, Any]) -> ImpersonationMetadata:
         name=lease["name"],
         executor_name=lease["executor_name"],
         provider=lease["relay_provider"],
-        process=lease["process_metadata"],
     )
 
 

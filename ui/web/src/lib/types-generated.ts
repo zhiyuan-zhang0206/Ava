@@ -5610,7 +5610,10 @@ export interface components {
         };
         /**
          * ImpersonationMetadata
-         * @description Declared identity and observed process facts on a rendered message.
+         * @description Declared identity on a rendered message.
+         *
+         *     The observed process facts are captured once at request time and live on
+         *     the session record (``process_metadata``), not on every message.
          */
         ImpersonationMetadata: {
             /** Agent Id */
@@ -5623,10 +5626,6 @@ export interface components {
             executor_name: string;
             /** Provider */
             provider: string | null;
-            /** Process */
-            process: {
-                [key: string]: unknown;
-            };
             /** Anchor Item Id */
             anchor_item_id?: string | null;
             /** Seq */

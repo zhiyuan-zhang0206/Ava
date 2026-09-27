@@ -4951,7 +4951,7 @@ describe("TimelineView sticky message header (task #3136)", () => {
 
 it("preserves every paragraph of a human message during impersonation", () => {
   const item = makeItem({ kind: "inbound_chat", source: "user", payload: "First paragraph.\n\nSecond paragraph.",
-    impersonation: { agent_id: 42, session_id: 0, name: "Fix login", executor_name: "Claude: helper", provider: "claude", process: {} } });
+    impersonation: { agent_id: 42, session_id: 0, name: "Fix login", executor_name: "Claude: helper", provider: "claude" } });
   const { container } = render(<ItemView item={item} streaming={false} />);
   expect(container.querySelector("[data-testid=chat-markdown]")?.textContent).toContain("First paragraph.");
   expect(container.textContent).toContain("Second paragraph.");
@@ -4961,7 +4961,7 @@ it("preserves every paragraph of a human message during impersonation", () => {
 it("renders image-only human messages during impersonation as thumbnails", () => {
   const item = makeItem({ kind: "inbound_chat", source: "user", payload: "[image]",
     images: ["/api/agents/42/uploads/screenshot.png"],
-    impersonation: { agent_id: 42, session_id: 0, name: "Fix login", executor_name: "Claude: helper", provider: "claude", process: {} } });
+    impersonation: { agent_id: 42, session_id: 0, name: "Fix login", executor_name: "Claude: helper", provider: "claude" } });
   const { container } = render(<ItemView item={item} streaming={false} />);
   expect(container.querySelector("img")?.getAttribute("src")).toContain("/api/agents/42/uploads/screenshot.png");
   expect(container.textContent).not.toContain("[image]");
