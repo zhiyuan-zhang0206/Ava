@@ -479,3 +479,23 @@ def test_inbound_attachments_survive_timeline_and_handoff(
     document = history.build_document(lease, history.entries(str(lease["id"]), db_conn))
     assert document["messages"][0]["payload"]["payload"] == payload
     assert document["messages"][0]["acknowledged"] is True
+
+
+def test_public_session_exposes_handoff_applied_at(
+    db_conn: psycopg.Connection[Any], owner: RuntimeIncarnation
+) -> None:
+    """INC-927 closure read-face: the applied receipt must be visible.
+
+    `ava impersonate list` projects through `public_session`; before this pin
+    the whitelist omitted `handoff_applied_at`, so a caller reading the CLI
+    output with `.get(...)` saw the missing key as an unapplied handoff while
+    the column held a value.
+    """
+    lease = start(owner)
+    leases.release(str(lease["id"]), attested_caller(lease), "Done")
+    db_conn.execute(
+        "UPDATE agent_impersonations SET handoff_applied_at=now() WHERE id=%s", (lease["id"],)
+    )
+    db_conn.commit()
+    applied = history.public_session(history.resolve(owner.agent_id, lease["session_id"]))
+    assert applied["handoff_applied_at"] is not None
