@@ -74,7 +74,7 @@ def execute(path: Path) -> None:
             raise RuntimeError("release executor belongs to a retired native launch attempt")
         journal.record_native(_executor_receipt(operation.launch))
         if isinstance(request, PitrRequest):
-            from cli.release_transition.pitr_inputs import require_inputs
+            from cli.release_transition.pitr.inputs import require_inputs
             from shared.release_operation import authorized_pitr
 
             require_inputs(journal.operation)
@@ -124,7 +124,7 @@ def reenter(operation: Operation) -> None:
 
 
 def drive_pitr(journal: Journal) -> None:
-    from cli.release_transition.pitr import PitrTransition, persist_failure
+    from cli.release_transition.pitr.transition import PitrTransition, persist_failure
 
     request = journal.operation.request
     if not isinstance(request, PitrRequest):

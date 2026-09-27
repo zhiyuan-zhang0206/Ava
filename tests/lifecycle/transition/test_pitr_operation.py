@@ -13,8 +13,8 @@ import pytest
 from pydantic import JsonValue, ValidationError
 
 from cli.release_transition import journal
-from cli.release_transition.pitr_evidence import PitrSeal
-from cli.release_transition.pitr_inputs import read_record, require_inputs
+from cli.release_transition.pitr.evidence import PitrSeal
+from cli.release_transition.pitr.inputs import read_record, require_inputs
 from cli.release_transition.request import PitrRequest, ReleaseRef, read_request
 from services.pitr.activation_state import ActivationRecord, record_path, write_record
 from shared.process_evidence import ExpectedProcess
@@ -280,7 +280,8 @@ def test_rollback_refuses_unclosed_executor(pitr_request: PitrRequest) -> None:
 def test_rollback_submission_preserves_held_generation_or_renews_after_resume(
     pitr_request: PitrRequest, monkeypatch: pytest.MonkeyPatch, post_resume: bool
 ) -> None:
-    from cli.release_transition import launcher_linux, pitr_submit
+    from cli.release_transition import launcher_linux
+    from cli.release_transition.pitr import submission
     from shared import pause_owner
 
     journal.create(pitr_request)
@@ -319,7 +320,7 @@ def test_rollback_submission_preserves_held_generation_or_renews_after_resume(
             acquired_at=pitr_request.created_at,
         ),
     )
-    pitr_submit._rollback(journal.read_operation(pitr_request.path))
+    submission._rollback(journal.read_operation(pitr_request.path))
     result = journal.read_operation(pitr_request.path)
     assert observed == ["native closure before decision"]
     assert result.pitr is not None and result.pitr.record_intent is None
@@ -335,7 +336,8 @@ def test_rollback_submission_preserves_held_generation_or_renews_after_resume(
 def test_rollback_cannot_decide_while_native_attempt_is_unknown(
     pitr_request: PitrRequest, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from cli.release_transition import launcher_linux, pitr_submit
+    from cli.release_transition import launcher_linux
+    from cli.release_transition.pitr import submission
 
     journal.create(pitr_request)
     with journal.exclusive(pitr_request.path) as handle:
@@ -348,14 +350,14 @@ def test_rollback_cannot_decide_while_native_attempt_is_unknown(
 
     monkeypatch.setattr(launcher_linux, "retire_current", unknown)
     with pytest.raises(RuntimeError, match="native custody unknown"):
-        pitr_submit._rollback(journal.read_operation(pitr_request.path))
+        submission._rollback(journal.read_operation(pitr_request.path))
     assert pitr_request.path.read_bytes() == before
 
 
 def test_new_rollback_after_release_uses_selected_image_and_same_activation(
     pitr_request: PitrRequest, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from cli.release_transition import pitr_submit
+    from cli.release_transition.pitr import submission
     from cli.release_transition.request import Request
     from shared import cluster, machine, paths
 
@@ -394,12 +396,12 @@ def test_new_rollback_after_release_uses_selected_image_and_same_activation(
     )
     registry = Path(pitr_request.registry)
     registry.write_text("{}")
-    monkeypatch.setattr(pitr_submit, "_active", _constant(completed))
-    monkeypatch.setattr(pitr_submit, "selected_image", _constant(image_b))
+    monkeypatch.setattr(submission, "_active", _constant(completed))
+    monkeypatch.setattr(submission, "selected_image", _constant(image_b))
     monkeypatch.setattr(paths, "ava_home", lambda: home)
     monkeypatch.setattr(cluster, "registry_path", lambda: registry)
     monkeypatch.setattr(machine, "machine_name", lambda: pitr_request.machine)
-    result = pitr_submit.prepare_request("rollback", origin="operator")
+    result = submission.prepare_request("rollback", origin="operator")
     assert result.image == image_b and result.executor == image_b
     assert result.activation_id == pitr_request.activation_id
     assert result.expected_record == hashlib.sha256(record_path(home).read_bytes()).hexdigest()
@@ -432,7 +434,7 @@ def test_pitr_input_admission_imports_without_settings_or_database() -> None:
     root = Path(__file__).resolve().parents[3]
     program = (
         f"import sys; sys.path.insert(0, {str(root)!r}); "
-        "import cli.release_transition.pitr_inputs; "
+        "import cli.release_transition.pitr.inputs; "
         "assert not {'shared.config', 'shared.db', 'shared.runtime_config'} & sys.modules.keys()"
     )
     result = subprocess.run(  # noqa: S603 — fixed import probe in the candidate source

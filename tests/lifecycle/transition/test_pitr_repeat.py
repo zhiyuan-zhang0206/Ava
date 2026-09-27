@@ -10,8 +10,9 @@ from pathlib import Path
 
 import pytest
 
-from cli.release_transition import journal, pitr_submit, submit
-from cli.release_transition.pitr_inputs import require_inputs
+from cli.release_transition import journal, submit
+from cli.release_transition.pitr import submission
+from cli.release_transition.pitr.inputs import require_inputs
 from cli.release_transition.request import PitrRequest, Request
 from services.pitr.activation_state import mark_pre_mutation_rolled_back, record_path, write_record
 from shared.release_operation import authorized_pitr
@@ -67,9 +68,9 @@ def test_repeated_rollback_joins_exact_completed_business_receipt(
     home = Path(pitr_request.home)
     monkeypatch.setattr("shared.paths.ava_home", lambda: home)
     monkeypatch.setattr("shared.os_boot_unit.systemd_running", lambda: True)
-    monkeypatch.setattr(pitr_submit, "_active", _constant(active))
+    monkeypatch.setattr(submission, "_active", _constant(active))
     before = {path: path.read_bytes() for path in home.rglob("*") if path.is_file()}
-    request = pitr_submit.prepare_request("rollback", origin="operator")
+    request = submission.prepare_request("rollback", origin="operator")
     assert request == pitr_request
     assert request.activation_id == pitr_request.activation_id
     # A no-restart completion cannot fall into preflight/launch on repeat.
@@ -90,7 +91,7 @@ def test_terminal_repeat_rejects_unowned_business_bytes(
     path.write_text(json.dumps(payload))
     before = pitr_request.path.read_bytes()
     with pytest.raises(ValueError, match="activation record differs"):
-        pitr_submit.prepare_request("rollback", origin="operator")
+        submission.prepare_request("rollback", origin="operator")
     assert pitr_request.path.read_bytes() == before
 
 
@@ -102,9 +103,9 @@ def test_rolled_back_record_without_completed_journal_refuses_before_reservation
     write_record(home, record)
     mark_pre_mutation_rolled_back(home, record)
     monkeypatch.setattr("shared.paths.ava_home", lambda: home)
-    monkeypatch.setattr(pitr_submit, "_active", _constant(_release(pitr_request)))
+    monkeypatch.setattr(submission, "_active", _constant(_release(pitr_request)))
     with pytest.raises(ValueError, match="retained home journal"):
-        pitr_submit.prepare_request("rollback", origin="operator")
+        submission.prepare_request("rollback", origin="operator")
     assert not pitr_request.path.exists()
 
 

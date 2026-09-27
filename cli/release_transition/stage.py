@@ -15,7 +15,7 @@ from cli.release_transition.journal import Operation, read_operation
 
 def _require_inputs(operation: Operation) -> None:
     if operation.pitr is not None:
-        from cli.release_transition.pitr_inputs import require_inputs
+        from cli.release_transition.pitr.inputs import require_inputs
 
         require_inputs(operation)
     else:
@@ -179,7 +179,7 @@ def observe_operation(path: Path) -> int:
         raise RuntimeError("selected root has incomplete service readiness")
     _require_inputs(operation)
     if operation.pitr is not None:
-        from cli.release_transition.pitr import observe_postgres
+        from cli.release_transition.pitr.transition import observe_postgres
 
         observe_postgres(operation)
     return 0

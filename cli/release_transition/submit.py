@@ -81,7 +81,7 @@ def submit_request(request: Request | PitrRequest) -> tuple[Path, dict[str, Json
                 journal.record_launch(record)
             return request.path, native.for_launch(record).launch(record).model_dump(mode="json")
     if isinstance(request, PitrRequest):
-        from cli.release_transition.pitr import PitrTransition
+        from cli.release_transition.pitr.transition import PitrTransition
 
         pitr = PitrTransition(request)
         pitr.preflight()

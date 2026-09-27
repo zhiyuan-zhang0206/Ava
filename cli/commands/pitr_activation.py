@@ -663,13 +663,13 @@ def _require_owned_rollback_config(home: Path, record: ActivationRecord) -> str:
 
 def cmd_pitr_activate(*, origin: str) -> int:
     """Submit or join the home's finite, retained-image PITR operation."""
-    from cli.release_transition.pitr_submit import run_pitr
+    from cli.release_transition.pitr.submission import run_pitr
 
     return run_pitr("activate", origin=origin)
 
 
 def cmd_pitr_rollback() -> int:
     """Serialize explicit rollback under the same home operation authority."""
-    from cli.release_transition.pitr_submit import run_pitr
+    from cli.release_transition.pitr.submission import run_pitr
 
     return run_pitr("rollback", origin="operator")

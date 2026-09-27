@@ -17,7 +17,7 @@ from typing import Literal, Self
 from pydantic import Field, JsonValue, model_validator
 
 from cli.release_transition.native import DARWIN, LINUX
-from cli.release_transition.pitr_evidence import PitrProgress, PitrSeal
+from cli.release_transition.pitr.evidence import PitrProgress, PitrSeal
 from cli.release_transition.request import AnyRequest, PitrRequest, Record, ReleaseRef, Request
 from shared.atomic_io import write_text_atomic
 from shared.native_process.ownership import OwnedProcess

@@ -13,8 +13,8 @@ from datetime import datetime
 from pathlib import Path
 
 from cli.release_transition.journal import Journal, Operation, read_operation
-from cli.release_transition.pitr_evidence import PitrSeal
-from cli.release_transition.pitr_inputs import read_record, require_inputs
+from cli.release_transition.pitr.evidence import PitrSeal
+from cli.release_transition.pitr.inputs import read_record, require_inputs
 from cli.release_transition.request import PitrRequest
 from services.pitr.activation_state import ActivationRecord, record_path, write_record
 from shared.native_process.ownership import OwnedProcess

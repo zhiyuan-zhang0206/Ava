@@ -152,10 +152,11 @@ def test_pitr_still_refuses_a_live_terminal_before_draining(
 ) -> None:
     """PITR is not a release boundary: it keeps refusing retained terminals."""
     from cli.commands import maintenance_stop
-    from cli.release_transition import identity, pitr
+    from cli.release_transition import identity
+    from cli.release_transition.pitr import transition
     from shared import runtime_release
 
-    driver = object.__new__(pitr.PitrTransition)
+    driver = object.__new__(transition.PitrTransition)
     driver.request = SimpleNamespace(  # type: ignore[assignment]
         require_configuration=lambda: None, image=SimpleNamespace(selector="selected")
     )

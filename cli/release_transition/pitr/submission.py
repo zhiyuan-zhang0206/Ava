@@ -65,7 +65,7 @@ def _active(home: Path) -> Operation | None:
 
 def _rollback(operation: Operation) -> PitrRequest:
     from cli.release_transition import native
-    from cli.release_transition.pitr_inputs import read_record
+    from cli.release_transition.pitr.inputs import read_record
 
     if not isinstance(operation.request, PitrRequest):
         raise TypeError("PITR cannot take over a release operation")
@@ -133,7 +133,7 @@ def _completed_request(
     home: Path, record: ActivationRecord, action: Literal["activate", "rollback"]
 ) -> PitrRequest:
     """A repeated completed action joins its exact original business receipt."""
-    from cli.release_transition.pitr_inputs import read_record
+    from cli.release_transition.pitr.inputs import read_record
 
     if record.home_operation is None:
         raise ValueError("completed activation record has no captured home operation")

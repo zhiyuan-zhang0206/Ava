@@ -39,7 +39,7 @@ from cli.commands.maintenance_stop import (
     remaining,
     wait_for_exit,
 )
-from cli.release_transition.pitr_evidence import DataOwner, DataStop
+from cli.release_transition.pitr.evidence import DataOwner, DataStop
 from shared.cluster import ownership
 from shared.cluster import postgres as owned_postgres
 from shared.config import settings

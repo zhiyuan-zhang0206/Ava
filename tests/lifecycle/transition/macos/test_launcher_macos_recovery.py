@@ -20,10 +20,11 @@ from typing import Any
 import pytest
 from pydantic import JsonValue
 
-from cli.release_transition import execute, journal, native, pitr_submit
+from cli.release_transition import execute, journal, native
 from cli.release_transition import launcher_linux as linux
 from cli.release_transition import launcher_macos as macos
 from cli.release_transition.launchd_print import LaunchdPendingSpawnError
+from cli.release_transition.pitr import submission
 from cli.release_transition.request import PitrRequest
 from services.permissions_helper.finite_artifact import HelperArtifact
 from shared.native_process.ownership import OwnedProcess
@@ -389,7 +390,7 @@ def test_pitr_rollback_retires_through_the_recorded_adapter(
         launch={"kind": native.DARWIN},
     )
     with pytest.raises(RetiredError, match=native.DARWIN):
-        pitr_submit._rollback(operation)
+        submission._rollback(operation)
 
 
 def test_executor_and_helper_births_close_only_as_recorded(harness: Harness) -> None:

@@ -9,8 +9,9 @@ from typing import Any
 
 import pytest
 
-from cli.release_transition import execute, journal, pitr
-from cli.release_transition.pitr_evidence import DataOwner, DataStop
+from cli.release_transition import execute, journal
+from cli.release_transition.pitr import transition
+from cli.release_transition.pitr.evidence import DataOwner, DataStop
 from cli.release_transition.request import PitrRequest
 from shared.process_evidence import ExpectedProcess
 from tests.lifecycle.transition.test_launcher_linux import planned as planned
@@ -86,7 +87,7 @@ def test_interruption_replays_only_pending_pitr_phase(
         assert operation.pitr is not None and operation.pitr.seal is not None
         raise Interrupted
 
-    monkeypatch.setattr(pitr, "PitrTransition", Effects)
+    monkeypatch.setattr(transition, "PitrTransition", Effects)
     monkeypatch.setattr(execute, "reenter", new_interpreter)
     journal.create(pitr_request)
     with journal.exclusive(pitr_request.path) as handle, pytest.raises(Interrupted):
@@ -128,10 +129,10 @@ def test_db_down_stop_continuation_uses_persisted_native_receipt_without_sql_dra
         update={"data_stop": receipt, "seal": _seal(pitr_request, "f" * 64)}
     )
     operation = operation.model_copy(update={"phase": "stopping_data", "pitr": progress})
-    driver = object.__new__(pitr.PitrTransition)
+    driver = object.__new__(transition.PitrTransition)
     driver.request, driver.home = pitr_request, Path(pitr_request.home)
     observed: list[object] = []
-    monkeypatch.setattr(pitr, "require_inputs", _constant(None))
+    monkeypatch.setattr(transition, "require_inputs", _constant(None))
     monkeypatch.setattr(
         maintenance,
         "require_operation",
@@ -172,7 +173,7 @@ def test_failed_pitr_start_keeps_action_without_automatic_release_recovery(
         def start(self, _operation: journal.Operation) -> None:
             raise RuntimeError("native start failed")
 
-    monkeypatch.setattr(pitr, "PitrTransition", Failing)
+    monkeypatch.setattr(transition, "PitrTransition", Failing)
     with (
         journal.exclusive(pitr_request.path) as handle,
         pytest.raises(RuntimeError, match="native start failed"),
@@ -192,7 +193,7 @@ def test_preparation_lease_failure_cannot_mutate_business_state(
     from shared.release_operation import authorized_pitr
 
     journal.create(pitr_request)
-    driver = object.__new__(pitr.PitrTransition)
+    driver = object.__new__(transition.PitrTransition)
     driver.request, driver.home = pitr_request, Path(pitr_request.home)
     monkeypatch.setattr(cluster_lock, "acquire_update_lock", _constant(False))
     with journal.exclusive(pitr_request.path) as handle:
@@ -260,9 +261,9 @@ def test_failed_online_lease_keeps_business_diagnostics_and_operation_authority(
     from shared.release_operation import authorized_pitr
 
     journal.create(pitr_request)
-    driver = object.__new__(pitr.PitrTransition)
+    driver = object.__new__(transition.PitrTransition)
     driver.request, driver.home = pitr_request, Path(pitr_request.home)
-    monkeypatch.setattr(pitr, "PitrTransition", _constant(driver))
+    monkeypatch.setattr(transition, "PitrTransition", _constant(driver))
     monkeypatch.setattr(cluster_lock, "acquire_update_lock", _constant(False))
     with journal.exclusive(pitr_request.path) as handle:
         handle.advance("provisioning")
@@ -285,7 +286,7 @@ def test_data_capture_refuses_postgres_replacement_before_any_data_signal(
     from shared import maintenance
 
     journal.create(pitr_request)
-    driver = object.__new__(pitr.PitrTransition)
+    driver = object.__new__(transition.PitrTransition)
     driver.request, driver.home = pitr_request, Path(pitr_request.home)
     receipt = _custody(driver.home)
     newer = ExpectedProcess(pid=99, create_time=3.0, starttime=9)
@@ -294,7 +295,7 @@ def test_data_capture_refuses_postgres_replacement_before_any_data_signal(
             "postgres": receipt.postgres.model_copy(update={"process": newer, "tree": (newer,)})
         }
     )
-    monkeypatch.setattr(pitr, "require_inputs", _constant(None))
+    monkeypatch.setattr(transition, "require_inputs", _constant(None))
     monkeypatch.setattr(
         maintenance,
         "require_operation",

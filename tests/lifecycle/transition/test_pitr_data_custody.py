@@ -12,7 +12,7 @@ import psutil
 import pytest
 
 from cli.commands import maintenance_data_plane as data
-from cli.release_transition.pitr_evidence import DataOwner, DataStop
+from cli.release_transition.pitr.evidence import DataOwner, DataStop
 from shared.native_process.ownership import OwnedProcess
 from shared.process_evidence import ExpectedProcess
 from tests.lifecycle.transition.test_pitr_execution import _constant
