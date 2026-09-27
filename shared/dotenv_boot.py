@@ -31,13 +31,13 @@ ad-hoc `import shared.config` on a production agent-runner load that unit's
 snapshot (2026-09-27). So case 4 resolves to a per-process scratch path under
 the system temp dir (`_unanchored_home`, created only if something writes to
 it) and boots BARE, exactly like a CI checkout: no `.env` / `mirror.env` is
-read, the config source decision never fetches (shared/config/_lite.py,
-shared/bootstrap.py:should_fetch_from_gateway), and `load_ava_env` plants
-`UNANCHORED_DB_SENTINEL` as AVA_DB_URL so a DB connection fails loudly
-(shared/db.connect raises an actionable error). Lint scripts, codegen hooks and
-dev tools keep working from any checkout; every verb that would act on "this
-checkout's cluster" refuses (`checkout_anchored()`, cli/preflight.py). This
-mirrors the same sentinel tests/conftest.py plants for unprovisioned test runs.
+read, the config source decision never fetches and the bootstrap transport
+refuses to dial (shared/config/_lite.py, shared/bootstrap.py), and
+`load_ava_env` plants `UNANCHORED_DB_SENTINEL` as AVA_DB_URL (the same sentinel
+tests/conftest.py plants for unprovisioned test runs) so a DB connection fails
+loudly (shared/db.connect raises an actionable error). Lint scripts, codegen
+hooks and dev tools keep working from any checkout; every verb that would act
+on "this checkout's cluster" refuses (`checkout_anchored()`, cli/preflight.py).
 
 Callers:
     shared/config.py            - before importing Settings

@@ -289,14 +289,27 @@ def test_unanchored_resolution_is_a_private_scratch_and_stays_unanchored(
         resolve_ava_home()
 
 
-def test_unanchored_checkout_never_decides_to_fetch(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_unanchored_checkout_never_decides_to_fetch_nor_dials(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Even with the runner flag and a gateway URL in the environment, an
-    unanchored checkout's fetch decision is no."""
+    unanchored checkout's fetch decision is no — and a caller that skips the
+    decision still cannot dial: the transport refuses before any request."""
     monkeypatch.setitem(os.environ, "AVA_MACHINE_SERVE_AGENT_RUNNER", "true")
     monkeypatch.setitem(os.environ, "AVA_GATEWAY_URL", "http://gateway.invalid:8000")
     assert bootstrap.should_fetch_from_gateway() is True
     monkeypatch.setattr(dotenv_boot, "_ANCHORED", False)
     assert bootstrap.should_fetch_from_gateway() is False
+
+    dials: list[object] = []
+
+    def _record(*args: object, **_kwargs: object) -> None:
+        dials.append(args)
+
+    monkeypatch.setattr(bootstrap, "dial_get", _record)
+    with pytest.raises(bootstrap.BootstrapFetchError, match=r"install\.sh --worktree"):
+        bootstrap.fetch_bootstrap_config("http://gateway.invalid:8000", role="runner")
+    assert dials == []
 
 
 def test_prod_service_guard_refuses_an_unanchored_checkout(
