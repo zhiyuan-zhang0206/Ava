@@ -11,12 +11,12 @@ from uuid import UUID
 
 from shared.runtime_incarnation import RuntimeIncarnation
 
-# Covers two 30s DB-only handoff stages + a heartbeat delayed by 10s ownership
-# renewal, 3s publication and 15s sleep, with 12s scheduling allowance. Recovery
-# renews the window per bounded stage (each carries its own 30s database_phase
-# bound, issue #1972), never on heartbeat snapshot reads: only entering another
-# real bounded attempt does.
-DB_WAIT_PROOF_TTL_SECONDS = 100.0
+# Covers two 120s DB-only handoff stages + a heartbeat delayed by 10s ownership
+# renewal, 3s publication and 15s sleep, with 12s scheduling allowance (120+120+
+# 10+3+15+12 = 280). Recovery renews the window per bounded stage (each carries
+# its own 120s database_phase bound, issue #1972), never on heartbeat snapshot
+# reads: only entering another real bounded attempt does.
+DB_WAIT_PROOF_TTL_SECONDS = 280.0
 _CLOCK_SKEW_SECONDS = 5.0
 
 

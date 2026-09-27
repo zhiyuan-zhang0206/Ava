@@ -41,7 +41,7 @@ bounded, cancellable backoff and a total ladder budget
 through the crash path and the next wake retries.
 Recovery revalidates the exact incarnation, flushes
 retained writes, reconciles claimed input and repairs dangling tool pairs before
-continuing — each stage under its own 30s `database_phase` bound (issue #1972),
+continuing — each stage under its own 120s `database_phase` bound (issue #1972),
 never one aggregate deadline across the chain, so a healthy stage is not starved
 by the combined time of the stages before it. It creates no inbound, model call
 or maintenance acknowledgement; ownership loss stops the old continuation.
