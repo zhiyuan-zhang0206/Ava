@@ -76,7 +76,8 @@ the impersonation metadata stays on the timeline item.
 
 One session produces `<workspace>/impersonation/<session_id>.json` containing
 session/process metadata, all input/output bodies and inbound ACK state,
-lifecycle facts, original consumed SDK/API events and statistics. Normal release
+lifecycle facts, original consumed SDK/API events (in call order, by their own
+timestamps, not replay order) and statistics. Normal release
 requires the impersonator's own summary. Expiry/rejection states their reason and
 absence of an external summary. The first new system note contains that summary
 and the JSON path, before ordinary queued input; it is the resumed input — while

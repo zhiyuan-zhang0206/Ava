@@ -164,7 +164,15 @@ def test_recipient_statistics_follow_real_chat_event_direction(
     events, recipient = peer_events
     # Both incoming and outgoing peer messages belong to the conversation;
     # only the outgoing message is evidence of a recipient of this executor.
-    rows: list[dict[str, Any]] = [{"kind": "api_event", "payload": event} for event in events[:2]]
+    rows: list[dict[str, Any]] = [
+        {
+            "seq": seq,
+            "kind": "api_event",
+            "created_at": datetime.fromisoformat(event["ts"]),
+            "payload": event,
+        }
+        for seq, event in enumerate(events[:2])
+    ]
     document = history.build_document(
         history.resolve(session["agent_id"], session["session_id"]), rows
     )
