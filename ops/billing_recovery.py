@@ -10,10 +10,9 @@ halt victims, verify the provider balance recovered, and resurrect them.
 Contract:
 
 - Explicit operator trigger only. Nothing here runs on a schedule or from any
-  automatic recovery path; the closure fence (#3911) and the ordinary
-  terminated semantics are untouched.
-- Whitelist: ``status='terminated'`` + ``closed_at IS NULL`` + the recovery
-  breaker halted (``permanent_reject_streak >= threshold``) with
+  automatic recovery path; the ordinary terminated semantics are untouched.
+- Whitelist: ``status='terminated'`` + the recovery breaker halted
+  (``permanent_reject_streak >= threshold``) with
   ``last_permanent_reject_reason = 'billing'`` + not user/integrity-terminated
   (explicit-human finalizations and corrupt-history rows are never re-opened
   by the batch).
@@ -111,7 +110,6 @@ def enumerate_candidates(conn: Connection) -> list[BillingCandidate]:
         "SELECT id, machine, permanent_reject_streak, termination_source "
         "FROM agents_meta "
         "WHERE status = 'terminated' "
-        "  AND closed_at IS NULL "
         "  AND permanent_reject_streak >= %s "
         "  AND last_permanent_reject_reason = %s "
         "  AND COALESCE(termination_source, '') NOT IN (%s, %s) "
@@ -152,7 +150,6 @@ def enumerate_halted_alive(conn: Connection) -> list[BillingHaltedAlive]:
         "SELECT id, machine, permanent_reject_streak "
         "FROM agents_meta "
         "WHERE status IN ('idling', 'running') "
-        "  AND closed_at IS NULL "
         "  AND permanent_reject_streak >= %s "
         "  AND last_permanent_reject_reason = %s "
         "ORDER BY id",

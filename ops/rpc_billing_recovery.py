@@ -60,8 +60,8 @@ class BillingResurrectAgentResponse(BaseModel):
         terminated -> idling + launch.
     `already_alive`: not terminated — an idempotent repeat, or a concurrent
         run won (the per-agent CAS is the dedupe).
-    `refused`: a guard refused (fail closed) — `reason` names it ('closed',
-        'not_billing_halted', 'machine_paused').
+    `refused`: a guard refused (fail closed) — `reason` names it
+        ('not_billing_halted', 'machine_paused').
     `deferred`: the outstanding lifecycle target has not been observed ended
         (`ResurrectExitDeferredError`); retry once it settles.
     """

@@ -286,6 +286,68 @@ def test_kill_shell_missing_session_is_absent(monkeypatch: pytest.MonkeyPatch) -
     assert cluster_status.kill_shell(7, 99) == ("absent", False, None)
 
 
+class _KillAllBackend:
+    """Shell backend stub for kill_agent_shells: `dead` names fail to kill and
+    are gone; `stuck` names fail to kill and are still there."""
+
+    def __init__(
+        self, *, dead: frozenset[str] = frozenset(), stuck: frozenset[str] = frozenset()
+    ) -> None:
+        self.killed: list[str] = []
+        self.dead, self.stuck = dead, stuck
+
+    def kill_session(self, name: str, *, graceful: bool = False) -> tuple[bool, str]:
+        assert not graceful
+        if name in self.dead or name in self.stuck:
+            return False, "forced"
+        self.killed.append(name)
+        return True, "forced"
+
+    def has_session(self, name: str) -> bool:
+        return name in self.stuck
+
+
+def test_kill_agent_shells_kills_only_the_owners_sessions(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Every `-agent-<id>-shell-<sid>[-<name>]` session of the owner goes —
+    watchers included; another agent's shells and non-shell sessions stay.
+    A session that vanished before its kill is absent, not killed."""
+    from shared.cluster import session_name
+
+    _stub_sessions(
+        monkeypatch,
+        "ava-agent-7",
+        "ava-agent-7-shell-0",
+        "ava-agent-7-shell-2-watcher",
+        "ava-agent-7-shell-5-dev-server",
+        "ava-agent-71-shell-0",
+        "ava-agent-12-shell-3",
+        "ava-restarter",
+    )
+    backend = _KillAllBackend(dead=frozenset({session_name("agent-7-shell-5-dev-server")}))
+    monkeypatch.setattr("shared.session_backend.get_shell_backend", lambda: backend)
+
+    assert cluster_status.kill_agent_shells(7) == [0, 2]
+    assert sorted(backend.killed) == [
+        session_name("agent-7-shell-0"),
+        session_name("agent-7-shell-2-watcher"),
+    ]
+    assert cluster_status.kill_agent_shells(99) == []
+
+
+def test_kill_agent_shells_raises_after_trying_every_session(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from shared.cluster import session_name
+
+    _stub_sessions(monkeypatch, "ava-agent-7-shell-0", "ava-agent-7-shell-1")
+    backend = _KillAllBackend(stuck=frozenset({session_name("agent-7-shell-0")}))
+    monkeypatch.setattr("shared.session_backend.get_shell_backend", lambda: backend)
+
+    with pytest.raises(RuntimeError, match=r"shell session\(s\) \[0\] of agent 7"):
+        cluster_status.kill_agent_shells(7)
+    assert backend.killed == [session_name("agent-7-shell-1")]
+
+
 def test_capture_shell_capture_failure_raises(monkeypatch: pytest.MonkeyPatch):
     """A backend capture failure (session died after probe) → RuntimeError."""
     _stub_sessions(monkeypatch, "ava-main-agent-7-shell-1")

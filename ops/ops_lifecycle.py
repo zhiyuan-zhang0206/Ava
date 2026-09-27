@@ -35,6 +35,7 @@ from ops.agents import (
     get_agent_status,
     resurrect_agent,
 )
+from ops.cluster_status import kill_agent_shells
 
 # Re-exported from ops_events after Task #1999; callers retain module-qualified sites.
 from ops.ops_events import (
@@ -80,9 +81,6 @@ from ops.resurrect_gates import (
     clear_wake_suppression as _clear_wake_suppression,
 )
 from ops.resurrect_gates import (
-    closed_agent as _closed_agent,
-)
-from ops.resurrect_gates import (
     recovery_halt_reason as _recovery_halt_reason,
 )
 from ops.resurrect_gates import (
@@ -105,6 +103,7 @@ from ops.rpc_schemas import (
     TerminateAgentRequest,
     TerminateAgentResponse,
 )
+from ops.rpc_terminate import ShellSessionsKill
 from shared import telemetry
 from shared.agents import (
     AgentNotFound,
@@ -153,15 +152,14 @@ async def terminate_agent_op(
 ) -> TerminateAgentResponse:
     """Local-target graceful or force terminate. Caller handles cross-machine.
 
-    `body.final` additionally closes the agent — the closure marker (never
-    auto-resurrect) is stamped in the same transaction as the termination
-    intent. A graceful terminate that lands on an already-dead row has no
-    termination left to apply, so `final` there is the metadata-only mark
-    (`ops_exit.mark_agent_closed`), which doubles as the backfill route for
-    agents closed before the marker existed.
-
-    Every response reports the post-call closure state in `closed` (see
-    `_closure_state`), so the close is verifiable from the response alone.
+    `body.kill_all_shell_sessions` also kills the agent's shell sessions on
+    this, its home machine (decisions/2026-09-27-terminate-has-no-closed-state.md).
+    A force terminate kills them right after its fence commits, and so does a
+    terminate that finds the agent already terminated. A graceful terminate of
+    a live agent only records the request on its terminate command: the home
+    runtime kills the sessions right before the termination applies, after the
+    agent's last step (`agent.hosted_ownership.apply_hosted_lifecycle`). The
+    response's `shell_sessions` reports which of the two happened.
     """
     if body.force:
         _old_status, pid, killed_page_names, command_id = await asyncio.to_thread(
@@ -179,63 +177,50 @@ async def terminate_agent_op(
         # Neither HTTP delivery nor Task.cancel proves resource quiescence.
         return TerminateAgentResponse(
             status="enqueued",
-            closed=await _closure_state(agent_id, final=body.final, db_pool=db_pool),
+            shell_sessions=await _kill_shell_sessions_now(
+                agent_id, kill=body.kill_all_shell_sessions
+            ),
         )
 
     s = await asyncio.to_thread(get_agent_status, agent_id)
     if s is AgentStatus.TERMINATED:
-        if body.final:
-            marked = await asyncio.to_thread(
-                ops_exit.mark_agent_closed, agent_id, source=body.source, db_pool=db_pool
-            )
-            if marked:
-                _log.info(
-                    "[gateway] agent %s already terminated; closed by %s (never auto-resurrect)",
-                    agent_id,
-                    body.source,
-                )
         return TerminateAgentResponse(
             status="already_terminated",
-            closed=await _closure_state(agent_id, final=body.final, db_pool=db_pool),
+            shell_sessions=await _kill_shell_sessions_now(
+                agent_id, kill=body.kill_all_shell_sessions
+            ),
         )
 
-    status, iid, zombie_closed_page_names = await asyncio.to_thread(
-        _terminate_graceful_blocking, agent_id, body, db_pool
-    )
-    if status == "already_terminated":
-        for page_name in zombie_closed_page_names:
-            await publish_page_closed(agent_id, page_name)
+    iid = await asyncio.to_thread(_terminate_graceful_blocking, agent_id, body, db_pool)
+    if iid is None:
+        # The kill-requesting enqueue found the row terminated under its lock.
         return TerminateAgentResponse(
             status="already_terminated",
-            closed=await _closure_state(agent_id, final=body.final, db_pool=db_pool),
+            shell_sessions=await _kill_shell_sessions_now(agent_id, kill=True),
         )
-    assert iid is not None  # status == "enqueued" implies the inbound was inserted  # noqa: S101
     await publish_inbound_arrived(agent_id, iid, "terminate", body.source, "")
     return TerminateAgentResponse(
         status="enqueued",
-        closed=await _closure_state(agent_id, final=body.final, db_pool=db_pool),
+        shell_sessions=ShellSessionsKill(when="at_exit") if body.kill_all_shell_sessions else None,
     )
 
 
-async def _closure_state(agent_id: int, *, final: bool, db_pool: ConnectionPool) -> bool:
-    """Closure post-state of one terminate request, for the response's `closed`.
+async def _kill_shell_sessions_now(agent_id: int, *, kill: bool) -> ShellSessionsKill | None:
+    """Kill the agent's shell sessions on this host when `kill`; report them.
 
-    `final=True` is truth by construction: the marker is stamped in the same
-    transaction as the termination intent (graceful enqueue / force), or marked
-    idempotently on the already-terminated backfill path. Otherwise read the
-    row — the caller may be terminating an agent an earlier `--final` closed.
+    A failed kill propagates: the termination itself is already durable, so
+    the caller sees the failure and a repeat request retries the kill.
     """
-
-    def _read() -> bool:
-        with db_pool.connection() as conn:
-            row = conn.execute(
-                "SELECT closed_at IS NOT NULL FROM agents_meta WHERE id = %s", (agent_id,)
-            ).fetchone()
-        return row is not None and row[0] is True
-
-    if final:
-        return True
-    return await asyncio.to_thread(_read)
+    if not kill:
+        return None
+    killed = await asyncio.to_thread(kill_agent_shells, agent_id)
+    _log.info(
+        "[gateway] agent %s terminate killed %d shell session(s): %s",
+        agent_id,
+        len(killed),
+        killed,
+    )
+    return ShellSessionsKill(when="now", killed=killed)
 
 
 async def _cancel_hosted_turn_best_effort(agent_id: int, command_id: int) -> None:
@@ -278,25 +263,25 @@ def _terminate_force_blocking(
         db_pool,
         source=body.source,
         message=body.message,
-        final=body.final,
+        kill_all_shell_sessions=body.kill_all_shell_sessions,
     )
-    _publish_force_terminate_inbound(agent_id, inbound_id, body.source, closed=body.final)
+    _publish_force_terminate_inbound(agent_id, inbound_id, body.source)
     publish_agent_updated_sync(agent_id)
     return old_status, pid, killed_page_names, inbound_id
 
 
 def _terminate_graceful_blocking(
     agent_id: int, body: TerminateAgentRequest, db_pool: ConnectionPool
-) -> tuple[str, int | None, list[str]]:
-    """Insert the durable termination message and command."""
-    iid = ops_exit._enqueue_termination_inbounds(
+) -> int | None:
+    """Insert the durable termination message and command; None when a
+    kill-requesting enqueue found the agent already terminated."""
+    return ops_exit._enqueue_termination_inbounds(
         agent_id,
         db_pool,
         source=body.source,
         message=body.message,
-        final=body.final,
+        kill_all_shell_sessions=body.kill_all_shell_sessions,
     )
-    return "enqueued", iid, []
 
 
 async def resurrect_agent_op(
@@ -385,12 +370,6 @@ async def resurrect_if_terminated(
     carries the `hosted_turn_recovery` payload marker and must revive its
     wedged owner (task #3687 review). User / peer chats, compact requests,
     and system notes with an explicit resurrect request remain unaffected.
-
-    A closed agent (`terminate --final`, `closed_at` set) is never
-    auto-resurrected: the closure marker outranks every automatic channel,
-    system-notice carve-out included, and only an explicit manual resurrect
-    reopens it. The home runner's final CAS re-checks the same predicate, so a
-    close landing while this call is in flight still refuses the wake.
     """
     status = await asyncio.to_thread(get_agent_status, agent_id)
     if status is not AgentStatus.TERMINATED:
@@ -406,13 +385,6 @@ async def resurrect_if_terminated(
         _log.debug(
             "resurrect_if_terminated: recovery circuit breaker tripped for agent %s "
             "after consecutive permanent provider rejections; skipping auto-resurrect",
-            agent_id,
-        )
-        return status
-    if await asyncio.to_thread(_closed_agent, agent_id):
-        _log.debug(
-            "resurrect_if_terminated: agent %s is closed (never auto-resurrect); "
-            "skipping auto-resurrect — queued work waits for an explicit manual resurrect",
             agent_id,
         )
         return status

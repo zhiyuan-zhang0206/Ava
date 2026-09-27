@@ -476,80 +476,40 @@ class TestResurrectAgent:
             ("", "resurrect", "system"),
         ]
 
-    def test_guarded_resurrect_refuses_closed_agent(
+    def test_guarded_resurrect_wakes_a_row_with_a_legacy_closure_stamp(
         self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """`terminate --final` closes the agent: a fresh pending chat is not
-        work that may auto-wake it, even though the same chat wakes an open
-        agent. The final CAS re-checks `closed_at` under the same row lock the
-        close takes, so the close cannot race past the wake."""
+        """Terminate has no closed state: an `agents_meta.closed_at` left by the
+        retired closed-agent concept neither gates the automatic wake nor is
+        cleared by it (decisions/2026-09-27-terminate-has-no-closed-state.md)."""
         agent_id = _spawn_agent()
-        with db_conn.cursor() as cur:
-            cur.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (agent_id,))
-        db_conn.commit()
-        trigger_id = shared.db.insert_inbound_message(
-            db_conn, agent_id, "wake despite closure?", source="user"
-        )
-        with db_conn.cursor() as cur:
-            cur.execute("UPDATE agents_meta SET closed_at = now() WHERE id = %s", (agent_id,))
-        db_conn.commit()
-
-        with pytest.raises(ResurrectTriggerStaleError, match="trigger work no longer qualifies"):
-            resurrect_agent(
-                agent_id,
-                resurrected_by="system",
-                trigger_inbound_id=trigger_id,
-                trigger_inbound_kind="chat",
-            )
-
-        row = _agents_row(db_conn, agent_id)
-        assert row is not None and row[2] == "terminated"
-        # The closure survives the refused wake; the chat stays pending for the
-        # existing dead-letter age gate.
-        assert db_conn.execute(
-            "SELECT closed_at IS NOT NULL FROM agents_meta WHERE id = %s", (agent_id,)
-        ).fetchone() == (True,)
-        assert _inbound_rows(db_conn, agent_id) == [("wake despite closure?", "chat", "user")]
-
-    def test_manual_resurrect_reopens_closed_agent(
-        self,
-        db_conn: psycopg.Connection,
-        monkeypatch: pytest.MonkeyPatch,
-        loguru_records: list[dict[str, Any]],
-    ) -> None:
-        """The explicit manual resurrect is the one channel that may reopen a
-        closed agent: the CAS clears the marker, the resurrect audit event
-        carries `reopened`, and a WARNING line marks the reopen for operators."""
-        agent_id = _spawn_agent()
-        with db_conn.cursor() as cur:
-            cur.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (agent_id,))
-        db_conn.commit()
         with db_conn.cursor() as cur:
             cur.execute(
-                "UPDATE agents_meta SET closed_at = now() - interval '1 hour' WHERE id = %s",
+                "UPDATE agents_meta SET status = 'terminated', closed_at = now() WHERE id = %s",
                 (agent_id,),
             )
         db_conn.commit()
-        events: list[Any] = []
-        monkeypatch.setattr("ops.agent_wake.telemetry.emit_prepared", events.append)
+        trigger_id = shared.db.insert_inbound_message(
+            db_conn, agent_id, "wake the terminated agent", source="user"
+        )
 
-        returned = resurrect_agent(agent_id, resurrected_by="user")
+        returned = resurrect_agent(
+            agent_id,
+            resurrected_by="system",
+            trigger_inbound_id=trigger_id,
+            trigger_inbound_kind="chat",
+        )
 
         assert returned == agent_id
         row = _agents_row(db_conn, agent_id)
         assert row is not None and row[2] == "idling"
         assert db_conn.execute(
-            "SELECT closed_at FROM agents_meta WHERE id = %s", (agent_id,)
-        ).fetchone() == (None,)
-        assert events[-1].event_name == "resurrect"
-        assert events[-1].attributes == {"reopened": True}
-        reopened_records = [
-            r for r in loguru_records if r["extra"].get("event") == "agent_reopened"
+            "SELECT closed_at IS NOT NULL FROM agents_meta WHERE id = %s", (agent_id,)
+        ).fetchone() == (True,)
+        assert _inbound_rows(db_conn, agent_id) == [
+            ("wake the terminated agent", "chat", "user"),
+            ("", "resurrect", "system"),
         ]
-        assert len(reopened_records) == 1
-        assert reopened_records[0]["level"].name == "WARNING"
-        assert reopened_records[0]["extra"]["agent_id"] == agent_id
-        assert reopened_records[0]["extra"]["resurrected_by"] == "user"
 
     def test_guarded_compact_rejects_kind_mismatch_and_claimed_trigger(
         self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
@@ -766,7 +726,7 @@ class TestResurrectAgent:
         def tracking_execute(self: Any, query: Any, *args: Any, **kwargs: Any) -> Any:
             result = original_execute(self, query, *args, **kwargs)
             if query == (
-                "SELECT status,machine,closed_at,permanent_reject_streak,"
+                "SELECT status,machine,permanent_reject_streak,"
                 "last_permanent_reject_reason FROM agents_meta WHERE id = %s FOR UPDATE"
             ):
                 status_select_cursors.add(id(self))
@@ -775,8 +735,8 @@ class TestResurrectAgent:
         def lying_fetchone(self: Any) -> Any:
             if id(self) in status_select_cursors:
                 status_select_cursors.remove(id(self))
-                # enter UPDATE while preserving placement; the closure marker is open
-                return ("terminated", machine_name(), None)
+                # enter UPDATE while preserving placement
+                return ("terminated", machine_name(), 0, None)
             return original_fetchone(self)
 
         monkeypatch.setattr(psycopg.Cursor, "execute", tracking_execute)

@@ -17,9 +17,7 @@ accept different lifecycle states.
   its notification, optional message and an epoch fence: every earlier
   unapplied restart/terminate command is settled as superseded, so a delayed
   older terminate can never be replayed onto the successor incarnation
-  (issue #2158). It also reopens a closed agent, clearing the closure marker
-  (the audit event carries `reopened`, and a WARNING-level `agent_reopened` log
-  line marks it for operators). Then it publishes a host wake.
+  (issue #2158). Then it publishes a host wake.
 - Automatic resurrection requires actual pending work newer than the current
   death and above the force-terminate inbound fence — except for a row the
   system itself reaped after a crash (`termination_source='reaper'` with the
@@ -29,12 +27,11 @@ accept different lifecycle states.
   the spot (task #4039), so a crash death with no arrival still recovers
   near-field. The home-machine lock, automatic-wake policy, suppression window
   and the recovery breaker's durable streak guard that transition; a stale
-  trigger cannot undo a concurrent user termination. A closed agent
-  (`terminate --final`; `agents_meta.closed_at` set) is exempt from every
-  automatic path — its queued work waits and dead-letters on the existing
-  thresholds — and its claimed terminate is likewise exempt from the claim
-  node's newer-work veto: a message arriving after the close cannot keep the
-  agent alive.
+  trigger cannot undo a concurrent user termination. There is no closed
+  state: any new message may resurrect a user-terminated agent, including its
+  own shells' and watchers' messages — a terminate with
+  `kill_all_shell_sessions` kills those sessions right before the termination
+  applies ([decision](../../decisions/2026-09-27-terminate-has-no-closed-state.md)).
 - A chat stalled `pending` on a crash-marked idling corpse reaches a
   bounded-time recovery decision: the delivery watchdog escalates to the
   owner's home runner (`recover-crash-marked-v2`), which harvests the corpse

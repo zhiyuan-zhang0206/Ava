@@ -1,5 +1,6 @@
 """Database failures at final flush and lifecycle commit cannot replay work."""
 
+from typing import Any
 from unittest.mock import MagicMock
 
 import psycopg
@@ -47,15 +48,15 @@ async def test_database_failure_after_graph_return_preserves_completed_work(
         await original_flush(checkpointer, target)
 
     async def fail_lifecycle_once(
-        pool: AsyncConnectionPool, token: RuntimeIncarnation
+        pool: AsyncConnectionPool, token: RuntimeIncarnation, **kwargs: Any
     ) -> str | None:
         nonlocal failed
         if not failed:
             failed = True
             if failure_site == "after_lifecycle":
-                await apply_hosted_lifecycle(pool, token)
+                await apply_hosted_lifecycle(pool, token, **kwargs)
             await broken.execute("SELECT 1")
-        return await apply_hosted_lifecycle(pool, token)
+        return await apply_hosted_lifecycle(pool, token, **kwargs)
 
     if failure_site == "flush":
         monkeypatch.setattr(host_module, "flush_checkpoint", fail_flush_once)

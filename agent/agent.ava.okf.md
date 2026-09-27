@@ -32,18 +32,18 @@ Overview of the Agent subsystem.
   "whether the new process needs to be told what it went through":
   - **spawn** — create new agent, **no inbound message delivered** (from nothing, no "why was I called" issue).
   - **resurrect** — bring a `terminated` agent back (history preserved), deliver a `kind='resurrect'` marker
-    telling the model "you are resurrected" rather than continuing the previous context. The explicit path also
-    reopens a closed agent (`terminate --final`), which no automatic channel may wake.
+    telling the model "you are resurrected" rather than continuing the previous context. Any new message to a
+    terminated agent resurrects it the same way (there is no closed state).
   - **respawn** — the durable restarter replaces the process and `respawn_agent` delivers
     `kind='restart_completed'`; when restarted from idle, only commit the marker, no need to wake the model.
   - **fork** — new agent + inherit state of a checkpoint (including history), deliver `kind='fork'` identity marker
     correcting "who I am".
   - **terminate / force** — graceful exit (deliver `kind='terminate'`, graph goes to END, process exits naturally)
     or request interruption of the active hosted turn when stuck (`force=true`, not available on `ava.self.terminate()`);
-    `enqueued` confirms acceptance, not exit or completion of owned work. With `final` the
-    termination also closes the agent for good: never auto-resurrected, its claimed terminate exempt from the
-    claim-time newer-work veto, and the response carries the resulting closure state (`closed`). Only an explicit
-    resurrect reopens it.
+    `enqueued` confirms acceptance, not exit or completion of owned work. With `kill_all_shell_sessions`
+    every shell session the agent owns on its home machine (watchers included) is killed too, silently — right
+    before a graceful termination applies, or at once for force / an already-terminated agent — so none of them
+    can wake it again; the response's `shell_sessions` reports it.
   - **heartbeat** — check-in for an idle agent; claim appends a system note unless a permanent-provider circuit breaker is open, in which case the heartbeat is consumed without growing the LLM context.
 
 ## Sub-concepts

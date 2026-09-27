@@ -455,6 +455,11 @@ export interface paths {
          *     Both paths forward to the home runner. A missing agent returns 404; an
          *     already-terminated identity is a no-op for graceful termination.
          *
+         *     `kill_all_shell_sessions` also kills the agent's shell sessions on its home
+         *     machine, silently; `shell_sessions` in the response says whether that
+         *     already happened (`now`, with the killed ids) or happens right before a
+         *     graceful termination applies (`at_exit`).
+         *
          *     On success the response additionally carries `open_tasks` — the tasks the
          *     agent still owns (in_progress; at most five, most recently
          *     updated first) as it goes down. The hint is advisory: a failed read leaves
@@ -531,7 +536,7 @@ export interface paths {
          *     and the provider balance readout, nothing written. `execute=true` re-checks the provider balance (the run refuses
          *     below the configured floor) and then resurrects each candidate on its home
          *     machine through the versioned `resurrect-billing-v1` op, which enforces the
-         *     closed fence and the billing-halt whitelist under the metadata row lock.
+         *     billing-halt whitelist under the metadata row lock.
          *     Idempotent: the candidate set self-clears after a run, a repeated run is an
          *     audited no-op, and a concurrent second run is refused by the run-level
          *     advisory lock.
@@ -7868,6 +7873,28 @@ export interface components {
             expires_at?: string | null;
         };
         /**
+         * ShellSessionsKill
+         * @description What `kill_all_shell_sessions` did for one terminate request.
+         *
+         *     `when="now"`: the kill already ran on the agent's home machine — a force
+         *         terminate, or an agent that was already terminated. `killed` lists the
+         *         session ids it killed, ascending; empty means the agent had no shell
+         *         session there.
+         *     `when="at_exit"`: a graceful terminate of a live agent. The request is
+         *         durable on its terminate command; the home runtime kills every session
+         *         right before the termination applies, after the agent's last step.
+         *         `killed` is empty — the set is fixed only at exit.
+         */
+        ShellSessionsKill: {
+            /**
+             * When
+             * @enum {string}
+             */
+            when: "now" | "at_exit";
+            /** Killed */
+            killed?: number[];
+        };
+        /**
          * SkillEnableUpdate
          * @description Request body for PUT /api/skills — toggle one skill's enabled flag.
          */
@@ -8330,11 +8357,15 @@ export interface components {
          *     `force` defaults to False for graceful termination. True directly kills the
          *     detached process and force-updates status when the agent cannot reach claim.
          *
-         *     `final` closes the agent — the closure marker (`agents_meta.closed_at`)
-         *     means "never auto-resurrect": every automatic resurrection path skips it
-         *     and its queued work dead-letters on the existing thresholds; only an
-         *     explicit manual resurrect reopens it. Stamped even when the terminate lands
-         *     on an already-terminated agent (metadata-only mark; the backfill route).
+         *     `kill_all_shell_sessions` also kills every shell session the agent owns on
+         *     its home machine (watchers included), with no per-session notice. A
+         *     graceful terminate of a live agent records the request on its terminate
+         *     command and the home runtime kills the sessions right before the
+         *     termination applies, after the agent's last step; a force terminate, or an
+         *     agent that is already terminated, has them killed before the response.
+         *     Without it, sessions are left alone. A terminated agent is otherwise an
+         *     ordinary terminated agent — any new message may resurrect it
+         *     (decisions/2026-09-27-terminate-has-no-closed-state.md).
          *
          *     `source` defaults to "user"; SDK paths pass f"agent:{my_id}". Claim
          *     includes this source in the lifecycle marker shown to the agent.
@@ -8350,10 +8381,10 @@ export interface components {
              */
             force: boolean;
             /**
-             * Final
+             * Kill All Shell Sessions
              * @default false
              */
-            final: boolean;
+            kill_all_shell_sessions: boolean;
             /**
              * Source
              * @default user
@@ -8369,19 +8400,17 @@ export interface components {
          *     `enqueued`: termination accepted, including hosted force. Actual work may
          *         still be draining; this result does not prove exit.
          *     `already_terminated`: agent was already dead. Graceful termination is a
-         *         no-op. Hosted force instead returns enqueued until its exact original
-         *         host can prove quiescence; metadata status alone is not exit evidence.
+         *         no-op beyond a requested shell-session kill. Hosted force instead
+         *         returns enqueued until its exact original host can prove quiescence;
+         *         metadata status alone is not exit evidence.
          *
          *     `open_tasks`: the still-open tasks the agent owned as it went down — an
          *         advisory hint, null when it owned none or the hint read failed.
          *
-         *     `closed`: the agent's closure state after this request — True when `final`
-         *         was requested (the marker is stamped in the same transaction as the
-         *         termination intent; the already-terminated backfill marks idempotently)
-         *         or when the marker was already set; False otherwise; None only when the
-         *         reporting runner predates the field (version skew). Makes
-         *         `terminate --final` — including its already-terminated backfill form —
-         *         verifiable from the response alone.
+         *     `shell_sessions`: what the shell-session kill did — set when
+         *         `kill_all_shell_sessions` was requested, None otherwise. A requested
+         *         kill answered with None means the home runner predates the option
+         *         (version skew): nothing was killed.
          */
         TerminateAgentResponse: {
             /**
@@ -8390,8 +8419,7 @@ export interface components {
              */
             status: "enqueued" | "already_terminated";
             open_tasks?: components["schemas"]["OpenTasksHint"] | null;
-            /** Closed */
-            closed?: boolean | null;
+            shell_sessions?: components["schemas"]["ShellSessionsKill"] | null;
         };
         /**
          * TextContentBlock

@@ -50,9 +50,6 @@ class TerminationSource(StrEnum):
 
     Resurrect policy — INVOLUNTARY deaths come back, intentional ones stay dead:
     `ops/controllers/resurrect.py` allowlists exactly `RESURRECTABLE`.
-    Orthogonal to source: `agents_meta.closed_at` (set by `terminate --final`)
-    marks a closed agent that no automatic path may resurrect regardless of
-    source; only an explicit manual resurrect reopens it.
     """
 
     # Intentional — the user's will (force-kill, or a terminate that found the pid
@@ -223,13 +220,12 @@ class ResurrectRefused(ResurrectError):  # noqa: N818 — style consistent with 
     """A resurrect guard refused — the billing batch-recovery whitelist (task #3919).
 
     Raised under the metadata row lock when the versioned `resurrect-billing-v1`
-    action finds the row outside its contract: closed (the batch entry never
-    crosses the closure marker — only a single explicit manual resurrect
-    reopens), or not a billing-class recovery-breaker halt. Caught locally by
-    the billing op and turned into a structured per-agent outcome; like
-    `ResurrectAlreadyAlive` it is not wire-encoded (no ErrorReason entry).
+    action finds the row outside its contract: not a billing-class
+    recovery-breaker halt. Caught locally by the billing op and turned into a
+    structured per-agent outcome; like `ResurrectAlreadyAlive` it is not
+    wire-encoded (no ErrorReason entry).
 
-    `reason` is the machine-readable guard name: 'closed' / 'not_billing_halted'.
+    `reason` is the machine-readable guard name: 'not_billing_halted'.
     """
 
     def __init__(self, reason: str) -> None:

@@ -660,7 +660,7 @@
     "/api/agents/{agent_id}/terminate": {
       "post": {
         "summary": "Post Agent Terminate",
-        "description": "Terminate through the home runner's durable native control path.\n\nClaim returns to END and the host flushes before applying normal termination.\nAn optional message is committed as pending work before the command, retained\nfor later resurrection without causing another model turn. Force returns\nenqueued while the exact original host settles its task and execution\nresources; acceptance and metadata status are not proof of completed exit.\n\nBoth paths forward to the home runner. A missing agent returns 404; an\nalready-terminated identity is a no-op for graceful termination.\n\nOn success the response additionally carries `open_tasks` — the tasks the\nagent still owns (in_progress; at most five, most recently\nupdated first) as it goes down. The hint is advisory: a failed read leaves\nit null and never changes the termination result.",
+        "description": "Terminate through the home runner's durable native control path.\n\nClaim returns to END and the host flushes before applying normal termination.\nAn optional message is committed as pending work before the command, retained\nfor later resurrection without causing another model turn. Force returns\nenqueued while the exact original host settles its task and execution\nresources; acceptance and metadata status are not proof of completed exit.\n\nBoth paths forward to the home runner. A missing agent returns 404; an\nalready-terminated identity is a no-op for graceful termination.\n\n`kill_all_shell_sessions` also kills the agent's shell sessions on its home\nmachine, silently; `shell_sessions` in the response says whether that\nalready happened (`now`, with the killed ids) or happens right before a\ngraceful termination applies (`at_exit`).\n\nOn success the response additionally carries `open_tasks` — the tasks the\nagent still owns (in_progress; at most five, most recently\nupdated first) as it goes down. The hint is advisory: a failed read leaves\nit null and never changes the termination result.",
         "operationId": "post_agent_terminate_api_agents__agent_id__terminate_post",
         "parameters": [
           {
@@ -758,7 +758,7 @@
     "/api/agents/resurrect-billing": {
       "post": {
         "summary": "Post Agents Resurrect Billing",
-        "description": "Billing batch recovery — the explicit, operator-triggered entry (task #3919).\n\n`execute=false` (the default) is a strictly read-only preview: the\nbilling-class halt candidates, the halted-but-alive survey (report-only),\nand the provider balance readout, nothing written. `execute=true` re-checks the provider balance (the run refuses\nbelow the configured floor) and then resurrects each candidate on its home\nmachine through the versioned `resurrect-billing-v1` op, which enforces the\nclosed fence and the billing-halt whitelist under the metadata row lock.\nIdempotent: the candidate set self-clears after a run, a repeated run is an\naudited no-op, and a concurrent second run is refused by the run-level\nadvisory lock.",
+        "description": "Billing batch recovery — the explicit, operator-triggered entry (task #3919).\n\n`execute=false` (the default) is a strictly read-only preview: the\nbilling-class halt candidates, the halted-but-alive survey (report-only),\nand the provider balance readout, nothing written. `execute=true` re-checks the provider balance (the run refuses\nbelow the configured floor) and then resurrects each candidate on its home\nmachine through the versioned `resurrect-billing-v1` op, which enforces the\nbilling-halt whitelist under the metadata row lock.\nIdempotent: the candidate set self-clears after a run, a repeated run is an\naudited no-op, and a concurrent second run is refused by the run-level\nadvisory lock.",
         "operationId": "post_agents_resurrect_billing_api_agents_resurrect_billing_post",
         "requestBody": {
           "content": {
@@ -15470,6 +15470,31 @@
         "title": "ShellInfo",
         "description": "One live persistent-shell session of an agent — a session named\n`…-agent-<id>-shell-<sid>[-<name>]`. `id` is the agent-local session id\n(the int the agent uses to drive it); `name` is the optional slug label\n(a watcher carries the conventional name \"watcher\"), None when unnamed.\nThe agent's own process session has no `-shell-` segment and is excluded.\n\n`created_at` / `uptime_seconds` come from the runner's session record\n(the launch epoch, resolved to the cluster timezone); `expires_at` is\nthe gateway-owned TTL deadline from `agent_shell_ttls` — None when the\nsession has no TTL row (page and schedule sessions carry their own\nlifecycle)."
       },
+      "ShellSessionsKill": {
+        "properties": {
+          "when": {
+            "type": "string",
+            "enum": [
+              "now",
+              "at_exit"
+            ],
+            "title": "When"
+          },
+          "killed": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Killed"
+          }
+        },
+        "type": "object",
+        "required": [
+          "when"
+        ],
+        "title": "ShellSessionsKill",
+        "description": "What `kill_all_shell_sessions` did for one terminate request.\n\n`when=\"now\"`: the kill already ran on the agent's home machine — a force\n    terminate, or an agent that was already terminated. `killed` lists the\n    session ids it killed, ascending; empty means the agent had no shell\n    session there.\n`when=\"at_exit\"`: a graceful terminate of a live agent. The request is\n    durable on its terminate command; the home runtime kills every session\n    right before the termination applies, after the agent's last step.\n    `killed` is empty — the set is fixed only at exit."
+      },
       "SkillEnableUpdate": {
         "properties": {
           "name": {
@@ -16459,9 +16484,9 @@
             "title": "Force",
             "default": false
           },
-          "final": {
+          "kill_all_shell_sessions": {
             "type": "boolean",
-            "title": "Final",
+            "title": "Kill All Shell Sessions",
             "default": false
           },
           "source": {
@@ -16487,7 +16512,7 @@
         },
         "type": "object",
         "title": "TerminateAgentRequest",
-        "description": "POST /api/agents/{id}/terminate request body — fully optional.\n\n`force` defaults to False for graceful termination. True directly kills the\ndetached process and force-updates status when the agent cannot reach claim.\n\n`final` closes the agent — the closure marker (`agents_meta.closed_at`)\nmeans \"never auto-resurrect\": every automatic resurrection path skips it\nand its queued work dead-letters on the existing thresholds; only an\nexplicit manual resurrect reopens it. Stamped even when the terminate lands\non an already-terminated agent (metadata-only mark; the backfill route).\n\n`source` defaults to \"user\"; SDK paths pass f\"agent:{my_id}\". Claim\nincludes this source in the lifecycle marker shown to the agent.\n\n`message`, when present, is queued as chat immediately before the terminate\ninbound. Lifecycle acceptance claims only the terminate row, so the chat\nremains pending for the next resurrection without another LLM turn."
+        "description": "POST /api/agents/{id}/terminate request body — fully optional.\n\n`force` defaults to False for graceful termination. True directly kills the\ndetached process and force-updates status when the agent cannot reach claim.\n\n`kill_all_shell_sessions` also kills every shell session the agent owns on\nits home machine (watchers included), with no per-session notice. A\ngraceful terminate of a live agent records the request on its terminate\ncommand and the home runtime kills the sessions right before the\ntermination applies, after the agent's last step; a force terminate, or an\nagent that is already terminated, has them killed before the response.\nWithout it, sessions are left alone. A terminated agent is otherwise an\nordinary terminated agent — any new message may resurrect it\n(decisions/2026-09-27-terminate-has-no-closed-state.md).\n\n`source` defaults to \"user\"; SDK paths pass f\"agent:{my_id}\". Claim\nincludes this source in the lifecycle marker shown to the agent.\n\n`message`, when present, is queued as chat immediately before the terminate\ninbound. Lifecycle acceptance claims only the terminate row, so the chat\nremains pending for the next resurrection without another LLM turn."
       },
       "TerminateAgentResponse": {
         "properties": {
@@ -16509,16 +16534,15 @@
               }
             ]
           },
-          "closed": {
+          "shell_sessions": {
             "anyOf": [
               {
-                "type": "boolean"
+                "$ref": "#/components/schemas/ShellSessionsKill"
               },
               {
                 "type": "null"
               }
-            ],
-            "title": "Closed"
+            ]
           }
         },
         "type": "object",
@@ -16526,7 +16550,7 @@
           "status"
         ],
         "title": "TerminateAgentResponse",
-        "description": "POST /api/agents/{id}/terminate response.\n\n`enqueued`: termination accepted, including hosted force. Actual work may\n    still be draining; this result does not prove exit.\n`already_terminated`: agent was already dead. Graceful termination is a\n    no-op. Hosted force instead returns enqueued until its exact original\n    host can prove quiescence; metadata status alone is not exit evidence.\n\n`open_tasks`: the still-open tasks the agent owned as it went down — an\n    advisory hint, null when it owned none or the hint read failed.\n\n`closed`: the agent's closure state after this request — True when `final`\n    was requested (the marker is stamped in the same transaction as the\n    termination intent; the already-terminated backfill marks idempotently)\n    or when the marker was already set; False otherwise; None only when the\n    reporting runner predates the field (version skew). Makes\n    `terminate --final` — including its already-terminated backfill form —\n    verifiable from the response alone."
+        "description": "POST /api/agents/{id}/terminate response.\n\n`enqueued`: termination accepted, including hosted force. Actual work may\n    still be draining; this result does not prove exit.\n`already_terminated`: agent was already dead. Graceful termination is a\n    no-op beyond a requested shell-session kill. Hosted force instead\n    returns enqueued until its exact original host can prove quiescence;\n    metadata status alone is not exit evidence.\n\n`open_tasks`: the still-open tasks the agent owned as it went down — an\n    advisory hint, null when it owned none or the hint read failed.\n\n`shell_sessions`: what the shell-session kill did — set when\n    `kill_all_shell_sessions` was requested, None otherwise. A requested\n    kill answered with None means the home runner predates the option\n    (version skew): nothing was killed."
       },
       "TextContentBlock": {
         "properties": {

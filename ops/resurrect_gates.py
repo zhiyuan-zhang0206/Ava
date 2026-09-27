@@ -1,18 +1,17 @@
 """Durable gates consulted before an automatic resurrection.
 
-Split out of `ops/ops_lifecycle.py` when the closure guard pushed that module
-at its line budget. Each function answers one question about agents_meta /
-inbound_messages state — may an automatic wake proceed? — and each is its own
-durable policy: wake suppression (repeated resurrect failures), the recovery
-breaker (consecutive permanent provider rejections), the system-notice source
-(notifications never resurrect), and the closure marker (`terminate --final`:
-never auto-resurrect). Read failures propagate: a failed read must never
-degrade into a wake the policy forbids.
+Split out of `ops/ops_lifecycle.py` at its line budget. Each function answers
+one question about agents_meta / inbound_messages state — may an automatic
+wake proceed? — and each is its own durable policy: wake suppression (repeated
+resurrect failures), the recovery breaker (consecutive permanent provider
+rejections), and the system-notice source (notifications never resurrect).
+Read failures propagate: a failed read must never degrade into a wake the
+policy forbids.
 """
 
 import shared.db
 from shared.agents import AgentNotFound
-from shared.lifecycle_acceptance import is_closed_agent, is_system_notice_source
+from shared.lifecycle_acceptance import is_system_notice_source
 
 
 def wake_suppression_active(agent_id: int) -> bool:
@@ -114,21 +113,3 @@ def clear_wake_suppression(agent_id: int) -> None:
             "WHERE id=%s AND wake_suppressed_until IS NOT NULL",
             (agent_id,),
         )
-
-
-def closed_agent(agent_id: int) -> bool:
-    """Whether the user closed `agent_id` — never auto-resurrect (`closed_at` set).
-
-    The closure marker outranks every automatic channel, including the
-    system-notice carve-out: only an explicit manual resurrect reopens (and
-    clears) the agent. Read shape mirrors `wake_suppression_active` /
-    `recovery_halted` — a DB read failure propagates, never a silent skip.
-    """
-    with shared.db.connect() as conn:
-        row = conn.execute(
-            "SELECT closed_at FROM agents_meta WHERE id=%s",
-            (agent_id,),
-        ).fetchone()
-    if row is None:
-        raise AgentNotFound(f"agent {agent_id} does not exist")
-    return is_closed_agent(row[0])
