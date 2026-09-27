@@ -69,7 +69,8 @@ while active. Idempotent chat retries produce one history entry. Inbox reads lea
 messages pending; explicit ACK records processing without removing their bodies.
 `ava impersonate say` commits an outbound message with
 a stable retry key, then publishes `impersonation_changed`. Logical identity
-remains the Ava agent; `impersonation` metadata names the session and executor.
+remains the Ava agent; `impersonation` metadata names the session and executor. Process facts
+stay on the session, not on each message.
 Incoming user messages remain incoming messages.
 
 The existing timeline endpoint hydrates the checkpoint's session anchor with

@@ -141,6 +141,13 @@ def test_say_ack_and_file_preserve_all_message_bodies(
     assert document["statistics"]["outgoing_messages"] == 1
     assert document["session"]["executor_name"] == "Codex: thoughtful squirrel"
     assert document["session"]["process_metadata"]["name"] == "python3.12"
+    # Process facts live once on the session record, not on every message;
+    # rows persisted with the former per-message copy still validate.
+    said = document["messages"][1]["payload"]["impersonation"]
+    assert said["executor_name"] == "Codex: thoughtful squirrel"
+    assert "process" not in said
+    legacy = history.ImpersonationMetadata.model_validate({**said, "process": {"pid": 1}})
+    assert "process" not in legacy.model_dump()
     with (
         db_conn.transaction(force_rollback=True),
         pytest.raises(psycopg.errors.RaiseException, match="permanent"),
