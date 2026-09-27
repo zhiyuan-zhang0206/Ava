@@ -481,7 +481,7 @@ def test_hostless_record_reads_dead_and_is_swept(sessions: Path) -> None:
             "cmd": "/bin/sleep 300",
             "cwd": str(sessions),
             "started_at": time.time(),
-            "starttime": None,
+            "starttime": pid_starttime_ticks(shell.pid),  # as launch.py stamps it
             "generation": None,
             "control_mode": None,
             "host_pid": 999999,
