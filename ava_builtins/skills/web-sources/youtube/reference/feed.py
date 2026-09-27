@@ -269,15 +269,9 @@ def _whisper_fallback(video_id: str) -> str | None:
     skill (OpenAI). Opt-in through `fetch(whisper_fallback=True)`. A real failure
     (missing key / ffmpeg / network) propagates — only empty output yields None,
     so this never silently masks a transcription error."""
-    import importlib.util
+    from ava_builtins.skill_support.audio_transcribe.transcribe import transcribe
 
-    mod_path = Path(__file__).parents[3] / "audio-transcribe" / "transcribe.py"
-    spec = importlib.util.spec_from_file_location("audio-transcribe", mod_path)
-    if spec is None or spec.loader is None:
-        raise RuntimeError(f"cannot load audio-transcribe skill at {mod_path}")
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod.transcribe(video_id)["text"] or None
+    return transcribe(video_id)["text"] or None
 
 
 def fetch(
