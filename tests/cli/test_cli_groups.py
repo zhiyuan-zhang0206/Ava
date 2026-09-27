@@ -98,8 +98,9 @@ def test_host_enroll_no_longer_routes() -> None:
 
 def test_help_builds_parser_config_free(tmp_path: Path) -> None:
     """`ava --help` must build the parser WITHOUT loading Settings — no
-    `_add_*_parser` may eager-import cli.commands (whose package __init__ loads
-    Settings), or a fresh host with no .env can't even read --help.
+    `_add_*_parser` may eager-import a `cli.commands.*` module at build time
+    (some of which load Settings), or a fresh host with no .env can't even
+    read --help.
 
     Run in a subprocess with AVA_HOME at an empty dir + every AVA_* stripped, so a
     stray Settings load fails with a missing-required-field ValidationError."""

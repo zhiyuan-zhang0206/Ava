@@ -29,7 +29,6 @@ from pathlib import Path
 
 import pytest
 
-import cli.commands as _cli
 from cli.commands import _probe
 from cli.commands import _repo as _repo_mod
 from cli.commands import _session_lifecycle as _session_mod
@@ -200,7 +199,7 @@ def test_unready_service_exits_nonzero_after_printing_the_snapshot(
     _roster(monkeypatch, (("gateway", None), ("labeler", None)))
     _probes(monkeypatch, ready={"labeler"})
 
-    rc = _cli.cmd_start()
+    rc = _start_mod.cmd_start()
 
     assert rc == SERVICES_NOT_READY_EXIT_CODE
     out = capsys.readouterr()  # pyright: ignore[reportUnknownMemberType]
@@ -230,7 +229,7 @@ def test_unready_start_revokes_a_previous_serving_generation(
     _roster(monkeypatch, (("gateway", None),))
     _probes(monkeypatch, ready=set())
 
-    assert _cli.cmd_start() == SERVICES_NOT_READY_EXIT_CODE
+    assert _start_mod.cmd_start() == SERVICES_NOT_READY_EXIT_CODE
     assert start_serving.is_serving() is False
 
 
@@ -245,7 +244,7 @@ def test_ready_start_marks_its_serving_generation(
     _roster(monkeypatch, (("gateway", None),))
     _probes(monkeypatch, ready={"gateway"})
 
-    assert _cli.cmd_start() == 0
+    assert _start_mod.cmd_start() == 0
     assert start_serving.is_serving() is True
 
 
@@ -313,7 +312,7 @@ def test_failed_launch_exits_nonzero_and_records_the_session_names(
     monkeypatch.setattr(_session_mod, "_has_session", lambda _s: False)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_session_mod, "_new_session", lambda *_a, **_kw: False)  # pyright: ignore[reportUnknownArgumentType]
 
-    rc = _cli.cmd_start()
+    rc = _start_mod.cmd_start()
 
     assert rc == SERVICES_NOT_READY_EXIT_CODE
     combined = "".join(capsys.readouterr())  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
@@ -336,7 +335,7 @@ def test_successful_launch_clears_a_previous_runs_failure_record(
     monkeypatch.setattr(_session_mod, "_has_session", lambda _s: False)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_session_mod, "_new_session", lambda *_a, **_kw: True)  # pyright: ignore[reportUnknownArgumentType]
 
-    assert _cli.cmd_start() == 0
+    assert _start_mod.cmd_start() == 0
     assert launch_failures.take() == []
 
 
@@ -354,7 +353,7 @@ def test_failed_launch_is_waived_with_the_readiness_gate_off(
     monkeypatch.setattr(_session_mod, "_has_session", lambda _s: False)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_session_mod, "_new_session", lambda *_a, **_kw: False)  # pyright: ignore[reportUnknownArgumentType]
 
-    assert _cli.cmd_start(readiness_gate=False) == 0
+    assert _start_mod.cmd_start(readiness_gate=False) == 0
     assert launch_failures.take() == [_sess("gateway")], (
         "waiving the exit code must not waive the record — it is the rollout's channel"
     )
@@ -377,7 +376,7 @@ def test_gated_out_service_cannot_fail_the_start(monkeypatch: pytest.MonkeyPatch
     )
     _probes(monkeypatch, ready={"gateway"})  # browser-mcp probes False
 
-    rc = _cli.cmd_start()
+    rc = _start_mod.cmd_start()
 
     assert rc == 0
     combined = "".join(capsys.readouterr())  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
@@ -390,7 +389,7 @@ def test_disable_service_skip_cannot_fail_the_start(monkeypatch: pytest.MonkeyPa
     _roster(monkeypatch, (("gateway", None), ("labeler", None)))
     _probes(monkeypatch, ready={"gateway"})  # labeler probes False
 
-    assert _cli.cmd_start(disabled_services=("labeler",)) == 0
+    assert _start_mod.cmd_start(disabled_services=("labeler",)) == 0
 
 
 def test_frontend_is_not_gated_on(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -400,7 +399,7 @@ def test_frontend_is_not_gated_on(monkeypatch: pytest.MonkeyPatch) -> None:
     _roster(monkeypatch, (("gateway", None), ("frontend", None)))
     _probes(monkeypatch, ready={"gateway"})  # frontend still building
 
-    assert _cli.cmd_start() == 0
+    assert _start_mod.cmd_start() == 0
 
 
 def test_degraded_start_still_unpauses_this_host(
@@ -419,7 +418,7 @@ def test_degraded_start_still_unpauses_this_host(
     _roster(monkeypatch, (("gateway", None),))
     _probes(monkeypatch, ready=set())
 
-    assert _cli.cmd_start() == SERVICES_NOT_READY_EXIT_CODE
+    assert _start_mod.cmd_start() == SERVICES_NOT_READY_EXIT_CODE
     assert calls and calls[-1] == "idle", "a degraded start must still declare this host serving"
 
 
@@ -446,7 +445,7 @@ def test_late_but_within_bound_readiness_exits_zero(monkeypatch: pytest.MonkeyPa
 
     monkeypatch.setattr(_probe, "_probe_service", _slow)
 
-    assert _cli.cmd_start() == 0
+    assert _start_mod.cmd_start() == 0
     assert polls["n"] == 3, "the wait must return on the poll that passes, not at the bound"
 
 
@@ -478,7 +477,7 @@ def test_all_ready_start_exits_zero(monkeypatch: pytest.MonkeyPatch) -> None:
     _roster(monkeypatch, (("gateway", None), ("labeler", None)))
     _probes(monkeypatch, ready={"gateway", "labeler"})
 
-    assert _cli.cmd_start() == 0
+    assert _start_mod.cmd_start() == 0
 
 
 # ─── --no-readiness-gate ──────────────────────────────────────────────────────
@@ -493,7 +492,7 @@ def test_no_readiness_gate_still_prints_but_exits_zero(
     _roster(monkeypatch, (("gateway", None),))
     _probes(monkeypatch, ready=set())
 
-    rc = _cli.cmd_start(readiness_gate=False)
+    rc = _start_mod.cmd_start(readiness_gate=False)
 
     assert rc == 0
     combined = "".join(capsys.readouterr())  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
@@ -512,7 +511,7 @@ def test_waived_unready_start_keeps_recovery_gated(
     _roster(monkeypatch, (("gateway", None),))
     _probes(monkeypatch, ready=set())
 
-    assert _cli.cmd_start(readiness_gate=False) == 0
+    assert _start_mod.cmd_start(readiness_gate=False) == 0
     assert start_serving.is_serving() is False
 
 
@@ -563,7 +562,7 @@ def test_live_update_lease_does_not_waive_on_a_pure_agent_runner(
     _probes(monkeypatch, ready=set())
     monkeypatch.setattr(_start_mod, "_update_in_flight", lambda: True)
 
-    assert _cli.cmd_start() == SERVICES_NOT_READY_EXIT_CODE
+    assert _start_mod.cmd_start() == SERVICES_NOT_READY_EXIT_CODE
 
 
 def test_no_lease_still_gates(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -582,7 +581,7 @@ def test_no_lease_still_gates(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(_sb, "get_backend", _FakeSessionBackend)
     monkeypatch.setattr(_sb, "get_shell_backend", _FakeSessionBackend)
 
-    assert _cli.cmd_start() == SERVICES_NOT_READY_EXIT_CODE
+    assert _start_mod.cmd_start() == SERVICES_NOT_READY_EXIT_CODE
 
 
 def test_healthy_start_never_asks_about_the_lease(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -599,7 +598,7 @@ def test_healthy_start_never_asks_about_the_lease(monkeypatch: pytest.MonkeyPatc
 
     monkeypatch.setattr(_start_mod, "_update_in_flight", _fail)
 
-    assert _cli.cmd_start() == 0
+    assert _start_mod.cmd_start() == 0
 
 
 def test_cli_flag_reaches_cmd_start(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -615,7 +614,7 @@ def test_cli_flag_reaches_cmd_start(monkeypatch: pytest.MonkeyPatch) -> None:
         return 0
 
     monkeypatch.setattr(
-        _cli,
+        _start_mod,
         "cmd_start",
         _start,
     )
@@ -768,7 +767,7 @@ def test_rollback_keeps_the_rollback_when_a_service_is_unready(
     The `start_rc != 0` branch re-applies forward migrations and git-resets back to
     the pre-rollback commit. Firing that because a `browser` was slow would leave the
     operator with neither the state they asked for nor the one they had."""
-    from cli.commands import _cluster_rollback as _rb
+    from cli.commands import cluster_rollback as _rb
 
     undone: list[str] = []
 
@@ -1269,7 +1268,7 @@ def test_non_critical_failure_posts_alert_and_im(monkeypatch: pytest.MonkeyPatch
     # proceeds as a fresh firing.
     monkeypatch.setattr(_probe, "_unresolved_alert_instance", lambda _c, _s: None)  # pyright: ignore[reportUnknownArgumentType]
 
-    rc = _cli.cmd_start()
+    rc = _start_mod.cmd_start()
 
     assert rc == 0, "a non-critical failure must not fail the start"
     assert calls["upsert"], "an alerts row must be written"
@@ -1301,7 +1300,7 @@ def test_non_critical_alert_failure_degrades_to_a_print(monkeypatch: pytest.Monk
     # Both rails degrade to a printed note; the start itself must not fail.
     monkeypatch.setattr(_probe, "_unresolved_alert_instance", lambda _c, _s: None)  # pyright: ignore[reportUnknownArgumentType]
 
-    assert _cli.cmd_start() == 0
+    assert _start_mod.cmd_start() == 0
 
 
 # ─── the alert lifecycle: one instance per failure, resolved on recovery ──────

@@ -922,7 +922,7 @@ def _machine_row() -> dict[str, Any]:
 def test_status_off_is_silent(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    from cli import commands as _cli
+    from cli.commands.cluster import control as _cli
 
     _disable(monkeypatch)
     _patch_roster(monkeypatch, [_machine_row()])
@@ -934,7 +934,7 @@ def test_status_shows_effective_blocked_not_just_config(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """Switch on + guard missing renders blocked -- never a plain 'on'."""
-    from cli import commands as _cli
+    from cli.commands.cluster import control as _cli
 
     _enable(monkeypatch)
     _clear_guard(monkeypatch, _CHECKED)
@@ -951,7 +951,7 @@ def test_status_shows_effective_blocked_not_just_config(
 def test_status_shows_active(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    from cli import commands as _cli
+    from cli.commands.cluster import control as _cli
 
     _ready_guards(monkeypatch)
     _patch_roster(monkeypatch, [_machine_row()])

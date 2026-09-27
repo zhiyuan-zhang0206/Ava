@@ -67,7 +67,7 @@ def test_short_target_sha_is_refused_at_parse(capsys: pytest.CaptureFixture[str]
 
 def test_target_scoped_dispatch_carries_the_pin(monkeypatch: pytest.MonkeyPatch) -> None:
     """The pin reaches `cmd_update` only together with `--target`."""
-    import cli.commands as _commands
+    from cli.commands import update_dispatch as _commands
 
     seen: dict[str, object] = {}
 
@@ -95,7 +95,7 @@ def test_target_scoped_dispatch_carries_the_pin(monkeypatch: pytest.MonkeyPatch)
 
 def test_plain_update_dispatch_stays_pin_free(monkeypatch: pytest.MonkeyPatch) -> None:
     """A plain `ava cluster update` parses fine and carries no pin on any rung."""
-    import cli.commands as _commands
+    from cli.commands import update_dispatch as _commands
 
     seen: list[dict[str, object]] = []
 
@@ -132,7 +132,7 @@ def test_whole_cluster_rollout_body_stays_pin_free(
 
     monkeypatch.setattr("httpx.post", fake_post)
 
-    from cli.commands import cmd_update
+    from cli.commands.update_dispatch import cmd_update
 
     assert cmd_update() == 0
     body = seen["json"]
@@ -156,7 +156,7 @@ def test_rollout_log_flag_is_internal_but_parseable(
 
 
 def test_rollout_log_flag_reaches_command_dispatch(monkeypatch: pytest.MonkeyPatch) -> None:
-    import cli.commands as _commands
+    from cli.commands import update_dispatch as _commands
 
     seen: dict[str, object] = {}
     log_path = "/home/ava/.ava/logs/rollout-1785470000.log"

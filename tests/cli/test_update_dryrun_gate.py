@@ -718,7 +718,7 @@ def test_cmd_update_posts_the_dry_run_flag(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """The gateway receives dry-run intent instead of a client-side maintenance action."""
-    from cli.commands import _update_dispatch as _dispatch
+    from cli.commands import update_dispatch as _dispatch
 
     request: dict[str, object] = {}
 

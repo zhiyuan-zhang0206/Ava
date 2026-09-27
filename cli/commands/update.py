@@ -16,10 +16,10 @@ from pathlib import Path
 
 # The orchestration steps live in sibling `_update_*` modules (split out to keep
 # this module within the file-size budget). Everything below is re-imported so
-# existing `cli.commands.update.*` references — the `cli.commands` re-exports,
-# the tests' `_up.*` monkeypatch seams, `_cluster_rollback.py` and the detached
-# rollout subprocess — keep resolving. Each name is `X as X` (an explicit
-# re-export) so pyright does not flag it as unused here.
+# existing `cli.commands.update.*` references — the tests' `_up.*` monkeypatch
+# seams, `cluster_rollback.py` and the detached rollout subprocess — keep
+# resolving. Each name is `X as X` (an explicit re-export) so pyright does not
+# flag it as unused here.
 from cli.commands._managed_writer_hop import ManagedWriterPhaseInput
 from cli.commands._managed_writer_mode import (
     decide_managed_writer_mode as _decide_managed_writer_mode,
@@ -34,9 +34,6 @@ from cli.commands._managed_writer_wiring import (
 from cli.commands._repo import _repo_root as _repo_root
 from cli.commands._update_agent_runner import (
     _run_agent_runner_self_update as _run_agent_runner_self_update,
-)
-from cli.commands._update_dispatch import (
-    cmd_update as cmd_update,
 )
 from cli.commands._update_dryrun import (
     dry_run_checks,
@@ -250,6 +247,9 @@ from cli.commands._update_verdict import (
     _phase_b_and_commit,
 )
 from cli.commands.stop import _do_stop as _do_stop
+from cli.commands.update_dispatch import (
+    cmd_update as cmd_update,
+)
 from shared import launch_failures, ui_update_state
 from shared.cluster import get_record as get_record
 from shared.cluster_lock import (

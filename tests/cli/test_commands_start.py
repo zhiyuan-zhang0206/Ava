@@ -8,7 +8,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from cli import commands as _cli
+from cli.commands import start as _cli
 from cli.commands._setup import _collect_setup_values as _real_collect_setup_values
 from shared.config import settings
 from tests.cli._commands_helpers import _fake_session_backends as _fake_session_backends

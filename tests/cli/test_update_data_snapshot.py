@@ -13,10 +13,10 @@ from typing import NoReturn
 import pytest
 
 import shared.pg_tools
-from cli.commands import _cluster_rollback as _rollback
 from cli.commands import _update_git as _git
 from cli.commands import _update_local as _local
 from cli.commands import _update_snapshot as _snapshot
+from cli.commands import cluster_rollback as _rollback
 from services import backup
 from shared.platform import LockTimeoutError
 

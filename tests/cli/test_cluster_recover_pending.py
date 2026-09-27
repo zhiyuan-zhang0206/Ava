@@ -183,7 +183,6 @@ def test_a_clean_pre_stop_window_exits_zero(
 def test_the_pre_stop_flag_parses_and_reaches_the_handler(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from cli import commands
     from cli.main import _build_parser
 
     calls: list[bool] = []
@@ -192,7 +191,7 @@ def test_the_pre_stop_flag_parses_and_reaches_the_handler(
         calls.append(pre_stop)
         return 0
 
-    monkeypatch.setattr(commands, "cmd_cluster_recover_pending", _fake)
+    monkeypatch.setattr(_entry, "cmd_cluster_recover_pending", _fake)
 
     flagged = _build_parser().parse_args(["cluster", "recover-pending", "--pre-stop"])
     assert flagged.func.__name__ == "_h_cluster_recover_pending"

@@ -181,7 +181,7 @@ def test_status_handler_body_forwards_the_parsed_namespace(
     AttributeErrors on the first real `ava status`. Stub one level lower instead:
     `cmd_status`, which `_h_status` lazy-imports, so the real body executes against
     the real Namespace."""
-    import cli.commands as _commands
+    from cli.commands import status as _commands
 
     calls: list[dict[str, object]] = []
     monkeypatch.setattr(_commands, "cmd_status", lambda **kwargs: calls.append(kwargs) or 0)  # pyright: ignore[reportUnknownArgumentType]
@@ -524,3 +524,41 @@ def _noop_parser_recording(verb: str, sink: list[str]) -> argparse.ArgumentParse
     parser.add_argument("--path")
     parser.set_defaults(func=lambda _args: sink.append(verb) or 0)
     return parser
+
+
+@pytest.mark.parametrize("entry", ["package", "parser"])
+def test_command_import_boundary_is_settings_free(entry: str, tmp_path: Path) -> None:
+    """`cli.commands` is an empty package door: importing it does no import work
+    of its own, so it must load no `cli.commands.*` submodule and pull in no
+    `shared.config` — Settings stays out of the boundary. The `parser` case
+    additionally builds the real argparse tree and parses a real subcommand's
+    args (without dispatching to its handler), since `cli.parsers` must stay
+    just as settings-free while doing that."""
+    code = """
+import importlib.abc
+import sys
+class Deny(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname == 'shared.config':
+            raise AssertionError('forbidden early import: ' + fullname)
+sys.meta_path.insert(0, Deny())
+import cli.commands
+assert not any(name.startswith('cli.commands.') for name in sys.modules)
+assert not hasattr(cli.commands, '__getattr__')
+assert not hasattr(cli.commands, '__all__')
+if sys.argv[1] == 'parser':
+    from cli.parsers import build_parser
+    parser = build_parser()
+    args = parser.parse_args(['status'])
+assert 'shared.config' not in sys.modules
+"""
+    result = subprocess.run(  # noqa: S603 — fixed interpreter, isolated import-only program.
+        [sys.executable, "-B", "-c", code, entry],
+        cwd=Path(__file__).resolve().parents[2],
+        env={**os.environ, "HOME": str(tmp_path)},
+        capture_output=True,
+        text=True,
+        timeout=20,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr

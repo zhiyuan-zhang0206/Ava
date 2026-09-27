@@ -44,7 +44,7 @@ def test_target_posts_relay_and_prints_session(
 
     monkeypatch.setattr("httpx.post", fake_post)
 
-    from cli.commands import cmd_update
+    from cli.commands.update_dispatch import cmd_update
 
     rc = cmd_update(target="macmini", target_sha="abc123")
     assert rc == 0
@@ -67,7 +67,7 @@ def test_target_without_sha_omits_the_param(
 
     monkeypatch.setattr("httpx.post", fake_post)
 
-    from cli.commands import cmd_update
+    from cli.commands.update_dispatch import cmd_update
 
     assert cmd_update(target="company-mini") == 0
     assert seen["params"] == {"target": "company-mini"}
@@ -93,7 +93,7 @@ def test_target_refuses_whole_cluster_flags(
 
     monkeypatch.setattr("httpx.post", fail_post)
 
-    from cli.commands import cmd_update
+    from cli.commands.update_dispatch import cmd_update
 
     rc = cmd_update(target="macmini", **cast("dict[str, Any]", extra))
     assert rc == 2
@@ -114,13 +114,13 @@ def test_target_with_default_mode_is_accepted(
 
     monkeypatch.setattr("httpx.post", fake_post)
 
-    from cli.commands import cmd_update
+    from cli.commands.update_dispatch import cmd_update
 
     assert cmd_update(target="macmini", mode="smooth") == 0
 
 
 def test_target_sha_requires_target(capsys: pytest.CaptureFixture[str]) -> None:
-    from cli.commands import cmd_update
+    from cli.commands.update_dispatch import cmd_update
 
     assert cmd_update(target_sha="abc123") == 2
     assert "--target-sha requires --target" in capsys.readouterr().err
@@ -136,7 +136,7 @@ def test_target_503_surfaces_detail(
 
     monkeypatch.setattr("httpx.post", fake_post)
 
-    from cli.commands import cmd_update
+    from cli.commands.update_dispatch import cmd_update
 
     assert cmd_update(target="macmini") == 1
     assert "ops server unreachable" in capsys.readouterr().err
@@ -152,7 +152,7 @@ def test_target_502_surfaces_detail(
 
     monkeypatch.setattr("httpx.post", fake_post)
 
-    from cli.commands import cmd_update
+    from cli.commands.update_dispatch import cmd_update
 
     assert cmd_update(target="macmini") == 1
     assert "cluster_update failed" in capsys.readouterr().err
@@ -168,7 +168,7 @@ def test_target_origin_note(
 
     monkeypatch.setattr("httpx.post", fake_post)
 
-    from cli.commands import cmd_update
+    from cli.commands.update_dispatch import cmd_update
 
     assert cmd_update(target="macmini", origin="agent:9") == 0
     assert "ignored" in capsys.readouterr().err
@@ -213,7 +213,7 @@ def test_cluster_parser_directly_registers_target_flags() -> None:
 def test_parse_gate_refuses_target_combined_with_whole_cluster_flags(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    from cli import commands as _commands
+    from cli.commands import update_dispatch as _commands
     from cli.main import _build_parser
 
     def fail_if_called(**_kwargs: object) -> int:
@@ -228,7 +228,7 @@ def test_parse_gate_refuses_target_combined_with_whole_cluster_flags(
 def test_parse_gate_refuses_target_sha_without_target(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    from cli import commands as _commands
+    from cli.commands import update_dispatch as _commands
     from cli.main import _build_parser
 
     def fail_if_called(**_kwargs: object) -> int:
@@ -242,7 +242,7 @@ def test_parse_gate_refuses_target_sha_without_target(
 
 
 def test_parse_gate_passes_a_valid_target_invocation(monkeypatch: pytest.MonkeyPatch) -> None:
-    from cli import commands as _commands
+    from cli.commands import update_dispatch as _commands
     from cli.main import _build_parser
 
     seen: dict[str, object] = {}
