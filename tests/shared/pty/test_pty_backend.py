@@ -5,7 +5,7 @@ Most tests drive the backend through a fake ``subprocess.run`` — the same
 monkeypatch shape ``test_session_backend.py`` uses for the shell backend. The
 assertion target is the **calling shape**: argv, exit-status mapping, error
 propagation, and idempotence semantics — the real CLI round-trip is
-tests/shared/test_pty_sessions_cli.py's job.
+tests/shared/pty/test_pty_sessions_cli.py's job.
 
 The enumeration ops (``list_sessions`` / ``session_started_ats`` /
 ``session_started_at``) spawn nothing at all: they read the session records

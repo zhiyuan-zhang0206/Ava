@@ -34,7 +34,7 @@ from shared.sessions.pty import session_tree
 from shared.sessions.pty._paths import host_identity, record_path, socket_path
 from tests.cli.conftest import PtyReaper
 from tests.cli.conftest import pty_reaper as pty_reaper
-from tests.shared.test_pty_sessions_cli import (
+from tests.shared.pty.test_pty_sessions_cli import (
     REPO,
     _has,
     _new,
