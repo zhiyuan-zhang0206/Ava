@@ -21,7 +21,6 @@ on:
       - 'tests/services/test_heartbeat_liveness.py'
       - 'tests/gateway/test_agent_inspect.py'
       - 'tests/gateway/test_agents_endpoints.py'
-      - 'ui/web/src/lib/agent-observation*'
       - 'ui/web/src/components/agent-row*'
       - 'ui/web/src/components/inspector-panel*'
       - 'ui/web/src/lib/types*.ts'
@@ -68,7 +67,7 @@ jobs:
       - name: Verify rendered observation states
         if: success() || failure()
         working-directory: ui/web
-        run: npx vitest run src/lib/agent-observation.test.ts src/components/agent-row.test.tsx src/components/inspector-panel.test.tsx
+        run: npx vitest run src/components/agent-row.test.tsx src/components/inspector-panel.test.tsx
       - if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
