@@ -101,12 +101,47 @@ def test_short_literal_vs_ellipsis_module_level() -> None:
     assert entries == {"SHORT": ["SHORT = 'a value'"], "LONG": ["LONG = ..."]}
 
 
-def test_class_annassign_non_literal_has_no_fallback() -> None:
-    """Unlike module-level vars, a non-literal class AnnAssign default is
-    omitted entirely — no `...` filler, just the annotation."""
-    source = "class Foo:\n    x: int = compute()\n    y: str = 'short'\n"
+def test_class_annassign_default_presence_is_contract() -> None:
+    """Whether a dataclass/NamedTuple/TypedDict/pydantic field has a default
+    decides whether the constructor argument is required — so it must render
+    even when the default itself is not a short literal: `...`, not omitted."""
+    source = "class Foo:\n    x: int = compute()\n    y: str = 'short'\n    z: int\n"
     entries = _entries(source)
-    assert entries["Foo"] == ["class Foo", "  x: int", "  y: str = 'short'"]
+    assert entries["Foo"] == [
+        "class Foo",
+        "  x: int = ...",
+        "  y: str = 'short'",
+        "  z: int",
+    ]
+
+
+def test_type_expression_values_render_in_full() -> None:
+    """An old-style alias (Subscript on a typing/builtin generic, or a `|`
+    BinOp of such expressions/names) is contract and is never truncated to
+    `...`, however long — unlike an ordinary non-literal value."""
+    source = (
+        "Category = Literal['audit', 'telemetry', 'log']\n"
+        "Combined = str | list[dict[str, object]]\n"
+        "Plain = int | str\n"
+        "NotType = some_call()\n"
+    )
+    entries = _entries(source)
+    assert entries["Category"] == ["Category = Literal['audit', 'telemetry', 'log']"]
+    assert entries["Combined"] == ["Combined = str | list[dict[str, object]]"]
+    assert entries["Plain"] == ["Plain = int | str"]
+    assert entries["NotType"] == ["NotType = ..."]
+
+
+def test_typealias_annotated_value_renders_in_full_regardless_of_shape() -> None:
+    """`: TypeAlias` marks the value itself as contract even when it is not a
+    recognized generic shape (e.g. a bare custom sentinel)."""
+    entries = _entries("Custom: TypeAlias = some_call()\n")
+    assert entries == {"Custom": ["Custom: TypeAlias = some_call()"]}
+
+
+def test_module_level_annassign_non_literal_default_shows_ellipsis() -> None:
+    entries = _entries("X: dict = compute()\n")
+    assert entries == {"X": ["X: dict = ..."]}
 
 
 def test_class_assign_non_literal_falls_back_to_ellipsis() -> None:
@@ -250,6 +285,35 @@ def test_removed_public_name_fails_check(
     assert contracts.main(["--check"]) == 1
     output = capsys.readouterr().out
     assert "def bar" in output
+
+
+def test_alias_literal_value_change_fails_check(
+    _door: pathlib.Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A type-expression alias is rendered in full, so a changed member is a
+    contract change — not silently absorbed into an unchanged `...`."""
+    _write(_door, "pkg/mod.py", "Kind = Literal['a', 'b']\n")
+    contracts.main(["--write"])
+
+    _write(_door, "pkg/mod.py", "Kind = Literal['a', 'b', 'c']\n")
+    assert contracts.main(["--check"]) == 1
+    output = capsys.readouterr().out
+    assert "Kind = Literal['a', 'b', 'c']" in output
+
+
+def test_field_default_presence_change_fails_check(
+    _door: pathlib.Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A field gaining or losing a default changes whether the constructor
+    argument is required — that must move the snapshot even though the
+    default itself is not a short literal."""
+    _write(_door, "pkg/mod.py", "class Foo:\n    x: int\n")
+    contracts.main(["--write"])
+
+    _write(_door, "pkg/mod.py", "class Foo:\n    x: int = compute()\n")
+    assert contracts.main(["--check"]) == 1
+    output = capsys.readouterr().out
+    assert "x: int = ..." in output
 
 
 def test_deterministic_output_across_two_runs(_door: pathlib.Path) -> None:

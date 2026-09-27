@@ -147,7 +147,7 @@ def tier_for(event_name: str, category: str, level: str) -> EventTier
 class AgentSpawned(TypedDict)
   forked_from: int | None
   spawner: str
-Category = ...
+Category = Literal['audit', 'telemetry', 'log']
 class CiRunsDaily(TypedDict)
   abandoned_runs: int
   cancelled_runs: int
@@ -271,7 +271,7 @@ class EventLogDrop(TypedDict)
   last_dropped_at: NotRequired[float]
   n: int
   queue: NotRequired[str]
-EventTier = ...
+EventTier = Literal['business', 'anomaly', 'observation', 'noise']
 class ExecChildBoot(TypedDict)
   duration_ms: float
 class ExecEnvelope(TypedDict)
@@ -390,7 +390,7 @@ class PrFlowDaily(TypedDict)
   ready_to_merge_p90_seconds: NotRequired[float]
 class PrFlowRun(TypedDict)
   queue_depth: NotRequired[int]
-RetentionClass = ...
+RetentionClass = Literal['lineage', 'audit', 'lifecycle', 'telemetry', 'log']
 class SdkCall(TypedDict)
   detail: NotRequired[dict[str, Any]]
   duration: float
@@ -513,7 +513,7 @@ class EventSpec
   category: Category
   destination: Literal['events', 'file'] = 'events'
   doc: str = ''
-  extra_categories: frozenset[Category]
+  extra_categories: frozenset[Category] = ...
   family: str | None = None
   name: str
   payload: Any | None = None
@@ -522,7 +522,7 @@ class EventSpec
 class FleetGraphStale(TypedDict)
   reason: FleetGraphStaleReason
   route: str
-FleetGraphStaleReason = ...
+FleetGraphStaleReason = Literal['lock_wait', 'fetch_failed', 'pg_timeout', 'pg_budget', 'prom_budget', 'prom_failed', 'loki_budget', 'loki_failed']
 class GateAuthProbeFailed(TypedDict)
   category: str
   exception_type: str
@@ -665,7 +665,7 @@ class SseLifecycle(TypedDict)
 class StatsDashboardStale(TypedDict)
   reason: StatsDashboardStaleReason
   route: str
-StatsDashboardStaleReason = ...
+StatsDashboardStaleReason = Literal['loki_failed', 'loki_budget']
 class TelemetryReadRecovered(TypedDict)
   signal: str
   source: str
