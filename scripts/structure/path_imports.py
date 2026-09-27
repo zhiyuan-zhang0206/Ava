@@ -74,7 +74,7 @@ class _Bindings:
         return _LOADERS.get(func.attr)
 
 
-def _assigned(node: ast.AST) -> list[ast.expr]:
+def _assigned(node: ast.stmt) -> list[ast.expr]:
     if isinstance(node, ast.Assign | ast.Delete):
         return list(node.targets)
     if isinstance(node, ast.AugAssign | ast.AnnAssign):
@@ -89,12 +89,8 @@ def measure(tree: ast.Module, rel_path: str) -> Sites:
     bindings = _Bindings(tree)
     sites: Sites = {}
     for node in ast.walk(tree):
-        targets: list[tuple[int, str]] = []
         if isinstance(node, ast.Call) and (target := bindings.call_target(node)) is not None:
-            targets.append((node.lineno, target))
-        targets.extend(
-            (node.lineno, "sys.path") for expr in _assigned(node) if bindings.is_sys_path(expr)
-        )
-        for lineno, target in targets:
-            sites.setdefault(f"{rel_path}::{target}", []).append(lineno)
+            sites.setdefault(f"{rel_path}::{target}", []).append(node.lineno)
+        elif isinstance(node, ast.stmt) and any(map(bindings.is_sys_path, _assigned(node))):
+            sites.setdefault(f"{rel_path}::sys.path", []).append(node.lineno)
     return sites
