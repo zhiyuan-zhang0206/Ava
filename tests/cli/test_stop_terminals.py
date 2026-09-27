@@ -29,9 +29,8 @@ from cli.commands import _temporary_stop as command
 from cli.commands import stop as entry
 from cli.commands._maintenance_stop import OwnedProcess
 from shared import maintenance
-from shared.paths import run_dir
 from shared.session_backend import PtySessionBackend
-from shared.session_record import SessionRecord
+from tests.cli.conftest import PtyReaper
 from tests.cli.test_pause_stop import dependencies
 from tests.cli.test_pause_stop import home as home
 
@@ -98,7 +97,7 @@ def _stop_env(monkeypatch: pytest.MonkeyPatch, home: Path, terminal: PtySessionB
 
 
 def _start_busy_session(
-    terminal: PtySessionBackend, home: Path, name: str, job: str
+    terminal: PtySessionBackend, home: Path, name: str, job: str, reaper: PtyReaper
 ) -> OwnedProcess:
     # The job lives in a script file: shell quoting of an inline -c program is
     # the flakiest part of the fixture, and the production jobs (watchers) are
@@ -106,11 +105,19 @@ def _start_busy_session(
     script = home / f"{name}.job.py"
     script.write_text(job, encoding="utf-8")
     assert terminal.new_session(name, f"python3 -u {script}", home, env={"AVA_HOME": str(home)})
-    record = SessionRecord.read(run_dir() / "pty" / f"{name}.json")
-    assert record is not None
-    shell = OwnedProcess(record.pid, record.create_time, record.starttime)
-    assert shell.live()
-    return shell
+    return reaper.track_session(name)
+
+
+def _started_jobs(shell: OwnedProcess, reaper: PtyReaper) -> list[psutil.Process]:
+    """Wait for the shell's first live descendants and pin them for teardown:
+    a job that ignores HUP outlives the shell a stop hangs up."""
+    jobs: list[psutil.Process] = []
+    deadline = time.monotonic() + 15
+    while time.monotonic() < deadline and not jobs:
+        jobs = [child for child in _shell_children(shell) if not _has_exited(child)]
+        time.sleep(0.1)
+    reaper.track(*jobs)
+    return jobs
 
 
 @pytest.mark.flaky
@@ -179,33 +186,27 @@ def test_fork_shell_child_resets_term_and_hup_dispositions(
 
 @pytest.mark.flaky
 def test_stop_closes_busy_terminal_job_with_real_signals(
-    home: Path, monkeypatch: pytest.MonkeyPatch
+    home: Path, monkeypatch: pytest.MonkeyPatch, pty_reaper: PtyReaper
 ) -> None:
     """A regular interruptible foreground job closes via a normal stop."""
     dependencies(monkeypatch)
     terminal = PtySessionBackend()
     _stop_env(monkeypatch, home, terminal)
     name = "ava-agent-987-shell-2045-job"
-    shell = _start_busy_session(terminal, home, name, _TERM_OK_JOB)
-    try:
-        # wait for the job to actually start (bash prompt readiness + submit)
-        jobs: list[int] = []
-        deadline = time.monotonic() + 15
-        while time.monotonic() < deadline and not jobs:
-            jobs = [child.pid for child in _shell_children(shell) if not _has_exited(child)]
-            time.sleep(0.1)
-        assert jobs, "the synthetic job never started"
-        job_pid = jobs[0]
+    shell = _start_busy_session(terminal, home, name, _TERM_OK_JOB, pty_reaper)
+    # wait for the job to actually start (bash prompt readiness + submit)
+    jobs = _started_jobs(shell, pty_reaper)
+    assert jobs, "the synthetic job never started"
 
-        assert entry.cmd_stop(require_confirmation=False, keep_infra=True, timeout=10) == 0
-        assert not terminal.has_session(name)
-        assert _wait_exit(job_pid), "the job must be closed by the normal stop"
-    finally:
-        terminal.kill_session(name)
+    assert entry.cmd_stop(require_confirmation=False, keep_infra=True, timeout=10) == 0
+    assert not terminal.has_session(name)
+    assert _wait_exit(jobs[0].pid), "the job must be closed by the normal stop"
 
 
 @pytest.mark.flaky
-def test_stop_terminates_restart_loop_shell(home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_stop_terminates_restart_loop_shell(
+    home: Path, monkeypatch: pytest.MonkeyPatch, pty_reaper: PtyReaper
+) -> None:
     """A shell loop that keeps respawning its job cannot outlive the stop.
 
     HUP goes to the shell first (stopping the spawner), then the captured
@@ -216,51 +217,38 @@ def test_stop_terminates_restart_loop_shell(home: Path, monkeypatch: pytest.Monk
     _stop_env(monkeypatch, home, terminal)
     name = "ava-agent-987-shell-2045-loop"
     assert terminal.new_session(name, _LOOP_SHELL, home, env={"AVA_HOME": str(home)})
-    record = SessionRecord.read(run_dir() / "pty" / f"{name}.json")
-    assert record is not None
-    shell = OwnedProcess(record.pid, record.create_time, record.starttime)
-    try:
-        deadline = time.monotonic() + 15
-        while time.monotonic() < deadline and not _shell_children(shell):
-            time.sleep(0.1)
-        assert _shell_children(shell), "the loop never spawned its first child"
+    shell = pty_reaper.track_session(name)
+    assert _started_jobs(shell, pty_reaper), "the loop never spawned its first child"
 
-        assert entry.cmd_stop(require_confirmation=False, keep_infra=True, timeout=15) == 0
-        assert not terminal.has_session(name)
-        assert _wait_exit(shell.pid), "the restart loop shell must exit"
-    finally:
-        terminal.kill_session(name)
+    assert entry.cmd_stop(require_confirmation=False, keep_infra=True, timeout=15) == 0
+    assert not terminal.has_session(name)
+    assert _wait_exit(shell.pid), "the restart loop shell must exit"
 
 
 @pytest.mark.flaky
 def test_stop_keeps_hold_when_job_ignores_termination(
-    home: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    pty_reaper: PtyReaper,
 ) -> None:
     """A job that ignores TERM and HUP: bounded timeout, hold kept, no force."""
     dependencies(monkeypatch)
     terminal = PtySessionBackend()
     _stop_env(monkeypatch, home, terminal)
     name = "ava-agent-987-shell-2045-stubborn"
-    shell = _start_busy_session(terminal, home, name, _STUBBORN_JOB)
-    try:
-        jobs: list[int] = []
-        deadline = time.monotonic() + 15
-        while time.monotonic() < deadline and not jobs:
-            jobs = [child.pid for child in _shell_children(shell) if not _has_exited(child)]
-            time.sleep(0.1)
-        assert jobs, "the stubborn job never started"
-        job_pid = jobs[0]
+    shell = _start_busy_session(terminal, home, name, _STUBBORN_JOB, pty_reaper)
+    jobs = _started_jobs(shell, pty_reaper)
+    assert jobs, "the stubborn job never started"
 
-        assert entry.cmd_stop(require_confirmation=False, keep_infra=True, timeout=1) == 1
-        assert maintenance.held(), "the hold must survive an incomplete stop"
-        # The shell got a normal HUP (not a force) and may have exited,
-        # dropping its record; the signal-ignoring job must still be alive.
-        assert psutil.pid_exists(job_pid), "no kill escalation: the job is still there"
-        err = capsys.readouterr().err
-        assert "terminals" in err, "the failure must name the phase that ran out"
-        assert name in err, "the failure must name the owning session"
-    finally:
-        terminal.kill_session(name)
+    assert entry.cmd_stop(require_confirmation=False, keep_infra=True, timeout=1) == 1
+    assert maintenance.held(), "the hold must survive an incomplete stop"
+    # The shell got a normal HUP (not a force) and may have exited,
+    # dropping its record; the signal-ignoring job must still be alive.
+    assert psutil.pid_exists(jobs[0].pid), "no kill escalation: the job is still there"
+    err = capsys.readouterr().err
+    assert "terminals" in err, "the failure must name the phase that ran out"
+    assert name in err, "the failure must name the owning session"
 
 
 def _notice_files(home: Path) -> list[Path]:
@@ -271,7 +259,10 @@ def _notice_files(home: Path) -> list[Path]:
 
 
 def test_stop_records_notice_for_verified_closed_busy_session(
-    home: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    pty_reaper: PtyReaper,
 ) -> None:
     """A busy session verified closed leaves one durable notice; delivery to
     its owner happens at the next ops-daemon startup (issue #2044)."""
@@ -280,30 +271,26 @@ def test_stop_records_notice_for_verified_closed_busy_session(
     _stop_env(monkeypatch, home, terminal)
     (home / "machine_name").write_text("test-host")
     name = "ava-agent-987-shell-2044-busy"
-    shell = _start_busy_session(terminal, home, name, _TERM_OK_JOB)
-    try:
-        deadline = time.monotonic() + 15
-        while time.monotonic() < deadline and not _shell_children(shell):
-            time.sleep(0.1)
-        assert _shell_children(shell), "the job never started"
+    shell = _start_busy_session(terminal, home, name, _TERM_OK_JOB, pty_reaper)
+    assert _started_jobs(shell, pty_reaper), "the job never started"
 
-        assert entry.cmd_stop(require_confirmation=False, keep_infra=True, timeout=15) == 0
-        files = _notice_files(home)
-        assert len(files) == 1
-        import json as _json
+    assert entry.cmd_stop(require_confirmation=False, keep_infra=True, timeout=15) == 0
+    files = _notice_files(home)
+    assert len(files) == 1
+    import json as _json
 
-        notice = _json.loads(files[0].read_text())
-        assert notice["agent_id"] == 987
-        assert notice["session_id"] == 2044
-        assert notice["name"] == name
-        assert notice["machine"]
-        assert notice["operation"]
-        assert "operator stop" in notice["reason"]
-    finally:
-        terminal.kill_session(name)
+    notice = _json.loads(files[0].read_text())
+    assert notice["agent_id"] == 987
+    assert notice["session_id"] == 2044
+    assert notice["name"] == name
+    assert notice["machine"]
+    assert notice["operation"]
+    assert "operator stop" in notice["reason"]
 
 
-def test_stop_records_nothing_for_idle_shell(home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_stop_records_nothing_for_idle_shell(
+    home: Path, monkeypatch: pytest.MonkeyPatch, pty_reaper: PtyReaper
+) -> None:
     """An idle shell (no jobs) closed by stop is silent — the TTL reaper's
     quiet-empty policy, never a blanket close notification (issue #2044 #3)."""
     dependencies(monkeypatch)
@@ -311,23 +298,21 @@ def test_stop_records_nothing_for_idle_shell(home: Path, monkeypatch: pytest.Mon
     _stop_env(monkeypatch, home, terminal)
     name = "ava-agent-987-shell-2044-idle"
     assert terminal.new_session(name, "bash --norc", home, env={"AVA_HOME": str(home)})
-    record = SessionRecord.read(run_dir() / "pty" / f"{name}.json")
-    assert record is not None
-    shell = OwnedProcess(record.pid, record.create_time, record.starttime)
-    try:
-        deadline = time.monotonic() + 15
-        while time.monotonic() < deadline and _shell_children(shell):
-            time.sleep(0.1)
-        assert not _shell_children(shell), "the idle shell spawned children"
+    shell = pty_reaper.track_session(name)
+    deadline = time.monotonic() + 15
+    while time.monotonic() < deadline and _shell_children(shell):
+        time.sleep(0.1)
+    assert not _shell_children(shell), "the idle shell spawned children"
 
-        assert entry.cmd_stop(require_confirmation=False, keep_infra=True, timeout=15) == 0
-        assert _notice_files(home) == []
-    finally:
-        terminal.kill_session(name)
+    assert entry.cmd_stop(require_confirmation=False, keep_infra=True, timeout=15) == 0
+    assert _notice_files(home) == []
 
 
 def test_stop_records_nothing_on_timeout(
-    home: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    pty_reaper: PtyReaper,
 ) -> None:
     """A stop that timed out never claims a closure — only verified exits are
     recorded, partial success records nothing (issue #2044 #2)."""
@@ -335,25 +320,17 @@ def test_stop_records_nothing_on_timeout(
     terminal = PtySessionBackend()
     _stop_env(monkeypatch, home, terminal)
     name = "ava-agent-987-shell-2044-stubborn"
-    shell = _start_busy_session(terminal, home, name, _STUBBORN_JOB)
-    try:
-        jobs: list[int] = []
-        deadline = time.monotonic() + 15
-        while time.monotonic() < deadline and not jobs:
-            jobs = [child.pid for child in _shell_children(shell) if not _has_exited(child)]
-            time.sleep(0.1)
-        assert jobs, "the stubborn job never started"
+    shell = _start_busy_session(terminal, home, name, _STUBBORN_JOB, pty_reaper)
+    assert _started_jobs(shell, pty_reaper), "the stubborn job never started"
 
-        assert entry.cmd_stop(require_confirmation=False, keep_infra=True, timeout=1) == 1
-        assert "terminals" in capsys.readouterr().err
-        assert _notice_files(home) == []
-    finally:
-        terminal.kill_session(name)
+    assert entry.cmd_stop(require_confirmation=False, keep_infra=True, timeout=1) == 1
+    assert "terminals" in capsys.readouterr().err
+    assert _notice_files(home) == []
 
 
 @pytest.mark.flaky
 def test_stop_tolerates_naturally_exited_session_with_stale_record(
-    home: Path, monkeypatch: pytest.MonkeyPatch
+    home: Path, monkeypatch: pytest.MonkeyPatch, pty_reaper: PtyReaper
 ) -> None:
     """A session whose shell exited naturally before stop (leaving a record)
     must not fail the stop with RuntimeError — the terminal is already gone."""
@@ -361,7 +338,7 @@ def test_stop_tolerates_naturally_exited_session_with_stale_record(
     terminal = PtySessionBackend()
     _stop_env(monkeypatch, home, terminal)
     name = "ava-agent-987-shell-2045-already-dead"
-    shell = _start_busy_session(terminal, home, name, _TERM_OK_JOB)
+    shell = _start_busy_session(terminal, home, name, _TERM_OK_JOB, pty_reaper)
     # Kill the shell process out-of-band to leave its session record on disk
     os.kill(shell.pid, signal.SIGKILL)
     assert _wait_exit(shell.pid), "the shell must terminate after SIGKILL"
