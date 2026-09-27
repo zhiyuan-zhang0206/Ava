@@ -140,7 +140,7 @@ def test_full_stop_closes_real_idle_terminal_after_drain(
 
 @pytest.mark.real_cluster_spawn
 def test_normal_start_releases_hold_only_after_successful_readiness(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     drained()
     monkeypatch.setattr("ops.cluster_pause._unpause_local_cluster", lambda: None)
@@ -155,8 +155,11 @@ def test_normal_start_releases_hold_only_after_successful_readiness(
 
     assert start(4) == 4
     assert maintenance.held()
+    assert "hold released" not in capsys.readouterr().out
     assert start(0) == 0
     assert not maintenance.held()
+    # The start's status snapshot still read paused; the release is reported.
+    assert "maintenance hold released" in capsys.readouterr().out
 
 
 def test_delegated_start_leaves_authorization_and_resume_with_child(
@@ -182,13 +185,16 @@ def test_delegated_start_leaves_authorization_and_resume_with_child(
     unpause.assert_not_called()
 
 
-def test_plain_start_and_parser_need_no_manual_operation() -> None:
+def test_plain_start_and_parser_need_no_manual_operation(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     @resume_after_start
     def start() -> int:
         assert not maintenance.held()
         return 0
 
     assert start() == start() == 0
+    assert "hold released" not in capsys.readouterr().out
     parser = build_parser()
     pause = parser.parse_args(["pause", "--keep-service", "frontend"])
     stop = parser.parse_args(["stop", "--keep-infra", "--keep-service", "gateway", "--force"])
