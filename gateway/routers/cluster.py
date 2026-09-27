@@ -31,7 +31,6 @@ from ops import cluster_rpc as _cluster_rpc
 from ops import ops_cluster as _ops
 from ops.cluster_pause import is_paused as cluster_is_paused
 from ops.cluster_status import ClusterStatus
-from ops.rpc_schemas import ClusterTransitionPayload
 from ops.schema_mismatch import status as schema_mismatch_status
 from shared import machines
 from shared.cluster_drift import prod_source_head_sha
@@ -115,29 +114,6 @@ async def _dispatch_op(
             status_code=502,
             detail=f"machine {target!r} {kind} failed: {exc.result!r}",
         ) from exc
-
-
-@router.post("/api/cluster/stop", status_code=200)
-async def post_cluster_stop(body: ClusterTransitionPayload) -> dict[str, bool]:
-    """Phase A handler: drain native agent controls while SDK dependencies
-    remain available, then stop local services through cluster_stop.
-    """
-    await _dispatch_op(machine_name(), "cluster_stop", body.model_dump(mode="json"))
-    return {"paused": True}
-
-
-@router.post("/api/cluster/resume", status_code=200)
-async def post_cluster_resume(body: ClusterTransitionPayload) -> dict[str, bool]:
-    """Compensating unpause: restore posture and release native admission holds,
-    executed by this host's ops server via a cluster_resume op.
-
-    Symmetric inverse of `/api/cluster/stop`. The orchestration's failure path
-    fans this out (by dialing each host's ops server) to every host it had paused.
-    Operators recover a stranded host with `ava cluster recover` on that host; this
-    route requires the opaque exact capability of the deploy that created the pause.
-    """
-    await _dispatch_op(machine_name(), "cluster_resume", body.model_dump(mode="json"))
-    return {"paused": False}
 
 
 @router.post("/api/cluster/stopping", status_code=200)

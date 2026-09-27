@@ -1696,53 +1696,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/cluster/stop": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Post Cluster Stop
-         * @description Phase A handler: drain native agent controls while SDK dependencies
-         *     remain available, then stop local services through cluster_stop.
-         */
-        post: operations["post_cluster_stop_api_cluster_stop_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/cluster/resume": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Post Cluster Resume
-         * @description Compensating unpause: restore posture and release native admission holds,
-         *     executed by this host's ops server via a cluster_resume op.
-         *
-         *     Symmetric inverse of `/api/cluster/stop`. The orchestration's failure path
-         *     fans this out (by dialing each host's ops server) to every host it had paused.
-         *     Operators recover a stranded host with `ava cluster recover` on that host; this
-         *     route requires the opaque exact capability of the deploy that created the pause.
-         */
-        post: operations["post_cluster_resume_api_cluster_resume_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/cluster/stopping": {
         parameters: {
             query?: never;
@@ -4645,22 +4598,6 @@ export interface components {
                 [key: string]: unknown;
             }[];
             resource?: components["schemas"]["ResourceSample"] | null;
-        };
-        /**
-         * ClusterTransitionPayload
-         * @description Exact deploy-lease capability for one stop/resume generation.
-         *
-         *     Both fields are required. A delayed request from generation A must not be
-         *     authorized by whichever generation happens to own the lease when it lands.
-         */
-        ClusterTransitionPayload: {
-            /** Deploy Holder */
-            deploy_holder: string;
-            /**
-             * Deploy Acquired At
-             * Format: date-time
-             */
-            deploy_acquired_at: string;
         };
         /**
          * CommandItem
@@ -10373,76 +10310,6 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    post_cluster_stop_api_cluster_stop_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ClusterTransitionPayload"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: boolean;
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    post_cluster_resume_api_cluster_resume_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ClusterTransitionPayload"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: boolean;
-                    };
-                };
             };
             /** @description Validation Error */
             422: {

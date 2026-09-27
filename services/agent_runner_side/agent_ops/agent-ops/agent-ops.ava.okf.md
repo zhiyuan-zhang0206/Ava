@@ -25,7 +25,7 @@ The sole resident Ava HTTP process on agent-runner (session `ops`) — Gateway r
   admission or idempotency storage. Retired updater RPCs fail without effects,
   even when a caller presents an old successful idempotency key. The daemon
   accepts no bootstrap mode; unknown argv refuses before ordinary imports.
-- **work kinds**: `spawn-launch|spawn-launch-v2` / `lifecycle` / `cluster_stop` / `cluster_resume` / `status_probe` / `config_read|write` / `inventory_read|write` / `agent_skill_view`. The command-view read uses this runner's converged load dir plus the agent checkpoint's `ava_code__cwd` project roots, and scopes skill-as-command entries through that agent's persisted `config_overlay > birth_config` narrowing; provider cleanup is unconditional so one request cannot leak project skills into the next. Its result also carries this runner's sorted enabled MCP server names as phase-2 groundwork, with no gateway or frontend consumer yet.
+- **work kinds**: `spawn-launch|spawn-launch-v2` / `lifecycle` / `status_probe` / `config_read|write` / `inventory_read|write` / `agent_skill_view`. The command-view read uses this runner's converged load dir plus the agent checkpoint's `ava_code__cwd` project roots, and scopes skill-as-command entries through that agent's persisted `config_overlay > birth_config` narrowing; provider cleanup is unconditional so one request cannot leak project skills into the next. Its result also carries this runner's sorted enabled MCP server names as phase-2 groundwork, with no gateway or frontend consumer yet.
 - **Singleton**: pidfile ensures only one instance per agent-runner; before start, `assert_schema_current` (refuses service if DB is ahead).
 - **Boot self-registration** (`_register_boot`): once the health server is up, the daemon calls `shared.machines.register_self(url=unit_dial_url(machine_role()))` for its own unit — clearing any `stopped_at` latch and restamping `up_since_at`. The `machine_units` row is a liveness record, so the process whose liveness it stands for is the one that writes it; `ava start` alone could not, because a host also comes back via an OS autostart, a watchdog respawn, or a rollout's restart leg. Deliberately **non-fatal** (unlike `assert_schema_current`): a stale row is not incorrect dispatch, and exiting would hand the watchdog a respawn loop that takes the host dark for the gateway. `unit_dial_url` is shared with `ava start`, so the two writers cannot advertise different addresses for one unit.
 
@@ -33,11 +33,10 @@ The sole resident Ava HTTP process on agent-runner (session `ops`) — Gateway r
 `ops.agent_pause_probe` checks actual daemon identity and admitted work.
 Dependency APIs remain available until existing native actions finish.
 Local service teardown closes new API admission only after the drain; normal
-start resumes the existing hold after readiness. After the drain,
-`ops.cluster_stop` releases this daemon's idle dispatch-pool connections (and
-the local host daemon's pools over its loopback health port); the dispatch pool
-runs `min_size=0` and the shell-closure-notice flush defers while the unit is
-quiesced. See [[shared/maintenance/maintenance.ava.okf.md|Native pause and maintenance]].
+start resumes the existing hold after readiness. The dispatch pool runs
+`min_size=0` and the shell-closure-notice flush defers while the unit is
+quiesced. A release stops and resumes units through the fleet release
+transition, not through ops kinds. See [[shared/maintenance/maintenance.ava.okf.md|Native pause and maintenance]].
 
 ## Strongly-Typed Wire Layer (`ops/rpc_schemas.py`)
 

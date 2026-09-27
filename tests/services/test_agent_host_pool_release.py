@@ -1,6 +1,6 @@
 """The host daemon's pre-stop pool release — `/release-db-pools` + lazy pools.
 
-`cluster_stop_op` dials this route after the agent drain; it must close every
+`ops.cluster_pause.release_local_db_pools` dials this route; it must close every
 idle connection in BOTH host pools and leave both able to grow again on the
 first borrow after resume (the pools' `min_size=0` is what keeps resume from
 eagerly re-opening one).

@@ -95,50 +95,6 @@ async def test_dispatch_spawn_launch_calls_launch_agent_op(
 
 
 @pytest.mark.asyncio
-async def test_dispatch_routes_cluster_resume(monkeypatch: pytest.MonkeyPatch) -> None:
-    """cluster_resume kind -> ops.cluster_resume_op (compensating unpause)."""
-    monkeypatch.setattr(daemon, "_db_pool", _stub_pool())
-    seen: list[tuple[str, datetime]] = []
-
-    def _resume(holder: str, acquired: datetime) -> dict[str, bool]:
-        seen.append((holder, acquired))
-        return {"resumed": True}
-
-    monkeypatch.setattr(
-        daemon.ops_cluster,
-        "cluster_resume_op",
-        _resume,
-    )
-    status, result = await daemon._dispatch(
-        "cluster_resume",
-        {"deploy_holder": "g:pid1", "deploy_acquired_at": "2026-08-25T00:00:00Z"},
-    )
-    assert status == "completed"
-    assert result == {"resumed": True}
-    assert seen[0][0] == "g:pid1"
-
-
-@pytest.mark.asyncio
-async def test_empty_resume_payload_fails_closed(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The legacy empty-resume bridge is retired; an empty payload is malformed."""
-    monkeypatch.setattr(daemon, "_db_pool", _stub_pool())
-    called: list[bool] = []
-
-    def _record_resume(*_args: object, **_kwargs: object) -> dict[str, bool]:
-        called.append(True)
-        return {"resumed": True}
-
-    monkeypatch.setattr(daemon.ops_cluster, "cluster_resume_op", _record_resume)
-
-    status, result = await daemon._dispatch("cluster_resume", {})
-    assert status == "failed"
-    assert "error" in result
-    assert called == []
-
-
-@pytest.mark.asyncio
 async def test_dispatch_shell_probe_calls_shell_probe_op(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -567,7 +523,7 @@ async def test_ops_route_status_probe_serializes_datetime_fields(
     test keeps guarding the wire serialization even though the current
     `_group_agent_sessions` pre-serializes its shells to JSON-mode dicts.
     """
-    from datetime import UTC, datetime
+    from datetime import UTC
 
     from ops.cluster_status import ClusterStatus
 
@@ -651,7 +607,7 @@ async def test_ops_route_non_json_values_degrade_to_str(monkeypatch: pytest.Monk
     The Pydantic arms dump with mode="json"; default=str on the final dumps is
     the last-resort fallback for plain-dict results and any future op.
     """
-    from datetime import UTC, datetime
+    from datetime import UTC
 
     daemon._dispatch_sem = asyncio.Semaphore(1)
 
@@ -1297,7 +1253,7 @@ async def test_a_blocking_op_does_not_freeze_the_event_loop(
 async def test_an_unrelated_op_still_dispatches_while_a_read_is_stuck(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Generation-checked resume stays reachable while an unrelated worker is blocked."""
+    """A readiness probe stays reachable while an unrelated worker is blocked."""
     monkeypatch.setattr(daemon, "_db_pool", _stub_pool())
     started = threading.Event()
     release = threading.Event()
@@ -1311,19 +1267,21 @@ async def test_an_unrelated_op_still_dispatches_while_a_read_is_stuck(
 
     monkeypatch.setattr(daemon.ops_inventory, "inventory_read_op", _wedged)
 
-    def _resume(_holder: str, _acquired: datetime) -> dict[str, bool]:
-        return {"resumed": True}
+    class _Status:
+        def model_dump(self, *, mode: str) -> dict[str, bool]:
+            del mode
+            return {"ready": True}
 
-    monkeypatch.setattr(daemon.ops_cluster, "cluster_resume_op", _resume)
+    def _status(_pool: object) -> _Status:
+        return _Status()
+
+    monkeypatch.setattr(daemon.ops_cluster, "cluster_status_op", _status)
 
     stuck = asyncio.ensure_future(daemon._dispatch("inventory_read", {}))
     await asyncio.to_thread(started.wait, 10)
 
-    status, result = await daemon._dispatch(
-        "cluster_resume",
-        {"deploy_holder": "g:pid1", "deploy_acquired_at": "2026-08-25T00:00:00Z"},
-    )
-    assert (status, result) == ("completed", {"resumed": True})
+    status, result = await daemon._dispatch("status_probe", {})
+    assert (status, result) == ("completed", {"ready": True})
 
     release.set()
     await stuck

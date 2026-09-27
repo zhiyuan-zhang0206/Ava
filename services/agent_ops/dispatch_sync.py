@@ -18,7 +18,6 @@ from psycopg_pool import ConnectionPool
 from ops import ops_cluster, ops_config, ops_inventory, ops_uploads
 from ops.rpc_schemas import (
     AgentSkillViewPayload,
-    ClusterTransitionPayload,
     ConfigAuditReadPayload,
     ConfigWritePayload,
     InventoryWritePayload,
@@ -54,18 +53,6 @@ def dispatch_sync(
     maintenance resume and unrelated ops reachable.
     """
     match kind:
-        case "cluster_stop":
-            transition = ClusterTransitionPayload.model_validate(payload)
-            return "completed", ops_cluster.cluster_stop_op(
-                transition.deploy_holder,
-                transition.deploy_acquired_at,
-            )
-        case "cluster_resume":
-            transition = ClusterTransitionPayload.model_validate(payload)
-            return "completed", ops_cluster.cluster_resume_op(
-                transition.deploy_holder,
-                transition.deploy_acquired_at,
-            )
         case "status_probe":
             return "completed", ops_cluster.cluster_status_op(pool).model_dump(mode="json")
         case "config_read":

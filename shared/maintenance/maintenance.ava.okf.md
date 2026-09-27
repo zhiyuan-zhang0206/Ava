@@ -100,8 +100,8 @@ proves that every remote or unregistered writer has stopped.
 During a stopped/starting hold, gateway `GET /api/health` remains a control-plane
 identity and real database probe. It remains public and reports database
 failure as degraded; it does not certify business admission. Ops `status_probe`
-and `cluster_resume` also stay reachable and remain counted through completion.
-Their existing authentication requirements are unchanged.
+also stays reachable and remains counted through completion. Its existing
+authentication requirements are unchanged.
 Resume still checks the exact generation, failure receipts and actual serving
 state. Ordinary start proves readiness before releasing the hold; an exit-code
 waiver never marks either serving or explicit maintenance `ready`. Business APIs

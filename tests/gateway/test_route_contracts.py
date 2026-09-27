@@ -29,8 +29,6 @@ from shared.api_contracts.contracts import Idempotency, PauseSemantics
 # data-plane by default.
 _EXPECTED_CONTROL_PLANE = frozenset(
     {
-        ("POST", "/api/cluster/stop"),
-        ("POST", "/api/cluster/resume"),
         ("POST", "/api/cluster/stopping"),
         ("GET", "/api/cluster/status"),
         ("GET", "/api/cluster/roster"),
@@ -112,7 +110,7 @@ def test_should_bypass_pause_agrees_with_surface() -> None:
     exempt = [
         ("GET", "/api/health"),
         ("GET", "/api/cluster/status"),
-        ("POST", "/api/cluster/stop"),
+        ("POST", "/api/cluster/stopping"),
         ("POST", "/api/alerts"),
     ]
     blocked = [

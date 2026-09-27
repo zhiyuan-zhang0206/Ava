@@ -130,16 +130,6 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     # ── gateway/routers/bootstrap.py ───────────────────────────────────
     ("GET", "/api/bootstrap"): RouteContract(),
     # ── gateway/routers/cluster.py ───────────────────────────────────
-    ("POST", "/api/cluster/stop"): RouteContract(
-        Idempotency.NON_IDEMPOTENT,
-        PauseSemantics.CONTROL_PLANE,
-        note="control-plane op — state machine; repeats can double-fire a rollout phase",
-    ),
-    ("POST", "/api/cluster/resume"): RouteContract(
-        Idempotency.NON_IDEMPOTENT,
-        PauseSemantics.CONTROL_PLANE,
-        note="control-plane op — state machine",
-    ),
     ("POST", "/api/cluster/stopping"): RouteContract(
         Idempotency.NON_IDEMPOTENT,
         PauseSemantics.CONTROL_PLANE,

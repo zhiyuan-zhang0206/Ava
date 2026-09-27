@@ -18,14 +18,16 @@ leg, but from the start leg on a booting host must drain its pending workset
 and restore parked watcher intent even while the unit is still held — pub/sub
 has no replay, so recovery may not wait for the hold to release.
 
-The ops `cluster_stop` step — after the agent drain, before the data plane
-closes — releases every idle client-pool connection: the host daemon's shared
-and control pools (via `POST /release-db-pools` on its loopback health port)
-and the ops daemon's own dispatch pool. `shared.pool_release` performs the
-release against the pool's private face because psycopg-pool has no public
-"close idle, keep usable" operation (`drain()` re-opens replacements,
-`close()` is terminal). Both host pools and the ops pool run `min_size=0`, so
-the first borrow after resume reconnects lazily.
+`ops.cluster_pause.release_local_db_pools` releases every idle client-pool
+connection: the host daemon's shared and control pools (via `POST
+/release-db-pools` on its loopback health port) and the ops daemon's own
+dispatch pool. `shared.pool_release` performs the release against the pool's
+private face because psycopg-pool has no public "close idle, keep usable"
+operation (`drain()` re-opens replacements, `close()` is terminal). Its only
+caller was the legacy `cluster_stop` op, which the fleet release transition
+replaced; it has no production caller now (recorded debt). Both host pools and
+the ops pool run `min_size=0`, so the first borrow after resume reconnects
+lazily.
 
 ## Dependencies
 
