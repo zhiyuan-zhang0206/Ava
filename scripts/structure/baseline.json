@@ -610,7 +610,6 @@
     "agent/impersonation_handoff.py::shared.agents.impersonation._impersonation_store": 2,
     "ava/_settings.py::shared.db._restore_pooled_session": 1,
     "ava/impersonation_replay.py::shared.agents.impersonation._impersonation_store": 1,
-    "ava/sdk_metering.py::shared.sdk_telemetry._identity": 2,
     "cli/commands/cluster/hold_watchdog.py::ops.cluster_deploy._new_update_log": 1,
     "cli/commands/cluster_rollback.py::shared.migrations._BASELINE_NAME": 1,
     "cli/commands/cluster_rollback.py::shared.migrations._migration_stem": 1,
