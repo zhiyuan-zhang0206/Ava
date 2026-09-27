@@ -334,7 +334,7 @@ on this surface. Status of each, as of WP3:
 | Assumption | Where | Status |
 |---|---|---|
 | Sidecar OTLP receiver `127.0.0.1:4318` | `deploy/otel-collector/otel-collector.yaml` | Parameterized — `AVA_TELEMETRY_OTLP_PORT` (single source, task #1945) |
-| Gateway OTLP ingress + runner relay `:4318` | `cli/commands/_otel_collector.py` | Parameterized — same setting |
+| Gateway OTLP ingress + runner relay `:4318` | `cli/commands/observability/otel_collector.py` | Parameterized — same setting |
 | Roster gate + healthcheck probes `:4318` | `ops/spec.py`, `services/healthchecks/otel_collector.py` | Parameterized — same setting |
 | Agent export endpoint default `http://127.0.0.1:4318` | `shared/config/observability.py` | Default derived from the same constant; the full URL stays a separate override (`AVA_TELEMETRY_OTLP_ENDPOINT`) |
 | Loki/Prometheus/Grafana probes `127.0.0.1:3100/9090/3003` | `deploy/lgtm/start.sh` | Parameterized — probe URLs follow `AVA_TELEMETRY_LOKI_URL` / `AVA_TELEMETRY_PROMETHEUS_URL` / `AVA_TELEMETRY_GRAFANA_URL` (same source as the lgtm healthcheck's readiness probes) |

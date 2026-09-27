@@ -149,7 +149,7 @@ def cmd_status() -> int:
     # shown only on the host the operator designated via the $AVA_HOME/lgtm-host
     # marker (a host singleton, not a per-cluster service, so the marker — not
     # the role — decides).
-    from cli.commands._lgtm import is_lgtm_host, print_lgtm_status
+    from cli.commands.observability.lgtm import is_lgtm_host, print_lgtm_status
 
     if is_lgtm_host():
         print("\nlgtm (observability backend):")

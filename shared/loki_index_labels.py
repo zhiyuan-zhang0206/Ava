@@ -186,7 +186,7 @@ def validate_loki_deploy_config(config: Mapping[str, object]) -> None:
 
     Covers the global retention period, the per-stream lineage override, query
     capacity, and the WAL throttle. Every rendered native config passes through
-    here at converge time (`cli/commands/_lgtm_native.py`)."""
+    here at converge time (`cli/commands/observability/lgtm_native.py`)."""
 
     raw_limits_config = config["limits_config"]
     raw_querier = config["querier"]

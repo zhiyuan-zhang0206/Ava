@@ -1,5 +1,5 @@
 # Native LGTM backend pins for the launchd/systemd backends, consumed by
-# cli/commands/_lgtm_native.py at converge. SHA256 values are the upstream
+# cli/commands/observability/lgtm_native.py at converge. SHA256 values are the upstream
 # release assets' checksums, verified before extraction.
 loki:
   version: 3.7.6

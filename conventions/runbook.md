@@ -1916,7 +1916,7 @@ and user systemd units on Linux amd64 run Loki, Prometheus (GOMEMLIMIT
 2GiB / 1GiB), and Grafana. Unit names include the home slug; Linux ownership
 also checks the loaded unit file and exact executable. Explicit host listen
 ports permit isolated homes; defaults remain 3100/9090/3003 plus Loki gRPC
-9095. See [native lifecycle](../cli/commands/lgtm.ava.okf.md). Tempo is configured per cluster; prod's host-scope
+9095. See [native lifecycle](../cli/commands/observability/lgtm.ava.okf.md). Tempo is configured per cluster; prod's host-scope
 override targets the remote WSL Tempo. No
 service lifecycle depends on a container backend. The backend is required while the gateway serves /ops
 and the inspect endpoints (consumers: the gateway Loki/Prometheus read paths,
@@ -1996,7 +1996,7 @@ loop. Both the trace precheck and event exporter retry every five minutes; the
 event exporter records disabled/recovered attempts as real events in the JSONL
 mirror that survives the outage.
 
-**Ship** — `ava trace ship` (`cli/commands/trace.py`). Recovery replay reads
+**Ship** — `ava trace ship` (`cli/commands/observability/trace.py`). Recovery replay reads
 the mirror and bypasses the LOCAL sidecar, because replaying through it would
 write the replayed lines back into the mirror (watermark loop). A gateway or
 single-box unit POSTs straight to loopback

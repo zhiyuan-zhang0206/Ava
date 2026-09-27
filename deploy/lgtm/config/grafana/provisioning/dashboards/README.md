@@ -1,7 +1,7 @@
 # Grafana dashboards — Ava Ops (as code)
 
 This directory is the provisioning source. At converge,
-`cli/commands/_lgtm_native.py` renders the whole provisioning tree into
+`cli/commands/observability/lgtm_native.py` renders the whole provisioning tree into
 `$AVA_HOME/lgtm/native/config/provisioning/` (content-hash user-edit
 protected; datasource/webhook URLs are Grafana-native `$__env{}` references,
 so the checkout files are always valid). Every file is copied VERBATIM

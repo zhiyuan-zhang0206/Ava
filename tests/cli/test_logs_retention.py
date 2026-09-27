@@ -30,7 +30,7 @@ def _file_at(logs: Path, name: str, mtime: datetime) -> Path:
 def test_family_days_apply_tier_defaults_and_report_each_candidate_family(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    from cli.commands.logs import cmd_logs_retention
+    from cli.commands.observability.logs import cmd_logs_retention
 
     expired = [
         _file_at(tmp_path, "ava-agent-12.out.log", _NOW - timedelta(days=16)),
@@ -105,7 +105,7 @@ def test_family_days_apply_tier_defaults_and_report_each_candidate_family(
 def test_family_days_override_a_specific_family(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    from cli.commands.logs import cmd_logs_retention
+    from cli.commands.observability.logs import cmd_logs_retention
 
     gateway = _file_at(
         tmp_path,
@@ -132,7 +132,7 @@ def test_family_days_override_a_specific_family(
 def test_family_days_dry_run_reports_empty_policy_families(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    from cli.commands.logs import cmd_logs_retention
+    from cli.commands.observability.logs import cmd_logs_retention
 
     rc = cmd_logs_retention(
         older_than_days=None,
@@ -157,7 +157,7 @@ def test_family_days_dry_run_reports_empty_policy_families(
 
 
 def test_older_than_and_family_days_cannot_be_combined(tmp_path: Path) -> None:
-    from cli.commands.logs import cmd_logs_retention
+    from cli.commands.observability.logs import cmd_logs_retention
 
     with pytest.raises(ValueError, match="mutually exclusive"):
         cmd_logs_retention(
@@ -172,7 +172,7 @@ def test_older_than_and_family_days_cannot_be_combined(tmp_path: Path) -> None:
 def test_dry_run_reports_all_managed_families_without_deleting(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    from cli.commands.logs import cmd_logs_retention
+    from cli.commands.observability.logs import cmd_logs_retention
 
     managed = [
         _stale_file(tmp_path, "ava-agent-12.out.log", b"main"),
@@ -206,7 +206,7 @@ def test_dry_run_reports_all_managed_families_without_deleting(
 def test_active_open_file_is_excluded_from_retention(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    from cli.commands.logs import cmd_logs_retention
+    from cli.commands.observability.logs import cmd_logs_retention
 
     active = _stale_file(tmp_path, "ava-agent-12.out.log", b"active")
 
@@ -229,7 +229,7 @@ def test_active_open_file_is_excluded_from_retention(
 def test_delete_reports_reclaimed_bytes_and_is_idempotent(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    from cli.commands.logs import cmd_logs_retention
+    from cli.commands.observability.logs import cmd_logs_retention
 
     expired = _stale_file(tmp_path, "ava-agent-12.out.log", b"gone")
 
@@ -260,7 +260,7 @@ def test_delete_failure_is_reported_and_other_candidates_continue(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    from cli.commands.logs import cmd_logs_retention
+    from cli.commands.observability.logs import cmd_logs_retention
 
     failed = _stale_file(tmp_path, "ava-agent-12.out.log", b"bad")
     deleted = _stale_file(tmp_path, "ava-agent-13.out.log", b"good")
@@ -293,7 +293,7 @@ def test_unreadable_matching_path_is_reported(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    from cli.commands import logs
+    from cli.commands.observability import logs
 
     unreadable = tmp_path / "ava-agent-12.out.log"
 
@@ -337,7 +337,7 @@ def test_unreadable_matching_path_is_reported(
 def test_retention_preserves_every_path_outside_the_exact_boundary(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    from cli.commands.logs import cmd_logs_retention
+    from cli.commands.observability.logs import cmd_logs_retention
 
     logs = tmp_path / "logs"
     logs.mkdir()
@@ -391,7 +391,7 @@ def test_configured_days_apply_when_the_flag_is_omitted(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    from cli.commands.logs import cmd_logs_retention
+    from cli.commands.observability.logs import cmd_logs_retention
     from shared.config import settings
 
     managed = _stale_file(tmp_path, "ava-agent-12.out.log", b"keep")
@@ -423,7 +423,7 @@ def test_configured_days_apply_when_the_flag_is_omitted(
 def test_service_stdout_names_are_managed_and_follow_service_family_rules(
     name: str, family: str
 ) -> None:
-    from cli.commands.logs import _MANAGED_LOG_NAME, _log_family
+    from cli.commands.observability.logs import _MANAGED_LOG_NAME, _log_family
 
     match = _MANAGED_LOG_NAME.fullmatch(name)
     assert match is not None
@@ -432,7 +432,7 @@ def test_service_stdout_names_are_managed_and_follow_service_family_rules(
 
 
 def test_agent_and_shell_names_keep_precedence_over_service_stdout() -> None:
-    from cli.commands.logs import _MANAGED_LOG_NAME
+    from cli.commands.observability.logs import _MANAGED_LOG_NAME
 
     agent = _MANAGED_LOG_NAME.fullmatch("ava-agent-12.out.log")
     shell = _MANAGED_LOG_NAME.fullmatch("ava-agent-12-shell-3-review.out.log")
@@ -453,7 +453,7 @@ def test_agent_and_shell_names_keep_precedence_over_service_stdout() -> None:
     ],
 )
 def test_copytruncate_archives_are_managed(name: str, group: str, family: str) -> None:
-    from cli.commands.logs import _MANAGED_LOG_NAME, _log_family
+    from cli.commands.observability.logs import _MANAGED_LOG_NAME, _log_family
 
     match = _MANAGED_LOG_NAME.fullmatch(name)
     assert match is not None
@@ -466,7 +466,7 @@ def test_active_service_stdout_is_excluded_via_open_path_snapshot(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    from cli.commands import logs
+    from cli.commands.observability import logs
 
     active = _file_at(tmp_path, "ava-gateway.out.log", _NOW - timedelta(days=31))
 
@@ -493,7 +493,7 @@ def test_retention_deletes_expired_service_stdout_and_native_archive(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    from cli.commands import logs
+    from cli.commands.observability import logs
 
     logs_path = tmp_path / "logs"
     native_path = tmp_path / "lgtm" / "native" / "logs"
@@ -524,7 +524,7 @@ def test_retention_deletes_expired_service_stdout_and_native_archive(
 
 
 def test_snapshot_names_map_to_snapshot_family() -> None:
-    from cli.commands.logs import _MANAGED_LOG_NAME, _log_family
+    from cli.commands.observability.logs import _MANAGED_LOG_NAME, _log_family
 
     match = _MANAGED_LOG_NAME.fullmatch("agent-42-20260911T144255403250.png")
     assert match is not None
@@ -535,7 +535,7 @@ def test_snapshot_names_map_to_snapshot_family() -> None:
 def test_snapshot_retention_scans_the_nested_computer_dir(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    from cli.commands.logs import cmd_logs_retention
+    from cli.commands.observability.logs import cmd_logs_retention
 
     logs = tmp_path / "logs"
     snapshots = logs / "computer" / "snapshots"
@@ -579,7 +579,7 @@ def test_snapshot_retention_scans_the_nested_computer_dir(
 
 
 def test_retention_family_sets_stay_in_sync() -> None:
-    from cli.commands.logs import _FAMILY_DEFAULT_DAYS
+    from cli.commands.observability.logs import _FAMILY_DEFAULT_DAYS
     from cli.parsers.logs import _FAMILY_DAYS_NAMES
     from shared.os_logs_job import FAMILY_DAYS
 

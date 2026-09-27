@@ -27,7 +27,7 @@ def main() -> None:
     home.mkdir(parents=True, exist_ok=True)
     binary = otel_collector_binary()
     require(binary.is_relative_to(Path(sys.prefix).resolve().parent), "binary outside image")
-    from cli.commands._otel_collector import ensure_otel_collector
+    from cli.commands.observability.otel_collector import ensure_otel_collector
 
     rejected_home = home / "must-not-be-created"
     with patch("shared.runtime_interpreter.runtime_otel_binary", return_value=home / "missing"):

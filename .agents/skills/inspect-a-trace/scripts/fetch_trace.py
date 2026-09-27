@@ -156,7 +156,7 @@ def _http_get_json(url: str) -> dict:
     # Bypass the system HTTP proxy: cluster endpoints are loopback or on the
     # private cluster network, and the macOS system proxy (Clash/VPN on
     # 127.0.0.1:7897) answers 502 for them. Same rationale as the
-    # `trust_env=False` in cli/commands/trace.py's ship path.
+    # `trust_env=False` in cli/commands/observability/trace.py's ship path.
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
     with opener.open(url, timeout=60) as resp:
         return json.loads(resp.read().decode())

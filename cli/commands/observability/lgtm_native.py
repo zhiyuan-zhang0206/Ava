@@ -30,16 +30,17 @@ import yaml
 from dotenv import dotenv_values
 
 from cli.commands._converge_spec import ConvergeCtx
-from cli.commands._lgtm import is_station_ctx, roles_declare_station
-from cli.commands._lgtm_assets import _NATIVE_CONSTANTS, load_versions
-from cli.commands._lgtm_provisioning import _render_provisioning
-from cli.commands.observatory_urls import (
-    _alerts_webhook_url,
-    _observability_datasource_urls,
-)
 from shared.log import logger
 from shared.loki_index_labels import validate_loki_deploy_config
 from shared.resilience import Policy, retry
+
+from ._lgtm_assets import _NATIVE_CONSTANTS, load_versions
+from ._lgtm_provisioning import _render_provisioning
+from .lgtm import is_station_ctx, roles_declare_station
+from .observatory_urls import (
+    _alerts_webhook_url,
+    _observability_datasource_urls,
+)
 
 SUPPORTED_TAGS = {"darwin_arm64", "linux_amd64"}
 

@@ -82,7 +82,7 @@ def stop_lgtm_services(*, force: bool = False, timeout_s: float = 30.0) -> None:
     # already be stopped, otherwise it could reconverge the retained marker.
     for name in reversed(BACKENDS):
         if IS_MACOS:
-            from cli.commands._lgtm_native import native_label
+            from cli.commands.observability.lgtm_native import native_label
 
             stop_launchd(native_label(name, home), force=force, timeout_s=remaining(deadline))
         elif sys.platform == "linux":

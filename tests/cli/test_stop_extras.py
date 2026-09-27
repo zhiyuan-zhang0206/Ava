@@ -278,8 +278,8 @@ def test_helper_non_macos_skipped(monkeypatch: pytest.MonkeyPatch, tmp_path: Pat
 def test_lgtm_stop_preserves_desired_state_and_data(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    from cli.commands._lgtm_native import native_label
     from cli.commands._stop_extras import stop_lgtm_services
+    from cli.commands.observability.lgtm_native import native_label
     from shared.lgtm_local import BACKENDS
 
     home = _home(monkeypatch, tmp_path)

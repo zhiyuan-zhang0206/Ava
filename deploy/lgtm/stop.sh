@@ -13,4 +13,4 @@ cd "$SCRIPT_DIR"
 
 # The CLI owns the exact home-scoped launchd/systemd identity, including Grafana.
 exec "$SCRIPT_DIR/../../.venv/bin/python" -c \
-    'from cli.commands._lgtm_native import bootout_native_jobs; from shared.paths import ava_home; bootout_native_jobs(ava_home())'
+    'from cli.commands.observability.lgtm_native import bootout_native_jobs; from shared.paths import ava_home; bootout_native_jobs(ava_home())'

@@ -36,7 +36,7 @@ dashboards).
 
 Native Grafana on the LGTM host (port 3003) evaluates these rules from the
 converge-rendered provisioning tree (`$AVA_HOME/lgtm/native/config/
-provisioning/`, copied verbatim by `cli/commands/_lgtm_native.py` from the
+provisioning/`, copied verbatim by `cli/commands/observability/lgtm_native.py` from the
 source checkout's `deploy/lgtm/config/grafana/provisioning` — rendered files
 carry content-hash user-edit protection; the webhook URL is a Grafana-native
 `$__env{AVA_ALERTS_WEBHOOK_URL}` reference resolved from the process env).

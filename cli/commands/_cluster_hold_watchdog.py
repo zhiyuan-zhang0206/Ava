@@ -97,7 +97,7 @@ def _completion_environment_problem() -> str | None:
     """Why the completion environment is not ready, or None when it is.
 
     The pre-attempt gate (task #4080). Only a PURE agent-runner's converge
-    builds the gateway OTLP relay (`cli.commands._otel_collector._otlp_exporters`),
+    builds the gateway OTLP relay (`cli.commands.observability.otel_collector._otlp_exporters`),
     and that build is the precondition the 2026-09-19 migration window failed:
     `AVA_GATEWAY_OTLP_ENDPOINT` was not yet published, the start leg died at the
     relay step, and the generation's single attempt was spent in a window
@@ -117,7 +117,7 @@ def _completion_environment_problem() -> str | None:
         return "this unit's capability set cannot be resolved"
     if roles != frozenset({"agent-runner"}):
         return None
-    from cli.commands._otel_collector import gateway_otlp_endpoint_problem
+    from cli.commands.observability.otel_collector import gateway_otlp_endpoint_problem
     from shared.bootstrap import BootstrapFetchError, resolve_bootstrap_values
 
     try:

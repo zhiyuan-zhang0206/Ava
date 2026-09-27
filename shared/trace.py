@@ -26,7 +26,7 @@ local recovery copy. A gap present in the mirror can be replayed with
   content back in). Turn content is fetched on demand from the checkpoints
   table by trace id — see `shared/agents/history/checkpoint.py` / the gateway trace endpoint.
 
-- **Ship** (`cli/commands/trace.py`, `ava trace ship`): replays a time window of
+- **Ship** (`cli/commands/observability/trace.py`, `ava trace ship`): replays a time window of
   the sidecar's JSONL mirror to Tempo directly on a gateway, or through the
   gateway collector's authenticated receiver on a pure runner. This is the
   recovery path (backend down longer than the collector queue held, offline

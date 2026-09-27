@@ -40,12 +40,13 @@ from string import Template
 from urllib.parse import unquote, urlsplit
 
 from cli.commands._converge_spec import ConvergeCtx
-from cli.commands._otel_collector_exporters import BACKEND_EXPORTERS, RELAY_EXPORTERS
 from cli.commands._rendered_file import write_rendered_guarded
 from shared.atomic_io import write_text_atomic
 from shared.machine import MachineRoles
 from shared.observability import collector_allowed_for_home
 from shared.resilience import Policy, retry
+
+from ._otel_collector_exporters import BACKEND_EXPORTERS, RELAY_EXPORTERS
 
 # Pinned contrib version — re-validate against the deploy/lgtm backends
 # (Tempo/Loki/Prometheus OTLP intake) when bumping.
@@ -308,8 +309,9 @@ def gateway_otel_ingress_endpoint() -> str:
 
 def station_otel_ingress_endpoint() -> str:
     """The selected station's ingress, independent of this unit's listen port."""
-    from cli.commands.observatory_urls import validated_observability_base
     from shared.config import settings
+
+    from .observatory_urls import validated_observability_base
 
     base = validated_observability_base(settings.observability.observability_url)
     if not base:
@@ -546,7 +548,7 @@ def _download_with_retry(url: str, tarball: Path) -> None:
         ) from exc
 
 
-def _download_and_verify(tag: str, dest_dir: Path) -> None:
+def download_and_verify(tag: str, dest_dir: Path) -> None:
     """Download + SHA256-verify + extract the pinned tarball into dest_dir."""
     url = _DOWNLOAD_URL.format(version=OTELCOL_CONTRIB_VERSION, tag=tag)
     expected = _OTELCOL_CONTRIB_SHA256[tag]
@@ -582,8 +584,9 @@ def _lgtm_fanout_bases(*, remote: bool = True) -> tuple[str, str]:
     (base URL + the service's own port). The runner relay path is unaffected —
     it always relays to the gateway collector.
     """
-    from cli.commands.observatory_urls import validated_observability_base
     from shared.config import settings
+
+    from .observatory_urls import validated_observability_base
 
     obs = settings.observability
     base = validated_observability_base(obs.observability_url)
@@ -665,7 +668,7 @@ def ensure_otel_collector(repo: Path, ava_home: Path, roles: MachineRoles | None
     if not (
         binary.exists() and marker.read_text(encoding="utf-8").strip() == OTELCOL_CONTRIB_VERSION
     ):
-        _download_and_verify(tag, dest_dir)
+        download_and_verify(tag, dest_dir)
         print(f"  · otel-collector: installed otelcol-contrib {OTELCOL_CONTRIB_VERSION} ({tag})")
     else:
         print(f"  · otel-collector: otelcol-contrib {OTELCOL_CONTRIB_VERSION} present")

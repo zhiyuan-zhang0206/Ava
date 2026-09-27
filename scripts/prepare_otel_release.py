@@ -6,9 +6,9 @@ import json
 import sys
 from pathlib import Path
 
-from cli.commands._otel_collector import (
+from cli.commands.observability.otel_collector import (
     OTELCOL_CONTRIB_VERSION,
-    _download_and_verify,
+    download_and_verify,
     platform_tag,
 )
 from shared.runtime_prepare import inventory_digest, tree_inventory
@@ -20,7 +20,7 @@ def main() -> None:
     if tag is None or tag.startswith("windows"):
         raise RuntimeError("collector release preparation currently supports POSIX only")
     destination.mkdir(mode=0o700)
-    _download_and_verify(tag, destination)
+    download_and_verify(tag, destination)
     # This trusted build receipt remains beside, not inside, its own inventory.
     destination.with_suffix(".json").write_text(
         json.dumps(

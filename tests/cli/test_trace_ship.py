@@ -9,7 +9,7 @@ from typing import cast
 import httpx
 import pytest
 
-from cli.commands.trace import (
+from cli.commands.observability.trace import (
     TraceShipError,
     _load_watermark,
     _post_line,
@@ -22,7 +22,7 @@ def test_load_watermark_drops_entries_for_missing_files(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ):
     """Retention prunes mirror files; the watermark must shed their stale entries."""
-    monkeypatch.setattr("cli.commands.trace.traces_dir", lambda: tmp_path)
+    monkeypatch.setattr("cli.commands.observability.trace.traces_dir", lambda: tmp_path)
     (tmp_path / "spans.jsonl").write_text("x\n", encoding="utf-8")
     (tmp_path / ".ship-watermark.json").write_text(
         json.dumps({"spans.jsonl": 2, "spans-20200101-9.jsonl": 5}),
@@ -38,7 +38,8 @@ def _enable_tempo_config(monkeypatch: pytest.MonkeyPatch):
         "shared.config.settings.observability.telemetry_tempo_endpoint", "http://tempo.test:14318"
     )
     monkeypatch.setattr(
-        "cli.commands.trace.machine_role", lambda: frozenset({"gateway", "agent-runner"})
+        "cli.commands.observability.trace.machine_role",
+        lambda: frozenset({"gateway", "agent-runner"}),
     )
 
 
@@ -126,7 +127,7 @@ def test_post_line_converts_otlp_json_hex_ids_to_protobuf_bytes() -> None:
 def test_ship_disabled_raises(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     """The OTLP kill switch off -> fail fast, the shipper is unconfigured."""
     monkeypatch.setattr("shared.trace_mirror.traces_dir", lambda: tmp_path)
-    monkeypatch.setattr("cli.commands.trace.traces_dir", lambda: tmp_path)
+    monkeypatch.setattr("cli.commands.observability.trace.traces_dir", lambda: tmp_path)
     monkeypatch.setattr("shared.config.settings.observability.telemetry_otlp_enabled", False)
     with pytest.raises(TraceShipError, match="AVA_TELEMETRY_OTLP_ENABLED"):
         cmd_trace_ship(since=None, until=None, dry_run=False)
@@ -135,7 +136,7 @@ def test_ship_disabled_raises(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
 def test_ship_dry_run_needs_no_config(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     """--dry-run reads the mirror only: no backend config required, nothing
     POSTed, counts reported — the inspection path when the kill switch is off."""
-    monkeypatch.setattr("cli.commands.trace.traces_dir", lambda: tmp_path)
+    monkeypatch.setattr("cli.commands.observability.trace.traces_dir", lambda: tmp_path)
     (tmp_path / "spans.jsonl").write_text(
         _otlp_line("a") + "\n" + _otlp_line("b") + "\n", encoding="utf-8"
     )
@@ -169,7 +170,7 @@ def test_incremental_ship_posts_and_advances_watermark(
 ):
     """Incremental ship POSTs each line, then a second run sends nothing new."""
     _enable_tempo_config(monkeypatch)
-    monkeypatch.setattr("cli.commands.trace.traces_dir", lambda: tmp_path)
+    monkeypatch.setattr("cli.commands.observability.trace.traces_dir", lambda: tmp_path)
 
     (tmp_path / "spans.jsonl").write_text(
         _otlp_line("a") + "\n" + _otlp_line("b") + "\n", encoding="utf-8"
@@ -218,7 +219,7 @@ def test_incremental_ship_reads_gzipped_segments_and_keeps_watermark(
     import gzip as gz
 
     _enable_tempo_config(monkeypatch)
-    monkeypatch.setattr("cli.commands.trace.traces_dir", lambda: tmp_path)
+    monkeypatch.setattr("cli.commands.observability.trace.traces_dir", lambda: tmp_path)
 
     rotated = tmp_path / "spans-2026-08-27T03-29-10.942-size.jsonl.gz"
     with gz.open(rotated, "wt", encoding="utf-8") as f:
@@ -269,7 +270,7 @@ def test_incremental_ship_gz_resumes_from_partial_watermark(
     import gzip as gz
 
     _enable_tempo_config(monkeypatch)
-    monkeypatch.setattr("cli.commands.trace.traces_dir", lambda: tmp_path)
+    monkeypatch.setattr("cli.commands.observability.trace.traces_dir", lambda: tmp_path)
 
     rotated = tmp_path / "spans-2026-08-27T03-29-10.942-size.jsonl.gz"
     with gz.open(rotated, "wt", encoding="utf-8") as f:
@@ -316,7 +317,7 @@ def test_windowed_ship_includes_gzipped_segments(monkeypatch: pytest.MonkeyPatch
     import gzip as gz
 
     _enable_tempo_config(monkeypatch)
-    monkeypatch.setattr("cli.commands.trace.traces_dir", lambda: tmp_path)
+    monkeypatch.setattr("cli.commands.observability.trace.traces_dir", lambda: tmp_path)
 
     gz_rotated = tmp_path / "spans-2026-06-16T00-00-00.000-size.jsonl.gz"
     with gz.open(gz_rotated, "wt", encoding="utf-8") as f:
@@ -363,7 +364,7 @@ def test_ship_client_bypasses_environment_proxy(monkeypatch: pytest.MonkeyPatch,
     the VPN/clash proxy (127.0.0.1:7897), which mangles binary bodies and answers
     502 — a two-day real outage of the trace replay pipeline (2026-08-25)."""
     _enable_tempo_config(monkeypatch)
-    monkeypatch.setattr("cli.commands.trace.traces_dir", lambda: tmp_path)
+    monkeypatch.setattr("cli.commands.observability.trace.traces_dir", lambda: tmp_path)
     (tmp_path / "spans.jsonl").write_text(_otlp_line("a") + "\n", encoding="utf-8")
 
     seen: dict[str, object] = {}
@@ -397,7 +398,7 @@ def test_windowed_ship_filters_by_file_day_and_ignores_watermark(
     """--since/--until selects files by day stamp and ships them whole, regardless
     of any incremental watermark."""
     _enable_tempo_config(monkeypatch)
-    monkeypatch.setattr("cli.commands.trace.traces_dir", lambda: tmp_path)
+    monkeypatch.setattr("cli.commands.observability.trace.traces_dir", lambda: tmp_path)
 
     (tmp_path / "spans-20260610-1.jsonl").write_text(_otlp_line("old") + "\n", encoding="utf-8")
     (tmp_path / "spans-2026-06-16T03-04-05.000.jsonl").write_text(
@@ -447,13 +448,13 @@ def test_gateway_ship_posts_to_local_tempo_without_auth(
     """A gateway replays straight to its loopback Tempo, bypassing its local
     collector because that collector would mirror the replay again."""
     monkeypatch.setattr("shared.trace_mirror.traces_dir", lambda: tmp_path)  # pyright: ignore[reportUnknownMemberType]
-    monkeypatch.setattr("cli.commands.trace.traces_dir", lambda: tmp_path)  # pyright: ignore[reportUnknownMemberType]
+    monkeypatch.setattr("cli.commands.observability.trace.traces_dir", lambda: tmp_path)  # pyright: ignore[reportUnknownMemberType]
     monkeypatch.setattr("shared.config.settings.observability.telemetry_otlp_enabled", True)  # pyright: ignore[reportUnknownMemberType]
     monkeypatch.setattr(  # pyright: ignore[reportUnknownMemberType]
         "shared.config.settings.observability.telemetry_tempo_endpoint", "http://tempo.test:14318"
     )
     monkeypatch.setattr(  # pyright: ignore[reportUnknownMemberType]
-        "cli.commands.trace.machine_role", lambda: frozenset({"gateway"})
+        "cli.commands.observability.trace.machine_role", lambda: frozenset({"gateway"})
     )
 
     (tmp_path / "spans.jsonl").write_text(  # pyright: ignore[reportUnknownMemberType]
@@ -498,7 +499,7 @@ def test_runner_ship_posts_to_gateway_relay_with_cluster_bearer(
 ) -> None:
     """A pure runner cannot dial loopback Tempo. It replays to the gateway's
     authenticated remote trace pipeline, which deliberately has no file exporter."""
-    monkeypatch.setattr("cli.commands.trace.traces_dir", lambda: tmp_path)  # pyright: ignore[reportUnknownMemberType]
+    monkeypatch.setattr("cli.commands.observability.trace.traces_dir", lambda: tmp_path)  # pyright: ignore[reportUnknownMemberType]
     monkeypatch.setattr(  # pyright: ignore[reportUnknownMemberType]
         "shared.config.settings.observability.telemetry_otlp_enabled", True
     )
@@ -509,7 +510,7 @@ def test_runner_ship_posts_to_gateway_relay_with_cluster_bearer(
         "shared.config.settings.data_plane.cluster_secret", "cluster-token"
     )
     monkeypatch.setattr(  # pyright: ignore[reportUnknownMemberType]
-        "cli.commands.trace.machine_role", lambda: frozenset({"agent-runner"})
+        "cli.commands.observability.trace.machine_role", lambda: frozenset({"agent-runner"})
     )
     (tmp_path / "spans.jsonl").write_text(_otlp_line("remote") + "\n", encoding="utf-8")  # pyright: ignore[reportUnknownMemberType]
 
