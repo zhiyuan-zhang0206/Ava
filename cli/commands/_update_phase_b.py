@@ -75,13 +75,13 @@ _POLL_INTERVAL_S = 2.0
 # watchdog already covered its convergence). The stalled / no-progress verdicts end
 # a host's poll in seconds regardless of either bound, and `_POLL_TIMEOUT_S` stays
 # the deadline for every host — this only spends less of it. A module-level alias
-# read through the `cli.commands` namespace so tests can shrink it, exactly like
+# read at call time, so tests shrink it by patching this module, exactly like
 # `_POLL_TIMEOUT_S`.
 _CONVERGING_TIMEOUT_S = CONVERGING_POLL_TIMEOUT_S
 # How long one updater stage may be in flight before a probe's own evidence proves
 # no-progress (the family's STAGE_NO_PROGRESS_TIMEOUT_S — see shared.deploy_timing).
-# A module-level alias read through the `cli.commands` namespace so tests can shrink
-# it, exactly like _POLL_TIMEOUT_S.
+# A module-level alias read at call time, so tests shrink it by patching this
+# module, exactly like _POLL_TIMEOUT_S.
 _STAGE_NO_PROGRESS_S = STAGE_NO_PROGRESS_TIMEOUT_S
 # Alias of the deploy family's lease-arm grace — a registered clock
 # (shared.deploy_timing); the poll's own elapsed clock anchors it (branch above).

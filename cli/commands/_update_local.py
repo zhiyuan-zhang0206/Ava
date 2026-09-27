@@ -29,9 +29,9 @@ frontend-only fast path and the frontend session relaunch it shares:
 - `_run_gateway_local_update` — the composed local leg; every failure recovers
   to last-known-good before returning non-zero (a KeyboardInterrupt included).
 
-Re-imported by `cli/commands/update.py` (and re-exported through `cli.commands`)
-so `cli.commands(.update)._run_gateway_local_update` / `._run_frontend_only_update`
-/ `._restart_frontend_session` keep resolving.
+`cli/commands/update.py` re-imports `_run_frontend_only_update` /
+`_restart_frontend_session`; this module and its tests reach them (and
+`git_pull_main`) through that `cli.commands.update` seam.
 
 """
 

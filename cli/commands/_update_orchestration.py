@@ -15,8 +15,9 @@ under the size ceiling; these are the standalone steps:
   gateway,agent-runner box updates itself in the local leg and must not also be
   handed a self-update by its own fan-out.
 
-`_changed_paths_vs_origin` / `_run_frontend_only_update` are looked up through the
-`cli.commands` namespace (so tests can monkeypatch them) rather than imported here.
+`_changed_paths_vs_origin` / `_run_frontend_only_update` are called through their
+defining modules (`_update_preflight`, `_update_local`) at call time, so tests patch
+them there.
 """
 
 from __future__ import annotations

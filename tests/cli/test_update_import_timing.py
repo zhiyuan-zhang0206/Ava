@@ -1,7 +1,7 @@
 """The agent-runner self-update keeps its pre-checkout import closure narrow.
 
 `cli/commands/_update_agent_runner.py` now execs a fresh interpreter after
-`git checkout` + `uv sync`; only that post-checkout image calls `_ns._do_stop(...)`.
+`git checkout` + `uv sync`; only that post-checkout image calls `cli.commands.stop._do_stop(...)`.
 The boundary prevents any old ``sys.modules`` entry from satisfying a new-tree
 import. The assertions here remain defense in depth: nothing the pre-checkout
 updater imports may reach `shared.session_backend` or `shared.session_record`, so
