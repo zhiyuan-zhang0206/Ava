@@ -284,6 +284,42 @@ def test_a_plugin_load_is_undone_by_the_autouse_teardown(request: pytest.Fixture
     ]
 
 
+def test_a_plugin_load_leaves_no_section_behind_its_namespace(
+    request: pytest.FixtureRequest,
+) -> None:
+    """The test above still left every plugin registration in its xdist worker. A later
+    namespace-only cleanup (`ava.clear_registered_namespaces()`) then stranded the
+    ava_code prompt section without `ava.cwd`, and every `build_system_prompt()` after
+    it raised `module 'ava' has no attribute 'cwd'` (CI shard 14/16 on PR #3513).
+
+    The autouse `_restore_plugin_registrations` (`tests/fixtures/plugin_registrations.py`)
+    closes that. Same split as above: the guard is wired onto every test, it sees
+    a real `_load_extensions()`, and its reset leaves sections, namespaces and
+    state fields empty together.
+    """
+    from agent.graph import _build
+    from agent.graph._system_prompt import _FRAMEWORK_SECTION_COUNT, _SYSTEM_PROMPT_SECTIONS
+    from agent.state import _EXTRA_FIELDS
+    from ava.sdk_surface.plugins import _REGISTERED_MEMBERS, _REGISTERED_NAMESPACES
+    from tests.fixtures.plugin_registrations import (
+        drop_plugin_registrations,
+        plugin_registrations_present,
+    )
+
+    assert "_restore_plugin_registrations" in request.fixturenames
+    assert not plugin_registrations_present()
+
+    _build._load_extensions()
+    assert plugin_registrations_present()
+    assert "cwd" in _REGISTERED_NAMESPACES, "the leak this guards is gone"
+
+    drop_plugin_registrations()  # the guard's action, made observable
+    assert not plugin_registrations_present()
+    assert len(_SYSTEM_PROMPT_SECTIONS) == _FRAMEWORK_SECTION_COUNT
+    assert not _REGISTERED_NAMESPACES and not _REGISTERED_MEMBERS and not _EXTRA_FIELDS
+    assert not hasattr(ava, "cwd")
+
+
 def test_uninstall_restores_from_the_install_record_without_a_namespace_walk(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
