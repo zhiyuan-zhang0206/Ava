@@ -59,6 +59,11 @@ are not implementation requirements for this revision.
    directories as `AVA_SERVICE_PATH` in its home configuration before first start
    with the new code; omit virtualenv directories. Do not derive this declaration
    from a later recovery caller's PATH. Deployment is separate from PR merge.
+   Existing homes are adopted (start intent, `AVA_SERVICE_PATH`, legacy OS jobs,
+   legacy files and runner residue) by the one-time
+   `scripts/cutover_adopt_home.py`, after the read-only
+   `scripts/cutover_inventory.py`
+   ([procedure](../../conventions/cutover-home-adoption.md)).
    Cutover preconditions and one-time repairs:
    - Every cluster reads `deployment_state.managed_writer_evidence->'pending'
      IS NULL` before this release is admitted. The retired updater's checked
