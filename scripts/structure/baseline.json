@@ -129,7 +129,7 @@
     "tests/shared/test_memory_repo.py": 846,
     "tests/shared/test_posixproc.py": 840,
     "tests/shared/test_provider_plugins.py": 952,
-    "tests/shared/test_pty_sessions_cli.py": 1467,
+    "tests/shared/test_pty_sessions_cli.py": 1444,
     "tests/shared/test_runner_role.py": 1061,
     "tests/shared/test_service_respawn.py": 880,
     "tests/shared/test_telemetry_otlp.py": 1276,
