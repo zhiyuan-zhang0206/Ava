@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pytest
 
-from cli.commands import config as cfg
+from cli.commands.management import config as cfg
 from shared import runtime_config
 from shared.api_contracts.config import ConfigFieldView
 

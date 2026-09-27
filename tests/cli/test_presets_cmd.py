@@ -22,7 +22,7 @@ def test_update_requires_at_least_one_field_at_parse_time(
 def test_update_passes_the_parse_gate_with_one_field(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from cli.commands import presets as _presets
+    from cli.commands.management import presets as _presets
 
     def fake(_args: object) -> int:
         return 0

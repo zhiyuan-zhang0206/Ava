@@ -17,7 +17,7 @@ from typing import Any
 
 import pytest
 
-from cli.commands import config as cfg
+from cli.commands.management import config as cfg
 from shared import runtime_config
 from shared.api_contracts.config import (
     ConfigAuditView,
@@ -459,7 +459,7 @@ def test_cli_module_imports_without_settings(tmp_path: Path) -> None:
             sys.executable,
             "-c",
             (
-                "from cli.commands.config import cmd_config_get; "
+                "from cli.commands.management.config import cmd_config_get; "
                 "raise SystemExit(cmd_config_get(None, None, local=True))"
             ),
         ],
@@ -666,7 +666,7 @@ def test_local_set_repairs_incident_env(local_env_home: Path) -> None:
             sys.executable,
             "-c",
             (
-                "from cli.commands.config import cmd_config_set; "
+                "from cli.commands.management.config import cmd_config_set; "
                 "raise SystemExit(cmd_config_set("
                 "['AVA_PITR_RESTORE_PROOF_ENABLED=false'], None, local=True))"
             ),
