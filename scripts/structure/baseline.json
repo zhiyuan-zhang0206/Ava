@@ -74,7 +74,7 @@
     "tests/conftest.py": 1971,
     "tests/e2e/conftest.py": 812,
     "tests/gateway/test_agent_inspect.py": 823,
-    "tests/gateway/test_agents_endpoints.py": 1416,
+    "tests/gateway/test_agents_endpoints.py": 1403,
     "tests/gateway/test_agents_internals.py": 1323,
     "tests/gateway/test_alerts_api.py": 1014,
     "tests/gateway/test_auth.py": 1161,
