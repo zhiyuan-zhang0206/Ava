@@ -17,8 +17,9 @@ enforces it) — routing an operation by role is exactly what the ruling bans.
                     explicit flag, not a role branch: the user asked for the
                     foreground leg on whatever host they are on.
 
-Re-imported by `cli/commands/update.py` (and re-exported through `cli.commands`)
-so `cli.commands(.update).cmd_update` keeps resolving.
+Re-imported by `cli/commands/update.py`; `cli.parsers.cluster`'s handler
+imports `cmd_update` straight from this module — there is no package-level
+re-export.
 """
 
 from __future__ import annotations

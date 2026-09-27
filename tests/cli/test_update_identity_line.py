@@ -20,8 +20,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from cli import commands as _cli
 from cli.commands import update as _update
+from cli.commands import update_dispatch as _cli
 
 _REPO = Path("/repo")
 _HOME = Path("/home/ava-prod")
@@ -35,7 +35,7 @@ def runner_env(monkeypatch: pytest.MonkeyPatch) -> None:
     (the `cli.commands` package re-exports only `_repo_root`/dispatch names —
     patching the package attr would not reach cmd_update's global lookup).
     `_run_gateway_orchestration` is looked up on the `cli.commands` package at
-    call time inside `_update_dispatch._run_in_process`, so patching the
+    call time inside `update_dispatch._run_in_process`, so patching the
     package attr stops the dispatch before any repo/git work.
     """
     monkeypatch.setattr(_update, "_repo_root", lambda: _REPO)

@@ -15,7 +15,7 @@ import time
 import psycopg
 import pytest
 
-from cli.commands._cluster_rollback import _notify_agents_of_rollback
+from cli.commands.cluster_rollback import _notify_agents_of_rollback
 from shared import db
 from shared.config import settings
 from shared.redis_listener import RedisInboundListener
@@ -96,7 +96,7 @@ def test_the_rollback_records_what_it_did_on_the_last_update(db_conn: psycopg.Co
     verdict alone. Turning "an orphaned update, since recovered" into `RECOVERED` is
     the reader's move, so nothing here can overwrite a verdict another process filed.
     """
-    from cli.commands._cluster_rollback import _note_rollback_on_last_update
+    from cli.commands.cluster_rollback import _note_rollback_on_last_update
     from shared.last_update import UpdateOutcome, begin_update, read_last_update
 
     begin_update(target_sha="8bdd3667", origin="frontend", holder="mini:pid999")
@@ -121,7 +121,7 @@ def test_a_failed_annotation_never_fails_the_rollback(
 ) -> None:
     """The rollback already succeeded by the time this runs. A note that cannot be
     written must not turn a working recovery into a reported failure."""
-    from cli.commands import _cluster_rollback as mod
+    from cli.commands import cluster_rollback as mod
 
     def _boom(_reason: str) -> None:
         raise RuntimeError("db gone")

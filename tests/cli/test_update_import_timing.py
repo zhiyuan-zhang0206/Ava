@@ -1,7 +1,7 @@
 """The agent-runner self-update keeps its pre-checkout import closure narrow.
 
 `cli/commands/_update_agent_runner.py` now execs a fresh interpreter after
-`git checkout` + `uv sync`; only that post-checkout image calls `_ns._do_stop(...)`.
+`git checkout` + `uv sync`; only that post-checkout image calls `cli.commands.stop._do_stop(...)`.
 The boundary prevents any old ``sys.modules`` entry from satisfying a new-tree
 import. The assertions here remain defense in depth: nothing the pre-checkout
 updater imports may reach `shared.session_backend` or `shared.session_record`, so
@@ -48,10 +48,16 @@ Shape of the assertion, and why it is not vacuous on the POSIX host CI runs on:
   supervisor leaf alone would be a meaningful assertion on POSIX: `shared.winproc`
   is never imported at all off Windows, so its absence there proves nothing by
   itself.
-- A **positive control** pins that the subject still exists: `cli.commands.stop`
-  (which owns `_do_stop`) must BE resident in the pre-checkout closure. It proves
-  this remains a meaningful shape check rather than an absence assertion detached
-  from the updater's command namespace.
+- A **positive control** pins that the measurement itself still works:
+  `cli.commands._repo` (one of `_update_agent_runner.py`'s own module-scope
+  imports) must BE resident in the pre-checkout closure. It proves this remains
+  a meaningful shape check rather than an absence assertion that would pass
+  vacuously if `_resident()` always returned the empty set. `cli.commands.stop`
+  is deliberately NOT this positive control: `cli.commands/__init__.py` is an
+  empty package door, and `stop`'s own import inside `_update_agent_runner.py`
+  is itself method-local (it runs at call time, not at this module's import
+  time), so the real pre-checkout closure this test measures never includes
+  it — a narrower closure than before, not a gap in the check.
 - Every name is checked to actually resolve, so renaming a module cannot silently
   disarm an absence assertion into a tautology.
 
@@ -76,8 +82,9 @@ from pathlib import Path
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
 # What the updater has loaded by the time it reaches the checkout: its own
-# module-scope imports, plus the `import cli.commands as _ns` it does first (a lazy
-# import that avoids a top-level cycle, and the widest thing it pulls in).
+# module-scope imports, plus `import cli.commands` itself (an empty package
+# door — no import work of its own, kept here so a future eager re-export
+# would be caught the moment it widens this closure).
 _UPDATER_IMPORTS = ("cli.commands", "cli.commands._update_agent_runner")
 
 # The post-checkout stop's dispatcher and platform supervisors, plus
@@ -91,8 +98,10 @@ _MUST_BE_LAZY = (
     "shared.session_record",
 )
 
-# Positive control — the old command namespace still includes the stop entrypoint.
-_MUST_BE_RESIDENT = ("cli.commands.stop",)
+# Positive control — proves `_resident()` can detect a real transitive import
+# rather than always reporting the empty set (`_repo` is one of
+# `_update_agent_runner.py`'s own module-scope imports).
+_MUST_BE_RESIDENT = ("cli.commands._repo",)
 
 
 def _resident(names: tuple[str, ...]) -> set[str]:
@@ -160,15 +169,16 @@ def test_session_kill_chain_is_not_in_the_updaters_import_closure() -> None:
     )
 
 
-def test_the_stop_entrypoint_itself_is_resident() -> None:
-    """Positive control for the test above: the updater still has the stop entrypoint.
-
-    `_do_stop` lives in `cli.commands.stop` and remains in the pre-checkout command
-    namespace, while the current implementation executes it only after a fresh
-    interpreter boundary. If this goes red the absence assertions have stopped
-    describing a real updater shape and need rewriting against wherever stop moved.
+def test_a_real_transitive_import_is_resident() -> None:
+    """Positive control for the test above: `_resident()` can see a module that is
+    genuinely there, so its empty result for `_MUST_BE_LAZY` is a real absence, not
+    an artifact of a broken probe. If this goes red, either the probe subprocess is
+    failing before it can report, or `_update_agent_runner.py` stopped importing
+    `cli.commands._repo` at module scope and this positive control needs rewriting
+    against whatever it imports eagerly now.
     """
     assert _resident(_MUST_BE_RESIDENT) == set(_MUST_BE_RESIDENT), (
-        "cli.commands.stop is no longer in the updater's import closure — the "
-        "stop entrypoint this file uses as its positive control has moved or gone away."
+        "cli.commands._repo is no longer in the updater's pre-checkout import "
+        "closure — the module this file uses as its positive control has moved "
+        "or gone away."
     )

@@ -10,8 +10,9 @@ from pathlib import Path
 
 import pytest
 
-from cli import commands as _cli
 from cli.commands import _update_uv_sync
+from cli.commands import start as _start_mod
+from cli.commands import update_dispatch as _update_mod
 from shared.config import settings
 from tests.cli._commands_helpers import _fake_session_backends as _fake_session_backends
 from tests.cli._commands_helpers import _FakeResult, _FakeSessionBackend, _git_aware, _sess
@@ -46,7 +47,7 @@ def test_update_posts_rollout_to_gateway_from_any_host(
         return _Resp()
 
     monkeypatch.setattr("httpx.post", _fake_post)  # pyright: ignore[reportUnknownArgumentType]
-    rc = _cli.cmd_update()
+    rc = _update_mod.cmd_update()
     assert rc == 0
     assert calls[0][0] == "http://gw:8000/api/cluster/rollout"
     body = calls[0][1]
@@ -77,7 +78,7 @@ def test_update_restart_only_posts_restart_endpoint(
         return _Resp()
 
     monkeypatch.setattr("httpx.post", _fake_post)  # pyright: ignore[reportUnknownArgumentType]
-    rc = _cli.cmd_update(restart_only=True)
+    rc = _update_mod.cmd_update(restart_only=True)
     assert rc == 0
     assert calls == ["http://gw:8000/api/cluster/restart"]
     assert "ava-rollout" in capsys.readouterr().out
@@ -193,7 +194,7 @@ def test_update_local_runs_in_process_orchestration(monkeypatch: pytest.MonkeyPa
 
     monkeypatch.setattr(_up_mod, "_run_gateway_orchestration", _orch)  # pyright: ignore[reportUnknownArgumentType]
 
-    rc = _cli.cmd_update(local=True)
+    rc = _update_mod.cmd_update(local=True)
     assert rc == 0
     assert calls == ["orchestration"]
 
@@ -212,7 +213,7 @@ def test_cmd_start_returns_this_host_to_idle_posture(
         _git_aware(lambda *_a, **_kw: _FakeResult(returncode=0)),  # pyright: ignore[reportUnknownArgumentType]
     )
 
-    rc = _cli.cmd_start()
+    rc = _start_mod.cmd_start()
     assert rc == 0
     assert calls and calls[-1] == "idle"
 
@@ -254,7 +255,7 @@ def test_cmd_start_finalizes_a_paused_deploy_journal(
         return _probe.ReadinessWait((), 0.0, sessions_gone=False)
 
     monkeypatch.setattr(_probe, "_wait_for_services_ready", ready)
-    assert _cli.cmd_start() == 0
+    assert _start_mod.cmd_start() == 0
 
     snapshot = pause_owner.read()
     assert snapshot.status == "resumed"
@@ -311,7 +312,7 @@ def test_rollout_child_start_does_not_finalize_the_pause_journal(
 
     pause_owner.mark_paused("rollout:42", datetime(2026, 8, 26, 14, 14, 42, tzinfo=UTC))
 
-    assert _cli.cmd_start(persist_services=False) == 0
+    assert _start_mod.cmd_start(persist_services=False) == 0
 
     snapshot = pause_owner.read()
     assert snapshot.status == "paused"
@@ -360,7 +361,7 @@ def test_rollout_child_keeps_converging_before_parent_readiness(
         _git_aware(lambda *_a, **_kw: _FakeResult(returncode=0)),  # pyright: ignore[reportUnknownArgumentType]
     )
 
-    rc = _cli.cmd_start(persist_services=False)
+    rc = _start_mod.cmd_start(persist_services=False)
 
     assert rc == 0
     assert postures[-1] == "converging"
@@ -408,7 +409,7 @@ def test_handoff_capable_rollout_child_may_commit_credential_transition(
         _git_aware(lambda *_a, **_kw: _FakeResult(returncode=0)),  # pyright: ignore[reportUnknownArgumentType]
     )
 
-    assert _cli.cmd_start(persist_services=False) == 0
+    assert _start_mod.cmd_start(persist_services=False) == 0
     assert legacy_upgrade == [True]
     assert _sess("restarter") not in service.created
     assert ROLLOUT_PARENT_CREDENTIAL_HANDOFF_ENV not in os.environ
@@ -447,7 +448,7 @@ def test_phase_b_pure_runner_restores_idle_posture_and_agent_host(
         _git_aware(lambda *_a, **_kw: _FakeResult(returncode=0)),  # pyright: ignore[reportUnknownArgumentType]
     )
 
-    assert _cli.cmd_start(persist_services=False) == 0
+    assert _start_mod.cmd_start(persist_services=False) == 0
     assert postures[-1] == "idle"
     assert _sess("agent-host") in service.created
 
@@ -476,7 +477,7 @@ def test_operator_start_refuses_executing_rollout_before_migrations(
         lambda: pytest.fail("migration ran before rollout refusal"),
     )
 
-    assert _cli.cmd_start() == 1
+    assert _start_mod.cmd_start() == 1
     assert service.created == []
 
 
@@ -499,7 +500,7 @@ def test_rollout_lease_read_failure_is_before_migrations(
         lambda: pytest.fail("migration ran with unreadable rollout authority"),
     )
 
-    assert _cli.cmd_start() == 1
+    assert _start_mod.cmd_start() == 1
     assert service.created == []
 
 
@@ -529,7 +530,7 @@ def test_pending_credential_transition_replays_before_migrations(
         _git_aware(lambda *_a, **_kw: _FakeResult(returncode=0)),  # pyright: ignore[reportUnknownArgumentType]
     )
 
-    assert _cli.cmd_start() == 0
+    assert _start_mod.cmd_start() == 0
     assert order[:2] == ["resume", "migrate"]
 
 
@@ -623,7 +624,7 @@ def test_cmd_update_gateway_default_posts_rollout(
         return _Resp()
 
     monkeypatch.setattr("httpx.post", _fake_post)  # pyright: ignore[reportUnknownArgumentType]
-    rc = _cli.cmd_update()
+    rc = _update_mod.cmd_update()
     assert rc == 0
     # a human-invoked `ava cluster update` self-identifies as cli:<machine>
     assert calls[0][0] == "http://gw:8000/api/cluster/rollout"
@@ -650,7 +651,7 @@ def test_cmd_update_local_forces_in_process_orchestration(monkeypatch: pytest.Mo
         "_run_gateway_orchestration",
         lambda *_a, **_kw: ran.append(True) or 0,  # pyright: ignore[reportUnknownArgumentType]
     )
-    rc = _cli.cmd_update(local=True)
+    rc = _update_mod.cmd_update(local=True)
     assert rc == 0
     assert ran == [True]
 
@@ -684,12 +685,12 @@ def test_cmd_update_rollout_conflict_and_noop_are_friendly(
         "httpx.post",
         lambda *_a, **_kw: _Resp(409, "deploy already in flight"),  # pyright: ignore[reportUnknownArgumentType]
     )
-    assert _cli.cmd_update() == 1
+    assert _update_mod.cmd_update() == 1
     assert "deploy already in flight" in capsys.readouterr().err
 
     monkeypatch.setattr(
         "httpx.post",
         lambda *_a, **_kw: _Resp(422, "already up to date"),  # pyright: ignore[reportUnknownArgumentType]
     )
-    assert _cli.cmd_update() == 0  # a no-op update is not a failure
+    assert _update_mod.cmd_update() == 0  # a no-op update is not a failure
     assert "already up to date" in capsys.readouterr().err

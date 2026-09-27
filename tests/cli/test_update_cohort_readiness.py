@@ -138,7 +138,7 @@ def test_dry_run_prints_readiness_before_dispatch(
     monkeypatch.setattr("shared.machine.gateway_api_base", lambda: "http://gw:8000")
     monkeypatch.setattr("httpx.post", fake_post)
 
-    from cli.commands import cmd_update
+    from cli.commands.update_dispatch import cmd_update
 
     rc = cmd_update(dry_run=True)
     assert rc == 0

@@ -28,7 +28,8 @@ from pathlib import Path
 import psutil
 import pytest
 
-from cli import commands as _cli
+from cli.commands import stop as _stop_mod
+from cli.commands import update_dispatch as _update_mod
 from shared.paths import run_dir
 from shared.proc import _ORCHESTRATION_SESSIONS
 from shared.session_record import SessionRecord
@@ -133,7 +134,7 @@ def test_in_process_legs_refused_inside_supervised_session(
     write_session_record(_HOSTING_SESSION)
     _stub_all_legs(monkeypatch)
 
-    rc = _cli.cmd_update(local=local, restart_only=restart_only)
+    rc = _update_mod.cmd_update(local=local, restart_only=restart_only)
 
     assert rc == 2
     err = capsys.readouterr().err
@@ -161,7 +162,7 @@ def test_restart_only_posts_even_inside_supervised_session(
     monkeypatch.setattr("shared.machine.gateway_api_base", lambda: "http://gw:8000")
     monkeypatch.setattr("httpx.post", lambda *_a, **_k: _Resp())  # pyright: ignore[reportUnknownArgumentType]
 
-    assert _cli.cmd_update(restart_only=True) == 0
+    assert _update_mod.cmd_update(restart_only=True) == 0
 
 
 def test_local_restart_only_runs_gateway_orchestration_without_posting(
@@ -196,12 +197,15 @@ def test_local_restart_only_runs_gateway_orchestration_without_posting(
 
     monkeypatch.setattr(update, "_run_gateway_orchestration", _capture)
     monkeypatch.setattr(
-        "cli.commands._update_dispatch._post_cluster_restart",
+        "cli.commands.update_dispatch._post_cluster_restart",
         _fail_if_called("the gateway restart POST"),
     )
 
     assert (
-        _cli.cmd_update(local=True, restart_only=True, origin="detached:restart", mode="force") == 0
+        _update_mod.cmd_update(
+            local=True, restart_only=True, origin="detached:restart", mode="force"
+        )
+        == 0
     )
     assert captured == {
         "repo": tmp_path,
@@ -222,7 +226,7 @@ def test_ancestor_lineage_is_walked_not_just_self(
     write_session_record(_HOSTING_SESSION, pid=os.getppid())
     _stub_all_legs(monkeypatch)
 
-    assert _cli.cmd_update(local=True) == 2
+    assert _update_mod.cmd_update(local=True) == 2
 
 
 def _stub_in_process_gateway_leg(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -256,7 +260,7 @@ def test_detached_orchestration_sessions_are_exempt(
     write_session_record(session)
     _stub_in_process_gateway_leg(monkeypatch, tmp_path)
 
-    assert _cli.cmd_update(local=True) == 0
+    assert _update_mod.cmd_update(local=True) == 0
 
 
 def test_detached_rollout_dry_run_session_is_exempt(
@@ -268,7 +272,7 @@ def test_detached_rollout_dry_run_session_is_exempt(
     write_session_record("ava-rollout-dryrun")
     _stub_in_process_gateway_leg(monkeypatch, tmp_path)
 
-    assert _cli.cmd_update(local=True, dry_run=True) == 0
+    assert _update_mod.cmd_update(local=True, dry_run=True) == 0
 
 
 def test_stale_record_of_a_recycled_pid_does_not_refuse(
@@ -281,7 +285,7 @@ def test_stale_record_of_a_recycled_pid_does_not_refuse(
     write_session_record(_HOSTING_SESSION, create_time=1.0)
     _stub_in_process_gateway_leg(monkeypatch, tmp_path)
 
-    assert _cli.cmd_update(local=True) == 0
+    assert _update_mod.cmd_update(local=True) == 0
 
 
 def test_record_missing_create_time_fails_open_by_design(
@@ -302,7 +306,7 @@ def test_record_missing_create_time_fails_open_by_design(
     path.write_text(json.dumps({"pid": os.getpid(), "cmd": "t", "cwd": ".", "started_at": 0.0}))
     try:
         _stub_in_process_gateway_leg(monkeypatch, tmp_path)
-        assert _cli.cmd_update(local=True) == 0
+        assert _update_mod.cmd_update(local=True) == 0
     finally:
         path.unlink(missing_ok=True)
 
@@ -327,7 +331,7 @@ def test_restart_refused_inside_supervised_session(
     )
     monkeypatch.setattr(stop, "_do_stop", _fail_if_called("_do_stop"))
 
-    rc = _cli.cmd_restart()
+    rc = _stop_mod.cmd_restart()
 
     assert rc == RESTART_DECLINED_EXIT_CODE
     assert _HOSTING_SESSION in capsys.readouterr().err
@@ -363,7 +367,7 @@ def test_restart_proceeds_when_windows_stop_would_spare_its_lineage(
     monkeypatch.setattr(start, "_cmd_start_body", _success)
 
     assert hosting_supervised_session() is None
-    assert _cli.cmd_restart() == 0
+    assert _stop_mod.cmd_restart() == 0
     assert "refusing restart" not in capsys.readouterr().err
 
 
@@ -390,7 +394,7 @@ def test_restart_refuses_when_the_service_tree_would_not_spare_its_lineage(
     )
     monkeypatch.setattr(stop, "_do_stop", _fail_if_called("_do_stop"))
 
-    assert _cli.cmd_restart() == RESTART_DECLINED_EXIT_CODE
+    assert _stop_mod.cmd_restart() == RESTART_DECLINED_EXIT_CODE
     assert _HOSTING_SESSION in capsys.readouterr().err
 
 
@@ -448,7 +452,7 @@ def test_in_process_legs_refused_inside_an_exec_domain(
     monkeypatch.setattr("shared.proc.hosting_exec_domain", lambda: "agent.exec_child")
     _stub_all_legs(monkeypatch)
 
-    rc = _cli.cmd_update(local=local, restart_only=restart_only)
+    rc = _update_mod.cmd_update(local=local, restart_only=restart_only)
 
     assert rc == 2
     err = capsys.readouterr().err
@@ -479,7 +483,7 @@ def test_restart_refused_inside_an_exec_domain(
     )
     monkeypatch.setattr(stop, "_do_stop", _fail_if_called("_do_stop"))
 
-    assert _cli.cmd_restart() == RESTART_DECLINED_EXIT_CODE
+    assert _stop_mod.cmd_restart() == RESTART_DECLINED_EXIT_CODE
     err = capsys.readouterr().err
     assert "execute_code" in err
     assert "ava.shell.run_background" in err

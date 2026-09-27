@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from cli import commands as _cli
+from cli.commands.cluster import control as _cli
 from tests.cli._commands_helpers import _fake_session_backends as _fake_session_backends
 from tests.cli._commands_helpers import _FakeResponse
 from tests.cli._commands_helpers import _hermetic_gateway_base as _hermetic_gateway_base

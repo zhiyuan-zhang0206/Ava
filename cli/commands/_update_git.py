@@ -3,9 +3,8 @@
 Split out of `cli/commands/update.py` to keep that module within the file-size
 budget. `ava cluster update` runs git in a detached subprocess spawned by the gateway;
 that child is what imports these helpers — the agent SDK path does not call them
-directly. Re-imported by `cli/commands/update.py` (and re-exported through
-`cli.commands`) so existing `cli.commands.git_pull_main` /
-`cli.commands.update.git_pull_main` references keep resolving.
+directly. Re-imported by `cli/commands/update.py`, whose `git_pull_main` is the
+seam `_update_local` and its tests go through.
 """
 
 from __future__ import annotations
@@ -588,7 +587,7 @@ def snapshot_pre_update_data(target_sha: str) -> Path | None:
     reclaimed as before. The lock wait is bounded by that same timeout —
     expiry raises `LockTimeoutError`.
     """
-    from cli.commands._cluster_rollback import _migration_set_at_commit
+    from cli.commands.cluster_rollback import _migration_set_at_commit
 
     if _migration_set_at_commit(target_sha) == current_schema_state():
         return None

@@ -52,7 +52,7 @@ def _h_cluster_update(args: argparse.Namespace) -> int:
             )
             return 2
 
-    from cli.commands import cmd_update
+    from cli.commands.update_dispatch import cmd_update
 
     return cmd_update(
         restart_only=args.restart_only,
@@ -68,91 +68,91 @@ def _h_cluster_update(args: argparse.Namespace) -> int:
 
 
 def _h_cluster_status(_args: argparse.Namespace) -> int:
-    from cli.commands import cmd_cluster_status
+    from cli.commands.cluster.control import cmd_cluster_status
 
     return cmd_cluster_status()
 
 
 def _h_cluster_mark_staging(args: argparse.Namespace) -> int:
-    from cli.commands import cmd_cluster_mark_staging
+    from cli.commands.cluster.control import cmd_cluster_mark_staging
 
     return cmd_cluster_mark_staging(name=args.name, is_staging=args.is_staging)
 
 
 def _h_cluster_restart(_args: argparse.Namespace) -> int:
-    from cli.commands import cmd_cluster_restart
+    from cli.commands.cluster.control import cmd_cluster_restart
 
     return cmd_cluster_restart()
 
 
 def _h_cluster_pause(args: argparse.Namespace) -> int:
-    from cli.commands import cmd_cluster_pause
+    from cli.commands.cluster.control import cmd_cluster_pause
 
     return cmd_cluster_pause(name=args.name, reason=args.reason)
 
 
 def _h_cluster_resume(args: argparse.Namespace) -> int:
-    from cli.commands import cmd_cluster_resume
+    from cli.commands.cluster.control import cmd_cluster_resume
 
     return cmd_cluster_resume(name=args.name)
 
 
 def _h_cluster_recover(_args: argparse.Namespace) -> int:
-    from cli.commands import cmd_cluster_recover
+    from cli.commands.cluster.recover import cmd_cluster_recover
 
     return cmd_cluster_recover()
 
 
 def _h_cluster_recover_pending(args: argparse.Namespace) -> int:
-    from cli.commands import cmd_cluster_recover_pending
+    from cli.commands.cluster.recover_pending import cmd_cluster_recover_pending
 
     return cmd_cluster_recover_pending(pre_stop=bool(args.pre_stop))
 
 
 def _h_cluster_cancel(_args: argparse.Namespace) -> int:
-    from cli.commands import cmd_cluster_cancel
+    from cli.commands.cluster.cancel import cmd_cluster_cancel
 
     return cmd_cluster_cancel()
 
 
 def _h_cluster_pitr_activate(args: argparse.Namespace) -> int:
-    from cli.commands import cmd_pitr_activate
+    from cli.commands.data_plane.pitr_activation import cmd_pitr_activate
 
     return cmd_pitr_activate(origin=args.origin)
 
 
 def _h_cluster_pitr_status(_args: argparse.Namespace) -> int:
-    from cli.commands import cmd_pitr_status
+    from cli.commands.data_plane.pitr_activation import cmd_pitr_status
 
     return cmd_pitr_status()
 
 
 def _h_cluster_pitr_rollback(args: argparse.Namespace) -> int:
-    from cli.commands import cmd_pitr_rollback
+    from cli.commands.data_plane.pitr_activation import cmd_pitr_rollback
 
     return cmd_pitr_rollback(continuation=args.continuation)
 
 
 def _h_cluster_ls(_args: argparse.Namespace) -> int:
-    from cli.commands import cmd_cluster_ls
+    from cli.commands.cluster.registry import cmd_cluster_ls
 
     return cmd_cluster_ls()
 
 
 def _h_cluster_down(args: argparse.Namespace) -> int:
-    from cli.commands import cmd_cluster_down
+    from cli.commands.cluster.registry import cmd_cluster_down
 
     return cmd_cluster_down(path=args.path)
 
 
 def _h_cluster_destroy(args: argparse.Namespace) -> int:
-    from cli.commands import cmd_cluster_destroy
+    from cli.commands.cluster.registry import cmd_cluster_destroy
 
     return cmd_cluster_destroy(path=args.path, drop_db=args.drop_db)
 
 
 def _h_cluster_health_probe(args: argparse.Namespace) -> int:
-    from cli.commands import cmd_health_probe
+    from cli.commands.cluster.health import cmd_health_probe
 
     return cmd_health_probe(
         agent_min=args.agent_min,
@@ -166,13 +166,13 @@ def _h_cluster_health_probe(args: argparse.Namespace) -> int:
 
 
 def _h_cluster_ensure_db_role(_args: argparse.Namespace) -> int:
-    from cli.commands import cmd_ensure_db_role
+    from cli.commands.data_plane.ensure_db_role import cmd_ensure_db_role
 
     return cmd_ensure_db_role()
 
 
 def _h_cluster_rollback(args: argparse.Namespace) -> int:
-    from cli.commands import cmd_rollback
+    from cli.commands.cluster_rollback import cmd_rollback
 
     return cmd_rollback(
         to=args.to,
@@ -183,7 +183,7 @@ def _h_cluster_rollback(args: argparse.Namespace) -> int:
 
 
 def _h_cluster_health_probe_register(args: argparse.Namespace) -> int:
-    from cli.commands import cmd_cron_register
+    from cli.commands.cluster.cron import cmd_cron_register
 
     return cmd_cron_register(
         interval_s=args.interval,
@@ -192,49 +192,49 @@ def _h_cluster_health_probe_register(args: argparse.Namespace) -> int:
 
 
 def _h_cluster_health_probe_unregister(_args: argparse.Namespace) -> int:
-    from cli.commands import cmd_cron_unregister
+    from cli.commands.cluster.cron import cmd_cron_unregister
 
     return cmd_cron_unregister()
 
 
 def _h_cluster_watchdog_probe(args: argparse.Namespace) -> int:
-    from cli.commands import cmd_watchdog_probe
+    from cli.commands.cluster.watchdog_probe import cmd_watchdog_probe
 
     return cmd_watchdog_probe(args.role)
 
 
 def _h_cluster_watchdog_probe_register(args: argparse.Namespace) -> int:
-    from cli.commands import cmd_watchdog_probe_register
+    from cli.commands.cluster.watchdog_probe import cmd_watchdog_probe_register
 
     return cmd_watchdog_probe_register(args.role)
 
 
 def _h_cluster_watchdog_probe_unregister(args: argparse.Namespace) -> int:
-    from cli.commands import cmd_watchdog_probe_unregister
+    from cli.commands.cluster.watchdog_probe import cmd_watchdog_probe_unregister
 
     return cmd_watchdog_probe_unregister(args.role)
 
 
 def _h_cluster_hold_watchdog(_args: argparse.Namespace) -> int:
-    from cli.commands import cmd_hold_watchdog
+    from cli.commands.cluster.hold_watchdog import cmd_hold_watchdog
 
     return cmd_hold_watchdog()
 
 
 def _h_cluster_hold_watchdog_register(_args: argparse.Namespace) -> int:
-    from cli.commands import cmd_hold_watchdog_register
+    from cli.commands.cluster.hold_watchdog import cmd_hold_watchdog_register
 
     return cmd_hold_watchdog_register()
 
 
 def _h_cluster_hold_watchdog_unregister(_args: argparse.Namespace) -> int:
-    from cli.commands import cmd_hold_watchdog_unregister
+    from cli.commands.cluster.hold_watchdog import cmd_hold_watchdog_unregister
 
     return cmd_hold_watchdog_unregister()
 
 
 def _h_cluster_boot_unit_install(args: argparse.Namespace) -> int:
-    from cli.commands import cmd_boot_unit_install
+    from cli.commands.cluster.boot_unit import cmd_boot_unit_install
 
     return cmd_boot_unit_install(
         enable=not args.no_enable,
@@ -244,13 +244,13 @@ def _h_cluster_boot_unit_install(args: argparse.Namespace) -> int:
 
 
 def _h_cluster_boot_unit_uninstall(_args: argparse.Namespace) -> int:
-    from cli.commands import cmd_boot_unit_uninstall
+    from cli.commands.cluster.boot_unit import cmd_boot_unit_uninstall
 
     return cmd_boot_unit_uninstall()
 
 
 def _h_cluster_boot_unit_status(_args: argparse.Namespace) -> int:
-    from cli.commands import cmd_boot_unit_status
+    from cli.commands.cluster.boot_unit import cmd_boot_unit_status
 
     return cmd_boot_unit_status()
 

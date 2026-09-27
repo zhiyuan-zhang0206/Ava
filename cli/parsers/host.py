@@ -16,7 +16,7 @@ def _h_start(args: argparse.Namespace) -> int:
     # The installed-home gate already ran in main() (cli.preflight, settings-free,
     # BEFORE this handler's cli.commands import can trip a generic Settings
     # validation error on an uninstalled home).
-    from cli.commands import cmd_start
+    from cli.commands.start import cmd_start
 
     return cmd_start(
         machine_name=args.machine_name,
@@ -34,7 +34,7 @@ def _h_start(args: argparse.Namespace) -> int:
 
 
 def _h_stop(args: argparse.Namespace) -> int:
-    from cli.commands import cmd_stop
+    from cli.commands.stop import cmd_stop
 
     return cmd_stop(
         keep_infra=args.keep_infra,
@@ -55,7 +55,7 @@ def _h_pause(args: argparse.Namespace) -> int:
 
 
 def _h_restart(args: argparse.Namespace) -> int:
-    from cli.commands import cmd_restart
+    from cli.commands.stop import cmd_restart
 
     return cmd_restart(
         quiesce=args.quiesce,
@@ -65,31 +65,31 @@ def _h_restart(args: argparse.Namespace) -> int:
 
 
 def _h_status(_args: argparse.Namespace) -> int:
-    from cli.commands import cmd_status
+    from cli.commands.status import cmd_status
 
     return cmd_status()
 
 
 def _h_converge(_args: argparse.Namespace) -> int:
-    from cli.commands import cmd_converge
+    from cli.commands.converge.host import cmd_converge
 
     return cmd_converge()
 
 
 def _h_firewall_status(_args: argparse.Namespace) -> int:
-    from cli.commands import cmd_firewall_status
+    from cli.commands.converge.firewall_command import cmd_firewall_status
 
     return cmd_firewall_status()
 
 
 def _h_firewall_sync(_args: argparse.Namespace) -> int:
-    from cli.commands import cmd_firewall_sync
+    from cli.commands.converge.firewall_command import cmd_firewall_sync
 
     return cmd_firewall_sync()
 
 
 def _h_trace_ship(args: argparse.Namespace) -> int:
-    from cli.commands import cmd_trace_ship
+    from cli.commands.observability.trace import cmd_trace_ship
 
     return cmd_trace_ship(since=args.since, until=args.until, dry_run=args.dry_run)
 
@@ -317,14 +317,14 @@ def _add_firewall_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser
 
 
 def _h_lgtm(args: argparse.Namespace) -> int:
-    from cli.commands import cmd_lgtm_off, cmd_lgtm_on, cmd_lgtm_status
+    from cli.commands.observability.lgtm import cmd_lgtm_off, cmd_lgtm_on, cmd_lgtm_status
 
     if args.lgtm_cmd == "on":
         return cmd_lgtm_on()
     if args.lgtm_cmd == "off":
         return cmd_lgtm_off()
     if args.lgtm_cmd == "render":
-        from cli.commands import cmd_grafana_render
+        from cli.commands.observability.grafana_render import cmd_grafana_render
 
         return cmd_grafana_render(force=args.force, repo_only=args.repo_only)
     return cmd_lgtm_status()

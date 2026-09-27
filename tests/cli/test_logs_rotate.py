@@ -154,8 +154,8 @@ def test_native_scope_excludes_grafana_archives_symlinks_and_nested_files(
 def test_logs_path_flag_reaches_the_command(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from cli import commands
     from cli import main as cli_main
+    from cli.commands.observability import logs as commands
 
     seen: list[dict[str, object]] = []
 

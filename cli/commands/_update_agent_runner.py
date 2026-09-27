@@ -3,9 +3,8 @@
 Split out of `cli/commands/update.py` to keep that module within the file-size
 budget. This is the in-process self-update an *operator* triggers with `ava cluster update`
 on an agent-runner (the rollout's Phase B uses the detached `spawn_update` shell
-instead). Re-imported by `cli/commands/update.py` (and re-exported through
-`cli.commands`) so `cli.commands(.update)._run_agent_runner_self_update` keeps
-resolving for the dispatch in `cmd_update` and the test seams.
+instead). Re-imported by `cli/commands/update.py`, so
+`cli.commands.update._run_agent_runner_self_update` resolves as well.
 """
 
 from __future__ import annotations

@@ -21,7 +21,6 @@ from pathlib import Path
 
 import pytest
 
-import cli.commands as _ns
 from cli.commands import _update_orchestration as orch
 from shared.exit_codes import RESTART_DECLINED_EXIT_CODE
 from shared.platform import IS_WINDOWS
@@ -179,7 +178,7 @@ def test_declined_restart_reports_its_own_exit_code(monkeypatch: pytest.MonkeyPa
     monkeypatch.setattr(stop, "_do_stop", lambda *_a, **_k: stopped.append(True) or 0)  # type: ignore[func-returns-value]
     monkeypatch.setattr(stop, "_release_self_heal_pause", lambda: None)
 
-    assert _ns.cmd_restart() == RESTART_DECLINED_EXIT_CODE
+    assert stop.cmd_restart() == RESTART_DECLINED_EXIT_CODE
     assert stopped == []  # validate-before-kill: nothing was taken down
 
 
@@ -199,7 +198,7 @@ def test_failed_restart_after_the_stop_is_not_reported_as_declined(
     monkeypatch.setattr(stop, "_do_stop", lambda *_a, **_k: 0)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(start, "_cmd_start_body", lambda **_k: 1)  # pyright: ignore[reportUnknownArgumentType]
 
-    rc = _ns.cmd_restart()
+    rc = stop.cmd_restart()
     assert rc != 0
     assert rc != RESTART_DECLINED_EXIT_CODE
 
