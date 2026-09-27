@@ -2,7 +2,7 @@
 #
 # NOT part of the supported bring-up: no Python code reads this file, and
 # `ava start` never invokes it. The supported data plane is native per-cluster
-# pg/redis under $AVA_HOME (cli/commands/_cluster_instance.py).
+# pg/redis under $AVA_HOME (cli/commands/cluster_instance.py).
 #
 # This is a hand-run convenience for ONE case: a gateway inside WSL2 on Windows
 # hardware, where you would rather not apt-install pg/redis into the distro.
