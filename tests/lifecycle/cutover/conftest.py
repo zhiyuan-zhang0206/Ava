@@ -34,6 +34,7 @@ import pytest
 from scripts.cutover_legacy_jobs import Host
 from shared.cluster import home_slug
 from shared.port_block import PORT_OFFSETS
+from shared.session_env import normalize_service_path
 
 CANARY = "canary-3f9a-never-printed"
 MACHINE_KEY = "OPENAI_API_KEY"
@@ -407,7 +408,12 @@ def build_legacy_home(root: Path, roles: tuple[str, ...], platform: str) -> Lega
     return legacy
 
 
-SERVICE_PATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+# The reviewed --service-path must already be normalized (admit_service_path).
+# On a usrmerge Linux /bin and /sbin resolve to /usr/bin and /usr/sbin, so the
+# raw macOS-shaped list is not; normalize it on the host running the suite.
+SERVICE_PATH = normalize_service_path(
+    "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+)
 
 
 @pytest.fixture
