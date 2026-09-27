@@ -133,18 +133,6 @@ def _env_pair(value: str) -> str:
 
 
 def _add_mcp_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
-    from cli.main import (
-        _h_mcp_add,
-        _h_mcp_disable,
-        _h_mcp_enable,
-        _h_mcp_install,
-        _h_mcp_list,
-        _h_mcp_remove,
-        _h_mcp_serve,
-        _h_mcp_uninstall,
-        _h_mcp_upgrade,
-    )
-
     # `ava mcp` — manage MCP servers: install/uninstall out-of-core packages
     # (under $AVA_HOME/mcps/) and edit the machine config ($AVA_HOME/mcp.json,
     # the cross-vendor `mcpServers` shape Claude Code / Codex also consume).
@@ -243,8 +231,6 @@ def _add_memory_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser])
     refresh       Trigger gateway memory index refresh
     search        Search indexed memory with relative-path results
     """
-    from cli.main import _h_memory_init, _h_memory_refresh, _h_memory_search
-
     memory_p = sub.add_parser("memory", help="memory pool operations")
     memory_sub = memory_p.add_subparsers(dest="memory_cmd", required=True)
 

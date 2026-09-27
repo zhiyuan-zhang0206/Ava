@@ -32,6 +32,8 @@ import pytest
 import cli.commands as _cli
 from cli.commands import start as _start_mod
 from cli.commands._repo import ServiceSpec
+from cli.main import _build_parser
+from cli.parsers.host import _h_start
 from ops.service_spec import _GATEWAY
 from shared.exit_codes import RESTART_DECLINED_EXIT_CODE, SERVICES_NOT_READY_EXIT_CODE
 
@@ -523,8 +525,6 @@ def test_live_update_lease_waives_the_gate_on_a_gateway(
     _probes(monkeypatch, ready=set())
     monkeypatch.setattr(_start_mod, "_update_in_flight", lambda: True)
 
-    from cli.main import _build_parser, _h_start
-
     # The old orchestrator's argv, verbatim (`cli/commands/update.py` at 7e571b4).
     rc = _h_start(_build_parser().parse_args(["start", "--persist-services"]))
 
@@ -610,11 +610,7 @@ def test_cli_flag_reaches_cmd_start(monkeypatch: pytest.MonkeyPatch) -> None:
         _start,
     )
 
-    from cli.main import _build_parser
-
     parser = _build_parser()
-    from cli.main import _h_start
-
     _h_start(parser.parse_args(["start"]))
     _h_start(parser.parse_args(["start", "--no-readiness-gate"]))
     _h_start(parser.parse_args(["start", "--updater-telemetry"]))
@@ -672,7 +668,6 @@ def test_boot_start_under_the_gate_off_flag_exits_zero_when_a_service_is_down(
     Asserted through `cmd_start` rather than reasoned about, because the whole risk of
     this change is a boot loop that never ends."""
     from cli.boot_retry import _start_command
-    from cli.main import _build_parser, _h_start
 
     _roster(monkeypatch, (("gateway", None),))
     _probes(monkeypatch, ready=set())

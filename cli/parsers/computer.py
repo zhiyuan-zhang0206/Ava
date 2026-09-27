@@ -17,8 +17,6 @@ def _h_computer_release(args: argparse.Namespace) -> int:
 
 
 def _add_computer_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
-    from cli.main import _h_computer_release
-
     # `ava computer` — operator commands for the computer-use daemon (the
     # per-machine MCP service that drives the shared desktop).
     computer_p = sub.add_parser(
