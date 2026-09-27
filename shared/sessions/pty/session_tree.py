@@ -166,23 +166,25 @@ class _Table(NamedTuple):
 
 
 def _scan() -> _Table:
-    """Session id per pid, then parent pid per pid.
+    """Parent pid per pid, then session id per pid.
 
-    The session ids come first, from a bare getsid(2) per pid, newest pids
-    first: a fork-and-exit chain's current hop is the newest process and lives
-    a few milliseconds, so it is read while it exists far more often than
-    behind a full psutil pass over hundreds of processes.
+    The session ids come last, from a bare getsid(2) per pid, newest pids
+    first. A fork-and-exit chain's current hop is the newest process and
+    lives a few milliseconds: read this way it still exists, and the pass
+    pins (and in a kill, freezes) it about a millisecond later instead of
+    after a full psutil pass over hundreds of processes. The parent map is
+    that much older, which costs nothing: every pin re-reads its parent.
     """
     started = time.monotonic()
-    sessions: dict[int, int] = {}
-    for pid in sorted(psutil.pids(), reverse=True):
-        with contextlib.suppress(OSError):
-            sessions[pid] = os.getsid(pid)
     parents: dict[int, int] = {}
     for proc in psutil.process_iter(["ppid"]):
         ppid = proc.info["ppid"]
         if isinstance(ppid, int):
             parents[proc.pid] = ppid
+    sessions: dict[int, int] = {}
+    for pid in sorted(psutil.pids(), reverse=True):
+        with contextlib.suppress(OSError):
+            sessions[pid] = os.getsid(pid)
     return _Table(parents, sessions, started)
 
 

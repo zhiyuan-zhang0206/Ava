@@ -393,19 +393,29 @@ def test_stop_kills_a_helper_its_job_forks_on_term_and_orphans(
 
 
 @pytest.mark.flaky
-@pytest.mark.parametrize(("hop_ms", "hops"), [(3, 60), (8, 40), (10, 150)])
+@pytest.mark.parametrize(
+    ("hop_ms", "hops", "grace_s"), [(3, 60, 2.0), (8, 40, 2.0), (10, 150, 2.0), (10, 150, 0.5)]
+)
 def test_stop_kills_the_last_hop_of_a_fork_chain_started_on_term(
-    hop_ms: int, hops: int, home: Path, monkeypatch: pytest.MonkeyPatch, pty_reaper: PtyReaper
+    hop_ms: int,
+    hops: int,
+    grace_s: float,
+    home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    pty_reaper: PtyReaper,
 ) -> None:
     """A TERM handler starts a chain of processes that each fork the next and
     exit within a few ms — too short for a full process-table pass to read one
     alive. While the session still holds a process the grace keeps polling, a
-    proven pass that reads a hop keeps the proof current, and the chain's last
-    hop dies with the stop (10 ms x 150 runs past the proof's first second)."""
+    proven pass that reads a hop keeps the proof current, and no part of the
+    chain outlives the stop: it either reached its last hop, which dies with
+    the stop, or the stop cut it short. 10 ms x 150 runs past the proof's first
+    second; with a 0.5 s grace it is still forking when the kill starts, whose
+    freeze passes must stop a hop before it forks on."""
     dependencies(monkeypatch)
     terminal = PtySessionBackend()
     _stop_env(monkeypatch, home, terminal)
-    monkeypatch.setattr(command, "_TERMINAL_STOP_GRACE_S", 2.0)
+    monkeypatch.setattr(command, "_TERMINAL_STOP_GRACE_S", grace_s)
     (home / "machine_name").write_text("test-host")
     name = "ava-agent-987-shell-2048-chain"
     pidfile = home / "last.pid"
@@ -423,14 +433,13 @@ def test_stop_kills_the_last_hop_of_a_fork_chain_started_on_term(
     assert ready.exists(), "the job never installed its TERM handler"
 
     assert entry.cmd_stop(require_confirmation=False, keep_infra=True, timeout=12) == 0
-    deadline = time.monotonic() + 5
-    while time.monotonic() < deadline and not pidfile.exists():
-        time.sleep(0.05)
-    assert pidfile.exists(), "the chain never reached its last hop"
-    last = int(pidfile.read_text(encoding="utf-8"))
-    with contextlib.suppress(psutil.NoSuchProcess):
-        pty_reaper.track(psutil.Process(last))
-    assert _wait_exit(last, timeout=5), "the chain's last hop outlived a stop that succeeded"
+    # Wait out the chain's own run: a chain that escaped always has a live hop
+    # (each hop forks the next before it exits), or has reached its last one.
+    time.sleep(hops * hop_ms / 1000 + 1.0)
+    left = _running(script)
+    assert not left, f"part of the chain outlived a stop that succeeded: {left}"
+    if pidfile.exists():
+        assert _wait_exit(int(pidfile.read_text(encoding="utf-8")), timeout=5)
     assert len(_notice_files(home)) == 1
 
 
@@ -507,6 +516,15 @@ def test_a_terminal_left_after_the_closure_fails_the_stop_in_its_own_words(
     assert name in message
     assert "will not kill" not in message
     assert excinfo.value.stage == "terminals"
+
+
+def _running(script: Path) -> list[int]:
+    """Live processes running `script` (a job and every fork of it carry it on argv)."""
+    return [
+        process.pid
+        for process in psutil.process_iter(["cmdline"])
+        if str(script) in (process.info["cmdline"] or ()) and not _has_exited(process)
+    ]
 
 
 def _notice_files(home: Path) -> list[Path]:

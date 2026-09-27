@@ -66,10 +66,11 @@ The stop keeps its proof current while it waits:
   (`session_tree.refresh`), adding new descendants and proven session members.
   A capture nothing can prove any more is still scanned, so a process left in
   its session is logged.
-- The scan reads session ids first, with a bare `getsid` per pid, newest pids
+- The scan reads session ids last, with a bare `getsid` per pid, newest pids
   first. A fork-and-exit chain's current hop is the newest process and lives a
-  few milliseconds, so it is read while it exists; behind a full psutil pass
-  over some 800 processes it was already gone.
+  few milliseconds. Read this way it still exists, and the pass pins it (in a
+  kill, freezes it) about a millisecond later. Read inside a full psutil pass
+  over some 800 processes, it was already gone.
 - A poll is quiet only when its scan read no process in the session, pinned or
   not, and no captured process lives. A member can fork while that scan runs,
   so a quiet poll counts only after a second, immediate poll is quiet too.
@@ -128,9 +129,11 @@ session, and whatever outlived the SIGKILL is out of its reach too.
     keeps the grace polling until its deadline. The stop's result is unchanged
     by it.
   - A fork-and-exit chain whose hops all die before two consecutive scans
-    read any of them. Nothing logs it, because no scan saw it. Chains of
-    3 ms x 60, 8 ms x 40 and 10 ms x 150 hops are taken, and tests lock that.
-  - A chain still forking after the stop has finished.
+    read any of them. Nothing logs it, because no scan saw it.
+  - A chain whose hops keep forking on before a kill's freeze lands. Running
+    out of freeze passes is logged; a pass that misses the current hop is not.
+  - Chains of 3 ms x 60, 8 ms x 40 and 10 ms x 150 hops are taken, including
+    one still forking when the kill starts, and tests lock that.
 - **Theoretical corner.** The witness argument assumes that the shell's pid
   was not recycled onto one of the session's own descendants, which then led
   its own session and has itself already exited. That requires the whole
