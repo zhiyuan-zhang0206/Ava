@@ -42,7 +42,10 @@ while not Path(sys.argv[1]).exists():
         [sys.executable, "-I", "-B", str(script), str(release)], stdout=subprocess.PIPE, text=True
     ) as parent:
         assert parent.stdout is not None
-        child = OwnedProcess.capture(psutil.Process(int(parent.stdout.readline())))
+        # Held from capture on: once killed, the orphan's new parent may reap it
+        # before a fresh psutil.Process(pid) could be built for the cleanup wait.
+        child_process = psutil.Process(int(parent.stdout.readline()))
+        child = OwnedProcess.capture(child_process)
         leader = OwnedProcess.capture(psutil.Process(parent.pid))
         assert psutil.Process(child.pid).ppid() == leader.pid
         owner = DataOwner(
@@ -76,5 +79,5 @@ while not Path(sys.argv[1]).exists():
         finally:
             if child.live():
                 os.kill(child.pid, 9)  # exact native birth captured by this isolated test
-            psutil.wait_procs([psutil.Process(child.pid)], timeout=5)
+            psutil.wait_procs([child_process], timeout=5)
         data.stop_captured(receipt, 0.5)
