@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import subprocess
 import sys
@@ -71,7 +72,7 @@ async def test_only_explicit_route_and_authenticated_challenge_can_run() -> None
         port=0,
         health_response=lambda: (503, b'{"mode":"bootstrap_observation","full_ready":false}'),
         extra_routes={("POST", "/ops/bootstrap-observation"): observe},
-        auth_token="test-cluster-secret",  # noqa: S106 — isolated socket fixture
+        auth_digests=frozenset({hashlib.sha256(b"test-cluster-secret").hexdigest()}),
     )
     port = server.sockets[0].getsockname()[1]
     try:

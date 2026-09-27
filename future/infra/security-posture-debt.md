@@ -10,8 +10,9 @@
 
 ## Trust model (context, not debt)
 
-`AVA_CLUSTER_SECRET` (43-char high-entropy) authorizes the gateway API and ops
-RPC only. The data plane authenticates independently, whatever the bearer: the
+`AVA_CLUSTER_SECRET` (43-char high-entropy) is the gateway's human bearer;
+machine callers present their write generation's API token (the gateway and ops
+RPC admit only the current generation's). The data plane authenticates independently, whatever the bearer: the
 Postgres administrator is the OS user over the owner-only socket (`peer`), the
 schema owner is `NOLOGIN`, application processes hold only a write generation's
 class login (`$AVA_HOME/db-authority/`), and Redis has the gateway-only

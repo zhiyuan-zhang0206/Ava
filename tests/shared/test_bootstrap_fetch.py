@@ -18,10 +18,14 @@ def test_fetch_bootstrap_config_against_live_endpoint(
     monkeypatch: pytest.MonkeyPatch,
     served_gateway_home: Any,
 ) -> None:
-    # Suite runs multi-host on: the gateway requires the cluster secret, and the
-    # fetch reads it from os.environ. Set both ends so the live fetch authenticates.
+    # An authenticated gateway: the runner presents its delivered machine API
+    # token (the active generation's runner token), never the human secret.
+    from shared import runtime_config as rt
+
     monkeypatch.setattr(config.settings.data_plane, "cluster_secret", "live-secret")
-    monkeypatch.setitem(os.environ, "AVA_CLUSTER_SECRET", "live-secret")
+    monkeypatch.setattr("shared.paths.ava_home", rt._ava_home)
+    monkeypatch.setitem(os.environ, "AVA_API_TOKEN", served_gateway_home.api.runner)
+    monkeypatch.delitem(os.environ, "AVA_CLUSTER_SECRET")
 
     # Route shared.bootstrap's dial_get (shared.http_dial.get) through the
     # in-process ASGI app.
@@ -60,6 +64,9 @@ def test_fetch_bootstrap_config_against_live_endpoint(
         expected_parts.path.lstrip("/"),
     )
     assert runner.password not in "".join(values.values())
+    # Nor does it serve the human secret: a remote unit never holds it.
+    assert "AVA_CLUSTER_SECRET" not in values
+    assert "test-cluster-secret" not in "".join(values.values())
 
 
 # NOTE: shared/bootstrap.py reads os.environ directly (it must run BEFORE

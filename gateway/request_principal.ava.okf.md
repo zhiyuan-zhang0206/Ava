@@ -16,8 +16,10 @@ same stable cluster administrator; rotating a cookie does not change principal.
 No-auth mode has no verified principal. Caller/source JSON cannot bind one.
 
 Alongside that authorization principal, the middleware stores the narrower
-credential fact used for inbound audit rows: `cluster_bearer` or
-`user_session`. Scoped webhook and MCP boundaries establish their own
+credential fact used for inbound audit rows: `cluster_bearer` (the human
+secret), `machine_token:<class>` (the active write generation's machine API
+token, `cluster_credential`) or `user_session`. Both bearers authenticate the
+same cluster administrator; a revoked generation's token never matches. Scoped webhook and MCP boundaries establish their own
 `webhook:<provider>` or `mcp_client:<id>` fact after authenticating outside the
 cluster middleware. This fact does not grant authority and is never copied
 from request JSON.

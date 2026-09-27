@@ -89,7 +89,9 @@ agent onto a gateway-only node where only the scheduling/DB layer lives".
   role scope; the classification rule is in
   `conventions/python-conventions.md`.
 - Enrolling a split runner (`ava start`) does not birth a cluster — its cluster
-  identity **is** the gateway URL + cluster secret it presented.
+  identity **is** the gateway URL + the capability bundle it installed.
+- `gateway_auth_headers` presents this process's delivered machine API token
+  (`AVA_API_TOKEN`), else the gateway home's human secret; empty when open.
 
 ## Key Dependencies
 

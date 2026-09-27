@@ -34,7 +34,7 @@ are specified in [[cluster-isolation.ava.okf.md|Telemetry cluster isolation]].
 - `ava trace ship` (`cli/commands/trace.py`) — recovery replay that bypasses
   the local sidecar (replaying through it would loop the mirror watermark).
   Gateway/single-box units dial loopback Tempo; pure runners dial the gateway
-  collector's authenticated receiver with the cluster bearer.
+  collector's authenticated receiver with the telemetry token.
 - The sidecar also **scrapes** the traditional SRE layer — host, Postgres,
   Redis — into the same metrics fan-out, with no producer code involved:
   [[infra-metrics.ava.okf.md|Infrastructure metrics]].
@@ -59,7 +59,7 @@ are specified in [[cluster-isolation.ava.okf.md|Telemetry cluster isolation]].
   target: gateway/single-box → `{AVA_TELEMETRY_TEMPO_ENDPOINT}/v1/traces`
   without auth; pure runner → gateway private address on the OTLP ingress
   port (`AVA_TELEMETRY_OTLP_PORT`, default 4318) with
-  `Authorization: Bearer $AVA_CLUSTER_SECRET`. It refuses while the OTLP flag
+  `Authorization: Bearer <telemetry token>`. It refuses while the OTLP flag
   is off (one kill switch for the
   whole OTLP surface — with the sidecar architecture that also stops
   recording). Incremental (per-file byte-offset watermark
@@ -89,8 +89,8 @@ The LGTM gateway uses `AVA_TELEMETRY_TEMPO_ENDPOINT` (default loopback host
 port 14318), `AVA_TELEMETRY_LOKI_URL` and
 `AVA_TELEMETRY_PROMETHEUS_URL` as gateway-local backend URLs. Pure runners do
 not consume those loopback backend URLs: they derive the gateway collector
-ingress host from `AVA_GATEWAY_URL` and authenticate with
-`AVA_CLUSTER_SECRET`. The remote receiver exists only on a gateway with a
+ingress host from `AVA_GATEWAY_URL` and authenticate with the telemetry
+token. The remote receiver exists only on a gateway with a
 non-empty secret and an exact non-loopback `AVA_MACHINE_HOST`; combined
 single-box hosts collapse to the local receiver even when their secret is set.
 

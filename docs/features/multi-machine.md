@@ -18,9 +18,10 @@ no flag and no opt-in.
 
 Any machines that are **network-reachable to each other** form a cluster: run
 `ava start --serve-gateway --serve-agent-runner --machine-name <name>` on the
-gateway box, and, with `AVA_CLUSTER_SECRET` exported,
-`ava start --no-serve-gateway --serve-agent-runner --gateway-url <url> --machine-name <name> --machine-host <host>` on
-each runner. `ava cluster status` shows every host's running commit; release
+gateway box, and, with the capability bundle the gateway issues
+(`ava cluster db-authority issue-unit`) and its transport key exported,
+`ava start --no-serve-gateway --serve-agent-runner --gateway-url <url> --machine-name <name> --machine-host <host> --db-capability <bundle>` on
+each runner (a runner never holds the gateway's cluster secret). `ava cluster status` shows every host's running commit; release
 transitions currently act on one home at a time, and fleet-wide transitions are
 planned work ([unified cluster lifecycle](../../future/infra/unified-cluster-lifecycle.md)).
 

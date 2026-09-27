@@ -31,6 +31,25 @@ class PrincipalScopeError(ValueError):
     """The requested key scope cannot be honored before any durable write."""
 
 
+def cluster_credential(authorization: str | None, secret: str) -> str | None:
+    """The credential fact of a cluster bearer, or None when it presents none.
+
+    `cluster_bearer` for the human cluster secret; `machine_token:<class>` for
+    the ACTIVE write generation's machine API token of that class (a revoked
+    generation's token never matches: `shared.cluster.authority.api`). Both
+    authenticate the one cluster administrator; the fact only records which
+    credential did. A blank `secret` never verifies as the human bearer.
+    """
+    from shared.cluster.authority.api import acceptance, bearer_class
+    from shared.cluster_auth import verify_bearer
+    from shared.paths import ava_home
+
+    if verify_bearer(authorization, secret):
+        return "cluster_bearer"
+    cls = bearer_class(authorization, acceptance(ava_home().resolve()))
+    return None if cls is None else f"machine_token:{cls}"
+
+
 def principal_key(principal: AuthPrincipal, method: str, path: str, key: str) -> str:
     """Stable opaque key under actual credential + logical operation identity."""
     if not key or len(key) > 128:

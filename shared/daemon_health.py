@@ -283,7 +283,7 @@ async def start_health_server(
     liveness: Liveness | LivenessGroup | None = None,
     components: list[dict[str, object]] | Callable[[], list[dict[str, object]]] | None = None,
     extra: dict[str, object] | Callable[[], dict[str, object]] | None = None,
-    auth_token: str | None = None,
+    auth_digests: frozenset[str] | None = None,
 ) -> asyncio.Server:
     """Start daemon HTTP server; return server instance (caller is responsible for close).
 
@@ -310,11 +310,13 @@ async def start_health_server(
             sharing mutable response state with this server.
         extra: optional non-component health fields. As with ``components``, a
             callable is evaluated on each request.
-        auth_token: when set, every ``extra_routes`` request must carry
-            ``Authorization: Bearer <auth_token>`` or it gets 401. ``/healthz``
-            stays unauthenticated (the watchdog probes it locally and it leaks
-            no secret). The ops server passes the cluster secret here when
-            multi-host is on, so a LAN peer cannot drive /ops without it.
+        auth_digests: when set, every ``extra_routes`` request must carry
+            ``Authorization: Bearer <token>`` whose SHA-256 is one of
+            ``auth_digests``, or it gets 401. ``/healthz`` stays unauthenticated
+            (the watchdog probes it locally and it leaks no secret). The ops
+            server passes the digests of its write generation's machine API
+            tokens when its API is authenticated, so a LAN peer cannot drive
+            /ops without one; the server compares digests only.
     """
     if port is None:
         port = health_port(name)
@@ -335,7 +337,7 @@ async def start_health_server(
         port=port,
         health_response=health_response,
         extra_routes=extra_routes,
-        auth_token=auth_token,
+        auth_digests=auth_digests,
     )
 
 

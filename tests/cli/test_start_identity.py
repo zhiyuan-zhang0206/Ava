@@ -350,6 +350,9 @@ def test_config_file_cannot_choose_identity(inputs: identity.IdentityInput, key:
 _RUNNER_ENDPOINT = "postgresql://ava@remote.invalid/db"
 
 
+_FETCH_BEARERS: list[object] = []
+
+
 def _runner_start(
     inputs: identity.IdentityInput, monkeypatch: pytest.MonkeyPatch, *extra: str
 ) -> Any:
@@ -359,9 +362,11 @@ def _runner_start(
     monkeypatch.setattr(start_intent, "_checkout", lambda: inputs.checkout)
     monkeypatch.setenv("AVA_HOME", str(inputs.home))
     monkeypatch.setenv("AVA_CLUSTER_REGISTRY", str(inputs.registry))
-    monkeypatch.setenv("AVA_CLUSTER_SECRET", "runner-bearer")
+    # A remote unit joins without the human secret: its capability authenticates.
+    monkeypatch.delenv("AVA_CLUSTER_SECRET", raising=False)
 
-    def served(*_a: object, **_k: object) -> dict[str, str]:
+    def served(*_a: object, **kwargs: object) -> dict[str, str]:
+        _FETCH_BEARERS.append(kwargs.get("bearer"))
         return {"AVA_DB_URL": _RUNNER_ENDPOINT, "AVA_REDIS_URL": "redis://remote.invalid/0"}
 
     monkeypatch.setattr(bootstrap, "fetch_bootstrap_config", served)
@@ -401,6 +406,7 @@ def test_runner_without_a_capability_refuses_before_persisting(
         gateway.resolve(),
         unit=unit.UnitIdentity(machine="runner", home=str(home)),
         endpoint=_RUNNER_ENDPOINT,
+        cluster_secret="gateway-human-secret-" + "g" * 32,
         ttl_s=60,
     )
     unit.install_bundle(
@@ -410,10 +416,15 @@ def test_runner_without_a_capability_refuses_before_persisting(
         served_endpoint=_RUNNER_ENDPOINT,
         probe=lambda _dsn: None,
     )
+    _FETCH_BEARERS.clear()
     start_intent.prepare_start(args)
     env = dotenv_values(inputs.home / ".env")
     assert env["AVA_MACHINE_HOST"] == "runner.invalid"
     assert "AVA_DB_URL" not in env and "AVA_REDIS_URL" not in env
+    # The fetch authenticated with the capability's API token; no bearer persisted.
+    installed = unit.require_unit_capability(home)
+    assert installed.api is not None and [installed.api.token] == _FETCH_BEARERS
+    assert "AVA_CLUSTER_SECRET" not in env
     assert not inputs.registry.exists()
 
 

@@ -330,6 +330,31 @@ def db_delivery(cls: DbAccess) -> dict[str, str]:
     return {"AVA_DB_URL": grant.dsn(db_endpoint()), GENERATION_ENV: str(grant.number)}
 
 
+def api_delivery(cls: DbAccess) -> dict[str, str]:
+    """The launch-environment machine API token for one service of class `cls`.
+
+    Delivered only while the cluster's API is authenticated, so a delivered
+    token always means "present a bearer": a pure agent-runner delivers its
+    capability's runner token (none when the cluster is open); the gateway home
+    delivers the active generation's `cls` token while its human secret is set.
+    A remote-managed plane keeps no write generations and delivers nothing; its
+    gateway-local services present the human secret.
+    """
+    from shared.bootstrap import config_source_is_local
+    from shared.cluster.authority.api import API_TOKEN_ENV, api_token
+    from shared.paths import ava_home
+
+    if not config_source_is_local():
+        from shared.cluster.authority.unit import unit_api_delivery
+
+        if cls != "runner":
+            raise RuntimeError(f"a pure agent-runner cannot launch a {cls}-class service")
+        return unit_api_delivery(ava_home().resolve())
+    if settings.data_plane.is_remote or not settings.data_plane.cluster_secret:
+        return {}
+    return {API_TOKEN_ENV: api_token(ava_home().resolve(), cls)}
+
+
 def _ensure_pooler(rec: ClusterRecord, database: str, home: Path, generation: Generation) -> None:
     """Serve exactly `generation` through the owned pooler (restart on change)."""
     if not settings.data_plane.pgbouncer_enabled:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -64,7 +65,7 @@ async def test_actual_observation_socket_requires_fresh_authenticated_challenge(
     server = await start_daemon_http(
         host="127.0.0.1",
         port=0,
-        auth_token=token,
+        auth_digests=frozenset({hashlib.sha256(token.encode()).hexdigest()}),
         health_response=lambda: (503, b'{"mode":"bootstrap_observation","full_ready":false}'),
         extra_routes={("POST", "/ops/bootstrap-observation"): observer.respond},
     )

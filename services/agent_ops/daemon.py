@@ -78,7 +78,7 @@ from services.agent_ops import close_notices, health, outbox_flusher
 from services.agent_ops import maintenance as maintenance_activity
 from services.agent_ops._boot import (
     _open_db_pool,
-    _ops_auth_token,
+    _ops_acceptance,
     _ops_bind_host,
     _register_boot,
 )
@@ -490,12 +490,12 @@ async def _main() -> None:
     outbox_flusher.start(pool)
 
     try:
-        bind_host = _ops_bind_host()
+        # Every /ops dial presents a machine API token of this generation; an
+        # open cluster serves /ops unauthenticated on loopback.
+        acceptance = _ops_acceptance()
+        bind_host = _ops_bind_host(acceptance)
         if bind_host != "127.0.0.1":
-            verify_transport_encryption(settings.data_plane.cluster_secret, bind_host)
-        # The gateway presents the cluster secret on every /ops dial; a
-        # no-secret cluster serves /ops unauthenticated on loopback.
-        auth_token = _ops_auth_token()
+            verify_transport_encryption(bind_host, authenticated=acceptance is not None)
         server = await start_health_server(
             "ops",
             host=bind_host,
@@ -507,7 +507,7 @@ async def _main() -> None:
                     _active_ops, max(1, settings.services.ops_concurrency)
                 ),
             },
-            auth_token=auth_token,
+            auth_digests=acceptance,
         )
         _log.info(
             "ava-ops up, machine=%s serving POST /ops on %s:%d",

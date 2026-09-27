@@ -399,8 +399,8 @@ def _cmd_start_body(  # noqa: PLR0915 — cohesive linear start sequence (conver
             print(
                 f"  join an agent-runner: ava start --serve-agent-runner --no-serve-gateway --gateway-url {reachable} "
                 "--machine-name <name> --machine-host <runner-host> --db-capability <bundle> "
-                "(bundle from `ava cluster db-authority issue-unit` here; AVA_CLUSTER_SECRET and "
-                "AVA_DB_CAPABILITY_KEY set from non-echoing prompts)"
+                "(bundle from `ava cluster db-authority issue-unit` here; AVA_DB_CAPABILITY_KEY "
+                "set from a non-echoing prompt)"
             )
 
     # 8) Readiness verdict last: its exit code and printed snapshot describe the same run.

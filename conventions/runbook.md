@@ -1254,12 +1254,14 @@ selected resources. `restart` is the ordinary local pause/start path. Destroy
 retires this home's native jobs and registry reservation; `--drop-db` additionally
 removes its data directories. It refuses the default production home.
 
-A runner joins through the same first-start entry. Supply `AVA_CLUSTER_SECRET`
-and the capability bundle's `AVA_DB_CAPABILITY_KEY` without echoing them, then
-use `ava start --serve-agent-runner --no-serve-gateway --gateway-url URL
---machine-name NAME --machine-host HOST --db-capability BUNDLE` (the bundle from
-`ava cluster db-authority issue-unit` on the gateway). Bootstrap publishes no
-database credential; the runner's login is that unit-bound capability. Memory checkout initialization remains
+A runner joins through the same first-start entry. Supply the capability
+bundle's `AVA_DB_CAPABILITY_KEY` without echoing it, then use `ava start
+--serve-agent-runner --no-serve-gateway --gateway-url URL --machine-name NAME
+--machine-host HOST --db-capability BUNDLE` (the bundle from `ava cluster
+db-authority issue-unit` on the gateway). Bootstrap publishes no database
+credential and not the human secret; the runner's login, API token and
+telemetry token are that unit-bound capability, and a runner never holds
+`AVA_CLUSTER_SECRET` (a home that still records it refuses to start). Memory checkout initialization remains
 explicit through `ava memory init`.
 
 **Release-operator verbs (single host).** `ava cluster release prepare` /
@@ -1472,9 +1474,11 @@ agent-runners, and the user's own devices (laptop, phone) are **one trust
 group**. The gateway is reachable **only** over the private network — there is
 no public ingress, the gateway host has no public IP (and the earlier
 Cloudflare Tunnel was retired) — but reachability is not trust: every
-authenticated route requires the cluster secret (`AVA_CLUSTER_SECRET`, presented
-as a bearer token (agent-runner / `/api/bootstrap`
-/ `/ops`) or a signed session cookie (browser login). See
+authenticated route requires a bearer or a session cookie (browser login). A
+human or operator presents the cluster secret (`AVA_CLUSTER_SECRET`, gateway
+only); services, agents and remote units present their write generation's
+machine API token (`AVA_API_TOKEN`: the gateway admits the active
+generation's, a unit's `/ops` its own generation's). See
 [`decisions/2026-06-11-multihost-deployment.md`](../decisions/2026-06-11-multihost-deployment.md)
 (explicitly flags its own §4/§5/§9 "no auth" description as superseded history)
 and [`Credential rotation`](#credential-rotation) below for the bearer and
@@ -1523,14 +1527,20 @@ loopback.
 
 ## Credential rotation
 
-`AVA_CLUSTER_SECRET` is the control-plane bearer only: `/api/bootstrap`,
-`/ops`, gateway API requests, and machine registration. It is normally stable;
-run [`scripts/rotate_cluster_secret.py`](../scripts/rotate_cluster_secret.py)
-only after a bearer leak. Its dry-run preflights `GET /api/bootstrap` with the
-current bearer and a rejected invalid bearer. Execute stages only the new bearer
-in the gateway `.env`; restart that gateway, then push the bearer to every
-enrolled runner and restart them. It does not change Postgres, Redis, ACLs, or
-PgBouncer.
+`AVA_CLUSTER_SECRET` is the gateway's human bearer (API, frontend login); no
+remote unit holds it, and machine API tokens rotate with every write
+generation. The fleet cutover rotates it once (`scripts/cutover_db_authority.py`,
+step `api`); otherwise run
+[`scripts/rotate_cluster_secret.py`](../scripts/rotate_cluster_secret.py)
+(`--execute`) only after a bearer leak. Both first pin the logical-backup
+passphrase to `$AVA_HOME/backups/logical-backup.passphrase` — derived from the
+pre-rotation secret, so every earlier logical backup keeps decrypting — and only
+then write the new secret; each step is journaled with fingerprints, never
+secrets. **The pinned file is backup-critical material**: losing it together
+with the old secret makes every earlier logical backup unreadable; keep a copy
+with the gateway's backup keys. Restart the gateway, then issue every remote
+unit a new capability bundle (its telemetry token derives from the secret). It
+does not change Postgres, Redis, ACLs, or PgBouncer.
 
 Routine data-plane rotation is independent and uses
 [`scripts/rotate_data_plane_secrets.py`](../scripts/rotate_data_plane_secrets.py):
@@ -1613,8 +1623,9 @@ gateway collector writes traces to the Tempo selected by the host-scope
 Tempo) and logs/metrics to gateway-loopback Loki/Prometheus; a pure runner
 collector keeps the same three exporter component IDs and relays each
 signal to `AVA_GATEWAY_OTLP_ENDPOINT`, a read-only bootstrap projection of
-the gateway's reachable host and OTLP port, with
-`Authorization: Bearer $AVA_CLUSTER_SECRET`. A runner's local port never
+the gateway's reachable host and OTLP port, with `Authorization: Bearer
+<telemetry token>` (from its capability; the gateway derives the same token
+from its secret). A runner's local port never
 selects the remote port: a Windows receiver on 4318 can relay to a WSL gateway
 on 54318 without colliding in mirrored networking. Update the gateway before
 runners; a missing or invalid endpoint fails converge rather than guessing a
@@ -1813,7 +1824,7 @@ the mirror and bypasses the LOCAL sidecar, because replaying through it would
 write the replayed lines back into the mirror (watermark loop). A gateway or
 single-box unit POSTs straight to loopback
 `{AVA_TELEMETRY_TEMPO_ENDPOINT}/v1/traces` without auth; a pure runner POSTs
-to the gateway collector's private port 4318 with the cluster bearer. The
+to the gateway collector's private port 4318 with its telemetry token. The
 remote trace pipeline writes Tempo only and never the gateway mirror, avoiding
 a second copy and replay ambiguity. Needed only for gaps the queue could not
 hold (backend down longer than the queue, offline machines, past windows).

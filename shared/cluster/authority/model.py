@@ -219,12 +219,30 @@ class SecretRoles(_Record):
         return self.gateway if cls == "gateway" else self.runner
 
 
+class ApiTokens(_Record):
+    """One write generation's machine API tokens, one per class.
+
+    The gateway accepts the ACTIVE generation's tokens as HTTP bearers (a
+    revoked generation's never); a runner's ops server accepts the gateway
+    token. Machine callers present their class token from the launch
+    environment, so a stale caller loses the API with its database login.
+    """
+
+    gateway: str = Field(min_length=32, max_length=256)
+    runner: str = Field(min_length=32, max_length=256)
+
+    def of(self, cls: GenerationClass) -> str:
+        return self.gateway if cls == "gateway" else self.runner
+
+
 class GenerationSecret(_Record):
-    """``generations/<n>.json``: the only place a login password exists."""
+    """``generations/<n>.json``: the only place a login password or a machine
+    API token exists."""
 
     number: int = Field(ge=0)
     home: str
     roles: SecretRoles
+    api: ApiTokens
 
 
 @dataclass(frozen=True)

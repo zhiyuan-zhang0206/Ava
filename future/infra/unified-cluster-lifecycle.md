@@ -194,9 +194,9 @@ unit/image. Include the generation in its immutable launch proof; never swap
 credentials underneath an old environment digest. Retire the bootstrap endpoint
 that can exchange an old bearer for fresh database credentials. Offline units
 must converge before receiving current authority. The local transition does not
-yet implement this fleet delivery channel. Direct database fencing also does not
-revoke a stale caller's HTTP bearer; API admission requires its own explicit
-generation boundary before claiming complete stale-writer exclusion.
+yet implement this fleet delivery channel. Direct database fencing does not
+revoke a stale caller's HTTP bearer, so API admission has its own generation
+boundary (below).
 
 PostgreSQL and pooler connections always authenticate, even when the
 frontend/control-plane bearer is empty
@@ -213,11 +213,19 @@ delivers each service its class login bound into the launch digest, and an
 admitted operator CLI consumes the gateway login. Bootstrap serves no database
 credential; a remote agent-runner installs a sealed, unit-bound capability the
 gateway operator issues (`ava cluster db-authority issue-unit`,
-`ava start --db-capability`), carrying the active generation's runner login and
-the unit's enrollment secret
+`ava start --db-capability`), carrying the active generation's runner login,
+its API admission and the unit's enrollment secret
 ([unit capability](../../shared/cluster/authority/wiring.ava.okf.md#remote-agent-runner-units)).
+API admission is a generation boundary too: every generation carries one
+machine API token per class; the gateway admits the human secret or the ACTIVE
+generation's tokens, a unit's ops server its generation's two tokens, and the
+launcher delivers each service its class token (`AVA_API_TOKEN`) only while the
+API is authenticated. Remote units never hold the human secret (bootstrap does
+not serve it); their OTLP relay uses a telemetry token derived from it
+([API tokens](../../shared/cluster/authority/api-tokens.ava.okf.md)).
 Existing homes convert through the one-time `scripts/cutover_db_authority.py`
-(steps `redis`, `db`, and for networked homes `remote-units`;
+(steps `redis`, `db`, and for networked homes `api` — the one bearer rotation,
+after pinning the logical-backup passphrase — and `remote-units`;
 [credential split](../../conventions/data-plane-secret-split.md#convert-an-existing-home)).
 
 The unit enrollment secret (minted at a unit's first bundle: its join or the
@@ -244,8 +252,9 @@ Remaining: running that A/B/A on real images in a disposable Linux preview,
 plus a candidate-failure variant; the coordinator listener on the reserved
 port, the handoff's `receipt` and `preflight` entries, and the automated
 per-operation capability exchange, without which networked rollouts keep
-refusing; per-generation API machine tokens and runners that stop holding the
-human bearer.
+refusing. Browser sessions a managed browser minted with its runner token live
+until their TTL, not only until the generation rotates; binding them to the
+generation needs a session column.
 
 ## Remaining: qualify PITR custody and restart recovery
 

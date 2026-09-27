@@ -149,3 +149,23 @@ def db_access(spec: ServiceSpec) -> DbAccess | None:
         f"service {spec.session!r} uses the database but declares no db_access and "
         "its capabilities do not decide one"
     )
+
+
+def api_access(spec: ServiceSpec) -> DbAccess | None:
+    """The machine API token class the launcher delivers to ``spec``.
+
+    A database service's API class is its login class (``db_access``). Any
+    other service's follows its profile marker or its single capability, like
+    the login class; a service carrying both capabilities without a declared
+    class (the telemetry collector, whose relay bearer is rendered into its
+    configuration) receives no token.
+    """
+    declared = db_access(spec)
+    if declared is not None:
+        return declared
+    marker = profile_marker(spec)
+    if marker == "gateway" or (marker is None and spec.capabilities == _GATEWAY):
+        return "gateway"
+    if marker in {"runner", "agent"} or (marker is None and spec.capabilities == _AGENT_RUNNER):
+        return "runner"
+    return None

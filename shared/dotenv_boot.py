@@ -70,8 +70,10 @@ _HOME_POINTER = ".ava_home"
 _RUNNER_LOGIN = re.compile(r"ava_runner|ava_g(?:0|[1-9][0-9]*)_runner")
 
 # The non-secret launch-environment marker that makes a launcher-injected
-# AVA_DB_URL authoritative (mirrors shared.cluster.authority.GENERATION_ENV).
+# AVA_DB_URL authoritative (mirrors shared.cluster.authority.GENERATION_ENV),
+# and the delivered machine API token (shared.cluster.authority.api).
 _GENERATION_ENV = "AVA_DB_GENERATION"
+_API_TOKEN_ENV = "AVA_API_TOKEN"  # noqa: S105 — env key name, not a credential
 
 # Why this process holds no database authority, when a home with a write-
 # generation ledger delivered none to it: `shared.db_connections._guard_db_url`
@@ -432,11 +434,11 @@ def watcher_runner_env() -> dict[str, str]:
         except ValueError:
             db_host = redis_user = redis_password = None
         if db_host and redis_user not in (None, "default") and redis_password:
-            generation = os.environ.get(_GENERATION_ENV)
+            carried = (_GENERATION_ENV, _API_TOKEN_ENV)
             return {
                 "AVA_DB_URL": db_url,
                 "AVA_REDIS_URL": redis_url,
-                **({_GENERATION_ENV: generation} if generation else {}),
+                **{key: os.environ[key] for key in carried if os.environ.get(key)},
             }
 
     if _HOME.resolve() == (Path.home() / ".ava").resolve() and os.environ.get("AVA_CLUSTER_SECRET"):
@@ -563,9 +565,6 @@ def _enforce_cluster_env_authority() -> None:
     # - the per-unit health ports + the gateway URL series: host-scope facts
     #   whose dynamic values (e2e, co-located units) arrive by env alone, but
     #   whose .env declaration must still win over a leaked sibling value;
-    # - AVA_CLUSTER_SECRET: the gateway-auth credential a not-yet-enrolled
-    #   runner (or a test subprocess) supplies from env alone before its first
-    #   fetch — dropping it would silently un-configure the fetch.
     # AVA_TIMEZONE joins the never-drop family for the same reason as the
     # gateway URL series: a gateway-hosted child (the schedule runner) receives
     # it from the gateway's own spawn env, and the gateway IS the cluster's
@@ -585,9 +584,11 @@ def _enforce_cluster_env_authority() -> None:
     # wave: the tempo target flipped back to the tailnet address,
     # up{job="tempo"}=0 for ~14 min; task #3339). Declared -> force;
     # undeclared -> untouched.
+    # AVA_CLUSTER_SECRET is an ordinary cluster-scope key: only the gateway's
+    # `.env` declares it, so a remote unit drops an inherited copy (it
+    # authenticates with its capability's machine API token instead).
     _force_also = {
         "AVA_SERVICE_PATH",
-        "AVA_CLUSTER_SECRET",
         "AVA_GATEWAY_URL",
         "AVA_GATEWAY_PORT",
         "AVA_GATEWAY_HEALTH_URL",
@@ -688,8 +689,9 @@ def _deliver_operator_authority(endpoint: str | None) -> None:
 
     Processes the root launcher starts carry their class login in the launch
     environment. An operator process (the `ava` CLI, a script, an OS job) on
-    the gateway home has none; it receives the active gateway login only when
-    it runs the home's admitted runtime (`shared.cluster.authority.consume`:
+    the gateway home has none; it receives the active gateway login (and, while
+    the API is authenticated, the gateway API token) only when it runs the
+    home's admitted runtime (`shared.cluster.authority.consume`:
     the selected release image, or the source checkout the home was born
     from). A launcher-context process that arrived without a delivery, or a
     refused runtime, keeps the credential-free endpoint and records why, so its
@@ -716,8 +718,7 @@ def _deliver_operator_authority(endpoint: str | None) -> None:
     except (AuthorityRefusedError, ValueError, OSError) as exc:
         _db_authority_refusal = f"no database authority for this process: {exc}"
         return
-    os.environ["AVA_DB_URL"] = grant.dsn(endpoint)
-    os.environ[_GENERATION_ENV] = str(grant.number)
+    os.environ.update(grant.environment(endpoint, api=bool(os.environ.get("AVA_CLUSTER_SECRET"))))
 
 
 def _keeps_undeclared_db_url(value: str | None) -> bool:
@@ -738,8 +739,9 @@ def is_delivered_unit_login() -> bool:
 
 
 def deliver_unit_authority() -> None:
-    """Give a pure agent-runner process its database login after the bootstrap
-    fetch, which serves only the credential-free endpoint.
+    """Give a pure agent-runner process its database login and API token before
+    the bootstrap fetch (which serves only the credential-free endpoint and
+    authenticates with that token).
 
     A launcher delivery of this home's installed capability is kept. An
     operator process (the `ava` CLI, a script) with no launcher context
@@ -769,6 +771,8 @@ def deliver_unit_authority() -> None:
         return
     os.environ["AVA_DB_URL"] = capability.dsn
     os.environ[_GENERATION_ENV] = str(capability.generation.number)
+    if capability.api is not None:
+        os.environ[_API_TOKEN_ENV] = capability.api.token
 
 
 def db_authority_refusal() -> str | None:

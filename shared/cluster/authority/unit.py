@@ -22,6 +22,11 @@ refusing until the automated exchange exists.
 - The unit's root launcher delivers that login per service
   (`unit_delivery`), an admitted operator process consumes it
   (`consume_unit`), and the launch digest binds its non-secret reference.
+- When the issuing gateway's API is authenticated (a non-empty human secret)
+  the capability also carries the unit's API admission (`UnitApi`): the
+  generation's runner API token its services present, the digest of the
+  gateway token its ops server accepts, and the telemetry relay token. The
+  unit never holds the human cluster secret.
 
 The enrollment secret is the unit's durable identity toward the gateway: it
 keys the release coordinator channel (`shared.cluster.authority.channel`). The
@@ -59,16 +64,18 @@ from pydantic import (
 )
 
 from shared.atomic_io import fsync_parent
+from shared.cluster.authority.api import API_TOKEN_ENV, telemetry_token, token_digest
 from shared.cluster.authority.delivery import (
     GENERATION_ENV,
+    active_generation,
     require_admitted_runtime,
-    write_grant,
 )
 from shared.cluster.authority.ledger import (
     _locked,
     _publish_exclusive,
     _read_private,
     authority_dir,
+    read_secret,
 )
 from shared.cluster.authority.model import AuthorityRefusedError, Digest, RoleName
 from shared.private_storage import write_private_bytes
@@ -147,8 +154,17 @@ class GenerationRef(_Record):
     credential_digest: Digest
 
 
+class UnitApi(_Record):
+    """The unit's HTTP admission for one generation (authenticated clusters only)."""
+
+    token: Secret  # the generation's runner API token, presented by the unit
+    gateway: Digest  # digest of the gateway API token, accepted by its ops server
+    telemetry: Secret  # the OTLP relay ingress bearer (derived from the human secret)
+
+
 class UnitCapability(_Record):
-    """`unit.json`: the runner login of one write generation for one unit."""
+    """`unit.json`: the runner login of one write generation for one unit, and
+    its API admission when the cluster's API is authenticated."""
 
     version: Literal[1]
     unit: UnitIdentity
@@ -157,6 +173,7 @@ class UnitCapability(_Record):
     role: RoleName
     password: Secret
     bundle: Hex32
+    api: UnitApi | None
 
     @property
     def dsn(self) -> str:
@@ -344,28 +361,50 @@ class IssuedBundle:
 
 
 def issue_bundle(
-    home: Path, *, unit: UnitIdentity, endpoint: str, ttl_s: float, now: float | None = None
+    home: Path,
+    *,
+    unit: UnitIdentity,
+    endpoint: str,
+    cluster_secret: str,
+    ttl_s: float,
+    now: float | None = None,
 ) -> IssuedBundle:
-    """Seal the ACTIVE generation's runner login for `unit`.
+    """Seal the ACTIVE generation's runner login (and API admission) for `unit`.
 
     `home` is the gateway home keeping the ledger; `endpoint` is the
-    credential-free database URL bootstrap serves to runners. A home without
-    an active generation raises (a pending or revoked one is never issued).
+    credential-free database URL bootstrap serves to runners;
+    `cluster_secret` is the gateway's human secret, from which only the
+    telemetry token is derived (empty = an open API: no `UnitApi`). A home
+    without an active generation raises (a pending or revoked one is never
+    issued).
     """
     if urlsplit(endpoint).password is not None:
         raise UnitCapabilityError("a capability names the credential-free endpoint")
     if ttl_s <= 0:
         raise UnitCapabilityError("a bundle's lifetime must be positive")
-    grant = write_grant(home, "runner")
+    generation = active_generation(home)
+    secret = read_secret(home, generation)
+    api = (
+        UnitApi(
+            token=secret.api.runner,
+            gateway=token_digest(secret.api.gateway),
+            telemetry=telemetry_token(cluster_secret),
+        )
+        if cluster_secret
+        else None
+    )
     issued_at = time.time() if now is None else now
     capability = UnitCapability(
         version=1,
         unit=unit,
         endpoint=endpoint,
-        generation=GenerationRef(number=grant.number, credential_digest=grant.credential_digest),
-        role=grant.role,
-        password=grant.password,
+        generation=GenerationRef(
+            number=generation.number, credential_digest=generation.credential_digest
+        ),
+        role=secret.roles.runner.name,
+        password=secret.roles.runner.password,
         bundle=secrets.token_hex(16),
+        api=api,
     )
     bundle = Bundle(
         version=1,
@@ -378,7 +417,7 @@ def issue_bundle(
         enrollment=ensure_enrollment(home, unit),
     )
     key = secrets.token_bytes(_KEY_BYTES)
-    return IssuedBundle(_seal(bundle, key), _b64(key), unit, grant.number, bundle.expires_at)
+    return IssuedBundle(_seal(bundle, key), _b64(key), unit, generation.number, bundle.expires_at)
 
 
 def _header(bundle: Bundle) -> _Header:
@@ -559,6 +598,13 @@ def unit_delivery(home: Path) -> dict[str, str]:
     return {"AVA_DB_URL": capability.dsn, GENERATION_ENV: str(capability.generation.number)}
 
 
+def unit_api_delivery(home: Path) -> dict[str, str]:
+    """The launch-environment API token of the installed capability; none when
+    the cluster's API is open."""
+    api = require_unit_capability(home).api
+    return {} if api is None else {API_TOKEN_ENV: api.token}
+
+
 def unit_reference(home: Path) -> dict[str, object] | None:
     capability = load_unit_capability(home)
     return None if capability is None else capability.reference
@@ -583,3 +629,17 @@ def consume_unit(home: Path) -> UnitCapability:
     code_root = Path(__file__).resolve().parents[3]
     require_admitted_runtime(home, code_root=code_root, prefix=Path(sys.prefix))
     return require_unit_capability(home)
+
+
+def telemetry_bearer(home: Path, cluster_secret: str) -> str | None:
+    """The OTLP relay ingress bearer `home` presents and accepts, or None (open).
+
+    A remote unit (an installed capability) uses the telemetry token its
+    capability carries; it holds no human secret. The gateway derives the same
+    token from its human secret. None means the cluster's API is open: no
+    authenticated ingress exists.
+    """
+    capability = load_unit_capability(home)
+    if capability is not None:
+        return None if capability.api is None else capability.api.telemetry
+    return telemetry_token(cluster_secret) if cluster_secret else None

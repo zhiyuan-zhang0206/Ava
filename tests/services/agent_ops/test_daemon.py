@@ -791,36 +791,14 @@ def test_main_logs_and_exits_nonzero_on_an_uncaught_crash(tmp_path: Path) -> Non
     assert "crashed" in combined and "db pool exploded" in combined
 
 
-def test_ops_bind_host_all_interfaces_with_secret(monkeypatch: pytest.MonkeyPatch) -> None:
-    """With a cluster secret, /ops binds 0.0.0.0 — no single-vs-multi-host branch.
-    The gateway dials it over the network (or its own loopback self-dial), and the
-    surface is always authenticated with the cluster-secret bearer, so reachability
-    is not trust."""
-    monkeypatch.setattr(daemon.settings.data_plane, "cluster_secret", "s3cret")
-    assert daemon._ops_bind_host() == "0.0.0.0"  # noqa: S104
-
-
-def test_ops_bind_host_loopback_without_secret(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A no-secret cluster serves /ops unauthenticated, so it must bind loopback
-    only — an unauthenticated control surface is never LAN-reachable."""
-    monkeypatch.setattr(daemon.settings.data_plane, "cluster_secret", "")
-    assert daemon._ops_bind_host() == "127.0.0.1"
-
-
-def test_ops_auth_token_is_secret(monkeypatch: pytest.MonkeyPatch) -> None:
-    """With a secret, the token /ops requires is the cluster secret — regardless
-    of bind posture (the gateway presents it on the loopback self-dial too)."""
-    monkeypatch.setattr(daemon.settings.data_plane, "cluster_secret", "s3cret")
-    assert daemon._ops_auth_token() == "s3cret"
-
-
-def test_ops_auth_token_is_none_without_secret(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A no-secret cluster has no token to require: /ops serves unauthenticated
-    (on loopback — see `_ops_bind_host`)."""
-    monkeypatch.setattr(daemon.settings.data_plane, "cluster_secret", "")
-    assert daemon._ops_auth_token() is None
+def test_ops_binds_all_interfaces_only_when_authenticated() -> None:
+    """An authenticated /ops (any acceptance set, even an empty fail-closed one)
+    binds 0.0.0.0; the open posture binds loopback only — an unauthenticated
+    control surface is never LAN-reachable. Which tokens /ops accepts is the
+    write-generation matrix in tests/lifecycle/db_authority/test_api_tokens.py."""
+    assert daemon._ops_bind_host(frozenset({"d" * 64})) == "0.0.0.0"  # noqa: S104
+    assert daemon._ops_bind_host(frozenset()) == "0.0.0.0"  # noqa: S104
+    assert daemon._ops_bind_host(None) == "127.0.0.1"
 
 
 # ─── boot self-registration ────────────────────────────────────────────────────

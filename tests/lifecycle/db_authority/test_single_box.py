@@ -33,6 +33,7 @@ from cli.commands import pgbouncer as pooler
 from cli.commands.migrations import cmd_migrations_apply
 from shared import cluster
 from shared.cluster import authority, ownership
+from shared.cluster.authority.api import API_TOKEN_ENV
 from shared.config import settings
 from shared.url_secret import url_with_userinfo
 from tests._containers import _free_port
@@ -390,8 +391,18 @@ def test_launched_services_receive_their_class_login_only(
     assert _service_extra_env(runner)["AVA_DB_URL"] == born.dsn("runner")
     assert _service_extra_env(runner)[authority.GENERATION_ENV] == "0"
     assert "AVA_DB_URL" not in _service_extra_env(frontend)
+    # The born single box serves an open API: no machine token is delivered.
+    assert API_TOKEN_ENV not in _service_extra_env(gateway)
+    # An authenticated API delivers each service its class token, the
+    # database-free frontend included, and never the root itself.
+    monkeypatch.setattr(settings.data_plane, "cluster_secret", "human-" + "h" * 40)
+    tokens = authority.read_secret(born.home, authority.active_generation(born.home)).api
+    assert _service_extra_env(gateway)[API_TOKEN_ENV] == tokens.gateway
+    assert _service_extra_env(runner)[API_TOKEN_ENV] == tokens.runner
+    assert _service_extra_env(frontend)[API_TOKEN_ENV] == tokens.gateway
     root = root_child_env()
     assert "AVA_DB_URL" not in root and authority.GENERATION_ENV not in root
+    assert API_TOKEN_ENV not in root
 
 
 def test_revoked_generation_login_is_not_resurrected_by_start(born: Born) -> None:

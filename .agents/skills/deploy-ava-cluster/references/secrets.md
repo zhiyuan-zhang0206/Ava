@@ -18,17 +18,23 @@ agent reaches for it.
 ### `AVA_CLUSTER_SECRET` — the cluster control credential
 
 One URL-safe token per cluster, minted at install and never rotated by a
-re-install. The gateway API and each runner's `/ops` accept it as a bearer
-token. It does not authenticate Postgres, PgBouncer, or Redis: the internal
-data plane always authenticates with its own credentials, whatever the bearer.
+re-install. It is the gateway's human bearer (API, frontend login) and stays on
+the gateway: services, agents and remote units present their write
+generation's machine API token instead (`AVA_API_TOKEN`), which the gateway
+admits for the active generation only, and a runner's `/ops` accepts only its
+generation's tokens. It does not authenticate Postgres, PgBouncer, or Redis:
+the internal data plane always authenticates with its own credentials,
+whatever the bearer. Rotating it (`scripts/rotate_cluster_secret.py`) first
+pins the logical-backup passphrase; keep that pinned file with the backup keys.
 
 Postgres application logins are write generations recorded in the gateway's
 private `$AVA_HOME/db-authority/`: one gateway and one runner login inheriting
 the `NOLOGIN` groups `ava_gateway` / `ava_runner`. The schema owner is `NOLOGIN`
 and the gateway `.env` holds only the credential-free endpoint. A remote runner
-receives the runner login only as a sealed per-unit capability bundle the
-gateway operator issues (`ava cluster db-authority issue-unit`), installed into
-its private `$AVA_HOME/db-authority/`; bootstrap never serves a database login. Runner Redis has the independent `AVA_REDIS_PASSWORD`, embedded
+receives the runner login, its API token and the telemetry token only as a
+sealed per-unit capability bundle the gateway operator issues (`ava cluster
+db-authority issue-unit`), installed into its private `$AVA_HOME/db-authority/`;
+bootstrap never serves a database login or the human secret. Runner Redis has the independent `AVA_REDIS_PASSWORD`, embedded
 only in the bootstrap URL; Redis `default`/`requirepass` uses
 `AVA_REDIS_ADMIN_PASSWORD`, file-only on the gateway. A remote-managed plane
 keeps its provider URLs and `AVA_RUNNER_DB_PASSWORD` for its gateway-local
@@ -39,14 +45,15 @@ The first-start capabilities determine the initial control-plane secret:
 | First-start shape | Secret |
 |---|---|
 | `--serve-gateway --serve-agent-runner` | Empty bearer by default; unauthenticated loopback API. Postgres/PgBouncer still admit only write-generation logins (generation 0 minted at first start) and Redis gets its generated admin and runtime passwords. |
-| `--serve-gateway --no-serve-agent-runner` | Minted automatically. Transfer only the bearer to runners through the operator's secret channel. |
+| `--serve-gateway --no-serve-agent-runner` | Minted automatically. It stays on the gateway; runners receive capability bundles instead. |
 | `--worktree` | Single-box defaults; no production secret or data is copied. |
-| `--serve-agent-runner --no-serve-gateway` | Supply the gateway bearer as `AVA_CLUSTER_SECRET` and the capability bundle's transport key as `AVA_DB_CAPABILITY_KEY` for the first start. |
+| `--serve-agent-runner --no-serve-gateway` | No bearer: supply the capability bundle's transport key as `AVA_DB_CAPABILITY_KEY` for the first start. A runner home recording `AVA_CLUSTER_SECRET` refuses. |
 
 The initialization journal binds credentials before their first effects.
 Repeated or interrupted start preserves them. Do not edit the journal or copy a
 new environment template over the generated file. Credential rotation is a
 separate authorized operation; it is not performed by a start retry.
 
-Runner bootstrap serves the Redis runtime credential and no database login. `AVA_CLUSTER_SECRET` remains the HTTP bearer; the gateway's
-database authority store and Redis-admin credential remain private to it.
+Runner bootstrap serves the Redis runtime credential and no database login or
+human secret; the gateway's database authority store, human bearer and
+Redis-admin credential remain private to it.

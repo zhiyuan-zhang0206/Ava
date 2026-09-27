@@ -44,7 +44,7 @@ Ava code participates and a box with no agents running still reports.
   the gateway's series — `_data_plane_receivers` in
   `cli/commands/_otel_collector.py` omits them, and the rendered config is 0600
   because it carries the Redis admin password (and, on split units, the
-  cluster bearer).
+  telemetry token).
 
 Not a node_exporter / postgres_exporter / redis_exporter trio: the pinned
 contrib collector already carries equivalent receivers, and one supervised

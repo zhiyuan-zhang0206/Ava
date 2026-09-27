@@ -777,7 +777,7 @@ def test_runner_forwards_to_authenticated_gateway_ingress_without_renaming_queue
     for exporter_id in ("otlphttp/tempo", "otlphttp/loki", "otlphttp/prometheus"):
         exporter = exporters[exporter_id]
         assert exporter["endpoint"] == "http://10.0.0.10:4318"
-        assert exporter["headers"] == {"Authorization": "Bearer cluster-token"}
+        assert exporter["headers"] == {"Authorization": f"Bearer {oc.telemetry_bearer()}"}
     assert exporters["otlphttp/tempo"]["sending_queue"]["storage"] == "file_storage"
     assert exporters["otlphttp/loki"]["sending_queue"]["storage"] == "file_storage"
     assert "storage" not in exporters["otlphttp/prometheus"]["sending_queue"]
@@ -799,7 +799,8 @@ def test_gateway_has_separate_authenticated_reachable_receiver(
         "endpoint": "10.0.0.10:4318",
         "auth": {"authenticator": "bearertokenauth/cluster"},
     }
-    assert cfg["extensions"]["bearertokenauth/cluster"] == {"token": "cluster-token"}
+    assert cfg["extensions"]["bearertokenauth/cluster"] == {"token": oc.telemetry_bearer()}
+    assert oc.telemetry_bearer() not in ("", "cluster-token")  # derived, never the secret
     assert "bearertokenauth/cluster" in cfg["service"]["extensions"]
     # Remote traces fan out to Tempo but never enter the gateway's local mirror.
     assert cfg["service"]["pipelines"]["traces/remote"]["exporters"] == ["otlphttp/tempo"]
@@ -828,7 +829,7 @@ def test_station_has_separate_authenticated_reachable_receiver(
         "endpoint": "10.0.0.10:4318",
         "auth": {"authenticator": "bearertokenauth/cluster"},
     }
-    assert cfg["extensions"]["bearertokenauth/cluster"] == {"token": "cluster-token"}
+    assert cfg["extensions"]["bearertokenauth/cluster"] == {"token": oc.telemetry_bearer()}
     assert "bearertokenauth/cluster" in cfg["service"]["extensions"]
     # Remote traces fan out to the station's own Tempo and never enter the
     # station's local trace mirror; remote logs/metrics land in its Loki/Prom.
@@ -863,7 +864,7 @@ def test_remote_observatory_gateway_relays_to_station_single_ingress(
     for exporter_id in ("otlphttp/tempo", "otlphttp/loki", "otlphttp/prometheus"):
         exporter = exporters[exporter_id]
         assert exporter["endpoint"] == "http://10.0.0.46:4318"
-        assert exporter["headers"] == {"Authorization": "Bearer cluster-token"}
+        assert exporter["headers"] == {"Authorization": f"Bearer {oc.telemetry_bearer()}"}
     rendered = str(cfg)
     assert "127.0.0.1:3100" not in rendered
     assert "127.0.0.1:9090" not in rendered
@@ -878,7 +879,7 @@ def test_remote_observatory_relay_without_secret_fails_closed(
 ) -> None:
     """A remote observatory with no cluster secret cannot authenticate the
     relay — converge must fail, not ship an unauthenticated fan-out."""
-    with pytest.raises(RuntimeError, match="cluster secret"):
+    with pytest.raises(RuntimeError, match="telemetry token"):
         _render_real_template(
             monkeypatch,
             frozenset({"gateway", "agent-runner"}),
@@ -1051,7 +1052,7 @@ def test_pure_role_units_collapse_remote_ingress_without_remote_identity(
             "http://10.0.0.10:8000",
             "10.0.0.20",
             "",
-            "cluster secret",
+            "telemetry token",
         ),
         (frozenset({"gateway"}), "http://10.0.0.10:8000", "0.0.0.0", "token", "reachable host"),  # noqa: S104 — rejection fixture
         (
@@ -1112,9 +1113,8 @@ def test_collector_self_metrics_are_scraped_for_queue_and_drop_visibility(
 
 
 def test_config_file_is_owner_only(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """Every split role's config carries the cluster bearer, and a gateway
-    also carries the Redis admin password. The file is 0600 from first
-    creation, not write-as-0644 followed by chmod."""
+    """Every split role's config carries the telemetry bearer (never the secret) and a gateway's
+    the Redis admin password; the file is 0600 from creation, not chmod-ed after."""
     if platform.system() == "Windows":
         pytest.skip("POSIX file modes only")
     (tmp_path / "otel-collector").mkdir(parents=True)
@@ -1142,7 +1142,7 @@ def test_config_file_is_owner_only(monkeypatch: pytest.MonkeyPatch, tmp_path: Pa
     config = tmp_path / "otel-collector/config.yaml"
     assert modes_before_publish == [0o600]
     assert config.stat().st_mode & 0o777 == 0o600
-    assert "Bearer cluster-token" in config.read_text(encoding="utf-8")
+    assert f"Bearer {oc.telemetry_bearer()}" in config.read_text(encoding="utf-8")
 
 
 # -- issue #172: bounded, loud download -------------------------------------

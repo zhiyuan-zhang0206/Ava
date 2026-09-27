@@ -6,9 +6,9 @@ reads them through here, bound to the ledger's credential digest:
 - the owned PgBouncer, whose ``auth_file`` holds exactly one generation's two
   SCRAM verifiers plus the operator admin-console entry ``ava_pooler_admin``
   (a userlist-only name, never a PostgreSQL role);
-- the root launcher, which projects one class login into one service's launch
-  environment (``write_grant``); only ``number`` and ``credential_digest``
-  reach launch digests and journals;
+- the root launcher, which projects one class login (and its API token) into
+  one service's launch environment (``write_grant``); only ``number`` and
+  ``credential_digest`` reach launch digests and journals;
 - an operator process on the gateway home that no launcher injected
   (``consume``), admitted only while it runs the home's admitted runtime: the
   selected release image, or the source checkout the home was born from.
@@ -116,18 +116,27 @@ def render_userlist(home: Path, generation: Generation) -> bytes:
 
 @dataclass(frozen=True)
 class WriteGrant:
-    """One class login of the home's active generation, for one launch."""
+    """One class login and API token of the home's active generation, for one launch."""
 
     number: int
     credential_digest: str
     role: str
     password: str
+    api_token: str
 
     def dsn(self, endpoint: str) -> str:
         """``endpoint`` (the home's credential-free URL) dialed as this login."""
         from shared.url_secret import url_with_userinfo
 
         return url_with_userinfo(endpoint, self.role, self.password)
+
+    def environment(self, endpoint: str, *, api: bool) -> dict[str, str]:
+        """The process-environment delivery: the login, its generation marker and,
+        when the cluster's API is authenticated (``api``), the class API token."""
+        from shared.cluster.authority.api import API_TOKEN_ENV
+
+        delivered = {"AVA_DB_URL": self.dsn(endpoint), GENERATION_ENV: str(self.number)}
+        return {**delivered, API_TOKEN_ENV: self.api_token} if api else delivered
 
     @property
     def reference(self) -> dict[str, object]:
@@ -149,12 +158,14 @@ def active_generation(home: Path) -> Generation:
 def write_grant(home: Path, cls: GenerationClass) -> WriteGrant:
     """The active generation's ``cls`` login, bound to the ledger digest."""
     generation = active_generation(home)
-    role = read_secret(home, generation).roles.of(cls)
+    secret = read_secret(home, generation)
+    role = secret.roles.of(cls)
     return WriteGrant(
         number=generation.number,
         credential_digest=generation.credential_digest,
         role=role.name,
         password=role.password,
+        api_token=secret.api.of(cls),
     )
 
 

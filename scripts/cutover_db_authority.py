@@ -32,18 +32,26 @@ owner and runner passwords are removed. A home born with a ledger is only
 verified. Any release request prepared before the cutover no longer matches its
 configuration digest and must be prepared again.
 
+Step `api` (networked homes only): runners now authenticate with their write
+generation's machine API token, so the human `AVA_CLUSTER_SECRET` they hold
+copies of rotates once here. The rotation (`scripts/rotate_cluster_secret`,
+recorded in this journal as fingerprints only) first pins the logical-backup
+passphrase to `$AVA_HOME/backups/logical-backup.passphrase` — backup-critical:
+earlier logical backups decrypt only with it. The telemetry relay token derives
+from the secret and changes once too. A single box keeps its secret.
+
 Step `remote-units` (networked homes only): every `machine_units` row other
 than this gateway unit is a remote unit whose runners held the owner-era
 `ava_runner` login (the `db` step fenced it) and copies of the Redis admin
 password. The operator classifies each one explicitly: `--unit MACHINE:HOME`
-(included: it receives a sealed database capability bundle for generation 0
-with its enrollment secret, written into `--bundle-dir`, its transport key
-printed once) or `--exclude-unit MACHINE:HOME` (paused or offline: no bundle,
-it stays fenced until a later issue-unit). Units of paused machines must be
-excluded; an unclassified or unknown unit refuses. The step also rotates the
-Redis admin password, staged in `db-authority/redis-admin.pending` so a crash
-resumes with the same value, then applied live, persisted to `redis.conf`
-and `.env`. A single box has no remote unit and the step is a no-op.
+(included: a sealed bundle for generation 0 — runner login, API admission,
+enrollment secret — in `--bundle-dir`, its transport key printed once) or
+`--exclude-unit MACHINE:HOME` (paused or offline: no bundle, it stays fenced
+until a later issue-unit). Units of paused machines must be excluded; an
+unclassified or unknown unit refuses. The step also rotates the Redis admin
+password, staged in `db-authority/redis-admin.pending` so a crash resumes
+with the same value, then applied live, persisted to `redis.conf` and `.env`.
+A single box has no remote unit and the step is a no-op.
 
 Dry-run is the default and changes nothing. `--execute` requires the home's
 application root to be absent, no persistent terminals and no active release
@@ -82,7 +90,7 @@ import secrets
 import socket
 import stat
 import sys
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Literal, cast
 from urllib.parse import unquote, urlsplit
@@ -108,6 +116,7 @@ _URL_ENV = "AVA_REDIS_URL"
 _STEP_STATES: dict[str, tuple[str, ...]] = {
     "redis": ("converting", "done"),
     "db": ("converting", "done"),
+    "api": ("rotating", "done"),
     "remote-units": ("issuing", "done"),
 }
 _DB_URL_ENV = "AVA_DB_URL"
@@ -126,17 +135,22 @@ def journal_path(home: Path) -> Path:
     return home / "db-authority" / "cutover.json"
 
 
-def read_journal(home: Path) -> dict[str, str]:
-    """The recorded state of each cutover step; empty before the first run."""
-    path = journal_path(home)
+def _journal(home: Path) -> dict[str, object]:
     try:
-        data: object = json.loads(regular_bytes(path))
+        data: object = json.loads(regular_bytes(journal_path(home)))
     except FileNotFoundError:
         return {}
-    journal = cast("dict[str, object]", data) if isinstance(data, dict) else {}
+    return cast("dict[str, object]", data) if isinstance(data, dict) else {"": None}
+
+
+def read_journal(home: Path) -> dict[str, str]:
+    """The recorded state of each cutover step; empty before the first run."""
+    path, journal = journal_path(home), _journal(home)
+    if not journal:
+        return {}
     steps = journal.get("steps")
     if (
-        set(journal) != {"version", "home", "steps"}
+        set(journal) - {"api"} != {"version", "home", "steps"}
         or journal["version"] != 1
         or journal["home"] != str(home)
         or not isinstance(steps, dict)
@@ -149,11 +163,14 @@ def read_journal(home: Path) -> dict[str, str]:
     return recorded
 
 
-def _record(home: Path, step: str, state: str) -> None:
+def _record(home: Path, step: str, state: str, *, api: dict[str, Any] | None = None) -> None:
     steps = read_journal(home)
     steps[step] = state
     ensure_private_dir(journal_path(home).parent)
-    body = {"version": 1, "home": str(home), "steps": steps}
+    body: dict[str, object] = {"version": 1, "home": str(home), "steps": steps}
+    recorded = api if api is not None else _journal(home).get("api")
+    if recorded is not None:
+        body["api"] = recorded
     write_private_bytes(journal_path(home), (json.dumps(body, sort_keys=True) + "\n").encode())
 
 
@@ -523,6 +540,37 @@ def convert_db(home: Path, record: ClusterRecord, *, execute: bool) -> str:
     )
 
 
+def convert_api(home: Path, record: ClusterRecord, *, execute: bool) -> str:
+    """Rotate the human bearer once on a networked home (step `api`)."""
+    from cli.commands import cluster_instance as instance
+    from scripts import rotate_cluster_secret as bearer
+    from shared.cluster import record_postgres_port
+
+    state, raw = read_journal(home).get("api"), _journal(home).get("api")
+    rotation = None if raw is None else bearer.Rotation.parse(raw)
+    if state is None:
+        if not instance._pg_running(record_postgres_port(record)):
+            if not execute:
+                return "api: would decide once PostgreSQL runs"
+            raise RuntimeError("the owned PostgreSQL is not running; `ava stop --keep-infra`")
+        if not _remote_inventory(record, DbEnv.read(home).database, home)[0]:
+            return "api: none (single box keeps its bearer)"
+    if not execute:
+        verb = "verify" if state == "done" else "pin the logical-backup passphrase and rotate"
+        return f"api: would {verb} AVA_CLUSTER_SECRET (journal={state or 'none'})"
+    if state is None:
+        _record(home, "api", "rotating")
+    done = bearer.advance(
+        home, rotation, lambda current: _record(home, "api", "rotating", api=asdict(current))
+    )
+    _record(home, "api", "done", api=asdict(done))
+    return (
+        "api: AVA_CLUSTER_SECRET rotated once (runners' copies evicted); the logical-backup "
+        f"passphrase is pinned at {home / 'backups' / 'logical-backup.passphrase'} — "
+        "backup-critical: keep it with the gateway's backup keys"
+    )
+
+
 Units = set[tuple[str, str]]
 
 
@@ -617,9 +665,17 @@ def _issue_bundles(home: Path, plan: UnitPlan, bundle_dir: Path) -> list[str]:
     if not stat.S_ISDIR(info.st_mode) or info.st_mode & 0o077 or info.st_uid != os.geteuid():
         raise CutoverRefusedError(f"--bundle-dir {bundle_dir} must be an owner-only directory")
     lines: list[str] = []
+    # Fresh from `.env`: the `api` step may have rotated the secret in this run.
+    cluster_secret = dotenv_values(home / ".env").get("AVA_CLUSTER_SECRET") or ""
     for machine, unit_home in plan.include:
         unit = UnitIdentity(machine=machine, home=unit_home)
-        issued = issue_bundle(home, unit=unit, endpoint=served_db_endpoint(), ttl_s=plan.ttl_s)
+        issued = issue_bundle(
+            home,
+            unit=unit,
+            endpoint=served_db_endpoint(),
+            cluster_secret=cluster_secret,
+            ttl_s=plan.ttl_s,
+        )
         target = bundle_dir / f"{machine}-{unit.key[:12]}.bundle"
         target.unlink(missing_ok=True)
         write_bundle(target, issued.envelope)
@@ -688,15 +744,11 @@ def admitted_record(home: Path) -> ClusterRecord:
     return record
 
 
-def admitted_redis_port(home: Path) -> int:
-    """`home`'s Redis port under the same admission as `admitted_record`."""
-    return record_redis_port(admitted_record(home))
-
-
 def _run(home: Path, *, execute: bool, plan: UnitPlan) -> None:
     record = admitted_record(home)
     print(convert_redis(home, record_redis_port(record), execute=execute))
     print(convert_db(home, record, execute=execute))
+    print(convert_api(home, record, execute=execute))
     print(convert_remote_units(home, record, plan, execute=execute))
 
 

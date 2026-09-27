@@ -602,7 +602,7 @@ def ensure_cluster_storage(
             "    so it cannot carry the `gateway` capability. Run the gateway on\n"
             "    macOS/Linux — on Windows hardware, inside WSL2 — and join this host\n"
             "    to it as an agent-runner:\n"
-            "      set AVA_CLUSTER_SECRET and AVA_DB_CAPABILITY_KEY from non-echoing prompts, then run:\n"
+            "      set AVA_DB_CAPABILITY_KEY from a non-echoing prompt, then run:\n"
             "      ava start --serve-agent-runner --no-serve-gateway --gateway-url <url> --machine-name <name> \\\n"
             "                 --machine-host <this-host-private-ip> --db-capability <bundle>\n"
             "    What a gateway would additionally require: future/infra/windows-gateway.md",

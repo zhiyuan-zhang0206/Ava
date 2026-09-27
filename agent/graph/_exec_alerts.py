@@ -8,7 +8,7 @@ agent-facing half of the fix, this alert is the operator-facing half.
 
 Posts through the gateway's /api/alerts ingest — the single funnel that stores
 the row AND fans the IM notification out (same shape the health probe posts,
-W16) — with the cluster secret as the bearer credential. Never raises and
+W16) — with the agent's machine API token as the bearer. Never raises and
 never blocks the agent's event loop: the POST runs on a daemon thread, and a
 per-process rate limit turns an outage that fails every exec into one alert
 per window instead of one per attempt. When the gateway itself is unreachable
@@ -73,13 +73,12 @@ def _post(agent_id: int, exc_type: str, exc_msg: str) -> None:
     try:
         import httpx
 
-        from shared.config import settings
-        from shared.machine import gateway_api_base
+        from shared.machine import gateway_api_base, gateway_auth_headers
 
         resp = httpx.post(
             f"{gateway_api_base()}/api/alerts",
             json=_payload(agent_id, exc_type, exc_msg),
-            headers={"Authorization": f"Bearer {settings.data_plane.cluster_secret}"},
+            headers=gateway_auth_headers(),
             timeout=_POST_TIMEOUT_S,
         )
         if resp.status_code >= 400:

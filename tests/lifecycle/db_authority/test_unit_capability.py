@@ -36,6 +36,7 @@ from scripts import cutover_db_authority as cutover
 from shared import bootstrap, config, dotenv_boot
 from shared.cluster import authority
 from shared.cluster.authority import unit
+from shared.cluster.authority.api import API_TOKEN_ENV
 from shared.config import settings
 from shared.config.service_read import served_db_endpoint
 from shared.db_connections import NoDatabaseAuthorityError, _guard_db_url
@@ -50,6 +51,7 @@ born = _single_box.born
 _REPO = Path(__file__).resolve().parents[3]
 _ENDPOINT = "postgresql://ava@10.0.0.7:6433/ava"
 _MACHINE = "mini"
+_HUMAN = "gateway-human-secret-" + "s" * 32
 
 
 def _no_probe(_dsn: str) -> None:
@@ -80,11 +82,19 @@ def _issue(
     home: Path,
     *,
     endpoint: str = _ENDPOINT,
+    cluster_secret: str = _HUMAN,
     ttl_s: float = 600.0,
     now: float | None = None,
 ) -> unit.IssuedBundle:
     identity = unit.UnitIdentity(machine=_MACHINE, home=str(home))
-    return unit.issue_bundle(gateway, unit=identity, endpoint=endpoint, ttl_s=ttl_s, now=now)
+    return unit.issue_bundle(
+        gateway,
+        unit=identity,
+        endpoint=endpoint,
+        cluster_secret=cluster_secret,
+        ttl_s=ttl_s,
+        now=now,
+    )
 
 
 def _open(issued: unit.IssuedBundle) -> unit.Bundle:
@@ -135,10 +145,16 @@ def test_a_bundle_opens_only_with_its_own_transport_key(gateway: Path, runner_ho
         unit.open_bundle(issued.envelope, "AAAA")
     with pytest.raises(unit.UnitCapabilityError, match="not a database capability bundle"):
         unit.open_bundle(b"{}", issued.transport_key)
-    # The envelope never carries the login or the enrollment secret in clear.
+    # The envelope never carries the login, the API token or the enrollment
+    # secret in clear.
     bundle = _open(issued)
-    assert bundle.capability.password.encode() not in issued.envelope
-    assert bundle.enrollment.secret.encode() not in issued.envelope
+    assert bundle.capability.api is not None
+    for secret in (
+        bundle.capability.password,
+        bundle.capability.api.token,
+        bundle.enrollment.secret,
+    ):
+        assert secret.encode() not in issued.envelope
 
 
 def test_an_expired_bundle_is_refused(gateway: Path, runner_home: Path) -> None:
@@ -228,6 +244,7 @@ def runner_boot(
         dotenv_boot.LAUNCHER_PROFILE_ENV_KEY,
         authority.GENERATION_ENV,
         "AVA_DB_URL",
+        API_TOKEN_ENV,
     ):
         os.environ.pop(key, None)
     capability = _install(runner_home, _issue(gateway, runner_home))
@@ -239,13 +256,14 @@ def runner_boot(
 
 
 def _boot_with_bootstrap() -> None:
-    """The runner's boot order: the authority pass, then the bootstrap payload
-    (the credential-free endpoint), then the unit delivery."""
+    """The runner's boot order: the authority pass, the unit delivery (which
+    supplies the fetch's API token), then the bootstrap payload (the
+    credential-free endpoint)."""
     dotenv_boot._enforce_cluster_env_authority()
+    dotenv_boot.deliver_unit_authority()
     bootstrap._apply_bootstrap_values(
         "http://gateway.invalid", {"AVA_DB_URL": _ENDPOINT, "AVA_EVENTS_CHANNEL": "ava:events"}
     )
-    dotenv_boot.deliver_unit_authority()
 
 
 def test_a_launched_service_keeps_its_unit_login_over_the_bootstrap_endpoint(
@@ -253,10 +271,23 @@ def test_a_launched_service_keeps_its_unit_login_over_the_bootstrap_endpoint(
 ) -> None:
     os.environ["AVA_PROCESS_PROFILE"] = "runner"
     os.environ.update(unit.unit_delivery(Path(runner_boot.unit.home)))
+    os.environ.update(unit.unit_api_delivery(Path(runner_boot.unit.home)))
     _boot_with_bootstrap()
     assert os.environ["AVA_DB_URL"] == runner_boot.dsn
     assert os.environ[authority.GENERATION_ENV] == "0"
+    assert runner_boot.api is not None and os.environ[API_TOKEN_ENV] == runner_boot.api.token
     assert dotenv_boot.db_authority_refusal() is None
+
+
+def test_a_remote_unit_drops_an_inherited_human_secret(
+    runner_boot: unit.UnitCapability,
+) -> None:
+    """Its `.env` never declares the human secret, so a copy inherited from a
+    shell is dropped: remote-unit processes never hold it."""
+    del runner_boot
+    os.environ["AVA_CLUSTER_SECRET"] = "inherited-" + "x" * 32
+    _boot_with_bootstrap()
+    assert "AVA_CLUSTER_SECRET" not in os.environ
 
 
 def test_a_forged_login_is_replaced_by_the_endpoint_and_refused(
@@ -283,6 +314,8 @@ def test_an_admitted_operator_process_consumes_the_installed_login(
     _boot_with_bootstrap()
     assert os.environ["AVA_DB_URL"] == runner_boot.dsn
     assert os.environ[authority.GENERATION_ENV] == "0"
+    # ... and its API token, which the bootstrap fetch then presents.
+    assert runner_boot.api is not None and os.environ[API_TOKEN_ENV] == runner_boot.api.token
     assert dotenv_boot.db_authority_refusal() is None
 
 
@@ -296,6 +329,7 @@ def test_a_runner_without_a_capability_is_refused_by_name(
     unit.unit_capability_path(runner_home).unlink()
     _boot_with_bootstrap()
     assert os.environ["AVA_DB_URL"] == _ENDPOINT
+    assert API_TOKEN_ENV not in os.environ
     refusal = dotenv_boot.db_authority_refusal()
     assert refusal is not None and "holds no database capability" in refusal
     assert "ava cluster db-authority issue-unit" in refusal
@@ -360,6 +394,8 @@ def test_issued_bundle_starts_a_runner_that_connects_as_the_generation_login(
     from cli.commands.cluster import cmd_db_authority_issue_unit
 
     _serve_on_loopback(monkeypatch, born)
+    # The gateway's API is authenticated: the bundle carries the unit's API admission.
+    monkeypatch.setattr(settings.data_plane, "cluster_secret", _HUMAN)
     runner = (tmp_path / "runner").resolve()
     bundle = tmp_path / "mini.bundle"
     assert (
@@ -379,12 +415,17 @@ def test_issued_bundle_starts_a_runner_that_connects_as_the_generation_login(
     checkout.mkdir()
     monkeypatch.setattr(start_intent, "_checkout", lambda: checkout)
 
-    def fetch(*_a: object, **_k: object) -> dict[str, str]:
+    bearers: list[object] = []
+
+    def fetch(*_a: object, **kwargs: object) -> dict[str, str]:
+        bearers.append(kwargs.get("bearer"))
         return dict(served)
 
     monkeypatch.setattr(bootstrap, "fetch_bootstrap_config", fetch)
     with patch.dict(os.environ):
         os.environ.pop("AVA_MACHINE_SERVE_GATEWAY")
+        # The unit joins without the human secret: its bundle authenticates it.
+        os.environ.pop("AVA_CLUSTER_SECRET", None)
         os.environ["AVA_HOME"] = str(runner)
         os.environ["AVA_CLUSTER_REGISTRY"] = str(tmp_path / "runner-registry.json")
         os.environ[unit.CAPABILITY_KEY_ENV] = match.group(1)
@@ -393,8 +434,11 @@ def test_issued_bundle_starts_a_runner_that_connects_as_the_generation_login(
     assert not bundle.exists()
     env = dotenv_values(runner / ".env")
     assert "AVA_DB_URL" not in env and unit.CAPABILITY_KEY_ENV not in env
+    assert "AVA_CLUSTER_SECRET" not in env
 
     capability = unit.require_unit_capability(runner)
+    # The join's bootstrap fetch presented the bundle's runner API token.
+    assert capability.api is not None and bearers == [capability.api.token]
     with psycopg.connect(capability.dsn, prepare_threshold=None, connect_timeout=5) as conn:
         assert conn.execute("SELECT current_user").fetchone() == ("ava_g0_runner",)
         assert conn.execute("SELECT count(*) FROM agents_meta").fetchone() is not None
@@ -407,6 +451,16 @@ def test_issued_bundle_starts_a_runner_that_connects_as_the_generation_login(
             "AVA_DB_URL": capability.dsn,
             authority.GENERATION_ENV: "0",
         }
+
+
+def test_a_remote_unit_home_holding_the_human_secret_refuses_to_start(tmp_path: Path) -> None:
+    """A remote unit never holds the human secret; a home that still records
+    it (not adopted) refuses before any fetch or identity effect."""
+    home = (tmp_path / "legacy-runner").resolve()
+    home.mkdir(mode=0o700)
+    values = {"AVA_GATEWAY_URL": "http://10.0.0.7:8000", "AVA_CLUSTER_SECRET": _HUMAN}
+    with pytest.raises(ValueError, match="records the human cluster secret"):
+        start_intent._join(values, home, None)
 
 
 def test_a_bearer_only_runner_receives_no_database_login(
@@ -594,3 +648,57 @@ def test_a_single_box_has_no_remote_units(
     assert cutover._authenticates(
         born.record.ports["redis"], born.values["AVA_REDIS_ADMIN_PASSWORD"]
     )
+
+
+def test_networked_cutover_rotates_the_bearer_once_before_issuing_bundles(
+    networked: Born, tmp_path: Path
+) -> None:
+    """Step `api`: the human secret every runner held rotates once, after the
+    logical-backup passphrase is pinned; the bundles issued afterwards carry the
+    rotated telemetry token and the generation's API admission."""
+    from scripts import rotate_cluster_secret as bearer
+    from services.gateway_side.backup import passphrase
+    from shared.cluster.authority.api import telemetry_token
+    from shared.envfile import upsert_env
+
+    born = networked
+    upsert_env(born.home / ".env", {"AVA_CLUSTER_SECRET": _HUMAN}, audit_site="test")
+    dry = cutover.convert_api(born.home, born.record, execute=False)
+    assert dry.startswith("api: would pin the logical-backup passphrase and rotate")
+    assert dotenv_values(born.home / ".env")["AVA_CLUSTER_SECRET"] == _HUMAN
+
+    outcome = cutover.convert_api(born.home, born.record, execute=True)
+    rotated = dotenv_values(born.home / ".env")["AVA_CLUSTER_SECRET"] or ""
+    assert outcome.startswith("api: AVA_CLUSTER_SECRET rotated once") and rotated != _HUMAN
+    assert passphrase.pinned(born.home) == passphrase.derive(_HUMAN)
+    journal = json.loads(cutover.journal_path(born.home).read_text())
+    assert journal["steps"]["api"] == "done" and journal["api"]["state"] == "done"
+    assert _HUMAN not in json.dumps(journal) and rotated not in json.dumps(journal)
+    assert bearer.bearer_fingerprint(rotated) == journal["api"]["new"]
+    # A repeat verifies; it never rotates a second time.
+    assert cutover.convert_api(born.home, born.record, execute=True).startswith("api: AVA")
+    assert dotenv_values(born.home / ".env")["AVA_CLUSTER_SECRET"] == rotated
+
+    bundles = tmp_path / "bundles"
+    plan = cutover.UnitPlan(include=(_MINI,), exclude=(_WIN,), bundle_dir=bundles)
+    try:
+        outcome = cutover.convert_remote_units(born.home, born.record, plan, execute=True)
+    finally:
+        _redis_shutdown(
+            born.record.ports["redis"],
+            dotenv_values(born.home / ".env")["AVA_REDIS_ADMIN_PASSWORD"] or "",
+        )
+    [(path, key)] = re.findall(r"(\S+\.bundle) transport key (\S+)", outcome)
+    api = unit.open_bundle(Path(path).read_bytes(), key).capability.api
+    secret = authority.read_secret(born.home, authority.active_generation(born.home))
+    assert api is not None and api.token == secret.api.runner
+    assert api.telemetry == telemetry_token(rotated) != telemetry_token(_HUMAN)
+
+
+def test_a_single_box_keeps_its_bearer(
+    born: Born, set_machine_identity: Callable[..., None]
+) -> None:
+    set_machine_identity(role="gateway", name="gw")
+    outcome = cutover.convert_api(born.home, born.record, execute=True)
+    assert outcome == "api: none (single box keeps its bearer)"
+    assert "api" not in cutover.read_journal(born.home)

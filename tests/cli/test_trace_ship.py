@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 from typing import cast
 
 import httpx
@@ -493,11 +494,12 @@ def test_gateway_ship_posts_to_local_tempo_without_auth(
     assert wm["spans.jsonl"] > 0
 
 
-def test_runner_ship_posts_to_gateway_relay_with_cluster_bearer(
+def test_runner_ship_posts_to_gateway_relay_with_its_telemetry_token(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """A pure runner cannot dial loopback Tempo. It replays to the gateway's
-    authenticated remote trace pipeline, which deliberately has no file exporter."""
+    authenticated remote trace pipeline, which deliberately has no file exporter,
+    with its capability's telemetry token (it holds no human secret)."""
     monkeypatch.setattr("cli.commands.trace.traces_dir", lambda: tmp_path)  # pyright: ignore[reportUnknownMemberType]
     monkeypatch.setattr(  # pyright: ignore[reportUnknownMemberType]
         "shared.config.settings.observability.telemetry_otlp_enabled", True
@@ -506,8 +508,14 @@ def test_runner_ship_posts_to_gateway_relay_with_cluster_bearer(
         "shared.config.settings.observability.gateway_otlp_endpoint", "http://10.0.0.10:4318"
     )
     monkeypatch.setattr(  # pyright: ignore[reportUnknownMemberType]
-        "shared.config.settings.data_plane.cluster_secret", "cluster-token"
+        "shared.config.settings.data_plane.cluster_secret", ""
     )
+    capability = SimpleNamespace(api=SimpleNamespace(telemetry="unit-telemetry-token"))
+
+    def installed(_home: Path) -> SimpleNamespace:
+        return capability
+
+    monkeypatch.setattr("shared.cluster.authority.unit.load_unit_capability", installed)
     monkeypatch.setattr(  # pyright: ignore[reportUnknownMemberType]
         "cli.commands.trace.machine_role", lambda: frozenset({"agent-runner"})
     )
@@ -541,7 +549,7 @@ def test_runner_ship_posts_to_gateway_relay_with_cluster_bearer(
             "http://10.0.0.10:4318/v1/traces",
             {
                 "Content-Type": "application/x-protobuf",
-                "Authorization": "Bearer cluster-token",
+                "Authorization": "Bearer unit-telemetry-token",
             },
         )
     ]

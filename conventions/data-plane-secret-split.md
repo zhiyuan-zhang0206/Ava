@@ -6,11 +6,13 @@ internal data plane always authenticates, whatever the bearer
 
 | Authority | Holder | Purpose |
 |---|---|---|
-| `AVA_CLUSTER_SECRET` | Gateway and enrolled runners | Control-plane bearer for gateway API, `/ops`, bootstrap, and machine registration; empty = unauthenticated user-facing API, loopback-only listeners |
+| `AVA_CLUSTER_SECRET` | Gateway only | Human/operator bearer for the gateway API and frontend login (never served by bootstrap, never held by a remote unit); empty = unauthenticated user-facing API and `/ops`, loopback-only listeners |
+| `AVA_API_TOKEN` (launch environment only) | Each launched service, admitted operator processes | The write generation's machine API token of the process's class: the gateway admits the active generation's tokens, a unit's `/ops` its generation's two; delivered only while the API is authenticated |
+| `$AVA_HOME/backups/logical-backup.passphrase` (0600) | Gateway home, once its bearer has rotated | The pinned logical-backup passphrase (the pre-rotation secret's derivation); **backup-critical**: with the old secret gone it is the only key to earlier logical backups |
 | OS user over the owner-only socket (`peer`) | Gateway host | Postgres administrator: provisioning, migrations (acting as the NOLOGIN schema owner), grants, the authority fence |
 | OS user mapped to `ava_monitor` (`peer map=ava_monitor`) | Gateway host's OTel collector | Password-less statistics reader (`pg_read_all_stats`, CONNECT); not a write generation, so no credential exists and rollouts leave it alone |
-| `$AVA_HOME/db-authority/` (0700; files 0600) | Gateway home | `ledger.json` (owner, groups, active generation), `generations/<n>.json` (the write generation's two logins with passwords and SCRAM verifiers), `pooler-admin.json` (PgBouncer admin console `ava_pooler_admin`), `units/<key>.json` (each remote unit's enrollment secret) |
-| `$AVA_HOME/db-authority/` (0700; files 0600) | Remote agent-runner home | `unit.json` (the installed runner login of one generation, bound to this unit and the served endpoint), `enrollment.json` (this unit's enrollment secret) |
+| `$AVA_HOME/db-authority/` (0700; files 0600) | Gateway home | `ledger.json` (owner, groups, active generation), `generations/<n>.json` (the write generation's two logins with passwords and SCRAM verifiers, and its two machine API tokens), `pooler-admin.json` (PgBouncer admin console `ava_pooler_admin`), `units/<key>.json` (each remote unit's enrollment secret) |
+| `$AVA_HOME/db-authority/` (0700; files 0600) | Remote agent-runner home | `unit.json` (the installed runner login of one generation, bound to this unit and the served endpoint, with its API admission: the runner API token, the gateway token's digest and the telemetry token), `enrollment.json` (this unit's enrollment secret) |
 | `AVA_REDIS_ADMIN_PASSWORD` | Gateway only | Redis `default` user and `requirepass` |
 | `AVA_REDIS_PASSWORD` | Gateway file; embedded in `AVA_REDIS_URL` | Redis ACL runtime user |
 | `AVA_RUNNER_DB_PASSWORD` | Remote-managed planes only | The provider-provisioned `ava_runner` login the gateway-local launcher projects for agents (never served by bootstrap) |
@@ -39,8 +41,9 @@ Delivery:
   agent-runner's root launcher delivers its installed unit capability to every
   runner-class service, and an admitted operator process on that home consumes
   it; anything else refuses by name. The capability arrives only as an
-  operator-issued bundle ([runbook](runbook.md)), so a stale runner holding the
-  bearer cannot reacquire the current generation.
+  operator-issued bundle ([runbook](runbook.md)), so a stale runner cannot
+  reacquire the current generation. Bootstrap never serves the human secret
+  either, and the fetch authenticates with the unit's API token.
 
 Agents never receive an admin password, `AVA_REDIS_PASSWORD` as a standalone
 variable, or a gateway-class login. Agent-profile startup at the default home
@@ -55,9 +58,9 @@ no database authority ledger. `ava start` refuses it before any native effect
 and names `scripts/cutover_db_authority.py`, the one explicit conversion;
 nothing converts implicitly. Development and preview homes can be destroyed
 and re-born instead. A networked home (remote agent-runners) additionally
-classifies its remote units and issues their capabilities in step
-`remote-units` below; the runner-side cleanup of retired keys belongs to the
-home adoption.
+rotates the human bearer once (step `api`) and classifies its remote units and
+issues their capabilities (step `remote-units`) below; the runner-side cleanup
+of retired keys, the human bearer included, belongs to the home adoption.
 
 Run it from the checkout that owns the home (its `.venv`), in a gateway context,
 with the application stopped (a networked home adds `--unit` / `--exclude-unit`
@@ -72,7 +75,7 @@ ava start
 
 `--home` must name the checkout's own home. The script refuses a remote-managed
 plane, a home without a registry record, an active release operation, a running
-application root and persistent terminals. Two steps run in order:
+application root and persistent terminals. The steps run in order:
 
 - `redis` mints both passwords into `.env` (the runtime one also inside
   `AVA_REDIS_URL`), stops the owned password-less Redis under native custody
@@ -87,6 +90,16 @@ application root and persistent terminals. Two steps run in order:
   that pair, proves both logins, activates the generation, checks the catalog
   invariant, and only then rewrites `.env` (credential-free `AVA_DB_URL`; the
   owner and runner passwords removed). A superuser owner is refused first.
+- `api` (networked homes only; a single box keeps its secret): every runner
+  holds a copy of `AVA_CLUSTER_SECRET`, and from now on it authenticates with
+  its generation's API token, so the secret rotates once. The rotation
+  (`scripts/rotate_cluster_secret.advance`, recorded in this journal as
+  fingerprints only) pins the logical-backup passphrase derived from the
+  pre-rotation secret to `$AVA_HOME/backups/logical-backup.passphrase` before it
+  writes the new secret, so every earlier logical backup keeps decrypting. That
+  file is backup-critical: verify the gateway's copy with its other backup keys
+  before any runner copy of the old material is archived and removed. The
+  telemetry relay token derives from the secret and changes here exactly once.
 - `remote-units` reads `machine_units`: every unit other than this gateway unit
   must be classified exactly once, `--unit MACHINE:HOME` (included) or
   `--exclude-unit MACHINE:HOME` (paused or offline; it stays fenced); units of
@@ -95,8 +108,9 @@ application root and persistent terminals. Two steps run in order:
   crash resumes with the same value, applied with `CONFIG SET requirepass`,
   persisted to `redis.conf` and `.env`, the old password proven refused) and
   writes one sealed bundle per included unit into `--bundle-dir` (an
-  owner-only directory), printing each transport key once. A single box has no
-  remote unit and the step is a no-op.
+  owner-only directory), printing each transport key once; bundles issued after
+  `api` carry the rotated telemetry token and the generation's API admission.
+  A single box has no remote unit and the step is a no-op.
 
 A home already born authenticated is only verified. Each step records its
 intent before its effect in `$AVA_HOME/db-authority/cutover.json` (0600): an
@@ -146,18 +160,18 @@ reloads its Redis URL. Each execute writes a 0600 recovery file beneath
 
 ## Emergency bearer rotation
 
-`AVA_CLUSTER_SECRET` does not rotate with the data plane. Use it only for a
-confirmed bearer leak:
+`AVA_CLUSTER_SECRET` does not rotate with the data plane, and machine callers
+never hold it. Rotate it only for a confirmed leak:
 
 ```bash
-.venv/bin/python scripts/rotate_cluster_secret.py
+.venv/bin/python scripts/rotate_cluster_secret.py              # dry run
 .venv/bin/python scripts/rotate_cluster_secret.py --execute
 ```
 
-The script preflights the current bearer against `GET /api/bootstrap`, stages
-only the new bearer in the gateway `.env`, and prints the enrolled-runner
-checklist. Restart the gateway, distribute the new bearer out of band, then
-restart every runner. If the gateway has not yet restarted, restoring the old
-bearer in its `.env` is a safe cancellation. After restart, use the recovery
-state to coordinate a deliberate rollback; never leave runners split between
-bearer values.
+The script stages the next secret (`backups/secret-rotation/bearer.pending`),
+journals the rotation as fingerprints (`backups/secret-rotation/bearer.json`),
+pins the logical-backup passphrase on the first rotation (an existing pin is
+kept), and only then writes the new secret into the gateway `.env`; a re-run
+resumes an interrupted rotation from its journal. Restart the gateway, then
+issue every remote unit a new capability bundle: its telemetry relay token
+derives from the secret. New browser logins use the new secret.

@@ -12,6 +12,7 @@ import io
 import os
 import sys
 from pathlib import Path
+from typing import Any
 from urllib.parse import SplitResult, urlsplit
 
 from dotenv import dotenv_values
@@ -127,58 +128,77 @@ def _capability_value(cap: str, stored: dict[str, str], *, explicit: bool | None
 
 
 def _join(values: dict[str, str], home: Path, capability: str | None) -> None:
-    from shared.bootstrap import fetch_bootstrap_config
-    from shared.cluster.authority.unit import CAPABILITY_KEY_ENV, load_unit_capability
+    """Verify a remote unit's gateway and install or require its capability.
 
+    The unit never holds the human cluster secret: it authenticates with the
+    machine API token of its capability — the carried bundle's at a join, the
+    installed one's afterwards (none when the cluster's API is open).
+    """
+    from shared.bootstrap import fetch_bootstrap_config
+    from shared.cluster.authority.unit import install_bundle
+
+    if "AVA_CLUSTER_SECRET" in values:
+        raise ValueError(
+            f"this remote unit's home ({home}) records the human cluster secret; a remote "
+            "unit authenticates with its capability's machine API token and never holds "
+            "it. Remove AVA_CLUSTER_SECRET from its .env (the one-time home adoption does "
+            "this: scripts/cutover_adopt_home.py)"
+        )
     gateway = values["AVA_GATEWAY_URL"]
     host = values.get("AVA_MACHINE_HOST", "")
-    secret = values.get("AVA_CLUSTER_SECRET", "")
-    transport_key = os.environ.pop(CAPABILITY_KEY_ENV, "")
     remote = not is_loopback_host(urlsplit(gateway).hostname or "")
     if remote and (not host or is_loopback_host(host)):
         raise ValueError("joining a remote gateway requires a reachable --machine-host")
-    if remote and not secret:
-        raise ValueError("joining a remote gateway requires AVA_CLUSTER_SECRET")
-    os.environ["AVA_CLUSTER_SECRET"] = secret
-    payload = fetch_bootstrap_config(gateway)
+    bundle, token = _join_credential(home, capability, remote=remote)
+    payload = fetch_bootstrap_config(gateway, bearer=token)
     if remote and any(
         is_loopback_host(urlsplit(payload[key]).hostname or "")
         for key in ("AVA_DB_URL", "AVA_REDIS_URL")
     ):
         raise ValueError("remote gateway returned loopback data-plane URLs")
-    if capability is not None:
-        _install_capability(home, Path(capability), transport_key, values, payload["AVA_DB_URL"])
-    elif load_unit_capability(home) is None:
-        from shared.cluster.authority.unit import no_capability_message
-
-        raise ValueError(no_capability_message(home))
+    if capability is not None and bundle is not None:
+        installed = install_bundle(
+            home, bundle, machine=values["AVA_MACHINE_NAME"], served_endpoint=payload["AVA_DB_URL"]
+        )
+        Path(capability).unlink()
+        print(
+            f"  ✓ database capability installed: write generation {installed.generation.number}; "
+            f"bundle {capability} consumed"
+        )
     # Verify connection facts without persisting a gateway-owned configuration cache.
     for key in payload:
         values.pop(key, None)
 
 
-def _install_capability(
-    home: Path, bundle_path: Path, transport_key: str, values: dict[str, str], endpoint: str
-) -> None:
-    """Install the operator-carried unit capability, then delete the bundle."""
+def _join_credential(home: Path, capability: str | None, *, remote: bool) -> tuple[Any, str]:
+    """(the opened bundle or None, the API token the join presents; "" when open).
+
+    A carried bundle is opened (authenticated, unexpired) before anything is
+    fetched; without one the installed capability must exist.
+    """
     from shared.cluster.authority.unit import (
         CAPABILITY_KEY_ENV,
-        install_bundle,
+        load_unit_capability,
+        no_capability_message,
         open_bundle,
     )
     from shared.verified_file import regular_bytes
 
-    if not transport_key:
-        raise ValueError(f"--db-capability requires its transport key in {CAPABILITY_KEY_ENV}")
-    bundle = open_bundle(regular_bytes(bundle_path, max_bytes=64 * 1024), transport_key)
-    installed = install_bundle(
-        home, bundle, machine=values["AVA_MACHINE_NAME"], served_endpoint=endpoint
-    )
-    bundle_path.unlink()
-    print(
-        f"  ✓ database capability installed: write generation {installed.generation.number}; "
-        f"bundle {bundle_path} consumed"
-    )
+    transport_key = os.environ.pop(CAPABILITY_KEY_ENV, "")
+    bundle = None
+    if capability is not None:
+        if not transport_key:
+            raise ValueError(f"--db-capability requires its transport key in {CAPABILITY_KEY_ENV}")
+        bundle = open_bundle(regular_bytes(Path(capability), max_bytes=64 * 1024), transport_key)
+    held = bundle.capability if bundle is not None else load_unit_capability(home)
+    if held is None:
+        raise ValueError(no_capability_message(home))
+    if remote and held.api is None:
+        raise ValueError(
+            "the capability carries no API token (it was issued by a gateway with an open "
+            "API), but a remote gateway authenticates; issue a new bundle on the gateway"
+        )
+    return bundle, "" if held.api is None else held.api.token
 
 
 def _config_values(args: argparse.Namespace, home: Path) -> tuple[dict[str, str], str | None]:
@@ -295,7 +315,6 @@ def _inputs(
     if "gateway" not in roles:
         if not values.get("AVA_GATEWAY_URL"):
             raise ValueError("first remote-unit start requires --gateway-url")
-        values.setdefault("AVA_CLUSTER_SECRET", os.environ.get("AVA_CLUSTER_SECRET", ""))
         _join(values, home, args.db_capability)
     elif args.db_capability is not None:
         raise ValueError(

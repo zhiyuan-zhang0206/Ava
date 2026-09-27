@@ -78,14 +78,15 @@ def _require_ship_config() -> _ShipTarget:
             "mirror to Tempo."
         )
     if machine_role() == frozenset({"agent-runner"}):
-        from cli.commands._otel_collector import gateway_otel_ingress_endpoint
+        from cli.commands._otel_collector import gateway_otel_ingress_endpoint, telemetry_bearer
         from shared.cluster_auth import bearer_header
 
-        secret = settings.data_plane.cluster_secret
-        if not secret:
+        token = telemetry_bearer()
+        if not token:
             raise TraceShipError(
-                "a pure runner needs AVA_CLUSTER_SECRET to replay through the "
-                "gateway's authenticated OTLP receiver"
+                "a pure runner replays through the gateway's authenticated OTLP "
+                "receiver with its capability's telemetry token, and this unit's "
+                "capability carries none (an open cluster, or no capability installed)"
             )
         try:
             base = gateway_otel_ingress_endpoint()
@@ -93,7 +94,7 @@ def _require_ship_config() -> _ShipTarget:
             raise TraceShipError(str(exc)) from exc
         return _ShipTarget(
             endpoint=base + _OTLP_V1_PATH,
-            headers=bearer_header(secret),
+            headers=bearer_header(token),
             label="gateway OTLP relay",
         )
     return _ShipTarget(

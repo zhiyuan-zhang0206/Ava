@@ -46,7 +46,9 @@ def identity(runner_home: Path) -> unit.UnitIdentity:
 
 
 def _bundle(gateway: Path, identity: unit.UnitIdentity) -> unit.Bundle:
-    issued = unit.issue_bundle(gateway, unit=identity, endpoint=_ENDPOINT, ttl_s=600)
+    issued = unit.issue_bundle(
+        gateway, unit=identity, endpoint=_ENDPOINT, cluster_secret="", ttl_s=600
+    )
     return unit.open_bundle(issued.envelope, issued.transport_key)
 
 

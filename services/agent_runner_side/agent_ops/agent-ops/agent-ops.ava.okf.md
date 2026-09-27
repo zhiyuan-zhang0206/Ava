@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Agent-Ops — Agent-Runner Inbound HTTP Ops Service
-description: The sole resident Ava HTTP process on agent-runner — binds 0.0.0.0, receives POST /ops ops requests from Gateway after authentication with cluster secret, calls ops/ops_*.py in-process, executes and returns synchronously. Compact request/response, non-streaming.
+description: The sole resident Ava HTTP process on agent-runner — binds 0.0.0.0, receives POST /ops ops requests from Gateway after authentication with a write-generation machine API token, calls ops/ops_*.py in-process, executes and returns synchronously. Compact request/response, non-streaming.
 tags: []
 ---
 
@@ -14,7 +14,7 @@ The sole resident Ava HTTP process on agent-runner (session `ops`) — Gateway r
 
 ## Core Responsibilities
 - **Inbound HTTP endpoint**: binds `0.0.0.0:<ops_port>`, serves `POST /ops`; `GET /healthz` (watchdog health check) on the same port, via localhost without auth. The health envelope reports active-op age and informational worker saturation; an operation held longer than 20 minutes (the no-progress bound plus margin) returns 503 so the watchdog restarts the daemon.
-- **Bearer-authenticated when configured**: with `AVA_CLUSTER_SECRET`, every `/ops` carries it as a bearer — including a single-machine gateway dialing its own `/ops`. An empty secret is the deliberate no-auth, loopback-only single-box posture.
+- **Bearer-authenticated when configured** (`services/agent_ops/_boot._ops_acceptance`): every `/ops` carries a machine API token of this unit's write generation — the gateway's gateway-class token, or a runner-class token from the unit's own processes — verified against digests only (a remote unit's capability carries the gateway token's digest, never the token or the human secret); a single-machine gateway dials its own `/ops` the same way. An open cluster (empty secret; a capability without API admission) is the deliberate no-auth, loopback-only posture.
 - **In-process execution**: each request calls ops functions inside the daemon, no extra spawn; bounded concurrency semaphore (`ops_concurrency`) + shared DB pool.
 - **Off the event loop**: agent launch and lifecycle operations run on the loop;
   synchronous arms run in the daemon's worker pool through

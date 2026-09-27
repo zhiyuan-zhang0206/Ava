@@ -430,8 +430,10 @@ def cmd_db_authority_issue_unit(*, machine: str, home: str, out: str, ttl_hours:
     """`ava cluster db-authority issue-unit` — seal one remote unit's database capability.
 
     Runs on the gateway home. The bundle carries the ACTIVE write generation's
-    runner login, the endpoint bootstrap serves and the unit's enrollment
-    secret, bound to (`machine`, `home`) and expiring after `ttl_hours`. It is
+    runner login and (while the API is authenticated) its API admission — the
+    runner API token, the gateway token's digest and the telemetry token — the
+    endpoint bootstrap serves and the unit's enrollment secret, bound to
+    (`machine`, `home`) and expiring after `ttl_hours`. It is
     written 0600 to `out` (never overwritten) and sealed under a transport key
     printed once here; the unit installs it with
     `ava start --db-capability <bundle>` and that key in AVA_DB_CAPABILITY_KEY.
@@ -440,6 +442,7 @@ def cmd_db_authority_issue_unit(*, machine: str, home: str, out: str, ttl_hours:
     """
     from shared.cluster.authority import AuthorityRefusedError
     from shared.cluster.authority.unit import UnitIdentity, issue_bundle, write_bundle
+    from shared.config import settings
     from shared.config.service_read import served_db_endpoint
 
     target = Path(out).expanduser().absolute()
@@ -449,7 +452,11 @@ def cmd_db_authority_issue_unit(*, machine: str, home: str, out: str, ttl_hours:
     try:
         unit = UnitIdentity(machine=machine, home=home)
         issued = issue_bundle(
-            gateway_home, unit=unit, endpoint=served_db_endpoint(), ttl_s=ttl_hours * 3600
+            gateway_home,
+            unit=unit,
+            endpoint=served_db_endpoint(),
+            cluster_secret=settings.data_plane.cluster_secret,
+            ttl_s=ttl_hours * 3600,
         )
         write_bundle(target, issued.envelope)
     except (AuthorityRefusedError, ValueError, RuntimeError, OSError) as exc:
@@ -462,6 +469,6 @@ def cmd_db_authority_issue_unit(*, machine: str, home: str, out: str, ttl_hours:
         f"  transport key (shown once, carry it separately): {issued.transport_key}\n"
         "  on the unit: export AVA_DB_CAPABILITY_KEY from a non-echoing prompt, then run\n"
         f"  `ava start --db-capability <bundle>` (first start also takes --gateway-url, "
-        "--machine-name, --machine-host and AVA_CLUSTER_SECRET)"
+        "--machine-name and --machine-host; the unit never needs AVA_CLUSTER_SECRET)"
     )
     return 0

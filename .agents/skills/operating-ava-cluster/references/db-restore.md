@@ -72,7 +72,7 @@ For an operator investigating an artifact, the transform it performs is:
 scratch_dir=$(mktemp -d)
 chmod 700 "$scratch_dir"
 key_file="$scratch_dir/backup.key"
-.venv/bin/python -c 'import hashlib; from shared.config import settings; print(hashlib.sha256(settings.data_plane.cluster_secret.encode()).hexdigest())' > "$key_file"
+.venv/bin/python -c 'from services.gateway_side.backup.passphrase import logical_backup_passphrase; print(logical_backup_passphrase())' > "$key_file"
 chmod 600 "$key_file"
 openssl enc -d -aes-256-cbc -pbkdf2 -salt -kfile "$key_file" -in /absolute/path/to/<db>-<utc>.dump.enc -out "$scratch_dir/backup.dump"
 chmod 600 "$scratch_dir/backup.dump"
@@ -80,16 +80,17 @@ chmod 600 "$scratch_dir/backup.dump"
 # gzip --decompress --stdout "$scratch_dir/backup.dump" > "$scratch_dir/backup.dump.raw" && mv "$scratch_dir/backup.dump.raw" "$scratch_dir/backup.dump"
 ```
 
-The key file is the SHA-256 hex digest of the cluster secret. It is private,
-never passed on argv, and must be deleted with the scratch directory after the
-drill. The cluster secret itself lives in the surviving unit's `.env`
-(`$AVA_HOME/.env`, mode 0600) — in a disaster-recovery scenario the secret from
-any surviving runner (or the gateway) is sufficient to decrypt every artifact,
-because the passphrase is derived from the cluster secret alone, not from any
-per-host value. Note: rotating the cluster secret makes artifacts encrypted
-under the previous value unrecoverable — after any rotation, keep the prior
-secret in escrow (or re-run a backup) until the old artifacts have been
-retired. The archive's compression CRC and `pg_restore` failure path detect
+The key file holds the logical-backup passphrase from its one resolution
+(`services/gateway_side/backup/passphrase.py`, the same one every backup and
+restore uses): the pinned `$AVA_HOME/backups/logical-backup.passphrase` once the
+gateway's human secret has rotated, otherwise the SHA-256 hex digest of that
+secret. It is private, never passed on argv, and must be deleted with the
+scratch directory after the drill. Only the gateway holds that material —
+remote units no longer hold the human secret — so disaster recovery needs the
+gateway's `.env` or, after a rotation, its pinned passphrase file; keep an
+escrowed copy with the gateway's other backup keys. A bearer rotation pins the
+pre-rotation passphrase before it changes the secret, so earlier artifacts stay
+decryptable. The archive's compression CRC and `pg_restore` failure path detect
 corruption; the artifact is encrypted with AES-256-CBC and inherits the local
 artifact's 0600 threat model.
 

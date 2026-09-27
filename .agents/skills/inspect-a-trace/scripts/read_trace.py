@@ -27,9 +27,11 @@ a text summary on stdout.
   trimmed (expected for old turns). 404 = agent no longer exists.
 - events: `GET /api/events?trace_id=...` — the correlated event stream.
 
-Gateway auth: `Authorization: Bearer <secret>` where the secret is
-`AVA_CLUSTER_SECRET` from the environment or `$AVA_HOME/.env` (no header when
-empty — a single-box no-auth cluster). The gateway listens on :8000.
+Gateway auth: `Authorization: Bearer <token>` — the process's machine API token
+(`AVA_API_TOKEN`, set in every launched service and agent), else
+`AVA_CLUSTER_SECRET` from the environment or `$AVA_HOME/.env` (the gateway
+home; no header when empty — a single-box no-auth cluster). The gateway
+listens on :8000.
 
 LLM span detection: span name ends with `.chat`, or attribute
 `gen_ai.operation.name` == "chat". Model comes from
@@ -160,6 +162,9 @@ def _node_sequence(spans: list[dict], start_ns: int) -> list[dict]:
 
 
 def _cluster_secret() -> str:
+    token = os.environ.get("AVA_API_TOKEN")
+    if token:
+        return token  # a launched process's machine API token
     env = os.environ.get("AVA_CLUSTER_SECRET")
     if env is not None:
         return env

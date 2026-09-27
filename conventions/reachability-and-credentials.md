@@ -40,7 +40,7 @@ Three rules:
    identity (the 2026-07-18 runner incident).
 3. **The station's advertised url is its OTLP ingress** (single source:
    the station unit's `AVA_TELEMETRY_OTLP_PORT`, default 4318) — the one station endpoint that
-   authenticates with the cluster bearer. The native backends (Loki 3100 /
+   authenticates with the telemetry token. The native backends (Loki 3100 /
    Prometheus 9090 / Grafana 3003) have no advertised url; they stay
    loopback-bound unless an operator widens the listen host,
    and they are never dialed cross-machine.
@@ -69,27 +69,32 @@ guard correct.
 
 | Surface | Credential | Verifier |
 |---|---|---|
-| Gateway HTTP API, `/ops`, bootstrap, machine registration | `AVA_CLUSTER_SECRET` bearer | `shared/cluster_auth.py` `verify_bearer` (constant-time) |
-| Station OTLP ingress (remote receiver) | `AVA_CLUSTER_SECRET` bearer | otel-collector `bearertokenauth/cluster` extension |
+| Gateway HTTP API, bootstrap, webhooks | `AVA_CLUSTER_SECRET` bearer (human/operator, gateway only) or the active write generation's machine API token (`AVA_API_TOKEN`) | `gateway.request_principal.cluster_credential` (constant-time; a revoked generation's token never matches) |
+| A unit's `/ops` | its write generation's gateway or runner API token | `shared/cluster_auth.py` `verify_bearer_digest` over digests only |
+| Gateway and station OTLP ingress (remote receiver) | the telemetry token (`HMAC(AVA_CLUSTER_SECRET)`; remote units hold only the token, from their capability) | otel-collector `bearertokenauth/cluster` extension |
 | Data plane (Postgres/Redis) | split admin/runtime credentials, gateway-only admin | `conventions/data-plane-secret-split.md` |
 | Loki/Prometheus backend APIs | none — loopback-only (`AVA_LGTM_LISTEN_HOST`) | n/a |
 | Grafana UI | gateway session auth through `/grafana/*` proxy | gateway middleware; Grafana runs anonymous read-only |
 
 An **empty `AVA_CLUSTER_SECRET`** is the zero-config single-box posture:
-every surface serves unauthenticated on loopback, and any unit that would
-have to expose a remote ingress **fails closed** (converge raises) rather
-than exposing an unauthenticated receiver. A non-empty secret on a unit with
-a non-loopback reachable host is what turns remote ingress on.
+every surface serves unauthenticated on loopback, no machine token is
+delivered, and any unit that would have to expose a remote ingress **fails
+closed** (converge raises) rather than exposing an unauthenticated receiver. A
+telemetry token (a non-empty secret on the gateway, an API-bearing capability
+on a remote unit) on a unit with a non-loopback reachable host is what turns
+remote ingress on.
 
-The station's bearer is the **same** `AVA_CLUSTER_SECRET` as the control
-plane — there is deliberately no second station secret. What differs is the
-verification surface (the collector's `bearertokenauth` extension, not the
-gateway admin middleware), so a credential valid for telemetry ingress is
-still scoped to that surface and carries no admin semantics.
+The telemetry token is derived from the human secret, so there is
+deliberately no second station secret to distribute, yet a unit holding it
+learns nothing about the secret. It is scoped to the telemetry surface (the
+collector's `bearertokenauth` extension) and carries no API semantics; it
+does not rotate per write generation (telemetry is not a write path) and
+changes only when the human secret rotates.
 
 ## Verification
 
-- Gateway / ops dialers present `Authorization: Bearer <secret>` and the
+- Gateway / ops dialers present `Authorization: Bearer <token>` (their
+  delivered machine API token, else an operator's human secret) and the
   receiver verifies in constant time; a blank configured secret never
   verifies (fails closed).
 - The collector's remote receivers authenticate via the
@@ -98,6 +103,6 @@ still scoped to that surface and carries no admin semantics.
   attach the same header.
 - **Probe contract** (remote station health, `services/heartbeat/station_probe.py`):
   `POST <advertised station url>/v1/traces` with an empty
-  `ExportTraceServiceRequest` and the cluster bearer; any 2xx = alive. The
+  `ExportTraceServiceRequest` and the telemetry token; any 2xx = alive. The
   probe dials the **advertised** address (rule 1), never a bare connect.
   Probe failure is fail-open: it alerts and never blocks local business.

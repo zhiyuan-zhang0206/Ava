@@ -32,7 +32,8 @@ Repeated start does not change the recorded identity; conflicting inputs refuse.
 Acquire the checkout's dependencies using the
 [deployment procedure](../.agents/skills/deploy-ava-cluster/SKILL.md). A split
 gateway must already be serving and have a cluster bearer. On the new host,
-join the private network, read/export that bearer without echoing it, then run:
+join the private network, then run (the runner never needs the gateway's
+bearer: its capability bundle authenticates it):
 
 ```bash
 .venv/bin/ava start --serve-agent-runner --no-serve-gateway \
@@ -43,8 +44,8 @@ join the private network, read/export that bearer without echoing it, then run:
 
 The bundle comes from `ava cluster db-authority issue-unit --machine <new-name>
 --home <this unit's $AVA_HOME> --out <bundle>` on the gateway; export its
-printed transport key as `AVA_DB_CAPABILITY_KEY` without echoing it. Unset the
-bearer and the key afterward. `--ssl-cert-file PATH` supplies a trusted CA
+printed transport key as `AVA_DB_CAPABILITY_KEY` without echoing it, and unset
+it afterward. `--ssl-cert-file PATH` supplies a trusted CA
 bundle when required. First start installs the capability (and deletes the
 bundle), durably records local identity, registers this host, and starts its
 selected root services.

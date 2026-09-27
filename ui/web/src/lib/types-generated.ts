@@ -17,7 +17,9 @@ export interface paths {
          * Login
          * @description Authenticate with the cluster secret and receive a session cookie.
          *
-         *     Request body: ``{"password": "<cluster-secret>"}``
+         *     Request body: ``{"password": "<cluster-secret>"}``. An agent-runner's
+         *     managed browser presents the active generation's runner API token instead
+         *     (`_is_runner_token`); its session is an ordinary session afterwards.
          *
          *     On success, returns ``{"ok": true}`` and sets an HTTP-only session
          *     cookie whose lifetime is controlled by ``session_ttl_seconds``.
@@ -156,10 +158,11 @@ export interface paths {
          *     shared.config.bootstrap_config_values).
          *
          *     Raises:
-         *         HTTPException: 401 when the request does not carry
-         *             `Authorization: Bearer <cluster secret>` (a no-secret cluster serves
-         *             without auth — there is no credential to require); 400 when the
-         *             gateway configuration has no database endpoint.
+         *         HTTPException: 401 when the request carries neither the active write
+         *             generation's machine API token nor the cluster secret as its bearer
+         *             (a no-secret cluster serves without auth — there is no credential
+         *             to require); 400 when the gateway configuration has no database
+         *             endpoint.
          */
         get: operations["get_bootstrap_api_bootstrap_get"];
         put?: never;
@@ -5739,9 +5742,11 @@ export interface components {
         };
         /**
          * LoginRequest
-         * @description POST /api/auth/login body. `password` is the cluster secret; a missing or
-         *     empty one falls through to the 401 below rather than a 422. `username` is
-         *     accepted for Chrome password-manager compatibility but never validated.
+         * @description POST /api/auth/login body. `password` is the cluster secret (or, for the
+         *     managed browser of an agent-runner, the active generation's runner API
+         *     token); a missing or empty one falls through to the 401 below rather than a
+         *     422. `username` is accepted for Chrome password-manager compatibility but
+         *     never validated.
          */
         LoginRequest: {
             /**

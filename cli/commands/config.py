@@ -112,14 +112,26 @@ def _guard_gateway_write(target: str) -> None:
 
 
 def _auth_headers() -> dict[str, str]:
-    """Read this unit's bearer secret without constructing Settings."""
-    from shared import runtime_config
-    from shared.cluster_auth import bearer_header
+    """This unit's bearer, read without constructing Settings.
 
-    secret = os.environ.get("AVA_CLUSTER_SECRET")
-    if secret is None:
-        secret = runtime_config.read_env_aliases().get("AVA_CLUSTER_SECRET", "")
-    return bearer_header(secret) if secret else {}
+    A delivered machine API token first (the boot pass gives an admitted
+    operator process on the gateway home its token); else the gateway's human
+    secret (environment, then `.env`); else, on a remote unit, its installed
+    capability's API token, only while this process runs the admitted runtime.
+    """
+    from shared import runtime_config
+    from shared.cluster_auth import bearer_header, delivered_token
+
+    bearer = delivered_token() or os.environ.get("AVA_CLUSTER_SECRET")
+    if bearer is None:
+        bearer = runtime_config.read_env_aliases().get("AVA_CLUSTER_SECRET", "")
+    home = runtime_config.env_file_path().parent
+    if not bearer and (home / "db-authority" / "unit.json").exists():
+        from shared.cluster.authority.unit import consume_unit
+
+        api = consume_unit(home.resolve()).api
+        bearer = "" if api is None else api.token
+    return bearer_header(bearer) if bearer else {}
 
 
 def _get_config(machine: str | None) -> ConfigView:

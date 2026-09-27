@@ -1,10 +1,12 @@
 """Bootstrap serves the authoritative hosted turn limit without rewriting zero."""
 
 import json
+import os
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 from urllib.parse import urlsplit
 
 import httpx2
@@ -31,6 +33,20 @@ def gateway_snapshot(monkeypatch: pytest.MonkeyPatch) -> dict[str, str]:
     monkeypatch.setattr(config.settings.daemon, "host_control_pool_max_size", 8)
     monkeypatch.setattr(config.settings.data_plane, "cluster_secret", _SECRET)
     return aliases
+
+
+@pytest.fixture
+def runner_token(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, seed_write_generation: Callable[[Path], Any]
+) -> str:
+    """The gateway's active write generation (a private home) and this runner
+    process's delivered runner API token: a runner never holds the human secret."""
+    home = (tmp_path / "gateway-home").resolve()
+    home.mkdir(mode=0o700)
+    token = seed_write_generation(home).api.runner
+    monkeypatch.setattr("shared.paths.ava_home", lambda: home)
+    monkeypatch.setitem(os.environ, "AVA_API_TOKEN", token)
+    return token
 
 
 @pytest.fixture
@@ -82,11 +98,14 @@ def test_no_secret_bootstrap_serves_zero_verbatim(
 
 
 def test_runner_fetch_replaces_stale_admission(
-    gateway_snapshot: dict[str, str], gateway_client: TestClient, monkeypatch: pytest.MonkeyPatch
+    gateway_snapshot: dict[str, str],
+    gateway_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    runner_token: str,
 ) -> None:
+    del runner_token
     env = {
         "AVA_GATEWAY_URL": "http://gateway",
-        "AVA_CLUSTER_SECRET": _SECRET,
         _TURN_LIMIT: "16",
         "AVA_HOST_DB_POOL_MAX_SIZE": "20",
         "AVA_HOST_CONTROL_POOL_MAX_SIZE": "4",
@@ -116,12 +135,10 @@ def test_runner_refreshes_an_outdated_admission_snapshot(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     age_seconds: float,
+    runner_token: str,
 ) -> None:
-    env = {
-        "AVA_HOME": str(tmp_path),
-        "AVA_GATEWAY_URL": "http://gateway",
-        "AVA_CLUSTER_SECRET": _SECRET,
-    }
+    del runner_token
+    env = {"AVA_HOME": str(tmp_path), "AVA_GATEWAY_URL": "http://gateway"}
     snapshot = tmp_path / "run" / "bootstrap-snapshot.json"
     snapshot.parent.mkdir()
     snapshot.write_text(

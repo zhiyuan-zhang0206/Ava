@@ -86,7 +86,8 @@ The local OTLP producer endpoint and collector port are host-scoped. Bootstrap
 publishes the read-only `AVA_GATEWAY_OTLP_ENDPOINT` derived from the gateway's
 reachable host and fresh OTLP port, overriding any stale copy of that derived
 field. Pure-runner collectors and trace replay consume it while retaining
-independent local listeners. The relay still requires the cluster bearer.
+independent local listeners. The relay still requires the telemetry token
+(derived from the gateway's human secret, carried in a runner's capability).
 
 Remote station ingress resolution lives in `shared/station_endpoint.py` and is
 shared by collector rendering and station health probing. Pure stations on the

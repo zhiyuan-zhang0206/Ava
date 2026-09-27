@@ -45,7 +45,9 @@ can capture the screen and inject clicks/keys; the **managed Chrome** CDP
 port (`--remote-debugging-port`) is unauthenticated by design and the bridge
 injects a configurable, server-side gateway session cookie into it; the **mcp
 daemon** socket
-shares the machine with the cluster secret. Their real boundary is the OS
+shares the machine with the unit's machine credentials (its write generation's
+API token and database login; the gateway also holds the cluster secret). Their
+real boundary is the OS
 user: only processes running as the same user can reach them, and that user
 is the same trust domain `execute_code` runs in. Same-user isolation for
 these is a non-goal today; if a deployment needs it, isolate the OS user or

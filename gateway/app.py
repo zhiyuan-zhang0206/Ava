@@ -228,10 +228,7 @@ from gateway.routers import (
 from gateway.schedule_manager import ScheduleManager
 from gateway.session_store import session_is_valid, touch_session
 from shared.agents import AvaAgentError
-from shared.cluster_auth import (
-    cookie_name,
-    verify_bearer,
-)
+from shared.cluster_auth import cookie_name
 from shared.config import settings
 from shared.context import AvaContext
 from shared.lm._plugin_providers import ensure_provider_plugins_loaded
@@ -428,8 +425,9 @@ async def _cluster_pause_middleware(
 # reachable without auth. Health is probed by each host on the private
 # network; login is how the browser obtains a session cookie.
 # Every other API route requires either a valid session cookie or a
-# Bearer token carrying the cluster secret — unless the cluster has no secret
-# at all (no-auth posture) or the middleware is disabled for e2e.
+# Bearer token carrying the cluster secret or a machine API token of the active
+# write generation — unless the cluster has no secret at all (no-auth posture)
+# or the middleware is disabled for e2e.
 _AUTH_BYPASS_PATHS: frozenset[str] = frozenset(
     {
         "/api/health",
@@ -484,7 +482,9 @@ async def _cluster_auth_middleware(
 
     Two auth methods, checked in order:
     1. Session cookie (``ava_session``) — for browser users who logged in.
-    2. ``Authorization: Bearer <secret>`` — for SDK / agent / script callers.
+    2. ``Authorization: Bearer <token>`` — the human cluster secret (operator
+       SDK / scripts), or the active write generation's machine API token that
+       the launcher delivers to every service and agent (``AVA_API_TOKEN``).
 
     Two states serve the API unauthenticated, both first-class:
     - ``cluster_secret`` empty — a no-secret cluster is fully unauthenticated by
@@ -494,7 +494,7 @@ async def _cluster_auth_middleware(
       middleware while keeping the cluster secret for internal
       service-to-service auth (ops / agent-host).
     """
-    from gateway.request_principal import AuthPrincipal
+    from gateway.request_principal import AuthPrincipal, cluster_credential
 
     # This is set only by credential verification, never by caller/source JSON.
     request.state.auth_principal = None
@@ -559,11 +559,12 @@ async def _cluster_auth_middleware(
             )
         return await call_next(request)
 
-    # 2. Check Bearer token
-    authorization = request.headers.get("Authorization")
-    if verify_bearer(authorization, secret):
+    # 2. Check Bearer token: the human secret, or the active write generation's
+    # machine API token (a revoked generation's never authenticates).
+    verified_by = cluster_credential(request.headers.get("Authorization"), secret)
+    if verified_by is not None:
         request.state.auth_principal = AuthPrincipal("cluster", "administrator")
-        request.state.source_verified_by = "cluster_bearer"
+        request.state.source_verified_by = verified_by
         return await call_next(request)
 
     _log_auth401_rejection(request)

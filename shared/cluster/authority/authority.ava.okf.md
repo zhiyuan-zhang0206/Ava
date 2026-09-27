@@ -43,9 +43,10 @@ goes with the publication graph).
 
 `$AVA_HOME/db-authority/` (0700) is outside the configuration digest.
 `ledger.json` records owner, groups, `counter`, `active`, `pending` and every
-revoked number. `generations/<n>.json` holds the two passwords and their
-client-computed verifiers; its SHA-256 is the ledger's `credential_digest`,
-the only credential fact other records may carry. Files are 0600, written
+revoked number. `generations/<n>.json` holds the two passwords, their
+client-computed verifiers and one machine API token per class; its SHA-256 is
+the ledger's `credential_digest`, the only credential fact other records may
+carry. Files are 0600, written
 atomically with file and directory fsync; reads refuse symlinks, loose modes
 and foreign owners. Every number `0..counter` is exactly one of active,
 pending or revoked, so `counter` never decreases.
@@ -107,7 +108,8 @@ sessions.
 
 How the active generation reaches the pooler, launched services, operator
 processes and remote agent-runner units (`unit`: sealed per-unit bundles), and
-where birth, ordinary start and the cutover call this library:
+where birth, ordinary start and the cutover call this library (API tokens:
+[[shared/cluster/authority/api-tokens.ava.okf.md|machine API tokens]]):
 [[shared/cluster/authority/wiring.ava.okf.md|Write-generation delivery and wiring]].
 
 ## Tests
@@ -117,6 +119,8 @@ where birth, ordinary start and the cutover call this library:
 start steps and the cutover against a home-owned PostgreSQL, PgBouncer and
 Redis (including the collector's monitoring dial across a rollover), and
 `test_delivery.py` covers delivery and the boot pass without a database;
+`test_api_tokens.py` is the API token acceptance matrix (gateway, bootstrap,
+login, webhooks, `/ops`, launch delivery, clients);
 `test_unit_capability.py` covers the remote-unit bundle (sealing, binding,
 install, the runner's boot pass and launcher) and, on the real gateway plane,
 issue -> runner start -> generation login, the credential-free bootstrap, a

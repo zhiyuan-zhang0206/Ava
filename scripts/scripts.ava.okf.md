@@ -63,7 +63,7 @@ immediately.
 - `start_agent.py` (derives an agent via gateway `/api/agents`), `start_gateway.py` (directly starts the gateway FastAPI body, ≈ `.venv/bin/python -m gateway`) — **the latter does not derive an agent**
 - `multihost/` (`multihost.py` + `agent_runner_entrypoint.sh`), `preview/` (daily deployment + checkpoint rebuild)
 - `cloud-bench-bootstrap.sh`, `metrics.py`
-- `rotate_cluster_secret.py` — emergency control-plane `AVA_CLUSTER_SECRET` bearer rotation on the gateway machine (default `--dry-run`); it does not change the data plane
+- `rotate_cluster_secret.py` — the human-bearer `AVA_CLUSTER_SECRET` rotation on the gateway (`advance`, also step `api` of the cutover): journaled as fingerprints, it pins the logical-backup passphrase before writing the new secret; default dry run; it does not change the data plane
 - `rotate_data_plane_secrets.py` — routine gateway-local data-plane rotation (`--scope admin`, `runner`, or `both`) with a 0600 recovery state
 - `restore_drill.py` — decrypts a managed database backup, restores it into throwaway Postgres, and verifies schema, checkpoint counts, and a readable conversation without touching the live databaserypted daily artifacts)
 

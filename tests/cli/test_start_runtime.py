@@ -441,9 +441,11 @@ def test_operation_preflight_checks_actual_roster_without_selection_or_effects(
     monkeypatch.setattr(_repo, "_services_for_roles_annotated", annotated)
     monkeypatch.setattr(root_driver, "root_child_env", environment)
     monkeypatch.setattr(root_driver, "_bring_up_root", forbidden)
-    # The roster preflight is under test here; per-service database delivery
-    # (write generation or unit capability) is covered by the db-authority tests.
+    # The roster preflight is under test here; per-service database and API
+    # token delivery (write generation or unit capability) is covered by the
+    # db-authority tests.
     monkeypatch.setattr(_data_plane, "db_delivery", no_delivery)
+    monkeypatch.setattr(_data_plane, "api_delivery", no_delivery)
     before = {path: path.read_bytes() for path in home.rglob("*") if path.is_file()}
     if foreign_executable:
         with pytest.raises((ReleaseRejectedError, FileNotFoundError)):

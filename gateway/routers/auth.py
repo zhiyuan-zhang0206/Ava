@@ -38,19 +38,37 @@ router = APIRouter()
 
 
 class LoginRequest(BaseModel):
-    """POST /api/auth/login body. `password` is the cluster secret; a missing or
-    empty one falls through to the 401 below rather than a 422. `username` is
-    accepted for Chrome password-manager compatibility but never validated."""
+    """POST /api/auth/login body. `password` is the cluster secret (or, for the
+    managed browser of an agent-runner, the active generation's runner API
+    token); a missing or empty one falls through to the 401 below rather than a
+    422. `username` is accepted for Chrome password-manager compatibility but
+    never validated."""
 
     password: str = ""
     username: str | None = None
+
+
+def _is_runner_token(password: str) -> bool:
+    """Whether `password` is the active write generation's runner API token.
+
+    The managed browser of an agent-runner holds no human secret; it logs its
+    Chrome in with the machine token its launcher delivered. A revoked
+    generation's token never matches.
+    """
+    from shared.cluster.authority.api import acceptance, bearer_class
+    from shared.paths import ava_home
+
+    accepted = acceptance(ava_home().resolve())
+    return bearer_class(f"Bearer {password}", accepted) == "runner"
 
 
 @router.post("/api/auth/login")
 async def login(body: LoginRequest, request: Request) -> JSONResponse:
     """Authenticate with the cluster secret and receive a session cookie.
 
-    Request body: ``{"password": "<cluster-secret>"}``
+    Request body: ``{"password": "<cluster-secret>"}``. An agent-runner's
+    managed browser presents the active generation's runner API token instead
+    (`_is_runner_token`); its session is an ordinary session afterwards.
 
     On success, returns ``{"ok": true}`` and sets an HTTP-only session
     cookie whose lifetime is controlled by ``session_ttl_seconds``.
@@ -99,7 +117,7 @@ async def login(body: LoginRequest, request: Request) -> JSONResponse:
             retryable=False,
         )
 
-    if not hmac.compare_digest(password, secret):
+    if not hmac.compare_digest(password, secret) and not _is_runner_token(password):
         login_limiter.record_failure(ip)
         return error_response(
             request,

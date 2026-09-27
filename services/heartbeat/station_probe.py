@@ -12,11 +12,11 @@ is empty the check is a no-op: the observatory is local and the `lgtm`
 healthcheck keeps the native stack alive. When it is set, the gateway dials
 the station through the reachability contract — the address the station
 unit advertises in `machine_units` (`shared.machines.unit_dial_url`), not a
-bare connect — and authenticates with the cluster bearer, exactly like the
-collector relay that ships telemetry to it.
+bare connect — and authenticates with the cluster's telemetry token, exactly
+like the collector relay that ships telemetry to it.
 
 The probe is an OTLP round-trip: `POST <advertised url>/v1/traces` with an
-empty `ExportTraceServiceRequest` and `Authorization: Bearer <secret>`. Any
+empty `ExportTraceServiceRequest` and `Authorization: Bearer <telemetry token>`. Any
 2xx counts as alive (the station's `otlp/remote` receiver authenticates and
 accepts the empty batch); a connection failure, timeout, 401, or 4xx/5xx
 means the station's ingress is not serving.
@@ -111,7 +111,10 @@ def resolve_target() -> _StationTarget | None:
 
 
 def _station_answers(url: str) -> bool:
-    """One bearer-authenticated OTLP round-trip; any 2xx = the ingress serves."""
+    """One bearer-authenticated OTLP round-trip; any 2xx = the ingress serves.
+
+    The bearer is the cluster's telemetry token, derived from this gateway's
+    human secret (the station accepts the same token from its capability)."""
     secret = settings.data_plane.cluster_secret
     if not secret:
         # A remote observatory without a cluster secret cannot authenticate a
@@ -123,7 +126,12 @@ def _station_answers(url: str) -> bool:
             url,
         )
         return True
-    headers = {"Authorization": f"Bearer {secret}", "Content-Type": "application/json"}
+    from shared.cluster.authority.api import telemetry_token
+
+    headers = {
+        "Authorization": f"Bearer {telemetry_token(secret)}",
+        "Content-Type": "application/json",
+    }
     req = urllib.request.Request(  # noqa: S310 — advertised private-network endpoint, deliberate
         f"{url.rstrip('/')}/v1/traces",
         method="POST",

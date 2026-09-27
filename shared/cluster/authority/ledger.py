@@ -2,7 +2,7 @@
 
 Settings-free and database-free. ``ledger.json`` records the owner, the
 capability groups and every allocated generation; ``generations/<n>.json``
-holds that generation's passwords and SCRAM verifiers. The directory is
+holds that generation's passwords, SCRAM verifiers and machine API tokens. The directory is
 owner-only (0700), every file 0600, every write atomic with file and directory
 fsync. The store sits outside the configuration digest, so a rotation leaves
 configuration unchanged.
@@ -37,6 +37,7 @@ from pydantic import ValidationError
 
 from shared.cluster.authority.model import (
     CLASSES,
+    ApiTokens,
     BirthAuthority,
     ClosureEvidence,
     CutoverAuthority,
@@ -259,7 +260,8 @@ def _new_secret(home: Path, number: int, encrypt: Encrypt) -> GenerationSecret:
     for cls, name in zip(CLASSES, generation_names(number), strict=True):
         password = secrets.token_urlsafe(32)
         roles[cls] = RoleSecret(name=name, password=password, verifier=encrypt(name, password))
-    return GenerationSecret(number=number, home=str(home), roles=SecretRoles(**roles))
+    api = ApiTokens(gateway=secrets.token_urlsafe(32), runner=secrets.token_urlsafe(32))
+    return GenerationSecret(number=number, home=str(home), roles=SecretRoles(**roles), api=api)
 
 
 def _parse_secret(home: Path, number: int, body: bytes) -> GenerationSecret:

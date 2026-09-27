@@ -286,20 +286,22 @@ class DataPlaneSettings(EnvSettings):
         default="",
         alias="AVA_CLUSTER_SECRET",
         description=(
-            "Single per-cluster pre-shared secret: the human/control-plane bearer "
-            "(gateway API, frontend login, /ops dials, runner /api/bootstrap). EMPTY = "
-            "the single-box posture: the user-facing API and /ops serve without auth "
-            "and every data-plane listener binds loopback alone. The internal data "
-            "plane authenticates whatever the secret: Postgres/PgBouncer admit only "
-            "SCRAM write-generation logins delivered by the launcher, and Redis "
-            "requires its generated passwords. Set the secret on the gateway and hand "
-            "it to each runner out-of-band as AVA_CLUSTER_SECRET for `ava start`."
+            "The gateway's human/control-plane bearer (gateway API, frontend login). "
+            "It stays on the gateway: machine callers present their write "
+            "generation's API token, and remote units never receive or hold this "
+            "secret (bootstrap does not serve it). EMPTY = the single-box posture: "
+            "the user-facing API and /ops serve without auth and every data-plane "
+            "listener binds loopback alone. The internal data plane authenticates "
+            "whatever the secret: Postgres/PgBouncer admit only SCRAM write-generation "
+            "logins delivered by the launcher, and Redis requires its generated "
+            "passwords."
         ),
         json_schema_extra={
             "restart_required": "all",
             "writable": True,
             "sensitive": True,
             "scope": "cluster-pinned",
+            "bootstrap": False,
         },
     )
 

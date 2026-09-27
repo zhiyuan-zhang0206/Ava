@@ -1,8 +1,9 @@
 # Join a runner through first start
 
-A runner joins an already-serving gateway. Its identity is its local home,
-gateway URL, and cluster bearer; its database login is a per-unit capability the
-gateway operator issues. It creates no local cluster data plane.
+A runner joins an already-serving gateway. Its identity is its local home and
+gateway URL; its database login, machine API token and telemetry token are a
+per-unit capability the gateway operator issues. It never holds the gateway's
+human cluster secret, and it creates no local cluster data plane.
 
 On the gateway, issue the unit's capability bundle (0600) and note the transport
 key it prints once:
@@ -17,33 +18,34 @@ the canonical source checkout as described in
 [the deployment guide](../SKILL.md), then run:
 
 ```bash
-printf 'Cluster secret: ' >&2
-IFS= read -rs AVA_CLUSTER_SECRET
-printf '\nCapability transport key: ' >&2
+printf 'Capability transport key: ' >&2
 IFS= read -rs AVA_DB_CAPABILITY_KEY
 printf '\n' >&2
-export AVA_CLUSTER_SECRET AVA_DB_CAPABILITY_KEY
+export AVA_DB_CAPABILITY_KEY
 .venv/bin/ava start --serve-agent-runner --no-serve-gateway \
   --gateway-url http://<gateway-host>:8000 \
   --machine-name machine-2 --machine-host <this-host-addr> \
   --db-capability /path/to/machine-2.bundle
-unset AVA_CLUSTER_SECRET AVA_DB_CAPABILITY_KEY
+unset AVA_DB_CAPABILITY_KEY
 ```
 
-Transfer only the bearer, the bundle and its key through the operator's secret
-channel. Never copy the gateway's `.env`: it contains credentials a runner must
-not hold.
+Transfer only the bundle and its key through the operator's secret channel.
+Never copy the gateway's `.env`: it contains credentials a runner must not
+hold. A runner home whose `.env` still records `AVA_CLUSTER_SECRET` refuses to
+start.
 
-First start fetches `GET /api/bootstrap` (configuration only: `AVA_DB_URL` is
-the credential-free endpoint), rejects a remote gateway returning loopback
-storage URLs, and installs the capability: the bundle must authenticate under
+First start fetches `GET /api/bootstrap` with the bundle's API token
+(configuration only: `AVA_DB_URL` is the credential-free endpoint and the human
+secret is never served), rejects a remote gateway returning loopback storage
+URLs, and installs the capability: the bundle must authenticate under
 the key, name this machine and home and the endpoint the gateway serves, be
 unexpired, carry a generation not older than an installed one, and log in. It
 writes `$AVA_HOME/db-authority/unit.json` and `enrollment.json` (0600) and
 deletes the bundle. A runner with no installed capability refuses. It records
 the local identity before host convergence, registration, and root startup. `--machine-host` must be reachable from the gateway: the gateway calls
-the runner's `/ops` there with the cluster bearer. A remote join requires a
-non-loopback address and nonempty bearer.
+the runner's `/ops` there with its gateway API token (the runner holds only
+that token's digest). A remote join requires a non-loopback address and a
+bundle issued by an authenticated gateway.
 
 The bootstrap response is not cached into the runner `.env`. Every process
 fetches current connection facts at Settings construction; gateway unavailability

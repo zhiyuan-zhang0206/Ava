@@ -45,8 +45,8 @@ import httpx
 from pydantic import ValidationError
 
 from ops.rpc_schemas import OpEnvelope, OpKind, OpResponse, is_op_kind
-from shared.cluster_auth import bearer_header
 from shared.config import settings
+from shared.machine import gateway_auth_headers
 from shared.machines import (
     MachineGatewayUrlMissing,
     MachineNotRegistered,
@@ -212,11 +212,11 @@ async def _dispatch_once(
         # connect is capped by timeout_s: a blackholed host (powered-off private-
         # network peer) hangs in connect, so a connect floor above timeout_s would defeat
         # short probe timeouts like the roster's 3s probe.
-        # Present the cluster secret so the runner's authenticated /ops accepts
-        # the dial. When the secret is empty (tests, unprovisioned checkout), skip
-        # the header entirely to avoid an illegal "Bearer " value.
-        secret = settings.data_plane.cluster_secret
-        headers = bearer_header(secret) if secret else {}
+        # Present the gateway's machine API token so the runner's authenticated
+        # /ops accepts the dial (a runner holds only its digest, never the human
+        # secret). The open posture (tests, unprovisioned checkout) sends no
+        # header at all rather than an illegal "Bearer " value.
+        headers = gateway_auth_headers()
         # Cluster-internal dials must never honor the host's system/env proxy:
         # private peers are not proxy-routable. This matches shared/http_dial.py's
         # PinnedIPv4Transport, which is sync-only; async httpx already handles

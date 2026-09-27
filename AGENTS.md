@@ -59,24 +59,26 @@ Windows unit carries `agent-runner` only
 ([setup](conventions/windows-setup.md)). Rationale + the remaining slice:
 [`future/infra/embedded-per-cluster-data-plane.md`](future/infra/embedded-per-cluster-data-plane.md).
 
-**Auth follows the authority boundary.** `AVA_CLUSTER_SECRET` is the human/control-plane
-bearer (gateway API, frontend login, `/ops`, bootstrap, machine registration). An EMPTY
-secret (single-box default) leaves the user-facing API and frontend unauthenticated and
-binds every data-plane listener to loopback; a set secret adds this host's reachable
-address for Postgres and its pooler (Redis stays loopback, off-box inbound via the relay
-bridge). The internal data plane always authenticates: Postgres and PgBouncer admit only
-SCRAM application logins (the OS-user administrator and the collector's password-less
-monitoring role use `peer` on the owner-only socket),
-and Redis requires its generated passwords. Application processes never hold schema-owner
-or admin credentials: the owner is NOLOGIN, and each rollout's write generation — one
-gateway and one runner login inheriting the NOLOGIN groups `ava_gateway` / `ava_runner`,
-recorded in `$AVA_HOME/db-authority/` — is delivered only in the launch environment of
-the admitted runtime; `.env` holds the credential-free endpoint. Every DB-using service is
-launched with its class's generation login; none inherits an owner or admin URL. Bootstrap
-serves configuration only: a remote agent-runner receives its runner login as a sealed
-per-unit capability the gateway operator issues (`ava cluster db-authority issue-unit`),
-bound to its machine and home and installed by its start. Older homes convert once:
-`scripts/cutover_db_authority.py`.
+**Auth follows the authority boundary.** `AVA_CLUSTER_SECRET` is the gateway's human
+bearer (API, frontend login); it stays on the gateway and rotates only explicitly
+(`scripts/rotate_cluster_secret.py` pins the logical-backup passphrase first). An EMPTY
+secret (single-box default) leaves the API, `/ops` and frontend unauthenticated and binds
+every data-plane listener to loopback; a set secret adds this host's reachable address for
+Postgres and its pooler (Redis stays loopback, off-box inbound via the relay bridge). The
+internal data plane always authenticates: Postgres and PgBouncer admit only SCRAM
+application logins (the OS-user administrator and the collector's password-less
+monitoring role use `peer` on the owner-only socket), and Redis requires its generated
+passwords. Application processes never hold schema-owner or admin credentials: the owner
+is NOLOGIN, and each rollout's write generation — one gateway and one runner login
+inheriting the NOLOGIN groups `ava_gateway` / `ava_runner`, plus one machine API token per
+class, recorded in `$AVA_HOME/db-authority/` — is delivered only in the launch environment
+of the admitted runtime (`AVA_DB_URL`, `AVA_API_TOKEN`); `.env` holds the credential-free
+endpoint. Machine callers present their API token: the gateway admits the active
+generation's tokens (never a revoked one), an ops server its generation's two. Bootstrap
+serves configuration only: a remote agent-runner receives its runner login, API token and
+telemetry token as a sealed per-unit capability (`ava cluster db-authority issue-unit`)
+installed by its start, and never holds the human secret. Older homes convert once:
+`scripts/cutover_db_authority.py` (a networked home also rotates the human secret there).
 
 | Path | Role |
 |---|---|
@@ -93,11 +95,10 @@ instead of creating a second identity. The home is checkout-anchored: explicit
 `--worktree` supplies a deterministic development home when none is explicit.
 
 First start takes the machine name, capability flags and reachable host. A
-remote agent-runner joins through the same entry with `--gateway-url`,
-`AVA_CLUSTER_SECRET` and its database capability bundle (`--db-capability`, the
-transport key in `AVA_DB_CAPABILITY_KEY`); it does not create a gateway or a
-local data plane. Networked release operations keep refusing until capability
-delivery is automated.
+remote agent-runner joins through the same entry with `--gateway-url` and its
+capability bundle (`--db-capability`, the transport key in `AVA_DB_CAPABILITY_KEY`),
+which also authenticates it; it creates no gateway or local data plane. Networked
+release operations keep refusing until capability delivery is automated.
 Registry records are keyed by absolute home path in `~/.ava/clusters.json`
 (or an explicit private `AVA_CLUSTER_REGISTRY`). First configuration may be
 supplied with `--config-file`; credentials and identity survive retries.
@@ -145,11 +146,10 @@ ava status    # check status (includes the pg/redis view)
 ava cluster update --prepared /absolute/request.json
               # submit or continue one captured operation; dispatch is not completion
 ava cluster db-authority issue-unit --machine NAME --home UNIT_HOME --out BUNDLE
-              # on the gateway: seal the active generation's runner login for one unit;
-              # prints the bundle's transport key once
+              # gateway: seal one unit's capability; prints its transport key once
 ava start --no-serve-gateway --serve-agent-runner --gateway-url URL --machine-name NAME --machine-host HOST --db-capability BUNDLE
-              # first start of a remote runner; supply AVA_CLUSTER_SECRET and
-              # AVA_DB_CAPABILITY_KEY in the environment; the bundle is consumed
+              # first start of a remote runner; supply AVA_DB_CAPABILITY_KEY in the
+              # environment; the bundle is consumed
 ava cluster ls / status             # list all registered clusters (label = home basename) / full multi-machine roster
 ava cluster down --path PATH        # stop the cluster at a home path, keep its slot (data stays on disk)
 ava cluster destroy --path PATH     # stop + free its slot + deregister its OS jobs (refused for ~/.ava)

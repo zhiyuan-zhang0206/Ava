@@ -37,7 +37,7 @@ import enum
 from collections.abc import Iterable
 from typing import Literal
 
-from shared.cluster_auth import bearer_header
+from shared.cluster_auth import bearer_header, client_bearer
 from shared.config import settings
 from shared.paths import ava_home
 
@@ -429,20 +429,18 @@ def gateway_api_base() -> str:
 
 
 def gateway_auth_headers() -> dict[str, str]:
-    """Auth headers a client presents to the gateway's authenticated surfaces.
+    """Auth headers a client presents to the cluster's authenticated surfaces.
 
-    The cluster secret as a Bearer token, paired with `gateway_api_base` for every
-    client-side call to an authenticated gateway route (`/api/cluster/*`,
-    `/api/agents/*`, `/api/config`, `/api/memory/*`, ...) — which the gateway's auth
-    middleware requires on every route but the bypass set (`/api/health`,
-    `/api/auth/*`) once a cluster secret is set. Empty when no secret is set
-    (dev/test), where the middleware is a no-op, so the same call site works either way.
+    The Bearer paired with `gateway_api_base` for every client-side call to an
+    authenticated gateway route (`/api/cluster/*`, `/api/agents/*`,
+    `/api/config`, `/api/memory/*`, ...) and with the gateway's `/ops` dials: this
+    process's machine API token of the active write generation (delivered by the
+    launcher, or by the boot pass to an admitted operator process), else the
+    human cluster secret (an operator on the gateway home). Empty in the open
+    posture, where the middleware is a no-op, so the same call site works either way.
     """
-    return (
-        bearer_header(settings.data_plane.cluster_secret)
-        if settings.data_plane.cluster_secret
-        else {}
-    )
+    bearer = client_bearer(settings.data_plane.cluster_secret)
+    return bearer_header(bearer) if bearer else {}
 
 
 def _parse_roles(value: str) -> MachineRoles:

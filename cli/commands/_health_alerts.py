@@ -154,7 +154,6 @@ def _ingest_alert(
     alerting is a side channel and must never break health observation.
     """
     from shared.alerts import fingerprint as compute_fingerprint
-    from shared.config import settings
 
     summary = _alert_summary(recovered=status == "resolved", message=message)
     stable_labels = {"alertname": OPS_RULE_NAME}
@@ -176,12 +175,12 @@ def _ingest_alert(
         ],
     }
     try:
-        from shared.machine import gateway_api_base
+        from shared.machine import gateway_api_base, gateway_auth_headers
 
         resp = httpx.post(
             f"{gateway_api_base()}/api/alerts",
             json=payload,
-            headers={"Authorization": f"Bearer {settings.data_plane.cluster_secret}"},
+            headers=gateway_auth_headers(),
             timeout=10.0,
         )
         resp.raise_for_status()

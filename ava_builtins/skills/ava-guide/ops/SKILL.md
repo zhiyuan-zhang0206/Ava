@@ -101,30 +101,27 @@ channels) from the gateway:
 # on the gateway: seal the unit's database capability (prints its key once)
 ava cluster db-authority issue-unit --machine <NAME> --home <runner $AVA_HOME> --out <NAME>.bundle
 # on the runner, with the bundle carried over:
-printf 'Cluster secret: ' >&2
-IFS= read -rs AVA_CLUSTER_SECRET
-printf '\nCapability transport key: ' >&2
+printf 'Capability transport key: ' >&2
 IFS= read -rs AVA_DB_CAPABILITY_KEY
 printf '\n' >&2
-export AVA_CLUSTER_SECRET AVA_DB_CAPABILITY_KEY
+export AVA_DB_CAPABILITY_KEY
 ava start --serve-agent-runner --no-serve-gateway --gateway-url <URL> \
   --machine-name <NAME> --machine-host <HOST> --db-capability <NAME>.bundle
-unset AVA_CLUSTER_SECRET AVA_DB_CAPABILITY_KEY
+unset AVA_DB_CAPABILITY_KEY
 ```
 
-First start presents the cluster secret (`AVA_CLUSTER_SECRET`) to the gateway's
-authenticated `/api/bootstrap`, which returns the cluster's configuration
-(the credential-free database endpoint, the Redis URL with its runtime ACL
-password, channels). The database login arrives only in the sealed bundle: the
-active write generation's runner login (it inherits the least-privilege
-`ava_runner` group), bound to this machine and home, installed into the
-runner's private `$AVA_HOME/db-authority/`. The cluster secret remains the HTTP
-bearer only; the gateway's schema owner never logs in, and its Redis-admin
-credential stays gateway-local.
-`--machine-host` is the runner's own reachable address (how the gateway dials
-back to its ops server) and is **required**. The runner starts no gateway
-process of its own; it needs both network reachability to the gateway *and* the
-cluster secret.
+The sealed bundle carries the active write generation's runner login (it
+inherits the least-privilege `ava_runner` group) and machine API token, bound
+to this machine and home and installed into the runner's private
+`$AVA_HOME/db-authority/`. First start presents that API token to the gateway's
+authenticated `/api/bootstrap`, which returns the cluster's configuration (the
+credential-free database endpoint, the Redis URL with its runtime ACL password,
+channels). The runner never holds the gateway's human cluster secret; the
+gateway's schema owner never logs in, and its Redis-admin credential stays
+gateway-local. `--machine-host` is the runner's own reachable address (how the
+gateway dials back to its ops server) and is **required**. The runner starts no
+gateway process of its own; it needs network reachability to the gateway and
+its capability bundle.
 
 ## Prepare, update and recover
 

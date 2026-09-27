@@ -233,9 +233,10 @@ export const GROUP_ENV_VARS: Record<string, string[]> = {
 // them. Admission criterion is editorial, not structural: a field belongs
 // here only if a human should NOT reach for the panel to change it. Three
 // buckets today:
-//   - AVA_CLUSTER_SECRET: the cluster-wide pre-shared secret. Rotating it is a
-//     multi-step out-of-band dance (every runner re-enrolled), never a panel
-//     edit; hiding it also keeps it out of the write-only secret editor below.
+//   - AVA_CLUSTER_SECRET: the gateway's human bearer. Rotating it pins the
+//     logical-backup passphrase and re-issues every remote unit's bundle
+//     (scripts/rotate_cluster_secret.py), never a panel edit; hiding it also
+//     keeps it out of the write-only secret editor below.
 //   - AVA_GATEWAY_MAX_RETRIES / AVA_GATEWAY_RETRY_DELAY_SECONDS: SDK→gateway
 //     transport micro-tuning with no operator-facing consequence. For a genuine
 //     need, ask the Ava Guide agent — it edits .env via the `ava` CLI.

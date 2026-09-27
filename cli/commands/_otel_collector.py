@@ -20,7 +20,8 @@ Remote OTLP ingress is the bearer-authenticated machine-to-machine surface
 (conventions/reachability-and-credentials.md): a gateway sidecar accepts
 pure-runner relays, and an observability-station sidecar accepts remote
 gateway collectors — both through `otlp/remote` + `bearertokenauth/cluster`
-with the cluster secret.
+with the cluster's telemetry token (`telemetry_bearer`: derived from the
+gateway's human secret, carried to remote units in their capability).
 """
 
 from __future__ import annotations
@@ -264,17 +265,29 @@ def station_otel_ingress_endpoint() -> str:
     return resolve_station_target(base).url
 
 
-def _cluster_bearer() -> str:
-    from shared.config import settings
+def telemetry_bearer() -> str | None:
+    """The OTLP relay ingress token this unit presents and accepts, or None.
 
-    secret = settings.data_plane.cluster_secret
-    if not secret:
+    Stable per cluster (it does not rotate with the write generation): the
+    gateway derives it from its human secret; a remote unit reads it from its
+    installed capability and never holds the secret. None = an open cluster.
+    """
+    from shared.cluster.authority.unit import telemetry_bearer as resolve
+    from shared.config import settings
+    from shared.paths import ava_home
+
+    return resolve(ava_home().resolve(), settings.data_plane.cluster_secret)
+
+
+def _cluster_bearer() -> str:
+    token = telemetry_bearer()
+    if not token:
         raise RuntimeError(
-            "cannot build split-cluster OTLP relay without a cluster secret "
-            "(AVA_CLUSTER_SECRET); "
+            "cannot build split-cluster OTLP relay without a telemetry token (the "
+            "gateway's AVA_CLUSTER_SECRET, or an API-bearing unit capability); "
             "remote ingress must fail closed"
         )
-    return f"Bearer {secret}"
+    return f"Bearer {token}"
 
 
 def _remote_receiver_fragments(roles: MachineRoles | None) -> dict[str, str]:
@@ -283,14 +296,14 @@ def _remote_receiver_fragments(roles: MachineRoles | None) -> dict[str, str]:
     Served by any unit that remote peers dial OTLP into: a gateway (pure
     runner relays) and an observability station (remote gateway collectors,
     WP4, task #1946 — conventions/reachability-and-credentials.md). Remote
-    ingress exists only when the unit could actually have remote peers: an
-    empty cluster secret (the zero-config single-box posture) and a loopback
+    ingress exists only when the unit could actually have remote peers: no
+    telemetry token (an open cluster: the zero-config single-box posture) and a loopback
     reachable host (co-located posture) both mean NO remote peers, so no
     receiver is rendered — the same "legal when nothing remote dials it" rule
     as the registration loopback guard (shared.machines._reject_loopback_dial_url,
     conventions rule 2). A wildcard reachable host is a configuration error
     either way and fails closed. Any gateway- or station-capable host with a
-    non-empty secret and a non-loopback address may serve remote peers —
+    telemetry token and a non-loopback address may serve remote peers —
     including a hybrid gateway+runner+station such as production. Remote
     traces use a separate pipeline so they cannot be mirrored a second time.
     """
@@ -304,11 +317,10 @@ def _remote_receiver_fragments(roles: MachineRoles | None) -> dict[str, str]:
     if roles is None or not (roles & {"gateway", "observability-station"}):
         return no_remote
 
-    from shared.config import settings
     from shared.machine import reachable_host
     from shared.netutil import is_loopback_host
 
-    secret = settings.data_plane.cluster_secret
+    token = telemetry_bearer()
     host = reachable_host()
     if _unspecified_address(host):
         # 0.0.0.0 / :: is never a reachable host (the loopback classifier
@@ -320,10 +332,11 @@ def _remote_receiver_fragments(roles: MachineRoles | None) -> dict[str, str]:
             "wildcard; set AVA_MACHINE_HOST to this host's exact "
             "private address"
         )
-    if not secret or is_loopback_host(host):
-        # Empty secret or loopback host = no remote peers exist (single-box
-        # posture). No receiver, no error — same rule the registration guard
-        # applies (a co-located unit may advertise loopback).
+    if not token or is_loopback_host(host):
+        # No telemetry token (an open cluster) or loopback host = no remote
+        # peers exist (single-box posture). No receiver, no error — same rule
+        # the registration guard applies (a co-located unit may advertise
+        # loopback).
         return no_remote
     return {
         "REMOTE_OTLP_RECEIVER": f"""
@@ -336,7 +349,7 @@ def _remote_receiver_fragments(roles: MachineRoles | None) -> dict[str, str]:
 """,
         "CLUSTER_AUTH_EXTENSION": f"""
   bearertokenauth/cluster:
-    token: {_yaml_quote(secret)}
+    token: {_yaml_quote(token)}
 """,
         "CLUSTER_AUTH_SERVICE_EXTENSION": ", bearertokenauth/cluster",
         "REMOTE_OTLP_PIPELINE_RECEIVER": ", otlp/remote",

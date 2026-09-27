@@ -42,7 +42,6 @@ Restore procedure: `.agents/skills/operating-ava-cluster/references/db-restore.m
 from __future__ import annotations
 
 import argparse
-import hashlib
 import logging
 import os
 import subprocess
@@ -61,6 +60,7 @@ import psycopg
 from psycopg.conninfo import conninfo_to_dict, make_conninfo
 
 from services.gateway_side.backup.intermediates import sweep_closed_partials
+from services.gateway_side.backup.passphrase import logical_backup_passphrase
 from services.pitr.logical_dump_names import (
     ACTIVATION_MARKER,
     DUMP_NAME_RE,
@@ -284,13 +284,13 @@ def _passwordless_conninfo(db_url: str) -> tuple[str, str]:
 
 
 def _key_file(directory: Path) -> Path:
-    """Write the derived backup passphrase to a private temporary file."""
+    """Write the logical-backup passphrase (pinned, else derived) to a private temporary file."""
     fd, name = tempfile.mkstemp(prefix=".backup-key-", dir=directory)
     path = Path(name)
     try:
         os.fchmod(fd, 0o600)
         with os.fdopen(fd, "w", encoding="ascii") as key_file:
-            key_file.write(hashlib.sha256(settings.data_plane.cluster_secret.encode()).hexdigest())
+            key_file.write(logical_backup_passphrase())
     except BaseException:
         with suppress(OSError):
             path.unlink(missing_ok=True)
@@ -304,8 +304,8 @@ def decrypt_artifact(artifact: Path, custom_dump: Path) -> None:
     `custom_dump` is the raw `pg_dump --format=custom` archive for artifacts
     written by the current pipeline; for legacy `<db>-<ts>.dump.gz.enc`
     artifacts it is the gzip-compressed archive (call `gunzip_if_needed`).
-    The caller owns `custom_dump` and removes it once consumed. Neither the
-    cluster secret nor its derived passphrase is placed on argv.
+    The caller owns `custom_dump` and removes it once consumed. The
+    logical-backup passphrase is never placed on argv.
     """
     custom_dump.touch(mode=0o600, exist_ok=False)
     custom_dump.chmod(0o600)
