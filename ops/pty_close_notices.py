@@ -1,13 +1,17 @@
-"""Durable close-notice outbox for persistent shells interrupted by `ava stop` (issue #2044).
+"""Durable close-notice outbox for busy persistent shells a unit closes (issue #2044).
 
-`ava stop` closes busy persistent-shell sessions AFTER the gateway and ops
-server are already down, so the closure notice for each owner agent cannot be
-delivered synchronously. The stop path records one notice per busy session it
-VERIFIED closed (exact process identity gone, no terminals left) under
-``$AVA_HOME/state/pty-close-notices/`` — durable across the data-plane
-shutdown. The ops daemon flushes the journal at its next startup: a notice for
-a live owner becomes a system inbound message, one for a terminated/restarting
-owner is dropped without delivery (a closure notice must never resurrect a dead
+`ava stop` and a release transition close busy persistent-shell sessions AFTER
+the gateway and ops server are already down, so the closure notice for each
+owner agent cannot be delivered synchronously. Each records one notice per busy
+session under ``$AVA_HOME/state/pty-close-notices/`` — durable across the
+data-plane shutdown — naming why it closed. `ava stop` records only sessions it
+VERIFIED closed (exact process identity gone, no terminals left): its closure
+may be refused. A release records before its cancel: no terminal survives a
+release (decisions/2026-09-27-fleet-release-and-cutover-policies.md item 2), so
+the notice is that closure's intent and an interrupted executor cannot lose it.
+The ops daemon flushes the journal at its next startup: a notice for a live
+owner becomes a system inbound message, one for a terminated/restarting owner
+is dropped without delivery (a closure notice must never resurrect a dead
 agent — the TTL reaper's boundary, gateway/ttl_reaper.py:83).
 
 One file per (machine, agent_id, session_id, shell-birth) dedup key: a stop
@@ -42,15 +46,15 @@ from shared.paths import ava_home
 # notice; anything else (terminated / restarting / missing) drops the record.
 _NOTIFIABLE_STATUSES = ("running", "idling")
 
-# The only caller that reaches terminal closure through this journal is the
-# operator's `ava stop` (updates and pause retain terminals; see
-# cli/commands/_temporary_stop.stop).
-_REASON = "an operator stop (ava stop)"
+# Why a unit closed the session, as the owner's notice names it. A pause
+# retains terminals and records nothing.
+STOP_REASON = "an operator stop (ava stop)"
+RELEASE_REASON = "a release transition"
 
 
 @dataclass(frozen=True)
 class ClosureNotice:
-    """One verified-closed busy session and the stop that closed it."""
+    """One closed busy session and the stop or release that closed it."""
 
     machine: str
     agent_id: int
@@ -95,12 +99,14 @@ def record_close(
     shell_birth: str,
     operation: str,
     acquired_at: datetime,
+    reason: str,
 ) -> Path | None:
-    """Durably record one verified-closed busy session; None when not an agent shell.
+    """Durably record one closed busy session; None when not an agent shell.
 
-    The caller guarantees the session was busy and its exact process identity
-    verified gone. Returns the record path, or None when the session name is
-    not an agent-owned shell (the canonical ``-agent-<id>-shell-<sid>`` shape).
+    The caller guarantees the session was busy and that it closes it for
+    `reason` (see the module docstring for when each caller records). Returns
+    the record path, or None when the session name is not an agent-owned shell
+    (the canonical ``-agent-<id>-shell-<sid>`` shape).
     """
     match = _AGENT_SHELL_RE.search(name)
     if match is None:
@@ -116,7 +122,7 @@ def record_close(
         acquired_at=acquired_at.astimezone(UTC).isoformat()
         if acquired_at.tzinfo
         else acquired_at.isoformat(),
-        reason=_REASON,
+        reason=reason,
         closed_at=datetime.now(UTC).isoformat(),
     )
     _write_atomic(notice)

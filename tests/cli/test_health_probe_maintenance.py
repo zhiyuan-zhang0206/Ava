@@ -1,5 +1,6 @@
 """A real low-population query cannot turn explicit maintenance into a rollback."""
 
+import json
 import subprocess
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -153,3 +154,37 @@ def test_maintenance_does_not_turn_db_failure_into_an_expected_population(
     assert cluster_health._agent_population_failure_class(1) == "environment"
     assert cluster_health.run_health_probe() == 1
     assert rollbacks == []
+
+
+def test_release_operation_annotates_the_outage_it_explains_until_it_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    alerts: list[dict[str, object]],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """An in-flight home operation pauses grading and names itself, even with
+    the data plane (and its deploy lease) down; a failed one alerts."""
+    from ops.deploy_window import DeployWindow
+    from tests.lifecycle.transition.test_start_guard import _operation
+
+    path = _operation(tmp_path.resolve() / "home")
+    home = path.parent.parent.parent
+
+    def lease_unreadable(**_kwargs: object) -> DeployWindow:
+        return DeployWindow(active=False, detail="data plane down")
+
+    monkeypatch.setattr("shared.paths.ava_home", lambda: home)
+    monkeypatch.setattr("ops.deploy_window.deploy_in_flight", lease_unreadable)
+    message = "FAIL: gateway liveness — health endpoint unreachable or non-200"
+    started_at = datetime.now(UTC) - timedelta(minutes=20)
+    (home / cluster_health.ALERT_STATE_FILE).write_text(f"{message}\n{started_at.isoformat()}\n")
+
+    assert cluster_health._unhealthy(home, message) == 1
+    assert alerts == []
+    assert f"release operation {path.parent.name} at prepared" in capsys.readouterr().err
+
+    failed = json.loads(path.read_bytes()) | {"error": "injected native failure"}
+    path.write_text(json.dumps(failed) + "\n")
+    assert cluster_health._unhealthy(home, message) == 1
+    assert [alert["status"] for alert in alerts] == ["firing"]
+    assert "alert grading paused" not in capsys.readouterr().err

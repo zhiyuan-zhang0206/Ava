@@ -55,6 +55,7 @@ def _record(
         shell_birth=birth,
         operation="local-pause:macmini:1:uuid",
         acquired_at=_WHEN,
+        reason=notices.STOP_REASON,
     )
     assert path is not None
     return path
@@ -101,6 +102,7 @@ def test_record_close_rejects_non_agent_shell_names(journal: Path) -> None:
             shell_birth="birth:1.0",
             operation="local-pause:macmini:1:uuid",
             acquired_at=_WHEN,
+            reason=notices.STOP_REASON,
         )
         is None
     )

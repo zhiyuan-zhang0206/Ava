@@ -1,9 +1,12 @@
 """One-host same-schema transition through the existing root lifecycle.
 
-The initial adapter refuses remote enrollment and retained terminal writers.
-Their absence is checked before drain and again before stop/selection; it is
-never inferred from a successful root shutdown. Fleet fencing extends this
-boundary rather than falling back to the mutable checkout updater.
+The initial adapter refuses remote enrollment. Persistent terminals, including
+agents' coding sessions and schedule runners, are writers that do not survive a
+release (decisions/2026-09-27-fleet-release-and-cutover-policies.md item 2):
+the stop phase lets their work finish within a bound, stops root, then closes
+every terminal. Their absence is closure evidence before selection, never
+inferred from a successful root shutdown. Fleet fencing extends this boundary
+rather than falling back to the mutable checkout updater.
 
 The native root owner follows the operation's recorded executor kind: the
 Linux boot unit (root_service.py) or the persistent macOS home helper
@@ -19,6 +22,13 @@ from cli.release_transition.native import helper_root
 from cli.release_transition.request import Request, verify_pair
 from shared.runtime_abi import current_abi
 from shared.runtime_release import VerifiedRelease, activate_release, current_pointer
+
+# Release writer closure bounds. Busy terminals get the completed-work wait
+# while root still serves them, then the graceful cancel; whatever is live
+# after the grace gets SIGKILL over its captured birth.
+_TERMINAL_WORK_S = 30.0
+_TERMINAL_GRACE_S = 10.0
+_TERMINAL_KILL_S = 10.0
 
 
 class LocalTransition:
@@ -52,6 +62,7 @@ class LocalTransition:
 
     def stop(self, operation: Operation) -> None:
         from cli.commands import maintenance as maintenance_commands
+        from cli.commands import maintenance_stop
         from cli.commands.root_driver import require_root_absent
         from cli.release_transition import root_macos
         from shared import maintenance, pause_owner
@@ -69,11 +80,21 @@ class LocalTransition:
             pause_owner.change_maintenance(
                 holder, at, hold, MaintenanceHold.decode(hold.encode() | {"phase": "stopping"})
             )
+        # Observation only: in-flight terminal work may still need root.
+        busy = maintenance_stop.await_terminal_work(_TERMINAL_WORK_S)
         darwin = helper_root(operation.launch)
         if darwin:
             # The stop request goes only to the authenticated recorded helper.
             root_macos.verified_helper(operation)
-        maintenance_commands.stop(holder, at, 90, gateway_last=True)
+        # Root first: its reconcilers (schedules, pages) would re-arm a session.
+        maintenance_commands.stop(holder, at, 90, gateway_last=True, keep_terminals=True)
+        closed = maintenance_stop.close_release_terminals(
+            holder, at, grace_s=_TERMINAL_GRACE_S, kill_s=_TERMINAL_KILL_S
+        )
+        print(
+            f"Release closed persistent terminals: {sorted(closed.shells)}; "
+            f"busy past the {_TERMINAL_WORK_S:.0f}s work bound: {busy}"
+        )
         require_root_absent()
         if darwin:
             # Durable keeper stop intent: no restart, not even at login, until
@@ -84,10 +105,13 @@ class LocalTransition:
         return self.candidate if operation.direction == "candidate" else self.previous
 
     def select(self, operation: Operation) -> None:
+        from cli.commands.maintenance_stop import live_terminals
         from cli.commands.root_driver import require_root_absent
 
         self.preflight()
         require_root_absent()
+        if terminals := live_terminals():
+            raise RuntimeError(f"terminals appeared after release closure: {terminals}")
         target = (
             self.request.candidate if operation.direction == "candidate" else self.request.previous
         )

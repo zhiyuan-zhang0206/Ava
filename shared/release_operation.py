@@ -123,6 +123,24 @@ def _require_operation_identity(home: Path, path: Path, operation: dict[str, Any
         raise ValueError("invalid PITR operation progress")
 
 
+def operation_in_flight(home: Path) -> str | None:
+    """Name this home's incomplete operation that has recorded no failure.
+
+    Such an operation explains an outage of the unit it is replacing. A failed
+    or recovering operation (a recorded error) explains nothing: its hold is
+    itself worth an alert. None when no operation is active or it completed.
+    """
+    active = _active(home)
+    if active is None:
+        return None
+    path, encoded = active
+    operation = json.loads(encoded)
+    _require_operation_identity(home, path, operation)
+    if operation["phase"] == "complete" or operation["error"] is not None:
+        return None
+    return f"{operation['request']['kind']} operation {path.parent.name} at {operation['phase']}"
+
+
 def require_start_authorized(home: Path) -> tuple[str, datetime] | None:
     """Return the exact operation hold, or no hold for ordinary startup.
 

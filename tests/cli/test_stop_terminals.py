@@ -1,4 +1,4 @@
-"""Normal-stop terminal closure (#2045): real PTY sessions, real signals.
+"""Terminal closure at a normal stop (#2045) and a release: real PTYs, real signals.
 
 The 2026-09-09 migration stop timed out on machines whose services had all
 exited: the survivors were persistent-shell jobs (watcher / tee) that ignored
@@ -9,27 +9,38 @@ no-op. These tests lock the two parts of the fix:
 
 - the pty child resets the dispositions before exec (TERM/HUP reach the shell
   and its jobs again),
-- `_stop_terminals` HUPs the shells first (stopping restart loops from
+- `close_terminals` HUPs the shells first (stopping restart loops from
   spawning new jobs), then TERMs the captured jobs, and a survivor leaves the
   maintenance hold in place with a per-phase diagnostic — never a force.
+
+A release is different (decisions/2026-09-27-fleet-release-and-cutover-policies.md
+item 2): terminals get a bounded completed-work wait, then the same cancel,
+then SIGKILL over their captured births — none survives, and each busy owner
+gets the `ava stop` closure notice naming the release.
 """
 
 from __future__ import annotations
 
 import contextlib
+import json
 import os
 import signal
 import time
 from pathlib import Path
+from types import SimpleNamespace
+from uuid import uuid4
 
 import psutil
 import pytest
 
-from cli.commands import _temporary_stop as command
+from cli.commands import maintenance_stop as strict
 from cli.commands import stop as entry
+from cli.commands._maintenance_stop_report import StopIncompleteError
 from cli.commands.maintenance_stop import OwnedProcess
+from ops import pty_close_notices
 from shared import maintenance
 from shared.session_backend import PtySessionBackend
+from tests.agent.test_maintenance import WHEN
 from tests.cli.conftest import PtyReaper
 from tests.cli.test_pause_stop import dependencies
 from tests.cli.test_pause_stop import home as home
@@ -87,9 +98,6 @@ def _stop_env(monkeypatch: pytest.MonkeyPatch, home: Path, terminal: PtySessionB
     monkeypatch.setitem(os.environ, "AVA_HOME", str(home))
     monkeypatch.setenv("AVA_HOME_OVERRIDE", "1")
     monkeypatch.setenv("HOME", str(home))
-    monkeypatch.setattr(command, "get_shell_backend", lambda: terminal)
-    from cli.commands import maintenance_stop as strict
-
     monkeypatch.setattr(strict, "get_shell_backend", lambda: terminal)
     for name in ("stop_permissions_helper",):
         monkeypatch.setattr(f"cli.commands._stop_extras.{name}", lambda **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
@@ -358,3 +366,154 @@ def test_wait_exit_reads_a_reaped_process_as_exited(
 
     monkeypatch.setattr(psutil.Process, "status", vanished)
     assert _wait_exit(os.getpid(), timeout=0.3) is True
+
+
+# ─── release boundary (FC-6) ─────────────────────────────────────────────────
+
+
+def _finishing_job(marker: Path) -> str:
+    return (
+        "import pathlib,time\n"
+        "print('finishing-ready', flush=True)\n"
+        "time.sleep(2.0)\n"
+        f"pathlib.Path({str(marker)!r}).write_text('done')\n"
+    )
+
+
+def _release_notices(home: Path) -> list[dict[str, object]]:
+    return [json.loads(path.read_text()) for path in _notice_files(home)]
+
+
+def test_release_work_wait_lets_a_finishing_job_complete_then_closes_it_idle(
+    home: Path, monkeypatch: pytest.MonkeyPatch, pty_reaper: PtyReaper
+) -> None:
+    """The completed-work bound signals nothing: a job that finishes in time
+    is never interrupted, and its session closes idle, without a notice."""
+    terminal = PtySessionBackend()
+    _stop_env(monkeypatch, home, terminal)
+    marker = home / "finished"
+    name = "ava-agent-987-shell-6001-finishing"
+    shell = _start_busy_session(terminal, home, name, _finishing_job(marker), pty_reaper)
+    assert _started_jobs(shell, pty_reaper), "the finishing job never started"
+
+    assert strict.await_terminal_work(20) == []
+    assert marker.read_text() == "done", "the job ran to completion"
+    closed = strict.close_release_terminals(str(uuid4()), WHEN, grace_s=10, kill_s=10)
+    assert sorted(closed.shells) == [name] and closed.busy == {}
+    assert not terminal.has_session(name)
+    assert _wait_exit(shell.pid)
+    assert _notice_files(home) == []
+
+
+def test_release_work_wait_is_bounded_and_interrupts_nothing(
+    home: Path, monkeypatch: pytest.MonkeyPatch, pty_reaper: PtyReaper
+) -> None:
+    """A resident job (a schedule runner, a coding tool) only spends the bound."""
+    terminal = PtySessionBackend()
+    _stop_env(monkeypatch, home, terminal)
+    name = "ava-agent-987-shell-6002-resident"
+    shell = _start_busy_session(terminal, home, name, _TERM_OK_JOB, pty_reaper)
+    jobs = _started_jobs(shell, pty_reaper)
+    assert jobs, "the resident job never started"
+
+    started = time.monotonic()
+    assert strict.await_terminal_work(1.0) == [name]
+    assert 1.0 <= time.monotonic() - started < 10
+    assert not _has_exited(jobs[0]) and shell.live(), "the wait never signals"
+
+
+def test_release_closure_kills_a_job_that_ignores_the_cancel_and_notifies_owner(
+    home: Path, monkeypatch: pytest.MonkeyPatch, pty_reaper: PtyReaper
+) -> None:
+    """No terminal survives a release: a job ignoring HUP and TERM gets SIGKILL
+    over its captured birth, and its owner gets the `ava stop` notice naming
+    the release."""
+    terminal = PtySessionBackend()
+    _stop_env(monkeypatch, home, terminal)
+    (home / "machine_name").write_text("test-host")
+    name = "ava-agent-987-shell-6003-stubborn"
+    shell = _start_busy_session(terminal, home, name, _STUBBORN_JOB, pty_reaper)
+    jobs = _started_jobs(shell, pty_reaper)
+    assert jobs, "the stubborn job never started"
+    operation = str(uuid4())
+
+    closed = strict.close_release_terminals(operation, WHEN, grace_s=0.5, kill_s=10)
+    assert sorted(closed.busy) == [name]
+    assert _wait_exit(jobs[0].pid, timeout=1), "closure returned with the job alive"
+    assert not terminal.has_session(name)
+    assert strict.live_terminals() == []
+    [notice] = _release_notices(home)
+    assert notice["name"] == name and notice["operation"] == operation
+    assert notice["reason"] == pty_close_notices.RELEASE_REASON
+
+
+def test_release_closure_reports_a_sigkill_survivor_after_recording_its_notice(
+    home: Path, monkeypatch: pytest.MonkeyPatch, pty_reaper: PtyReaper
+) -> None:
+    """An unresolved closure fails with the survivor's identity; the notice was
+    recorded before the cancel, so no retry or crash can lose it."""
+    terminal = PtySessionBackend()
+    _stop_env(monkeypatch, home, terminal)
+    (home / "machine_name").write_text("test-host")
+    name = "ava-agent-987-shell-6004-unkillable"
+    shell = _start_busy_session(terminal, home, name, _STUBBORN_JOB, pty_reaper)
+    jobs = _started_jobs(shell, pty_reaper)
+    assert jobs, "the stubborn job never started"
+    deliver = OwnedProcess.send_signal
+
+    def withheld_kill(identity: OwnedProcess, signum: int) -> bool:
+        # Stand-in for an uninterruptible process: SIGKILL has no effect.
+        return False if signum == signal.SIGKILL else deliver(identity, signum)
+
+    monkeypatch.setattr(OwnedProcess, "send_signal", withheld_kill)
+    with pytest.raises(StopIncompleteError) as caught:
+        strict.close_release_terminals(str(uuid4()), WHEN, grace_s=0.3, kill_s=0.3)
+    assert caught.value.stage == "release-terminals"
+    assert {(entry["pid"], entry["service"]) for entry in caught.value.survivors} >= {
+        (jobs[0].pid, name)
+    }
+    assert not _has_exited(jobs[0])
+    assert [notice["name"] for notice in _release_notices(home)] == [name]
+
+
+def test_release_stop_closes_terminals_after_root_and_before_evidence(
+    home: Path, monkeypatch: pytest.MonkeyPatch, pty_reaper: PtyReaper
+) -> None:
+    """The release stop phase closes a live terminal instead of refusing it:
+    work bound, root stop keeping terminals, closure, then root evidence."""
+    from cli.commands import maintenance as maintenance_commands
+    from cli.commands import root_driver
+    from cli.release_transition import local
+
+    terminal = PtySessionBackend()
+    _stop_env(monkeypatch, home, terminal)
+    name = "ava-agent-987-shell-6005-release"
+    shell = _start_busy_session(terminal, home, name, _STUBBORN_JOB, pty_reaper)
+    jobs = _started_jobs(shell, pty_reaper)
+    assert jobs, "the stubborn job never started"
+    events: list[str] = []
+
+    def root_stop(*_args: object, **kwargs: object) -> None:
+        assert kwargs["keep_terminals"] is True and shell.live(), "root stops first"
+        events.append("root stop")
+
+    def root_absent() -> None:
+        assert not terminal.has_session(name), "terminals close before the evidence"
+        events.append("root absent")
+
+    for bound, value in (("_TERMINAL_WORK_S", 0.5), ("_TERMINAL_GRACE_S", 0.5)):
+        monkeypatch.setattr(local, bound, value)
+    monkeypatch.setattr(maintenance_commands, "stop", root_stop)
+    monkeypatch.setattr(root_driver, "require_root_absent", root_absent)
+
+    def drained(*_args: object) -> SimpleNamespace:
+        return SimpleNamespace(maintenance=SimpleNamespace(phase="drained"))
+
+    monkeypatch.setattr(maintenance, "require_operation", drained)
+    transition = object.__new__(local.LocalTransition)
+    transition.request = SimpleNamespace(id=uuid4(), created_at=WHEN)  # type: ignore[assignment]
+    monkeypatch.setattr(transition, "preflight", lambda: None)
+
+    transition.stop(SimpleNamespace(direction="candidate", launch=None))  # type: ignore[arg-type]
+    assert events == ["root stop", "root absent"]
+    assert _wait_exit(jobs[0].pid, timeout=1)

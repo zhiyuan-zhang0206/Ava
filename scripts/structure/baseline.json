@@ -170,7 +170,6 @@
     "cli/commands/pitr_activation.py::_validate_secrets": 31,
     "cli/commands/release_inventory.py::_launchd": 17,
     "cli/commands/release_inventory.py::collect_inventory": 15,
-    "cli/commands/_temporary_stop.py::_stop_terminals": 20,
     "cli/commands/_temporary_stop.py::stop": 22,
     "cli/commands/agents.py::send_agent_message": 15,
     "cli/commands/impersonation_relay.py::relay_inbox": 22,

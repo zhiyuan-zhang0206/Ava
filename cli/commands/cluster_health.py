@@ -161,17 +161,22 @@ def _agent_population_failure_class(min_agents: int) -> str | None:
     return "code"
 
 
+def _grade(home: Path, message: str) -> None:
+    """Grade one failed check, annotating the deploy that pauses its grading."""
+    deploying = _deploy_suppression()
+    _alert_failure(home, message, deploy_explains=deploying is not None)
+    if deploying is not None:
+        print(f"  deploy in flight — alert grading paused ({deploying})", file=sys.stderr)
+
+
 def _unhealthy(home: Path, message: str, *, failure_class: str = "code") -> int:
     """Report an unhealthy observation without making a release decision."""
     print(message, file=sys.stderr)
-    deploying = _deploy_suppression()
-    _alert_failure(home, message, deploy_explains=deploying is not None)
     if failure_class == "maintenance":
         print("  local agent maintenance explains the low population", file=sys.stderr)
     elif failure_class == "environment":
         print("  environment-class failure", file=sys.stderr)
-    if deploying is not None:
-        print(f"  deploy in flight — alert grading paused ({deploying})", file=sys.stderr)
+    _grade(home, message)
     return 1
 
 
@@ -436,7 +441,7 @@ def _run_source_tree_check(home: Path) -> int | None:
         return None
     message = f"FAIL: source tree — {failure}"
     print(message, file=sys.stderr)
-    _alert_failure(home, message, deploy_explains=_deploy_suppression() is not None)
+    _grade(home, message)
     return 1
 
 
@@ -546,7 +551,7 @@ def _check_alert_only_health(home: Path) -> int:
     if failing:
         message = f"FAIL: service probe — not healthy: {', '.join(sorted(failing))}"
         print(message, file=sys.stderr)
-        _alert_failure(home, message, deploy_explains=_deploy_suppression() is not None)
+        _grade(home, message)
         return 1
     print("  ✓ service probes")
 
@@ -572,7 +577,7 @@ def _check_alert_only_health(home: Path) -> int:
     if editable_failure is not None:
         message = f"FAIL: editable install — {editable_failure}"
         print(message, file=sys.stderr)
-        _alert_failure(home, message, deploy_explains=_deploy_suppression() is not None)
+        _grade(home, message)
         return 1
     print("  ✓ editable install records")
 

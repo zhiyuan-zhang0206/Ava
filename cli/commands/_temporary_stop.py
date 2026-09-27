@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import contextlib
 import os
 import signal
 import subprocess
@@ -13,150 +12,23 @@ from datetime import datetime
 
 import psutil
 
-from cli.commands._maintenance_stop_report import (
-    StopIncompleteError,
-    SurvivorInventory,
-    capture_survivor,
-    live_identities,
-)
 from cli.commands._repo import _repo_root, build_services, session_name
 from cli.commands.maintenance_stop import (
     OwnedProcess,
     capture_tree,
+    close_terminals,
     deadline_after,
     remaining,
     stop_data_plane,
     wait_for_exit,
 )
-from ops import pty_close_notices
 from ops.agent_pause import PAUSE_TIMEOUT_SECONDS, pause_agents
 from ops.agent_pause_probe import ops_quiescent
 from shared import maintenance, start_serving
 from shared.exit_codes import SERVICES_NOT_READY_EXIT_CODE
 from shared.lifecycle_status import begin, finish, phase, status_path
-from shared.machine import MachineRoles, machine_name, machine_role
+from shared.machine import MachineRoles, machine_role
 from shared.native_process.ownership import retain_processes
-from shared.paths import run_dir
-from shared.session_backend import get_shell_backend
-from shared.session_record import SessionRecord
-
-
-def _stop_terminals(deadline: float, operation: str, acquired_at: datetime) -> None:
-    """Close this unit's terminal jobs and shells without a kill escalation.
-
-    Busy sessions verified closed leave a durable closure notice for their
-    owner agent (issue #2044): the gateway and ops server are already down by
-    now, so the notice is delivered at the next ops-daemon startup.
-    """
-    backend = get_shell_backend()
-    names = backend.list_sessions()
-    if sys.platform == "win32":
-        for name in names:
-            ok, _mode = backend.kill_session(name, graceful=True, timeout=remaining(deadline))
-            if not ok:
-                raise RuntimeError(f"terminal {name!r} lacks a native Job closure receipt")
-        return
-    # Capture identities before signalling anything.
-    shells: list[OwnedProcess] = []
-    jobs: set[OwnedProcess] = set()
-    owner: dict[int, str] = {}
-    by_name: dict[str, OwnedProcess] = {}
-    for name in names:
-        record = SessionRecord.read(run_dir() / "pty" / f"{name}.json")
-        if record is None:
-            continue
-        shell = OwnedProcess(record.pid, record.create_time, record.starttime)
-        if not shell.live():
-            continue
-        shells.append(shell)
-        by_name[name] = shell
-        owner[shell.pid] = name
-        for identity in capture_tree(shell) - {shell}:
-            jobs.add(identity)
-            owner[identity.pid] = name
-    busy = {owner[identity.pid]: by_name[owner[identity.pid]] for identity in jobs}
-    # Stop the spawners FIRST: an interactive shell's own SIGHUP makes bash
-    # exit (re-sending HUP to its jobs), so a loop that restarts its job cannot
-    # keep producing new descendants during the wait — the 2026-09-09 field
-    # evidence showed a restart loop outliving every interrupt aimed at its
-    # current job (#2045). Jobs get their graceful SIGTERM right after.
-    for shell in shells:
-        if shell.live():
-            with contextlib.suppress(psutil.NoSuchProcess, psutil.ZombieProcess):
-                shell.send_signal(signal.SIGHUP)
-    for process in jobs:
-        if process.live():
-            with contextlib.suppress(psutil.NoSuchProcess, psutil.ZombieProcess):
-                process.send_signal(signal.SIGTERM)
-    try:
-        wait_for_exit(set(shells) | jobs, deadline)
-    except TimeoutError as exc:
-        # A shell that HUP'd out may have dropped its record while a
-        # signal-ignoring job survives as an orphan — report the owning
-        # session by name and each survivor's identity (issue #2162) so the
-        # operator can find and judge the exact process.
-        live = live_identities(set(shells) | jobs)
-        survivors = [
-            capture_survivor(
-                identity,
-                service=owner.get(identity.pid),
-                role="terminal" if identity in shells else "job",
-            )
-            for identity in live
-        ]
-        surviving = sorted({owner[identity.pid] for identity in live})
-        raise StopIncompleteError(
-            f"terminal stop incomplete — {exc} surviving terminal processes "
-            f"from sessions: {surviving}\n"
-            f"{SurvivorInventory(survivors=survivors, groups=[]).render(stage='terminals')}",
-            stage="terminals",
-            survivors=[survivor.payload() for survivor in survivors],
-        ) from exc
-    # Hosts finish naturally after their child exits. Their protocol deliberately
-    # ignores SIGTERM, so sending signals to every host process is not a stop API.
-    from cli.commands.maintenance_stop import require_no_terminals
-
-    while True:
-        try:
-            require_no_terminals()
-            break
-        except RuntimeError:
-            time.sleep(min(0.05, remaining(deadline)))
-    _record_close_notices(busy, operation, acquired_at)
-
-
-def _record_close_notices(
-    busy: dict[str, OwnedProcess], operation: str, acquired_at: datetime
-) -> None:
-    """Durably record one closure notice per busy session verified closed.
-
-    Only sessions whose exact process identity is gone reach this point; an
-    idle session, a timed-out stop, or a Windows unit records nothing. A write
-    failure is loud but never fails the stop — the resources are already
-    closed and retrying the whole stop would not restore them.
-    """
-    for name, shell in busy.items():
-        if shell.starttime is not None:
-            birth = f"starttime:{shell.starttime}"
-        else:
-            birth = f"birth:{shell.birth!r}"
-        try:
-            pty_close_notices.record_close(
-                machine=machine_name(),
-                name=name,
-                shell_pid=shell.pid,
-                shell_birth=birth,
-                operation=operation,
-                acquired_at=acquired_at,
-            )
-        except Exception as exc:
-            # The side-channel notice must never fail a stop whose resources
-            # are already closed; stay loud so the gap is visible either way.
-            print(
-                f"closure notice for session {name!r} could not be recorded: "
-                f"{type(exc).__name__}: {exc}",
-                file=sys.stderr,
-            )
 
 
 def _stop_browser(deadline: float) -> None:
@@ -549,7 +421,7 @@ def stop(
             _timed_phase(
                 phases,
                 "terminals",
-                lambda: _stop_terminals(deadline, holder, acquired_at),
+                lambda: close_terminals(deadline, holder, acquired_at),
             )
         if teardown_extras:
             _timed_phase(phases, "extras", lambda: _stop_extras(deadline))

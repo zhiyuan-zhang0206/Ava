@@ -515,11 +515,12 @@ or continue that operation; a submission acknowledgement is not completion.
 Continuation first proves the prior execution domain closed. Unknown ownership,
 a changed request or configuration, or a surviving child refuses continuation.
 
-The connected transition currently supports one initialized local Linux gateway,
-equal migration inventories and no persistent terminal writers. It refuses fleet
-or schema changes before maintenance. Do not infer fleet recovery, migration
-rollback or workload-threshold support from this local proof boundary. The
-remaining work is explicit in
+The connected transition currently supports one initialized local Linux gateway
+with equal migration inventories, and closes persistent terminal writers in its
+stop phase instead of keeping them. It refuses fleet or schema changes before
+maintenance. Do not infer fleet recovery, migration rollback or
+workload-threshold support from this local proof boundary. The remaining work
+is explicit in
 [the lifecycle plan](../future/infra/unified-cluster-lifecycle.md).
 
 Ordinary maintenance holds retain their separate operator procedures in
@@ -1266,10 +1267,11 @@ the transition. Candidate start/readiness failure selects the captured predecess
 once through the same startup path.
 
 The connected effect adapter currently supports one initialized local Linux
-gateway, equal packaged migration SQL, and no retained terminal writers. It
-refuses other boundaries before stopping work. This is not a fleet/schema update
-or a production cutover instruction. The remaining writer barrier, recovery policy,
-PITR restart integration and platform proof are tracked in the
+gateway and equal packaged migration SQL, and closes persistent terminal
+writers at its stop phase. It refuses other boundaries before stopping work.
+This is not a fleet/schema update or a production cutover instruction. The
+remaining writer barrier, recovery policy, PITR restart integration and
+platform proof are tracked in the
 [lifecycle plan](../future/infra/unified-cluster-lifecycle.md). The preparation and
 execution contracts live in [release preparation](../cli/release_prepare/release_prepare.ava.okf.md)
 and [release transition](../cli/release_transition/release_transition.ava.okf.md).
@@ -1280,7 +1282,10 @@ Gateway and population failures retain their code, environment, or local-mainten
 classification. A disabled agent-host or native maintenance hold cannot hide a low
 global population: the probe still exits 1 and grades that outage. A live cluster
 deploy can pause explained alert grading while retaining the episode's true start;
-disk pressure remains independent. Missing or unreadable ownership explains nothing.
+so can this home's in-flight release or PITR operation (`$AVA_HOME/updates/active`),
+which the probe names in its output even while the data plane is down. A failed
+operation, like missing or unreadable ownership, explains nothing; disk pressure
+remains independent.
 
 The OS job and CLI probe only observe and alert. They do not invoke rollback,
 maintain release-policy failure counters, or promote pending code to known-good.
@@ -1358,8 +1363,9 @@ load-bearing:
 
 `ava pause`, `ava stop`, restart and update use the native maintenance primitives.
 Pause retains infrastructure and persistent PTYs; default stop closes those local
-resources. The connected release adapter currently refuses retained terminal
-writers before maintenance. Durable agent identity and work remain on disk.
+resources. The connected release adapter closes persistent terminals (and
+schedules) at its stop phase after a bounded completed-work wait; they do not
+survive a release. Durable agent identity and work remain on disk.
 A stop timeout is a failure; force escalation requires an explicit option.
 Normal `ava start` resumes only after readiness. See the
 [pause/stop procedure](graceful-maintenance.md) for partial stop, coordinated

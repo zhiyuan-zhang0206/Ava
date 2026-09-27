@@ -16,6 +16,7 @@ import pytest
 
 from cli.commands import _maintenance_stop_report as report
 from cli.commands import _temporary_stop as command
+from cli.commands import maintenance_stop as stop
 from shared import lifecycle_status
 from shared.native_process import ownership
 from shared.native_process.ownership import OwnedProcess
@@ -36,7 +37,7 @@ def _terminal(
         identity.pid, identity.birth, "private-terminal", str(home), time.time(), identity.starttime
     ).write(home / "run/pty/private-terminal.json")
     monkeypatch.setattr(
-        command,
+        stop,
         "get_shell_backend",
         lambda: SimpleNamespace(list_sessions=lambda: ["private-terminal"]),
     )
@@ -57,7 +58,7 @@ def test_terminal_deadline_names_survivor_and_persists_exact_inventory(
     identity = _terminal(home, process, monkeypatch)
     assert lifecycle_status.begin("stop")
     with pytest.raises(report.StopIncompleteError) as caught:
-        command._stop_terminals(time.monotonic() + 0.25, "private-stop", WHEN)
+        stop.close_terminals(time.monotonic() + 0.25, "private-stop", WHEN)
     failure = caught.value
     assert identity.live(), "a reporting deadline must not force-kill the survivor"
     assert failure.stage == "terminals"
@@ -101,7 +102,7 @@ def test_report_keeps_owned_job_after_shell_exits(
     child = OwnedProcess.capture(children[0])
     try:
         with pytest.raises(report.StopIncompleteError) as caught:
-            command._stop_terminals(time.monotonic() + 0.35, "private-stop", WHEN)
+            stop.close_terminals(time.monotonic() + 0.35, "private-stop", WHEN)
         assert parent.wait(timeout=5) == -signal.SIGHUP
         assert child.live()
         assert len(caught.value.survivors) == 1

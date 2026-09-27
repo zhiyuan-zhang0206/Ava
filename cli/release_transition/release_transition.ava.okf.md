@@ -125,13 +125,13 @@ outside that executor; a process cannot certify its own closure.
 ## Connected boundary
 
 The current effect adapter admits an initialized, single-host gateway (Linux,
-or macOS through the persistent home helper) with a local data plane, equal
-packaged SQL, and no retained terminal writers. Other topologies or schema
-changes refuse before quiescing. A schedule or PTY may write the DB after
-application root exits; root closure is not fleet writer closure. PITR is never
-admitted on macOS. Native Windows execution, fleet/schema barriers, workload
-rollback policy and complete application A/B/A proof remain in the
-[lifecycle implementation plan](../../future/infra/unified-cluster-lifecycle.md).
+or macOS through the persistent home helper) with a local data plane and equal
+packaged SQL. Other topologies or schema changes refuse before quiescing. A
+schedule or PTY may write the DB after application root exits, so the stop
+phase closes every persistent terminal (see Execution); PITR refuses them and
+is never admitted on macOS. Native Windows execution, fleet/schema
+barriers, workload rollback policy and complete application A/B/A proof remain
+in the [lifecycle implementation plan](../../future/infra/unified-cluster-lifecycle.md).
 
 The older HTTP/publication orchestration still being removed is not a fallback
 of this entry. Its remaining callers must be deleted before cutover.

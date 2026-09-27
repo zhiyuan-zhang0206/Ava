@@ -116,7 +116,6 @@ def test_full_stop_closes_real_idle_terminal_after_drain(
     from cli.commands import maintenance_stop as strict
 
     terminal = PtySessionBackend()
-    monkeypatch.setattr(command, "get_shell_backend", lambda: terminal)
     monkeypatch.setattr(strict, "get_shell_backend", lambda: terminal)
     for name in ("stop_permissions_helper",):
         monkeypatch.setattr(f"cli.commands._stop_extras.{name}", lambda **_kw: None)  # pyright: ignore[reportUnknownArgumentType]

@@ -28,10 +28,14 @@ def require_reservation(request: HomeRequest, *, active_registry: Path) -> None:
 
 
 def require_local_writers(request: HomeRequest) -> None:
-    """Current one-host writer boundary; native resource/fleet fencing extends it."""
+    """Current one-host writer boundary; native resource/fleet fencing extends it.
+
+    It admits only a home whose data plane and registered units are its own.
+    Persistent terminals are not refused here: a release closes them at its
+    stop phase, and PITR refuses them itself.
+    """
     import os
 
-    from cli.commands.maintenance_stop import require_no_terminals
     from shared.cluster import registry_path
     from shared.config import settings
     from shared.db import connect
@@ -49,4 +53,3 @@ def require_local_writers(request: HomeRequest) -> None:
         machines = {row[0] for row in conn.execute("SELECT name FROM machines").fetchall()}
     if units != {(request.machine, request.home)} or machines != {request.machine}:
         raise ValueError("all registered units must belong to this one-host operation")
-    require_no_terminals()

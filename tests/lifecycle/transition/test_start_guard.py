@@ -12,7 +12,11 @@ import pytest
 
 from cli.release_transition.journal import create
 from cli.release_transition.request import ReleaseRef, Request
-from shared.release_operation import authorized_start, require_start_authorized
+from shared.release_operation import (
+    authorized_start,
+    operation_in_flight,
+    require_start_authorized,
+)
 from shared.runtime_release import ReleaseRejectedError
 from shared.start_inputs import configuration_digest
 
@@ -373,3 +377,21 @@ def test_operation_start_rejects_naive_maintenance_timestamp(operation_path: Pat
     operation_path.write_text(json.dumps(payload))
     with authorized_start(operation_path), pytest.raises(ValueError, match="aware"):
         require_start_authorized(_home(operation_path))
+
+
+def test_operation_in_flight_names_only_an_unfailed_incomplete_operation(
+    operation_path: Path,
+) -> None:
+    """The health probe's annotation source: a failed or completed operation
+    explains no outage, and no active pointer means no operation."""
+    home = _home(operation_path)
+    identity = operation_path.parent.name
+    assert operation_in_flight(home) == f"release operation {identity} at prepared"
+    _set_state(operation_path, phase="stopping")
+    assert operation_in_flight(home) == f"release operation {identity} at stopping"
+    _set_state(operation_path, error="injected native failure")
+    assert operation_in_flight(home) is None
+    _set_state(operation_path, phase="complete", error=None)
+    assert operation_in_flight(home) is None
+    (operation_path.parent.parent / "active").unlink()
+    assert operation_in_flight(home) is None

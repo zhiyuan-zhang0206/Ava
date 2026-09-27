@@ -202,7 +202,7 @@ def test_stop_authenticates_the_helper_before_and_proves_its_stop_intent_after(
     harness: Harness, monkeypatch: pytest.MonkeyPatch, kind: str
 ) -> None:
     from cli.commands import maintenance as maintenance_commands
-    from cli.commands import root_driver
+    from cli.commands import maintenance_stop, root_driver
     from shared import maintenance
 
     transition = _transition(harness, monkeypatch)
@@ -213,16 +213,24 @@ def test_stop_authenticates_the_helper_before_and_proves_its_stop_intent_after(
     events: list[str] = []
     monkeypatch.setattr(root_macos, "verified_helper", lambda _op: events.append("authenticate"))
     monkeypatch.setattr(
+        maintenance_stop, "await_terminal_work", lambda _timeout: events.append("work") or []
+    )
+    monkeypatch.setattr(
         maintenance_commands, "stop", lambda *_args, **_kwargs: events.append("stop")
+    )
+    monkeypatch.setattr(
+        maintenance_stop,
+        "close_release_terminals",
+        lambda *_args, **_kwargs: events.append("terminals") or SimpleNamespace(shells={}),
     )
     monkeypatch.setattr(root_driver, "require_root_absent", lambda: events.append("absent"))
     monkeypatch.setattr(root_macos, "require_stopped", lambda _op: events.append("stop-intent"))
     operation = journal.read_operation(harness.path).model_copy(update={"launch": {"kind": kind}})
     transition.stop(operation)
     assert events == (
-        ["authenticate", "stop", "absent", "stop-intent"]
+        ["work", "authenticate", "stop", "terminals", "absent", "stop-intent"]
         if kind == native.DARWIN
-        else ["stop", "absent"]
+        else ["work", "stop", "terminals", "absent"]
     )
 
 

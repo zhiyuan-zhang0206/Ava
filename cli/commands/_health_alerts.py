@@ -407,10 +407,25 @@ def _alert_recovery(home: Path) -> None:
 def _deploy_suppression() -> str | None:
     """Pause alert grading only while a live deploy explains the outage.
 
-    The episode retains its true start. An expired or unreadable deploy owner
-    explains nothing, so severity resumes from that same start.
+    This home's in-flight release or PITR operation explains it first: the
+    probe annotates its output with the operation instead of alerting, even
+    while the data plane that holds the deploy lease is down. The episode
+    retains its true start. An expired or unreadable deploy owner, or a failed
+    operation, explains nothing, so severity resumes from that same start.
     """
     from ops.deploy_window import deploy_in_flight
+    from shared.paths import ava_home
+    from shared.release_operation import operation_in_flight
 
+    try:
+        operation = operation_in_flight(ava_home())
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        print(
+            f"  (release operation unreadable, explains nothing: {type(exc).__name__}: {exc})",
+            file=sys.stderr,
+        )
+        operation = None
+    if operation is not None:
+        return operation
     window = deploy_in_flight()
     return window.detail if window.active else None

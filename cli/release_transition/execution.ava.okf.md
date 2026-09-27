@@ -15,6 +15,22 @@ another target or loops between releases. A failure while resuming retains
 that phase: admission may already have opened, so it is not an automatic
 rollback boundary.
 
+The stop phase closes this unit's writers. Persistent terminals — agent
+shells, coding sessions, watchers, page and schedule runners — do not survive
+a release ([decision](../../decisions/2026-09-27-fleet-release-and-cutover-policies.md)
+item 2). While root still serves them, the phase waits a bounded time for
+their jobs to finish, signalling nothing. It then stops root, keeping
+terminals, so no reconciler re-arms a session. `close_release_terminals`
+(`cli/commands/maintenance_stop.py`) captures every recorded shell, job and PTY
+host birth, records the `ava stop` closure notice for each busy session's
+owner (naming the release, before any signal), HUPs shells and TERMs jobs,
+and after a grace SIGKILLs only those captured births still live. Closure is
+the kernel observation that each is gone and no recorded terminal is live;
+selection checks that evidence again. A survivor fails the phase with its
+identity. After start, the schedule manager re-arms schedules and the page
+server re-arms open pages; other sessions stay closed, and their owners learn
+it from the notice.
+
 `local.py` owns those release effects and selects the native root owner by
 the operation's recorded executor kind. On Linux `root_service.py` uses the
 existing home boot unit, never a second application supervisor. Its

@@ -46,10 +46,12 @@ are not implementation requirements for this revision.
 4. Close fleet write authority before schema changes. An offline runner is not a
    stopped writer. Rejoining stale releases remain fenced until they converge.
    Revoking DB access does not prove external code execution has stopped; the
-   operation must also resolve execution custody. Include durable schedule/PTY
-   workloads in the writer inventory: a schedule runner can outlive application
-   root and access the database through its own process. Root exit alone is not
-   a migration barrier.
+   operation must also resolve execution custody. Durable schedule/PTY
+   workloads are in the writer inventory: a schedule runner can outlive
+   application root and access the database through its own process. The
+   one-host stop phase closes them (see
+   [release execution](../../cli/release_transition/execution.ava.okf.md));
+   each fleet unit must run the same closure at `closing`.
 5. Exercise upgrade and recovery in disposable clusters, including paired
    migrations and writes made after upgrade. A down migration alone does not
    prove those writes remain usable by the retained release.
@@ -279,11 +281,11 @@ empty, is positive closure.
 
 Release start through the persistent home helper is connected (see
 [macOS release root start](../../cli/release_transition/root_macos.ava.okf.md)),
-so macOS admits a same-schema release for one local gateway home with no
-retained terminal writers. The executor runs the selected image's ordinary
-start as a finite tool; the keeper births root outside the job. The journal
-retains helper birth and keeper restart baseline before the effect and the
-root birth after it; observation requires that exact root, the keeper's held
+so macOS admits a same-schema release for one local gateway home, closing its
+persistent terminal writers at the stop phase. The executor runs the selected
+image's ordinary start as a finite tool; the keeper births root outside the
+job. The journal retains helper birth and keeper restart baseline before the
+effect and the root birth after it; observation requires that exact root, the keeper's held
 seed, `seed.json` and the live argv pinned to the image; recovery stops the
 candidate through the keeper and starts the previous image the same way.
 
