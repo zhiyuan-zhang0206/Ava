@@ -1,6 +1,6 @@
 """Per-cluster PgBouncer healthcheck — called every 60s by the gateway watchdog.
 
-PgBouncer is the third per-cluster data-plane process (`cli/commands/pgbouncer.py`),
+PgBouncer is the third per-cluster data-plane process (`cli/commands/data_plane/pgbouncer.py`),
 and when it is enabled `AVA_DB_URL` points AT it — so every gateway daemon and every
 agent reaches Postgres only through the pooler. It was the one data-plane process with
 no probe, no alert and no self-heal: the gateway, the frontend and each agent-runner
@@ -57,7 +57,7 @@ def check(
     operator's screen every round.
     """
     db_admin_password = db_admin_password or cluster_secret
-    from cli.commands.pgbouncer import (
+    from cli.commands.data_plane.pgbouncer import (
         ensure_pgbouncer,
         pgbouncer_listener_reachable,
         pgbouncer_public_listener_reachable,

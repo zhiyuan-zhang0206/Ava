@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from cli.commands import pgbouncer as pg
+from cli.commands.data_plane import pgbouncer as pg
 
 
 class _CompletedOk:

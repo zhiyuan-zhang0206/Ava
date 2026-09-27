@@ -52,7 +52,7 @@ def sweep_seams(monkeypatch: pytest.MonkeyPatch) -> dict[str, list[int]]:
         state["killed"].append(pid)
         return True
 
-    monkeypatch.setattr("cli.commands.pgbouncer._terminate_verified", _terminate)
+    monkeypatch.setattr("cli.commands.data_plane.pgbouncer.terminate_verified", _terminate)
     return state
 
 
@@ -199,7 +199,7 @@ def test_reap_surviving_pid_is_not_claimed(
     sweep_seams["ours"] = [101]
 
     monkeypatch.setattr(
-        "cli.commands.pgbouncer._terminate_verified",
+        "cli.commands.data_plane.pgbouncer.terminate_verified",
         lambda _pid, **_kw: False,  # pyright: ignore[reportUnknownArgumentType]
     )
 

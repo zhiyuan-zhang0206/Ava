@@ -29,7 +29,7 @@ from cli.commands._repo import (
     build_services,
     session_name,
 )
-from cli.commands.cluster_instance import print_data_plane_status
+from cli.commands.data_plane.cluster_instance import print_data_plane_status
 from shared.cluster_drift import prod_source_pin_relation
 
 # Cluster-pin line marks, keyed by `prod_source_pin_relation`. "ahead" means HEAD

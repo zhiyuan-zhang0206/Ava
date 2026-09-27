@@ -117,7 +117,7 @@ def test_rollback_schema_to_local_admin_bypasses_stale_runtime_password(
     this cluster's passwordless local Postgres admin socket."""
     import psycopg
 
-    from cli.commands import cluster_instance
+    from cli.commands.data_plane import cluster_instance
     from shared import cluster
     from shared import migrations as _mig
     from shared.config import settings

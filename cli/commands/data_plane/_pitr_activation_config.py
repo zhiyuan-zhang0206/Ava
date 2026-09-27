@@ -11,7 +11,6 @@ from pathlib import Path
 import psycopg
 from psycopg import sql
 
-from cli.commands.cluster_instance import pg_admin_url
 from services.pitr.activation_runtime import (
     PITR_ENV_FIELDS,
     enable_pitr_services,
@@ -24,6 +23,8 @@ from services.pitr.activation_state import ActivationRecord, write_record_cas
 from shared.cluster import get_record, record_postgres_port
 from shared.config import settings
 from shared.paths import ava_home
+
+from .cluster_instance import pg_admin_url
 
 
 def _pg_connection() -> psycopg.Connection[tuple[object, ...]]:

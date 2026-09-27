@@ -9,7 +9,7 @@ from urllib.parse import urlsplit
 
 import pytest
 
-from cli.commands import _data_plane_admin_secrets as split
+from cli.commands.data_plane import admin_secrets as split
 from shared import cluster
 from shared.config import settings
 
@@ -283,8 +283,8 @@ def test_interrupted_split_journals_one_secret_set_and_replays_it(
 def test_gateway_data_plane_retries_with_journal_credentials(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    from cli.commands import cluster_instance
     from cli.commands import start as start_mod
+    from cli.commands.data_plane import cluster_instance
 
     record = cluster.ClusterRecord(
         ports=cast("cluster.ClusterPorts", {"postgres": 15433, "redis": 16380, "pgbouncer": 16433}),

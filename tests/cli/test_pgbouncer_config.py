@@ -10,7 +10,7 @@ from __future__ import annotations
 import inspect
 import re
 
-from cli.commands import pgbouncer
+from cli.commands.data_plane import pgbouncer
 
 
 def test_render_userlist_quotes_role_and_secret() -> None:

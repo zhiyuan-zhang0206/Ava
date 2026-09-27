@@ -9,8 +9,8 @@ from pathlib import Path
 
 import pytest
 
-from cli.commands import _pitr_activation as activation
-from cli.commands import _pitr_activation_config as activation_config
+from cli.commands.data_plane import _pitr_activation_config as activation_config
+from cli.commands.data_plane import pitr_activation as activation
 from ops.pitr_restart import PitrRestartContinuation
 from services.pitr import activation_runtime
 from services.pitr.activation_observability import refusal_message, save_error
@@ -1309,7 +1309,7 @@ def test_frozen_pg_state_contract_with_real_reader(
             lambda _home: SimpleNamespace(ports={"postgres": port}, gateway_home=str(tmp_path)),
         )
         monkeypatch.setattr(
-            "cli.commands.cluster_instance.pg_admin_url",
+            "cli.commands.data_plane.cluster_instance.pg_admin_url",
             lambda _pg_port: f"postgresql://ava@/postgres?host={sock}&port={port}",
         )
 

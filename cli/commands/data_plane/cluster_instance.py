@@ -106,11 +106,11 @@ _BIND_WAIT_TIMEOUT_S = 60.0
 _BIND_WAIT_INTERVAL_S = 2.0
 
 
-def _pg_data_dir() -> Path:
+def pg_data_dir() -> Path:
     return ava_home() / "pg"
 
 
-def _redis_data_dir() -> Path:
+def redis_data_dir() -> Path:
     return ava_home() / "redis"
 
 
@@ -142,7 +142,7 @@ def _redis_cli_bin() -> str:
     return _redis_bin("redis-cli")
 
 
-def _pg_bin(name: str) -> str:
+def pg_bin(name: str) -> str:
     return str(pg_tool(name)) if is_macos() else str(PG_BIN_LINUX / name)
 
 
@@ -245,7 +245,7 @@ def _initdb(target: Path) -> None:
     target.parent.mkdir(parents=True, exist_ok=True)
     subprocess.run(
         [
-            _pg_bin("initdb"),
+            pg_bin("initdb"),
             "-D",
             str(target),
             "-U",
@@ -263,7 +263,7 @@ def _initdb(target: Path) -> None:
 def _ensure_pg_data() -> Path:
     """Ensure this cluster's pg data dir exists and is initialized, via the cached
     template (initdb once host-wide, then copy). Returns the data dir."""
-    data = _pg_data_dir()
+    data = pg_data_dir()
     if (data / "PG_VERSION").exists():
         return data
     template = _pg_template_dir()
@@ -297,7 +297,7 @@ def pg_admin_url(pg_port: int) -> str:
 
 def _pg_running(pg_port: int, host: str = "127.0.0.1") -> bool:
     out = subprocess.run(
-        [_pg_bin("pg_isready"), "-h", host, "-p", str(pg_port)],
+        [pg_bin("pg_isready"), "-h", host, "-p", str(pg_port)],
         capture_output=True,
         check=False,
     )
@@ -320,7 +320,7 @@ def _start_pg(pg_port: int, cluster_secret: str) -> int:
         # first-start migration failed `fe_sendauth: no password supplied`).
         # pg_ctl reload is a SIGHUP — a no-op when the content is unchanged.
         result = subprocess.run(
-            [_pg_bin("pg_ctl"), "-D", str(data), "reload"],
+            [pg_bin("pg_ctl"), "-D", str(data), "reload"],
             check=False,
             capture_output=True,
             text=True,
@@ -351,7 +351,7 @@ def _start_pg(pg_port: int, cluster_secret: str) -> int:
     listen = ",".join(_bind_addrs(cluster_secret))
     result = subprocess.run(
         [
-            _pg_bin("pg_ctl"),
+            pg_bin("pg_ctl"),
             "-D",
             str(data),
             "-l",
@@ -445,7 +445,7 @@ def start_redis(
     dial_host = _redis_dial_host()
     if _redis_running(redis_port, redis_admin_password, dial_host):
         print(f"  ✓ redis already running ({dial_host}:{redis_port})")
-        _write_redis_conf(_redis_data_dir(), redis_admin_password)
+        _write_redis_conf(redis_data_dir(), redis_admin_password)
         # Re-affirm the ACL user on every start (survives a restart that drops
         # the in-memory ACL) — including no-secret clusters, whose identity
         # user is created with `nopass` (see _ensure_redis_acl).
@@ -455,7 +455,7 @@ def start_redis(
     bind_addrs = ["127.0.0.1"] if is_macos() else _bind_addrs(cluster_secret)
     if not is_macos() and cluster_secret and not _wait_for_reachable_bind():
         return 1
-    data = _redis_data_dir()
+    data = redis_data_dir()
     data.mkdir(parents=True, exist_ok=True)
     args = [
         _redis_server_bin(),
@@ -550,7 +550,7 @@ def _start_pgbouncer(
     install birth — the .env does not exist yet then — and resolved from the
     home's .env file on every later bring-up (the userlist carries an
     `ava_runner` entry only once the cluster has a runner credential)."""
-    from cli.commands.pgbouncer import ensure_pgbouncer, runner_password_from_env
+    from .pgbouncer import ensure_pgbouncer, runner_password_from_env
 
     return ensure_pgbouncer(
         pg_port=pg_port,
@@ -685,7 +685,7 @@ def print_data_plane_status() -> None:
     if settings.data_plane.is_remote:
         # A remote-managed plane has no local instance to manage — probe the
         # URLs themselves (the switch) and skip the local pooler line.
-        from cli.commands._data_plane import remote_pg_reachable, remote_redis_reachable
+        from .bringup import remote_pg_reachable, remote_redis_reachable
 
         print("  · data plane remote-managed — probing the URLs (no local instance)")
         pg_ok, pg_line = remote_pg_reachable()
@@ -717,8 +717,9 @@ def print_data_plane_status() -> None:
         f"redis ({redis_host}:{redis_port})"
     )
     if settings.data_plane.pgbouncer_enabled:
-        from cli.commands.pgbouncer import pgbouncer_reachable
         from shared.cluster import db_identity, get_record, record_pgbouncer_port
+
+        from .pgbouncer import pgbouncer_reachable
 
         # The pooler LISTENS on the registry-derived port (`ensure_cluster_instance`
         # is called with `record_pgbouncer_port(rec)`), so probe/display that same
@@ -742,7 +743,7 @@ def print_data_plane_status() -> None:
             print(f"  {'✓' if ok else '✗'} pgbouncer (127.0.0.1:{port}, transaction pooling)")
 
 
-def _redis_endpoint() -> tuple[int, str | None] | None:
+def redis_endpoint() -> tuple[int, str | None] | None:
     """(port, password) of this cluster's redis from settings.data_plane.redis_url, or None
     if not resolvable (no instance to stop). The password is None on a no-secret
     cluster (redis has no requirepass then)."""
@@ -765,26 +766,26 @@ def stop_cluster_instance() -> int:
         # box to tear down, and the provider owns the service lifecycle. But a
         # cluster that SWITCHED local→remote may still have its old local
         # instance running; warn so it is torn down deliberately.
-        from cli.commands._data_plane import remote_plane_host, warn_orphaned_local_instance
+        from .bringup import remote_plane_host, warn_orphaned_local_instance
 
         print(f"\n→ data plane remote-managed ({remote_plane_host()}) — nothing to stop locally")
         warn_orphaned_local_instance()
         return 0
-    data = _pg_data_dir()
+    data = pg_data_dir()
     print("\n→ stopping per-cluster data plane")
     # Stop the pooler first (best-effort, no-op if it was never enabled) so clients
     # are disconnected before Postgres goes down.
-    from cli.commands.pgbouncer import stop_pgbouncer
+    from .pgbouncer import stop_pgbouncer
 
     stop_pgbouncer()
     if (data / "PG_VERSION").exists():
         subprocess.run(
-            [_pg_bin("pg_ctl"), "-D", str(data), "-m", "fast", "stop"],
+            [pg_bin("pg_ctl"), "-D", str(data), "-m", "fast", "stop"],
             check=False,
             capture_output=True,
         )
         print("  ✓ postgres stopped")
-    endpoint = _redis_endpoint()
+    endpoint = redis_endpoint()
     if endpoint is not None:
         port, password = endpoint
         subprocess.run(

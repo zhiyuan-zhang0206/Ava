@@ -52,7 +52,7 @@ from pathlib import Path
 
 import shared.port_preflight
 from cli.commands._converge_spec import ConvergeCtx
-from cli.commands.cluster_instance import (
+from cli.commands.data_plane.cluster_instance import (
     _BIND_WAIT_TIMEOUT_S,
     _bind_addrs,
     _live_pg_socket_dir,
@@ -70,7 +70,7 @@ from shared.proc import process_alive
 _MAX_CLIENT_CONN = 500
 _DEFAULT_POOL_SIZE = 25
 
-# How often `_terminate_verified` re-probes while waiting out its grace period, and
+# How often `terminate_verified` re-probes while waiting out its grace period, and
 # how long it lets a force kill land before calling the process a survivor. Both are
 # reaction times for a stop that is already happening, not judgments about whether a
 # host is making progress, so they are deliberately not in the `shared.deploy_timing`
@@ -109,7 +109,7 @@ def _userlist_path() -> Path:
     return _pgbouncer_dir() / "userlist.txt"
 
 
-def _pidfile_path() -> Path:
+def pidfile_path() -> Path:
     return _pgbouncer_dir() / "pgbouncer.pid"
 
 
@@ -234,7 +234,7 @@ def _render_ini(
             "log_connections = 0",
             "log_disconnections = 0",
             f"logfile = {_logfile_path()}",
-            f"pidfile = {_pidfile_path()}",
+            f"pidfile = {pidfile_path()}",
             "",
         ]
     )
@@ -269,12 +269,12 @@ def _write_config(
     userlist.chmod(0o600)
 
 
-def _pid_is_our_pooler(pid: int) -> bool:
+def pid_is_our_pooler(pid: int) -> bool:
     """Whether `pid` is really THIS home's pooler, and not a stranger that
     inherited the number.
 
     A pidfile holds a bare integer and the OS recycles pids. pgbouncer unlinks its
-    pidfile on a clean exit but cannot on a force kill — and `_terminate_verified`
+    pidfile on a clean exit but cannot on a force kill — and `terminate_verified`
     force-kills a straggler after 5s while a pooler holding live clients drains for
     minutes, so an ordinary `ava stop` on a busy cluster is the normal way to
     leave a stale pidfile behind, not an exotic one.
@@ -342,20 +342,20 @@ def _running_pid() -> int | None:
     The one seam both signalling paths read — `stop_pgbouncer`'s SIGTERM and
     `ensure_pgbouncer`'s reload SIGHUP (which is a kill for most processes that
     are not pgbouncer). A pidfile that no longer names our pooler — process gone,
-    or the number since recycled onto someone else (`_pid_is_our_pooler`) — reads
+    or the number since recycled onto someone else (`pid_is_our_pooler`) — reads
     as None and is removed, so the next bring-up starts from a clean slate instead
     of re-deciding against the same dead number. A live stranger is reported: that
     line is the one that makes a cross-home pidfile visible before it costs an
     outage."""
 
-    pidfile = _pidfile_path()
+    pidfile = pidfile_path()
     if not pidfile.exists():
         return None
     try:
         pid = int(pidfile.read_text().strip())
     except (ValueError, OSError):
         return None
-    if _pid_is_our_pooler(pid):
+    if pid_is_our_pooler(pid):
         return pid
     if process_alive(pid):
         print(
@@ -536,7 +536,7 @@ def ensure_pgbouncer(
             # Raw SIGHUP is safe HERE and nowhere else in this file: `signal.SIGHUP`
             # is undefined on Windows, but a pooler only exists on a gateway unit and
             # the gateway capability is POSIX-only (no native Windows redis to drive),
-            # so this line is unreachable there. `_terminate_verified` below had the
+            # so this line is unreachable there. `terminate_verified` below had the
             # same shape and was NOT unreachable — it is called from `_do_stop` on
             # every platform — which is why it goes through `shared.proc` now.
             os.kill(pid, signal.SIGHUP)  # online reload of ini + userlist
@@ -566,7 +566,7 @@ def ensure_pgbouncer(
             "re-bind it; restarting the pooler",
             file=sys.stderr,
         )
-        if not _terminate_verified(pid, label="pgbouncer"):
+        if not terminate_verified(pid, label="pgbouncer"):
             print(
                 f"  ✗ could not stop the degraded pooler (pid {pid}) — it survived the "
                 "force kill; not starting a second pooler on the same port",
@@ -679,10 +679,10 @@ def stop_pgbouncer() -> None:
     # process still held its socket and kept running). SIGKILL a straggler after
     # the grace period and report honestly either way — a stop must never CLAIM
     # success it did not verify.
-    _terminate_verified(pid, label="pgbouncer")
+    terminate_verified(pid, label="pgbouncer")
 
 
-def _terminate_verified(pid: int, *, label: str, timeout_s: float = 5.0) -> bool:
+def terminate_verified(pid: int, *, label: str, timeout_s: float = 5.0) -> bool:
     """Ask `pid` to stop, wait up to `timeout_s`, force-kill a straggler, and report
     the verified outcome. A PID that is already gone counts as stopped (the race
     between the pidfile read and the signal is covered either way).
@@ -733,7 +733,7 @@ def _terminate_verified(pid: int, *, label: str, timeout_s: float = 5.0) -> bool
     return False
 
 
-def _ensure_pgbouncer_step(ctx: ConvergeCtx) -> None:
+def ensure_pgbouncer_step(ctx: ConvergeCtx) -> None:
     """Converge step: reconcile the one DB URL with the pooler toggle, and
     preflight the binary. Gateway-only.
 

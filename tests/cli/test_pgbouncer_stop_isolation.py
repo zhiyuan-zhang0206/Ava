@@ -18,7 +18,7 @@ from pathlib import Path
 import psutil
 import pytest
 
-from cli.commands import pgbouncer as pgb
+from cli.commands.data_plane import pgbouncer as pgb
 from shared.config import settings
 
 _SECRET = "pgbouncerstopisolationtestsecret"  # noqa: S105 — test fixture, not a real credential
@@ -100,7 +100,7 @@ def signalled(monkeypatch: pytest.MonkeyPatch) -> list[int]:
     """Every pid the stop path would signal. Replaces the SIGTERM/SIGKILL seam so
     a regression shows up as a recorded pid, not as a dead process."""
     calls: list[int] = []
-    monkeypatch.setattr(pgb, "_terminate_verified", lambda pid, **_: calls.append(pid))  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(pgb, "terminate_verified", lambda pid, **_: calls.append(pid))  # pyright: ignore[reportUnknownArgumentType]
     return calls
 
 

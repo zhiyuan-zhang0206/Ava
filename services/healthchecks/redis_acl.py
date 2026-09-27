@@ -99,7 +99,7 @@ def check(
             "[redis-acl healthcheck] redis unreachable (%s) — restarting its local instance",
             exc,
         )
-        from cli.commands.cluster_instance import start_redis
+        from cli.commands.data_plane.cluster_instance import start_redis
 
         rc = start_redis(redis_port, redis_admin_password, runtime_password, cluster_secret, user)
         if rc != 0:

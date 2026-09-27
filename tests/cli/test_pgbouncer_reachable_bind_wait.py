@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import pytest
 
-from cli.commands import pgbouncer as _pb
+from cli.commands.data_plane import pgbouncer as _pb
 
 _SECRET = "s3cr3t"  # noqa: S105 — test fixture, not a real credential
 
@@ -184,7 +184,7 @@ def test_running_pooler_is_reloaded_when_public_listener_is_healthy(
     monkeypatch.setattr(_pb, "_running_pid", lambda: 4242)
     monkeypatch.setattr(
         _pb,
-        "_terminate_verified",
+        "terminate_verified",
         lambda pid, **_: killed.append(pid) or True,  # pyright: ignore[reportUnknownArgumentType]
     )
     monkeypatch.setattr(
@@ -227,7 +227,7 @@ def test_running_degraded_pooler_is_restarted_not_reloaded(
     monkeypatch.setattr(_pb, "_running_pid", lambda: 4242)
     monkeypatch.setattr(
         _pb,
-        "_terminate_verified",
+        "terminate_verified",
         lambda pid, **_: killed.append(pid) or True,  # pyright: ignore[reportUnknownArgumentType]
     )
     monkeypatch.setattr(
@@ -264,13 +264,13 @@ def test_running_degraded_pooler_is_restarted_not_reloaded(
 def test_running_degraded_pooler_surviving_terminate_is_reported(
     monkeypatch: pytest.MonkeyPatch, _noop_write: None, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """P7: `_terminate_verified` returning False means the degraded pooler survived
+    """P7: `terminate_verified` returning False means the degraded pooler survived
     the force kill — starting a second pooler on the same port would fail
     confusingly. The real cause must be said out loud."""
     monkeypatch.setattr(_pb, "_running_pid", lambda: 4242)
     monkeypatch.setattr(_pb, "pgbouncer_public_listener_reachable", lambda *_a, **_kw: False)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_pb, "_wait_for_reachable_bind_gated", lambda _secret: True)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_pb, "_terminate_verified", lambda *_a, **_kw: False)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_pb, "terminate_verified", lambda *_a, **_kw: False)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_pb, "os", type("_OS", (), {"kill": staticmethod(lambda *_a: None)})())
     calls = _fake_start(monkeypatch)
 

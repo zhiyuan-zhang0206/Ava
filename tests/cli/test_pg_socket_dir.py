@@ -4,7 +4,7 @@
 a pre-cutover instance keeps listening on the old name-keyed
 `/tmp/ava-pg-<cluster>` dir while the canonical dir is the new slug one. Every
 backend consumer of the socket (the provisioning admin dial via `pg_admin_url`,
-AND pgbouncer's rendered `host=` — cli/commands/pgbouncer.py) must therefore
+AND pgbouncer's rendered `host=` — cli/commands/data_plane/pgbouncer.py) must therefore
 dial the dir the running pg actually serves.
 """
 
@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-import cli.commands.cluster_instance as ci
+import cli.commands.data_plane.cluster_instance as ci
 
 
 @pytest.fixture()
@@ -63,7 +63,7 @@ def test_pgbouncer_ini_renders_the_live_socket_dir(
     """The pooler's backend `host=` must go through the same live-socket probe as
     the admin dial — rendering the canonical dir against a pre-cutover pg breaks
     every pooled query while admin readiness stays green."""
-    import cli.commands.pgbouncer as pgb
+    import cli.commands.data_plane.pgbouncer as pgb
 
     legacy = tmp_path / "probe" / "ava-pg-main"
     _sock(legacy, 5433)

@@ -307,7 +307,7 @@ rebuilt audit line.
 Postgres and Redis run as native processes (no Docker — the binaries come from brew's
 `redis@8.2` keg on macOS / apt on Linux, but Ava drives them directly via `pg_ctl` + `redis-server`,
 not `brew services`/launchd/systemd). Every cluster — including `main` — brings up its
-OWN pair under `$AVA_HOME` on its per-cluster ports (`cli/commands/cluster_instance.py`):
+OWN pair under `$AVA_HOME` on its per-cluster ports (`cli/commands/data_plane/cluster_instance.py`):
 `initdb` into `$AVA_HOME/pg` (template-cached through a host-level dir beside the
 registry, so a new cluster / a test spins up by directory copy rather than a fresh
 multi-second init), plus `redis-server` with its data dir under `$AVA_HOME/redis`.

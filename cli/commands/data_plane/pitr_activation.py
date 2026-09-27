@@ -19,7 +19,7 @@ import psutil
 import psycopg
 from psycopg.conninfo import make_conninfo
 
-from cli.commands._pitr_activation_config import (
+from cli.commands.data_plane._pitr_activation_config import (
     apply_wal_config,
     require_inactive_gate_posture,
     restore_archive_settings,
@@ -196,8 +196,9 @@ def _validate_secrets() -> dict[str, str]:
 
 
 def _read_pg_state() -> dict[str, str]:
-    from cli.commands.cluster_instance import pg_admin_url
     from shared.cluster import db_identity, get_record, record_postgres_port
+
+    from .cluster_instance import pg_admin_url
 
     if (record := get_record(ava_home())) is None:
         raise RuntimeError("cluster registry record is missing")
