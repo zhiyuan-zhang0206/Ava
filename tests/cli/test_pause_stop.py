@@ -13,7 +13,6 @@ import pytest
 
 from cli.commands import _temporary_stop as command
 from cli.commands import stop as entry
-from cli.commands._maintenance_stop import OwnedProcess
 from cli.commands._pause_resume import StartDelegation, resume_after_start
 from cli.parsers import build_parser
 from ops import agent_pause
@@ -23,6 +22,7 @@ from shared.maintenance_state import MaintenanceHold
 from shared.session_backend import PtySessionBackend
 from tests.agent.test_maintenance import WHEN
 from tests.agent.test_maintenance import isolate as isolate
+from tests.cli.conftest import PtyReaper
 from tests.cli.test_maintenance_stop import Launcher
 from tests.cli.test_maintenance_stop import home as home
 from tests.cli.test_maintenance_stop import launch as launch
@@ -67,6 +67,7 @@ def test_real_service_pause_preserves_unselected_orchestration_and_pty(
     home: Path,
     launch: Launcher,
     monkeypatch: pytest.MonkeyPatch,
+    pty_reaper: PtyReaper,
 ) -> None:
     dependencies(monkeypatch)
     # Bootstrap and spawned interpreters consume the raw home before Settings.
@@ -77,26 +78,18 @@ def test_real_service_pause_preserves_unselected_orchestration_and_pty(
     terminal = PtySessionBackend()
     name = "ava-agent-987-shell-1"
     assert terminal.new_session(name, "", home, env={"AVA_HOME": str(home)})
-    from shared.session_record import SessionRecord
-    from shared.sessions.pty._paths import record_path
-
-    record = SessionRecord.read(record_path(name))
-    assert record is not None
-    identity = OwnedProcess(record.pid, record.create_time, record.starttime)
+    identity = pty_reaper.track_session(name)
     deadline = time.monotonic() + 5
-    while psutil.Process(record.pid).children(recursive=True):
+    while psutil.Process(identity.pid).children(recursive=True):
         assert time.monotonic() < deadline
         time.sleep(0.05)
-    try:
-        assert entry.cmd_pause(timeout=5) == 0
-        assert service.poll() is not None
-        assert orchestration.poll() is None
-        assert terminal.has_session(name) and identity.live()
-        current = maintenance.snapshot()
-        assert current is not None and current.maintenance is not None
-        assert current.maintenance.phase == "stopped"
-    finally:
-        terminal.kill_session(name)
+    assert entry.cmd_pause(timeout=5) == 0
+    assert service.poll() is not None
+    assert orchestration.poll() is None
+    assert terminal.has_session(name) and identity.live()
+    current = maintenance.snapshot()
+    assert current is not None and current.maintenance is not None
+    assert current.maintenance.phase == "stopped"
 
 
 def test_real_stubborn_service_fails_without_force_and_keeps_hold(
@@ -116,6 +109,7 @@ def test_real_stubborn_service_fails_without_force_and_keeps_hold(
 def test_full_stop_closes_real_idle_terminal_after_drain(
     home: Path,
     monkeypatch: pytest.MonkeyPatch,
+    pty_reaper: PtyReaper,
 ) -> None:
     dependencies(monkeypatch)
     monkeypatch.setitem(os.environ, "AVA_HOME", str(home))
@@ -131,11 +125,9 @@ def test_full_stop_closes_real_idle_terminal_after_drain(
     monkeypatch.setattr(entry, "_announce_stopping", lambda: None)
     name = "ava-agent-987-shell-2"
     assert terminal.new_session(name, "", home, env={"AVA_HOME": str(home)})
-    try:
-        assert entry.cmd_stop(require_confirmation=False, keep_infra=True, timeout=5) == 0
-        assert not terminal.has_session(name)
-    finally:
-        terminal.kill_session(name)
+    pty_reaper.track_session(name)
+    assert entry.cmd_stop(require_confirmation=False, keep_infra=True, timeout=5) == 0
+    assert not terminal.has_session(name)
 
 
 @pytest.mark.real_cluster_spawn
@@ -338,6 +330,7 @@ def test_explicit_force_stops_host_and_preserves_only_pause_terminals(
     home: Path,
     launch: Launcher,
     monkeypatch: pytest.MonkeyPatch,
+    pty_reaper: PtyReaper,
     full_stop: bool,
 ) -> None:
     from cli.commands import _repo
@@ -361,20 +354,18 @@ def test_explicit_force_stops_host_and_preserves_only_pause_terminals(
     terminal = PtySessionBackend()
     name = "ava-agent-987-shell-force"
     assert terminal.new_session(name, "", home, env={"AVA_HOME": str(home)})
-    try:
-        if full_stop:
-            rc = entry.cmd_stop(force=True, require_confirmation=False, stop_browser=False)
-        else:
-            rc = entry.cmd_pause(force=True)
-        assert rc == 0
-        # The backend reaps its tracked process, so Popen cannot retain its
-        # signal exit code. Verify the original TERM-ignoring PID is gone.
-        host.wait(timeout=2)
-        assert not psutil.pid_exists(host.pid)
-        assert terminal.has_session(name) is not full_stop
-        assert not maintenance.held(), "force must not invent a durable flush receipt"
-    finally:
-        terminal.kill_session(name)
+    pty_reaper.track_session(name)
+    if full_stop:
+        rc = entry.cmd_stop(force=True, require_confirmation=False, stop_browser=False)
+    else:
+        rc = entry.cmd_pause(force=True)
+    assert rc == 0
+    # The backend reaps its tracked process, so Popen cannot retain its
+    # signal exit code. Verify the original TERM-ignoring PID is gone.
+    host.wait(timeout=2)
+    assert not psutil.pid_exists(host.pid)
+    assert terminal.has_session(name) is not full_stop
+    assert not maintenance.held(), "force must not invent a durable flush receipt"
 
 
 # ── services restore after a data-plane stop failure (issue #2307) ────────────
