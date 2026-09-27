@@ -33,7 +33,7 @@ from cli.commands._converge_spec import ConvergeCtx
 from cli.commands._lgtm import is_station_ctx, roles_declare_station
 from cli.commands._lgtm_assets import _NATIVE_CONSTANTS, load_versions
 from cli.commands._lgtm_provisioning import _render_provisioning
-from cli.commands._observatory_urls import (
+from cli.commands.observatory_urls import (
     _alerts_webhook_url,
     _observability_datasource_urls,
 )

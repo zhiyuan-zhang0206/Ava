@@ -148,8 +148,6 @@ def _h_notices_clear(args: argparse.Namespace) -> int:
 
 
 def _add_timeline_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
-    from cli.main import _h_agents_timeline
-
     parser = sub.add_parser(
         "timeline", aliases=["context"], help="read standing context and recent conversation"
     )
@@ -162,8 +160,6 @@ def _add_timeline_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser
 
 
 def _add_list_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
-    from cli.main import _h_agents_ls
-
     agents_ls_p = sub.add_parser(
         "ls", help="read one agent directory page (live agents by default)"
     )
@@ -175,8 +171,6 @@ def _add_list_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -
 
 
 def _add_send_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
-    from cli.main import _h_agents_send
-
     agents_send_p = sub.add_parser(
         "send", help="deliver a chat message to an agent (auto-resurrects a terminated target)"
     )
@@ -217,8 +211,6 @@ def _add_source_argument(*parsers: argparse.ArgumentParser) -> None:
 
 
 def _add_compact_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
-    from cli.main import _h_agents_compact
-
     agents_compact_p = sub.add_parser(
         "compact",
         help="request conversation compaction (durable; consumed on the agent's next claim)",
@@ -230,8 +222,6 @@ def _add_compact_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]
 def _add_resurrect_billing_parser(
     sub: argparse._SubParsersAction[argparse.ArgumentParser],
 ) -> None:
-    from cli.main import _h_agents_resurrect_billing
-
     agents_resurrect_billing_p = sub.add_parser(
         "resurrect-billing",
         help="batch-resurrect the billing-class halt victims once the provider balance recovered "
@@ -246,17 +236,6 @@ def _add_resurrect_billing_parser(
 
 
 def _add_agents_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
-    from cli.main import (
-        _h_agents_cancel,
-        _h_agents_kill,
-        _h_agents_restart,
-        _h_agents_resurrect,
-        _h_agents_terminate,
-        _h_notices_clear,
-        _h_notices_list,
-        _h_notices_resolve,
-    )
-
     # `ava agents` — operator lifecycle ops (thin client over the gateway's
     # /api/agents + /api/cancel routes). Handlers defer the cli.commands import so
     # `ava --help` builds the parser without a configured .env. Verbs are ordered

@@ -24,8 +24,6 @@ import os
 from collections.abc import Callable
 from pathlib import Path
 
-from cli.commands._release_selector import read_selector, selector_bytes
-from cli.commands._release_services import PreparedService, prepare_normal_services
 from cli.commands._update_bootstrap import BootstrapHopRequest, _private_reference, probe_bootstrap
 from cli.commands._update_normal_release import (
     NormalReleaseRequest,
@@ -36,6 +34,8 @@ from cli.commands._update_normal_release import (
     commit_normal_release_after_publication,
     execute_normal_release,
 )
+from cli.commands.release_selector import read_selector, selector_bytes
+from cli.commands.release_services import PreparedService, prepare_normal_services
 from services.agent_ops.bootstrap import (
     ObserverProjection,
     read_prepared_context,

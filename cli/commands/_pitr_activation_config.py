@@ -11,14 +11,14 @@ from pathlib import Path
 import psycopg
 from psycopg import sql
 
-from cli.commands._cluster_instance import pg_admin_url
+from cli.commands.cluster_instance import pg_admin_url
 from services.pitr.activation_runtime import (
-    _PITR_ENV_FIELDS,
-    _enable_pitr_services,
-    _file_evidence,
-    _settings_digest,
+    PITR_ENV_FIELDS,
+    enable_pitr_services,
+    file_evidence,
     pitr_env_absent,
     pitr_env_is_desired,
+    settings_digest,
 )
 from services.pitr.activation_state import ActivationRecord, write_record_cas
 from shared.cluster import get_record, record_postgres_port
@@ -113,7 +113,7 @@ def restore_archive_settings(
                 record,
                 rollback_setting_intent={
                     "name": name,
-                    "expected_digest": _file_evidence(auto_path)[1],
+                    "expected_digest": file_evidence(auto_path)[1],
                     "current_value": current,
                     "desired_value": desired,
                 },
@@ -129,7 +129,7 @@ def restore_archive_settings(
         applied[name] = json.dumps(
             {
                 "desired_value": desired,
-                "post_digest": _file_evidence(auto_path)[1],
+                "post_digest": file_evidence(auto_path)[1],
             },
             sort_keys=True,
             separators=(",", ":"),
@@ -139,7 +139,7 @@ def restore_archive_settings(
             record,
             rollback_setting_intent=None,
             rollback_settings_applied=applied,
-            rollback_expected_auto_conf_digest=_file_evidence(auto_path)[1],
+            rollback_expected_auto_conf_digest=file_evidence(auto_path)[1],
         )
     return record
 
@@ -163,7 +163,7 @@ def apply_wal_config(
         intent = record.config_apply_intent
         if current == value:
             if intent is not None and intent.get("name") == name:
-                digest = _file_evidence(auto_path)[1]
+                digest = file_evidence(auto_path)[1]
                 record = _journal(
                     home,
                     record,
@@ -176,7 +176,7 @@ def apply_wal_config(
                     rollback_expected_auto_conf_digest=digest,
                 )
             continue
-        expected = _file_evidence(auto_path)[1]
+        expected = file_evidence(auto_path)[1]
         if intent is not None and (
             intent.get("kind") != "postgresql_auto_conf"
             or intent.get("name") != name
@@ -196,7 +196,7 @@ def apply_wal_config(
                 },
             )
         _alter(name, value)
-        digest = _file_evidence(auto_path)[1]
+        digest = file_evidence(auto_path)[1]
         record = _journal(
             home,
             record,
@@ -223,7 +223,7 @@ def apply_wal_config(
                 config_apply_intent={
                     "kind": "env",
                     "expected_digest": expected,
-                    "desired_digest": _settings_digest(
+                    "desired_digest": settings_digest(
                         {
                             "pitr_enabled": "true",
                             "pitr_base_backup_enabled": "true",
@@ -240,7 +240,7 @@ def apply_wal_config(
             or intent.get("expected_digest") != expected
         ):
             raise RuntimeError(".env differs from durable PITR apply intent")
-        owned = _enable_pitr_services(expected)
+        owned = enable_pitr_services(expected)
     else:
         raise RuntimeError(
             "PITR environment keys are config-owned; align them with "
@@ -260,7 +260,7 @@ def apply_wal_config(
         "wal_restart_pending",
         restart_handoff=str(uuid.uuid4()),
         restart_orchestration=str(uuid.uuid4()),
-        rollback_expected_auto_conf_digest=_file_evidence(auto_path)[1],
+        rollback_expected_auto_conf_digest=file_evidence(auto_path)[1],
         error=None,
     )
     write_record_cas(home, expected=record, replacement=replacement)
@@ -268,7 +268,7 @@ def apply_wal_config(
 
 
 def gate_unset_command() -> str:
-    return "ava config unset " + " ".join(_PITR_ENV_FIELDS)
+    return "ava config unset " + " ".join(PITR_ENV_FIELDS)
 
 
 def require_inactive_gate_posture(boundary: str) -> None:

@@ -27,7 +27,7 @@ from psycopg.conninfo import conninfo_to_dict
 
 from services.pitr.activation_runtime import pitr_admin_url
 from services.pitr.activation_state import lock_path
-from services.pitr.base_manifest import CandidateManifest, WalRange, _lsn
+from services.pitr.base_manifest import CandidateManifest, WalRange, lsn
 from services.pitr.object_store import ObjectStore
 from services.pitr.restore_manifest import (
     ProtectedManifest,
@@ -215,7 +215,7 @@ def create_recovery_point(target_sha: str) -> Path:
             if row is None:
                 raise RecoveryPointError("PostgreSQL omitted the pre-update restore point")
             archive_end_lsn = str(row[0])
-            if _lsn(archive_end_lsn) < _lsn(proof.target_lsn):
+            if lsn(archive_end_lsn) < lsn(proof.target_lsn):
                 raise RecoveryPointError("PITR restore point precedes the protected base")
             conn.execute("SELECT pg_switch_wal()")
             if _identity(conn) != identity:

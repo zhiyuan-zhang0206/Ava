@@ -41,12 +41,21 @@ boundaries, already carried by codegen, and not debt.
    one. Then narrow `scripts/lint_pool_keepalives.py` to what Rule 5 does not
    cover (`scripts/`, and any async pool left in `allowed`), or retire it if
    nothing remains.
-2. **Reach-in burn-down** (`private_imports`, 286 keys / 297 sites / 105
-   files), highest yield first: `cli/main.py` re-exports 121 private
-   `cli.parsers.*._h_*` handlers so tests have one namespace to patch (a
-   hand-maintained registry — bind handlers in their parser modules and patch
-   there); then the most reached-into privates (`shared.lm._effort`,
-   `shared.lm._plugin_providers`, `shared.agents.impersonation._impersonation_store`,
+2. **Reach-in burn-down** (`private_imports`, 140 keys / 151 sites / 96
+   files) — `cli/main.py`'s 121-key handler registry is gone: builders bind
+   their own module's `_h_*` handler directly, and tests patch the parser
+   module. Every `cli.*` / `services.pitr.*` target reached across a package
+   boundary is resolved too: 8 internal `cli/commands/_*.py` steps promoted to
+   public module names (`cluster_instance`, `maintenance`, `packages_refresh`,
+   `pgbouncer`, `observatory_urls`, `release_inventory`, `release_selector`,
+   `release_services` — each still defines no `cmd_*` of its own), plus 4
+   `cluster_lifecycle` test-seam wrappers and 8 `services.pitr` names promoted
+   (`activation_runtime`'s env-field table, archive/desired-archive settings,
+   file evidence, settings digest, shadow-pg gate and service-enable, plus
+   `base_manifest.lsn`).
+   Highest yield next: the most reached-into privates (`shared.lm._effort`,
+   `shared.lm._plugin_providers`,
+   `shared.agents.impersonation._impersonation_store`,
    `agent.graph._exec_protocol`, `agent._turn_progress`) each get a verdict:
    contract (export it) or internal (route callers through a door).
    `ava` carries no frozen reach-ins any more: agent visibility there is the

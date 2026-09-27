@@ -35,7 +35,7 @@ def _full_ports(base: int) -> ClusterPorts:
 
 
 # ---------------------------------------------------------------------------
-# _ensure_record — path-keyed allocation
+# ensure_record — path-keyed allocation
 # ---------------------------------------------------------------------------
 
 
@@ -45,7 +45,7 @@ def test_ensure_record_default_home_uses_legacy_ports(
     import cli.commands.cluster_lifecycle as gw
 
     monkeypatch.setattr(cl, "_port_free", lambda _port: True)  # pyright: ignore[reportUnknownArgumentType]
-    rec, created = gw._ensure_record(cl.default_home())
+    rec, created = gw.ensure_record(cl.default_home())
     assert created is True
     assert rec.gateway_home == str(cl.default_home())
     assert rec.ports["gateway"] == LEGACY_AVA_PORTS["gateway"]  # 8000
@@ -60,14 +60,14 @@ def test_ensure_record_allocates_block_for_dev_home(
 
     monkeypatch.setattr(cl, "_port_free", lambda _port: True)  # pyright: ignore[reportUnknownArgumentType]
     home = tmp_path / ".ava-dev"
-    rec, created = gw._ensure_record(home)
+    rec, created = gw.ensure_record(home)
     assert created is True
     assert rec.gateway_home == str(home)
     # a dev cluster gets its own pg/redis ports inside its allocated block
     assert rec.ports["postgres"] == rec.ports["gateway"] + 11
     assert rec.ports["redis"] == rec.ports["gateway"] + 12
     # second call: reuse, not re-allocate
-    rec2, created2 = gw._ensure_record(home)
+    rec2, created2 = gw.ensure_record(home)
     assert created2 is False
     assert rec2 == rec
 
@@ -75,7 +75,7 @@ def test_ensure_record_allocates_block_for_dev_home(
 def test_concurrent_ensure_record_no_collision(
     isolated_registry: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Concurrent _ensure_record (the registry read-allocate-save critical section)
+    """Concurrent ensure_record (the registry read-allocate-save critical section)
     must serialize under registry_lock so no two clusters get the same port block
     (and with it, the same pg/redis instance ports)."""
     import threading
@@ -87,7 +87,7 @@ def test_concurrent_ensure_record_no_collision(
     results: dict[str, object] = {}
 
     def make(h: Path) -> None:
-        rec, _created = gw._ensure_record(h)
+        rec, _created = gw.ensure_record(h)
         results[str(h)] = rec
 
     threads = [threading.Thread(target=make, args=(h,)) for h in homes]
@@ -818,7 +818,7 @@ def test_destroy_reports_a_failing_unregister_but_still_succeeds(
 
 
 # ---------------------------------------------------------------------------
-# _ensure_pgvector_extension — remote-managed planes skip (no local admin socket)
+# ensure_pgvector_extension — remote-managed planes skip (no local admin socket)
 # ---------------------------------------------------------------------------
 
 
@@ -842,7 +842,7 @@ def test_ensure_pgvector_extension_skips_remote_plane(
         types.SimpleNamespace(data_plane=types.SimpleNamespace(is_remote=True)),
     )
     monkeypatch.setattr(cl, "ensure_pgvector_extension", fake_ensure)
-    gw._ensure_pgvector_extension("ava_ident", base_admin_url="postgresql://admin@/postgres")
+    gw.ensure_pgvector_extension("ava_ident", base_admin_url="postgresql://admin@/postgres")
     assert called == []
 
 
@@ -864,5 +864,5 @@ def test_ensure_pgvector_extension_forwards_on_local_plane(
         types.SimpleNamespace(data_plane=types.SimpleNamespace(is_remote=False)),
     )
     monkeypatch.setattr(cl, "ensure_pgvector_extension", fake_ensure)
-    gw._ensure_pgvector_extension("ava_ident", base_admin_url="postgresql://admin@/postgres")
+    gw.ensure_pgvector_extension("ava_ident", base_admin_url="postgresql://admin@/postgres")
     assert called == [("ava_ident", "postgresql://admin@/postgres")]

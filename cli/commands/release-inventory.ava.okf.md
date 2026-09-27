@@ -10,7 +10,7 @@ tags:
 
 # Prepared unit inventory
 
-`_release_inventory.prepare_unit_inventory` runs from the verified installed
+`release_inventory.prepare_unit_inventory` runs from the verified installed
 image with an explicit canonical registered unit home. It reads the existing
 annotated service roster (including presence-discovered plugin services), every
 home session record, and user launchd/crontab definitions. Disabled and obsolete

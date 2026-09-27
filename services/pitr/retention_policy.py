@@ -13,7 +13,7 @@ import json
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime, tzinfo
 
-from services.pitr.base_manifest import CandidateManifest, _lsn
+from services.pitr.base_manifest import CandidateManifest, lsn
 from services.pitr.logical_dump_names import (
     KIND_ACTIVATION,
     KIND_DAILY,
@@ -339,7 +339,7 @@ def _pin_contiguous_wal(
     latest_range = oldest.wal_ranges[-1]
     timeline = latest_range.timeline
     segment_size = oldest.wal_segment_size
-    start = (_lsn(latest_range.end_lsn) + segment_size - 1) // segment_size
+    start = (lsn(latest_range.end_lsn) + segment_size - 1) // segment_size
     on_timeline: dict[int, RetentionObject] = {}
     for item in wal:
         name = item.archive_name or ""
@@ -394,7 +394,7 @@ def _before_frontier(item: RetentionObject, oldest: CandidateManifest) -> bool:
         return False
     timeline, segment = _segment_origin(item.archive_name, oldest.wal_segment_size)
     start_timeline = oldest.wal_ranges[0].timeline
-    start_segment = _lsn(oldest.start_lsn) // oldest.wal_segment_size
+    start_segment = lsn(oldest.start_lsn) // oldest.wal_segment_size
     return timeline < start_timeline or (timeline == start_timeline and segment < start_segment)
 
 

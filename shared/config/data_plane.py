@@ -254,7 +254,7 @@ class DataPlaneSettings(EnvSettings):
             "passes a foreign host through untouched. The URLs, not this knob, "
             "are what every process dials — this field only decides the host "
             "they are born with; the registry record snapshots it at birth "
-            "(`cli.commands.cluster_lifecycle._ensure_record`)."
+            "(`cli.commands.cluster_lifecycle.ensure_record`)."
         ),
         json_schema_extra={
             "restart_required": "all",

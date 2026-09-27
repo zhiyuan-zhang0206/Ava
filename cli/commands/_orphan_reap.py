@@ -49,7 +49,7 @@ def _reap_orphan_listeners(
 
     Returns [(service, port, pid)] of reaped orphans for the stop output.
     """
-    from cli.commands._pgbouncer import _terminate_verified
+    from cli.commands.pgbouncer import _terminate_verified
     from shared.port_preflight import listeners_on, process_mentions, unit_port_map
     from shared.proc import process_cmdline
 

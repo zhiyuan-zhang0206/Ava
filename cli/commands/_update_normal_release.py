@@ -29,23 +29,23 @@ from uuid import uuid4
 import psycopg
 from pydantic import Field
 
-from cli.commands._release_selector import (
+from cli.commands._update_bootstrap import (
+    PreparedBootstrapHop,
+    _private_reference,
+)
+from cli.commands.release_selector import (
     pending_transaction,
     read_selector,
     select_pending_release,
     selector_bytes,
 )
-from cli.commands._release_services import (
+from cli.commands.release_services import (
     PreparedService,
     adopt_birth_record,
     await_normal_service_ready,
     normal_spawn_command,
     prepare_normal_services,
     start_normal_service,
-)
-from cli.commands._update_bootstrap import (
-    PreparedBootstrapHop,
-    _private_reference,
 )
 from services.agent_ops.bootstrap import (
     ObserverProjection,

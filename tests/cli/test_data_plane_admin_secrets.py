@@ -283,7 +283,7 @@ def test_interrupted_split_journals_one_secret_set_and_replays_it(
 def test_gateway_data_plane_retries_with_journal_credentials(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    from cli.commands import _cluster_instance
+    from cli.commands import cluster_instance
     from cli.commands import start as start_mod
 
     record = cluster.ClusterRecord(
@@ -322,7 +322,7 @@ def test_gateway_data_plane_retries_with_journal_credentials(
         attempts.append(credentials)
         return 0 if credentials == (_NEW_DB, _NEW_REDIS_ADMIN, _NEW_REDIS_RUNTIME) else 1
 
-    monkeypatch.setattr(_cluster_instance, "ensure_cluster_instance", _ensure)
+    monkeypatch.setattr(cluster_instance, "ensure_cluster_instance", _ensure)
 
     assert start_mod._ensure_gateway_data_plane() == 0
     assert attempts == [

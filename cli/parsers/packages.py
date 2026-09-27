@@ -36,7 +36,7 @@ def _h_packages_rollback(args: argparse.Namespace) -> int:
 
 def _duration(value: str) -> str:
     """Argparse type for `--check-every`: validate the duration before any command runs."""
-    from cli.commands._packages_refresh import parse_duration
+    from cli.commands.packages_refresh import parse_duration
 
     try:
         parse_duration(value)
@@ -60,8 +60,6 @@ def _h_packages_policy(args: argparse.Namespace) -> int:
 
 
 def _add_packages_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
-    from cli.main import _h_packages_status
-
     packages_p = sub.add_parser(
         "packages",
         help="inspect per-package update policy, channels, and refresh state (this machine)",

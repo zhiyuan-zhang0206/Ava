@@ -11,8 +11,8 @@ from __future__ import annotations
 
 import pytest
 
-from cli.commands import _cluster_instance as ci
 from cli.commands import _data_plane as dp
+from cli.commands import cluster_instance as ci
 from cli.commands import start as start_mod
 from shared.config import settings
 

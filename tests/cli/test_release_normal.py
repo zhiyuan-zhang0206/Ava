@@ -24,10 +24,10 @@ import psutil
 import psycopg
 import pytest
 
-from cli.commands import _release_services as release_services
 from cli.commands import _update_normal_release as normal
-from cli.commands._release_selector import read_selector, selector_bytes
-from cli.commands._release_services import PreparedService, _command, normal_spawn_command
+from cli.commands import release_services as release_services
+from cli.commands.release_selector import read_selector, selector_bytes
+from cli.commands.release_services import PreparedService, _command, normal_spawn_command
 from ops.spec import ServiceSpec
 from services.agent_ops.bootstrap import PreparedObservation
 from shared import spawn_receipt
@@ -214,7 +214,7 @@ def test_prepared_services_pin_dependency_order_before_mutable_roster_changes(
 ) -> None:
     from unittest.mock import Mock
 
-    from cli.commands import _release_services as services
+    from cli.commands import release_services as services
     from shared.runtime_publication_input import PreparedService as ReceiptService
 
     root = tmp_path / "releases" / ("a" * 64)

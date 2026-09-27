@@ -12,8 +12,8 @@ import psycopg
 import pytest
 from pydantic import SecretStr, ValidationError
 
-from cli.commands import _release_inventory as inventory
 from cli.commands import _update_bootstrap as bootstrap
+from cli.commands import release_inventory as inventory
 from shared.managed_writer_observation import (
     ExpectedLauncher,
     ExpectedProcess,

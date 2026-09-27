@@ -12,7 +12,7 @@ import argparse
 
 def _duration(value: str) -> str:
     """Argparse type for `--check-every`: validate the duration before any command runs."""
-    from cli.commands._packages_refresh import parse_duration
+    from cli.commands.packages_refresh import parse_duration
 
     try:
         parse_duration(value)
@@ -128,17 +128,6 @@ def _h_skill_trust(args: argparse.Namespace) -> int:
 
 
 def _add_plugins_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
-    from cli.main import (
-        _h_plugins_disable,
-        _h_plugins_enable,
-        _h_plugins_inspect,
-        _h_plugins_install,
-        _h_plugins_installed,
-        _h_plugins_uninstall,
-        _h_plugins_update,
-        _h_plugins_upgrade,
-    )
-
     # `ava plugins` — plugin config update + external skill package install lifecycle.
     plugins_p = sub.add_parser(
         "plugins",
@@ -221,17 +210,6 @@ def _add_plugins_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]
 
 
 def _add_skill_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
-    from cli.main import (
-        _h_skill_disable,
-        _h_skill_enable,
-        _h_skill_install,
-        _h_skill_register,
-        _h_skill_scan,
-        _h_skill_trust,
-        _h_skill_update,
-        _h_skill_upgrade,
-    )
-
     # `ava skill` — install into + toggle $AVA_HOME/skills/ (the single skill
     # load dir). installed (dir on disk) and enabled (scanner loads it) are
     # orthogonal; removal lives under `ava plugins uninstall`.

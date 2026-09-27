@@ -275,7 +275,7 @@ def cmd_packages_refresh(
     recorded in the registry and shown here."""
     import json
 
-    from cli.commands._packages_refresh import run_refresh
+    from cli.commands.packages_refresh import run_refresh
 
     report = run_refresh(check_only=check_only, only=only, force=force, from_job=from_job)
     if json_output:
@@ -418,7 +418,7 @@ def cmd_packages_policy(
     [--check-every 24h]` — record an explicit policy decision on the row; explicit
     values survive every refresh pass (only None fields are resolved from
     settings)."""
-    from cli.commands._packages_refresh import parse_duration
+    from cli.commands.packages_refresh import parse_duration
     from shared import install_registry
     from shared.packages.skills.skill_names import match_key
 

@@ -3,7 +3,7 @@
 The pooled front door consumers dial past ~50 agents (each agent holds 2
 Postgres connections; see `agent/db.py`).
 PgBouncer is the third per-cluster data-plane process — a peer of this cluster's
-own Postgres and Redis (`_cluster_instance.py`) — brought up on the cluster's own
+own Postgres and Redis (`cluster_instance.py`) — brought up on the cluster's own
 `pgbouncer` port (a registry-record fact; the port is no longer materialized in
 `.env` — AVA_DB_URL carries it) right after Postgres whenever
 `AVA_PGBOUNCER_ENABLED` (ON by default: past ~50 agents pooling is the density
@@ -51,13 +51,13 @@ import time
 from pathlib import Path
 
 import shared.port_preflight
-from cli.commands._cluster_instance import (
+from cli.commands._converge_spec import ConvergeCtx
+from cli.commands.cluster_instance import (
     _BIND_WAIT_TIMEOUT_S,
     _bind_addrs,
     _live_pg_socket_dir,
     _wait_for_reachable_bind,
 )
-from cli.commands._converge_spec import ConvergeCtx
 from shared.cluster.derive import RUNNER_ROLE
 from shared.machine import reachable_host
 from shared.paths import ava_home

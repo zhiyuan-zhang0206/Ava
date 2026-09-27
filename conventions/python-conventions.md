@@ -100,9 +100,9 @@ What this means for common edits:
   imported its privates become outside importers. Promote what they need, or
   keep them inside the new package.
 - **A new CLI command** binds its `_h_*` handler directly in
-  `cli/parsers/<domain>.py` instead of adding another re-export to
-  `cli/main.py` (the existing re-exports are frozen debt); its tests patch the
-  parser module before `build_parser()` runs.
+  `cli/parsers/<domain>.py` (`set_defaults(func=_h_x)` referring to the
+  function defined in that same module) — `cli.main` is not a handler
+  registry; its tests patch the parser module before `build_parser()` runs.
 
 ## Function quality budgets: complexity and nesting
 

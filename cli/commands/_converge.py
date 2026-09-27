@@ -66,8 +66,8 @@ from cli.commands._otel_collector import ensure_otel_collector_step
 from cli.commands._ownership_preflight import (
     ensure_ownership_preflight as _ensure_ownership_preflight,
 )
-from cli.commands._pgbouncer import _ensure_pgbouncer_step
 from cli.commands._port_preflight import ensure_port_preflight as _ensure_port_preflight
+from cli.commands.pgbouncer import _ensure_pgbouncer_step
 from shared.cluster import is_default_home
 from shared.config import settings
 from shared.host.converge.accessibility import (

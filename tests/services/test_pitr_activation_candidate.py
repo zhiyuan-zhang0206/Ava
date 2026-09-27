@@ -44,6 +44,6 @@ def test_enable_pitr_services_refuses_incomplete_oss_restore_proof_candidate(
     before = env_path.read_bytes()
 
     with pytest.raises(RuntimeError, match="PITR activation refused"):
-        activation_runtime._enable_pitr_services(hashlib.sha256(before).hexdigest())
+        activation_runtime.enable_pitr_services(hashlib.sha256(before).hexdigest())
 
     assert env_path.read_bytes() == before

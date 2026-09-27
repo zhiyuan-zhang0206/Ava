@@ -124,18 +124,18 @@ def _mock_activation_mutation(monkeypatch: pytest.MonkeyPatch) -> None:
     digest = "0" * 64
     monkeypatch.setattr(activation_config, "_alter", lambda _name, _value: None)
     monkeypatch.setattr(activation_config, "_archive_value", lambda _name: "off")
-    monkeypatch.setattr(activation_config, "_enable_pitr_services", lambda _digest: b"a")
+    monkeypatch.setattr(activation_config, "enable_pitr_services", lambda _digest: b"a")
     monkeypatch.setattr(activation_config, "_env_payload", lambda _home: b"a")
     monkeypatch.setattr(activation_config, "pitr_env_is_desired", lambda _payload: False)
-    monkeypatch.setattr(activation_config, "_file_evidence", lambda _path: ("YQ==", digest))
-    monkeypatch.setattr(activation, "_file_evidence", lambda _path: ("YQ==", digest))
+    monkeypatch.setattr(activation_config, "file_evidence", lambda _path: ("YQ==", digest))
+    monkeypatch.setattr(activation, "file_evidence", lambda _path: ("YQ==", digest))
     monkeypatch.setattr(
         activation,
         "capture_pitr_env_baseline",
         lambda _path: (
             "YQ==",
             digest,
-            dict.fromkeys(activation._PITR_ENV_FIELDS, "[]"),
+            dict.fromkeys(activation.PITR_ENV_FIELDS, "[]"),
         ),
     )
     monkeypatch.setattr(
@@ -187,7 +187,7 @@ def _wal_restart_pending_record(credentials: dict[str, str] | None = None) -> Ac
             "wal_config_applying",
             wal_config_before_digest="before",
             wal_config_desired_digest="desired",
-            pre_activation_pitr_env=dict.fromkeys(activation._PITR_ENV_FIELDS, "[]"),
+            pre_activation_pitr_env=dict.fromkeys(activation.PITR_ENV_FIELDS, "[]"),
             pre_activation_pg_auto_conf={
                 "archive_mode": "__ABSENT__",
                 "archive_command": "__ABSENT__",
@@ -534,7 +534,7 @@ def test_config_apply_journals_intent_before_alter_and_resumes_partial_crash(
         "wal_config_applying",
         wal_config_before_digest="before",
         wal_config_desired_digest="desired",
-        pre_activation_pitr_env=dict.fromkeys(activation._PITR_ENV_FIELDS, "[]"),
+        pre_activation_pitr_env=dict.fromkeys(activation.PITR_ENV_FIELDS, "[]"),
         pre_activation_pg_auto_conf={"archive_mode": "__ABSENT__"},
         pre_activation_env_b64="T1RIRVI9a2VwdAo=",
         pre_activation_env_digest=hashlib.sha256(b"OTHER=kept\n").hexdigest(),
@@ -615,7 +615,7 @@ def test_rollback_setting_crash_matrix_resumes_each_owned_alter(
     )
     monkeypatch.setattr(
         activation_config,
-        "_file_evidence",
+        "file_evidence",
         lambda _path: (
             "",
             hashlib.sha256(json.dumps(current, sort_keys=True).encode()).hexdigest(),
@@ -689,7 +689,7 @@ def test_rollback_leaves_config_owned_env_untouched(
     )
     monkeypatch.setattr(
         activation_config,
-        "_file_evidence",
+        "file_evidence",
         lambda _path: ("", "a" * 64),
     )
     monkeypatch.setattr(
@@ -703,7 +703,7 @@ def test_rollback_leaves_config_owned_env_untouched(
             "postmaster_started_at": "2026-08-31 12:00:00+00",
         },
     )
-    monkeypatch.setattr(activation, "_file_evidence", lambda _path: ("", "a" * 64))
+    monkeypatch.setattr(activation, "file_evidence", lambda _path: ("", "a" * 64))
 
     def spawn_restart(*_args: object, **kwargs: object) -> dict[str, str]:
         binder = kwargs["bind_continuation"]
@@ -802,7 +802,7 @@ def _env_apply_fixture(
         "wal_config_applying",
         wal_config_before_digest="before",
         wal_config_desired_digest="desired",
-        pre_activation_pitr_env=dict.fromkeys(activation._PITR_ENV_FIELDS, "[]"),
+        pre_activation_pitr_env=dict.fromkeys(activation.PITR_ENV_FIELDS, "[]"),
         pre_activation_pg_auto_conf={
             "archive_mode": "__ABSENT__",
             "archive_command": "__ABSENT__",
@@ -817,8 +817,8 @@ def _env_apply_fixture(
     write_record(tmp_path, record)
     monkeypatch.setattr(activation_config, "_archive_value", lambda _name: "on")
     monkeypatch.setattr(activation_config, "_alter", lambda _name, _value: None)
-    monkeypatch.setattr(activation_config, "_file_evidence", lambda _path: ("YQ==", "0" * 64))
-    monkeypatch.setattr(activation_config, "_settings_digest", lambda _values: "0" * 64)
+    monkeypatch.setattr(activation_config, "file_evidence", lambda _path: ("YQ==", "0" * 64))
+    monkeypatch.setattr(activation_config, "settings_digest", lambda _values: "0" * 64)
     return record
 
 
@@ -859,7 +859,7 @@ def test_env_apply_provisions_only_when_all_four_absent(
         called.append(digest)
         return b"a"
 
-    monkeypatch.setattr(activation_config, "_enable_pitr_services", enable)
+    monkeypatch.setattr(activation_config, "enable_pitr_services", enable)
     record = _env_apply_fixture(monkeypatch, tmp_path, "OTHER=kept\n")
     replacement = activation_config.apply_wal_config(tmp_path, record, {"archive_mode": "on"})
     assert called == [hashlib.sha256(b"OTHER=kept\n").hexdigest()]
@@ -881,7 +881,7 @@ def test_env_apply_resumes_after_provisioning_crash(
         calls.append(digest)
         raise RuntimeError("crash during env write")
 
-    monkeypatch.setattr(activation_config, "_enable_pitr_services", crash_after_intent)
+    monkeypatch.setattr(activation_config, "enable_pitr_services", crash_after_intent)
     record = _env_apply_fixture(monkeypatch, tmp_path, "OTHER=kept\n")
     with pytest.raises(RuntimeError, match="crash during env write"):
         activation_config.apply_wal_config(tmp_path, record, {"archive_mode": "on"})
@@ -890,7 +890,7 @@ def test_env_apply_resumes_after_provisioning_crash(
     assert durable.config_apply_intent is not None
     assert durable.config_apply_intent["kind"] == "env"
 
-    monkeypatch.setattr(activation_config, "_enable_pitr_services", lambda _digest: b"a")
+    monkeypatch.setattr(activation_config, "enable_pitr_services", lambda _digest: b"a")
     replacement = activation_config.apply_wal_config(tmp_path, durable, {"archive_mode": "on"})
     assert calls == [hashlib.sha256(b"OTHER=kept\n").hexdigest()]
     assert replacement.phase == "wal_restart_pending"
@@ -905,7 +905,7 @@ def test_env_apply_noop_when_already_desired(
     def unexpected_write(_digest: str) -> bytes:
         raise AssertionError("provisioning write ran although the env was desired")
 
-    monkeypatch.setattr(activation_config, "_enable_pitr_services", unexpected_write)
+    monkeypatch.setattr(activation_config, "enable_pitr_services", unexpected_write)
     desired = (
         "AVA_PITR_ENABLED=true\n"
         "AVA_PITR_BASE_BACKUP_ENABLED=true\n"
@@ -1082,12 +1082,12 @@ def test_shadow_pg_gate_accepts_pg17_disabled_archive_command() -> None:
     is off; the gate must accept that display, not only an empty string (the
     CI mocks previously hid the real PostgreSQL behavior, so activation
     failed at shadow on a pristine cluster)."""
-    assert activation._shadow_pg_gate({"archive_mode": "off", "archive_command": "(disabled)"})
-    assert activation._shadow_pg_gate({"archive_mode": "off", "archive_command": "  (disabled)  "})
-    assert activation._shadow_pg_gate({"archive_mode": "off", "archive_command": ""})
-    assert activation._shadow_pg_gate({"archive_mode": "off", "archive_command": "   "})
-    assert not activation._shadow_pg_gate({"archive_mode": "on", "archive_command": "(disabled)"})
-    assert not activation._shadow_pg_gate(
+    assert activation.shadow_pg_gate({"archive_mode": "off", "archive_command": "(disabled)"})
+    assert activation.shadow_pg_gate({"archive_mode": "off", "archive_command": "  (disabled)  "})
+    assert activation.shadow_pg_gate({"archive_mode": "off", "archive_command": ""})
+    assert activation.shadow_pg_gate({"archive_mode": "off", "archive_command": "   "})
+    assert not activation.shadow_pg_gate({"archive_mode": "on", "archive_command": "(disabled)"})
+    assert not activation.shadow_pg_gate(
         {"archive_mode": "off", "archive_command": "cp %p /spool/%f"}
     )
 
@@ -1309,7 +1309,7 @@ def test_frozen_pg_state_contract_with_real_reader(
             lambda _home: SimpleNamespace(ports={"postgres": port}, gateway_home=str(tmp_path)),
         )
         monkeypatch.setattr(
-            "cli.commands._cluster_instance.pg_admin_url",
+            "cli.commands.cluster_instance.pg_admin_url",
             lambda _pg_port: f"postgresql://ava@/postgres?host={sock}&port={port}",
         )
 

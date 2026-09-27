@@ -70,12 +70,12 @@ def _configured_observability_base() -> str:
     """The validated AVA_OBSERVABILITY_URL base, or "" when unset/malformed.
 
     The same validation the collector fan-out uses
-    (cli/commands/_observatory_urls.py) — the two consumer paths can never
+    (cli/commands/observatory_urls.py) — the two consumer paths can never
     disagree about where the station is.
     """
-    from cli.commands._observatory_urls import _validated_observability_base
+    from cli.commands.observatory_urls import validated_observability_base
 
-    return _validated_observability_base(settings.observability.observability_url)
+    return validated_observability_base(settings.observability.observability_url)
 
 
 def resolve_target() -> _StationTarget | None:

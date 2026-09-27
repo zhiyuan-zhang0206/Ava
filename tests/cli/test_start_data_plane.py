@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from cli.commands import _cluster_instance as _ci
+from cli.commands import cluster_instance as _ci
 from cli.commands import start as _start
 from cli.commands._converge_spec import ConvergeCtx
 from shared import cluster
