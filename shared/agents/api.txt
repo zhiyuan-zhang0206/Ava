@@ -149,7 +149,7 @@ class RecoveryReconstructionScope
   generation: int = 0
   def invalidate(self) -> None
   key: tuple[str, str, str] | None = None
-  lock: asyncio.Lock
+  lock: asyncio.Lock = ...
   messages: list[BaseMessage] | None = None
   saver: AsyncPostgresSaver
   thread_id: str
@@ -292,11 +292,11 @@ SMALL_UNIT_TOK = 1500
 SRC_CAP = 150000
 @dataclass(frozen=True)
 class SealParams
-  cap: int
-  cap_small: int
-  min_count: int
-  small_tok: int
-  src_cap: int
+  cap: int = ...
+  cap_small: int = ...
+  min_count: int = ...
+  small_tok: int = ...
+  src_cap: int = ...
 @dataclass(frozen=True)
 class SealResult
   max_level: int
@@ -512,7 +512,7 @@ def reconcile_chat_inbound(db: psycopg.Connection, *, client_message_id: str, ag
 
 ## shared.agents.messages.delivery_outbox
 CompletionNoticePayload = ...
-Content = ...
+Content = str | list[dict[str, object]]
 @dataclass(frozen=True)
 class DeliveryOutboxLimits
   abandoned_retention_days: int

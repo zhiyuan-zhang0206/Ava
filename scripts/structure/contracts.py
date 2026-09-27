@@ -44,15 +44,27 @@ Every expression (signatures, bases, annotations, values) goes through
 `ast.unparse`. A value only prints in full when `ast.literal_eval` accepts it and
 the unparsed text is at most 100 characters (a "short literal") — event-kind
 strings and enum values are exactly this and belong in the contract; a computed
-or oversized value renders as `...` (module/class-Assign) or is omitted entirely
-(class-AnnAssign with a non-literal default — the annotation alone is the
-contract). A class's members (public methods — plus the handful of structural
-dunders `__init__`/`__call__`/`__enter__`/`__exit__`/`__aenter__`/`__aexit__`/
-`__iter__` — fields, enum-style Assigns, and nested classes) are sorted by name
-and indented two spaces per nesting level; a module's entries (functions,
-classes, variables, re-exports) are likewise sorted by name. Modules within a
-door are sorted by dotted name. Output always ends with exactly one trailing
-newline and uses `\n` line endings.
+or oversized value renders as `...` instead. **Type-expression values are the
+exception and always render in full, however long**: an old-style alias
+(`Category = Literal["audit", "telemetry", "log"]`, `X = A | B`) is as much a
+contract as a PEP 695 `type X = ...` one, and truncating its members to `...`
+would hide exactly the diff a reviewer needs to see. A value counts as a type
+expression when it is a `Subscript` whose base is a typing/builtin generic
+(`Literal`, `Union`, `Optional`, `Annotated`, `Callable`, `Mapping`, `Sequence`,
+`Iterable`, `tuple`, `list`, `dict`, `set`, `frozenset`, `type`, `TypeAlias`),
+a `|`-`BinOp` of such expressions or plain names, or any value at all on an
+assignment annotated `: TypeAlias`. Default **presence** is also contract for an
+`AnnAssign` field (dataclass / NamedTuple / TypedDict / pydantic — whether a
+constructor argument is required), module-level or class-level alike: a short
+literal default prints in full, a non-literal default prints as `...` (still
+present, so the field reads as optional), and no default at all renders the
+bare `name: annotation`. A class's members (public methods — plus the handful
+of structural dunders `__init__`/`__call__`/`__enter__`/`__exit__`/
+`__aenter__`/`__aexit__`/`__iter__` — fields, enum-style Assigns, and nested
+classes) are sorted by name and indented two spaces per nesting level; a
+module's entries (functions, classes, variables, re-exports) are likewise
+sorted by name. Modules within a door are sorted by dotted name. Output always
+ends with exactly one trailing newline and uses `\n` line endings.
 """
 
 from __future__ import annotations
@@ -135,6 +147,63 @@ def _short_literal_text(node: ast.expr) -> str | None:
 def _value_or_ellipsis(node: ast.expr) -> str:
     text = _short_literal_text(node)
     return text if text is not None else "..."
+
+
+# --- type-expression values (always rendered in full) ---------------------------
+
+# Typing/builtin generics whose subscript is itself contract, not a runtime value
+# (an old-style alias like `Category = Literal["audit", "telemetry", "log"]`).
+_TYPE_GENERIC_BASES = frozenset(
+    {
+        "Literal",
+        "Union",
+        "Optional",
+        "Annotated",
+        "Callable",
+        "Mapping",
+        "Sequence",
+        "Iterable",
+        "tuple",
+        "list",
+        "dict",
+        "set",
+        "frozenset",
+        "type",
+        "TypeAlias",
+    }
+)
+
+
+def _subscript_base_name(node: ast.expr) -> str | None:
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        return node.attr
+    return None
+
+
+def _is_type_expr(node: ast.expr) -> bool:
+    if isinstance(node, ast.Subscript):
+        return _subscript_base_name(node.value) in _TYPE_GENERIC_BASES
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr):
+        return all(
+            isinstance(side, ast.Name) or _is_type_expr(side) for side in (node.left, node.right)
+        )
+    return False
+
+
+def _is_type_alias_annotation(annotation: ast.expr | None) -> bool:
+    if isinstance(annotation, ast.Name):
+        return annotation.id == "TypeAlias"
+    return isinstance(annotation, ast.Attribute) and annotation.attr == "TypeAlias"
+
+
+def _value_suffix(value: ast.expr, annotation: ast.expr | None) -> str:
+    """The rendered value: full `ast.unparse` for a type expression (however
+    long), else the short-literal-or-`...` fallback."""
+    if _is_type_alias_annotation(annotation) or _is_type_expr(value):
+        return ast.unparse(value)
+    return _value_or_ellipsis(value)
 
 
 # --- __all__ -----------------------------------------------------------------
@@ -228,14 +297,6 @@ def _class_header(node: ast.ClassDef) -> str:
     return f"class {node.name}({', '.join(parts)})" if parts else f"class {node.name}"
 
 
-def _render_class_annassign(name: str, annotation: ast.expr, value: ast.expr | None) -> str:
-    head = f"{name}: {ast.unparse(annotation)}"
-    if value is None:
-        return head
-    literal = _short_literal_text(value)
-    return f"{head} = {literal}" if literal is not None else head
-
-
 def _class_members(node: ast.ClassDef, indent: str) -> list[tuple[str, list[str]]]:
     members: dict[str, list[str]] = {}
     for stmt in node.body:
@@ -245,13 +306,14 @@ def _class_members(node: ast.ClassDef, indent: str) -> list[tuple[str, list[str]
         elif isinstance(stmt, ast.AnnAssign) and isinstance(stmt.target, ast.Name):
             name = stmt.target.id
             if not name.startswith("_"):
-                members[name] = [
-                    f"{indent}{_render_class_annassign(name, stmt.annotation, stmt.value)}"
-                ]
+                # Default presence is contract (dataclass/NamedTuple/TypedDict/pydantic
+                # required-vs-optional) — same rule as a module-level AnnAssign.
+                members[name] = [f"{indent}{_render_var(name, stmt.annotation, stmt.value)}"]
         elif isinstance(stmt, ast.Assign):
             for target in stmt.targets:
                 if isinstance(target, ast.Name) and not target.id.startswith("_"):
-                    members[target.id] = [f"{indent}{target.id} = {_value_or_ellipsis(stmt.value)}"]
+                    value = _value_suffix(stmt.value, None)
+                    members[target.id] = [f"{indent}{target.id} = {value}"]
         elif isinstance(stmt, ast.ClassDef) and not stmt.name.startswith("_"):
             members[stmt.name] = _render_class(stmt, indent)
     return sorted(members.items())
@@ -265,9 +327,11 @@ def _render_class(node: ast.ClassDef, indent: str) -> list[str]:
 
 
 def _render_var(name: str, annotation: ast.expr | None, value: ast.expr | None) -> str:
-    """Module-level variable: `NAME[: annotation][ = value-or-...]`."""
+    """A variable (module-level, or a class `AnnAssign` field): `NAME[: annotation]
+    [ = value-or-...]`. A missing value renders bare — for a field, that means no
+    default, i.e. the constructor argument is required."""
     head = f"{name}: {ast.unparse(annotation)}" if annotation is not None else name
-    return head if value is None else f"{head} = {_value_or_ellipsis(value)}"
+    return head if value is None else f"{head} = {_value_suffix(value, annotation)}"
 
 
 # --- one module's public entries ------------------------------------------------
