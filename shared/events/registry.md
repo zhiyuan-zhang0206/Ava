@@ -24,7 +24,7 @@ generated from it and never hand-synced. event_names that violate the naming rul
 | mechanism | table/channel | registered event_names | destination |
 |------|------|-------------|------|
 | audit (category=audit) | `events` | 29 | event stream |
-| telemetry (category=telemetry) | `events` | 222 | event stream |
+| telemetry (category=telemetry) | `events` | 221 | event stream |
 | log (category=log) | `events` | 12 | event stream |
 | file-only (destination=file) | file log | 1 | file only (not the stream) |
 | SSE live | Redis → frontend (not persisted) | 31 role | live projection |
@@ -96,7 +96,7 @@ Emit sites and consumers: see the comments at each emit point.
 | `managed_writer_pre_stop_aborted` | the exact pre-stop abort cleared a never-effective pending publication and its lease | business | — | events |
 | `managed_writer_blocked` | managed-writer mode requested but refused entry: a readiness guard is missing or not True; the rollout ran the legacy flow | business | — | events |
 
-## 3. Telemetry events (category=telemetry, 222)
+## 3. Telemetry events (category=telemetry, 221)
 
 Telemetry-side event name resolution (`shared/log.py`): **explicit `event=` →
 `label=` fallback → default `"log"`**. Payload = logger extra fields + `msg`
@@ -228,7 +228,6 @@ consumers: see the comments at each emit point.
 | `page_restore_notified` | page restore notified | noise | — | — | events |
 | `agent_spawned` | agent process started | observation | spawner, forked_from | — | events |
 | `agent_resurrected` | agent resurrected | observation | — | — | events |
-| `agent_reopened` | an explicit resurrect cleared a closed agent's durable closure marker (closed_at) — the WARNING-level operator-side marker that the agent is out of the never-auto-resurrect closure (task #4165) | observation | — | — | events |
 | `billing_resurrect_run` | billing batch recovery run finished | observation | — | — | events |
 | `agent_terminated` | agent terminated | observation | — | — | events |
 | `agent_revived` | agent revived | noise | — | — | events |

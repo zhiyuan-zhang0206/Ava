@@ -8,6 +8,7 @@ from uuid import uuid4
 import psycopg
 import pytest
 from langchain_core.messages import HumanMessage
+from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool, ConnectionPool
 
 from agent.db import ClaimedInbound, claim_inbound_batch
@@ -141,8 +142,10 @@ async def test_hosted_terminate_crash_has_no_applied_unobserved_gap(
         original_drop(target)
         raise RuntimeError("injected cache crash")
 
-    async def fail_after_commit(pool: AsyncConnectionPool, token: RuntimeIncarnation) -> str | None:
-        await apply_hosted_lifecycle(pool, token)
+    async def fail_after_commit(
+        pool: AsyncConnectionPool, token: RuntimeIncarnation, **kwargs: Any
+    ) -> str | None:
+        await apply_hosted_lifecycle(pool, token, **kwargs)
         raise RuntimeError("injected post-commit crash")
 
     with bind_turn_identity(agent_id, incarnation=owner):
@@ -255,3 +258,149 @@ async def test_existing_pg_backstop_finds_accepted_command_without_pending_rows(
     assert db_conn.execute(
         "SELECT count(*) FROM inbound_messages WHERE agent_id=%s AND status='pending'", (agent_id,)
     ).fetchone() == (0,)
+
+
+# ─── kill_all_shell_sessions: the at-exit kill ───────────────────────────────
+# decisions/2026-09-27-terminate-has-no-closed-state.md: a graceful terminate
+# that asked for it has the agent's shell sessions killed on its home host
+# after the last step returned, right before the termination commits.
+
+
+def _terminate_command(
+    conn: psycopg.Connection, agent_id: int, *, source: str = "user", kill: bool = False
+) -> int:
+    row = conn.execute(
+        "INSERT INTO inbound_messages(agent_id,content,kind,source,payload) "
+        "VALUES (%s,'','terminate',%s,%s) RETURNING id",
+        (agent_id, source, Jsonb({"kill_all_shell_sessions": True}) if kill else None),
+    ).fetchone()
+    conn.commit()
+    assert row is not None
+    return row[0]
+
+
+def _record_kills(
+    monkeypatch: pytest.MonkeyPatch, *, fail: bool = False
+) -> list[tuple[int, str | None]]:
+    """Patch the host's kill primitive; record (agent id, status at kill time)."""
+    calls: list[tuple[int, str | None]] = []
+
+    def _kill(agent_id: int) -> list[int]:
+        with psycopg.connect(settings.data_plane.db_url, autocommit=True) as conn:
+            row = conn.execute("SELECT status FROM agents_meta WHERE id=%s", (agent_id,)).fetchone()
+        calls.append((agent_id, None if row is None else row[0]))
+        if fail:
+            raise RuntimeError("failed to kill shell session(s) [4]")
+        return [4]
+
+    monkeypatch.setattr("ops.cluster_status.kill_agent_shells", _kill)
+    return calls
+
+
+async def _run_terminating_turn(aops_pool: AsyncConnectionPool, agent_id: int) -> None:
+    graph = Mock()
+    graph.ainvoke = AsyncMock(
+        return_value={"exit_requested": True, "restart_requested": False, "turn_idle": False}
+    )
+    host = AgentHost(pool=aops_pool, checkpointer=Mock(), graph=graph, machine="claim-test")
+    host._runtimes[agent_id] = Mock()
+    assert await host._invoke_until_done(agent_id, AvaContext(ops_pool=aops_pool))
+
+
+@pytest.mark.parametrize("requested", [True, False])
+async def test_hosted_terminate_kills_requested_shell_sessions_before_the_death(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    monkeypatch: pytest.MonkeyPatch,
+    requested: bool,
+) -> None:
+    agent_id = _agent(db_conn)
+    owner = await _admit(aops_pool, agent_id)
+    _terminate_command(db_conn, agent_id, kill=requested)
+    kills = _record_kills(monkeypatch)
+    with bind_turn_identity(agent_id, incarnation=owner):
+        await claim_inbound_batch(aops_pool, agent_id)
+        await _run_terminating_turn(aops_pool, agent_id)
+    # The kill ran after the last step returned, before `terminated` committed.
+    assert kills == ([(agent_id, "running")] if requested else [])
+    assert db_conn.execute(
+        "SELECT status FROM agents_meta WHERE id=%s", (agent_id,)
+    ).fetchone() == ("terminated",)
+
+
+async def test_hosted_self_terminate_honors_a_queued_kill_request(
+    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The agent's own terminate won acceptance; the operator's kill-requesting
+    terminate queued behind it still takes the sessions with the death."""
+    agent_id = _agent(db_conn)
+    owner = await _admit(aops_pool, agent_id)
+    own = _terminate_command(db_conn, agent_id, source="self")
+    _terminate_command(db_conn, agent_id, kill=True)
+    kills = _record_kills(monkeypatch)
+    with bind_turn_identity(agent_id, incarnation=owner):
+        assert [row.id for row in await claim_inbound_batch(aops_pool, agent_id)] == [own]
+        await _run_terminating_turn(aops_pool, agent_id)
+    assert kills == [(agent_id, "running")]
+
+
+async def test_hosted_restart_leaves_shell_sessions_for_the_later_terminate(
+    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    agent_id = _agent(db_conn)
+    owner = await _admit(aops_pool, agent_id)
+    _command(db_conn, agent_id, "restart")
+    _terminate_command(db_conn, agent_id, kill=True)
+    kills = _record_kills(monkeypatch)
+    with bind_turn_identity(agent_id, incarnation=owner):
+        await claim_inbound_batch(aops_pool, agent_id)
+        assert (
+            await apply_hosted_lifecycle(
+                aops_pool, owner, kill_shell_sessions=lambda _aid: kills.append((_aid, None))
+            )
+            == "restart"
+        )
+    assert kills == []
+
+
+async def test_hosted_failed_kill_still_applies_the_termination(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    monkeypatch: pytest.MonkeyPatch,
+    loguru_records: list[dict[str, Any]],
+) -> None:
+    """A session-kill failure is an ERROR, never a crashed turn: the death applies."""
+    agent_id = _agent(db_conn)
+    owner = await _admit(aops_pool, agent_id)
+    _terminate_command(db_conn, agent_id, kill=True)
+    kills = _record_kills(monkeypatch, fail=True)
+    with bind_turn_identity(agent_id, incarnation=owner):
+        await claim_inbound_batch(aops_pool, agent_id)
+        await _run_terminating_turn(aops_pool, agent_id)
+    assert kills == [(agent_id, "running")]
+    assert db_conn.execute(
+        "SELECT status FROM agents_meta WHERE id=%s", (agent_id,)
+    ).fetchone() == ("terminated",)
+    assert any(
+        record["level"].name == "ERROR" and "could not kill" in record["message"]
+        for record in loguru_records
+    )
+
+
+async def test_hosted_apply_without_a_bound_killer_refuses_a_kill_request(
+    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+) -> None:
+    """Fail fast: a caller that binds no killer cannot silently drop the
+    request — the apply raises and rolls back, the termination stays pending."""
+    agent_id = _agent(db_conn)
+    owner = await _admit(aops_pool, agent_id)
+    command = _terminate_command(db_conn, agent_id, kill=True)
+    with bind_turn_identity(agent_id, incarnation=owner):
+        await claim_inbound_batch(aops_pool, agent_id)
+        with pytest.raises(RuntimeError, match="no killer is bound"):
+            await apply_hosted_lifecycle(aops_pool, owner)
+    assert db_conn.execute(
+        "SELECT i.applied_at, m.status FROM inbound_messages i JOIN agents_meta m "
+        "ON m.id=i.agent_id WHERE i.id=%s",
+        (command,),
+    ).fetchone() == (None, "running")

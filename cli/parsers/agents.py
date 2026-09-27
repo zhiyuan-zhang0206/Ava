@@ -106,7 +106,11 @@ def _h_agents_terminate(args: argparse.Namespace) -> int:
     from cli.commands.agents.control import ProvenanceError, cmd_agents_terminate
 
     try:
-        return cmd_agents_terminate(args.agent_id, source=args.source, final=args.final)
+        return cmd_agents_terminate(
+            args.agent_id,
+            source=args.source,
+            kill_all_shell_sessions=args.kill_all_shell_sessions,
+        )
     except ProvenanceError as exc:
         print(f"ava: {exc}", file=sys.stderr)
         return 2
@@ -116,7 +120,11 @@ def _h_agents_kill(args: argparse.Namespace) -> int:
     from cli.commands.agents.control import ProvenanceError, cmd_agents_kill
 
     try:
-        return cmd_agents_kill(args.agent_id, source=args.source, final=args.final)
+        return cmd_agents_kill(
+            args.agent_id,
+            source=args.source,
+            kill_all_shell_sessions=args.kill_all_shell_sessions,
+        )
     except ProvenanceError as exc:
         print(f"ava: {exc}", file=sys.stderr)
         return 2
@@ -284,23 +292,21 @@ def _add_agents_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser])
         "terminate", help="stop the agent gracefully (it exits after its current turn)"
     )
     agents_terminate_p.add_argument("agent_id", type=int, help="agent id to terminate")
-    agents_terminate_p.add_argument(
-        "--final",
-        action="store_true",
-        help="also close the agent: never auto-resurrect (resurrect reopens it)",
-    )
     agents_terminate_p.set_defaults(func=_h_agents_terminate)
 
     agents_kill_p = agents_sub.add_parser(
         "kill", help="hard-stop a stuck agent (kill the process + mark terminated)"
     )
     agents_kill_p.add_argument("agent_id", type=int, help="agent id to kill")
-    agents_kill_p.add_argument(
-        "--final",
-        action="store_true",
-        help="also close the agent: never auto-resurrect (resurrect reopens it)",
-    )
     agents_kill_p.set_defaults(func=_h_agents_kill)
+
+    for lifecycle_end_parser in (agents_terminate_p, agents_kill_p):
+        lifecycle_end_parser.add_argument(
+            "--kill-all-shell-sessions",
+            action="store_true",
+            help="also kill every shell session the agent owns (watchers included), "
+            "so none of them can wake it again",
+        )
 
     _add_source_argument(
         agents_restart_p,

@@ -222,9 +222,12 @@ def test_category_projection_matches_telemetry_whitelist() -> None:
     # hierarchy_regen_budget_tripped) raises it to 219; pause_orphan_claim_settled
     # (task #4728's parked orphan settlement) raises it to 220.
     # The recovery wake pacing pair (task #4722: host_recovery_wake_started /
-    # host_recovery_wake_released) raises it to 222.
+    # host_recovery_wake_released) raises it to 222. Retiring the closed-agent
+    # concept (decisions/2026-09-27-terminate-has-no-closed-state.md: no
+    # agent_reopened) lowers it to 221.
     assert "restart_cas_lost" not in _TELEMETRY_KINDS
-    assert len(_TELEMETRY_KINDS) == 222
+    assert "agent_reopened" not in _TELEMETRY_KINDS
+    assert len(_TELEMETRY_KINDS) == 221
     assert payload_keys("debt_sweep_daily") == (
         "day",
         "scan_status",

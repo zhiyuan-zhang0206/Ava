@@ -406,13 +406,13 @@ def terminate(
     source: str | None = None,
     message: str | None = None,
     force: bool = False,
-    final: bool = False,
+    kill_all_shell_sessions: bool = False,
 ) -> dict:
     """POST /api/agents/{id}/terminate → response dict.
 
     `status` is "enqueued" / "already_terminated"; `open_tasks` carries what
-    the agent still owned as it went down, if anything; `closed` carries the
-    agent's closure state after the request (absent on older versions).
+    the agent still owned as it went down, if anything; `shell_sessions`
+    carries what a requested shell-session kill did (absent on older versions).
 
     source defaults to f"agent:{ava.self.AGENT_ID}" so the lifecycle marker
     tells the peer who terminated it. Pass source=None to use the gateway
@@ -424,10 +424,9 @@ def terminate(
     message, when present, is retained for the agent's next resurrection while
     termination proceeds without waiting for another response.
 
-    final=True closes the agent — never auto-resurrected (its queued work
-    dead-letters on the existing thresholds); an explicit resurrect reopens it.
-    Sent only when set, so an older gateway never receives a flag it cannot
-    honor.
+    kill_all_shell_sessions=True also kills every shell session the agent owns
+    on its home machine. Sent only when set; an older gateway ignores it and
+    answers without `shell_sessions`, so an unhonored request stays visible.
     """
     body: dict = {}
     if source is not None:
@@ -438,8 +437,8 @@ def terminate(
         body["message"] = message
     if force:
         body["force"] = True
-    if final:
-        body["final"] = True
+    if kill_all_shell_sessions:
+        body["kill_all_shell_sessions"] = True
     resp = post(f"/api/agents/{agent_id}/terminate", body)
     raise_from_response(resp)
     return resp.json()

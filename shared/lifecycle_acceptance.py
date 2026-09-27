@@ -16,6 +16,7 @@ from typing import Any, LiteralString
 from uuid import UUID
 
 import psycopg
+from psycopg import sql
 from psycopg.pq import TransactionStatus
 from psycopg.types.json import Jsonb
 
@@ -101,24 +102,41 @@ def is_system_notice_source(source: str, payload: Mapping[str, object] | None) -
     return payload.get(HOSTED_TURN_RECOVERY_MARKER) is not True
 
 
-# A closed agent (`agents_meta.closed_at` set) never auto-resurrects: every
-# automatic resurrection path — delivery chat, compact, the delivery
-# watchdog's terminated-owner retry, hosted-turn recovery — skips it, so its
-# queued work stays pending and dead-letters on the existing thresholds. The
-# user closes an agent with `terminate --final`; only an explicit manual
-# resurrect reopens it (clearing the column). This is the closure analogue
-# of the notice gate above: the delivery watchdog's selection and the
-# resurrect endpoint (plus the home runner's final CAS) gate the same
-# decision and must be updated together (the parity test pins the SQL
-# fragment and the Python twin to each other).
-CLOSED_AGENT: LiteralString = "agents_meta.closed_at IS NOT NULL"
+# A terminate command may carry `{"kill_all_shell_sessions": true}` in its
+# payload: every shell session of the agent on its home machine (watchers
+# included) is killed with a graceful termination, right before it commits
+# (decisions/2026-09-27-terminate-has-no-closed-state.md). The request counts
+# while ANY unapplied terminate of the agent's current life carries it — the
+# command the runtime accepted may be a different one (a self-terminate that
+# won acceptance first), and the requester's kill still rides that death. A
+# force fence supersedes unapplied terminates and kills only when asked
+# itself. Assumes the unaliased `agents_meta` row, like the fragments above.
+KILL_ALL_SHELL_SESSIONS = "kill_all_shell_sessions"
+
+TERMINATE_KILLS_SHELL_SESSIONS: LiteralString = (
+    "EXISTS(SELECT 1 FROM inbound_messages k WHERE k.agent_id=agents_meta.id "
+    "AND k.kind='terminate' AND k.status IN ('pending','claimed') AND k.applied_at IS NULL "
+    "AND k.id > COALESCE(agents_meta.last_resurrect_inbound_id, 0) "
+    "AND COALESCE((k.payload -> 'kill_all_shell_sessions') = 'true'::jsonb, false))"
+)
 
 
-def is_closed_agent(closed_at: datetime | None) -> bool:
-    """Python twin of `CLOSED_AGENT`, kept adjacent on purpose — a drift
-    between the two would reopen the closure gap from opposite sides; the
-    parity test fails if they disagree on any `closed_at` input."""
-    return closed_at is not None
+async def terminate_kills_shell_sessions(conn: psycopg.AsyncConnection, agent_id: int) -> bool:
+    """Whether a pending terminate asks to take the agent's shell sessions along.
+
+    The graceful apply reads this after locking the agent row. A
+    kill-requesting graceful terminate locks the same row before queueing
+    (`ops.ops_exit._enqueue_termination_inbounds`), so it either committed
+    before this read and is honored, or it sees the committed termination and
+    kills the sessions itself — the request cannot fall between the two.
+    """
+    cursor = await conn.execute(
+        sql.SQL("SELECT {} FROM agents_meta WHERE id=%s").format(
+            sql.SQL(TERMINATE_KILLS_SHELL_SESSIONS)
+        ),
+        (agent_id,),
+    )
+    return await cursor.fetchone() == (True,)
 
 
 # Every unapplied lifecycle command whose intent predates the recorded

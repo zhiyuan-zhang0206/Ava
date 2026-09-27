@@ -14,12 +14,6 @@ _EVENTS_LIFECYCLE: dict[str, EventSpec] = {
     "agent_resurrected": _telemetry(
         "agent_resurrected", "agent resurrected", retention_class="lineage"
     ),
-    "agent_reopened": _telemetry(
-        "agent_reopened",
-        "an explicit resurrect cleared a closed agent's durable closure marker "
-        "(closed_at) — the WARNING-level operator-side marker that the agent is "
-        "out of the never-auto-resurrect closure (task #4165)",
-    ),
     "billing_resurrect_run": _telemetry(
         "billing_resurrect_run", "billing batch recovery run finished"
     ),

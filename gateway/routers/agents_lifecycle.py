@@ -41,6 +41,7 @@ from ops.rpc_schemas import (
 from shared.agents.impersonation._impersonation_store import ImpersonationError
 from shared.agents.impersonation.impersonation_maintenance import force_expire_impersonation
 from shared.db import agent_exists, insert_compact_request_inbound
+from shared.db_transaction import write_transaction
 
 router = APIRouter()
 
@@ -163,6 +164,11 @@ async def post_agent_terminate(
     Both paths forward to the home runner. A missing agent returns 404; an
     already-terminated identity is a no-op for graceful termination.
 
+    `kill_all_shell_sessions` also kills the agent's shell sessions on its home
+    machine, silently; `shell_sessions` in the response says whether that
+    already happened (`now`, with the killed ids) or happens right before a
+    graceful termination applies (`at_exit`).
+
     On success the response additionally carries `open_tasks` — the tasks the
     agent still owns (in_progress; at most five, most recently
     updated first) as it goes down. The hint is advisory: a failed read leaves
@@ -173,8 +179,9 @@ async def post_agent_terminate(
 async def terminate_agent_with_open_tasks(
     agent_id: int, body: TerminateAgentRequest, pool: ConnectionPool
 ) -> TerminateAgentResponse:
-    """Forward the terminate op to the home runner, then attach the agent's
-    open-task hint — read once from `agent_tasks` after acceptance.
+    """Forward the terminate op to the home runner, drop the TTL rows of any
+    shell sessions it killed, then attach the agent's open-task hint — read
+    once from `agent_tasks` after acceptance.
 
     Advisory by design: a failed hint read is logged and leaves `open_tasks`
     null, so it can never block or alter the termination itself."""
@@ -182,6 +189,8 @@ async def terminate_agent_with_open_tasks(
         agent_id, f"/api/agents/{agent_id}/terminate", body.model_dump()
     )
     response = TerminateAgentResponse.model_validate(forwarded)
+    if response.shell_sessions is not None and response.shell_sessions.killed:
+        await _drop_killed_shell_ttls(pool, agent_id, response.shell_sessions.killed)
     try:
         hint = await asyncio.to_thread(_open_tasks_hint_blocking, pool, agent_id)
     except (psycopg.Error, PoolTimeout) as exc:
@@ -192,6 +201,35 @@ async def terminate_agent_with_open_tasks(
         )
         return response
     return response.model_copy(update={"open_tasks": hint})
+
+
+async def _drop_killed_shell_ttls(pool: ConnectionPool, agent_id: int, killed: list[int]) -> None:
+    """Delete the `agent_shell_ttls` rows of sessions a terminate just killed.
+
+    The TTL reaper's own row removal, done up front because the runner that
+    killed them holds no DELETE on the table. Sessions a graceful terminate
+    kills at exit keep their rows until the reaper retires them at their
+    deadline, silently (an absent session never notifies). A failed delete is
+    logged and left to that same reaper; it never alters the termination.
+    """
+
+    def _delete() -> None:
+        with write_transaction(pool) as conn:
+            conn.execute(
+                "DELETE FROM agent_shell_ttls WHERE agent_id = %s AND session_id = ANY(%s)",
+                (agent_id, killed),
+            )
+
+    try:
+        await asyncio.to_thread(_delete)
+    except (psycopg.Error, PoolTimeout) as exc:
+        _log.error(
+            "[lifecycle] TTL rows of agent %s's killed shell sessions %s were not dropped "
+            "(the TTL reaper retires them): %r",
+            agent_id,
+            killed,
+            exc,
+        )
 
 
 def _open_tasks_hint_blocking(pool: ConnectionPool, agent_id: int) -> OpenTasksHint | None:
@@ -270,7 +308,7 @@ async def post_agents_resurrect_billing(
     and the provider balance readout, nothing written. `execute=true` re-checks the provider balance (the run refuses
     below the configured floor) and then resurrects each candidate on its home
     machine through the versioned `resurrect-billing-v1` op, which enforces the
-    closed fence and the billing-halt whitelist under the metadata row lock.
+    billing-halt whitelist under the metadata row lock.
     Idempotent: the candidate set self-clears after a run, a repeated run is an
     audited no-op, and a concurrent second run is refused by the run-level
     advisory lock.

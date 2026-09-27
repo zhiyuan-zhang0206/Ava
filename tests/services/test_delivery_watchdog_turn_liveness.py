@@ -227,23 +227,28 @@ async def test_recovery_emits_evidence_then_terminates_queues_and_resurrects(
     assert calls == ["event", "terminate", "queue", "resurrect"]
 
 
+@pytest.mark.parametrize("legacy_closed", [False, True])
 async def test_recovery_chain_reaches_dispatch_through_the_real_notice_guard(
     db_conn: psycopg.Connection,
     pool: ConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
+    legacy_closed: bool,
 ) -> None:
     """BLOCK regression (Ava #3242): the queued recovery trigger is
     source='system', so the plain notice guard used to cut the chain before
     any resurrect ran. This drives the REAL `resurrect_if_terminated`, the
     REAL guard read, and the REAL queued marker row; only the terminate and
     the below-dispatch machinery are stubbed — a guard that wrongly matched
-    would reach no dispatch and fail the assert."""
+    would reach no dispatch and fail the assert. A `closed_at` stamp left by
+    the retired closed-agent concept gates nothing
+    (decisions/2026-09-27-terminate-has-no-closed-state.md)."""
     import ops.ops_lifecycle as lifecycle
 
     agent_id = _make_hosted_running_agent(db_conn)
     db_conn.execute(
-        "UPDATE agents_meta SET status='terminated', status_changed_at=now() WHERE id=%s",
-        (agent_id,),
+        "UPDATE agents_meta SET status='terminated', status_changed_at=now(), "
+        "closed_at=CASE WHEN %s THEN now() END WHERE id=%s",
+        (legacy_closed, agent_id),
     )
     db_conn.commit()
 
@@ -289,58 +294,6 @@ async def test_recovery_chain_reaches_dispatch_through_the_real_notice_guard(
     body = forwarded["body"]
     assert isinstance(body, dict)
     assert body["resurrected_by"] == "system"
-
-
-async def test_closed_agent_blocks_the_real_recovery_chain(
-    db_conn: psycopg.Connection,
-    pool: ConnectionPool,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The closure outranks the recovery carve-out too: a closed agent's
-    wedged-turn recovery queues the marked chat (durable) but reaches no
-    dispatch — the REAL guard reads the real marker and refuses, even though
-    the same chat revives an open agent."""
-    import ops.ops_lifecycle as lifecycle
-
-    agent_id = _make_hosted_running_agent(db_conn)
-    db_conn.execute(
-        "UPDATE agents_meta SET status='terminated', status_changed_at=now(), closed_at=now() "
-        "WHERE id=%s",
-        (agent_id,),
-    )
-    db_conn.commit()
-
-    def _silent_emit(*_args: object, **_kwargs: object) -> None:
-        return None
-
-    monkeypatch.setattr(watchdog.telemetry, "emit", _silent_emit)
-
-    async def fake_terminate(agent_id: int, body: object, db_pool: object) -> object:
-        return object()
-
-    monkeypatch.setattr(lifecycle, "terminate_agent_op", fake_terminate)
-    dispatched: list[dict[str, object]] = []
-
-    async def fake_dispatch(
-        *, target_machine: str, kind: str, payload: dict[str, object]
-    ) -> dict[str, str]:
-        dispatched.append({"target_machine": target_machine, "kind": kind, "payload": payload})
-        return {"status": "spawned"}
-
-    monkeypatch.setattr(lifecycle._cluster_rpc, "dispatch_to_machine", fake_dispatch)
-
-    wedge = watchdog._HostedTurnWedge(agent_id, "runner-a", 2500.0, (), False)
-    await watchdog._recover_hosted_turn(pool, wedge)
-
-    assert dispatched == []
-    # The marked recovery chat is still queued (durable), so an explicit
-    # manual resurrect later picks the work up.
-    row = db_conn.execute(
-        "SELECT payload FROM inbound_messages WHERE agent_id=%s AND source='system' "
-        "ORDER BY id DESC LIMIT 1",
-        (agent_id,),
-    ).fetchone()
-    assert row is not None and row[0] == {"hosted_turn_recovery": True}
 
 
 async def test_hosted_turn_recovery_has_a_ten_minute_per_agent_cooldown(

@@ -99,7 +99,7 @@ class TestTerminateRouting:
                 json={"message": "retain this note"},
             )
         assert resp.status_code == 200
-        assert resp.json() == {"status": "enqueued", "open_tasks": None, "closed": None}
+        assert resp.json() == {"status": "enqueued", "open_tasks": None, "shell_sessions": None}
         assert captured["agent_id"] == agent_id
         assert captured["path"] == f"/api/agents/{agent_id}/terminate"
         assert captured["json_body"]["message"] == "retain this note"
@@ -126,7 +126,7 @@ class TestTerminateRouting:
                 json={"force": True, "source": "user"},
             )
         assert resp.status_code == 200
-        assert resp.json() == {"status": "enqueued", "open_tasks": None, "closed": None}
+        assert resp.json() == {"status": "enqueued", "open_tasks": None, "shell_sessions": None}
         assert captured["json_body"]["force"] is True
         assert captured["json_body"]["source"] == "user"
 
@@ -191,7 +191,7 @@ def test_remote_home_machine_is_forwarded(
         monkeypatch.setattr(forward_module, "_enqueue_lifecycle", _capture_enqueue)  # pyright: ignore[reportUnknownArgumentType]
         resp = client.post(f"/api/agents/{agent_id}/terminate")
     assert resp.status_code == 200
-    assert resp.json() == {"status": "enqueued", "open_tasks": None, "closed": None}
+    assert resp.json() == {"status": "enqueued", "open_tasks": None, "shell_sessions": None}
     assert captured["target"] == "stale-wsl"
 
 
@@ -272,7 +272,7 @@ class TestTerminateOpenTasksHint:
             _set_agent_machine(db_conn, agent_id, "local-test")
             resp = client.post(f"/api/agents/{agent_id}/terminate")
         assert resp.status_code == 200
-        assert resp.json() == {"status": "enqueued", "open_tasks": None, "closed": False}
+        assert resp.json() == {"status": "enqueued", "open_tasks": None, "shell_sessions": None}
 
     def test_open_tasks_reported_newest_first(
         self, _force_local_machine: str, db_conn: psycopg.Connection
@@ -342,45 +342,77 @@ class TestTerminateOpenTasksHint:
             _set_agent_machine(db_conn, agent_id, "local-test")
             resp = client.post(f"/api/agents/{agent_id}/terminate")
         assert resp.status_code == 200
-        assert resp.json() == {"status": "enqueued", "open_tasks": None, "closed": False}
+        assert resp.json() == {"status": "enqueued", "open_tasks": None, "shell_sessions": None}
 
 
-class TestTerminateClosedState:
-    """`closed` rides the forward response verbatim: the closure post-state the
-    home runner computed for this request (True when `final` was requested or
-    the marker was already set; False otherwise; None when an older runner
-    does not report it)."""
+def _seed_shell_ttls(db_conn: psycopg.Connection, agent_id: int, session_ids: list[int]) -> None:
+    with db_conn.cursor() as cur:
+        for session_id in session_ids:
+            cur.execute(
+                "INSERT INTO agent_shell_ttls (agent_id, session_id, expires_at) "
+                "VALUES (%s, %s, now() + interval '1 hour')",
+                (agent_id, session_id),
+            )
+    db_conn.commit()
 
-    def test_reports_the_home_runner_closure_state(
+
+def _shell_ttl_ids(db_conn: psycopg.Connection, agent_id: int) -> list[int]:
+    rows = db_conn.execute(
+        "SELECT session_id FROM agent_shell_ttls WHERE agent_id = %s ORDER BY session_id",
+        (agent_id,),
+    ).fetchall()
+    return [row[0] for row in rows]
+
+
+class TestTerminateShellSessions:
+    """`kill_all_shell_sessions` rides to the home runner, whose report comes
+    back verbatim in `shell_sessions`; the gateway then drops the TTL rows of
+    the sessions it reports killed (the runner holds no DELETE on them)."""
+
+    def test_forwards_the_option_and_drops_killed_sessions_ttl_rows(
+        self,
+        _force_local_machine: str,
+        db_conn: psycopg.Connection,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        captured: dict[str, Any] = {}
+
+        async def _capture_forward(agent_id: int, path: str, json_body: dict) -> dict:
+            captured["json_body"] = json_body
+            return {"status": "enqueued", "shell_sessions": {"when": "now", "killed": [0, 1]}}
+
+        with TestClient(app) as client:
+            agent_id = client.post("/api/agents", json={}).json()["id"]
+            _set_agent_machine(db_conn, agent_id, "remote-mac")
+            _seed_shell_ttls(db_conn, agent_id, [0, 1, 2])
+            monkeypatch.setattr(lifecycle_module, "_forward_to_home_machine", _capture_forward)  # pyright: ignore[reportUnknownArgumentType]
+            resp = client.post(
+                f"/api/agents/{agent_id}/terminate",
+                json={"force": True, "kill_all_shell_sessions": True},
+            )
+        assert resp.status_code == 200
+        assert resp.json()["shell_sessions"] == {"when": "now", "killed": [0, 1]}
+        assert captured["json_body"]["kill_all_shell_sessions"] is True
+        # Session 2 is gone too, but not by this kill: the TTL reaper retires it.
+        assert _shell_ttl_ids(db_conn, agent_id) == [2]
+
+    def test_at_exit_kill_leaves_ttl_rows_to_the_reaper(
         self,
         _force_local_machine: str,
         db_conn: psycopg.Connection,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         async def _capture_forward(agent_id: int, path: str, json_body: dict) -> dict:
-            return {"status": "already_terminated", "closed": True}
+            return {"status": "enqueued", "shell_sessions": {"when": "at_exit", "killed": []}}
 
         with TestClient(app) as client:
             agent_id = client.post("/api/agents", json={}).json()["id"]
             _set_agent_machine(db_conn, agent_id, "remote-mac")
+            _seed_shell_ttls(db_conn, agent_id, [0])
             monkeypatch.setattr(lifecycle_module, "_forward_to_home_machine", _capture_forward)  # pyright: ignore[reportUnknownArgumentType]
-            resp = client.post(f"/api/agents/{agent_id}/terminate", json={"final": True})
+            resp = client.post(
+                f"/api/agents/{agent_id}/terminate", json={"kill_all_shell_sessions": True}
+            )
         assert resp.status_code == 200
-        assert resp.json()["closed"] is True
-
-    def test_closed_false_for_an_open_agent(
-        self,
-        _force_local_machine: str,
-        db_conn: psycopg.Connection,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        async def _capture_forward(agent_id: int, path: str, json_body: dict) -> dict:
-            return {"status": "enqueued", "closed": False}
-
-        with TestClient(app) as client:
-            agent_id = client.post("/api/agents", json={}).json()["id"]
-            _set_agent_machine(db_conn, agent_id, "remote-mac")
-            monkeypatch.setattr(lifecycle_module, "_forward_to_home_machine", _capture_forward)  # pyright: ignore[reportUnknownArgumentType]
-            resp = client.post(f"/api/agents/{agent_id}/terminate")
-        assert resp.status_code == 200
-        assert resp.json()["closed"] is False
+        assert resp.json()["shell_sessions"] == {"when": "at_exit", "killed": []}
+        assert _shell_ttl_ids(db_conn, agent_id) == [0]

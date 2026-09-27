@@ -19,11 +19,15 @@ class TerminateAgentRequest(BaseModel):
     `force` defaults to False for graceful termination. True directly kills the
     detached process and force-updates status when the agent cannot reach claim.
 
-    `final` closes the agent — the closure marker (`agents_meta.closed_at`)
-    means "never auto-resurrect": every automatic resurrection path skips it
-    and its queued work dead-letters on the existing thresholds; only an
-    explicit manual resurrect reopens it. Stamped even when the terminate lands
-    on an already-terminated agent (metadata-only mark; the backfill route).
+    `kill_all_shell_sessions` also kills every shell session the agent owns on
+    its home machine (watchers included), with no per-session notice. A
+    graceful terminate of a live agent records the request on its terminate
+    command and the home runtime kills the sessions right before the
+    termination applies, after the agent's last step; a force terminate, or an
+    agent that is already terminated, has them killed before the response.
+    Without it, sessions are left alone. A terminated agent is otherwise an
+    ordinary terminated agent — any new message may resurrect it
+    (decisions/2026-09-27-terminate-has-no-closed-state.md).
 
     `source` defaults to "user"; SDK paths pass f"agent:{my_id}". Claim
     includes this source in the lifecycle marker shown to the agent.
@@ -34,7 +38,7 @@ class TerminateAgentRequest(BaseModel):
     """
 
     force: bool = Field(default=False)
-    final: bool = Field(default=False)
+    kill_all_shell_sessions: bool = Field(default=False)
     source: str = Field(default="user", min_length=1, max_length=64)
     message: UserContent | None = None
 
@@ -75,27 +79,42 @@ class OpenTasksHint(BaseModel):
     more: int
 
 
+class ShellSessionsKill(BaseModel):
+    """What `kill_all_shell_sessions` did for one terminate request.
+
+    `when="now"`: the kill already ran on the agent's home machine — a force
+        terminate, or an agent that was already terminated. `killed` lists the
+        session ids it killed, ascending; empty means the agent had no shell
+        session there.
+    `when="at_exit"`: a graceful terminate of a live agent. The request is
+        durable on its terminate command; the home runtime kills every session
+        right before the termination applies, after the agent's last step.
+        `killed` is empty — the set is fixed only at exit.
+    """
+
+    when: Literal["now", "at_exit"]
+    killed: list[int] = Field(default_factory=list[int])
+
+
 class TerminateAgentResponse(BaseModel):
     """POST /api/agents/{id}/terminate response.
 
     `enqueued`: termination accepted, including hosted force. Actual work may
         still be draining; this result does not prove exit.
     `already_terminated`: agent was already dead. Graceful termination is a
-        no-op. Hosted force instead returns enqueued until its exact original
-        host can prove quiescence; metadata status alone is not exit evidence.
+        no-op beyond a requested shell-session kill. Hosted force instead
+        returns enqueued until its exact original host can prove quiescence;
+        metadata status alone is not exit evidence.
 
     `open_tasks`: the still-open tasks the agent owned as it went down — an
         advisory hint, null when it owned none or the hint read failed.
 
-    `closed`: the agent's closure state after this request — True when `final`
-        was requested (the marker is stamped in the same transaction as the
-        termination intent; the already-terminated backfill marks idempotently)
-        or when the marker was already set; False otherwise; None only when the
-        reporting runner predates the field (version skew). Makes
-        `terminate --final` — including its already-terminated backfill form —
-        verifiable from the response alone.
+    `shell_sessions`: what the shell-session kill did — set when
+        `kill_all_shell_sessions` was requested, None otherwise. A requested
+        kill answered with None means the home runner predates the option
+        (version skew): nothing was killed.
     """
 
     status: Literal["enqueued", "already_terminated"]
     open_tasks: OpenTasksHint | None = None
-    closed: bool | None = None
+    shell_sessions: ShellSessionsKill | None = None

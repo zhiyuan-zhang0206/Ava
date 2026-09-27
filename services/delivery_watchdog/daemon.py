@@ -37,8 +37,6 @@ in-flight turn is normal — the claim's turn-end SELECT picks it up. Boot state
    (60s) + per-tick cap + concurrency semaphore keep a pile of dead letters
    from spawning an LLM wake storm; repeated failures suppress automatic wakes
    for a bounded exponentially increasing window, and normal delivery resumes after expiry.
-   Closed agents (`closed_at` set via `terminate --final`) are never selected:
-   closure outranks every automatic channel.
 4. **Stale-inbound dead-letter sweep** — every 30s, flip `claimed` chat
    inbounds of TERMINATED owners older than
    `AVA_DELIVERY_WATCHDOG_STALE_CLAIMED_THRESHOLD_SECONDS` (default 24h), or
@@ -193,18 +191,12 @@ def select_terminated_owners_with_pending(
     chats (`hosted_turn_recovery` marker): the watchdog's wedged-turn wake and
     the corpse reaper's crash-recovery wake (task #4039) revive their owner.
 
-    A closed agent (user marked it `terminate --final`; `closed_at` set) is
-    never a resurrect candidate — the closure outranks every automatic
-    channel, the recovery-marker exemption included. Its pending chats stay
-    queued and dead-letter on the age gate above.
-
     `threshold_s` bounds how long a pending chat keeps its terminated owner a
     resurrect candidate: past it the row is a dead letter (issue #2049) that
     `dead_letter_stale_pending_chats` closes — and with it the trigger, so no
     unbounded retry can resurrect-suicide the agent forever.
     """
     from shared.lifecycle_acceptance import (
-        CLOSED_AGENT,
         FAILED_RESTART_FOR_CURRENT_TARGET,
         SYSTEM_NOTICE_SOURCE,
         SYSTEM_REAPED_CRASH_ROW,
@@ -226,7 +218,6 @@ def select_terminated_owners_with_pending(
                 "       OR agents_meta.wake_suppressed_until < now()) "
                 "  AND {} "
                 "  AND NOT {} "
-                "  AND NOT {} "
                 "GROUP BY m.agent_id "
                 "ORDER BY m.agent_id"
             ).format(
@@ -234,7 +225,6 @@ def select_terminated_owners_with_pending(
                 sql.SQL(SYSTEM_REAPED_CRASH_ROW),
                 sql.SQL(RECOVERY_BREAKER_CLEAR),
                 sql.SQL(SYSTEM_NOTICE_SOURCE),
-                sql.SQL(CLOSED_AGENT),
             ),
             (threshold_s,),
         )
