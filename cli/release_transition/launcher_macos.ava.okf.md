@@ -117,7 +117,7 @@ next attempt label once.
 
 ## Current scope
 
-darwin `for_host` admits a same-schema release `Request` (common release
+darwin `for_host` admits a same-schema fleet release request (common release
 preflight scope); root start goes through the persistent home helper:
 [[cli/release_transition/root_macos.ava.okf.md]]. `PitrRequest` refuses before
 reservation. Unit tests cover the parser, journal evidence, adapter paths and

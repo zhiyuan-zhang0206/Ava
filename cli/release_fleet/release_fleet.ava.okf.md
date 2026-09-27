@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Fleet release workload policy
-description: Pure policy for a fleet release - captured bounds, frozen cohort, start-barrier and watch-window verdicts, alert routing and known-good publication. Not yet connected to a coordinator.
+description: The fleet release transition - one coordinator decides, units follow; this node holds its pure workload policy (captured bounds, frozen cohort, start-barrier and watch-window verdicts, alert routing, known-good publication).
 tags:
 - cluster-lifecycle
 - release
@@ -9,11 +9,13 @@ tags:
 
 # Fleet release workload policy
 
-`cli/release_fleet/` will hold the fleet coordinator (slice FC-7). Today it
-holds only the workload policy: pure functions over typed records, with no
-clock, file, database or network access. The coordinator journals each result,
-then executes it. The legacy health probe, heartbeat liveness pass and their
-alert rows are not evidence here.
+`cli/release_fleet/` is the fleet release transition: the coordinator and
+its phases ([[cli/release_fleet/coordinator.ava.okf.md]]) and the channel to
+remote units ([[cli/release_fleet/channel.ava.okf.md]]). This node is its
+workload policy: pure functions over typed records, with no clock, file,
+database or network access. The coordinator journals each result, then
+executes it. The legacy health probe, heartbeat liveness pass and their alert
+rows are not evidence here.
 
 ## Policy block (`policy.py`)
 
@@ -21,10 +23,9 @@ alert rows are not evidence here.
 `cancel_grace_s`, `start_s`, `watch_s`, `threshold_percent` (default 20),
 `min_affected` (default 2), `alert_route` and `acknowledged_rejection`.
 Bounds are whole seconds and the threshold an integer percent, so boundaries
-are exact. `close_s` and `cancel_grace_s` default to the writer-closure bounds
-the one-host transition still hard-codes (`_TERMINAL_WORK_S`,
-`_TERMINAL_GRACE_S` in `cli/release_transition/local.py`); the fleet threads
-them to every unit's `closing`. Its SIGKILL observation bound stays mechanism.
+are exact. `close_s` and `cancel_grace_s` are the writer-closure bounds
+`cli/release_transition/local.py` applies at every unit's `closing` (30 s and
+10 s by default); its SIGKILL observation bound stays mechanism.
 
 `exceeds(affected, cohort)` is `affected >= min_affected` and
 `affected / cohort > threshold_percent / 100`: exactly at the threshold does

@@ -7,25 +7,31 @@ tags: [cluster-lifecycle, release]
 
 # Release transition execution
 
-`execute.py` advances prepared, quiescing, stopping, fencing, selecting,
-authorizing, starting, observing, resuming, and complete. Each phase reconciles
-actual state. Candidate start/observation failure chooses the captured
-predecessor once, closes the candidate, then uses the same
+`execute.py` runs a fleet operation's coordinator
+([[cli/release_fleet/coordinator.ava.okf.md]]; a single box is a fleet of one),
+a remote unit's follower, or PITR's own phases. The coordinator advances
+prepared, dispatching, quiescing, stopping, fencing, selecting, authorizing,
+starting, observing, starting_units, resuming, watching and complete; each
+phase reconciles actual state. A failure before the fence aborts (`restoring`:
+the unchanged previous image on the unchanged generation). A candidate failure
+at start, observation, the start barrier or the watch window chooses the
+captured predecessor once, closes the candidate, then uses the same
 fence/select/authorize/start/observe path. Recovery never chooses another
-target or loops between releases. A failure while fencing, authorizing or
-resuming retains that phase: the first two hold for continuation, and resuming
-may already have opened admission, so none is an automatic rollback boundary.
+target or loops between releases. A failure while fencing, selecting,
+authorizing, resuming or restoring holds for continuation: none is an
+automatic rollback boundary.
 
 The stop phase closes this unit's writers. Persistent terminals — agent
 shells, coding sessions, watchers, page and schedule runners — do not survive
 a release ([decision](../../decisions/2026-09-27-fleet-release-and-cutover-policies.md)
-item 2). While root still serves them, the phase waits a bounded time for
-their jobs to finish, signalling nothing. It then stops root, keeping
+item 2). While root still serves them, the phase waits the captured policy's
+`close_s` for their jobs to finish, signalling nothing. It then stops root, keeping
 terminals, so no reconciler re-arms a session. `close_release_terminals`
 (`cli/commands/maintenance_stop.py`) captures every recorded shell, job and PTY
 host birth, records the `ava stop` closure notice for each busy session's
 owner (naming the release, before any signal), HUPs shells and TERMs jobs,
-and after a grace SIGKILLs only those captured births still live. Closure is
+and after the policy's `cancel_grace_s` SIGKILLs only those captured births
+still live. Closure is
 the kernel observation that each is gone and no recorded terminal is live;
 selection checks that evidence again. A survivor fails the phase with its
 identity. After start, the schedule manager re-arms schedules and the page
@@ -79,6 +85,8 @@ intent before each ledger transition, a non-secret receipt after it.
   pending generation or another allocation refuses before any effect.
 - **starting**: the stage refuses unless the ledger's active generation is
   this direction's authorized issue, so the launch delivers and binds only it.
+- **restoring** (an abort): nothing was fenced or minted; the stage refuses
+  unless the active generation is still the one `prepared` recorded.
 - **observing / resuming**: after readiness the stage proves the issued
   generation is active, the invariant holds, no fenced session survives, the
   pooler serves only that pair, and both logins answer.
@@ -87,5 +95,7 @@ The finite executor itself runs the candidate image, which the boot pass never
 admits to a generation. It adopts, in-process, the OS-user administrator over
 the owner-only socket acting as `ava_gateway` (`peer`, startup
 `-c role=ava_gateway`, which `RESET ALL` keeps): no fence census includes its
-session. PITR operations carry neither record and reuse the active generation.
-Networked homes still refuse before quiescing (`identity.py`).
+session. PITR operations and aborts carry neither record and reuse the active
+generation; a remote unit receives its generation over the coordinator channel
+(slice dbgen-8). Networked fleets refuse before any effect
+(`cli/release_fleet/inventory.py`).

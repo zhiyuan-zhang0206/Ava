@@ -11,15 +11,15 @@ tags:
 
 `ava cluster update --prepared REQUEST` hands the request to its verified
 executor image ([[cli/release_handoff/release_handoff.ava.okf.md]]), which
-submits or resumes one immutable release operation (no moving-main, mutable
-checkout or per-service branch). Success is native dispatch/readback, not a
-completed upgrade.
+submits or resumes one immutable operation (no moving-main, mutable checkout
+or per-service branch). Success is native dispatch/readback, not completion.
 
 ## Authority and inputs
 
 `request.py` captures the home, registry, machine, configuration digest, operation
 generation, and exact previous/candidate/executor artifact, manifest, source and
-schema identities. The candidate supplies the retained executor. Full image
+schema identities, as kind `fleet`, `unit` or `pitr`. The candidate supplies
+the retained executor. Full image
 verification includes packaged source identity and every up/down migration SQL
 file; an unchanged squashed baseline alone does not establish equal SQL.
 No platform is captured: each verification, boot included, checks the image's
@@ -47,9 +47,8 @@ cannot authorize disruption of a different release.
 
 ## Execution
 
-`execute.py` drives the journal's phases through `local.py` effects; the
-details, including recovery direction and root start, are in
-[[cli/release_transition/execution.ava.okf.md]].
+`execute.py` runs the fleet coordinator (or a unit follower, or PITR) over
+`local.py`'s one-home effects: [[cli/release_transition/execution.ava.okf.md]].
 
 ## PITR operations
 
@@ -125,14 +124,14 @@ outside that executor; a process cannot certify its own closure.
 
 ## Connected boundary
 
-The current effect adapter admits an initialized, single-host gateway (Linux,
-or macOS through the persistent home helper) with a local data plane and equal
-packaged SQL. Other topologies or schema changes refuse before quiescing. A
-schedule or PTY may write the DB after application root exits, so the stop
-phase closes every persistent terminal (see Execution); PITR refuses them and
-is never admitted on macOS. Native Windows execution, fleet/schema
-barriers, workload rollback policy and complete application A/B/A proof remain
-in the [lifecycle implementation plan](../../future/infra/unified-cluster-lifecycle.md).
+A release ([[cli/release_fleet/release_fleet.ava.okf.md]]) admits a fleet of
+one: an initialized gateway home (Linux, or macOS through the persistent home
+helper), local data plane, equal packaged SQL. Networked fleets (slice
+dbgen-8) and schema changes refuse before effects. A schedule or PTY may write the DB after application root exits, so
+the stop phase closes every persistent terminal (see Execution); PITR refuses
+them and is never admitted on macOS. Native Windows execution, the migration
+barrier and a full A/B/A proof remain in the
+[lifecycle implementation plan](../../future/infra/unified-cluster-lifecycle.md).
 
 The older HTTP/publication orchestration still being removed is not a fallback
 of this entry. Its remaining callers must be deleted before cutover.

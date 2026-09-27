@@ -75,7 +75,8 @@ Unit tests: `test_root_macos.py`, `test_root_macos_boundaries.py`. Opt-in
 native (`AVA_NATIVE_RELEASE_START=1`, `AVA_NATIVE_SIGNED_HELPER=1` for the
 stable identity): a disposable helper job and two minimal retained images
 whose stage stands in for ordinary start, driving the real keeper, ordinary
-root stop, selector CAS, journal and `drive` through A -> B -> A, candidate
+root stop, selector CAS, journal and the fleet coordinator (a fleet of one)
+through A -> B -> A, candidate
 start failure, a keeper-respawned candidate, a stage killed mid-start, executor
 loss after the effect and a killed helper. The application start itself, the
 finite job around the start, the data-plane bracket and logout/reboot are not
