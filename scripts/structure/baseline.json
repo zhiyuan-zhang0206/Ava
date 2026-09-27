@@ -626,7 +626,6 @@
     "agent/hooks/_registry.py::agent.graph._node_log": 1,
     "agent/hooks/capabilities.py::agent.graph._capabilities": 1,
     "agent/hooks/compact.py::agent.graph._interrupt": 1,
-    "agent/impersonation.py::shared.agents.impersonation._impersonation_store": 1,
     "agent/impersonation_handoff.py::shared.agents.impersonation._impersonation_store": 2,
     "agent/plugin_catalog.py::agent.graph._build": 1,
     "agent/state.py::agent.graph._context_notes": 1,
