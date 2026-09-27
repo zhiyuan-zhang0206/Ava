@@ -126,7 +126,8 @@ from cli import main, start_intent, start_runtime
 from cli.parsers import build_parser
 from cli.release_transition import stage
 from cli.release_transition.journal import Operation
-from cli.release_transition.request import ReleaseRef, Request
+from cli.release_fleet.request import FleetRequest
+from cli.release_transition.request import ReleaseRef
 from shared import cluster
 from shared.maintenance_state import MaintenanceHold
 from shared.start_inputs import configuration_digest
@@ -140,10 +141,10 @@ start_intent.prepare_start(build_parser().parse_args(["start", "--worktree"]))
 before = (home / ".env").read_bytes()
 reference = ReleaseRef(artifact_digest="a"*64, manifest_digest="b"*64,
     schema_digest="c"*64, source_commit="d"*40)
-request = Request(id=uuid4(), home=str(home),
+request = FleetRequest(id=uuid4(), home=str(home),
     registry=os.environ["AVA_CLUSTER_REGISTRY"], created_at=datetime.now(UTC),
     machine="test",
-    previous=reference.model_copy(update={"artifact_digest":"e"*64}),
+    previous=reference.model_copy(update={"artifact_digest":"e"*64, "source_commit":"c"*40}),
     candidate=reference, executor=reference,
     configuration_digest=configuration_digest(home))
 # The start delivers the ledger's active generation: it is this direction's issue.

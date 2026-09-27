@@ -56,10 +56,12 @@ def pause_local_cluster() -> None:
     paused. Posture becomes 503 only when the caller actually stops services,
     after all participating runners have completed their ordinary restarts.
 
-    This entry is update-family only (`ops.ops_cluster.cluster_stop_op` under an
-    executing deploy lease), so the drain enables the straggler reap (task
-    #4016): a member still un-landed past `update_straggler_reap_seconds` is
-    truncated and released as `reaped` instead of aborting the wave.
+    This entry is update-family only, so the drain enables the straggler reap
+    (task #4016): a member still un-landed past `update_straggler_reap_seconds`
+    is truncated and released as `reaped` instead of aborting the wave. Its
+    only production caller, the legacy lease-bound `cluster_stop` op, was
+    replaced by the fleet release transition; it stays until its straggler-reap
+    tests move to the release drain (recorded debt).
     """
     from ops.agent_pause import pause_agents
     from shared.config import settings

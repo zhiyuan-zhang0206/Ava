@@ -1,7 +1,7 @@
 """Fleet release alerts and their routing, as data the coordinator delivers.
 
 Pure: every alert is derived from a journaled verdict, cohort or outcome, and
-every delivery is a record. The coordinator (FC-7) journals each alert by
+every delivery is a record. The coordinator journals each alert by
 `key` at first emission and re-delivers from the journal, so a retried
 delivery carries the same `at` and the alerts table deduplicates it by
 `(fingerprint, starts_at)`. An alert row needs the database; the out-of-band

@@ -1,13 +1,15 @@
-"""One-host same-schema transition through the existing root lifecycle.
+"""One home's release effects through the existing root lifecycle.
 
-The initial adapter refuses remote enrollment. Persistent terminals, including
-agents' coding sessions and schedule runners, are writers that do not survive a
-release (decisions/2026-09-27-fleet-release-and-cutover-policies.md item 2):
-the stop phase lets their work finish within a bound, stops root, then closes
-every terminal. Their absence is closure evidence before selection, never
-inferred from a successful root shutdown. Fleet fencing extends this boundary
-rather than falling back to the mutable checkout updater.
+The fleet coordinator runs them for the gateway unit; a remote unit's executor
+runs them for its own home. Persistent terminals, including agents' coding
+sessions and schedule runners, are writers that do not survive a release
+(decisions/2026-09-27-fleet-release-and-cutover-policies.md item 2): the stop
+phase lets their work finish within the captured `close_s`, stops root, then
+closes every terminal after `cancel_grace_s`. Their absence is closure
+evidence before selection, never inferred from a successful root shutdown.
 
+The maintenance hold is `(operation id, operation.maintenance_at)` on every
+unit; a recovery after admission reopened drains again under a new timestamp.
 The native root owner follows the operation's recorded executor kind: the
 Linux boot unit (root_service.py) or the persistent macOS home helper
 (root_macos.py). There is no host-probing fallback between them.
@@ -17,22 +19,24 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from cli.release_fleet.request import FleetRequest, UnitRequest
+from cli.release_transition.authority_evidence import GenerationRef
 from cli.release_transition.journal import Journal, Operation
 from cli.release_transition.native import helper_root
-from cli.release_transition.request import Request, verify_pair
+from cli.release_transition.request import verify_pair
+from shared.maintenance_state import MaintenanceHold
 from shared.runtime_abi import current_abi
 from shared.runtime_release import VerifiedRelease, activate_release, current_pointer
 
-# Release writer closure bounds. Busy terminals get the completed-work wait
-# while root still serves them, then the graceful cancel; whatever is live
-# after the grace gets SIGKILL over its captured birth.
-_TERMINAL_WORK_S = 30.0
-_TERMINAL_GRACE_S = 10.0
+# Whatever is live after the cancel grace gets SIGKILL over its captured birth;
+# this bounds only the kernel observation of that kill.
 _TERMINAL_KILL_S = 10.0
+# Bound of the ordinary root stop inside a release (services' own shutdown).
+_ROOT_STOP_S = 90
 
 
 class LocalTransition:
-    def __init__(self, request: Request) -> None:
+    def __init__(self, request: FleetRequest | UnitRequest) -> None:
         self.request = request
         self.home = Path(request.home)
         self.previous, self.candidate = verify_pair(request)
@@ -40,25 +44,34 @@ class LocalTransition:
     def preflight(self) -> None:
         """Read-only operational gates; an unsupported request cannot stop work."""
         self.request.require_configuration()
-        from cli.release_transition.identity import require_local_writers
+        from cli.release_fleet.inventory import require_topology
 
-        require_local_writers(self.request)
+        require_topology(self.request)
 
-    def quiesce(self) -> None:
-        from cli.release_transition.journal import read_operation
+    def quiesce(self, operation: Operation) -> MaintenanceHold:
+        """Drain local agents under the operation's hold; the drained hold is the cohort."""
         from cli.release_transition.root_service import preflight
         from ops import agent_pause
+        from shared import maintenance
 
         self.preflight()
-        operation = read_operation(self.request.path)
         preflight(operation, self.previous, previous=True)
         preflight(operation, self.candidate, previous=False)
         # The selector can also be changed by callers outside journal admission.
-        # Refuse before creating a maintenance hold or draining any workload.
-        if current_pointer(self.home / "releases") != self.request.previous.selector:
-            raise ValueError("prepared predecessor is not the selected release before quiescing")
-        agent_pause.prepare(str(self.request.id), self.request.created_at)
-        agent_pause.drain(str(self.request.id), self.request.created_at, 90, reap=True)
+        # Refuse before creating a maintenance hold or draining any workload. A
+        # recovery that drains again (from `watching`) finds the candidate selected.
+        expected = (
+            self.request.previous if operation.direction == "candidate" else self.request.candidate
+        )
+        if current_pointer(self.home / "releases") != expected.selector:
+            raise ValueError("the recorded release is not the selected release before quiescing")
+        holder, at = str(self.request.id), operation.maintenance_at
+        agent_pause.prepare(holder, at)
+        agent_pause.drain(holder, at, self.request.policy.drain_s, reap=True)
+        current = maintenance.require_operation(holder, at).maintenance
+        if current is None:
+            raise RuntimeError("release drain lost its maintenance cohort")
+        return current
 
     def stop(self, operation: Operation) -> None:
         from cli.commands import maintenance as maintenance_commands
@@ -67,10 +80,10 @@ class LocalTransition:
         from cli.release_transition import root_macos
         from ops import pty_close_notices
         from shared import maintenance, pause_owner
-        from shared.maintenance_state import MaintenanceHold
 
         self.preflight()
-        holder, at = str(self.request.id), self.request.created_at
+        policy = self.request.policy
+        holder, at = str(self.request.id), operation.maintenance_at
         current = maintenance.require_operation(holder, at)
         hold = current.maintenance
         if hold is None:
@@ -82,23 +95,23 @@ class LocalTransition:
                 holder, at, hold, MaintenanceHold.decode(hold.encode() | {"phase": "stopping"})
             )
         # Observation only: in-flight terminal work may still need root.
-        busy = service_stop.await_terminal_work(_TERMINAL_WORK_S)
+        busy = service_stop.await_terminal_work(float(policy.close_s))
         darwin = helper_root(operation.launch)
         if darwin:
             # The stop request goes only to the authenticated recorded helper.
             root_macos.verified_helper(operation)
         # Root first: its reconcilers (schedules, pages) would re-arm a session.
-        maintenance_commands.stop(holder, at, 90, gateway_last=True, keep_terminals=True)
+        maintenance_commands.stop(holder, at, _ROOT_STOP_S, gateway_last=True, keep_terminals=True)
         closed = service_stop.close_release_terminals(
             holder,
             at,
-            grace_s=_TERMINAL_GRACE_S,
+            grace_s=float(policy.cancel_grace_s),
             kill_s=_TERMINAL_KILL_S,
             reason=pty_close_notices.RELEASE_REASON,
         )
         print(
             f"Release closed persistent terminals: {sorted(closed.shells)}; "
-            f"busy past the {_TERMINAL_WORK_S:.0f}s work bound: {busy}"
+            f"busy past the {policy.close_s}s work bound: {busy}"
         )
         require_root_absent()
         if darwin:
@@ -106,11 +119,11 @@ class LocalTransition:
             # the selected image's explicit seed.
             root_macos.require_stopped(operation)
 
-    def preflight_authority(self) -> None:
+    def preflight_authority(self) -> GenerationRef:
         """Read-only: exactly one admitted write generation exists to fence."""
         from cli.release_transition import authority
 
-        authority.preflight()
+        return authority.preflight()
 
     def fence(self, journal: Journal) -> None:
         """Revoke the direction's write generation once its root is gone."""
@@ -135,7 +148,7 @@ class LocalTransition:
         authority.authorize(journal, target)
 
     def image(self, operation: Operation) -> VerifiedRelease:
-        return self.candidate if operation.direction == "candidate" else self.previous
+        return self.candidate if operation.reference == self.request.candidate else self.previous
 
     def select(self, operation: Operation) -> None:
         from cli.commands.root_driver import require_root_absent
@@ -171,11 +184,12 @@ class LocalTransition:
         from shared import maintenance
 
         operation = journal.operation
-        current = maintenance.require_operation(str(self.request.id), self.request.created_at)
+        holder, at = str(self.request.id), operation.maintenance_at
+        current = maintenance.require_operation(holder, at)
         if current.maintenance is None:
             raise RuntimeError("release start lost its maintenance cohort")
         if current.maintenance.phase == "stopped":
-            maintenance.set_phase(str(self.request.id), self.request.created_at, "starting")
+            maintenance.set_phase(holder, at, "starting")
         elif current.maintenance.phase not in {"starting", "ready"}:
             raise RuntimeError("release start requires completed writer closure")
         if helper_root(operation.launch):
@@ -187,7 +201,7 @@ class LocalTransition:
 
             start(operation, self.image(operation))
 
-    def _observe_root(self, operation: Operation) -> None:
+    def observe_root(self, operation: Operation) -> None:
         if helper_root(operation.launch):
             from cli.release_transition.root_macos import observe
         else:
@@ -198,11 +212,12 @@ class LocalTransition:
         self.request.require_configuration()
         from shared import maintenance
 
-        self._observe_root(operation)
+        self.observe_root(operation)
         self.request.require_configuration()
-        current = maintenance.require_operation(str(self.request.id), self.request.created_at)
+        holder, at = str(self.request.id), operation.maintenance_at
+        current = maintenance.require_operation(holder, at)
         if current.maintenance is not None and current.maintenance.phase == "starting":
-            maintenance.set_phase(str(self.request.id), self.request.created_at, "ready")
+            maintenance.set_phase(holder, at, "ready")
         if helper_root(operation.launch):
             from cli.release_transition.root_macos import restore_boot
         else:
@@ -216,15 +231,43 @@ class LocalTransition:
 
         # An executor may have died after recording this phase. A durable
         # serving marker or an earlier observation cannot admit work now.
-        self._observe_root(operation)
+        self.observe_root(operation)
         self.request.require_configuration()
+        holder, at = str(self.request.id), operation.maintenance_at
         current = pause_owner.read()
         if (
             current.status == "resumed"
-            and current.holder == str(self.request.id)
-            and current.acquired_at == self.request.created_at
+            and current.holder == holder
+            and current.acquired_at == at
             and start_serving.is_serving()
         ):
             return
-        maintenance.require_operation(str(self.request.id), self.request.created_at)
-        maintenance_commands.resume(str(self.request.id), self.request.created_at, cancel=False)
+        maintenance.require_operation(holder, at)
+        maintenance_commands.resume(holder, at, cancel=False)
+
+    def restore(self, journal: Journal) -> None:
+        """Abort: bring back the unchanged previous image on the unchanged generation.
+
+        Nothing was fenced or selected. A drain that never stopped root is
+        cancelled; otherwise the stop completes, the previous root starts,
+        is observed and resumes, all under the same hold.
+        """
+        from cli.commands import maintenance as maintenance_commands
+        from shared import pause_owner
+
+        operation = journal.operation
+        holder, at = str(self.request.id), operation.maintenance_at
+        current = pause_owner.read()
+        if not current.matches(holder, at) or current.status == "resumed":
+            if current.status == "paused" and not current.matches(holder, at):
+                raise RuntimeError("another maintenance owner holds this unit; restore refused")
+            return  # never quiesced, or already restored and resumed
+        hold = current.maintenance
+        if hold is None or hold.phase in {"preparing", "draining", "drained"}:
+            maintenance_commands.resume(holder, at, cancel=True)
+            return
+        if hold.phase == "stopping":
+            self.stop(operation)
+        self.start(journal)
+        self.observe(journal.operation)
+        self.resume(journal.operation)

@@ -113,14 +113,22 @@ def _require_operation_identity(home: Path, path: Path, operation: dict[str, Any
         request["version"] != 1
         or request["home"] != str(home)
         or request["id"] != path.parent.name
-        or request["kind"] not in {"release", "pitr"}
+        or request["kind"] not in {"fleet", "unit", "pitr"}
     ):
         raise ValueError("invalid active release operation identity")
-    if request["kind"] == "release":
-        if operation["direction"] not in {"candidate", "previous"} or operation["pitr"] is not None:
+    if request["kind"] != "pitr":
+        if (
+            operation["direction"] not in {"candidate", "previous"}
+            or operation["pitr"] is not None
+            or operation[request["kind"]] is None
+        ):
             raise ValueError("invalid release operation progress identity")
     elif operation["direction"] is not None or operation["pitr"] is None:
         raise ValueError("invalid PITR operation progress")
+
+
+# How an operator reads each journaled kind: a fleet operation is the release.
+_KIND_LABELS = {"fleet": "release", "unit": "unit release", "pitr": "pitr"}
 
 
 def operation_in_flight(home: Path) -> str | None:
@@ -138,7 +146,8 @@ def operation_in_flight(home: Path) -> str | None:
     _require_operation_identity(home, path, operation)
     if operation["phase"] == "complete" or operation["error"] is not None:
         return None
-    return f"{operation['request']['kind']} operation {path.parent.name} at {operation['phase']}"
+    label = _KIND_LABELS[operation["request"]["kind"]]
+    return f"{label} operation {path.parent.name} at {operation['phase']}"
 
 
 def require_start_authorized(home: Path) -> tuple[str, datetime] | None:
@@ -157,7 +166,8 @@ def require_start_authorized(home: Path) -> tuple[str, datetime] | None:
     request = operation["request"]
     if operation["phase"] == "complete" and operation["error"] is None:
         return None
-    if operation["phase"] == "starting" and _start.get() == (
+    # `restoring` is an abort's restart of the unchanged previous image.
+    if operation["phase"] in {"starting", "restoring"} and _start.get() == (
         path,
         hashlib.sha256(encoded).hexdigest(),
     ):
@@ -168,11 +178,7 @@ def require_start_authorized(home: Path) -> tuple[str, datetime] | None:
                 raise ValueError("PITR start requires its provisioned configuration seal")
             digest = seal["configuration_digest"]
         require_configuration(home, digest)
-        at = datetime.fromisoformat(
-            request["created_at"]
-            if request["kind"] == "release"
-            else operation["pitr"]["maintenance_at"]
-        )
+        at = datetime.fromisoformat(operation[request["kind"]]["maintenance_at"])
         if at.tzinfo is None:
             raise ValueError("release start requires an aware maintenance timestamp")
         return request["id"], at

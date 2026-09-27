@@ -8,13 +8,21 @@ from pathlib import Path
 
 from pydantic import JsonValue
 
-from cli.release_transition.journal import Operation, create, exclusive, read_operation
+from cli.release_fleet.gateway import GatewayUnit
+from cli.release_fleet.request import FleetRequest, UnitRequest
+from cli.release_transition.journal import (
+    Operation,
+    create,
+    exclusive,
+    read_operation,
+    read_request,
+)
 from cli.release_transition.local import LocalTransition
-from cli.release_transition.request import PitrRequest, Request, read_request
+from cli.release_transition.request import PitrRequest
 from shared.verified_file import regular_bytes
 
 
-def _retire_previous(request: Request | PitrRequest) -> None:
+def _retire_previous(request: FleetRequest | UnitRequest | PitrRequest) -> None:
     """An active-pointer replacement cannot orphan the prior native executor."""
     from cli.release_transition import native
 
@@ -46,7 +54,9 @@ def _terminal_native(operation: Operation) -> dict[str, JsonValue]:
     )
 
 
-def submit_request(request: Request | PitrRequest) -> tuple[Path, dict[str, JsonValue]]:
+def submit_request(
+    request: FleetRequest | UnitRequest | PitrRequest,
+) -> tuple[Path, dict[str, JsonValue]]:
     """Reserve and dispatch one typed home operation, or join its retained attempt."""
     from cli.release_transition import native
     from shared.paths import ava_home
@@ -87,7 +97,11 @@ def submit_request(request: Request | PitrRequest) -> tuple[Path, dict[str, Json
         pitr.preflight()
         image = pitr.image
     else:
-        driver = LocalTransition(request)
+        # The coordinator's own gates (its release history admits the
+        # candidate) refuse before any reservation, like the home's.
+        driver = (
+            GatewayUnit(request) if isinstance(request, FleetRequest) else LocalTransition(request)
+        )
         driver.preflight()
         image = driver.candidate
     _retire_previous(request)

@@ -12,7 +12,6 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
-    TypeAdapter,
     field_validator,
     model_validator,
 )
@@ -86,7 +85,12 @@ class HomeRequest(Record):
 
 
 class Request(HomeRequest):
-    kind: Literal["release"] = "release"
+    """A release-shaped home request: the images one home moves between.
+
+    Only its concrete kinds, the fleet coordinator's and a remote unit's
+    (`cli.release_fleet.request`), are journaled and executed.
+    """
+
     previous: ReleaseRef
     candidate: ReleaseRef
     executor: ReleaseRef
@@ -124,14 +128,6 @@ class PitrRequest(HomeRequest):
     @property
     def executor(self) -> ReleaseRef:
         return self.image
-
-
-AnyRequest = Annotated[Request | PitrRequest, Field(discriminator="kind")]
-_REQUEST: TypeAdapter[Request | PitrRequest] = TypeAdapter(AnyRequest)
-
-
-def read_request(encoded: bytes) -> Request | PitrRequest:
-    return _REQUEST.validate_json(encoded)
 
 
 def sql_inventory(image: VerifiedRelease) -> dict[str, str]:

@@ -17,10 +17,11 @@ from uuid import uuid4
 import pytest
 from pydantic import JsonValue
 
+from cli.release_fleet.request import FleetRequest
 from cli.release_transition import journal, launchd_custody
 from cli.release_transition import launcher_macos as macos
 from cli.release_transition.launchd_print import _DARWIN_STRSIGNAL
-from cli.release_transition.request import ReleaseRef, Request
+from cli.release_transition.request import ReleaseRef
 from services.permissions_helper import finite_artifact
 from services.permissions_helper.finite_artifact import HelperArtifact
 from shared.native_process.ownership import OwnedProcess
@@ -187,8 +188,8 @@ def operation(
         schema_digest="c" * 64,
         source_commit="d" * 40,
     )
-    new = old.model_copy(update={"artifact_digest": "e" * 64})
-    request = Request(
+    new = old.model_copy(update={"artifact_digest": "e" * 64, "source_commit": "9" * 40})
+    request = FleetRequest(
         id=uuid4(),
         home=str(home),
         registry=str(registry),

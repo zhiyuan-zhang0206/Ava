@@ -24,7 +24,7 @@ def _require_inputs(operation: Operation) -> None:
 
 def start_operation(path: Path) -> int:
     operation = read_operation(path)
-    if operation.phase != "starting":
+    if operation.phase not in {"starting", "restoring"}:
         raise RuntimeError("release start action requires the recorded starting phase")
     request = operation.request
     _require_inputs(operation)
@@ -152,7 +152,14 @@ def preflight_operation(path: Path, *, previous: bool = False) -> int:
 def observe_operation(path: Path) -> int:
     """Verify the selected image's own full manifest and fresh health round."""
     operation = read_operation(path)
-    if operation.phase not in {"starting", "observing", "resuming"}:
+    if operation.phase not in {
+        "starting",
+        "observing",
+        "starting_units",
+        "resuming",
+        "watching",
+        "restoring",
+    }:
         raise RuntimeError("root observation requires a selected start/observe phase")
     request = operation.request
     _require_inputs(operation)

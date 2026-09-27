@@ -168,14 +168,10 @@ _INDEPENDENT_CLOCKS: dict[tuple[str, str], str] = {
         "_TERMINATE_GRACE_S",
     ): "independent: TERM->KILL ladder wait in the terminate step, no lattice neighbour",
     (
-        "cli/release_transition/local.py",
-        "_TERMINAL_GRACE_S",
-    ): "independent: HUP/TERM->KILL ladder wait for release terminal closure, no lattice neighbour",
-    (
         "cli/release_transition/pitr/transition.py",
         "_TERMINAL_GRACE_S",
     ): "independent: HUP/TERM->KILL ladder wait for PITR terminal closure — same class as "
-    "cli/release_transition/local.py's release terminal closure, no lattice neighbour",
+    "shared/proc.py's TERM->KILL ladder wait, no lattice neighbour",
     (
         "services/pitr/operation_custody.py",
         "TERMINATE_GRACE_S",

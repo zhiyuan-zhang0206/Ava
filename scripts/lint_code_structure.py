@@ -163,6 +163,8 @@ _STRUCTURE_DIRS = (*_SCAN_DIRS, "tests", "scripts")
 _MACHINE_ROLE_ALLOWED: dict[str, str] = {
     "cli/release_transition/stage.py": "Read the local ordinary root roster for captured-image preflight and readiness; does not route a cluster request.",
     "cli/release_transition/identity.py": "Refuse a nonlocal/fleet topology before effects in the first one-host release adapter; never dispatch by role.",
+    "cli/release_fleet/inventory.py": "Refuse a fleet of one whose home does not serve the gateway before effects; never dispatch by role.",
+    "cli/release_fleet/entries.py": "Report which capabilities this unit serves in its release receipt; never dispatch by role.",
     "cli/commands/_temporary_stop.py": "Which selected local services and data plane does this unit own during explicit pause/stop? No execution is routed elsewhere.",
     "ops/agent_pause.py": "Does this unit serve an agent host whose admitted cohort and actual continuation completion must be verified before local shutdown?",
     "cli/commands/maintenance.py": "Which services/data plane does this explicitly local, DB-offline-capable stop/start own? Fleet transport is operator-coordinated.",

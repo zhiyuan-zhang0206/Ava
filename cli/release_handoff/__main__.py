@@ -2,9 +2,9 @@
 
 `SOURCE` is the request document's path, or `-` for the exact bytes on stdin.
 The entry runs only as the image the request names as its executor, so the
-code that acts is always the code the previous image verified. This image
-provides `submit` (the home release journal's submission); `receipt` and
-`preflight` are reserved v1 names it refuses.
+code that acts is always the code the previous image verified. `submit` is the
+home release journal's submission; `receipt` and `preflight` are a unit's
+read-only answers to a fleet coordinator (`cli.release_fleet.entries`).
 """
 
 from __future__ import annotations
@@ -65,8 +65,9 @@ def main(argv: list[str] | None = None) -> int:
         from cli.release_transition.submit import run
 
         return run(encoded)
-    sys.stderr.write(f"release handoff refused: this image does not provide the {entry} entry\n")
-    return 2
+    from cli.release_fleet.entries import run as answer
+
+    return answer(entry, encoded)
 
 
 if __name__ == "__main__":

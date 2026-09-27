@@ -14,9 +14,10 @@ from uuid import uuid4
 import pytest
 from pydantic import JsonValue
 
+from cli.release_fleet.request import FleetRequest
 from cli.release_transition import journal, native
 from cli.release_transition import launcher_linux as linux
-from cli.release_transition.request import ReleaseRef, Request
+from cli.release_transition.request import ReleaseRef
 from shared.native_process.ownership import OwnedProcess
 from shared.runtime_release import VerifiedRelease
 from tests.lifecycle.transition.phases import advance_to
@@ -46,8 +47,8 @@ def planned(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, JsonVa
         schema_digest="c" * 64,
         source_commit="d" * 40,
     )
-    new = old.model_copy(update={"artifact_digest": "e" * 64})
-    request = Request(
+    new = old.model_copy(update={"artifact_digest": "e" * 64, "source_commit": "9" * 40})
+    request = FleetRequest(
         id=uuid4(),
         home=str(home),
         registry=str(registry),
@@ -383,6 +384,7 @@ def _closed_attempt(
         current.mark_launch_attempted()
         if captured:
             current.record_native(running.identity)
+        current.advance("dispatching")
         current.advance("quiescing")
         current.advance("stopping")
     _readback_seams(monkeypatch, planned, pid=0)

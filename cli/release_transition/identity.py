@@ -28,11 +28,11 @@ def require_reservation(request: HomeRequest, *, active_registry: Path) -> None:
 
 
 def require_local_writers(request: HomeRequest) -> None:
-    """Current one-host writer boundary; native resource/fleet fencing extends it.
+    """PITR's one-host writer boundary, pending its switch to the fleet gate.
 
     It admits only a home whose data plane and registered units are its own.
-    Persistent terminals are not refused here: a release closes them at its
-    stop phase, and PITR refuses them itself.
+    A release uses `cli.release_fleet.inventory.require_topology`; PITR moves to
+    `require_fleet_of_one(home)` and this function is deleted then.
     """
     import os
 

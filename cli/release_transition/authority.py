@@ -74,11 +74,12 @@ def adopt_executor_authority(home: Path) -> None:
     adopt_administrator(f"postgresql://{user}@/{database}?{query}")
 
 
-def preflight() -> None:
-    """Read-only: the home holds exactly one admitted generation to fence."""
+def preflight() -> GenerationRef:
+    """Read-only: the home holds exactly one admitted generation to fence; it is
+    also the generation an abort restores on."""
     from cli.commands.data_plane.write_generation import preflight_write_authority
 
-    preflight_write_authority()
+    return GenerationRef.of(preflight_write_authority())
 
 
 def _unfinished(ledger: Ledger) -> list[int]:
@@ -258,11 +259,48 @@ def _require_active(operation: Operation, record: Issue) -> None:
         )
 
 
+def _unit_generation(operation: Operation) -> None:
+    """A remote unit starts only on a generation it holds: an abort's unchanged one.
+
+    A new generation reaches a unit through its capability exchange over the
+    coordinator channel (slice dbgen-8); until then a unit start refuses.
+    """
+    from shared.cluster.authority.unit import load_unit_capability
+
+    unit = operation.unit
+    assert unit is not None  # noqa: S101 — called for unit operations only
+    installed = load_unit_capability(_home(operation))
+    if operation.phase != "restoring":
+        raise AuthorityRefusedError(
+            "a unit starts on a new write generation only after its capability exchange "
+            "over the coordinator channel (slice dbgen-8)"
+        )
+    if installed is None or installed.generation.number != unit.admitted:
+        raise AuthorityRefusedError("an aborted unit restores only on its unchanged generation")
+
+
+def _admitted(operation: Operation) -> GenerationRef:
+    """An abort restores on generation n, recorded at `prepared` and never fenced."""
+    fleet = operation.fleet
+    if fleet is None or fleet.admitted is None or operation.db_fences:
+        raise AuthorityRefusedError("an abort restores only on its recorded unfenced generation")
+    return fleet.admitted
+
+
 def require_issued(operation: Operation) -> None:
     """Before root start: the ledger's active generation is exactly this
-    direction's authorized issue, so the launch delivers (and binds into its
-    digest) only that generation. PITR reuses the active generation."""
+    direction's authorized issue (an abort's: the unchanged admitted one), so
+    the launch delivers (and binds into its digest) only that generation. PITR
+    reuses the active generation."""
     if operation.pitr is not None:
+        return
+    if operation.unit is not None:
+        _unit_generation(operation)
+        return
+    if operation.phase == "restoring":
+        admitted = _admitted(operation)
+        if GenerationRef.of(active_generation(_home(operation))) != admitted:
+            raise AuthorityRefusedError("the write generation changed during an aborted release")
         return
     _require_active(operation, _issued(operation))
 
@@ -271,8 +309,13 @@ def verify_active(operation: Operation) -> None:
     """After readiness: exactly the issued generation writes and nothing older can."""
     from cli.commands.data_plane.write_generation import verify_write_generation
 
-    record = _issued(operation)
-    generation = record.generation
+    if operation.unit is not None:
+        _unit_generation(operation)
+        return
+    if operation.phase == "restoring":
+        generation: GenerationRef | None = _admitted(operation)
+    else:
+        generation = _issued(operation).generation
     if generation is None:
         raise RuntimeError("an authorized issue names its generation")
     verify_write_generation(generation.number, generation.credential_digest)

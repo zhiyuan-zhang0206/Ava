@@ -1,6 +1,7 @@
 """Cluster-ops RPC implementations.
 
-Local pause, resume, recovery, stopping announcements and live status snapshots. One of the four
+Stranded-lease recovery, stopping announcements, live status snapshots and the
+release image-exec handoff. One of the four
 op clusters split out of the former single `ops/operations.py` (the others
 are ops_lifecycle / ops_config / ops_inventory); each cluster is self-contained.
 
@@ -16,11 +17,10 @@ import binascii
 import json
 import os
 import subprocess
-from datetime import datetime
 from pathlib import Path
 from typing import Any, cast
 
-from ops.cluster_pause import pause_local_cluster, release_local_db_pools, unpause_local_cluster
+from ops.cluster_pause import unpause_local_cluster
 from ops.cluster_status import (
     ClusterStatus,
     agent_shell_sessions,
@@ -64,105 +64,6 @@ from shared.runtime_abi import current_abi
 
 class ClusterUpdateInProgress(RuntimeError):  # noqa: N818 — state description
     """An exact deploy or maintenance owner still excludes this transition."""
-
-
-def _require_executing_deploy(
-    deploy_holder: str,
-    deploy_acquired_at: datetime,
-) -> None:
-    """Reject a delayed transition unless its exact lease generation still runs."""
-    lease = read_update_lease()
-    if (
-        lease is None
-        or lease.is_settle_hold
-        or lease.acquired_at is None
-        or lease.holder != deploy_holder
-        or lease.acquired_at != deploy_acquired_at
-    ):
-        raise ClusterUpdateInProgress(
-            "cluster transition refused: its exact executing deploy lease is no longer current"
-        )
-
-
-def cluster_stop_op(
-    deploy_holder: str,
-    deploy_acquired_at: datetime,
-) -> dict[str, object]:
-    """Drain hosted continuations under the exact executing deploy generation."""
-    with home_lifecycle_locks.resource_lock(purpose="ops.cluster_stop drain"):
-        with home_lifecycle_locks.lifecycle_lock():
-            # Recovery takes these locks in the same order. Keep the lease proof
-            # and local owner publication indivisible, then release the short
-            # mutex before the potentially long drain.
-            _require_executing_deploy(deploy_holder, deploy_acquired_at)
-            admission = pause_owner.begin_maintenance(deploy_holder, deploy_acquired_at)
-            try:
-                _require_executing_deploy(deploy_holder, deploy_acquired_at)
-            except BaseException:
-                if admission.created_here:
-                    current = admission.snapshot
-                    assert current.maintenance is not None  # noqa: S101
-                    pause_owner.change_maintenance(
-                        deploy_holder,
-                        deploy_acquired_at,
-                        current.maintenance,
-                        current.maintenance,
-                        resumed=True,
-                    )
-                raise
-        try:
-            pause_local_cluster()
-        except BaseException:
-            try:
-                unpause_local_cluster()
-            except Exception:
-                # Partial pause + failed compensation is conservative: retain
-                # the paused journal so an exact retry/recover can repair it.
-                logger.warning(
-                    "[cluster] pause failed and compensating unpause also failed; "
-                    "retaining exact pause owner"
-                )
-            raise
-        released = release_local_db_pools()
-    return {"released": released}
-
-
-def _refuse_live_local_updater() -> None:
-    """Keep a deploy resume from unpausing a newer host-local updater."""
-    handoff = updater_handoff.read()
-    if handoff.status == "invalid":
-        raise ClusterUpdateInProgress(
-            "cluster resume refused: local updater ownership is unreadable"
-        )
-    if handoff.status == "pending" and not handoff.expired:
-        raise ClusterUpdateInProgress("cluster resume refused: a newer local updater is pending")
-    if handoff.status == "running" and updater_handoff.owner_is_live(handoff):
-        raise ClusterUpdateInProgress("cluster resume refused: a newer local updater is running")
-
-
-def cluster_resume_op(
-    deploy_holder: str,
-    deploy_acquired_at: datetime,
-) -> dict[str, object]:
-    """Generation-scoped unpause — never resume a later rollout's pause."""
-    with (
-        home_lifecycle_locks.resource_lock(purpose="ops.cluster_resume"),
-        home_lifecycle_locks.lifecycle_lock(),
-    ):
-        owner = pause_owner.read()
-        if not owner.matches(deploy_holder, deploy_acquired_at):
-            raise ClusterUpdateInProgress(
-                "cluster resume refused: this host is paused by a different deploy generation"
-            )
-        if owner.status == "resumed":
-            return {}
-        if owner.status != "paused":
-            raise ClusterUpdateInProgress("cluster resume refused: pause owner is unreadable")
-        _refuse_live_local_updater()
-        unpause_local_cluster()
-        if not pause_owner.mark_resumed(deploy_holder, deploy_acquired_at):
-            raise RuntimeError("lost the local pause-owner capability after unpausing")
-    return {}
 
 
 def _lock_holder_is_live(holder: str, *, held_for_s: float | None = None) -> bool:

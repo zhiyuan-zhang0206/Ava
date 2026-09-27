@@ -21,7 +21,8 @@ from uuid import uuid4
 
 import pytest
 
-from cli.release_transition.request import ReleaseRef, Request
+from cli.release_fleet.request import FleetRequest
+from cli.release_transition.request import ReleaseRef
 from shared.runtime_abi import current_abi
 from shared.runtime_release import MANIFEST_VERSION, VerifiedRelease
 
@@ -111,7 +112,7 @@ class Store:
 
     def request(self, **overrides: Any) -> bytes:
         """A current single-host release request naming the executor image."""
-        request = Request(
+        request = FleetRequest(
             id=uuid4(),
             home=str(self.home),
             registry=str(self.home.parent / "clusters.json"),

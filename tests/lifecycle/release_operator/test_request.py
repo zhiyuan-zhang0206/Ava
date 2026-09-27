@@ -1,23 +1,26 @@
-"""`ava cluster release request` — build one single-host release `Request`.
+"""`ava cluster release request` — build the fleet's release request on the gateway home.
 
 Exercises the real `current_release` discovery and `verify_pair` admission
 against real fixture images (`conftest.build_image`); only the *prepared
 receipt file* is stubbed — `PreparationReceipt`'s own cross-field validation
 belongs to `tests/lifecycle/preparation/test_preparation.py`, not this
-module's wiring.
+module's wiring — and the registered units, which are database rows
+(`registered_units`; real in tests/lifecycle/db_authority/test_fleet_of_one.py).
 """
 
 from __future__ import annotations
 
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
 import shared.cluster as cluster_pkg
+from cli.release_fleet.request import FleetRequest
 from cli.release_operator import request as request_module
 from cli.release_operator.layout import receipt_path
-from cli.release_transition.request import ReleaseRef, Request
+from cli.release_transition.request import ReleaseRef
 from shared import machine as shared_machine
 from shared import paths as shared_paths
 from shared.runtime_abi import current_abi
@@ -27,13 +30,28 @@ from tests.lifecycle.release_operator.conftest import build_image
 _COMMIT = "a" * 40
 
 
+_RUNNER = ("macbook-air", "/Users/zzy/.ava")
+
+
 @pytest.fixture
-def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+def rows() -> dict[str, set[Any]]:
+    """The database's registered units, machines and paused machines."""
+    return {"units": set(), "machines": {"test-unit"}, "paused": set()}
+
+
+@pytest.fixture
+def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, rows: dict[str, set[Any]]) -> Path:
     path = tmp_path / "home"
     path.mkdir()
+    rows["units"].add(("test-unit", str(path)))
     monkeypatch.setattr(shared_paths, "ava_home", lambda: path)
     monkeypatch.setattr(cluster_pkg, "registry_path", lambda: tmp_path / "clusters.json")
     monkeypatch.setattr(shared_machine, "machine_name", lambda: "test-unit")
+    monkeypatch.setattr(
+        request_module,
+        "registered_units",
+        lambda: (set(rows["units"]), set(rows["machines"]), set(rows["paused"])),
+    )
     return path
 
 
@@ -48,10 +66,12 @@ def _select(home: Path, reference: ReleaseRef) -> None:
     )
 
 
-def _stub_receipt(monkeypatch: pytest.MonkeyPatch, home: Path, reference: ReleaseRef) -> Path:
-    """Place a receipt at the exact path `--commit` resolves to; its bytes are
-    never really parsed — `PreparationReceipt.model_validate_json` is stubbed."""
-    path = receipt_path(home, reference.source_commit)
+def _stub_receipt(
+    monkeypatch: pytest.MonkeyPatch, home: Path, reference: ReleaseRef, *, path: Path | None = None
+) -> Path:
+    """Place a receipt at the exact path `--commit` resolves to (or `path`); its
+    bytes are never really parsed — `PreparationReceipt.model_validate_json` is stubbed."""
+    path = receipt_path(home, reference.source_commit) if path is None else path
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(b"{}")
     fake = SimpleNamespace(
@@ -70,16 +90,91 @@ def _stub_receipt(monkeypatch: pytest.MonkeyPatch, home: Path, reference: Releas
     return path
 
 
-def test_exclude_or_reason_always_refuses(home: Path, tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    ("exclude", "reason", "message"),
+    [
+        (("macbook-air:/Users/zzy/.ava",), None, "given together"),
+        ((), "paused", "given together"),
+        (("win:C:\\ava",), "gone", "not registered"),
+        (("test-unit:HOME",), "gone", "cannot be excluded"),
+        ((), None, "dbgen-8"),
+    ],
+)
+def test_every_registered_unit_is_accounted_for_before_writing(
+    home: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    rows: dict[str, set[Any]],
+    capsys: pytest.CaptureFixture[str],
+    exclude: tuple[str, ...],
+    reason: str | None,
+    message: str,
+) -> None:
+    previous = build_image(home, "previous")
+    candidate = build_image(home, "candidate")
+    _select(home, previous)
+    _stub_receipt(monkeypatch, home, candidate)
+    rows["units"].add(_RUNNER)
+    rows["machines"].add(_RUNNER[0])
+    exclude = tuple(value.replace("HOME", str(home)) for value in exclude)
     code = request_module.cmd_release_request(
-        commit=_COMMIT, out=tmp_path / "out.json", exclude=("m:home",), reason=None
+        commit=candidate.source_commit, out=tmp_path / "out.json", exclude=exclude, reason=reason
     )
-    assert code == 2
-    code = request_module.cmd_release_request(
-        commit=_COMMIT, out=tmp_path / "out.json", exclude=(), reason="paused"
-    )
-    assert code == 2
+    assert code == 2 and message in capsys.readouterr().err
     assert not (tmp_path / "out.json").exists()
+
+
+def test_paused_and_operator_excluded_units_are_recorded_exclusions(
+    home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, rows: dict[str, set[Any]]
+) -> None:
+    previous = build_image(home, "previous")
+    candidate = build_image(home, "candidate")
+    _select(home, previous)
+    _stub_receipt(monkeypatch, home, candidate)
+    rows["units"] |= {_RUNNER, ("win", "C:\\Users\\zzy\\.ava")}
+    rows["machines"] |= {"macbook-air", "win"}
+    rows["paused"].add("win")
+    out = tmp_path / "out.json"
+    code = request_module.cmd_release_request(
+        commit=candidate.source_commit,
+        out=out,
+        exclude=("macbook-air:/Users/zzy/.ava",),
+        reason="lid closed",
+    )
+    assert code == 0
+    request = FleetRequest.model_validate_json(out.read_bytes())
+    assert request.units == () and request.coordinator is None
+    assert [(e.unit.label, e.reason, e.detail) for e in request.excluded] == [
+        ("macbook-air:/Users/zzy/.ava", "operator", "lid closed"),
+        ("win:C:\\Users\\zzy\\.ava", "paused", "paused machine"),
+    ]
+    assert request.excluded[0].recorded_by.startswith("operator:")
+
+
+def test_an_explicit_receipt_and_watch_window_are_captured(
+    home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    previous = build_image(home, "previous")
+    candidate = build_image(home, "candidate")
+    _select(home, previous)
+    elsewhere = tmp_path / "receipt-b.json"
+    _stub_receipt(monkeypatch, home, candidate, path=elsewhere)
+    out = tmp_path / "out.json"
+    code = request_module.cmd_release_request(
+        commit=candidate.source_commit,
+        out=out,
+        exclude=(),
+        reason=None,
+        receipt=elsewhere,
+        watch_s=60,
+    )
+    assert code == 0
+    request = FleetRequest.model_validate_json(out.read_bytes())
+    assert request.candidate == candidate and request.policy.watch_s == 60
+    code = request_module.cmd_release_request(
+        commit="f" * 40, out=tmp_path / "other.json", exclude=(), reason=None, receipt=elsewhere
+    )
+    assert code == 2
 
 
 def test_malshaped_commit_refuses(home: Path, tmp_path: Path) -> None:
@@ -152,11 +247,12 @@ def test_happy_path_writes_a_request_ava_cluster_update_can_consume(
 
     assert code == 0
     assert out.stat().st_mode & 0o777 == 0o600
-    request = Request.model_validate_json(out.read_bytes())
+    request = FleetRequest.model_validate_json(out.read_bytes())
     assert request.home == str(home)
     assert request.registry == str(cluster_pkg.registry_path())
     assert request.machine == "test-unit"
     assert request.previous == previous
     assert request.candidate == candidate
     assert request.executor == candidate
+    assert (request.units, request.excluded, request.coordinator) == ((), (), None)
     assert request.path.parent.exists() is False  # nothing was submitted or dispatched

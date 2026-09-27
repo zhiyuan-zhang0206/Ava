@@ -20,8 +20,8 @@ from typing import Literal, NamedTuple, Self, get_args
 from pydantic import AwareDatetime, Field, model_validator
 
 from cli.release_fleet.policy import Cohort, FleetPolicy, UnitKey
-from cli.release_transition.journal import Direction
 from cli.release_transition.request import Record
+from shared.cluster.authority.model import Direction
 
 CoreSignal = Literal[
     "gateway",  # the gateway unit's selected services are ready

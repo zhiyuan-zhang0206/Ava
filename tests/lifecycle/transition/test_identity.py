@@ -9,14 +9,15 @@ from uuid import uuid4
 
 import pytest
 
+from cli.release_fleet.request import FleetRequest
 from cli.release_transition.identity import require_reservation
-from cli.release_transition.request import ReleaseRef, Request
+from cli.release_transition.request import ReleaseRef
 from cli.start_identity import IdentityInput, mark_phase, prepare_identity
 from shared import cluster
 
 
 @pytest.fixture
-def prepared(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Request:
+def prepared(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> FleetRequest:
     root = tmp_path.resolve()
     checkout = root / "source"
     checkout.mkdir()
@@ -39,8 +40,8 @@ def prepared(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Request:
         schema_digest="c" * 64,
         source_commit="d" * 40,
     )
-    candidate = previous.model_copy(update={"artifact_digest": "e" * 64})
-    return Request(
+    candidate = previous.model_copy(update={"artifact_digest": "e" * 64, "source_commit": "9" * 40})
+    return FleetRequest(
         id=uuid4(),
         home=str(home),
         registry=str(registry),
@@ -53,14 +54,14 @@ def prepared(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Request:
     )
 
 
-def test_matching_prepared_reservation_does_not_rewrite_it(prepared: Request) -> None:
+def test_matching_prepared_reservation_does_not_rewrite_it(prepared: FleetRequest) -> None:
     registry = Path(prepared.registry)
     before = registry.read_bytes()
     require_reservation(prepared, active_registry=registry)
     assert registry.read_bytes() == before
 
 
-def test_request_cannot_redirect_runtime_to_an_empty_registry(prepared: Request) -> None:
+def test_request_cannot_redirect_runtime_to_an_empty_registry(prepared: FleetRequest) -> None:
     wrong = Path(prepared.registry).with_name("other.json")
     wrong.write_text("{}")
     redirected = prepared.model_copy(update={"registry": str(wrong)})
@@ -71,7 +72,9 @@ def test_request_cannot_redirect_runtime_to_an_empty_registry(prepared: Request)
 
 
 @pytest.mark.parametrize("mutation", ["missing", "ports", "home"])
-def test_lost_or_changed_reservation_refuses_before_drain(prepared: Request, mutation: str) -> None:
+def test_lost_or_changed_reservation_refuses_before_drain(
+    prepared: FleetRequest, mutation: str
+) -> None:
     registry = Path(prepared.registry)
     values = json.loads(registry.read_bytes())
     if mutation == "missing":
@@ -87,7 +90,7 @@ def test_lost_or_changed_reservation_refuses_before_drain(prepared: Request, mut
         require_reservation(prepared, active_registry=registry)
 
 
-def test_registry_symlink_is_not_an_admitted_authority(prepared: Request) -> None:
+def test_registry_symlink_is_not_an_admitted_authority(prepared: FleetRequest) -> None:
     link = Path(prepared.registry).with_name("registry-link.json")
     link.symlink_to(prepared.registry)
     redirected = prepared.model_copy(update={"registry": str(link)})
@@ -124,7 +127,7 @@ def _live_terminal() -> None:
 
 
 def test_release_writer_boundary_admits_terminals_its_stop_phase_closes(
-    prepared: Request, monkeypatch: pytest.MonkeyPatch
+    prepared: FleetRequest, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A live terminal is no longer a release refusal: production always has
     schedules and PTYs, and the stop phase closes them (FC-6)."""

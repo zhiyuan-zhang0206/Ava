@@ -30,9 +30,10 @@ import pytest
 from cli.commands.data_plane import bringup, write_generation
 from cli.commands.data_plane import cluster_instance as ci
 from cli.commands.data_plane import pgbouncer as pooler
+from cli.release_fleet.request import FleetRequest
 from cli.release_transition import authority as release_authority
 from cli.release_transition.journal import Operation, create, exclusive, read_operation
-from cli.release_transition.request import ReleaseRef, Request
+from cli.release_transition.request import ReleaseRef
 from shared import db_connections, dotenv_boot
 from shared.cluster import authority, ownership
 from shared.config import settings
@@ -53,7 +54,7 @@ _PREVIOUS = ReleaseRef(
     schema_digest="c" * 64,
     source_commit="d" * 40,
 )
-_CANDIDATE = _PREVIOUS.model_copy(update={"artifact_digest": "e" * 64})
+_CANDIDATE = _PREVIOUS.model_copy(update={"artifact_digest": "e" * 64, "source_commit": "9" * 40})
 
 
 def _point(home: Path, reference: ReleaseRef) -> None:
@@ -68,10 +69,10 @@ def _point(home: Path, reference: ReleaseRef) -> None:
 
 
 @pytest.fixture
-def release(born: Born) -> Request:
+def release(born: Born) -> FleetRequest:
     (born.home / "releases").mkdir()
     _point(born.home, _PREVIOUS)
-    request = Request(
+    request = FleetRequest(
         id=uuid4(),
         home=str(born.home),
         registry=str(born.home.parent / "clusters.json"),
@@ -110,7 +111,7 @@ def _refused_everywhere(born: Born, login: Login) -> None:
         _refused(host=host, port=port, user=login.name, password=login.password, dbname="ava")
 
 
-def _fence(request: Request) -> Operation:
+def _fence(request: FleetRequest) -> Operation:
     with exclusive(request.path) as journal:
         if journal.operation.phase != "fencing":
             advance_to(journal, "fencing")
@@ -118,7 +119,7 @@ def _fence(request: Request) -> Operation:
         return journal.operation
 
 
-def _authorize(request: Request, target: ReleaseRef) -> Operation:
+def _authorize(request: FleetRequest, target: ReleaseRef) -> Operation:
     with exclusive(request.path) as journal:
         if journal.operation.phase == "fencing":
             journal.advance("selecting")
@@ -202,7 +203,7 @@ def _stale_writers(born: Born, old: dict[str, Login]) -> Generator[Callable[[], 
 
 
 def test_fence_closes_every_stale_writer_before_any_new_generation(
-    born: Born, release: Request
+    born: Born, release: FleetRequest
 ) -> None:
     old = _logins(born)
     with _stale_writers(born, old) as writers_closed:
@@ -236,7 +237,7 @@ def test_fence_closes_every_stale_writer_before_any_new_generation(
 
 
 def test_the_admitted_generation_is_the_only_writer_behind_a_fresh_pooler(
-    born: Born, release: Request
+    born: Born, release: FleetRequest
 ) -> None:
     old = _logins(born)
     before = _pooler_birth()
@@ -261,7 +262,7 @@ def test_the_admitted_generation_is_the_only_writer_behind_a_fresh_pooler(
 
 
 def test_failed_candidate_is_fenced_and_the_predecessor_runs_on_a_new_generation(
-    born: Born, release: Request
+    born: Born, release: FleetRequest
 ) -> None:
     """The data-plane A/B/A: G0 -> G1 for the candidate -> G2 for the predecessor."""
     generation_zero = _logins(born)
@@ -272,7 +273,7 @@ def test_failed_candidate_is_fenced_and_the_predecessor_runs_on_a_new_generation
     held.execute("SELECT 1")
     with exclusive(release.path) as journal:
         advance_to(journal, "starting")
-        journal.recover("candidate readiness failed")
+        journal.recover("candidate readiness failed", at=datetime.now(UTC))
         journal.advance("fencing")
     recovered = _fence(release)
     with pytest.raises(psycopg.OperationalError):
@@ -333,7 +334,7 @@ _ISSUE_DEATHS = {
 
 @pytest.mark.parametrize("death", [*_FENCE_DEATHS, *_ISSUE_DEATHS])
 def test_death_after_each_boundary_continues_the_same_generation(
-    born: Born, release: Request, monkeypatch: pytest.MonkeyPatch, death: str
+    born: Born, release: FleetRequest, monkeypatch: pytest.MonkeyPatch, death: str
 ) -> None:
     old = _logins(born)
     if death in _FENCE_DEATHS:
@@ -365,7 +366,7 @@ def test_death_after_each_boundary_continues_the_same_generation(
 
 
 def test_a_changed_verifier_after_a_death_holds_instead_of_minting_again(
-    born: Born, release: Request, monkeypatch: pytest.MonkeyPatch
+    born: Born, release: FleetRequest, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _fence(release)
     _ISSUE_DEATHS["minted"](monkeypatch)
@@ -383,7 +384,7 @@ def test_a_changed_verifier_after_a_death_holds_instead_of_minting_again(
 
 
 def test_a_surviving_session_holds_the_fence_without_a_closure_receipt(
-    born: Born, release: Request, monkeypatch: pytest.MonkeyPatch
+    born: Born, release: FleetRequest, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from shared.cluster.authority import fence as library_fence
 
@@ -450,7 +451,7 @@ def test_executor_dials_the_owner_socket_acting_as_the_gateway_group(
 
 
 def test_the_fence_never_terminates_the_executors_own_sessions(
-    born: Born, release: Request, executor: str
+    born: Born, release: FleetRequest, executor: str
 ) -> None:
     import shared.db
 
@@ -460,7 +461,7 @@ def test_the_fence_never_terminates_the_executors_own_sessions(
         assert conn.execute("SELECT current_user").fetchone() == ("ava_gateway",)
 
 
-def test_observation_refuses_a_surviving_fenced_session(born: Born, release: Request) -> None:
+def test_observation_refuses_a_surviving_fenced_session(born: Born, release: FleetRequest) -> None:
     """A session the fence would close (here: of a role that lost LOGIN while
     connected) makes observation hold, even though every login answers."""
     _fence(release)
@@ -486,7 +487,7 @@ def test_observation_refuses_a_surviving_fenced_session(born: Born, release: Req
         assert lingering.execute("SELECT 1").fetchone() == (1,)  # observed, never terminated
 
 
-def test_preview_stale_writer_probe_proves_the_fence(born: Born, release: Request) -> None:
+def test_preview_stale_writer_probe_proves_the_fence(born: Born, release: FleetRequest) -> None:
     """The preview A/B/A's probe (scripts/preview/release_generation.py) on a real
     fence: a writer outside root custody holding generation 0 is terminated, its
     transaction aborts, it never commits again, and every generation-0 login is
@@ -521,7 +522,7 @@ def test_preview_stale_writer_probe_proves_the_fence(born: Born, release: Reques
 
 
 def test_preview_observer_reads_stored_agents_as_the_administrator_across_rotations(
-    born: Born, release: Request
+    born: Born, release: FleetRequest
 ) -> None:
     """The preview observer runs from the source checkout, which is not the
     admitted runtime once a release image is selected: it reads the retained

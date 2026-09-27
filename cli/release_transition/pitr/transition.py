@@ -29,7 +29,8 @@ from shared.native_process.ownership import OwnedProcess
 from shared.process_evidence import ExpectedProcess
 from shared.verified_file import regular_bytes
 
-# Terminal writer closure bounds, matching the release stop phase (FC-6): busy
+# Terminal writer closure bounds, matching the release stop phase's default
+# FleetPolicy `close_s` and `cancel_grace_s`: busy
 # terminals get the completed-work wait while root still serves them, then the
 # graceful cancel; whatever is live after the grace gets SIGKILL over its
 # captured birth.

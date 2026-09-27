@@ -13,9 +13,10 @@ import pytest
 from pydantic import JsonValue, ValidationError
 
 from cli.release_transition import journal
+from cli.release_transition.journal import read_request
 from cli.release_transition.pitr.evidence import PitrSeal
 from cli.release_transition.pitr.inputs import read_record, require_inputs
-from cli.release_transition.request import PitrRequest, ReleaseRef, read_request
+from cli.release_transition.request import PitrRequest, ReleaseRef
 from services.pitr.activation_state import ActivationRecord, record_path, write_record
 from shared.process_evidence import ExpectedProcess
 from shared.release_operation import (
@@ -108,7 +109,7 @@ def test_pitr_round_trip_has_one_image_and_no_release_direction(pitr_request: Pi
         journal.Operation(request=pitr_request)
     with journal.exclusive(pitr_request.path) as handle:
         with pytest.raises(ValueError, match="automatic"):
-            handle.recover("failure")
+            handle.recover("failure", at=datetime.now(UTC))
         with pytest.raises(ValueError, match="invalid release transition"):
             handle.advance("selecting")
 
@@ -358,8 +359,8 @@ def test_rollback_cannot_decide_while_native_attempt_is_unknown(
 def test_new_rollback_after_release_uses_selected_image_and_same_activation(
     pitr_request: PitrRequest, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    from cli.release_fleet.request import FleetRequest
     from cli.release_transition.pitr import submission
-    from cli.release_transition.request import Request
     from shared import cluster, machine, paths
 
     # The activation was born under A. A subsequent completed release selected B.
@@ -368,8 +369,10 @@ def test_new_rollback_after_release_uses_selected_image_and_same_activation(
     home = Path(pitr_request.home)
     record = _record(pitr_request)
     write_record(home, record)
-    image_b = pitr_request.image.model_copy(update={"artifact_digest": "e" * 64})
-    release = Request(
+    image_b = pitr_request.image.model_copy(
+        update={"artifact_digest": "e" * 64, "source_commit": "9" * 40}
+    )
+    release = FleetRequest(
         **pitr_request.model_dump(
             exclude={
                 "kind",

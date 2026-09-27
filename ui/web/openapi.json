@@ -2898,92 +2898,6 @@
         }
       }
     },
-    "/api/cluster/stop": {
-      "post": {
-        "summary": "Post Cluster Stop",
-        "description": "Phase A handler: drain native agent controls while SDK dependencies\nremain available, then stop local services through cluster_stop.",
-        "operationId": "post_cluster_stop_api_cluster_stop_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ClusterTransitionPayload"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": {
-                    "type": "boolean"
-                  },
-                  "type": "object",
-                  "title": "Response Post Cluster Stop Api Cluster Stop Post"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/cluster/resume": {
-      "post": {
-        "summary": "Post Cluster Resume",
-        "description": "Compensating unpause: restore posture and release native admission holds,\nexecuted by this host's ops server via a cluster_resume op.\n\nSymmetric inverse of `/api/cluster/stop`. The orchestration's failure path\nfans this out (by dialing each host's ops server) to every host it had paused.\nOperators recover a stranded host with `ava cluster recover` on that host; this\nroute requires the opaque exact capability of the deploy that created the pause.",
-        "operationId": "post_cluster_resume_api_cluster_resume_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ClusterTransitionPayload"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": {
-                    "type": "boolean"
-                  },
-                  "type": "object",
-                  "title": "Response Post Cluster Resume Api Cluster Resume Post"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/cluster/stopping": {
       "post": {
         "summary": "Post Cluster Stopping",
@@ -8866,28 +8780,6 @@
         ],
         "title": "ClusterStatus",
         "description": "`GET /api/cluster/status` response body — this host's snapshot in the\nmulti-machine view.\n\n`ava cluster status` CLI and the future monitoring page consume the\nsame payload."
-      },
-      "ClusterTransitionPayload": {
-        "properties": {
-          "deploy_holder": {
-            "type": "string",
-            "minLength": 1,
-            "title": "Deploy Holder"
-          },
-          "deploy_acquired_at": {
-            "type": "string",
-            "format": "date-time",
-            "title": "Deploy Acquired At"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "deploy_holder",
-          "deploy_acquired_at"
-        ],
-        "title": "ClusterTransitionPayload",
-        "description": "Exact deploy-lease capability for one stop/resume generation.\n\nBoth fields are required. A delayed request from generation A must not be\nauthorized by whichever generation happens to own the lease when it lands."
       },
       "CommandItem": {
         "properties": {

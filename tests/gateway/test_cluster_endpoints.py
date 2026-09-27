@@ -477,111 +477,20 @@ class TestStatusSnapshot:
         assert cluster_status.status_snapshot().supervisor_online is online
 
 
-# ─── /api/cluster/stop + update endpoints via TestClient ─────────────────────
+# ─── cluster endpoints via TestClient ─────────────────────────────────────────
 
 
 class TestClusterEndpoints:
-    def test_post_stop_dispatches_cluster_stop(
-        self,
-        monkeypatch: pytest.MonkeyPatch,
-        set_machine_identity,
-    ) -> None:
-        """POST /api/cluster/stop forwards a cluster_stop op to this host's own
-        ops server — the gateway router never touches the flag/session itself."""
-        from gateway.routers import cluster as cluster_router
-
-        set_machine_identity(role="gateway", name="test-host")
-        dispatched: list[dict] = []
-
-        async def _fake_dispatch(
-            *,
-            target_machine,
-            kind,
-            payload,
-            timeout_s=None,
-            retries=None,
-            idempotency_key=None,
-        ):  # type: ignore[no-untyped-def]
-            dispatched.append({"target_machine": target_machine, "kind": kind, "payload": payload})  # pyright: ignore[reportUnknownMemberType]
-            return {}
-
-        monkeypatch.setattr(cluster_router._cluster_rpc, "dispatch_to_machine", _fake_dispatch)  # pyright: ignore[reportUnknownArgumentType]
+    @pytest.mark.parametrize("route", ["/api/cluster/stop", "/api/cluster/resume"])
+    def test_the_legacy_deploy_lease_transition_is_gone(self, route: str) -> None:
+        """A fleet release stops and resumes units itself (cli/release_fleet); the
+        legacy lease-bound stop/resume routes and their ops kinds no longer exist."""
         with TestClient(app) as client:
             r = client.post(
-                "/api/cluster/stop",
+                route,
                 json={"deploy_holder": "g:pid1", "deploy_acquired_at": "2026-08-25T00:00:00Z"},
             )
-        assert r.status_code == 200
-        assert r.json() == {"paused": True}
-        assert dispatched == [
-            {
-                "target_machine": "test-host",
-                "kind": "cluster_stop",
-                "payload": {
-                    "deploy_holder": "g:pid1",
-                    "deploy_acquired_at": "2026-08-25T00:00:00Z",
-                },
-            }
-        ]
-
-    def test_post_resume_dispatches_cluster_resume(
-        self,
-        monkeypatch: pytest.MonkeyPatch,
-        set_machine_identity,
-    ) -> None:
-        """POST /api/cluster/resume forwards a cluster_resume op to this host's
-        own ops server, symmetric with /stop."""
-        from gateway.routers import cluster as cluster_router
-
-        set_machine_identity(role="gateway", name="test-host")
-        dispatched: list[dict] = []
-
-        async def _fake_dispatch(
-            *,
-            target_machine,
-            kind,
-            payload,
-            timeout_s=None,
-            retries=None,
-            idempotency_key=None,
-        ):  # type: ignore[no-untyped-def]
-            dispatched.append({"target_machine": target_machine, "kind": kind, "payload": payload})  # pyright: ignore[reportUnknownMemberType]
-            return {}
-
-        monkeypatch.setattr(cluster_router._cluster_rpc, "dispatch_to_machine", _fake_dispatch)  # pyright: ignore[reportUnknownArgumentType]
-        with TestClient(app) as client:
-            r = client.post(
-                "/api/cluster/resume",
-                json={"deploy_holder": "g:pid1", "deploy_acquired_at": "2026-08-25T00:00:00Z"},
-            )
-        assert r.status_code == 200
-        assert r.json() == {"paused": False}
-        assert dispatched == [
-            {
-                "target_machine": "test-host",
-                "kind": "cluster_resume",
-                "payload": {
-                    "deploy_holder": "g:pid1",
-                    "deploy_acquired_at": "2026-08-25T00:00:00Z",
-                },
-            }
-        ]
-
-    def test_post_resume_never_mints_a_capability_from_current_state(self) -> None:
-        with TestClient(app) as client:
-            r = client.post("/api/cluster/resume")
-        assert r.status_code == 422
-
-    def test_transition_capability_requires_an_rfc3339_offset(self) -> None:
-        with TestClient(app) as client:
-            r = client.post(
-                "/api/cluster/resume",
-                json={
-                    "deploy_holder": "g:pid1",
-                    "deploy_acquired_at": "2026-08-25T00:00:00",
-                },
-            )
-        assert r.status_code == 422
+        assert r.status_code in {404, 405}
 
     def test_post_stopping_marks_machine(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """POST /api/cluster/stopping?machine=<name>&home=<home> retracts that unit."""

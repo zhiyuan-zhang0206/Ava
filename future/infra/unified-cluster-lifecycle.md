@@ -376,11 +376,12 @@ the alert recipient does not become the automatic recovery authority.
 
 The independent health-probe rollback and known-good writers are removed.
 The new executor's frozen-cohort workload threshold, alert routing and
-known-good publication exist only as a pure policy module
-([fleet workload policy](../../cli/release_fleet/release_fleet.ava.okf.md));
-no executor calls it yet, so none of it is in force before the fleet
-coordinator (FC-7) connects it. Health alerts remain active; removing an old
-decision path is not evidence that its replacement is complete.
+known-good publication are the fleet workload policy
+([fleet workload policy](../../cli/release_fleet/release_fleet.ava.okf.md)),
+executed by the fleet coordinator for a fleet of one; networked fleets wait
+for per-unit credential delivery (dbgen-8) and converge (FC-9). Health alerts
+remain active; removing an old decision path is not evidence that its
+replacement is complete.
 
 Current local serving proofs do not complete this plan. Acceptance requires
 normal teardown, interrupted recovery and release A/B/A evidence, removal of

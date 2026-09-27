@@ -6,6 +6,7 @@ import json
 import subprocess
 from collections.abc import Generator
 from contextlib import contextmanager
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import NoReturn
 from uuid import uuid4
@@ -13,9 +14,9 @@ from uuid import uuid4
 import pytest
 from pydantic import JsonValue
 
+from cli.release_fleet.request import FleetRequest
 from cli.release_transition import journal, submit
 from cli.release_transition import launcher_linux as linux
-from cli.release_transition.request import Request
 from shared import os_boot_unit, paths
 from tests.lifecycle.transition.phases import advance_to
 from tests.lifecycle.transition.test_launcher_linux import (
@@ -33,7 +34,7 @@ def _request_file(plan: dict[str, JsonValue], monkeypatch: pytest.MonkeyPatch) -
     request_path.write_text(operation.request.model_dump_json())
     monkeypatch.setattr(paths, "ava_home", lambda: Path(operation.request.home))
     monkeypatch.setattr(os_boot_unit, "systemd_running", lambda: True)
-    monkeypatch.setattr(submit, "LocalTransition", _unexpected)
+    monkeypatch.setattr(submit, "GatewayUnit", _unexpected)
     return request_path
 
 
@@ -45,14 +46,14 @@ def test_public_submission_loses_predecessor_while_waiting_for_home_lock_without
     prior = journal.read_operation(old_path)
     # The planned operation is a release transition: only that request kind
     # carries the previous/candidate pair the predecessor check compares.
-    assert isinstance(prior.request, Request)
+    assert isinstance(prior.request, FleetRequest)
     request = prior.request.model_copy(update={"id": uuid4()})
     request_file.write_text(request.model_dump_json())
     store = Path(request.home) / "releases"
     events: list[str] = []
 
     class AdmittedInputs:
-        def __init__(self, inputs: Request) -> None:
+        def __init__(self, inputs: FleetRequest) -> None:
             self.candidate = inputs.executor.verify(Path(inputs.home))
 
         def preflight(self) -> None:
@@ -79,7 +80,7 @@ def test_public_submission_loses_predecessor_while_waiting_for_home_lock_without
             events.append("prior update completes on B")
             yield
 
-    monkeypatch.setattr(submit, "LocalTransition", AdmittedInputs)
+    monkeypatch.setattr(submit, "GatewayUnit", AdmittedInputs)
     monkeypatch.setattr(journal, "file_lock", previous_update_finishes)
     monkeypatch.setattr(linux, "plan_launch", _unexpected)
     monkeypatch.setattr(linux, "launch", _unexpected)
@@ -104,7 +105,7 @@ def test_public_submit_continues_closed_attempt_and_interrupted_relaunch(
     with journal.exclusive(path) as current:
         if rollback:
             advance_to(current, "starting")
-            current.recover("candidate readiness failed")
+            current.recover("candidate readiness failed", at=datetime.now(UTC))
         if crash != "finished":
             current.request_retirement(terminal.model_dump(mode="json"))
             current.record_retired()
@@ -244,13 +245,13 @@ def test_new_public_request_retires_previous_before_replacing_active_pointer(
     request_file.write_text(request.model_dump_json())
 
     class AdmittedInputs:
-        def __init__(self, request: Request) -> None:
+        def __init__(self, request: FleetRequest) -> None:
             self.candidate = request.executor.verify(Path(request.home))
 
         def preflight(self) -> None:
             pass
 
-    monkeypatch.setattr(submit, "LocalTransition", AdmittedInputs)
+    monkeypatch.setattr(submit, "GatewayUnit", AdmittedInputs)
     if living:
         _readback_seams(monkeypatch, planned)
     retire = _retiring_manager(planned, monkeypatch)

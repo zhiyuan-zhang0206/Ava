@@ -202,7 +202,7 @@ async def test_provided_ops_url_bypasses_machines_lookup(monkeypatch: pytest.Mon
         handler=lambda _r: httpx.Response(200, json={"status": "completed", "result": {"ok": 1}}),
     )
     result = await cluster_rpc.dispatch_to_machine(
-        "wsl", "cluster_resume", {}, ops_url="http://direct:8106"
+        "wsl", "status_probe", {}, ops_url="http://direct:8106"
     )
     assert result == {"ok": 1}
     assert str(captured["request"].url) == "http://direct:8106/ops"
@@ -512,7 +512,7 @@ async def test_5xx_is_retried(monkeypatch: pytest.MonkeyPatch) -> None:
     captured = _patch(monkeypatch, handler=_flaky)
     _pin_retry(monkeypatch)
 
-    result = await cluster_rpc.dispatch_to_machine("wsl", "cluster_resume", {}, retries=2)
+    result = await cluster_rpc.dispatch_to_machine("wsl", "status_probe", {}, retries=2)
 
     assert result == {"paused": True}
     assert calls["n"] == 2

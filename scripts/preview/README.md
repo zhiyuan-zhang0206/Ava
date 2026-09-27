@@ -174,8 +174,9 @@ Its `work` must be `RUN/release-proof/a/acquisition` or
 `RUN/release-proof/b/acquisition`, respectively. The controller creates their
 parents. Optional collector/plugin inputs retain the ordinary acquisition
 contract. Neither document can substitute a moving ref or reuse failed work.
-Both commits must implement this lifecycle and the same schema/scenario contract;
-the cycle checks these before stopping source services.
+Both commits must differ, implement this lifecycle and share one schema, paired
+migration SQL and scenario contract; the cycle checks these before stopping
+source services.
 
 The composition invokes each acquisition and preparation in a fresh source
 interpreter. It verifies the original acquisition again after building the
@@ -228,8 +229,11 @@ final-terminate API, waits for durable termination and native terminal closure,
 and retains identity/configuration/checkpoint digests. Source stop keeps the
 private data plane alive. Public `ava cluster release adopt` selects A (the
 CAS requires no existing image) and starts it through the same home's ordinary
-systemd boot unit and pinned boot entry. Public `ava cluster update --prepared`
-then performs A→B, followed by a separately captured B→A request. Each transition must finish in the requested candidate
+systemd boot unit and pinned boot entry. Each transition's request is built at
+its dispatch by the public `ava cluster release request` (the fleet of one,
+with a short captured watch window), run by the then-admitted image: A builds
+A→B, B builds B→A. Public `ava cluster update --prepared` then performs it.
+Each transition must finish in the requested candidate
 direction with a successful, closed finite executor; public resubmission then
 retires that exact executor. A live, failed, recovered or retried operation
 cannot count as a passing transition.

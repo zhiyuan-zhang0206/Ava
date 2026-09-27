@@ -33,10 +33,11 @@ import psutil
 import pytest
 from pydantic import JsonValue
 
+from cli.release_fleet.request import FleetRequest
 from cli.release_transition import journal
 from cli.release_transition import launcher_macos as macos
 from cli.release_transition.launchd_print import read_job
-from cli.release_transition.request import ReleaseRef, Request
+from cli.release_transition.request import ReleaseRef
 from services.permissions_helper import finite_artifact, lifecycle
 from shared.config import settings
 from shared.native_process.ownership import OwnedProcess
@@ -164,13 +165,13 @@ def _image(home: Path) -> ReleaseRef:
     )
 
 
-def _operation(tmp_path: Path) -> Request:
+def _operation(tmp_path: Path) -> FleetRequest:
     home = tmp_path.resolve() / "home"
     home.mkdir(mode=0o700)
     registry = tmp_path.resolve() / "clusters.json"
     registry.write_text("{}")
     image = _image(home)
-    request = Request(
+    request = FleetRequest(
         id=uuid4(),
         home=str(home),
         registry=str(registry),
@@ -269,7 +270,7 @@ def _require_exec_environment(pid: int, expected: dict[str, str]) -> list[str]:
     return trailing
 
 
-def _running_facts(request: Request, job: macos.DarwinJob) -> dict[str, Any]:
+def _running_facts(request: FleetRequest, job: macos.DarwinJob) -> dict[str, Any]:
     """Native ancestry, group and exact exec-time environment of one attempt."""
     launch = macos.DarwinLaunch.model_validate(journal.read_operation(request.path).launch)
     assert job.helper is not None and job.executor is not None
@@ -343,7 +344,7 @@ def _launch(mode: str, plan: dict[str, JsonValue], monkeypatch: pytest.MonkeyPat
     return macos.launch(plan)
 
 
-def _finish(request: Request, plan: dict[str, JsonValue]) -> dict[str, Any]:
+def _finish(request: FleetRequest, plan: dict[str, JsonValue]) -> dict[str, Any]:
     (request.path.parent / "fixture-finish").touch()
     terminal = _terminal(plan)
     assert terminal.exit_code == 0 and terminal.signal is None
@@ -357,13 +358,17 @@ def _finish(request: Request, plan: dict[str, JsonValue]) -> dict[str, Any]:
 
 
 def _executor_kill(
-    request: Request, plan: dict[str, JsonValue], job: macos.DarwinJob, births: list[OwnedProcess]
+    request: FleetRequest,
+    plan: dict[str, JsonValue],
+    job: macos.DarwinJob,
+    births: list[OwnedProcess],
 ) -> dict[str, Any]:
     assert job.executor is not None and job.helper is not None
     child = _capture(_note(request.path.parent, job.executor.pid, "child")["pid"])
     births.append(child)
     assert os.getpgid(child.pid) == job.helper.pid
     with journal.exclusive(request.path) as current:
+        current.advance("dispatching")
         current.advance("quiescing")
         current.advance("stopping")
     assert job.executor.owned().send_signal(signal.SIGKILL)
@@ -389,7 +394,10 @@ def _executor_kill(
 
 
 def _helper_kill(
-    request: Request, plan: dict[str, JsonValue], job: macos.DarwinJob, births: list[OwnedProcess]
+    request: FleetRequest,
+    plan: dict[str, JsonValue],
+    job: macos.DarwinJob,
+    births: list[OwnedProcess],
 ) -> dict[str, Any]:
     assert job.executor is not None and job.helper is not None
     child = _capture(_note(request.path.parent, job.executor.pid, "child")["pid"])
@@ -404,7 +412,10 @@ def _helper_kill(
 
 
 def _escaped(
-    request: Request, plan: dict[str, JsonValue], job: macos.DarwinJob, births: list[OwnedProcess]
+    request: FleetRequest,
+    plan: dict[str, JsonValue],
+    job: macos.DarwinJob,
+    births: list[OwnedProcess],
 ) -> dict[str, Any]:
     assert job.executor is not None and job.helper is not None
     (request.path.parent / "fixture-escape").touch()
@@ -446,7 +457,7 @@ def _gone(process: OwnedProcess, timeout: float = 10) -> bool:
     return True
 
 
-def _child(request: Request, job: macos.DarwinJob, births: list[OwnedProcess]) -> OwnedProcess:
+def _child(request: FleetRequest, job: macos.DarwinJob, births: list[OwnedProcess]) -> OwnedProcess:
     assert job.executor is not None and job.helper is not None
     child = _capture(_note(request.path.parent, job.executor.pid, "child")["pid"])
     births.append(child)
@@ -455,7 +466,7 @@ def _child(request: Request, job: macos.DarwinJob, births: list[OwnedProcess]) -
 
 
 def _refused_until_operator_kill(
-    request: Request, plan: dict[str, JsonValue], child: OwnedProcess
+    request: FleetRequest, plan: dict[str, JsonValue], child: OwnedProcess
 ) -> dict[str, Any]:
     """No recorded owner pins the group: closure refuses, names the survivor, signals nothing."""
     refusals: dict[str, str] = {}
@@ -479,7 +490,10 @@ def _refused_until_operator_kill(
 
 
 def _helper_kill_ignoring(
-    request: Request, plan: dict[str, JsonValue], job: macos.DarwinJob, births: list[OwnedProcess]
+    request: FleetRequest,
+    plan: dict[str, JsonValue],
+    job: macos.DarwinJob,
+    births: list[OwnedProcess],
 ) -> dict[str, Any]:
     """Review P1-2/P2-3: launchd's cleanup is SIGTERM only; a TERM-ignoring member survives."""
     child = _child(request, job, births)
@@ -494,7 +508,10 @@ def _helper_kill_ignoring(
 
 
 def _exit_ignoring(
-    request: Request, plan: dict[str, JsonValue], job: macos.DarwinJob, births: list[OwnedProcess]
+    request: FleetRequest,
+    plan: dict[str, JsonValue],
+    job: macos.DarwinJob,
+    births: list[OwnedProcess],
 ) -> dict[str, Any]:
     """The helper itself closes its group after the executor: TERM, grace, then KILL."""
     child = _child(request, job, births)
@@ -509,7 +526,10 @@ def _exit_ignoring(
 
 
 def _executor_ignoring(
-    request: Request, plan: dict[str, JsonValue], job: macos.DarwinJob, births: list[OwnedProcess]
+    request: FleetRequest,
+    plan: dict[str, JsonValue],
+    job: macos.DarwinJob,
+    births: list[OwnedProcess],
 ) -> dict[str, Any]:
     """A live recorded executor pins the group, so the adapter's bounded SIGKILL is exact."""
     child = _child(request, job, births)
@@ -536,7 +556,7 @@ def _signaled(plan: dict[str, JsonValue], job: macos.DarwinJob, number: int) -> 
     return {"terminal": terminal.model_dump(mode="json"), "print": text}
 
 
-def _retire_fixture(request: Request, births: list[OwnedProcess]) -> dict[str, Any]:
+def _retire_fixture(request: FleetRequest, births: list[OwnedProcess]) -> dict[str, Any]:
     current = journal.read_operation(request.path)
     records = [retired["launch"] for retired in current.retired_executors]
     if current.launch is not None:
@@ -576,7 +596,7 @@ _IGNORING = {"helper-kill-ignoring", "helper-kill-unrecorded", "exit-ignoring", 
 
 def _exercise(
     mode: str,
-    request: Request,
+    request: FleetRequest,
     plan: dict[str, JsonValue],
     job: macos.DarwinJob,
     births: list[OwnedProcess],

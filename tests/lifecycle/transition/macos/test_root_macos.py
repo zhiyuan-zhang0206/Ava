@@ -10,15 +10,16 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
+from cli.release_fleet.request import FleetRequest
 from cli.release_transition import journal, root_macos, root_service
 from cli.release_transition.launchd_custody import Birth, RootCustody
-from cli.release_transition.request import Request
 from services.permissions_helper import client, finite_artifact
 from shared import paths
 from shared.native_process import ownership
@@ -43,7 +44,7 @@ class World:
     def __init__(self, harness: Harness, monkeypatch: pytest.MonkeyPatch) -> None:
         self.harness = harness
         request = journal.read_operation(harness.path).request
-        assert isinstance(request, Request)
+        assert isinstance(request, FleetRequest)
         self.home = Path(request.home)
         self.run_dir = self.home / "run/ava-root"
         self.run_dir.mkdir(parents=True)
@@ -425,7 +426,7 @@ def test_observation_requires_a_receipt_of_the_current_direction(world: World) -
         root_macos.require_custody(operation, world.image)
     _start(world)
     with journal.exclusive(world.harness.path) as current:
-        current.recover("candidate failed")
+        current.recover("candidate failed", at=datetime.now(UTC))
     with pytest.raises(RuntimeError, match="no journaled start receipt"):
         root_macos.require_custody(journal.read_operation(world.harness.path), world.image)
 

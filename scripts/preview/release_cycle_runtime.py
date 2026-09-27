@@ -12,21 +12,24 @@ import json
 import subprocess
 import sys
 import time
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
-from uuid import uuid4
 
 from dotenv import dotenv_values
 
+from cli.release_fleet.request import FleetRequest
 from cli.release_transition.journal import Operation, read_operation
 from cli.release_transition.launcher_linux import LinuxJob, readback, retire_current
-from cli.release_transition.request import ReleaseRef, Request, verify_pair
+from cli.release_transition.request import ReleaseRef, sql_inventory
 from scripts.preview import local
 from scripts.preview.linux_observer import _require_context
 from scripts.preview.linux_runtime import bound_runtime
 from shared.runtime_release import VerifiedRelease, current_pointer
 from shared.verified_file import regular_bytes
+
+# The captured watch window of each cycle release: long enough for the
+# coordinator's own samples, short against the 900 s executor wait.
+_WATCH_S = 30
 
 _FIXTURE = """import hashlib, json, sys
 from pathlib import Path
@@ -87,9 +90,9 @@ def _fixture(run: Path, image: VerifiedRelease) -> dict[str, Any]:
 def prepare(
     run: Path, previous: Path, candidate: Path, bindings: tuple[tuple[str, str], tuple[str, str]]
 ) -> None:
-    from shared.machine import machine_name
+    """Capture both images; each release request is built later, at its dispatch,
+    by the public `ava cluster release request` in the then-admitted image."""
     from shared.os_boot_unit import systemd_running, unit_name
-    from shared.start_inputs import configuration_digest
 
     if not systemd_running():
         raise RuntimeError("image cycle requires the native Linux system manager")
@@ -124,27 +127,14 @@ def prepare(
         }
     if inputs["images"]["a"]["fixture"] != inputs["images"]["b"]["fixture"]:
         raise RuntimeError("A and B scripted fixture scenarios differ")
-    for label, old, new in (("ab", a_ref, b_ref), ("ba", b_ref, a_ref)):
-        request = Request(
-            id=uuid4(),
-            home=str(run / "home"),
-            registry=str(run / "clusters.json"),
-            created_at=datetime.now(UTC),
-            machine=machine_name(),
-            previous=old,
-            candidate=new,
-            executor=new,
-            configuration_digest=configuration_digest(run / "home"),
-        )
-        verify_pair(request)
-        path = run / f"release-{label}-request.json"
-        path.write_text(request.model_dump_json() + "\n")
-        path.chmod(0o600)
-        inputs["requests"][label] = {
-            "request": str(path),
-            "operation": str(request.path),
-            "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
-        }
+    # What each request will be admitted on, checked before any source stop:
+    # two distinct commits over one schema and equal paired migration SQL.
+    if a_ref.source_commit == b_ref.source_commit:
+        raise ValueError("a fleet release moves between two distinct source commits")
+    if a_ref.schema_digest != b_ref.schema_digest or sql_inventory(a_image) != sql_inventory(
+        b_image
+    ):
+        raise ValueError("the image cycle proves same-schema releases only")
     local.write_json(destination, inputs)
 
 
@@ -187,12 +177,61 @@ def initial(run: Path) -> None:
     )
 
 
-def _operation(run: Path, label: str) -> Request:
+def _requested(run: Path, label: str) -> bool:
+    inputs = json.loads(regular_bytes(run / "release-inputs.json"))
+    return label in inputs["requests"]
+
+
+def _build_request(run: Path, label: str) -> None:
+    """The public operator verb, run by the admitted image: A for A→B, B for B→A.
+
+    Only the admitted runtime receives the home's database login, and the
+    verb reads the registered units there. The captured bytes are hashed once;
+    every later read (dispatch retry, wait, retirement) must match them.
+    """
+    source, target = ("a", "b") if label == "ab" else ("b", "a")
+    _, admitted = image_input(run, source)
+    inputs = json.loads(regular_bytes(run / "release-inputs.json"))
+    selected = inputs["images"][target]
+    out = run / f"release-{label}-request.json"
+    subprocess.run(  # noqa: S603 — fixed argv, verified image interpreter, no shell
+        admitted.module_argv(
+            "cli.main",
+            "cluster",
+            "release",
+            "request",
+            "--commit",
+            selected["reference"]["source_commit"],
+            "--receipt",
+            selected["receipt"],
+            "--out",
+            str(out),
+            "--watch-s",
+            str(_WATCH_S),
+        ),
+        cwd=admitted.cwd,
+        env=local.clean_env()
+        | {"AVA_HOME": str(run / "home"), "AVA_CLUSTER_REGISTRY": str(run / "clusters.json")},
+        timeout=180,
+        check=True,
+    )
+    request = FleetRequest.model_validate_json(regular_bytes(out))
+    if request.executor.model_dump(mode="json") != selected["reference"]:
+        raise RuntimeError("the built request names another executor than the captured image")
+    inputs["requests"][label] = {
+        "request": str(out),
+        "operation": str(request.path),
+        "sha256": hashlib.sha256(regular_bytes(out)).hexdigest(),
+    }
+    local.write_json(run / "release-inputs.json", inputs)
+
+
+def _operation(run: Path, label: str) -> FleetRequest:
     encoded = regular_bytes(run / f"release-{label}-request.json")
     inputs = json.loads(regular_bytes(run / "release-inputs.json"))
     if hashlib.sha256(encoded).hexdigest() != inputs["requests"][label]["sha256"]:
         raise RuntimeError("captured cycle request changed")
-    request = Request.model_validate_json(encoded)
+    request = FleetRequest.model_validate_json(encoded)
     if request.home != str(run / "home") or request.registry != str(run / "clusters.json"):
         raise RuntimeError("cycle operation belongs to another preview")
     return request
@@ -200,6 +239,8 @@ def _operation(run: Path, label: str) -> Request:
 
 def dispatch(run: Path, label: str) -> None:
     reference, image = image_input(run, "b" if label == "ab" else "a")
+    if not _requested(run, label):
+        _build_request(run, label)
     request = _operation(run, label)
     if request.executor != reference:
         raise RuntimeError("cycle dispatch names a different retained executor")
@@ -232,7 +273,7 @@ def _closed_journal(operation: Operation, native: LinuxJob) -> Operation:
     return final
 
 
-def _sample(request: Request, *, cleanup: bool) -> tuple[Operation, LinuxJob | None]:
+def _sample(request: FleetRequest, *, cleanup: bool) -> tuple[Operation, LinuxJob | None]:
     operation = read_operation(request.path)
     if operation.request != request or operation.attempt != 0:
         raise RuntimeError("cycle operation changed inputs or retried a failed executor")
@@ -279,6 +320,8 @@ def _completed(operation: Operation, native: LinuxJob, *, cleanup: bool) -> bool
 
 
 def wait_executor(run: Path, label: str, *, cleanup: bool = False) -> None:
+    if cleanup and not _requested(run, label):
+        return  # never dispatched: no executor to settle
     request = _operation(run, label)
     if cleanup and not request.path.exists():
         return

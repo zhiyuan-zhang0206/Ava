@@ -14,12 +14,15 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+from cli.release_fleet.policy import UnitCohort, capture_cohort
+from cli.release_fleet.progress import initial_progress
+from cli.release_fleet.request import FleetRequest
 from cli.release_transition.authority_evidence import Fence, FenceEvidence, GenerationRef, Issue
 from cli.release_transition.journal import Journal, Operation, Phase
-from cli.release_transition.request import Request
 
 RELEASE_PHASES: tuple[Phase, ...] = (
     "prepared",
+    "dispatching",
     "quiescing",
     "stopping",
     "fencing",
@@ -27,7 +30,9 @@ RELEASE_PHASES: tuple[Phase, ...] = (
     "authorizing",
     "starting",
     "observing",
+    "starting_units",
     "resuming",
+    "watching",
     "complete",
 )
 
@@ -56,7 +61,7 @@ def closed(direction: str, fenced: GenerationRef) -> Fence:
 
 def authorized(direction: str, issued: GenerationRef, operation: Operation) -> Issue:
     request = operation.request
-    assert isinstance(request, Request)
+    assert isinstance(request, FleetRequest)
     target = request.candidate if direction == "candidate" else request.previous
     return Issue.model_validate(
         {
@@ -116,7 +121,15 @@ def records(
 def at_phase(phase: Phase, *, issued: GenerationRef | None = None, **fields: Any) -> Operation:
     """A validated operation with `fields` placed at `phase`, carrying the
     receipts that phase requires (`fields` alone may not be a valid journal
-    state, as for a recovery before its candidate's records exist)."""
+    state, as for a recovery before its candidate's records exist) and, for a
+    fleet request without explicit progress, a fresh fleet progress (completed
+    `clean` at `complete`)."""
+    request = fields["request"]
+    if isinstance(request, FleetRequest) and "fleet" not in fields:
+        progress = initial_progress(request)["fleet"]
+        if phase == "complete":
+            progress = progress.model_copy(update={"outcome": "clean"})
+        fields = fields | {"fleet": progress}
     draft = Operation.model_construct(**fields)
     return Operation.model_validate(
         draft.model_dump() | records(draft, phase, issued) | {"phase": phase}
@@ -195,19 +208,49 @@ def journal_issue(handle: Journal) -> Operation:
 
 
 def step(handle: Journal, phase: Phase) -> Operation:
-    """`handle.advance(phase)`, first journaling the receipt the phase it leaves requires."""
+    """`handle.advance(phase)`, first journaling the receipt the phase it leaves
+    requires; completing a fleet operation records a `clean` outcome (or
+    `recovered` for a recovery)."""
     operation = handle.operation
     if operation.direction is not None and operation.phase == "fencing":
         journal_fence(handle)
     if operation.direction is not None and operation.phase == "authorizing":
         journal_issue(handle)
+    if operation.fleet is not None:
+        _stamp(handle, phase)
+    if phase == "complete" and operation.fleet is not None:
+        return handle.complete("clean" if operation.direction == "candidate" else "recovered")
     return handle.advance(phase)
 
 
+def _stamp(handle: Journal, phase: Phase) -> None:
+    """What the coordinator would have journaled before leaving the phase: the
+    frozen cohort (the gateway unit, no agents), the start and resume stamps."""
+    progress = handle.operation.fleet
+    request = handle.operation.request
+    assert progress is not None and isinstance(request, FleetRequest)
+    changes: dict[str, object] = {}
+    if phase == "stopping" and progress.cohort is None:
+        changes["cohort"] = capture_cohort(
+            gateway=request.gateway,
+            reports=[UnitCohort(unit=request.gateway)],
+            captured_at=request.created_at,
+        )
+    if phase == "observing" and progress.started_at is None:
+        changes["started_at"] = request.created_at
+    if phase == "watching" and progress.resumed_at is None:
+        changes["resumed_at"] = request.created_at
+    if changes:
+        handle.record_fleet(progress.model_copy(update=changes))
+
+
 def advance_to(handle: Journal, target: Phase) -> Operation:
-    """Step through every release phase after the current one up to `target`."""
+    """Step through every release phase after the current one up to `target`
+    (a recovery skips `watching`)."""
     current = handle.operation
     start = RELEASE_PHASES.index(current.phase) + 1
     for phase in RELEASE_PHASES[start : RELEASE_PHASES.index(target) + 1]:
+        if phase == "watching" and current.direction == "previous":
+            continue
         current = step(handle, phase)
     return current

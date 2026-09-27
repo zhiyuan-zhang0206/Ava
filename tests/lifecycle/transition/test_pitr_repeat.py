@@ -10,10 +10,11 @@ from pathlib import Path
 
 import pytest
 
+from cli.release_fleet.request import FleetRequest
 from cli.release_transition import journal, submit
 from cli.release_transition.pitr import submission
 from cli.release_transition.pitr.inputs import require_inputs
-from cli.release_transition.request import PitrRequest, Request
+from cli.release_transition.request import PitrRequest
 from services.pitr.activation_state import mark_pre_mutation_rolled_back, record_path, write_record
 from shared.release_operation import authorized_pitr
 from tests.lifecycle.transition.phases import at_phase
@@ -39,8 +40,10 @@ def _rolled_back(request: PitrRequest) -> journal.Operation:
 
 
 def _release(request: PitrRequest) -> journal.Operation:
-    image = request.image.model_copy(update={"artifact_digest": "e" * 64})
-    release = Request(
+    image = request.image.model_copy(
+        update={"artifact_digest": "e" * 64, "source_commit": "9" * 40}
+    )
+    release = FleetRequest(
         **request.model_dump(
             exclude={
                 "kind",

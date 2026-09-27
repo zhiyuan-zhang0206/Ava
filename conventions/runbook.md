@@ -1283,28 +1283,30 @@ telemetry token are that unit-bound capability, and a runner never holds
 `AVA_CLUSTER_SECRET` (a home that still records it refuses to start). Memory checkout initialization remains
 explicit through `ava memory init`.
 
-**Release-operator verbs (single host).** `ava cluster release prepare` /
-`request` / `adopt` / `status` are thin operator wiring over the same
-release-prepare and release-transition machinery, for exactly one host — there
-is no fleet model yet:
+**Release-operator verbs.** `ava cluster release prepare` / `request` /
+`adopt` / `exclude` / `status` are thin operator wiring over release
+preparation and the fleet release transition; a single box is a fleet of one:
 
 ```bash
 ava cluster release prepare --commit FULL_COMMIT_SHA --inputs LOCAL_INPUTS_JSON [--repo REPO]
-ava cluster release request --commit FULL_COMMIT_SHA --out /absolute/path/to/request.json
+ava cluster release request --commit FULL_COMMIT_SHA --out /absolute/path/to/request.json \
+  [--receipt RECEIPT_JSON] [--exclude MACHINE:HOME --reason R] [--watch-s S]
 ava cluster release adopt --receipt /absolute/path/to/receipt.json
+ava cluster release exclude --operation OPERATION_ID --unit MACHINE:HOME --reason R
 ava cluster release status [--operation OPERATION_ID] [--json]
 ```
 
 `prepare` builds one inactive image under `$AVA_HOME/releases/work/<commit>`;
 no outage. It takes an already-acquired `LocalInputs` document — this verb
 does not acquire build inputs online. `request` reads that receipt plus this
-home's currently selected release and writes the `Request` JSON `ava cluster
-update --prepared` consumes, replacing hand-building that request. `adopt` is
+home's currently selected release and writes the fleet request `ava cluster
+update --prepared` consumes; it must account for every registered unit (a
+paused machine's units are excluded; `--exclude` records an operator
+exclusion; any other unit refuses until networked releases exist). `adopt` is
 this home's first-ever image selection
 (`activate_release(expected_current=None)` plus the steady boot action, Linux
-only); every later transition goes through `request` then `update`. `status`
-is read-only. `request`'s `--exclude`/`--reason` name a multi-host fleet
-exclusion and always refuse — see
+only); every later transition goes through `request` then `update`. `exclude`
+leaves a unit out of a held operation; `status` is read-only — see
 [release operator surface](../cli/release_operator/release_operator.ava.okf.md).
 
 Release preparation completes before maintenance. The prepared request captures
@@ -1323,14 +1325,19 @@ state. Completion comes from the operation journal, not a successful submission
 exit. Resubmit the same captured request to
 inspect or continue a positively closed attempt; uncertain native custody refuses.
 The executor lives outside the application root and retains its code throughout
-the transition. Candidate start/readiness failure selects the captured predecessor
-once through the same startup path.
+the transition. It is the fleet coordinator
+([coordinator](../cli/release_fleet/coordinator.ava.okf.md)): a failure before
+the write-generation fence aborts and restarts the unchanged previous image; a
+candidate failure after it (start, readiness, the start barrier or the
+post-resume watch window) selects the captured predecessor once on a new
+generation; anything else holds for the operator with a `held` alert.
 
-The connected effect adapter currently supports one initialized local Linux
-gateway and equal packaged migration SQL, and closes persistent terminal
-writers at its stop phase. It refuses other boundaries before stopping work.
-This is not a fleet/schema update or a production cutover instruction. The
-remaining writer barrier, recovery policy, PITR restart integration and
+The connected effect adapter currently supports a fleet of one (one
+initialized local Linux gateway, or macOS through the home helper) and equal
+packaged migration SQL, and closes persistent terminal writers at its stop
+phase. Networked fleets and schema changes refuse before stopping work.
+This is not a production cutover instruction. The remaining per-unit
+credential delivery, converge, migration barrier, PITR restart integration and
 platform proof are tracked in the
 [lifecycle plan](../future/infra/unified-cluster-lifecycle.md). The preparation and
 execution contracts live in [release preparation](../cli/release_prepare/release_prepare.ava.okf.md)

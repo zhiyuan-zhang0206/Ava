@@ -13,16 +13,17 @@ from uuid import uuid4
 
 import pytest
 
+from cli.release_fleet.request import FleetRequest
 from cli.release_transition import local, stage
 from cli.release_transition.journal import Phase
-from cli.release_transition.request import ReleaseRef, Request
+from cli.release_transition.request import ReleaseRef
 from shared.runtime_release import ReleaseRejectedError
 from shared.start_inputs import configuration_digest
 from tests.lifecycle.transition.phases import at_phase
 
 
 @pytest.fixture
-def request_fixture(tmp_path: Path) -> Request:
+def request_fixture(tmp_path: Path) -> FleetRequest:
     home = tmp_path.resolve() / "home"
     home.mkdir()
     (home / ".env").write_text("AVA_MACHINE_NAME=original\n")
@@ -33,8 +34,8 @@ def request_fixture(tmp_path: Path) -> Request:
         schema_digest="c" * 64,
         source_commit="d" * 40,
     )
-    candidate = previous.model_copy(update={"artifact_digest": "e" * 64})
-    return Request(
+    candidate = previous.model_copy(update={"artifact_digest": "e" * 64, "source_commit": "9" * 40})
+    return FleetRequest(
         id=uuid4(),
         home=str(home),
         registry=str(home.parent / "clusters.json"),
@@ -47,7 +48,7 @@ def request_fixture(tmp_path: Path) -> Request:
     )
 
 
-def _change(request: Request, member: str) -> None:
+def _change(request: FleetRequest, member: str) -> None:
     (Path(request.home) / member).write_text("changed after release preparation\n")
 
 
@@ -73,7 +74,7 @@ def _forbid_runtime_imports(monkeypatch: pytest.MonkeyPatch) -> None:
 @pytest.mark.parametrize("member", [".env", "service-selection.json"])
 @pytest.mark.parametrize("phase", ["prepared", "starting", "observing", "resuming"])
 def test_stage_refuses_changed_inputs_before_settings_or_effects(
-    request_fixture: Request,
+    request_fixture: FleetRequest,
     monkeypatch: pytest.MonkeyPatch,
     member: str,
     phase: Phase,
@@ -102,7 +103,7 @@ def test_stage_refuses_changed_inputs_before_settings_or_effects(
 @pytest.mark.parametrize("member", [".env", "service-selection.json"])
 @pytest.mark.parametrize("action", ["preflight", "start", "observe", "resume"])
 def test_executor_phase_refuses_drift_before_runtime_effects(
-    request_fixture: Request,
+    request_fixture: FleetRequest,
     monkeypatch: pytest.MonkeyPatch,
     member: str,
     action: str,
@@ -119,15 +120,17 @@ def test_executor_phase_refuses_drift_before_runtime_effects(
             getattr(transition, action)()
 
 
-def test_request_configuration_check_is_read_only_and_repeatable(request_fixture: Request) -> None:
+def test_request_configuration_check_is_read_only_and_repeatable(
+    request_fixture: FleetRequest,
+) -> None:
     home = Path(request_fixture.home)
     before = {path: path.read_bytes() for path in home.rglob("*") if path.is_file()}
     request_fixture.require_configuration()
-    Request.model_validate_json(request_fixture.model_dump_json()).require_configuration()
+    FleetRequest.model_validate_json(request_fixture.model_dump_json()).require_configuration()
     assert {path: path.read_bytes() for path in home.rglob("*") if path.is_file()} == before
 
 
-def test_configuration_identity_imports_without_settings(request_fixture: Request) -> None:
+def test_configuration_identity_imports_without_settings(request_fixture: FleetRequest) -> None:
     code = """
 import builtins
 import sys
@@ -140,7 +143,7 @@ def guarded(name, *args, **kwargs):
     return original(name, *args, **kwargs)
 builtins.__import__ = guarded
 from shared.start_inputs import configuration_digest
-from cli.release_transition.request import Request
+from cli.release_fleet.request import FleetRequest
 assert configuration_digest(Path(sys.argv[2])) == sys.argv[3]
 assert "shared.config" not in sys.modules
 """

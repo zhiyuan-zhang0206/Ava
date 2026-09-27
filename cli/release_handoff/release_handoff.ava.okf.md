@@ -57,19 +57,20 @@ on stdin.
 The entry runs only as the image the request names as executor (its code root
 must lie in `home/releases/<executor artifact>`), so the code that acts is the
 code the previous image verified even if the request file changed after the
-check. This image provides `submit`, which is the home release journal's
-submission ([[cli/release_transition/release_transition.ava.okf.md]]); it
-refuses the reserved `receipt` and `preflight` names. A later image fills them
-in (the fleet request builder asks each unit for its receipt and preflight
-through the ops kind), and the previous image then needs nothing new.
+check. `submit` is the home release journal's submission
+([[cli/release_transition/release_transition.ava.okf.md]]). `receipt` and
+`preflight` are a unit's read-only answers to a fleet coordinator
+(`cli/release_fleet/entries.py`, [[cli/release_fleet/release_fleet.ava.okf.md]]):
+the unit's facts for including it, and whether its own unit request is
+admissible now. The previous image needed nothing new for them.
 
 ## Boundaries
 
 - The coordinator that calls the ops kind, the fleet request kinds and the
   unit follower belong to the fleet release transition
-  ([plan](../../future/infra/unified-cluster-lifecycle.md)). The ops kind
-  needs the unit's candidate image reference up front; it does not look images
-  up by commit.
+  ([[cli/release_fleet/release_fleet.ava.okf.md]]). The ops kind needs the
+  unit's candidate image reference up front; it does not look images up by
+  commit.
 - The coordinator's own listener and its per-unit authentication (the
   enrollment secret) are separate: see
   [[shared/cluster/authority/wiring.ava.okf.md]].

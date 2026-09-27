@@ -13,13 +13,14 @@ from uuid import uuid4
 import pytest
 from pydantic import JsonValue
 
+from cli.release_fleet.request import FleetRequest
 from cli.release_transition import journal
-from cli.release_transition.request import ReleaseRef, Request
-from tests.lifecycle.transition.phases import advance_to, step
+from cli.release_transition.request import ReleaseRef
+from tests.lifecycle.transition.phases import advance_to, at_phase, step
 
 
 @pytest.fixture
-def request_record(tmp_path: Path) -> Request:
+def request_record(tmp_path: Path) -> FleetRequest:
     home = tmp_path.resolve() / "home"
     home.mkdir()
     previous = ReleaseRef(
@@ -28,7 +29,7 @@ def request_record(tmp_path: Path) -> Request:
         schema_digest="c" * 64,
         source_commit="d" * 40,
     )
-    candidate = previous.model_copy(update={"artifact_digest": "e" * 64})
+    candidate = previous.model_copy(update={"artifact_digest": "e" * 64, "source_commit": "9" * 40})
     (home / "releases").mkdir()
     (home / "releases/current-release").write_text(
         json.dumps(
@@ -38,7 +39,7 @@ def request_record(tmp_path: Path) -> Request:
             }
         )
     )
-    return Request(
+    return FleetRequest(
         id=uuid4(),
         home=str(home),
         registry=str(home.parent / "clusters.json"),
@@ -51,13 +52,13 @@ def request_record(tmp_path: Path) -> Request:
     )
 
 
-def _active(request: Request) -> Path:
+def _active(request: FleetRequest) -> Path:
     return Path(request.home) / "updates/active"
 
 
 @pytest.mark.parametrize("missing", [False, True])
 def test_initial_admission_reads_predecessor_after_acquiring_home_lock(
-    request_record: Request, monkeypatch: pytest.MonkeyPatch, *, missing: bool
+    request_record: FleetRequest, monkeypatch: pytest.MonkeyPatch, *, missing: bool
 ) -> None:
     pointer = Path(request_record.home) / "releases/current-release"
     original_lock = journal.file_lock
@@ -87,7 +88,7 @@ def test_initial_admission_reads_predecessor_after_acquiring_home_lock(
 
 @pytest.mark.parametrize("missing_active", [False, True])
 def test_replay_after_selecting_candidate_does_not_readmit_predecessor(
-    request_record: Request, *, missing_active: bool
+    request_record: FleetRequest, *, missing_active: bool
 ) -> None:
     journal.create(request_record)
     with journal.exclusive(request_record.path) as handle:
@@ -122,7 +123,7 @@ def _advance(handle: journal.Journal, target: journal.Phase) -> None:
     "phase", ["stopping", "fencing", "selecting", "authorizing", "starting", "resuming"]
 )
 def test_interrupted_intent_is_retained_and_exact_replay_is_read_only(
-    request_record: Request, phase: journal.Phase
+    request_record: FleetRequest, phase: journal.Phase
 ) -> None:
     journal.create(request_record)
     with pytest.raises(KeyboardInterrupt), journal.exclusive(request_record.path) as handle:
@@ -147,7 +148,7 @@ def test_interrupted_intent_is_retained_and_exact_replay_is_read_only(
 
 
 @pytest.mark.parametrize("field", ["configuration_digest", "registry", "machine"])
-def test_same_id_cannot_mutate_captured_inputs(request_record: Request, field: str) -> None:
+def test_same_id_cannot_mutate_captured_inputs(request_record: FleetRequest, field: str) -> None:
     journal.create(request_record)
     before = (_file_state(request_record.path), _file_state(_active(request_record)))
     replacement = {
@@ -155,13 +156,13 @@ def test_same_id_cannot_mutate_captured_inputs(request_record: Request, field: s
         "registry": str(Path(request_record.home).parent / "other-registry.json"),
         "machine": "another-machine",
     }[field]
-    changed = Request.model_validate(request_record.model_dump() | {field: replacement})
+    changed = FleetRequest.model_validate(request_record.model_dump() | {field: replacement})
     with pytest.raises(ValueError, match="cannot change its inputs"):
         journal.create(changed)
     assert (_file_state(request_record.path), _file_state(_active(request_record))) == before
 
 
-def test_competing_operation_refused_until_prior_is_terminal(request_record: Request) -> None:
+def test_competing_operation_refused_until_prior_is_terminal(request_record: FleetRequest) -> None:
     journal.create(request_record)
     competing = request_record.model_copy(update={"id": uuid4()})
     with journal.exclusive(request_record.path) as handle:
@@ -174,8 +175,7 @@ def test_competing_operation_refused_until_prior_is_terminal(request_record: Req
     assert (_file_state(request_record.path), _file_state(_active(request_record))) == before
 
     with journal.exclusive(request_record.path) as handle:
-        handle.advance("resuming")
-        handle.advance("complete")
+        advance_to(handle, "complete")
     completed = _file_state(request_record.path)
     assert journal.create(competing).phase == "prepared"
     assert _active(competing).read_text().strip() == str(competing.path)
@@ -190,7 +190,7 @@ def test_competing_operation_refused_until_prior_is_terminal(request_record: Req
 
 
 def test_interrupted_active_publication_preserves_the_written_intent(
-    request_record: Request, monkeypatch: pytest.MonkeyPatch
+    request_record: FleetRequest, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     original = journal.write_text_atomic
 
@@ -211,7 +211,7 @@ def test_interrupted_active_publication_preserves_the_written_intent(
 
 
 def test_missing_active_pointer_does_not_reset_uncertain_generation(
-    request_record: Request,
+    request_record: FleetRequest,
 ) -> None:
     journal.create(request_record)
     with journal.exclusive(request_record.path) as handle:
@@ -223,7 +223,7 @@ def test_missing_active_pointer_does_not_reset_uncertain_generation(
     assert _file_state(request_record.path) == before
 
 
-def test_interrupted_native_dispatch_cannot_be_repeated(request_record: Request) -> None:
+def test_interrupted_native_dispatch_cannot_be_repeated(request_record: FleetRequest) -> None:
     journal.create(request_record)
     with journal.exclusive(request_record.path) as handle:
         with pytest.raises(ValueError, match="unattempted launch intent"):
@@ -242,7 +242,9 @@ def test_interrupted_native_dispatch_cannot_be_repeated(request_record: Request)
     assert _file_state(request_record.path) == before
 
 
-def test_native_birth_is_recorded_once_and_retained_across_replay(request_record: Request) -> None:
+def test_native_birth_is_recorded_once_and_retained_across_replay(
+    request_record: FleetRequest,
+) -> None:
     journal.create(request_record)
     with journal.exclusive(request_record.path) as handle:
         handle.record_launch({"kind": journal.LINUX, "job": "retained-external-executor"})
@@ -268,7 +270,7 @@ def test_native_birth_is_recorded_once_and_retained_across_replay(request_record
     ],
 )
 def test_launch_record_requires_a_recognized_adapter_kind(
-    request_record: Request, bad_launch: dict[str, JsonValue]
+    request_record: FleetRequest, bad_launch: dict[str, JsonValue]
 ) -> None:
     journal.create(request_record)
     with (
@@ -278,7 +280,9 @@ def test_launch_record_requires_a_recognized_adapter_kind(
         handle.record_launch(bad_launch)
 
 
-def test_reading_a_journal_with_an_invalid_launch_kind_refuses(request_record: Request) -> None:
+def test_reading_a_journal_with_an_invalid_launch_kind_refuses(
+    request_record: FleetRequest,
+) -> None:
     operation = journal.create(request_record)
     raw = operation.model_dump(mode="json") | {"launch": {"unit": "executor-0", "boot_id": "boot"}}
     request_record.path.write_text(json.dumps(raw))
@@ -286,11 +290,11 @@ def test_reading_a_journal_with_an_invalid_launch_kind_refuses(request_record: R
         journal.read_operation(request_record.path)
 
 
-def test_stale_journal_cas_cannot_overwrite_a_newer_decision(request_record: Request) -> None:
+def test_stale_journal_cas_cannot_overwrite_a_newer_decision(request_record: FleetRequest) -> None:
     journal.create(request_record)
     with journal.exclusive(request_record.path) as handle:
         stale = journal.Journal(handle.operation)
-        current = handle.advance("quiescing")
+        current = handle.advance("dispatching")
         before = _file_state(request_record.path)
         with pytest.raises(ValueError, match="changed while executing"):
             stale.fail("overwrite from stale executor")
@@ -300,12 +304,12 @@ def test_stale_journal_cas_cannot_overwrite_a_newer_decision(request_record: Req
 
 @pytest.mark.parametrize("phase", ["starting", "observing"])
 def test_recovery_direction_is_durable_and_cannot_reverse_again(
-    request_record: Request, phase: journal.Phase
+    request_record: FleetRequest, phase: journal.Phase
 ) -> None:
     journal.create(request_record)
     with journal.exclusive(request_record.path) as handle:
         _advance(handle, phase)
-        recovered = handle.recover("candidate failed")
+        recovered = handle.recover("candidate failed", at=datetime.now(UTC))
     assert recovered.direction == "previous"
     assert recovered.phase == "stopping"
     assert journal.create(request_record) == recovered
@@ -316,6 +320,7 @@ def test_recovery_direction_is_durable_and_cannot_reverse_again(
             "authorizing",
             "starting",
             "observing",
+            "starting_units",
             "resuming",
             "complete",
         )
@@ -323,7 +328,7 @@ def test_recovery_direction_is_durable_and_cannot_reverse_again(
             step(handle, next_phase)
             before = _file_state(request_record.path)
             with pytest.raises(ValueError):
-                handle.recover("reverse the recovery")
+                handle.recover("reverse the recovery", at=datetime.now(UTC))
             assert _file_state(request_record.path) == before
         with pytest.raises(ValueError, match="cannot become failed"):
             handle.fail("late failure")
@@ -335,19 +340,19 @@ def test_recovery_direction_is_durable_and_cannot_reverse_again(
     ["prepared", "quiescing", "stopping", "fencing", "selecting", "authorizing", "resuming"],
 )
 def test_recovery_requires_a_failed_candidate_start(
-    request_record: Request, phase: journal.Phase
+    request_record: FleetRequest, phase: journal.Phase
 ) -> None:
     journal.create(request_record)
     with journal.exclusive(request_record.path) as handle:
         if phase != "prepared":
             _advance(handle, phase)
         before = _file_state(request_record.path)
-        with pytest.raises(ValueError, match="only candidate startup"):
-            handle.recover("not a candidate startup failure")
+        with pytest.raises(ValueError, match="cannot recover from"):
+            handle.recover("not a candidate startup failure", at=datetime.now(UTC))
     assert _file_state(request_record.path) == before
 
 
-def test_transition_cannot_skip_intent_or_regress(request_record: Request) -> None:
+def test_transition_cannot_skip_intent_or_regress(request_record: FleetRequest) -> None:
     journal.create(request_record)
     with journal.exclusive(request_record.path) as handle:
         invalid: tuple[journal.Phase, ...] = ("starting", "complete", "prepared")
@@ -360,14 +365,14 @@ def test_transition_cannot_skip_intent_or_regress(request_record: Request) -> No
         assert _file_state(request_record.path) == retained
         with pytest.raises(ValueError, match="replace its recorded native launch"):
             handle.record_launch({"kind": journal.LINUX, "pid": 456})
-        handle.advance("quiescing")
+        handle.advance("dispatching")
         with pytest.raises(ValueError, match="invalid release transition"):
             handle.advance("prepared")
 
 
 @pytest.mark.parametrize("target", ["updates", "generation", "operation", "active", "lock"])
 def test_symlink_storage_is_refused_without_changing_the_target(
-    request_record: Request, tmp_path: Path, target: str
+    request_record: FleetRequest, tmp_path: Path, target: str
 ) -> None:
     home = Path(request_record.home)
     outside = tmp_path / "outside"
@@ -380,7 +385,7 @@ def test_symlink_storage_is_refused_without_changing_the_target(
         request_record.path.parent.mkdir(parents=True)
         if target == "operation":
             destination = outside / "operation.json"
-            destination.write_text(journal.Operation(request=request_record).model_dump_json())
+            destination.write_text(at_phase("prepared", request=request_record).model_dump_json())
             link = request_record.path
         else:
             destination = outside / "sentinel"
@@ -397,7 +402,7 @@ def test_symlink_storage_is_refused_without_changing_the_target(
 
 
 def test_dangling_journal_symlink_is_not_replaced_as_a_fresh_operation(
-    request_record: Request, tmp_path: Path
+    request_record: FleetRequest, tmp_path: Path
 ) -> None:
     request_record.path.parent.mkdir(parents=True)
     missing = tmp_path / "missing-intent.json"
@@ -410,7 +415,9 @@ def test_dangling_journal_symlink_is_not_replaced_as_a_fresh_operation(
 
 
 @pytest.mark.parametrize("target", ["operation", "active"])
-def test_corrupt_active_state_is_not_reinitialized(request_record: Request, target: str) -> None:
+def test_corrupt_active_state_is_not_reinitialized(
+    request_record: FleetRequest, target: str
+) -> None:
     journal.create(request_record)
     path = request_record.path if target == "operation" else _active(request_record)
     path.write_text("{interrupted-or-corrupt")
@@ -420,7 +427,9 @@ def test_corrupt_active_state_is_not_reinitialized(request_record: Request, targ
     assert (_file_state(request_record.path), _file_state(_active(request_record))) == before
 
 
-def test_active_pointer_cannot_adopt_another_home(request_record: Request, tmp_path: Path) -> None:
+def test_active_pointer_cannot_adopt_another_home(
+    request_record: FleetRequest, tmp_path: Path
+) -> None:
     foreign_home = tmp_path.resolve() / "foreign"
     foreign_home.mkdir()
     foreign = request_record.model_copy(update={"home": str(foreign_home), "id": uuid4()})
@@ -447,15 +456,15 @@ def test_active_pointer_cannot_adopt_another_home(request_record: Request, tmp_p
     ],
 )
 def test_incoherent_executor_history_is_rejected(
-    request_record: Request, changes: dict[str, Any]
+    request_record: FleetRequest, changes: dict[str, Any]
 ) -> None:
-    encoded = journal.Operation(request=request_record).model_dump() | changes
+    encoded = at_phase("prepared", request=request_record).model_dump() | changes
     with pytest.raises(ValueError):
         journal.Operation.model_validate(encoded)
 
 
 def test_repeated_continuations_cannot_publish_an_unreadable_journal(
-    request_record: Request,
+    request_record: FleetRequest,
 ) -> None:
     journal.create(request_record)
     with journal.exclusive(request_record.path) as handle:
@@ -500,7 +509,7 @@ def test_repeated_continuations_cannot_publish_an_unreadable_journal(
 
 
 def test_journal_capacity_counts_utf8_bytes_before_atomic_publication(
-    request_record: Request,
+    request_record: FleetRequest,
 ) -> None:
     journal.create(request_record)
     with journal.exclusive(request_record.path) as handle:
@@ -516,7 +525,7 @@ def test_journal_capacity_counts_utf8_bytes_before_atomic_publication(
         assert journal.read_operation(request_record.path) == handle.operation
 
 
-def test_native_retirement_intent_and_absence_survive_crashes(request_record: Request) -> None:
+def test_native_retirement_intent_and_absence_survive_crashes(request_record: FleetRequest) -> None:
     journal.create(request_record)
     closed: dict[str, JsonValue] = {
         "unit": "executor-0",
@@ -565,7 +574,7 @@ def test_native_retirement_intent_and_absence_survive_crashes(request_record: Re
 
 @pytest.mark.parametrize("bad", [{"owner": {"pid": 123}}, {"sub": "running"}, {"unit": "foreign"}])
 def test_native_cleanup_cannot_retire_live_or_foreign_jobs(
-    request_record: Request, bad: dict[str, JsonValue]
+    request_record: FleetRequest, bad: dict[str, JsonValue]
 ) -> None:
     journal.create(request_record)
     with journal.exclusive(request_record.path) as handle:
@@ -583,7 +592,7 @@ def test_native_cleanup_cannot_retire_live_or_foreign_jobs(
         assert _file_state(request_record.path) == before
 
 
-def test_new_operation_requires_previous_executor_retirement(request_record: Request) -> None:
+def test_new_operation_requires_previous_executor_retirement(request_record: FleetRequest) -> None:
     journal.create(request_record)
     next_request = request_record.model_copy(update={"id": uuid4()})
     with journal.exclusive(request_record.path) as handle:

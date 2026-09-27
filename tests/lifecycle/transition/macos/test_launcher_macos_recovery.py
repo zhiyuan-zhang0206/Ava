@@ -161,6 +161,7 @@ def test_crash_and_user_signals_close_like_any_signal(harness: Harness, number: 
 
 def _advance(harness: Harness) -> None:
     with journal.exclusive(harness.path) as current:
+        current.advance("dispatching")
         current.advance("quiescing")
         current.advance("stopping")
 

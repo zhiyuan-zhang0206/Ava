@@ -1,8 +1,8 @@
 """Captured fleet release policy and the frozen eligible cohort.
 
 Pure: no clock, file, database or network access. Every time is an input.
-The fleet coordinator (FC-7) captures `FleetPolicy` in its request and threads
-it to each phase; it captures the `Cohort` once, at `quiescing`, from the
+The fleet coordinator captures `FleetPolicy` in its request and threads it to
+each phase; it captures the `Cohort` once, at `quiescing`, from the
 drain reports of the included units.
 """
 
@@ -75,9 +75,8 @@ class FleetPolicy(Record):
     """The request's `policy` block, captured once and never re-read from Settings.
 
     Bounds are whole seconds so every boundary is exact. `close_s` and
-    `cancel_grace_s` are the writer-closure bounds the one-host transition still
-    hard-codes (`cli/release_transition/local.py`: `_TERMINAL_WORK_S`,
-    `_TERMINAL_GRACE_S`); the fleet threads them to every unit's `closing`.
+    `cancel_grace_s` are the writer-closure bounds the one-home effects
+    (`cli/release_transition/local.py`) apply at every unit's `closing`.
     The threshold is an integer percent so "exactly at the threshold" is exact.
     """
 
