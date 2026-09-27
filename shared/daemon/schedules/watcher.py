@@ -234,12 +234,13 @@ def session_deadline(
 ) -> _dt.datetime | None:
     """The moment a watcher's session must be reclaimed — its target deadline.
 
-    One derivation for every surface of the lifecycle (user ruling
-    2026-09-14, task #3411: a watcher session's shell TTL IS its target
-    deadline, one system — never the registry and the TTL disagreeing). The
-    spawn write path (`ava.watcher._spawn`) and the gateway TTL reaper
-    (deadline-data validation, `running` -> `reaped`) both derive through
-    THIS function:
+    One derivation for the lifecycle (user ruling 2026-09-14, task #3411: a
+    watcher session's shell TTL IS its target deadline). `ava.watcher._spawn`
+    calls this once, at spawn, to fold the deadline into the session's shell
+    TTL — the only place it is derived any more: the gateway TTL reaper
+    (`gateway/ttl_reaper.py`) reclaims every session, watcher or not, purely
+    from its `agent_shell_ttls` deadline and no longer reads this function or
+    any watcher-specific data:
 
     - ``launch`` — ``created_at + timeout_secs`` (the watchdog horizon; the
       session is created with its watchdog, so created_at is the launch);

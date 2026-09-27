@@ -49,13 +49,6 @@ cap-domain exits use `exitType`, `expires`, and `approver`); readers ignore unkn
 - **first-seen**: 2026-09-21
 - **last-verified**: 2026-09-23
 
-### boundary:ava-watcher-py-split
-- **class**: boundary
-- **status**: open
-- **evidence**: `ava/watcher.py` is close to the 800-line ceiling (783 lines after the 2026-09-23 docstring trims; exactly 800 before them) — the per-file budget in `conventions/python-conventions.md` is enforced by `scripts/lint_code_structure.py`; new violations cannot enter the shrink-only baseline, so splitting preserves room for changes. Both R2 PRs (#3148, #3150) had to compress/offload content to stay under the cap. Candidate split: spawn/rebuild helpers vs. public API surface.
-- **first-seen**: 2026-09-22 (PR #3150)
-- **last-verified**: 2026-09-23
-
 ## Wontfix
 
 ### docstring-budget:ava/security.py:module
@@ -75,6 +68,6 @@ cap-domain exits use `exitType`, `expires`, and `approver`); readers ignore unkn
 ### docstring-budget:ava/watcher.py:cron
 - **class**: docstring-budget
 - **status**: wontfix
-- **evidence**: trimmed 31 -> 19 lines this pass (soft cap 12). Residue: five Args (cron format, timezone, end_time types, name, notify) + the renewal semantics (supersede / replace / reuse) whose loss would reintroduce double-firing schedules. The class's calibration note already expected `watcher.cron` as an Args-format-heavy standing item.
+- **evidence**: ~18 lines (soft cap 12) after the 2026-09-27 watcher-registry removal (decisions/2026-09-27-watchers-are-never-restarted.md) dropped the old supersede/replace/reuse residue entirely. Residue now: five Args (cron format, timezone, end_time types, name, notify) + the one-line warning that re-registering the same schedule does NOT dedupe any more — it starts a second, independent session, whose loss would silently reintroduce the double-firing confusion the old dedupe used to prevent. The class's calibration note already expected `watcher.cron` as an Args-format-heavy standing item.
 - **first-seen**: 2026-09-23
-- **last-verified**: 2026-09-23
+- **last-verified**: 2026-09-27

@@ -18,8 +18,11 @@ touch; the full documents are the authority — this is the quick reference.
   can classify.
 - **Alive predicate has one answer**: if a change makes liveness answerable
   two ways (lease vs pid identity), it violates the model.
-- **Watchers get a registry**: no new fire-and-forget watcher/session
-  without a registry entry and a rebuild path.
+- **Watchers are plain sessions, never rebuilt** (ruling reversed
+  2026-09-27, decisions/2026-09-27-watchers-are-never-restarted.md): a
+  watcher (`ava.watcher.at/cron/launch`) carries no registry entry and
+  nothing ever re-spawns one — new code that adds a watcher registry row or
+  a rebuild path is the violation now, not the absence of one.
 - **Event stream records facts only**: no new code that treats the event
   table as a state register.
 

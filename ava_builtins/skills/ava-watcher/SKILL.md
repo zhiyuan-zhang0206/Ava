@@ -52,11 +52,12 @@ wid = ava.watcher.launch(code, timeout="1h", name="file-watcher")
 `timeout` is mandatory — a watcher always has a bounded lifetime so a forgotten
 one can never run forever. Pass a number of seconds, a `timedelta`, or a
 `"<n>{s,m,h,d}"` string. When the timeout elapses the watcher stops itself —
-and **every watcher sends you an exit notice when it stops** (exit code, a
-pointer to its full output, and the tail of that output — a timeout shows up
-there as code 124 with the reason in the tail), so you are never silently
-un-watched; re-launch it if you still need it. Set the timeout comfortably
-longer than you expect to wait.
+and **every watcher sends you an exit notice when it stops on its own** (exit
+code, a pointer to its full output, and the tail of that output — a timeout
+shows up there as code 124 with the reason in the tail); re-launch it if you
+still need it. Set the timeout comfortably longer than you expect to wait.
+That covers a watcher stopping itself — see "Time watchers" below for the
+cases where the platform ends it instead, some of which are silent.
 
 Then idle (do not return a tool call) — the watcher's message will wake you.
 
@@ -160,10 +161,11 @@ learn about it depends on how its session ended:
 - It exits on its own (fired / timed out) — you get the usual completion
   notice, and that's it.
 - You kill it yourself — no extra message; you already have the result.
-- The platform reclaims it at its TTL deadline, or force-closes it on
-  `ava stop` / an update — you get a message saying so.
-- Its pty host is killed with nothing to record it (an external SIGKILL, a
-  power loss) — no message; check `ava.shell.sessions.list()` if a watcher's
+- The platform reclaims it at its TTL deadline, or a normal `ava stop` /
+  update force-closes a busy terminal — you get a message saying so.
+- `ava stop --force`, a Windows unit's stop, or its pty host being killed
+  with nothing to record it (an external SIGKILL, a power loss) — no
+  message in any of these; check `ava.shell.sessions.list()` if a watcher's
   continued presence matters to you.
 
 None of these bring the watcher back. Decide whether to re-create it.

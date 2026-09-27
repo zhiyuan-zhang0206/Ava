@@ -1,7 +1,7 @@
 ---
 type: doc
 title: "R1 — State & Liveness (explicit model)"
-description: "Planned concept model (v3.3, awaiting user): deployment state becomes two explicit tables, liveness becomes leases, watchers get a registry, the event stream returns to pure facts, migrations get a single applier. Final state of a Big Bang migration."
+description: "Planned concept model (v3.3, awaiting user): deployment state becomes two explicit tables, liveness becomes leases, the event stream returns to pure facts, migrations get a single applier. Final state of a Big Bang migration. (The watcher-registry piece of this plan shipped, then was reversed 2026-09-27 — decisions/2026-09-27-watchers-are-never-restarted.md; watchers are not part of this frame any more.)"
 tags:
 - design
 - planned

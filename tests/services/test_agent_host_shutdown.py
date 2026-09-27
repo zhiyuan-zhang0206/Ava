@@ -114,7 +114,6 @@ def _exercise_shutdown(failure: str) -> None:
             _PLUGINS_POLL_INTERVAL_S=0.01,
             _page_reconcile_forever=background,
             _rotate_stdout_log_forever=background,
-            _schedule_watcher_recovery=AsyncMock(),
             InboundWakeDispatcher=MagicMock(return_value=MagicMock(run=dispatch)),
         ),
     ):

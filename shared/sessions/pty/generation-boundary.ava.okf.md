@@ -19,10 +19,12 @@ kill a PTY, but reconcilers apply the boundary on their next pass:
 - ScheduleManager reaps every earlier-generation schedule PTY on its next tick
   and records an open schedule run as `interrupted`. An enabled schedule remains
   current desired state and can later be rebuilt under the new generation.
-- At the next agent boot, watcher reconciliation reaps each
-  earlier-generation watcher row and retains it as `reaped` history. Its old
-  `cron` declaration is not restored automatically. Reaped `at` and `launch`
-  one-shots notify their owner that the event was missed.
+- A watcher (`ava.watcher.at/cron/launch`) is NOT one of these reconcilers any
+  more — it has no desired-state record and nothing rebuilds one
+  (decisions/2026-09-27-watchers-are-never-restarted.md). A watcher session
+  from an earlier generation simply keeps running (or not) exactly as it
+  would without the freeze, subject only to its own TTL deadline, an
+  explicit kill, or `ava stop`.
 
 An inspection freeze has the same boundary semantics. Fence reconcilers before
 freezing when an operation requires selective cleanup rather than this complete

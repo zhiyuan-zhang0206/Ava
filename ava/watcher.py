@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import datetime
 import hashlib
 import logging
@@ -326,12 +327,15 @@ def _spawn(
     agent_id = _agent_id()
     # The session's shell TTL IS this watcher's target deadline (user ruling
     # 2026-09-14, task #3411): launch = created + timeout, cron = cron_end_at,
-    # at = fires_at + grace — derived by `shared.daemon.schedules.watcher.session_deadline`,
-    # the one function the gateway TTL reaper also reads. Written as the
+    # at = fires_at + grace — derived once, here, by
+    # `shared.daemon.schedules.watcher.session_deadline`. Written as the
     # system-side TRUE value: a 7-day standing cron is a normal watcher,
-    # exempt from the 24h user-session cap. Renewing it later
-    # (`ava.shell.sessions.renew`) extends this same deadline like any other
-    # session's TTL.
+    # exempt from the 24h user-session cap. `ava.shell.sessions.renew` can
+    # move this same deadline later, exactly like any other session's TTL —
+    # but only the session's reclamation, never the generated script's own
+    # end (the cron's `_END`, the launch watchdog, the at fire moment), and
+    # a renewal call is itself capped at 24h, so it can pull a standing
+    # cron's reclaim earlier than its declared end.
     now = datetime.datetime.now(datetime.UTC)
     deadline = session_deadline(
         kind,
@@ -378,7 +382,22 @@ def _spawn(
         keep=False,
         notify=notify,
     )
-    _sessions.send(session_id, line)
+    try:
+        _sessions.send(session_id, line)
+    except Exception:
+        # A session whose launch command never sent is not a watcher — it is
+        # an idle login shell sitting under the watcher's name until its TTL
+        # (up to 7 days for a default cron). Kill it now rather than leaking
+        # it; there is no registry row to compensate for any more, but the
+        # session itself still must not linger.
+        logger.error(
+            "[watcher] failed to start session %s — killing it",
+            session_id,
+            exc_info=True,
+        )
+        with contextlib.suppress(Exception):
+            _sessions.kill(session_id)
+        raise
     return session_id
 
 
