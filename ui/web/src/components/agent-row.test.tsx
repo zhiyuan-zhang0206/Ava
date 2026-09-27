@@ -398,6 +398,16 @@ describe("AgentRow status dot gating (display.show_agent_status)", () => {
     const d = statusDot(container);
     expect(d!.className).toContain("bg-emerald-500");
   });
+
+  it("enabled: impersonated status gets its own distinct color", () => {
+    const { container } = renderWithSettings(
+      <AgentRow {...baseProps} agent={ag(1, { status: "impersonated" })} depth={0} ancestorsIsLast={[]} />,
+      { "display.show_agent_status": true },
+    );
+    const d = statusDot(container);
+    expect(d).toBeTruthy();
+    expect(d!.className).toContain("bg-indigo-400");
+  });
 });
 
 describe("AgentRow time display (display.time_mode)", () => {
@@ -597,31 +607,27 @@ describe("AgentRow right-click context menu", () => {
 });
 
 describe("AgentRow takeover control", () => {
-  it("shows an open takeover and ends the observed session from a visible button", () => {
-    const onForceExpire = vi.fn();
-    const confirmMock = vi.fn().mockReturnValue(true);
-    vi.stubGlobal("confirm", confirmMock);
-    render(<AgentRow {...baseProps} onForceExpire={onForceExpire}
-      agent={ag(1, { open_impersonation_session_id: 7 })} depth={0} ancestorsIsLast={[]} />);
-
-    expect(screen.getByText("Takeover open")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "End external takeover session" }));
-    expect(confirmMock).toHaveBeenCalledWith(expect.stringContaining("agent resumes its own work"));
-    expect(onForceExpire).toHaveBeenCalledExactlyOnceWith(7);
-  });
-
-  it("shows no takeover control without an open session, and disables it while an action is pending", () => {
-    const onForceExpire = vi.fn();
-    render(<AgentRow {...baseProps} onForceExpire={onForceExpire}
-      agent={ag(1)} depth={0} ancestorsIsLast={[]} />);
+  // The sidebar shows no dedicated takeover UI at all (user ruling: the only
+  // visible difference for an impersonated agent is its status). Ending a
+  // takeover is reachable only from the right-click context menu — see the
+  // "AgentRow right-click context menu" describe block above for the
+  // end-session item's click → confirm → onForceExpire(sessionId) path.
+  it("renders no on-row takeover label or button when a session is open", () => {
+    render(
+      <AgentRow {...baseProps}
+        agent={ag(1, { open_impersonation_session_id: 7 })} depth={0} ancestorsIsLast={[]} />,
+    );
     expect(screen.queryByText("Takeover open")).toBeNull();
     expect(screen.queryByRole("button", { name: "End external takeover session" })).toBeNull();
+  });
 
-    cleanup();
-    render(<AgentRow {...baseProps} onForceExpire={onForceExpire} pending="expiring"
-      agent={ag(1, { open_impersonation_session_id: 7 })} depth={0} ancestorsIsLast={[]} />);
-    expect(screen.getByText("Ending takeover…")).toBeTruthy();
+  it("renders no 'Ending takeover…' label while a force-expire is pending — the row shows only its generic spinner", () => {
+    render(
+      <AgentRow {...baseProps} pending="expiring"
+        agent={ag(1, { open_impersonation_session_id: 7 })} depth={0} ancestorsIsLast={[]} />,
+    );
+    expect(screen.queryByText("Ending takeover…")).toBeNull();
+    expect(screen.queryByText("Takeover open")).toBeNull();
     expect(screen.queryByRole("button", { name: "End external takeover session" })).toBeNull();
-    expect(onForceExpire).not.toHaveBeenCalled();
   });
 });
