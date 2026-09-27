@@ -602,7 +602,7 @@ def test_sync_bounds_a_stalled_caller_flush(monkeypatch: pytest.MonkeyPatch) -> 
         reports.append(message)
 
     monkeypatch.setattr(pipe, "flush", blocked_flush)
-    monkeypatch.setattr(emitter, "_report_no_pipeline", report)
+    monkeypatch.setattr(emitter, "report_no_pipeline", report)
     timer = threading.Timer(0.1, release.set)
     timer.daemon = True
     timer.start()
@@ -634,7 +634,7 @@ def test_sync_bounds_a_full_marker_enqueue(monkeypatch: pytest.MonkeyPatch) -> N
     def report(message: str, **_extra: Any) -> None:
         reports.append(message)
 
-    monkeypatch.setattr(emitter, "_report_no_pipeline", report)
+    monkeypatch.setattr(emitter, "report_no_pipeline", report)
 
     def free_slot() -> None:
         time.sleep(0.1)

@@ -174,7 +174,7 @@ def _build_providers(endpoint: str) -> tuple[Any, Any]:
     from opentelemetry.sdk.metrics import MeterProvider
     from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
 
-    from shared.telemetry_loss import install_exporter_drop_observer
+    from shared.telemetry.loss import install_exporter_drop_observer
 
     install_exporter_drop_observer()
     # `shutdown_on_exit=False` on both providers: the SDK default registers a

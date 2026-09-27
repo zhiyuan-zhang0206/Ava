@@ -23,7 +23,7 @@ from services.events_maintenance.rollup import (
 from shared.log import logger
 from shared.loki_index_labels import EVENT_STREAM_RETENTION
 from shared.paths import logs_dir
-from shared.telemetry import _is_rollup_source
+from shared.telemetry import is_rollup_source
 
 
 @dataclass(frozen=True)
@@ -51,7 +51,7 @@ def aggregate_rollup_file(path: Path) -> tuple[list[TokensRow], list[MetricsRow]
         for line in source:
             event = json.loads(line)
             event_name = str(event["event_name"])
-            if not _is_rollup_source(event_name):
+            if not is_rollup_source(event_name):
                 continue
             try:
                 agent_id = int(event["agent_id"])

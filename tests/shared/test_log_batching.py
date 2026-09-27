@@ -26,8 +26,8 @@ from typing import Any, cast
 import pytest
 
 from shared import log as slog
-from shared import telemetry, telemetry_loss
-from shared.telemetry import emitter
+from shared import telemetry
+from shared.telemetry import emitter, loss
 
 
 def _event(i: int, category: str = "log") -> telemetry.Event:
@@ -193,13 +193,13 @@ def test_queue_is_bounded_and_counts_what_it_sheds(
         blocked(batch)
 
     reports: list[dict[str, Any]] = []
-    original_report = telemetry_loss.report_loss
+    original_report = loss.report_loss
 
     def report(event: telemetry.Event, count: int, queue_name: str) -> telemetry.Event:
         reports.append({"event": "event_log_drop", "n": count})
         return original_report(event, count, queue_name)
 
-    monkeypatch.setattr(telemetry_loss, "report_loss", report)
+    monkeypatch.setattr(loss, "report_loss", report)
     # Not stopped in a finally: stop() joins, and this writer sleeps 5s by
     # design. The drain thread is already a daemon, so it cannot hold the
     # interpreter open.
@@ -449,7 +449,7 @@ def test_delayed_loss_summary_preserves_actual_drop_time() -> None:
     from datetime import timedelta
 
     dropped_at = datetime.now(UTC) - timedelta(minutes=10)
-    report = telemetry_loss.loss_event(_event(1), 3, "emitter", dropped_at=dropped_at)
+    report = loss.loss_event(_event(1), 3, "emitter", dropped_at=dropped_at)
     assert report.attributes["last_dropped_at"] == dropped_at.timestamp()
     assert report.ts > dropped_at
 
