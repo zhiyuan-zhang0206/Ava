@@ -10554,11 +10554,6 @@
             ],
             "title": "Provider"
           },
-          "process": {
-            "additionalProperties": true,
-            "type": "object",
-            "title": "Process"
-          },
           "anchor_item_id": {
             "anyOf": [
               {
@@ -10588,11 +10583,10 @@
           "session_id",
           "name",
           "executor_name",
-          "provider",
-          "process"
+          "provider"
         ],
         "title": "ImpersonationMetadata",
-        "description": "Declared identity and observed process facts on a rendered message."
+        "description": "Declared identity on a rendered message.\n\nThe observed process facts are captured once at request time and live on\nthe session record (``process_metadata``), not on every message."
       },
       "ImpersonationRetentionLossRow": {
         "properties": {
