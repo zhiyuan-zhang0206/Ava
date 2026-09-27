@@ -1268,11 +1268,17 @@ class TestResurrectIfTerminatedNotificationGuard:
         var_iid = insert_inbound_message(db_conn, aid, "variant", source="system:notice-reply")
         user_iid = insert_inbound_message(db_conn, aid, "hi", source="user")
         note_iid = insert_inbound_message(db_conn, aid, "note", source="system", kind="system_note")
+        # A watcher's wake is source="watcher:<id>" — neither "system" nor a
+        # "system:" variant, so it is NOT a notice: a terminated owner with a
+        # live watcher is auto-resurrected at its next fire, same as any user
+        # chat (decisions/2026-09-27-watchers-are-never-restarted.md).
+        watcher_iid = insert_inbound_message(db_conn, aid, "wake", source="watcher:7")
 
         assert ops_lifecycle._system_notice_source_of_trigger(aid, sys_iid) == "system"
         assert ops_lifecycle._system_notice_source_of_trigger(aid, var_iid) == "system:notice-reply"
         assert ops_lifecycle._system_notice_source_of_trigger(aid, user_iid) is None
         assert ops_lifecycle._system_notice_source_of_trigger(aid, note_iid) is None
+        assert ops_lifecycle._system_notice_source_of_trigger(aid, watcher_iid) is None
         assert ops_lifecycle._system_notice_source_of_trigger(aid, 10**12) is None
         assert ops_lifecycle._system_notice_source_of_trigger(aid + 999, sys_iid) is None
 

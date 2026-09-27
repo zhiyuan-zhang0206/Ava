@@ -202,31 +202,27 @@ def test_renew_rejects_unknown_session() -> None:
         ava.shell.sessions.renew(999_999, ttl=120)
 
 
-def test_renew_rejects_watcher_session(db_conn: psycopg.Connection, _agent_row: int) -> None:
-    """Task #3411: a watcher's TTL is derived from its target deadline
-    (launch timeout / cron end / at moment + grace) — renewing would desync
-    the TTL from that target, so the call is rejected; extending a schedule
-    means re-registering it."""
-    session_id = ava.shell.sessions.new("test-renew-watcher", ttl=120)
+def test_renew_accepts_watcher_session(db_conn: psycopg.Connection, _agent_row: int) -> None:
+    """A watcher's session renews exactly like any other session
+    (decisions/2026-09-27-watchers-are-never-restarted.md): a watcher is
+    nothing but a shell session, with no separate registry or deadline of
+    its own to desync from — deadline = now + ttl, same as any other renew."""
+    wid = ava.watcher.launch(
+        "import time\ntime.sleep(60)\n", timeout="30s", name="test-renew-watcher"
+    )
     try:
-        with db_conn.cursor() as cur:
-            cur.execute(
-                "INSERT INTO agent_watchers (agent_id, session_id, kind, name) "
-                "VALUES (%s, %s, 'cron', 'test-watcher')",
-                (_agent_row, session_id),
-            )
-        db_conn.commit()
-        with pytest.raises(ValueError, match="watcher"):
-            ava.shell.sessions.renew(session_id, ttl=120)
-        renewals, _ = _facts(db_conn, _agent_row, session_id)
-        assert renewals == 0
-        assert _renewal_rows(db_conn, _agent_row, session_id) == []
+        before = datetime.now(UTC)
+        new_deadline = ava.shell.sessions.renew(wid, ttl=120)
+        assert (
+            before + timedelta(seconds=119)
+            <= new_deadline
+            <= datetime.now(UTC) + timedelta(seconds=121)
+        )
+        renewals, _ = _facts(db_conn, _agent_row, wid)
+        assert renewals == 1
     finally:
-        from shared.daemon.schedules.watcher_registry import delete_watcher
-
-        delete_watcher(_agent_row, session_id)
         with contextlib.suppress(ValueError, RuntimeError):
-            ava.shell.sessions.kill(session_id)
+            ava.shell.sessions.kill(wid)
 
 
 def test_renew_rejects_expired_row(db_conn: psycopg.Connection, _agent_row: int) -> None:

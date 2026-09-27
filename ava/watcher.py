@@ -11,13 +11,11 @@ import re as _re
 import tempfile
 from typing import Any
 
-import ava._watcher_reconcile as _reconcile
 from ava.sdk_validation import coerce_str
 from ava.shell import background
 from ava.shell import sessions as _sessions
 from shared.daemon.schedules.watcher import (
     DEFAULT_STANDING_CRON_MAX_SECONDS,
-    TEMPLATE_VERSION,
     _parse_timeout,
     build_at_script,
     build_cron_script,
@@ -168,16 +166,16 @@ def _build_boot(script_path: _pl.Path, watchdog_secs: float | None, agent_id: in
     propagates, Python prints the traceback to stderr (teed to the watcher's
     log file and session capture) and exits non-zero, and the shell-level
     completion notice reports that exit code and carries the tail of the log. A
-    ``SystemExit(n)`` likewise becomes exit code n. The finally block only
-    deletes the generated script + bootstrap files: a watcher reads them
-    exactly once at launch, so removing them on exit keeps the watchers dir
-    empty instead of accumulating a script graveyard (the old global
-    $AVA_HOME/watchers dir grew past 180 files). The watchdog is a daemon
-    timer that prints its reason (into the log) and hard-exits with code 124
-    (the ``timeout(1)`` convention), so a script stuck in a Python-level loop
-    still dies on time — the one thing it cannot preempt is native code that
-    never releases the GIL; a killed watcher skips the finally and leaves its
-    pair behind, which the next launch prunes (_prune_stale_watcher_files).
+    ``SystemExit(n)`` likewise becomes exit code n. The finally block deletes
+    the generated script + bootstrap files: a watcher reads them exactly once
+    at launch, so removing them on exit keeps the watchers dir empty instead
+    of accumulating a script graveyard (the old global $AVA_HOME/watchers dir
+    grew past 180 files). The watchdog is a daemon timer that prints its
+    reason (into the log) and hard-exits with code 124 (the ``timeout(1)``
+    convention), so a script stuck in a Python-level loop still dies on time
+    — the one thing it cannot preempt is native code that never releases the
+    GIL; a killed watcher skips the finally and leaves its pair behind, which
+    the next launch prunes (_prune_stale_watcher_files).
 
     Every bootstrap also arms the ORPHAN GUARD (task #1726): a daemon thread
     that compares ``os.getppid()`` against the parent the process booted
@@ -186,7 +184,11 @@ def _build_boot(script_path: _pl.Path, watchdog_secs: float | None, agent_id: in
     the login shell dies with it and the watcher child is reparented to init
     — still alive, still firing cron/at. The guard makes host death → child
     death within a few seconds, on every host-death path (a kill-path
-    cascade cannot cover a crash or an external SIGKILL).
+    cascade cannot cover a crash or an external SIGKILL). This is the only
+    thing standing between a dead session and a watcher that keeps firing
+    forever: nothing tracks or restarts watchers
+    (decisions/2026-09-27-watchers-are-never-restarted.md), so a watcher
+    child that outlived its session would otherwise run unsupervised.
     """
     watchdog = ""
     if watchdog_secs is not None:
@@ -281,103 +283,7 @@ def _build_boot(script_path: _pl.Path, watchdog_secs: float | None, agent_id: in
         "            os.unlink(_p)\n"
         "        except OSError:\n"
         "            pass\n"
-        "    # R1 (Task #1021): a CLEAN exit ends this watcher for good, so its\n"
-        "    # registry row goes too — a surviving row with a missing session is\n"
-        "    # exactly what the boot reconcile reads as 'killed, should exist'.\n"
-        "    # A killed watcher skips this finally and keeps its row. Fail-soft:\n"
-        "    # a registry blip must not turn a clean exit into a crash.\n"
-        "    try:\n"
-        "        from shared.daemon.schedules.watcher_registry import delete_watcher\n"
-        "        delete_watcher(\n"
-        "            int(os.environ['AVA_AGENT_ID']),\n"
-        "            int(os.environ['AVA_WATCHER_SESSION_ID']),\n"
-        "        )\n"
-        "    except Exception:\n"
-        "        # Not bare: a failed delete leaves a stale row the boot\n"
-        "        # reconcile then misreads (task #1858) — make it visible.\n"
-        "        import logging\n"
-        "        logging.getLogger('watcher').warning(\n"
-        "            'watcher registry row delete failed on clean exit',\n"
-        "            exc_info=True,\n"
-        "        )\n"
     )
-
-
-def _register_cron_spawn(
-    agent_id: int,
-    session_id: int,
-    *,
-    name: str,
-    message: str | None,
-    cron_expr: str,
-    cron_timezone: str,
-    cron_end_at: Any,
-    _exclude_session: int | None,
-    generation: str | None,
-    notify: str,
-) -> tuple[int | None, list[int]]:
-    """Register one cron spawn; return ``(reused_session, superseded_sessions)``.
-
-    ``reused``: an identical live schedule already exists (the Task #1825
-    dedupe won the race) — the caller disposes its fresh session and hands
-    back the winner's id. ``superseded``: every live twin with a different
-    end time was found — the new row is registered here and the caller kills
-    each twin AFTER the new child has started. At most one of the two is
-    non-empty.
-
-    The twin supersede runs FIRST for EVERY registration (task #2617
-    renewal and #2061 explicit-end supersede — one schedule, one live
-    watcher, whatever end times are in play): a defaulted re-registration
-    renews a standing schedule, and an explicit-end re-registration
-    REPLACES a standing twin instead of stacking a double-firing duplicate
-    (user ruling 2026-09-10). An already-live exact-end schedule falls
-    through to the atomic dedupe below and is reused.
-    """
-    from shared.daemon.schedules.watcher_registry import register_cron_atomic, register_cron_renewal
-
-    def _fresh_alive() -> set[int] | None:
-        try:
-            return set(_sessions.list())
-        except Exception:
-            # Session list unavailable — cannot verify liveness, so no
-            # dedupe (spawning is the fail-safe: a duplicate is
-            # recoverable, a reused dead session would silently lose
-            # the schedule).
-            return None
-
-    # The supersede re-check needs the FRESH session list fetched INSIDE
-    # the lock for the same reason as the dedupe (QA nit, #794 delta2).
-    superseded = register_cron_renewal(
-        agent_id,
-        session_id,
-        name=name,
-        message=message,
-        cron_expr=cron_expr,
-        cron_timezone=cron_timezone,
-        cron_end_at=cron_end_at,
-        alive_provider=_fresh_alive,
-        exclude_session=_exclude_session,
-        template_version=TEMPLATE_VERSION,
-        generation=generation,
-        notify=notify,
-    )
-    if superseded:
-        return None, superseded
-    reused = register_cron_atomic(
-        agent_id,
-        session_id,
-        name=name,
-        message=message,
-        cron_expr=cron_expr,
-        cron_timezone=cron_timezone,
-        cron_end_at=cron_end_at,
-        alive_provider=_fresh_alive,
-        exclude_session=_exclude_session,
-        template_version=TEMPLATE_VERSION,
-        generation=generation,
-        notify=notify,
-    )
-    return reused, []
 
 
 def _spawn(
@@ -386,16 +292,20 @@ def _spawn(
     name: str,
     *,
     kind: str,
-    message: str | None = None,
     fires_at: Any = None,
-    cron_expr: str | None = None,
-    cron_timezone: str | None = None,
     cron_end_at: Any = None,
     timeout_secs: float | None = None,
-    _exclude_session: int | None = None,
     notify: str | None = None,
 ) -> int:
     """Start a watcher child running ``code``; return its watcher id.
+
+    A watcher is nothing more than a shell session running a generated
+    script — there is no separate registry or desired-state record
+    (decisions/2026-09-27-watchers-are-never-restarted.md): list it, capture
+    its output, renew its deadline, or kill it exactly like any other session
+    via ``ava.shell.sessions``. Re-registering the same schedule (`cron()`
+    with the same expression/timezone, say) does not replace anything — it
+    simply starts another independent session; nothing dedupes.
 
     The session runs two files: the agent's script (written verbatim) and a
     generated bootstrap that inlines the agent identity, arms the optional
@@ -417,12 +327,15 @@ def _spawn(
     agent_id = _agent_id()
     # The session's shell TTL IS this watcher's target deadline (user ruling
     # 2026-09-14, task #3411): launch = created + timeout, cron = cron_end_at,
-    # at = fires_at + grace — derived by `shared.daemon.schedules.watcher.session_deadline`,
-    # the one function the boot reconcile and the gateway reaper also read.
-    # Written as the system-side TRUE value: a 7-day standing cron is a
-    # normal watcher, exempt from the 24h user-session cap — and a rebuild
-    # (this same path, re-entered by the reconcile with the stored payload)
-    # inherits the remaining time instead of a fresh default.
+    # at = fires_at + grace — derived once, here, by
+    # `shared.daemon.schedules.watcher.session_deadline`. Written as the
+    # system-side TRUE value: a 7-day standing cron is a normal watcher,
+    # exempt from the 24h user-session cap. `ava.shell.sessions.renew` can
+    # move this same deadline later, exactly like any other session's TTL —
+    # but only the session's reclamation, never the generated script's own
+    # end (the cron's `_END`, the launch watchdog, the at fire moment), and
+    # a renewal call is itself capped at 24h, so it can pull a standing
+    # cron's reclaim earlier than its declared end.
     now = datetime.datetime.now(datetime.UTC)
     deadline = session_deadline(
         kind,
@@ -435,22 +348,14 @@ def _spawn(
         # Callers hand a future target (cron()/at() validate theirs; launch
         # requires a positive timeout) — a missing or already-passed deadline
         # here is a call-site bug, never a reason to mount a stillborn
-        # session. The reconcile's deadline-passed guard is the sibling of
-        # this check on the rebuild path.
+        # session.
         raise ValueError(
             f"watcher {kind!r} target deadline is not in the future "
             f"({deadline!r}) — refusing to spawn its session"
         )
-    session_id, session_name = _sessions.create_session(
+    session_id, _session_name = _sessions.create_session(
         name, ttl=(deadline - now).total_seconds(), system=True, env_overrides=watcher_runner_env()
     )
-    # The registry is desired state, so it must remember the generation of
-    # the exact PTY record it can later rebuild. Reading the backend record
-    # (rather than today's marker) binds the row to the session actually
-    # admitted under the allocation lock.
-    from shared.session_backend import get_shell_backend
-
-    generation = get_shell_backend().session_generation(session_name)
     script_path = _watchers_dir() / f"watcher_{session_id}.py"
     # Prune files from earlier watchers before writing: a watcher reads its
     # script + bootstrap exactly once at launch, so everything already on
@@ -477,111 +382,22 @@ def _spawn(
         keep=False,
         notify=notify,
     )
-    # R1 (Task #1021): the watcher registry — this row is what the agent's boot
-    # reconcile reads to rebuild a watcher whose session a stop/rollout reaped
-    # (#1014). The row is written BEFORE the child starts, never after: a child
-    # that exits before its row lands would leave the row inserted after its
-    # clean-exit cleanup already ran — a permanent ghost "running" row the boot
-    # reconcile would read as "killed, should exist". Registering first closes
-    # that race, and a registry failure now FAILS the spawn instead of being
-    # swallowed (the old fail-soft left a live watcher the boot reconcile can
-    # never rebuild — the registry is the only record of "should exist").
-    superseded: list[int] = []
-    try:
-        if kind == "cron":
-            # Atomically dedupe exact schedules and supersede live different-end twins.
-            from typing import cast
-
-            reused, superseded = _register_cron_spawn(
-                agent_id,
-                session_id,
-                name=name,
-                message=message,
-                cron_expr=cast(str, cron_expr),
-                cron_timezone=cast(str, cron_timezone),
-                cron_end_at=cron_end_at,
-                _exclude_session=_exclude_session,
-                generation=generation,
-                notify="agent" if notify is None else notify,
-            )
-            if reused is not None:
-                # A concurrent registration won the race — the schedule is
-                # already live under `reused`. Dispose the session we created
-                # and hand the caller the winner's id.
-                logger.info(
-                    "[watcher] cron %r already live as session %s — reusing (dedupe)",
-                    cron_expr,
-                    reused,
-                )
-                with contextlib.suppress(Exception):
-                    _sessions.kill(session_id)
-                return reused
-        else:
-            from shared.daemon.schedules.watcher_registry import register_watcher
-
-            register_watcher(
-                agent_id,
-                session_id,
-                kind=kind,
-                name=name,
-                message=message,
-                fires_at=fires_at,
-                cron_expr=cron_expr,
-                cron_timezone=cron_timezone,
-                cron_end_at=cron_end_at,
-                timeout_secs=timeout_secs,
-                template_version=TEMPLATE_VERSION,
-                generation=generation,
-                notify="agent" if notify is None else notify,
-            )
-    except Exception:
-        logger.error(
-            "[watcher] registry write failed for session %s — refusing to start "
-            "the watcher (the boot reconcile could never rebuild it)",
-            session_id,
-            exc_info=True,
-        )
-        # Dispose the session we created but will not start; kill() also drops
-        # any registry row, so this is safe on every failure path.
-        with contextlib.suppress(Exception):
-            _sessions.kill(session_id)
-        raise
     try:
         _sessions.send(session_id, line)
     except Exception:
-        # Compensating delete: a registered row whose child never started would
-        # be read by the next boot reconcile as "killed, should exist" and
-        # rebuilt forever. The row only exists because the spawn failed after
-        # registration, so it must not survive the failed spawn.
+        # A session whose launch command never sent is not a watcher — it is
+        # an idle login shell sitting under the watcher's name until its TTL
+        # (up to 7 days for a default cron). Kill it now rather than leaking
+        # it; there is no registry row to compensate for any more, but the
+        # session itself still must not linger.
         logger.error(
-            "[watcher] failed to start session %s after registering it — dropping the registry row",
+            "[watcher] failed to start session %s — killing it",
             session_id,
             exc_info=True,
         )
         with contextlib.suppress(Exception):
-            from shared.daemon.schedules.watcher_registry import delete_watcher
-
-            delete_watcher(agent_id, session_id)
-        with contextlib.suppress(Exception):
             _sessions.kill(session_id)
         raise
-    for old_session in superseded:
-        # The new child is running; retire each superseded twin. A deliberate
-        # kill drops its registry row, so exactly one live row (this
-        # session's) describes the schedule — the re-registration never
-        # stacks (Task #1825 double-fire shape). Superseding EVERY twin (not
-        # just the newest) is what makes a repeated re-registration converge
-        # after a partial failure left two live rows behind (QA review of PR
-        # #2037). Fail-soft per twin: a kill failure leaves that twin until
-        # its own end_time expires.
-        logger.info(
-            "[watcher] cron %r re-registered — twin session %s superseded by %s",
-            cron_expr,
-            old_session,
-            session_id,
-        )
-        with contextlib.suppress(Exception):
-            _sessions.kill(old_session)
     return session_id
 
 
@@ -619,16 +435,14 @@ def cron(
     end_time: datetime.datetime | datetime.timedelta | str | None = None,
     name: str,
     notify: str | None = None,
-    _exclude_session: int | None = None,
 ) -> int:
     """Runs until `end_time`, or until you kill its session.
 
     `end_time` defaults to now + 7 days; pass an explicit one for a longer
-    schedule. Re-registering the same expression + timezone supersedes the
-    existing watcher with a fresh session carrying the new end — never a
-    double-firing duplicate: an explicit end replaces a standing twin, a
-    defaulted one renews it, and an exact (agent, expression, timezone, end)
-    match is reused as-is.
+    schedule. Calling `cron()` again with the same expression + timezone does
+    NOT replace anything — it starts another, independent session; if you
+    want to renew or replace a schedule, kill the old session yourself
+    (`ava.shell.sessions.kill`) before or after registering the new one.
 
     Args:
         expr: 5-field cron expression (`minute hour day-of-month month
@@ -658,11 +472,8 @@ def cron(
     validate_timezone(tz)
     if end_time is None:
         # Standing-cron cap (task #2617): no end_time means the DEFAULT
-        # window — 7 days, counted from the current minute — not forever.
-        # Minute truncation groups a double registration of the same
-        # schedule into one exact-match dedupe (the Task #1825 reuse); a
-        # later re-registration carries a later end and supersedes instead
-        # of stacking. A longer schedule must pass an explicit end_time.
+        # window — 7 days, counted from the current minute — not forever. A
+        # longer schedule must pass an explicit end_time.
         now = datetime.datetime.now(datetime.UTC)
         et = now.replace(second=0, microsecond=0) + datetime.timedelta(
             seconds=DEFAULT_STANDING_CRON_MAX_SECONDS
@@ -671,10 +482,7 @@ def cron(
         # normalize_when (not normalize_end_time): this branch excludes None,
         # so the result is a non-optional datetime for the type checker.
         et = normalize_when(end_time)
-        # Align with at(): a past end must not register. Under the #2061
-        # supersede-first semantics a past end would otherwise kill the live
-        # standing twin and register a watcher that self-terminates at once —
-        # recoverable only by re-registering (issue #2078).
+        # Align with at(): a past end must not register.
         if et < datetime.datetime.now(datetime.UTC):
             raise ValueError(
                 f"end_time is in the past: {et.isoformat()}. "
@@ -689,21 +497,12 @@ def cron(
     # The generated script self-terminates (it stops looping past end_time —
     # which every registration now carries, the default being now + 7 days),
     # so no watchdog.
-    # Registration carries the Task #1825 dedupe — atomically: one transaction
-    # (pg_advisory_xact_lock + re-check + insert, shared.daemon.schedules.watcher_registry.
-    # register_cron_atomic), so a concurrent registration of the same schedule
-    # can never slip between the check and the insert (N2). `_exclude_session`
-    # lets the stale-template rebuild skip the very session it is replacing.
     return _spawn(
         code,
         None,
         name,
         kind="cron",
-        message=message,
-        cron_expr=expr,
-        cron_timezone=tz,
         cron_end_at=et,
-        _exclude_session=_exclude_session,
         notify=coerce_str(notify, "notify", allow_none=True),
     )
 
@@ -754,31 +553,9 @@ def at(
         None,
         name,
         kind="at",
-        message=message,
         fires_at=due_at,
         notify=coerce_str(notify, "notify", allow_none=True),
     )
 
 
 logger = logging.getLogger(__name__)
-
-_reconcile.bind(
-    agent_id=_agent_id,
-    watchers_dir=_watchers_dir,
-    cron_fn=cron,
-    at_fn=at,
-    launch_fn=launch,
-    target_logger=logger,
-)
-
-from ava import (  # noqa: E402 — back-compat aliases split out at the 800-line ceiling (issue #2078)
-    _watcher_reexports as _reexports,
-)
-
-_kill_watcher_orphan_processes = _reexports._kill_watcher_orphan_processes
-_live_cron_session = _reexports._live_cron_session
-_notify_missed_watcher = _reexports._notify_missed_watcher
-_reconcile_missing = _reexports._reconcile_missing
-_reap_superseded_watcher = _reexports._reap_superseded_watcher
-_rebuild_stale_cron_watcher = _reexports._rebuild_stale_cron_watcher
-reconcile = _reexports.reconcile

@@ -146,7 +146,9 @@ matters + suggested fix**. Match the diff against
 ### D8 Concept alignment & discipline
 
 - R1: state/liveness separation, lease-based liveness, single status
-  machine, watcher registry, events record facts only.
+  machine, watchers are plain sessions that are never rebuilt (no registry,
+  no rebuild path — decisions/2026-09-27-watchers-are-never-restarted.md),
+  events record facts only.
 - R2: single-source registries (EnvRegistry / EventSpec / resilience) — no
   duplicated constants, retry loops, or idempotency mechanisms; schema.sql
   is the truth.

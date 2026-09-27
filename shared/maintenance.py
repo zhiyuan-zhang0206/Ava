@@ -69,9 +69,9 @@ def quiesced() -> bool:
 # not begun coming back up (`starting`). The host's turn scan reads this
 # narrower slice instead of the whole quiesced window: while the stop leg runs,
 # the operator's stop owns the agents and a scan would fight it, but from the
-# start leg on a booting host must drain its pending workset and restore parked
-# watcher intent — recovery may not wait for the hold to release, because
-# pub/sub has no replay (task #3227; tests/ava/test_hosted_watcher_recovery.py).
+# start leg on a booting host must drain its pending workset — recovery may
+# not wait for the hold to release, because pub/sub has no replay (task
+# #3227).
 _STOP_LEG_PHASES = frozenset({"drained", "stopping", "stopped"})
 
 
