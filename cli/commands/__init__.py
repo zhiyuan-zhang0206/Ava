@@ -14,30 +14,7 @@ this package namespace.
 
 from __future__ import annotations
 
-from cli.commands._cluster_boot_unit import (
-    cmd_boot_unit_install,
-    cmd_boot_unit_status,
-    cmd_boot_unit_uninstall,
-)
-from cli.commands._cluster_cancel import cmd_cluster_cancel
-from cli.commands._cluster_cron import (
-    cmd_cron_register,
-    cmd_cron_unregister,
-)
-from cli.commands._cluster_health import cmd_health_probe
-from cli.commands._cluster_hold_watchdog import (
-    cmd_hold_watchdog,
-    cmd_hold_watchdog_register,
-    cmd_hold_watchdog_unregister,
-)
-from cli.commands._cluster_recover import cmd_cluster_recover
-from cli.commands._cluster_recover_pending import cmd_cluster_recover_pending
 from cli.commands._cluster_rollback import cmd_rollback
-from cli.commands._cluster_watchdog_probe import (
-    cmd_watchdog_probe,
-    cmd_watchdog_probe_register,
-    cmd_watchdog_probe_unregister,
-)
 from cli.commands._converge import cmd_converge
 from cli.commands._firewall import (
     cmd_firewall_status,
@@ -49,17 +26,40 @@ from cli.commands.agents.pty import (
     cmd_pty_resume,
     cmd_pty_status,
 )
-from cli.commands.cluster import (
+from cli.commands.cluster.boot_unit import (
+    cmd_boot_unit_install,
+    cmd_boot_unit_status,
+    cmd_boot_unit_uninstall,
+)
+from cli.commands.cluster.cancel import cmd_cluster_cancel
+from cli.commands.cluster.control import (
     cmd_cluster_mark_staging,
     cmd_cluster_pause,
     cmd_cluster_restart,
     cmd_cluster_resume,
     cmd_cluster_status,
 )
-from cli.commands.cluster_lifecycle import (
+from cli.commands.cluster.cron import (
+    cmd_cron_register,
+    cmd_cron_unregister,
+)
+from cli.commands.cluster.health import cmd_health_probe
+from cli.commands.cluster.hold_watchdog import (
+    cmd_hold_watchdog,
+    cmd_hold_watchdog_register,
+    cmd_hold_watchdog_unregister,
+)
+from cli.commands.cluster.recover import cmd_cluster_recover
+from cli.commands.cluster.recover_pending import cmd_cluster_recover_pending
+from cli.commands.cluster.registry import (
     cmd_cluster_destroy,
     cmd_cluster_down,
     cmd_cluster_ls,
+)
+from cli.commands.cluster.watchdog_probe import (
+    cmd_watchdog_probe,
+    cmd_watchdog_probe_register,
+    cmd_watchdog_probe_unregister,
 )
 from cli.commands.data_plane.ensure_db_role import cmd_ensure_db_role
 from cli.commands.data_plane.pitr import (

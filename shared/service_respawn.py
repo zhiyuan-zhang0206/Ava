@@ -161,7 +161,7 @@ def respawn_service(
             Used to inject per-process markers like AVA_PROCESS_PROFILE.
         force: launch even while the source tree is mid-switch (the
             watchdog-probe's contract — dumb revival that ignores every gate,
-            see `cli/commands/_cluster_watchdog_probe.py`). Default False.
+            see `cli/commands/cluster/watchdog_probe.py`). Default False.
         graceful_timeout_s: when set, ask the existing session to stop and
             wait no longer than this many seconds before the backend verifies
             its SIGKILL fallback. Limited to ten seconds so a watchdog round

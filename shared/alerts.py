@@ -6,7 +6,7 @@ own IM channel):
 
 - the gateway router (gateway/routers/alerts.py) ingests the Grafana
   embedded-Alertmanager webhook on ``POST /api/alerts``;
-- the cluster health probe (cli/commands/_health_alerts.py) posts its
+- the cluster health probe (cli/commands/cluster/health_alerts.py) posts its
   time-graded health alerts through that endpoint too
   (``source="health-probe"``) — and when the gateway is unreachable, it runs
   these same functions locally against its own DB connection, so one health

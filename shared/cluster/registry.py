@@ -29,7 +29,7 @@ class ClusterRecord:
     # empty = loopback (127.0.0.1), the single-box posture. Stored on the record
     # because derivation happens at birth, before the home's `.env` exists; the
     # birth path snapshots it from `settings.data_plane.data_plane_host`
-    # (AVA_DATA_PLANE_HOST) — see `cli.commands.cluster_lifecycle.ensure_record`
+    # (AVA_DATA_PLANE_HOST) — see `cli.commands.cluster.registry.ensure_record`
     # and `shared.cluster.derive.per_cluster_base_urls`. External data plane:
     # Task #1752.
     data_plane_host: str = ""

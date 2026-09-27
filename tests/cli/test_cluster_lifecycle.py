@@ -1,5 +1,5 @@
 """Unit tests for the path-only cluster lifecycle helpers
-(cli/commands/cluster_lifecycle.py): registry allocation, the `ava start`
+(cli/commands/cluster/registry.py): registry allocation, the `ava start`
 installed-home gate, and `ava cluster ls/down/destroy` addressed by home path.
 
 All side-effecting steps are monkeypatched so no real pg/redis/subprocess is
@@ -42,7 +42,7 @@ def _full_ports(base: int) -> ClusterPorts:
 def test_ensure_record_default_home_uses_legacy_ports(
     isolated_registry: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import cli.commands.cluster_lifecycle as gw
+    import cli.commands.cluster.registry as gw
 
     monkeypatch.setattr(cl, "_port_free", lambda _port: True)  # pyright: ignore[reportUnknownArgumentType]
     rec, created = gw.ensure_record(cl.default_home())
@@ -56,7 +56,7 @@ def test_ensure_record_default_home_uses_legacy_ports(
 def test_ensure_record_allocates_block_for_dev_home(
     isolated_registry: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import cli.commands.cluster_lifecycle as gw
+    import cli.commands.cluster.registry as gw
 
     monkeypatch.setattr(cl, "_port_free", lambda _port: True)  # pyright: ignore[reportUnknownArgumentType]
     home = tmp_path / ".ava-dev"
@@ -80,7 +80,7 @@ def test_concurrent_ensure_record_no_collision(
     (and with it, the same pg/redis instance ports)."""
     import threading
 
-    import cli.commands.cluster_lifecycle as gw
+    import cli.commands.cluster.registry as gw
 
     monkeypatch.setattr(cl, "_port_free", lambda _port: True)  # pyright: ignore[reportUnknownArgumentType]
     homes = [tmp_path / f".ava-t{i}" for i in range(6)]
@@ -416,7 +416,7 @@ def test_gate_skips_the_port_check_for_an_enrolled_runner(
 
 
 def test_cluster_ls_empty(isolated_registry: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    from cli.commands.cluster_lifecycle import cmd_cluster_ls
+    from cli.commands.cluster.registry import cmd_cluster_ls
 
     rc = cmd_cluster_ls()
     assert rc == 0
@@ -426,7 +426,7 @@ def test_cluster_ls_empty(isolated_registry: Path, capsys: pytest.CaptureFixture
 def test_cluster_ls_shows_label_and_home(
     isolated_registry: Path, capsys: pytest.CaptureFixture[str], tmp_path: Path
 ) -> None:
-    from cli.commands.cluster_lifecycle import cmd_cluster_ls
+    from cli.commands.cluster.registry import cmd_cluster_ls
 
     home = tmp_path / ".ava-mycluster"
     cl.save_record(ClusterRecord(ports=_full_ports(18000), gateway_home=str(home), created_at="t"))
@@ -446,7 +446,7 @@ def test_cluster_ls_shows_label_and_home(
 def test_cluster_down_unknown_path(
     isolated_registry: Path, capsys: pytest.CaptureFixture[str], tmp_path: Path
 ) -> None:
-    from cli.commands.cluster_lifecycle import cmd_cluster_down
+    from cli.commands.cluster.registry import cmd_cluster_down
 
     rc = cmd_cluster_down(path=str(tmp_path / ".ava-nope"))
     assert rc == 1
@@ -457,7 +457,7 @@ def test_cluster_down_happy_path(
     isolated_registry: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """cmd_cluster_down invokes the stop subprocess with AVA_HOME = the target home."""
-    import cli.commands.cluster_lifecycle as gw
+    import cli.commands.cluster.registry as gw
 
     home = tmp_path / ".ava-myc"
     cl.save_record(ClusterRecord(ports=_full_ports(19000), gateway_home=str(home), created_at="t"))
@@ -497,7 +497,7 @@ def test_subprocess_env_isolates_cluster_and_identity_keys(
     — the child's own $AVA_HOME/.env is authoritative."""
     import os
 
-    import cli.commands.cluster_lifecycle as gw
+    import cli.commands.cluster.registry as gw
 
     monkeypatch.setattr(
         os,
@@ -538,7 +538,7 @@ def test_subprocess_env_isolates_cluster_and_identity_keys(
 def test_destroy_removes_registry_record(
     isolated_registry: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import cli.commands.cluster_lifecycle as gw
+    import cli.commands.cluster.registry as gw
 
     home = tmp_path / ".ava-destroyme"
     cl.save_record(ClusterRecord(ports=_full_ports(18016), gateway_home=str(home), created_at="t"))
@@ -553,7 +553,7 @@ def test_destroy_refuses_default_home(
     isolated_registry: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """Destroying the default home (~/.ava, prod) is refused; returns 1."""
-    from cli.commands.cluster_lifecycle import cmd_cluster_destroy
+    from cli.commands.cluster.registry import cmd_cluster_destroy
 
     rc = cmd_cluster_destroy(path="~/.ava")
     assert rc == 1
@@ -563,7 +563,7 @@ def test_destroy_refuses_default_home(
 def test_destroy_unknown_path_returns_1(
     isolated_registry: Path, capsys: pytest.CaptureFixture[str], tmp_path: Path
 ) -> None:
-    from cli.commands.cluster_lifecycle import cmd_cluster_destroy
+    from cli.commands.cluster.registry import cmd_cluster_destroy
 
     rc = cmd_cluster_destroy(path=str(tmp_path / ".ava-doesnotexist"))
     assert rc == 1
@@ -587,7 +587,7 @@ def test_destroy_leaves_the_home_env_untouched(
     loopback-`trust` socket, so a fresh secret self-heals. The cost is
     credentials and config, not data.
     """
-    import cli.commands.cluster_lifecycle as gw
+    import cli.commands.cluster.registry as gw
 
     home = tmp_path / ".ava-keepenv"
     home.mkdir()
@@ -609,7 +609,7 @@ def test_destroy_drop_db_removes_data_dirs_but_still_keeps_env(
     dirs: the cluster's own pg/redis instance IS its database, so removing those
     directories is the drop (there is no shared server to DROP DATABASE inside).
     `.env` survives even here — the secret is what a later re-install reuses."""
-    import cli.commands.cluster_lifecycle as gw
+    import cli.commands.cluster.registry as gw
 
     home = tmp_path / ".ava-dropme"
     (home / "pg").mkdir(parents=True)
@@ -639,7 +639,7 @@ def test_destroy_cannot_reach_a_home_with_no_record(
     registry branch covers. Both homes in the #1075 census carry
     `AVA_MACHINE_SERVE_GATEWAY=true`, consistent with that.
     """
-    from cli.commands.cluster_lifecycle import cmd_cluster_destroy
+    from cli.commands.cluster.registry import cmd_cluster_destroy
 
     home = tmp_path / ".ava-runner-only"
     home.mkdir()
@@ -704,7 +704,7 @@ def test_destroy_unregisters_every_scheduled_job(
     monkeypatch: pytest.MonkeyPatch,
     recording_backend: _RecordingBackend,
 ) -> None:
-    import cli.commands.cluster_lifecycle as gw
+    import cli.commands.cluster.registry as gw
 
     home = _registered_home(tmp_path, ".ava-jobs", 18017)
     monkeypatch.setattr(gw, "cmd_cluster_down", lambda *, path: 0)  # noqa: ARG005  # pyright: ignore[reportUnknownArgumentType]
@@ -729,7 +729,7 @@ def test_destroy_uninstalls_the_target_homes_boot_unit(
     """The systemd boot unit is home-anchored like the other OS jobs: destroy
     removes the unit for the TARGET home, never this process's own -- a unit
     left behind would boot a home whose slot is already freed."""
-    import cli.commands.cluster_lifecycle as gw
+    import cli.commands.cluster.registry as gw
     from shared import os_boot_unit
 
     home = _registered_home(tmp_path, ".ava-bootunit", 18019)
@@ -760,7 +760,7 @@ def test_destroy_unregisters_the_target_homes_jobs_not_this_processs(
     the prod checkout would deregister prod's health probe, both watchdog probes
     and autostart.
     """
-    import cli.commands.cluster_lifecycle as gw
+    import cli.commands.cluster.registry as gw
     from shared.os_autostart import _autostart_label
     from shared.os_cron import _health_probe_label
     from shared.os_watchdog_probe import probe_label
@@ -798,7 +798,7 @@ def test_destroy_reports_a_failing_unregister_but_still_succeeds(
     """A half-registered cluster (or a host whose scheduler is unavailable) must
     still be destroyable — the registry slot matters more than a stale job — but
     the failure is reported, never printed as a success."""
-    import cli.commands.cluster_lifecycle as gw
+    import cli.commands.cluster.registry as gw
 
     home = _registered_home(tmp_path, ".ava-broken", 18019)
     monkeypatch.setattr(gw, "cmd_cluster_down", lambda *, path: 0)  # noqa: ARG005  # pyright: ignore[reportUnknownArgumentType]
@@ -827,7 +827,7 @@ def test_ensure_pgvector_extension_skips_remote_plane(
 ) -> None:
     import types
 
-    import cli.commands.cluster_lifecycle as gw
+    import cli.commands.cluster.registry as gw
 
     called: list[tuple[str, str]] = []
 
@@ -851,7 +851,7 @@ def test_ensure_pgvector_extension_forwards_on_local_plane(
 ) -> None:
     import types
 
-    import cli.commands.cluster_lifecycle as gw
+    import cli.commands.cluster.registry as gw
 
     called: list[tuple[str, str]] = []
 

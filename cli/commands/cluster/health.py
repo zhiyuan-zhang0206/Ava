@@ -83,24 +83,24 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 # Alert machinery (failure counter, edge alerts, auto-rollback gate) lives in
-# `_health_alerts` (split out 2026-08-07 to stay under the 800-line ceiling).
+# `health_alerts` (split out 2026-08-07 to stay under the 800-line ceiling).
 # The probe runner uses the pieces below; the rest are re-exported so tests
-# and callers that address them as `_cluster_health.<name>` keep working.
-from cli.commands._health_alerts import (
-    ALERT_STATE_FILE,  # noqa: F401  # pyright: ignore[reportUnusedImport]  # re-export (tests access via _cluster_health)
-    FAILURE_COUNT_FILE,  # noqa: F401  # pyright: ignore[reportUnusedImport]  # re-export (tests access via _cluster_health)
+# and callers that address them as `health.<name>` keep working.
+from cli.commands.cluster._provider_guard import run_provider_guard
+from cli.commands.cluster.health_alerts import (
+    ALERT_STATE_FILE,  # noqa: F401  # pyright: ignore[reportUnusedImport]  # re-export (tests access via health)
+    FAILURE_COUNT_FILE,  # noqa: F401  # pyright: ignore[reportUnusedImport]  # re-export (tests access via health)
     _alert_failure,
     _alert_recovery,
-    _alert_summary,  # noqa: F401  # pyright: ignore[reportUnusedImport]  # re-export (tests access via _cluster_health)
+    _alert_summary,  # noqa: F401  # pyright: ignore[reportUnusedImport]  # re-export (tests access via health)
     _deploy_suppression,
     _handle_consecutive_failure,
-    _increment_failure_count,  # noqa: F401  # pyright: ignore[reportUnusedImport]  # re-export (tests access via _cluster_health)
-    _ingest_alert,  # noqa: F401  # pyright: ignore[reportUnusedImport]  # re-export (tests access via _cluster_health)
-    _ingest_alert_fallback,  # noqa: F401  # pyright: ignore[reportUnusedImport]  # re-export (tests access via _cluster_health)
-    _notify_owner,  # noqa: F401  # pyright: ignore[reportUnusedImport]  # re-export (tests access via _cluster_health)
+    _increment_failure_count,  # noqa: F401  # pyright: ignore[reportUnusedImport]  # re-export (tests access via health)
+    _ingest_alert,  # noqa: F401  # pyright: ignore[reportUnusedImport]  # re-export (tests access via health)
+    _ingest_alert_fallback,  # noqa: F401  # pyright: ignore[reportUnusedImport]  # re-export (tests access via health)
     _reset_failure_count,
+    notify_owner,  # noqa: F401  # pyright: ignore[reportUnusedImport]  # re-export (tests access via health)
 )
-from cli.commands._provider_guard import run_provider_guard
 from shared.loki_index_labels import LokiReadEra, event_stream_selector, split_index_label_window
 
 # Default thresholds. Overridable via CLI flags; the cron wrapper's

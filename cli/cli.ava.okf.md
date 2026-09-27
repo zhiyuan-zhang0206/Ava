@@ -77,7 +77,7 @@ the rest of the `_`-prefixed steps are enumerated in
 
 - `cli/main.py:main()` — argparse entrypoint + enroll/preflight special routing; `cli/parsers/` — the settings-free argparse tree (builders + handlers per domain); `cli/preflight.py:require_installed_home()` — settings-free installed-home gate
 - `cli/install_cluster.py:cmd_install_cluster()` — install-time birth; `cli/enroll.py:run_enroll` — config-free enrollment
-- `cli/commands/cluster_lifecycle.py` — registry allocation + `ls/down/destroy` (`--path` addressed); `start.py` / `status.py` / `data_plane/cluster_instance.py`
+- `cli/commands/cluster/registry.py` — registry allocation + `ls/down/destroy` (`--path` addressed); `start.py` / `status.py` / `data_plane/cluster_instance.py`
 
 ## Notes
 

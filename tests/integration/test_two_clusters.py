@@ -17,7 +17,7 @@ from typing import cast
 
 import pytest
 
-from cli.commands.cluster_lifecycle import ensure_record
+from cli.commands.cluster.registry import ensure_record
 from shared import cluster
 from shared.port_block import BLOCK_SIZE
 

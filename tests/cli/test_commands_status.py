@@ -26,7 +26,7 @@ def test_fetch_gateway_cluster_status_sends_bearer(monkeypatch: pytest.MonkeyPat
     an authenticated-but-healthy gateway reads as up instead of a false 401."""
     import httpx
 
-    from cli.commands.cluster import _fetch_gateway_cluster_status
+    from cli.commands.cluster.control import fetch_gateway_cluster_status
 
     monkeypatch.setattr(settings.data_plane, "cluster_secret", "s3cr3t")
     captured: dict[str, object] = {}
@@ -43,7 +43,7 @@ def test_fetch_gateway_cluster_status_sends_bearer(monkeypatch: pytest.MonkeyPat
         return _Resp()
 
     monkeypatch.setattr(httpx, "get", _fake_get)
-    assert _fetch_gateway_cluster_status() == {"ok": True}
+    assert fetch_gateway_cluster_status() == {"ok": True}
     assert captured["url"] == "http://gw:8000/api/cluster/status"
     assert captured["headers"] == {"Authorization": "Bearer s3cr3t"}
 
@@ -54,7 +54,7 @@ def test_fetch_gateway_cluster_status_no_bearer_when_secret_unset(
     """Unprovisioned (no secret): send no auth header rather than a blank bearer."""
     import httpx
 
-    from cli.commands.cluster import _fetch_gateway_cluster_status
+    from cli.commands.cluster.control import fetch_gateway_cluster_status
 
     monkeypatch.setattr(settings.data_plane, "cluster_secret", "")
     captured: dict[str, object] = {}
@@ -70,7 +70,7 @@ def test_fetch_gateway_cluster_status_no_bearer_when_secret_unset(
         return _Resp()
 
     monkeypatch.setattr(httpx, "get", _fake_get)
-    _fetch_gateway_cluster_status()
+    fetch_gateway_cluster_status()
     assert captured["headers"] == {}
 
 

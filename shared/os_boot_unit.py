@@ -29,7 +29,7 @@ same no-prompt stance as `shared.macos_firewall`. The convergence script under
 `$AVA_HOME/bin` is written as the invoking user.
 
 Operator surfaces: `ava cluster boot-unit install|uninstall|status` (wrappers
-in `cli/commands/_cluster_boot_unit.py`), and `ava cluster destroy` removes the
+in `cli/commands/cluster/boot_unit.py`), and `ava cluster destroy` removes the
 unit with the other OS jobs.
 """
 

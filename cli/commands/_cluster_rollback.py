@@ -20,7 +20,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-from cli.commands._health_alerts import _notify_owner
 from cli.commands._update_fanout import (
     _PHASE_A_TIMEOUT_S,
     ClusterOpPayload,
@@ -40,6 +39,7 @@ from cli.commands._update_orchestration import _phase_b_targets
 from cli.commands._update_pause import _stop_the_world
 from cli.commands._update_phase_b import POLL_OK, _phase_b_and_poll, _still_converging
 from cli.commands._update_uv_sync import run_uv_sync
+from cli.commands.cluster.health_alerts import notify_owner
 from shared.cluster_lock import (
     SETTLE_TTL_S,
     acquire_update_lock,
@@ -467,7 +467,7 @@ def _record_completed_rollback(
             f"({', '.join(sorted(mid_transition))})"
         )
     try:
-        _notify_owner(owner_text)
+        notify_owner(owner_text)
     except Exception as exc:
         print(f"  . could not notify owner: {type(exc).__name__}", file=sys.stderr)
     logger.info(
