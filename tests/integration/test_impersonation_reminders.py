@@ -90,6 +90,8 @@ def test_reminder_uses_request_interpreter_or_legacy_machine_home(
     assert reminder is not None
     content: str = reminder[0]
     _assert_reminder_commands(content, invoked_python, home, stopped_home, null_home)
+    # The renew suggestion repeats the lease's own window, not a fixed hour.
+    assert f"renew 0 --agent {agent_id} --ttl 300\n" in content
 
 
 def _assert_reminder_commands(

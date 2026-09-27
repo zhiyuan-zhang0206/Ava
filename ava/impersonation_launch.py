@@ -6,11 +6,11 @@ from pathlib import Path
 
 # The generated request command spells out both former defaults because the CLI
 # takes neither as an implicit default (user ruling 2026-09-20, task #4102).
-# --ttl: the lease's recovery deadline — one hour was the request's effective
-# value before the ruling; the executor extends it deliberately from renewal
-# reminders, never on a timer (impersonator guide). --batch-window 0: deliver
-# immediately — no coalescing of routine arrivals, the former effective value.
-_TAKEOVER_TTL_SECONDS = 3600
+# --ttl: the lease's recovery deadline, estimated short as the impersonator
+# guide asks (about 30 minutes, extended in steps); the executor renews
+# deliberately from renewal reminders, never on a timer. --batch-window 0:
+# deliver immediately — no coalescing of routine arrivals.
+_TAKEOVER_TTL_SECONDS = 1800
 _TAKEOVER_BATCH_WINDOW_SECONDS = 0
 _EXECUTOR_LABELS = {"codex": "Codex", "claude": "Claude", "dsh": "DeepSeek Harness"}
 # The impersonator guide's host-specific half, beside its SKILL.md.

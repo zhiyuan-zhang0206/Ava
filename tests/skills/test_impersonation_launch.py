@@ -46,7 +46,7 @@ def test_self_takeover_bootstrap_inlines_brief_and_links_real_guide(
     assert "--agent 42" in message and "--name 'Fix login'" in message
     # The request command spells out its former defaults (task #4102: the CLI
     # defaults are gone).
-    assert "--ttl 3600" in message and "--batch-window 0" in message
+    assert "--ttl 1800" in message and "--batch-window 0" in message
     assert str(guide) in message and brief in message
     assert "work.md" not in message and "tasks.md" not in message and "work file" not in message
     assert "ava impersonate say" in message
