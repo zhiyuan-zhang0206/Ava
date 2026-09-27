@@ -295,8 +295,8 @@ def test_agents_parser_wires_kill_all_shell_sessions(monkeypatch: pytest.MonkeyP
         seen[str(agent_id)] = kill_all_shell_sessions
         return 0
 
-    monkeypatch.setattr("cli.commands.agents.cmd_agents_terminate", _record)
-    monkeypatch.setattr("cli.commands.agents.cmd_agents_kill", _record)
+    monkeypatch.setattr("cli.commands.agents.control.cmd_agents_terminate", _record)
+    monkeypatch.setattr("cli.commands.agents.control.cmd_agents_kill", _record)
     for argv in (
         ["agents", "terminate", "7", "--kill-all-shell-sessions"],
         ["agents", "kill", "8", "--kill-all-shell-sessions"],

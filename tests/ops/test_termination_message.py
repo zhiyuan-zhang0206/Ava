@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 import sys
 from collections.abc import Iterator
 from pathlib import Path
 from typing import cast
 
+import psutil
 import psycopg
 import pytest
 from psycopg_pool import ConnectionPool
@@ -18,6 +20,8 @@ from ops.rpc_schemas import TerminateAgentRequest
 from shared.config import settings
 from shared.db import create_agent
 from shared.telemetry import Event
+from tests.cli.conftest import PtyReaper
+from tests.cli.conftest import pty_reaper as pty_reaper
 
 
 @pytest.fixture
@@ -218,6 +222,22 @@ def _terminate_payloads(db_conn: psycopg.Connection, agent_id: int) -> list[obje
     ]
 
 
+async def _until_blocked_or_done(task: asyncio.Task[object], holder_pid: int) -> None:
+    """Return once `task` finished or some backend waits on `holder_pid`'s lock."""
+    deadline = asyncio.get_running_loop().time() + 10
+    while not task.done():
+        with psycopg.connect(settings.data_plane.db_url, autocommit=True) as probe:
+            row = probe.execute(
+                "SELECT EXISTS(SELECT 1 FROM pg_stat_activity "
+                "WHERE %s = ANY(pg_blocking_pids(pid)))",
+                (holder_pid,),
+            ).fetchone()
+        if row == (True,):
+            return
+        assert asyncio.get_running_loop().time() < deadline, "enqueue neither blocked nor ended"
+        await asyncio.sleep(0.02)
+
+
 class TestKillAllShellSessions:
     """`kill_all_shell_sessions` on terminate / kill
     (decisions/2026-09-27-terminate-has-no-closed-state.md): a graceful
@@ -403,6 +423,43 @@ class TestKillAllShellSessions:
         assert _terminate_payloads(db_conn, running_agent_id) == []
 
     @pytest.mark.asyncio
+    async def test_enqueue_waits_on_the_row_lock_of_a_committing_death(
+        self,
+        db_conn: psycopg.Connection,
+        db_pool: ConnectionPool,
+        running_agent_id: int,
+        kills: list[int],
+    ) -> None:
+        """The kill-requesting enqueue reads the status under the agent row
+        lock. The home runtime's apply holds that lock while it commits the
+        death, so the enqueue waits for it, sees `terminated`, and kills the
+        sessions now — never an `at_exit` request no apply will ever read."""
+        from ops import ops_lifecycle
+        from ops.rpc_terminate import ShellSessionsKill
+
+        with psycopg.connect(settings.data_plane.db_url) as apply_conn:
+            apply_conn.execute(
+                "SELECT 1 FROM agents_meta WHERE id=%s FOR UPDATE", (running_agent_id,)
+            )
+            op = asyncio.create_task(
+                ops_lifecycle.terminate_agent_op(
+                    running_agent_id, TerminateAgentRequest(kill_all_shell_sessions=True), db_pool
+                )
+            )
+            await _until_blocked_or_done(op, apply_conn.info.backend_pid)
+            apply_conn.execute(
+                "UPDATE agents_meta SET status='terminated', termination_source='user' WHERE id=%s",
+                (running_agent_id,),
+            )
+            apply_conn.commit()
+            resp = await op
+
+        assert resp.status == "already_terminated"
+        assert resp.shell_sessions == ShellSessionsKill(when="now", killed=[0, 3])
+        assert kills == [running_agent_id]
+        assert _terminate_payloads(db_conn, running_agent_id) == []
+
+    @pytest.mark.asyncio
     async def test_a_failed_kill_fails_the_request_after_the_fence(
         self,
         db_conn: psycopg.Connection,
@@ -434,6 +491,24 @@ class TestKillAllShellSessions:
         ).fetchone() == ("terminated",)
 
 
+# A watcher-shaped job whose normal exit path messages its owner: SIGTERM,
+# SIGHUP and an ordinary end all leave the marker (the stand-in for the trailing
+# `ava agents send ... --source watcher:N`). Only a hard kill leaves none.
+_NOTICE_ON_EXIT_JOB = """\
+import pathlib, signal, sys, time
+marker = pathlib.Path(sys.argv[1])
+def notify(*_):
+    marker.write_text("notice")
+    sys.exit(0)
+signal.signal(signal.SIGTERM, notify)
+signal.signal(signal.SIGHUP, notify)
+try:
+    time.sleep(300)
+finally:
+    marker.write_text("notice")
+"""
+
+
 @pytest.mark.skipif(sys.platform == "win32", reason="real POSIX PTY sessions")
 @pytest.mark.asyncio
 async def test_kill_terminates_only_the_owners_real_shell_sessions(
@@ -442,15 +517,19 @@ async def test_kill_terminates_only_the_owners_real_shell_sessions(
     running_agent_id: int,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    pty_reaper: PtyReaper,
 ) -> None:
     """End to end on real PTY sessions: `kill --kill-all-shell-sessions`
-    kills the owner's shells and its watcher-shaped job session, and leaves
-    another agent's session running."""
+    kills the owner's shells and its watcher-shaped running job without
+    letting the job's exit path send its notice, and leaves the owner's
+    `ava.ui.serve` page session and another agent's session running."""
+    import shlex
+
     from ops import ops_lifecycle
     from ops.rpc_terminate import ShellSessionsKill
     from shared.cluster import session_name
     from shared.session_backend import PtySessionBackend
-    from shared.session_record import SessionRecord
+    from shared.sessions.page_session import page_session_name
 
     monkeypatch.setattr(settings.general, "ava_home", str(tmp_path))
     # The PTY CLI runs as a child process: it resolves its home from the
@@ -463,41 +542,36 @@ async def test_kill_terminates_only_the_owners_real_shell_sessions(
         return None
 
     monkeypatch.setattr(ops_lifecycle, "_cancel_hosted_turn_best_effort", _noop_cancel)
+    job = tmp_path / "notice_on_exit.py"
+    job.write_text(_NOTICE_ON_EXIT_JOB, encoding="utf-8")
+    marker = tmp_path / "notice.marker"
     other_agent_id = create_agent(db_conn)
-    owned = [
-        session_name(f"agent-{running_agent_id}-shell-0"),
-        session_name(f"agent-{running_agent_id}-shell-1-watcher"),
-    ]
+    shell = session_name(f"agent-{running_agent_id}-shell-0")
+    watcher = session_name(f"agent-{running_agent_id}-shell-1-watcher")
+    page = page_session_name(running_agent_id, "dash_board", 2)
     foreign = session_name(f"agent-{other_agent_id}-shell-0")
     backend = PtySessionBackend()
-    shell_pids: dict[str, int] = {}
-    try:
-        for name, cmd in ((owned[0], ""), (owned[1], "sleep 300"), (foreign, "")):
-            assert backend.new_session(name, cmd, tmp_path, env={"AVA_HOME": str(tmp_path)})
-            record = SessionRecord.read(tmp_path / "run" / "pty" / f"{name}.json")
-            assert record is not None
-            shell_pids[name] = record.pid
-        job_pid = _wait_child(shell_pids[owned[1]])  # the watcher-shaped running job
+    watcher_cmd = shlex.join([sys.executable, "-u", str(job), str(marker)])
+    shells: dict[str, int] = {}
+    for name, cmd in ((shell, ""), (watcher, watcher_cmd), (page, "sleep 300"), (foreign, "")):
+        assert backend.new_session(name, cmd, tmp_path, env={"AVA_HOME": str(tmp_path)})
+        shells[name] = pty_reaper.track_session(name).pid
+    job_pid = _wait_child(shells[watcher])
+    pty_reaper.track(psutil.Process(job_pid))
 
-        resp = await ops_lifecycle.terminate_agent_op(
-            running_agent_id,
-            TerminateAgentRequest(force=True, kill_all_shell_sessions=True),
-            db_pool,
-        )
+    resp = await ops_lifecycle.terminate_agent_op(
+        running_agent_id,
+        TerminateAgentRequest(force=True, kill_all_shell_sessions=True),
+        db_pool,
+    )
 
-        assert resp.shell_sessions == ShellSessionsKill(when="now", killed=[0, 1])
-        assert set(backend.list_sessions()) == {foreign}
-        assert not any(_pid_alive(shell_pids[name]) for name in owned)
-        assert not _pid_alive(job_pid)
-        assert _pid_alive(shell_pids[foreign])
-        # An owner-level kill is silent: the killed running job leaves no notice.
-        assert db_conn.execute(
-            "SELECT kind FROM inbound_messages WHERE agent_id=%s", (running_agent_id,)
-        ).fetchall() == [("terminate",)]
-    finally:
-        for name in backend.list_sessions():
-            backend.kill_session(name)
-    assert not any(_pid_alive(pid) for pid in shell_pids.values())
+    assert resp.shell_sessions == ShellSessionsKill(when="now", killed=[0, 1])
+    assert set(backend.list_sessions()) == {page, foreign}
+    assert not _pid_alive(shells[shell]) and not _pid_alive(shells[watcher])
+    assert not _pid_alive(job_pid)
+    assert _pid_alive(shells[page]) and _pid_alive(shells[foreign])
+    # An owner-level kill is silent: the killed job's exit path never ran.
+    assert not marker.exists()
 
 
 def _wait_child(pid: int, timeout: float = 15.0) -> int:

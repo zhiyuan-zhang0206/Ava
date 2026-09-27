@@ -34,6 +34,7 @@ from shared.config import cluster_tz
 from shared.machine import is_agent_runner, is_gateway, is_observability_station, machine_name
 from shared.proc import process_alive
 from shared.resource_sample import ResourceSample
+from shared.sessions.page_session import is_page_label
 
 _log = logging.getLogger(__name__)
 
@@ -338,37 +339,33 @@ def kill_agent_shells(agent_id: int) -> list[int]:
     (decisions/2026-09-27-terminate-has-no-closed-state.md). The enumeration is
     `agent_shell_sessions` — the one `…-agent-<id>-shell-<sid>[-<name>]` rule —
     so the agent's explicit shells and its watchers go, while another agent's
-    sessions and the agent's own process session are never touched. A session
-    that ended between the listing and its kill is absent, not killed. No
+    sessions and the agent's own process session are never touched. Page-server
+    sessions (`ava.ui.serve`, the `page-` label owned by
+    `shared.sessions.page_session`) are spared: a page keeps its own lifecycle.
+    The backend's kill is idempotent, so a session that ended between the
+    listing and its kill still counts as killed — it is gone either way. No
     notice is produced here (an owner-level kill is silent) and nothing is
     written to the database: removing `agent_shell_ttls` rows is the gateway's
-    part. Every listed session is attempted; a kill that fails raises one
-    RuntimeError naming the failed ids after the others were killed.
+    part. Every listed session is attempted; a kill the backend could not
+    confirm raises one RuntimeError naming those ids after the others ran.
     """
-    shells = agent_shell_sessions(agent_id)
+    shells = [shell for shell in agent_shell_sessions(agent_id) if not is_page_label(shell.name)]
     if not shells:
         return []
     from shared.session_backend import get_shell_backend
 
     backend = get_shell_backend()
 
-    def _kill(shell: ShellInfo) -> str:
-        name = _shell_session_name(agent_id, shell)
-        ok, _mode = backend.kill_session(name, graceful=False)
-        if ok:
-            return "killed"
-        return "failed" if backend.has_session(name) else "absent"
+    def _kill(shell: ShellInfo) -> bool:
+        ok, _mode = backend.kill_session(_shell_session_name(agent_id, shell), graceful=False)
+        return ok
 
     with ThreadPoolExecutor(max_workers=min(len(shells), _KILL_ALL_WORKERS)) as pool:
-        outcomes = list(pool.map(_kill, shells))
-    failed = [
-        shell.id for shell, outcome in zip(shells, outcomes, strict=True) if outcome == "failed"
-    ]
+        confirmed = list(pool.map(_kill, shells))
+    failed = [shell.id for shell, ok in zip(shells, confirmed, strict=True) if not ok]
     if failed:
         raise RuntimeError(f"failed to kill shell session(s) {failed} of agent {agent_id}")
-    return [
-        shell.id for shell, outcome in zip(shells, outcomes, strict=True) if outcome == "killed"
-    ]
+    return [shell.id for shell in shells]
 
 
 def _shell_session_name(agent_id: int, shell: ShellInfo) -> str:

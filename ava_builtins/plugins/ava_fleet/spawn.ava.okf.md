@@ -40,7 +40,7 @@ Terminates an agent. A terminated agent is resurrected by any new message, inclu
 - Default: agent exits after completing the current turn
 - `message`: retain a final message for the next resurrection without another response
 - `force=True`: request interruption when a clean stop cannot progress
-- `kill_all_shell_sessions=True`: also kill every shell session the agent owns (watchers included), silently — right before a graceful termination applies, or at once for `force=True` / an already-terminated agent
+- `kill_all_shell_sessions=True`: also kill every shell session the agent owns (watchers included; `ava.ui.serve` pages keep running), silently — right before a graceful termination applies, or at once for `force=True` (swept again once the agent's work ended) / an already-terminated agent
 - Result: reads as the acceptance status string (`enqueued` / `already_terminated`); `enqueued` confirms acceptance, not exit or completion of owned work. It carries `open_tasks` — the tasks the agent still owns as it goes down (at most five, newest first), or None — and `shell_sessions`: what the shell-session kill did (`when` = `now` with the `killed` ids, or `at_exit`), or None when none was requested
 
 ### `ava.agents.restart(agent_id: int) -> RestartResult`

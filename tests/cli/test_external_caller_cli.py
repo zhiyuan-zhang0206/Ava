@@ -150,7 +150,7 @@ def test_lifecycle_invalid_source_exits_cleanly(
 ) -> None:
     from cli.parsers.agents import _h_agents_kill
 
-    args = argparse.Namespace(agent_id=42, source="bogus", final=False)
+    args = argparse.Namespace(agent_id=42, source="bogus", kill_all_shell_sessions=False)
     assert _h_agents_kill(args) == 2
     assert "Unrecognized inbound source" in capsys.readouterr().err
     post.assert_not_called()

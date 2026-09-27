@@ -1,6 +1,7 @@
 """Hosted application waits for graph return, then uses the durable command."""
 
 import asyncio
+from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, Mock
 from uuid import uuid4
@@ -18,10 +19,12 @@ from agent.hosted_ownership import (
     apply_hosted_lifecycle,
     settle_hosted_runtime,
 )
-from services.agent_host.host import AgentHost
+from ops.ops_exit import _force_terminate_transaction
+from services.agent_host.host import AgentHost, kill_terminating_agent_shells
 from shared.config import settings
 from shared.context import AvaContext
 from shared.db import PG_KEEPALIVE_KWARGS
+from shared.hosted_force import recover_orphaned_hosted_forces
 from shared.runtime_incarnation import RuntimeIncarnation
 from shared.turn_identity import bind_turn_identity
 from tests.agent.test_inbound_ownership import _admit, _agent
@@ -183,8 +186,6 @@ async def test_hosted_terminate_crash_has_no_applied_unobserved_gap(
 async def test_hosted_force_cannot_be_undone_by_prior_restart(
     db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, applied: bool
 ) -> None:
-    from ops.ops_exit import _force_terminate_transaction
-
     agent_id = _agent(db_conn)
     owner = await _admit(aops_pool, agent_id)
     first = _command(db_conn, agent_id, "restart")
@@ -404,3 +405,85 @@ async def test_hosted_apply_without_a_bound_killer_refuses_a_kill_request(
         "ON m.id=i.agent_id WHERE i.id=%s",
         (command,),
     ).fetchone() == (None, "running")
+
+
+def _any_model(*, model: str | None = None, config: dict[str, object] | None = None) -> str:
+    """A fake host's wake carries no provider keys; accept the model as given."""
+    del config
+    return model or "deepseek-v4-flash-vision-exp"
+
+
+def _record_force_sweeps(monkeypatch: pytest.MonkeyPatch, command: int) -> list[tuple[int, object]]:
+    """Patch the host's kill primitive; record (agent id, command observed_at)."""
+    calls: list[tuple[int, object]] = []
+
+    def _kill(agent_id: int) -> list[int]:
+        with psycopg.connect(settings.data_plane.db_url, autocommit=True) as conn:
+            row = conn.execute(
+                "SELECT observed_at FROM inbound_messages WHERE id=%s", (command,)
+            ).fetchone()
+        calls.append((agent_id, None if row is None else row[0]))
+        return []
+
+    monkeypatch.setattr("ops.cluster_status.kill_agent_shells", _kill)
+    return calls
+
+
+@pytest.mark.parametrize("requested", [True, False])
+async def test_force_settlement_sweeps_requested_shell_sessions_again(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    monkeypatch: pytest.MonkeyPatch,
+    requested: bool,
+) -> None:
+    """A step still draining past a force's kill may create a shell; the live
+    host sweeps again when it observes the force quiescent, before recording
+    the observation (decisions/2026-09-27-terminate-has-no-closed-state.md)."""
+    monkeypatch.setattr("services.agent_host.runtime.validate_model_config", _any_model)
+    agent_id = _agent(db_conn)
+    host = AgentHost(pool=aops_pool, checkpointer=Mock(), graph=Mock(), machine="claim-test")
+    await admit_hosted_runtime(
+        aops_pool, agent_id, "claim-test", host._owner, expected_from="idling"
+    )
+    with ConnectionPool[psycopg.Connection](settings.data_plane.db_url) as pool:
+        _, _, _, command = await asyncio.to_thread(
+            _force_terminate_transaction,
+            agent_id,
+            pool,
+            source="user",
+            kill_all_shell_sessions=requested,
+        )
+    sweeps = _record_force_sweeps(monkeypatch, command)
+    await host.run_turn(agent_id)
+    assert sweeps == ([(agent_id, None)] if requested else [])
+    assert db_conn.execute(
+        "SELECT observed_at IS NOT NULL FROM inbound_messages WHERE id=%s", (command,)
+    ).fetchone() == (True,)
+
+
+async def test_boot_recovery_sweeps_a_requested_force_shell_kill(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    agent_id = _agent(db_conn)
+    old = AgentHost(pool=aops_pool, checkpointer=Mock(), graph=Mock(), machine="claim-test")
+    await admit_hosted_runtime(
+        aops_pool, agent_id, "claim-test", old._owner, expected_from="idling"
+    )
+    with ConnectionPool[psycopg.Connection](settings.data_plane.db_url) as pool:
+        _, _, _, command = await asyncio.to_thread(
+            _force_terminate_transaction,
+            agent_id,
+            pool,
+            source="user",
+            kill_all_shell_sessions=True,
+        )
+    monkeypatch.setattr("shared.exec_request_evidence.exec_run_dir", lambda: tmp_path)
+    sweeps = _record_force_sweeps(monkeypatch, command)
+    recovered, _ = await recover_orphaned_hosted_forces(
+        aops_pool, "claim-test", kill_shell_sessions=kill_terminating_agent_shells
+    )
+    assert recovered == [agent_id]
+    assert sweeps == [(agent_id, None)]

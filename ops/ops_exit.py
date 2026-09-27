@@ -217,9 +217,11 @@ def _force_terminate_transaction(
     """Lock the agent, insert termination intent and install its host resource fence. A newer inbound cannot bypass this accepted force command.
 
     `kill_all_shell_sessions` is recorded on the force command and in its audit
-    event; the caller kills the sessions once this fence commits. The fence
-    supersedes any unapplied graceful terminate, including a shell-session
-    kill that terminate carried: a force kills sessions only when asked itself.
+    event; the caller kills the sessions once this fence commits, and the host
+    sweeps them again when it observes the force quiescent
+    (`shared.hosted_force`). The fence supersedes any unapplied graceful
+    terminate, including a shell-session kill that terminate carried: a force
+    kills sessions only when asked itself.
     """
     with db_pool.connection() as conn, conn.cursor() as cur:
         conn.execute("SET TRANSACTION READ WRITE")
