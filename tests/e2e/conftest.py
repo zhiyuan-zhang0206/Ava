@@ -211,6 +211,7 @@ def _e2e_process_env(_provisioned_db: str, _provisioned_redis: str) -> Iterator[
     # the setup without a line here cannot merge.
     _env_keys = (
         "AVA_AUTH_MIDDLEWARE_ENABLED",
+        "AVA_CLUSTER_SECRET",
         "AVA_CONFIG_FETCH",
         "AVA_EVENTS_CHANNEL",
         "AVA_HOME",
@@ -298,6 +299,11 @@ def _e2e_process_env(_provisioned_db: str, _provisioned_redis: str) -> Iterator[
     # an inherited value the unit .env does not declare (default True = 401 on
     # every unauthenticated e2e call). Declare it so e2e runs auth-off.
     os.environ["AVA_AUTH_MIDDLEWARE_ENABLED"] = "false"
+    # The prod default single box has no cluster secret: the API and /ops are
+    # open on loopback. With the suite's secret set, /ops accepts only a write
+    # generation's machine API tokens, which this direct-process stack (no
+    # root launcher, no ledger) never mints: a set secret refuses every spawn.
+    os.environ["AVA_CLUSTER_SECRET"] = ""
 
     env_lines = [
         f"{key}={os.environ[key]}"
