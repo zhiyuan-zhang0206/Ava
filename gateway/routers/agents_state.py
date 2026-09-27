@@ -17,8 +17,8 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from psycopg_pool import ConnectionPool
 
 from gateway.inbound_provenance import request_inbound_provenance
-from gateway.routers._delivery import deliver_chat_inbound, reconcile_chat_delivery
 from gateway.routers._eval_guard import caller_eval_isolation, deny_isolated_result_read
+from gateway.routers.delivery import deliver_chat_inbound, reconcile_chat_delivery
 from gateway.schemas import (
     AgentMessageEnqueued,
     AgentMessagesResponse,

@@ -8,7 +8,7 @@ on:
       - 'agent/graph/_chat_inbound.py'
       - 'services/agent_host/**'
       - 'gateway/mcp_endpoint.py'
-      - 'gateway/routers/_delivery.py'
+      - 'gateway/routers/delivery.py'
       - 'gateway/routers/agents*.py'
       - 'cli/commands/agents/control.py'
       - 'ops/rpc_schemas.py'

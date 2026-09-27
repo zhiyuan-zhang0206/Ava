@@ -640,8 +640,6 @@
     "cli/commands/observability/trace.py::shared.trace._mirror_sort_key": 1,
     "cli/prepared_facts.py::shared.runtime_publication_input._receipt_expected": 1,
     "gateway/app.py::gateway.routers._machine_pause": 1,
-    "gateway/completion_notice_flusher.py::gateway.routers._delivery": 1,
-    "gateway/mcp_endpoint.py::gateway.routers._delivery": 1,
     "gateway/routers/_machine_pause.py::ops.ops_lifecycle._force_mark_terminated": 1,
     "gateway/routers/agents.py::ops.ops_lifecycle._spawn_prechecks_blocking": 1,
     "gateway/routers/agents_lifecycle.py::shared.agents.impersonation._impersonation_store": 1,

@@ -35,7 +35,7 @@ from fastapi.responses import FileResponse
 from psycopg_pool import ConnectionPool
 
 from gateway.inbound_provenance import request_inbound_provenance
-from gateway.routers._delivery import deliver_chat_inbound
+from gateway.routers.delivery import deliver_chat_inbound
 from gateway.schemas import UploadedBatch, UploadedFile
 from shared.agents import AgentNotFound
 from shared.db import agent_exists
