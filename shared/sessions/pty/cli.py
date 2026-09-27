@@ -25,17 +25,20 @@ Ops (session ops take the session name first):
                             print captured text to stdout (pyte render;
                             scrollback defaults to True).
 - ``resize <name> <cols> <rows>``  TIOCSWINSZ + SIGWINCH to the group.
-- ``kill <name> [--graceful]``     kill the session's process tree
-                            (graceful: SIGTERM first); idempotent noop.
-                            Falls back to record-pid kills when the host
+- ``kill <name> [--graceful]``     kill every process of the session — the
+                            shell's tree and its POSIX session
+                            (``session_tree``; graceful: SIGTERM first);
+                            idempotent noop. Falls back to a record-based
+                            kill of the same membership when the host
                             itself is wedged, so a kill is authoritative
-                            even against a broken host. On success prints
+                            even against a broken host. Fails naming any
+                            process that survived. On success prints
                             `interrupted` when the session carried live
-                            processes (a running foreground/background job)
-                            at kill time, `idle` otherwise — the TTL
-                            reaper's interrupt verdict (a record-based kill
-                            of a wedged host answers `interrupted`,
-                            fail-open).
+                            processes (a foreground/background job, a
+                            double-forked orphan) at kill time, `idle`
+                            otherwise — the TTL reaper's interrupt verdict
+                            (a record-based kill of a wedged host answers
+                            `interrupted`, fail-open).
 - ``list [prefix]``         live session names, one per line (record scan —
                             no process to dial; sweeps dead records).
 - ``list-started-at [prefix]``     every live session's launch epoch.
@@ -58,7 +61,6 @@ import json
 import os
 import re
 import shlex
-import signal
 import socket
 import subprocess
 import sys
@@ -72,7 +74,7 @@ import psutil
 from shared.log import logger
 from shared.paths import run_dir
 from shared.platform import LockTimeoutError
-from shared.proc_tree import stable_create_time
+from shared.proc_tree import OwnedProcess, stable_create_time
 from shared.session_record import SessionRecord, pid_starttime_ticks
 from shared.sessions.pty._paths import (
     CAPTURE_MAX_LINES,
@@ -94,6 +96,7 @@ from shared.sessions.pty.records import (
     session_generation,
     session_started_at,
 )
+from shared.sessions.pty.session_tree import kill_host_tree, kill_session_tree
 
 # ---------------------------------------------------------------------------
 # Key translation — the classic send-keys vocabulary (prototype _KEYMAP, with
@@ -256,6 +259,10 @@ _HOST_TIMEOUT_S = 30.0
 # (~0.5s), not bash login.
 _SPAWN_READY_TIMEOUT_S = 15.0
 
+# How long a kill the CLI performs itself (a wedged host, a failed spawn)
+# waits for its SIGKILLed processes to exit before reporting survivors.
+_RECORD_KILL_WAIT_S = 3.0
+
 
 def session_request(name: str, req: dict[str, Any]) -> dict[str, Any]:
     """Send one JSON request to the session's host, return its response.
@@ -393,28 +400,17 @@ def _abort_failed_spawn(name: str, host_pid: int) -> None:
     """Make a failed allocation terminal before its admission lock is released.
 
     A host that merely missed the ready deadline could otherwise write its
-    record after a concurrent freeze acknowledged. Snapshot descendants while
-    the known host is alive, kill the host first so it cannot fork more work,
-    then kill the snapshot and remove only provably dead session artifacts.
+    record after a concurrent freeze acknowledged. The host is frozen first so
+    it cannot fork more work, its shell's whole session is killed
+    (`session_tree`), then the host, and only provably dead session artifacts
+    are removed.
     """
-    processes: list[psutil.Process] = []
-    with contextlib.suppress(psutil.Error):
-        host = psutil.Process(host_pid)
-        processes = [host, *host.children(recursive=True)]
-    for proc in processes:
-        with contextlib.suppress(psutil.Error):
-            proc.kill()
-    if processes:
-        _gone, alive = psutil.wait_procs(processes, timeout=3.0)
-        survivors: list[int] = []
-        for proc in alive:
-            with contextlib.suppress(psutil.Error):
-                if proc.is_running() and proc.status() != psutil.STATUS_ZOMBIE:
-                    survivors.append(proc.pid)
-        if survivors:
-            sys.stderr.write(
-                f"failed pty allocation for {name} left live process(es): {sorted(survivors)}\n"
-            )
+    survivors: list[int] = []
+    with contextlib.suppress(psutil.NoSuchProcess):
+        result = kill_host_tree(psutil.Process(host_pid), wait_s=_RECORD_KILL_WAIT_S)
+        survivors = sorted(identity.pid for identity in result.survivors)
+    if survivors:
+        sys.stderr.write(f"failed pty allocation for {name} left live process(es): {survivors}\n")
     _sweep_dead(name)
     try:
         _reap_orphaned_hosts(name, force_unresponsive=True)
@@ -553,36 +549,43 @@ def _op_resize(name: str, rest: list[str]) -> int:
     return _finish_op(resp)
 
 
+def _kill_recorded_host(name: str) -> None:
+    """SIGKILL the record's host pid, identity-checked against its start time."""
+    identity = host_identity(record_path(name))
+    if identity is None:
+        return
+    host_pid, host_create = identity
+    with contextlib.suppress(psutil.Error):
+        proc = psutil.Process(host_pid)
+        recorded_starttime = host_starttime(record_path(name))
+        matches = (
+            pid_starttime_ticks(host_pid) == recorded_starttime
+            if recorded_starttime is not None
+            else abs(stable_create_time(proc) - host_create) <= _CREATE_TIME_TOLERANCE_S
+        )
+        if proc.is_running() and matches:
+            proc.kill()
+
+
 def _kill_by_record(name: str) -> int:
     """Kill a session whose host is not answering, straight from its record.
 
     The host owns the orderly kill; this fallback keeps `kill` authoritative
-    against a wedged or SIGKILLed host: signal the shell's group and the
-    host pid (both identity-checked against recorded start-times so a
-    recycled pid is never signalled), then sweep the record + socket only
-    when they are provably stale.
+    against a wedged or SIGKILLed host: kill the same membership the host's
+    kill takes (`session_tree` — the shell's tree and POSIX session), then the
+    host pid, each identity-checked against its recorded start time so a
+    recycled pid is never signalled; then sweep the record + socket only when
+    they are provably stale.
     """
     path = record_path(name)
     rec = SessionRecord.read(path)
+    survivors: list[int] = []
     if rec is not None and _record_alive(rec, path):
-        with contextlib.suppress(ProcessLookupError, OSError):
-            os.killpg(rec.pid, signal.SIGKILL)
-        with contextlib.suppress(ProcessLookupError, OSError):
-            os.kill(rec.pid, signal.SIGKILL)
-    identity = host_identity(record_path(name))
-    if identity is not None:
-        host_pid, host_create = identity
-        with contextlib.suppress(psutil.Error):
-            proc = psutil.Process(host_pid)
-            recorded_starttime = host_starttime(record_path(name))
-            matches = (
-                pid_starttime_ticks(host_pid) == recorded_starttime
-                if recorded_starttime is not None
-                else abs(stable_create_time(proc) - host_create) <= _CREATE_TIME_TOLERANCE_S
-            )
-            if proc.is_running() and matches:
-                proc.kill()
-    deadline = time.monotonic() + 3.0
+        shell = OwnedProcess(rec.pid, rec.create_time, rec.starttime)
+        result = kill_session_tree(shell, wait_s=_RECORD_KILL_WAIT_S)
+        survivors = sorted(identity.pid for identity in result.survivors)
+    _kill_recorded_host(name)
+    deadline = time.monotonic() + _RECORD_KILL_WAIT_S
     while time.monotonic() < deadline:
         rec = SessionRecord.read(path)
         if rec is None or not _record_alive(rec, path):
@@ -590,6 +593,9 @@ def _kill_by_record(name: str) -> int:
         time.sleep(0.05)
     if has_session(name):
         sys.stderr.write(f"session {name} survived the record-based kill\n")
+        return 1
+    if survivors:
+        sys.stderr.write(f"session {name}: processes survived the record-based kill: {survivors}\n")
         return 1
     sys.stdout.write("interrupted\n")  # fail-open: a wedged host's kill could not be probed
     _sweep_dead(name)
