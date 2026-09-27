@@ -430,6 +430,9 @@ def test_operation_preflight_checks_actual_roster_without_selection_or_effects(
     def forbidden(*_args: object, **_kwargs: object) -> None:
         raise AssertionError("read-only preflight cannot start a root")
 
+    def no_delivery(_cls: object) -> dict[str, str]:
+        return {}
+
     monkeypatch.setattr(stage, "read_operation", operation)
     monkeypatch.setattr(machine, "machine_role", roles)
     # The stage names the roster through ops.spec; root_driver builds it via _repo.
@@ -439,7 +442,7 @@ def test_operation_preflight_checks_actual_roster_without_selection_or_effects(
     monkeypatch.setattr(root_driver, "_bring_up_root", forbidden)
     # The roster preflight is under test here; per-service database delivery
     # (write generation or unit capability) is covered by the db-authority tests.
-    monkeypatch.setattr(_data_plane, "db_delivery", lambda _cls: {})
+    monkeypatch.setattr(_data_plane, "db_delivery", no_delivery)
     before = {path: path.read_bytes() for path in home.rglob("*") if path.is_file()}
     if foreign_executable:
         with pytest.raises((ReleaseRejectedError, FileNotFoundError)):
