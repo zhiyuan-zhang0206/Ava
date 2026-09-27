@@ -4,7 +4,7 @@
     "agent/graph": 42,
     "ava": 36,
     "ava_builtins/skills": 35,
-    "cli/commands": 87,
+    "cli/commands": 86,
     "gateway": 44,
     "gateway/routers": 62,
     "gateway/schemas": 28,

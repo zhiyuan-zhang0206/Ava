@@ -15,7 +15,6 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from cli.commands._converge_pitr import converge_pitr_foundation
 from cli.commands._health_preflight import ensure_health_preflight as _ensure_health_preflight
 from cli.commands._ownership_preflight import (
     ensure_ownership_preflight as _ensure_ownership_preflight,
@@ -64,6 +63,7 @@ from cli.commands.converge.source_tree import ensure_source_tree_integrity
 # test reaches for `cli.commands.converge.host.ConvergeCtx` / `ALL_ROLES`.
 from cli.commands.converge.spec import ALL_ROLES, ConvergeCtx, ConvergeStep
 from cli.commands.data_plane.pgbouncer import ensure_pgbouncer_step
+from cli.commands.data_plane.pitr_foundation import converge_pitr_foundation
 from cli.commands.extensions.external_skills import converge_external_agent_skill
 from cli.commands.observability.lgtm import ensure_lgtm_stack_step
 from cli.commands.observability.lgtm_native import ensure_lgtm_native_step

@@ -31,7 +31,8 @@ out of the once-flat directory, each an independent package door:
 - `observability/` — native LGTM, the OTel collector, trace shipping, logs;
   owns its converge steps (`lgtm.py`, `otel_collector.py`)
 - `data_plane/` — per-cluster Postgres/Redis/PgBouncer, their verified
-  maintenance stop, db roles, PITR; owns its converge step (`pgbouncer.py`)
+  maintenance stop, db roles, PITR; owns its converge steps (`pgbouncer.py`,
+  `pitr_foundation.py`)
 - `cluster/` — whole-cluster verbs, the health probe, watchdogs, the registry
 - `converge/` — the orchestrator (`host.py`), the step contract (`spec.py`),
   and host-wiring steps owned by no other domain (source tree, firewall,
