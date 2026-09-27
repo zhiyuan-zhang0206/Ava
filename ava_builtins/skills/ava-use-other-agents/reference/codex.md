@@ -62,8 +62,7 @@ A hand launch is **not canonical**: no generation is registered, no task or
 work files are created, and no supervisor starts — the ownership and
 supervision the spawn script provides are yours to reproduce. Run it under
 the same file-driven discipline as Mode A (task file + work file +
-`watch_work.py` to wake you), and keep to one live Codex per workspace so a
-second launch cannot race the first.
+`watch_work.py` to wake you).
 
 A hand launch runs on the default `~/.codex`, as `spawn_codex.py` does, so the
 session stays resumable. Pass the launcher's per-session overrides instead of

@@ -1,15 +1,12 @@
 #!/usr/bin/env python3
-"""Create, adopt, inspect, or stop the canonical Claude Code workspace generation.
+"""Launch, inspect, or stop Claude Code sessions in persistent shells.
 
-The active identity is ``(cluster, canonical workspace, claude)``. A supervised
-worker (the default) keeps the two-file collaboration — a task file, a work
-file, and a session the launcher's owner follows with ``watch_work.py``. A
-takeover (``--impersonate-self``) runs file- and supervisor-less with its
-briefing inlined in the launch message: its relay starts with the session
-via the bundled ava-relay plugin (resident mode; ``--no-relay-resident``
-restores the executor-armed Monitor flow). A concurrent or
-cross-agent caller adopts the live record instead of stacking another Claude
-process.
+A supervised worker (the default) keeps the two-file collaboration — a task
+file, a work file, and a session the launcher's owner follows with
+``watch_work.py``. A takeover (``--impersonate-self``) runs file- and
+supervisor-less with its briefing inlined in the launch message: its relay
+starts with the session via the bundled ava-relay plugin (resident mode;
+``--no-relay-resident`` restores the executor-armed Monitor flow).
 
 Usage::
 
@@ -27,8 +24,8 @@ ANTHROPIC_API_KEY`` to avoid API-key billing trap), then polls
 the collaboration-contract message — which names both file paths, so the
 coding agent is told where they are rather than assuming a layout.
 
-A takeover instead publishes a generation-owned record under the canonical key,
-opens the session under the record's name, and sends the inline briefing; it
+A takeover instead publishes an owner generation of its own under
+``(cluster, workspace, claude)``, opens the session under the record's name, and sends the inline briefing; it
 reads no task or work file, writes nothing in the workspace beyond the trust
 flag, and starts no supervisor. ``--status`` / ``--cancel-generation`` inspect
 or stop the record (supervised launches stay outside the record plane by
@@ -42,7 +39,7 @@ The launch logic lives in ``ava.shell.coding_tools.claude``; this script is
 its command-line entry and passes its own directory, which holds the
 collaboration contract and the resident relay plugin.
 
-Output: owner-record fields (``adopted`` / ``session_id`` / ``generation`` …)
+Output: owner-record fields (``status`` / ``session_id`` / ``generation`` …)
 for a takeover; ``session_id``, ``tasks_file``, ``work_file`` for a supervised
 launch (one ``key=value`` per line). Feed ``work_file`` straight into
 ``watch_work.py``'s ``WORK_FILE``; do not reconstruct the path from a
@@ -110,7 +107,7 @@ def main() -> int:
     action.add_argument(
         "--status",
         action="store_true",
-        help="Print the canonical owner record (takeover generations; supervised "
+        help="Print the workspace's owner records (takeover generations; supervised "
         "launches are not registered).",
     )
     action.add_argument(
@@ -122,7 +119,7 @@ def main() -> int:
     action.add_argument(
         "--cancel-generation",
         metavar="GENERATION",
-        help="Stop and terminalize exactly this canonical generation "
+        help="Stop and terminalize exactly this generation "
         "(takeover generations; supervised launches are not registered).",
     )
     parser.add_argument(

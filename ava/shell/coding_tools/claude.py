@@ -3,8 +3,8 @@
 A supervised worker (the default) keeps the two-file collaboration: a task
 file, a work file, and a session the launcher's owner follows with the skill's
 ``watch_work.py``. A takeover (``impersonation_name``) runs file- and
-supervisor-less with its briefing inlined in the launch message, under a
-canonical owner record keyed by ``(cluster, workspace, claude)``; its relay
+supervisor-less with its briefing inlined in the launch message, under an
+owner generation of its own keyed by ``(cluster, workspace, claude)``; its relay
 starts with the session via the skill's bundled ava-relay plugin (resident
 mode) unless the executor-armed Monitor flow is requested.
 
@@ -36,7 +36,7 @@ from ._claude_checks import (
     _wait_for_ready,
 )
 from ._common import cancel as _cancel_generation
-from ._common import claim_canonical, impersonator_guide, init_file, worker_bootstrap
+from ._common import impersonator_guide, init_file, new_generation, worker_bootstrap
 from ._common import resolve_dir as resolve_dir
 from ._common import resolve_file as resolve_file
 from ._common import session_uuid as session_uuid
@@ -118,8 +118,7 @@ def _takeover_bootstrap_message(
     return bootstrap_message(agent_id, name, "claude", brief, guide, relay_resident=relay_resident)
 
 
-def _print_owner(owner: coding_session_owner.CodingSessionOwner, *, adopted: bool) -> None:
-    print(f"adopted={'true' if adopted else 'false'}")
+def _print_owner(owner: coding_session_owner.CodingSessionOwner) -> None:
     print(f"status={owner.status}")
     if owner.generation is not None:
         print(f"generation={owner.generation}")
@@ -138,19 +137,19 @@ def _print_owner(owner: coding_session_owner.CodingSessionOwner, *, adopted: boo
 
 
 def status(workspace: Path) -> int:
-    """Print the canonical takeover record (supervised launches are not registered)."""
+    """Print the workspace's takeover generations (supervised launches are not registered)."""
     return _owner_status(
         coding_session_owner.canonical_key(workspace, tool="claude"),
-        lambda owner: _print_owner(owner, adopted=False),
+        _print_owner,
     )
 
 
 def cancel(workspace: Path, generation: str) -> int:
-    """Stop and terminalize exactly this canonical takeover generation."""
+    """Stop and terminalize exactly this takeover generation."""
     return _cancel_generation(
         coding_session_owner.canonical_key(workspace, tool="claude"),
         generation,
-        lambda owner: _print_owner(owner, adopted=False),
+        _print_owner,
     )
 
 
@@ -240,20 +239,9 @@ def _run_takeover_launch(
             )
         plugin_dir = candidate.resolve()
     key = coding_session_owner.canonical_key(workspace, tool="claude")
-    claim = claim_canonical(
-        key,
-        tasks_file=None,
-        work_file=None,
-        ttl_seconds=ttl_seconds,
-    )
-    if claim.action == "adopt":
-        raise RuntimeError(
-            "a takeover needs a fresh coding workspace; this workspace already has a live "
-            "generation - cancel it with --cancel-generation first"
-        )
-    owner = claim.owner
+    owner = new_generation(key, tasks_file=None, work_file=None, ttl_seconds=ttl_seconds)
     if owner.generation is None or owner.expected_suffix is None or owner.owner_agent_id is None:
-        raise RuntimeError("new canonical owner is missing launch fields")
+        raise RuntimeError("new owner generation is missing launch fields")
     generation = owner.generation
     expected_suffix = owner.expected_suffix
     owner_agent_id = owner.owner_agent_id
@@ -306,9 +294,9 @@ def _run_takeover_launch(
             lambda: _bootstrap_count(claude_session) > baseline,
         )
     except BaseException:
-        # A replacement may own the canonical record by now, so its generation
-        # CAS cannot reclaim this PTY. The old launcher still owns the numeric id
-        # and must reclaim it directly before rolling back its record.
+        # Another launch's sweep may have reclaimed this generation's record by
+        # now, so its CAS cannot reclaim this PTY. The launcher still owns the
+        # numeric id and must reclaim it directly before rolling back its record.
         if sid is not None:
             with contextlib.suppress(Exception):
                 ava.shell.sessions.kill(sid)
@@ -321,7 +309,7 @@ def _run_takeover_launch(
         raise
 
     print(f"ready. name={active.expected_suffix} workspace={workspace}")
-    _print_owner(active, adopted=False)
+    _print_owner(active)
     print(f"claude_session={claude_session}")
     return 0
 

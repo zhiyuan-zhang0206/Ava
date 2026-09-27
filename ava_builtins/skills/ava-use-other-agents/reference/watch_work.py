@@ -257,7 +257,7 @@ def watch(
 
         if canonical_context is not None:
             key, expected_generation, canonical_owner = canonical_context
-            owner = coding_session_owner.read(key)
+            owner = coding_session_owner.read(key, expected_generation)
             if owner.generation != expected_generation or owner.status in (
                 "inactive",
                 "terminal",

@@ -22,10 +22,11 @@ tags:
 
 `reference/spawn_codex.py` is a thin command-line entry over
 [[ava/shell/coding_tools/coding-tools.ava.okf.md|ava.shell.coding_tools]] (so is
-`reference/spawn_claude.py`). It creates or adopts one generation keyed by resolved
-cluster home plus resolved workspace plus `codex`. The canonical record returns
-the current owner and full Persistent Shell handle across Ava-agent callers;
-workspace basename appears only in display suffixes. Launching is serialized by
+`reference/spawn_claude.py`). Every launch owns a generation of its own under the
+resolved cluster home plus resolved workspace plus `codex`, so several can share
+a workspace; the record carries its owner and full Persistent Shell handle, and
+the workspace basename appears only in display suffixes. A launch first reclaims
+the workspace's dead generations; transitions are serialized by
 [[shared/coding-session-owner.ava.okf.md|the host-local owner journal]].
 
 Codex runs on the host user's own `~/.codex` with per-session `-c` overrides
@@ -49,5 +50,5 @@ use non-resurrecting system notes.
 - [[ava_builtins/skills/orchestration/orchestration.ava.okf.md|Workflow orchestration skill]] — belongs to functional group
 - [[ava/shell/shell.ava.okf.md|ava.shell]] — `sessions` (new/send/send_keys/capture/kill) session primitive itself
 - [[ava/watcher.ava.okf.md|ava.watcher]] — wait for it to produce results when supervising long tasks
-- [[shared/coding-session-owner.ava.okf.md]] — canonical generation admission, adoption, transfer, and cleanup
+- [[shared/coding-session-owner.ava.okf.md]] — per-launch generations, the dead-sibling sweep, and exact cleanup
 - [[ava/shell/coding_tools/coding-tools.ava.okf.md|ava.shell.coding_tools]] — the launch logic behind the Claude and Codex spawn scripts

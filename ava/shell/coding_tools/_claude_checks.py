@@ -123,7 +123,7 @@ def _check_login_marker(failure_marker: Path | None) -> None:
 def _generation_relay_stub(state_dir: Path | None) -> Path:
     """Create the new generation's private dir and name its stub inside it."""
     if state_dir is None:
-        raise RuntimeError("new canonical owner is missing its generation state dir")
+        raise RuntimeError("new owner generation is missing its state dir")
     state_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
     return _relay_stub_path(state_dir)
 
@@ -227,8 +227,9 @@ def _verify_start_receipt(
     that still lacks evidence, rebuild and resend the formal bootstrap once.
     The final evidence re-check immediately before rebuilding avoids a duplicate
     during delayed transcript writes; the straight-line recovery branch invokes
-    the factory at most once. Canonical session ownership already excludes a
-    second launcher for the same workspace. Kept loud but not fatal: the
+    the factory at most once. Evidence is counted in this session's own
+    transcript, so another launch in the same workspace cannot pass for it.
+    Kept loud but not fatal: the
     session may still be rendering; the operator sees the warning. A dead
     session's send_keys()/send()/capture() refusal is reported the same way.
     """

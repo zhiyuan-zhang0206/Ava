@@ -1121,8 +1121,10 @@ python ava_builtins/skills/ava-use-other-agents/reference/spawn_codex.py \
   --status
 ```
 
-A live record is adopted across agent changes instead of launching a duplicate.
-A record is either a supervised worker (task/work files plus an automatic
+Every launch owns a generation record of its own, so several Codex sessions can
+share a workspace; `--status` lists them all, and a launch first reclaims the
+workspace's dead generations (expired, crashed, unsupervised, or owned by a
+terminated agent). A record is either a supervised worker (task/work files plus an automatic
 supervisor) or a file-less takeover (no files, no supervisor; the coding
 session alone is its liveness signal).
 Each ownership generation has a private

@@ -139,8 +139,8 @@ def test_takeover_never_delivers_bootstrap_to_a_non_claude_panel(
     def _kill(sid: int) -> None:
         killed.append(sid)
 
-    def _claim(*_args: object, **_kwargs: object) -> coding_session_owner.CodingSessionClaim:
-        return coding_session_owner.CodingSessionClaim(action="launch", owner=launching)
+    def _claim(*_args: object, **_kwargs: object) -> coding_session_owner.CodingSessionOwner:
+        return launching
 
     def _pretrust(_workspace: Path) -> None:
         return None
@@ -192,7 +192,7 @@ def test_takeover_never_delivers_bootstrap_to_a_non_claude_panel(
     def _receipt(_sid: int, _rebuild: Callable[[], str], _submitted: object) -> None:
         pytest.fail("bootstrap sent")
 
-    monkeypatch.setattr(claude, "claim_canonical", _claim)
+    monkeypatch.setattr(claude, "new_generation", _claim)
     monkeypatch.setattr(claude, "_pretrust", _pretrust)
     monkeypatch.setattr(claude.ava.shell.sessions, "new", _new)
     monkeypatch.setattr(claude.ava.shell.sessions, "send", _send)
@@ -243,11 +243,11 @@ def test_takeover_launch_inlines_brief_without_files_or_supervisor(
         tasks_file: Path | None,
         work_file: Path | None,
         ttl_seconds: float,
-    ) -> coding_session_owner.CodingSessionClaim:
+    ) -> coding_session_owner.CodingSessionOwner:
         assert tasks_file is None and work_file is None
         assert ttl_seconds == 3600
         events.append("claim")
-        return coding_session_owner.CodingSessionClaim(action="launch", owner=launching)
+        return launching
 
     def _unexpected(*_args: object, **_kwargs: object) -> None:
         raise AssertionError("a takeover launch must not create files or start a supervisor")
@@ -287,7 +287,7 @@ def test_takeover_launch_inlines_brief_without_files_or_supervisor(
         events.append("publish")
         return replace(launching, status="active", session_id=7, session_name=session_name)
 
-    monkeypatch.setattr(claude, "claim_canonical", _claim)
+    monkeypatch.setattr(claude, "new_generation", _claim)
     monkeypatch.setattr(claude, "init_file", _unexpected)
     monkeypatch.setattr(claude, "_pretrust", _pretrust)
     monkeypatch.setattr(claude.ava.shell.sessions, "new", _new)
@@ -322,8 +322,8 @@ def test_resident_launch_scopes_the_credential_stub_to_its_generation(
     launching = replace(active, status="launching", session_id=None, session_name=None)
     sent: list[str] = []
 
-    def _claim(*_args: object, **_kwargs: object) -> coding_session_owner.CodingSessionClaim:
-        return coding_session_owner.CodingSessionClaim(action="launch", owner=launching)
+    def _claim(*_args: object, **_kwargs: object) -> coding_session_owner.CodingSessionOwner:
+        return launching
 
     def _pretrust(_workspace: Path) -> None:
         return None
@@ -350,7 +350,7 @@ def test_resident_launch_scopes_the_credential_stub_to_its_generation(
     ) -> coding_session_owner.CodingSessionOwner:
         return replace(launching, status="active", session_id=session_id, session_name=session_name)
 
-    monkeypatch.setattr(claude, "claim_canonical", _claim)
+    monkeypatch.setattr(claude, "new_generation", _claim)
     monkeypatch.setattr(claude, "_pretrust", _pretrust)
     monkeypatch.setattr(claude.ava.shell.sessions, "new", _new)
     monkeypatch.setattr(claude.ava.shell.sessions, "send", _send)
@@ -562,34 +562,6 @@ def test_start_receipt_warns_after_one_unconfirmed_rebuild_resend(
     assert "after one rebuild resend" in out
 
 
-def test_takeover_launch_refuses_a_workspace_with_a_live_generation(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    record = _owner(tmp_path)
-
-    def _claim(
-        _key: coding_session_owner.CodingSessionKey,
-        *,
-        tasks_file: Path | None,
-        work_file: Path | None,
-        ttl_seconds: float,
-    ) -> coding_session_owner.CodingSessionClaim:
-        assert tasks_file is None and work_file is None
-        return coding_session_owner.CodingSessionClaim(action="adopt", owner=record)
-
-    monkeypatch.setattr(claude, "claim_canonical", _claim)
-    stub = Path(record.key.workspace) / ".ava-relay.env"
-    marker = Path(record.key.workspace) / ".ava-relay.pid"
-    stub.write_text("current credential", encoding="utf-8")
-    marker.write_text("1234\n", encoding="utf-8")
-
-    with pytest.raises(RuntimeError, match="fresh coding workspace"):
-        _launch_takeover(Path(record.key.workspace), "the briefing")
-    assert stub.read_text(encoding="utf-8") == "current credential"
-    assert marker.read_text(encoding="utf-8") == "1234\n"
-
-
 @pytest.mark.parametrize(
     "extra",
     [
@@ -630,40 +602,26 @@ def test_supervised_launch_needs_its_files(tmp_path: Path) -> None:
         claude.launch(tmp_path, None, None, 3600, reference_dir=_REFERENCE)
 
 
-def test_claim_reclaims_a_terminated_owners_generation(
+def test_a_new_generation_lets_the_sweep_ask_about_terminated_owners(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     record = _owner(tmp_path)
-    seen: list[str | None] = []
+    seen: list[object] = []
 
-    def _claim(
-        _key: coding_session_owner.CodingSessionKey,
-        *,
-        owner_agent_id: int,
-        tasks_file: Path | None,
-        work_file: Path | None,
-        ttl_seconds: float,
-        terminated_generation: str | None,
-    ) -> coding_session_owner.CodingSessionClaim:
-        seen.append(terminated_generation)
-        return coding_session_owner.CodingSessionClaim(action="launch", owner=record)
-
-    def _read(
-        _key: coding_session_owner.CodingSessionKey,
+    def _launch_generation(
+        _key: coding_session_owner.CodingSessionKey, **kwargs: object
     ) -> coding_session_owner.CodingSessionOwner:
+        seen.append(kwargs["owner_terminated"])
         return record
 
-    def _terminated(_agent_id: int) -> bool:
-        return True
+    monkeypatch.setattr(claude.coding_session_owner, "launch_generation", _launch_generation)
 
-    monkeypatch.setattr(claude.coding_session_owner, "read", _read)
-    monkeypatch.setattr(_common, "owner_terminated", _terminated)
-    monkeypatch.setattr(claude.coding_session_owner, "claim", _claim)
-
-    claude.claim_canonical(record.key, tasks_file=None, work_file=None, ttl_seconds=3600)
-
-    assert seen == [record.generation]
+    assert (
+        claude.new_generation(record.key, tasks_file=None, work_file=None, ttl_seconds=3600)
+        is record
+    )
+    assert seen == [_common.owner_terminated]
 
 
 def test_failed_early_publish_kills_claude_session_before_startup(
@@ -689,9 +647,9 @@ def test_failed_early_publish_kills_claude_session_before_startup(
         tasks_file: Path | None,
         work_file: Path | None,
         ttl_seconds: float,
-    ) -> coding_session_owner.CodingSessionClaim:
+    ) -> coding_session_owner.CodingSessionOwner:
         events.append("claim")
-        return coding_session_owner.CodingSessionClaim(action="launch", owner=launching)
+        return launching
 
     def _pretrust(_workspace: Path) -> None:
         events.append("pretrust")
@@ -728,7 +686,7 @@ def test_failed_early_publish_kills_claude_session_before_startup(
         terminated.append((_generation, reason))
         return False
 
-    monkeypatch.setattr(claude, "claim_canonical", _claim)
+    monkeypatch.setattr(claude, "new_generation", _claim)
     monkeypatch.setattr(claude, "_pretrust", _pretrust)
     monkeypatch.setattr(claude.ava.shell.sessions, "new", _new)
     monkeypatch.setattr(claude.ava.shell.sessions, "send", _send)

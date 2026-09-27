@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Create, adopt, inspect, or stop the canonical Codex workspace generation.
+"""Launch, inspect, or stop Codex sessions in persistent shells.
 
 The launch logic lives in ``ava.shell.coding_tools.codex``; this script is its
 command-line entry and passes its own directory, which holds the collaboration
@@ -21,9 +21,9 @@ _REFERENCE = Path(__file__).resolve().parent
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Launch or adopt the canonical supervised Codex workspace generation."
+        description="Launch, inspect, or stop Codex sessions (a supervised worker or a takeover)."
     )
-    parser.add_argument("workspace", help="Canonical workspace directory for Codex.")
+    parser.add_argument("workspace", help="Workspace directory for Codex.")
     parser.add_argument(
         "--caller-instance",
         default=None,
@@ -48,7 +48,9 @@ def main() -> int:
         help="Task-adapted hard expiry, up to one day (default: %(default)s).",
     )
     action = parser.add_mutually_exclusive_group()
-    action.add_argument("--status", action="store_true", help="Print the canonical owner record.")
+    action.add_argument(
+        "--status", action="store_true", help="Print every owner record of the workspace."
+    )
     action.add_argument(
         "--resume",
         metavar="SESSION_ID",
@@ -58,7 +60,7 @@ def main() -> int:
     action.add_argument(
         "--cancel-generation",
         metavar="GENERATION",
-        help="Stop and terminalize exactly this canonical generation.",
+        help="Stop and terminalize exactly this generation.",
     )
     parser.add_argument(
         "--impersonate-self", action="store_true", help="replace the launching Ava agent"

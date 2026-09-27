@@ -74,8 +74,7 @@ interrupted.
 **Supervised worker (Mode A).**
 - For Claude, start the watcher again (`watch_work.py`). The old one ended with
   the shell.
-- For Codex, the launcher starts a new supervisor itself. The workspace must
-  carry no live generation (`--status`; `--cancel-generation` a stale one).
+- For Codex, the launcher starts a new supervisor itself.
 
 **Takeover (Mode B).**
 - Read the handoff JSON first.
