@@ -131,10 +131,12 @@ def snapshot_env(path: Path, *, keep: int = ENV_BACKUP_KEEP) -> Path | None:
         existing = sorted(backup_dir.glob(".env.*"))
         if existing and existing[-1].read_text() == content:
             return None
-        # Backups are local filesystem metadata. Their timestamp must not load
-        # runtime Settings (this writer also runs before first-start identity).
-        tz = None
-        dest = backup_dir / f".env.{datetime.now().astimezone(tz).strftime('%Y%m%d-%H%M%S-%f')}"
+        # Backups are local filesystem metadata: the stamp is the HOST clock,
+        # not the cluster's (decisions/2026-09-28-env-backup-names-use-the-host-clock.md
+        # — the ruling exception to the 2026-08-27 one-cluster-clock rule). This
+        # writer also runs before first-start identity, so it must not load
+        # runtime Settings to find a cluster clock in the first place.
+        dest = backup_dir / f".env.{datetime.now().astimezone().strftime('%Y%m%d-%H%M%S-%f')}"
         dest.write_text(content)
         ensure_private_file(dest)
         if keep > 0:
