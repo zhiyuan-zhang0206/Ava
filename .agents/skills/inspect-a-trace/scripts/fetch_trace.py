@@ -36,7 +36,12 @@ Output `trace_raw.json` (contract for read_trace.py):
       ]
     }
 
-stdlib only; runs inside the repo venv or any Python 3.12.
+Otherwise stdlib only. Needs the repo's `shared` package on the path (see
+`_source_root`, below) to resolve `$AVA_HOME` the same checkout-anchored way
+every other Ava process does — a guessed `AVA_HOME` here pointed an
+unanchored checkout at prod's `~/.ava/traces` (2026-09-27); runs inside the
+repo venv (`.venv/bin/python`) or any Python 3.12 with `shared`'s deps
+installed.
 """
 
 from __future__ import annotations
@@ -47,8 +52,37 @@ import gzip
 import json
 import os
 import re
+import sys
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
+
+
+def _source_root() -> Path:
+    """The checkout / install root that holds the ``shared`` package.
+
+    The script is invoked from two places: the dev checkout (``.agents/
+    skills/...`` — walk up to the repo root) and the prod install
+    (``$AVA_HOME/skills/...`` — a converge copy; ``shared`` lives in
+    ``$AVA_HOME/source``). ``shared.dotenv_boot`` must be importable from
+    either, so the root is resolved before the import happens.
+    """
+
+    here = Path(__file__).resolve().parent
+    for cand in (here, *here.parents):
+        if (cand / "shared" / "__init__.py").is_file():
+            return cand
+    home = Path(os.environ.get("AVA_HOME", "~/.ava")).expanduser()
+    cand = home / "source"
+    if (cand / "shared" / "__init__.py").is_file():
+        return cand
+    raise RuntimeError(
+        f"cannot locate the Ava source root: no `shared` package above {here} and none at {cand}"
+    )
+
+
+sys.path.insert(0, str(_source_root()))
+
+from shared.dotenv_boot import resolve_ava_home  # noqa: E402 - after the sys.path setup above
 
 _KIND_STRIP = "SPAN_KIND_"
 _STATUS_OK = "STATUS_CODE_OK"
@@ -193,8 +227,11 @@ def cmd_search(args) -> int:
 def _mirror_dir(args) -> Path:
     if args.mirror_dir:
         return Path(args.mirror_dir)
-    ava_home = Path(os.environ.get("AVA_HOME", Path.home() / ".ava"))
-    return ava_home / "traces"
+    # Checkout-anchored, like every other AVA_HOME resolution (shared/dotenv_boot.py):
+    # an unanchored checkout (case 4) gets its own private scratch home, never a
+    # guessed `~/.ava` — so it scans nothing instead of silently reading prod's mirror.
+    home, _ = resolve_ava_home()
+    return home / "traces"
 
 
 def _trace_id_b64(hex_trace_id: str) -> str:

@@ -2,7 +2,26 @@
 
 Self-contained (stdlib + subprocess only): these scripts are meant to be
 copied with the skill and run on any machine that has the pool checkout,
-git, gh, and the `ava` CLI on PATH. No dependency on the Ava source tree.
+git, gh, and the `ava` CLI on PATH. No dependency on the Ava source tree —
+`consolidation/SKILL.md` runs them with a bare `python3` (not `.venv/bin/
+python`), and a machine may carry only the copied skill folder plus the pool
+checkout, with no Ava source checkout at all, so `shared.dotenv_boot` (which
+also pulls in the `python-dotenv` third-party package) cannot be imported
+here the way `shared`-dependent skill scripts do.
+
+That rules out the checkout-anchored home resolution the rest of the repo
+uses, so `ava_home()` takes the opposite, simpler stance: require an explicit
+`AVA_HOME` instead of guessing one. Every legitimate caller already has it:
+these scripts run inside an agent's shell tool, a child of the agent process
+that pinned `AVA_HOME` into its own environment at boot
+(`shared.dotenv_boot.load_ava_env`), which subprocess inherits. A caller with
+no `AVA_HOME` — an ad-hoc run from an unrelated shell, e.g. a dev checkout
+with no cluster of its own — has no business guessing `~/.ava` either: that
+default is THIS MACHINE's real cluster home, and `pool_dir()` /
+`refresh_index()` are write paths (git commit + push to the pool, `ava
+memory refresh`), so a wrong guess here does not just misread — it can
+mutate production (the same "unanchored checkout reaches production" bug
+class as `shared/dotenv_boot.py`, 2026-09-27).
 """
 
 from __future__ import annotations
@@ -13,7 +32,15 @@ from pathlib import Path
 
 
 def ava_home() -> Path:
-    return Path(os.environ.get("AVA_HOME", Path.home() / ".ava"))
+    """This process's Ava home. No fallback — see the module docstring."""
+    env = os.environ.get("AVA_HOME")
+    if not env:
+        raise SystemExit(
+            "AVA_HOME is not set. These scripts never guess a home (an agent's shell "
+            "inherits it from the agent process; a manual run must set it explicitly) "
+            "-- pass AVA_HOME=<path> instead of relying on ~/.ava."
+        )
+    return Path(env)
 
 
 def pool_dir() -> Path:
