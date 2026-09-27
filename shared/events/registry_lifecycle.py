@@ -23,6 +23,18 @@ _EVENTS_LIFECYCLE: dict[str, EventSpec] = {
     "billing_resurrect_run": _telemetry(
         "billing_resurrect_run", "billing batch recovery run finished"
     ),
+    "auto_resurrect_refused": _telemetry(
+        "auto_resurrect_refused",
+        "an automatic resurrect of a terminated agent was refused (e.g. "
+        "runtime_cutover_required); the triggering inbound stays queued until an "
+        "operator resolves the named reason",
+        tier="anomaly",
+    ),
+    "auto_resurrect_failed": _telemetry(
+        "auto_resurrect_failed",
+        "an automatic resurrect failed for a possibly transient reason; the "
+        "triggering inbound stays queued for a later or manual resurrect",
+    ),
     "agent_terminated": _telemetry("agent_terminated", "agent terminated"),
     "agent_revived": _telemetry("agent_revived", "agent revived", tier="noise"),
     "respawn_phase1": _telemetry("respawn_phase1", "restart phase 1", tier="noise"),
