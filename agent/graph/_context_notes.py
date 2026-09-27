@@ -452,7 +452,17 @@ def fork_tail_skills_note(names: list[str]) -> HumanMessage | None:
 
 # Count of framework-owned notes, snapshotted after the registrations above (all
 # at module import). Everything appended later comes from a plugin via
-# `_load_extensions`; `clear_plugin_registrations` truncates back to this count
+# `_load_extensions`; `clear_plugin_context_notes` truncates back to this count
 # so a plugin reload drops only the plugin tail — the framework notes are never
 # re-registered in-process, so clearing them would lose them for the rest of the run.
 _FRAMEWORK_NOTE_COUNT = len(_CONTEXT_NOTES)
+
+
+def clear_plugin_context_notes() -> None:
+    """Drop plugin-contributed context notes, keeping the framework-owned ones."""
+    del _CONTEXT_NOTES[_FRAMEWORK_NOTE_COUNT:]
+
+
+def plugin_context_notes() -> tuple[ContextNote, ...]:
+    """Return the plugin-contributed context notes (the tail past the framework-owned ones)."""
+    return tuple(_CONTEXT_NOTES[_FRAMEWORK_NOTE_COUNT:])

@@ -652,16 +652,16 @@ def clear_plugin_registrations() -> None:
     import ava
     import ava.sdk_surface.wraps
     import ava.skill_sources
-    from agent.graph._context_notes import _CONTEXT_NOTES, _FRAMEWORK_NOTE_COUNT
-    from agent.graph._system_prompt import _FRAMEWORK_SECTION_COUNT, _SYSTEM_PROMPT_SECTIONS
+    from agent.graph._context_notes import clear_plugin_context_notes
+    from agent.graph._system_prompt import clear_plugin_system_prompt_sections
     from agent.hooks._registry import HOOKS
     from shared.plugin_config_registry import clear_plugin_configs
     from shared.plugin_flags import clear_plugin_flags
 
     # Keep the framework-owned sections / context notes (registered once at
     # module import); drop only the plugin-contributed tails.
-    del _SYSTEM_PROMPT_SECTIONS[_FRAMEWORK_SECTION_COUNT:]
-    del _CONTEXT_NOTES[_FRAMEWORK_NOTE_COUNT:]
+    clear_plugin_system_prompt_sections()
+    clear_plugin_context_notes()
     for hook_list in HOOKS.values():
         hook_list.clear()
     clear_plugin_configs()
