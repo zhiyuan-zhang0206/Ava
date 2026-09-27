@@ -123,12 +123,16 @@ def test_type_expression_values_render_in_full() -> None:
         "Category = Literal['audit', 'telemetry', 'log']\n"
         "Combined = str | list[dict[str, object]]\n"
         "Plain = int | str\n"
+        "Optional = Plain | None\n"
+        "Qualified = mod.Row | None\n"
         "NotType = some_call()\n"
     )
     entries = _entries(source)
     assert entries["Category"] == ["Category = Literal['audit', 'telemetry', 'log']"]
     assert entries["Combined"] == ["Combined = str | list[dict[str, object]]"]
     assert entries["Plain"] == ["Plain = int | str"]
+    assert entries["Optional"] == ["Optional = Plain | None"]
+    assert entries["Qualified"] == ["Qualified = mod.Row | None"]
     assert entries["NotType"] == ["NotType = ..."]
 
 
