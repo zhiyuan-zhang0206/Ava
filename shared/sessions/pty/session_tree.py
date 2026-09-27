@@ -18,9 +18,6 @@ Why the POSIX session is the membership test, not process groups or the tty:
   controlling tty is the session's pty is necessarily in the shell's session,
   and a member that dropped the tty (TIOCNOTTY) or outlived its hangup keeps
   the session id. The session id covers both and costs one getsid(2) per pid.
-  The kernel never hands out a pid that still names a live session, so the id
-  cannot be recycled onto a stranger while a member remains
-  (`shared.proc.hosting_exec_domain` answers the same question the same way).
 - A process that calls setsid(2) AND has left the shell's tree has left the
   session by the kernel's own definition. That is how Ava launches a sovereign
   process from inside a shell (`shared._reparent`: setsid, fork, reparent to
@@ -28,6 +25,18 @@ Why the POSIX session is the membership test, not process groups or the tty:
   birth-identified, name-free fact separates it from any other daemon, so it
   survives the kill. A setsid'd process still inside the tree is covered by
   the descendant walk.
+
+A pass takes a process by its session id only while the id is proven to still
+name the shell's session. The kernel never gives a new session an id another
+session still carries (Linux keeps a pid number allocated while any task holds
+it as its PID, process group or session; XNU's `forkproc` skips a candidate
+that `pgfind`/`session_find` still resolve). So a captured member that still
+is the captured process and still reads the id after the pass's reads — the
+shell itself, or any other — sat in that one session through the whole pass,
+provided the shell's pid is not held by some other process (`_proven`). With
+no such witness left, a proof no older than `_PROOF_FRESH_S` still stands:
+pid reuse cannot land that fast (`shared.proc_tree`). Otherwise the process is
+logged and left alone.
 
 Kill sequence: pin each member (a psutil object, which refuses a recycled pid,
 plus its `OwnedProcess` birth identity) before any signal and SIGSTOP it,
@@ -39,8 +48,8 @@ before parents and the shell's own tree last. The order matters because the
 kernel SIGHUP+SIGCONTs the stopped members of a process group the moment an
 exit orphans it: a job's leader is what ties the job's group to the session,
 and a member that double-forked out of the tree may still share that group, so
-it dies before the leader does. The shell is still frozen and alive after that
-batch, so the session id still names only this session: one more closure
+it dies before the leader does. The frozen shell (or a member the batch could
+not end) still proves the session id after that batch: one more closure
 catches anything that ran meanwhile and kills it too. Then the shell dies, and
 every captured member still alive after the wait is reported. A kill that
 raises midway SIGKILLs every member it froze on the way out, so none is left
@@ -55,12 +64,13 @@ import signal
 import time
 from collections import deque
 from collections.abc import Iterable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 import psutil
 
 from shared.log import logger
 from shared.proc_tree import OwnedProcess
+from shared.session_record import pid_starttime_ticks
 
 # How long one freeze pass waits for its SIGSTOPs to land before rescanning.
 # A member in uninterruptible sleep stops late; the next pass still sees it.
@@ -71,6 +81,14 @@ _STOP_SETTLE_S = 1.0
 _MAX_FREEZE_PASSES = 32
 
 _POLL_S = 0.01
+
+# How long a session-id proof stands once no captured member is left to renew
+# it: the original session could only have been replaced by a new one under the
+# same id if it ended and the kernel handed the pid out again inside this
+# window. Half the couple of seconds the identity check already relies on for
+# the same fact (`shared.proc_tree`: "Pid reuse cannot land inside a couple of
+# seconds").
+_PROOF_FRESH_S = 1.0
 
 # A member in one of these states cannot fork any more.
 _SETTLED = frozenset(
@@ -88,6 +106,28 @@ class _Member:
     identity: OwnedProcess
     process: psutil.Process
     frozen: bool
+
+
+@dataclass(frozen=True)
+class _Pin:
+    """A process a capture pass pinned, before the pass decides to keep it.
+
+    `by_session`: it belongs only through its session id (itself, or through a
+    parent that does), so it is kept only when the pass proves the id.
+    """
+
+    member: _Member
+    by_session: bool
+
+
+@dataclass
+class _Proof:
+    """When the session id was last proven to name the shell's session (monotonic)."""
+
+    at: float | None = None
+
+    def fresh(self) -> bool:
+        return self.at is not None and time.monotonic() - self.at <= _PROOF_FRESH_S
 
 
 @dataclass(frozen=True)
@@ -184,25 +224,48 @@ def _pin_identity(identity: OwnedProcess) -> psutil.Process | None:
         return None
 
 
-def _pin_new(pid: int, members: dict[int, _Member], sid: int | None) -> _Member | None:
+def _parent_link(ppid: int, members: dict[int, _Member], fresh: dict[int, _Pin]) -> bool | None:
+    """How the process at `ppid` vouches for a child it parents.
+
+    None when it is no captured process — a member whose pid the kernel has
+    since handed on vouches for nothing. Otherwise whether the parent itself
+    rests on a session read (a pin this pass has not proven yet).
+    """
+    pin = fresh.get(ppid)
+    if pin is not None:
+        return pin.by_session if pin.member.process.is_running() else None
+    member = members.get(ppid)
+    if member is not None and member.process.is_running():
+        return False
+    return None
+
+
+def _pin_new(
+    pid: int, members: dict[int, _Member], fresh: dict[int, _Pin], sid: int
+) -> _Pin | None:
     """Pin `pid` when the pinned process itself belongs to the session.
 
     Membership is re-read on the pinned handle — its parent is a captured
-    member, or its session is the shell's — and `is_running` afterwards proves
-    those reads described that handle, so a pid recycled since the scan is
-    never captured. A zombie cannot execute and is skipped.
+    process, checked after the parent pid was read, or its session is the
+    shell's — and `is_running` afterwards proves those reads described that
+    handle, so a pid recycled since the scan is never captured. A zombie
+    cannot execute and is skipped.
     """
     try:
         process = psutil.Process(pid)
-        belongs = process.ppid() in members or (sid is not None and os.getsid(pid) == sid)
-        if not belongs or process.status() == psutil.STATUS_ZOMBIE:
+        by_session = _parent_link(process.ppid(), members, fresh)
+        if by_session is None:
+            if os.getsid(pid) != sid:
+                return None
+            by_session = True
+        if process.status() == psutil.STATUS_ZOMBIE:
             return None
         identity = OwnedProcess.capture(process)
         if not process.is_running():
             return None
     except (psutil.Error, ProcessLookupError):
         return None
-    return _Member(identity, process, frozen=False)
+    return _Pin(_Member(identity, process, frozen=False), by_session)
 
 
 def _freeze(process: psutil.Process) -> bool:
@@ -232,29 +295,121 @@ def _pin_roots(
             members[identity.pid] = _Member(identity, process, freeze and _freeze(process))
 
 
-def _capture_pass(members: dict[int, _Member], sid: int | None, *, freeze: bool) -> bool:
-    """Add every member the current process table shows; True when one was new.
+def _shell_pid_unclaimed(leader: OwnedProcess) -> bool:
+    """Whether the shell's pid is free or still the shell's own (a zombie included).
 
-    Members already captured move to their place in this snapshot, so the
-    dict stays parents-first whatever order the roots were pinned in.
+    Any other process there means the kernel released the pid, which it does
+    only once no session carries it as its id: the shell's session is over,
+    and the id may now name the new holder's own session.
     """
-    parents, sessions = _scan()
-    roots = set(members)
-    if sid is not None:
-        roots |= {pid for pid, session in sessions.items() if session == sid}
-    added = False
-    for pid in _top_down(roots, parents, sid):
-        if pid in members:
+    try:
+        process = psutil.Process(leader.pid)
+        if leader.starttime is not None:
+            return pid_starttime_ticks(leader.pid) in (leader.starttime, None)
+        return leader.birth_matches(process)
+    except psutil.NoSuchProcess:
+        return True
+    except psutil.Error:
+        return False
+
+
+def _witnessed(members: dict[int, _Member], sid: int) -> bool:
+    """Whether a captured member, read now, still is the captured process in session `sid`.
+
+    The session id is read first and the identity verified after it, so the
+    read described that member. A member leaves its session only by setsid,
+    which renames the session to its own pid.
+    """
+    for member in members.values():
+        with contextlib.suppress(OSError, RuntimeError, psutil.Error):
+            if os.getsid(member.identity.pid) == sid and member.identity.live():
+                return True
+    return False
+
+
+def _proven(members: dict[int, _Member], leader: OwnedProcess, proof: _Proof) -> bool:
+    """Whether the session id still names the shell's session, read after a pass's reads.
+
+    A live witness renews the proof; without one, a fresh proof still stands.
+    """
+    if not _shell_pid_unclaimed(leader):
+        return False
+    if _witnessed(members, leader.pid):
+        proof.at = time.monotonic()
+        return True
+    return proof.fresh()
+
+
+def _unproven(fresh: dict[int, _Pin], leader: OwnedProcess) -> dict[int, _Pin]:
+    """The pins that do not rest on the session id; the others are logged, never taken."""
+    dropped = sorted(pid for pid, pin in fresh.items() if pin.by_session)
+    if dropped:
+        logger.warning(
+            "pty session {leader}: {pids} carry its session id, but nothing proves the "
+            "id still names that session; left running",
+            leader=leader.pid,
+            pids=dropped,
+        )
+    return {pid: pin for pid, pin in fresh.items() if not pin.by_session}
+
+
+def _capture_pass(
+    members: dict[int, _Member],
+    leader: OwnedProcess,
+    proof: _Proof,
+    *,
+    freeze: bool,
+    table: tuple[dict[int, int], dict[int, int]] | None = None,
+) -> bool:
+    """Add every member the process table shows; True when one was new.
+
+    Descendants of live members join outright. A process that belongs only
+    through its session id joins when, after every read of the pass, the id is
+    still proven (`_proven`). Nothing is signalled before that. Members already
+    captured move to their place in this snapshot, so the dict stays
+    parents-first whatever order the roots were pinned in.
+    """
+    sid = leader.pid
+    parents, sessions = table if table is not None else _scan()
+    live = {pid for pid, member in members.items() if member.process.is_running()}
+    rows = {pid for pid, session in sessions.items() if session == sid}
+    order = _top_down(live | rows, parents, sid)
+    fresh = _pin_candidates(order, live, members, sid)
+    if not _proven(members, leader, proof):
+        fresh = _unproven(fresh, leader)
+    _place(order, live, fresh, members, freeze=freeze)
+    return bool(fresh)
+
+
+def _pin_candidates(
+    order: list[int], live: set[int], members: dict[int, _Member], sid: int
+) -> dict[int, _Pin]:
+    """Pin, without signalling anything, each process in `order` not yet a live member."""
+    fresh: dict[int, _Pin] = {}
+    for pid in order:
+        if pid not in live and _signallable(pid):
+            pin = _pin_new(pid, members, fresh, sid)
+            if pin is not None:
+                fresh[pid] = pin
+    return fresh
+
+
+def _place(
+    order: list[int],
+    live: set[int],
+    fresh: dict[int, _Pin],
+    members: dict[int, _Member],
+    *,
+    freeze: bool,
+) -> None:
+    """Move members to their place in this snapshot and add the kept pins, parents first."""
+    for pid in order:
+        if pid in live:
             members[pid] = members.pop(pid)
-            continue
-        if not _signallable(pid):
-            continue
-        member = _pin_new(pid, members, sid)
-        if member is None:
-            continue
-        members[pid] = _Member(member.identity, member.process, freeze and _freeze(member.process))
-        added = True
-    return added
+        elif pid in fresh:
+            member = fresh[pid].member
+            members.pop(pid, None)  # a dead member whose pid the kernel handed on
+            members[pid] = replace(member, frozen=freeze and _freeze(member.process))
 
 
 def _settled(member: _Member) -> bool:
@@ -277,11 +432,11 @@ def _await_stopped(members: Iterable[_Member]) -> None:
             time.sleep(_POLL_S)
 
 
-def _close(members: dict[int, _Member], sid: int | None) -> bool:
+def _close(members: dict[int, _Member], leader: OwnedProcess, proof: _Proof) -> bool:
     """Freeze passes until one adds nobody; False when the pass cap ran out first."""
     for _ in range(_MAX_FREEZE_PASSES):
         _await_stopped(members.values())
-        if not _capture_pass(members, sid, freeze=True):
+        if not _capture_pass(members, leader, proof, freeze=True):
             return True
     return False
 
@@ -293,7 +448,9 @@ def _live(identity: OwnedProcess) -> bool:
         return True  # an identity that cannot be verified is never certified gone
 
 
-def _kill(batch: list[_Member], done: set[int]) -> tuple[list[OwnedProcess], list[OwnedProcess]]:
+def _kill(
+    batch: list[_Member], done: set[OwnedProcess]
+) -> tuple[list[OwnedProcess], list[OwnedProcess]]:
     """SIGKILL every still-live member of `batch` in one tight loop: (killed, denied).
 
     Liveness is read for the whole batch before the first signal, so no probe
@@ -311,8 +468,8 @@ def _kill(batch: list[_Member], done: set[int]) -> tuple[list[OwnedProcess], lis
                 killed.append(member.identity)
             except psutil.AccessDenied:
                 denied.append(member.identity)
-        done.add(member.identity.pid)
-    done.update(member.identity.pid for member in batch)
+        done.add(member.identity)
+    done.update(member.identity for member in batch)
     return killed, denied
 
 
@@ -335,7 +492,7 @@ class _Outcome:
     denied: list[OwnedProcess] = field(default_factory=list[OwnedProcess])
     survivors: list[OwnedProcess] = field(default_factory=list[OwnedProcess])
 
-    def kill(self, batch: list[_Member], done: set[int], wait_s: float) -> None:
+    def kill(self, batch: list[_Member], done: set[OwnedProcess], wait_s: float) -> None:
         """SIGKILL `batch` in one tight loop, then wait for what it signalled to exit.
 
         A member the caller may not signal got no signal, so no wait can
@@ -360,14 +517,14 @@ class _Outcome:
         return TreeKill(tuple(self.killed), tuple(self.survivors), denied)
 
 
-def _kill_stranded(members: Iterable[_Member], done: set[int]) -> None:
+def _kill_stranded(members: Iterable[_Member], done: set[OwnedProcess]) -> None:
     """SIGKILL every frozen member a raising kill never reached.
 
     A no-op when the kill completed: every member went through `_kill`. A
     member that cannot be killed is resumed instead of left stopped.
     """
     for member in members:
-        if not member.frozen or member.identity.pid in done:
+        if not member.frozen or member.identity in done:
             continue
         try:
             member.process.kill()
@@ -384,12 +541,79 @@ def session_members(leader: OwnedProcess) -> list[OwnedProcess]:
     Empty when `leader` is no longer the live shell. A live member beyond the
     leader is running work — the kill op's `interrupted` verdict.
     """
+    return capture_session(leader).members
+
+
+@dataclass
+class SessionCapture:
+    """A session's captured membership, kept current while its members exit.
+
+    `members` holds every process ever captured, leader first, each
+    re-verified before it is signalled. `proven_at` is when the session id was
+    last proven to name this session (monotonic): within `_PROOF_FRESH_S` of
+    it a pass may still take a process by that id after the last captured
+    member is gone — a job that forked a helper on TERM and exited leaves the
+    helper as the session's only process.
+    """
+
+    leader: OwnedProcess
+    members: list[OwnedProcess]
+    proven_at: float | None
+
+    @property
+    def active(self) -> bool:
+        """Whether a kill may still find a process: a captured one lives, or the proof is fresh."""
+        return any(_live(identity) for identity in self.members) or _Proof(self.proven_at).fresh()
+
+
+def _absorb(
+    capture: SessionCapture,
+    members: dict[int, _Member],
+    table: tuple[dict[int, int], dict[int, int]],
+) -> bool:
+    """Fold one scan into `capture`; True while a captured process lives."""
+    proof = _Proof(capture.proven_at)
+    _capture_pass(members, capture.leader, proof, freeze=False, table=table)
+    capture.proven_at = proof.at
+    known = set(capture.members)
+    capture.members += [
+        member.identity for member in members.values() if member.identity not in known
+    ]
+    return any(_live(member.identity) for member in members.values())
+
+
+def capture_session(leader: OwnedProcess) -> SessionCapture:
+    """Capture the session `leader` leads before anything is signalled.
+
+    No members when `leader` is no longer the live shell.
+    """
+    capture = SessionCapture(leader, [], None)
     members: dict[int, _Member] = {}
     _pin_roots(leader, (), members, freeze=False)
-    if leader.pid not in members:
-        return []
-    _capture_pass(members, leader.pid, freeze=False)
-    return [member.identity for member in members.values()]
+    if leader.pid in members:
+        _absorb(capture, members, _scan())
+    return capture
+
+
+def refresh(captures: Iterable[SessionCapture]) -> bool:
+    """Fold every session's newcomers into its capture; True while any captured process lives.
+
+    One scan serves every capture. A capture with no live process and no fresh
+    proof can take nothing more, and is skipped.
+    """
+    pinned: list[tuple[SessionCapture, dict[int, _Member]]] = []
+    for capture in captures:
+        members: dict[int, _Member] = {}
+        _pin_roots(capture.leader, capture.members, members, freeze=False)
+        if members or _Proof(capture.proven_at).fresh():
+            pinned.append((capture, members))
+    if not pinned:
+        return False
+    table = _scan()
+    busy = False
+    for capture, members in pinned:
+        busy = _absorb(capture, members, table) or busy
+    return busy
 
 
 def terminate(members: Iterable[OwnedProcess], sig: int = signal.SIGTERM) -> None:
@@ -402,22 +626,26 @@ def terminate(members: Iterable[OwnedProcess], sig: int = signal.SIGTERM) -> Non
 
 
 def kill_session_tree(
-    leader: OwnedProcess, *, also: Iterable[OwnedProcess] = (), wait_s: float
+    leader: OwnedProcess,
+    *,
+    also: Iterable[OwnedProcess] = (),
+    wait_s: float,
+    proven_at: float | None = None,
 ) -> TreeKill:
     """Freeze, then SIGKILL, the whole membership of `leader`'s session.
 
     `leader` is the session's shell. `also` adds roots captured earlier (a
-    graceful kill's pre-TERM snapshot, a stop's pre-hangup capture), so their
-    trees are still taken when the shell itself already died. The session-id
-    scan runs only while the leader is the verified live shell. The leader
-    dies last, after the rest were waited for; `wait_s` bounds each wait. When
-    anything raises midway, every member frozen and not yet killed is
-    SIGKILLed on the way out.
+    graceful kill's pre-TERM snapshot, a stop's capture), so their trees are
+    still taken when the shell itself already died, and any of them still in
+    the session proves its id; `proven_at` carries a caller's own proof
+    (`SessionCapture.proven_at`). The leader dies last, after the rest were
+    waited for; `wait_s` bounds each wait. When anything raises midway, every
+    member frozen and not yet killed is SIGKILLed on the way out.
     """
     members: dict[int, _Member] = {}
-    done: set[int] = set()
+    done: set[OwnedProcess] = set()
     try:
-        return _kill_frozen(leader, also, members, done, wait_s)
+        return _kill_frozen(leader, also, members, done, wait_s, _Proof(proven_at))
     finally:
         _kill_stranded(members.values(), done)
 
@@ -426,17 +654,17 @@ def _kill_frozen(
     leader: OwnedProcess,
     also: Iterable[OwnedProcess],
     members: dict[int, _Member],
-    done: set[int],
+    done: set[OwnedProcess],
     wait_s: float,
+    proof: _Proof,
 ) -> TreeKill:
     _pin_roots(leader, also, members, freeze=True)
-    sid = leader.pid if leader.pid in members else None
     outcome = _Outcome()
-    # Two rounds: the second closure runs while the leader is still frozen (its
-    # session id still names only this session) and takes whatever ran or
-    # forked while the first batch was dying.
+    # Two rounds: the second closure runs while the frozen shell (or a member
+    # the first batch could not end) still proves the session id, and takes
+    # whatever ran or forked while the first batch was dying.
     for _ in range(2):
-        if not _close(members, sid):
+        if not _close(members, leader, proof):
             logger.warning(
                 "pty session {leader}: still finding new members after {passes} freeze "
                 "passes; a process forked during the last pass may escape the kill",
@@ -446,10 +674,11 @@ def _kill_frozen(
         body = [
             member
             for member in reversed(members.values())
-            if member.identity.pid != leader.pid and member.identity.pid not in done
+            if member.identity != leader and member.identity not in done
         ]
         outcome.kill(body, done, wait_s)
-    outcome.kill([members[leader.pid]] if leader.pid in members else [], done, wait_s)
+    shell = members.get(leader.pid)
+    outcome.kill([shell] if shell is not None and shell.identity == leader else [], done, wait_s)
     return outcome.result()
 
 
