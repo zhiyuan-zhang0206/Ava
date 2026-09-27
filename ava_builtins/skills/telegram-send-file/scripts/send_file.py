@@ -33,6 +33,8 @@ from typing import Any
 
 import httpx
 
+from shared.config import settings
+
 # Telegram's hard cap for documents sent through the Bot API.
 MAX_DOCUMENT_BYTES = 50 * 1024 * 1024
 # Telegram's caption cap for sendDocument (task #3696 exception inventory).
@@ -40,34 +42,6 @@ MAX_CAPTION_CHARS = 1024
 # Uploads up to 50 MB over a private link need more headroom than a text
 # message; a slow link should fail loudly rather than hang the caller.
 _SEND_TIMEOUT_S = 120.0
-
-
-def _source_root() -> Path:
-    """The checkout / install root that holds the ``shared`` package.
-
-    The script is invoked from two places: the dev checkout (``.agents/
-    skills/...`` — walk up to the repo root) and the prod install
-    (``$AVA_HOME/skills/...`` — a converge copy; ``shared`` lives in
-    ``$AVA_HOME/source``). ``shared.config`` must be importable from either,
-    so the root is resolved before the import happens.
-    """
-
-    here = Path(__file__).resolve().parent
-    for cand in (here, *here.parents):
-        if (cand / "shared" / "__init__.py").is_file():
-            return cand
-    home = Path(os.environ.get("AVA_HOME", "~/.ava")).expanduser()
-    cand = home / "source"
-    if (cand / "shared" / "__init__.py").is_file():
-        return cand
-    raise RuntimeError(
-        f"cannot locate the Ava source root: no `shared` package above {here} and none at {cand}"
-    )
-
-
-sys.path.insert(0, str(_source_root()))
-
-from shared.config import settings  # noqa: E402 - after the sys.path setup above
 
 
 def validate_file(path: str | Path) -> Path:
