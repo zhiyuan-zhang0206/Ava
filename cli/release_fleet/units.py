@@ -47,6 +47,10 @@ from shared.api_contracts.release_handoff import ReleaseImageEntry
 Clock = Callable[[], datetime]
 # How long one barrier poll waits for the next answer before re-checking deadlines.
 _POLL_S = 1.0
+# After this run bound its listener, a unit gets at least this long to answer
+# again: answers sent while the coordinator was away were never received, and
+# a unit re-sends its journaled answer on every poll (`follower.POLL_S`).
+_REANSWER_S = 30.0
 
 
 class Transport(Protocol):
@@ -118,11 +122,14 @@ class RemoteUnits:
         transport: Transport | None = None,
         listener: CoordinatorListener | None = None,
         clock: Clock = _utc_now,
+        reanswer_s: float = _REANSWER_S,
     ) -> None:
         self.request = request
+        self.reanswer_s = reanswer_s
         self._transport = transport
         self._listener = listener
         self._bound = False
+        self._bound_at: datetime | None = None
         self.clock = clock
 
     # ── views ───────────────────────────────────────────────────────────────
@@ -148,6 +155,7 @@ class RemoteUnits:
         if not self._bound:
             self._listener.start(endpoint.host, endpoint.port)
             self._bound = True
+            self._bound_at = self.clock()
         progress = self._progress(journal)
         self._listener.publish(s.instruction for s in progress.units if s.instruction)
         return self._listener
@@ -296,8 +304,13 @@ class RemoteUnits:
         return marks
 
     def _late(self, status: UnitStatus) -> bool:
+        """Silent past its journaled deadline, and past this run's re-answer window."""
         deadline = None if status.instruction is None else status.instruction.deadline
-        return status.answered is None and deadline is not None and self.clock() >= deadline
+        if status.answered is not None or deadline is None:
+            return False
+        if self._bound_at is not None:
+            deadline = max(deadline, self._bound_at + timedelta(seconds=self.reanswer_s))
+        return self.clock() >= deadline
 
     def _leave(self, journal: Journal, marks: dict[UnitKey, Inclusion]) -> None:
         progress = self._progress(journal)

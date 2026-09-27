@@ -50,6 +50,8 @@ RUNNER_MACHINE = "macbook-air"  # the unit home is a per-test temp dir
 GATEWAY_AGENT = 7
 RUNNER_AGENT = 11
 POLICY = FleetPolicy(drain_s=5, close_s=1, cancel_grace_s=1, start_s=5, watch_s=1)
+# The unit's poll is 0.02 s here; a continuation waits this long for re-answers.
+REANSWER_S = 1.0
 
 
 class ControllerLost(BaseException):
@@ -283,9 +285,14 @@ def coordinate(journal: Journal, gateway: Gateway, units: RemoteUnits) -> None:
     Coordinator(journal, gateway, units, sleep=time.sleep).run()
 
 
+def units(request: FleetRequest, unit: Unit) -> RemoteUnits:
+    """The coordinator's side, with a re-answer window short enough for tests."""
+    return RemoteUnits(request, transport=unit, reanswer_s=REANSWER_S)
+
+
 def run(request: FleetRequest, gateway: Gateway, unit: Unit) -> Operation:
     """Create the fleet journal and run the coordinator to completion (or its hold)."""
     create(request)
     with exclusive(request.path) as journal:
-        coordinate(journal, gateway, RemoteUnits(request, transport=unit))
+        coordinate(journal, gateway, units(request, unit))
     return read_operation(request.path)

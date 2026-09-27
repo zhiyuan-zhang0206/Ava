@@ -12,7 +12,6 @@ from pathlib import Path
 
 import pytest
 
-from cli.release_fleet.units import RemoteUnits
 from cli.release_transition import journal as journal_module
 from cli.release_transition.journal import Operation, create, exclusive, read_operation
 from tests.lifecycle.release_fleet.remote import (
@@ -26,6 +25,7 @@ from tests.lifecycle.release_fleet.remote import (
     coordinate,
     fleet_request,
     run,
+    units,
 )
 
 _FORWARD = [
@@ -197,11 +197,11 @@ def test_a_coordinator_death_after_each_durable_write_is_reconciled_by_digest(
         _writes(monkeypatch, "fleet", boundary)
         try:
             with exclusive(request.path) as journal:
-                coordinate(journal, gateway, RemoteUnits(request, transport=unit))
+                coordinate(journal, gateway, units(request, unit))
         except ControllerLost:
             monkeypatch.setattr(journal_module, "_write", _real_write)
             with exclusive(request.path) as journal:
-                coordinate(journal, gateway, RemoteUnits(request, transport=unit))
+                coordinate(journal, gateway, units(request, unit))
         monkeypatch.setattr(journal_module, "_write", _real_write)
         final = read_operation(request.path)
         unit_final = unit.join((boundary, final.phase, final.fleet and final.fleet.units))
@@ -230,3 +230,39 @@ def test_a_unit_executor_death_after_each_durable_write_is_reconciled_by_digest(
         assert unit_final is not None and unit_final.unit is not None
         acted = unit_final.unit.acted
         assert len(acted) == len(set(acted)), boundary
+
+
+def test_a_continuation_gives_units_time_to_answer_again_before_calling_them_silent(
+    tmp_path: Path,
+) -> None:
+    """Answers sent while the coordinator was away were never received; a new
+    run's listener waits one re-answer window past its own bind before a unit
+    whose journaled deadline long passed counts as silent."""
+    from datetime import UTC, datetime, timedelta
+
+    from cli.release_fleet.units import RemoteUnits
+    from tests.lifecycle.release_fleet.fakes import Clock
+
+    request = fleet_request(tmp_path.resolve())
+    unit = Unit(Path(request.home), UnitEffects(), Exchange())
+    unit.silent = True
+    create(request)
+    clock = Clock(datetime.now(UTC))
+    first = RemoteUnits(request, transport=unit, clock=clock, reanswer_s=30)
+    with exclusive(request.path) as journal:
+        first.instruct(journal, "standby", bound_s=1)
+    first.close()
+    clock.sleep(3600)  # the coordinator was away for an hour
+    later = RemoteUnits(request, transport=unit, clock=clock, reanswer_s=30)
+    try:
+        with exclusive(request.path) as journal:
+            later.instruct(journal, "standby", bound_s=1)  # same order: rebinds, keeps the deadline
+            status = later.included(journal)[0]
+            assert status.instruction is not None
+            assert status.instruction.deadline is not None
+            assert clock() - status.instruction.deadline > timedelta(minutes=59)
+            assert not later._late(status)
+            clock.sleep(31)
+            assert later._late(status)
+    finally:
+        later.close()

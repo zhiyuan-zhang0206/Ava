@@ -12,7 +12,6 @@ from pathlib import Path
 
 import pytest
 
-from cli.release_fleet.units import RemoteUnits
 from cli.release_operator import exclude as exclude_module
 from cli.release_operator.exclude import exclude_unit
 from cli.release_transition.journal import create, exclusive, read_operation
@@ -25,6 +24,7 @@ from tests.lifecycle.release_fleet.remote import (
     coordinate,
     fleet_request,
     run,
+    units,
 )
 from tests.lifecycle.transition.phases import advance_to
 
@@ -113,7 +113,7 @@ def test_an_operator_excluded_unit_closes_and_the_held_release_continues(
     assert (held.phase, held.terminal) == ("resuming", False) and held.error is not None
     with exclusive(request.path) as journal:
         exclude_unit(journal, request.units[0].unit, "the runner lost power")
-        coordinate(journal, gateway, RemoteUnits(request, transport=unit))
+        coordinate(journal, gateway, units(request, unit))
     final = read_operation(request.path)
     assert final.fleet is not None and final.fleet.outcome == "degraded"
     status = final.fleet.units[0]
