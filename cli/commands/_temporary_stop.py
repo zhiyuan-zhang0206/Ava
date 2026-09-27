@@ -206,10 +206,11 @@ def _stop_terminals(deadline: float, operation: str, acquired_at: datetime) -> N
     (`_hang_up`); whatever is still alive after `_TERMINAL_STOP_GRACE_S` is
     SIGKILLed with its session (`session_tree`).
 
-    Busy sessions verified closed — a job the SIGKILL cut short included —
-    leave a durable closure notice for their owner agent (issue #2044): the
-    gateway and ops server are already down by now, so the notice is
-    delivered at the next ops-daemon startup — also when another session
+    Busy sessions whose shell is verified gone — a job the SIGKILL cut short
+    included — leave a durable closure notice for their owner agent (issue
+    #2044): the gateway and ops server are already down by now, so the notice
+    is delivered at the next ops-daemon startup. That holds when a process
+    outlived the SIGKILL too (the notice names it) and when another session
     keeps the stop incomplete (`_close_out`).
     """
     backend = get_shell_backend()
@@ -234,35 +235,59 @@ def _close_out(
     operation: str,
     acquired_at: datetime,
 ) -> None:
-    """Record every closed busy session's notice, then fail on what outlived its SIGKILL.
+    """Record every busy session whose shell is verified gone, then fail on what outlived its SIGKILL.
 
-    A session with a live survivor is not closed and records nothing; a retry
-    sees it again while its shell lives. The others are recorded first: their
-    records are gone by any retry.
+    The shell is the session as its owner uses it: once it is gone the session
+    cannot be used again, so its notice is recorded, naming whatever of it
+    outlived the SIGKILL (issue #2044's "notify only what actually closed",
+    judged by the shell). A session whose shell still lives records nothing; a
+    retry sees it again. The notices go first: a closed session's record is
+    gone by any retry.
     """
     stuck = set(live_identities(identity for _terminal, identity in survivors))
-    unclosed = {terminal.name for terminal, identity in survivors if identity in stuck}
-    _record_close_notices(
-        {t.name: t.shell for t in terminals if t.busy and t.name not in unclosed},
-        operation,
-        acquired_at,
-    )
+    left: dict[str, list[OwnedProcess]] = {}
+    for terminal, identity in survivors:
+        if identity in stuck:
+            left.setdefault(terminal.name, []).append(identity)
+    closed = {
+        terminal.name: (terminal.shell, left.get(terminal.name, []))
+        for terminal in terminals
+        if terminal.busy and not live_identities([terminal.shell])
+    }
+    _record_close_notices(closed, operation, acquired_at)
     if stuck:
         raise _terminals_incomplete(survivors)
 
 
+def _named(identities: list[OwnedProcess]) -> list[tuple[int, str]]:
+    """(pid, command name) of each process still running as its captured identity."""
+    named: list[tuple[int, str]] = []
+    for identity in sorted(identities, key=lambda identity: identity.pid):
+        try:
+            name = psutil.Process(identity.pid).name()
+        except psutil.NoSuchProcess:
+            continue
+        except psutil.Error:
+            name = "<unreadable>"
+        if live_identities([identity]):  # the name was read from that process
+            named.append((identity.pid, name))
+    return named
+
+
 def _record_close_notices(
-    busy: dict[str, OwnedProcess], operation: str, acquired_at: datetime
+    closed: dict[str, tuple[OwnedProcess, list[OwnedProcess]]],
+    operation: str,
+    acquired_at: datetime,
 ) -> None:
     """Durably record one closure notice per busy session verified closed.
 
-    Only sessions whose captured processes are all verified gone reach this
-    point; an idle session, a session with a process that outlived its
-    SIGKILL, or a Windows unit records nothing. A write failure is loud but
-    never fails the stop — the resources are already closed and retrying the
-    whole stop would not restore them.
+    Each entry is a session whose shell identity is verified gone, with the
+    processes of it that outlived the SIGKILL; an idle session, a session
+    whose shell lives, or a Windows unit records nothing. A write failure is
+    loud but never fails the stop — the resources are already closed and
+    retrying the whole stop would not restore them.
     """
-    for name, shell in busy.items():
+    for name, (shell, left) in closed.items():
         if shell.starttime is not None:
             birth = f"starttime:{shell.starttime}"
         else:
@@ -275,6 +300,7 @@ def _record_close_notices(
                 shell_birth=birth,
                 operation=operation,
                 acquired_at=acquired_at,
+                survivors=_named(left),
             )
         except Exception as exc:
             # The side-channel notice must never fail a stop whose resources

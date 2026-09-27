@@ -64,13 +64,24 @@ The stop keeps its proof current while it waits:
 - The kill leg starts with one more refresh and passes each capture's proof to
   the kill.
 
-Closure notices follow #2044's rule that partial success notifies only what
-actually closed:
+Closure notices refine #2044's rule that partial success notifies only what
+actually closed: "closed" is judged by the shell, which is the session as its
+owner uses it. Once the shell is gone, the agent can no longer use the
+session, and whatever outlived the SIGKILL is out of its reach too.
 
-- A busy session whose captured processes are all verified gone records its
-  notice before an incomplete stop reports.
-- A session with a live survivor records nothing, and a retry picks it up
-  while its shell is still alive.
+- A busy session whose shell identity is verified gone records its notice
+  before an incomplete stop reports. A retry can no longer see it, because
+  its record is gone.
+- If processes of that session outlived the SIGKILL, the notice names them by
+  pid and command name. These are typically another user's (a root `sudo`),
+  which neither the stop nor the agent may signal. The stop still reports
+  incomplete and keeps its hold. This matches the host's kill op, which
+  answers `ok`, `interrupted` and the survivors once the shell is gone.
+- A session whose shell still lives records nothing, and a retry sees it
+  again.
+- The survivor list is not part of the outbox's dedup key (machine, agent,
+  session, shell birth). Recording the same shell again rewrites the one
+  record, and its delivery claim yields one inbound.
 
 ## Alternatives rejected
 
@@ -92,6 +103,9 @@ actually closed:
   changes the host's reap protocol and couples the stop to the host.
 - **Scanning by session id with no proof:** this can kill a process in a new
   session that received the recycled id.
+- **Notifying only sessions whose every captured process is gone:** a session
+  whose shell died but whose root `sudo` survived would never get a notice,
+  because its record is gone by any retry.
 
 ## Consequences
 

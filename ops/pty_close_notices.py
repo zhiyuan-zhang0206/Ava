@@ -3,8 +3,9 @@
 `ava stop` closes busy persistent-shell sessions AFTER the gateway and ops
 server are already down, so the closure notice for each owner agent cannot be
 delivered synchronously. The stop path records one notice per busy session it
-VERIFIED closed (every captured process of it gone — also when another session
-leaves the stop incomplete) under
+VERIFIED closed (its shell's exact identity gone — also when another session
+leaves the stop incomplete, and naming any process of the session that outlived
+its SIGKILL) under
 ``$AVA_HOME/state/pty-close-notices/`` — durable across the data-plane
 shutdown. The ops daemon flushes the journal at its next startup: a notice for
 a live owner becomes a system inbound message, one for a terminated/restarting
@@ -23,6 +24,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+from collections.abc import Sequence
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -51,7 +53,13 @@ _REASON = "an operator stop (ava stop)"
 
 @dataclass(frozen=True)
 class ClosureNotice:
-    """One verified-closed busy session and the stop that closed it."""
+    """One verified-closed busy session and the stop that closed it.
+
+    `survivors` are the session's processes that outlived the stop's SIGKILL
+    (typically another user's, which neither the stop nor the agent may
+    signal), as (pid, command name); empty when every process is gone. They
+    are not part of the dedup key: the notice is about the shell.
+    """
 
     machine: str
     agent_id: int
@@ -63,13 +71,14 @@ class ClosureNotice:
     acquired_at: str
     reason: str
     closed_at: str
+    survivors: tuple[tuple[int, str], ...] = ()
 
     def dedup_key(self) -> str:
         raw = f"{self.machine}|{self.agent_id}|{self.session_id}|{self.shell_birth}"
         return hashlib.sha256(raw.encode()).hexdigest()[:16]
 
     def as_dict(self) -> dict[str, object]:
-        return {
+        record: dict[str, object] = {
             "machine": self.machine,
             "agent_id": self.agent_id,
             "session_id": self.session_id,
@@ -81,6 +90,9 @@ class ClosureNotice:
             "reason": self.reason,
             "closed_at": self.closed_at,
         }
+        if self.survivors:
+            record["survivors"] = [{"pid": pid, "name": name} for pid, name in self.survivors]
+        return record
 
 
 def journal_dir() -> Path:
@@ -96,12 +108,15 @@ def record_close(
     shell_birth: str,
     operation: str,
     acquired_at: datetime,
+    survivors: Sequence[tuple[int, str]] = (),
 ) -> Path | None:
     """Durably record one verified-closed busy session; None when not an agent shell.
 
-    The caller guarantees the session was busy and its exact process identity
-    verified gone. Returns the record path, or None when the session name is
-    not an agent-owned shell (the canonical ``-agent-<id>-shell-<sid>`` shape).
+    The caller guarantees the session was busy and its shell's exact process
+    identity verified gone; `survivors` names, as (pid, command name), the
+    session's processes that outlived the SIGKILL. Returns the record path, or
+    None when the session name is not an agent-owned shell (the canonical
+    ``-agent-<id>-shell-<sid>`` shape).
     """
     match = _AGENT_SHELL_RE.search(name)
     if match is None:
@@ -119,6 +134,7 @@ def record_close(
         else acquired_at.isoformat(),
         reason=_REASON,
         closed_at=datetime.now(UTC).isoformat(),
+        survivors=tuple(survivors),
     )
     _write_atomic(notice)
     return _record_path(notice)
@@ -149,60 +165,78 @@ def _integer(raw: dict[str, object], key: str) -> int | None:
     return value if isinstance(value, int) and not isinstance(value, bool) else None
 
 
+def _survivors(raw: dict[str, object]) -> tuple[tuple[int, str], ...] | None:
+    """The record's survivor list; None when it is malformed (an absent one is empty)."""
+    entries = raw.get("survivors", [])
+    if not isinstance(entries, list):
+        return None
+    survivors: list[tuple[int, str]] = []
+    for entry in cast("list[object]", entries):
+        if not isinstance(entry, dict):
+            return None
+        fields = cast("dict[str, object]", entry)
+        pid, name = _integer(fields, "pid"), _text(fields, "name")
+        if pid is None or name is None:
+            return None
+        survivors.append((pid, name))
+    return tuple(survivors)
+
+
+_TEXT_FIELDS = ("machine", "name", "shell_birth", "operation", "acquired_at", "reason", "closed_at")
+_INTEGER_FIELDS = ("agent_id", "session_id", "shell_pid")
+
+
+def _notice(raw: dict[str, object]) -> ClosureNotice | None:
+    """The notice a parsed record describes; None when any field is missing or malformed."""
+    texts = {key: value for key in _TEXT_FIELDS if (value := _text(raw, key)) is not None}
+    integers = {key: value for key in _INTEGER_FIELDS if (value := _integer(raw, key)) is not None}
+    survivors = _survivors(raw)
+    if len(texts) < len(_TEXT_FIELDS) or len(integers) < len(_INTEGER_FIELDS):
+        return None
+    if survivors is None:
+        return None
+    return ClosureNotice(
+        machine=texts["machine"],
+        agent_id=integers["agent_id"],
+        session_id=integers["session_id"],
+        name=texts["name"],
+        shell_pid=integers["shell_pid"],
+        shell_birth=texts["shell_birth"],
+        operation=texts["operation"],
+        acquired_at=texts["acquired_at"],
+        reason=texts["reason"],
+        closed_at=texts["closed_at"],
+        survivors=survivors,
+    )
+
+
 def _read(path: Path) -> ClosureNotice | None:
     try:
         raw = json.loads(path.read_text())
         if not isinstance(raw, dict):
             return None
-        raw = cast("dict[str, object]", raw)
-        machine = _text(raw, "machine")
-        name = _text(raw, "name")
-        shell_birth = _text(raw, "shell_birth")
-        operation = _text(raw, "operation")
-        acquired_at = _text(raw, "acquired_at")
-        reason = _text(raw, "reason")
-        closed_at = _text(raw, "closed_at")
-        agent_id = _integer(raw, "agent_id")
-        session_id = _integer(raw, "session_id")
-        shell_pid = _integer(raw, "shell_pid")
-        if (
-            machine is None
-            or name is None
-            or shell_birth is None
-            or operation is None
-            or acquired_at is None
-            or reason is None
-            or closed_at is None
-            or agent_id is None
-            or session_id is None
-            or shell_pid is None
-        ):
-            return None
-        notice = ClosureNotice(
-            machine=machine,
-            agent_id=agent_id,
-            session_id=session_id,
-            name=name,
-            shell_pid=shell_pid,
-            shell_birth=shell_birth,
-            operation=operation,
-            acquired_at=acquired_at,
-            reason=reason,
-            closed_at=closed_at,
-        )
+        notice = _notice(cast("dict[str, object]", raw))
     except (ValueError, KeyError, TypeError, OSError):
         return None
-    if notice.dedup_key() not in path.name:
+    if notice is None or notice.dedup_key() not in path.name:
         return None
     return notice
 
 
 def _content(notice: ClosureNotice) -> str:
-    return (
+    text = (
         f"Shell session {notice.name!r} (id {notice.session_id}, agent {notice.agent_id}) "
         f"was closed by {notice.reason} on {notice.machine}, interrupting a running task. "
         f"Recreate the session if its work is still needed (operation {notice.operation})."
     )
+    if notice.survivors:
+        left = ", ".join(f"pid {pid} ({name})" for pid, name in notice.survivors)
+        text += (
+            f" Processes of the session the stop could not end are still running: {left}. "
+            "Such a process usually belongs to another user (a root sudo), which you may "
+            "not signal either."
+        )
+    return text
 
 
 def _deliver(pool: ConnectionPool, notice: ClosureNotice) -> None:
