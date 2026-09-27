@@ -60,8 +60,9 @@ any signal:
   fork-and-exit chain keeps it current while scans keep reading its hops.
 
 Anything else is logged once, with pid and command name, and left running.
-The scan reads session ids first with a bare getsid, newest pids first, so a
-short-lived hop is read while it exists. A parent vouches for a child only
+The scan reads session ids last, with a bare getsid, newest pids first, so a
+short-lived hop is read while it exists and pinned (in a kill, frozen) about a
+millisecond later. A parent vouches for a child only
 while it still is the captured process, so a member's recycled pid adds
 nobody.
 
