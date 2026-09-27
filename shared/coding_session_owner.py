@@ -15,8 +15,11 @@ stops the recorded PTY before removing private tool state.
 
 from __future__ import annotations
 
+import contextlib
 import datetime as dt
+import os
 import shutil
+import stat
 import uuid
 from collections.abc import Callable
 from dataclasses import replace
@@ -41,13 +44,14 @@ from shared.coding_session_owner_record import (
     supervisor_suffix,
     write_unlocked,
 )
-from shared.platform import file_lock
+from shared.platform import IS_MACOS, IS_WINDOWS, file_lock
 
 __all__ = [
     "CodingSessionCleanupError",
     "CodingSessionGenerationChangedError",
     "CodingSessionKey",
     "CodingSessionOwner",
+    "CodingSessionSocketError",
     "InvalidCodingSessionOwnerError",
     "attach_supervisor",
     "canonical_key",
@@ -94,28 +98,64 @@ def launch_is_stale(
     return timestamp - owner.created_at >= _UNPUBLISHED_CLAIM_WINDOW
 
 
+# A unix socket path must fit ``sockaddr_un.sun_path`` with its terminating NUL:
+# 104 bytes on macOS, 108 on Linux.
+_SUN_PATH_BYTES = 104 if IS_MACOS else 108
+# Short real directories to hold the per-user socket directory. On macOS
+# ``/tmp`` is a symlink, and codex refuses a socket directory reached through
+# one, so the real ``/private/tmp`` is used.
+_SOCKET_BASE = Path("/private/tmp" if IS_MACOS else "/tmp")  # noqa: S108 — the per-user dir below is checked: real, ours, 0700
+
+
+class CodingSessionSocketError(RuntimeError):
+    """No private, short-enough directory is available for an app-server socket."""
+
+
+def _private_socket_dir() -> Path:
+    """``<short tmp>/ava-<uid>``: a real directory this user owns, mode 0700.
+
+    A world-writable parent lets anyone pre-create the name, so a directory
+    that is a symlink or belongs to another user is refused rather than used.
+    """
+    if IS_WINDOWS:
+        raise CodingSessionSocketError("a Codex takeover's app server needs a POSIX unix socket")
+    uid = os.getuid()
+    directory = _SOCKET_BASE / f"ava-{uid}"
+    with contextlib.suppress(FileExistsError):
+        directory.mkdir(mode=0o700)
+    info = directory.lstat()
+    if not stat.S_ISDIR(info.st_mode) or info.st_uid != uid:
+        raise CodingSessionSocketError(
+            f"{directory} is not a directory owned by uid {uid}; refusing to put a "
+            "Codex app-server socket there (remove it, or it was created by someone else)"
+        )
+    if stat.S_IMODE(info.st_mode) & 0o077:
+        directory.chmod(0o700)
+    return directory
+
+
 def codex_app_server_socket(key: CodingSessionKey, generation: str) -> Path:
     """Private host-local unix socket for a generation's shared Codex app server.
 
-    Kept under the cluster home's ``run/`` directory and shortened (12 hex
-    digest + 8 generation chars) because a socket path inside the generation
-    state dir can exceed the kernel's unix-socket path limit (104 bytes on
-    macOS). The name is scoped to one generation, so a dying predecessor can
-    never unlink a successor's socket; a crashed generation's stale file is
-    inert.
-
-    ``key.cluster`` is canonically the resolved Ava home (``canonical_key``),
-    so ``<key.cluster>/run`` is the same directory ``shared.paths.run_dir()``
-    returns; it is built from the key here to keep this helper key-scoped and
-    settings-free, mirroring ``generation_state_dir`` (review N1). Privacy is
-    inherited: ``ava_home()`` is created 0o700 and the house run-dir helpers
-    set no separate mode.
+    The socket lives in a short per-user directory (``/private/tmp/ava-<uid>``
+    on macOS, ``/tmp/ava-<uid>`` elsewhere), created 0700 and verified to be
+    this user's real directory, so its length no longer depends on the cluster
+    home: a preview home under ``~/.ava-previews/<run>/home`` pushed a
+    ``<home>/run`` socket past the kernel limit and codex refused to listen.
+    The name carries the key digest (cluster, workspace, tool) and the
+    generation, so clusters never collide and a dying predecessor can never
+    unlink a successor's socket; a crashed generation's stale file is inert.
+    A path that would still not fit ``sun_path`` fails here, before any launch.
     """
-    return (
-        Path(key.cluster)
-        / "run"
-        / f"codex-app-server.{key_digest(key)[:12]}-{generation.replace('-', '')[:8]}.sock"
-    )
+    name = f"codex-app-server.{key_digest(key)[:12]}-{generation.replace('-', '')[:8]}.sock"
+    path = _private_socket_dir() / name
+    size = len(os.fsencode(path))
+    if size >= _SUN_PATH_BYTES:
+        raise CodingSessionSocketError(
+            f"Codex app-server socket path {path} is {size} bytes; unix sockets on this "
+            f"host take at most {_SUN_PATH_BYTES - 1}"
+        )
+    return path
 
 
 def read(key: CodingSessionKey, generation: str) -> CodingSessionOwner:
