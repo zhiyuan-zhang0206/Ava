@@ -374,11 +374,11 @@ async def reconcile_claimed_inbounds(
     HumanMessage actually made it into `state.messages`.
 
     The inbound reconcile — one helper shared by every settlement point that
-    can leave claimed-but-uncommitted rows behind. The caller reads the
-    agent's LangGraph checkpoint, extracts every
-    `additional_kwargs.ava_inbound_id` from `state.messages` (caller-supplied
-    `committed_inbound_ids`), and passes that set here. Each `'claimed'` row
-    is then either:
+    can leave claimed-but-uncommitted rows behind. The caller supplies the
+    `committed_inbound_ids` set — read back from `state.messages`, or
+    side-loaded from the claim window's write rows (`shared/agents/history/inbound_sideload.py`),
+    which also proves a message committed and later removed. Each `'claimed'`
+    row is then either:
 
       - **flipped to `'done'`** if its id is in `committed_inbound_ids` —
         the previous process's claim → langgraph commit chain completed

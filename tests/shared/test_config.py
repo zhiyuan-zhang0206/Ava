@@ -612,6 +612,9 @@ _REMOTE_WRITABLE_ALLOWLIST = frozenset(
         "host_turn_reconcile_enabled",
         "hosted_crash_recovery_wake_enabled",
         "hosted_recrash_prompt_reap_enabled",
+        "inbound_reconcile_boundary_scan_limit",
+        "inbound_reconcile_clock_pad_seconds",
+        "inbound_reconcile_window_row_cap",
         "machine_description",
         "permissions_helper_enabled",
         "permissions_helper_spawn",
@@ -660,13 +663,9 @@ def test_non_host_fields_not_remote_writable_true() -> None:
 
 
 def test_no_agent_scope_field_is_writable() -> None:
-    """Every agent-scope field must have writable=False.
-
-    Agent-scope fields are read from env vars at process startup and are not
-    stored in cluster or host override storage. Marking any of them writable=True
-    would allow the config PUT to accept them, but there is no store to route them
-    to. The writable gate enforces this invariant at the field-metadata layer.
-    """
+    """Every agent-scope field must have writable=False: no override store exists
+    behind a config PUT for process-startup env vars, so the writable gate keeps
+    them out."""
     from shared.config import FIELD_INFOS
 
     violations = [

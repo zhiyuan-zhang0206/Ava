@@ -370,17 +370,22 @@ async def _reconcile_claimed_inbounds_at_startup(
     checkpointer: AsyncPostgresSaver,
     agent_id: int,
 ) -> None:
-    """Load the agent's LangGraph checkpoint, harvest every committed
-    `ava_inbound_id` from state.messages, and hand the set to
-    `reconcile_claimed_inbounds` so it can finalize any `'claimed'` rows
-    left behind by interrupted work.
+    """Hand `reconcile_claimed_inbounds` the set of committed `ava_inbound_id`s
+    so it can finalize any `'claimed'` chat rows left behind by interrupted
+    work.
 
     The name is historical: this is the inbound reconcile, not a startup-only
     step. The host calls it under the admitted incarnation's single-flight on
     cold runtime construction, on database recovery, and at a hosted turn's
     settled abort — in the last case the flushed checkpoint the abort wrote is
-    exactly what is read back here. The inbound owner lock fences concurrent
-    control decisions; the caller must retain that identity.
+    exactly what the read (or its side-load) must observe. The inbound owner
+    lock fences concurrent control decisions; the caller must retain that
+    identity.
+
+    The committed-id source strategy (task #4788) lives in
+    `shared/agents/history/inbound_sideload.py::committed_ids_for_reconcile`:
+    a guard read, then the claim-window side-load, with the full checkpoint
+    read as the fallback.
 
     No prior checkpoint (brand-new agent) → no commits to confirm; reconcile
     is still called with an empty set so any unlikely stray `'claimed'`
@@ -388,15 +393,9 @@ async def _reconcile_claimed_inbounds_at_startup(
     are reset to `'pending'`.
     """
     from agent.db import reconcile_claimed_inbounds
+    from shared.agents.history.inbound_sideload import committed_ids_for_reconcile
 
-    config: RunnableConfig = {"configurable": {"thread_id": str(agent_id)}}
-    ckpt = await checkpointer.aget(config)
-    messages = (ckpt or {}).get("channel_values", {}).get("messages", [])
-    committed_inbound_ids: set[int] = set()
-    for msg in messages:
-        ava_id = (getattr(msg, "additional_kwargs", None) or {}).get("ava_inbound_id")  # pyright: ignore[reportUnknownMemberType]
-        if isinstance(ava_id, int):
-            committed_inbound_ids.add(ava_id)
+    committed_inbound_ids = await committed_ids_for_reconcile(ops_pool, checkpointer, agent_id)
 
     committed, reset, dead_lettered = await reconcile_claimed_inbounds(
         ops_pool, agent_id, committed_inbound_ids

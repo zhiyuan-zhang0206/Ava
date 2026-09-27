@@ -1,4 +1,4 @@
-"""The delivery-watchdog field block of `DaemonSettings`.
+"""The delivery-watchdog and inbound-reconcile field blocks of `DaemonSettings`.
 
 Moved out of `shared/config/daemon.py` when two in-flight field additions and
 this block together pushed that module past its 800-line hard ceiling (task
@@ -7,6 +7,12 @@ a config domain: `settings.daemon.delivery_watchdog_*`, every alias/scope/
 capability face, and the `.env` contract stay exactly as they were. The two
 `delivery_watchdog_dispatch_backoff_steps_s` validators stay on the model in
 `daemon.py`.
+
+The inbound-reconcile window bounds joined the module 2026-09-27 (task #4788)
+under the same ceiling. Both blocks bound the same `'claimed'` chat-row
+lifecycle: the watchdog sweeps stale claims, the reconcile finalizes them from
+the claim window at boot/settle, and the reconcile's fresh-claim scope reads
+`delivery_watchdog_stale_claimed_threshold_seconds` from the block above.
 """
 
 from __future__ import annotations
@@ -182,5 +188,54 @@ class DeliveryWatchdogFields:
             "writable": True,
             "sensitive": False,
             "scope": "cluster-pinned",
+        },
+    )
+
+
+class InboundReconcileFields:
+    """The inbound-reconcile window bounds, in their former `daemon.py` order."""
+
+    inbound_reconcile_clock_pad_seconds: float = Field(
+        default=300.0,
+        gt=0,
+        alias="AVA_INBOUND_RECONCILE_CLOCK_PAD_SECONDS",
+        description="Hosted agent-runner: seconds subtracted from the oldest fresh claim timestamp when bounding the inbound reconcile's claim window — absorbs clock skew between the writer's checkpoint ts (agent-host clock) and the row's claimed_at (database clock). Larger widens the claim-window side-load (more write rows fetched); the side-load falls back to the full checkpoint read once its row cap is exceeded, so this trades cost, never correctness.",
+        json_schema_extra={
+            "capability": "agent-runner",
+            "restart_required": "",
+            "writable": False,
+            "sensitive": False,
+            "scope": "host",
+            "remote_writable": True,
+        },
+    )
+
+    inbound_reconcile_boundary_scan_limit: int = Field(
+        default=1024,
+        ge=1,
+        alias="AVA_INBOUND_RECONCILE_BOUNDARY_SCAN_LIMIT",
+        description="Hosted agent-runner: how many of the newest checkpoints the inbound reconcile's claim-window side-load scans (newest-first) for the first checkpoint older than the earliest fresh claim. Beyond the limit the side-load yields to the full checkpoint read; the limit bounds the common path's scan cost only, never correctness.",
+        json_schema_extra={
+            "capability": "agent-runner",
+            "restart_required": "",
+            "writable": False,
+            "sensitive": False,
+            "scope": "host",
+            "remote_writable": True,
+        },
+    )
+
+    inbound_reconcile_window_row_cap: int = Field(
+        default=256,
+        ge=1,
+        alias="AVA_INBOUND_RECONCILE_WINDOW_ROW_CAP",
+        description="Hosted agent-runner: maximum messages-channel write rows the inbound reconcile's claim-window side-load fetches (about 2.5MB at the observed ~10KB/row) before yielding to the full checkpoint read. A claim window larger than this cap is cheaper served by the fallback — the full read is itself bounded to one snapshot period (at most ~1000 updates) — so the cap keeps the side-load strictly cheaper than the read it replaces.",
+        json_schema_extra={
+            "capability": "agent-runner",
+            "restart_required": "",
+            "writable": False,
+            "sensitive": False,
+            "scope": "host",
+            "remote_writable": True,
         },
     )

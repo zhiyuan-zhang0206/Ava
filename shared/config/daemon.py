@@ -13,7 +13,7 @@ from pydantic import Field, field_validator, model_validator
 from shared.config._base import EnvSettings
 from shared.config.billing_recovery_fields import BillingRecoveryFields
 from shared.config.delivery_outbox_fields import DeliveryOutboxFields
-from shared.config.delivery_watchdog_fields import DeliveryWatchdogFields
+from shared.config.delivery_watchdog_fields import DeliveryWatchdogFields, InboundReconcileFields
 from shared.config.hierarchy_worker_fields import HierarchyWorkerFields
 
 
@@ -21,6 +21,7 @@ class DaemonSettings(
     BillingRecoveryFields,
     DeliveryOutboxFields,
     DeliveryWatchdogFields,
+    InboundReconcileFields,
     HierarchyWorkerFields,
     EnvSettings,
 ):
