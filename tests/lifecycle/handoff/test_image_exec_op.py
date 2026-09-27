@@ -9,6 +9,7 @@ time, returning the entry's JSON object and changing nothing else.
 from __future__ import annotations
 
 import base64
+import contextlib
 import os
 from pathlib import Path
 from typing import Any
@@ -132,12 +133,18 @@ def test_an_entry_past_its_bound_is_killed(store: Store, monkeypatch: pytest.Mon
     with pytest.raises(HandoffRefusedError, match=r"did not finish within 0\.5s"):
         _run(store, store.request(), timeout_s=0.5)
     # The entry was the only process (the script execs `sleep`), and the bound killed it.
-    leftovers = [
-        child
-        for child in psutil.Process().children(recursive=True)
-        if child.cmdline()[:2] == ["sleep", "30"]
-    ]
-    assert leftovers == []
+    assert [argv for argv in _children_argv() if argv[:2] == ["sleep", "30"]] == []
+
+
+def _children_argv() -> list[list[str]]:
+    """Command lines of this process's descendants that can still run. A child
+    that exited and awaits its reap (another test's, in a shared xdist worker)
+    has none, and cannot be a leftover entry."""
+    argvs: list[list[str]] = []
+    for child in psutil.Process().children(recursive=True):
+        with contextlib.suppress(psutil.NoSuchProcess):  # ZombieProcess included
+            argvs.append(child.cmdline())
+    return argvs
 
 
 def test_a_request_that_is_not_base64_refuses(unit: Store) -> None:
