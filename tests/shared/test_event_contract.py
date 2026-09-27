@@ -225,9 +225,10 @@ def test_category_projection_matches_telemetry_whitelist() -> None:
     # host_recovery_wake_released) raises it to 222. Retiring the closed-agent
     # concept (decisions/2026-09-27-terminate-has-no-closed-state.md: no
     # agent_reopened) lowers it to 221.
+    # The inbound reconcile's settled-history fallback (task #4788) raises it to 222.
     assert "restart_cas_lost" not in _TELEMETRY_KINDS
     assert "agent_reopened" not in _TELEMETRY_KINDS
-    assert len(_TELEMETRY_KINDS) == 221
+    assert len(_TELEMETRY_KINDS) == 222
     assert payload_keys("debt_sweep_daily") == (
         "day",
         "scan_status",
