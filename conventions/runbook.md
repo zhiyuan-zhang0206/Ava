@@ -136,6 +136,17 @@ operation is incomplete and on a remote-managed plane. Networked release
 operations keep refusing; a new generation reaches remote units only by a new
 bundle (cutover, join, emergency).
 
+The bundle also carries the unit's enrollment secret, its identity toward a
+release coordinator (minted at its first bundle, then reused). Change it only
+on the gateway; both commands print the enrollment id, never the secret:
+
+```bash
+ava cluster db-authority rotate-enrollment --machine <name> --home <unit $AVA_HOME>
+# then issue-unit again: the unit authenticates only after installing the new bundle
+ava cluster db-authority revoke-enrollment --machine <name> --home <unit $AVA_HOME>
+# a later issue-unit re-enrolls it with a new secret
+```
+
 Its DB/Redis connection facts are not cached locally: every runner process
 fetches them at Settings construction. Start the gateway first, then the
 runners. Gateway unavailability fails runner startup; the boot policy retries
@@ -1283,8 +1294,12 @@ and operation generation:
 ava cluster update --prepared /absolute/path/to/request.json
 ```
 
-Submission reports native execution state. Completion comes from the operation
-journal, not a successful submission exit. Resubmit the same captured request to
+The running CLI only verifies the request's executor image in this home's
+release store and hands off to that image's fixed entry point (the frozen v1
+[image-exec handoff](../cli/release_handoff/release_handoff.ava.okf.md)); the
+executor's code performs the submission. Submission reports native execution
+state. Completion comes from the operation journal, not a successful submission
+exit. Resubmit the same captured request to
 inspect or continue a positively closed attempt; uncertain native custody refuses.
 The executor lives outside the application root and retains its code throughout
 the transition. Candidate start/readiness failure selects the captured predecessor

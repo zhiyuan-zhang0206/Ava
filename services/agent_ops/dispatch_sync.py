@@ -27,6 +27,7 @@ from ops.rpc_schemas import (
     ShellProbePayload,
     UploadReceivePayload,
 )
+from shared.api_contracts.release_handoff import ReleaseImageExecPayload
 
 # The read-modify-write arms are serialized against each other: `config_write` and `inventory_write` both
 # READ their on-disk state, modify it and write it back, so an interleave lands the
@@ -86,26 +87,36 @@ def dispatch_sync(
                 return "completed", ops_inventory.inventory_write_op(
                     iw.plugins, iw.mcp_servers
                 ).model_dump(mode="json")
-        case "shell_probe":
-            sp = ShellProbePayload.model_validate(payload)
-            return "completed", ops_cluster.shell_probe_op(sp.agent_id).model_dump(mode="json")
-        case "shell_kill":
-            sk = ShellKillPayload.model_validate(payload)
-            return "completed", ops_cluster.shell_kill_op(sk.agent_id, sk.session_id).model_dump(
-                mode="json"
-            )
-        case "agent_skill_view":
-            asv = AgentSkillViewPayload.model_validate(payload)
-            return "completed", ops_cluster.agent_skill_view_op(asv.agent_id, pool).model_dump(
-                mode="json"
-            )
-        case "shell_capture":
-            sc = ShellCapturePayload.model_validate(payload)
-            return "completed", ops_cluster.shell_capture_op(
-                sc.agent_id, sc.session_id, sc.lines
-            ).model_dump(mode="json")
+        case "shell_probe" | "shell_kill" | "shell_capture" | "agent_skill_view":
+            return "completed", _agent_arm(kind, payload, pool)
         case "upload_receive":
             ur = UploadReceivePayload.model_validate(payload)
             return "completed", ops_uploads.upload_receive_op(ur).model_dump(mode="json")
+        case "release_image_exec":
+            rie = ReleaseImageExecPayload.model_validate(payload)
+            return "completed", ops_cluster.release_image_exec_op(rie).model_dump(mode="json")
         case _:
             return "failed", {"error": f"unknown kind: {kind!r}"}
+
+
+def _agent_arm(
+    kind: str, payload: dict[str, Any], pool: ConnectionPool | None
+) -> dict[str, object]:
+    """The per-agent read and shell arms (one agent's shells and command view)."""
+    match kind:
+        case "shell_probe":
+            sp = ShellProbePayload.model_validate(payload)
+            return ops_cluster.shell_probe_op(sp.agent_id).model_dump(mode="json")
+        case "shell_kill":
+            sk = ShellKillPayload.model_validate(payload)
+            return ops_cluster.shell_kill_op(sk.agent_id, sk.session_id).model_dump(mode="json")
+        case "agent_skill_view":
+            asv = AgentSkillViewPayload.model_validate(payload)
+            return ops_cluster.agent_skill_view_op(asv.agent_id, pool).model_dump(mode="json")
+        case "shell_capture":
+            sc = ShellCapturePayload.model_validate(payload)
+            return ops_cluster.shell_capture_op(sc.agent_id, sc.session_id, sc.lines).model_dump(
+                mode="json"
+            )
+        case _:
+            raise ValueError(f"not an agent arm: {kind!r}")

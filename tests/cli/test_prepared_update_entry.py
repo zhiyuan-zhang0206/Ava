@@ -1,4 +1,4 @@
-"""The prepared release request is the only update CLI entry."""
+"""The prepared release request is the only update CLI entry; it enters the handoff."""
 
 import os
 import subprocess
@@ -26,7 +26,7 @@ def test_invalid_combination_refuses_before_plan_or_old_dispatch(
     def forbidden(_path: Path) -> int:
         raise AssertionError("invalid flags must not read a plan")
 
-    monkeypatch.setattr("cli.release_transition.submit.run", forbidden)
+    monkeypatch.setattr("cli.release_handoff.handoff.run", forbidden)
     monkeypatch.setattr("cli.preflight.require_anchored_home", forbidden)
     with pytest.raises(SystemExit) as exited:
         main.main(["cluster", "update", *tail])
@@ -43,7 +43,7 @@ def test_prepared_enters_handler_before_checkout_anchor(monkeypatch: pytest.Monk
     def forbidden(_verb: str) -> None:
         raise AssertionError("wheel entry must not ask an absent checkout for its home")
 
-    monkeypatch.setattr("cli.release_transition.submit.run", prepared)
+    monkeypatch.setattr("cli.release_handoff.handoff.run", prepared)
     monkeypatch.setattr("cli.preflight.require_anchored_home", forbidden)
     assert main.main(["cluster", "update", "--prepared", "/private/plan"]) == 17
     assert seen == ["/private/plan"]

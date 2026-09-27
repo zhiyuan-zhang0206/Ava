@@ -23,10 +23,13 @@ refusing until the automated exchange exists.
   (`unit_delivery`), an admitted operator process consumes it
   (`consume_unit`), and the launch digest binds its non-secret reference.
 
-The enrollment secret is the unit's durable identity toward the gateway. The
+The enrollment secret is the unit's durable identity toward the gateway: it
+keys the release coordinator channel (`shared.cluster.authority.channel`). The
 gateway keeps its copy in `$AVA_HOME/db-authority/units/<key>.json`, minted
-once per unit and reused by later bundles; revoking it means deleting that
-record.
+when the unit first receives a bundle (its join, or the one-time cutover) and
+reused by later bundles. Only an explicit operator command changes it:
+`rotate_enrollment` replaces the secret (the next bundle delivers it) and
+`revoke_enrollment` deletes the record.
 """
 
 from __future__ import annotations
@@ -55,6 +58,7 @@ from pydantic import (
     model_validator,
 )
 
+from shared.atomic_io import fsync_parent
 from shared.cluster.authority.delivery import (
     GENERATION_ENV,
     require_admitted_runtime,
@@ -250,23 +254,82 @@ def _parse[M: BaseModel](model: type[M], body: bytes, path: Path) -> M:
         raise UnitCapabilityError(f"{path} is corrupt: {exc}") from exc
 
 
+def _new_enrollment(unit: UnitIdentity) -> Enrollment:
+    return Enrollment(
+        version=1,
+        enrollment_id=uuid.uuid4().hex,
+        unit=unit,
+        secret=secrets.token_urlsafe(32),
+    )
+
+
+def _recorded_enrollment(path: Path, unit: UnitIdentity) -> Enrollment:
+    """The gateway record at `path`; FileNotFoundError passes through."""
+    enrollment = _parse(Enrollment, _read_private(path), path)
+    if enrollment.unit != unit:
+        raise UnitCapabilityError(f"{path} records another unit")
+    return enrollment
+
+
 def ensure_enrollment(home: Path, unit: UnitIdentity) -> Enrollment:
     """The unit's enrollment on this gateway, minted once and then reused."""
     with _locked(home):
         path = enrollment_record_path(home, unit)
         try:
-            enrollment = _parse(Enrollment, _read_private(path), path)
+            return _recorded_enrollment(path, unit)
         except FileNotFoundError:
-            enrollment = Enrollment(
-                version=1,
-                enrollment_id=uuid.uuid4().hex,
-                unit=unit,
-                secret=secrets.token_urlsafe(32),
-            )
+            enrollment = _new_enrollment(unit)
             _publish_exclusive(path, _canonical(enrollment) + b"\n")
-        if enrollment.unit != unit:
-            raise UnitCapabilityError(f"{path} records another unit")
+            return enrollment
+
+
+def load_enrollment(home: Path, unit: UnitIdentity) -> Enrollment | None:
+    """The gateway's record for `unit`, or None when it is not enrolled."""
+    try:
+        return _recorded_enrollment(enrollment_record_path(home, unit), unit)
+    except FileNotFoundError:
+        return None
+
+
+def _not_enrolled(home: Path, unit: UnitIdentity) -> UnitCapabilityError:
+    return UnitCapabilityError(
+        f"{unit.describe()} holds no enrollment on the gateway home {home}; "
+        "`ava cluster db-authority issue-unit` enrolls it"
+    )
+
+
+def rotate_enrollment(home: Path, unit: UnitIdentity) -> Enrollment:
+    """Replace an enrolled unit's secret and id; the old secret stops authenticating.
+
+    The unit keeps its old copy until its next bundle (`issue_bundle` carries
+    the current record), so the channel refuses it in between.
+    """
+    with _locked(home):
+        path = enrollment_record_path(home, unit)
+        try:
+            _recorded_enrollment(path, unit)
+        except FileNotFoundError:
+            raise _not_enrolled(home, unit) from None
+        enrollment = _new_enrollment(unit)
+        write_private_bytes(path, _canonical(enrollment) + b"\n")
         return enrollment
+
+
+def revoke_enrollment(home: Path, unit: UnitIdentity) -> Enrollment:
+    """Delete an enrolled unit's gateway record; returns what was revoked.
+
+    A later `issue_bundle` for the same unit mints a new enrollment: re-enrolling
+    is an explicit operator step, never automatic.
+    """
+    with _locked(home):
+        path = enrollment_record_path(home, unit)
+        try:
+            revoked = _recorded_enrollment(path, unit)
+        except FileNotFoundError:
+            raise _not_enrolled(home, unit) from None
+        path.unlink()
+        fsync_parent(path)
+        return revoked
 
 
 @dataclass(frozen=True)
@@ -392,6 +455,18 @@ def unit_capability_path(home: Path) -> Path:
 
 def unit_enrollment_path(home: Path) -> Path:
     return authority_dir(home) / "enrollment.json"
+
+
+def load_unit_enrollment(home: Path) -> Enrollment | None:
+    """The unit's installed enrollment, bound to `home`; None when none is installed."""
+    path = unit_enrollment_path(home)
+    try:
+        enrollment = _parse(Enrollment, _read_private(path), path)
+    except FileNotFoundError:
+        return None
+    if enrollment.unit.home != str(home):
+        raise UnitCapabilityError(f"{path} belongs to another home")
+    return enrollment
 
 
 def load_unit_capability(home: Path) -> UnitCapability | None:

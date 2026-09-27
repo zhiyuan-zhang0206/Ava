@@ -13,7 +13,7 @@ from pathlib import Path
 
 
 def _h_cluster_update(args: argparse.Namespace) -> int:
-    from cli.release_transition.submit import run
+    from cli.release_handoff.handoff import run
 
     return run(Path(args.prepared))
 
@@ -151,6 +151,43 @@ def _h_cluster_db_authority_issue_unit(args: argparse.Namespace) -> int:
     )
 
 
+def _h_cluster_db_authority_rotate_enrollment(args: argparse.Namespace) -> int:
+    from cli.commands.cluster import cmd_db_authority_rotate_enrollment
+
+    return cmd_db_authority_rotate_enrollment(machine=args.machine, home=args.home)
+
+
+def _h_cluster_db_authority_revoke_enrollment(args: argparse.Namespace) -> int:
+    from cli.commands.cluster import cmd_db_authority_revoke_enrollment
+
+    return cmd_db_authority_revoke_enrollment(machine=args.machine, home=args.home)
+
+
+def _add_enrollment_parsers(
+    db_authority_sub: argparse._SubParsersAction[argparse.ArgumentParser],
+) -> None:
+    for verb, handler, help_text in (
+        (
+            "rotate-enrollment",
+            _h_cluster_db_authority_rotate_enrollment,
+            "on the gateway: replace one unit's enrollment secret (the release coordinator "
+            "channel key); its next issue-unit bundle delivers the new one",
+        ),
+        (
+            "revoke-enrollment",
+            _h_cluster_db_authority_revoke_enrollment,
+            "on the gateway: delete one unit's enrollment record; the unit can no longer "
+            "authenticate to a release coordinator",
+        ),
+    ):
+        verb_p = db_authority_sub.add_parser(verb, help=help_text)
+        verb_p.add_argument("--machine", required=True, help="the unit's machine name")
+        verb_p.add_argument(
+            "--home", required=True, help="the unit's absolute $AVA_HOME path on its machine"
+        )
+        verb_p.set_defaults(func=handler)
+
+
 def _add_db_authority_parser(
     cluster_sub: argparse._SubParsersAction[argparse.ArgumentParser],
 ) -> None:
@@ -176,6 +213,7 @@ def _add_db_authority_parser(
         "--ttl-hours", type=float, default=24.0, help="bundle lifetime in hours (default: 24)"
     )
     issue_unit_p.set_defaults(func=_h_cluster_db_authority_issue_unit)
+    _add_enrollment_parsers(db_authority_sub)
 
 
 def _add_release_parser(cluster_sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
@@ -348,7 +386,8 @@ def _add_cluster_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]
 
     cluster_update_p = cluster_sub.add_parser(
         "update",
-        help="[cluster] submit or resume one captured immutable release operation",
+        help="[cluster] submit or resume one captured immutable release operation: verify "
+        "its executor image in this home's store and hand off to that image",
     )
     cluster_update_p.add_argument(
         "--prepared",

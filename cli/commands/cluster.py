@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import sys
 from datetime import datetime
+from pathlib import Path
 
 import httpx
 
@@ -336,6 +337,95 @@ def _fetch_gateway_cluster_status() -> dict[str, object]:
     return resp.json()
 
 
+def _gateway_authority_home(verb: str) -> Path | None:
+    """This gateway home for a db-authority verb, or None after printing the refusal.
+
+    The verbs need a gateway home with a local data plane (a remote-managed
+    plane has no write generation or enrollment store), and no release
+    operation may be incomplete: it captured the units it releases.
+    """
+    from shared.bootstrap import config_source_is_local
+    from shared.config import settings
+    from shared.paths import ava_home
+    from shared.release_operation import require_configuration_write_authorized
+
+    if not config_source_is_local() or settings.data_plane.is_remote:
+        print(
+            f"✗ ava cluster db-authority {verb}: runs on a gateway home with a local data "
+            "plane; a remote-managed plane has no write generation to issue",
+            file=sys.stderr,
+        )
+        return None
+    gateway_home = ava_home().resolve()
+    try:
+        require_configuration_write_authorized(gateway_home)
+    except (RuntimeError, ValueError, OSError) as exc:
+        print(f"✗ ava cluster db-authority {verb}: {exc}", file=sys.stderr)
+        return None
+    return gateway_home
+
+
+def _change_enrollment(verb: str, machine: str, home: str) -> tuple[str, str] | None:
+    """Rotate or revoke one unit's gateway enrollment; (unit, enrollment id) or None.
+
+    None means the refusal was printed. Only the enrollment id leaves this
+    function, never the secret.
+    """
+    from shared.cluster.authority import AuthorityRefusedError
+    from shared.cluster.authority.unit import (
+        UnitIdentity,
+        revoke_enrollment,
+        rotate_enrollment,
+    )
+
+    change = {"rotate-enrollment": rotate_enrollment, "revoke-enrollment": revoke_enrollment}[verb]
+    gateway_home = _gateway_authority_home(verb)
+    if gateway_home is None:
+        return None
+    try:
+        unit = UnitIdentity(machine=machine, home=home)
+        enrollment = change(gateway_home, unit)
+    except (AuthorityRefusedError, ValueError, OSError) as exc:
+        print(f"✗ ava cluster db-authority {verb}: {exc}", file=sys.stderr)
+        return None
+    return unit.describe(), enrollment.enrollment_id
+
+
+def cmd_db_authority_rotate_enrollment(*, machine: str, home: str) -> int:
+    """`ava cluster db-authority rotate-enrollment` (gateway): replace a unit's secret.
+
+    The unit's next `issue-unit` bundle delivers the new secret; until it is
+    installed the release coordinator channel refuses the unit.
+    """
+    changed = _change_enrollment("rotate-enrollment", machine, home)
+    if changed is None:
+        return 1
+    unit, enrollment_id = changed
+    print(
+        f"✓ enrollment of {unit} rotated (new id {enrollment_id}); the unit authenticates "
+        "again after it installs a new bundle: run `ava cluster db-authority issue-unit "
+        f"--machine {machine} --home {home} --out <bundle>`"
+    )
+    return 0
+
+
+def cmd_db_authority_revoke_enrollment(*, machine: str, home: str) -> int:
+    """`ava cluster db-authority revoke-enrollment` (gateway): delete a unit's record.
+
+    The unit can no longer authenticate to a release coordinator; a later
+    `issue-unit` for it mints a new enrollment (an explicit re-enrollment).
+    """
+    changed = _change_enrollment("revoke-enrollment", machine, home)
+    if changed is None:
+        return 1
+    unit, enrollment_id = changed
+    print(
+        f"✓ enrollment {enrollment_id} of {unit} revoked; the unit can no longer "
+        "authenticate to a release coordinator (a later issue-unit re-enrolls it)"
+    )
+    return 0
+
+
 def cmd_db_authority_issue_unit(*, machine: str, home: str, out: str, ttl_hours: float) -> int:
     """`ava cluster db-authority issue-unit` — seal one remote unit's database capability.
 
@@ -348,27 +438,15 @@ def cmd_db_authority_issue_unit(*, machine: str, home: str, out: str, ttl_hours:
     Refused on a pure agent-runner, a remote-managed plane, a home without an
     active generation, and while a release operation is incomplete.
     """
-    from pathlib import Path
-
-    from shared.bootstrap import config_source_is_local
     from shared.cluster.authority import AuthorityRefusedError
     from shared.cluster.authority.unit import UnitIdentity, issue_bundle, write_bundle
-    from shared.config import settings
     from shared.config.service_read import served_db_endpoint
-    from shared.paths import ava_home
-    from shared.release_operation import require_configuration_write_authorized
 
-    gateway_home = ava_home().resolve()
     target = Path(out).expanduser().absolute()
-    if not config_source_is_local() or settings.data_plane.is_remote:
-        print(
-            "✗ ava cluster db-authority issue-unit: runs on a gateway home with a local data "
-            "plane; a remote-managed plane has no write generation to issue",
-            file=sys.stderr,
-        )
+    gateway_home = _gateway_authority_home("issue-unit")
+    if gateway_home is None:
         return 1
     try:
-        require_configuration_write_authorized(gateway_home)
         unit = UnitIdentity(machine=machine, home=home)
         issued = issue_bundle(
             gateway_home, unit=unit, endpoint=served_db_endpoint(), ttl_s=ttl_hours * 3600

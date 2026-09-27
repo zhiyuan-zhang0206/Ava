@@ -220,15 +220,22 @@ Existing homes convert through the one-time `scripts/cutover_db_authority.py`
 (steps `redis`, `db`, and for networked homes `remote-units`;
 [credential split](../../conventions/data-plane-secret-split.md#convert-an-existing-home)).
 
+The unit enrollment secret (minted at a unit's first bundle: its join or the
+cutover) has operator rotation and revocation and keys the coordinator
+channel's request authentication and sealing
+([enrollment](../../shared/cluster/authority/wiring.ava.okf.md#unit-enrollment)).
+The only cross-release contract, the frozen v1 image-exec handoff (CLI and the
+`release_image_exec` ops kind), and the port block's reserved `coordinator`
+slot exist ([handoff](../../cli/release_handoff/release_handoff.ava.okf.md)).
+
 Remaining: the release transition's `fencing` / `authorizing` phases (revoke,
 pooler stop, closure proof, mint the next generation, restart the pooler) and
 its executor's admin DSN — until they land, the finite executor running a
 candidate image receives no database authority from the boot pass; the
-enrollment channel that uses the unit enrollment secret (join-time minting,
-rotation and revocation commands, the coordinator listener) and the automated
-per-operation capability exchange, without which networked rollouts keep
-refusing; per-generation API machine tokens and runners that stop holding the
-human bearer.
+coordinator listener on the reserved port, the handoff's `receipt` and
+`preflight` entries, and the automated per-operation capability exchange,
+without which networked rollouts keep refusing; per-generation API machine
+tokens and runners that stop holding the human bearer.
 
 ## Remaining: qualify PITR custody and restart recovery
 

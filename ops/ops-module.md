@@ -42,7 +42,11 @@ vocabulary lives in `ops/rpc_schemas.py`; focused agent contracts live in
 `ops/rpc_terminate.py`, `ops/rpc_content.py`, and
 `ops/rpc_billing_recovery.py`. Gateway-only schemas stay in `gateway/schemas/`.
 The client and daemon reject unknown kinds before machine lookup, maintenance
-admission, dedupe, or dispatch. Retired updater fetch, prepare, bootstrap, and
+admission, dedupe, or dispatch. `release_image_exec` is the frozen v1
+image-exec handoff (`ops_cluster.release_image_exec_op`): the unit verifies a
+prepared image in its own store and runs one fixed entry of that image with
+bounded time (contract in `shared/api_contracts/release_handoff.py`, described
+in `cli/release_handoff/release_handoff.ava.okf.md`). Retired updater fetch, prepare, bootstrap, and
 continuation requests have no wire registration or handler. Their handlers, schemas, command producers and session/log status projections
 are absent. Callers import live pause, status and recovery definitions directly.
 The shared database publication and maintenance fences still enforce admission;

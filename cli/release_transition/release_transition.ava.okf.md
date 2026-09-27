@@ -9,10 +9,11 @@ tags:
 
 # Retained release transition
 
-`ava cluster update --prepared REQUEST` submits or resumes one immutable release
-operation. The CLI has no moving-main, mutable-checkout or per-service update
-branch. Submission success describes native dispatch/readback, not a completed
-upgrade. The operation journal supplies its actual phase and chosen direction.
+`ava cluster update --prepared REQUEST` hands the request to its verified
+executor image ([[cli/release_handoff/release_handoff.ava.okf.md]]), which
+submits or resumes one immutable release operation (no moving-main, mutable
+checkout or per-service branch). Success is native dispatch/readback, not a
+completed upgrade.
 
 ## Authority and inputs
 

@@ -98,9 +98,10 @@ def submit_request(request: Request | PitrRequest) -> tuple[Path, dict[str, Json
     return request.path, host.launch(record).model_dump(mode="json")
 
 
-def run(path: Path) -> int:
+def run(encoded: bytes) -> int:
+    """The `submit` handoff entry: submit one request document, print its dispatch."""
     try:
-        operation_path, native = submit(path)
+        operation_path, native = submit_request(read_request(encoded))
     except (ValueError, OSError, RuntimeError) as exc:
         sys.stderr.write(f"release update refused: {exc}\n")
         return 2
