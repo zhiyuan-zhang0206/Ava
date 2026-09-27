@@ -12,7 +12,6 @@ from pathlib import Path
 
 import pytest
 
-import cli.commands as commands_ns
 from cli.commands import _lgtm, _lgtm_native
 
 
@@ -36,6 +35,8 @@ def _wire(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> tuple[Path, list[tuple[list[str], Path]]]:
     """Point marker + deploy dir at tmp, record subprocess invocations."""
+    from cli.commands import _repo as _repo_mod
+
     marker = tmp_path / "home" / "lgtm-host"
     marker.parent.mkdir(parents=True, exist_ok=True)
     deploy_dir = tmp_path / "repo" / "deploy" / "lgtm"
@@ -44,7 +45,7 @@ def _wire(
     monkeypatch.setattr(_lgtm.platform, "system", lambda: "Darwin")
     monkeypatch.setattr("shared.paths.ava_home", lambda: marker.parent)
     monkeypatch.setattr(_lgtm, "lgtm_deploy_dir", lambda _repo: deploy_dir)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(commands_ns, "_repo_root", lambda: tmp_path / "repo")
+    monkeypatch.setattr(_repo_mod, "_repo_root", lambda: tmp_path / "repo")
 
     def noop_native(_repo: Path, _home: Path) -> None:
         return None

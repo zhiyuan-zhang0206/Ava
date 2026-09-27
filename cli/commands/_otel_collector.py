@@ -682,12 +682,11 @@ def _reap_orphan_collector_session() -> None:
     Its force-kill fallback is the designed remedy for this operator-initiated
     transition, so the backend logs an escalation at INFO instead of WARNING.
     """
-    import cli.commands as _ns
-    from cli.commands._session_lifecycle import _graceful_kill_session
+    from cli.commands._session_lifecycle import _graceful_kill_session, _has_session
     from shared.cluster import session_name
 
     sess = session_name("otel-collector")
-    if not _ns._has_session(sess):
+    if not _has_session(sess):
         return
     ok, mode = _graceful_kill_session(sess, expected=True)
     print(

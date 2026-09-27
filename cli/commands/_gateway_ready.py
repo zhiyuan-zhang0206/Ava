@@ -152,13 +152,13 @@ def _gateway_session_alive() -> bool:
 
     The gate's fast exit for the case no wait can fix. A session that exited took the
     uvicorn with it — commonly `assert_schema_current` failing at boot, or `[Errno 48]
-    Address already in use` — and the port will never be bound. Read through the
-    `cli.commands` namespace so it shares the seam `ava status` uses.
+    Address already in use` — and the port will never be bound. Reads through
+    `cli.commands._session_lifecycle` so it shares the seam `ava status` uses.
     """
-    import cli.commands as _ns
+    from cli.commands import _session_lifecycle
     from cli.commands._repo import session_name
 
-    return _ns._has_session(session_name("gateway"))
+    return _session_lifecycle._has_session(session_name("gateway"))
 
 
 def _serving_locally() -> bool:

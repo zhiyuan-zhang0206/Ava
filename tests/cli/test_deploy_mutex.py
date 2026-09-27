@@ -375,7 +375,7 @@ def test_the_phase_b_poll_renews_the_lease_it_runs_under(monkeypatch: pytest.Mon
     renewing when it returns, so a crashed rollout still lapses."""
     from datetime import UTC, datetime, timedelta
 
-    import cli.commands as _cli
+    from cli.commands import _update_phase_b
     from ops import cluster_rpc as cr
     from shared.cluster_lock import self_holder
     from shared.host_deploy_state import HostDeployState
@@ -401,11 +401,11 @@ def test_the_phase_b_poll_renews_the_lease_it_runs_under(monkeypatch: pytest.Mon
 
     monkeypatch.setattr(cr, "dispatch_to_machine", _paused_forever)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr("cli.commands._update_phase_b.read", _fake_read)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_POLL_TIMEOUT_S", 0.2)
-    monkeypatch.setattr(_cli, "_POLL_INTERVAL_S", 0.01)
+    monkeypatch.setattr(_update_phase_b, "_POLL_TIMEOUT_S", 0.2)
+    monkeypatch.setattr(_update_phase_b, "_POLL_INTERVAL_S", 0.01)
 
-    out = _cli._poll_until_unpaused([("win", "http://unused")])
+    out = _update_phase_b._poll_until_unpaused([("win", "http://unused")])
 
-    assert {n: v.status for n, v in out.items()} == {"win": _cli.POLL_CONVERGING}
+    assert {n: v.status for n, v in out.items()} == {"win": _update_phase_b.POLL_CONVERGING}
     assert renewals, "the poll must keep its own lease alive while it waits"
     assert set(renewals) == {self_holder()}

@@ -31,7 +31,6 @@ from typing import Literal
 import psutil
 import pytest
 
-import cli.commands as _cli
 from cli.commands._probe import ServiceProbe
 from cli.commands._repo import ServiceSpec
 from ops.service_spec import _GATEWAY
@@ -228,9 +227,12 @@ def _launch_probe_env(
     probe: ServiceProbe,
 ) -> dict[str, list[str]]:
     """Stub the three seams `_launch_sessions` reaches through and record them."""
+    from cli.commands import _probe as _probe_mod
+    from cli.commands import _session_lifecycle as _session_mod
+
     seen: dict[str, list[str]] = {"killed": [], "launched": []}
-    monkeypatch.setattr(_cli, "_has_session", lambda s: s in sessions_alive)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_probe_service", lambda _spec: probe)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_session_mod, "_has_session", lambda s: s in sessions_alive)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_probe_mod, "_probe_service", lambda _spec: probe)  # pyright: ignore[reportUnknownArgumentType]
 
     def _kill(session: str, **_kw: object) -> bool:
         seen["killed"].append(session)
@@ -240,8 +242,8 @@ def _launch_probe_env(
         seen["launched"].append(session)
         return True
 
-    monkeypatch.setattr(_cli, "_kill_session", _kill)
-    monkeypatch.setattr(_cli, "_new_session", _new)
+    monkeypatch.setattr(_session_mod, "_kill_session", _kill)
+    monkeypatch.setattr(_session_mod, "_new_session", _new)
     return seen
 
 
@@ -290,6 +292,8 @@ def test_husk_session_is_cleared_and_relaunched(
 ) -> None:
     """The incident, replayed: `ava-gateway`'s session exists, nothing is behind it.
     Before the fix this printed `✓ ava-gateway already running` and launched nothing."""
+    from cli.commands import _session_lifecycle as _session_mod
+
     seen = _launch_probe_env(
         monkeypatch,
         sessions_alive={"ava-gateway"},
@@ -297,7 +301,7 @@ def test_husk_session_is_cleared_and_relaunched(
     )
     _roster(monkeypatch, "gateway")
 
-    _cli._launch_sessions(frozenset({"gateway"}), set(), tmp_path)
+    _session_mod._launch_sessions(frozenset({"gateway"}), set(), tmp_path)
 
     assert seen["killed"] == ["ava-gateway"], "the husk must be cleared before relaunching"
     assert seen["launched"] == ["ava-gateway"]
@@ -310,6 +314,8 @@ def test_live_service_is_still_skipped(
     monkeypatch: pytest.MonkeyPatch, capsys, tmp_path: Path
 ) -> None:
     """A healthy session already launched on the checkout's code is left alone."""
+    from cli.commands import _session_lifecycle as _session_mod
+
     seen = _launch_probe_env(
         monkeypatch,
         sessions_alive={"ava-gateway"},
@@ -318,7 +324,7 @@ def test_live_service_is_still_skipped(
     _stub_session_code_state(monkeypatch, launched="current", head="current")
     _roster(monkeypatch, "gateway")
 
-    _cli._launch_sessions(frozenset({"gateway"}), set(), tmp_path)
+    _session_mod._launch_sessions(frozenset({"gateway"}), set(), tmp_path)
 
     assert seen == {"killed": [], "launched": []}
     assert "✓ ava-gateway already running" in capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
@@ -328,6 +334,8 @@ def test_live_service_on_stale_code_is_cleared_and_relaunched(
     monkeypatch: pytest.MonkeyPatch, capsys, tmp_path: Path
 ) -> None:
     """A healthy session carrying a prior checkout is not an idempotent start."""
+    from cli.commands import _session_lifecycle as _session_mod
+
     seen = _launch_probe_env(
         monkeypatch,
         sessions_alive={"ava-ops"},
@@ -336,7 +344,7 @@ def test_live_service_on_stale_code_is_cleared_and_relaunched(
     sources = _stub_session_code_state(monkeypatch, launched="oldsha", head="newsha")
     _roster(monkeypatch, "ops")
 
-    _cli._launch_sessions(frozenset({"gateway"}), set(), tmp_path)
+    _session_mod._launch_sessions(frozenset({"gateway"}), set(), tmp_path)
 
     assert seen["killed"] == ["ava-ops"]
     assert seen["launched"] == ["ava-ops"]
@@ -350,6 +358,8 @@ def test_stale_code_session_is_left_alone_while_its_check_is_guarded(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, guard: str
 ) -> None:
     """Updates own code transitions, and dev/prod checkout pairs are incomparable."""
+    from cli.commands import _session_lifecycle as _session_mod
+
     seen = _launch_probe_env(
         monkeypatch,
         sessions_alive={"ava-gateway"},
@@ -375,7 +385,7 @@ def test_stale_code_session_is_left_alone_while_its_check_is_guarded(
         monkeypatch.setattr(cluster_drift, "running_from_prod_source", lambda: False)
     _roster(monkeypatch, "gateway")
 
-    _cli._launch_sessions(frozenset({"gateway"}), set(), tmp_path)
+    _session_mod._launch_sessions(frozenset({"gateway"}), set(), tmp_path)
 
     assert seen == {"killed": [], "launched": []}
 
@@ -386,6 +396,8 @@ def test_probeless_service_keeps_the_session_only_guard(
     """`alive is None` (browser-mcp: an AF_UNIX transport only its own healthcheck
     dials) is "never observed", not "down". There is no evidence to overrule the
     session with, so the old guard stands."""
+    from cli.commands import _session_lifecycle as _session_mod
+
     seen = _launch_probe_env(
         monkeypatch,
         sessions_alive={"ava-browser-mcp"},
@@ -393,7 +405,7 @@ def test_probeless_service_keeps_the_session_only_guard(
     )
     _roster(monkeypatch, "browser-mcp")
 
-    _cli._launch_sessions(frozenset({"gateway"}), set(), tmp_path)
+    _session_mod._launch_sessions(frozenset({"gateway"}), set(), tmp_path)
 
     assert seen == {"killed": [], "launched": []}
 
@@ -402,6 +414,8 @@ def test_frontend_mid_build_is_not_a_husk(monkeypatch: pytest.MonkeyPatch, tmp_p
     """The frontend answers its healthcheck ~30-60 s after its pane exists, so a
     False probe there means "still building", not "dead". Relaunching would restart
     the build the session is in the middle of — and would do it on every retry."""
+    from cli.commands import _session_lifecycle as _session_mod
+
     seen = _launch_probe_env(
         monkeypatch,
         sessions_alive={"ava-frontend"},
@@ -409,7 +423,7 @@ def test_frontend_mid_build_is_not_a_husk(monkeypatch: pytest.MonkeyPatch, tmp_p
     )
     _roster(monkeypatch, "frontend")
 
-    _cli._launch_sessions(frozenset({"gateway"}), set(), tmp_path)
+    _session_mod._launch_sessions(frozenset({"gateway"}), set(), tmp_path)
 
     assert seen == {"killed": [], "launched": []}
 
@@ -420,15 +434,21 @@ def test_uncleanable_husk_is_reported_not_relaunched(
     """When the husk survives the clearing kill too, a fresh spawn would only
     fail on the duplicate name. Say so instead, and leave the spec on the returned
     roster so the readiness gate turns it into the start's exit code."""
+    from cli.commands import _session_lifecycle as _session_mod
+
     seen = _launch_probe_env(
         monkeypatch,
         sessions_alive={"ava-gateway"},
         probe=ServiceProbe(False, "http", "no 2xx/3xx"),
     )
-    monkeypatch.setattr(_cli, "_kill_session", lambda s, **_kw: seen["killed"].append(s) or False)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(
+        _session_mod,
+        "_kill_session",
+        lambda s, **_kw: seen["killed"].append(s) or False,  # pyright: ignore[reportUnknownArgumentType]
+    )
     _roster(monkeypatch, "gateway")
 
-    launch = _cli._launch_sessions(frozenset({"gateway"}), set(), tmp_path)
+    launch = _session_mod._launch_sessions(frozenset({"gateway"}), set(), tmp_path)
 
     assert seen["launched"] == []
     assert "could not clear the stale session" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
@@ -446,7 +466,11 @@ def test_husk_reason_matches_the_readiness_gate_exemption(monkeypatch: pytest.Mo
     reason, from one predicate — two copies of the frontend rule would drift."""
     from cli.commands import _probe as _probe_mod
 
-    monkeypatch.setattr(_cli, "_probe_service", lambda _s: ServiceProbe(False, "http", "down"))  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(
+        _probe_mod,
+        "_probe_service",
+        lambda _s: ServiceProbe(False, "http", "down"),  # pyright: ignore[reportUnknownArgumentType]
+    )
 
     assert _probe_mod._probe_judges_a_fresh_launch(_spec("gateway")) is True
     assert _probe_mod._probe_judges_a_fresh_launch(_spec("frontend")) is False

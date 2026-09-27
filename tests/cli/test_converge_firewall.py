@@ -289,9 +289,9 @@ def test_unconfigured_unit_audits_the_interpreter(
 def test_firewall_status_renders_manifest_details(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    import cli.commands as command_namespace
+    from cli.commands import _repo
 
-    monkeypatch.setattr(command_namespace, "_roles_or_none", lambda: {"gateway"})
+    monkeypatch.setattr(_repo, "_roles_or_none", lambda: {"gateway"})
     monkeypatch.setattr(
         firewall_cmd,
         "audit_this_host",

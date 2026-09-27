@@ -120,9 +120,9 @@ def _machine_roles() -> MachineRoles | None:
     gate that runs just before this one already refuses on that condition, so
     this gate does not have to fail twice for it.
     """
-    import cli.commands as _ns
+    from cli.commands import _repo
 
-    return _ns._roles_or_none()
+    return _repo._roles_or_none()
 
 
 def _port_findings(repo: Path, home: Path, roles: MachineRoles) -> tuple[list[str], list[str]]:
@@ -141,7 +141,7 @@ def _port_findings(repo: Path, home: Path, roles: MachineRoles) -> tuple[list[st
     `_port_preflight.ensure_port_preflight`'s contract: a preflight must never
     be the thing that takes the host down.
     """
-    import cli.commands as _ns
+    from cli.commands import _probe, _session_lifecycle
     from cli.commands._converge_spec import ConvergeCtx
     from cli.commands._port_preflight import collect_port_conflicts
     from shared import cluster
@@ -149,8 +149,8 @@ def _port_findings(repo: Path, home: Path, roles: MachineRoles) -> tuple[list[st
     from shared.port_preflight import env_port_drift
 
     try:
-        roster = _ns._launch_roster(roles, resolve_launch_skip(set(), persist=False))
-        occupied = _ns._occupied_health_ports(roster)
+        roster = _session_lifecycle._launch_roster(roles, resolve_launch_skip(set(), persist=False))
+        occupied = _probe._occupied_health_ports(roster)
     except Exception as exc:  # a preflight must not fail the update
         return [], [f"health-port check skipped: {exc}"]
 

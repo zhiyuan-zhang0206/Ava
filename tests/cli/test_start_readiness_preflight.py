@@ -42,8 +42,11 @@ def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     for name in ("logs", "workspaces", "memory"):
         (home / name).mkdir(parents=True)
     monkeypatch.setattr("shared.paths.ava_home", lambda: home)
-    monkeypatch.setattr("cli.commands._roles_or_none", lambda: frozenset({"agent-runner"}))
-    monkeypatch.setattr("cli.commands._launch_roster", lambda *_a, **_k: ())  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("cli.commands._repo._roles_or_none", lambda: frozenset({"agent-runner"}))
+    monkeypatch.setattr(
+        "cli.commands._session_lifecycle._launch_roster",
+        lambda *_a, **_k: (),  # pyright: ignore[reportUnknownArgumentType]
+    )
     monkeypatch.setattr(
         "cli.commands._port_preflight.collect_port_conflicts",
         lambda _ctx: [],  # pyright: ignore[reportUnknownArgumentType]
@@ -96,7 +99,7 @@ def test_machine_role_missing_skips_ports_as_an_observation(
 ) -> None:
     """An unresolvable identity is the probe gate's refusal, not this one's: the
     port checks are skipped and the update still proceeds."""
-    monkeypatch.setattr("cli.commands._roles_or_none", lambda: None)
+    monkeypatch.setattr("cli.commands._repo._roles_or_none", lambda: None)
 
     assert _run(repo) == 0
 
@@ -124,7 +127,10 @@ def test_health_port_occupancy_is_fatal(
         spec=SimpleNamespace(session="ava-gateway"),
         detail="answered by $AVA_HOME=/other-unit (http://127.0.0.1:8123/healthz)",
     )
-    monkeypatch.setattr("cli.commands._occupied_health_ports", lambda _roster: (occupied,))  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(
+        "cli.commands._probe._occupied_health_ports",
+        lambda _roster: (occupied,),  # pyright: ignore[reportUnknownArgumentType]
+    )
 
     assert _run(repo) == 1
     err = capsys.readouterr().err

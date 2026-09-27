@@ -14,7 +14,6 @@ from pathlib import Path
 
 import pytest
 
-from cli import commands as _cli
 from cli.commands import update as _up
 
 ME = "orchestrator-box"
@@ -38,23 +37,33 @@ def _drive(
     registered: list[tuple[str, str | None]],
 ) -> None:
     """Run the gateway orchestration with every side effect stubbed out."""
+    from cli.commands import (
+        _update_fanout,
+        _update_local,
+        _update_phase_b,
+        _update_preflight,
+        _update_quiesce,
+    )
+
     set_machine_identity(role="gateway,agent-runner", name=ME)
 
     def _fan_out(hosts, path, _timeout, payload=None):  # type: ignore[no-untyped-def]
         return [(name, "ok", "") for name, _url in hosts]
 
-    monkeypatch.setattr(_cli, "_changed_paths_vs_origin", lambda: ["gateway/app.py"])
-    monkeypatch.setattr(_cli, "_list_agent_runners", lambda: list(registered))
+    monkeypatch.setattr(_update_preflight, "_changed_paths_vs_origin", lambda: ["gateway/app.py"])
+    monkeypatch.setattr(_update_fanout, "_list_agent_runners", lambda: list(registered))
     monkeypatch.setattr("shared.machines.list_stopped_agent_runners", list)
-    monkeypatch.setattr(_cli, "_fan_out", _fan_out)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_quiesce_all_agents", lambda **_: True)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_run_gateway_local_update", lambda _repo, **_kw: 0)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_update_fanout, "_fan_out", _fan_out)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_update_quiesce, "_quiesce_all_agents", lambda **_: True)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_update_local, "_run_gateway_local_update", lambda _repo, **_kw: 0)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(
-        _cli,
+        _update_phase_b,
         "_poll_until_unpaused",
-        lambda hosts, **_unused: {name: _cli.PollVerdict(_cli.POLL_OK) for name, _url in hosts},  # pyright: ignore[reportUnknownArgumentType]
+        lambda hosts, **_unused: {
+            name: _update_phase_b.PollVerdict(_update_phase_b.POLL_OK) for name, _url in hosts
+        },  # pyright: ignore[reportUnknownArgumentType]
     )
-    rc = _cli._run_gateway_orchestration(Path("/unused"), origin="test-origin")
+    rc = _up._run_gateway_orchestration(Path("/unused"), origin="test-origin")
     assert rc == 0
 
 
@@ -102,15 +111,17 @@ def test_an_abort_before_phase_a_still_prints_the_summary(
 ) -> None:
     """The pre-try early returns (a failed Phase-0 fetch) print the summary too —
     an aborted rollout is the one whose phase times the operator needs most."""
+    from cli.commands import _update_fanout
+
     _drive(monkeypatch, set_machine_identity, registered=[(ME, None)])  # pyright: ignore[reportUnknownArgumentType]
     capsys.readouterr()  # discard the clean run's output; capsys accumulates
     monkeypatch.setattr(
-        _cli,
+        _update_fanout,
         "_fan_out",
         lambda hosts, _path, _timeout, _payload=None: [(h, "fatal", "") for h, _u in hosts],  # type: ignore[no-untyped-def]
     )
 
-    rc = _cli._run_gateway_orchestration(Path("/unused"), origin="test-origin")
+    rc = _up._run_gateway_orchestration(Path("/unused"), origin="test-origin")
 
     assert rc == 1
     summaries = _summary_lines(capsys)

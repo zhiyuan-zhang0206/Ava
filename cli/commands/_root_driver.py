@@ -458,21 +458,21 @@ def _ensure_root_service_tree(
 # ─── the start-body facades (one call site each) ────────────────────────────
 #
 # `_cmd_start_body` picks its path through these three, so the body carries one
-# line per leg instead of a root/session branch per leg. Every hop goes through
-# the `cli.commands` namespace, the same seam the session path's callers and
-# tests already patch.
+# line per leg instead of a root/session branch per leg. Each hop's session-mode
+# fallback is patched at the module that defines it (`_session_lifecycle`,
+# `_probe`), the same seam their own callers and tests already use.
 
 
 def _start_roster(
     roles: MachineRoles, launch_skip: set[str]
 ) -> tuple[bool, tuple[ServiceSpec, ...]]:
     """Read the switch and return `(root_driven, this start's roster)`."""
-    import cli.commands as _ns
+    from cli.commands import _session_lifecycle
 
-    root_driven = _ns._root_driven_enabled()
+    root_driven = _root_driven_enabled()
     if root_driven:
-        return root_driven, _ns._root_tree_roster(roles, launch_skip)
-    return root_driven, _ns._launch_roster(roles, launch_skip)
+        return root_driven, _root_tree_roster(roles, launch_skip)
+    return root_driven, _session_lifecycle._launch_roster(roles, launch_skip)
 
 
 def _launch_service_tree(
@@ -485,11 +485,11 @@ def _launch_service_tree(
     reconcile: bool,
 ) -> LaunchOutcome:
     """Launch this start's roster: the root-owned tree, or the named sessions."""
-    import cli.commands as _ns
+    from cli.commands import _session_lifecycle
 
     if root_driven:
-        return _ns._ensure_root_service_tree(roster, repo, roles=roles, reconcile=reconcile)
-    return _ns._launch_sessions(roles, launch_skip, repo)
+        return _ensure_root_service_tree(roster, repo, roles=roles, reconcile=reconcile)
+    return _session_lifecycle._launch_sessions(roles, launch_skip, repo)
 
 
 def _wait_for_service_tree(
@@ -499,11 +499,11 @@ def _wait_for_service_tree(
     timeout_s: float,
 ) -> ReadinessWait:
     """Wait for this start's roster: the root status surface, or the probes."""
-    import cli.commands as _ns
+    from cli.commands import _probe
 
     if root_driven:
-        return _ns._wait_for_root_services_ready(roster, timeout_s=timeout_s)
-    return _ns._wait_for_services_ready(roster, timeout_s=timeout_s)
+        return _wait_for_root_services_ready(roster, timeout_s=timeout_s)
+    return _probe._wait_for_services_ready(roster, timeout_s=timeout_s)
 
 
 # ─── the readiness leg ──────────────────────────────────────────────────────

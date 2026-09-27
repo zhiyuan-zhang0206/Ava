@@ -661,7 +661,7 @@ def test_non_lgtm_gateway_reaps_orphan_collector_session(
     def _collector_session_exists(session: str) -> bool:
         return session == "ava-otel-collector"
 
-    monkeypatch.setattr("cli.commands._has_session", _collector_session_exists)
+    monkeypatch.setattr("cli.commands._session_lifecycle._has_session", _collector_session_exists)
 
     def _record_kill(session: str, *, expected: bool = False) -> tuple[bool, str]:
         killed.append(session)
@@ -697,7 +697,7 @@ def test_non_lgtm_gateway_without_session_skips_reap(
     def _no_session(_session: str) -> bool:
         return False
 
-    monkeypatch.setattr("cli.commands._has_session", _no_session)
+    monkeypatch.setattr("cli.commands._session_lifecycle._has_session", _no_session)
 
     def _record_kill(session: str, *, expected: bool = False) -> tuple[bool, str]:
         killed.append(session)

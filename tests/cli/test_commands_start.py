@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
 
 from cli import commands as _cli
-from cli.commands import _collect_setup_values as _real_collect_setup_values
+from cli.commands._setup import _collect_setup_values as _real_collect_setup_values
 from shared.config import settings
 from tests.cli._commands_helpers import _fake_session_backends as _fake_session_backends
 from tests.cli._commands_helpers import (
@@ -28,21 +29,31 @@ from tests.cli._commands_helpers import _noop_start_prechecks as _noop_start_pre
 def test_has_session_true(
     monkeypatch, _fake_session_backends: tuple[_FakeSessionBackend, _FakeSessionBackend]
 ) -> None:
+    from cli.commands import _session_lifecycle
+
     service, _shell = _fake_session_backends
     service.alive.add("ava-gateway")
-    assert _cli._has_session("ava-gateway") is True
+    assert _session_lifecycle._has_session("ava-gateway") is True
 
 
 def test_has_session_false(
     monkeypatch, _fake_session_backends: tuple[_FakeSessionBackend, _FakeSessionBackend]
 ) -> None:
-    assert _cli._has_session("ava-missing") is False
+    from cli.commands import _session_lifecycle
+
+    assert _session_lifecycle._has_session("ava-missing") is False
 
 
 # ─── _wait_for_services_ready ──────────────────────────────────────────────────
 def test_wait_returns_immediately_when_all_ready(monkeypatch: pytest.MonkeyPatch) -> None:
     """All probes already passing -> return without ever sleeping."""
-    monkeypatch.setattr(_cli, "_probe_service", lambda _spec: _cli.ServiceProbe(True, "http", ""))  # pyright: ignore[reportUnknownArgumentType]
+    from cli.commands import _probe
+
+    monkeypatch.setattr(
+        _probe,
+        "_probe_service",
+        lambda _spec: _probe.ServiceProbe(True, "http", ""),  # pyright: ignore[reportUnknownArgumentType]
+    )
     monkeypatch.setattr(
         "cli.commands._probe._poll_sleep",
         lambda _s: pytest.fail("must not sleep when every probe is already ready"),  # pyright: ignore[reportUnknownArgumentType]
@@ -53,8 +64,14 @@ def test_wait_returns_immediately_when_all_ready(monkeypatch: pytest.MonkeyPatch
 def test_wait_returns_on_timeout_when_probe_stays_down(monkeypatch: pytest.MonkeyPatch) -> None:
     """A probe stuck at False does not hang: the deadline returns control, and it
     hands back the spec that never came up (the start path's exit-code signal)."""
-    monkeypatch.setattr(_cli, "_probe_service", lambda _spec: _cli.ServiceProbe(False, "http", ""))  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_has_session", lambda _s: True)  # pyright: ignore[reportUnknownArgumentType]
+    from cli.commands import _probe, _session_lifecycle
+
+    monkeypatch.setattr(
+        _probe,
+        "_probe_service",
+        lambda _spec: _probe.ServiceProbe(False, "http", ""),  # pyright: ignore[reportUnknownArgumentType]
+    )
+    monkeypatch.setattr(_session_lifecycle, "_has_session", lambda _s: True)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr("cli.commands._probe._poll_sleep", lambda _s: None)  # pyright: ignore[reportUnknownArgumentType]
     # timeout_s=0 -> the first failing check immediately crosses the deadline.
     wait = _real_wait_for_services_ready((_spec("gateway"),), timeout_s=0.0)
@@ -67,15 +84,17 @@ def test_wait_returns_once_probe_flips_ready(monkeypatch: pytest.MonkeyPatch) ->
     The session must be pinned alive: an unready spec whose session is *gone* will
     never bind a port, and the wait stops early on that rather than spending its
     bound — which is a different case from the slow-but-alive one under test here."""
+    from cli.commands import _probe, _session_lifecycle
+
     calls = {"n": 0}
 
     def _flip(_spec):
         calls["n"] += 1
         # not-ready for the first two polls
-        return _cli.ServiceProbe(calls["n"] >= 3, "http", "")
+        return _probe.ServiceProbe(calls["n"] >= 3, "http", "")
 
-    monkeypatch.setattr(_cli, "_probe_service", _flip)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_has_session", lambda _s: True)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_probe, "_probe_service", _flip)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_session_lifecycle, "_has_session", lambda _s: True)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr("cli.commands._probe._poll_sleep", lambda _s: None)  # pyright: ignore[reportUnknownArgumentType]
     assert _real_wait_for_services_ready((_spec("gateway"),), timeout_s=5.0).unready == ()
     assert calls["n"] == 3
@@ -83,7 +102,13 @@ def test_wait_returns_once_probe_flips_ready(monkeypatch: pytest.MonkeyPatch) ->
 
 def test_wait_ignores_probeless_services(monkeypatch: pytest.MonkeyPatch) -> None:
     """A probe-less spec (None) counts as ready and never blocks the wait."""
-    monkeypatch.setattr(_cli, "_probe_service", lambda _spec: _cli.ServiceProbe(None, "n/a", ""))  # pyright: ignore[reportUnknownArgumentType]
+    from cli.commands import _probe
+
+    monkeypatch.setattr(
+        _probe,
+        "_probe_service",
+        lambda _spec: _probe.ServiceProbe(None, "n/a", ""),  # pyright: ignore[reportUnknownArgumentType]
+    )
     monkeypatch.setattr(
         "cli.commands._probe._poll_sleep",
         lambda _s: pytest.fail("n/a probe must not be treated as not-ready"),  # pyright: ignore[reportUnknownArgumentType]
@@ -103,7 +128,7 @@ def test_cmd_start_needs_no_tty(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(_sys.stdin, "isatty", lambda: False)
     monkeypatch.setattr(
-        _cli.subprocess,
+        subprocess,
         "run",
         _git_aware(lambda *_a, **_kw: _FakeResult(returncode=0)),  # pyright: ignore[reportUnknownArgumentType]
     )
@@ -121,9 +146,11 @@ def test_cmd_start_aborts_when_schema_mismatched(
 ) -> None:
     """_assert_schema_current_or_die returning non-zero short-circuits cmd_start
     before register_self / session launch, so a code-vs-DB drift fails loud at start."""
+    from cli.commands import _repo
+
     _ = tmp_path
     service, _shell = _fake_session_backends
-    monkeypatch.setattr(_cli, "_assert_schema_current_or_die", lambda: 1)
+    monkeypatch.setattr(_repo, "_assert_schema_current_or_die", lambda: 1)
 
     rc = _cli.cmd_start()
     assert rc == 1
@@ -140,16 +167,18 @@ def test_start_skips_existing_sessions(
     _fake_session_backends: tuple[_FakeSessionBackend, _FakeSessionBackend],
 ) -> None:
     """Existing sessions are skipped, no duplicate launch."""
+    from cli.commands import _repo
+
     _ = tmp_path
     service, _shell = _fake_session_backends
     service.alive = {
-        _sess(spec.session) for spec in _cli._services_for_roles(frozenset({"gateway"}))
+        _sess(spec.session) for spec in _repo._services_for_roles(frozenset({"gateway"}))
     }
 
     def fake_run(args, **_kwargs):
         return _FakeResult(returncode=0)
 
-    monkeypatch.setattr(_cli.subprocess, "run", _git_aware(fake_run))  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(subprocess, "run", _git_aware(fake_run))  # pyright: ignore[reportUnknownArgumentType]
 
     rc = _cli.cmd_start()
     assert rc == 0
@@ -166,17 +195,19 @@ def test_start_creates_missing_sessions(
     role=gateway excludes ava-ops (gateway is the gateway itself, does not run an ops server against itself),
     so launch count = len(_services_for_role("gateway")) not len(build_services()).
     """
+    from cli.commands import _repo
+
     _ = tmp_path
     service, _shell = _fake_session_backends
 
     def fake_run(args, **_kwargs):
         return _FakeResult(returncode=0)
 
-    monkeypatch.setattr(_cli.subprocess, "run", _git_aware(fake_run))  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(subprocess, "run", _git_aware(fake_run))  # pyright: ignore[reportUnknownArgumentType]
 
     rc = _cli.cmd_start()
     assert rc == 0
-    expected = _cli._services_for_roles(frozenset({"gateway"}))
+    expected = _repo._services_for_roles(frozenset({"gateway"}))
     assert len(service.created) == len(expected)
     assert _sess("ops") not in service.created
 
@@ -195,7 +226,7 @@ def test_start_includes_watchdog_session(
     def fake_run(args, **_kw):
         return _FakeResult(returncode=0)
 
-    monkeypatch.setattr(_cli.subprocess, "run", _git_aware(fake_run))  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(subprocess, "run", _git_aware(fake_run))  # pyright: ignore[reportUnknownArgumentType]
     _cli.cmd_start()
     assert _sess("gateway-watchdog") in service.created
     assert _sess("agent-runner-watchdog") not in service.created  # gateway-only host
@@ -210,6 +241,8 @@ def test_start_agent_runner_skips_local_infra(
     _fake_session_backends: tuple[_FakeSessionBackend, _FakeSessionBackend],
 ) -> None:
     """Secondary node does not start local pg/redis (uses the central node's DB/Redis/Milvus)."""
+    from cli.commands import _repo, _setup
+
     _ = tmp_path
 
     def _secondary_collect(_args: dict[str, str | None]) -> tuple[dict[str, str], list]:
@@ -220,8 +253,8 @@ def test_start_agent_runner_skips_local_infra(
             "gateway_url": "https://gateway.test.example/",
         }, []
 
-    monkeypatch.setattr(_cli, "_collect_setup_values", _secondary_collect)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_roles_or_none", lambda: frozenset({"agent-runner"}))
+    monkeypatch.setattr(_setup, "_collect_setup_values", _secondary_collect)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_repo, "_roles_or_none", lambda: frozenset({"agent-runner"}))
     monkeypatch.setattr("shared.machine.machine_role", lambda: frozenset({"agent-runner"}))
 
     # the data-plane bring-up must NOT be called for an agent-runner-only host.
@@ -235,7 +268,7 @@ def test_start_agent_runner_skips_local_infra(
     def fake_run(args, **_kw):
         return _FakeResult(returncode=0)
 
-    monkeypatch.setattr(_cli.subprocess, "run", _git_aware(fake_run))  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(subprocess, "run", _git_aware(fake_run))  # pyright: ignore[reportUnknownArgumentType]
     rc = _cli.cmd_start()
     assert rc == 0
     assert infra_calls == [], f"secondary must not start local infra, actually called {infra_calls}"
@@ -247,6 +280,8 @@ def test_start_agent_runner_starts_only_minimal_services(
     _fake_session_backends: tuple[_FakeSessionBackend, _FakeSessionBackend],
 ) -> None:
     """secondary only starts ops, agent-host and agent-runner services."""
+    from cli.commands import _repo, _setup
+
     _ = tmp_path
     monkeypatch.setattr("shared.config.settings.services.browser_enabled", False)  # env-independent
     # Pin computer-mcp's platform gate "available" (env-independent roster).
@@ -261,8 +296,8 @@ def test_start_agent_runner_starts_only_minimal_services(
             "gateway_url": "https://gateway.test.example/",
         }, []
 
-    monkeypatch.setattr(_cli, "_collect_setup_values", _secondary_collect)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_roles_or_none", lambda: frozenset({"agent-runner"}))
+    monkeypatch.setattr(_setup, "_collect_setup_values", _secondary_collect)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_repo, "_roles_or_none", lambda: frozenset({"agent-runner"}))
     monkeypatch.setattr("shared.machine.machine_role", lambda: frozenset({"agent-runner"}))
 
     service, _shell = _fake_session_backends
@@ -270,7 +305,7 @@ def test_start_agent_runner_starts_only_minimal_services(
     def fake_run(args, **_kw):
         return _FakeResult(returncode=0)
 
-    monkeypatch.setattr(_cli.subprocess, "run", _git_aware(fake_run))  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(subprocess, "run", _git_aware(fake_run))  # pyright: ignore[reportUnknownArgumentType]
     _cli.cmd_start()
     assert set(service.created) == {
         _sess("ops"),
@@ -295,9 +330,11 @@ def test_services_for_role_gateway_excludes_ops(monkeypatch: pytest.MonkeyPatch)
     """
     # The exact roster includes the designated gateway's collector; pin its
     # marker gate open so this capability-partition assertion is host-independent.
+    from cli.commands import _repo
+
     monkeypatch.setattr("ops.spec._otel_collector_gate_reason", lambda: None)
-    sessions = {s.session for s in _cli._services_for_roles(frozenset({"gateway"}))}
-    all_sessions = {s.session for s in _cli.build_services()}
+    sessions = {s.session for s in _repo._services_for_roles(frozenset({"gateway"}))}
+    all_sessions = {s.session for s in _repo.build_services()}
     assert sessions == all_sessions - {
         "ops",
         "page-server",
@@ -326,6 +363,8 @@ def test_services_for_role_gateway_excludes_ops(monkeypatch: pytest.MonkeyPatch)
 def test_services_for_role_agent_runner_subset(monkeypatch: pytest.MonkeyPatch) -> None:
     """role=agent-runner → ops (inbound server), agent-host and agent-runner-watchdog.
     No local gateway, no gateway-watchdog."""
+    from cli.commands import _repo
+
     monkeypatch.setattr("shared.config.settings.services.browser_enabled", False)  # env-independent
     # computer-mcp's gate is the platform's permissions-helper capability, not a
     # setting — pin it "available" so the roster is env-independent (CI hosts
@@ -336,7 +375,7 @@ def test_services_for_role_agent_runner_subset(monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setattr("ops.spec._otel_collector_gate_reason", lambda: None)
     # Pin the process partition: hosted (the default since 2026-09) swaps
     # restarter for agent-host on this roster.
-    sessions = {s.session for s in _cli._services_for_roles(frozenset({"agent-runner"}))}
+    sessions = {s.session for s in _repo._services_for_roles(frozenset({"agent-runner"}))}
     assert sessions == {
         "ops",
         "agent-host",
@@ -353,6 +392,8 @@ def test_services_for_roles_single_box_unions_both(monkeypatch: pytest.MonkeyPat
     """A single-box gateway,agent-runner host runs the UNION — every gateway
     daemon PLUS ops (so its own gateway can dial it over localhost for spawn),
     both capability watchdogs, and one agent host."""
+    from cli.commands import _repo
+
     monkeypatch.setattr("shared.config.settings.services.browser_enabled", False)
     # computer-mcp's gate is the platform's permissions-helper capability, not a
     # setting — pin it "available" so the union is env-independent.
@@ -363,8 +404,10 @@ def test_services_for_roles_single_box_unions_both(monkeypatch: pytest.MonkeyPat
     # Pin the runner mode BEFORE computing the roster: hosted is the default
     # since 2026-09, so this asserts the default shape — agent-host in,
     # restarter out.
-    sessions = {s.session for s in _cli._services_for_roles(frozenset({"gateway", "agent-runner"}))}
-    all_sessions = {s.session for s in _cli.build_services()}
+    sessions = {
+        s.session for s in _repo._services_for_roles(frozenset({"gateway", "agent-runner"}))
+    }
+    all_sessions = {s.session for s in _repo.build_services()}
     # union = everything that is not gated out; browser + browser-mcp are off
     # above (build_services still lists them, services_for_capabilities drops
     # them), computer-mcp is pinned available; ops IS present.
@@ -395,6 +438,8 @@ def test_start_missing_capability_reports_serve_flags_only(
     other fields cannot be judged for relevance, so the error lists only the two --serve-* flags
     rather than listing all fields."""
 
+    from cli.commands import _setup
+
     monkeypatch.setattr(settings.general, "machine_name", "")
     monkeypatch.setattr(settings.general, "machine_serve_gateway", None)
     monkeypatch.setattr(settings.general, "machine_serve_agent_runner", None)
@@ -404,7 +449,7 @@ def test_start_missing_capability_reports_serve_flags_only(
     from shared import paths
 
     monkeypatch.setattr(paths, "ava_home", lambda: tmp_path / "unconfigured")
-    monkeypatch.setattr(_cli, "_collect_setup_values", _real_collect_setup_values)
+    monkeypatch.setattr(_setup, "_collect_setup_values", _real_collect_setup_values)
 
     rc = _cli.cmd_start()
     assert rc == 1
@@ -422,6 +467,8 @@ def test_start_missing_agent_runner_fields_reports_agent_runner_flags(
 ) -> None:
     """capability is agent-runner, other fields missing → error lists agent-runner needed flags (--gateway-url)."""
 
+    from cli.commands import _setup
+
     monkeypatch.setattr(settings.general, "machine_name", "")
     monkeypatch.setattr(settings.general, "machine_serve_gateway", None)
     monkeypatch.setattr(settings.general, "machine_serve_agent_runner", True)
@@ -430,7 +477,7 @@ def test_start_missing_agent_runner_fields_reports_agent_runner_flags(
     from shared import paths
 
     monkeypatch.setattr(paths, "ava_home", lambda: tmp_path / "unconfigured")
-    monkeypatch.setattr(_cli, "_collect_setup_values", _real_collect_setup_values)
+    monkeypatch.setattr(_setup, "_collect_setup_values", _real_collect_setup_values)
 
     rc = _cli.cmd_start()
     assert rc == 1
@@ -444,6 +491,8 @@ def test_start_missing_gateway_fields_reports_gateway_flags(
 ) -> None:
     """capability=gateway, other fields missing → error lists gateway needed flags (--gateway-url)."""
 
+    from cli.commands import _setup
+
     monkeypatch.setattr(settings.general, "machine_name", "")
     monkeypatch.setattr(settings.general, "machine_serve_gateway", True)
     monkeypatch.setattr(settings.general, "machine_serve_agent_runner", None)
@@ -453,7 +502,7 @@ def test_start_missing_gateway_fields_reports_gateway_flags(
     from shared import paths
 
     monkeypatch.setattr(paths, "ava_home", lambda: tmp_path / "unconfigured")
-    monkeypatch.setattr(_cli, "_collect_setup_values", _real_collect_setup_values)
+    monkeypatch.setattr(_setup, "_collect_setup_values", _real_collect_setup_values)
 
     rc = _cli.cmd_start()
     assert rc == 1
@@ -505,12 +554,12 @@ def test_start_arg_writes_to_file_for_persistence(
 def test_retired_service_failure_prevents_start_converge_and_migrations(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from cli.commands import start
+    from cli.commands import _converge, start
 
     retired = MagicMock(side_effect=TimeoutError("retired service is still running"))
     converge, migrate = MagicMock(), MagicMock()
     monkeypatch.setattr("cli.commands._retired_services.stop_retired_services", retired)
-    monkeypatch.setattr(_cli, "converge_host", converge)
+    monkeypatch.setattr(_converge, "converge_host", converge)
     monkeypatch.setattr(start, "cmd_migrations_apply", migrate)
     assert _cli.cmd_start() == 1
     retired.assert_called_once()

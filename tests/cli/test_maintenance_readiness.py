@@ -21,20 +21,26 @@ pytestmark = pytest.mark.real_service_readiness_gate
 def test_start_measures_real_health_then_resumes_without_early_business_admission(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    from cli.commands import _probe, _session_lifecycle
+
     _roster(monkeypatch, (("gateway", None),))
-    monkeypatch.setattr(cli, "_has_session", MagicMock(return_value=True))
+    monkeypatch.setattr(_session_lifecycle, "_has_session", MagicMock(return_value=True))
     measurements: list[int] = []
     with TestClient(app) as client:
 
-        def probe(_spec: object) -> cli.ServiceProbe:
+        def probe(_spec: object) -> _probe.ServiceProbe:
+            from cli.commands import _probe
+
             assert maintenance.held()
             assert not start_serving.is_serving()
             assert client.get("/api/agents").status_code == 503
             response = client.get("/api/health")
             measurements.append(response.status_code)
-            return cli.ServiceProbe(response.status_code == 200, "http", "measured gateway health")
+            return _probe.ServiceProbe(
+                response.status_code == 200, "http", "measured gateway health"
+            )
 
-        monkeypatch.setattr(cli, "_probe_service", probe)
+        monkeypatch.setattr(_probe, "_probe_service", probe)
         assert cli.cmd_start(persist_services=False) == 0
     assert measurements and set(measurements) == {200}
     assert start_serving.is_serving()

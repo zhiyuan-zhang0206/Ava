@@ -83,13 +83,15 @@ def _verdicts(monkeypatch: pytest.MonkeyPatch, by_session: dict[str, DaemonProbe
     translation the real one performs — so what these tests exercise is the
     gate's reading of a verdict, not a hand-built `ServiceProbe`."""
 
-    def _probe(spec: ServiceSpec) -> _cli.ServiceProbe:
+    from cli.commands import _probe as _probe_mod
+
+    def _probe(spec: ServiceSpec) -> _probe_mod.ServiceProbe:
         probe = by_session[spec.session]
-        return _cli.ServiceProbe(
+        return _probe_mod.ServiceProbe(
             probe.alive, "identity", "" if probe.alive else probe.detail, probe.terminal
         )
 
-    monkeypatch.setattr(_cli, "_probe_service", _probe)
+    monkeypatch.setattr(_probe_mod, "_probe_service", _probe)
 
 
 # ─── which verdicts are conflicts ────────────────────────────────────────────
@@ -98,10 +100,12 @@ def _verdicts(monkeypatch: pytest.MonkeyPatch, by_session: dict[str, DaemonProbe
 def test_a_foreign_units_daemon_on_a_health_port_is_a_conflict(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    from cli.commands import _probe as _probe_mod
+
     restarter = _healthz_spec("restarter", 8102)
     _verdicts(monkeypatch, {"restarter": DaemonProbe.port_taken(_FOREIGN)})
 
-    occupied = _cli._occupied_health_ports((restarter,))
+    occupied = _probe_mod._occupied_health_ports((restarter,))
 
     assert [o.spec.session for o in occupied] == ["restarter"]
     assert occupied[0].detail == _FOREIGN
@@ -111,10 +115,12 @@ def test_our_own_running_daemon_is_not_a_conflict(monkeypatch: pytest.MonkeyPatc
     """The idempotent case. `ava start` over a healthy host re-probes every port
     it is about to use and finds its own daemons — a start that refused here
     would make restart impossible on exactly the hosts that are working."""
+    from cli.commands import _probe as _probe_mod
+
     restarter = _healthz_spec("restarter", 8102)
     _verdicts(monkeypatch, {"restarter": DaemonProbe.up("pid 4242")})
 
-    assert _cli._occupied_health_ports((restarter,)) == ()
+    assert _probe_mod._occupied_health_ports((restarter,)) == ()
 
 
 def test_a_dead_or_cold_port_is_not_a_conflict(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -122,6 +128,8 @@ def test_a_dead_or_cold_port_is_not_a_conflict(monkeypatch: pytest.MonkeyPatch) 
     (`probe_daemon` reaches the pid arm only after name and home matched). Both
     are cleared by the launch that follows — the kill-session a respawn does
     first is exactly the fix — so neither may stop the start."""
+    from cli.commands import _probe as _probe_mod
+
     restarter = _healthz_spec("restarter", 8102)
     ops = _healthz_spec("ops", 8106)
     _verdicts(
@@ -132,7 +140,7 @@ def test_a_dead_or_cold_port_is_not_a_conflict(monkeypatch: pytest.MonkeyPatch) 
         },
     )
 
-    assert _cli._occupied_health_ports((restarter, ops)) == ()
+    assert _probe_mod._occupied_health_ports((restarter, ops)) == ()
 
 
 def test_only_the_ports_a_health_port_base_can_move_are_gated(
@@ -144,6 +152,8 @@ def test_only_the_ports_a_health_port_base_can_move_are_gated(
     refused would leave a headed box unable to come up at all. Neither is a port
     `--health-port-base` moves either, so the remedy this gate prints would be
     wrong advice."""
+    from cli.commands import _probe as _probe_mod
+
     gateway = _other_endpoint_spec("gateway", "http://localhost:8000/api/health")
     browser = _other_endpoint_spec("browser", "http://localhost:9222/json/version")
     restarter = _healthz_spec("restarter", 8102)
@@ -156,7 +166,7 @@ def test_only_the_ports_a_health_port_base_can_move_are_gated(
         },
     )
 
-    assert _cli._occupied_health_ports((gateway, browser, restarter)) == ()
+    assert _probe_mod._occupied_health_ports((gateway, browser, restarter)) == ()
 
 
 def test_every_conflicting_port_is_reported_not_just_the_first(
@@ -165,13 +175,18 @@ def test_every_conflicting_port_is_reported_not_just_the_first(
     """An operator moving a unit needs the whole overlap in one pass: reporting
     only the first port turns one fix into a sequence of restarts, each revealing
     the next collision."""
+    from cli.commands import _probe as _probe_mod
+
     specs = (_healthz_spec("restarter", 8102), _healthz_spec("ops", 8106))
     _verdicts(
         monkeypatch,
         {"restarter": DaemonProbe.port_taken("a"), "ops": DaemonProbe.port_taken("b")},
     )
 
-    assert [o.spec.session for o in _cli._occupied_health_ports(specs)] == ["restarter", "ops"]
+    assert [o.spec.session for o in _probe_mod._occupied_health_ports(specs)] == [
+        "restarter",
+        "ops",
+    ]
 
 
 # ─── what the start does with a conflict ─────────────────────────────────────
@@ -185,8 +200,10 @@ def _hermetic_start(monkeypatch: pytest.MonkeyPatch) -> None:
     migrations, machine registration, the schema assertion) is stubbed to
     success, so what a non-zero rc can mean here is the gate and nothing else.
     """
+    from cli.commands import _converge, _repo, _setup
+
     monkeypatch.setattr(
-        _cli,
+        _setup,
         "_collect_setup_values",
         lambda _a: (  # pyright: ignore[reportUnknownArgumentType]
             {
@@ -198,11 +215,11 @@ def _hermetic_start(monkeypatch: pytest.MonkeyPatch) -> None:
             [],
         ),
     )
-    monkeypatch.setattr(_cli, "converge_host", lambda *_a, **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_register_machine_or_die", lambda _r, _role: 0)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_probe_gateway_or_die", lambda _url: 0)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_assert_schema_current_or_die", lambda: 0)
-    monkeypatch.setattr(_cli, "_roles_or_none", lambda: frozenset({"agent-runner"}))
+    monkeypatch.setattr(_converge, "converge_host", lambda *_a, **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_repo, "_register_machine_or_die", lambda _r, _role: 0)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_repo, "_probe_gateway_or_die", lambda _url: 0)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_repo, "_assert_schema_current_or_die", lambda: 0)
+    monkeypatch.setattr(_repo, "_roles_or_none", lambda: frozenset({"agent-runner"}))
     monkeypatch.setattr("shared.machine.machine_role", lambda: frozenset({"agent-runner"}))
     monkeypatch.setattr("shared.machine.gateway_api_base", lambda: "http://gw:8000")
 
@@ -228,9 +245,15 @@ def test_start_refuses_and_launches_nothing(
     and it is the wrong shape here — the daemons would either die on 'address
     already in use' or, under a loopback relay, come up while the watchdog probes
     the other unit and reads green."""
+    from cli.commands import _session_lifecycle as _session_mod
+
     launched: list[str] = []
-    monkeypatch.setattr(_cli, "_new_session", lambda s, *_a, **_kw: launched.append(s) is None)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_has_session", lambda _s: False)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(
+        _session_mod,
+        "_new_session",
+        lambda s, *_a, **_kw: launched.append(s) is None,  # pyright: ignore[reportUnknownArgumentType]
+    )
+    monkeypatch.setattr(_session_mod, "_has_session", lambda _s: False)  # pyright: ignore[reportUnknownArgumentType]
     _roster(monkeypatch, (_healthz_spec("restarter", 8102),))
     _verdicts(monkeypatch, {"restarter": DaemonProbe.port_taken(_FOREIGN)})
 
@@ -254,8 +277,10 @@ def test_the_refusal_names_the_occupant_and_the_remedy(
     WHOLE start, gateway and frontend included, and there is no flag that waives
     the gate — so an operator who needs the rest of the unit up now has exactly
     one move, and leaving them to find it is how a refusal becomes the outage."""
-    monkeypatch.setattr(_cli, "_new_session", lambda *_a, **_kw: True)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_has_session", lambda _s: False)  # pyright: ignore[reportUnknownArgumentType]
+    from cli.commands import _session_lifecycle as _session_mod
+
+    monkeypatch.setattr(_session_mod, "_new_session", lambda *_a, **_kw: True)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_session_mod, "_has_session", lambda _s: False)  # pyright: ignore[reportUnknownArgumentType]
     _roster(monkeypatch, (_healthz_spec("restarter", 8102),))
     _verdicts(monkeypatch, {"restarter": DaemonProbe.port_taken(_FOREIGN)})
 
@@ -271,10 +296,16 @@ def test_the_refusal_names_the_occupant_and_the_remedy(
 def test_a_clear_roster_starts_normally(monkeypatch: pytest.MonkeyPatch, _hermetic_start) -> None:
     """The gate is invisible when nothing is in the way — no port this unit is
     about to bind is answered by anyone else, so the launch proceeds."""
+    from cli.commands import _session_lifecycle as _session_mod
+
     launched: list[str] = []
-    monkeypatch.setattr(_cli, "_new_session", lambda s, *_a, **_kw: launched.append(s) is None)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_has_session", lambda _s: False)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "cmd_status", lambda *_a, **_kw: 0)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(
+        _session_mod,
+        "_new_session",
+        lambda s, *_a, **_kw: launched.append(s) is None,  # pyright: ignore[reportUnknownArgumentType]
+    )
+    monkeypatch.setattr(_session_mod, "_has_session", lambda _s: False)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("cli.commands.start.cmd_status", lambda *_a, **_kw: 0)  # pyright: ignore[reportUnknownArgumentType]
     _roster(monkeypatch, (_healthz_spec("restarter", 8102),))
     _verdicts(monkeypatch, {"restarter": DaemonProbe.down("nothing there")})
 
@@ -291,9 +322,11 @@ def test_a_disabled_service_cannot_block_the_start(
     this unit is about to bind — and an occupant there is simply not this start's
     business. The gate reads the same roster the launch does for exactly this
     reason; a second, wider list would refuse over a port nobody was going to use."""
-    monkeypatch.setattr(_cli, "_new_session", lambda *_a, **_kw: True)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_has_session", lambda _s: False)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "cmd_status", lambda *_a, **_kw: 0)  # pyright: ignore[reportUnknownArgumentType]
+    from cli.commands import _session_lifecycle as _session_mod
+
+    monkeypatch.setattr(_session_mod, "_new_session", lambda *_a, **_kw: True)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_session_mod, "_has_session", lambda _s: False)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("cli.commands.start.cmd_status", lambda *_a, **_kw: 0)  # pyright: ignore[reportUnknownArgumentType]
     _roster(monkeypatch, (_healthz_spec("restarter", 8102), _healthz_spec("ops", 8106)))
     _verdicts(
         monkeypatch,
@@ -311,6 +344,7 @@ def test_disable_service_start_leaves_no_marker_in_the_session_home(
     worker's shared session home, where it would silently disable the restarter
     for every later test that reads the marker (the `TestUnpauseLocalCluster`
     respawn tests — CI #1172/#1173, task #2177)."""
+    from cli.commands import _session_lifecycle as _session_mod
     from shared.config import settings
 
     marker = Path(settings.general.ava_home) / "disabled_services"
@@ -321,9 +355,9 @@ def test_disable_service_start_leaves_no_marker_in_the_session_home(
         "an upstream test leaked the durable --disable-service marker into the "
         "shared session home; failing here instead of cleaning it up keeps the leak visible"
     )
-    monkeypatch.setattr(_cli, "_new_session", lambda *_a, **_kw: True)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_has_session", lambda _s: False)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "cmd_status", lambda *_a, **_kw: 0)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_session_mod, "_new_session", lambda *_a, **_kw: True)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_session_mod, "_has_session", lambda _s: False)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("cli.commands.start.cmd_status", lambda *_a, **_kw: 0)  # pyright: ignore[reportUnknownArgumentType]
     _roster(monkeypatch, (_healthz_spec("restarter", 8102),))
     _verdicts(monkeypatch, {"restarter": DaemonProbe.down("cold")})
 

@@ -98,12 +98,16 @@ def write_session_record() -> Iterator[Callable[..., Path]]:
 
 
 def _stub_all_legs(monkeypatch: pytest.MonkeyPatch) -> None:
+    from cli.commands import _update_agent_runner, update
+
     monkeypatch.setattr("shared.machine.machine_name", lambda: "m1")
     monkeypatch.setattr(
-        _cli, "_run_gateway_orchestration", _fail_if_called("the gateway orchestration")
+        update, "_run_gateway_orchestration", _fail_if_called("the gateway orchestration")
     )
     monkeypatch.setattr(
-        _cli, "_run_agent_runner_self_update", _fail_if_called("the agent-runner self-update")
+        _update_agent_runner,
+        "_run_agent_runner_self_update",
+        _fail_if_called("the agent-runner self-update"),
     )
 
 
@@ -166,6 +170,8 @@ def test_local_restart_only_runs_gateway_orchestration_without_posting(
 ) -> None:
     """The detached restart session's `--local --restart-only` route enters
     the gateway orchestration directly; the plain form above remains a POST."""
+    from cli.commands import update
+
     _stub_in_process_gateway_leg(monkeypatch, tmp_path)
     captured: dict[str, object] = {}
 
@@ -188,7 +194,7 @@ def test_local_restart_only_runs_gateway_orchestration_without_posting(
         )
         return 0
 
-    monkeypatch.setattr(_cli, "_run_gateway_orchestration", _capture)
+    monkeypatch.setattr(update, "_run_gateway_orchestration", _capture)
     monkeypatch.setattr(
         "cli.commands._update_dispatch._post_cluster_restart",
         _fail_if_called("the gateway restart POST"),
@@ -222,6 +228,8 @@ def test_ancestor_lineage_is_walked_not_just_self(
 def _stub_in_process_gateway_leg(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Let the in-process gateway dispatch reach a stubbed orchestration."""
 
+    from cli.commands import update
+
     def _no_record(_home: Path) -> None:
         return None
 
@@ -233,7 +241,7 @@ def _stub_in_process_gateway_leg(monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     monkeypatch.setattr("cli.commands.update._repo_root", lambda: tmp_path)
     monkeypatch.setattr("cli.commands.update.ava_home", lambda: tmp_path)
     monkeypatch.setattr("cli.commands.update.get_record", _no_record)
-    monkeypatch.setattr(_cli, "_run_gateway_orchestration", _ok)
+    monkeypatch.setattr(update, "_run_gateway_orchestration", _ok)
 
 
 @pytest.mark.parametrize("session", sorted(_ORCHESTRATION_SESSIONS - {"ava-rollout-dryrun"}))
@@ -306,15 +314,18 @@ def test_restart_refused_inside_supervised_session(
 ) -> None:
     """`ava restart` severs itself the same way mid stop→start; it declines with
     the host untouched (RESTART_DECLINED_EXIT_CODE — the no-recovery verdict)."""
+    from cli.commands import _repo, _start_readiness_preflight, stop
     from shared.exit_codes import RESTART_DECLINED_EXIT_CODE
 
     write_session_record(_HOSTING_SESSION)
     monkeypatch.setattr("cli.commands.stop._release_self_heal_pause", lambda: None)
-    monkeypatch.setattr(_cli, "_preflight_probes", _fail_if_called("the preflight"))
+    monkeypatch.setattr(_repo, "_preflight_probes", _fail_if_called("the preflight"))
     monkeypatch.setattr(
-        _cli, "_preflight_start_readiness", _fail_if_called("the readiness preflight")
+        _start_readiness_preflight,
+        "preflight_start_readiness",
+        _fail_if_called("the readiness preflight"),
     )
-    monkeypatch.setattr(_cli, "_do_stop", _fail_if_called("_do_stop"))
+    monkeypatch.setattr(stop, "_do_stop", _fail_if_called("_do_stop"))
 
     rc = _cli.cmd_restart()
 
@@ -334,6 +345,7 @@ def test_restart_proceeds_when_windows_stop_would_spare_its_lineage(
     The 2026-08-24 guard must consult that fact instead of declining a restart
     whose stop leg cannot kill it.
     """
+    from cli.commands import _repo, _start_readiness_preflight, start, stop
     from shared.proc import hosting_supervised_session
 
     def _spares(_name: str, _proc: psutil.Process, _ancestor_pids: set[int]) -> bool:
@@ -345,10 +357,10 @@ def test_restart_proceeds_when_windows_stop_would_spare_its_lineage(
     write_session_record("ava-updater", pid=os.getppid())
     write_session_record("ava-ops", pid=os.getppid())
     monkeypatch.setattr("shared.winproc.tree_kill_would_spare", _spares)
-    monkeypatch.setattr(_cli, "_preflight_probes", _success)
-    monkeypatch.setattr(_cli, "_preflight_start_readiness", _success)
-    monkeypatch.setattr(_cli, "_do_stop", _success)
-    monkeypatch.setattr(_cli, "_cmd_start_body", _success)
+    monkeypatch.setattr(_repo, "_preflight_probes", _success)
+    monkeypatch.setattr(_start_readiness_preflight, "preflight_start_readiness", _success)
+    monkeypatch.setattr(stop, "_do_stop", _success)
+    monkeypatch.setattr(start, "_cmd_start_body", _success)
 
     assert hosting_supervised_session() is None
     assert _cli.cmd_restart() == 0
@@ -361,6 +373,7 @@ def test_restart_refuses_when_the_service_tree_would_not_spare_its_lineage(
     write_session_record: Callable[..., Path],
 ) -> None:
     """The 2026-08-12 whole-tree shape remains unsafe and must still refuse."""
+    from cli.commands import _repo, _start_readiness_preflight, stop
     from shared.exit_codes import RESTART_DECLINED_EXIT_CODE
 
     def _does_not_spare(_name: str, _proc: psutil.Process, _ancestor_pids: set[int]) -> bool:
@@ -369,11 +382,13 @@ def test_restart_refuses_when_the_service_tree_would_not_spare_its_lineage(
     write_session_record(_HOSTING_SESSION, pid=os.getppid())
     monkeypatch.setattr("shared.winproc.tree_kill_would_spare", _does_not_spare)
     monkeypatch.setattr("cli.commands.stop._release_self_heal_pause", lambda: None)
-    monkeypatch.setattr(_cli, "_preflight_probes", _fail_if_called("the preflight"))
+    monkeypatch.setattr(_repo, "_preflight_probes", _fail_if_called("the preflight"))
     monkeypatch.setattr(
-        _cli, "_preflight_start_readiness", _fail_if_called("the readiness preflight")
+        _start_readiness_preflight,
+        "preflight_start_readiness",
+        _fail_if_called("the readiness preflight"),
     )
-    monkeypatch.setattr(_cli, "_do_stop", _fail_if_called("_do_stop"))
+    monkeypatch.setattr(stop, "_do_stop", _fail_if_called("_do_stop"))
 
     assert _cli.cmd_restart() == RESTART_DECLINED_EXIT_CODE
     assert _HOSTING_SESSION in capsys.readouterr().err
@@ -450,16 +465,19 @@ def test_restart_refused_inside_an_exec_domain(
     group as it returns, so it declines before any preflight. With a
     supervised-session record also in the lineage, the exec refusal is the one
     surfaced — `run_background` is the host that survives both."""
+    from cli.commands import _repo, _start_readiness_preflight, stop
     from shared.exit_codes import RESTART_DECLINED_EXIT_CODE
 
     write_session_record(_HOSTING_SESSION)
     monkeypatch.setattr("shared.proc.hosting_exec_domain", lambda: "agent.exec_child")
     monkeypatch.setattr("cli.commands.stop._release_self_heal_pause", lambda: None)
-    monkeypatch.setattr(_cli, "_preflight_probes", _fail_if_called("the preflight"))
+    monkeypatch.setattr(_repo, "_preflight_probes", _fail_if_called("the preflight"))
     monkeypatch.setattr(
-        _cli, "_preflight_start_readiness", _fail_if_called("the readiness preflight")
+        _start_readiness_preflight,
+        "preflight_start_readiness",
+        _fail_if_called("the readiness preflight"),
     )
-    monkeypatch.setattr(_cli, "_do_stop", _fail_if_called("_do_stop"))
+    monkeypatch.setattr(stop, "_do_stop", _fail_if_called("_do_stop"))
 
     assert _cli.cmd_restart() == RESTART_DECLINED_EXIT_CODE
     err = capsys.readouterr().err

@@ -49,7 +49,9 @@ def fanout(monkeypatch: pytest.MonkeyPatch):
         *,
         clear_stale_markers: bool = True,
     ) -> tuple[list, list[str]]:
-        monkeypatch.setattr(_ns, "_list_agent_runners", lambda: list(live))  # pyright: ignore[reportUnknownArgumentType]
+        from cli.commands import _update_fanout
+
+        monkeypatch.setattr(_update_fanout, "_list_agent_runners", lambda: list(live))  # pyright: ignore[reportUnknownArgumentType]
         monkeypatch.setattr("shared.machines.list_stopped_agent_runners", lambda: list(stopped))  # pyright: ignore[reportUnknownArgumentType]
 
         async def _fake_probe(rows: list) -> dict[str, str]:
@@ -170,10 +172,12 @@ def test_declined_restart_reports_its_own_exit_code(monkeypatch: pytest.MonkeyPa
     """A preflight refusal stops nothing, so the host is still serving. It must be
     distinguishable from a failure after the stop — the updater shell branches on
     exactly this code to decide whether to run `ava start`."""
+    from cli.commands import _repo, stop
+
     stopped: list[bool] = []
-    monkeypatch.setattr(_ns, "_preflight_probes", lambda: 1)
-    monkeypatch.setattr(_ns, "_do_stop", lambda *_a, **_k: stopped.append(True) or 0)  # type: ignore[func-returns-value]
-    monkeypatch.setattr(_ns, "_release_self_heal_pause", lambda: None)
+    monkeypatch.setattr(_repo, "_preflight_probes", lambda: 1)
+    monkeypatch.setattr(stop, "_do_stop", lambda *_a, **_k: stopped.append(True) or 0)  # type: ignore[func-returns-value]
+    monkeypatch.setattr(stop, "_release_self_heal_pause", lambda: None)
 
     assert _ns.cmd_restart() == RESTART_DECLINED_EXIT_CODE
     assert stopped == []  # validate-before-kill: nothing was taken down
@@ -184,10 +188,16 @@ def test_failed_restart_after_the_stop_is_not_reported_as_declined(
 ) -> None:
     """Once the stop has happened the host may be DOWN, so its code must NOT be the
     one the updater treats as "still serving"."""
-    monkeypatch.setattr(_ns, "_preflight_probes", lambda: 0)
-    monkeypatch.setattr(_ns, "_preflight_start_readiness", lambda *_a, **_k: 0)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_ns, "_do_stop", lambda *_a, **_k: 0)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_ns, "_cmd_start_body", lambda **_k: 1)  # pyright: ignore[reportUnknownArgumentType]
+    from cli.commands import _repo, _start_readiness_preflight, start, stop
+
+    monkeypatch.setattr(_repo, "_preflight_probes", lambda: 0)
+    monkeypatch.setattr(
+        _start_readiness_preflight,
+        "preflight_start_readiness",
+        lambda *_a, **_k: 0,  # pyright: ignore[reportUnknownArgumentType]
+    )
+    monkeypatch.setattr(stop, "_do_stop", lambda *_a, **_k: 0)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(start, "_cmd_start_body", lambda **_k: 1)  # pyright: ignore[reportUnknownArgumentType]
 
     rc = _ns.cmd_restart()
     assert rc != 0
@@ -295,12 +305,14 @@ def test_declined_restart_releases_a_pause_no_rollout_owns(
     """A locally spawned self-heal pauses this host before running `ava restart`. If
     that restart declines, nothing else clears the pause — so a healthy host would
     sit with its restarter killed until the 10-minute stranded-pause recovery."""
+    from cli.commands import stop
+
     _paused_posture(monkeypatch)
     monkeypatch.setattr("shared.cluster_lock.update_lock_holder", lambda: None)
     unpaused: list[bool] = []
     monkeypatch.setattr("ops.cluster.unpause_local_cluster", lambda: unpaused.append(True))
 
-    _ns._release_self_heal_pause()
+    stop._release_self_heal_pause()
     assert unpaused == [True]
 
 
@@ -309,12 +321,14 @@ def test_declined_restart_leaves_a_rollouts_pause_alone(
 ) -> None:
     """A live update lock means the rollout owns this pause and will resume the host
     itself; unpausing now would let old-code agents respawn mid-migration."""
+    from cli.commands import stop
+
     _paused_posture(monkeypatch)
     monkeypatch.setattr("shared.cluster_lock.update_lock_holder", lambda: "cloud:pid1")
     unpaused: list[bool] = []
     monkeypatch.setattr("ops.cluster.unpause_local_cluster", lambda: unpaused.append(True))
 
-    _ns._release_self_heal_pause()
+    stop._release_self_heal_pause()
     assert unpaused == []
 
 
@@ -327,10 +341,11 @@ def test_pin_hint_does_not_cry_stray_git_pull_during_a_rollout(
     """Mid-rollout the checkout legitimately runs ahead of a pin that is only
     written once the gateway lands the target. Read live in a rollout log, the
     standing hint reads as an incident."""
+    from cli.commands import _repo
     from cli.commands import status as status_mod
 
     monkeypatch.setattr(status_mod, "_repo_root", lambda: "/repo")
-    monkeypatch.setattr(_ns, "_roles_or_none", lambda: frozenset({"agent-runner"}))
+    monkeypatch.setattr(_repo, "_roles_or_none", lambda: frozenset({"agent-runner"}))
     monkeypatch.setattr(status_mod, "_cluster_pin_status", lambda: ("aaaaaaa", "bbbbbbb"))
     monkeypatch.setattr(status_mod, "prod_source_pin_relation", lambda _p, _h: "ahead")  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(status_mod, "_update_in_flight", lambda: True)
@@ -350,10 +365,11 @@ def test_pin_hint_still_warns_when_no_update_is_running(
 ) -> None:
     """Outside a rollout the same state IS a stray `git pull`, and the hint that
     says so must survive."""
+    from cli.commands import _repo
     from cli.commands import status as status_mod
 
     monkeypatch.setattr(status_mod, "_repo_root", lambda: "/repo")
-    monkeypatch.setattr(_ns, "_roles_or_none", lambda: frozenset({"agent-runner"}))
+    monkeypatch.setattr(_repo, "_roles_or_none", lambda: frozenset({"agent-runner"}))
     monkeypatch.setattr(status_mod, "_cluster_pin_status", lambda: ("aaaaaaa", "bbbbbbb"))
     monkeypatch.setattr(status_mod, "prod_source_pin_relation", lambda _p, _h: "ahead")  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(status_mod, "_update_in_flight", lambda: False)

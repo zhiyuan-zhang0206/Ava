@@ -254,10 +254,11 @@ Nothing failed — the suite just got slow.
 So when a test needs to shorten or forbid one specific sleep, the product gives that
 sleep a name and the test patches the name: `cli/commands/_probe.py` binds
 `_poll_sleep = time.sleep` at import, and `monkeypatch.setattr(_probe, "_poll_sleep",
-...)` reaches that poll and nothing else. Same reasoning as the
-`import cli.commands as _ns` indirection used for `_probe_service` / `_has_session`
-— one named seam per patchable behaviour, so a stub's blast radius is stated in the
-product rather than inferred from an attribute path.
+...)` reaches that poll and nothing else. Same reasoning behind patching `_probe_service`
+/ `_has_session` at the module that actually defines them (`cli.commands._probe` /
+`cli.commands._session_lifecycle`) rather than some shared namespace — one named seam
+per patchable behaviour, so a stub's blast radius is stated in the product rather than
+inferred from an attribute path.
 
 The related trap in the same incident: patching a name on the **package** when the
 caller imported it directly. `cli/commands/update.py` does `from cli.commands.stop

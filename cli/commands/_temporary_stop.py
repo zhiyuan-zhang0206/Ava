@@ -413,10 +413,10 @@ def _services_phase_action(
     call time, like every other phase, so it sees the settings of the process
     actually running the stop.
     """
-    import cli.commands as _ns
+    from cli.commands import _root_driver
 
-    if _ns._root_driven_enabled():
-        return lambda: _ns._stop_root_service_tree(
+    if _root_driver._root_driven_enabled():
+        return lambda: _root_driver._stop_root_service_tree(
             preserve=preserved, timeout_s=remaining(deadline)
         )
     return lambda: stop_services(remaining(deadline), keep_terminals=True, selected=selected)

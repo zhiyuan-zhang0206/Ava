@@ -30,7 +30,11 @@ from pathlib import Path
 import pytest
 
 import cli.commands as _cli
+from cli.commands import _probe
+from cli.commands import _repo as _repo_mod
+from cli.commands import _session_lifecycle as _session_mod
 from cli.commands import start as _start_mod
+from cli.commands._probe import ServiceProbe
 from cli.commands._repo import ServiceSpec
 from cli.main import _build_parser
 from cli.parsers.host import _h_start
@@ -106,8 +110,10 @@ def _hermetic_start(monkeypatch: pytest.MonkeyPatch) -> None:
     real gateway. What is left un-stubbed on purpose is the wait itself and the
     status snapshot, because those are what these tests are about.
     """
+    from cli.commands import _converge, _setup
+
     monkeypatch.setattr(
-        _cli,
+        _setup,
         "_collect_setup_values",
         lambda _a: (  # pyright: ignore[reportUnknownArgumentType]
             {
@@ -119,15 +125,14 @@ def _hermetic_start(monkeypatch: pytest.MonkeyPatch) -> None:
             [],
         ),
     )
-    monkeypatch.setattr(_cli, "converge_host", lambda *_a, **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_register_machine_or_die", lambda _r, _role: 0)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_probe_gateway_or_die", lambda _url: 0)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_assert_schema_current_or_die", lambda: 0)
-    monkeypatch.setattr(_cli, "_roles_or_none", lambda: frozenset({"gateway"}))
+    monkeypatch.setattr(_converge, "converge_host", lambda *_a, **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_repo_mod, "_register_machine_or_die", lambda _r, _role: 0)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_repo_mod, "_probe_gateway_or_die", lambda _url: 0)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_repo_mod, "_assert_schema_current_or_die", lambda: 0)
+    monkeypatch.setattr(_repo_mod, "_roles_or_none", lambda: frozenset({"gateway"}))
     monkeypatch.setattr("shared.machine.machine_role", lambda: frozenset({"gateway"}))
     monkeypatch.setattr("shared.machine.gateway_api_base", lambda: "http://gw:8000")
 
-    from cli.commands import _session_lifecycle as _session_mod
     from cli.commands import start as _start_mod
 
     monkeypatch.setattr(_start_mod, "_ensure_gateway_data_plane", lambda: 0)
@@ -162,7 +167,6 @@ def _hermetic_start(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def _roster(monkeypatch: pytest.MonkeyPatch, entries: tuple[tuple[str, str | None], ...]) -> None:
     """Pin the capability roster `_launch_sessions` reads, as (service, gate reason)."""
-    from cli.commands import _session_lifecycle as _session_mod
 
     annotated = tuple((_spec(name), reason) for name, reason in entries)
     monkeypatch.setattr(_session_mod, "_services_for_roles_annotated", lambda _roles: annotated)  # pyright: ignore[reportUnknownArgumentType]
@@ -171,13 +175,13 @@ def _roster(monkeypatch: pytest.MonkeyPatch, entries: tuple[tuple[str, str | Non
 def _probes(monkeypatch: pytest.MonkeyPatch, ready: set[str]) -> None:
     """Every service in `ready` probes True; every other probes False."""
     monkeypatch.setattr(
-        _cli,
+        _probe,
         "_probe_service",
-        lambda spec: _cli.ServiceProbe(spec.session in ready, "http", ""),  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
+        lambda spec: ServiceProbe(spec.session in ready, "http", ""),  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
     )
     # Sessions all alive: an unready service that is still running is the "slow, not
     # dead" case, so the wait must spend its bound rather than exit early.
-    monkeypatch.setattr(_cli, "_has_session", lambda _s: True)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_session_mod, "_has_session", lambda _s: True)  # pyright: ignore[reportUnknownArgumentType]
 
 
 # ─── a rostered service that never comes up fails the start ───────────────────
@@ -305,8 +309,8 @@ def test_failed_launch_exits_nonzero_and_records_the_session_names(
 
     _roster(monkeypatch, (("gateway", None),))
     _probes(monkeypatch, ready={"gateway"})
-    monkeypatch.setattr(_cli, "_has_session", lambda _s: False)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_new_session", lambda *_a, **_kw: False)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_session_mod, "_has_session", lambda _s: False)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_session_mod, "_new_session", lambda *_a, **_kw: False)  # pyright: ignore[reportUnknownArgumentType]
 
     rc = _cli.cmd_start()
 
@@ -328,8 +332,8 @@ def test_successful_launch_clears_a_previous_runs_failure_record(
     launch_failures.record([_sess("gateway")])
     _roster(monkeypatch, (("gateway", None),))
     _probes(monkeypatch, ready={"gateway"})
-    monkeypatch.setattr(_cli, "_has_session", lambda _s: False)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_new_session", lambda *_a, **_kw: True)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_session_mod, "_has_session", lambda _s: False)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_session_mod, "_new_session", lambda *_a, **_kw: True)  # pyright: ignore[reportUnknownArgumentType]
 
     assert _cli.cmd_start() == 0
     assert launch_failures.take() == []
@@ -346,8 +350,8 @@ def test_failed_launch_is_waived_with_the_readiness_gate_off(
 
     _roster(monkeypatch, (("gateway", None),))
     _probes(monkeypatch, ready={"gateway"})
-    monkeypatch.setattr(_cli, "_has_session", lambda _s: False)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_new_session", lambda *_a, **_kw: False)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_session_mod, "_has_session", lambda _s: False)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_session_mod, "_new_session", lambda *_a, **_kw: False)  # pyright: ignore[reportUnknownArgumentType]
 
     assert _cli.cmd_start(readiness_gate=False) == 0
     assert launch_failures.take() == [_sess("gateway")], (
@@ -428,15 +432,18 @@ def test_late_but_within_bound_readiness_exits_zero(monkeypatch: pytest.MonkeyPa
 
     monkeypatch.setattr(_start_mod, "SERVICE_READY_TIMEOUT_S", 30.0)
     _roster(monkeypatch, (("gateway", None),))
-    monkeypatch.setattr(_cli, "_has_session", lambda _s: True)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_session_mod, "_has_session", lambda _s: True)  # pyright: ignore[reportUnknownArgumentType]
 
+    # The trailing `ava status` print shares the probe seam; it is not the subject,
+    # so every counted probe below is the readiness wait's own poll.
+    monkeypatch.setattr(_start_mod, "cmd_status", lambda *_a, **_kw: 0)  # pyright: ignore[reportUnknownArgumentType]
     polls = {"n": 0}
 
-    def _slow(_spec: ServiceSpec) -> _cli.ServiceProbe:
+    def _slow(_spec: ServiceSpec) -> ServiceProbe:
         polls["n"] += 1
-        return _cli.ServiceProbe(polls["n"] >= 3, "http", "")
+        return ServiceProbe(polls["n"] >= 3, "http", "")
 
-    monkeypatch.setattr(_cli, "_probe_service", _slow)
+    monkeypatch.setattr(_probe, "_probe_service", _slow)
 
     assert _cli.cmd_start() == 0
     assert polls["n"] == 3, "the wait must return on the poll that passes, not at the bound"
@@ -452,13 +459,14 @@ def test_all_ready_roster_never_sleeps(monkeypatch: pytest.MonkeyPatch) -> None:
     connect retry inside the best-effort last-known-good seed, say), which is not
     what this test is about — and does not reproduce on every host, so it read as
     green locally and red on CI. The seam narrows the assertion to this poll."""
-    monkeypatch.setattr(_cli, "_probe_service", lambda _spec: _cli.ServiceProbe(True, "http", ""))  # pyright: ignore[reportUnknownArgumentType]
+
+    monkeypatch.setattr(_probe, "_probe_service", lambda _spec: ServiceProbe(True, "http", ""))  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(
         "cli.commands._probe._poll_sleep",
         lambda _s: pytest.fail("a fully-ready roster must not sleep"),  # pyright: ignore[reportUnknownArgumentType]
     )
 
-    assert _cli._wait_for_services_ready((_spec("gateway"), _spec("labeler")), 30.0).unready == ()
+    assert _probe._wait_for_services_ready((_spec("gateway"), _spec("labeler")), 30.0).unready == ()
 
 
 def test_all_ready_start_exits_zero(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -544,7 +552,8 @@ def test_live_update_lease_does_not_waive_on_a_pure_agent_runner(
     cluster-wide revert. A runner's updater ladder answers this code with an
     idempotent `ava start` that repairs that host and touches nothing else, which is
     the right response and worth keeping."""
-    monkeypatch.setattr(_cli, "_roles_or_none", lambda: frozenset({"agent-runner"}))
+
+    monkeypatch.setattr(_repo_mod, "_roles_or_none", lambda: frozenset({"agent-runner"}))
     monkeypatch.setattr("shared.machine.machine_role", lambda: frozenset({"agent-runner"}))
     # A CRITICAL service, so the readiness gate still owns the verdict — the
     # waiver scope is what this test is about, and a non-critical straggler
@@ -725,6 +734,7 @@ def test_gateway_local_update_start_opts_out(
 
     monkeypatch.setattr(subprocess, "run", _fake_run)  # pyright: ignore[reportUnknownArgumentType]
 
+    from cli.commands import _update_local
     from cli.commands import update as _update
 
     # On `_update`, not on the `cli.commands` package: `update.py` does `from
@@ -739,7 +749,7 @@ def test_gateway_local_update_start_opts_out(
     monkeypatch.setattr(_update, "git_head_sha", lambda: "a" * 40)
     monkeypatch.setattr(_update, "current_schema_state", set)
 
-    _update._run_gateway_local_update(tmp_path, pull=False)
+    _update_local._run_gateway_local_update(tmp_path, pull=False)
 
     start_argv = next(a for a in seen if "start" in a)
     assert "--no-readiness-gate" in start_argv
@@ -829,14 +839,14 @@ def test_wait_returns_the_unready_specs(monkeypatch: pytest.MonkeyPatch) -> None
     """The wait reports *which* specs are unready, not just that some are — that list
     is what lets the exit code arrive with the diagnosis attached."""
     monkeypatch.setattr(
-        _cli,
+        _probe,
         "_probe_service",
-        lambda spec: _cli.ServiceProbe(spec.session != "gateway", "http", ""),  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
+        lambda spec: ServiceProbe(spec.session != "gateway", "http", ""),  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
     )
-    monkeypatch.setattr(_cli, "_has_session", lambda _s: True)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_session_mod, "_has_session", lambda _s: True)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr("cli.commands._probe._poll_sleep", lambda _s: None)  # pyright: ignore[reportUnknownArgumentType]
 
-    wait = _cli._wait_for_services_ready((_spec("gateway"), _spec("labeler")), timeout_s=0.0)
+    wait = _probe._wait_for_services_ready((_spec("gateway"), _spec("labeler")), timeout_s=0.0)
 
     assert [s.session for s in wait.unready] == ["gateway"]
 
@@ -847,15 +857,16 @@ def test_wait_gives_up_early_only_once_every_dead_session_is_confirmed(
     """A launched service whose session is gone will never bind, so the wait stops
     instead of spending the bound — but only on the SECOND such reading, because the
     backend may not have registered a just-spawned session yet."""
-    monkeypatch.setattr(_cli, "_probe_service", lambda _spec: _cli.ServiceProbe(False, "http", ""))  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_has_session", lambda _s: False)  # pyright: ignore[reportUnknownArgumentType]
+
+    monkeypatch.setattr(_probe, "_probe_service", lambda _spec: ServiceProbe(False, "http", ""))  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_session_mod, "_has_session", lambda _s: False)  # pyright: ignore[reportUnknownArgumentType]
     sleeps = {"n": 0}
     monkeypatch.setattr(
         "cli.commands._probe._poll_sleep",
         lambda _s: sleeps.__setitem__("n", sleeps["n"] + 1),  # pyright: ignore[reportUnknownArgumentType]
     )
 
-    wait = _cli._wait_for_services_ready((_spec("gateway"),), timeout_s=600.0)
+    wait = _probe._wait_for_services_ready((_spec("gateway"),), timeout_s=600.0)
 
     assert [s.session for s in wait.unready] == ["gateway"]
     assert sleeps["n"] == 1, "one confirmation interval, not the 600s bound"
@@ -867,19 +878,19 @@ def test_wait_does_not_cut_short_a_slow_service_because_a_sibling_died(
     """One dead session must not end the wait while another service is still alive and
     still coming up — reporting a gateway 20s from serving as unready would make the
     exit code lie in the other direction."""
-    monkeypatch.setattr(_cli, "_has_session", lambda sess: sess != _sess("browser"))  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_session_mod, "_has_session", lambda sess: sess != _sess("browser"))  # pyright: ignore[reportUnknownArgumentType]
     polls = {"n": 0}
 
-    def _probe(spec: ServiceSpec) -> _cli.ServiceProbe:
+    def _fake_probe(spec: ServiceSpec) -> ServiceProbe:
         if spec.session == "browser":
-            return _cli.ServiceProbe(False, "http", "")  # dead, never coming back
+            return ServiceProbe(False, "http", "")  # dead, never coming back
         polls["n"] += 1
-        return _cli.ServiceProbe(polls["n"] >= 4, "http", "")  # slow, but coming
+        return ServiceProbe(polls["n"] >= 4, "http", "")  # slow, but coming
 
-    monkeypatch.setattr(_cli, "_probe_service", _probe)
+    monkeypatch.setattr(_probe, "_probe_service", _fake_probe)
     monkeypatch.setattr("cli.commands._probe._poll_sleep", lambda _s: None)  # pyright: ignore[reportUnknownArgumentType]
 
-    wait = _cli._wait_for_services_ready((_spec("gateway"), _spec("browser")), timeout_s=600.0)
+    wait = _probe._wait_for_services_ready((_spec("gateway"), _spec("browser")), timeout_s=600.0)
 
     # `browser` is non-critical (C2): its confirmed-dead session leaves the wait
     # without ending it, and it is reported on the alert rail — the live-but-slow
@@ -893,13 +904,18 @@ def test_probeless_service_can_never_gate(monkeypatch: pytest.MonkeyPatch) -> No
     """`browser-mcp` has no HTTP/TCP/pidfile probe — its transport is a Unix socket
     only its healthcheck dials — so it reports `None` and can never be observed
     unready. Absence of evidence must not become a failed start."""
-    monkeypatch.setattr(_cli, "_probe_service", lambda _spec: _cli.ServiceProbe(None, "n/a", ""))  # pyright: ignore[reportUnknownArgumentType]
+
+    monkeypatch.setattr(
+        _probe,
+        "_probe_service",
+        lambda _spec: ServiceProbe(None, "n/a", ""),  # pyright: ignore[reportUnknownArgumentType]
+    )
     monkeypatch.setattr(
         "cli.commands._probe._poll_sleep",
         lambda _s: pytest.fail("an n/a probe must not be treated as not-ready"),  # pyright: ignore[reportUnknownArgumentType]
     )
 
-    assert _cli._wait_for_services_ready((_spec("browser-mcp"),), timeout_s=5.0).unready == ()
+    assert _probe._wait_for_services_ready((_spec("browser-mcp"),), timeout_s=5.0).unready == ()
 
 
 # ─── the verdict names the exit it took, not always the bound ────────────────
@@ -920,15 +936,16 @@ def test_the_sessions_gone_exit_reports_elapsed_instead_of_the_unspent_bound(
     spent and naming it asserts an elapsed time that the surrounding timestamps
     contradict. Say how long it actually took, and that the sessions are absent —
     which is the next question, and not one a longer timeout answers."""
-    monkeypatch.setattr(_cli, "_probe_service", lambda _spec: _cli.ServiceProbe(False, "http", ""))  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_has_session", lambda _s: False)  # pyright: ignore[reportUnknownArgumentType]
+
+    monkeypatch.setattr(_probe, "_probe_service", lambda _spec: ServiceProbe(False, "http", ""))  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_session_mod, "_has_session", lambda _s: False)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr("cli.commands._probe._poll_sleep", lambda _s: None)  # pyright: ignore[reportUnknownArgumentType]
 
-    wait = _cli._wait_for_services_ready((_spec("gateway"), _spec("gateway-watchdog")), 180.0)
+    wait = _probe._wait_for_services_ready((_spec("gateway"), _spec("gateway-watchdog")), 180.0)
     assert wait.sessions_gone is True
     assert wait.elapsed_s < 180.0
 
-    _cli._print_unready_services(wait, 180.0)
+    _probe._print_unready_services(wait, 180.0)
 
     out = capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
     assert "never became ready within 180s" not in out
@@ -942,14 +959,15 @@ def test_the_deadline_exit_still_names_the_bound(monkeypatch: pytest.MonkeyPatch
     """The other half: a service alive and still not serving DID spend the bound, so
     the bound is the meaningful number and waiting longer might genuinely help. The
     elapsed time rides along so the two lines are read the same way."""
-    monkeypatch.setattr(_cli, "_probe_service", lambda _spec: _cli.ServiceProbe(False, "http", ""))  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_has_session", lambda _s: True)  # pyright: ignore[reportUnknownArgumentType]
+
+    monkeypatch.setattr(_probe, "_probe_service", lambda _spec: ServiceProbe(False, "http", ""))  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_session_mod, "_has_session", lambda _s: True)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr("cli.commands._probe._poll_sleep", lambda _s: None)  # pyright: ignore[reportUnknownArgumentType]
 
-    wait = _cli._wait_for_services_ready((_spec("gateway"),), timeout_s=0.0)
+    wait = _probe._wait_for_services_ready((_spec("gateway"),), timeout_s=0.0)
     assert wait.sessions_gone is False
 
-    _cli._print_unready_services(wait, 180.0)
+    _probe._print_unready_services(wait, 180.0)
 
     out = capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
     assert "never became ready within 180s" in out
@@ -964,18 +982,19 @@ def test_a_mixed_roster_that_runs_out_of_time_is_not_a_sessions_gone_verdict(
     of them gone), so the wait spends its bound and the verdict must not claim the
     sessions are gone — the live one is exactly the service a longer bound could
     still save."""
-    monkeypatch.setattr(_cli, "_probe_service", lambda _spec: _cli.ServiceProbe(False, "http", ""))  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_has_session", lambda sess: sess != _sess("browser"))  # pyright: ignore[reportUnknownArgumentType]
+
+    monkeypatch.setattr(_probe, "_probe_service", lambda _spec: ServiceProbe(False, "http", ""))  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_session_mod, "_has_session", lambda sess: sess != _sess("browser"))  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr("cli.commands._probe._poll_sleep", lambda _s: None)  # pyright: ignore[reportUnknownArgumentType]
 
-    wait = _cli._wait_for_services_ready((_spec("gateway"), _spec("browser")), timeout_s=0.0)
+    wait = _probe._wait_for_services_ready((_spec("gateway"), _spec("browser")), timeout_s=0.0)
 
     assert wait.sessions_gone is False
     # The verdict is critical-only (C2): `browser` is non-critical and still
     # inside its short window here, so it is neither a failure nor reported.
     assert [s.session for s in wait.unready] == ["gateway"]
     assert wait.non_critical_unready == ()
-    _cli._print_unready_services(wait, 180.0)
+    _probe._print_unready_services(wait, 180.0)
     assert "never became ready within 180s" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
 
 
@@ -1013,34 +1032,32 @@ def test_shortening_the_poll_leaves_the_stdlib_sleep_alone(monkeypatch: pytest.M
     from 850 ms to 78-93 s (issue #1001)."""
     import time
 
-    from cli.commands import _probe as _probe_mod
-
     assert time.sleep is _REAL_SLEEP, (
         "an autouse fixture in this file replaced the stdlib sleep; patch "
         "`cli.commands._probe._poll_sleep` instead"
     )
 
-    monkeypatch.setattr(_probe_mod, "_poll_sleep", lambda _s: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_probe, "_poll_sleep", lambda _s: None)  # pyright: ignore[reportUnknownArgumentType]
     assert time.sleep is _REAL_SLEEP, "the seam must be module-local"
 
     # And the seam is the name the poll actually calls, so patching it is not a no-op
     # that leaves the real sleep running (which would make the isolation vacuous).
     slept: list[float] = []
-    monkeypatch.setattr(_probe_mod, "_poll_sleep", slept.append)
-    monkeypatch.setattr(_cli, "_probe_service", lambda _spec: _cli.ServiceProbe(False, "http", ""))  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_has_session", lambda _s: True)  # pyright: ignore[reportUnknownArgumentType]
-    _cli._wait_for_services_ready((_spec("gateway"),), 0.0)
+    monkeypatch.setattr(_probe, "_poll_sleep", slept.append)
+    monkeypatch.setattr(_probe, "_probe_service", lambda _spec: ServiceProbe(False, "http", ""))  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_session_mod, "_has_session", lambda _s: True)  # pyright: ignore[reportUnknownArgumentType]
+    _probe._wait_for_services_ready((_spec("gateway"),), 0.0)
     assert slept == [], "timeout_s=0 crosses the deadline before the first sleep"
 
     calls = {"n": 0}
 
     def _flip(_spec):
         calls["n"] += 1
-        return _cli.ServiceProbe(calls["n"] >= 2, "http", "")
+        return ServiceProbe(calls["n"] >= 2, "http", "")
 
-    monkeypatch.setattr(_cli, "_probe_service", _flip)  # pyright: ignore[reportUnknownArgumentType]
-    assert _cli._wait_for_services_ready((_spec("gateway"),), 30.0).unready == ()
-    assert slept == [_probe_mod._READY_POLL_INTERVAL_S], (
+    monkeypatch.setattr(_probe, "_probe_service", _flip)  # pyright: ignore[reportUnknownArgumentType]
+    assert _probe._wait_for_services_ready((_spec("gateway"),), 30.0).unready == ()
+    assert slept == [_probe._READY_POLL_INTERVAL_S], (
         "the poll must route its throttle through the seam"
     )
 
@@ -1070,12 +1087,11 @@ class _FakeClock:
 
 
 def _fake_clock(monkeypatch: pytest.MonkeyPatch) -> _FakeClock:
-    from cli.commands import _probe as _probe_mod
 
     clock = _FakeClock()
     # Rebind only THIS module's `time` name — the stdlib module object stays
     # intact for every other consumer (the same lesson as issue #1001).
-    monkeypatch.setattr(_probe_mod, "time", clock)
+    monkeypatch.setattr(_probe, "time", clock)
     monkeypatch.setattr(
         "cli.commands._probe._poll_sleep",
         clock.advance,
@@ -1087,7 +1103,6 @@ def test_critical_service_manifest_is_pinned_and_real() -> None:
     """The critical roster is an explicit single source of truth: this exact set,
     and every name is a session `ops.spec` actually builds — a rename or a typo
     would silently demote a service to the short window and turn red here."""
-    from cli.commands import _probe as _probe_mod
     from ops.spec import services_for_capabilities_annotated
 
     assert (
@@ -1101,7 +1116,7 @@ def test_critical_service_manifest_is_pinned_and_real() -> None:
                 "im-bridge",
             }
         )
-        == _probe_mod.CRITICAL_SERVICE_SESSIONS
+        == _probe.CRITICAL_SERVICE_SESSIONS
     )
     real = {
         s.session
@@ -1109,22 +1124,19 @@ def test_critical_service_manifest_is_pinned_and_real() -> None:
             frozenset({"gateway", "agent-runner"})
         )
     }
-    assert real >= _probe_mod.CRITICAL_SERVICE_SESSIONS, (
-        "every critical session must exist in ops.spec"
-    )
+    assert real >= _probe.CRITICAL_SERVICE_SESSIONS, "every critical session must exist in ops.spec"
 
 
 def test_critical_service_waits_the_full_bound(monkeypatch: pytest.MonkeyPatch) -> None:
     """A critical service that never comes up holds the wait for the whole
     `SERVICE_READY_TIMEOUT_S` (180 s): the tier keeps the long bound."""
-    from cli.commands import _probe as _probe_mod
 
-    monkeypatch.setattr(_cli, "_probe_service", lambda _spec: _cli.ServiceProbe(False, "http", ""))  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_has_session", lambda _s: True)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_probe_mod, "NON_CRITICAL_SERVICE_READY_TIMEOUT_S", 45.0)
+    monkeypatch.setattr(_probe, "_probe_service", lambda _spec: ServiceProbe(False, "http", ""))  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_session_mod, "_has_session", lambda _s: True)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_probe, "NON_CRITICAL_SERVICE_READY_TIMEOUT_S", 45.0)
     _fake_clock(monkeypatch)
 
-    wait = _cli._wait_for_services_ready((_spec("gateway"), _spec("pitr-uploader")), 180.0)
+    wait = _probe._wait_for_services_ready((_spec("gateway"), _spec("pitr-uploader")), 180.0)
 
     assert [s.session for s in wait.unready] == ["gateway"]
     assert wait.elapsed_s == 180.0, "the critical bound must be spent in full"
@@ -1140,18 +1152,17 @@ def test_non_critical_service_gets_only_the_short_window(
     """A non-critical service that never comes up holds the wait only for
     `NON_CRITICAL_SERVICE_READY_TIMEOUT_S` (45 s): the wait returns with the
     critical roster clean and the straggler in `non_critical_unready`."""
-    from cli.commands import _probe as _probe_mod
 
     monkeypatch.setattr(
-        _cli,
+        _probe,
         "_probe_service",
-        lambda spec: _cli.ServiceProbe(spec.session == "gateway", "http", ""),  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
+        lambda spec: ServiceProbe(spec.session == "gateway", "http", ""),  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
     )
-    monkeypatch.setattr(_cli, "_has_session", lambda _s: True)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_probe_mod, "NON_CRITICAL_SERVICE_READY_TIMEOUT_S", 45.0)
+    monkeypatch.setattr(_session_mod, "_has_session", lambda _s: True)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_probe, "NON_CRITICAL_SERVICE_READY_TIMEOUT_S", 45.0)
     _fake_clock(monkeypatch)
 
-    wait = _cli._wait_for_services_ready((_spec("gateway"), _spec("pitr-uploader")), 180.0)
+    wait = _probe._wait_for_services_ready((_spec("gateway"), _spec("pitr-uploader")), 180.0)
 
     assert wait.unready == ()
     assert wait.elapsed_s == 45.0, "the wait must end at the short window, not the bound"
@@ -1164,14 +1175,13 @@ def test_critical_verdict_ignores_non_critical_failures(
     """When the critical bound expires while a non-critical service is still inside
     ITS window, the verdict is critical-only — the straggler is neither a failed
     start nor a reported failure (it was still being waited on)."""
-    from cli.commands import _probe as _probe_mod
 
-    monkeypatch.setattr(_cli, "_probe_service", lambda _spec: _cli.ServiceProbe(False, "http", ""))  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_has_session", lambda _s: True)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_probe_mod, "NON_CRITICAL_SERVICE_READY_TIMEOUT_S", 600.0)
+    monkeypatch.setattr(_probe, "_probe_service", lambda _spec: ServiceProbe(False, "http", ""))  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_session_mod, "_has_session", lambda _s: True)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_probe, "NON_CRITICAL_SERVICE_READY_TIMEOUT_S", 600.0)
     _fake_clock(monkeypatch)
 
-    wait = _cli._wait_for_services_ready((_spec("gateway"), _spec("pitr-uploader")), 0.0)
+    wait = _probe._wait_for_services_ready((_spec("gateway"), _spec("pitr-uploader")), 0.0)
 
     assert [s.session for s in wait.unready] == ["gateway"]
     assert wait.non_critical_unready == ()
@@ -1185,13 +1195,14 @@ def test_non_critical_session_gone_exits_without_spending_the_window(
     session, and it is reported as failed rather than waited out. The wait does
     not return on the critical roster's clearance alone: the dying session is
     still given its confirmation interval."""
+
     monkeypatch.setattr(
-        _cli,
+        _probe,
         "_probe_service",
-        lambda spec: _cli.ServiceProbe(spec.session == "gateway", "http", ""),  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
+        lambda spec: ServiceProbe(spec.session == "gateway", "http", ""),  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
     )
     monkeypatch.setattr(
-        _cli,
+        _session_mod,
         "_has_session",
         lambda sess: sess == _sess("gateway"),  # pyright: ignore[reportUnknownArgumentType]
     )
@@ -1200,11 +1211,10 @@ def test_non_critical_session_gone_exits_without_spending_the_window(
         "cli.commands._probe._poll_sleep",
         lambda _s: sleeps.__setitem__("n", sleeps["n"] + 1),  # pyright: ignore[reportUnknownArgumentType]
     )
-    from cli.commands import _probe as _probe_mod
 
-    monkeypatch.setattr(_probe_mod, "NON_CRITICAL_SERVICE_READY_TIMEOUT_S", 600.0)
+    monkeypatch.setattr(_probe, "NON_CRITICAL_SERVICE_READY_TIMEOUT_S", 600.0)
 
-    wait = _cli._wait_for_services_ready((_spec("gateway"), _spec("pitr-uploader")), 600.0)
+    wait = _probe._wait_for_services_ready((_spec("gateway"), _spec("pitr-uploader")), 600.0)
 
     assert wait.unready == ()
     assert [s.session for s in wait.non_critical_unready] == ["pitr-uploader"]
@@ -1216,7 +1226,6 @@ def test_non_critical_failure_posts_alert_and_im(monkeypatch: pytest.MonkeyPatch
     but a non-critical service is down exits 0 and posts an alerts row + an IM —
     the downgrade is a verdict change, never a silence."""
     import shared.alerts as _alerts
-    from cli.commands import _probe as _probe_mod
 
     class _FakeConn:
         def __enter__(self) -> _FakeConn:
@@ -1230,14 +1239,14 @@ def test_non_critical_failure_posts_alert_and_im(monkeypatch: pytest.MonkeyPatch
 
     _roster(monkeypatch, (("gateway", None), ("pitr-uploader", None)))
     monkeypatch.setattr(
-        _cli,
+        _probe,
         "_probe_service",
-        lambda spec: _cli.ServiceProbe(spec.session == "gateway", "http", ""),  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
+        lambda spec: ServiceProbe(spec.session == "gateway", "http", ""),  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
     )
-    monkeypatch.setattr(_cli, "_has_session", lambda _s: True)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_probe_mod, "NON_CRITICAL_SERVICE_READY_TIMEOUT_S", 0.0)
+    monkeypatch.setattr(_session_mod, "_has_session", lambda _s: True)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_probe, "NON_CRITICAL_SERVICE_READY_TIMEOUT_S", 0.0)
     calls: dict[str, list[object]] = {"upsert": [], "im": []}
-    monkeypatch.setattr(_probe_mod, "_alert_db_connect", _FakeConn)
+    monkeypatch.setattr(_probe, "_alert_db_connect", _FakeConn)
     monkeypatch.setattr(_alerts, "display_language", lambda _conn: "en")  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_alerts, "notify_text", lambda _a, _l: f"TEXT:{_a['labels']['service']}")  # pyright: ignore[reportUnknownArgumentType]
 
@@ -1257,7 +1266,7 @@ def test_non_critical_failure_posts_alert_and_im(monkeypatch: pytest.MonkeyPatch
     )
     # No open instance yet: the alert DB lookup returns none, so the upsert
     # proceeds as a fresh firing.
-    monkeypatch.setattr(_probe_mod, "_unresolved_alert_instance", lambda _c, _s: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_probe, "_unresolved_alert_instance", lambda _c, _s: None)  # pyright: ignore[reportUnknownArgumentType]
 
     rc = _cli.cmd_start()
 
@@ -1274,23 +1283,22 @@ def test_non_critical_failure_posts_alert_and_im(monkeypatch: pytest.MonkeyPatch
 def test_non_critical_alert_failure_degrades_to_a_print(monkeypatch: pytest.MonkeyPatch) -> None:
     """A DB/IM failure while posting the alert must not fail the start — the
     printed note in the log is the degraded channel, and rc stays 0."""
-    from cli.commands import _probe as _probe_mod
 
     _roster(monkeypatch, (("gateway", None), ("pitr-uploader", None)))
     monkeypatch.setattr(
-        _cli,
+        _probe,
         "_probe_service",
-        lambda spec: _cli.ServiceProbe(spec.session == "gateway", "http", ""),  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
+        lambda spec: ServiceProbe(spec.session == "gateway", "http", ""),  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
     )
-    monkeypatch.setattr(_cli, "_has_session", lambda _s: True)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_probe_mod, "NON_CRITICAL_SERVICE_READY_TIMEOUT_S", 0.0)
+    monkeypatch.setattr(_session_mod, "_has_session", lambda _s: True)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_probe, "NON_CRITICAL_SERVICE_READY_TIMEOUT_S", 0.0)
 
     def _boom() -> object:
         raise RuntimeError("db down")
 
-    monkeypatch.setattr(_probe_mod, "_alert_db_connect", _boom)
+    monkeypatch.setattr(_probe, "_alert_db_connect", _boom)
     # Both rails degrade to a printed note; the start itself must not fail.
-    monkeypatch.setattr(_probe_mod, "_unresolved_alert_instance", lambda _c, _s: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_probe, "_unresolved_alert_instance", lambda _c, _s: None)  # pyright: ignore[reportUnknownArgumentType]
 
     assert _cli.cmd_start() == 0
 
@@ -1326,9 +1334,8 @@ class _FakeAlertConn:
 def _wire_alert_store(monkeypatch: pytest.MonkeyPatch, conn: _FakeAlertConn) -> None:
     """Route `_notify` / `_resolve` through the fake conn + shared.alerts."""
     import shared.alerts as _alerts
-    from cli.commands import _probe as _probe_mod
 
-    monkeypatch.setattr(_probe_mod, "_alert_db_connect", lambda: conn)
+    monkeypatch.setattr(_probe, "_alert_db_connect", lambda: conn)
 
     def _lookup(c: object, service: str) -> tuple[str, str] | None:
         for (fp, starts_at), row in conn.rows.items():
@@ -1339,7 +1346,7 @@ def _wire_alert_store(monkeypatch: pytest.MonkeyPatch, conn: _FakeAlertConn) -> 
                 return starts_at, fp  # type: ignore[return-value]
         return None
 
-    monkeypatch.setattr(_probe_mod, "_unresolved_alert_instance", _lookup)
+    monkeypatch.setattr(_probe, "_unresolved_alert_instance", _lookup)
 
     def _upsert(
         _c: object, alert: dict[str, object], source: str
@@ -1384,7 +1391,6 @@ def test_repeated_start_reuses_the_open_alert_instance(
     re-inserted: one alerts row and one IM across N starts (the boot job retries
     every 60 s — this is the anti-spam guarantee)."""
     import shared.alerts as _alerts
-    from cli.commands import _probe as _probe_mod
 
     conn = _FakeAlertConn()
     _wire_alert_store(monkeypatch, conn)
@@ -1392,8 +1398,8 @@ def test_repeated_start_reuses_the_open_alert_instance(
     monkeypatch.setattr(_alerts, "notify_im", lambda t: ims.append(t) or True)  # pyright: ignore[reportUnknownArgumentType]
 
     specs = (_spec("pitr-uploader"),)
-    _probe_mod._notify_non_critical_unready_services(specs, im_enabled=True)
-    _probe_mod._notify_non_critical_unready_services(specs, im_enabled=True)
+    _probe._notify_non_critical_unready_services(specs, im_enabled=True)
+    _probe._notify_non_critical_unready_services(specs, im_enabled=True)
 
     assert len(conn.rows) == 1, "the second start must reuse the open instance"
     assert len(ims) == 1, "only the first firing IM is sent"
@@ -1406,7 +1412,6 @@ def test_recovered_service_resolves_its_open_alert(
     Inspector's unresolved panel must not keep a fixed failure (user ruling
     2026-08-29)."""
     import shared.alerts as _alerts
-    from cli.commands import _probe as _probe_mod
 
     conn = _FakeAlertConn()
     _wire_alert_store(monkeypatch, conn)
@@ -1414,8 +1419,8 @@ def test_recovered_service_resolves_its_open_alert(
     monkeypatch.setattr(_alerts, "notify_im", lambda t: ims.append(t) or True)  # pyright: ignore[reportUnknownArgumentType]
 
     specs = (_spec("pitr-uploader"),)
-    _probe_mod._notify_non_critical_unready_services(specs, im_enabled=True)
-    _probe_mod._resolve_recovered_non_critical_alerts(specs, im_enabled=True)
+    _probe._notify_non_critical_unready_services(specs, im_enabled=True)
+    _probe._resolve_recovered_non_critical_alerts(specs, im_enabled=True)
 
     assert len(conn.rows) == 1, "the resolved edge updates the same instance"
     (key,) = conn.rows
@@ -1431,14 +1436,13 @@ def test_im_is_suppressed_under_no_readiness_gate(
     the alerts row but sends no IM — the store stays visible, the user's IM
     stays quiet (QA #1196 P1-1)."""
     import shared.alerts as _alerts
-    from cli.commands import _probe as _probe_mod
 
     conn = _FakeAlertConn()
     _wire_alert_store(monkeypatch, conn)
     ims: list[str] = []
     monkeypatch.setattr(_alerts, "notify_im", lambda t: ims.append(t) or True)  # pyright: ignore[reportUnknownArgumentType]
 
-    _probe_mod._notify_non_critical_unready_services((_spec("pitr-uploader"),), im_enabled=False)
+    _probe._notify_non_critical_unready_services((_spec("pitr-uploader"),), im_enabled=False)
 
     assert len(conn.rows) == 1, "the alerts row must still be written"
     assert ims == [], "the IM push must be suppressed"
@@ -1454,11 +1458,10 @@ def test_recovered_non_critical_specs_excludes_critical_and_failed(
     the failures the wait just returned — so a service that missed its window
     THIS start (even one that came up the instant after) is not resolved by the
     same start that alerted it; it stays open for the next start."""
-    from cli.commands import _probe as _probe_mod
 
     started = (_spec("gateway"), _spec("agent-host"), _spec("pitr-uploader"), _spec("browser"))
     failed = (_spec("pitr-uploader"),)
 
-    recovered = _probe_mod._recovered_non_critical_specs(started, failed)
+    recovered = _probe._recovered_non_critical_specs(started, failed)
 
     assert [s.session for s in recovered] == ["browser"]

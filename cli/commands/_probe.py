@@ -72,8 +72,8 @@ __all__ = ["_detect_prod_source_drift", "_prod_source_head_sha"]
 # swap out from under the prod box (issue #1001).
 #
 # Bound at import, so patching this name replaces THIS poll's sleep and nothing
-# else. Same intent as the `import cli.commands as _ns` indirection below: a
-# named seam per patchable behaviour.
+# else. Same intent as the per-function seams below: a named, patchable module
+# attribute per patchable behaviour.
 _poll_sleep = time.sleep
 
 logger = logging.getLogger(__name__)
@@ -176,11 +176,6 @@ def _probe_service(spec: ServiceSpec) -> ServiceProbe:
     endpoints that cannot carry identity — curl, TCP connect, pidfile. A spec with
     neither reports `alive=None`.
     """
-    # Lookup _curl_ok through the package namespace so tests can monkeypatch
-    # `cli.commands._curl_ok` to stub HTTP calls. Same pattern in
-    # _print_service_row below.
-    import cli.commands as _ns
-
     if spec.identity_probe is not None:
         # The three built-in probes are total wrappers — every failure mode
         # (timeout, refused connection, malformed body) already comes back as a
@@ -207,7 +202,7 @@ def _probe_service(spec: ServiceSpec) -> ServiceProbe:
             probe.alive, "identity", "" if probe.alive else probe.detail, probe.terminal
         )
     if spec.curl_url is not None:
-        ok = _ns._curl_ok(spec.curl_url)
+        ok = _curl_ok(spec.curl_url)
         return ServiceProbe(ok, "http", "" if ok else f"no 2xx/3xx from {spec.curl_url}")
     if spec.tcp_port is not None:
         ok = _tcp_alive(spec.tcp_port)
@@ -286,11 +281,9 @@ def _husk_session_reason(spec: ServiceSpec) -> str | None:
     endpoint carries no probe at all (`alive is None`), or the probe cannot judge a
     fresh launch (`_probe_judges_a_fresh_launch`).
     """
-    import cli.commands as _ns
-
     if not _probe_judges_a_fresh_launch(spec):
         return None
-    probe = _ns._probe_service(spec)
+    probe = _probe_service(spec)
     if probe.alive is not False:
         return None
     return probe.detail or f"{probe.label} probe reports it down"
@@ -351,13 +344,11 @@ def _occupied_health_ports(specs: tuple[ServiceSpec, ...]) -> tuple[OccupiedPort
     to prevent. The gate narrows the failure it was built for (issue #977's relay,
     which answers) and leaves the generic taken-port case where it already was.
     """
-    import cli.commands as _ns
-
     occupied: list[OccupiedPort] = []
     for spec in specs:
         if not _binds_a_daemon_health_port(spec):
             continue
-        probe = _ns._probe_service(spec)
+        probe = _probe_service(spec)
         if probe.terminal:
             occupied.append(OccupiedPort(spec, probe.detail))
     return tuple(occupied)
@@ -445,9 +436,7 @@ def _wait_for_services_ready(specs: tuple[ServiceSpec, ...], timeout_s: float) -
     never reach here at all — the roster this receives is `ops.spec`'s capability
     view minus those, so "skipped" and "unready" stay different answers.
     """
-    # Go through the package namespace so a test can monkeypatch
-    # `cli.commands._probe_service` (same pattern as _probe_service -> _curl_ok).
-    import cli.commands as _ns
+    from cli.commands import _session_lifecycle
 
     started_at = time.monotonic()
     deadline = started_at + timeout_s
@@ -462,10 +451,10 @@ def _wait_for_services_ready(specs: tuple[ServiceSpec, ...], timeout_s: float) -
         # drop the ready ones every poll, drop a session confirmed gone without
         # spending the window, and at the window's end drop whatever is left.
         for name, spec in list(non_critical.items()):
-            if _ns._probe_service(spec).alive is not False:
+            if _probe_service(spec).alive is not False:
                 del non_critical[name]
                 continue
-            alive = _ns._has_session(session_name(name))
+            alive = _session_lifecycle._has_session(session_name(name))
             non_critical_gone_streak[name] = (
                 0 if alive else non_critical_gone_streak.get(name, 0) + 1
             )
@@ -480,7 +469,7 @@ def _wait_for_services_ready(specs: tuple[ServiceSpec, ...], timeout_s: float) -
         # non-critical service has not reached a verdict (ready, confirmed gone,
         # or its window expired) — otherwise a session that dies on the very
         # poll the critical roster clears would be dropped without a report.
-        unready = tuple(s for s in critical if _ns._probe_service(s).alive is False)
+        unready = tuple(s for s in critical if _probe_service(s).alive is False)
         if not unready and not non_critical:
             return ReadinessWait(
                 (),
@@ -490,7 +479,7 @@ def _wait_for_services_ready(specs: tuple[ServiceSpec, ...], timeout_s: float) -
             )
         if unready:
             for spec in unready:
-                alive = _ns._has_session(session_name(spec.session))
+                alive = _session_lifecycle._has_session(session_name(spec.session))
                 gone_streak[spec.session] = 0 if alive else gone_streak.get(spec.session, 0) + 1
             gone = all(gone_streak[s.session] >= _SESSION_GONE_CONFIRMATIONS for s in unready)
             if gone or time.monotonic() >= deadline:
@@ -736,14 +725,15 @@ def _print_service_row(
     *,
     root_units: dict[str, dict[str, Any]] | None = None,
 ) -> None:
-    # Lazy import keeps tests' `monkeypatch.setattr(cli.commands, "_has_session", X)`
-    # effective — the call goes through the package namespace which the test
-    # rebinds, instead of the sub-module's frozen local binding.
-    import cli.commands as _ns
+    # Lazy import keeps tests' `monkeypatch.setattr(
+    # "cli.commands._session_lifecycle._has_session", X)` effective — the lookup
+    # happens at call time against that module's current attribute, not a frozen
+    # binding taken at import time.
+    from cli.commands import _session_lifecycle
 
     sess = session_name(spec.session)
     if root_units is None:
-        session_mark = "✓" if _ns._has_session(sess) else "✗"
+        session_mark = "✓" if _session_lifecycle._has_session(sess) else "✗"
     else:
         # Root mode (task #3370): the column's question — "does this host run
         # this service" — is answered by the tree that actually drives it. The

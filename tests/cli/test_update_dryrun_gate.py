@@ -12,7 +12,6 @@ from typing import Never, cast
 
 import pytest
 
-from cli import commands as _cli
 from cli.commands import _update_dryrun as _dryrun
 from cli.commands import _update_finalize as _finalize
 from cli.commands import _update_prepare as _prepare
@@ -21,6 +20,8 @@ from cli.commands import update as _up
 
 def _stub_prepare(monkeypatch: pytest.MonkeyPatch) -> None:
     """Make the orchestration reach prepare without a live cluster or git remote."""
+    from cli.commands import _update_orchestration
+
     monkeypatch.setattr(
         _up,
         "_rollout_preflight",
@@ -32,7 +33,7 @@ def _stub_prepare(monkeypatch: pytest.MonkeyPatch) -> None:
         lambda *_args, **_kw: None,  # pyright: ignore[reportUnknownArgumentType]
     )
     monkeypatch.setattr(
-        _cli,
+        _update_orchestration,
         "_resolve_fanout_targets",
         lambda **_kw: [],  # pyright: ignore[reportUnknownArgumentType]
     )
@@ -326,6 +327,8 @@ def test_offsite_probe_performs_a_read_only_remote_stat(
 
 def test_excessive_estimate_does_not_block_phase_a(monkeypatch: pytest.MonkeyPatch) -> None:
     """A slow prior rollout is observational data, never permission to update."""
+    from cli.commands import _update_local
+
     _stub_prepare(monkeypatch)
     stopped: list[str] = []
     pins: list[str] = []
@@ -337,7 +340,7 @@ def test_excessive_estimate_does_not_block_phase_a(monkeypatch: pytest.MonkeyPat
         "_stop_the_world",
         lambda *_args, **_kw: stopped.append("stop") or (set[str](), True),  # pyright: ignore[reportUnknownArgumentType]
     )
-    monkeypatch.setattr(_cli, "_run_gateway_local_update", lambda *_args, **_kw: 0)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_update_local, "_run_gateway_local_update", lambda *_args, **_kw: 0)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_up, "refresh_data_plane_settings", lambda: None)
     monkeypatch.setattr(_up, "_persist_cluster_pin", lambda sha, **_kw: pins.append(sha))  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_finalize, "_unpause_local_via_tree", lambda _repo: True)  # pyright: ignore[reportUnknownArgumentType]
@@ -352,11 +355,13 @@ def test_prepare_check_refusal_resumes_nothing_and_skips_local_unpause(
     monkeypatch: pytest.MonkeyPatch, local_unpauses: list[bool]
 ) -> None:
     """A prepare refusal cannot compensate for a Phase A pause that never began."""
+    from cli.commands import _update_orchestration
+
     _stub_prepare(monkeypatch)
     finalized: list[tuple[list[tuple[str, str | None]], object]] = []
     tree_unpauses: list[Path] = []
     monkeypatch.setattr(
-        _cli,
+        _update_orchestration,
         "_resolve_fanout_targets",
         lambda **_kw: [("runner-a", "http://runner-a")],  # pyright: ignore[reportUnknownArgumentType]
     )
@@ -386,6 +391,8 @@ def test_prepare_check_refusal_resumes_nothing_and_skips_local_unpause(
 
 def test_phase_a_started_runs_tree_unpause(monkeypatch: pytest.MonkeyPatch) -> None:
     """A post-pause abort delegates local compensation to the deployed tree."""
+    from cli.commands import _update_local
+
     _stub_prepare(monkeypatch)
     tree_unpauses: list[Path] = []
     monkeypatch.setattr(_up, "dry_run_checks", lambda *_args, **_kw: [])  # pyright: ignore[reportUnknownArgumentType]
@@ -401,7 +408,7 @@ def test_phase_a_started_runs_tree_unpause(monkeypatch: pytest.MonkeyPatch) -> N
         lambda *_args, **_kw: (set[str](), True),  # pyright: ignore[reportUnknownArgumentType]
     )
     monkeypatch.setattr(
-        _cli,
+        _update_local,
         "_run_gateway_local_update",
         lambda *_args, **_kw: 2,  # pyright: ignore[reportUnknownArgumentType]
     )
@@ -475,6 +482,8 @@ def test_failed_or_incomplete_commit_does_not_record_a_clean_baseline(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Only a fully clean commit contributes an observed maintenance baseline."""
+    from cli.commands import _update_local
+
     _stub_prepare(monkeypatch)
     baseline_calls: list[object] = []
     monkeypatch.setattr(_up, "dry_run_checks", lambda *_args, **_kwargs: [])  # pyright: ignore[reportUnknownArgumentType]
@@ -484,7 +493,7 @@ def test_failed_or_incomplete_commit_does_not_record_a_clean_baseline(
         "_snapshot_known_good",
         lambda **_kwargs: ("old", set[str](), None),  # pyright: ignore[reportUnknownArgumentType]
     )
-    monkeypatch.setattr(_cli, "_run_gateway_local_update", lambda *_args, **_kwargs: 2)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_update_local, "_run_gateway_local_update", lambda *_args, **_kwargs: 2)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_up, "refresh_data_plane_settings", lambda: None)
     monkeypatch.setattr("ops.cluster.unpause_local_cluster", lambda: None)
     monkeypatch.setattr("ops.cluster_pause.finalize_pause_owner_journal", lambda: None)
@@ -503,10 +512,12 @@ def test_incomplete_commit_does_not_record_a_clean_baseline(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A successful gateway leg without readiness is still not observed clean telemetry."""
+    from cli.commands import _update_local, _update_orchestration
+
     _stub_prepare(monkeypatch)
     baseline_calls: list[object] = []
     monkeypatch.setattr(
-        _cli,
+        _update_orchestration,
         "_resolve_fanout_targets",
         lambda **_kwargs: [("runner-a", "http://runner-a")],  # pyright: ignore[reportUnknownArgumentType]
     )
@@ -522,7 +533,7 @@ def test_incomplete_commit_does_not_record_a_clean_baseline(
         "_stop_the_world",
         lambda *_args, **_kwargs: (set[str](), True),  # pyright: ignore[reportUnknownArgumentType]
     )
-    monkeypatch.setattr(_cli, "_run_gateway_local_update", lambda *_args, **_kwargs: 0)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_update_local, "_run_gateway_local_update", lambda *_args, **_kwargs: 0)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_up, "refresh_data_plane_settings", lambda: None)
     monkeypatch.setattr(_up, "_persist_cluster_pin", lambda *_args, **_kwargs: None)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_up, "_gateway_ready_or_incomplete", lambda *_args, **_kwargs: False)  # pyright: ignore[reportUnknownArgumentType]
@@ -543,10 +554,12 @@ def test_commit_clears_reconciled_markers_only_after_prepare_gate(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Reconciliation is read-only until its candidate set has passed the prepare gate."""
+    from cli.commands import _update_local, _update_orchestration
+
     _stub_prepare(monkeypatch)
     order: list[str] = []
     monkeypatch.setattr(
-        _cli,
+        _update_orchestration,
         "_resolve_fanout_targets",
         lambda **_kwargs: [("runner-a", "http://runner-a")],  # pyright: ignore[reportUnknownArgumentType]
     )
@@ -567,7 +580,7 @@ def test_commit_clears_reconciled_markers_only_after_prepare_gate(
         "_stop_the_world",
         lambda *_args, **_kwargs: order.append("stop") or (set[str](), True),  # pyright: ignore[reportUnknownArgumentType]
     )
-    monkeypatch.setattr(_cli, "_run_gateway_local_update", lambda *_args, **_kwargs: 2)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_update_local, "_run_gateway_local_update", lambda *_args, **_kwargs: 2)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_up, "refresh_data_plane_settings", lambda: None)
     monkeypatch.setattr("ops.cluster.unpause_local_cluster", lambda: None)
     monkeypatch.setattr("ops.cluster_pause.finalize_pause_owner_journal", lambda: None)
@@ -581,6 +594,8 @@ def test_normal_prepare_snapshots_before_maintenance_and_threads_recovery(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The local leg receives the prepare result and never recreates it after Phase A."""
+    from cli.commands import _update_local
+
     _stub_prepare(monkeypatch)
     order: list[str] = []
     pull_recover = ("old-sha", {"baseline"}, Path("/backups/snapshot.dump.enc"))
@@ -598,7 +613,7 @@ def test_normal_prepare_snapshots_before_maintenance_and_threads_recovery(
         lambda *_args, **_kw: order.append("stop") or (set[str](), True),  # pyright: ignore[reportUnknownArgumentType]
     )
     monkeypatch.setattr(
-        _cli,
+        _update_local,
         "_run_gateway_local_update",
         lambda _repo, **kw: captured.update(kw) or 0,  # pyright: ignore[reportUnknownArgumentType]
     )

@@ -693,14 +693,14 @@ def converge_host(
 
 def cmd_converge() -> int:
     """`ava converge` — bring this host to the state the current code expects (idempotent)."""
-    import cli.commands as _ns
+    from cli.commands import _repo
     from shared import maintenance
     from shared.platform import raise_fd_limit
 
     maintenance.require_start_allowed()
     raise_fd_limit(65536)  # converge spawns services + frontend deps; children inherit
-    repo = _ns._repo_root()
-    roles = _ns._roles_or_none()
+    repo = _repo._repo_root()
+    roles = _repo._roles_or_none()
     print(f"[ava converge] cwd = {repo}  roles = {','.join(sorted(roles)) if roles else 'unknown'}")
 
     # Source-integrity guard: detect manual git operations in the source tree.
@@ -734,7 +734,7 @@ def cmd_converge() -> int:
                         file=sys.stderr,
                     )
 
-    _ns.converge_host(repo, roles)
+    converge_host(repo, roles)
     # After the steps, not inside them: standalone converge runs against a
     # cluster that is already up, which is the precondition this needs and which
     # a CONVERGE_STEPS entry would not have on the `ava start` path.

@@ -14,7 +14,6 @@ from datetime import UTC, datetime
 
 import pytest
 
-from cli import commands as _cli
 from ops import cluster_rpc as cr
 from shared.host_deploy_state import HostDeployState
 
@@ -28,8 +27,10 @@ def poll_seams(
     """Short poll constants + a recorded dispatch queue; the fixture's read
     flips the posture to idle on the probe number in `idle_at` (default: after
     the queued responses are exhausted)."""
-    monkeypatch.setattr(_cli, "_POLL_TIMEOUT_S", 5.0)
-    monkeypatch.setattr(_cli, "_POLL_INTERVAL_S", 0.01)
+    from cli.commands import _update_phase_b
+
+    monkeypatch.setattr(_update_phase_b, "_POLL_TIMEOUT_S", 5.0)
+    monkeypatch.setattr(_update_phase_b, "_POLL_INTERVAL_S", 0.01)
     monkeypatch.setattr("cli.commands._update_phase_b.HARVEST_GRACE_S", 0.01)
     calls: dict[str, int] = {"n": 0}
     responses: list[dict[str, object]] = []
@@ -71,14 +72,18 @@ def test_the_convergence_probe_carries_the_completed_stages(
     """The normal path: the probe that sees the host resume carries the full
     breakdown (`start` included, via the fresh-idle read) — no harvest probe
     needed."""
+    from cli.commands import _update_phase_b
+
     calls, responses, _idle_at = poll_seams
     responses.append({"last_updater_outcome": _outcome({"checkout": 3.2})})
     responses.append({"last_updater_outcome": _outcome({"checkout": 3.2, "start": 14.6})})
     host_outcomes: dict[str, dict[str, object]] = {}
 
-    out = _cli._poll_until_unpaused([(HOST, "http://unused")], host_outcomes=host_outcomes)
+    out = _update_phase_b._poll_until_unpaused(
+        [(HOST, "http://unused")], host_outcomes=host_outcomes
+    )
 
-    assert {n: v.status for n, v in out.items()} == {HOST: _cli.POLL_OK}
+    assert {n: v.status for n, v in out.items()} == {HOST: _update_phase_b.POLL_OK}
     assert host_outcomes[HOST] == {
         "checkout": 3.2,
         "start": 14.6,
@@ -92,6 +97,8 @@ def test_the_convergence_probe_carries_terminal_wall_time_and_outcome(
 ) -> None:
     """Host telemetry adds the terminal outcome and wall time beside the existing
     per-stage values, so old stage readers remain valid."""
+    from cli.commands import _update_phase_b
+
     _calls, responses, _idle_at = poll_seams
     responses.append(
         {
@@ -105,9 +112,13 @@ def test_the_convergence_probe_carries_terminal_wall_time_and_outcome(
     )
     host_outcomes: dict[str, dict[str, object]] = {}
 
-    out = _cli._poll_until_unpaused([(HOST, "http://unused")], host_outcomes=host_outcomes)
+    out = _update_phase_b._poll_until_unpaused(
+        [(HOST, "http://unused")], host_outcomes=host_outcomes
+    )
 
-    assert {name: verdict.status for name, verdict in out.items()} == {HOST: _cli.POLL_OK}
+    assert {name: verdict.status for name, verdict in out.items()} == {
+        HOST: _update_phase_b.POLL_OK
+    }
     assert host_outcomes[HOST] == {
         "checkout": 3.2,
         "start": 14.6,
@@ -122,6 +133,8 @@ def test_a_missing_start_stage_triggers_one_harvest_probe(
     """The race: the convergence probe beats the updater's final `start` line by
     milliseconds. The poll re-probes once after a short grace — the fresh-idle
     read then serves the completed breakdown."""
+    from cli.commands import _update_phase_b
+
     calls, responses, idle_at = poll_seams
     idle_at["n"] = 2
     responses.append({"last_updater_outcome": _outcome({"checkout": 3.2})})
@@ -129,9 +142,11 @@ def test_a_missing_start_stage_triggers_one_harvest_probe(
     responses.append({"last_updater_outcome": _outcome({"checkout": 3.2, "start": 14.6})})
     host_outcomes: dict[str, dict[str, object]] = {}
 
-    out = _cli._poll_until_unpaused([(HOST, "http://unused")], host_outcomes=host_outcomes)
+    out = _update_phase_b._poll_until_unpaused(
+        [(HOST, "http://unused")], host_outcomes=host_outcomes
+    )
 
-    assert {n: v.status for n, v in out.items()} == {HOST: _cli.POLL_OK}
+    assert {n: v.status for n, v in out.items()} == {HOST: _update_phase_b.POLL_OK}
     assert host_outcomes[HOST] == {
         "checkout": 3.2,
         "start": 14.6,
@@ -146,13 +161,17 @@ def test_a_fast_host_is_served_by_the_fresh_idle_read(
     """A host that converges before the poll's first probe ever reaches it
     carries nothing mid-run; the fresh-idle read serves its completed stages on
     the first probe that finds it converged."""
+    from cli.commands import _update_phase_b
+
     calls, responses, _idle_at = poll_seams
     responses.append({"last_updater_outcome": _outcome({"checkout": 3.2, "start": 14.6})})
     host_outcomes: dict[str, dict[str, object]] = {}
 
-    out = _cli._poll_until_unpaused([(HOST, "http://unused")], host_outcomes=host_outcomes)
+    out = _update_phase_b._poll_until_unpaused(
+        [(HOST, "http://unused")], host_outcomes=host_outcomes
+    )
 
-    assert {n: v.status for n, v in out.items()} == {HOST: _cli.POLL_OK}
+    assert {n: v.status for n, v in out.items()} == {HOST: _update_phase_b.POLL_OK}
     assert host_outcomes[HOST] == {
         "checkout": 3.2,
         "start": 14.6,
@@ -166,6 +185,8 @@ def test_the_harvest_is_best_effort(
 ) -> None:
     """A harvest probe that comes back empty changes nothing about the verdict —
     the host converged; the summary just keeps the last stages it did carry."""
+    from cli.commands import _update_phase_b
+
     calls, responses, idle_at = poll_seams
     idle_at["n"] = 2
     responses.append({"last_updater_outcome": _outcome({"checkout": 3.2})})
@@ -173,9 +194,11 @@ def test_the_harvest_is_best_effort(
     responses.append({})  # harvest probe: no outcome at all
     host_outcomes: dict[str, dict[str, object]] = {}
 
-    out = _cli._poll_until_unpaused([(HOST, "http://unused")], host_outcomes=host_outcomes)
+    out = _update_phase_b._poll_until_unpaused(
+        [(HOST, "http://unused")], host_outcomes=host_outcomes
+    )
 
-    assert {n: v.status for n, v in out.items()} == {HOST: _cli.POLL_OK}
+    assert {n: v.status for n, v in out.items()} == {HOST: _update_phase_b.POLL_OK}
     assert host_outcomes[HOST] == {
         "checkout": 3.2,
         "outcome": {"kind": "exited", "rc": 0},

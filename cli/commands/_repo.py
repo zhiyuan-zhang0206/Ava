@@ -371,7 +371,6 @@ def _preflight_probes() -> int:
 
     Returns 0 when both checks pass, non-zero otherwise.
     """
-    import cli.commands as _ns
     from cli.commands._setup import _collect_setup_values, _print_missing_setup_error
 
     # Resolve setup from persisted env/files (all None args = read-only, no writes).
@@ -393,14 +392,14 @@ def _preflight_probes() -> int:
     roles: MachineRoles = frozenset(roles_raw.split(",")) if roles_raw else frozenset()
 
     print("\n→ preflight: register machine in central DB")
-    rc = _ns._register_machine_or_die(resolved, roles)
+    rc = _register_machine_or_die(resolved, roles)
     if rc != 0:
         print("  ✗ preflight failed: cannot register machine — host still serving", file=sys.stderr)
         return rc
 
     if "agent-runner" in roles and "gateway" not in roles:
         print("\n→ preflight: probe gateway")
-        rc = _ns._probe_gateway_or_die(resolved["gateway_url"])
+        rc = _probe_gateway_or_die(resolved["gateway_url"])
         if rc != 0:
             print("  ✗ preflight failed: gateway unreachable — host still serving", file=sys.stderr)
             return rc

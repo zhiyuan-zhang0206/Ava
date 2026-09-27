@@ -18,7 +18,6 @@ from pathlib import Path
 
 import pytest
 
-from cli import commands as _cli
 from cli.commands import _gateway_ready as _gr
 from cli.commands import update as _up
 from cli.commands._gateway_ready import GatewayReadiness
@@ -255,6 +254,14 @@ def _drive_rollout(
 ) -> tuple[int, list[tuple[str, list[str]]], list[str]]:
     """Run the gateway orchestration with two agent-runners, a succeeding local update
     and a scripted readiness verdict. Returns (rc, fan-out calls, settle-hold hosts)."""
+    from cli.commands import (
+        _update_fanout,
+        _update_local,
+        _update_phase_b,
+        _update_preflight,
+        _update_quiesce,
+    )
+
     calls: list[tuple[str, list[str]]] = []
     settled: list[str] = []
 
@@ -263,20 +270,22 @@ def _drive_rollout(
         status = phase_a if path == "/api/cluster/stop" else "ok"
         return [(name, status, "") for name, _url in hosts]
 
-    monkeypatch.setattr(_cli, "_changed_paths_vs_origin", lambda: ["gateway/app.py"])
-    monkeypatch.setattr(_cli, "_list_agent_runners", lambda: [("a", None), ("b", None)])
-    monkeypatch.setattr(_cli, "_fan_out", _fan_out)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_quiesce_all_agents", lambda **_: True)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_run_gateway_local_update", lambda _repo, **_kw: 0)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_await_gateway_serving", lambda **_kw: readiness)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_update_preflight, "_changed_paths_vs_origin", lambda: ["gateway/app.py"])
+    monkeypatch.setattr(_update_fanout, "_list_agent_runners", lambda: [("a", None), ("b", None)])
+    monkeypatch.setattr(_update_fanout, "_fan_out", _fan_out)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_update_quiesce, "_quiesce_all_agents", lambda **_: True)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_update_local, "_run_gateway_local_update", lambda _repo, **_kw: 0)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_gr, "await_gateway_serving", lambda **_kw: readiness)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(
-        _cli,
+        _update_phase_b,
         "_poll_until_unpaused",
-        lambda hosts, **_unused: {name: _cli.PollVerdict(_cli.POLL_OK) for name, _url in hosts},  # pyright: ignore[reportUnknownArgumentType]
+        lambda hosts, **_unused: {
+            name: _update_phase_b.PollVerdict(_update_phase_b.POLL_OK) for name, _url in hosts
+        },  # pyright: ignore[reportUnknownArgumentType]
     )
     monkeypatch.setattr(_up, "settle_update_lock", lambda _holder, hosts: settled.extend(hosts))  # pyright: ignore[reportUnknownArgumentType]
 
-    rc = _cli._run_gateway_orchestration(Path("/unused"), origin="test-origin")
+    rc = _up._run_gateway_orchestration(Path("/unused"), origin="test-origin")
     return rc, calls, settled
 
 
@@ -346,33 +355,43 @@ def test_ready_gateway_proceeds_to_phase_b_in_order(monkeypatch: pytest.MonkeyPa
     """The gate is a precondition, not a step that can be skipped or reordered: it runs
     after the local update and before the fan-out, and a SERVING verdict costs the
     rollout nothing."""
+    from cli.commands import (
+        _update_fanout,
+        _update_local,
+        _update_phase_b,
+        _update_preflight,
+        _update_quiesce,
+    )
+
     order: list[str] = []
 
     def _fan_out(hosts, path, _timeout, payload=None):  # type: ignore[no-untyped-def]
         order.append(path)  # pyright: ignore[reportUnknownArgumentType]
         return [(name, "ok", "") for name, _url in hosts]
 
-    monkeypatch.setattr(_cli, "_changed_paths_vs_origin", lambda: ["gateway/app.py"])
-    monkeypatch.setattr(_cli, "_list_agent_runners", lambda: [("a", None)])
-    monkeypatch.setattr(_cli, "_fan_out", _fan_out)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_quiesce_all_agents", lambda **_: True)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_update_preflight, "_changed_paths_vs_origin", lambda: ["gateway/app.py"])
+    monkeypatch.setattr(_update_fanout, "_list_agent_runners", lambda: [("a", None)])
+    monkeypatch.setattr(_update_fanout, "_fan_out", _fan_out)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_update_quiesce, "_quiesce_all_agents", lambda **_: True)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(
-        _cli,
+        _update_local,
         "_run_gateway_local_update",
         lambda _repo, **_kw: order.append("local-update") or 0,  # pyright: ignore[reportUnknownArgumentType]
     )
     monkeypatch.setattr(
-        _cli,
-        "_await_gateway_serving",
+        _gr,
+        "await_gateway_serving",
         lambda **_kw: order.append("readiness") or (GatewayReadiness.SERVING, "http://gw"),  # pyright: ignore[reportUnknownArgumentType]
     )
     monkeypatch.setattr(
-        _cli,
+        _update_phase_b,
         "_poll_until_unpaused",
-        lambda hosts, **_unused: {name: _cli.PollVerdict(_cli.POLL_OK) for name, _url in hosts},  # pyright: ignore[reportUnknownArgumentType]
+        lambda hosts, **_unused: {
+            name: _update_phase_b.PollVerdict(_update_phase_b.POLL_OK) for name, _url in hosts
+        },  # pyright: ignore[reportUnknownArgumentType]
     )
 
-    rc = _cli._run_gateway_orchestration(Path("/unused"), origin="test-origin")
+    rc = _up._run_gateway_orchestration(Path("/unused"), origin="test-origin")
 
     assert rc == 0
     assert order == [
@@ -387,17 +406,19 @@ def test_ready_gateway_proceeds_to_phase_b_in_order(monkeypatch: pytest.MonkeyPa
 def test_single_host_cluster_skips_the_gate(monkeypatch: pytest.MonkeyPatch) -> None:
     """No agent-runners means no Phase B, so there is nothing to gate: a cluster with
     no dependents must not be able to fail a rollout on its own readiness."""
-    monkeypatch.setattr(_cli, "_changed_paths_vs_origin", lambda: ["gateway/app.py"])
-    monkeypatch.setattr(_cli, "_list_agent_runners", list)
-    monkeypatch.setattr(_cli, "_quiesce_all_agents", lambda **_: True)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_run_gateway_local_update", lambda _repo, **_kw: 0)  # pyright: ignore[reportUnknownArgumentType]
+    from cli.commands import _update_fanout, _update_local, _update_preflight, _update_quiesce
+
+    monkeypatch.setattr(_update_preflight, "_changed_paths_vs_origin", lambda: ["gateway/app.py"])
+    monkeypatch.setattr(_update_fanout, "_list_agent_runners", list)
+    monkeypatch.setattr(_update_quiesce, "_quiesce_all_agents", lambda **_: True)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_update_local, "_run_gateway_local_update", lambda _repo, **_kw: 0)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(
-        _cli,
-        "_await_gateway_serving",
+        _gr,
+        "await_gateway_serving",
         lambda **_kw: pytest.fail("no Phase B, no gate"),  # pyright: ignore[reportUnknownArgumentType]
     )
 
-    assert _cli._run_gateway_orchestration(Path("/unused"), origin="test-origin") == 0
+    assert _up._run_gateway_orchestration(Path("/unused"), origin="test-origin") == 0
 
 
 # ── the gate and the preflight cannot drift apart ──────────────────────────────
@@ -407,6 +428,8 @@ def test_gate_and_runner_preflight_share_one_probe(monkeypatch: pytest.MonkeyPat
     """A gate that probed a *different* endpoint than the runner's preflight would be
     the "usually true" fix: green here, refused there. Both must go through
     `probe_gateway_once`, so the gate's success criterion IS the preflight's."""
+    from cli.commands import _repo as _repo_mod
+
     seen: list[str] = []
 
     def _probe(url: str, *, timeout_s: float = 10.0) -> GatewayProbe:
@@ -419,7 +442,7 @@ def test_gate_and_runner_preflight_share_one_probe(monkeypatch: pytest.MonkeyPat
     # the ownership check is a separate concern — pin it owned for this test
     monkeypatch.setattr(_gr, "_gateway_listener_owned", lambda _url: True)  # pyright: ignore[reportUnknownArgumentType]
 
-    assert _cli._probe_gateway_or_die("http://gw:8000") == 0
+    assert _repo_mod._probe_gateway_or_die("http://gw:8000") == 0
     assert _gr.await_gateway_serving()[0] is GatewayReadiness.SERVING
     assert seen == ["http://gw:8000", "http://gw:8000"]
 

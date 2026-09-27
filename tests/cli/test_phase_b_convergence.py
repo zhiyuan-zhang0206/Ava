@@ -135,7 +135,7 @@ def test_phase_b_polls_the_dispatched_target(
     monkeypatch: pytest.MonkeyPatch, restart_only: bool
 ) -> None:
     """Reject matching old code on update, and retained native hold on same-pin restart."""
-    from cli import commands
+    from cli.commands import _update_fanout, _update_phase_b
     from cli.commands._update_phase_b import _phase_b_and_poll
     from ops import cluster_rpc
 
@@ -154,9 +154,9 @@ def test_phase_b_polls_the_dispatched_target(
         code = "b" * 40 if probes == 1 and not restart_only else SHA
         return {"head_sha": code, "running_sha": code, "paused": restart_only and probes == 1}
 
-    monkeypatch.setattr(commands, "_fan_out", fanout)
-    monkeypatch.setattr(commands, "_POLL_INTERVAL_S", 0.001)
-    monkeypatch.setattr(commands, "_POLL_TIMEOUT_S", 2)
+    monkeypatch.setattr(_update_fanout, "_fan_out", fanout)
+    monkeypatch.setattr(_update_phase_b, "_POLL_INTERVAL_S", 0.001)
+    monkeypatch.setattr(_update_phase_b, "_POLL_TIMEOUT_S", 2)
     monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", probe)
     result = _phase_b_and_poll(
         [(machine_name(), None)],

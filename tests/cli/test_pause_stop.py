@@ -340,7 +340,7 @@ def test_explicit_force_stops_host_and_preserves_only_pause_terminals(
     monkeypatch: pytest.MonkeyPatch,
     full_stop: bool,
 ) -> None:
-    from cli import commands
+    from cli.commands import _repo
     from shared.session_backend import PosixProcSessionBackend
 
     monkeypatch.setitem(os.environ, "AVA_HOME", str(home))
@@ -348,7 +348,7 @@ def test_explicit_force_stops_host_and_preserves_only_pause_terminals(
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.setattr("shared.session_backend.get_backend", PosixProcSessionBackend)
     monkeypatch.setattr("shared.session_backend.get_shell_backend", PtySessionBackend)
-    monkeypatch.setattr(commands, "_roles_or_none", lambda: frozenset({"agent-runner"}))
+    monkeypatch.setattr(_repo, "_roles_or_none", lambda: frozenset({"agent-runner"}))
     monkeypatch.setattr(entry, "build_services", lambda: [SimpleNamespace(session="agent-host")])
     monkeypatch.setattr(entry, "_announce_stopping", lambda: None)
     monkeypatch.setattr(entry, "_reap_orphan_step", lambda *_a, **_kw: None)  # pyright: ignore[reportUnknownArgumentType]

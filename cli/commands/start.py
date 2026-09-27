@@ -281,12 +281,12 @@ def _refuse_occupied_health_ports(roster: tuple[ServiceSpec, ...]) -> int:
     reads and is therefore the way to bring the rest of the unit up while the
     collision is being sorted out; the message says so.
     """
-    # Via `_ns` so the autouse test guard's monkeypatch of
-    # `cli.commands._occupied_health_ports` takes effect at this callsite.
-    import cli.commands as _ns
+    # Through `_probe` so the autouse test guard's monkeypatch of
+    # `cli.commands._probe._occupied_health_ports` takes effect at this callsite.
+    from cli.commands import _probe
     from shared.paths import ava_home
 
-    occupied = _ns._occupied_health_ports(roster)
+    occupied = _probe._occupied_health_ports(roster)
     if not occupied:
         return 0
     print("\n✗ another unit already answers on this unit's daemon health ports:", file=sys.stderr)
@@ -340,8 +340,8 @@ def _cmd_start_body(  # noqa: PLR0915 — cohesive linear start sequence (conver
     `readiness_gate` decides whether an unready service is an exit code or only a
     printed cross; the module docstring holds which callers turn it off and why.
     """
-    # Dynamic namespace lookup preserves existing setup/converge/probe test seams.
-    import cli.commands as _ns
+    # Each seam lives at the module that defines it — the test-patch target.
+    from cli.commands import _converge, _probe, _repo, _root_driver, _setup
     from shared import maintenance
 
     maintenance.require_start_allowed()
@@ -383,7 +383,7 @@ def _cmd_start_body(  # noqa: PLR0915 — cohesive linear start sequence (conver
         "gateway_url": gateway_url,
     }
     try:
-        resolved, missing = _ns._collect_setup_values(args)
+        resolved, missing = _setup._collect_setup_values(args)
     except ValueError as e:
         # validator failure (e.g. MachineRoleInvalid) — do not persist invalid
         # value, print error + exit.
@@ -435,7 +435,7 @@ def _cmd_start_body(  # noqa: PLR0915 — cohesive linear start sequence (conver
     # runs during start or rollback. `ava cluster update` inherits this via its
     # trailing cmd_start, so one gateway update converges the whole fleet.
     try:
-        _ns.converge_host(repo, roles)
+        _converge.converge_host(repo, roles)
     except Exception as e:
         print(f"  ✗ converge failed: {e}", file=sys.stderr)
         return 1
@@ -499,7 +499,7 @@ def _cmd_start_body(  # noqa: PLR0915 — cohesive linear start sequence (conver
     # server would happily start against a schema it doesn't understand and
     # produce confusing wire-level errors.
     print("\n→ verify schema version")
-    rc = _ns._assert_schema_current_or_die()
+    rc = _repo._assert_schema_current_or_die()
     if rc != 0:
         return rc
 
@@ -577,7 +577,7 @@ def _cmd_start_body(  # noqa: PLR0915 — cohesive linear start sequence (conver
     # agent-runner will also fail every subsequent `ava cluster status` and
     # `ava cluster update` orchestration.
     print("\n→ register machine in central DB")
-    rc = _ns._register_machine_or_die(resolved, roles)
+    rc = _repo._register_machine_or_die(resolved, roles)
     if rc != 0:
         return rc
 
@@ -589,7 +589,7 @@ def _cmd_start_body(  # noqa: PLR0915 — cohesive linear start sequence (conver
     # is on this stdout and the host fails non-zero.
     if "agent-runner" in roles and "gateway" not in roles:
         print("\n→ probe gateway")
-        rc = _ns._probe_gateway_or_die(resolved["gateway_url"])
+        rc = _repo._probe_gateway_or_die(resolved["gateway_url"])
         if rc != 0:
             return rc
 
@@ -601,7 +601,7 @@ def _cmd_start_body(  # noqa: PLR0915 — cohesive linear start sequence (conver
     launch_skip = resolve_launch_skip(set(disabled_services), persist=persist_services)
 
     # 4.1) a root_driven_enabled host drives this roster through ava-root.
-    root_driven, roster = _ns._start_roster(roles, launch_skip)
+    root_driven, roster = _root_driver._start_roster(roles, launch_skip)
 
     # 4a) probe before binding: refuse to launch a daemon onto a health port
     # another unit already answers on — this is the last point at which nothing
@@ -613,7 +613,7 @@ def _cmd_start_body(  # noqa: PLR0915 — cohesive linear start sequence (conver
     # Failed start attempts must leave recovery actions gated.
     serving_generation = start_serving.begin_start()
     _record_running_sha(repo)
-    launch = _ns._launch_service_tree(
+    launch = _root_driver._launch_service_tree(
         root_driven, roster, repo, roles, launch_skip, reconcile=persist_services
     )
     started = launch.started
@@ -657,7 +657,7 @@ def _cmd_start_body(  # noqa: PLR0915 — cohesive linear start sequence (conver
     print("\n→ waiting for services to come up")
     with updater_stage("readiness") if updater_telemetry else nullcontext():
         # The root path judges its status surface; the session path probes.
-        wait = _ns._wait_for_service_tree(
+        wait = _root_driver._wait_for_service_tree(
             root_driven,
             tuple(s for s in started if _probe_judges_a_fresh_launch(s)),
             timeout_s=SERVICE_READY_TIMEOUT_S,
@@ -711,7 +711,7 @@ def _cmd_start_body(  # noqa: PLR0915 — cohesive linear start sequence (conver
             file=sys.stderr,
         )
     if wait.unready:
-        _ns._print_unready_services(wait, SERVICE_READY_TIMEOUT_S)
+        _probe._print_unready_services(wait, SERVICE_READY_TIMEOUT_S)
     # The tier's second rail: a non-critical service that missed its short window
     # does not fail the start, but it is reported and alerted — the downgrade must
     # never go silent (see `_probe._notify_non_critical_unready_services`). The
@@ -719,16 +719,16 @@ def _cmd_start_body(  # noqa: PLR0915 — cohesive linear start sequence (conver
     # retries run with `--no-readiness-gate` and must not spam the user's IM,
     # while the alerts store and this output stay visible.
     if wait.non_critical_unready:
-        _ns._print_non_critical_unready_services(wait.non_critical_unready)
-        _ns._notify_non_critical_unready_services(
+        _probe._print_non_critical_unready_services(wait.non_critical_unready)
+        _probe._notify_non_critical_unready_services(
             wait.non_critical_unready, im_enabled=readiness_gate
         )
     # The resolved edge: a non-critical service that is up again closes its open
     # alert instance, so the Inspector never keeps showing a resolved failure
     # (QA #1196 P1-1).
-    recovered = _ns._recovered_non_critical_specs(started, wait.non_critical_unready)
+    recovered = _probe._recovered_non_critical_specs(started, wait.non_critical_unready)
     if recovered:
-        _ns._resolve_recovered_non_critical_alerts(recovered, im_enabled=readiness_gate)
+        _probe._resolve_recovered_non_critical_alerts(recovered, im_enabled=readiness_gate)
     if wait.unready or launch.failed:
         waiver = _readiness_waiver(roles, readiness_gate=readiness_gate)
         if waiver is None:

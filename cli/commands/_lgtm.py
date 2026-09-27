@@ -91,15 +91,14 @@ def cmd_lgtm_on() -> int:
     stack up. Writes the `$AVA_HOME/lgtm-host` marker (so converge and the
     gateway watchdog keep the stack alive from now on), installs current native
     backends, and runs the idempotent deploy/lgtm/start.sh. Safe to re-run."""
-    import cli.commands as _ns
-    from cli.commands import _lgtm_native
+    from cli.commands import _lgtm_native, _repo
     from shared.paths import ava_home
 
     marker = lgtm_host_marker()
     if not marker.exists():
         marker.touch()
         print(f"✓ marker written: {marker}")
-    repo = _ns._repo_root()
+    repo = _repo._repo_root()
     _lgtm_native.ensure_lgtm_native(repo, ava_home())
     result = _start_stack(repo, ava_home())
     if result != 0:

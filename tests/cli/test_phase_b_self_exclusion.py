@@ -26,7 +26,6 @@ from pathlib import Path
 
 import pytest
 
-from cli import commands as _cli
 from cli.commands import _update_orchestration as orch
 from cli.commands import update as _up
 from cli.commands._gateway_ready import GatewayReadiness
@@ -67,6 +66,14 @@ def _drive(
 ) -> _Rollout:
     """Run the gateway orchestration with `registered` as the reconciled rollout list
     and this host named `ME`, recording which hosts each phase reached."""
+    from cli.commands import (
+        _update_fanout,
+        _update_local,
+        _update_phase_b,
+        _update_preflight,
+        _update_quiesce,
+    )
+
     set_machine_identity(role=role, name=ME)
     calls: list[tuple[str, list[str]]] = []
 
@@ -74,18 +81,20 @@ def _drive(
         calls.append((path, [h[0] for h in hosts]))  # pyright: ignore[reportUnknownArgumentType]
         return [(name, "ok", "") for name, _url in hosts]
 
-    monkeypatch.setattr(_cli, "_changed_paths_vs_origin", lambda: ["gateway/app.py"])
-    monkeypatch.setattr(_cli, "_list_agent_runners", lambda: list(registered))
+    monkeypatch.setattr(_update_preflight, "_changed_paths_vs_origin", lambda: ["gateway/app.py"])
+    monkeypatch.setattr(_update_fanout, "_list_agent_runners", lambda: list(registered))
     monkeypatch.setattr("shared.machines.list_stopped_agent_runners", list)
-    monkeypatch.setattr(_cli, "_fan_out", _fan_out)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_quiesce_all_agents", lambda **_: True)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_cli, "_run_gateway_local_update", lambda _repo, **_kw: 0)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_update_fanout, "_fan_out", _fan_out)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_update_quiesce, "_quiesce_all_agents", lambda **_: True)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_update_local, "_run_gateway_local_update", lambda _repo, **_kw: 0)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(
-        _cli,
+        _update_phase_b,
         "_poll_until_unpaused",
-        lambda hosts, **_unused: {name: _cli.PollVerdict(_cli.POLL_OK) for name, _url in hosts},  # pyright: ignore[reportUnknownArgumentType]
+        lambda hosts, **_unused: {
+            name: _update_phase_b.PollVerdict(_update_phase_b.POLL_OK) for name, _url in hosts
+        },  # pyright: ignore[reportUnknownArgumentType]
     )
-    rc = _cli._run_gateway_orchestration(Path("/unused"), origin="test-origin")
+    rc = _up._run_gateway_orchestration(Path("/unused"), origin="test-origin")
     return _Rollout(rc, calls)
 
 
@@ -176,9 +185,11 @@ def test_lone_single_box_still_has_its_readiness_checked(
     The local leg starts the gateway with `--no-readiness-gate` precisely because this
     gate asks it off-box, so a single box whose gateway never rebound has to end
     INCOMPLETE — otherwise a rollout that left the cluster dark reports CLEAN."""
+    from cli.commands import _gateway_ready
+
     monkeypatch.setattr(
-        _cli,
-        "_await_gateway_serving",
+        _gateway_ready,
+        "await_gateway_serving",
         lambda **_kw: (GatewayReadiness.TIMED_OUT, "no answer"),  # pyright: ignore[reportUnknownArgumentType]
     )
 

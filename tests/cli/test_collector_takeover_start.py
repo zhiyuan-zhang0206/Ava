@@ -7,7 +7,6 @@ from pathlib import Path
 import pytest
 
 import cli.commands._session_lifecycle as lifecycle
-from cli import commands
 from ops.service_spec import _BOTH, ServiceSpec
 from shared.machine import MachineRoles
 
@@ -39,8 +38,8 @@ def test_start_reclaims_a_stale_collector_before_launching_its_session(
         return True
 
     monkeypatch.setattr(lifecycle, "_launch_roster", _roster)
-    monkeypatch.setattr(commands, "_has_session", _has_session)
-    monkeypatch.setattr(commands, "_new_session", _new_session)
+    monkeypatch.setattr(lifecycle, "_has_session", _has_session)
+    monkeypatch.setattr(lifecycle, "_new_session", _new_session)
 
     lifecycle._launch_sessions(frozenset({"gateway"}), set(), tmp_path)
 
