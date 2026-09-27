@@ -81,7 +81,8 @@ Two separate problems were tangled in the old design:
    interruption notice (it previously suppressed that notice in favor of a
    registry-status flip nobody reads any more) — and since a watcher always
    has a running job when its TTL fires, that notice fires every time.
-4. **Three ends, three outcomes — no fourth path drops a watcher silently.**
+4. **Four ends, four outcomes — no fifth path drops a watcher silently, but
+   two of the four already carry no message.**
    - *The watcher exits on its own* (script finished, one-shot fired, its own
      timeout watchdog): the shell layer's existing completion notice fires,
      respecting the `notify` policy, and the session (with no row to delete
@@ -90,16 +91,20 @@ Two separate problems were tangled in the old design:
      `kill_all`): no extra message — the call already returned its result to
      the same turn that made the decision.
    - *The platform reclaims it*: at its TTL deadline (the gateway TTL
-     reaper, point 3 above) or by a release/update force-closing busy
-     terminals on `ava stop` (`cli/commands/_temporary_stop.py`'s existing
-     durable closure notice for a busy session, unchanged and unaffected by
-     this PR — verified nothing watcher-specific ever excluded a watcher
-     session from it). Either way the owner gets a message.
-   - *The pty host is killed with no orchestrated closer* (an external
-     SIGKILL, a machine power loss, a crash nothing durably recorded): **no
-     message.** The session is simply absent from
-     `ava.shell.sessions.list()` on the agent's next check. This is an
-     accepted gap, not a deferred feature — see Alternatives rejected.
+     reaper, point 3 above), or a **normal** `ava stop` / update force-closes
+     a busy terminal (`cli/commands/_temporary_stop.py`'s existing durable
+     closure notice for a busy session, unchanged and unaffected by this PR
+     — verified nothing watcher-specific ever excluded a watcher session from
+     it). Either of these sends a message.
+   - *The pty host is killed with no orchestrated closer* — an external
+     SIGKILL, a machine power loss, a crash nothing durably recorded, but
+     also `ava stop --force` (`cli/commands/stop.py:_stop_terminals_force`,
+     which kills every session directly with no notice path at all) and a
+     Windows unit's stop (`cli/commands/_temporary_stop.py`'s Windows branch
+     returns before the notice-capture step): **no message in any of
+     these.** The session is simply absent from `ava.shell.sessions.list()`
+     on the agent's next check. This is an accepted gap, not a deferred
+     feature — see Alternatives rejected.
 5. **The generated bootstrap's orphan guard and timeout watchdog are
    unchanged.** They are not about recovery — the orphan guard makes a
    watcher child self-terminate within seconds of its pty host dying (so a
@@ -116,10 +121,10 @@ Two separate problems were tangled in the old design:
   became clear the registry's only remaining reader would be that one
   observer: keeping a whole table, its writers, and its status lifecycle
   alive purely to feed a single "tell the owner" pass is exactly the kind of
-  parallel bookkeeping this change exists to remove. A watcher session
-  destroying its owner a message is a fact about *sessions*, not about
-  *watchers* — it belongs at the session/TTL layer (point 3), where it now
-  lives, not in a bespoke watcher ledger.
+  parallel bookkeeping this change exists to remove. A watcher session's
+  destruction reaching its owner as a message is a fact about *sessions*,
+  not about *watchers* — it belongs at the session/TTL layer (point 3),
+  where it now lives, not in a bespoke watcher ledger.
 - **A PTY-level destruction notice for every session kind** (not just
   watchers) — considered as the natural generalization of "tell the owner
   their session is gone," but the crash/reboot/external-SIGKILL case (point
@@ -172,11 +177,14 @@ Two separate problems were tangled in the old design:
   code-level judgment in the old design (Context, above). An agent that does
   not want to be woken again kills its watchers (`ava.shell.sessions.kill`)
   before terminating.
-- A watcher's `notify` completion policy is resolved once at spawn time,
-  from the SDK layer straight into the shell-level notification wrapper —
-  it was never truly a registry fact (the registry only stored it to hand to
-  a future rebuild), so removing the registry write changes nothing about
-  how a watcher's own completion notice behaves.
+- A watcher's `notify` completion policy behaves exactly as it did before:
+  an explicit `notify="always"`/`"failure"` is baked into the shell command
+  at spawn, while an omitted `notify` is resolved against the agent's
+  `completion_notice_policy` by the gateway at delivery time, not at spawn
+  (`ava/shell/background.py:notified_line`). It was never truly a registry
+  fact (the registry only stored it to hand to a future rebuild), so
+  removing the registry write changes nothing about how a watcher's own
+  completion notice behaves.
 - The crash/reboot-with-no-closer gap (point 4) means a watcher can vanish
   with zero record, same as an ordinary shell session can. Anyone who needs
   to notice a specific watcher's disappearance must poll

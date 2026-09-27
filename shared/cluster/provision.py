@@ -620,13 +620,18 @@ def ensure_runner_role(identity: str, *, base_admin_url: str, runner_password: s
         conn.execute(
             pgsql.SQL("GRANT INSERT ON hierarchy_jobs TO {}").format(pgsql.Identifier(RUNNER_ROLE))
         )
-        # A watcher that exits cleanly deletes its OWN registry row from the
-        # watcher child's finally (shared/watcher_registry.delete_watcher) —
-        # without DELETE the row survives and the boot reconcile later treats
-        # the gone session as a killed watcher to rebuild / mark missed
-        # (prod finding 2026-08-28: "permission denied for table
-        # agent_watchers"). agent_tasks stays INSERT+UPDATE-only: no SDK path
-        # deletes task rows from the runner process.
+        # Historical grant for a DELETE path that no longer exists: a watcher
+        # used to delete its OWN registry row from the watcher child's finally
+        # on clean exit (prod finding 2026-08-28: "permission denied for
+        # table agent_watchers"). Since 2026-09-27
+        # (decisions/2026-09-27-watchers-are-never-restarted.md) no code reads
+        # or writes `agent_watchers` at all — a watcher is a plain shell
+        # session. The grant (and the table, and its CHECK constraints) stay
+        # on purpose pending a later contract-migration PR that drops them
+        # together (expand-contract); this GRANT statement itself is
+        # follow-up debt, not something to remove in isolation. agent_tasks
+        # stays INSERT+UPDATE-only: no SDK path deletes task rows from the
+        # runner process.
         conn.execute(
             pgsql.SQL("GRANT DELETE ON agent_watchers TO {}").format(pgsql.Identifier(RUNNER_ROLE))
         )

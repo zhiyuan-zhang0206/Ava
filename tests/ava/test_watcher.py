@@ -190,7 +190,7 @@ def test_cron_registers_ttl_folded_to_end_time(
 ) -> None:
     """Task #3411: a cron watcher's session TTL IS its deadline — the
     registration's end_time (defaulted to now + 7 days, task #2617), folded
-    as `deadline - now` at the (re)mount — never the old 24h placeholder."""
+    as `deadline - now` at mount time — never the old 24h placeholder."""
     before = datetime.datetime.now(datetime.UTC)
     wid = watcher.cron("0 4 * * *", "wake", name="test-cron-ttl")
     try:
@@ -452,6 +452,28 @@ def test_shell_kill_stops_watcher(_agent_row: int) -> None:
     while time.time() < deadline and _is_live_watcher(wid, "test-launch"):
         time.sleep(0.05)
     assert not _is_live_watcher(wid, "test-launch")
+
+
+def test_spawn_kills_session_when_send_fails(
+    _agent_row: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A session whose launch command never sent must not linger as an idle
+    login shell under the watcher's name until its TTL (up to 7 days for a
+    default cron) — kill it and propagate the failure."""
+    from ava.shell import sessions as _sessions
+
+    captured: dict[str, int] = {}
+
+    def fail_send(session_id: int, _cmd: str) -> None:
+        captured["session_id"] = session_id
+        raise RuntimeError("session send failed")
+
+    monkeypatch.setattr(_sessions, "send", fail_send)
+
+    with pytest.raises(RuntimeError, match="session send failed"):
+        watcher.launch("import ava\n", timeout="1h", name="test-send-fail")
+
+    assert captured["session_id"] not in ava.shell.list()
 
 
 def test_at_builds_and_spawns_without_watchdog(
@@ -1031,14 +1053,26 @@ def test_cron_registered_twice_yields_two_independent_sessions(_agent_row: int) 
 
 
 def test_kill_does_not_touch_any_registry_table(_agent_row: int) -> None:
-    """A watcher is just a shell session: spawning and killing it must never
-    read or write `agent_watchers` — there is no registry left to consult."""
+    """A watcher is just a shell session: kill must never read or write
+    `agent_watchers` — there is no registry left to consult.
+
+    Locked by seeding a row for the exact session about to be killed — the
+    shape an old, not-yet-updated runner's `register_watcher` would still
+    write during a rollout — and asserting kill leaves it untouched. The old
+    `kill()` deleted exactly this row, so this fails on the old code and
+    passes on the new."""
     import psycopg
 
     from shared.config import settings
 
     wid = watcher.launch("import time\ntime.sleep(60)\n", timeout="1h", name="test-no-registry")
+    with psycopg.connect(settings.data_plane.db_url, autocommit=True) as conn, conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO agent_watchers (agent_id, session_id, kind, name) "
+            "VALUES (%s, %s, 'launch', 'test-no-registry')",
+            (_agent_row, wid),
+        )
     ava.shell.kill(wid)
     with psycopg.connect(settings.data_plane.db_url, autocommit=True) as conn, conn.cursor() as cur:
         cur.execute("SELECT count(*) FROM agent_watchers WHERE agent_id = %s", (_agent_row,))
-        assert cur.fetchone() == (0,)
+        assert cur.fetchone() == (1,)

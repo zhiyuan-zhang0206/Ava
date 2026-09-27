@@ -4,7 +4,6 @@ __all_for_ava__ = ["capture", "kill", "list", "new", "renew", "send", "send_keys
 
 import builtins
 import contextlib
-import logging
 import math
 import re
 from datetime import datetime
@@ -20,8 +19,6 @@ from shared.config import settings
 from shared.paths import repo_root, workspace_dir
 from shared.session_backend import get_shell_backend
 from shared.session_env import cwd_is_inside_checkout, forward_env_dict
-
-logger = logging.getLogger(__name__)
 
 
 def _agent_prefix() -> str:
@@ -339,8 +336,12 @@ def renew(id: int, *, ttl: float) -> datetime:
     The deadline moves to now + ttl — never stacked on the current deadline.
     `ttl` is required, capped at 24h per call; renewal has no lifetime cap.
     Only this agent's live, not-yet-expired sessions can renew — a watcher
-    session renews exactly the same way (it is just a shell session; there is
-    no separate watcher deadline to desync from).
+    session renews exactly the same way (it is just a shell session). This
+    only moves the session's own reclamation deadline; it does not touch the
+    generated script's own end (a cron's `_END`, a launch's watchdog timer,
+    an at's fire moment) — renewing cannot extend a schedule past what the
+    script itself will stop at, and because a call is capped at 24h it can
+    actually pull a standing cron's reclaim earlier than its declared end.
 
     Returns:
         The new deadline (DB clock).

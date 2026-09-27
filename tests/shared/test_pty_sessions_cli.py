@@ -886,8 +886,8 @@ def test_failed_allocation_cannot_publish_after_freeze_ack(
 def test_desired_state_session_families_rebuild_once_after_resume(
     sessions: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Page, schedule, and watcher reconcilers share this deepest backend.
-
+    """Page and schedule reconcilers share this deepest backend (watcher, the
+    third family below, is not one any more — no registry, no rebuild).
     Their own suites pin desired-state decisions and this test pins the common
     allocation result: none can recreate while frozen, then each name is
     created exactly once after resume even when reconciliation retries.
