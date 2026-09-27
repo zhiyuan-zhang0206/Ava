@@ -126,7 +126,7 @@ renders that surface (module-by-module, function/class/variable/re-export, sorte
 and deterministic) into a snapshot file next to the code: `shared/db.api.txt`,
 `shared/agents/api.txt`, `shared/events/api.txt`. Regenerate with
 `.venv/bin/python scripts/structure/contracts.py --write`; the
-`contracts-snapshot-fresh` pre-commit hook runs `--check` and fails on drift.
+`lint-contract-snapshots` pre-commit hook runs `--check` and fails on drift.
 
 **A snapshot diff is a contract change, and the PR must declare it** (see the
 "Contract change" section in
