@@ -1,6 +1,6 @@
 """Single-box consolidation: stage, commit, push, refresh index.
 
-Usage: python3 consolidate.py -m "memory: <machine> <date> daily sync"
+Usage: $AVA_HOME/source/.venv/bin/python consolidate.py -m "memory: <machine> <date> daily sync"
 
 The single-box flow for a checkout that tracks its own branch directly.
 For the multi-host flow see steward.py (per-machine) and arbiter_merge.py.
@@ -10,10 +10,8 @@ from __future__ import annotations
 
 import argparse
 import sys
-from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _common import pool_dir, refresh_index, run, stage_and_commit
+from ava_builtins.plugins.ava_memory.pool_ops import pool_dir, refresh_index, run, stage_and_commit
 
 
 def main() -> int:
