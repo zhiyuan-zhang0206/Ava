@@ -36,10 +36,9 @@ shebang) may not import a same-directory sibling unless a
 ## Scope boundaries
 
 - **Module-only files are out of scope** (no main block, no shebang): they are
-  reached through guarded importers and never run as scripts. The standing
-  examples are `gmail/reference/_smtp.py` and `web-ai/reference/_utils.py` —
-  sole importers `feed.py` / `webchat.py` install the guard first. A module
-  that grows a main block or shebang enters scope automatically.
+  reached through guarded importers and never run as scripts (e.g. a sibling
+  a guarded entry script imports before running). A module that grows a main
+  block or shebang enters scope automatically.
 - **Tests are excluded**: pytest inserts the test directory into sys.path
   itself, so sibling imports in tests are module mode, not script mode.
 - **`from sibling.submodule import X` where `sibling` is a same-dir FILE is

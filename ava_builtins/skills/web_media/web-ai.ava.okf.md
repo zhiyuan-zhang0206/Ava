@@ -17,7 +17,7 @@ Users pay a **monthly flat fee** for ChatGPT/Gemini/Claude, but Ava's own backbo
 - **deep-research** — run Deep Research on Gemini/ChatGPT/Perplexity, poll until the report is ready; use when a long, cited, multi-source report is needed.
 - **media** — generate images (ChatGPT/Gemini) or video (Gemini) and download the files.
 
-Each sub-skill is a self-contained CLI (agent runs via bash, prints JSON to stdout, mirroring the web-sources adapter); the shared "open new conversation → input → submit → wait for streaming answer to finish" mechanics are in `reference/webchat.py`.
+Each sub-skill is a self-contained CLI (agent runs via bash, prints JSON to stdout, mirroring the web-sources adapter); the shared "open new conversation → input → submit → wait for streaming answer to finish" mechanics are in `ava_builtins/skill_support/web_ai/webchat.py`.
 
 ## Key dependencies
 - [[ava_builtins/skills/web_media/web_media.ava.okf.md|Web & multimodal skill]] — belongs to functional group

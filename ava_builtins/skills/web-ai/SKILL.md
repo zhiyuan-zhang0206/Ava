@@ -25,8 +25,9 @@ features that have **no API at all** (Deep Research, image/video generation).
 Each child is a self-contained CLI the agent runs with bash; it drives the
 browser itself and prints JSON to stdout, mirroring the `web-sources` adapters.
 The common mechanic — open a fresh chat, type the prompt, submit, wait for the
-streamed answer to finish — lives once in `reference/webchat.py`, which the
-children load with importlib. Messages can also carry a **local file
+streamed answer to finish — lives once in
+`ava_builtins/skill_support/web_ai/webchat.py`, which the children import.
+Messages can also carry a **local file
 attachment** (`console --file`, e.g. hand a PDF or image to the flat-rate seat
 for analysis) and **continue an existing conversation** (`console
 --continue-url`, `deep-research reply`) instead of always opening a fresh one.
@@ -66,7 +67,7 @@ These web UIs change without notice. When a child raises "composer not found" /
 "prompt did not register" / "answer empty", the fix is almost always one drifted
 CSS selector: open the site in the shared browser, inspect the live composer /
 send button / answer node, and update the relevant list in `SITES`
-(`$AVA_HOME/skills/web-ai/reference/webchat.py`). Selectors are tried in order, so prepend
+(`ava_builtins/skill_support/web_ai/_sites.py`). Selectors are tried in order, so prepend
 the new one and keep the old as a fallback.
 
 ## Boundaries
