@@ -11,7 +11,7 @@ tags: []
 
 Ava plugin's **graph-edge hook system**—four hook container nodes (`after_init / before_llm / before_exec / after_exec`) provide extension points in the LangGraph execution graph. Plugins register instances of `Hook` subclasses; the framework calls their typed `__call__` in registration order during graph node execution, with reducer arbitration for co-writes.
 
-Together with SDK wraps (the `ava.extend.wrap` registration primitive in `ava/_extend.py`), this forms the two-layer plugin system: SDK wraps modify the behavior of the ava namespace, while graph-edge hooks intervene in the agent execution pipeline.
+Together with SDK wraps (the `ava.extend.wrap` registration primitive in `ava/sdk_surface/wraps.py`), this forms the two-layer plugin system: SDK wraps modify the behavior of the ava namespace, while graph-edge hooks intervene in the agent execution pipeline.
 
 ## Core Responsibilities
 

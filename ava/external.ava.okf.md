@@ -23,7 +23,7 @@ The close-time pipeline and OTLP worker barriers are bounded: a timeout leaves
 the JSONL mirror and its delivery diagnostic intact rather than silently blocking
 or claiming an export that did not finish.
 
-`ava._boot.validate_external_identity` checks the lease, the caller's presence in
+`ava.agent_identity.validate_external_identity` checks the lease, the caller's presence in
 the recorded controller tree, and the state version on SDK
 identity paths, including provenance and MCP requests. `PluginStateHandle.read` and
 `update` perform the same check; raw `ava.state` remains a local snapshot rather
@@ -33,7 +33,7 @@ external caller profile so peer operations carry `agent:N`, then restores the
 ordinary profile when closed.
 
 Plugins load through the existing extension loader. Framework and plugin config
-views bind the agent's stored configuration, while `_external_state.load_snapshot`
+views bind the agent's stored configuration, while `external_state.load_snapshot`
 reads its checkpoint without writing it. Pending journal entries are replayed
 through their registered reducers after the checkpoint's applied receipt.
 

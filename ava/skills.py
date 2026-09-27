@@ -8,7 +8,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, TypedDict
 
-from ava import _skill_sources
+from ava import skill_sources
 from shared.log import logger
 from shared.packages.skills.skill_names import SkillIdentity, display_name, match_key
 from shared.paths import ava_home
@@ -142,7 +142,7 @@ def _skills_dir() -> Path:
 
 
 # Plugin-contributed skill-root providers. The registry storage lives in
-# `ava._skill_sources` (framework-internal) so the kernel's plugin reload can
+# `ava.skill_sources` (framework-internal) so the kernel's plugin reload can
 # clear it without importing this disable-able `ava.skills` module; the
 # functions here are the agent/plugin-facing client over it.
 
@@ -156,18 +156,18 @@ def register_skill_source(provider: Callable[[], list[Path]]) -> None:
     between projects. Provider roots are scanned last, so a project-local skill
     overrides a same-named built-in one.
     """
-    _skill_sources.register(provider)
+    skill_sources.register(provider)
 
 
 def clear_skill_sources() -> None:
     """Drop all registered skill-source providers, so the next plugin load
     re-registers from empty state."""
-    _skill_sources.clear()
+    skill_sources.clear()
 
 
 def _provider_roots() -> list[Path]:
     """Flatten all registered providers' roots into one list (scan order)."""
-    return _skill_sources.roots()
+    return skill_sources.roots()
 
 
 # ─── scanning: folder tree = namespace tree ────────────────────────────────
@@ -486,7 +486,7 @@ def skills_in(roots: list[Path]) -> list[Skill]:
     return _flatten(builder.tree)
 
 
-def _names() -> list[Skill]:
+def names() -> list[Skill]:
     return _flatten(_scan_tree())
 
 
@@ -641,7 +641,7 @@ def _record_skill_invoked_by_path(path: str | Path) -> bool:
     p = Path(path).expanduser().absolute()
     if p.name != "SKILL.md":
         return False
-    for skill in _names():
+    for skill in names():
         if Path(skill["path"]).expanduser().absolute() == p.parent:
             _record_skill_invoked(skill)
             return True
@@ -656,10 +656,10 @@ def read(name: str) -> str:
     spelling that folds to it (`"web_ai.deep_research"`, bare frontmatter name
     for a flat skill). Returns the same shape a proxy's `__doc__` carries.
     Unknown names raise ValueError."""
-    from ava._sdk_validation import coerce_str
+    from ava.sdk_validation import coerce_str
 
     key = match_key(coerce_str(name, "name"))
-    for skill in _names():
+    for skill in names():
         if match_key(identifier(skill)) == key or match_key(skill["name"]) == key:
             return _consume_skill_body(skill)
     raise ValueError(f"no skill named {name!r} — `ava.help(ava.skills)` lists the loaded catalog")
@@ -672,7 +672,7 @@ def _record_skill_invoked(skill: Skill) -> None:
     run only emits one event per skill. Skipped silently outside an agent
     process; a write failure is logged and swallowed.
     """
-    from ava._boot import require_agent_id
+    from ava.agent_identity import require_agent_id
 
     try:
         agent = require_agent_id()

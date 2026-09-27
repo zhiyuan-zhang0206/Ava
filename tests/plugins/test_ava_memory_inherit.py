@@ -1,6 +1,6 @@
 """Inherited memory — the `inheritable` block parser and the chain-read note.
 
-The chain is faked at the client seam (`ava._gateway_client.get_born_chain`)
+The chain is faked at the client seam (`ava.gateway_client.get_born_chain`)
 and entry files are written into the test home's workspaces, so the note
 builder runs end to end minus the network and the DB. What the real claim node
 does with the note (strip on fork + regraft) is pinned in
@@ -17,7 +17,7 @@ from typing import Any
 import pytest
 from langchain_core.messages import HumanMessage
 
-from ava import _gateway_client
+from ava import gateway_client
 from ava_builtins.plugins.ava_memory import inherit
 from shared.agents import GatewayUnavailable
 from shared.config import settings
@@ -94,7 +94,7 @@ def _fresh_chain_cache() -> Iterator[None]:
 @pytest.fixture
 def chain(monkeypatch: pytest.MonkeyPatch) -> _FakeChain:
     fake = _FakeChain()
-    monkeypatch.setattr(_gateway_client, "get_born_chain", fake)
+    monkeypatch.setattr(gateway_client, "get_born_chain", fake)
     return fake
 
 
@@ -268,12 +268,12 @@ def test_chain_read_failure_degrades_and_is_not_cached(chain: _FakeChain) -> Non
 def test_chain_read_is_cached_per_process(
     chain: _FakeChain, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr("ava._boot._agent_id", 1)
+    monkeypatch.setattr("ava.agent_identity._agent_id", 1)
     _write_entry(600351, "rules", _wrap("cached block"))
     chain.rows = [_local_row(600351)]
     assert inherit.inherited_memory_note() is not None
     assert inherit.inherited_memory_note() is not None
-    assert chain.calls == [1]  # the boot identity in tests; read once
+    assert chain.calls == [1]  # the established agent id; read once
 
 
 def test_content_is_deterministic(chain: _FakeChain) -> None:

@@ -1,4 +1,4 @@
-"""Unit tests for ava/_sdk_metering.py — the per-call SDK usage recorder.
+"""Unit tests for ava/sdk_metering.py — the per-call SDK usage recorder.
 
 The recorder wraps every public `ava.*` callable to emit one `sdk_call` event per
 top-level invocation (counted by the `sdk_usage` metric). These tests pin the two
@@ -19,7 +19,7 @@ from types import SimpleNamespace
 import pytest
 
 import ava
-from ava import _sdk_metering as sdk_metering
+from ava import sdk_metering
 from shared import sdk_telemetry
 
 
@@ -164,7 +164,7 @@ def test_plugin_wrapped_signature_survives_and_counts_once(
     def plugin_wrapped(a: int, b: int, *, label: str | None = None) -> tuple[int, int]:
         return core(a, b)
 
-    # mimic ava._extend._install_metadata: identity of the wrapped member + a
+    # mimic ava.sdk_surface.wraps._install_metadata: identity of the wrapped member + a
     # signature that advertises the plugin's added `label` kwarg.
     plugin_wrapped.__name__ = "spawn"
     plugin_wrapped.__module__ = "ava.agents"
@@ -263,7 +263,7 @@ def test_a_plugin_load_is_undone_by_the_autouse_teardown(request: pytest.Fixture
     """
     import ava.mcps
     from agent.graph import _build
-    from ava._sdk_metering import _RECORDERS
+    from ava.sdk_metering import _RECORDERS
 
     assert "_restore_sdk_metering" in request.fixturenames
 
@@ -337,7 +337,7 @@ def test_teardown_survives_a_poisoned_dynamic_surface(monkeypatch: pytest.Monkey
     sdk_metering.uninstall()
     # Completeness on the precise unit of the guarantee: no recorded pair still
     # holds a recorder. (The set itself may retain recorders that
-    # `ava._extend._ORIGINALS` captured before this test armed metering — that
+    # `ava.sdk_surface.wraps._ORIGINALS` captured before this test armed metering — that
     # retention predates task #3426 and is not this fix's business.)
     for parent, attr in recorded:
         assert getattr(parent, attr, None) not in sdk_metering._RECORDERS
@@ -405,7 +405,7 @@ def test_borrowed_identity_is_stamped_on_external_sdk_events(
 ) -> None:
     from typing import Any
 
-    from ava import _boot
+    from ava import agent_identity
     from shared import sdk_call_policy, telemetry
 
     rows: list[dict[str, Any]] = []
@@ -416,9 +416,9 @@ def test_borrowed_identity_is_stamped_on_external_sdk_events(
     def validate() -> int:
         pytest.fail("observational telemetry must not validate the lease")
 
-    monkeypatch.setattr(_boot, "_external_identity", validate)
-    monkeypatch.setattr(_boot, "_external_agent_id", 99)
-    monkeypatch.setattr(_boot, "_agent_id", 42)
+    monkeypatch.setattr(agent_identity, "_external_identity", validate)
+    monkeypatch.setattr(agent_identity, "_external_agent_id", 99)
+    monkeypatch.setattr(agent_identity, "_agent_id", 42)
     monkeypatch.setattr(telemetry, "emit", capture)
     monkeypatch.setattr(sdk_call_policy, "policy", sdk_call_policy.SamplingPolicy)
     wrapped = sdk_metering._make_recorder(lambda: "ok", "files.read")
@@ -435,7 +435,7 @@ async def test_plugin_wrap_preserves_awaited_single_event(
     import asyncio
     from collections.abc import Awaitable, Callable
 
-    from ava import _extend
+    from ava.sdk_surface import wraps
     from shared.plugin_context import PluginContext
 
     calls = _spy_emit(monkeypatch)
@@ -469,7 +469,7 @@ async def test_plugin_wrap_preserves_awaited_single_event(
         assert calls == [("self.review_async_test", {"body": True}, 2.0)]
     finally:
         sdk_metering.uninstall()
-        _extend.clear_wraps()
+        wraps.clear_wraps()
         ava.clear_registered_namespaces()
 
 

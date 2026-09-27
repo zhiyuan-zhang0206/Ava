@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 import ava
+from ava.sdk_surface import plugin_loader, sdk_disable
 from ava.shell import sessions
 from shared.config.turn_view import turn_settings
 from shared.daemon.schedules.watcher import TEMPLATE_VERSION
@@ -29,16 +30,16 @@ def _apply_per_agent_sdk_disable() -> None:
     sdk_disable is applied at ``ava`` import time from the env var
     ``AVA_SDK_DISABLE``.  Per-agent overlay additions to sdk_disable are
     set on settings by ``apply_config_overlay`` and must be applied on top
-    of the env baseline — ``ava._apply_sdk_disable`` is idempotent, so
+    of the env baseline — ``sdk_disable.apply_sdk_disable`` is idempotent, so
     only genuinely new entries take effect.
     """
 
     if not turn_settings.agent.sdk_disable:
         return
-    env_entries = set(ava._sdk_disable_entries)
+    env_entries = set(sdk_disable.sdk_disable_entries)
     new_disable = [e for e in turn_settings.agent.sdk_disable if e not in env_entries]
     if new_disable:
-        ava._apply_sdk_disable(new_disable)
+        sdk_disable.apply_sdk_disable(new_disable)
 
 
 def _apply_per_agent_eval_isolation() -> None:
@@ -57,7 +58,7 @@ def _apply_per_agent_eval_isolation() -> None:
         disabled.append("web")
     if "understand" not in allowed_network:
         disabled.append("understand")
-    ava._apply_sdk_disable(disabled)
+    sdk_disable.apply_sdk_disable(disabled)
 
     agent_id = int(os.environ["AVA_AGENT_ID"])
     isolated_pool = workspace_dir(agent_id) / "memory-pool"
@@ -177,7 +178,7 @@ def load_process_extensions() -> None:
     known = set(plugins_config.installed_plugin_dirs())
     config = plugins_config.load_for_runtime(known)
     enabled = {name for name, entry in config.plugins.items() if entry.enabled}
-    ava._extend.scan_and_load(enabled=enabled)
+    plugin_loader.scan_and_load(enabled=enabled)
     # Each loaded surface's agent-runtime face (state fields / hooks / prompt
     # sections). Faces of plugins whose surface loads later (the built-in set,
     # via build_graph's full `load_extensions`) are picked up there — the face
@@ -244,11 +245,11 @@ async def reconcile_agent_watchers(agent_id: int) -> bool:
         if not running:
             return True
         alive = sessions.list()
-        generation = sessions._current_session_generation()
+        generation = sessions.current_session_generation()
         return all(
             row["generation"] == generation
             and row["session_id"] in alive
-            and sessions._session_generation(row["session_id"]) == generation
+            and sessions.session_generation(row["session_id"]) == generation
             and (row["kind"] != "cron" or (row["template_version"] or 0) >= TEMPLATE_VERSION)
             for row in running
         )

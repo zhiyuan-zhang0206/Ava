@@ -3,7 +3,7 @@
 The kind predicates, the `_Constant` wrapper, and the module/class child
 walkers that power `help()` rendering, SDK-expand discovery, doc linting, and
 metering. `agent_visible_names` is the single source of truth the rest of the
-framework imports (`agent/graph/_system_prompt.py`, `ava/_sdk_metering.py`,
+framework imports (`agent/graph/_system_prompt.py`, `ava/sdk_metering.py`,
 `scripts/lint_doc_symbols.py`). Split out of `ava/__init__.py`; the package
 entry re-exports the names tests and framework code reach as `ava.<name>`.
 """
@@ -23,7 +23,7 @@ from .const import _DOCUMENTED_TYPE_CACHE
 # on a text-only model, user ruling 2026-08-28) sets this for the render
 # scope; scoped by contextvar so concurrent renders (hosted mode) never see
 # another agent's filter.
-_hidden_surface_members: contextvars.ContextVar[frozenset[str] | None] = contextvars.ContextVar(
+hidden_surface_members: contextvars.ContextVar[frozenset[str] | None] = contextvars.ContextVar(
     "ava_hidden_surface_members", default=None
 )
 
@@ -162,7 +162,7 @@ def _module_children(mod: Any) -> list[tuple[str, Any]]:
     docs = _module_attribute_docs(mod)
     surface = _static_agent_surface(mod)
     if surface is not None:
-        hidden = _hidden_surface_members.get()
+        hidden = hidden_surface_members.get()
         if hidden:
             # Dotted member paths (``ava.self.attach``) set by the render
             # caller — the member stays in the surface list (plugin members,

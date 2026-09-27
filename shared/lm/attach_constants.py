@@ -1,7 +1,7 @@
 """Attachment limits and the shared suffix-to-MIME table — a pure-data leaf.
 
 The constants below are read by paths that must not pull the provider stack:
-the SDK registration/validation surface (`ava._attach`), the SDK media
+the SDK registration/validation surface (`ava.attachment_transport`), the SDK media
 classification (`ava.understand`), the exec merge validator
 (`agent.graph._attach_merge`), and the turn-boundary packer
 (`shared.lm.attach`) itself. Keep this module import-free; anything that needs

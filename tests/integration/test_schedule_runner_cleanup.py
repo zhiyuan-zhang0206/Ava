@@ -171,7 +171,7 @@ def test_runner_hard_exit_child_ownership(
         )
     code = (
         setup + "from gateway import schedule_runner as r; import ava; "
-        "ava._ensure_plugins_loaded = lambda: None; "
+        "ava.ensure_plugins_loaded = lambda: None; "
         "r._STALL_TIMEOUT_S = 0.15; r._STALL_CHECK_INTERVAL_S = 0.02; "
         f"raise SystemExit(r.run({row[0]}))"
     )

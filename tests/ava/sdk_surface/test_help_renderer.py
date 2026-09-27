@@ -18,14 +18,18 @@ import textwrap
 import types
 
 import ava
-from ava import (
+from ava.sdk_surface.discovery import (
     _classify_dir_entry,
     _Constant,
-    _format_docstring,
-    _format_signature,
     _module_attribute_annotations,
     _module_attribute_docs,
     _module_children,
+)
+from ava.sdk_surface.help import (
+    _format_docstring,
+    _format_documented_const_stub,
+    _format_signature,
+    compact_classes,
 )
 
 
@@ -279,11 +283,11 @@ def test_class_child_compact_keeps_fields_drops_methods_and_nested() -> None:
         ''',
         name="t_class_compact",
     )
-    token = ava._COMPACT_CLASSES.set(True)
+    token = compact_classes.set(True)
     try:
         out = _render(mod)
     finally:
-        ava._COMPACT_CLASSES.reset(token)
+        compact_classes.reset(token)
     assert "class Widget:" in out
     assert '"""A widget."""' in out
     # fields kept
@@ -312,11 +316,11 @@ def test_class_child_compact_keeps_enum_members() -> None:
         ''',
         name="t_enum_compact",
     )
-    token = ava._COMPACT_CLASSES.set(True)
+    token = compact_classes.set(True)
     try:
         out = _render(mod)
     finally:
-        ava._COMPACT_CLASSES.reset(token)
+        compact_classes.reset(token)
     assert "class Status(StrEnum):" in out
     assert "ON = 'on'" in out
     assert "OFF = 'off'" in out
@@ -346,7 +350,7 @@ def test_pep224_constant_child_renders_name_type_with_docstring() -> None:
 def test_documented_const_short_value_renders_inline_assignment() -> None:
     """A scalar `ava.const()` value renders as a one-line `name: T = value`."""
     c = ava.const(7, doc="The answer-ish.")
-    out = ava._format_documented_const_stub("LIMIT", c)
+    out = _format_documented_const_stub("LIMIT", c)
     assert out == 'LIMIT: int = 7\n"""The answer-ish."""'
 
 
@@ -354,7 +358,7 @@ def test_documented_const_multiline_string_renders_triple_quoted_block() -> None
     """A multi-line string const (e.g. a skill body) renders as a triple-quoted
     block with the doc as a lead-in — not a stiff `name: str = <... one line>`."""
     c = ava.const("line one\nline two\nline three", doc="A text block.")
-    out = ava._format_documented_const_stub("BODY", c)
+    out = _format_documented_const_stub("BODY", c)
     assert out == '"""A text block."""\nBODY: str = """\nline one\nline two\nline three\n"""'
 
 
@@ -478,7 +482,7 @@ def test_documented_const_path_under_home_renders_tilde_relative() -> None:
     from pathlib import Path
 
     c = ava.const(Path.home() / ".ava" / "memory", doc="x")
-    out = ava._format_documented_const_stub("PATH", c)
+    out = _format_documented_const_stub("PATH", c)
     assert "PATH: PosixPath = ~/.ava/memory" in out
 
 

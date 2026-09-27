@@ -179,7 +179,7 @@ def resolve_command(cmd: str) -> str:
     return cmd
 
 
-def _machine_config_path() -> Path:
+def machine_config_path() -> Path:
     """`mcp.json` path — goes through `ava_home()` so AVA_HOME env injection takes effect.
 
     Avoids a module-level constant: in docker / eval scenarios AVA_HOME may
@@ -188,7 +188,7 @@ def _machine_config_path() -> Path:
     return ava_home() / "mcp.json"
 
 
-def _read_servers(path: Path) -> dict[str, dict[str, Any]]:
+def read_servers(path: Path) -> dict[str, dict[str, Any]]:
     """Read the `mcpServers` section of one JSON config file.
 
     Missing file or missing `mcpServers` section → empty dict (tolerates a
@@ -214,7 +214,7 @@ def _read_servers(path: Path) -> dict[str, dict[str, Any]]:
     return section
 
 
-def _builtin_mcp_paths() -> list[Path]:
+def builtin_mcp_paths() -> list[Path]:
     """Built-in MCP declarations shipped in the repo's `ava_builtins/mcps/` folder
     (`<repo>/ava_builtins/mcps/*/.mcp.json`), sorted by name. Symmetric with built-in skills
     (`ava_builtins/skills/`) and plugins (`ava_builtins/plugins/`)."""
@@ -267,7 +267,7 @@ def installed_mcp_dir(name: str) -> Path | None:
 
     if name not in installed_mcp_names():
         return None
-    if name in _read_servers(_machine_config_path()):
+    if name in read_servers(machine_config_path()):
         return None
     d = mcps_dir() / name
     return d if (d / ".mcp.json").is_file() else None
@@ -293,16 +293,16 @@ def server_cwd(name: str) -> Path | None:
       line (absolute or PATH-resolved), so we must not reinterpret it.
     """
     # Machine config is the top layer — the user's own command line.
-    if name in _read_servers(_machine_config_path()):
+    if name in read_servers(machine_config_path()):
         return None
     installed = installed_mcp_dir(name)
     if installed is not None:
         return installed
     for path in _plugin_config_paths():
-        if name in _read_servers(path):
+        if name in read_servers(path):
             return None
-    for path in _builtin_mcp_paths():
-        if name in _read_servers(path):
+    for path in builtin_mcp_paths():
+        if name in read_servers(path):
             return repo_root()
     return None
 
@@ -345,13 +345,13 @@ def load_mcp_config(*, include_disabled: bool = False) -> dict[str, dict[str, An
         MCPError: any source file fails to parse or has a non-dict `mcpServers`.
     """
     merged: dict[str, dict[str, Any]] = {}
-    for path in _builtin_mcp_paths():
-        merged.update(_read_servers(path))
+    for path in builtin_mcp_paths():
+        merged.update(read_servers(path))
     for path in _plugin_config_paths():
-        merged.update(_read_servers(path))
+        merged.update(read_servers(path))
     for path in _installed_mcp_paths():
-        merged.update(_read_servers(path))
-    merged.update(_read_servers(_machine_config_path()))
+        merged.update(read_servers(path))
+    merged.update(read_servers(machine_config_path()))
     if include_disabled:
         return merged
     from shared.mcp_enabled import McpEnabledConfigError, read_enabled

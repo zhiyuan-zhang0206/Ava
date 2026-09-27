@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from ava._attach import attach, take_attachments
+from ava.attachment_transport import attach, take_attachments
 from shared.lm.attach_constants import ATTACH_MAX_FILE_BYTES, ATTACH_MAX_LABEL_CHARS
 
 
@@ -87,7 +87,7 @@ def test_uses_workspace_relative_path_semantics(
 ) -> None:
     _exec_child(monkeypatch, tmp_path)
     monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.setattr("ava.files._boot.agent_id", lambda: None)
+    monkeypatch.setattr("ava.files.agent_identity.agent_id", lambda: None)
     image = tmp_path / "relative.png"
     image.write_bytes(b"png")
 
@@ -99,13 +99,13 @@ def test_uses_workspace_relative_path_semantics(
 def test_take_attachments_drops_tampered_entries(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    from ava import _attach
+    from ava import attachment_transport
 
     _exec_child(monkeypatch, tmp_path)
     image = tmp_path / "result.png"
     image.write_bytes(b"png")
     attach(image)
-    _attach._ATTACHMENTS.extend(
+    attachment_transport._ATTACHMENTS.extend(
         [{"path": 1, "label": None}, {"path": "x", "label": 1}, object()]  # pyright: ignore[reportArgumentType]  # Deliberately tamper with the private buffer.
     )
 

@@ -23,8 +23,8 @@ import psycopg
 import pytest
 
 import ava
-from ava import _gateway_client, _watcher_reconcile, watcher
-from ava.shell import _background
+from ava import _watcher_reconcile, gateway_client, watcher
+from ava.shell import background
 from shared.platform import IS_WINDOWS
 
 pytestmark = [
@@ -424,8 +424,8 @@ def test_boot_loads_plugins_before_running_script(tmp_path: pathlib.Path) -> Non
     # (ava.tasks etc.) before it runpys the watcher script — otherwise the script
     # AttributeErrors on any plugin namespace. Order matters: load then run.
     boot = watcher._build_boot(tmp_path / "x.py", None, 42)
-    assert "ava._ensure_plugins_loaded()" in boot
-    assert boot.index("ava._ensure_plugins_loaded()") < boot.index("runpy.run_path")
+    assert "ava.ensure_plugins_loaded()" in boot
+    assert boot.index("ava.ensure_plugins_loaded()") < boot.index("runpy.run_path")
     compile(boot, "<boot>", "exec")  # must be valid Python
 
 
@@ -642,7 +642,7 @@ def test_launch_carries_agent_and_session_to_child(
     boot = _boot_text(wid)
     # Identity is inlined; ava is imported for init_globals
     assert f'os.environ["AVA_AGENT_ID"] = "{_agent_row}"' in boot
-    assert "ava._boot.establish" not in boot
+    assert "ava.agent_identity.establish" not in boot
     assert "import ava" in boot
     assert "runpy.run_path" in boot
     assert "init_globals" in boot
@@ -670,7 +670,7 @@ def test_launch_writes_script_verbatim_and_runs_via_runpy(
     assert "runpy.run_path" in boot
     # Identity is inlined into the bootstrap
     assert f'os.environ["AVA_AGENT_ID"] = "{_agent_row}"' in boot
-    assert "ava._boot.establish" not in boot
+    assert "ava.agent_identity.establish" not in boot
     assert "import ava" in boot
     assert "init_globals" in boot
     assert f"watcher_{wid}.py" in boot
@@ -716,7 +716,7 @@ def test_watcher_completion_notice_e2e(
     fake_cli = tmp_path / "fake-ava"
     fake_cli.write_text(f"#!/bin/sh\nprintf '%s\\n' \"$@\" > {argv_file}\n")
     fake_cli.chmod(0o755)
-    monkeypatch.setattr(_background, "cli_path", lambda: fake_cli)
+    monkeypatch.setattr(background, "cli_path", lambda: fake_cli)
 
     # `exit 7` exits the shell subshell wrapping the python command — use a
     # python-level SystemExit instead so the exit code flows through the child.
@@ -833,7 +833,7 @@ def test_boot_inlines_agent_identity(tmp_path: pathlib.Path) -> None:
     assert 'os.environ["AVA_AGENT_ID"] = "42"' in boot
     env_line = boot.index('os.environ["AVA_AGENT_ID"]')
     assert env_line < boot.index("import ava")  # before the ava import, not just before use
-    assert env_line < boot.index("ava._ensure_plugins_loaded()")
+    assert env_line < boot.index("ava.ensure_plugins_loaded()")
     assert env_line < boot.index("runpy.run_path")
     compile(boot, "<boot>", "exec")  # must be valid Python
 
@@ -858,7 +858,7 @@ def test_watcher_child_sees_agent_identity(
     fake_cli = tmp_path / "fake-ava"
     fake_cli.write_text("#!/bin/sh\nexit 0\n")
     fake_cli.chmod(0o755)
-    monkeypatch.setattr(_background, "cli_path", lambda: fake_cli)
+    monkeypatch.setattr(background, "cli_path", lambda: fake_cli)
 
     wid = watcher.launch(code, timeout="1h", name="test-identity")
 
@@ -934,7 +934,7 @@ def test_watcher_child_overrides_stale_session_identity(
     fake_cli = tmp_path / "fake-ava"
     fake_cli.write_text("#!/bin/sh\nexit 0\n")
     fake_cli.chmod(0o755)
-    monkeypatch.setattr(_background, "cli_path", lambda: fake_cli)
+    monkeypatch.setattr(background, "cli_path", lambda: fake_cli)
 
     stale = _agent_row + 1  # a WRONG identity, as if frozen into the session env
 
@@ -985,7 +985,7 @@ def _clean_registry_rows(
     # accompanying PTY record. Keep those unit cases in the legacy no-flip
     # generation; focused tests override this seam to exercise the active
     # generation boundary.
-    monkeypatch.setattr(_sessions, "_current_session_generation", lambda: None)
+    monkeypatch.setattr(_sessions, "current_session_generation", lambda: None)
 
     yield
     with psycopg.connect(settings.data_plane.db_url, autocommit=True) as conn:
@@ -1084,7 +1084,7 @@ def test_reconcile_rebuilds_missing_current_generation_cron(
     from shared.daemon.schedules.watcher_registry import register_watcher
 
     monkeypatch.setattr(_sessions, "send", lambda _id, _cmd: None)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_sessions, "_current_session_generation", lambda: "current-generation")
+    monkeypatch.setattr(_sessions, "current_session_generation", lambda: "current-generation")
     calls: list[tuple[Any, ...]] = []
     monkeypatch.setattr(_watcher_reconcile, "cron", lambda *a, **k: calls.append((a, k)) or 999)  # pyright: ignore[reportUnknownArgumentType]
     register_watcher(
@@ -1115,11 +1115,11 @@ def test_reconcile_reaps_superseded_generation_without_rebuilding(
 
     monkeypatch.setattr(_sessions, "send", lambda _id, _cmd: None)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_sessions, "list", lambda: {424248: "old-cron"})
-    monkeypatch.setattr(_sessions, "_current_session_generation", lambda: "current-generation")
+    monkeypatch.setattr(_sessions, "current_session_generation", lambda: "current-generation")
     reaped: list[int] = []
     monkeypatch.setattr(
         _sessions,
-        "_reap",
+        "reap",
         lambda session_id: reaped.append(session_id) or True,  # pyright: ignore[reportUnknownArgumentType]
     )
     calls: list[tuple[Any, ...]] = []
@@ -1155,10 +1155,10 @@ def test_reconcile_notifies_when_a_superseded_one_shot_is_reaped(
     session_id = 424249 if kind == "at" else 424250
     monkeypatch.setattr(_sessions, "send", lambda _id, _cmd: None)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(_sessions, "list", lambda: {session_id: f"old-{kind}"})
-    monkeypatch.setattr(_sessions, "_current_session_generation", lambda: "current-generation")
-    monkeypatch.setattr(_sessions, "_reap", lambda _session_id: True)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_sessions, "current_session_generation", lambda: "current-generation")
+    monkeypatch.setattr(_sessions, "reap", lambda _session_id: True)  # pyright: ignore[reportUnknownArgumentType]
     sent: list[str] = []
-    monkeypatch.setattr(_gateway_client, "send_message", _capture_completion_notice(sent))
+    monkeypatch.setattr(gateway_client, "send_message", _capture_completion_notice(sent))
     if kind == "at":
         register_watcher(
             _agent_row,
@@ -1203,7 +1203,7 @@ def test_spawn_binds_registry_generation_to_the_created_session_record(
 
     backend = _Backend()
 
-    def _create_session(
+    def create_session(
         _name: str | None = None,
         *,
         cwd: str | None = None,
@@ -1213,7 +1213,7 @@ def test_spawn_binds_registry_generation_to_the_created_session_record(
     ) -> tuple[int, str]:
         return 424271, "ava-agent-1-shell-424271-record-bound"
 
-    monkeypatch.setattr(_sessions, "_create_session", _create_session)
+    monkeypatch.setattr(_sessions, "create_session", create_session)
     monkeypatch.setattr(_sessions, "send", lambda _id, _cmd: None)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr("shared.session_backend.get_shell_backend", lambda: backend)
 
@@ -1237,7 +1237,7 @@ def test_reconcile_drops_already_fired_one_shot_without_alert(
 
     monkeypatch.setattr(_sessions, "send", lambda _id, _cmd: None)  # pyright: ignore[reportUnknownArgumentType]
     sent: list[str] = []
-    monkeypatch.setattr(_gateway_client, "send_message", _capture_completion_notice(sent))
+    monkeypatch.setattr(gateway_client, "send_message", _capture_completion_notice(sent))
 
     past = datetime.datetime.now(datetime.UTC) - datetime.timedelta(minutes=5)
     register_watcher(_agent_row, 424245, kind="at", name="fired", message="go", fires_at=past)
@@ -1267,7 +1267,7 @@ def test_reconcile_completion_notice_does_not_count_as_delivered(
 
     monkeypatch.setattr(_sessions, "send", lambda _id, _cmd: None)  # pyright: ignore[reportUnknownArgumentType]
     sent: list[str] = []
-    monkeypatch.setattr(_gateway_client, "send_message", _capture_completion_notice(sent))
+    monkeypatch.setattr(gateway_client, "send_message", _capture_completion_notice(sent))
 
     past = datetime.datetime.now(datetime.UTC) - datetime.timedelta(minutes=5)
     register_watcher(
@@ -1299,7 +1299,7 @@ def test_reconcile_marks_missed_one_shot_and_alerts(
 
     monkeypatch.setattr(_sessions, "send", lambda _id, _cmd: None)  # pyright: ignore[reportUnknownArgumentType]
     sent: list[str] = []
-    monkeypatch.setattr(_gateway_client, "send_message", _capture_completion_notice(sent))
+    monkeypatch.setattr(gateway_client, "send_message", _capture_completion_notice(sent))
     from shared.daemon.schedules.watcher_registry import register_watcher
 
     past = datetime.datetime.now(datetime.UTC) - datetime.timedelta(minutes=5)
@@ -1336,7 +1336,7 @@ def test_reconcile_never_reruns_launch(_agent_row: int, monkeypatch: pytest.Monk
 
     monkeypatch.setattr(_sessions, "send", lambda _id, _cmd: None)  # pyright: ignore[reportUnknownArgumentType]
     sent: list[str] = []
-    monkeypatch.setattr(_gateway_client, "send_message", _capture_completion_notice(sent))
+    monkeypatch.setattr(gateway_client, "send_message", _capture_completion_notice(sent))
     calls: list[tuple[Any, ...]] = []
     monkeypatch.setattr(_watcher_reconcile, "launch", lambda *a, **k: calls.append((a, k)) or 999)  # pyright: ignore[reportUnknownArgumentType]
     from shared.daemon.schedules.watcher_registry import register_watcher
@@ -1408,7 +1408,7 @@ def test_spawn_back_to_back_keeps_all_files(
         alive.add(sid)
         return sid, name
 
-    monkeypatch.setattr(_sessions, "_create_session", _fake_create)
+    monkeypatch.setattr(_sessions, "create_session", _fake_create)
     monkeypatch.setattr(_sessions, "list", lambda: dict.fromkeys(alive, "w"))
     d = watcher._watchers_dir()
 

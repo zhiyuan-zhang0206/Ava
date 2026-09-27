@@ -7,8 +7,8 @@ argument — the free-text natural-language instruction typed after `/name`; the
 `instruction-hint` is the placeholder for it (Claude Code's `argument-hint` key
 is also read, for imported CC-plugin commands).
 
-This module is private (`_`) and is never registered on the `ava.*` namespace;
-the expansion machinery is an implementation detail. The web Composer sends the
+This module is framework-internal and is never registered on the `ava.*`
+namespace; the expansion machinery is an implementation detail. The web Composer sends the
 raw `/<name> <free text>` a human typed; `expand_command` rewrites it (here, in
 the agent's claim node, before the message is wrapped for the model) into the
 final prompt. The model only ever sees that expanded string. The gateway reuses
@@ -55,7 +55,7 @@ Discovery sources (later overrides earlier on name collision):
   5. `<skill-dir>/commands/<name>.md`            — skill-carried (under the
                                                    carrying skill's namespace path)
 
-Sources 5 and 0 walk the *active* skill set (`ava.skills._names()`), inheriting
+Sources 5 and 0 walk the *active* skill set (`ava.skills.names()`), inheriting
 its install-registry gating. Source 0 gives every skill a same-named
 `/`-command for free; an explicit command file overrides it.
 
@@ -144,7 +144,7 @@ def _command_dirs() -> list[tuple[Path, tuple[str, ...]]]:
                 for p in sorted(base.iterdir())
                 if p.is_dir() and not p.name.startswith((".", "_"))
             )
-    for sk in skills._names():
+    for sk in skills.names():
         dirs.append((Path(sk["path"]) / "commands", (*sk["namespace"], sk["name"])))
     return dirs
 
@@ -198,7 +198,7 @@ def _skill_commands() -> dict[str, Command]:
     it into a load-and-follow instruction rather than inlining a body.
     """
     out: dict[str, Command] = {}
-    for sk in skills._names():
+    for sk in skills.names():
         ident = skills.identifier(sk)
         out[ident] = {
             "name": ident,

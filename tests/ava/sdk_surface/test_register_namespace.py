@@ -27,6 +27,7 @@ import pytest
 
 import ava
 from agent.state import clear_plugin_registrations
+from ava.sdk_surface import plugins
 
 
 @pytest.fixture(autouse=True)
@@ -34,7 +35,7 @@ def _isolate_namespaces():
     """Before/after each test clear plugin-registered namespaces to prevent cross-test leaks,
     ensuring ava surface (package attrs, `__all_for_ava__`, sys.modules aliases)
     matches pre-test state after completion."""
-    _saved_ns = dict(ava._REGISTERED_NAMESPACES)
+    _saved_ns = dict(plugins._REGISTERED_NAMESPACES)
     # `ava.<name>` aliases in sys.modules are part of the surface
     # register_namespace now writes; snapshot them too so teardown puts the
     # pre-test objects back instead of leaving test-created ones behind.
@@ -48,8 +49,8 @@ def _isolate_namespaces():
     ava.clear_registered_namespaces()
     for _name, _obj in _saved_ns.items():
         setattr(ava, _name, _obj)
-        if _name not in ava._REGISTERED_NAMESPACES:
-            ava._REGISTERED_NAMESPACES[_name] = "<restored>"
+        if _name not in plugins._REGISTERED_NAMESPACES:
+            plugins._REGISTERED_NAMESPACES[_name] = "<restored>"
         if _name not in ava.__all_for_ava__:
             ava.__all_for_ava__.append(_name)
     # Restore the sys.modules aliases the tests see: `clear_registered_namespaces`
@@ -170,7 +171,7 @@ def test_register_namespace_refuses_disabled_sentinel():
     sentinel at import time (before plugin load); register_namespace must not
     clobber it — the namespace stays disabled (framework-owned, not
     overridable) and the sentinel keeps raising its legible error."""
-    from ava._exports.sdk_disable import _DisabledSDKModule
+    from ava.sdk_surface.sdk_disable import _DisabledSDKModule
 
     sentinel = _DisabledSDKModule("ava.code")
     sys.modules["ava.code"] = sentinel

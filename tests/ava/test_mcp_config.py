@@ -1,4 +1,4 @@
-"""`ava._mcp_config` — the shared MCP config loader.
+"""`ava.mcp_config` — the shared MCP config loader.
 
 Covers the three concerns the loader factors out of the two `_load_config`
 call sites: reading one file's `mcpServers` section (with fail-fast on bad
@@ -16,7 +16,7 @@ from typing import Any
 
 import pytest
 
-import ava._mcp_config as cfg_mod
+import ava.mcp_config as cfg_mod
 
 
 def _write(path: Path, servers: dict[str, dict[str, str]]) -> None:
@@ -24,38 +24,38 @@ def _write(path: Path, servers: dict[str, dict[str, str]]) -> None:
     path.write_text(json.dumps({"mcpServers": servers}), encoding="utf-8")
 
 
-# ─── _machine_config_path ────────────────────────────────────────────────
+# ─── machine_config_path ─────────────────────────────────────────────────
 
 
 def test_machine_config_path_uses_ava_home(unit_home: Path) -> None:
-    assert cfg_mod._machine_config_path() == unit_home / "mcp.json"
+    assert cfg_mod.machine_config_path() == unit_home / "mcp.json"
 
 
-# ─── _read_servers ───────────────────────────────────────────────────────
+# ─── read_servers ────────────────────────────────────────────────────────
 
 
 def test_read_servers_empty_when_no_file(tmp_path: Path) -> None:
-    assert cfg_mod._read_servers(tmp_path / "absent.json") == {}
+    assert cfg_mod.read_servers(tmp_path / "absent.json") == {}
 
 
 def test_read_servers_empty_when_no_section(tmp_path: Path) -> None:
     """A generic settings file lacking `mcpServers` contributes nothing."""
     p = tmp_path / "mcp.json"
     p.write_text(json.dumps({"other": {}}), encoding="utf-8")
-    assert cfg_mod._read_servers(p) == {}
+    assert cfg_mod.read_servers(p) == {}
 
 
 def test_read_servers_parses_section(tmp_path: Path) -> None:
     p = tmp_path / "mcp.json"
     _write(p, {"fs": {"command": "x"}, "github": {"command": "y"}})
-    assert cfg_mod._read_servers(p) == {"fs": {"command": "x"}, "github": {"command": "y"}}
+    assert cfg_mod.read_servers(p) == {"fs": {"command": "x"}, "github": {"command": "y"}}
 
 
 def test_read_servers_raises_on_bad_json(tmp_path: Path) -> None:
     p = tmp_path / "mcp.json"
     p.write_text("{not json", encoding="utf-8")
     with pytest.raises(cfg_mod.MCPError, match="Failed to read"):
-        cfg_mod._read_servers(p)
+        cfg_mod.read_servers(p)
 
 
 def test_read_servers_raises_when_section_not_dict(tmp_path: Path) -> None:
@@ -63,7 +63,7 @@ def test_read_servers_raises_when_section_not_dict(tmp_path: Path) -> None:
     p = tmp_path / "mcp.json"
     p.write_text(json.dumps({"mcpServers": [1, 2, 3]}), encoding="utf-8")
     with pytest.raises(cfg_mod.MCPError, match="mcpServers field is not a dict"):
-        cfg_mod._read_servers(p)
+        cfg_mod.read_servers(p)
 
 
 def test_read_servers_raises_when_top_level_not_object(tmp_path: Path) -> None:
@@ -71,7 +71,7 @@ def test_read_servers_raises_when_top_level_not_object(tmp_path: Path) -> None:
     p = tmp_path / "mcp.json"
     p.write_text(json.dumps([1, 2, 3]), encoding="utf-8")
     with pytest.raises(cfg_mod.MCPError, match="is not a JSON object"):
-        cfg_mod._read_servers(p)
+        cfg_mod.read_servers(p)
 
 
 def test_read_servers_empty_when_section_null(tmp_path: Path) -> None:
@@ -79,7 +79,7 @@ def test_read_servers_empty_when_section_null(tmp_path: Path) -> None:
     the section is optional, so null collapses to empty rather than raising."""
     p = tmp_path / "mcp.json"
     p.write_text(json.dumps({"mcpServers": None}), encoding="utf-8")
-    assert cfg_mod._read_servers(p) == {}
+    assert cfg_mod.read_servers(p) == {}
 
 
 # ─── _plugin_config_paths (discovery) ────────────────────────────────────
@@ -104,13 +104,13 @@ def test_plugin_config_paths_ignores_plugin_without_mcp_json(unit_home: Path) ->
 def test_load_empty_when_nothing_configured(
     unit_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(cfg_mod, "_builtin_mcp_paths", list)
+    monkeypatch.setattr(cfg_mod, "builtin_mcp_paths", list)
     monkeypatch.setattr(cfg_mod, "_plugin_config_paths", list)
     assert cfg_mod.load_mcp_config() == {}
 
 
 def test_load_returns_machine_servers(unit_home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(cfg_mod, "_builtin_mcp_paths", list)
+    monkeypatch.setattr(cfg_mod, "builtin_mcp_paths", list)
     monkeypatch.setattr(cfg_mod, "_plugin_config_paths", list)
     _write(unit_home / "mcp.json", {"fs": {"command": "machine"}})
     assert cfg_mod.load_mcp_config() == {"fs": {"command": "machine"}}
@@ -121,7 +121,7 @@ def test_load_returns_plugin_servers_when_no_machine_config(
 ) -> None:
     plugin_json = tmp_path / "plugin" / ".mcp.json"
     _write(plugin_json, {"fs": {"command": "plugin"}})
-    monkeypatch.setattr(cfg_mod, "_builtin_mcp_paths", list)
+    monkeypatch.setattr(cfg_mod, "builtin_mcp_paths", list)
     monkeypatch.setattr(cfg_mod, "_plugin_config_paths", lambda: [plugin_json])
     assert cfg_mod.load_mcp_config() == {"fs": {"command": "plugin"}}
 
@@ -133,7 +133,7 @@ def test_machine_overrides_plugin_on_name_collision(
     plugin servers still surface."""
     plugin_json = tmp_path / "plugin" / ".mcp.json"
     _write(plugin_json, {"fs": {"command": "plugin"}, "extra": {"command": "p"}})
-    monkeypatch.setattr(cfg_mod, "_builtin_mcp_paths", list)
+    monkeypatch.setattr(cfg_mod, "builtin_mcp_paths", list)
     monkeypatch.setattr(cfg_mod, "_plugin_config_paths", lambda: [plugin_json])
     _write(unit_home / "mcp.json", {"fs": {"command": "machine"}})
 
@@ -149,7 +149,7 @@ def test_later_plugin_overrides_earlier(
     second = tmp_path / "b" / ".mcp.json"
     _write(first, {"fs": {"command": "first"}})
     _write(second, {"fs": {"command": "second"}})
-    monkeypatch.setattr(cfg_mod, "_builtin_mcp_paths", list)
+    monkeypatch.setattr(cfg_mod, "builtin_mcp_paths", list)
     monkeypatch.setattr(cfg_mod, "_plugin_config_paths", lambda: [first, second])
     assert cfg_mod.load_mcp_config() == {"fs": {"command": "second"}}
 
@@ -206,7 +206,7 @@ def _install_mcp(home: Path, name: str, spec: dict[str, Any]) -> Path:
 def test_installed_mcp_surfaces_when_registered(
     unit_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(cfg_mod, "_builtin_mcp_paths", list)
+    monkeypatch.setattr(cfg_mod, "builtin_mcp_paths", list)
     monkeypatch.setattr(cfg_mod, "_plugin_config_paths", list)
     _install_mcp(unit_home, "acme", {"command": ".venv/bin/python", "args": ["-m", "acme"]})
     assert "acme" in cfg_mod.load_mcp_config()
@@ -216,7 +216,7 @@ def test_installed_mcp_ignored_without_registry_row(
     unit_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A stray dir under the load dir with no `type="mcp"` registry row is not loaded."""
-    monkeypatch.setattr(cfg_mod, "_builtin_mcp_paths", list)
+    monkeypatch.setattr(cfg_mod, "builtin_mcp_paths", list)
     monkeypatch.setattr(cfg_mod, "_plugin_config_paths", list)
     _write(unit_home / "mcps" / "stray" / ".mcp.json", {"stray": {"command": "x"}})
     assert "stray" not in cfg_mod.load_mcp_config()
@@ -224,7 +224,7 @@ def test_installed_mcp_ignored_without_registry_row(
 
 def test_machine_overrides_installed(unit_home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Machine config is the top layer: it wins over a same-named installed server."""
-    monkeypatch.setattr(cfg_mod, "_builtin_mcp_paths", list)
+    monkeypatch.setattr(cfg_mod, "builtin_mcp_paths", list)
     monkeypatch.setattr(cfg_mod, "_plugin_config_paths", list)
     _install_mcp(unit_home, "acme", {"command": "installed"})
     _write(unit_home / "mcp.json", {"acme": {"command": "machine"}})
@@ -237,7 +237,7 @@ def test_installed_overrides_plugin(
     """Installed layer sits above plugin: an installed server wins over a same-named plugin one."""
     plugin_json = tmp_path / "plugin" / ".mcp.json"
     _write(plugin_json, {"acme": {"command": "plugin"}})
-    monkeypatch.setattr(cfg_mod, "_builtin_mcp_paths", list)
+    monkeypatch.setattr(cfg_mod, "builtin_mcp_paths", list)
     monkeypatch.setattr(cfg_mod, "_plugin_config_paths", lambda: [plugin_json])
     _install_mcp(unit_home, "acme", {"command": "installed"})
     assert cfg_mod.load_mcp_config()["acme"] == {"command": "installed"}

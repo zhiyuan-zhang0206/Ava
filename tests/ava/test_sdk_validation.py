@@ -1,7 +1,7 @@
 """Unified SDK argument validation — the trailing-comma guard.
 
 Every ava.* entry point validates its own arguments through the shared
-`ava._sdk_validation` helpers (one implementation, user ruling 2026-08-28):
+`ava.sdk_validation` helpers (one implementation, user ruling 2026-08-28):
 
 - string-expected arguments unwrap a one-element list/tuple whose element is a
   string (the LLM trailing-comma class that 422'd the gateway — issue #1343,
@@ -25,13 +25,13 @@ import psycopg
 import pytest
 
 import ava
-import ava._boot
+import ava.agent_identity
 from ava import agents
 from ava import files as _files
 from ava import shell as _shell
 from ava import ui as _ui
 from ava import watcher as _watcher
-from ava._sdk_validation import coerce_str, coerce_typed
+from ava.sdk_validation import coerce_str, coerce_typed
 
 # ── helper units ─────────────────────────────────────────────────────────────
 
@@ -135,7 +135,7 @@ class TestAgentsEntries:
     ) -> None:
         seen: dict[str, Any] = {}
         monkeypatch.setattr(agents._client, "spawn", lambda **kw: seen.update(kw) or 1)  # pyright: ignore[reportUnknownArgumentType]
-        monkeypatch.setattr(ava._boot, "require_actor", lambda: "agent:1")
+        monkeypatch.setattr(ava.agent_identity, "require_actor", lambda: "agent:1")
 
         agents.spawn(prompt=("hello",))  # pyright: ignore[reportArgumentType]
         assert seen["prompt"] == "hello"
@@ -342,21 +342,21 @@ class TestShellEntries:
         sent: dict[str, Any] = {}
         monkeypatch.setattr(
             _shell.sessions,
-            "_create_session",
+            "create_session",
             lambda name, **kw: created.update(name=name, **kw) or (42, "full"),  # pyright: ignore[reportUnknownArgumentType]
         )  # pyright: ignore[reportUnknownArgumentType]
         monkeypatch.setattr(
-            _shell._background,
+            _shell.background,
             "allocate_output_path",
             lambda sid, _name: tmp_path / f"{sid}.log",  # pyright: ignore[reportUnknownArgumentType]
         )  # pyright: ignore[reportUnknownArgumentType]
-        monkeypatch.setattr(_shell._background, "notified_line", lambda *_a, **_kw: "line")  # pyright: ignore[reportUnknownArgumentType]
+        monkeypatch.setattr(_shell.background, "notified_line", lambda *_a, **_kw: "line")  # pyright: ignore[reportUnknownArgumentType]
         monkeypatch.setattr(
             _shell.sessions,
             "send",
             lambda sid, line: sent.update(sid=sid, line=line),  # pyright: ignore[reportUnknownArgumentType]
         )  # pyright: ignore[reportUnknownArgumentType]
-        monkeypatch.setattr(ava._boot, "agent_id", lambda: 900001)
+        monkeypatch.setattr(ava.agent_identity, "agent_id", lambda: 900001)
 
         run = _shell.run_background(("echo hi",), name=("bg",), ttl=60)  # pyright: ignore[reportArgumentType]
         assert run.session_id == 42
@@ -413,7 +413,7 @@ class TestUiEntries:
     def test_close_unwraps_name(self, monkeypatch: pytest.MonkeyPatch) -> None:
         seen: dict[str, Any] = {}
         monkeypatch.setattr(
-            _ui._gateway_client,
+            _ui.gateway_client,
             "close_page",
             lambda _aid, name: seen.update(name=name),  # pyright: ignore[reportUnknownArgumentType]
         )  # pyright: ignore[reportUnknownArgumentType]
@@ -569,12 +569,12 @@ class TestUnderstandEntries:
 
 class TestMemoryEntries:
     def test_search_query_unwraps(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        from ava import _gateway_client
+        from ava import gateway_client
         from ava_builtins.plugins.ava_memory import sdk as memory_plugin
 
         seen: dict[str, Any] = {}
         monkeypatch.setattr(
-            _gateway_client,
+            gateway_client,
             "memory_search",
             lambda q, k, **_kw: seen.update(q=q, k=k) or [],  # pyright: ignore[reportUnknownArgumentType]
         )  # pyright: ignore[reportUnknownArgumentType]
@@ -583,10 +583,10 @@ class TestMemoryEntries:
         assert seen["q"] == "query"
 
     def test_search_query_multi_element_type_errors(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        from ava import _gateway_client
+        from ava import gateway_client
         from ava_builtins.plugins.ava_memory import sdk as memory_plugin
 
-        monkeypatch.setattr(_gateway_client, "memory_search", lambda _q, _k, **_kw: [])  # pyright: ignore[reportUnknownArgumentType]
+        monkeypatch.setattr(gateway_client, "memory_search", lambda _q, _k, **_kw: [])  # pyright: ignore[reportUnknownArgumentType]
         with pytest.raises(TypeError, match="query must be a string"):
             memory_plugin._search(("a", "b"))  # pyright: ignore[reportArgumentType]
 
@@ -596,7 +596,7 @@ class TestMemoryEntries:
         from shared.paths import workspace_dir
 
         root = workspace_dir(900001) / "memory"
-        monkeypatch.setattr(ava._boot, "_agent_id", 900001)
+        monkeypatch.setattr(ava.agent_identity, "_agent_id", 900001)
         monkeypatch.setattr(
             memory_plugin,
             "_entry_path",
@@ -638,7 +638,7 @@ class TestTasksEntries:
             assert row is not None
             root_id = row[0]  # pyright: ignore[reportOptionalSubscript]
         db_conn.commit()
-        monkeypatch.setattr(ava._boot, "_agent_id", 900001)
+        monkeypatch.setattr(ava.agent_identity, "_agent_id", 900001)
         with db_conn.cursor() as cur:
             cur.execute("INSERT INTO agents (id) VALUES (900001) ON CONFLICT (id) DO NOTHING")
         db_conn.commit()
@@ -692,17 +692,17 @@ class TestTasksEntries:
 
 class TestNoticeEntries:
     def test_notify_title_unwraps(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        from ava import _gateway_client
+        from ava import gateway_client
         from ava_builtins.plugins.ava_fleet import plugin as fleet_plugin
 
         seen: dict[str, Any] = {}
         monkeypatch.setattr(
-            _gateway_client,
-            "_post",
+            gateway_client,
+            "post",
             lambda *_a, **_kw: seen.update(body=_a[1]) or _FakeResp(),  # pyright: ignore[reportUnknownArgumentType]
         )  # pyright: ignore[reportUnknownArgumentType]
-        monkeypatch.setattr(_gateway_client, "_raise_from_response", lambda _resp: None)  # pyright: ignore[reportUnknownArgumentType]
-        monkeypatch.setattr(ava._boot, "agent_id", lambda: 900001)
+        monkeypatch.setattr(gateway_client, "raise_from_response", lambda _resp: None)  # pyright: ignore[reportUnknownArgumentType]
+        monkeypatch.setattr(ava.agent_identity, "agent_id", lambda: 900001)
 
         notice = fleet_plugin.notify(("Hi",), ("detail",), priority=("P2",))  # pyright: ignore[reportArgumentType]
         body = seen["body"]
@@ -746,7 +746,7 @@ class TestSelfEntries:
         from ava import self as self_mod
 
         seen: dict[str, Any] = {}
-        monkeypatch.setattr(ava._boot, "assert_self_action", lambda _action: None)  # pyright: ignore[reportUnknownArgumentType]
+        monkeypatch.setattr(ava.agent_identity, "assert_self_action", lambda _action: None)  # pyright: ignore[reportUnknownArgumentType]
 
         class _FakeCur:
             def execute(self, sql: str, params: tuple[object, ...]) -> None:
@@ -759,7 +759,7 @@ class TestSelfEntries:
             def __exit__(self, *exc: object) -> None:
                 return None
 
-        monkeypatch.setattr(ava._boot, "agent_id", lambda: 900001)
+        monkeypatch.setattr(ava.agent_identity, "agent_id", lambda: 900001)
         monkeypatch.setattr(ava.DB, "cursor", _FakeCursor)
         monkeypatch.setattr(self_mod, "_publish_self_inbound_wake", lambda: None)
         import shared.audit_events as _audit

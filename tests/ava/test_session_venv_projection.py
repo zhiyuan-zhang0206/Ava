@@ -63,10 +63,10 @@ def test_create_session_activates_only_checkout_cwds(
         return None
 
     monkeypatch.setattr(sessions, "_record_ttl", _noop_record_ttl)
-    sessions._create_session("inside", cwd=str(inside), ttl=120)
-    sessions._create_session("sibling", cwd=str(sibling_worktree), ttl=120)
-    sessions._create_session("claude-sibling", cwd=str(claude_sibling_worktree), ttl=120)
-    sessions._create_session("outside", cwd=str(outside), ttl=120)
+    sessions.create_session("inside", cwd=str(inside), ttl=120)
+    sessions.create_session("sibling", cwd=str(sibling_worktree), ttl=120)
+    sessions.create_session("claude-sibling", cwd=str(claude_sibling_worktree), ttl=120)
+    sessions.create_session("outside", cwd=str(outside), ttl=120)
 
     assert activations == [True, False, False, False]
     assert backend.environments[0]["VIRTUAL_ENV"] == "/venv"
@@ -125,7 +125,7 @@ def test_watcher_override_reaches_backend_without_changing_generic_sessions(
     assert watcher_env["AVA_REDIS_URL"] == runner_redis
 
     with pytest.raises(_CapturedSessionError):
-        sessions._create_session("ordinary", cwd=str(tmp_path), ttl=120)
+        sessions.create_session("ordinary", cwd=str(tmp_path), ttl=120)
     generic_env = backend.environments[1]
     assert "AVA_DB_URL" not in generic_env
     assert "AVA_REDIS_URL" not in generic_env
@@ -147,7 +147,7 @@ def test_watcher_fail_fast_precedes_session_allocation(monkeypatch: pytest.Monke
     def forbid_session(*_args: object, **_kwargs: object) -> tuple[int, str]:
         raise AssertionError("session allocation started")
 
-    monkeypatch.setattr(sessions, "_create_session", forbid_session)
+    monkeypatch.setattr(sessions, "create_session", forbid_session)
     with pytest.raises(RuntimeError, match="Launch the watcher from an agent-profile process"):
         watcher.launch("pass", "10s", name="refused")
 

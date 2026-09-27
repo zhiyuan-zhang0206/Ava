@@ -2,12 +2,13 @@
 
 The env-var parse, the sentinel module, and the idempotent apply machinery
 (split out of `ava/__init__.py`) live here; the package entry imports
-`_apply_sdk_disable` / `_sdk_disable_entries` and applies the env entries at
+`apply_sdk_disable` / `sdk_disable_entries` and applies the env entries at
 its own import-time point (after the submodule imports + `__all_for_ava__`
 exist). The disposable exec child applies its agent overlay before
 importing the SDK; the shared host does not mutate exports per turn.
 """
 
+import importlib.util
 import inspect
 import os as _os
 import sys as _sys
@@ -36,7 +37,7 @@ from . import ava_module
 # Used to scope the SDK to a context — e.g. a benchmark runner that owns the
 # agent lifecycle disables watcher / self / agents / shell.sessions.
 _sdk_disable_raw = _os.environ.get("AVA_SDK_DISABLE", "")
-_sdk_disable_entries: list[str] = [e.strip() for e in _sdk_disable_raw.split(",") if e.strip()]
+sdk_disable_entries: list[str] = [e.strip() for e in _sdk_disable_raw.split(",") if e.strip()]
 
 # (the package entry applies the parsed entries after its submodule imports
 # and `__all_for_ava__` exist — see `ava/__init__.py`)
@@ -62,19 +63,21 @@ class _DisabledSDKModule(_types.ModuleType):
 # Track entries already applied so re-entrant calls are idempotent and
 # cumulative — the env parse runs first, then per-agent config_overlay
 # additions add new entries on top without re-processing the old ones.
-_applied_disable_entries: set[str] = set()
+applied_disable_entries: set[str] = set()
 
 
-def _apply_sdk_disable(entries: list[str]) -> None:
+def apply_sdk_disable(entries: list[str]) -> None:
     """Apply SDK disable entries — idempotent, re-entrant, cumulative.
 
     Each call computes the delta (entries not yet applied) and processes
     only those. Called at import time from env ``AVA_SDK_DISABLE`` and
     later from per-agent ``config_overlay`` sdk_disable additions.
     """
-    new_entries = [e for e in entries if e not in _applied_disable_entries]
+    new_entries = [e for e in entries if e not in applied_disable_entries]
     if not new_entries:
         return
+    for entry in new_entries:
+        _refuse_framework_module(entry)
 
     # Top-level modules: delete from this package + swap sys.modules entry
     # with the sentinel so `import ava.<mod>` returns it — its __getattr__
@@ -91,7 +94,25 @@ def _apply_sdk_disable(entries: list[str]) -> None:
     for _entry in [e for e in new_entries if "." in e]:
         _disable_dotted_entry(_entry)
 
-    _applied_disable_entries.update(new_entries)
+    applied_disable_entries.update(new_entries)
+
+
+def _refuse_framework_module(entry: str) -> None:
+    """Fail fast when an entry names a framework module rather than a piece of
+    the agent-facing SDK: disabling `ava.agent_identity` or `ava.sdk_surface`
+    would break the framework itself, not scope what the agent sees. A name that
+    is on the surface, or not a real `ava` submodule at all (a plugin namespace
+    registered later), stays disable-able."""
+    name = entry.split(".", 1)[0]
+    surface = getattr(ava_module(), "__all_for_ava__", None) or []
+    if name in surface or isinstance(_sys.modules.get(f"ava.{name}"), _DisabledSDKModule):
+        return  # agent-facing, or already disabled by an earlier entry
+    if importlib.util.find_spec(f"ava.{name}") is not None:
+        raise ValueError(
+            f"AVA_SDK_DISABLE entry {entry!r} names the framework module ava.{name}, "
+            "which is not part of the agent-facing SDK (`ava.__all_for_ava__`); "
+            "only agent-facing namespaces and their members can be disabled"
+        )
 
 
 def _disable_top_level_module(name: str) -> None:

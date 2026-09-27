@@ -211,11 +211,14 @@ repos:
       # folding; budgets are 800 lines/file, 20 direct entries/directory,
       # CC <15 (10-14 warn), and nesting <=5 over packages + tests/scripts,
       # with a frozen shrink-only baseline checked against the base revision.
-      # Rules + the _TYPE_CHECKING_ALLOWED list live in
-      # scripts/lint_code_structure.py header. (print() bans are enforced by
-      # ruff T20, not here.)
+      # Also locality: no `_`-private import from outside its owning package
+      # (package doors), and single decision owners (scripts/structure/
+      # locality.py DECISIONS, e.g. postgres-dial -> shared/db_connections.py) —
+      # both frozen in baseline.json as exact site counts. Rules + the
+      # _TYPE_CHECKING_ALLOWED list live in scripts/lint_code_structure.py
+      # header. (print() bans are enforced by ruff T20, not here.)
       - id: lint-code-structure
-        name: lint code structure (AST rules, file/directory budgets)
+        name: lint code structure (AST rules, file/directory budgets, package doors, single owners)
         entry: .venv/bin/python scripts/lint_code_structure.py
         language: system
         always_run: true  # Baseline JSON and directories can change without Python edits.

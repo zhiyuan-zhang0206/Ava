@@ -5,9 +5,9 @@ from datetime import datetime
 from typing import Literal
 
 import ava
-import ava._boot
-from ava import _gateway_client as _client
-from ava._sdk_validation import coerce_str, coerce_typed
+import ava.agent_identity
+from ava import gateway_client as _client
+from ava.sdk_validation import coerce_str, coerce_typed
 from shared.agents import AgentLaunchFailed as AgentLaunchFailed
 
 # Redundant-alias re-exports: importable from this module but deliberately not
@@ -374,21 +374,22 @@ def spawn(
     base and the explicit fields win per key.
 
     A fork keeps the source agent's effective config so its inherited context
-    stays cache-valid: at fork, `config_overlay` may only ADD skills to
+    stays cache-valid: at fork, `config_overlay` may only ADD entries to
     `skills_to_inject_into_system_prompt` / `skills_to_expand_at_start`
     (supersets — loaded at the context tail); any other change raises
     ForkConfigChangeNotAllowed.
 
-    Identity-class config you do not name — model, reasoning effort, skill set,
-    prompt shaping — is taken from the cluster default at spawn time and frozen
-    onto the new agent for its whole life, so a later change to that default
-    never re-brains it. Operational knobs (compaction thresholds, timeouts) stay
-    live and follow the cluster. `config_overlay={"eval_isolation": True,
+    Identity-class config you do not name — model, reasoning effort, the inject
+    and expand lists, prompt shaping — is taken from the shared default at spawn
+    time and frozen onto the new agent for its whole life, so a later change to
+    that default never re-brains it. Operational knobs (compaction thresholds,
+    timeouts) stay live and follow the shared default.
+    `config_overlay={"eval_isolation": True,
     "eval_network_allowlist": ["web"]}` starts an eval-isolated agent and
     explicitly permits only the listed `web` or `understand` capability; `mcps`
     and `ui` are always disabled for isolated agents.
     """
-    return _spawn_impl(
+    return spawn_impl(
         prompt=prompt,
         fork_from=fork_from,
         machine=machine,
@@ -407,7 +408,7 @@ def retry_launch(agent_id: int) -> int:
     return _client.retry_launch(agent_id)
 
 
-def _spawn_impl(
+def spawn_impl(
     *,
     prompt: str | None,
     fork_from: int | None,
@@ -426,7 +427,7 @@ def _spawn_impl(
     machine = coerce_str(machine, "machine", allow_none=True)
     config = coerce_typed(config, "config", dict, allow_none=True)
     label = coerce_str(label, "label", allow_none=True)
-    spawner = ava._boot.require_actor()
+    spawner = ava.agent_identity.require_actor()
     if config:
         # The `preset` key is spawn-boundary metadata, not a Settings field: it
         # must not reach the overlay validators, which reject unknown keys.
@@ -502,7 +503,7 @@ def resurrect(agent_id: int, prompt: str) -> ResurrectResult:
 def commands() -> list[CommandInfo]:
     """List the commands a peer agent accepts; invoke one by sending
     `/name <instruction>` as the message text."""
-    from ava._commands import discover_commands
+    from ava.composer_commands import discover_commands
 
     return [
         CommandInfo(
@@ -519,7 +520,7 @@ def send_message(agent_id: int, content: str) -> None:
     """  # lint-docstring: ok "auto-resurrected" is public behaviour, not impl detail
     agent_id = coerce_typed(agent_id, "agent_id", int)
     content = coerce_str(content, "content", allow_types=(list,))
-    source = ava._boot.require_actor()
+    source = ava.agent_identity.require_actor()
     _client.send_message(agent_id, content=content, source=source)
 
 
@@ -562,7 +563,7 @@ def send_system_note(
     if task_id is not None and tag != NoteTag.TASK.value:
         raise ValueError("task_id requires tag='task'")
     resurrect = coerce_typed(resurrect, "resurrect", bool)
-    source = ava._boot.require_actor()
+    source = ava.agent_identity.require_actor()
     return _client.send_system_note(
         agent_id,
         content=content,
@@ -586,7 +587,7 @@ def get_last_message(agent_id: int) -> str | None:
     from ava.security import scan_content
 
     agent_id = coerce_typed(agent_id, "agent_id", int)
-    caller = ava._boot.require_actor()
+    caller = ava.agent_identity.require_actor()
     message = _client.get_last_message(agent_id, caller)
     if message is not None:
         scan_content(message, source=f"peer.last_message:{agent_id}")

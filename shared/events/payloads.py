@@ -290,7 +290,7 @@ class EventLogDrop(TypedDict):
 
 
 class SdkCall(TypedDict):
-    """`sdk_call` payload — ava/_sdk_metering.py recorder."""
+    """`sdk_call` payload — ava/sdk_metering.py recorder."""
 
     fn: str
     duration: float

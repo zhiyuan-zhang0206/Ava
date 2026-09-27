@@ -127,7 +127,7 @@ def _rebuild_derived_views() -> None:
 # ---------------------------------------------------------------------------
 # Media-capability resolution — data-leaf queries over MODELS / provider
 # bindings. Lives here (not in factory.py) so the boot path (the exec child's
-# media gate, `ava/_attach.py`) resolves without importing the LangChain-heavy
+# media gate, `ava/attachment_transport.py`) resolves without importing the LangChain-heavy
 # factory; factory re-exports the same entry points (startup-path laziness,
 # task #3585).
 # ---------------------------------------------------------------------------

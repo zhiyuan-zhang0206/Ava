@@ -140,11 +140,11 @@ def _ancestor_chain(agent_id: int) -> list[dict[str, Any]] | None:
         return cached
     import httpx  # deferred: stays off the boot path
 
-    from ava import _gateway_client
+    from ava import gateway_client
     from shared.agents import GatewayUnavailable
 
     try:
-        chain = _gateway_client.get_born_chain(agent_id)
+        chain = gateway_client.get_born_chain(agent_id)
     except (GatewayUnavailable, httpx.HTTPStatusError) as exc:
         logger.warning("[inherited-memory] born-chain read failed (agent {}): {}", agent_id, exc)
         return None
@@ -232,7 +232,7 @@ def inherited_memory_note() -> HumanMessage | None:
     if depth <= 0:
         logger.debug("[inherited-memory] disabled by settings (depth={})", depth)
         return None
-    from ava._boot import agent_id
+    from ava.agent_identity import agent_id
 
     aid = agent_id()
     if aid is None:  # pyright: ignore[reportUnnecessaryComparison] — agent_id() is None pre-bootstrap.

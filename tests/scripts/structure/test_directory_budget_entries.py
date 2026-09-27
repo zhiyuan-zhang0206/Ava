@@ -17,7 +17,15 @@ def _isolated_repo(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> N
     monkeypatch.delenv("LINT_STRUCTURE_BASELINE_BASE", raising=False)
     baseline = tmp_path / "scripts/structure/baseline.json"
     baseline.parent.mkdir(parents=True)
-    empty = {"directories": {}, "files": {}, "complexity": {}, "nesting": {}}
+    sections = (
+        "directories",
+        "files",
+        "complexity",
+        "nesting",
+        "private_imports",
+        "owner_bypasses",
+    )
+    empty = {section: {} for section in sections}
     baseline.write_text(json.dumps(empty) + "\n", encoding="utf-8")
 
 

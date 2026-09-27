@@ -36,8 +36,8 @@ def _disabled_by_sdk_config(path: str) -> bool:
     Two disable sources, one rendering rule. `turn_settings.agent.sdk_disable`
     carries the env (`AVA_SDK_DISABLE`) and per-agent overlay entries; the
     eval-isolation boundary (`_apply_per_agent_eval_isolation`) records surfaces
-    removed at runtime by `ava._apply_sdk_disable` in
-    `ava._applied_disable_entries` without touching settings. Only configured
+    removed at runtime by `sdk_disable.apply_sdk_disable` in
+    `sdk_disable.applied_disable_entries` without touching settings. Only configured
     entries and registry-recorded runtime removals count as disabled; an
     unresolved path that appears in neither source remains eligible for the
     expansion resolver's diagnostic warning."""
@@ -45,10 +45,11 @@ def _disabled_by_sdk_config(path: str) -> bool:
         path == entry or path.startswith(entry + ".") for entry in turn_settings.agent.sdk_disable
     ):
         return True
-    import ava
+    from ava.sdk_surface import sdk_disable
 
     return any(
-        path == entry or path.startswith(entry + ".") for entry in ava._applied_disable_entries
+        path == entry or path.startswith(entry + ".")
+        for entry in sdk_disable.applied_disable_entries
     )
 
 
@@ -126,7 +127,7 @@ def resolve_prompt_skills(wanted: list[str], *, config_field: str) -> list[Any]:
 
     import ava
 
-    loaded = ava.skills._names()
+    loaded = ava.skills.names()
     if "*" in wanted:
         # Wildcard: select the whole catalog — a human asked one agent to see
         # every loaded skill, so skip per-name resolution entirely.
@@ -158,7 +159,7 @@ def indexed_skills() -> list[Any]:
     """The skills `# Capabilities` covers, resolved against the catalog as it is
     **right now**.
 
-    `ava.skills._names()` is an uncached filesystem scan, so this is a live
+    `ava.skills.names()` is an uncached filesystem scan, so this is a live
     answer; the rendered index is one frozen sample of it, taken when
     `init_context` builds the SystemMessage. Everything that has to reason about
     the distance between the two — the snapshot `init_context` records, the drift

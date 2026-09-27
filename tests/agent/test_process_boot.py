@@ -47,7 +47,7 @@ def test_eval_isolation_disables_network_and_result_sdk_surfaces() -> None:
 
         original_path_doc = ava.memory.PATH.__doc__
         os.environ["AVA_AGENT_ID"] = "417"
-        ava._boot.establish(417, owns_loop=True)
+        ava.agent_identity.establish(417, owns_loop=True)
         settings.agent.eval_isolation = True
         settings.agent.eval_network_allowlist = []
 
@@ -82,7 +82,7 @@ def test_eval_network_allowlist_preserves_explicitly_allowed_web() -> None:
         with PluginContext("ava_memory"):
             from ava_builtins.plugins.ava_memory import plugin
         os.environ["AVA_AGENT_ID"] = "418"
-        ava._boot.establish(418, owns_loop=True)
+        ava.agent_identity.establish(418, owns_loop=True)
         settings.agent.eval_isolation = True
         settings.agent.eval_network_allowlist = ["web"]
 

@@ -22,7 +22,7 @@ from agent.graph._exec import exec_node
 from agent.hosted_ownership import admit_hosted_runtime
 from agent.impersonation import flush_checkpoint, protect_native_hooks, settle_checkpoint
 from agent.startup import _wrap_saver_writes_with_nstep_interval
-from ava._external_state import encode_plugin_delta
+from ava.external_state import encode_plugin_delta
 from shared.agents import impersonation as leases
 from shared.agents.history.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
 from shared.caller_identity import CallerIdentity
@@ -376,7 +376,7 @@ async def test_automatic_takeover_handoff_precedes_queued_input(
         return tmp_path
 
     monkeypatch.setattr(history, "workspace_dir", workspace_for_agent)
-    monkeypatch.setattr("ava._impersonation_events.consume_recorded_events", _no_events)
+    monkeypatch.setattr("ava.impersonation_replay.consume_recorded_events", _no_events)
     with bind_turn_identity(owner.agent_id, incarnation=owner):
         await graph.ainvoke(reset, config, context=ctx)
         assert not model_calls  # No native model acceptance turn.
@@ -472,7 +472,7 @@ async def test_handoff_checkpoint_failure_keeps_gate_and_retry_flushes_receipt(
         return tmp_path
 
     monkeypatch.setattr(history, "workspace_dir", workspace_for_agent)
-    monkeypatch.setattr("ava._impersonation_events.consume_recorded_events", _no_events)
+    monkeypatch.setattr("ava.impersonation_replay.consume_recorded_events", _no_events)
     with bind_turn_identity(owner.agent_id, incarnation=owner):
         await graph.ainvoke(reset, config, context=ctx)
         await flush_checkpoint(saver, owner.agent_id)
@@ -537,7 +537,7 @@ async def test_end_note_resumes_an_empty_queue(
         return tmp_path
 
     monkeypatch.setattr(history, "workspace_dir", workspace_for_agent)
-    monkeypatch.setattr("ava._impersonation_events.consume_recorded_events", _no_events)
+    monkeypatch.setattr("ava.impersonation_replay.consume_recorded_events", _no_events)
     wakes: list[tuple[int, str]] = []
 
     def record_wake(agent_id: int, payload: str) -> bool:
@@ -590,7 +590,7 @@ async def test_aborted_takeover_resumes_the_native_with_the_death_cause(
         return tmp_path
 
     monkeypatch.setattr(history, "workspace_dir", workspace_for_agent)
-    monkeypatch.setattr("ava._impersonation_events.consume_recorded_events", _no_events)
+    monkeypatch.setattr("ava.impersonation_replay.consume_recorded_events", _no_events)
     wakes: list[tuple[int, str]] = []
 
     def record_wake(agent_id: int, payload: str) -> bool:

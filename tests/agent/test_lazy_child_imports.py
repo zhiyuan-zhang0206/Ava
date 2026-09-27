@@ -19,7 +19,7 @@ prepended to `sys.path`) and reports the heavy modules the touch left in
 - the provider-registration surface (`shared.lm.provider_api` plus the `lm_*`
   provider plugins loaded by `ensure_provider_plugins_loaded`) must stay off
   the LM chat-model stack (task #3633);
-- the child's plugin autoload surface form (`ava._ensure_plugins_loaded(surface=True)`)
+- the child's plugin autoload surface form (`ava.ensure_plugins_loaded(surface=True)`)
   must load the plugin surfaces only — no agent-runtime faces, no `agent.state`
   / `agent.hooks` / `agent.graph.*`, no graph/LM stack — and a later full call
   must upgrade by loading faces only, never re-executing a surface (task #3633,
@@ -49,7 +49,7 @@ from typing import cast
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
 # Agent-launch markers: with AVA_AGENT_ID forwarded, `import ava` self-loads
-# plugin namespaces (`_boot.is_launched_child`), inflating the import by ~13MB
+# plugin namespaces (`agent_identity.is_launched_child`), inflating the import by ~13MB
 # and adding plugin modules (recon #3586 §2.6). A boot measurement must strip
 # them — mirroring measure-boot.sh's clean env.
 _CLEAN_ENV_STRIP = frozenset(
@@ -244,7 +244,7 @@ def test_factory_reexports_the_registry_resolution() -> None:
 _PLUGIN_SURFACE_LOAD = """
 import ava
 
-ava._ensure_plugins_loaded(surface=True)
+ava.ensure_plugins_loaded(surface=True)
 
 _PLUGIN_ROOTS = ("ava_builtins.plugins.", "plugins.")
 
@@ -296,10 +296,10 @@ import sys
 
 import ava
 
-ava._ensure_plugins_loaded(surface=True)
+ava.ensure_plugins_loaded(surface=True)
 surface = sys.modules["ava_builtins.plugins.ava_memory.plugin"]
 
-ava._ensure_plugins_loaded(surface=False)  # the stateful-request upgrade
+ava.ensure_plugins_loaded(surface=False)  # the stateful-request upgrade
 faces = sorted(
     name
     for name in sys.modules
@@ -415,7 +415,7 @@ def _snap(tag):
 
 
 payload = read_request(Path({req!r}))
-ava._ensure_plugins_loaded()
+ava.ensure_plugins_loaded()
 boot = _snap("boot")
 exec_child._build_state_slot(payload)
 armed = _snap("armed")
@@ -454,7 +454,7 @@ from agent.graph._exec_protocol import read_request
 
 exec_child._import_runtime()  # the child boot's step that binds the SDK (mirrors `_run`)
 payload = read_request(Path({req!r}))
-ava._ensure_plugins_loaded()
+ava.ensure_plugins_loaded()
 exec_child._build_state_slot(payload)
 
 out = {{}}
@@ -508,7 +508,7 @@ from agent.graph._exec_protocol import read_request
 
 exec_child._import_runtime()
 payload = read_request(Path({req!r}))
-ava._ensure_plugins_loaded()
+ava.ensure_plugins_loaded()
 exec_child._build_state_slot(payload)
 
 ava_code = sys.modules["ava_builtins.plugins.ava_code.plugin"]

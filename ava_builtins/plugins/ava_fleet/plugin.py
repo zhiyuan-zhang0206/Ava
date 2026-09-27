@@ -43,9 +43,9 @@ from datetime import UTC, datetime, timedelta
 from typing import Any, TypedDict
 
 import ava
-import ava._boot
+import ava.agent_identity
 import ava.agents
-from ava._sdk_validation import coerce_str, coerce_typed
+from ava.sdk_validation import coerce_str, coerce_typed
 from shared.tasks.priority import validate_priority
 
 from . import task_registry
@@ -53,23 +53,24 @@ from . import task_registry
 
 def set_label(text: str) -> None:
     text = coerce_str(text, "text", allow_none=True)
+    agent_id = ava.agent_identity.require_agent_id()
     with ava.DB.cursor() as cur:
         cur.execute(
             "UPDATE agents SET label=%s, label_user_set=TRUE WHERE id=%s",
-            (text or None, ava._boot.agent_id()),
+            (text or None, agent_id),
         )
         from shared.audit_events import insert_event_log
 
         insert_event_log(
             event_type="label_change",
-            agent_id=ava._boot.agent_id(),
+            agent_id=agent_id,
             source="self",
             payload={"new_label": text or None},
         )
     # Per-call import: plugin autoload stays off the redis/live-events stack (task #3816).
     from shared.live_announce import publish_agent_updated_sync
 
-    publish_agent_updated_sync(ava._boot.agent_id())
+    publish_agent_updated_sync(agent_id)
 
 
 # Sentinel for edit_notice: distinguishes "argument not passed" from an explicit
@@ -129,10 +130,10 @@ def _raise_as_value_error(resp: Any) -> None:
     """Raise gateway 422 validation errors as ValueError — the SDK's
     validation contract (fail fast with a clear message). Any other error
     propagates through the normal wire contract."""
-    from ava import _gateway_client
+    from ava import gateway_client
 
     try:
-        _gateway_client._raise_from_response(resp)
+        gateway_client.raise_from_response(resp)
     except Exception as e:
         status = getattr(getattr(e, "response", None), "status_code", None)
         if status != 422:
@@ -202,14 +203,14 @@ def notify(
             )
         expire_at_iso = due_at.isoformat()
 
-    aid = ava._boot.agent_id()
+    aid = ava.agent_identity.require_agent_id()
 
     # One unified write path (R3 door ④): the gateway performs the whole
     # lifecycle atomically — supersede the previous open notice + insert the
     # new one in one transaction, then publish the events.
-    from ava import _gateway_client
+    from ava import gateway_client
 
-    resp = _gateway_client._post(
+    resp = gateway_client.post(
         f"/api/agents/{aid}/notices",
         {
             "title": title,
@@ -279,13 +280,13 @@ def edit_notice(
     if not body:
         raise ValueError("edit_notice needs at least one field to change")
 
-    aid = ava._boot.agent_id()
+    aid = ava.agent_identity.require_agent_id()
 
     # One unified write path (R3 door ④): the gateway edits the agent's
     # current open notice and re-publishes the posted event.
-    from ava import _gateway_client
+    from ava import gateway_client
 
-    resp = _gateway_client._patch(
+    resp = gateway_client.patch(
         f"/api/agents/{aid}/notices/current",
         body,
     )
@@ -295,12 +296,12 @@ def edit_notice(
 def dismiss_notice() -> None:
     """Withdraw the open notice. At most one notice is open per agent (notify
     auto-resolves the previous one), so no id is needed."""
-    aid = ava._boot.agent_id()
+    aid = ava.agent_identity.require_agent_id()
     # One unified write path (R3 door ④): the gateway withdraws the agent's
     # current open notice and publishes the resolve + agent-updated events.
-    from ava import _gateway_client
+    from ava import gateway_client
 
-    resp = _gateway_client._post(f"/api/agents/{aid}/notices/current/dismiss")
+    resp = gateway_client.post(f"/api/agents/{aid}/notices/current/dismiss")
     _raise_as_value_error(resp)
 
 
@@ -321,7 +322,7 @@ ava.register_sdk_expand("tasks")
 
 # ── wrap ava.agents.spawn to add the fleet-only `label` arg ─────────────────
 # Replace-wrapper: it re-implements spawn to expose `label` (adding a keyword to
-# the surface, per the wrap contract) by calling `ava.agents._spawn_impl`
+# the surface, per the wrap contract) by calling `ava.agents.spawn_impl`
 # directly instead of `inner`. Declared short-circuit — `label` cannot thread
 # through the core spawn signature, so the wrapper owns the whole call; `inner`
 # is accepted only to satisfy the wrap protocol.
@@ -344,7 +345,7 @@ def _spawn_with_label(
             a preset is named inside it as {"preset": "name"} (task #4086).
         label: initial role name; omitted = auto-named.
     """
-    return ava.agents._spawn_impl(
+    return ava.agents.spawn_impl(
         prompt=prompt,
         fork_from=fork_from,
         machine=machine,

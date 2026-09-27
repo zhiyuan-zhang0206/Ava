@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from ava._impersonation_launch import bootstrap_message
+from ava.impersonation_launch import bootstrap_message
 from shared import coding_session_owner
 
 _REFERENCE = (
@@ -283,7 +283,7 @@ def test_launch_requires_native_identity_before_creating_workspace(
     def no_identity() -> None:
         raise RuntimeError("No launching Ava identity")
 
-    monkeypatch.setattr("ava._boot.require_agent_id", no_identity)
+    monkeypatch.setattr("ava.agent_identity.require_agent_id", no_identity)
     with pytest.raises(RuntimeError, match="No launching Ava identity"):
         module.main()
     assert not target.exists()

@@ -2,51 +2,6 @@ import sys as _sys
 from types import SimpleNamespace
 from typing import Any
 
-# ── SDK entry machinery — implementations in `ava/_exports/` ────────────────
-#
-# The entry surface moved into `ava/_exports/` modules to keep this file a
-# readable coordinator: `const` (the `ava.const()` factory — imported here,
-# before the submodule imports, so top-level const assignments like
-# `ava.self.AGENT_ID = ava.const(...)` work during submodule load),
-# `sdk_disable` (AVA_SDK_DISABLE), `discovery` (children discovery +
-# `agent_visible_names`), `help` (the `ava.help()` renderer), and `plugins`
-# (the plugin registration API). Each name is re-exported with a redundant
-# alias so the external API — `import ava.X`, `ava.help`,
-# `ava.register_namespace`, `ava._apply_sdk_disable`, the `ava._format_*`
-# helpers tests reach — is unchanged.
-from ._exports.const import const as const
-from ._exports.discovery import _classify_dir_entry as _classify_dir_entry
-from ._exports.discovery import _Constant as _Constant
-from ._exports.discovery import _hidden_surface_members as _hidden_surface_members
-from ._exports.discovery import _module_attribute_annotations as _module_attribute_annotations
-from ._exports.discovery import _module_attribute_docs as _module_attribute_docs
-from ._exports.discovery import _module_children as _module_children
-from ._exports.discovery import agent_visible_names as agent_visible_names
-from ._exports.help import _COMPACT_CLASSES as _COMPACT_CLASSES
-from ._exports.help import _format_docstring as _format_docstring
-from ._exports.help import _format_documented_const_stub as _format_documented_const_stub
-from ._exports.help import _format_signature as _format_signature
-from ._exports.help import help as help
-from ._exports.plugins import _REGISTERED_NAMESPACES as _REGISTERED_NAMESPACES
-from ._exports.plugins import _REGISTERED_SDK_EXPANSIONS as _REGISTERED_SDK_EXPANSIONS
-from ._exports.plugins import FrameworkNamespaceConflictError as FrameworkNamespaceConflictError
-from ._exports.plugins import InvalidNamespaceMemberError as InvalidNamespaceMemberError
-from ._exports.plugins import InvalidNamespaceModuleError as InvalidNamespaceModuleError
-from ._exports.plugins import InvalidNamespaceNameError as InvalidNamespaceNameError
-from ._exports.plugins import MemberConflictError as MemberConflictError
-from ._exports.plugins import NamespaceConflictError as NamespaceConflictError
-from ._exports.plugins import PluginNamespaceConflictError as PluginNamespaceConflictError
-from ._exports.plugins import RegisterNamespaceError as RegisterNamespaceError
-from ._exports.plugins import UnknownNamespaceError as UnknownNamespaceError
-from ._exports.plugins import clear_registered_namespaces as clear_registered_namespaces
-from ._exports.plugins import register_namespace as register_namespace
-from ._exports.plugins import register_namespace_member as register_namespace_member
-from ._exports.plugins import register_sdk_expand as register_sdk_expand
-from ._exports.sdk_disable import _applied_disable_entries as _applied_disable_entries
-from ._exports.sdk_disable import _apply_sdk_disable as _apply_sdk_disable
-from ._exports.sdk_disable import _DisabledSDKModule as _DisabledSDKModule
-from ._exports.sdk_disable import _sdk_disable_entries as _sdk_disable_entries
-
 # Runtime connections — DB, Redis. The agent's own identity (AGENT_ID) lives
 # under ava.self alongside ava.self.MACHINE_SPEC, not here.
 #
@@ -58,6 +13,34 @@ from ._exports.sdk_disable import _sdk_disable_entries as _sdk_disable_entries
 # invariant.
 from ._settings import DB as DB
 from ._settings import REDIS as REDIS
+
+# ── SDK entry machinery — implementations in `ava/sdk_surface/` ─────────────
+#
+# `ava/sdk_surface/` keeps this file a readable coordinator: `const` (the
+# `ava.const()` factory — imported here, before the submodule imports, so
+# top-level const assignments like `ava.self.AGENT_ID = ava.const(...)` work
+# during submodule load), `sdk_disable` (AVA_SDK_DISABLE), `discovery`
+# (children discovery + `agent_visible_names`), `help` (the `ava.help()`
+# renderer), and `plugins` (the plugin registration API). The plugin-author
+# entry points are re-exported here; framework controls (the render
+# contextvars, the SDK-disable entries) are imported from their own module.
+from .sdk_surface import sdk_disable as _sdk_disable
+from .sdk_surface.const import const as const
+from .sdk_surface.discovery import agent_visible_names as agent_visible_names
+from .sdk_surface.help import help as help
+from .sdk_surface.plugins import FrameworkNamespaceConflictError as FrameworkNamespaceConflictError
+from .sdk_surface.plugins import InvalidNamespaceMemberError as InvalidNamespaceMemberError
+from .sdk_surface.plugins import InvalidNamespaceModuleError as InvalidNamespaceModuleError
+from .sdk_surface.plugins import InvalidNamespaceNameError as InvalidNamespaceNameError
+from .sdk_surface.plugins import MemberConflictError as MemberConflictError
+from .sdk_surface.plugins import NamespaceConflictError as NamespaceConflictError
+from .sdk_surface.plugins import PluginNamespaceConflictError as PluginNamespaceConflictError
+from .sdk_surface.plugins import RegisterNamespaceError as RegisterNamespaceError
+from .sdk_surface.plugins import UnknownNamespaceError as UnknownNamespaceError
+from .sdk_surface.plugins import clear_registered_namespaces as clear_registered_namespaces
+from .sdk_surface.plugins import register_namespace as register_namespace
+from .sdk_surface.plugins import register_namespace_member as register_namespace_member
+from .sdk_surface.plugins import register_sdk_expand as register_sdk_expand
 
 # ── Framework-internal state slot ──────────────────────────────────────────
 #
@@ -103,11 +86,11 @@ state_update: dict[str, Any] | None = None
 
 
 # Per-process latches: set once this process has loaded plugin namespaces via
-# the subprocess self-load path (`_ensure_plugins_loaded`). Framework-internal —
-# only `_ensure_plugins_loaded` writes them. `_plugins_loaded` = the plugin
+# the subprocess self-load path (`ensure_plugins_loaded`). Framework-internal —
+# only `ensure_plugins_loaded` writes them. `_plugins_loaded` = the plugin
 # surfaces; `_plugin_faces_loaded` = the agent-runtime faces (state fields /
 # hooks / prompt sections), loaded only on the full path — a stateful child,
-# via `_ensure_plugins_loaded(surface=False)`. The agent process does NOT go
+# via `ensure_plugins_loaded(surface=False)`. The agent process does NOT go
 # through this path (it calls `agent._extensions.load_extensions` directly from
 # build_graph / host boot and re-registers built-in hooks after), so both
 # latches stay False there and a genuinely-unknown `ava.X` keeps failing fast in
@@ -126,7 +109,7 @@ _plugin_faces_loaded = False
 _init_complete = False
 
 
-def _ensure_plugins_loaded(*, surface: bool = True) -> None:
+def ensure_plugins_loaded(*, surface: bool = True) -> None:
     """Idempotently load plugin namespaces (`ava.tasks` etc.) into *this* process.
 
     The entry point for a process an agent launched: a watcher / schedule
@@ -232,7 +215,7 @@ def _maybe_load_plugins_for_missing(name: str) -> bool:
     Returns True iff this call latched a load (caller should re-attempt
     `getattr`); a deferral — the loader module is still importing — returns
     False so the caller fails fast now and a later miss retries. Fires only in
-    an agent-launched child (`_boot.is_launched_child`), only after `import ava`
+    an agent-launched child (`agent_identity.is_launched_child`), only after `import ava`
     is complete (`_init_complete`), only once (`_plugins_loaded`), and never for
     underscore names — so gateway / cli / the agent process keep fail-fast on a
     genuinely-unknown attribute, `import ava` is untouched, and a dunder probe
@@ -240,11 +223,11 @@ def _maybe_load_plugins_for_missing(name: str) -> bool:
     """
     if name.startswith("_") or not _init_complete or _plugins_loaded:
         return False
-    from . import _boot
+    from . import agent_identity
 
-    if not _boot.is_launched_child():
+    if not agent_identity.is_launched_child():
         return False
-    _ensure_plugins_loaded()
+    ensure_plugins_loaded()
     # Retry the lookup only if a load was recorded: a deferral (the loader
     # module is still importing) leaves the latch off, so the caller fails fast
     # now instead of re-entering this path, and a later miss retries.
@@ -284,13 +267,15 @@ def __getattr__(name: str) -> Any:
 # Submodule imports must come after DB / REDIS (they read these
 # globals when importing ava). The `# isort: split` above prevents ruff
 # from merging / reordering the two import blocks.
-# `_extend` intentionally carries the underscore prefix: it's a plugin-author +
-# framework module, should not appear in the `help()` view the agent sees. Its
-# curated author surface is assembled as `ava.extend` further down.
+# `ava.sdk_surface.wraps` and `ava.sdk_surface.plugin_loader` are public names
+# (agent visibility is the `__all_for_ava__` whitelist below, not the
+# underscore) reached across the `ava` package boundary by the agent kernel
+# (`agent/state.py`, `agent/_process_boot.py`, `agent/_extensions.py`).
+# `wraps`' curated plugin-author surface is assembled as `ava.extend` further
+# down.
 # ruff: noqa: E402 — submodule imports must come after DB/REDIS slot injection
-from . import _attach as _attach
-from . import _extend as _extend
 from . import agents as agents
+from . import attachment_transport as attachment_transport
 from . import files as files
 from . import impersonation as impersonation
 from . import mcps as mcps
@@ -300,19 +285,21 @@ from . import skills as skills
 from . import ui as ui
 from . import watcher as watcher
 from . import web as web
+from .sdk_surface import wraps as _wraps
 from .understand import understand as understand
 
 # ── ava.extend — the plugin extension surface ──────────────────────────────
-# Curated view of `_extend` for plugin authors: the wrap registration primitive
-# plus its introspection. Deliberately NOT added to `__all_for_ava__` (and not a
-# `register_namespace` call) — this is a plugin-author API, so it stays out of
-# the `help(ava)` view the agent sees, the same posture as the `_extend` module
-# itself. `_extend.scan_and_load` / `clear_wraps` are framework-internal and
-# reached via `ava._extend`, so they are absent from this surface.
+# Curated view of `ava.sdk_surface.wraps` for plugin authors: the wrap
+# registration primitive plus its introspection. Deliberately NOT added to
+# `__all_for_ava__` (and not a `register_namespace` call) — this is a
+# plugin-author API, so it stays out of the `help(ava)` view the agent sees.
+# `ava.sdk_surface.plugin_loader.scan_and_load` and `wraps.clear_wraps` are
+# framework-internal (reached via `ava.sdk_surface.plugin_loader` /
+# `ava.sdk_surface.wraps`), so they are absent from this surface.
 extend = SimpleNamespace(
-    wrap=_extend.wrap,
-    stack=_extend.stack,
-    wrappers=_extend.wrappers,
+    wrap=_wraps.wrap,
+    stack=_wraps.stack,
+    wrappers=_wraps.wrappers,
 )
 extend._qualname = "ava.extend"  # type: ignore[attr-defined]  # agent-facing name for help() resolution
 
@@ -323,7 +310,7 @@ extend._qualname = "ava.extend"  # type: ignore[attr-defined]  # agent-facing na
 # `const` / `extend` / the exception classes are deliberately absent: they are
 # plugin-author / framework API, importable but out of the agent's view.
 # `register_namespace` appends to this list and AVA_SDK_DISABLE removes from it,
-# so it must be defined before `_apply_sdk_disable` runs.
+# so it must be defined before `apply_sdk_disable` runs.
 __all_for_ava__ = [
     "agents",
     "files",
@@ -339,14 +326,13 @@ __all_for_ava__ = [
 ]
 
 # Apply env-based entries at import time (existing behavior)
-_apply_sdk_disable(_sdk_disable_entries)
+_sdk_disable.apply_sdk_disable(_sdk_disable.sdk_disable_entries)
 
 # The agent-facing FQN a help() heading shows comes from `fn.__module__`
-# (`ava.help` → `# ava.help`). The implementations moved into `ava/_exports/`
-# modules, so restore the package-level `__module__` on the re-exported entry
-# points that used to be defined here — keeps `help(ava.X)` headings
-# byte-identical to before the split. (`ava.understand` keeps its own
-# pre-existing `ava.understand` module path.)
+# (`ava.help` → `# ava.help`). The implementations live in `ava/sdk_surface/`
+# modules, so the re-exported entry points get the package-level `__module__`
+# back and `help(ava.X)` headings read `ava.X`. (`ava.understand` keeps its own
+# `ava.understand` module path.)
 for _entry in (
     help,
     const,
@@ -369,10 +355,9 @@ _init_complete = True
 # backstop. The agent host binds identities per turn and does not
 # export a process-wide AVA_AGENT_ID; gateway / cli do not carry it either.
 # Only an agent-launched child reaches this load.
-from . import _boot as _boot_module
-from . import _sdk_metering
+from . import agent_identity, sdk_metering
 
-_sdk_metering.install()
+sdk_metering.install()
 
-if _boot_module.is_launched_child():
-    _ensure_plugins_loaded()
+if agent_identity.is_launched_child():
+    ensure_plugins_loaded()

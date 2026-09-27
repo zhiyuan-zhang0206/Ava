@@ -139,7 +139,7 @@ async def test_checkpoint_receipt_prevents_reapplying_non_idempotent_delta(
     def decode(delta: dict[str, Any]) -> dict[str, Any]:
         return delta
 
-    monkeypatch.setattr("ava._external_state.decode_plugin_delta", decode)
+    monkeypatch.setattr("ava.external_state.decode_plugin_delta", decode)
     receipt = Mock(side_effect=RuntimeError("receipt commit lost"))
     monkeypatch.setattr("shared.agents.impersonation.mark_plugin_applied", receipt)
     with pytest.raises(RuntimeError, match="receipt commit lost"):
