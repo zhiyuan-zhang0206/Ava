@@ -17,7 +17,7 @@ from psycopg.rows import DictRow
 from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
 
-from agent.graph._claim import claim_node
+from agent.graph.claim.node import claim_node
 from agent.state import BaseAgentState
 from services.agent_host import dispatcher
 from services.agent_host import host as host_module

@@ -1,6 +1,6 @@
 """Claim-node display logic: SSE event publishing for the frontend timeline.
 
-Extracted from agent/graph/_claim.py (Phase 2 display isolation).
+Extracted from agent/graph/claim/node.py (Phase 2 display isolation).
 """
 
 from __future__ import annotations

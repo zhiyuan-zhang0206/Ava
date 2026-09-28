@@ -51,10 +51,10 @@ from shared.config import settings
 from shared.config.turn_view import turn_settings
 from shared.context import AvaContext
 
-from ._claim import claim_node
 from ._exec import exec_node
 from ._init_context import init_context_node
-from ._llm import llm_node
+from .claim.node import claim_node
+from .llm.node import llm_node
 
 # LLM node retry policy — covers network jitter + DeepSeek server-side intermittent drift.
 #

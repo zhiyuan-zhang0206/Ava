@@ -1,7 +1,7 @@
 {
   "directories": {
     "agent": 34,
-    "agent/graph": 42,
+    "agent/graph": 35,
     "ava": 36,
     "ava_builtins/skills": 35,
     "cli/commands": 86,
@@ -138,13 +138,13 @@
   "complexity": {
     "agent/db.py::claim_inbound_batch": 15,
     "agent/exec_domain_owner.py::run": 28,
-    "agent/graph/_claim_decide.py::decide": 35,
-    "agent/graph/_claim_dispatch.py::dispatch_batch": 21,
-    "agent/graph/_claim_routing.py::resolve_routing": 23,
+    "agent/graph/claim/_decide.py::decide": 35,
+    "agent/graph/claim/_dispatch.py::dispatch_batch": 21,
+    "agent/graph/claim/_routing.py::resolve_routing": 23,
     "agent/graph/exec_output.py::wrap_code_output": 18,
     "agent/graph/_exec_owned_run.py::run_owned": 47,
-    "agent/graph/_llm.py::llm_node": 19,
-    "agent/graph/_llm_stream.py::_consume_stream_with_stall_timeout": 17,
+    "agent/graph/llm/node.py::llm_node": 19,
+    "agent/graph/llm/_stream.py::_consume_stream_with_stall_timeout": 17,
     "agent/graph/memory_recall.py::passive_memory_recall": 15,
     "agent/hooks/_registry.py::make_hook_runner.<locals>.run": 17,
     "agent/hosted_ownership.py::admit_hosted_runtime": 20,

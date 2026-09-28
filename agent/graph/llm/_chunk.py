@@ -5,8 +5,8 @@
 ``_sanitize_thinking_blocks`` (DeepSeek thinking-delta drift repair) and
 ``_validate_stop_reason`` (missing / truncated / unexpected terminal reason).
 
-Split out of ``_llm.py`` (Task #1004 >800-line outlier) — a leaf dependency of
-the node entry; nothing here imports back into ``_llm.py``.
+Split out of ``node.py`` (Task #1004 >800-line outlier) — a leaf dependency of
+the node entry; nothing here imports back into ``node.py``.
 """
 
 from __future__ import annotations
@@ -15,14 +15,13 @@ from typing import Any, cast
 
 from langchain_core.messages import AIMessage, AIMessageChunk, message_chunk_to_message
 
-from shared.lm.content import content_blocks
-from shared.log import logger
-
-from .llm_errors import (
+from agent.graph.llm_errors import (
     LLMStreamCorruptedError,
     LLMStreamTruncatedError,
     LLMStreamUnexpectedStopReasonError,
 )
+from shared.lm.content import content_blocks
+from shared.log import logger
 
 
 def _sanitize_thinking_blocks(final_msg: AIMessage) -> None:

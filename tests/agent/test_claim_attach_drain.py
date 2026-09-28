@@ -14,7 +14,7 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 
 from agent.graph._attach_drain import build_attach_drain
-from agent.graph._claim import _claim_node_impl
+from agent.graph.claim.node import _claim_node_impl
 from agent.nodes import CLAIM
 from agent.state import AttachEntry, AttachState, BaseAgentState
 from shared.context import AvaContext
@@ -96,7 +96,7 @@ async def test_claim_drains_before_turn_boundary_wait(
     runtime = Runtime(context=_context("glm-5.3-flash"))
     config: RunnableConfig = {"configurable": {"thread_id": "42"}}
 
-    monkeypatch.setattr("agent.graph._claim.claim_inbound_batch", AsyncMock(return_value=[]))
+    monkeypatch.setattr("agent.graph.claim.node.claim_inbound_batch", AsyncMock(return_value=[]))
 
     command = await _claim_node_impl(state, runtime, config)
 
@@ -117,7 +117,7 @@ async def test_claim_does_not_drain_mid_turn(
     runtime = Runtime(context=_context("glm-5.3-flash"))
     config: RunnableConfig = {"configurable": {"thread_id": "42"}}
 
-    monkeypatch.setattr("agent.graph._claim.claim_inbound_batch", AsyncMock(return_value=[]))
+    monkeypatch.setattr("agent.graph.claim.node.claim_inbound_batch", AsyncMock(return_value=[]))
 
     command = await _claim_node_impl(state, runtime, config)
 

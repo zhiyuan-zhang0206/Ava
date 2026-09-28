@@ -1,6 +1,6 @@
 """Build the HumanMessage for a kind='chat' inbound row.
 
-Split out of `_claim.py` so the multimodal image-inlining path lives in one
+Split out of `claim/node.py` so the multimodal image-inlining path lives in one
 focused place: text inbounds envelope-wrap into a string message; multimodal
 inbounds wrap the text part into a leading block and inline each referenced
 image upload as a native base64 block the model decodes.

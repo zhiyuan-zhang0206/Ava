@@ -747,7 +747,7 @@ def build_system_prompt() -> str:
     """
     from shared.config import settings
 
-    from ._llm import _BASE_SYSTEM_PROMPT, _get_ava_overview
+    from ._base_prompt import _BASE_SYSTEM_PROMPT, _get_ava_overview
 
     if settings.agent.prompt_sdk_overview_enabled:
         parts = [_BASE_SYSTEM_PROMPT.format(_AVA_OVERVIEW=_get_ava_overview())]

@@ -10,11 +10,11 @@ This module is the pipeline orchestrator; the per-axis logic lives in
 co-located modules (Task #1006 split — the original 979-line file was divided
 by the batch-claim / kind-dispatch / lifecycle-routing axes, behavior preserved):
 
-- `_claim_batch.py`     — batch acquisition: idle wait loop, batch claim, idle trim, chat deferral
-- `_claim_routing.py`   — lifecycle routing: ClaimGoto vocabulary + batch winner resolution
-- `_claim_dispatch.py`  — per-kind dispatch: batch state, lifecycle markers, handlers, dispatch loop
-- `_claim_decide.py`    — decision: post-dispatch short-circuit rules → single Command
-- `_claim_present.py`   — display: SSE publishing for the frontend timeline
+- `_batch.py`     — batch acquisition: idle wait loop, batch claim, idle trim, chat deferral
+- `_routing.py`   — lifecycle routing: ClaimGoto vocabulary + batch winner resolution
+- `_dispatch.py`  — per-kind dispatch: batch state, lifecycle markers, handlers, dispatch loop
+- `_decide.py`    — decision: post-dispatch short-circuit rules → single Command
+- `_present.py`   — display: SSE publishing for the frontend timeline
 
 Pipeline (see _claim_node_impl): container early-return → first SELECT →
 idle wait (if halted / no conversation) → routing → dispatch → decide → END
@@ -40,7 +40,7 @@ fields; using the module attribute + deferred annotation evaluation picks up
 the dynamic class rebound by build_agent_state.
 
 Refactored (2026-08): _Routing + resolve_routing, _BatchState + per-kind
-handlers, _Outcome + decide extracted; display logic moved to _claim_present.py;
+handlers, _Outcome + decide extracted; display logic moved to _present.py;
 file split by axis under Task #1006. cc 70 → ~8-10 per module.
 """
 
@@ -53,10 +53,6 @@ from langgraph.types import Command
 from agent import state as _state
 from agent.db import claim_inbound_batch
 from agent.graph._attach_drain import build_attach_drain
-from agent.graph._claim_decide import decide
-from agent.graph._claim_dispatch import _BatchState, dispatch_batch
-from agent.graph._claim_present import publish_end_timeline_snapshot, publish_inbound_committed
-from agent.graph._claim_routing import ClaimGoto, resolve_routing
 from agent.graph.node_log import flush_node_exit_aggregate, node_lifecycle
 from agent.impersonation import claim_gate
 from agent.impersonation_handoff import resume_note_pending
@@ -66,12 +62,17 @@ from agent.nodes import BEFORE_LLM, CLAIM, END
 from ava.security import discard_inbound_findings
 from shared.context import AvaContext, agent_id_from_config
 
+from ._decide import decide
+from ._dispatch import _BatchState, dispatch_batch
+
 # Names moved to co-located submodules during the Task #1006 split, re-exported
-# here so existing `from agent.graph._claim import ...` call sites (tests) keep
-# working unchanged. New code should import from the submodule that owns them.
-from ._claim_dispatch import _by_who as _by_who
-from ._claim_dispatch import _handle_heartbeat as _handle_heartbeat
-from ._claim_dispatch import _render_restart_completed_marker as _render_restart_completed_marker
+# here so existing `from agent.graph.claim.node import ...` call sites (tests)
+# keep working unchanged. New code should import from the submodule that owns them.
+from ._dispatch import _by_who as _by_who
+from ._dispatch import _handle_heartbeat as _handle_heartbeat
+from ._dispatch import _render_restart_completed_marker as _render_restart_completed_marker
+from ._present import publish_end_timeline_snapshot, publish_inbound_committed
+from ._routing import ClaimGoto, resolve_routing
 
 
 def claim_will_idle(state: _state.AgentState) -> bool:

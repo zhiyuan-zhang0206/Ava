@@ -33,10 +33,10 @@ from langchain_core.messages import (
 from psycopg_pool import AsyncConnectionPool
 
 from agent.graph import context_notes
-from agent.graph._claim import claim_node
-from agent.graph._claim_dispatch import (
+from agent.graph.claim._dispatch import (
     _STRIP_ON_FORK_TAGS,
 )
+from agent.graph.claim.node import claim_node
 from agent.messages import NoteTag
 from agent.state import AgentState
 from tests.conftest import spawn_agent
@@ -187,7 +187,7 @@ def test_fork_rebuild_passes_the_messages_guard() -> None:
     order; the dropped source-identity notes are gone; the grafted notes land
     as new messages. This pins that the reducer accepts the exact shape
     `_fork_rebuild_prefix` produces."""
-    from agent.graph._claim_dispatch import _fork_rebuild_prefix
+    from agent.graph.claim._dispatch import _fork_rebuild_prefix
     from agent.messages_guard import guarded_add_messages
     from agent.state import AgentState
 
@@ -216,7 +216,7 @@ def test_fork_rebuild_dropping_a_conversation_message_is_rejected() -> None:
     the caller does not explicitly drop. This pins the rebuild shape (not the
     tag policy): dropping a conversation message from the rebuild re-listing
     is invisible to the guard, so the tag filter above is load-bearing."""
-    from agent.graph._claim_dispatch import _fork_rebuild_prefix
+    from agent.graph.claim._dispatch import _fork_rebuild_prefix
     from agent.state import AgentState
 
     conversation = HumanMessage(content="hello", id="m-chat")

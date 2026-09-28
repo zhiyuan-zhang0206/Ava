@@ -396,7 +396,7 @@ class TurnScheduler:
         """Each stuck agent's real activity clock — best-effort, bounded, never raises.
 
         `agents_meta.last_active_at` is written on every COMPLETED LLM step
-        (`agent/graph/_llm.py:_persist_last_active`), so a stale value means "no
+        (`agent/graph/llm/node.py:_persist_last_active`), so a stale value means "no
         LLM step has completed since then". That is the best wedge discriminator
         available and it is **not an oracle**: a turn sitting in one long exec,
         or one long model stream, also reads stale without being wedged. It

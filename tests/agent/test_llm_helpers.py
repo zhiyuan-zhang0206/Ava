@@ -1,8 +1,9 @@
 # pyright: reportOptionalSubscript=false
-"""mutmut gap-fix unit tests — locks down the actionable cluster in `agent/graph/_llm.py`:
+"""mutmut gap-fix unit tests — locks down the actionable cluster in `agent/graph/llm/node.py`:
 
-1. `_capture_ava_overview` (3 mutations) — a module-load helper with no dedicated unit test;
-   directly import + call, verify that stdout capture actually captures the output of `ava.help(ava)`.
+1. `_capture_ava_overview` (3 mutations, now in `agent/graph/_base_prompt.py`) — a module-load
+   helper with no dedicated unit test; directly import + call, verify that stdout capture
+   actually captures the output of `ava.help(ava)`.
 2. Cancel-detection boundary (`_llm_node_impl` mutmut_44) — `cancel_task in done`
    vs `stream first in done` two-path invariant: the cancel branch publishes Cancelled +
    returns halted and does not commit any message (the entire partial generation is discarded);
@@ -28,7 +29,7 @@ from langgraph.runtime import ExecutionInfo, Runtime
 from langgraph.types import Command
 
 from agent.graph import llm_node
-from agent.graph._llm import _capture_ava_overview, _get_ava_overview
+from agent.graph._base_prompt import _capture_ava_overview, _get_ava_overview
 from agent.state import AgentState
 from shared.context import AvaContext
 from shared.live_events import EVENT_ADAPTER, Cancelled
@@ -290,7 +291,7 @@ async def test_silent_idle_with_reasoning_continue_loops_not_raises() -> None:
     and returns halted=False so the claim node loops straight back to the LLM
     (the ava_silent_idle plugin then injects a Continue nudge). No token-wasting
     blind re-stream."""
-    from agent.graph._llm import _silent_idle_output_tokens
+    from agent.graph.llm.node import _silent_idle_output_tokens
 
     _silent_idle_output_tokens.pop("7", None)
 
@@ -363,7 +364,7 @@ def test_validate_stop_reason_unexpected_carries_stop_reason_and_output_tokens()
     attributes; `test_validate_raises_on_max_tokens` reads attributes but only covers the
     Truncated subclass path — the unexpected parent class path is uncovered.
     """
-    from agent.graph._llm_chunk import _validate_stop_reason
+    from agent.graph.llm._chunk import _validate_stop_reason
     from agent.graph.llm_errors import LLMStreamUnexpectedStopReasonError
 
     msg = AIMessage(
@@ -441,7 +442,7 @@ async def test_silent_idle_with_thinking_blocks_continue_loops() -> None:
 
     Locks the silent_idle thinking-block condition so it is not coupled with the output_tokens > 0 condition.
     """
-    from agent.graph._llm import _silent_idle_output_tokens
+    from agent.graph.llm.node import _silent_idle_output_tokens
 
     _silent_idle_output_tokens.pop("7", None)
 
@@ -550,7 +551,7 @@ async def test_silent_idle_with_deepseek_reasoning_content_continue_loops() -> N
     Construct: output_tokens=0, no text, no tool_call, no thinking blocks,
     but has `additional_kwargs.reasoning_content` → judged silent idle → continue-loop.
     """
-    from agent.graph._llm import _silent_idle_output_tokens
+    from agent.graph.llm.node import _silent_idle_output_tokens
 
     _silent_idle_output_tokens.pop("7", None)
 
@@ -583,7 +584,7 @@ async def test_silent_idle_zero_output_reasoning_content_consumes_minimum_budget
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Reasoning-content-only turns cannot bypass the silent-idle cost guard."""
-    from agent.graph._llm import _silent_idle_output_tokens
+    from agent.graph.llm.node import _silent_idle_output_tokens
     from shared.config import settings
 
     _silent_idle_output_tokens.pop("7", None)
@@ -752,7 +753,7 @@ async def test_llm_node_configured_fatal_error_type_fails_fast() -> None:
 
 async def test_silent_idle_guard_halts_at_cumulative_output_token_cap(loguru_records) -> None:
     """Silent-idle output consumes one token budget and reports its cost."""
-    from agent.graph._llm import _silent_idle_output_tokens
+    from agent.graph.llm.node import _silent_idle_output_tokens
     from shared.config import settings
 
     _silent_idle_output_tokens.pop("7", None)
@@ -830,7 +831,7 @@ async def test_retried_llm_node_records_total_retry_duration(loguru_records) -> 
 
 async def test_silent_idle_streak_resets_after_normal_turn() -> None:
     """A real action clears the silent-idle output-token budget."""
-    from agent.graph._llm import _silent_idle_output_tokens
+    from agent.graph.llm.node import _silent_idle_output_tokens
 
     _silent_idle_output_tokens.pop("7", None)
 
@@ -1075,7 +1076,7 @@ async def test_llm_usage_event_carries_latency_ms(loguru_records) -> None:
 
 async def test_completed_task_turn_records_usage(monkeypatch: pytest.MonkeyPatch) -> None:
     """A task-tagged completed turn forwards its measured usage to that task only."""
-    import agent.graph._llm as llm_module
+    import agent.graph.llm.node as llm_module
     from ava_builtins.plugins.ava_fleet import task_registry
 
     recorded: list[tuple[int, int, float]] = []
@@ -1110,7 +1111,7 @@ async def test_task_usage_failure_does_not_break_completed_turn(
     loguru_records: list[dict[str, Any]],
 ) -> None:
     """A metering-store outage cannot turn one completed LLM call into a retry."""
-    import agent.graph._llm as llm_module
+    import agent.graph.llm.node as llm_module
     from ava_builtins.plugins.ava_fleet import task_registry
 
     async def _one_chunk() -> AsyncIterator[AIMessageChunk]:
