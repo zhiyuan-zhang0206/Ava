@@ -4,18 +4,22 @@ The operation journal is the only decision record. This settings-free reader
 does not import CLI orchestration or infer permission from an environment flag.
 An explicit in-process capability permits one exact journal revision to start;
 children and an ordinary operator invocation do not inherit that capability.
+The running executor's heartbeat beside the journal is the only proof it
+still runs: an incomplete operation explains an outage only while it is fresh.
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
+import os
+import threading
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from contextvars import ContextVar  # noqa: TID251 — explicit start capability
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 from uuid import UUID
 
 from shared.start_inputs import require_configuration
@@ -129,15 +133,36 @@ def _require_operation_identity(home: Path, path: Path, operation: dict[str, Any
 
 # How an operator reads each journaled kind: a fleet operation is the release.
 _KIND_LABELS = {"fleet": "release", "unit": "unit release", "pitr": "pitr"}
+# Beside the journal: the running executor's last sign of life (`executor_heartbeat`).
+_HEARTBEAT = "executor-heartbeat"
+_MAX_HEARTBEAT_BYTES = 128
 
 
-def operation_in_flight(home: Path) -> str | None:
-    """Name this home's incomplete operation that has recorded no failure.
+class InFlight(NamedTuple):
+    """This home's incomplete operation, and whether its executor provably lives.
 
-    Such an operation explains an outage of the unit it is replacing. A failed
-    or recovering operation (a recorded error) explains nothing: its hold is
-    itself worth an alert. None when no operation is active or it completed.
+    `last_seen` is the executor's last heartbeat or, before its first one, the
+    operation's creation (the launch grace). `alive` means that is at most
+    `EXECUTOR_HEARTBEAT_TTL_S` old.
     """
+
+    label: str
+    alive: bool
+    last_seen: datetime
+
+
+def operation_in_flight(home: Path, *, now: datetime | None = None) -> InFlight | None:
+    """This home's incomplete operation that has recorded no failure, if any.
+
+    It explains an outage of the unit it is replacing only while its executor
+    is alive: a killed, OOM'd or rebooted executor, or one that never
+    launched, stops stamping its heartbeat, and its operation then explains
+    nothing — the executor is lost. A failed or recovering operation (a
+    recorded error) explains nothing either: its hold is itself worth an
+    alert. None when no operation is active or it completed.
+    """
+    from shared.deploy_timing import EXECUTOR_HEARTBEAT_TTL_S
+
     active = _active(home)
     if active is None:
         return None
@@ -147,7 +172,65 @@ def operation_in_flight(home: Path) -> str | None:
     if operation["phase"] == "complete" or operation["error"] is not None:
         return None
     label = _KIND_LABELS[operation["request"]["kind"]]
-    return f"{label} operation {path.parent.name} at {operation['phase']}"
+    created = datetime.fromisoformat(operation["request"]["created_at"])
+    last_seen = max(created, _heartbeat(path) or created)
+    stale = (now or datetime.now(UTC)) - last_seen > timedelta(seconds=EXECUTOR_HEARTBEAT_TTL_S)
+    return InFlight(
+        f"{label} operation {path.parent.name} at {operation['phase']}", not stale, last_seen
+    )
+
+
+def _heartbeat(path: Path) -> datetime | None:
+    """The executor's last stamp; a missing or unreadable one is no evidence of life.
+
+    Stamps are replaced atomically, so the file opened is always one complete
+    stamp, even when the next one lands while it is read.
+    """
+    try:
+        fd = os.open(path.parent / _HEARTBEAT, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+        with os.fdopen(fd, "rb") as stream:
+            stamped = datetime.fromisoformat(stream.read(_MAX_HEARTBEAT_BYTES).decode().strip())
+    except (OSError, ValueError, UnicodeDecodeError):
+        return None
+    return stamped if stamped.tzinfo is not None else None
+
+
+@contextmanager
+def executor_heartbeat(path: Path) -> Generator[None]:
+    """Stamp operation `path`'s executor heartbeat until the executor leaves.
+
+    One stamp before the body and then one every `LEASE_RENEW_INTERVAL_S`
+    from a thread; a failed stamp is only a missed beat. Leaving removes the
+    stamp, so an executor that exits without recording an outcome leaves no
+    evidence of life behind; a process that dies here simply stops stamping.
+    """
+    from shared.atomic_io import write_text_atomic
+    from shared.deploy_timing import LEASE_RENEW_INTERVAL_S
+
+    beat = path.parent / _HEARTBEAT
+    done = threading.Event()
+
+    def stamp() -> None:
+        write_text_atomic(beat, datetime.now(UTC).isoformat() + "\n", mode=0o600)
+
+    def beating() -> None:
+        while not done.wait(LEASE_RENEW_INTERVAL_S):
+            try:
+                stamp()
+            except OSError as exc:
+                from shared.log import logger
+
+                logger.warning("[release] executor heartbeat missed a beat: {exc}", exc=exc)
+
+    stamp()
+    thread = threading.Thread(target=beating, name="executor-heartbeat", daemon=True)
+    thread.start()
+    try:
+        yield
+    finally:
+        done.set()
+        thread.join()
+        beat.unlink(missing_ok=True)
 
 
 def require_start_authorized(home: Path) -> tuple[str, datetime] | None:

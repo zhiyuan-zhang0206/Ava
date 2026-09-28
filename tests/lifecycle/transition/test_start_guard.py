@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from contextvars import Context  # noqa: TID251 — verify the explicit startup capability's isolation
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from uuid import uuid4
 
@@ -13,6 +13,7 @@ import pytest
 from cli.release_fleet.request import FleetRequest
 from cli.release_transition.journal import create
 from cli.release_transition.request import ReleaseRef
+from shared.deploy_timing import EXECUTOR_HEARTBEAT_TTL_S
 from shared.release_operation import (
     authorized_start,
     operation_in_flight,
@@ -384,12 +385,22 @@ def test_operation_in_flight_names_only_an_unfailed_incomplete_operation(
     operation_path: Path,
 ) -> None:
     """The health probe's annotation source: a failed or completed operation
-    explains no outage, and no active pointer means no operation."""
+    explains no outage, and no active pointer means no operation. A bare
+    journal with no executor explains its outage only within the launch grace
+    (test_executor_liveness.py)."""
     home = _home(operation_path)
     identity = operation_path.parent.name
-    assert operation_in_flight(home) == f"release operation {identity} at prepared"
+    created = datetime.fromisoformat(
+        json.loads(operation_path.read_bytes())["request"]["created_at"]
+    )
+    late = created + timedelta(seconds=EXECUTOR_HEARTBEAT_TTL_S + 1)
+    launching = operation_in_flight(home)
+    assert launching is not None and launching.alive
+    assert launching.label == f"release operation {identity} at prepared"
     _set_state(operation_path, phase="stopping")
-    assert operation_in_flight(home) == f"release operation {identity} at stopping"
+    stopping = operation_in_flight(home, now=late)
+    assert stopping is not None and not stopping.alive, "no executor explains nothing"
+    assert stopping.label == f"release operation {identity} at stopping"
     _set_state(operation_path, error="injected native failure")
     assert operation_in_flight(home) is None
     _set_state(operation_path, phase="complete", error=None)

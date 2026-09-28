@@ -35,6 +35,7 @@ from cli.commands.cluster.health_alerts import (
     _deploy_suppression,
     _ingest_alert,  # noqa: F401  # pyright: ignore[reportUnusedImport]  # re-export (tests access via health)
     _ingest_alert_fallback,  # noqa: F401  # pyright: ignore[reportUnusedImport]  # re-export (tests access via health)
+    executor_lost,
     notify_owner,  # noqa: F401  # pyright: ignore[reportUnusedImport]  # re-export (tests access via health)
 )
 from shared.loki_index_labels import LokiReadEra, event_stream_selector, split_index_label_window
@@ -490,6 +491,15 @@ def _observe_cluster_health(
     check_schema: bool,
 ) -> int:
     """Observe one health round and report the first failed check."""
+    # 0. An in-flight release or PITR operation whose executor is gone: it
+    # holds the home and nothing will finish it, and it no longer explains
+    # any other failure (`health_alerts._deploy_suppression`).
+    if (lost := executor_lost()) is not None:
+        message, since = lost
+        print(message, file=sys.stderr)
+        _alert_failure(home, message, started_at=since)
+        return 1
+
     # 1. Gateway liveness (primary signal)
     if not _gateway_liveness_with_retry():
         failure_class = "environment" if _data_plane_abnormal() else "code"

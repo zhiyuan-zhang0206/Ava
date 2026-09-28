@@ -92,6 +92,12 @@ CLOCKS: dict[str, Clock] = {
         lambda: deploy.LEASE_RENEW_INTERVAL_S,
         "how often a lease-owning operation re-arms its own deploy lease",
     ),
+    "EXECUTOR_HEARTBEAT_TTL_S": Clock(
+        "deploy",
+        lambda: deploy.EXECUTOR_HEARTBEAT_TTL_S,
+        "how stale a release executor's heartbeat may grow before its operation "
+        "stops explaining an outage",
+    ),
     "GATEWAY_PREFLIGHT_BUDGET_S": Clock(
         "deploy",
         lambda: deploy.GATEWAY_PREFLIGHT_BUDGET_S,
@@ -184,6 +190,13 @@ CONSTRAINTS: list[Constraint] = [
         "a crash-marked corpse must first decay offline (its lease stops being "
         "renewed) before the reaper terminates it — the grace window sits "
         "outside the lease TTL so the visible sequence stays offline-then-dead",
+    ),
+    Constraint(
+        ">=",
+        "EXECUTOR_HEARTBEAT_TTL_S",
+        "5 * LEASE_RENEW_INTERVAL_S",
+        "the executor stamps its heartbeat every lease-renewal round; five missed "
+        "beats before it reads as lost, so one slow write never unpauses alerting",
     ),
     Constraint(
         "<",

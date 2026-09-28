@@ -52,6 +52,14 @@ NO_PROGRESS_TIMEOUT_S = 900.0
 # single-row UPDATEs rather than a poll-rate write stream.
 LEASE_RENEW_INTERVAL_S = 60.0
 
+# How stale a finite release or PITR executor's heartbeat may grow before its
+# incomplete operation stops explaining an outage and the health probe reports
+# the executor lost (`shared.release_operation`). The executor stamps a local
+# file every `LEASE_RENEW_INTERVAL_S` from its own thread, so five missed
+# beats are a dead, killed or rebooted process, never one slow write; the
+# database lease cannot say this, because a release stops that database.
+EXECUTOR_HEARTBEAT_TTL_S = 300.0
+
 # How often the agent host renews its hosted agents' leases: the one ownership
 # beat of `services/agent_host/daemon.py` (`_beat_forever`), which sleeps exactly
 # this long between renewals and uses this constant as its step, so the lattice
