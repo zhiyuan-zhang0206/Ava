@@ -45,7 +45,12 @@ drained.
 A terminated row that was never admitted resurrects as a fresh hosted birth
 only when that is proven: no runtime identity and the fresh-INSERT birth
 marker unconsumed, rechecked in the final CAS. NULL resources are unknown and
-refuse there.
+refuse there. A row the current runtime force-terminated while it was
+unowned resurrects the same way. It carries no resource evidence; the force
+recorded an `unowned_termination` receipt because the runtime's own birth
+epoch or `lifecycle_release` had left the row unowned
+(`decisions/2026-09-29-unowned-termination-resurrects.md`). A legacy row
+never qualifies.
 
 An agent terminated before the runtime incarnation existed has NULL resources
 and an incomplete identity, so resurrection refuses it too. The same cutover

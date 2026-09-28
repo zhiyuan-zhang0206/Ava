@@ -49,10 +49,13 @@ _MARKED_ROWS = (
     "ORDER BY m.id FOR UPDATE"
 )
 
+# The settle releases the row's runtime identity, so the closed command is also
+# a lifecycle release (`shared.lifecycle_acceptance.LIFECYCLE_RELEASE`).
 _CLOSE_COMMANDS = (
     "UPDATE inbound_messages SET status = 'done', "
     "payload = COALESCE(payload, '{}'::jsonb) || jsonb_build_object("
-    "'lifecycle_result', jsonb_build_object('outcome', %s::text, 'reason', %s::text)) "
+    "'lifecycle_result', jsonb_build_object('outcome', %s::text, 'reason', %s::text), "
+    "'lifecycle_release', true) "
     "WHERE agent_id = %s AND kind = 'restart' AND applied_at IS NULL "
     "AND observed_at IS NULL AND status IN ('pending','claimed') "
     "AND payload ? 'maintenance' RETURNING id"

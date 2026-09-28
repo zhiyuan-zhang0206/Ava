@@ -32,23 +32,35 @@ def hosted_resurrection_target(
     owner: UUID | None,
     pid: int | None,
     resources: object,
+    unowned_termination: int | None,
 ) -> RuntimeIncarnation | None:
-    """Require retained hosted authority or proven non-admission.
+    """Require retained hosted authority, proven non-admission or an unowned end.
 
     A retained hosted identity resumes that incarnation; its settled command
-    and resource set close it at the successor's admission. A row the runtime
-    never admitted (every runtime identity field empty and the fresh-INSERT
-    birth marker still unconsumed) resurrects as a fresh hosted birth, returned
-    as None: no predecessor allocation exists. NULL resources are unknown, not
-    proof of non-admission. Historical process/unknown rows, incomplete
-    identities and resources the current model cannot decode need explicit
-    cutover reconciliation.
+    and resource set close it at the successor's admission. Every other
+    accepted row has all runtime identity fields empty and resurrects as a
+    fresh hosted birth, returned as None, in two cases:
+
+    - the runtime never admitted it: the fresh-INSERT birth marker is still
+      unconsumed, so no predecessor allocation exists;
+    - `unowned_termination` names this life's force receipt
+      (`shared.lifecycle_acceptance.record_unowned_termination`): this runtime
+      ended the row while no incarnation owned it, and its own lifecycle had
+      left it unowned. Resurrection restores the state that force ended;
+      admission still decides the successor.
+
+    NULL resources are unknown, not proof of either. Historical process/unknown
+    rows, incomplete identities, unowned rows without a receipt (including
+    legacy ones this runtime ended) and resources the current model cannot
+    decode need explicit cutover reconciliation.
     """
     try:
         state = None if resources is None else decode_resources(resources)
     except ResourceShapeError:
         raise ResurrectRefused("runtime_cutover_required") from None
-    if isinstance(state, ResourceBirth) and (kind, generation, owner, pid) == (None,) * 4:
+    if (kind, generation, owner, pid) == (None,) * 4 and (
+        isinstance(state, ResourceBirth) or unowned_termination is not None
+    ):
         return None
     if kind != "hosted" or generation is None or owner is None or pid is not None:
         raise ResurrectRefused("runtime_cutover_required")

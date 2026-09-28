@@ -1,10 +1,11 @@
 """Resume a terminated agent by preserving its identity and enqueuing a wake."""
 
 from datetime import datetime
-from typing import Literal
+from typing import Literal, LiteralString
 
 import psycopg
 from psycopg import sql
+from psycopg.types.json import Jsonb
 
 from ops.resurrection_retry import ResurrectSettlementDeferredError, hosted_resurrection_target
 from ops.resurrection_retry import ResurrectTriggerStaleError as ResurrectTriggerStaleError
@@ -22,17 +23,32 @@ from shared.audit_events import prepare_event_log
 from shared.config import field_alias, get_field, settings
 from shared.db import fetch_one, publish_inbound_wake
 from shared.db_transaction import write_transaction
+from shared.lifecycle_acceptance import (
+    LIFECYCLE_RELEASE,
+    UNOWNED_TERMINATION_ID,
+    UNOWNED_TERMINATION_RECORDED,
+)
 from shared.live_announce import publish_agent_updated_sync
 from shared.log import logger
 from shared.machine import machine_name
 from shared.runtime_incarnation import RuntimeIncarnation
 
-# The exact retained hosted identity, or (all three NULL) a never-admitted row
-# whose fresh-INSERT birth marker is still unconsumed.
-_RESURRECTION_TARGET = (
+# The exact retained hosted identity; or, all three NULL, a never-admitted row
+# whose fresh-INSERT birth marker is still unconsumed, or a row whose unowned
+# termination receipt the last parameter names.
+_RESURRECTION_TARGET: LiteralString = (
     "runtime_kind IS NOT DISTINCT FROM %s AND runtime_generation IS NOT DISTINCT FROM %s "
     "AND runtime_owner IS NOT DISTINCT FROM %s "
-    "AND (runtime_kind IS NOT NULL OR incarnation_resources->>'state'='unadmitted')"
+    "AND (runtime_kind IS NOT NULL OR incarnation_resources->>'state'='unadmitted' OR "
+    + UNOWNED_TERMINATION_RECORDED
+    + ")"
+)
+# The locked row the gate judges, with this life's unowned termination receipt.
+_RESURRECTION_ROW: LiteralString = (
+    "SELECT status,machine,permanent_reject_streak,last_permanent_reject_reason,"  # noqa: S608 -- constant SQL fragment
+    "runtime_kind,runtime_generation,runtime_owner,pid,incarnation_resources,"
+    + UNOWNED_TERMINATION_ID
+    + " FROM agents_meta WHERE id = %s FOR UPDATE"
 )
 
 
@@ -41,13 +57,15 @@ def _transition_terminated_to_unclaimed_idling(
     agent_id: int,
     incarnation: RuntimeIncarnation | None,
     *,
+    unowned_termination: int | None,
     trigger_inbound_id: int | None,
     trigger_inbound_kind: Literal["chat", "compact_request", "system_note"] | None,
 ) -> datetime:
     """Run the one final resurrection CAS with a fully static SQL shape.
 
     `incarnation` None is a fresh hosted birth: the CAS re-proves, under the
-    row lock, that no runtime identity exists and the birth marker is intact.
+    row lock, that no runtime identity exists and that either the birth marker
+    is intact or `unowned_termination` names this agent's unowned force receipt.
     """
     base_params = (
         AgentStatus.IDLING,
@@ -56,6 +74,7 @@ def _transition_terminated_to_unclaimed_idling(
         None if incarnation is None else "hosted",
         None if incarnation is None else incarnation.generation,
         None if incarnation is None else incarnation.owner,
+        unowned_termination,
     )
     if trigger_inbound_id is not None:
         from shared.lifecycle_acceptance import (
@@ -185,12 +204,7 @@ def _prepare_resurrect_attempt(
     recover_local_resources(agent_id, machine_name())
     with write_transaction() as conn, conn.cursor() as cur:
         latched_machine = _lock_active_home_machine(cur, agent_id)
-        cur.execute(
-            "SELECT status,machine,permanent_reject_streak,last_permanent_reject_reason,"
-            "runtime_kind,runtime_generation,runtime_owner,pid,incarnation_resources "
-            "FROM agents_meta WHERE id = %s FOR UPDATE",
-            (agent_id,),
-        )
+        cur.execute(_RESURRECTION_ROW, (agent_id,))
         row = cur.fetchone()
         if row is None:
             raise AgentNotFound(f"agent {agent_id} does not exist")
@@ -201,8 +215,15 @@ def _prepare_resurrect_attempt(
             raise ResurrectAlreadyAlive(
                 f"agent {agent_id} is in {current.value!r} state, not 'terminated'"
             )
+        unowned_termination = row[9]
         incarnation = hosted_resurrection_target(
-            agent_id, kind=row[4], generation=row[5], owner=row[6], pid=row[7], resources=row[8]
+            agent_id,
+            kind=row[4],
+            generation=row[5],
+            owner=row[6],
+            pid=row[7],
+            resources=row[8],
+            unowned_termination=unowned_termination,
         )
         if billing_recovery:
             from shared.recovery_breaker import (
@@ -232,11 +253,12 @@ def _prepare_resurrect_attempt(
         # and a command that never applied cannot defer this resurrection. A
         # refusal below rolls the whole transaction back - fence included.
         # Stamp after the lock: a transaction begun before termination committed
-        # must not sort its resurrection ahead of the interruption notices.
+        # must not sort its resurrection ahead of the interruption notices. The
+        # row leaves this transaction unowned, a lifecycle release.
         cur.execute(
-            "INSERT INTO inbound_messages (agent_id, content, kind, source, created_at) "
-            "VALUES (%s, '', 'resurrect', %s, clock_timestamp()) RETURNING id",
-            (agent_id, resurrected_by),
+            "INSERT INTO inbound_messages (agent_id, content, kind, source, created_at, payload) "
+            "VALUES (%s, '', 'resurrect', %s, clock_timestamp(), %s) RETURNING id",
+            (agent_id, resurrected_by, Jsonb({LIFECYCLE_RELEASE: True})),
         )
         resurrect_row = cur.fetchone()
         if resurrect_row is None:
@@ -251,6 +273,7 @@ def _prepare_resurrect_attempt(
             cur,
             agent_id,
             incarnation,
+            unowned_termination=unowned_termination,
             trigger_inbound_id=trigger_inbound_id,
             trigger_inbound_kind=trigger_inbound_kind,
         )

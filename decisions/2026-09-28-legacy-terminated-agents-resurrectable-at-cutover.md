@@ -5,9 +5,11 @@
 Resurrection requires a terminated row to retain its hosted runtime identity:
 `runtime_kind='hosted'`, a generation and an owner, and no per-agent pid
 (`ops.resurrection_retry.hosted_resurrection_target`, rechecked by the final
-CAS in `ops.agent_wake`). Only a row whose fresh-INSERT birth marker proves it
-was never admitted resurrects without one. Every other row refuses with
-`runtime_cutover_required`.
+CAS in `ops.agent_wake`). Two kinds of row resurrect without one: a row whose
+fresh-INSERT birth marker proves it was never admitted, and a row the current
+runtime force-terminated while its own lifecycle had left it unowned
+([2026-09-29](2026-09-29-unowned-termination-resurrects.md)). Legacy rows
+qualify for neither. Every other row refuses with `runtime_cutover_required`.
 
 Agents terminated before the runtime incarnation existed
 ([2026-09-03](2026-09-03-agent-runtime-incarnation.md)) never received that

@@ -242,6 +242,11 @@ def _force_terminate_transaction(
             message=message,
             kill_all_shell_sessions=kill_all_shell_sessions,
         )
+        from shared.lifecycle_acceptance import record_unowned_termination
+
+        # Judged on the row as it is before this force ends it: no incarnation
+        # to settle leaves a receipt resurrection accepts.
+        record_unowned_termination(conn, agent_id, terminate_inbound_id)
         cur.execute(
             # termination_source='user': force-kill / a terminate that found the
             # pid already dead. Both are the user's will to end the agent, so it

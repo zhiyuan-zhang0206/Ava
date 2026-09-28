@@ -23,8 +23,17 @@ remains pending.
 
 Resurrection requires the terminated hosted incarnation's retained generation
 and owner, no per-agent PID, and no outstanding applied lifecycle command. A
-never-admitted row (no runtime identity, birth marker unconsumed, rechecked in
-the final CAS) resurrects as a fresh hosted birth instead.
+row with no runtime identity resurrects as a fresh hosted birth instead, in
+two cases, each rechecked in the final CAS. One is a never-admitted row whose
+birth marker is still unconsumed. The other is a row this runtime
+force-terminated while no incarnation owned it: the force records
+`unowned_termination` on its own command, but only when the row's unowned
+state has a lifecycle origin. That origin is the spawn's birth epoch
+(`last_resurrect_inbound_id = 0`), or a `lifecycle_release` receipt on the
+resurrection, applied restart or straggler settlement that left the row
+unowned. The receipt must belong to the current life, that is, have an id
+above the epoch fence
+(`decisions/2026-09-29-unowned-termination-resurrects.md`).
 Historical process runtimes, unknown runtime kinds, incomplete hosted
 identities and resources the current model cannot decode refuse resurrection
 (`runtime_cutover_required`) pending explicit one-time cutover reconciliation.
@@ -36,7 +45,8 @@ accepts and the resurrection CAS clears
 It reaches only rows terminated before their machine's attestation; a row
 whose pointer names a forced terminate is minted at the cutover's W12 late
 conversion once boot recovery settled that force. Rows the mint does not
-reach keep refusing, including rows this runtime terminates in that shape.
+reach keep refusing, and so does a legacy unowned row this runtime
+force-terminated without having released it first.
 An automatic resurrection that meets such a refusal leaves its inbound queued
 and logs a WARNING naming the reason.
 No process-exit observer adopts those rows or settles a hosted logical lifecycle.

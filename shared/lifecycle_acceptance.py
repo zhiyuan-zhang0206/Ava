@@ -333,3 +333,82 @@ def supersede_lifecycle_for_force(conn: psycopg.Connection, agent_id: int, force
     )
     if cleared.rowcount != 1:
         raise RuntimeError("force lifecycle settlement lost its locked pointer")
+
+
+# Resurrection needs positive evidence that no earlier incarnation can still
+# write (decisions/2026-09-29-unowned-termination-resurrects.md). A row this
+# runtime terminated while no incarnation owned it carries that evidence as two
+# facts only this runtime writes, both new values in existing columns:
+#
+# - its unowned state has a lifecycle origin: a birth recorded as epoch 0
+#   (`agents_meta.last_resurrect_inbound_id`, stamped by the spawn INSERT), or
+#   a `lifecycle_release` receipt on the resurrect or restart inbound whose
+#   transition left the row unowned (a resurrection, an applied restart, a
+#   straggler settlement). A retired runtime left identical row shapes but
+#   never these values, so a legacy unowned row has no origin;
+# - the force that ended it recorded `unowned_termination` on its own command.
+#
+# Like the markers above, only the exact JSON boolean `true` counts, and the
+# fragments embed the keys literally.
+LIFECYCLE_RELEASE = "lifecycle_release"
+UNOWNED_TERMINATION = "unowned_termination"
+
+# The unaliased agents_meta row's unowned state came from this runtime's lifecycle.
+_LIFECYCLE_ORIGIN: LiteralString = (
+    "(agents_meta.last_resurrect_inbound_id = 0 OR EXISTS (SELECT 1 FROM inbound_messages r "
+    "WHERE r.agent_id = agents_meta.id AND r.kind IN ('resurrect','restart') "
+    "AND COALESCE((r.payload -> 'lifecycle_release') = 'true'::jsonb, false)))"
+)
+
+# The hosted apply's receipt on its command (the one `%s`). An applied restart
+# released the runtime identity, so it is also a lifecycle release.
+RECORD_APPLIED: LiteralString = (
+    "UPDATE inbound_messages SET applied_at=clock_timestamp(),payload=CASE WHEN kind='restart' "
+    "THEN COALESCE(payload,'{}'::jsonb)||jsonb_build_object('lifecycle_release',true) "
+    "ELSE payload END WHERE id=%s"
+)
+
+# The force that ended the current life of the unaliased agents_meta row while
+# no incarnation owned it, or NULL. A life ends once: the next resurrection
+# moves the epoch fence past it, so an earlier life's receipt never carries over.
+UNOWNED_TERMINATION_ID: LiteralString = (
+    "(SELECT max(u.id) FROM inbound_messages u WHERE u.agent_id = agents_meta.id "
+    "AND u.kind = 'terminate' AND u.id > COALESCE(agents_meta.last_resurrect_inbound_id, 0) "
+    "AND COALESCE((u.payload -> 'unowned_termination') = 'true'::jsonb, false))"
+)
+
+# That receipt named by its id (the one `%s`) on the unaliased agents_meta row.
+# A command row is immutable evidence: a transaction's own resurrect inbound and
+# epoch fence cannot satisfy this.
+UNOWNED_TERMINATION_RECORDED: LiteralString = (
+    "EXISTS (SELECT 1 FROM inbound_messages u WHERE u.id = %s AND u.agent_id = agents_meta.id "
+    "AND u.kind = 'terminate' "
+    "AND COALESCE((u.payload -> 'unowned_termination') = 'true'::jsonb, false))"
+)
+
+_RECORD_UNOWNED_TERMINATION: LiteralString = (
+    "UPDATE inbound_messages u SET payload=COALESCE(u.payload,'{}'::jsonb)||%s "  # noqa: S608 -- constant SQL fragment
+    "FROM agents_meta WHERE u.id=%s AND u.agent_id=%s AND u.kind='terminate' "
+    "AND u.status='pending' AND agents_meta.id=u.agent_id AND agents_meta.status='idling' "
+    "AND agents_meta.runtime_kind IS NULL AND agents_meta.runtime_generation IS NULL "
+    "AND agents_meta.runtime_owner IS NULL AND agents_meta.pid IS NULL AND " + _LIFECYCLE_ORIGIN
+)
+
+
+def record_unowned_termination(conn: psycopg.Connection, agent_id: int, force_id: int) -> bool:
+    """Record that force `force_id` ends a row no runtime incarnation owns.
+
+    Called by the force transaction under the agents_meta row lock, before its
+    terminated write. The row must still be idling with no runtime kind,
+    generation, owner or pid, and its unowned state must have a lifecycle
+    origin. Admission writes the identity under the same lock, so no
+    incarnation is admitted concurrently. Returns whether the receipt was
+    written: a force on an owned, non-idling, already terminated or legacy
+    unowned row records nothing, and resurrection keeps refusing that row.
+    """
+    if conn.info.transaction_status != TransactionStatus.INTRANS:
+        raise RuntimeError("unowned termination requires an explicit transaction")
+    recorded = conn.execute(
+        _RECORD_UNOWNED_TERMINATION, (Jsonb({UNOWNED_TERMINATION: True}), force_id, agent_id)
+    )
+    return recorded.rowcount == 1

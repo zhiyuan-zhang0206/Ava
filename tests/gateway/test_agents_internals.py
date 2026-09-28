@@ -15,6 +15,7 @@ from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool, ConnectionPool
 
 import shared.db
+from ops import agent_wake
 from ops.agent_wake import ResurrectTriggerStaleError
 from ops.agents import (
     create_agent_row,
@@ -749,11 +750,7 @@ class TestResurrectAgent:
 
         def tracking_execute(self: Any, query: Any, *args: Any, **kwargs: Any) -> Any:
             result = original_execute(self, query, *args, **kwargs)
-            if query == (
-                "SELECT status,machine,permanent_reject_streak,last_permanent_reject_reason,"
-                "runtime_kind,runtime_generation,runtime_owner,pid,incarnation_resources "
-                "FROM agents_meta WHERE id = %s FOR UPDATE"
-            ):
+            if query == agent_wake._RESURRECTION_ROW:
                 status_select_cursors.add(id(self))
             return result
 

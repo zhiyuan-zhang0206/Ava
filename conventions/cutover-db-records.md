@@ -154,7 +154,10 @@ is less than a retired-shape conversion proves: such a row records no pid, so
 the attestation lists no process of it, and no receipt settles it
 ([why it suffices](../decisions/2026-09-28-legacy-terminated-agents-resurrectable-at-cutover.md)). The
 new code writes rows of the same shape, an agent terminated before its first
-admission, and those never qualify. The comparison crosses clocks (the
+admission, and those never qualify. The runtime resurrects such a row itself
+when the force that ended it recorded an unowned termination
+(`decisions/2026-09-29-unowned-termination-resurrects.md`); D-8 still lists it
+as `after_attestation`. The comparison crosses clocks (the
 database's `now()` stamps the termination, the attesting host's clock stamps
 `attested_at`, just after it read the census). Legacy terminations precede
 the attestation by at least the drain, and business, the first source of new
@@ -202,7 +205,8 @@ the script exists. What can change a fenced row:
   agent host settles at its first boot converts at the
   [late conversion](#late-conversion-at-w12); any other pointer keeps the row
   fenced. `after_attestation` never converts: once the new code runs on its
-  machine, no attestation can prove that home empty.
+  machine, no attestation can prove that home empty. The runtime resurrects
+  the ones whose force recorded an unowned termination; the rest stay fenced.
 - **Every other reason (known gap).** This covers:
   - a row of a machine with no unit left to attest: every unit is retired
     (`--retire-units`, from the run that retires the last one on) or none is
@@ -245,7 +249,8 @@ unit has had it. Then, on the gateway:
 1. `--check` with the same attestation documents W7 used. Rows the new code
    wrote in the same shape (agents terminated since W11 before their first
    admission) read `after_attestation`: the documents were taken before them,
-   so the run never mints them and they stay fenced.
+   so the run never mints them. The runtime resurrects the ones whose force
+   recorded an unowned termination; the rest stay fenced.
 2. The dry run with those attestations and a new `--reason`; the same inputs
    as W7's completed run change nothing. Pass no `--pending-json`,
    `--lease-json` or `--retire-units`: W7 applied them, and passing them again

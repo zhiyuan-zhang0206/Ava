@@ -171,7 +171,10 @@ identities gone and the home census empty); admission keeps
 `resource_fence` / `runtime_cutover_required`; NULL resources are never
 converted and stay protocol zero. Drain certification accepts
 the complete empty recorded set of the released incarnation. A never-admitted
-row resurrects as a fresh birth only with its birth marker intact.
+row resurrects as a fresh birth only with its birth marker intact, or when the
+runtime's own force recorded that it ended the row unowned after the
+runtime's own lifecycle had left it so
+(`decisions/2026-09-29-unowned-termination-resurrects.md`).
 
 Implemented for agents terminated before the runtime incarnation (why:
 `decisions/2026-09-28-legacy-terminated-agents-resurrectable-at-cutover.md`):

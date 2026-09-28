@@ -27,7 +27,7 @@ from shared.incarnation_resources import (
     ResourceProcess,
     decode_resources,
 )
-from shared.lifecycle_acceptance import terminate_kills_shell_sessions
+from shared.lifecycle_acceptance import RECORD_APPLIED, terminate_kills_shell_sessions
 from shared.live_announce import publish_agent_updated
 from shared.log import logger
 from shared.paths import ava_home
@@ -160,9 +160,7 @@ async def apply_hosted_lifecycle(
             )
         else:
             raise ValueError(f"not an executable lifecycle command: {lifecycle_kind}")
-        await conn.execute(
-            "UPDATE inbound_messages SET applied_at=clock_timestamp() WHERE id=%s", (row[0],)
-        )
+        await conn.execute(RECORD_APPLIED, (row[0],))  # an applied restart is a release
         if lifecycle_kind == "terminate":
             await conn.execute(
                 "UPDATE inbound_messages SET observed_at=clock_timestamp(),status='done' "
