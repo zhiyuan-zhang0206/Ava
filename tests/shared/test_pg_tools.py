@@ -190,9 +190,17 @@ def test_pg_start_env_carries_only_process_mechanics(monkeypatch: pytest.MonkeyP
 
     env = pg_tools.pg_start_env()
 
-    assert set(env) <= {"PATH", "HOME", "USER", "LOGNAME", "TMPDIR", "TZ", "LANG"} | {
-        name for name in env if name.startswith("LC_")
+    mechanics = {"PATH", "HOME", "USER", "LOGNAME", "TMPDIR", "TZ", "LANG"} | {
+        "SYSTEMROOT",
+        "WINDIR",
+        "SYSTEMDRIVE",
+        "COMSPEC",
+        "PATHEXT",
+        "TEMP",
+        "TMP",
+        "USERPROFILE",
     }
+    assert set(env) <= mechanics | {name for name in env if name.startswith("LC_")}
     assert env["TZ"] == "Asia/Shanghai" and env["LC_CTYPE"] == "UTF-8"
     assert env["PATH"] == os.environ["PATH"]
 

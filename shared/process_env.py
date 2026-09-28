@@ -22,8 +22,13 @@ def inherited_process_env(overrides: Mapping[str, str] | None = None) -> dict[st
 
 # The operator's process mechanics a long-lived native daemon may keep: binary
 # lookup (a bare `redis-server` resolves through the child's PATH), identity,
-# temp dir, timezone and locale (`LC_*` as a prefix).
-_DAEMON_ENV_NAMES = frozenset({"PATH", "HOME", "USER", "LOGNAME", "TMPDIR", "TZ", "LANG"})
+# temp dir, timezone and locale (`LC_*` as a prefix). The Windows names matter
+# only to a throwaway Postgres there (`pg_start_env`): a Windows child needs
+# `SystemRoot` to run at all, and `pg_ctl` starts the server through `COMSPEC`.
+_DAEMON_ENV_NAMES = frozenset(
+    {"PATH", "HOME", "USER", "LOGNAME", "TMPDIR", "TZ", "LANG"}
+    | {"SYSTEMROOT", "WINDIR", "SYSTEMDRIVE", "COMSPEC", "PATHEXT", "TEMP", "TMP", "USERPROFILE"}
+)
 
 
 def daemon_process_env() -> dict[str, str]:
