@@ -51,6 +51,9 @@ authority cutover brought the plane up under new custody. Run them with the
    when no retired-shape or identity-less row remains; otherwise it reads
    `fenced` with a count per verdict and reason, and `--check` exits 2 ([rows
    left fenced](#rows-left-fenced)).
+6. **Late conversion (W12).** Once every included unit ran the new code, run
+   the repair once more for the `pointer` rows the new agent hosts settled
+   ([late conversion at W12](#late-conversion-at-w12)).
 
 ```bash
 P=scripts/cutover_db_records.py
@@ -162,9 +165,12 @@ the script exists. What can change a fenced row:
   such a machine, and its agents stay fenced.
 - **An identity-less row.** `awaiting` converts as above, with a later
   attestation of its machine. `paused` needs the machine resumed first, with
-  the same posture gap. `no_unit` and `pointer` never convert: no attestation
-  can cover the first, and resurrection defers on the second whatever
-  identity the row carries.
+  the same posture gap. `no_unit` never converts: no attestation can cover
+  it. `pointer` converts only once its pointer is gone, since resurrection
+  defers on it whatever identity the row carries: a forced terminate the new
+  agent host settles at its first boot converts at the
+  [late conversion](#late-conversion-at-w12); any other pointer keeps the row
+  fenced.
 - **Every other reason (known gap).** This covers:
   - a row of a machine with no unit left to attest: every unit is retired
     (`--retire-units`, from the run that retires the last one on) or none is
@@ -184,6 +190,42 @@ the script exists. What can change a fenced row:
   shape. These agents stay fenced until a separate, evidence-backed decision
   exists. The cutover scripts, and this conversion with them, are deleted
   after the cutover.
+
+## Late conversion at W12
+
+An identity-less terminated row whose lifecycle pointer names a forced
+terminate that was applied but never observed reads `pointer` at W7 and stays
+fenced: resurrection defers on that pointer. The new agent host settles such a
+force when it boots on the row's machine, before its scheduler starts
+(`shared.hosted_force.recover_orphaned_hosted_forces`, logged as
+`hosted boot recovery: observed <n> orphaned force(s)`). It observes the force
+and clears the pointer, and the row reads `convertible` once its machine's
+attestation is supplied. A force whose exec evidence may still be live is
+deferred instead (`hosted boot recovery deferred`) and its row stays fenced.
+
+That boot is each unit's held first start (W8, W9), so by W12 every included
+unit has had it. Then, on the gateway:
+
+1. `--check` with the same attestation documents W7 used. For each machine,
+   D-8's `identityless` `convertible` count must not exceed the `pointer`
+   count of W7's final `--check`. The new code writes rows of the same shape
+   (an agent terminated before its first admission), and this run would mint
+   them too: if a count exceeds it, stop and decide before going on.
+2. The dry run with those attestations and a new `--reason`; the same inputs
+   as W7's completed run change nothing. Pass no `--pending-json`,
+   `--lease-json` or `--retire-units`: W7 applied them, and passing them again
+   refuses. The plan must hold only `identities` and `incarnations` effects;
+   a `pending`, `lease`, `posture` or `units` effect means the cluster moved
+   since W7: stop.
+3. `--execute` with the same arguments, then `--check`: the settled rows are
+   gone from `pointer`, and the run is appended to the journal.
+
+```bash
+.venv/bin/python $P --home ~/.ava --check --attestation attest-gw.json ... > check-w12.json
+.venv/bin/python $P --home ~/.ava --attestation attest-gw.json ... \
+    --operator "$OPERATOR" --reason "fleet cutover <id>: W12 late conversion"
+(the same) --execute
+```
 
 ## Record and recovery
 
