@@ -68,6 +68,9 @@ _STUBBORN_JOB = (
 
 _LOOP_SHELL = "bash -c 'while true; do sleep 1; done'"
 
+# The idle test's own prompt, set by its home's `.bash_profile`.
+_IDLE_PROMPT = "ava-idle-shell>"
+
 
 def _double_forked_job(pidfile: Path, *, ignore: tuple[str, ...]) -> str:
     """A job whose worker double-forks out of the shell's tree: reparented to
@@ -665,17 +668,22 @@ def test_stop_records_nothing_for_idle_shell(
     The session has no initial command: the host types one into the login
     shell after its prompt, where it runs as a job. Idle is the login shell at
     its first prompt — bash prints it only after its startup files ran. The
-    machine name lets a wrongly recorded notice land in the journal.
+    test owns that prompt: the login shell reads this home's `.bash_profile`
+    after the system's files, so the prompt is `_IDLE_PROMPT` whatever the
+    host's or the developer's shell configuration prints. The machine name
+    lets a wrongly recorded notice land in the journal.
     """
     dependencies(monkeypatch)
     terminal = PtySessionBackend()
     _stop_env(monkeypatch, home, terminal)
     (home / "machine_name").write_text("test-host")
+    (home / ".bash_profile").write_text(f"PS1='{_IDLE_PROMPT} '\n")
     name = "ava-agent-987-shell-2044-idle"
-    assert terminal.new_session(name, "", home, env={"AVA_HOME": str(home)})
+    env = {"AVA_HOME": str(home), "HOME": str(home)}
+    assert terminal.new_session(name, "", home, env=env)
     shell = pty_reaper.track_session(name)
     deadline = time.monotonic() + 15
-    while not terminal.capture_pane(name).rstrip().endswith(("$", "#")):
+    while not terminal.capture_pane(name).rstrip().endswith(_IDLE_PROMPT):
         assert time.monotonic() < deadline, "the login shell never printed its prompt"
         time.sleep(0.1)
     members = [member.pid for member in session_tree.session_members(shell)]
