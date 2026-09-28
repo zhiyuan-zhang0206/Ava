@@ -9,7 +9,9 @@ from psycopg.types.json import Jsonb
 
 from shared import redis_client
 from shared.agents.impersonation._impersonation_store import (
-    OPEN,
+    OPEN as OPEN,
+)
+from shared.agents.impersonation._impersonation_store import (
     SESSION_RELAY_PROVIDERS,
     authenticate,
     dismiss_reminders,
@@ -17,10 +19,8 @@ from shared.agents.impersonation._impersonation_store import (
     insert_handoff,
     local,
     lock_agent,
-    lock_lease,
     public,
     require_active_locked,
-    require_native,
     token_hash,
     validate_active,
     validate_relay_spec,
@@ -29,7 +29,13 @@ from shared.agents.impersonation._impersonation_store import (
     ImpersonationError as ImpersonationError,
 )
 from shared.agents.impersonation._impersonation_store import (
+    lock_lease as lock_lease,
+)
+from shared.agents.impersonation._impersonation_store import (
     provider_anchor_states as provider_anchor_states,
+)
+from shared.agents.impersonation._impersonation_store import (
+    require_native as require_native,
 )
 from shared.agents.impersonation.impersonation_history import append, capture_pending, set_actor
 from shared.caller_identity import CallerIdentity

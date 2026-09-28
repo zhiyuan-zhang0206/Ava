@@ -208,7 +208,7 @@ class TestSpawnPrechecksBlocking:
     def test_fork_resolves_checkpoint(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """fork_from -> latest_checkpoint_id resolves to an explicit id, not 'latest'."""
         monkeypatch.setattr(ops_launch, "latest_checkpoint_id", lambda _cur, _aid: "ckpt:v1")
-        checkpoint = ops_launch._spawn_prechecks_blocking(
+        checkpoint = ops_launch.spawn_prechecks_blocking(
             SpawnAgentRequest(spawner="user", fork_from=3),
             self._FakePool(),  # type: ignore[arg-type]
         )
@@ -220,7 +220,7 @@ class TestSpawnPrechecksBlocking:
 
         monkeypatch.setattr(ops_launch, "latest_checkpoint_id", lambda _cur, _aid: None)
         with pytest.raises(ForkSourceEmpty):
-            ops_launch._spawn_prechecks_blocking(
+            ops_launch.spawn_prechecks_blocking(
                 SpawnAgentRequest(spawner="user", fork_from=3),
                 self._FakePool(),  # type: ignore[arg-type]
             )
@@ -234,7 +234,7 @@ class TestSpawnPrechecksBlocking:
             return "never"
 
         monkeypatch.setattr(ops_launch, "latest_checkpoint_id", _fake_lookup)
-        checkpoint = ops_launch._spawn_prechecks_blocking(
+        checkpoint = ops_launch.spawn_prechecks_blocking(
             SpawnAgentRequest(spawner="user"),
             self._FakePool(),  # type: ignore[arg-type]
         )

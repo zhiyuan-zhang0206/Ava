@@ -60,7 +60,7 @@ def resume_note_pending(state: Any) -> bool:
 def _save_document(session: dict[str, Any], incarnation: RuntimeIncarnation) -> tuple[str, str]:
     from psycopg.types.json import Jsonb
 
-    from shared.agents.impersonation._impersonation_store import OPEN, lock_lease, require_native
+    from shared.agents.impersonation import OPEN, lock_lease, require_native
 
     with write_transaction() as conn:
         require_native(conn, incarnation)
@@ -82,7 +82,7 @@ def _save_document(session: dict[str, Any], incarnation: RuntimeIncarnation) -> 
 
 
 def _receipt(session: dict[str, Any], incarnation: RuntimeIncarnation) -> None:
-    from shared.agents.impersonation._impersonation_store import lock_lease, require_native
+    from shared.agents.impersonation import lock_lease, require_native
 
     with write_transaction() as conn:
         require_native(conn, incarnation)
