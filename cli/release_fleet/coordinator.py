@@ -38,7 +38,15 @@ from cli.release_fleet.progress import FLEET_ABORTABLE, AlertRecord, FleetProgre
 from cli.release_fleet.publication import Completion
 from cli.release_fleet.request import FleetRequest
 from cli.release_fleet.units import RemoteUnits
-from cli.release_fleet.workload import Evidence, UnitReport, Verdict, judge_start, judge_watch
+from cli.release_fleet.workload import (
+    AgentReport,
+    Evidence,
+    UnitReport,
+    Verdict,
+    first_sightings,
+    judge_start,
+    judge_watch,
+)
 from cli.release_transition.failure import OperationFailure, failure_detail
 from cli.release_transition.journal import Journal, Operation
 from shared.log import logger
@@ -353,12 +361,23 @@ class Coordinator:
         evidence = Evidence(
             since=since,
             units=(samples.gateway, *unit_reports),
-            agents=samples.agents,
+            agents=self._window(samples.agents, since) if stage == "watch" else (),
             core=samples.core,
         )
         now = max(self.clock(), observed)
         judge = judge_start if stage == "start" else judge_watch
         return judge(self.request.policy, self._cohort, evidence, direction=direction, now=now)
+
+    def _window(self, sampled: tuple[AgentReport, ...], since: datetime) -> tuple[AgentReport, ...]:
+        """This sample and every definitive fact the window saw before it.
+
+        What the window saw is journaled before it is judged, so a later
+        sample, or a continuation after executor death, judges it too.
+        """
+        known = self.progress.window_facts
+        if sightings := first_sightings(known, sampled, since=since):
+            self._record(window_facts=(*known, *sightings))
+        return (*self.progress.window_facts, *sampled)
 
     def _act(self, verdict: Verdict, *, on_proceed: Literal["resuming"] | None) -> None:
         """Journal the verdict (with its alerts and unit marks), then execute it."""

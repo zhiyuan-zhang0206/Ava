@@ -8,12 +8,14 @@ what it already saw. The harness is `test_coordinator.py`'s.
 
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 import pytest
 
+from cli.release_fleet.gateway import Samples
+from cli.release_fleet.policy import Cohort
 from cli.release_fleet.request import FleetRequest
 from cli.release_transition import journal as journal_module
 from cli.release_transition.journal import Journal, Operation, create, exclusive, read_operation
@@ -128,3 +130,90 @@ def test_a_hold_journaled_before_executor_death_is_executed_not_judged_again(
     final = read_operation(request_record.path)
     assert final.fleet is not None and final.fleet.outcome == "recovered"
     assert [v.action for v in final.fleet.verdicts] == ["hold", "proceed"]
+
+
+class FatalTurnsMidWindow(Effects):
+    """Chosen watch samples show a cohort agent's fatal turn; a completed turn
+    clears the mark (`last_turn_fatal_at`), so later samples show none."""
+
+    def __init__(self, request: FleetRequest, *, fatal: dict[int, tuple[int, ...]]) -> None:
+        super().__init__(request)
+        self.cohort_agents = (7, 8, 9)
+        self.fatal = fatal  # watch sample number -> agents whose fatal turn it shows
+        self.watch_samples = 0
+
+    def sample(
+        self,
+        operation: Operation,
+        cohort: Cohort,
+        *,
+        since: datetime,
+        observed: datetime,
+        agents: bool,
+    ) -> Samples:
+        base = super().sample(operation, cohort, since=since, observed=observed, agents=agents)
+        if not agents:
+            return base
+        self.watch_samples += 1
+        failing = self.fatal.get(self.watch_samples, ())
+        shown = tuple(
+            a.model_copy(update={"runtime_error": a.agent in failing}) for a in base.agents
+        )
+        return base._replace(agents=shown)
+
+
+def test_an_agent_affected_mid_window_keeps_the_release_from_known_good(
+    request_record: FleetRequest,
+) -> None:
+    """A fatal turn seen once, then cleared by a completed turn, still marks
+    the release degraded: any affected agent does, and nothing it showed is
+    forgotten by a later clean sample."""
+    create(request_record)
+    effects = FatalTurnsMidWindow(request_record, fatal={1: (7,)})
+    with exclusive(request_record.path) as journal:
+        drive(journal, effects)
+    final = read_operation(request_record.path)
+    assert effects.watch_samples > 2
+    assert final.fleet is not None and final.fleet.outcome == "degraded"
+    commit = final.fleet.verdicts[-1]
+    assert [(a.agent, a.reasons) for a in commit.affected] == [(7, ("runtime_error",))]
+    assert [c.outcome for c in effects.published] == ["degraded"]
+    assert not effects.published[0].exercised
+
+
+def test_errors_spread_over_the_window_add_up_to_the_threshold(
+    request_record: FleetRequest,
+) -> None:
+    """Each agent fails once, in a different sample, each cleared before the
+    next: together they exceed the threshold, and the candidate recovers."""
+    create(request_record)
+    effects = FatalTurnsMidWindow(request_record, fatal={1: (7,), 2: (8,)})
+    with exclusive(request_record.path) as journal:
+        drive(journal, effects)
+    final = read_operation(request_record.path)
+    assert final.fleet is not None and final.fleet.outcome == "recovered"
+    decision = final.fleet.decisions[0]
+    assert (decision.kind, decision.phase) == ("recover", "watching")
+
+
+def test_what_the_window_saw_survives_executor_death(
+    request_record: FleetRequest, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    create(request_record)
+    effects = FatalTurnsMidWindow(request_record, fatal={1: (7,)})
+    real = journal_module.Journal.record_fleet
+
+    def dies_after_the_sighting(self: Journal, progress: Any) -> Operation:
+        written = real(self, progress)
+        if progress.window_facts:
+            monkeypatch.setattr(journal_module.Journal, "record_fleet", real)
+            raise ControllerLost
+        return written
+
+    monkeypatch.setattr(journal_module.Journal, "record_fleet", dies_after_the_sighting)
+    with pytest.raises(ControllerLost), exclusive(request_record.path) as journal:
+        drive(journal, effects)
+    with exclusive(request_record.path) as journal:
+        drive(journal, effects)
+    final = read_operation(request_record.path)
+    assert final.fleet is not None and final.fleet.outcome == "degraded"

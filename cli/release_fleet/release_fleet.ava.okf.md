@@ -74,6 +74,13 @@ refused there because agents resume afterwards. Before the window ends only
 facts that can only grow count (recorded unit failures, runtime errors,
 quarantines, failed core samples), so an early recovery is the end decision
 made early. Recovery happens at most once: the previous direction holds.
+The signal an agent fact is read from does not grow (a completed turn clears
+`last_turn_fatal_at`), so the coordinator journals each agent's first
+sighting of each fact in the window (`first_sightings`,
+`FleetProgress.window_facts`) and judges it with every later sample: an
+agent affected mid-window keeps the release from known-good, errors spread
+across samples add up to the threshold, and a continuation keeps them. An
+error that appears and clears between two samples is not observed.
 
 ## Alerts (`alerting.py`)
 
