@@ -99,9 +99,9 @@ message brings it back with full context) only when a follow-up is needed.
 
 ```python
 import ava
-from pathlib import Path
+from shared.paths import workspace_dir
 
-handoff = Path.home() / ".ava/workspaces" / str(ava.self.AGENT_ID) / "task_handoff"
+handoff = workspace_dir(ava.self.AGENT_ID) / "task_handoff"
 handoff.mkdir(parents=True, exist_ok=True)
 
 flight_id = ava.agents.spawn(
