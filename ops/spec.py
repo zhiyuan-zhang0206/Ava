@@ -39,6 +39,7 @@ from __future__ import annotations
 
 import importlib.util
 import shlex
+import sys
 from dataclasses import dataclass, replace
 from pathlib import Path
 
@@ -135,12 +136,28 @@ def _plugin_services() -> tuple[ServiceSpec, ...]:
 
 
 def _load_plugin_module(name: str, services_py: Path) -> object:
-    """Import a plugin's ``services.py`` by file path, returning the module."""
+    """Load and register ``services.py`` so its own healthcheck is importable.
+
+    An external plugin can expose ``main`` here and declare
+    ``healthcheck_module=__name__``. The watchdog must resolve that module even
+    when no agent has bootstrapped the external plugin namespace. Registration
+    before execution also gives dataclasses their normal import-time identity.
+    Failed imports restore the prior module, never a half-executed replacement.
+    """
     spec = importlib.util.spec_from_file_location(f"plugins.{name}.services", services_py)
     if spec is None or spec.loader is None:
         raise PluginServiceError(f"cannot load services.py for plugin {name!r} ({services_py})")
     module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    previous = sys.modules.get(spec.name)
+    sys.modules[spec.name] = module
+    try:
+        spec.loader.exec_module(module)
+    except BaseException:
+        if previous is None:
+            sys.modules.pop(spec.name, None)
+        else:
+            sys.modules[spec.name] = previous
+        raise
     return module
 
 
