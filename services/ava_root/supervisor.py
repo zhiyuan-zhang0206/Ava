@@ -24,10 +24,10 @@ import psutil
 from services.ava_root.custody import ServiceCustody, require_clear
 from services.ava_root.group_scope import (
     capture_group,
-    group_births,
     group_closed,
     group_over,
     ownership_retained,
+    record_survivors,
     recorded_living,
     unproven_group,
 )
@@ -99,6 +99,9 @@ class _Generation:
     proc: asyncio.subprocess.Process | ApplicationProcess
     started_at: float
     identity: OwnedProcess | None = None
+    """The leader's native birth; None when the leader exited before root read it.
+
+    Root, its only reaper, reaped it or will; its group is still `proc.pid`."""
     custody: ServiceCustody | None = None
     tracked: set[OwnedProcess] = field(default_factory=set[OwnedProcess])
     closing: bool = False
@@ -184,13 +187,26 @@ class Supervisor:
             await asyncio.gather(*(self._start_unit(runtime) for runtime in self._units.values()))
 
     async def shutdown(self) -> None:
-        """Stop the whole tree (children before parents) and drain the tasks."""
+        """Stop the whole tree (children before parents) and drain the tasks.
+
+        A refused unit keeps its generation and custody, and the units after it
+        are still stopped; the refusals are then raised together, before any
+        watch is cancelled, so each refused unit's reap is still observed.
+        """
+        refusals: list[Exception] = []
         async with self._lock:
             self._running = False
             for unit_id in self._registry.all_stop_order():
                 runtime = self._units[unit_id]
                 runtime.desired = DesiredState.STOPPED
-                await self._stop_unit(runtime)
+                try:
+                    await self._stop_unit(runtime)
+                except Exception as exc:
+                    refusals.append(exc)
+        if refusals:
+            raise ExceptionGroup(
+                f"root shutdown retained custody of {len(refusals)} unit(s)", refusals
+            )
         pending = [
             task
             for runtime in self._units.values()
@@ -472,9 +488,10 @@ class Supervisor:
         # read. Once the survivors exit, a later group with that number may be a
         # stranger's, so no later stop signals by it.
         if not isinstance(generation.proc, ApplicationProcess):
-            generation.scope_closed_at_exit = group_closed(generation.proc.pid)
+            pgid = generation.proc.pid
+            generation.scope_closed_at_exit = group_closed(pgid)
             if not generation.scope_closed_at_exit:
-                _record_survivors(runtime.manifest.id, generation)
+                record_survivors(runtime.manifest.id, pgid, generation.tracked, generation.custody)
         if runtime.generation is generation:
             runtime.last_exit = _describe_exit(returncode)
             runtime.state = UnitState.STOPPED
@@ -513,34 +530,33 @@ class Supervisor:
         self,
         runtime: _UnitRuntime,
         generation: _Generation,
-        identity: OwnedProcess,
+        pgid: int,
         custody: ServiceCustody,
         *,
         force: bool,
     ) -> None:
         """Close what root recorded of a unit whose leader it reaped before this stop.
 
-        Root reaps its own leader, so after that reap the recorded birth is
-        positively dead, and the watch retained the members of the leader's
-        group it read just after that reap. After that the number proves
-        nothing: once those members exit, another program's group can carry
-        it. So this stop never signals by the group number: nothing it
-        signals, captures or adopts comes from a group listing, which only
-        reads the group's session or names it in a refusal. It signals only
-        recorded births and their birth-verified descendants (`capture_tree`),
-        each through its own birth check; only explicit force escalates. Once
-        none of them lives, custody is released when the unit's group is
-        proven over (`group_over`): empty when read after the reap or now, its
-        number now held as a PID, or the group carrying it now in another
-        session; no such group is ever signalled. A group still occupied in
-        root's own session, or in one root cannot read, may hold unrecorded
-        processes of the unit: custody stays and the stop refuses, naming it.
-        Moving the record aside is the operator's word that no process of the
-        unit remains; with no recorded birth alive, the generation is dropped
-        without a signal (`_drop_moved_aside`).
+        Root reaps its own leader, so after that reap the leader is positively
+        dead, whether or not root read its birth first, and the watch retained
+        the members of group `pgid` it read just after that reap. After that the
+        number proves nothing: once those members exit, another program's group
+        can carry it. So this stop never signals by the group number: nothing it
+        signals, captures or adopts comes from a group listing, which only reads
+        the group's session or names it in a refusal. It signals only recorded
+        births and their birth-verified descendants (`capture_tree`), each
+        through its own birth check; only explicit force escalates. Once none of
+        them lives, custody is released when the unit's group is proven over
+        (`group_over`): empty when read after the reap or now, its number now
+        held as a PID, or the group carrying it now in another session; no such
+        group is ever signalled. A group still occupied in root's own session,
+        or in one root cannot read, may hold unrecorded processes of the unit:
+        custody stays and the stop refuses, naming it. Moving the record aside
+        is the operator's word that no process of the unit remains; with no
+        recorded birth alive, the generation is dropped without a signal
+        (`_drop_moved_aside`).
         """
-        await self._await_reap(runtime, generation, identity, custody)
-        pgid = identity.pid
+        await self._await_reap(runtime, generation, pgid, custody)
         deadline = monotonic() + self._config.stop_timeout_s
         while True:
             # Judged as each poll begins, so a refusal rests on reads taken after the deadline.
@@ -576,7 +592,7 @@ class Supervisor:
         self,
         runtime: _UnitRuntime,
         generation: _Generation,
-        identity: OwnedProcess,
+        pgid: int,
         custody: ServiceCustody,
     ) -> None:
         """Wait (bounded) for the watch task to reap the exited leader.
@@ -591,7 +607,7 @@ class Supervisor:
                 await asyncio.wait_for(generation.exited.wait(), self._config.stop_timeout_s)
         if not generation.exited.is_set() and os.path.lexists(custody.path):
             raise RuntimeError(
-                f"unit {runtime.manifest.id}: recorded birth (pid {identity.pid}) exited but "
+                f"unit {runtime.manifest.id}: leader (pid {pgid}) exited but "
                 f"root never observed its reap; custody retained at {custody.path}. Once no "
                 "process of this unit remains, move that record aside and retry the stop"
             )
@@ -715,17 +731,25 @@ class Supervisor:
 
 def _exited_leader(
     runtime: _UnitRuntime, generation: _Generation
-) -> tuple[OwnedProcess, ServiceCustody] | None:
-    """The recorded leader and its custody when that birth is positively not live
-    (gone, a zombie, or its PID now another birth); None while it runs.
+) -> tuple[int, ServiceCustody] | None:
+    """The leader's group number and custody once the leader is positively not
+    live (gone, a zombie, or its PID now another birth); None while it runs.
 
-    An identity that cannot be verified keeps custody and names the next step.
+    A leader whose birth root never read had exited before that read: `_spawn`
+    records none only on NoSuchProcess, which a running child of root cannot
+    raise, and root, its only reaper, reaped it or will. Its group number is
+    `proc.pid`, which it was born leading (`process_group=0`), so it is judged
+    like any exited leader: by what the watch recorded at its reap, never by
+    signalling that number. An identity that cannot be verified keeps custody
+    and names the next step.
     """
     identity, custody = generation.identity, generation.custody
-    if identity is None or custody is None:
-        raise RuntimeError(f"unit {runtime.manifest.id} has unacknowledged native birth")
+    if custody is None:
+        raise RuntimeError(f"unit {runtime.manifest.id} has no durable custody")
+    if identity is None:
+        return generation.proc.pid, custody
     try:
-        return None if identity.live() else (identity, custody)
+        return None if identity.live() else (identity.pid, custody)
     except RuntimeError as exc:
         raise RuntimeError(
             f"unit {runtime.manifest.id}: cannot confirm whether its recorded birth "
@@ -760,23 +784,6 @@ def _drop_moved_aside(
         runtime.manifest.id,
         custody.path,
     )
-
-
-def _record_survivors(unit_id: str, generation: _Generation) -> None:
-    """Retain the births in a just-reaped leader's group while its number is reserved.
-
-    Never raises, so the watch still publishes the exit. A member whose birth
-    cannot be read is left out alone (`group_births`) and never signalled later;
-    it keeps the group occupied, and the stop then refuses instead of releasing
-    custody.
-    """
-    pgid = generation.proc.pid
-    try:
-        retain_processes(generation.tracked, group_births(pgid))
-        if generation.custody is not None:
-            generation.custody.retain(generation.tracked)
-    except (OSError, RuntimeError, psutil.Error) as exc:
-        _log.error("unit %s: group %s survivors not fully recorded at reap: %s", unit_id, pgid, exc)
 
 
 def _describe_exit(returncode: int) -> str:

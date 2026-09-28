@@ -296,5 +296,6 @@ async def test_integration_detects_a_disarmed_death_and_refuses_a_duplicate(
     assert result[0]["action"] == "failed"
     assert result[0]["pid"] is None
     assert "custody" in str(result[0]["error"])
-    with pytest.raises(RuntimeError, match="never observed its reap; custody retained"):
+    with pytest.raises(ExceptionGroup) as refused:
         await supervisor.shutdown()
+    assert refused.group_contains(RuntimeError, match="never observed its reap; custody retained")

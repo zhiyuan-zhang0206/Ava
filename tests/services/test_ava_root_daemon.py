@@ -221,10 +221,9 @@ def test_second_daemon_refuses_the_same_run_dir(short_tmp: Path) -> None:
         assert client.status()["ok"] is True
 
 
-def test_failed_shutdown_retains_owner_and_requires_explicit_closure(short_tmp: Path) -> None:
-    """A stubborn real child cannot turn ordinary root stop into orphaning or force."""
-    ready = short_tmp / "child-ready"
-    command = [
+def _stubborn(ready: Path) -> list[str]:
+    """A unit that ignores TERM once it has written `ready`."""
+    return [
         sys.executable,
         "-u",
         "-c",
@@ -233,7 +232,30 @@ def test_failed_shutdown_retains_owner_and_requires_explicit_closure(short_tmp: 
             f"pathlib.Path({str(ready)!r}).write_text('ready'); time.sleep(300)"
         ),
     ]
-    manifests = _write_manifests(short_tmp, [{"id": "svc", "exec": command, "restart": "never"}])
+
+
+def _assert_rest_of_tree_stopped(run_dir: Path, log: Path, peer: int) -> None:
+    """Both stubborn units' refusals are reported; the peer between them stopped."""
+    reported = _read_log(log)
+    assert "unit svc did not stop" in reported
+    assert "unit tail did not stop" in reported
+    _wait_dead(peer)
+    assert not (run_dir / "custody/peer.json").exists()
+
+
+def test_failed_shutdown_retains_owner_and_requires_explicit_closure(short_tmp: Path) -> None:
+    """A stubborn real child cannot turn ordinary root stop into orphaning or force.
+
+    Nor does it keep root from stopping the rest of its tree: the peer after it
+    in the stop order still stops, and each stubborn unit's refusal is reported.
+    """
+    ready, tail_ready = short_tmp / "child-ready", short_tmp / "tail-ready"
+    units: list[dict[str, object]] = [
+        {"id": "svc", "exec": _stubborn(ready), "restart": "never"},
+        {"id": "peer", "exec": _SLEEPER, "restart": "never"},
+        {"id": "tail", "exec": _stubborn(tail_ready), "restart": "never"},
+    ]
+    manifests = _write_manifests(short_tmp, units)
     fixture = short_tmp / "fixtures"
     fixture.mkdir()
     (fixture / "short_deadline.py").write_text(
@@ -251,14 +273,20 @@ def test_failed_shutdown_retains_owner_and_requires_explicit_closure(short_tmp: 
     ) as (root, log):
         client = _wait_ready(run_dir, root, log)
         _wait_for(ready.exists, "child did not install its TERM handler")
-        before = _units_of(client.status())[0]
-        child = cast(int, before["pid"])
+        _wait_for(tail_ready.exists, "tail did not install its TERM handler")
+        before, peer_unit, tail_unit = _units_of(client.status())
+        child, peer, tail = (
+            cast(int, before["pid"]),
+            cast(int, peer_unit["pid"]),
+            cast(int, tail_unit["pid"]),
+        )
         try:
             assert client.shutdown()["ok"]
             _wait_for(
                 lambda: "retains custody after failed shutdown" in _read_log(log),
                 "root did not report retained custody after its shutdown deadline",
             )
+            _assert_rest_of_tree_stopped(run_dir, log, peer)
             assert root.poll() is None
             _assert_alive(child)
             assert (run_dir / "custody/svc.json").exists()
@@ -272,28 +300,60 @@ def test_failed_shutdown_retains_owner_and_requires_explicit_closure(short_tmp: 
             ]
             assert all(not response["ok"] for response in refusals)
             assert client.force_down("svc")["ok"]
+            assert client.force_down("tail")["ok"]
             _wait_dead(child)
+            _wait_dead(tail)
             assert not list((run_dir / "custody").iterdir())
             assert client.shutdown()["ok"]
             assert root.wait(timeout=5) == 0
         finally:
             _kill_quietly(child)
+            _kill_quietly(peer)
+            _kill_quietly(tail)
 
 
-def test_termination_after_unit_exit_releases_custody_and_exits(short_tmp: Path) -> None:
+# Wiring hook: asyncio's child watcher reaps each unit leader before root reads its birth.
+_REAPED_FIRST = (
+    "import asyncio\n"
+    "spawn = asyncio.create_subprocess_exec\n"
+    "async def reaped_first(*args, **kwargs):\n"
+    "    proc = await spawn(*args, **kwargs)\n"
+    "    await proc.wait()\n"
+    "    return proc\n"
+    "def build(context):\n"
+    "    asyncio.create_subprocess_exec = reaped_first\n"
+    "    return []\n"
+)
+
+
+@pytest.mark.parametrize("reaped_first", [False, True])
+def test_termination_after_unit_exit_releases_custody_and_exits(
+    short_tmp: Path, reaped_first: bool
+) -> None:
     """A unit that exited before any stop does not hold root past SIGTERM.
 
     systemd's root boot unit sets SendSIGKILL=no: TERM is the only stop, so a
-    root that kept the dead unit's custody would never exit.
+    root that kept the dead unit's custody would never exit. That holds too when
+    the leader was reaped before root read its birth.
     """
     command = [sys.executable, "-c", "pass"]
     manifests = _write_manifests(short_tmp, [{"id": "svc", "exec": command, "restart": "never"}])
+    fixture = short_tmp / "fixtures"
+    fixture.mkdir()
+    (fixture / "reaped_first.py").write_text(_REAPED_FIRST)
     run_dir = short_tmp / "run"
-    with _daemon(run_dir, manifests) as (root, log):
+    with _daemon(
+        run_dir,
+        manifests,
+        wiring="reaped_first:build" if reaped_first else None,
+        env=_wiring_env(fixture, short_tmp / "markers") if reaped_first else None,
+    ) as (root, log):
         client = _wait_ready(run_dir, root, log)
         _wait_for(
             lambda: _units_of(client.status())[0]["pid"] is None, "unit did not exit on its own"
         )
+        if reaped_first:
+            assert _units_of(client.status())[0]["create_time"] is None, "root read its birth"
         assert (run_dir / "custody/svc.json").exists()
         root.terminate()
         assert root.wait(timeout=10) == 0, _read_log(log)

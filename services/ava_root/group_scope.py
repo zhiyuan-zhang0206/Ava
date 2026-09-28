@@ -1,7 +1,7 @@
 """What root reads of a POSIX unit's process group, and the refusals naming it.
 
-Each helper reads, captures or names; none signals. The supervisor decides
-when a group number still proves the unit's scope (see `supervisor`).
+Each helper reads, captures, records or names; none signals. The supervisor
+decides when a group number still proves the unit's scope (see `supervisor`).
 """
 
 from __future__ import annotations
@@ -119,6 +119,24 @@ def group_births(pgid: int) -> set[OwnedProcess]:
         except (psutil.Error, RuntimeError) as exc:
             _log.warning("process group %s: member %s not captured: %s", pgid, pid, exc)
     return members
+
+
+def record_survivors(
+    unit_id: str, pgid: int, tracked: set[OwnedProcess], custody: ServiceCustody | None
+) -> None:
+    """Retain the births in a just-reaped leader's group while its number is reserved.
+
+    Never raises, so the watch still publishes the exit. A member whose birth
+    cannot be read is left out alone (`group_births`) and never signalled later;
+    it keeps the group occupied, and the stop then refuses instead of releasing
+    custody.
+    """
+    try:
+        retain_processes(tracked, group_births(pgid))
+        if custody is not None:
+            custody.retain(tracked)
+    except (OSError, RuntimeError, psutil.Error) as exc:
+        _log.error("unit %s: group %s survivors not fully recorded at reap: %s", unit_id, pgid, exc)
 
 
 def capture_group(tracked: set[OwnedProcess], pgid: int) -> set[OwnedProcess]:

@@ -163,10 +163,9 @@ async def test_stop_closes_captured_descendant_after_leader_exits(tmp_path: Path
 def exits_on(trigger: Path, before: str = "pass") -> str:
     """Unit code that runs `before`, then exits once the test creates `trigger`.
 
-    Root reads a unit's birth only after asyncio's spawn returns. Under load, a
-    unit that exits at once can already be reaped by asyncio's child watcher,
-    leaving no birth to record ("unacknowledged native birth"), so each test
-    creates `trigger` only after `start()` has returned.
+    A unit that exits at once can be reaped before root reads its birth; these
+    tests inspect or rewrite that birth, so each creates `trigger` only after
+    `start()` has returned.
     """
     return (
         f"import pathlib,sys,time\n{before}\n"
@@ -612,6 +611,49 @@ async def test_unobserved_reap_refuses_until_the_record_is_moved_aside(tmp_path:
     await owner.down("worker")
     assert owner._units["worker"].generation is None
     await owner.shutdown()
+
+
+async def test_a_leader_reaped_before_its_birth_read_is_stopped_by_what_its_reap_recorded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The child watcher reaps the leader before root reads its birth.
+
+    The stop closes the child recorded at the reap; the other, unreadable then,
+    is never signalled, and the stop refuses until the record is moved aside."""
+    spawn, capture = asyncio.create_subprocess_exec, OwnedProcess.capture
+
+    async def reaped_first(*args: Any, **kwargs: Any) -> asyncio.subprocess.Process:
+        proc = await spawn(*args, **kwargs)
+        await proc.wait()
+        return proc
+
+    def unreadable(_cls: type[OwnedProcess], process: psutil.Process) -> OwnedProcess:
+        if process.pid == int((tmp_path / "other").read_text()):
+            raise psutil.AccessDenied(process.pid)
+        return capture(process)
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", reaped_first)
+    monkeypatch.setattr(OwnedProcess, "capture", classmethod(unreadable))
+    code = f"import pathlib,subprocess,sys\nfor n in ('kept', 'other'): c=subprocess.Popen([sys.executable,'-c','import time; time.sleep(60)']); pathlib.Path({str(tmp_path)!r}, n).write_text(str(c.pid))"
+    owner = root(tmp_path, code)
+    await owner.start()
+    spawned = [psutil.Process(await pid_in(tmp_path / name)) for name in ("kept", "other")]
+    try:
+        kept, other = spawned
+        await exited(owner)
+        generation = owner._units["worker"].generation
+        assert generation is not None and generation.identity is None
+        assert {item.pid for item in generation.tracked} == {kept.pid}
+        refusal = rf"process group {generation.proc.pid} still holds pids \[{other.pid}\]"
+        with pytest.raises(RuntimeError, match=refusal):
+            await owner.down("worker")
+        assert ended(kept) and not ended(other)
+        (tmp_path / "custody/worker.json").rename(tmp_path / "worker.json.aside")
+        await owner.down("worker")
+        await owner.shutdown()
+        assert not ended(other), "the unrecorded child received a signal"
+    finally:
+        kill_all(spawned)
 
 
 @pytest.mark.parametrize("moves_group", [False, True])

@@ -18,8 +18,11 @@ the leader is reaped inside that stop and the kernel reports its group empty
 or stop refuses with its PID; only force kills it. `setsid()` escapes by
 construction; exec domains keep their own groups.
 Root also keeps its control transport alive after failed ordinary shutdown;
-new service or resource birth remains closed. An operator can inspect the same
-owner, explicitly close its captured domains, then request shutdown again.
+new service or resource birth remains closed. One unit's refusal never halts
+that shutdown: every unit is still stopped in order, a refused one keeping its
+generation and custody, and all refusals are reported together. An operator can
+inspect the same owner, explicitly close its captured domains, then request
+shutdown again.
 Native birth checks reject PID reuse. Missing IPC is unknown, never proof of
 absence or readiness. Terminal and execution resources keep their own existing
 ownership contracts and are not renamed application service sessions.
@@ -40,6 +43,11 @@ nothing of the unit remained; otherwise root records each member's native birth
 in the unit's custody. Only a group that empties inside that window, its number
 then taken by another process, misleads the read. A member whose birth root
 cannot read is left out alone, never signalled, and keeps the group occupied.
+A leader can also exit and be reaped before root reads its birth (a unit whose
+`cd` or binary fails exits within milliseconds, and asyncio's child watcher can
+reap it before that read). Root, its only reaper, still knows it exited, and its
+group is the PID it was born leading, so the same read follows its reap and the
+same stop below applies; only its own birth is missing from the record.
 The record still blocks a cold duplicate root and automatic revival. A later
 stop, or a retry after a refused one, that finds the recorded leader not live
 (gone, a zombie, or its PID now another birth) never signals by the group
