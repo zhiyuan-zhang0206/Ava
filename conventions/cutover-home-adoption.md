@@ -14,7 +14,8 @@ are deleted with the other `scripts/cutover_*` scripts after the cutover:
   bound ports, a reviewed-PATH candidate, the refusals, and the exact plan
   adoption would execute now.
 - `scripts/cutover_adopt_home.py` executes that plan. Dry-run is the default;
-  `--execute` adopts; `--start` performs the held first start. `--execute`
+  `--execute` adopts; `--start` performs the held first start; `--resume`
+  releases the cutover hold at the go/no-go gate. `--execute`
   also requires `--expect-mode gateway|remote-unit`: the mode is inferred from
   the capability files alone, and a remote unit's adoption strips credentials
   and moves `pg/`, `backups/` and `secrets/`, so a mismatch refuses.
@@ -31,7 +32,9 @@ journal records stands, an ordinary start never releases it
 autostart job after a reboot) a bare start brings the unit up still held. A
 held first start that failed or was not ready leaves phase `starting`; the
 next start that passes readiness, `--start` or a bare one, completes it to
-`ready`. Only the go/no-go gate's `ava maintenance resume` opens business.
+`ready`. `ava cluster recover` and `ava maintenance resume` refuse that hold
+too and name the one exit, the go/no-go step `--resume`, which alone opens
+business.
 
 ## Order within the runbook
 
@@ -63,8 +66,17 @@ next start that passes readiness, `--start` or a bare one, completes it to
    cutover issued for it (step `remote-units`) and its transport key in
    `AVA_DB_CAPABILITY_KEY`: the runner no longer holds the human bearer, and
    its capability both authenticates it and carries its database login.
-5. At the go/no-go gate (W11), release each hold with the command `--start`
-   prints: `ava maintenance resume --operation <holder> --acquired-at <time>`.
+5. At the go/no-go gate (W10), verify the gate's checklist, then (W11) release
+   each hold with `--resume`, the gateway first, then the runners. It takes
+   the hold's identity from the journal and refuses unless the adoption
+   completed, the hold stands in phase `ready` (the held first start passed
+   readiness) and, on a gateway, the database-records repair recorded a
+   completed run with no incomplete one after it (W7). The release itself is
+   `ava maintenance resume`'s: the unit must be serving, and the agents the
+   hold drained are woken. Everything else the gate lists (smoke agents, the
+   alert path, an empty legacy census on every host, the stale-writer probe,
+   the gateway released before the runners) no single host can check, so it
+   stays the operator's.
 
 ```bash
 .venv/bin/python scripts/cutover_inventory.py --home ~/.ava --service-path "$REVIEWED_PATH"
@@ -72,6 +84,7 @@ next start that passes readiness, `--start` or a bare one, completes it to
 .venv/bin/python scripts/cutover_adopt_home.py --home ~/.ava --service-path "$REVIEWED_PATH" \
     --execute --expect-mode remote-unit    # gateway on the gateway
 .venv/bin/python scripts/cutover_adopt_home.py --home ~/.ava --start
+.venv/bin/python scripts/cutover_adopt_home.py --home ~/.ava --resume    # go/no-go (W11)
 ```
 
 `--registry` names the cluster registry when the home's `.env` does not declare

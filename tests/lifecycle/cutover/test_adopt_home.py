@@ -579,11 +579,8 @@ def test_held_start_runs_start_inside_the_hold_and_leaves_it_closed(
     hold = _hold(legacy)
     assert hold.status == "paused" and hold.maintenance is not None
     assert hold.maintenance.phase == "ready" and maintenance.business_paused()
-    out = capsys.readouterr().out
-    command = next(line.split() for line in out.splitlines() if "maintenance resume" in line)
-    assert command[command.index("--operation") + 1] == "cutover:c3"
-    at = datetime.fromisoformat(command[command.index("--acquired-at") + 1])
-    assert maintenance.require_operation("cutover:c3", at) is not None
+    assert f"cutover_adopt_home.py --home {legacy.home} --resume" in capsys.readouterr().out
+    assert _journal(legacy)["hold"]["holder"] == "cutover:c3"
     assert adopt.main(argv, checkout=legacy.checkout) == 0  # already ready: no second start
     assert len(seen) == 1
 
@@ -641,9 +638,7 @@ def test_a_completed_legacy_stop_hold_becomes_the_cutover_hold(
     monkeypatch.setattr(start_serving, "is_serving", lambda: True)
     capsys.readouterr()
     assert adopt.main(["--home", str(legacy.home), "--start"], checkout=legacy.checkout) == 0
-    assert (
-        f"--operation {doc['holder']} --acquired-at {doc['acquired_at']}" in capsys.readouterr().out
-    )
+    assert f"cutover_adopt_home.py --home {legacy.home} --resume" in capsys.readouterr().out
     current = maintenance.snapshot()
     assert current is not None and current.maintenance is not None
     assert (current.maintenance.phase, current.maintenance.commands) == ("ready", {7: 11})

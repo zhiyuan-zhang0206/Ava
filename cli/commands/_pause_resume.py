@@ -4,7 +4,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from functools import wraps
 
-from cli.cutover_hold import CutoverHold, held_start_command, standing_hold
+from cli.cutover_hold import CutoverHold, held_start_command, release_command, standing_hold
 from shared import maintenance, pause_owner, start_serving
 
 
@@ -65,7 +65,7 @@ def _start_held_for_cutover(
         maintenance.set_phase(cutover.holder, cutover.acquired_at, "ready")
     print(
         f"\n→ cutover hold {cutover.holder} kept: business stays closed until the "
-        f"go/no-go gate releases it with `{cutover.resume_command()}`"
+        f"go/no-go gate releases it with {release_command(ava_home())}"
     )
     return result
 

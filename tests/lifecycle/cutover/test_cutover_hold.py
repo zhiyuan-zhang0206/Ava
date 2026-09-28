@@ -3,7 +3,7 @@
 The adoption journal records the hold it adopted or created. While exactly
 that hold stands, `ava start` (typed by the operator, or run by the autostart
 job after a reboot) starts held and leaves admission closed until the go/no-go
-gate's `ava maintenance resume`. Any other hold keeps the ordinary behavior.
+step `cutover_adopt_home.py --resume`. Any other hold keeps the ordinary behavior.
 """
 
 from __future__ import annotations
@@ -59,7 +59,7 @@ def test_a_start_after_the_held_first_start_keeps_the_cutover_hold(
 ) -> None:
     """A reboot's autostart (or a typed `ava start`) between the held first start
     and the go/no-go gate brings the unit up and leaves business closed."""
-    _legacy, holder, at = _adopted(make_legacy, monkeypatch)
+    legacy, holder, at = _adopted(make_legacy, monkeypatch)
     maintenance.set_phase(holder, at, "starting")
     maintenance.set_phase(holder, at, "ready")
     start, unpause, authorized = _bare_start(monkeypatch)
@@ -73,7 +73,7 @@ def test_a_start_after_the_held_first_start_keeps_the_cutover_hold(
     assert current.maintenance is not None and current.maintenance.phase == "ready"
     assert maintenance.business_paused()
     out = capsys.readouterr().out
-    assert f"ava maintenance resume --operation {holder} --acquired-at" in out
+    assert f"cutover_adopt_home.py --home {legacy.home} --resume" in out
     assert "hold released" not in out
 
 
@@ -102,7 +102,7 @@ def test_a_start_that_passes_readiness_completes_a_starting_cutover_hold(
     assert current.maintenance is not None
     assert current.maintenance.phase == ("ready" if serving else "starting")
     assert maintenance.business_paused()
-    assert ("maintenance resume" in capsys.readouterr().out) == serving
+    assert ("--resume" in capsys.readouterr().out) == serving
 
 
 def test_a_start_before_the_held_first_start_refuses_and_names_it(
