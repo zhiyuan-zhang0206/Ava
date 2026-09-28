@@ -21,13 +21,20 @@ conversion). The conversion itself re-checks every guard under the row lock.
 The last two are `FENCED`: the runtime keeps refusing those agents, so D-8
 reads `repair` while convertible or awaiting rows remain, then `fenced` (never
 `ok`) while any fenced row remains, with a count per verdict and reason.
+
+D-8 also counts the identity-less terminated rows (`IDENTITYLESS`: NULL
+resources and no complete hosted runtime identity, which resurrection refuses)
+per machine and category: `convertible` (its machine's attestation is
+supplied), `awaiting` (a unit remains, no attestation yet), `no_unit` (no
+unit of the machine remains to attest), `paused`, or `pointer` (a lifecycle
+pointer resurrection does not supersede). The last three are fenced.
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field, fields
 from typing import Any, LiteralString, cast
 from uuid import UUID
@@ -77,6 +84,47 @@ _POSTURES = (
 )
 _MACHINES = "SELECT name, role, paused_at, pause_reason, stopped_at, gateway_url FROM machines"
 _NULLS = "SELECT machine, count(*) FROM agents_meta WHERE incarnation_resources IS NULL GROUP BY 1"
+# Terminated rows with unknown (NULL) resources and no complete hosted runtime
+# identity: resurrection refuses them (`runtime_cutover_required`). Their repair
+# mints an identity (decisions/2026-09-28-legacy-terminated-agents-resurrectable-at-cutover.md).
+IDENTITYLESS: LiteralString = (
+    "m.status='terminated' AND m.incarnation_resources IS NULL AND (m.runtime_kind IS "
+    "DISTINCT FROM 'hosted' OR m.runtime_generation IS NULL OR m.runtime_owner IS NULL "
+    "OR m.pid IS NOT NULL)"
+)
+# No lifecycle pointer, or one resurrection settles as superseded (an unapplied
+# restart or terminate); any other pointer defers resurrection.
+POINTER_CLEARS: LiteralString = (
+    "(m.lifecycle_command_id IS NULL OR EXISTS (SELECT 1 FROM inbound_messages i "
+    "WHERE i.id=m.lifecycle_command_id AND i.agent_id=m.id AND i.kind IN "
+    "('restart','terminate') AND i.status IN ('pending','claimed') AND i.applied_at IS NULL))"
+)
+# An identity-less row's before image: what the mint compares and the journal keeps.
+IDENTITY_IMAGE: LiteralString = (
+    "jsonb_build_object('machine',m.machine,'status',m.status,'runtime_kind',m.runtime_kind,"
+    "'runtime_generation',m.runtime_generation,'runtime_owner',m.runtime_owner,'pid',m.pid,"
+    "'lifecycle_command_id',m.lifecycle_command_id,'incarnation_resources',"
+    "m.incarnation_resources,'status_changed_at',m.status_changed_at)"
+)
+_IDENTITYLESS_ROWS = (
+    f"SELECT m.id, m.machine, {IDENTITY_IMAGE} AS image, {POINTER_CLEARS} AS clear "  # noqa: S608 -- constant fragments
+    f"FROM agents_meta m WHERE {IDENTITYLESS} ORDER BY m.id"
+)
+_PAUSED = "the machine is paused; no closure evidence exists for it"
+_NO_UNIT = "no unit of its machine remains to attest (retired or unregistered)"
+_UNATTESTED = "no closure attestation for this machine"
+_NO_IDENTITY = "terminated with no runtime identity; "
+# Each category of an identity-less row: its verdict and, unless convertible, why.
+IDENTITYLESS_CATEGORIES: dict[str, tuple[str, str | None]] = {
+    "convertible": ("convertible", None),
+    "awaiting": ("awaiting", _NO_IDENTITY + _UNATTESTED),
+    "no_unit": ("inadmissible", _NO_IDENTITY + _NO_UNIT),
+    "paused": ("inadmissible", _NO_IDENTITY + _PAUSED),
+    "pointer": (
+        "unconvertible",
+        _NO_IDENTITY + "its lifecycle pointer names a command resurrection does not supersede",
+    ),
+}
 # Verdicts whose agents the runtime keeps refusing after the repair.
 FENCED = ("inadmissible", "unconvertible")
 _EXAMPLES = 5
@@ -176,6 +224,24 @@ class Legacy:
 
 
 @dataclass
+class Identityless:
+    """One identity-less terminated row (`IDENTITYLESS`) and its category."""
+
+    agent_id: int
+    machine: str
+    before: dict[str, Any]  # its `IDENTITY_IMAGE`
+    category: str = "convertible"
+
+    @property
+    def verdict(self) -> str:
+        return IDENTITYLESS_CATEGORIES[self.category][0]
+
+    @property
+    def reason(self) -> str | None:
+        return IDENTITYLESS_CATEGORIES[self.category][1]
+
+
+@dataclass
 class Survey:
     """Every fact the check and the repairs need, read in one snapshot."""
 
@@ -185,8 +251,14 @@ class Survey:
     evidence: Any
     lease: dict[str, Any]
     legacy: list[Legacy] = field(default_factory=list[Legacy])
+    identityless: list[Identityless] = field(default_factory=list[Identityless])
     counts: dict[str, dict[str, int]] = field(default_factory=dict[str, dict[str, int]])
     checks: dict[str, dict[str, Any]] = field(default_factory=dict[str, dict[str, Any]])
+
+    @property
+    def classified(self) -> list[Legacy | Identityless]:
+        """Every row the repair judges: retired-shape, then identity-less."""
+        return [*self.legacy, *self.identityless]
 
     @property
     def paused(self) -> set[str]:
@@ -287,10 +359,10 @@ def _pin(conn: psycopg.Connection[Any], legacy_commit: str | None) -> dict[str, 
     return {"verdict": "ok" if matches else "attention", "pin": pin, "legacy_commit": legacy_commit}
 
 
-def fenced_summary(legacy: list[Legacy]) -> list[dict[str, Any]]:
+def fenced_summary(judged: Sequence[Legacy | Identityless]) -> list[dict[str, Any]]:
     """The fenced rows per (verdict, reason): a count and the first agent ids."""
     groups: dict[tuple[str, str], list[int]] = {}
-    for item in legacy:
+    for item in judged:
         if item.verdict in FENCED:
             groups.setdefault((item.verdict, str(item.reason)), []).append(item.agent_id)
     return [
@@ -338,8 +410,9 @@ def _checks(conn: psycopg.Connection[Any], found: Survey, inputs: Inputs) -> dic
     pending, problem = pending_of(found.evidence), publication_problem(found.evidence)
     owner = rows(conn, _OWNER)[0]
     prepared = value(conn, "SELECT count(*) FROM pg_prepared_xacts")
-    unreconciled = [item for item in found.legacy if item.verdict in ("convertible", "awaiting")]
-    fenced = fenced_summary(found.legacy)
+    judged = found.classified
+    unreconciled = [item for item in judged if item.verdict in ("convertible", "awaiting")]
+    fenced = fenced_summary(judged)
     checks: dict[str, dict[str, Any]] = {
         "D-1": {
             "verdict": "repair" if pending is not None else ("attention" if problem else "ok"),
@@ -355,6 +428,7 @@ def _checks(conn: psycopg.Connection[Any], found: Survey, inputs: Inputs) -> dic
         "D-8": {
             "verdict": "repair" if unreconciled else ("fenced" if fenced else "ok"),
             "counts": found.counts,
+            "identityless": _identityless_by_machine(found.identityless),
             "fenced": fenced,
             "rows": [item.summary() for item in found.legacy],
         },
@@ -449,7 +523,7 @@ def _classify(conn: psycopg.Connection[Any], row: dict[str, Any], paused: set[st
     if refusal is not None:
         return legacy.refuse(refusal.reason, refusal.verdict)
     if row["machine"] in paused:
-        return legacy.refuse("the machine is paused; no closure evidence exists for it")
+        return legacy.refuse(_PAUSED)
     return legacy
 
 
@@ -459,16 +533,56 @@ def _weigh_evidence(legacy: Legacy, inputs: Inputs, attestable: set[str]) -> Non
     if legacy.machine not in attestable:
         # An attestation must name a registered unit that is neither paused nor
         # retired (`_plan_evidence`, `_plan_units`), so none can ever cover it.
-        legacy.refuse("no unit of its machine remains to attest (retired or unregistered)")
+        legacy.refuse(_NO_UNIT)
         return
     attestation = inputs.attestations.get(legacy.machine)
     if attestation is None:
-        legacy.verdict, legacy.reason = "awaiting", "no closure attestation for this machine"
+        legacy.verdict, legacy.reason = "awaiting", _UNATTESTED
         return
     absent = attestation.absent()
     unproven = [item for item in legacy.identities if (item["pid"], item["birth"]) not in absent]
     if unproven:
         legacy.refuse(f"the attestation does not prove {len(unproven)} recorded identity(ies) gone")
+
+
+def _identityless(
+    conn: psycopg.Connection[Any], found: Survey, inputs: Inputs
+) -> list[Identityless]:
+    """Each identity-less row, judged by its pointer, then its machine's evidence:
+    the machine attestation is the allocation closure its identity mint rests on."""
+    registered = {
+        unit["machine_name"]
+        for unit in found.units
+        if (unit["machine_name"], unit["home"]) not in inputs.retired
+    }
+    judged: list[Identityless] = []
+    for row in rows(conn, _IDENTITYLESS_ROWS):
+        item = Identityless(row["id"], row["machine"], row["image"])
+        if not row["clear"]:
+            item.category = "pointer"
+        elif item.machine not in registered:
+            item.category = "no_unit"
+        elif item.machine in found.paused:
+            item.category = "paused"
+        elif item.machine not in inputs.attestations:
+            item.category = "awaiting"
+        judged.append(item)
+    return judged
+
+
+def _identityless_counts(judged: list[Identityless]) -> dict[str, int]:
+    """The identity-less rows per category, every category listed."""
+    categories = [item.category for item in judged]
+    return {category: categories.count(category) for category in IDENTITYLESS_CATEGORIES}
+
+
+def _identityless_by_machine(judged: list[Identityless]) -> dict[str, dict[str, int]]:
+    """The identity-less rows per machine and category."""
+    table: dict[str, dict[str, int]] = {}
+    for item in judged:
+        counts = table.setdefault(item.machine, {})
+        counts[item.category] = counts.get(item.category, 0) + 1
+    return dict(sorted(table.items()))
 
 
 def survey(conn: psycopg.Connection[Any], inputs: Inputs) -> Survey:
@@ -499,11 +613,13 @@ def survey(conn: psycopg.Connection[Any], inputs: Inputs) -> Survey:
     attestable = found.included(inputs.retired)
     for legacy in found.legacy:
         _weigh_evidence(legacy, inputs, attestable)
+    found.identityless = _identityless(conn, found, inputs)
     verdicts = ("convertible", "awaiting", "inadmissible", "unconvertible")
     found.counts = {
         "current_model": current,
         "null_protocol_zero": dict(conn.execute(_NULLS).fetchall()),
         "unconverted": {v: sum(1 for i in found.legacy if i.verdict == v) for v in verdicts},
+        "identityless": _identityless_counts(found.identityless),
     }
     found.checks = _checks(conn, found, inputs)
     return found

@@ -7,9 +7,9 @@ scripts, handle them:
 
 - `scripts/cutover_db_survey.py` is the read-only half: one snapshot of every
   record the repair touches, the plan's D-series checks (Appendix A plus
-  decoding with the current models) and the classification of every
+  decoding with the current models), the classification of every
   `agents_meta` row whose `incarnation_resources` the current model cannot
-  decode.
+  decode, and the per-machine count of identity-less terminated rows.
 - `scripts/cutover_db_records.py` is the entry point: `--check` prints the
   survey as JSON, the default mode dry-runs the repairs, `--execute` applies
   them. It is the only caller of anything that writes.
@@ -47,9 +47,9 @@ authority cutover brought the plane up under new custody. Run them with the
 5. **Repair (W7, after `scripts/cutover_db_authority.py`).** Dry-run with every
    input, resolve every refusal, then add `--execute`. Finally `--check` with
    the same attestations: D-1, D-2 and D-6 read `ok`. D-8 reads `ok` only
-   when no retired-shape row remains; otherwise it reads `fenced` with a count
-   per verdict and reason, and `--check` exits 2 ([rows left
-   fenced](#rows-left-fenced)).
+   when no retired-shape or identity-less row remains; otherwise it reads
+   `fenced` with a count per verdict and reason, and `--check` exits 2 ([rows
+   left fenced](#rows-left-fenced)).
 
 ```bash
 P=scripts/cutover_db_records.py
@@ -97,6 +97,7 @@ cause, and the same inputs continue it.
 | `posture` | `paused` postures of included hosts become `idle`. Paused machines keep theirs; stranded-hold columns stay for the retired-storage cleanup. A `converging` posture or a live updater lease refuses. |
 | `units` | Deletes the retired `machine_units` rows. Units of paused machines, this gateway's own unit and attested homes refuse. The stale `machines` row itself stays (the cluster machine-delete endpoint removes it). |
 | `incarnations` | `shared.predecessor_closure.close_retired_predecessor` per convertible row: the closed-predecessor form, with the before image, attestation digest, operator and reason recorded on the receipt ([why](../decisions/2026-09-27-existing-agent-closed-predecessor-admission.md)). The journal keeps both before images, the resources and the receipt's payload (NULL included), and both are compared. A row the guards refuse is recorded `refused: <why>` and the run continues. |
+| `identities` | One effect per attested machine: each convertible identity-less terminated row takes `runtime_kind='hosted'`, a minted UUID generation and owner, and `pid=NULL`, so resurrection accepts it; the resurrection clears it again. Resources stay NULL; no receipt or other row is written ([why](../decisions/2026-09-28-legacy-terminated-agents-resurrectable-at-cutover.md)). One compare-and-swap restates every identity-less condition and each row's before image. The result is `applied`, `already` (a continued run finds its minted pair), or names the rows that changed since planning, which it leaves unchanged; the run continues. |
 
 The pending, lease and posture repairs also require an attestation proving
 closure from every included machine (a unit neither paused nor retired).
@@ -119,13 +120,26 @@ terminated row whose runtime identity was
 released or carries no hosted kind, a terminated row still pointing at its
 receipt, a terminate receipt left as an idling row's pointer, a process
 runtime). The runtime keeps refusing those rows (`resource_fence`,
-`runtime_cutover_required`). NULL rows are counted and left as protocol zero.
+`runtime_cutover_required`). NULL rows keep protocol zero.
+
+An identity-less terminated row is one with status `terminated`, NULL
+resources and no complete hosted runtime identity (kind not `hosted`, a
+missing generation or owner, or a pid): an agent terminated before the runtime
+incarnation existed. Resurrection refuses it (`runtime_cutover_required`).
+D-8 counts these rows per machine and category (`identityless`, and the
+totals under `counts`): `convertible` (the machine's attestation is
+supplied), `awaiting` (a unit remains, no attestation yet), `no_unit` (every
+unit is retired or none is registered), `paused`, or `pointer` (a lifecycle
+pointer that resurrection would not settle as superseded: anything but an
+unapplied restart or terminate). Only `convertible` rows are written; the
+closure attestation, which proves the home census empty, is their evidence.
 
 ## Rows left fenced
 
-`--execute` converts only `convertible` rows. Every other retired-shape row
-stays fenced: the runtime keeps refusing its agent (`resource_fence` at
-admission, `runtime_cutover_required` at resurrection). D-8 reads `fenced`
+`--execute` converts only `convertible` rows. Every other retired-shape or
+identity-less row stays fenced: the runtime keeps refusing its agent
+(`resource_fence` at admission, `runtime_cutover_required` at resurrection;
+an identity-less row only at resurrection). D-8 reads `fenced`
 with a count and example agent ids per verdict and reason, so `--check` keeps
 exiting 2 after the repair. `fenced` is not a refusal: `--execute` prints the
 same summary before its first write and records it in its journal run.
@@ -145,6 +159,11 @@ the script exists. What can change a fenced row:
   machines run the new code, the only such documents are their cutover-time
   attestations, which no longer describe them. No sound late path exists for
   such a machine, and its agents stay fenced.
+- **An identity-less row.** `awaiting` converts as above, with a later
+  attestation of its machine. `paused` needs the machine resumed first, with
+  the same posture gap. `no_unit` and `pointer` never convert: no attestation
+  can cover the first, and resurrection defers on the second whatever
+  identity the row carries.
 - **Every other reason (known gap).** This covers:
   - a row of a machine with no unit left to attest: every unit is retired
     (`--retire-units`, from the run that retires the last one on) or none is
@@ -172,10 +191,13 @@ the script exists. What can change a fenced row:
 list of runs. A run records its inputs, the fenced summary it printed (which
 agents stay fenced, per verdict and reason) and every planned effect with its
 before image before the first write, then each effect's result. A run that
-plans no effect is recorded too, so its fenced summary is on record. A crashed run
-continues only with the same inputs; the same inputs as a completed run change
-nothing; new inputs (a late attestation) append a run. Refusals are all
-decided before the first write of a run.
+plans no effect is recorded too, so its fenced summary is on record. An
+`identities` effect records, per row, the before image and the minted
+generation and owner; its machine and attestation digest are on the effect. A
+crashed run continues only with the same inputs; the same inputs as a
+completed run change nothing; new inputs (a late attestation) append a run.
+Refusals are all decided before the first write of a run.
 
 Rollback after the repair (R2) restores the cold data-directory copy taken at
-W3; the before images in the journal document exactly what changed.
+W3, which predates every W7 write, minted identities included; the before
+images in the journal document exactly what changed.

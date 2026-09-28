@@ -304,6 +304,7 @@ def test_check_classifies_every_retired_row(cluster: Cluster) -> None:
         "current_model": {GATEWAY: 1},
         "null_protocol_zero": {GATEWAY: 1},
         "unconverted": {"convertible": 0, "awaiting": 3, "inadmissible": 3, "unconvertible": 0},
+        "identityless": dict.fromkeys(survey_module.IDENTITYLESS_CATEGORIES, 0),
     }
 
 
@@ -467,6 +468,7 @@ def test_execute_repairs_every_record(
             "posture": ["applied"],
             "units": ["applied"],
             "incarnations": ["applied", "applied", "applied"],
+            "identities": [],
         },
         "evidence": None,
         "lease": FREE_LEASE,

@@ -67,7 +67,8 @@ are not implementation requirements for this revision.
    `scripts/cutover_inventory.py`
    ([procedure](../../conventions/cutover-home-adoption.md)).
    The gateway's database records (pending publication, legacy deploy lease,
-   host postures, stale units, retired-shape incarnation rows) are inventoried
+   host postures, stale units, retired-shape incarnation rows, identity-less
+   terminated rows) are inventoried
    and repaired by the one-time `scripts/cutover_db_records.py`
    ([procedure](../../conventions/cutover-db-records.md)).
    Cutover preconditions and one-time repairs:
@@ -167,10 +168,20 @@ one-time library `scripts/cutover_db_records.py` calls, with one closure
 attestation per machine (`scripts/cutover_inventory.py --attest`: recorded
 identities gone and the home census empty); admission keeps
 `PREDECESSOR_RECEIPT` as its only rule. Unconverted rows refuse with
-`resource_fence` / `runtime_cutover_required`; NULL rows are untouched and
-stay protocol zero. Drain certification accepts
+`resource_fence` / `runtime_cutover_required`; NULL resources are never
+converted and stay protocol zero. Drain certification accepts
 the complete empty recorded set of the released incarnation. A never-admitted
 row resurrects as a fresh birth only with its birth marker intact.
+
+Implemented for agents terminated before the runtime incarnation (why:
+`decisions/2026-09-28-legacy-terminated-agents-resurrectable-at-cutover.md`):
+a terminated row with NULL resources and an incomplete runtime identity gets,
+at W7 and on a machine whose closure attestation the run holds, a minted
+hosted identity (fresh generation and owner, no pid), which only passes the
+resurrection gate and which the resurrection CAS clears. Resources stay NULL;
+no marker or receipt is written. Rows of unattested, paused or unit-less
+machines, and rows with a lifecycle pointer resurrection does not supersede,
+keep refusing.
 
 ### Proposed database authority boundary
 

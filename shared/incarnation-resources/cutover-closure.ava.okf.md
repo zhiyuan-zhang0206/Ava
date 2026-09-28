@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Closed predecessor
-description: Retired-shape resource values, their one-time cutover conversion, drained resource sets and never-admitted resurrection.
+description: Retired-shape resource values, their one-time cutover conversion, drained resource sets, never-admitted resurrection and the identity mint for legacy terminated rows.
 tags:
 - shared
 - lifecycle
@@ -45,6 +45,17 @@ drained.
 A terminated row that was never admitted resurrects as a fresh hosted birth
 only when that is proven: no runtime identity and the fresh-INSERT birth
 marker unconsumed, rechecked in the final CAS. NULL resources are unknown and
-still refuse.
+refuse there.
+
+An agent terminated before the runtime incarnation existed has NULL resources
+and an incomplete identity, so resurrection refuses it too. The same cutover
+script gives such a row, on a machine whose closure attestation it holds, a
+minted hosted identity: kind `hosted`, a fresh generation and owner, no pid.
+Resources stay NULL and no receipt is written. That identity only passes the
+resurrection gate; the resurrection CAS clears it, and the successor is
+admitted as protocol zero like any NULL row. It is never admission evidence
+(`decisions/2026-09-28-legacy-terminated-agents-resurrectable-at-cutover.md`).
+Rows without an attestation, on a machine with no unit or a paused one, or
+with a lifecycle pointer resurrection does not supersede keep refusing.
 
 Why: `decisions/2026-09-27-existing-agent-closed-predecessor-admission.md`.

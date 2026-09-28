@@ -40,6 +40,13 @@ images recorded at planning:
   `fenced`, not `ok`. What can still convert a fenced row, and which ones stay
   fenced for good (known gaps): conventions/cutover-db-records.md, "Rows left
   fenced". NULL rows stay protocol zero.
+- `identities`: each convertible identity-less terminated row (NULL
+  resources, no complete hosted runtime identity) takes a minted hosted
+  identity (a fresh generation and owner, no pid) so resurrection accepts it,
+  which clears it again. Resources stay NULL and no receipt is written. One
+  compare-and-swap per machine, backed by its attestation; the journal keeps
+  each before image and minted pair. Why:
+  decisions/2026-09-28-legacy-terminated-agents-resurrectable-at-cutover.md.
 
 The pending, lease and posture repairs also require every included machine (a
 unit neither paused nor retired) to prove it stopped: an attestation with an
@@ -69,6 +76,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, LiteralString, cast
+from uuid import uuid4
 
 import psycopg
 from psycopg.types.json import Jsonb
@@ -77,8 +85,11 @@ from pydantic import TypeAdapter, ValidationError
 from scripts.cutover_db_survey import (
     EVIDENCE,
     FREE_LEASE,
+    IDENTITY_IMAGE,
+    IDENTITYLESS,
     LEASE_COLUMNS,
     LEASE_JSON,
+    POINTER_CLEARS,
     Inputs,
     RetiredUnit,
     Survey,
@@ -108,7 +119,7 @@ from shared.private_storage import ensure_private_dir, write_private_bytes
 VERSION = 1
 RECORD = f"{ARCHIVE}/db-records"
 JOURNAL = f"{RECORD}/journal.json"
-STEPS = ("pending", "lease", "posture", "units", "incarnations")
+STEPS = ("pending", "lease", "posture", "units", "incarnations", "identities")
 # Ceilings of the owner session. A leftover transaction holding a row a repair
 # locks (a prepared one survives restarts; D-11) fails that effect instead of
 # hanging the run.
@@ -243,6 +254,28 @@ def _plan_incarnations(found: Survey, inputs: Inputs, plan: Plan) -> None:
         )
 
 
+def _plan_identities(found: Survey, inputs: Inputs, plan: Plan) -> None:
+    """One effect per machine; each row's generation and owner are minted here,
+    once, so a continuation of the run writes the recorded values."""
+    rows: dict[str, list[dict[str, Any]]] = {}
+    for item in found.identityless:
+        if item.category == "convertible":
+            minted = {"generation": str(uuid4()), "owner": str(uuid4())}
+            rows.setdefault(item.machine, []).append(
+                {"agent_id": item.agent_id, "before": item.before, **minted}
+            )
+    for machine, planned in sorted(rows.items()):
+        plan.effects["identities"].append(
+            {
+                "op": "identity-mint",
+                "machine": machine,
+                "attestation_sha256": inputs.digest(machine),
+                "count": len(planned),
+                "rows": planned,
+            }
+        )
+
+
 def plan_repairs(found: Survey, inputs: Inputs, own: tuple[str, str]) -> Plan:
     """Every effect with its before image, and every refusal, before any write.
 
@@ -260,6 +293,7 @@ def plan_repairs(found: Survey, inputs: Inputs, own: tuple[str, str]) -> Plan:
     _plan_units(found, inputs, plan, own)
     _plan_evidence(found, inputs, plan)
     _plan_incarnations(found, inputs, plan)
+    _plan_identities(found, inputs, plan)
     return plan
 
 
@@ -365,6 +399,44 @@ def _close_predecessor(
     return "applied"
 
 
+# The compare-and-swap restates every identity-less condition and the before image.
+_MINT: LiteralString = (
+    "UPDATE agents_meta m SET runtime_kind='hosted', runtime_generation=v.generation, "  # noqa: S608 -- constant fragments
+    "runtime_owner=v.owner, pid=NULL FROM jsonb_to_recordset(%s) AS "
+    "v(agent_id bigint, before jsonb, generation uuid, owner uuid) "
+    f"WHERE m.id=v.agent_id AND m.machine=%s AND {IDENTITYLESS} AND {POINTER_CLEARS} "
+    f"AND {IDENTITY_IMAGE}=v.before RETURNING m.id"
+)
+
+
+def _minted_image(row: dict[str, Any]) -> dict[str, Any]:
+    identity = {"runtime_generation": row["generation"], "runtime_owner": row["owner"]}
+    return row["before"] | identity | {"runtime_kind": "hosted", "pid": None}
+
+
+def _unminted(conn: psycopg.Connection[Any], skipped: list[dict[str, Any]]) -> list[int]:
+    """The rows the mint skipped that do not carry their minted pair either."""
+    if not skipped:
+        return []
+    sql = f"SELECT m.id, {IDENTITY_IMAGE} FROM agents_meta m WHERE m.id=ANY(%s)"  # noqa: S608 -- constant fragment
+    current = dict(conn.execute(sql, ([row["agent_id"] for row in skipped],)).fetchall())
+    return [
+        row["agent_id"] for row in skipped if current.get(row["agent_id"]) != _minted_image(row)
+    ]
+
+
+def _mint_identities(conn: psycopg.Connection[Any], effect: dict[str, Any], _inputs: Inputs) -> str:
+    """Mint each row whose image is still its before image; a row that already
+    carries its minted pair is `already`, any other row is left unchanged."""
+    rows = effect["rows"]
+    minted = {row[0] for row in conn.execute(_MINT, (Jsonb(rows), effect["machine"]))}
+    changed = _unminted(conn, [row for row in rows if row["agent_id"] not in minted])
+    if not changed:
+        return "applied" if minted else "already"
+    left = f"left {len(changed)} changed row(s) unchanged (agents {', '.join(map(str, changed))})"
+    return f"applied: minted {len(minted)}, {left}" if minted else f"refused: {left}"
+
+
 Handler = Callable[[psycopg.Connection[Any], dict[str, Any], Inputs], str]
 _HANDLERS: dict[str, Handler] = {
     "pending-clear": _clear_pending,
@@ -372,6 +444,7 @@ _HANDLERS: dict[str, Handler] = {
     "posture-idle": _idle_posture,
     "unit-retire": _retire_unit,
     "predecessor-close": _close_predecessor,
+    "identity-mint": _mint_identities,
 }
 
 
@@ -425,7 +498,7 @@ def _begin(
     plan = plan_repairs(found, inputs, own)
     if plan.refusals:
         raise RefusedError("; ".join(plan.refusals))
-    fenced = fenced_summary(found.legacy)
+    fenced = fenced_summary(found.classified)
     _print_fenced(fenced)
     _store_attestations(home, inputs)
     return _as_json(
@@ -623,10 +696,10 @@ def _print_plan(found: Survey, plan: Plan) -> None:
     for step in STEPS:
         print(f"  {step}: {len(plan.effects[step])} effect(s)")
         for effect in plan.effects[step]:
-            shown = {k: v for k, v in effect.items() if k not in {"op", "before", "after"}}
+            shown = {k: v for k, v in effect.items() if k not in {"op", "before", "after", "rows"}}
             print(f"    - {effect['op']} {json.dumps(shown, sort_keys=True, default=str)}")
     listed: dict[tuple[str, str], list[int]] = {}
-    for item in found.legacy:
+    for item in found.classified:
         if item.verdict != "convertible":
             listed.setdefault((item.verdict, str(item.reason)), []).append(item.agent_id)
     for (verdict, reason), agents in sorted(listed.items()):
