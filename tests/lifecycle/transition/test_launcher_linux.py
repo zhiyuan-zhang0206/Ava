@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any, NoReturn
 from uuid import uuid4
 
+import psutil
 import pytest
 from pydantic import JsonValue
 
@@ -21,6 +22,8 @@ from cli.release_transition.request import ReleaseRef
 from shared.native_process.ownership import OwnedProcess
 from shared.runtime_release import VerifiedRelease
 from tests.lifecycle.transition.phases import advance_to
+
+_NATIVE_OWNER = linux._owner
 
 
 def _constant[T](value: T) -> Callable[..., T]:
@@ -373,6 +376,90 @@ def test_owner_requires_kernel_birth_and_exact_cgroup(
         linux._owner(launch, owner.pid)
     monkeypatch.setattr(linux, "_cgroup", _constant(launch.cgroup))
     assert linux._owner(launch, owner.pid) == owner
+
+
+def _exiting_manager(
+    planned: dict[str, JsonValue], monkeypatch: pytest.MonkeyPatch, *, running_reads: int
+) -> None:
+    """systemd names MainPID for `running_reads` reads, then records the reaped exit."""
+    reads = iter(range(1_000))
+
+    def properties(_unit: str) -> dict[str, str]:
+        return _properties(planned, pid=900 if next(reads) < running_reads else 0)
+
+    monkeypatch.setattr(linux, "_properties", properties)
+    monkeypatch.setattr(linux, "_SETTLE_POLL_S", 0.0)
+
+
+class _Zombie:
+    """The main process exits mid-read; systemd has not reaped it yet."""
+
+    pid = 900
+
+    def ppid(self) -> int:
+        return 1
+
+    def uids(self) -> Any:
+        return type("Uids", (), {"real": os.getuid()})()
+
+    def cwd(self) -> str:
+        raise psutil.ZombieProcess(self.pid)
+
+
+@pytest.mark.parametrize("window", ["reaped", "zombie"])
+def test_executor_exit_between_manager_and_process_reads_settles(
+    planned: dict[str, JsonValue], monkeypatch: pytest.MonkeyPatch, window: str
+) -> None:
+    """The executor exits after systemd named its MainPID but before psutil reads it.
+
+    That is the executor finishing, not lost custody: readback settles on the
+    manager's recorded exit of the same invocation instead of crashing.
+    """
+    _readback_seams(monkeypatch, planned)
+    running = linux.readback(planned)
+    path = Path(str(planned["operation"]))
+    with journal.exclusive(path) as current:
+        current.mark_launch_attempted()
+        current.record_native(running.identity)
+    monkeypatch.setattr(linux, "_owner", _NATIVE_OWNER)
+    if window == "reaped":
+        _exiting_manager(planned, monkeypatch, running_reads=1)
+
+        def gone(pid: int) -> NoReturn:
+            raise psutil.NoSuchProcess(pid)
+
+        monkeypatch.setattr(linux.psutil, "Process", gone)
+    else:
+        # The manager reaps only after one more read.
+        _exiting_manager(planned, monkeypatch, running_reads=2)
+        monkeypatch.setattr(linux.psutil, "Process", _constant(_Zombie()))
+        monkeypatch.setattr(OwnedProcess, "capture", _constant(OwnedProcess(900, 1.5, 150)))
+        lives = iter([True])
+        monkeypatch.setattr(OwnedProcess, "live", lambda _self: next(lives, False))
+    job = linux.readback(planned)
+    assert job.finished and job.owner is None
+    assert (job.active, job.sub, job.exit_code, job.exit_status) == ("active", "exited", 1, 0)
+    assert journal.read_operation(path).native == running.identity
+
+
+def test_vanished_executor_without_a_settled_manager_exit_retains_custody(
+    planned: dict[str, JsonValue], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _readback_seams(monkeypatch, planned)
+    monkeypatch.setattr(linux, "_owner", _constant(None))
+    monkeypatch.setattr(linux, "_EXIT_SETTLE_S", 0.0)
+    with pytest.raises(RuntimeError, match="not settled by its manager; retain custody"):
+        linux.readback(planned)
+    reads = iter(range(1_000))
+
+    def replaced(_unit: str) -> dict[str, str]:
+        if next(reads) == 0:
+            return _properties(planned)
+        return _properties(planned, pid=0) | {"InvocationID": "b" * 32}
+
+    monkeypatch.setattr(linux, "_properties", replaced)
+    with pytest.raises(RuntimeError, match="changed during native observation"):
+        linux.readback(planned)
 
 
 def _closed_attempt(
