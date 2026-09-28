@@ -24,7 +24,7 @@ rows are not evidence here.
 `min_affected` (default 2), `alert_route` and `acknowledged_rejection`.
 Bounds are whole seconds and the threshold an integer percent, so boundaries
 are exact. `close_s` and `cancel_grace_s` are the writer-closure bounds
-`cli/release_transition/local.py` applies at every unit's `closing` (30 s and
+`cli/release_transition/local.py` applies at every unit's `stopping` (30 s and
 10 s by default); its SIGKILL observation bound stays mechanism.
 
 `exceeds(affected, cohort)` is `affected >= min_affected` and

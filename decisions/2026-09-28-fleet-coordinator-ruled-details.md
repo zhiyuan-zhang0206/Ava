@@ -14,14 +14,17 @@ refuses the operation outright or completes it.
 User ruling, 2026-09-28:
 
 1. **Code names win.** `stopping` is the plan's `closing`; `starting` +
-   `observing` together are the plan's `starting_gateway`. The coordinator
-   and its docs use the code's names; the plan document is updated to match
-   instead of the reverse.
+   `observing` together are the plan's `starting_gateway`. The coordinator,
+   its journal and every in-repo description use the code's names; the plan
+   (a working document kept outside the repository) is the one to change.
 2. **A unit's barrier deadline is journaled in its instruction and reused by
    a continuation.** The gateway computes the deadline once when it issues
    the instruction and journals it there; resuming a stalled operation reads
    that same journaled deadline rather than computing a new one from the
-   continuation's own start time.
+   continuation's own start time. A continuation only adds a re-answer
+   window: after it binds its listener, each unit has at least
+   `_REANSWER_S` (30 s, `cli/release_fleet/units.py`) to answer again,
+   because answers sent while the coordinator was away were never received.
 3. **An abort decided at `prepared` completes as `aborted`.** Nothing has
    been dispatched yet at that phase, so there is no effect to undo; the
    operation records outcome `aborted` and exits rather than refusing to run.
@@ -29,9 +32,10 @@ User ruling, 2026-09-28:
 ## Alternatives rejected
 
 - **Keep the plan's phase names (`closing`, `starting_gateway`) and rename the
-  code to match.** The code and its journaled phase values are already
-  running in production; renaming call sites and journal enum values instead
-  of updating a plan document risks a migration for no behavior change.
+  code to match.** The code, the journal's phase enum and the tests already
+  use the code's names; renaming all of them to match a planning document
+  changes no behavior. (The fleet coordinator has not run in production;
+  production still runs the legacy updater.)
 - **Recompute a fresh barrier deadline when a continuation resumes.** This
   would let a coordinator that was down for a long stretch keep extending a
   unit's wait indefinitely every time it comes back, defeating the barrier's
@@ -42,14 +46,15 @@ User ruling, 2026-09-28:
 
 ## Consequences
 
-- The plan document (`fleet-and-cutover-plan.md`) is corrected to use
-  `stopping` / `starting` + `observing` wherever it previously said `closing`
-  / `starting_gateway`, so future readers are not misled by stale names.
+- In-repo descriptions use `stopping` / `starting` + `observing`; the plan's
+  `closing` / `starting_gateway` appear only where a docstring maps them
+  (`cli/release_fleet/progress.py`).
 - Because a continuation reuses the original journaled deadline rather than
-  restarting the clock, a coordinator that resumes an operation after it has
-  been down for close to (or longer than) a unit's original barrier window
-  will find that unit already past deadline and immediately time out into
-  the held-for-operator state (per FC-7's ruling that a stalled operation
-  stops and waits rather than retrying automatically). Deadlines therefore
-  stay bounded, at the cost of no automatic grace extension after a long
-  coordinator outage.
+  restarting the clock, a coordinator that resumes after being down past a
+  unit's barrier window gives that unit only the 30 s re-answer window. A
+  unit still silent after it is late, and lateness never holds the
+  operation: before the fence (the candidate direction's `quiescing` and
+  `stopping` barriers) the barrier raises `UnitBarrierError` and the release
+  aborts; otherwise the unit is marked `unknown`, leaves the operation, and
+  the workload policy judges its agents as affected. Deadlines therefore stay
+  bounded, at the cost of no longer grace after a long coordinator outage.

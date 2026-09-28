@@ -29,7 +29,9 @@ User rulings, 2026-09-27:
    the request builder then verifies each receipt through that unit's handoff
    (`release_image_exec`, entry `receipt`). This is slice FC-7b. Until it
    lands, the request builder refuses any included remote unit (a unit must be
-   excluded or its machine paused).
+   excluded or its machine paused). Execution is narrower still: a networked
+   release also needs slices dbgen-8 and FC-9, so until both land the
+   operation refuses any request that names a unit or an exclusion.
 2. **A failure at `resuming` holds for an operator.** The coordinator journals
    the error and a `held` alert and exits; there is no automatic recovery from
    that phase. There is also no automatic retry of a failed unit start for
@@ -66,9 +68,14 @@ User rulings, 2026-09-27:
 
 ## Consequences
 
-- Until FC-7b, a networked cluster releases only its gateway home: every other
-  unit must be excluded (or its machine paused), stays stale, and rejoins only
-  through a converge operation (FC-9).
+- Nothing networked releases until dbgen-8 (per-unit write-generation
+  delivery over the coordinator channel) and FC-9 (converge, the only way a
+  unit left out rejoins) have both landed, besides FC-7b. Until then the
+  operation refuses any request that names a remote unit or an exclusion, and
+  any home with a cluster secret, a data-plane host or another registered
+  unit (`cli/release_fleet/inventory.py`, `require_topology` and
+  `require_fleet_of_one`): a release is a fleet of one, the gateway home of a
+  single-unit cluster.
 - A failure at `resuming` leaves the cluster held, possibly with admission
   open, until an operator continues the operation (`ava cluster update
   --prepared`) or intervenes.

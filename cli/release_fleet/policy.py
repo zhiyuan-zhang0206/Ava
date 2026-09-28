@@ -76,7 +76,7 @@ class FleetPolicy(Record):
 
     Bounds are whole seconds so every boundary is exact. `close_s` and
     `cancel_grace_s` are the writer-closure bounds the one-home effects
-    (`cli/release_transition/local.py`) apply at every unit's `closing`.
+    (`cli/release_transition/local.py`) apply at every unit's `stopping`.
     The threshold is an integer percent so "exactly at the threshold" is exact.
     """
 
