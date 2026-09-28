@@ -200,11 +200,11 @@ _HUMAN_FORMAT = (
 def add_sink(sink: Any, /, **kwargs: Any) -> int:
     """`logger.add(sink, ...)` with `diagnose` forced off.
 
-    Every loguru sink in this codebase must be registered through this helper
-    (or pass a literal `diagnose=False` itself — the repo-wide AST scan in
-    `tests/shared/test_log_init_idempotent.py::test_no_repo_logger_add_call_skips_diagnose_false`
-    enforces this for every non-test callsite under the scanned dirs). loguru's
-    own default is `diagnose=True`: on a formatted exception it renders every
+    Every loguru sink in this codebase is registered through this helper; its
+    one `logger.add` passes a literal `diagnose=False`, which
+    `scripts/lint/lint_logger_add_diagnose.py` (a pre-commit hook) requires of
+    every non-test `logger.add(...)` call. loguru's own default is
+    `diagnose=True`: on a formatted exception it renders every
     local variable's value from every frame of the traceback into the sink's
     output — not just the traceback text. A release-executor failure captured a
     `RoleSecret` in a stack frame, and `logger.opt(exception=exc)` printed that
@@ -218,13 +218,12 @@ def add_sink(sink: Any, /, **kwargs: Any) -> int:
     Raises if a caller explicitly asks for `diagnose=True` — that request is
     never honored, so failing loud beats a silently-ignored kwarg.
     """
-    if kwargs.get("diagnose"):
+    if kwargs.pop("diagnose", False):
         raise ValueError(
             "diagnose=True is forbidden on log sinks: it renders local variable "
             "values (including secrets) into exception output"
         )
-    kwargs["diagnose"] = False
-    return logger.add(sink, **kwargs)
+    return logger.add(sink, diagnose=False, **kwargs)
 
 
 _FILE_SINK_SIZE_LIMIT = 100 * 1024 * 1024

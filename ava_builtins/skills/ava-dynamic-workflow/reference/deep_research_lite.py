@@ -17,9 +17,10 @@ from datetime import datetime
 from pathlib import Path
 
 import ava
+from shared.paths import workspace_dir
 
 ORCH = ava.self.AGENT_ID
-HD = Path.home() / ".ava/workspaces" / str(ORCH) / "deep_research_lite"
+HD = workspace_dir(ORCH) / "deep_research_lite"
 HD.mkdir(parents=True, exist_ok=True)
 PF = HD / "progress.md"
 SF = HD / "orchestrator_state.json"

@@ -97,19 +97,15 @@ def run(
     cwd: str | None = None,
     timeout: float = 30.0,
 ) -> ShellResult:
-    """Non-zero exit does not
-    raise; exceeding `timeout` seconds kills the command and raises
-    `subprocess.TimeoutExpired`. `cwd` defaults to your workspace.
+    """Non-zero exit does not raise; exceeding `timeout` seconds kills the
+    command and raises `subprocess.TimeoutExpired`. `cwd` defaults to your
+    workspace.
 
-    The returned value is a string that works exactly as before, with the
-    command's exit status attached: `.returncode` is 0 on success and
-    non-zero on failure, and `.stderr` carries the standard error output.
-    Check `.returncode` instead of parsing stdout to tell success from
-    failure. The fields are read-only, and string operations (like
-    `.strip()` or concatenation) return a plain `str` without them.
-
-    For commands expected to outlive the timeout, use `run_background`
-    instead — it reports back when the command finishes."""
+    Returns the output as a `str` carrying read-only `.returncode` (0 = success)
+    and `.stderr` — check `.returncode`, not stdout, to tell success from
+    failure; string operations return a plain `str` without them. For commands
+    that may outlive the timeout use `run_background`, which reports back when
+    the command finishes."""
     cmd = coerce_str(cmd, "cmd")
     cwd = coerce_str(cwd, "cwd", allow_none=True, allow_types=(os.PathLike,))
     timeout = coerce_typed(timeout, "timeout", (int, float))
@@ -167,32 +163,14 @@ def run_background(
 ) -> BackgroundRun:
     """You get a message when it finishes — no polling.
 
-    The command runs in a fresh persistent session, stdout+stderr streaming to
-    `output_path` (`.shell_logs/<session_id>_<name>.log` in your workspace)
-    and visible live in the session capture — read either to check progress.
-    The completion message carries the exit code, the log path, and the output
-    tail; the session then closes itself unless `keep=True`. Omitting `notify`
-    applies the agent completion-notice policy (default `all` preserves a
-    message for every exit). Explicit `notify="always"` or `"failure"`
-    overrides that policy for this run. While running it is an ordinary session.
-
-    Use this for one-shot long tasks; interactive programs belong in
-    `sessions.new` + `send`.
-
-    Args:
-        cmd: must be a single line — join steps with `;` or `&&`, or point at
-            a script file.
-        name: a lowercase slug like `"build"`; names starting with `page-` are
-            reserved for pages opened with `ava.ui.serve`.
-        cwd: defaults to your workspace.
-        notify: omit to use the agent policy; `"always"` sends a completion
-            message for every exit and `"failure"` sends only non-zero exits.
-        ttl: required hard lifetime in seconds, counted from creation — the
-            session is force-killed once it elapses, with no idle/activity
-            renewal; extend it explicitly with ava.shell.sessions.renew()
-            before the deadline passes. Max 86400 (24 hours) per call; pass
-            a large value for a long-resident command within that cap.
-            `keep=True` does not extend or disable it.
+    `cmd` is a single line (join steps with `;` / `&&`, or run a script file); `name` is a
+    lowercase slug like `"build"` (`page-*` is reserved for `ava.ui.serve`); `cwd` defaults to
+    your workspace. It runs in a fresh persistent session; output streams to `output_path`
+    (`.shell_logs/<session_id>_<name>.log` in your workspace) and the capture. The completion
+    message carries the exit code, log path and output tail, then the session closes unless
+    `keep=True`. `ttl` is a required hard lifetime in seconds (max 86400 per call, no idle
+    renewal, not extended by `keep`); extend it with `sessions.renew()`. `notify="always"` /
+    `"failure"` overrides your completion-notice policy. Interactive programs: `sessions.new`.
     """
     cmd = coerce_str(cmd, "cmd")
     name = coerce_str(name, "name")

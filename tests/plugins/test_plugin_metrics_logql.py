@@ -23,6 +23,7 @@ from shared.plugin_metrics import (
     registered_metrics,
     render_query,
     render_targets,
+    render_title,
 )
 
 _PLUGINS = ("ava_code", "ava_fleet", "ava_memory")
@@ -112,7 +113,7 @@ def test_dashboard_json_matches_registrations() -> None:
     data = json.loads(path.read_text())
     by_title = {p.get("title"): p for p in data["panels"]}
     for spec in specs:
-        panel = by_title[spec.title]
+        panel = by_title[render_title(spec)]
         assert panel["datasource"] == {"type": "loki", "uid": "loki"}
         targets = panel["targets"]
         assert [t["expr"] for t in targets] == render_targets(spec)
@@ -133,10 +134,10 @@ def test_plugin_panels_live_under_their_plugin_rows() -> None:
     rows = sorted((p["gridPos"]["y"], p["title"]) for p in data["panels"] if p.get("type") == "row")
     by_title = {p.get("title"): p for p in data["panels"]}
     for spec in specs:
-        y = by_title[spec.title]["gridPos"]["y"]
+        y = by_title[render_title(spec)]["gridPos"]["y"]
         section = max(row for row in rows if row[0] <= y)[1]
         assert section == spec.plugin, (
-            f"{spec.title!r} sits under {section!r}, not its plugin row {spec.plugin!r}"
+            f"{render_title(spec)!r} sits under {section!r}, not its plugin row {spec.plugin!r}"
         )
 
 
@@ -174,7 +175,7 @@ def test_dashboard_json_matches_core_registrations() -> None:
                 f"panel {other['id']} ({other['title']!r})"
             )
     for spec in specs:
-        panel = panels_by_title[spec.title]
+        panel = panels_by_title[render_title(spec)]
         targets = panel["targets"]
         expected = render_targets(spec)
         if spec.query_type == "sql":
@@ -330,12 +331,14 @@ def test_pr_flow_panels_match_the_otlp_contract() -> None:
     assert flakes.target_names == ["new quarantines"]
 
     for spec in (latency, queue, qa, flakes):
-        assert by_title[spec.title]["description"] == spec.description
+        assert by_title[render_title(spec)]["description"] == spec.description
     for spec in (latency, qa, flakes):
         joins = [
-            t for t in by_title[spec.title].get("transformations", []) if t["id"] == "joinByField"
+            t
+            for t in by_title[render_title(spec)].get("transformations", [])
+            if t["id"] == "joinByField"
         ]
-        assert joins, spec.title
+        assert joins, render_title(spec)
         assert joins[0]["options"] == {"byField": "day", "mode": "outer"}
 
 
@@ -376,7 +379,7 @@ def test_cost_dashboard_windows_and_telemetry_contract() -> None:
         assert "timeFrom" not in by_title[title]
         assert "interval" not in by_title[title]
 
-    core_by_title = {spec.title: spec for spec in _load_core()}
+    core_by_title = {render_title(spec): spec for spec in _load_core()}
     for title in (
         "LLM cost estimate — day pace",
         "LLM cost estimate — 30-day pace",

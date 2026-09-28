@@ -75,9 +75,9 @@ repos:
       # `# async-blocking-ok: <reason>`; see the script header for the full rules.
       - id: lint-async-no-sync-blocking
         name: lint async bodies (no sync blocking calls)
-        entry: .venv/bin/python scripts/lint_async_no_sync_blocking.py
+        entry: .venv/bin/python scripts/lint/lint_async_no_sync_blocking.py
         language: system
-        files: ^((gateway|ops)/.*|scripts/lint_async_no_sync_blocking)\.py$
+        files: ^((gateway|ops)/.*|scripts/lint/lint_async_no_sync_blocking)\.py$
         pass_filenames: false
 
       # Ban raw os.environ / os.getenv — runtime config must go through shared.config.settings.
@@ -132,6 +132,19 @@ repos:
       - id: lint-pool-keepalives
         name: lint pool keepalives (no pool without PG_KEEPALIVE_KWARGS)
         entry: .venv/bin/python scripts/lint_pool_keepalives.py
+        language: system
+        types: [python]
+        pass_filenames: false
+
+      # Ban a logger.add(...) sink that does not explicitly pass diagnose=False.
+      # loguru's diagnose defaults to True, so logger.exception(...) on an
+      # unmarked sink renders every local variable of the failing frames (DSNs,
+      # tokens, passwords) into the sink's output — file, journal, and the
+      # telemetry pipeline that mirrors into Loki. No inline exemption; see
+      # scripts/lint/lint_logger_add_diagnose.py header.
+      - id: lint-logger-add-diagnose
+        name: lint logger.add diagnose (no sink without diagnose=False)
+        entry: .venv/bin/python scripts/lint/lint_logger_add_diagnose.py
         language: system
         types: [python]
         pass_filenames: false

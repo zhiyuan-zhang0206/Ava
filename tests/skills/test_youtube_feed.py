@@ -10,6 +10,7 @@ yt-dlp subprocess so nothing hits the network.
 from __future__ import annotations
 
 import importlib.util
+import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -302,3 +303,28 @@ def test_fetch_no_whisper_when_disabled(tmp_path: Path, monkeypatch: pytest.Monk
     post = feed.fetch("dRsjO-88nBs", root=tmp_path)  # whisper_fallback defaults False
     assert post["transcript"] is None and post["transcript_kind"] is None
     assert called is False
+
+
+# --------------------------------------------------------------------------- #
+# Default mirror root
+# --------------------------------------------------------------------------- #
+
+
+def test_default_root_under_ava_home(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    # The skill script resolves $AVA_HOME via `shared.dotenv_boot.resolve_ava_home`
+    # (2026-09-28 fix, PR #3550 follow-up) rather than reading `os.environ`
+    # directly, so the env var still works through the real resolution path.
+    monkeypatch.setitem(os.environ, "AVA_HOME", str(tmp_path))
+    assert feed._default_root() == tmp_path / "state" / "mirrors" / "youtube"
+
+
+def test_default_root_never_guesses_the_default_home(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Locks the 2026-09-28 fix: an unanchored checkout's scratch home (never
+    a hardcoded `~/.ava` guess) is what `_default_root` lands on when
+    `resolve_ava_home` itself resolves there — the same bug class `_common.py`
+    / `_source_root` were fixed for in #3550, one level down."""
+    scratch = tmp_path / "unanchored-scratch-home"
+    monkeypatch.setattr(feed, "resolve_ava_home", lambda: (scratch, False))
+    assert feed._default_root() == scratch / "state" / "mirrors" / "youtube"

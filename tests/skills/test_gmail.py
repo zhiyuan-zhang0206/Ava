@@ -15,6 +15,8 @@ _SKILL_DIR = Path(__file__).resolve().parents[2] / "ava_builtins" / "skills" / "
 sys.path.insert(0, str(_SKILL_DIR))
 import feed as gmail  # noqa: E402  # pyright: ignore[reportMissingImports]
 
+from ava_builtins.skill_support.gmail import imap as gmail_imap  # noqa: E402
+
 # The skill under test is a standalone reference file injected via
 # sys.path at runtime — pyright cannot resolve its module type, so every
 # call site reports Unknown. File-level downgrade of the two call-site
@@ -268,6 +270,30 @@ def test_sent_summary_real() -> None:
 
     summary = gmail.sent_summary(msg, sent=True)
     assert summary["sent"] is True
+
+
+# ── _app_password fallback is machine-level, not cluster-scoped ────────────
+
+
+def _no_keychain(*_args: str) -> str:
+    raise gmail_imap.GmailError("no Keychain in this test")
+
+
+def test_app_password_fallback_ignores_ava_home(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The Keychain-fallback secrets file is deliberately machine-level (like
+    the Keychain entry it substitutes for): it resolves via HOME, not via
+    resolve_ava_home()/AVA_HOME (see imap.py::_app_password). This process's
+    real AVA_HOME (a worktree cluster home, never this fake HOME) is left
+    untouched -- if the fallback ever started routing through it instead, the
+    file lookup below would miss and raise rather than silently pass."""
+    home = tmp_path / "home"
+    (home / ".ava" / "secrets").mkdir(parents=True)
+    (home / ".ava" / "secrets" / "gmail-app-password").write_text("abcd efgh")
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setattr(gmail_imap, "_keychain", _no_keychain)
+    assert gmail_imap._app_password() == "abcdefgh"
 
 
 # ── CLI dry-run integration ─────────────────────────────────────────────────

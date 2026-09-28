@@ -56,6 +56,8 @@ from typing import Any
 import trafilatura
 from loguru import logger
 
+from shared.dotenv_boot import resolve_ava_home
+
 # An honest browser UA: a bare client UA is 403'd / timed out by many news and
 # forum sites that answer a normal browser request (verified against Chinese
 # official / forum sites that 403 the WebFetch tool but 200 a Chrome UA via curl).
@@ -111,8 +113,14 @@ _SKILL = "web-scrape"
 def _default_root() -> Path:
     """Default raw-mirror dir `$AVA_HOME/state/mirrors/web-scrape/` — shared derived
     state doubling as the sync watermark; the per-content subdir is the stable
-    URL slug, so a re-run reuses it (dedup)."""
-    home = Path(os.environ.get("AVA_HOME", "~/.ava")).expanduser()
+    URL slug, so a re-run reuses it (dedup).
+
+    Resolves `$AVA_HOME` via `shared.dotenv_boot.resolve_ava_home` — the same
+    checkout-anchored resolution every other Ava process uses — rather than
+    guessing `~/.ava` when the env var is unset: an unanchored checkout has no
+    business writing its raw mirror into another cluster's home (2026-09-28,
+    PR #3550's P2 follow-up)."""
+    home, _anchored = resolve_ava_home()
     return home / "state" / "mirrors" / "web-scrape"
 
 

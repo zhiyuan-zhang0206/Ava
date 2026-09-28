@@ -30,3 +30,9 @@ roster. Agent-updated events also refetch the roster when another client opens
 or ends a session. No timeline or message marker is added for the control. The
 same relative API call and roster read work with shared SSE on HTTPS and
 per-page SSE on direct HTTP.
+
+Inspector Liveness Status reads the same selected-agent roster projection:
+an active takeover displays `Impersonated` even though `/inspect/live` carries
+the parked native lifecycle. Release or roster removal restores the Inspector
+lifecycle status; a terminated Inspector response always remains terminated.
+This is a reader of the existing roster cache, with no separate lease state.

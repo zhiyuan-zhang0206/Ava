@@ -32,7 +32,7 @@ Gateway auth: `Authorization: Bearer <token>` — the process's machine API toke
 `AVA_CLUSTER_SECRET` from the environment or `$AVA_HOME/.env` (the gateway
 home; no header when empty — a single-box no-auth cluster). `$AVA_HOME` is
 resolved the same checkout-anchored way every other Ava process resolves it
-(see `_source_root` / `shared.dotenv_boot.resolve_ava_home`), not guessed — an
+(see `_common.source_root` / `shared.dotenv_boot.resolve_ava_home`), not guessed — an
 unanchored checkout (no AVA_HOME, not the prod source, no `.ava_home`
 pointer) never reads `.env` and never dials the gateway, so it cannot send a
 guessed home's secret to a guessed `http://localhost:8000` (2026-09-27: on a
@@ -57,33 +57,12 @@ import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _common import source_root
 
-def _source_root() -> Path:
-    """The checkout / install root that holds the ``shared`` package.
+sys.path.insert(0, str(source_root()))
 
-    The script is invoked from two places: the dev checkout (``.agents/
-    skills/...`` — walk up to the repo root) and the prod install
-    (``$AVA_HOME/skills/...`` — a converge copy; ``shared`` lives in
-    ``$AVA_HOME/source``). ``shared.dotenv_boot`` must be importable from
-    either, so the root is resolved before the import happens.
-    """
-
-    here = Path(__file__).resolve().parent
-    for cand in (here, *here.parents):
-        if (cand / "shared" / "__init__.py").is_file():
-            return cand
-    home = Path(os.environ.get("AVA_HOME", "~/.ava")).expanduser()
-    cand = home / "source"
-    if (cand / "shared" / "__init__.py").is_file():
-        return cand
-    raise RuntimeError(
-        f"cannot locate the Ava source root: no `shared` package above {here} and none at {cand}"
-    )
-
-
-sys.path.insert(0, str(_source_root()))
-
-from shared.dotenv_boot import resolve_ava_home  # noqa: E402 - after the sys.path setup above
+from shared.dotenv_boot import resolve_ava_home
 
 _AGENT_ATTR = "session.id"
 _CHECKPOINT_ATTR = "ava.checkpoint_id"

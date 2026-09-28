@@ -15,6 +15,8 @@ A complete Gmail mail client (`ava_builtins/skills/gmail/`), pure IMAP/SMTP, **s
 ## Authentication Form
 Pure stdlib (imaplib+smtplib+email), no third-party SDK. One-time prerequisites: enable two-step verification + generate an App Password, enable IMAP, store the App Password in macOS Keychain (`security add-generic-password -s ava-gmail-imap`); the script reads login + password from that entry. It is one of the 5 skills injected by default into the system prompt index (every agent should know it exists).
 
+The credential model is machine-level, not per-cluster: the Keychain entry is scoped to the OS user, not to any `$AVA_HOME`. A headless agent without GUI Keychain access falls back to a plain-text file at `~/.ava/secrets/gmail-app-password` — deliberately resolved the same machine-level way (never through `resolve_ava_home()`), matching the per-machine `~/.ava/secrets/*.env` convention (`conventions/dev-setup.md`). A dev worktree cluster (home `~/.ava-<dir>`) still authenticates against this same one mailbox.
+
 ## Key Dependencies
 - [[ava_builtins/skills/comms/comms.ava.okf.md|Communication & User Interaction Skills]] — parent functional group
 - [[ava/skills.ava.okf.md|Skill System]] — indexed in every agent's `# Capabilities` section like every loaded skill (`skills_to_inject_into_system_prompt` defaults to `*`)

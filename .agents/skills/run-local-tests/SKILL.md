@@ -69,6 +69,12 @@ description: Runs the Ava repo's Python, frontend, and end-to-end checks and dia
   the `--no-verify` habit, so it stays CI-only. The cheap half of the migration
   gate (`scripts/lint_migrations.py` — filename format, up/down pairing,
   baseline seed) *is* a local hook, gated on `migrations/` + `db/schema.sql`.
+- **Positional test paths run grouped by directory, whatever order you pass.**
+  pytest 9 hides a conftest's fixtures (autouse ones included) from any directory
+  it collects twice, which happens when the paths leave a directory and come back
+  (`tests/agent/a.py tests/b.py tests/agent/c.py`). `tests/fixtures/collection_guard.py`
+  sorts the paths before collection and stops a run whose collection still splits
+  a directory.
 - **Full non-e2e + e2e + coverage threshold runs in CI** — it's the merge gate.
 - **Framework pre-push hooks** run pyright, frontend tsc, eslint and vitest. Install
   both stages from the main clone's stable `.venv`, never a worktree:

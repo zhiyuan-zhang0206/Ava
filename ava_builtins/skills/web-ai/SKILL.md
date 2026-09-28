@@ -33,13 +33,22 @@ for analysis) and **continue an existing conversation** (`console
 --continue-url`, `deep-research reply`) instead of always opening a fresh one.
 
 ```bash
-$AVA_HOME/source/.venv/bin/python $AVA_HOME/skills/web-ai/<child>/reference/<entry>.py <args>
+python $AVA_HOME/skills/web-ai/<child>/reference/<entry>.py <args>
 ```
+
+Bare `python` is deliberate, not shorthand: every agent process (and every
+`ava.shell` command it runs, one-shot or persistent) descends from
+`services.ava_root`, which is launched with this checkout's venv `bin/`
+(`Scripts\` on Windows) already first on `PATH`
+(`cli/commands/_root_driver.py::_root_child_env`, `shared/session_env.py::
+forward_env_dict`) — so `python` always resolves to the right interpreter for
+prod home, a dev worktree cluster, or Windows alike, with no
+`.venv/bin/` / `$AVA_HOME/source/.venv/bin/` / `Scripts\` prefix needed.
 
 These calls run for **tens of seconds to minutes** (they wait on a streamed
 answer or a rendered asset). When you launch one with `ava.shell.run`, pass a
-generous `timeout=` — e.g. `ava.shell.run(".venv/bin/python ...", timeout=600)` —
-or it hits the default 30s timeout and raises before the result is ready.
+generous `timeout=` — e.g. `ava.shell.run("python ...", timeout=600)` — or it
+hits the default 30s timeout and raises before the result is ready.
 
 ## Prerequisites
 

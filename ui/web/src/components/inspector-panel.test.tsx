@@ -21,7 +21,9 @@ import { BAR_DIVIDER_CLASS, BAR_HEIGHT_CLASS } from "@/lib/layout";
 import { formatAbsolute, formatRelative } from "@/lib/time";
 import { foldNotices } from "@/lib/fold/notices";
 import { BACK_VISIT_REVALIDATE_MAX } from "@/lib/switch-budget";
-import type { AgentInspectStatistics, AgentInspectLive, InspectWidget, PageRow, SystemEvent } from "@/lib/types";
+import { AGENTS_QUERY_KEY } from "@/lib/fold/agents";
+import { projectAgentStatus } from "@/lib/types";
+import type { AgentInspectStatistics, AgentInspectLive, AgentRoster, InspectWidget, PageRow, SystemEvent, WireAgentCard } from "@/lib/types";
 
 // vi.hoisted so the mock fn is initialized before the hoisted vi.mock factory
 // runs (the factory fires during the InspectorPanel import, before module-body
@@ -30,6 +32,7 @@ const {
   getAgentInspectStatistics,
   getAgentInspectLive,
   getAgentInspectWidgets,
+  getAgentRoster,
   listPages,
   listPresets,
   resolveNotice,
@@ -44,6 +47,7 @@ const {
       >(),
     getAgentInspectLive:
       vi.fn<(agentId: number, signal?: AbortSignal) => Promise<AgentInspectLive>>(),
+    getAgentRoster: vi.fn<(signal?: AbortSignal) => Promise<AgentRoster>>(),
     // Plugin widgets (task #2909): default to none so the render tests stay
     // focused; the widget tests drive it.
     getAgentInspectWidgets: vi.fn<(agentId: number, signal?: AbortSignal) => Promise<InspectWidget[]>>(
@@ -65,6 +69,7 @@ vi.mock("@/lib/api", () => ({
     getAgentInspectStatistics,
     getAgentInspectLive,
     getAgentInspectWidgets,
+    getAgentRoster,
     listPages,
     listPresets,
     resolveNotice,
@@ -129,6 +134,7 @@ beforeEach(() => {
   getAgentInspectStatistics.mockResolvedValue(fixture());
   getAgentInspectLive.mockResolvedValue(liveFixture());
   getAgentInspectWidgets.mockResolvedValue([]);
+  getAgentRoster.mockResolvedValue({ agents: [], ancestors: [] });
 });
 
 afterEach(() => {
@@ -137,6 +143,7 @@ afterEach(() => {
   getAgentInspectStatistics.mockReset();
   getAgentInspectLive.mockReset();
   getAgentInspectWidgets.mockReset();
+  getAgentRoster.mockReset();
   resolveNotice.mockClear();
   toggle.mockReset();
   panelState.open = true;
@@ -147,8 +154,10 @@ afterEach(() => {
   isLargeMock.mockReturnValue(true);
 });
 
-function render(ui: React.ReactElement) {
-  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+function render(
+  ui: React.ReactElement,
+  qc = new QueryClient({ defaultOptions: { queries: { retry: false } } }),
+) {
   return rtlRender(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>);
 }
 
@@ -1450,6 +1459,117 @@ describe("InspectorPanel manual refresh", () => {
   });
 });
 
+
+function rosterFixture(overrides: Partial<WireAgentCard> = {}): AgentRoster {
+  return {
+    agents: [projectAgentStatus({
+      agent_id: 1,
+      spawner: "user",
+      fork_source_agent_id: null,
+      status: "idling",
+      pid: null,
+      spawned_at: "2026-06-14T12:00:00Z",
+      started_at: "2026-06-14T12:00:05Z",
+      last_active_at: "2026-06-14T12:00:05Z",
+      last_inbound_at: "2026-06-14T12:00:05Z",
+      label: null,
+      machine: "test-host",
+      supports_vision: false,
+      liveness_state: "online",
+      observation: { runtime_owner: "unknown" },
+      awaiting_response_count: 0,
+      highest_notice_priority: null,
+      unread_notice_count: 0,
+      heartbeat_paused_until: null,
+      open_impersonation_session_id: 7,
+      open_impersonation_status: "active",
+      ...overrides,
+    })],
+    ancestors: [],
+  };
+}
+
+describe("InspectorPanel takeover status", () => {
+  it("shows Impersonated for an active lease while the native lifecycle is idling", async () => {
+    getAgentRoster.mockResolvedValue(rosterFixture());
+    getAgentInspectLive.mockResolvedValue(liveFixture({ status: "idling", liveness_state: "offline" }));
+    const { container } = render(<InspectorPanel agentId={1} />);
+
+    await waitFor(() => expect(screen.getByText("Impersonated")).toBeTruthy());
+    expect(screen.queryByText("Idling")).toBeNull();
+    expect(container.querySelector(".text-destructive")).not.toBeNull();
+  });
+
+  it("reacts to activation and release without retaining the takeover status", async () => {
+    const qc = new QueryClient();
+    qc.setQueryData(AGENTS_QUERY_KEY, rosterFixture({ open_impersonation_status: "requested" }));
+    getAgentInspectLive.mockResolvedValue(liveFixture({ status: "idling" }));
+    render(<InspectorPanel agentId={1} />, qc);
+    await waitFor(() => expect(screen.getByText("Idling")).toBeTruthy());
+
+    act(() => { qc.setQueryData(AGENTS_QUERY_KEY, rosterFixture()); });
+    await waitFor(() => expect(screen.getByText("Impersonated")).toBeTruthy());
+    act(() => {
+      qc.setQueryData(AGENTS_QUERY_KEY, rosterFixture({
+        open_impersonation_session_id: null,
+        open_impersonation_status: null,
+      }));
+    });
+    await waitFor(() => expect(screen.getByText("Idling")).toBeTruthy());
+    expect(screen.queryByText("Impersonated")).toBeNull();
+    expect(getAgentRoster).not.toHaveBeenCalled();
+    expect(getAgentInspectLive).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["requested", "accepted", null] as const)(
+    "keeps the lifecycle status for a %s lease",
+    async (phase) => {
+      const qc = new QueryClient();
+      getAgentRoster.mockResolvedValue(rosterFixture({ open_impersonation_status: phase }));
+      getAgentInspectLive.mockResolvedValue(liveFixture({ status: "idling" }));
+      render(<InspectorPanel agentId={1} />, qc);
+
+      await waitFor(() => expect(qc.getQueryState(AGENTS_QUERY_KEY)?.status).toBe("success"));
+      await waitFor(() => expect(screen.getByText("Idling")).toBeTruthy());
+      expect(screen.queryByText("Impersonated")).toBeNull();
+    },
+  );
+
+  it("keeps a terminated Inspector status even if an active roster card is still cached", async () => {
+    const qc = new QueryClient();
+    qc.setQueryData(AGENTS_QUERY_KEY, rosterFixture());
+    getAgentInspectLive.mockResolvedValue(liveFixture({ status: "terminated" }));
+    render(<InspectorPanel agentId={1} />, qc);
+
+    await waitFor(() => expect(screen.getByText("Terminated")).toBeTruthy());
+    expect(screen.queryByText("Impersonated")).toBeNull();
+  });
+
+  it("keeps takeover status scoped to the selected agent across switches and roster removal", async () => {
+    const qc = new QueryClient();
+    qc.setQueryData(AGENTS_QUERY_KEY, rosterFixture());
+    getAgentInspectLive.mockImplementation((id) => Promise.resolve(liveFixture({ agent_id: id, status: "idling" })));
+    getAgentInspectStatistics.mockImplementation((id) => Promise.resolve(fixture({ agent_id: id })));
+    const panel = (id: number) => (
+      <QueryClientProvider client={qc}><InspectorPanel agentId={id} /></QueryClientProvider>
+    );
+    const view = rtlRender(panel(2));
+    await waitFor(() => expect(screen.getByText("Idling")).toBeTruthy());
+    expect(screen.queryByText("Impersonated")).toBeNull();
+
+    view.rerender(panel(1));
+    await waitFor(() => expect(screen.getByText("Impersonated")).toBeTruthy());
+    view.rerender(panel(2));
+    await waitFor(() => expect(screen.getByText("Idling")).toBeTruthy());
+    expect(screen.queryByText("Impersonated")).toBeNull();
+
+    view.rerender(panel(1));
+    await waitFor(() => expect(screen.getByText("Impersonated")).toBeTruthy());
+    act(() => { qc.setQueryData(AGENTS_QUERY_KEY, { agents: [], ancestors: [] }); });
+    await waitFor(() => expect(screen.getByText("Idling")).toBeTruthy());
+    expect(screen.queryByText("Impersonated")).toBeNull();
+  });
+});
 
 describe("InspectorPanel liveness (merged section, Task #1195)", () => {
   it("omits the redundant online state cell and the old last-judged cell", async () => {

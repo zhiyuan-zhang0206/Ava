@@ -47,6 +47,7 @@ from shared.plugin_metrics import (
     drop_plugin_metrics,
     registered_metrics,
     render_query,
+    render_title,
     validate_metric_sql,
 )
 
@@ -221,7 +222,7 @@ def _execute_metric(
     without poisoning the sibling metrics' queries in the same transaction."""
     base = PluginMetricResult(
         name=spec.name,
-        title=spec.title,
+        title=render_title(spec),
         description=spec.description,
         plugin=spec.plugin,
         unit=spec.unit,
@@ -268,7 +269,7 @@ def _execute_metric_logql(spec: MetricSpec, query: str) -> PluginMetricResult:
     """
     base = PluginMetricResult(
         name=spec.name,
-        title=spec.title,
+        title=render_title(spec),
         description=spec.description,
         plugin=spec.plugin,
         unit=spec.unit,

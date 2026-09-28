@@ -70,7 +70,7 @@ from shared.metrics.grafana_dashboard_supply import (
     load_repo_plugin_specs,
 )
 from shared.plugin_context import PluginContext
-from shared.plugin_metrics import MetricSpec, clear_registry, registered_metrics
+from shared.plugin_metrics import MetricSpec, clear_registry, registered_metrics, render_title
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _DASHBOARD_FILE = (
@@ -197,9 +197,9 @@ def test_rendered_panels_match_the_provisioning_file(
     for spec in [*core_specs, *plugin_specs]:
         if "grafana" not in spec.output:
             continue
-        rendered = rendered_by_title.get(spec.title)
+        rendered = rendered_by_title.get(render_title(spec))
         assert rendered is not None, f"{spec.name} rendered no panel"
-        fixture_panel = fixture_by_title.get(spec.title)
+        fixture_panel = fixture_by_title.get(render_title(spec))
         assert fixture_panel is not None, f"{spec.name} has no fixture counterpart"
         expected = _canonical_panel(fixture_panel, from_fixture=True)
         actual = _canonical_panel(rendered, from_fixture=False)
@@ -218,7 +218,7 @@ def test_rendered_panels_match_the_provisioning_file(
                 expected.setdefault("fieldConfig", {}).setdefault("defaults", {})["custom"] = (
                     actual_defaults["custom"]
                 )
-        deltas = _panel_diffs(expected, actual, spec.title)
+        deltas = _panel_diffs(expected, actual, render_title(spec))
         if deltas:
             problems.append(f"{spec.name}: " + "; ".join(deltas[:6]))
     assert not problems, "rendered panels diverged from the provisioning file:\n" + "\n".join(
@@ -274,7 +274,9 @@ def test_layout_engine_reproduces_the_full_fixture_geometry(
     core_specs, plugin_specs, _ = world
     fixture = _fixture()
     specs_by_title = {
-        spec.title: spec for spec in [*core_specs, *plugin_specs] if "grafana" in spec.output
+        render_title(spec): spec
+        for spec in [*core_specs, *plugin_specs]
+        if "grafana" in spec.output
     }
     sections = {section.title: section for section in _CORE_SECTIONS_PREFIX + _CORE_SECTIONS_SUFFIX}
 
@@ -327,7 +329,7 @@ def test_render_invariants(
     rendered_titles = [panel["title"] for panel in panels if panel["type"] != "row"]
     for spec in [*core_specs, *plugin_specs]:
         if "grafana" in spec.output:
-            assert rendered_titles.count(spec.title) == 1, (
+            assert rendered_titles.count(render_title(spec)) == 1, (
                 f"{spec.name} must render exactly one panel"
             )
 

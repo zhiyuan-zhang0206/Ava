@@ -42,7 +42,7 @@ import re
 import sys
 from pathlib import Path
 
-_ROOT = Path(__file__).resolve().parent.parent
+_ROOT = Path(__file__).resolve().parent.parent.parent
 _SCAN_DIRS = ("gateway", "ops")
 
 # Sync library/method surfaces that must not appear un-awaited in an async body.
@@ -208,7 +208,7 @@ def main() -> int:
     if stale:
         for name in stale:
             print(
-                f"scripts/lint_async_no_sync_blocking.py: stale _REPO_BLOCKING_HELPERS "
+                f"scripts/lint/lint_async_no_sync_blocking.py: stale _REPO_BLOCKING_HELPERS "
                 f"entry {name!r} — no `def {name}` exists in the source tree any more; "
                 "drop it"
             )

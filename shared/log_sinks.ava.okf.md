@@ -23,7 +23,10 @@ interception; the event-pipeline sink stays in `shared/log.py`.
 ## Registration
 
 - **`diagnose` is always off.** Every sink goes through `add_sink`, which
-  forces `diagnose=False` and refuses `diagnose=True`. loguru's default renders
+  forces `diagnose=False` and refuses `diagnose=True`; the
+  `lint-logger-add-diagnose` hook (`scripts/lint/lint_logger_add_diagnose.py`)
+  rejects any non-test `logger.add` without a literal `diagnose=False`,
+  `add_sink`'s own included. loguru's default renders
   each traceback frame's local variables into the sink, which put a
   `RoleSecret` password and a password-bearing DSN into the journal and
   `release-executor.log`. `backtrace` (which frames show, never their values)

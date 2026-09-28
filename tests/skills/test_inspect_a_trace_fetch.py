@@ -19,6 +19,24 @@ Settings-free stance as the rest of this skill script) — `monkeypatch.
 setitem(os.environ, ...)` is used below instead of `monkeypatch.setenv` /
 `delenv` so `lint_no_os_environ.py`'s real Settings-singleton-no-op check
 stays meaningful for tests that DO exercise Settings.
+
+`_common.py::source_root` tests (2026-09-28 fix, PR #3550 follow-up P2-2):
+`read_trace.py` / `fetch_trace.py` each need to locate the `shared` package
+before they can import `shared.dotenv_boot.resolve_ava_home` — a bootstrap
+problem `resolve_ava_home` itself cannot solve. The walk-up-from-`__file__`
+branch (the dev checkout, or a converged `$AVA_HOME/skills/...` copy invoked
+with an interpreter that already carries `shared` on `sys.path`) needs no fix
+and is exercised by every `_load()` above. The tests below lock the *other*
+branch: when no `shared` package is found above the script and the
+converged-copy fallback (`$AVA_HOME/source`) is consulted, that fallback must
+require an explicit `AVA_HOME` — never `Path(os.environ.get("AVA_HOME",
+"~/.ava"))`, the same "unanchored checkout reaches production" bug class
+`_source_root` was itself created to fix for `read_trace.py` / `fetch_trace.py`,
+one level down. They run `_common.py` in a subprocess with a from-scratch
+environment (the `_common.py::ava_home` technique from
+`test_ava_memory_common_home.py`) and copy it to an isolated directory with no
+`shared` package anywhere above it, so the walk-up branch is forced to fail
+and the fallback branch actually runs.
 """
 
 from __future__ import annotations
@@ -26,6 +44,8 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import shutil
+import subprocess
 import sys
 import urllib.request
 from datetime import UTC, date, datetime, timedelta
@@ -453,3 +473,114 @@ def test_gateway_get_proceeds_when_anchored_using_the_homes_env_file_secret(
 
     assert result == {"ok": True}
     assert seen[0].get_header("Authorization") == "Bearer dev-cluster-secret"
+
+
+# --------------------------------------------------------------------------- #
+# `_common.py::source_root` — never guesses `~/.ava` (P2-2)
+# --------------------------------------------------------------------------- #
+
+# argv: <scripts dir>. Prints the resolved source root on success; on
+# RuntimeError (the fail-fast path), prints "RUNTIMEERROR: <message>" and
+# exits 1 so the test can tell a refusal apart from a crash.
+_SOURCE_ROOT_DRIVER = r"""
+import sys
+
+sys.path.insert(0, sys.argv[1])
+import _common
+
+try:
+    print(str(_common.source_root()))
+except RuntimeError as exc:
+    print(f"RUNTIMEERROR: {exc}")
+    sys.exit(1)
+"""
+
+
+def _run_source_root(
+    scripts_dir: Path, env_overrides: dict[str, str], home: Path | None = None
+) -> subprocess.CompletedProcess[str]:
+    env = {k: v for k, v in os.environ.items() if not k.startswith("AVA_")}
+    if home is not None:
+        env["HOME"] = str(home)
+    env |= env_overrides
+    return subprocess.run(  # noqa: S603 — fixed argv, repository-owned driver script
+        [sys.executable, "-c", _SOURCE_ROOT_DRIVER, str(scripts_dir)],
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=30,
+        check=False,
+    )
+
+
+def test_source_root_walks_up_to_the_real_checkout() -> None:
+    """The unmodified dev-checkout invocation needs no `AVA_HOME` at all —
+    `_common.py` lives under the real repo, whose root has `shared/__init__.py`."""
+    res = _run_source_root(_SCRIPTS_DIR, {})
+
+    assert res.returncode == 0, res.stdout + res.stderr
+    repo_root = Path(__file__).parents[2]
+    assert res.stdout.strip() == str(repo_root)
+
+
+def _isolated_scripts_dir(tmp_path: Path) -> Path:
+    """Copy `_common.py` somewhere with no `shared` package above it, forcing
+    the walk-up branch to fail so the AVA_HOME fallback branch actually runs."""
+    isolated = tmp_path / "isolated" / "scripts"
+    isolated.mkdir(parents=True)
+    shutil.copy(_SCRIPTS_DIR / "_common.py", isolated / "_common.py")
+    return isolated
+
+
+def test_source_root_refuses_when_shared_is_not_found_and_ava_home_is_unset(
+    tmp_path: Path,
+) -> None:
+    isolated = _isolated_scripts_dir(tmp_path)
+
+    res = _run_source_root(isolated, {})
+
+    assert res.returncode == 1
+    assert "RUNTIMEERROR:" in res.stdout
+    assert "AVA_HOME" in res.stdout
+
+
+def test_source_root_never_falls_back_to_a_look_alike_default_home(tmp_path: Path) -> None:
+    """A planted look-alike `~/.ava/source/shared` under a fake HOME must never
+    be picked up when AVA_HOME itself is unset — mirrors
+    `test_ava_home_never_falls_back_to_the_default_home` for `_common.py`."""
+    isolated = _isolated_scripts_dir(tmp_path)
+    fake_home = tmp_path / "home"
+    planted = fake_home / ".ava" / "source" / "shared"
+    planted.mkdir(parents=True)
+    (planted / "__init__.py").write_text("")
+
+    res = _run_source_root(isolated, {}, home=fake_home)
+
+    assert res.returncode == 1
+    assert "RUNTIMEERROR:" in res.stdout
+    assert str(planted.parent) not in res.stdout
+
+
+def test_source_root_uses_the_explicit_ava_home(tmp_path: Path) -> None:
+    isolated = _isolated_scripts_dir(tmp_path)
+    home = tmp_path / "dev-cluster-home"
+    source = home / "source"
+    (source / "shared").mkdir(parents=True)
+    (source / "shared" / "__init__.py").write_text("")
+
+    res = _run_source_root(isolated, {"AVA_HOME": str(home)})
+
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert res.stdout.strip() == str(source)
+
+
+def test_source_root_refuses_when_explicit_ava_home_has_no_source(tmp_path: Path) -> None:
+    isolated = _isolated_scripts_dir(tmp_path)
+    home = tmp_path / "dev-cluster-home-without-source"
+    home.mkdir()
+
+    res = _run_source_root(isolated, {"AVA_HOME": str(home)})
+
+    assert res.returncode == 1
+    assert "RUNTIMEERROR:" in res.stdout
+    assert str(home / "source") in res.stdout

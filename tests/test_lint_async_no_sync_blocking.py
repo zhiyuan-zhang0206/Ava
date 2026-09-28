@@ -1,4 +1,4 @@
-"""`scripts/lint_async_no_sync_blocking.py` — sync calls in async bodies, and a
+"""`scripts/lint/lint_async_no_sync_blocking.py` — sync calls in async bodies, and a
 current repo-helper list (a retired helper's name must not linger)."""
 
 from __future__ import annotations
@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-_lint = importlib.import_module("scripts.lint_async_no_sync_blocking")
+_lint = importlib.import_module("scripts.lint.lint_async_no_sync_blocking")
 
 
 @pytest.fixture()
