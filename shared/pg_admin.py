@@ -25,7 +25,7 @@ import getpass
 import re
 from collections.abc import Generator
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -155,7 +155,7 @@ class OwnerAuthority:
     to the home's postmaster.
     """
 
-    admin_url: str
+    admin_url: str = field(repr=False)
     database: str
     owner: str
     data_dir: Path

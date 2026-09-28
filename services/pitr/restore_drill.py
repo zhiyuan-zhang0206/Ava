@@ -134,7 +134,7 @@ class DrillRequest:
     target_wall: datetime
     pg_ctl: Path
     pg_verifybackup: Path
-    live_db_url: str
+    live_db_url: str = field(repr=False)
     data_directory: str
     timeout_seconds: int = 1800
 

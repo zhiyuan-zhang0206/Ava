@@ -7,7 +7,7 @@ import hashlib
 import shutil
 import stat
 import subprocess
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import LiteralString
@@ -76,7 +76,10 @@ _EMERGENCY_FLOOR_BYTES = 4 * 1024**3
 @dataclass(frozen=True)
 class ShadowReadiness:
     pg: dict[str, str]
-    credentials: dict[str, str]
+    # Today's evidence (`credential_evidence`) holds only identity (SecretId /
+    # backend / bucket), never the secret half — hidden anyway so a future
+    # evidence field cannot silently start leaking through repr.
+    credentials: dict[str, str] = field(repr=False)
 
 
 def _mode(path: Path) -> int:

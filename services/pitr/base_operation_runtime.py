@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import partial
 from pathlib import Path
 from typing import cast
@@ -65,7 +65,7 @@ class RestoreWorkerInput:
     backend: str
     store_args: tuple[tuple[str, str], ...]
     budget: RestoreSpaceBudget
-    live_db_url: str
+    live_db_url: str = field(repr=False)
     data_directory: str
     pg_ctl: Path
     pg_verifybackup: Path

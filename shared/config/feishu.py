@@ -28,6 +28,7 @@ class FeishuSettings(EnvSettings):
     feishu_app_secret: str = Field(
         default="",
         alias="AVA_FEISHU_APP_SECRET",
+        repr=False,
         description="Feishu app secret of the IM Bridge app. Empty = feishu channel unavailable.",
         json_schema_extra={
             "restart_required": "gateway",
