@@ -61,12 +61,12 @@ record and is a verified no-op once complete. Ambiguous state (partial
 credentials, a Redis password the home does not record, a journal that
 contradicts the `.env` or the ledger) is refused, never repaired.
 
-Run it from the checkout that owns the home, in a gateway context:
+Run it from the checkout that owns the home, in a gateway context (an adopted
+home is already stopped), then start the home as the script's last line names:
 
     ava stop --keep-infra
     .venv/bin/python scripts/cutover_db_authority.py --home <home>
     .venv/bin/python scripts/cutover_db_authority.py --home <home> --execute
-    ava start
 
 A networked home adds the classification and the bundle directory:
 
@@ -74,10 +74,9 @@ A networked home adds the classification and the bundle directory:
         --unit mini:/Users/u/.ava --exclude-unit win:C:\\Users\\u\\.ava \
         --bundle-dir <private dir>
 
-Each runner then installs its bundle at its first start on the new code
-(`ava start --db-capability <bundle>` with the transport key in
-`AVA_DB_CAPABILITY_KEY`); the runner-home cleanup of the retired keys belongs
-to the home adoption.
+Each runner installs its bundle at its held first start on the new code
+(`scripts/cutover_adopt_home.py --start --db-capability <bundle>`, transport
+key in `AVA_DB_CAPABILITY_KEY`), after the adoption cleaned its home.
 """
 
 from __future__ import annotations
@@ -101,6 +100,7 @@ from redis.backoff import NoBackoff
 from redis.exceptions import AuthenticationError
 from redis.retry import Retry
 
+from cli.cutover_hold import start_instruction
 from shared.cluster import get_record, identity_from_url, record_redis_port
 from shared.cluster.derive import REDIS_PASSWORD_ENV
 from shared.cluster.registry import ClusterRecord
@@ -792,7 +792,7 @@ def main(argv: list[str] | None = None) -> int:
     except (RuntimeError, ValueError, OSError) as exc:
         print(f"✗ cutover incomplete; fix the cause and re-run to continue: {exc}", file=sys.stderr)
         return 1
-    print("✓ cutover complete; run `ava start` to resume this home.")
+    print(f"✓ cutover complete; run {start_instruction(home)}.")
     return 0
 
 

@@ -62,13 +62,13 @@ import psutil
 from dotenv import dotenv_values
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
+from cli.cutover_hold import ADOPTION_JOURNAL
 from scripts.cutover_legacy_jobs import Host, Jobs, discover
 from shared import cluster
 from shared.port_block import LEGACY_AVA_PORTS, PORT_OFFSETS
 
 VERSION = 1
 ARCHIVE = "cutover-rollback"
-JOURNAL = f"{ARCHIVE}/adopt-home.json"
 _JOURNAL_KEYS = {"version", "home", "cutover_id", "created_at", "inputs", "hold", "steps"}
 
 # Inert legacy files (plan section "Inert files and residue"); directories move whole.
@@ -184,7 +184,7 @@ def registry_path(home: Path, explicit: str | None) -> Path:
 def read_journal(home: Path) -> dict[str, Any] | None:
     from shared.verified_file import regular_bytes
 
-    path = home / JOURNAL
+    path = home / ADOPTION_JOURNAL
     try:
         data: object = json.loads(regular_bytes(path))
     except FileNotFoundError:

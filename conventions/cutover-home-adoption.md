@@ -18,8 +18,12 @@ are deleted with the other `scripts/cutover_*` scripts after the cutover:
 
 Run both with the `.venv` of the checkout that owns the home (`$AVA_HOME/source`
 for production, or a checkout whose `.ava_home` names the home). Never run them
-against a home you are not converting, and never run bare `ava start` during the
-window: an ordinary start releases a standing maintenance hold after readiness.
+against a home you are not converting. While the cutover hold the adoption
+journal records stands, an ordinary start never releases it
+(`cli/cutover_hold.py`): before the held first start (`--start`) a bare
+`ava start` refuses and names that command, and after it (for example the
+autostart job after a reboot) a bare start brings the unit up still held. Only
+the go/no-go gate's `ava maintenance resume` opens business.
 
 ## Order within the runbook
 
@@ -113,6 +117,6 @@ from its pre-adoption snapshot in `backups/env/` (moved to
   gateway's other backup keys), archive the runner copies encrypted and
   offline, then delete `cutover-rollback/residue/`.
 - Keep the hosts awake and on AC until the holds are released: after the first
-  start the new converge registers the autostart job again, and a reboot runs
-  an ordinary start, which would release the hold.
+  start the new converge registers the autostart job again. A reboot's ordinary
+  start keeps the cutover hold, but the unit is down until it is ready again.
 - Delete `cutover-rollback/` after the agreed retention period.

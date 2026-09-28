@@ -30,8 +30,9 @@ after the data-plane authority cutover): the ordinary `ava start` inside the
 cutover hold's authorized-start boundary, moving the hold `stopped ->
 starting -> ready`. Business stays closed until the operator releases the
 hold at the go/no-go gate with the `ava maintenance resume` command printed
-here. Never run bare `ava start` during the cutover window: an ordinary
-start releases a standing maintenance hold after readiness.
+here. An ordinary start never releases the cutover hold (`cli.cutover_hold`):
+before this held first start it refuses, and afterwards (a reboot's autostart)
+it starts held.
 
 Run from the checkout that owns the home:
 
@@ -56,6 +57,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
 
+from cli.cutover_hold import ADOPTION_JOURNAL
 from scripts.cutover_adopt_plan import (
     SELECTION,
     STEPS,
@@ -67,7 +69,6 @@ from scripts.cutover_adopt_plan import (
 )
 from scripts.cutover_inventory import (
     ARCHIVE,
-    JOURNAL,
     PAUSE_OWNER,
     Facts,
     Inputs,
@@ -105,9 +106,9 @@ def require_owning_checkout(home: Path, checkout: Path) -> None:
 
 
 def _write_journal(home: Path, journal: dict[str, Any]) -> None:
-    ensure_private_dir((home / JOURNAL).parent)
+    ensure_private_dir((home / ADOPTION_JOURNAL).parent)
     write_private_bytes(
-        home / JOURNAL, (json.dumps(journal, indent=2, sort_keys=True) + "\n").encode()
+        home / ADOPTION_JOURNAL, (json.dumps(journal, indent=2, sort_keys=True) + "\n").encode()
     )
 
 

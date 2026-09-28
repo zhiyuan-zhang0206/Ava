@@ -265,13 +265,19 @@ READONLY_GRANTEES = ("grafana_ro",)
 
 
 def cutover_instruction(home: Path) -> str:
-    """The one explicit conversion an ordinary start names for a legacy home."""
+    """The one explicit conversion an ordinary start names for a legacy home.
+
+    An adopted home is already stopped under its cutover hold, and its start
+    is the cutover's held first start (`cli.cutover_hold`).
+    """
+    from cli.cutover_hold import standing_hold, start_instruction
+
+    stop = "" if standing_hold(home) else "`ava stop --keep-infra`, then "
     return (
         f"home {home} has no database authority ledger (born before the data plane "
-        "always authenticated). Convert it once with its application stopped: "
-        "`ava stop --keep-infra`, then "
+        f"always authenticated). Convert it once with its application stopped: {stop}"
         f"`.venv/bin/python scripts/cutover_db_authority.py --home {home} --execute` "
-        "(dry-run without --execute), then `ava start`."
+        f"(dry-run without --execute), then {start_instruction(home)}."
     )
 
 

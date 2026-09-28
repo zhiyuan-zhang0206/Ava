@@ -73,6 +73,15 @@ ava stop --keep-infra
 ava start
 ```
 
+A home in the fleet cutover is the exception: the home adoption
+([cutover home adoption](cutover-home-adoption.md)) already stopped it under
+the cutover hold, so skip `ava stop`, and never follow the conversion with
+bare `ava start`. The script's last line names the next steps instead: the
+[database records repair](cutover-db-records.md), then the held first start
+`scripts/cutover_adopt_home.py --home "$AVA_HOME" --start`. While that hold
+stands, an ordinary start refuses before the held first start and keeps the
+hold after it.
+
 `--home` must name the checkout's own home. The script refuses a remote-managed
 plane, a home without a registry record, an active release operation, a running
 application root and persistent terminals. The steps run in order:
