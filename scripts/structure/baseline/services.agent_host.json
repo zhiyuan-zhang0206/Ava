@@ -1,0 +1,11 @@
+{
+  "complexity": {
+    "services/agent_host/dispatcher.py::InboundWakeDispatcher.scan_once": 21
+  },
+  "owner_bypasses": {
+    "services/agent_host/pools.py::postgres-dial": 2
+  },
+  "private_imports": {
+    "services/agent_host/pools.py::shared.db._restore_pooled_session_async": 1
+  }
+}

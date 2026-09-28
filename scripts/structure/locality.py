@@ -2,7 +2,7 @@
 
 Both rules measure `path::target -> [line, ...]` sites per module; the frozen
 counts live in the `private_imports` / `owner_bypasses` sections of
-scripts/structure/baseline.json, and the rules themselves are documented in the
+scripts/structure/baseline/*.json shards, and the rules themselves are documented in the
 scripts/lint_code_structure.py header (Rules 4 and 5).
 """
 
@@ -17,10 +17,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import cast
 
-from scripts.structure import path_imports
+from scripts.structure import baseline_shards, path_imports
 
 SECTIONS = ("private_imports", "owner_bypasses")
-_BASELINE_PATH = "scripts/structure/baseline.json"
 # White-box tests reach into privates by design; only test *directories* are
 # exempt, since a governed module may legitimately be named test_*.py.
 _TEST_DIR = re.compile(r"(^|/)tests?/")
@@ -408,7 +407,7 @@ def _stale_errors(
         if now < count:
             action = f"lower it to {now}" if now else "remove it"
             errors.append(
-                f"{_BASELINE_PATH}: stale {kind} entry {key} is frozen at {count} but the "
+                f"{baseline_shards.shard_path(kind, key)}: stale {kind} entry {key} is frozen at {count} but the "
                 f"code has {now} — {action} (the baseline must match reality)"
             )
     return errors

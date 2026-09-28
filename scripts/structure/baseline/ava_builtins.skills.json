@@ -1,0 +1,16 @@
+{
+  "complexity": {
+    "ava_builtins/skills/ava-self-evolution/reference/daily_scan.py::render": 38,
+    "ava_builtins/skills/ava-use-other-agents/reference/spawn_claude.py::main": 19,
+    "ava_builtins/skills/ava-use-other-agents/reference/spawn_codex.py::main": 19,
+    "ava_builtins/skills/ava-use-other-agents/reference/watch_work.py::watch": 34,
+    "ava_builtins/skills/web-ai/console/reference/ask.py::main": 22
+  },
+  "directories": {
+    "ava_builtins/skills": 35
+  },
+  "owner_bypasses": {
+    "ava_builtins/skills/ava-goal/reference/watch_idle.py::postgres-dial": 1,
+    "ava_builtins/skills/ava-watcher/reference/watch_idle.py::postgres-dial": 1
+  }
+}

@@ -89,7 +89,7 @@ multi-chunk.
 | `test_error_recovery.py` | `error_recovery` | **Panoramic Case 3 (#1018)** — LLM raises FatalProviderError (no retry) → SSE `error` event → `[error]` marker in browser (NOT the unrecognized alarm), aborted turn commits no agent_chat, next message recovers normally |
 | `state/test_shell_history_state.py` | `shell_history` | **task #4585** — browser back/forward between `/?agent_id=N` and `/shell/N/S` restores each container's scroll position (per history entry) with no blank / invalid-params frame on either return, and the shell poll + manual refresh stay alive |
 
-`tests/e2e/state/` groups the browser scroll/navigation-state scenarios — `test_load_older_anchor.py`, `test_parked_compact_switch_back.py`, `test_shell_history_state.py` — split out of the top level to stay under the `tests/e2e` direct-entry budget in `scripts/structure/baseline.json`.
+`tests/e2e/state/` groups the browser scroll/navigation-state scenarios — `test_load_older_anchor.py`, `test_parked_compact_switch_back.py`, `test_shell_history_state.py` — split out of the top level to stay under the `tests/e2e` direct-entry budget in `scripts/structure/baseline/tests.e2e.json`.
 
 **Differences between fork scenario and lifecycle**: fork creates a **new agent_id** (not reused).
 `build()` distinguishes source / forked process by whether there is a `kind='fork'` inbound for

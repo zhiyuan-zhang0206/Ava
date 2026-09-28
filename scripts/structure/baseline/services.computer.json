@@ -1,0 +1,9 @@
+{
+  "complexity": {
+    "services/computer/execute.py::_execute": 24,
+    "services/computer/mcp_daemon.py::ComputerMcpDaemon._call_tool": 20
+  },
+  "nesting": {
+    "services/computer/session.py::ScreenSession.acquire": 6
+  }
+}

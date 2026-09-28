@@ -1,0 +1,19 @@
+{
+  "complexity": {
+    "ava_builtins/plugins/ava_fleet/task_registry.py::record_task_usage": 15,
+    "ava_builtins/plugins/ava_memory/inherit.py::inherited_memory_note": 20,
+    "ava_builtins/plugins/ava_memory/sdk.py::_insert_dir_pointer": 18,
+    "ava_builtins/plugins/ava_memory/skills/scripts/gen_indexes.py::write_index": 20,
+    "ava_builtins/plugins/ava_memory/template/validate.py::validate_file": 36,
+    "ava_builtins/plugins/ava_memory/template/validate.py::validate_indexes": 20,
+    "ava_builtins/plugins/ava_memory/template/validate.py::validate_pointers": 27,
+    "ava_builtins/plugins/ava_memory/template/validate.py::validate_project_home": 27,
+    "ava_builtins/plugins/ava_memory/template/validate.py::validate_type_tag": 22,
+    "ava_builtins/plugins/ava_sdk_reminder/agent_runtime.py::_SdkReminderAfterExecHook.__call__": 23,
+    "ava_builtins/plugins/lm_google/gemini_cache.py::get_or_create_cache": 16,
+    "ava_builtins/plugins/lm_google/provider.py::build": 18
+  },
+  "owner_bypasses": {
+    "ava_builtins/plugins/ava_fleet/skills/ava-fleet/reference/watch_idle.py::postgres-dial": 1
+  }
+}

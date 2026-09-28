@@ -1,0 +1,5 @@
+{
+  "complexity": {
+    "gateway/inspect/_metrics.py::_read_snapshot": 20
+  }
+}

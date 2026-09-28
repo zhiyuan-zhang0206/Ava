@@ -227,7 +227,7 @@ repos:
       # Also locality: no `_`-private import from outside its owning package
       # (package doors), and single decision owners (scripts/structure/
       # locality.py DECISIONS, e.g. postgres-dial -> shared/db_connections.py) —
-      # both frozen in baseline.json as exact site counts. Rules + the
+      # both frozen in the baseline shards as exact site counts. Rules + the
       # _TYPE_CHECKING_ALLOWED list live in scripts/lint_code_structure.py
       # header. (print() bans are enforced by ruff T20, not here.)
       - id: lint-code-structure

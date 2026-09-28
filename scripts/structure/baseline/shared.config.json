@@ -1,0 +1,8 @@
+{
+  "complexity": {
+    "shared/config/physical_backup.py::PhysicalBackupSettings._validate_contract": 80
+  },
+  "directories": {
+    "shared/config": 40
+  }
+}

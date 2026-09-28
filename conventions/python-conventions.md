@@ -29,8 +29,12 @@ normally (the Claude/Codex launchers live in `ava/shell/coding_tools/`, their
 `spawn_*.py` scripts only parse arguments). Splitting it into path-imported
 siblings is refused by Rule 6 below.
 
-Existing over-limit files are frozen in `scripts/structure/baseline.json`.
-New violations and growth above a frozen value fail the gate. The baseline is
+Existing over-limit files are frozen in the structure baseline,
+`scripts/structure/baseline/*.json`: one shard per directory area, named after
+the first two components of the entry's directory (`agent/graph/x.py` lives in
+`agent.graph.json`, `scripts/lint_x.py` in `scripts.json`), so changes to
+unrelated areas edit different files. An entry filed in the wrong shard fails
+the gate. New violations and growth above a frozen value fail the gate. The baseline is
 shrink-only: a guard compares it with the base revision described below and
 rejects added file entries or raised values. After splitting a file, lower
 its baseline value by hand to its current line count, or remove its entry
@@ -47,8 +51,8 @@ independently. `__pycache__`, dot-prefixed entries, and symlinks do not count
 and are not traversed. `migrations` subtrees are entirely exempt. `docs/` and `ui/` are
 outside the scope.
 
-Existing over-limit directories are frozen in the `directories` object of
-`scripts/structure/baseline.json`, with the same containment and shrink-only
+Existing over-limit directories are frozen in the `directories` sections of
+the baseline shards, with the same containment and shrink-only
 rules as files. After reorganizing a directory, lower its count by hand or
 remove its entry when it reaches the cap. A full gate run checks the whole
 scope; an explicit directory target checks itself and its descendants, and
@@ -96,7 +100,7 @@ section covers fixing a violation and maintaining its baseline.
   module(s), a `find(tree, roots)` AST scanner, and a `fix` message.
 
 Both rules freeze today's sites in the `private_imports` / `owner_bypasses`
-sections of `scripts/structure/baseline.json` as exact `path::target -> site
+sections of the baseline shards as exact `path::target -> site
 count` maps. Unlike the line/directory budgets, the count must match reality
 exactly in both directions: a new or grown site fails, and a shrunk or removed
 site fails too until its baseline entry is lowered or deleted — so a fixed
@@ -163,7 +167,7 @@ Keys use `<repo-relative .py path>::<qualname>` with Python qualification:
 Repeated qualified names in one file are ordered by source appearance:
 the first keeps its key, then `#2`, `#3`, and so on are appended.
 
-The `complexity` and `nesting` objects in `scripts/structure/baseline.json`
+The `complexity` and `nesting` sections of the baseline shards
 freeze hard violations, alongside `directories` and `files`. Function keys
 must name scoped `.py` paths and non-empty qualified names. Values must be
 integers at or above 15 for complexity, or above 5 for nesting; an entry

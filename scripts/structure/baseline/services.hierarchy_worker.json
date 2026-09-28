@@ -1,0 +1,5 @@
+{
+  "complexity": {
+    "services/hierarchy_worker/scan.py::_scan_tails": 16
+  }
+}
