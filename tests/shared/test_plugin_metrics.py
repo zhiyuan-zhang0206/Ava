@@ -7,6 +7,7 @@ placeholders — task #180 PR C) and the LogQL contract
 (``shared/metrics/metrics_logql.py``).
 """
 
+import re
 from typing import Any
 
 import pytest
@@ -22,6 +23,7 @@ from shared.plugin_metrics import (
     register_metric,
     render_query,
     render_targets,
+    render_title,
     validate_metric_sql,
 )
 
@@ -351,3 +353,74 @@ def test_render_escapes_quotes_defensively() -> None:
     from shared.plugin_metrics import _sql_literal
 
     assert _sql_literal("a'b") == "'a''b'"
+
+
+# ── time basis: the registry renders the title suffix and the divisor ─────────
+
+
+def _bucket(window: str) -> str:
+    return (
+        '(sum(count_over_time({service_name="unknown_service", event_name={event_name}} '
+        f"| json [{window}]))"
+    )
+
+
+def _logql_spec(**overrides: Any) -> MetricSpec:
+    base: dict[str, Any] = {"query_type": "logql", "query": _bucket("5m")}
+    base.update(overrides)
+    return _spec(**base)
+
+
+def test_per_minute_divides_each_part_by_its_own_bucket() -> None:
+    spec = _logql_spec(
+        time_basis="per_minute",
+        targets=[_bucket("30m")],
+        target_names=["a", "b"],
+    )
+    assert render_title(spec) == "Test Metric (per minute)"
+    first, second = render_targets(spec)
+    assert first.endswith("[5m])) / 5")
+    assert second.endswith("[30m])) / 30")
+    assert render_query(spec, agent_id=3).endswith("[5m])) / 5")
+
+
+def test_window_suffixes_the_title_and_leaves_the_query_alone() -> None:
+    spec = _logql_spec(time_basis="window", query=_bucket("$__range"))
+    assert render_title(spec) == "Test Metric (window)"
+    assert render_query(spec) == _bucket("$__range").replace("{event_name}", '"turn_end"')
+
+
+def test_the_basis_word_outside_a_parenthetical_is_just_a_title() -> None:
+    spec = _logql_spec(time_basis="window", title="Context window", query=_bucket("$__range"))
+    assert render_title(spec) == "Context window (window)"
+
+
+def test_no_time_basis_renders_the_title_verbatim() -> None:
+    assert render_title(_logql_spec()) == "Test Metric"
+
+
+@pytest.mark.parametrize(
+    ("overrides", "message"),
+    [
+        ({"time_basis": "per_minute", "title": "Calls (per minute)"}, "spells the time basis"),
+        ({"time_basis": "window", "title": "Calls (window)"}, "spells the time basis"),
+        ({"time_basis": "per_minute", "title": "Cost (USD, per minute)"}, "spells the time basis"),
+        ({"time_basis": "per_minute", "query": _bucket("$__range")}, "exactly one [Nm]"),
+        (
+            {"time_basis": "per_minute", "query": _bucket("5m") + " + " + _bucket("5m")},
+            "exactly one [Nm]",
+        ),
+        ({"time_basis": "per_minute", "query": _bucket("5m") + " / 5"}, "already divides"),
+        ({"time_basis": "window", "query": _bucket("5m")}, "$__range"),
+    ],
+)
+def test_time_basis_refuses_a_hand_spelled_or_unrenderable_spec(
+    overrides: dict[str, Any], message: str
+) -> None:
+    with pytest.raises(ValidationError, match=re.escape(message)):
+        _logql_spec(**overrides)
+
+
+def test_per_minute_needs_a_bucketed_dialect() -> None:
+    with pytest.raises(ValidationError, match="logql or promql"):
+        _spec(time_basis="per_minute")

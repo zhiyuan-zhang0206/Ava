@@ -35,13 +35,6 @@ cap-domain exits use `exitType`, `expires`, and `approver`); readers ignore unkn
 
 ## Open
 
-### locality:ava_builtins/plugins/ava_code/metrics.py:ava_builtins/plugins/ava_memory/metrics.py
-- **class**: locality
-- **status**: open
-- **evidence**: `cochange.py`: c=8, confidence 89%. Leaked decision: presentation conventions of the metric registry are spelled by hand in every metric spec (core panels and plugins alike), so each registry-format change edits every file: `01f016136` appended "(per minute)" to each plugin's titles, `1ebe6b67b` and `44e8b60d7` reshaped them together. The stream-selector/count dialect now has one owner (`shared/metrics/metrics_logql.py`: `event_count`, `EVENT_SELECTOR`, `CATEGORY_WITH_LEGACY_LOG`). Left: the panel-title time basis — 11 titles spell "(per minute)" by hand next to the ` / 5` bucket divisor in their query. Fix: a spec-level time basis that renders both the divisor and the title suffix; plugins declare only what differs.
-- **first-seen**: 2026-09-28 (locality class first run)
-- **last-verified**: 2026-09-28
-
 ### locality:gateway/routers/agent_inspect.py:gateway/schemas/inspect.py
 - **class**: locality
 - **status**: open

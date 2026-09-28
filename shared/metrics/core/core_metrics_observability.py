@@ -86,7 +86,8 @@ _SDK_ATTR = {k: f"attributes_{k}" for k in SDK_CALL_KEYS}
 core_metrics.register_core_metric(
     MetricSpec(
         name="ava_obs_llm_cost_usd",
-        title="LLM cost (USD, per minute)",
+        title="LLM cost",
+        time_basis="per_minute",
         description=(
             "LLM call cost per minute — unwrap of the cost_usd field every "
             "llm_usage payload carries (task #2626; the producer computes it "
@@ -103,7 +104,7 @@ core_metrics.register_core_metric(
         query=(
             f'sum(sum_over_time({{service_name="unknown_service", event_name={{event_name}}}} | json | '
             f"category={{category}} | "
-            f"unwrap {_LLM_ATTR['cost_usd']} [30m])) / 30"
+            f"unwrap {_LLM_ATTR['cost_usd']} [30m]))"
         ),
         target_names=["cost usd"],
         output=["grafana"],
@@ -141,7 +142,8 @@ core_metrics.register_core_metric(
 core_metrics.register_core_metric(
     MetricSpec(
         name="ava_obs_llm_error_rate",
-        title="LLM errors (per minute)",
+        title="LLM errors",
+        time_basis="per_minute",
         description=(
             "LLM failure signals per minute (5-minute buckets / 5): "
             "llm_provider_error (provider rejection / classification error), "
@@ -155,17 +157,13 @@ core_metrics.register_core_metric(
         unit="short",
         panel="timeseries",
         query_type="logql",
-        query=event_count("category={category}", "5m", matchers='event_name="llm_provider_error"')
-        + " / 5",
+        query=event_count("category={category}", "5m", matchers='event_name="llm_provider_error"'),
         targets=[
-            event_count("category={category}", "5m", matchers='event_name="stream_stalled_retry"')
-            + " / 5",
-            event_count("category={category}", "5m", matchers='event_name="llm_turn_aborted"')
-            + " / 5",
+            event_count("category={category}", "5m", matchers='event_name="stream_stalled_retry"'),
+            event_count("category={category}", "5m", matchers='event_name="llm_turn_aborted"'),
             event_count(
                 "category={category}", "5m", matchers='event_name="stream_overloaded_retry"'
-            )
-            + " / 5",
+            ),
         ],
         target_names=["provider_error", "stalled_retry", "turn_aborted", "overloaded_retry"],
         output=["grafana", "inspector"],
@@ -178,7 +176,8 @@ core_metrics.register_core_metric(
 core_metrics.register_core_metric(
     MetricSpec(
         name="ava_obs_llm_stall_rate",
-        title="Provider stalls (per minute)",
+        title="Provider stalls",
+        time_basis="per_minute",
         description=(
             "Provider stall health per minute (5-minute buckets / 5): "
             "stream_stalled_retry counted by vendor — a stalled stream "
@@ -203,12 +202,12 @@ core_metrics.register_core_metric(
         query=(
             'sum by (attributes_vendor) (count_over_time({service_name="unknown_service", '
             "event_name={event_name}} | json | "
-            "category={category} [5m])) / 5"
+            "category={category} [5m]))"
         ),
         targets=[
             'sum(count_over_time({service_name="unknown_service", '
             'event_name="stream_stall_pair_terminated"} | json | '
-            "category={category} [5m])) / 5",
+            "category={category} [5m]))",
         ],
         target_names=["{{attributes_vendor}}", "stall pairs"],
         output=["grafana"],
@@ -315,7 +314,8 @@ core_metrics.register_core_metric(
 core_metrics.register_core_metric(
     MetricSpec(
         name="ava_obs_compaction_rate",
-        title="Completed compactions (per minute)",
+        title="Completed compactions",
+        time_basis="per_minute",
         description=(
             "Applied history replacements per minute (5-minute buckets / 5). "
             "Counts compaction_completed rather than compact requests, so the "
@@ -327,7 +327,7 @@ core_metrics.register_core_metric(
         unit="short",
         panel="timeseries",
         query_type="logql",
-        query=event_count("category={category}", "5m", matchers="event_name={event_name}") + " / 5",
+        query=event_count("category={category}", "5m", matchers="event_name={event_name}"),
         target_names=["compactions/min"],
         output=["grafana"],
         thresholds=[],
@@ -343,7 +343,8 @@ core_metrics.register_core_metric(
 core_metrics.register_core_metric(
     MetricSpec(
         name="ava_obs_exec_success_rate",
-        title="Exec outcomes (per minute)",
+        title="Exec outcomes",
+        time_basis="per_minute",
         description=(
             "Exec outcome breakdown per minute (5-minute buckets / 5): ok = "
             "event_name='exec'; failures split by event_name (exec_failed / "
@@ -356,28 +357,24 @@ core_metrics.register_core_metric(
         unit="short",
         panel="timeseries",
         query_type="logql",
-        query=event_count("category={category}", "5m", matchers="event_name={event_name}") + " / 5",
+        query=event_count("category={category}", "5m", matchers="event_name={event_name}"),
         targets=[
             event_count(
                 "category={category}",
                 "5m",
                 matchers='event_name=~"exec_failed|exec[(]failed[)]"',
-            )
-            + " / 5",
+            ),
             event_count(
                 "category={category}",
                 "5m",
                 matchers='event_name=~"exec_timeout|exec[(]timeout[)]"',
-            )
-            + " / 5",
+            ),
             event_count(
                 "category={category}",
                 "5m",
                 matchers='event_name=~"exec_cancelled|exec[(]cancelled[)]"',
-            )
-            + " / 5",
-            event_count("category={category}", "5m", matchers='event_name="exec_node_timeout"')
-            + " / 5",
+            ),
+            event_count("category={category}", "5m", matchers='event_name="exec_node_timeout"'),
             # other: every exec* event outside the known spellings. Stream
             # selector matchers are full-string regexes, so the selector
             # keeps exactly the named spellings out (the pre-selector
@@ -396,8 +393,7 @@ core_metrics.register_core_metric(
                     "exec[(]timeout[)]|exec_cancelled|exec[(]cancelled[)]|"
                     'exec_node_timeout"'
                 ),
-            )
-            + " / 5",
+            ),
         ],
         target_names=[
             "ok",
@@ -420,7 +416,8 @@ core_metrics.register_core_metric(
 core_metrics.register_core_metric(
     MetricSpec(
         name="ava_obs_syntax_fix_by_kind",
-        title="Syntax fix triggers (per minute, by kind)",
+        title="Syntax fix triggers by kind",
+        time_basis="per_minute",
         description=(
             "Syntax-fix trigger counts per minute (5-minute buckets / 5), "
             "bucketed by the fix kinds in attributes.fixes (substring regex "
@@ -437,39 +434,33 @@ core_metrics.register_core_metric(
             f'category={{category}} | {_FIX_ATTR["fixes"]}=~".*ruff_format.*"',
             "5m",
             matchers="event_name={event_name}",
-        )
-        + " / 5",
+        ),
         targets=[
             event_count(
                 f'category={{category}} | {_FIX_ATTR["fixes"]}=~".*ruff.*" | {_FIX_ATTR["fixes"]}!~".*ruff_format.*"',
                 "5m",
                 matchers="event_name={event_name}",
-            )
-            + " / 5",
+            ),
             event_count(
                 f'category={{category}} | {_FIX_ATTR["fixes"]}=~".*invalid_escape.*"',
                 "5m",
                 matchers="event_name={event_name}",
-            )
-            + " / 5",
+            ),
             event_count(
                 f'category={{category}} | {_FIX_ATTR["fixes"]}=~".*missing_imports.*"',
                 "5m",
                 matchers="event_name={event_name}",
-            )
-            + " / 5",
+            ),
             event_count(
                 f'category={{category}} | {_FIX_ATTR["fixes"]}=~".*chinese_punct.*"',
                 "5m",
                 matchers="event_name={event_name}",
-            )
-            + " / 5",
+            ),
             event_count(
                 f'category={{category}} | {_FIX_ATTR["fixes"]}=~".*bracket_matching.*"',
                 "5m",
                 matchers="event_name={event_name}",
-            )
-            + " / 5",
+            ),
             # other: missing/none/unknown kinds — !~ matches lines where the
             # label is absent (empty), which is the SQL `IS NULL` branch.
             event_count(
@@ -477,8 +468,7 @@ core_metrics.register_core_metric(
                 f'{_FIX_ATTR["fixes"]}!~".*(ruff|invalid_escape|missing_imports|chinese_punct|bracket_matching).*"',
                 "5m",
                 matchers="event_name={event_name}",
-            )
-            + " / 5",
+            ),
         ],
         target_names=[
             "ruff_format",
@@ -633,7 +623,8 @@ core_metrics.register_core_metric(
 core_metrics.register_core_metric(
     MetricSpec(
         name="ava_obs_halt_breakdown",
-        title="Halt classes (per minute)",
+        title="Halt classes",
+        time_basis="per_minute",
         description=(
             "Halt events classified by body per minute (5-minute buckets / "
             "5): idle ('no tool_call (idle)'), compact ('system_halt "
@@ -649,21 +640,18 @@ core_metrics.register_core_metric(
             f'category={{category}} | {_HALT_ATTR["body"]}="no tool_call (idle)"',
             "5m",
             matchers="event_name={event_name}",
-        )
-        + " / 5",
+        ),
         targets=[
             event_count(
                 f'category={{category}} | {_HALT_ATTR["body"]}=~".*compact.*"',
                 "5m",
                 matchers="event_name={event_name}",
-            )
-            + " / 5",
+            ),
             event_count(
                 f'category={{category}} | {_HALT_ATTR["body"]}=~"lifecycle .*"',
                 "5m",
                 matchers="event_name={event_name}",
-            )
-            + " / 5",
+            ),
             # other: not idle/compact/lifecycle (missing body matches too —
             # the SQL `body IS NULL` branch).
             event_count(
@@ -673,8 +661,7 @@ core_metrics.register_core_metric(
                 f'{_HALT_ATTR["body"]}!~"lifecycle .*"',
                 "5m",
                 matchers="event_name={event_name}",
-            )
-            + " / 5",
+            ),
         ],
         target_names=["idle", "compact", "lifecycle", "other"],
         output=["grafana"],
@@ -687,13 +674,14 @@ core_metrics.register_core_metric(
 # ── delivery health ──────────────────────────────────────────────────────────
 
 for event_name, title, target_name, panel_id, order in (
-    ("delivery_stalled", "Delivery stalled (window)", "stalled", 32, 2),
-    ("delivery_poisoned", "Delivery poisoned (window)", "poisoned", 52, 3),
+    ("delivery_stalled", "Delivery stalled", "stalled", 32, 2),
+    ("delivery_poisoned", "Delivery poisoned", "poisoned", 52, 3),
 ):
     core_metrics.register_core_metric(
         MetricSpec(
             name=f"ava_obs_{event_name}_count",
             title=title,
+            time_basis="window",
             description=(
                 f"Windowed {event_name} total — a delivery-watchdog row signal "
                 "(a raw window count, not a per-minute rate). "

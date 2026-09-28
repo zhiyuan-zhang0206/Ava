@@ -33,7 +33,8 @@ from shared.plugin_metrics import MetricSpec, register_metric
 register_metric(
     MetricSpec(
         name="ava_code_syntax_fix_count",
-        title="Syntax fix count (per minute)",
+        title="Syntax fix count",
+        time_basis="per_minute",
         description=(
             "Syntax_fix events per minute (5-minute buckets / 5) — how often "
             "the repair pipeline fixes syntax errors in LLM-produced code "
@@ -43,8 +44,7 @@ register_metric(
         category="telemetry",
         unit="short",
         panel="timeseries",
-        query=event_count(CATEGORY_WITH_LEGACY_LOG, "5m", matchers="event_name={event_name}")
-        + " / 5",
+        query=event_count(CATEGORY_WITH_LEGACY_LOG, "5m", matchers="event_name={event_name}"),
         query_type="logql",
         target_names=["fixes"],
         output=["grafana"],
@@ -54,7 +54,8 @@ register_metric(
 register_metric(
     MetricSpec(
         name="ava_code_syntax_fix_total",
-        title="Syntax fixes (window)",
+        title="Syntax fixes",
+        time_basis="window",
         description=(
             "Total syntax_fix events in the current window (event_name='syntax_fix', "
             "category='telemetry')."

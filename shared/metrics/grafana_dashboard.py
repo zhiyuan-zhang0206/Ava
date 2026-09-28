@@ -42,7 +42,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any, cast
 
-from shared.plugin_metrics import MetricSpec, render_targets
+from shared.plugin_metrics import MetricSpec, render_targets, render_title
 
 # ── shell constants ───────────────────────────────────────────────────────────
 # The dashboard's fixed identity — uid, timezone, refresh/range defaults, and
@@ -353,7 +353,7 @@ def _panel(spec: MetricSpec, panel_id: int, grid: dict[str, int]) -> dict[str, A
             "id": panel_id,
             "options": _options(spec),
             "targets": _targets(spec),
-            "title": spec.title,
+            "title": render_title(spec),
             "type": spec.panel,
         }
     )
