@@ -2,10 +2,13 @@
 
 import asyncio
 import json
+import os
 from concurrent.futures import ThreadPoolExecutor
+from functools import partial
 from pathlib import Path
 from typing import Any
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
+from urllib.parse import urlsplit
 from uuid import uuid4
 
 import pytest
@@ -14,7 +17,9 @@ from psycopg_pool import ConnectionPool, PoolTimeout
 
 from gateway.app import app
 from services.agent_ops import daemon
-from shared import host_deploy_state, maintenance, pause_owner, start_serving
+from shared import config, host_deploy_state, maintenance, pause_owner, start_serving
+from shared import runtime_config as rt
+from shared.cluster_auth import bearer_header
 from shared.config import settings
 from shared.maintenance_state import MaintenanceHold
 from tests.agent.test_maintenance import WHEN
@@ -147,3 +152,79 @@ def test_maintenance_start_waiver_does_not_publish_ready(monkeypatch: pytest.Mon
     current = maintenance.snapshot()
     assert current is not None and current.maintenance is not None
     assert current.maintenance.phase == "starting"
+
+
+def _authenticated(monkeypatch: pytest.MonkeyPatch) -> str:
+    """The served home's ledger authenticates machine tokens; returns the human secret."""
+    secret = uuid4().hex
+    monkeypatch.setattr(settings.data_plane, "cluster_secret", secret)
+    monkeypatch.setattr(settings.gateway, "auth_middleware_enabled", True)
+    monkeypatch.setattr("shared.paths.ava_home", rt._ava_home)
+    return secret
+
+
+@pytest.mark.usefixtures("held")
+def test_held_gateway_serves_bootstrap_only_to_an_authenticated_caller(
+    monkeypatch: pytest.MonkeyPatch, served_gateway_home: Any
+) -> None:
+    """Bootstrap is control-plane: a runner's held first start and its processes'
+    config resolution read it before any hold is released. The exemption keeps
+    the authentication and serves no database login; business stays closed."""
+    _authenticated(monkeypatch)
+    runner = bearer_header(served_gateway_home.api.runner)
+    with TestClient(app) as client:
+        assert client.get("/api/bootstrap").status_code == 401
+        assert client.get("/api/bootstrap", headers=bearer_header("wrong")).status_code == 401
+        served = client.get("/api/bootstrap", headers=runner)
+        assert client.get("/api/agents", headers=runner).status_code == 503
+    assert served.status_code == 200, served.text
+    body: dict[str, str] = served.json()
+    assert urlsplit(body["AVA_DB_URL"]).password is None
+    assert not {"AVA_RUNNER_DB_PASSWORD", "AVA_REDIS_ADMIN_PASSWORD"} & set(body)
+    payload = "".join(body.values())
+    for role in (served_gateway_home.roles.runner, served_gateway_home.roles.gateway):
+        assert role.name not in payload and role.password not in payload
+    assert maintenance.business_paused()
+
+
+@pytest.mark.usefixtures("held")
+def test_a_runners_held_first_start_joins_a_held_gateway(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, served_gateway_home: Any
+) -> None:
+    """The cutover's W9: the runner's first start joins (`_join`) with the bundle
+    the gateway's data-plane cutover issued, while the gateway's own hold still
+    stands, over the gateway's real middleware stack."""
+    from cli import start_intent
+    from shared import bootstrap
+    from shared.cluster.authority import unit
+
+    secret = _authenticated(monkeypatch)
+    runner = (tmp_path / "runner").resolve()
+    runner.mkdir(mode=0o700)
+    issued = unit.issue_bundle(
+        rt._ava_home(),
+        unit=unit.UnitIdentity(machine="mini", home=str(runner)),
+        endpoint=config.bootstrap_config_values()["AVA_DB_URL"],
+        cluster_secret=secret,
+        ttl_s=600,
+    )
+    bundle = tmp_path / "mini.bundle"
+    bundle.write_bytes(issued.envelope)
+    # The seeded ledger's logins are no PostgreSQL roles: skip the install's login probe.
+    monkeypatch.setattr(
+        unit, "install_bundle", partial(unit.install_bundle, probe=lambda _dsn: None)
+    )
+    gateway = "http://127.0.0.1:1"
+    with TestClient(app) as client, patch.dict(os.environ):
+
+        def dial(url: str, **kwargs: Any) -> Any:
+            return client.get(url.removeprefix(gateway), **kwargs)
+
+        monkeypatch.setattr(bootstrap, "dial_get", dial)
+        os.environ[unit.CAPABILITY_KEY_ENV] = issued.transport_key
+        start_intent._join(
+            {"AVA_GATEWAY_URL": gateway, "AVA_MACHINE_NAME": "mini"}, runner, str(bundle)
+        )
+    installed = unit.require_unit_capability(runner)
+    assert installed.api is not None and not bundle.exists()
+    assert maintenance.business_paused()

@@ -114,7 +114,10 @@ business.
 No agent runs while a cutover hold stands, so the gate (W10) holds no smoke
 agent. The gateway answers every business route with 503 except its
 control-plane routes (`/api/cluster/*`, `GET /api/health`, `POST /api/alerts`,
-`POST /api/work-failed`), so a spawn never reaches a unit; a unit's `/ops`
+`POST /api/work-failed` and `GET /api/bootstrap`), so a spawn never reaches a
+unit. Bootstrap stays open because each runner's held first start (W9) joins
+through it and every runner process reads its configuration from it; it still
+requires the unit's machine API token and serves no database login. A unit's `/ops`
 admits only its readiness probe; the agent host builds no runtime for a held
 unit and the schedule manager fires nothing. Opening any of these for one
 smoke agent would open the path business uses, so the gate stays what the
@@ -123,7 +126,9 @@ held units prove, on every included unit:
 - `ava status` ready and naming the generation; `ava maintenance status`
   shows the cutover hold in phase `ready`;
 - business still closed: an authenticated `POST /api/agents` answers 503
-  (`cluster_updating`), `GET /api/health` answers 200;
+  (`cluster_updating`), `GET /api/health` answers 200; `GET /api/bootstrap`
+  answers 401 without a bearer and 200 with a unit's API token, and its
+  `AVA_DB_URL` carries no password;
 - the new code reads the production records: `GET /api/cluster/status` and
   `GET /api/cluster/roster` answer 200 with the new bearer;
 - the alert path: a test `POST /api/alerts` lands a row in `alerts` and reaches

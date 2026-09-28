@@ -126,7 +126,8 @@ application root and persistent terminals. The steps run in order:
   of each: the admin one (applied with `CONFIG SET requirepass`, persisted to
   `redis.conf` and `.env`) and the runtime ACL one (re-affirmed on the ACL user,
   persisted to `.env` and `AVA_REDIS_URL`; runners fetch the new URL from
-  bootstrap at their next start). Each is staged in
+  bootstrap at their next start, which a held gateway still serves: the route
+  is control-plane). Each is staged in
   `db-authority/redis-<admin|runtime>.pending` so a crash resumes with the same
   value, and each old password is proven refused. It then writes one sealed
   bundle per included unit into `--bundle-dir` (an

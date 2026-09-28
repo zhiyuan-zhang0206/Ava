@@ -402,8 +402,8 @@ async def _cluster_pause_middleware(
     the journal read, including when the record needs explicit repair.
 
     Exempt: every route whose doorplate declares CONTROL_PLANE (the
-    /api/cluster/* control plane and the Grafana alerting webhook).
-    Everything else 503.
+    /api/cluster/* control plane, health, the ingest webhooks and the
+    bootstrap config read). Everything else 503.
     """
     if not _pause_policy.should_bypass_pause(
         request.method, request.url.path

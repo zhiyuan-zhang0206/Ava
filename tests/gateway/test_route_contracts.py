@@ -41,6 +41,7 @@ _EXPECTED_CONTROL_PLANE = frozenset(
         ("POST", "/api/alerts"),
         ("POST", "/api/work-failed"),
         ("GET", "/api/health"),
+        ("GET", "/api/bootstrap"),
     }
 )
 
@@ -112,6 +113,7 @@ def test_should_bypass_pause_agrees_with_surface() -> None:
         ("GET", "/api/cluster/status"),
         ("POST", "/api/cluster/stopping"),
         ("POST", "/api/alerts"),
+        ("GET", "/api/bootstrap"),
     ]
     blocked = [
         ("GET", "/api/alerts"),  # same template as the exempt webhook, different method

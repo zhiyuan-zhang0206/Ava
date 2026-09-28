@@ -17,6 +17,11 @@ bundle the gateway operator issues for that unit
 (`ava cluster db-authority issue-unit`). Both are the write generation's,
 shared by every runner unit, and the bundle's telemetry token is the
 cluster's; only the bundle's enrollment secret is the unit's own.
+
+The route is control-plane (`shared.api_contracts.contracts`): a held gateway
+still serves it, since a runner's held first start joins through it and every
+runner process resolves its config from it before the hold is released. The
+pause exemption changes neither the authentication nor the payload.
 """
 
 from __future__ import annotations

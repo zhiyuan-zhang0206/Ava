@@ -88,7 +88,8 @@ class RouteContract:
 # that must stay reachable mid-migration — the /api/cluster/* control
 # plane, the Grafana alerting webhook (a 503 inside the rollout window
 # exhausts Grafana's webhook retries and the alert is lost exactly when
-# alerting matters most). Everything else is data-plane.
+# alerting matters most), and the bootstrap config read a held runner's
+# start needs. Everything else is data-plane.
 # ─────────────────────────────────────────────────────────────────────
 ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     # ── gateway/routers/agents.py ───────────────────────────────────
@@ -128,7 +129,11 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
         note="session revocation — guarded update; repeats cannot revoke twice"
     ),
     # ── gateway/routers/bootstrap.py ───────────────────────────────────
-    ("GET", "/api/bootstrap"): RouteContract(),
+    ("GET", "/api/bootstrap"): RouteContract(
+        pause=PauseSemantics.CONTROL_PLANE,
+        note="read-only config projection, still authenticated — a held unit's first start "
+        "and every runner process's config resolution read it before the hold is released",
+    ),
     # ── gateway/routers/cluster.py ───────────────────────────────────
     ("POST", "/api/cluster/stopping"): RouteContract(
         Idempotency.NON_IDEMPOTENT,
