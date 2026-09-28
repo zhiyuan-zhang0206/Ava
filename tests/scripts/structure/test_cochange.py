@@ -312,6 +312,30 @@ def test_rename_is_followed_to_the_current_name(tmp_path: pathlib.Path) -> None:
     assert not any("pkg_a/mod.py" in (a, b) for a, b in pairs)
 
 
+def test_pair_with_a_deleted_file_is_not_reported(tmp_path: pathlib.Path) -> None:
+    """A file gone from the tip has no owner left to fix, so its pairs drop out of
+    Metric B while its commits still count toward Metric A's spread."""
+    _init_repo(tmp_path)
+    for i in range(3):
+        _commit(
+            tmp_path,
+            f"fix(ab): touch all {i}",
+            {
+                "pkg_a/mod.py": f"x = {i}\n",
+                "pkg_b/mod.py": f"x = {i}\n",
+                "pkg_c/gone.py": f"x = {i}\n",
+            },
+        )
+    _git(tmp_path, "rm", "--quiet", "pkg_c/gone.py")
+    _git(tmp_path, "commit", "--quiet", "-m", "refactor: delete gone.py")
+
+    report = _run(tmp_path, "--min-support", "2", "--min-confidence", "0.5")
+
+    pairs = {(row["a"], row["b"]) for row in report["strong_pairs"]}
+    assert pairs == {("pkg_a/mod.py", "pkg_b/mod.py")}
+    assert report["spread_by_type"]["fix"]["p50"] == 3
+
+
 # --- JSON shape + exit code ----------------------------------------------
 
 
