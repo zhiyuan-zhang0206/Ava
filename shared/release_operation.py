@@ -142,9 +142,11 @@ class InFlight(NamedTuple):
     """This home's incomplete operation, and whether its executor provably lives.
 
     `last_seen` is the executor's last heartbeat or, before its first one, the
-    operation's creation (the launch grace). `alive` means that is at most
-    `EXECUTOR_HEARTBEAT_TTL_S` old. `recovering`: the operation journaled an
-    abort, recovery or rollback decision.
+    launch-grace stamp its submission and each native dispatch leave
+    (`open_launch_grace`); with no stamp at all, the request's creation.
+    `alive` means that is at most `EXECUTOR_HEARTBEAT_TTL_S` old.
+    `recovering`: the operation journaled an abort, recovery or rollback
+    decision.
     """
 
     label: str
@@ -209,6 +211,19 @@ def _heartbeat(path: Path) -> datetime | None:
     except (OSError, ValueError, UnicodeDecodeError):
         return None
     return stamped if stamped.tzinfo is not None else None
+
+
+def open_launch_grace(path: Path) -> None:
+    """Stamp operation `path`'s heartbeat on its executor's behalf: the launch grace.
+
+    The submission stamps it once the journal exists, and each native dispatch
+    (a continuation's included) again, so the grace never runs from the
+    request's own `created_at`, which `release request` stamped any time
+    before. The executor's own beats replace it once it runs.
+    """
+    from shared.atomic_io import write_text_atomic
+
+    write_text_atomic(path.parent / _HEARTBEAT, datetime.now(UTC).isoformat() + "\n", mode=0o600)
 
 
 @contextmanager

@@ -11,18 +11,27 @@ and the probe reports the executor lost.
 from __future__ import annotations
 
 import json
+import subprocess
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
+from pydantic import JsonValue
 
 from cli.commands.cluster import health as cluster_health
+from cli.commands.cluster import health_alerts
 from cli.release_fleet.request import FleetRequest
+from cli.release_transition import journal as journal_module
+from cli.release_transition import launcher_linux as linux
+from cli.release_transition import native, submit
 from cli.release_transition.journal import create
+from cli.release_transition.native import LINUX
 from cli.release_transition.request import ReleaseRef
+from shared import paths
 from shared.deploy_timing import EXECUTOR_HEARTBEAT_TTL_S
-from shared.release_operation import executor_heartbeat, operation_in_flight
+from shared.release_operation import InFlight, executor_heartbeat, operation_in_flight
 from shared.start_inputs import configuration_digest
 from tests.cli.test_cluster_health import _all_checks_pass as _all_checks_pass
 from tests.cli.test_cluster_health import _home as _home
@@ -30,12 +39,23 @@ from tests.cli.test_cluster_health import _no_deploy_in_flight as _no_deploy_in_
 from tests.cli.test_cluster_health import _provider_guard_healthy as _provider_guard_healthy
 from tests.cli.test_cluster_health import _sent_alerts as _sent_alerts
 from tests.cli.test_cluster_health import _write_aged_alert_state
+from tests.lifecycle.transition.test_launcher_linux import _properties, _readback_seams
+from tests.lifecycle.transition.test_launcher_linux import planned as planned
 
 _TTL = timedelta(seconds=EXECUTOR_HEARTBEAT_TTL_S)
 _LIVENESS_FAILURE = "FAIL: gateway liveness — health endpoint unreachable or non-200"
 
 
 def _journal(home: Path, *, created_at: datetime, phase: str) -> Path:
+    request = _request(home, created_at=created_at)
+    create(request)
+    payload = json.loads(request.path.read_bytes())
+    payload["phase"] = phase
+    request.path.write_text(json.dumps(payload) + "\n")
+    return request.path
+
+
+def _request(home: Path, *, created_at: datetime) -> FleetRequest:
     previous = ReleaseRef(
         artifact_digest="a" * 64,
         manifest_digest="b" * 64,
@@ -63,11 +83,7 @@ def _journal(home: Path, *, created_at: datetime, phase: str) -> Path:
             }
         )
     )
-    create(request)
-    payload = json.loads(request.path.read_bytes())
-    payload["phase"] = phase
-    request.path.write_text(json.dumps(payload) + "\n")
-    return request.path
+    return request
 
 
 def _beat(path: Path, at: datetime) -> None:
@@ -96,6 +112,67 @@ def test_an_operation_explains_an_outage_only_within_its_executors_heartbeat(
     assert alive is not None and alive.alive
     lost = operation_in_flight(home, now=beat + _TTL + timedelta(seconds=1))
     assert lost is not None and not lost.alive and lost.last_seen == beat
+
+
+def test_the_launch_grace_runs_from_submission_not_from_the_request(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`release request` stamps `created_at`; `update --prepared` submits it
+    any time later. Before the executor's first beat (plan, image
+    verification, native dispatch, a second verification, the lock), the
+    grace runs from the submission: a probe in that window finds nothing lost."""
+    home = tmp_path.resolve()
+    request = _request(home, created_at=datetime.now(UTC) - timedelta(minutes=11))
+    at_dispatch: list[tuple[InFlight | None, object]] = []
+
+    class Inputs:
+        def __init__(self, _request: FleetRequest) -> None:
+            self.candidate = None
+
+        def preflight(self) -> None:
+            return
+
+    def plan_launch(_path: Path, _image: object) -> dict[str, JsonValue]:
+        return {"kind": LINUX, "job": "retained-external-executor"}
+
+    def launch(_record: dict[str, JsonValue]) -> SimpleNamespace:
+        at_dispatch.append((operation_in_flight(home), health_alerts.executor_lost()))
+        return SimpleNamespace(model_dump=lambda **_kwargs: {})
+
+    host = SimpleNamespace(plan_launch=plan_launch, launch=launch)
+    monkeypatch.setattr(paths, "ava_home", lambda: home)
+    monkeypatch.setattr(native, "for_host", lambda _request: host)
+    monkeypatch.setattr(submit, "GatewayUnit", Inputs)
+    submitted = datetime.now(UTC)
+    submit.submit_request(request)
+    [(launching, lost)] = at_dispatch
+    assert launching is not None and launching.alive and launching.last_seen >= submitted
+    assert lost is None
+
+
+def test_a_native_dispatch_restarts_the_launch_grace(
+    planned: dict[str, JsonValue], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Each launch attempt, a continuation's included, is a fresh sign of life."""
+    path = Path(str(planned["operation"]))
+    home = path.parent.parent.parent
+    _readback_seams(monkeypatch, planned)
+    observations = iter([{"LoadState": "not-found"}, _properties(planned), _properties(planned)])
+    monkeypatch.setattr(linux, "_properties", lambda _unit: next(observations))
+    at_dispatch: list[InFlight | None] = []
+
+    def systemd_run(
+        argv: list[str], *, privileged: bool = False
+    ) -> subprocess.CompletedProcess[str]:
+        assert privileged and journal_module.read_operation(path).launch_attempted
+        at_dispatch.append(operation_in_flight(home))
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    monkeypatch.setattr(linux, "_command", systemd_run)
+    dispatched = datetime.now(UTC)
+    linux.launch(planned)
+    [fresh] = at_dispatch
+    assert fresh is not None and fresh.alive and fresh.last_seen >= dispatched
 
 
 def test_the_executor_heartbeat_stamps_while_it_runs_and_leaves_with_it(tmp_path: Path) -> None:

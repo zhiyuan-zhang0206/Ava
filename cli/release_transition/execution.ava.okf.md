@@ -24,21 +24,19 @@ treats any `Exception` as a failure and journals it before routing it
 (`failure.py`); only a process-ending `BaseException` passes undecided.
 
 The executor's `main` opens its log sinks first (`shared.log.init_cli_process`,
-name `release-executor`): stderr, which the native adapter keeps (the
-transient unit's systemd journal; launchd's `updates/<id>/executor/a<N>/stderr.log`),
-the JSONL file `$AVA_HOME/logs/release-executor.log`, and the event pipeline
-(JSONL mirror and OTLP, never the database). A routed failure's traceback,
-missed heartbeat and lease rounds and the listener's refusal reasons land
-there.
+name `release-executor`): stderr, kept by the native adapter (the transient
+unit's systemd journal; launchd's `updates/<id>/executor/a<N>/stderr.log`),
+`$AVA_HOME/logs/release-executor.log`, and the event pipeline (never the
+database). A routed failure's traceback lands there.
 
 While it runs, the executor stamps `updates/<id>/executor-heartbeat` from a
 thread every `LEASE_RENEW_INTERVAL_S` and removes it when it leaves
 (`shared/release_operation.py::executor_heartbeat`). The health probe lets an
-incomplete operation explain an outage only while that stamp (or, before the
-first one, the operation's creation) is at most `EXECUTOR_HEARTBEAT_TTL_S`
-old; past it the executor is lost — killed, OOM'd, rebooted or never
-launched — and the probe alerts `operation executor lost`, graded from the
-last stamp.
+incomplete operation explain an outage only while that stamp is at most
+`EXECUTOR_HEARTBEAT_TTL_S` old; before the first beat, the stamp the
+submission and each native dispatch leave (`open_launch_grace`). Past it the
+executor is lost (killed, OOM'd, rebooted or never launched) and the probe
+alerts `operation executor lost`, graded from the last stamp.
 
 The stop phase closes this unit's writers. Persistent terminals — agent
 shells, coding sessions, watchers, page and schedule runners — do not survive

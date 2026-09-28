@@ -23,6 +23,7 @@ from cli.release_transition.native import require_private_operation as _private_
 from cli.release_transition.request import Record
 from shared.native_process.ownership import OwnedProcess
 from shared.os_boot_unit import systemd_running
+from shared.release_operation import open_launch_grace
 from shared.runtime_release import VerifiedRelease
 
 _PROPERTIES = (
@@ -400,6 +401,7 @@ def _dispatch(journal: Journal, planned: LinuxLaunch) -> None:
         raise RuntimeError(
             "executor unit already exists; recover by readback, never duplicate launch"
         )
+    open_launch_grace(journal.operation.request.path)
     journal.mark_launch_attempted()
     result = _command(_launch_command(planned), privileged=True)
     if result.returncode:

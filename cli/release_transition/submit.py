@@ -19,6 +19,7 @@ from cli.release_transition.journal import (
 )
 from cli.release_transition.local import LocalTransition
 from cli.release_transition.request import PitrRequest
+from shared.release_operation import open_launch_grace
 from shared.verified_file import regular_bytes
 
 
@@ -106,6 +107,7 @@ def submit_request(
         image = driver.candidate
     _retire_previous(request)
     create(request)
+    open_launch_grace(request.path)
     record = host.plan_launch(request.path, image)
     with exclusive(request.path) as journal:
         journal.record_launch(record)
