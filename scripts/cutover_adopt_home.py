@@ -492,9 +492,10 @@ def release(home: Path) -> int:
     and, on a gateway, the database-records repair (W7) recorded a completed
     run. `ava maintenance resume` then releases the hold as for any other: the
     unit must be serving, and the agents the hold drained are woken. The rest
-    of the gate (smoke agents, the alert path, an empty legacy census on every
-    host, the stale-writer probe; the gateway before the runners) is the
-    operator's to verify first.
+    of the gate (the alert path, an empty legacy census on every host, the
+    stale-writer probe) is the operator's to verify first. No agent runs under
+    the hold, so the smoke agent follows each release, gateway first, before the
+    next unit is released (conventions/cutover-home-adoption.md).
     """
     from cli.commands.maintenance import resume
     from shared import pause_owner

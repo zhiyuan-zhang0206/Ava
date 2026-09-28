@@ -66,17 +66,18 @@ business.
    cutover issued for it (step `remote-units`) and its transport key in
    `AVA_DB_CAPABILITY_KEY`: the runner no longer holds the human bearer, and
    its capability both authenticates it and carries its database login.
-5. At the go/no-go gate (W10), verify the gate's checklist, then (W11) release
-   each hold with `--resume`, the gateway first, then the runners. It takes
+5. At the go/no-go gate (W10), verify the
+   [held gate](#the-held-gate-and-the-staged-release), then (W11) release each
+   hold with `--resume`, the gateway first, each release followed by a smoke
+   agent on that unit before the next one. It takes
    the hold's identity from the journal and refuses unless the adoption
    completed, the hold stands in phase `ready` (the held first start passed
    readiness) and, on a gateway, the database-records repair recorded a
    completed run with no incomplete one after it (W7). The release itself is
    `ava maintenance resume`'s: the unit must be serving, and the agents the
-   hold drained are woken. Everything else the gate lists (smoke agents, the
-   alert path, an empty legacy census on every host, the stale-writer probe,
-   the gateway released before the runners) no single host can check, so it
-   stays the operator's.
+   hold drained are woken. Everything else (the gate's cross-host checks, the
+   smoke agents, the gateway released before the runners) no single host can
+   check, so it stays the operator's.
 
 ```bash
 .venv/bin/python scripts/cutover_inventory.py --home ~/.ava --service-path "$REVIEWED_PATH"
@@ -89,6 +90,45 @@ business.
 
 `--registry` names the cluster registry when the home's `.env` does not declare
 `AVA_CLUSTER_REGISTRY` and it is not `~/.ava/clusters.json`.
+
+## The held gate and the staged release
+
+No agent runs while a cutover hold stands, so the gate (W10) holds no smoke
+agent. The gateway answers every business route with 503 except its
+control-plane routes (`/api/cluster/*`, `GET /api/health`, `POST /api/alerts`,
+`POST /api/work-failed`), so a spawn never reaches a unit; a unit's `/ops`
+admits only its readiness probe; the agent host builds no runtime for a held
+unit and the schedule manager fires nothing. Opening any of these for one
+smoke agent would open the path business uses, so the gate stays what the
+held units prove, on every included unit:
+
+- `ava status` ready and naming the generation; `ava maintenance status`
+  shows the cutover hold in phase `ready`;
+- business still closed: an authenticated `POST /api/agents` answers 503
+  (`cluster_updating`), `GET /api/health` answers 200;
+- the new code reads the production records: `GET /api/cluster/status` and
+  `GET /api/cluster/roster` answer 200 with the new bearer;
+- the alert path: a test `POST /api/alerts` lands a row in `alerts` and reaches
+  the out-of-band channel;
+- an empty legacy census on every host (the inventory lists no legacy job);
+- the stale-writer probe: the pre-cutover runner database login, human bearer
+  and Redis admin password (the W3 copies) are refused.
+
+That agents run on this commit is proven before the window: the cutover
+rehearsal (FC-10) at exactly this commit spawns agents through gateway →
+`/ops` with the secret set, and the Linux A→B→A proof runs them through a
+release. W10 is the last point of exact rollback (R2), and it therefore covers
+no smoke of the production units themselves.
+
+The release (W11) is staged. `--resume` the gateway, then run a smoke agent on
+the gateway's own machine: spawn one there (`POST /api/agents` with `machine`
+naming it) and have it run `print(1 + 2)`; its code output is `3`. Only then
+release a runner and smoke it the same way, one runner at a time. Business is
+open from the gateway's release on, so a failed smoke is repaired forward
+(R3); restoring the W3 dump instead is an explicit user decision that loses
+what business wrote since. Stop the release at the failed unit: units not yet
+released stay held, their agents asleep and their inbound messages queued,
+until the failure is understood.
 
 ## What adoption changes
 
