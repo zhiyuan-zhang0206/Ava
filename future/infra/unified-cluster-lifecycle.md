@@ -85,7 +85,8 @@ are not implementation requirements for this revision.
      current code spawns such a session, so recovery no longer probes for one:
      a legacy session is invisible to it until it takes its database lease. The
      remaining guards (updater handoff, deploy-lease holder PID probe, host
-     updater lease, maintenance admission) cover every current owner.
+     updater lease, maintenance admission, the fleet cutover's hold) cover
+     every current owner.
    - `$AVA_HOME/deploy-state.json`, the retired updater's Gate marker, has no
      reader or writer; Gate never renders an update page. Delete it in the
      cutover record.

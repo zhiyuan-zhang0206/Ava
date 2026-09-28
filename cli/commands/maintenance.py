@@ -22,6 +22,7 @@ from cli.commands.service_stop import (
     stop_data_plane,
     stop_services,
 )
+from cli.cutover_hold import resume_refusal
 from ops.agent_pause import _hold, drain, prepare
 from shared import hold_driver, maintenance, maintenance_cohort, pause_owner, start_serving
 from shared.db import connect
@@ -231,6 +232,20 @@ def _stop_data(
     print(f"Stopped local data plane: {stopped}; no backup was created")
 
 
+def _generation(args: argparse.Namespace) -> datetime:
+    """The exact hold generation the verb names; `resume` refuses the cutover hold."""
+    from shared.paths import ava_home
+
+    at = datetime.fromisoformat(args.acquired_at)
+    if at.tzinfo is None or not args.operation.strip():
+        raise ValueError("maintenance requires a nonempty operation and timezone-aware timestamp")
+    if args.maintenance_cmd == "resume" and (
+        refusal := resume_refusal(ava_home(), args.operation, at)
+    ):
+        raise RuntimeError(refusal)
+    return at
+
+
 def run(args: argparse.Namespace) -> int:
     verb: str = args.maintenance_cmd
     if verb == "status":
@@ -253,9 +268,7 @@ def run(args: argparse.Namespace) -> int:
     from shared.release_operation import require_start_authorized
 
     require_start_authorized(ava_home())
-    at = datetime.fromisoformat(args.acquired_at)
-    if at.tzinfo is None or not args.operation.strip():
-        raise ValueError("maintenance requires a nonempty operation and timezone-aware timestamp")
+    at = _generation(args)
     # Task #3270: this invocation is an operator-side ladder step, so stamp its
     # shepherding identity on the standing hold before doing its work. A no-op
     # when no matching hold stands yet (prepare's first run mints via prepare).

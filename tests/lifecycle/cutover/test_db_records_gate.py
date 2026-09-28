@@ -9,7 +9,9 @@ from __future__ import annotations
 import json
 import threading
 import time
+from dataclasses import replace
 from pathlib import Path
+from uuid import uuid4
 
 import psycopg
 import pytest
@@ -19,11 +21,14 @@ from scripts import cutover_db_survey as survey_module
 from shared.config import settings
 from tests.lifecycle.cutover.test_db_records import (  # noqa: F401 -- fixtures
     _BOOTSTRAP_OWNED,
+    GONE,
     Cluster,
+    _agent,
     _application_owner,
     _inputs,
     _patched_session,
     _refusals,
+    _retired,
     _run,
     _state,
     _survey,
@@ -103,7 +108,7 @@ def test_execute_prints_and_records_what_stays_fenced(
     assert [group["count"] for group in expected] == [1, 1, 1]
     capsys.readouterr()
     run = _run(cluster, inputs)
-    assert run is not None and run["fenced"] == expected
+    assert run["fenced"] == expected
     printed = capsys.readouterr().out
     agents = cluster.agents
     assert "3 agent(s) stay fenced" in printed
@@ -115,6 +120,50 @@ def test_execute_prints_and_records_what_stays_fenced(
         assert f"1 inadmissible: {reason} (agents {agents[name]})" in printed
     journal = json.loads((cluster.home / records.JOURNAL).read_text())
     assert journal["runs"][0]["fenced"] == expected
+
+
+def test_a_row_no_attestation_can_reach_is_fenced_and_d8_reaches_fenced(
+    cluster: Cluster,
+    db_conn: psycopg.Connection,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A row on a machine whose every unit the run retires can never be attested:
+    the run states and records it as fenced, and afterwards D-8 reads `fenced`,
+    not `repair` for good."""
+    gone, _ = _agent(db_conn, GONE, resources=_retired(uuid4(), uuid4(), 4343), receipt="restart")
+    db_conn.commit()
+    inputs = _inputs(tmp_path, cluster)
+    unattestable = {
+        "verdict": "inadmissible",
+        "reason": "no unit of its machine remains to attest (retired or unregistered)",
+        "count": 1,
+        "agents": [gone],
+    }
+    capsys.readouterr()
+    run = _run(cluster, inputs)
+    assert unattestable in run["fenced"]
+    assert "4 agent(s) stay fenced" in capsys.readouterr().out
+    after = _survey(replace(inputs, retire_units=())).checks["D-8"]
+    assert (after["verdict"], unattestable in after["fenced"]) == ("fenced", True)
+
+
+def test_a_run_without_effects_still_records_what_stays_fenced(
+    cluster: Cluster, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A run with nothing left to repair still states what stays fenced, and the
+    journal keeps that statement as a completed run."""
+    _run(cluster, _inputs(tmp_path, cluster))
+    fresh = _inputs(tmp_path, cluster, pending=None, lease=None, retire_units=())
+    expected = survey_module.fenced_summary(_survey(fresh).legacy)
+    capsys.readouterr()
+    run = _run(cluster, fresh)
+    assert not any(run["effects"].values())
+    assert (run["state"], run["fenced"]) == ("done", expected)
+    assert "3 agent(s) stay fenced" in capsys.readouterr().out
+    runs = json.loads((cluster.home / records.JOURNAL).read_text())["runs"]
+    assert [item["fenced"] for item in runs] == [expected, expected]
+    assert _run(cluster, fresh) == run  # the same inputs change nothing
 
 
 def test_a_held_row_lock_fails_the_effect_and_the_same_inputs_continue(
@@ -146,8 +195,7 @@ def test_a_held_row_lock_fails_the_effect_and_the_same_inputs_continue(
     assert _state(db_conn) == unchanged
     stopped = json.loads((cluster.home / records.JOURNAL).read_text())["runs"][0]
     assert (stopped["state"], stopped["results"]["pending"]) == ("started", [])
-    run = _run(cluster, inputs)
-    assert run is not None and run["state"] == "done"
+    assert _run(cluster, inputs)["state"] == "done"
 
 
 def test_every_owner_session_carries_the_lock_and_statement_ceilings() -> None:

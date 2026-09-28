@@ -14,7 +14,10 @@ request`), not adopt's. The selection commits before the boot action is
 installed, so a failure between the two (`sudo -n` wanting a password, a
 systemd error) or a crash leaves the receipt's own selection: re-running
 adopt with the same receipt finishes the install instead of refusing, and
-nothing else has to undo the selection. Both run under the home's start
+nothing else has to undo the selection. A release operation that holds
+startup refuses adopt as it refuses `ava start`: an operation that activated
+its candidate leaves the same pointer, and its boot action is not adopt's to
+replace. Both run under the home's start
 intent and lifecycle locks, in the order `ava start` takes them. Linux only: the macOS root-seed-from-image action does not exist yet
 (the `macos-release-start` slice) — a macOS host refuses here rather than
 approximating it with the persistent home helper, which only ever starts
@@ -75,7 +78,12 @@ def _select_and_install(home: Path, reference: ReleaseRef, receipt: Path) -> Ver
     from cli.release_transition.root_service import install_steady
     from shared.cluster import registry_path
     from shared.private_storage import ensure_private_dir
+    from shared.release_operation import require_start_authorized
 
+    # An operation that activated its candidate leaves the pointer on this
+    # receipt's image, which the re-run below would otherwise accept; its boot
+    # action is the operation's to install. Refuse exactly as `ava start` does.
+    require_start_authorized(home)
     store = home / "releases"
     ensure_private_dir(store)
     current = current_pointer(store)

@@ -17,13 +17,16 @@ also branches on the real platform and must not be faked here.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
+from uuid import uuid4
 
 import pytest
 
 import shared.cluster as cluster_pkg
+from cli.release_fleet.request import FleetRequest
 from cli.release_operator import adopt as adopt_module
 from cli.release_transition import root_service
 from cli.release_transition.request import ReleaseRef
@@ -31,7 +34,8 @@ from shared import paths as shared_paths
 from shared.os_boot_unit import BootStartAction, BootUnitContext
 from shared.runtime_abi import current_abi
 from shared.runtime_release import activate_release, current_pointer
-from tests.lifecycle.release_operator.conftest import build_image
+from tests.lifecycle.release_operator.conftest import build_image, digest
+from tests.lifecycle.transition.phases import at_phase
 
 
 @pytest.fixture
@@ -138,6 +142,51 @@ def test_a_failed_install_is_finished_by_rerunning_adopt(
     assert current_pointer(home / "releases") == selected
     assert len(calls) == 1 and reference.source_commit in calls[0][1].argv
     assert "re-run `ava cluster release adopt" in failure
+
+
+def test_a_rerun_refuses_while_a_release_operation_holds_startup(
+    home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """An operation that activated its candidate leaves the pointer on the receipt's
+    image. A re-run of adopt must refuse, as `ava start` does, instead of replacing
+    the boot action that operation owns."""
+    _as_linux(monkeypatch)
+    reference = build_image(home, "candidate")
+    activate_release(
+        home / "releases",
+        reference.artifact_digest,
+        expected_current=None,
+        manifest_digest=reference.manifest_digest,
+        host_abi=current_abi(),
+        schema_digest=reference.schema_digest,
+    )
+    previous = ReleaseRef(
+        artifact_digest=digest(b"previous"),
+        manifest_digest=digest(b"previous-m"),
+        schema_digest=digest(b"previous-s"),
+        source_commit=digest(b"previous-c")[:40],
+    )
+    request = FleetRequest(
+        id=uuid4(),
+        home=str(home),
+        registry=str(tmp_path / "clusters.json"),
+        created_at=datetime.now(UTC),
+        machine="test-unit",
+        previous=previous,
+        candidate=reference,
+        executor=reference,
+        configuration_digest="f" * 64,
+    )
+    request.path.parent.mkdir(parents=True)
+    request.path.write_text(at_phase("starting", request=request).model_dump_json())
+    (home / "updates/active").write_text(str(request.path))
+    receipt = _stub_receipt(monkeypatch, tmp_path, reference)
+    calls = _stub_install(monkeypatch)
+
+    assert adopt_module.cmd_release_adopt(receipt=receipt) == 2
+
+    assert "holds startup at starting" in capsys.readouterr().err
+    assert calls == []
 
 
 def test_missing_receipt_file_refuses_cleanly(

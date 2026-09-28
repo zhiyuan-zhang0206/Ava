@@ -14,7 +14,8 @@ named incarnation, a row its successor would take once converted, a settled
 lifecycle receipt, a machine attestation proving every recorded identity gone),
 `awaiting` (everything but the attestation), `inadmissible` with the reason (a
 live or different incarnation, an unsettled command, no receipt, a paused
-machine, an unattested identity, a malformed value), or `unconvertible` with
+machine, a machine with no unit left to attest, an unattested identity, a
+malformed value), or `unconvertible` with
 the reason (a shape neither resurrection nor admission accepts even after
 conversion). The conversion itself re-checks every guard under the row lock.
 The last two are `FENCED`: the runtime keeps refusing those agents, so D-8
@@ -452,8 +453,13 @@ def _classify(conn: psycopg.Connection[Any], row: dict[str, Any], paused: set[st
     return legacy
 
 
-def _weigh_evidence(legacy: Legacy, inputs: Inputs) -> None:
+def _weigh_evidence(legacy: Legacy, inputs: Inputs, attestable: set[str]) -> None:
     if legacy.verdict != "convertible":
+        return
+    if legacy.machine not in attestable:
+        # An attestation must name a registered unit that is neither paused nor
+        # retired (`_plan_evidence`, `_plan_units`), so none can ever cover it.
+        legacy.refuse("no unit of its machine remains to attest (retired or unregistered)")
         return
     attestation = inputs.attestations.get(legacy.machine)
     if attestation is None:
@@ -490,8 +496,9 @@ def survey(conn: psycopg.Connection[Any], inputs: Inputs) -> Survey:
             found.legacy.append(_classify(conn, row, paused))
             continue
         current[row["machine"]] = current.get(row["machine"], 0) + 1
+    attestable = found.included(inputs.retired)
     for legacy in found.legacy:
-        _weigh_evidence(legacy, inputs)
+        _weigh_evidence(legacy, inputs, attestable)
     verdicts = ("convertible", "awaiting", "inadmissible", "unconvertible")
     found.counts = {
         "current_model": current,

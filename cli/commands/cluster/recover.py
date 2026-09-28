@@ -13,7 +13,9 @@ release the lease.
 A holder on *another* machine cannot be pid-probed from here and is conservatively
 treated as live (refuse rather than risk clobbering a real owner); wait out its
 TTL or run this on that host. Prepared release operations are not recovered here:
-they continue by resubmitting their captured request.
+they continue by resubmitting their captured request. Nor is the fleet cutover's
+hold (`cli.cutover_hold`): while it stands, recover refuses before any effect and
+names the go/no-go step, the one exit that releases it.
 """
 
 from __future__ import annotations
@@ -29,9 +31,18 @@ def cmd_cluster_recover() -> int:
     Returns 0 when the cluster is (or has been made) deployable, 1 when a live
     deploy still owns it — that refusal is the command working, not failing.
     """
+    from cli.cutover_hold import release_command, standing_hold
     from ops.ops_cluster import ClusterUpdateInProgress, cluster_recover_op
     from shared.cluster_lock import update_lock_holder
+    from shared.paths import ava_home
 
+    if (cutover := standing_hold(ava_home())) is not None:
+        print(
+            f"\n✗ the fleet cutover's hold {cutover.holder} stands on this unit, and recover "
+            f"never releases it; the go/no-go gate does, with {release_command(ava_home())}",
+            file=sys.stderr,
+        )
+        return 1
     holder = update_lock_holder()
     if holder is None:
         print("· no update lock is held; checking for a stranded pause anyway")

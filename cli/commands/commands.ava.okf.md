@@ -69,7 +69,9 @@ native job, executable, socket and stopped-root custody are checked before
 native helper exit and removal of its definition. Start recreates that definition.
 Root owns Gate and native LGTM application services. `_pause_resume`
 releases normal startup admission only after readiness, and never releases the
-fleet cutover's hold (`cli/cutover_hold.py`, deleted with the cutover scripts).
+fleet cutover's hold (`cli/cutover_hold.py`, deleted with the cutover scripts);
+`ava maintenance resume` and `ava cluster recover` refuse that hold and name its
+one exit, `scripts/cutover_adopt_home.py --resume`.
 `cli/parsers/maintenance.py` retains explicit intermediate steps through
 `cli/commands/maintenance.py` and `_maintenance_probe`.
 They reuse the [durable maintenance journal](../../shared/maintenance/maintenance.ava.okf.md).

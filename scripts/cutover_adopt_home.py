@@ -29,10 +29,12 @@ nothing. A re-run must name the same inputs.
 after the data-plane authority cutover): the ordinary `ava start` inside the
 cutover hold's authorized-start boundary, moving the hold `stopped ->
 starting -> ready`. Business stays closed until the operator releases the
-hold at the go/no-go gate with the `ava maintenance resume` command printed
-here. An ordinary start never releases the cutover hold (`cli.cutover_hold`):
-before this held first start it refuses, and afterwards (a reboot's autostart)
-it starts held.
+hold at the go/no-go gate with `--resume`, its one exit: it refuses unless the
+adoption completed, the hold is `ready` and, on a gateway, the database-records
+repair recorded a completed run, then resumes exactly that hold. No ordinary
+path releases the cutover hold (`cli.cutover_hold`): before this held first
+start an ordinary start refuses, afterwards (a reboot's autostart) it starts
+held, and `ava cluster recover` and `ava maintenance resume` refuse it.
 
 Run from the checkout that owns the home:
 
@@ -40,6 +42,7 @@ Run from the checkout that owns the home:
     .venv/bin/python scripts/cutover_adopt_home.py --home ~/.ava --service-path P \
         --execute --expect-mode gateway|remote-unit
     .venv/bin/python scripts/cutover_adopt_home.py --home ~/.ava --start
+    .venv/bin/python scripts/cutover_adopt_home.py --home ~/.ava --resume
 
 `--execute` names the mode the operator expects (`--expect-mode`); the mode
 the capability files imply must match, since a remote unit's adoption strips
@@ -64,7 +67,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
 
-from cli.cutover_hold import ADOPTION_JOURNAL
+from cli.cutover_hold import ADOPTION_JOURNAL, held_start_command, release_command
 from scripts.cutover_adopt_plan import (
     SELECTION,
     STEPS,
@@ -473,8 +476,72 @@ def held_start(home: Path, db_capability: str | None = None) -> int:
         if rc != 0:
             return rc
     print(f"✓ {home} is started and held. At the go/no-go gate release it with:")
-    print(f"  ava maintenance resume --operation {holder} --acquired-at {raw}")
+    print(f"  {release_command(home)}")
     return 0
+
+
+def release(home: Path) -> int:
+    """The go/no-go gate: release the cutover hold, its one exit, which opens business.
+
+    Refuses unless the adoption completed, the held first start reached `ready`
+    and, on a gateway, the database-records repair (W7) recorded a completed
+    run. `ava maintenance resume` then releases the hold as for any other: the
+    unit must be serving, and the agents the hold drained are woken. The rest
+    of the gate (smoke agents, the alert path, an empty legacy census on every
+    host, the stale-writer probe; the gateway before the runners) is the
+    operator's to verify first.
+    """
+    from cli.commands.maintenance import resume
+    from shared import pause_owner
+    from shared.paths import ava_home
+    from shared.release_operation import require_start_authorized
+
+    journal = read_journal(home)
+    if not _complete(journal):
+        raise RefusedError("adoption is not complete; run --execute first")
+    assert journal is not None  # noqa: S101 — _complete checked
+    holder, at = journal["hold"]["holder"], datetime.fromisoformat(journal["hold"]["acquired_at"])
+    current = pause_owner.read_for_home(home)
+    if current.status == "resumed" and current.matches(holder, at):
+        print(f"✓ the cutover hold {holder} is already released on {home}.")
+        return 0
+    if current.status != "paused" or not current.matches(holder, at) or current.maintenance is None:
+        raise RefusedError(f"the cutover hold {holder} is not standing on this home")
+    if current.maintenance.phase != "ready":
+        raise RefusedError(
+            f"the cutover hold is in phase {current.maintenance.phase}; its held first start "
+            f"{held_start_command(home)} has not passed readiness"
+        )
+    if ava_home().resolve() != home:
+        raise RefusedError(f"this checkout's home is {ava_home()}, not {home}")
+    if "gateway" in _adopted_roles(home) and (missing := _records_repair_missing(home)):
+        raise RefusedError(missing)
+    require_start_authorized(home)
+    resume(holder, at, cancel=False)
+    print(f"✓ cutover hold {holder} released: business is open on {home}.")
+    return 0
+
+
+def _adopted_roles(home: Path) -> frozenset[str]:
+    from cli.start_identity import read_intent
+
+    intent = read_intent(home)
+    if intent is None:
+        raise RefusedError(f"{home} has no start intent")
+    return frozenset(intent["roles"])
+
+
+def _records_repair_missing(home: Path) -> str | None:
+    """Why the gateway's database-records repair (W7) is not on record as complete."""
+    from scripts.cutover_db_records import JOURNAL
+    from scripts.cutover_db_records import read_journal as read_records
+
+    runs = (read_records(home) or {"runs": []})["runs"]
+    if not runs:
+        return f"the database-records repair (W7) recorded no run in {home / JOURNAL}"
+    if runs[-1]["state"] != "done":
+        return "the last database-records repair run is incomplete; continue it with its inputs"
+    return None
 
 
 def _start_inside_hold(
@@ -534,11 +601,15 @@ def _arguments(argv: list[str] | None) -> argparse.Namespace:
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--execute", action="store_true", help="perform the adoption")
     mode.add_argument("--start", action="store_true", help="held first start after adoption")
+    mode.add_argument(
+        "--resume", action="store_true", help="go/no-go gate: release the cutover hold"
+    )
     args = parser.parse_args(argv)
     if args.db_capability is not None and not args.start:
         parser.error("--db-capability belongs to --start")
     if args.execute and args.expect_mode is None:
         parser.error("--execute requires --expect-mode gateway|remote-unit")
+    args.effects = args.execute or args.start or args.resume
     return args
 
 
@@ -549,9 +620,11 @@ def main(
     try:
         home = canonical_home(args.home)
         owner = checkout or own_checkout()
-        require_owning_checkout(home, owner, effects=args.execute or args.start)
+        require_owning_checkout(home, owner, effects=args.effects)
         if args.start:
             return held_start(home, args.db_capability)
+        if args.resume:
+            return release(home)
         inputs = Inputs(args.service_path, tuple(args.keep_secret))
         registry = registry_path(home, args.registry)
         host = host or Host.current()

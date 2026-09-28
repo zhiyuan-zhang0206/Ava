@@ -112,9 +112,10 @@ restart pointer), or a terminated row that still records exactly the closed
 hosted incarnation and holds no lifecycle pointer (what resurrection requires).
 Otherwise the row is `awaiting` (no attestation for its machine yet),
 `inadmissible` (it still names a live or different incarnation, the pointer
-names an unsettled command, no receipt exists, the machine is paused, an
-identity is unattested or malformed), or `unconvertible` (a shape no successor
-accepts even after conversion: a terminated row whose runtime identity was
+names an unsettled command, no receipt exists, the machine is paused, no unit
+of the machine remains to attest, an identity is unattested or malformed), or
+`unconvertible` (a shape no successor accepts even after conversion: a
+terminated row whose runtime identity was
 released or carries no hosted kind, a terminated row still pointing at its
 receipt, a terminate receipt left as an idling row's pointer, a process
 runtime). The runtime keeps refusing those rows (`resource_fence`,
@@ -145,6 +146,11 @@ the script exists. What can change a fenced row:
   attestations, which no longer describe them. No sound late path exists for
   such a machine, and its agents stay fenced.
 - **Every other reason (known gap).** This covers:
+  - a row of a machine with no unit left to attest: every unit is retired
+    (`--retire-units`, from the run that retires the last one on) or none is
+    registered. An attestation must name a registered unit that is neither
+    paused nor retired, so none can ever cover these rows; without this
+    verdict they would read `awaiting` and keep D-8 at `repair`;
   - a row that still names a live or different incarnation after every old
     host stopped;
   - a pointer to an unsettled command;
@@ -165,7 +171,8 @@ the script exists. What can change a fenced row:
 `attestations/<sha256>.json`, each attestation byte-for-byte. The journal is a
 list of runs. A run records its inputs, the fenced summary it printed (which
 agents stay fenced, per verdict and reason) and every planned effect with its
-before image before the first write, then each effect's result. A crashed run
+before image before the first write, then each effect's result. A run that
+plans no effect is recorded too, so its fenced summary is on record. A crashed run
 continues only with the same inputs; the same inputs as a completed run change
 nothing; new inputs (a late attestation) append a run. Refusals are all
 decided before the first write of a run.

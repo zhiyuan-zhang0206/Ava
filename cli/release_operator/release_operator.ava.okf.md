@@ -95,8 +95,11 @@ real `PreparationReceipt` file. Requires a stopped root
 release is already selected (that is `request` + `ava cluster update`'s job).
 The selection commits before the boot action installs; if the install fails
 (`sudo -n` wanting a password) or the process dies in between, re-running
-adopt with the same receipt keeps the selection and finishes the install. It
-holds the home's start-intent and lifecycle locks throughout.
+adopt with the same receipt keeps the selection and finishes the install. A
+release operation that holds startup refuses adopt as it refuses `ava start`
+(`shared.release_operation.require_start_authorized`): one that activated its
+candidate leaves the same pointer, and its boot action is not adopt's to
+replace. It holds the home's start-intent and lifecycle locks throughout.
 
 Linux only. The persistent macOS home helper only ever starts inside an
 existing release operation (`cli.release_transition.root_macos`); there is no

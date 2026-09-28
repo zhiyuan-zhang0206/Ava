@@ -14,7 +14,8 @@ are deleted with the other `scripts/cutover_*` scripts after the cutover:
   bound ports, a reviewed-PATH candidate, the refusals, and the exact plan
   adoption would execute now.
 - `scripts/cutover_adopt_home.py` executes that plan. Dry-run is the default;
-  `--execute` adopts; `--start` performs the held first start. `--execute`
+  `--execute` adopts; `--start` performs the held first start; `--resume`
+  releases the cutover hold at the go/no-go gate. `--execute`
   also requires `--expect-mode gateway|remote-unit`: the mode is inferred from
   the capability files alone, and a remote unit's adoption strips credentials
   and moves `pg/`, `backups/` and `secrets/`, so a mismatch refuses.
@@ -28,8 +29,12 @@ are not converting. While the cutover hold the adoption
 journal records stands, an ordinary start never releases it
 (`cli/cutover_hold.py`): before the held first start (`--start`) a bare
 `ava start` refuses and names that command, and after it (for example the
-autostart job after a reboot) a bare start brings the unit up still held. Only
-the go/no-go gate's `ava maintenance resume` opens business.
+autostart job after a reboot) a bare start brings the unit up still held. A
+held first start that failed or was not ready leaves phase `starting`; the
+next start that passes readiness, `--start` or a bare one, completes it to
+`ready`. `ava cluster recover` and `ava maintenance resume` refuse that hold
+too and name the one exit, the go/no-go step `--resume`, which alone opens
+business.
 
 ## Order within the runbook
 
@@ -61,8 +66,17 @@ the go/no-go gate's `ava maintenance resume` opens business.
    cutover issued for it (step `remote-units`) and its transport key in
    `AVA_DB_CAPABILITY_KEY`: the runner no longer holds the human bearer, and
    its capability both authenticates it and carries its database login.
-5. At the go/no-go gate (W11), release each hold with the command `--start`
-   prints: `ava maintenance resume --operation <holder> --acquired-at <time>`.
+5. At the go/no-go gate (W10), verify the gate's checklist, then (W11) release
+   each hold with `--resume`, the gateway first, then the runners. It takes
+   the hold's identity from the journal and refuses unless the adoption
+   completed, the hold stands in phase `ready` (the held first start passed
+   readiness) and, on a gateway, the database-records repair recorded a
+   completed run with no incomplete one after it (W7). The release itself is
+   `ava maintenance resume`'s: the unit must be serving, and the agents the
+   hold drained are woken. Everything else the gate lists (smoke agents, the
+   alert path, an empty legacy census on every host, the stale-writer probe,
+   the gateway released before the runners) no single host can check, so it
+   stays the operator's.
 
 ```bash
 .venv/bin/python scripts/cutover_inventory.py --home ~/.ava --service-path "$REVIEWED_PATH"
@@ -70,6 +84,7 @@ the go/no-go gate's `ava maintenance resume` opens business.
 .venv/bin/python scripts/cutover_adopt_home.py --home ~/.ava --service-path "$REVIEWED_PATH" \
     --execute --expect-mode remote-unit    # gateway on the gateway
 .venv/bin/python scripts/cutover_adopt_home.py --home ~/.ava --start
+.venv/bin/python scripts/cutover_adopt_home.py --home ~/.ava --resume    # go/no-go (W11)
 ```
 
 `--registry` names the cluster registry when the home's `.env` does not declare
@@ -126,6 +141,32 @@ journal's `record-retire` effect, delete `start-intent.json`, and restore `.env`
 from its pre-adoption snapshot in `backups/env/` (moved to
 `cutover-rollback/residue/backups/env/` on a remote unit).
 
+### An unreadable adoption journal
+
+The journal is written atomically, so only a hand edit or disk damage makes it
+unreadable. Nothing can then tell whether the standing hold is the cutover
+hold, so every path that asks fails closed with "unreadable adoption journal":
+a bare `ava start` (the autostart job included), `ava cluster recover`,
+`--start` and `--resume`. That also blocks the ordinary start of every later
+hold on the home, not only the cutover's.
+
+- **A later hold** (a stop after the cutover hold was released): read its
+  exact holder and time with `ava maintenance status`, then run
+  `ava maintenance start --operation <holder> --acquired-at <time>` and
+  `ava maintenance resume --operation <holder> --acquired-at <time>`. Neither
+  needs the journal; the resume notes that it could not read it.
+- **The cutover hold itself**: that recovery would release it without the
+  go/no-go step's checks. Repair the journal and use `--resume`, or, if it
+  cannot be repaired, verify those checks by hand first (the adoption steps
+  all `done` as far as the damaged file shows, phase `ready` in
+  `ava maintenance status`, on a gateway a `done` last run in
+  `cutover-rollback/db-records/journal.json`) and record that in the cutover
+  record.
+
+A *missing* journal instead reads as a home that was never adopted, and an
+ordinary start then releases the hold like any other. Never delete or move
+`cutover-rollback/` while the cutover hold stands.
+
 ## A legacy stop hold with failure receipts
 
 Adoption keeps only a completed legacy stop's hold: phase `stopped` with no
@@ -139,9 +180,21 @@ before the host's code switch; read the receipts with the old
   agents' root cause, run the old
   `ava maintenance repair --operation <holder> --acquired-at <time>` (it
   records the operator and moves the receipts into `repaired`), then re-run
-  the old `ava stop --yes`: it continues the same hold to `stopped`, and the
-  inventory then reports it adoptable. The repair needs the gateway database,
+  the old `ava stop --yes`. The repair **releases** that hold ("hold
+  released"): the unit's posture returns to `idle`, admission reopens and
+  the drained agents are woken. The re-run stop then drains again under a
+  fresh holder (`local-pause:<machine>:<pid>:<uuid>`) and takes that new hold
+  to `stopped`; the inventory reports the new one adoptable, and it is the
+  generation the adoption records. The repair needs the gateway database,
   so a runner settles before the gateway's W3 stop.
+
+  Between the repair and the re-run stop, business is briefly open again on
+  that unit while the rest of the fleet stays closed: its agents may run
+  turns and rewrite their rows. Consequences for the window: re-run the stop
+  at once and budget a second drain for that unit; take the W3 row export
+  ([database records](cutover-db-records.md)) only after that unit's last
+  drain completed, since the rows must be final; and record the reopening
+  and the new holder in the cutover record.
 - **Known gap:** the hold reached `stopped` with a receipt latched after its
   drain (a turn failing while services stopped). Neither code base has a
   sanctioned exit: `repair` and `resume --cancel` refuse a started stop, and
@@ -163,4 +216,5 @@ before the host's code switch; read the receipts with the old
 - Keep the hosts awake and on AC until the holds are released: after the first
   start the new converge registers the autostart job again. A reboot's ordinary
   start keeps the cutover hold, but the unit is down until it is ready again.
-- Delete `cutover-rollback/` after the agreed retention period.
+- Delete `cutover-rollback/` after the agreed retention period, and never
+  before `--resume` released the cutover hold.
