@@ -56,7 +56,7 @@ def _validate_launch_row(db_pool: ConnectionPool, body: LaunchAgentRequest) -> N
         raise ValueError(f"agent {body.agent_id} launch attempt is stale or misplaced")
 
 
-def _spawn_prechecks_blocking(body: SpawnAgentRequest, db_pool: ConnectionPool) -> str | None:
+def spawn_prechecks_blocking(body: SpawnAgentRequest, db_pool: ConnectionPool) -> str | None:
     """Sync spawn pre-checks — via to_thread: model-config validation (may read
     provider API keys) + fork checkpoint lookup. Returns the fork checkpoint
     (None for a plain spawn)."""

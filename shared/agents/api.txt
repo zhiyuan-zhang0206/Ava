@@ -384,6 +384,7 @@ class TimelineItem(BaseModel)
 
 ## shared.agents.impersonation
 ImpersonationError  (re-export of shared.agents.impersonation._impersonation_store.ImpersonationError)
+OPEN  (re-export of shared.agents.impersonation._impersonation_store.OPEN)
 RELAY_HEARTBEAT_SECONDS  (re-export of shared.agents.impersonation.relay.RELAY_HEARTBEAT_SECONDS)
 RELAY_HEARTBEAT_STALE_SECONDS  (re-export of shared.agents.impersonation.relay.RELAY_HEARTBEAT_STALE_SECONDS)
 abort_lease  (re-export of shared.agents.impersonation.relay.abort_lease)
@@ -394,6 +395,7 @@ def activate(lease_id: str, incarnation: RuntimeIncarnation) -> dict[str, Any]
 fail_acceptance  (re-export of shared.agents.impersonation.relay.fail_acceptance)
 def get(lease_id: str, caller: object) -> dict[str, Any]
 def inbox(lease_id: str, caller: object, *, limit: int=100) -> list[dict[str, Any]]
+lock_lease  (re-export of shared.agents.impersonation._impersonation_store.lock_lease)
 def mark_plugin_applied(lease_id: str, version: int, incarnation: RuntimeIncarnation) -> None
 def merge_plugin_delta(lease_id: str, caller: object, delta: dict[str, Any], *, expected_version: int) -> None
 def native_status(agent_id: int, incarnation: RuntimeIncarnation) -> dict[str, Any] | None
@@ -409,6 +411,7 @@ def release(lease_id: str, caller: object, summary: str) -> dict[str, Any]
 def renew(lease_id: str, caller: object, *, ttl_seconds: int | None=None) -> dict[str, Any]
 def request(agent_id: int, *, caller: CallerIdentity, ttl_seconds: int=3600, reason: str='', relay_provider: str, relay_thread_id: str | None=None, relay_codex_remote: str | None=None, relay_batch_window_seconds: int=0, name: str='', executor_name: str='', process_metadata: dict[str, Any] | None=None, automatic: bool=False) -> dict[str, Any]
 def require_active(lease_id: str, caller: object) -> dict[str, Any]
+require_native  (re-export of shared.agents.impersonation._impersonation_store.require_native)
 
 ## shared.agents.impersonation.impersonation_delivery
 def reserve_delivery(lease_id: str, relay_token: str, message_ids: list[int]) -> frozenset[int]

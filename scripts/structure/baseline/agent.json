@@ -12,7 +12,6 @@
     "agent": 34
   },
   "private_imports": {
-    "agent/exec_child.py::shared.log._add_postgres_sink": 1,
-    "agent/impersonation_handoff.py::shared.agents.impersonation._impersonation_store": 2
+    "agent/exec_child.py::shared.log._add_postgres_sink": 1
   }
 }

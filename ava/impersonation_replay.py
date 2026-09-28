@@ -8,7 +8,7 @@ import psycopg
 from psycopg.types.json import Jsonb
 
 from ava._gateway_transport import _get
-from shared.agents.impersonation._impersonation_store import lock_lease
+from shared.agents.impersonation import lock_lease
 from shared.agents.impersonation.impersonation_events import consume_events
 from shared.agents.impersonation.impersonation_history import event_belongs_to_agent
 from shared.agents.impersonation_manifest import (

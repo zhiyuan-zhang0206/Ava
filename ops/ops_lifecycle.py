@@ -68,9 +68,6 @@ from ops.ops_launch import (
     _insert_prompt_blocking as _insert_prompt_blocking,
 )
 from ops.ops_launch import (
-    _spawn_prechecks_blocking as _spawn_prechecks_blocking,
-)
-from ops.ops_launch import (
     launch_agent_op as launch_agent_op,
 )
 

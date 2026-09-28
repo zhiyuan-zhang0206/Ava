@@ -7,8 +7,5 @@
     "shared/agents/impersonation/__init__.py::request": 20,
     "shared/agents/messages/delivery_outbox.py::flush": 18,
     "shared/agents/messages/envelope.py::wrap_inbound": 15
-  },
-  "private_imports": {
-    "shared/agents/impersonation_manifest.py::shared.agents.impersonation._impersonation_store": 1
   }
 }

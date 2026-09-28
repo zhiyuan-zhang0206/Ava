@@ -15,7 +15,6 @@
     "ava/external_state.py::postgres-dial": 1
   },
   "private_imports": {
-    "ava/_settings.py::shared.db._restore_pooled_session": 1,
-    "ava/impersonation_replay.py::shared.agents.impersonation._impersonation_store": 1
+    "ava/_settings.py::shared.db._restore_pooled_session": 1
   }
 }
