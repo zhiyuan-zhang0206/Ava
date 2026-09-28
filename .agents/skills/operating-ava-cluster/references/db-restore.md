@@ -82,17 +82,20 @@ chmod 600 "$scratch_dir/backup.dump"
 
 The key file holds the logical-backup passphrase from its one resolution
 (`services/gateway_side/backup/passphrase.py`, the same one every backup and
-restore uses): the pinned `$AVA_HOME/backups/logical-backup.passphrase` once the
-gateway's human secret has rotated, otherwise the SHA-256 hex digest of that
-secret. It is private, never passed on argv, and must be deleted with the
-scratch directory after the drill. Only the gateway holds that material —
-remote units no longer hold the human secret — so disaster recovery needs the
-gateway's `.env` or, after a rotation, its pinned passphrase file; keep an
-escrowed copy with the gateway's other backup keys. A bearer rotation pins the
-pre-rotation passphrase before it changes the secret, so earlier artifacts stay
-decryptable. The archive's compression CRC and `pg_restore` failure path detect
-corruption; the artifact is encrypted with AES-256-CBC and inherits the local
-artifact's 0600 threat model.
+restore uses): the pinned `$AVA_HOME/backups/logical-backup.passphrase`. A
+gateway birth mints it; a home born earlier pinned `sha256(secret)` in the
+cutover's `api` step. It never changes with the cluster secret and is never
+derived: a home without it refuses. It is private, never passed on argv, and
+must be deleted with the scratch directory after the drill. Only the gateway
+holds it, so disaster recovery needs that file: keep an escrowed copy with the
+gateway's other backup keys. An artifact an empty-secret home wrote before its
+cutover pinned a minted passphrase was encrypted under the public
+`sha256("")`; restore it with
+`.venv/bin/python scripts/restore_drill.py <artifact> --legacy-empty-secret-passphrase`
+(by hand: the key file holds `printf '' | shasum -a 256 | cut -d' ' -f1`).
+The archive's compression CRC and `pg_restore` failure path detect corruption;
+the artifact is encrypted with AES-256-CBC and inherits the local artifact's
+0600 threat model.
 
 To complete a manual investigation, use a scratch Postgres URL only:
 

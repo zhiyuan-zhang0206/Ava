@@ -56,3 +56,8 @@ against the generation's verifier userlist; changed userlist or ini bytes
 restart it (a reload never revokes a user). A live pooler with closed listeners
 retains custody: normal start cannot repeat its shutdown signal or escalate to
 force. A graceful stop timeout fails without killing the survivor.
+
+PgBouncer and Redis are spawned with `shared.process_env.daemon_process_env`:
+the operator's PATH, home, user, temp dir, timezone and locale only. The
+gateway login, write generation and API token the boot pass delivered to
+`ava start` never reach a long-lived daemon's environment.

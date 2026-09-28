@@ -45,7 +45,6 @@ import argparse
 import logging
 import os
 import subprocess
-import tempfile
 import threading
 import time
 from collections.abc import Callable, Generator, Iterable
@@ -59,8 +58,8 @@ from zoneinfo import ZoneInfo
 import psycopg
 from psycopg.conninfo import conninfo_to_dict, make_conninfo
 
+from services.gateway_side.backup import passphrase as backup_passphrase
 from services.gateway_side.backup.intermediates import sweep_closed_partials
-from services.gateway_side.backup.passphrase import logical_backup_passphrase
 from services.pitr.logical_dump_names import (
     ACTIVATION_MARKER,
     DUMP_NAME_RE,
@@ -283,33 +282,27 @@ def _passwordless_conninfo(db_url: str) -> tuple[str, str]:
     return conninfo, password if isinstance(password, str) else ""
 
 
-def _key_file(directory: Path) -> Path:
-    """Write the logical-backup passphrase (pinned, else derived) to a private temporary file."""
-    fd, name = tempfile.mkstemp(prefix=".backup-key-", dir=directory)
-    path = Path(name)
-    try:
-        os.fchmod(fd, 0o600)
-        with os.fdopen(fd, "w", encoding="ascii") as key_file:
-            key_file.write(logical_backup_passphrase())
-    except BaseException:
-        with suppress(OSError):
-            path.unlink(missing_ok=True)
-        raise
-    return path
+def _key_file(directory: Path, *, legacy_empty_secret: bool = False) -> Path:
+    """A private temporary key file holding the pinned logical-backup passphrase."""
+    return backup_passphrase.write_key_file(directory, legacy_empty_secret=legacy_empty_secret)
 
 
-def decrypt_artifact(artifact: Path, custom_dump: Path) -> None:
+def decrypt_artifact(
+    artifact: Path, custom_dump: Path, *, legacy_empty_secret: bool = False
+) -> None:
     """Decrypt one managed artifact into a custom-format dump.
 
     `custom_dump` is the raw `pg_dump --format=custom` archive for artifacts
     written by the current pipeline; for legacy `<db>-<ts>.dump.gz.enc`
     artifacts it is the gzip-compressed archive (call `gunzip_if_needed`).
-    The caller owns `custom_dump` and removes it once consumed. The
-    logical-backup passphrase is never placed on argv.
+    The caller owns `custom_dump` and removes it once consumed. The pinned
+    passphrase decrypts, never placed on argv; `legacy_empty_secret` (an
+    explicit restore option, never a fallback) uses the public pre-cutover key
+    of an empty-secret home instead.
     """
     custom_dump.touch(mode=0o600, exist_ok=False)
     custom_dump.chmod(0o600)
-    key_file = _key_file(custom_dump.parent)
+    key_file = _key_file(custom_dump.parent, legacy_empty_secret=legacy_empty_secret)
     try:
         proc = subprocess.run(  # noqa: S603
             [
@@ -331,7 +324,8 @@ def decrypt_artifact(artifact: Path, custom_dump: Path) -> None:
             timeout=_DUMP_TIMEOUT_S,
         )
         if proc.returncode != 0:
-            raise RuntimeError(f"backup decrypt exited {proc.returncode}")
+            hint = "" if legacy_empty_secret else f"; {backup_passphrase.LEGACY_RESTORE_HINT}"
+            raise RuntimeError(f"backup decrypt exited {proc.returncode}{hint}")
     finally:
         with suppress(OSError):
             key_file.unlink(missing_ok=True)

@@ -12,13 +12,17 @@ tags:
 The authentication middleware binds an `AuthPrincipal` only after successful
 credential validation. A cluster bearer is one shared cluster principal, not a
 different principal per tool label. Validated browser sessions authenticate that
-same stable cluster administrator; rotating a cookie does not change principal.
+same stable cluster administrator, but only while the credential that minted
+them is current ([[web-sessions.ava.okf.md]]); rotating a cookie does not
+change principal.
 No-auth mode has no verified principal. Caller/source JSON cannot bind one.
 
 Alongside that authorization principal, the middleware stores the narrower
 credential fact used for inbound audit rows: `cluster_bearer` (the human
 secret), `machine_token:<class>` (the active write generation's machine API
-token, `cluster_credential`) or `user_session`. Both bearers authenticate the
+token, `cluster_credential`), `user_session` (a browser session the human secret
+minted) or `machine_session:runner` (one a runner token minted, a unit's managed
+browser). Both bearers authenticate the
 same cluster administrator; a revoked generation's token never matches. Scoped webhook and MCP boundaries establish their own
 `webhook:<provider>` or `mcp_client:<id>` fact after authenticating outside the
 cluster middleware. This fact does not grant authority and is never copied

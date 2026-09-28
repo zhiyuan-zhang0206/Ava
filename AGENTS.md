@@ -61,7 +61,7 @@ Windows unit carries `agent-runner` only
 
 **Auth follows the authority boundary.** `AVA_CLUSTER_SECRET` is the gateway's human
 bearer (API, frontend login); it stays on the gateway and rotates only explicitly
-(`scripts/rotate_cluster_secret.py` pins the logical-backup passphrase first). An EMPTY
+(`scripts/rotate_cluster_secret.py`; backups use a birth-pinned passphrase). An EMPTY
 secret (single-box default) leaves the API, `/ops` and frontend unauthenticated and binds
 every data-plane listener to loopback; a set secret adds this host's reachable address for
 Postgres and its pooler (Redis stays loopback, off-box inbound via the relay bridge). The
@@ -87,7 +87,7 @@ installed by its start, and never holds the human secret. Older homes convert on
 
 `ava start` is the single idempotent initialization and startup entry. Before
 runtime Settings or native effects, it persists `start-intent.json` (home,
-capabilities, checkout, ports, credentials); repeats retain that identity and
+capabilities, checkout, ports; credentials until `.env` holds them); repeats retain that identity and
 service selection, an interrupted one resumes, and an ambiguous home or
 contradictory pointer refuses. The home is checkout-anchored: explicit `AVA_HOME`,
 the production source path, or the checkout's `.ava_home` pointer (`--worktree`

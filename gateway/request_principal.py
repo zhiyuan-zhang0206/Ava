@@ -2,15 +2,22 @@
 
 Caller labels are deliberately absent. A shared bearer authenticates exactly
 one cluster administrator, not separate tools. Browser sessions minted from the
-same cluster login authenticate that administrator too, even after token rotation.
+same cluster login authenticate that administrator too, but only while the
+credential that minted them is still current (`session_mints`).
 """
 
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
+import os
+import re
+import secrets
+from contextlib import suppress
 from dataclasses import dataclass
-from typing import Literal
+from pathlib import Path
+from typing import Any, Literal
 
 from starlette.requests import Request
 
@@ -48,6 +55,129 @@ def cluster_credential(authorization: str | None, secret: str) -> str | None:
         return "cluster_bearer"
     cls = bearer_class(authorization, acceptance(ava_home().resolve()))
     return None if cls is None else f"machine_token:{cls}"
+
+
+# ── browser sessions bound to their minting credential ─────────────────────
+#
+# A session id is `<mint>.<random>`. The mint names the credential that logged
+# the browser in: `human-<mac>` (the human cluster secret) or `runner-<mac>` (a
+# write generation's runner API token, which a unit's managed browser
+# presents). `<mac>` is HMAC-SHA256 under this gateway's private session key
+# over the credential's SHA-256 digest, so a cookie carries no form of the
+# credential that can be brute-forced offline. A session authenticates only
+# while its mint is one of the CURRENT credentials' mints: the fence revoking a
+# generation, or a rotated human secret, ends every session that credential
+# minted at once, with no revocation step at any rotation point.
+
+SESSION_KEY_NAME = "web-session.key"
+_SESSION_KEY = re.compile(r"^[0-9a-f]{64}$")
+_MINT_FACTS = {"human": "user_session", "runner": "machine_session:runner"}
+_session_key_cache: dict[Path, tuple[tuple[int, int, int], bytes]] = {}
+
+
+def session_key_path(home: Path) -> Path:
+    return home / SESSION_KEY_NAME
+
+
+def _session_key(home: Path, *, create: bool) -> bytes | None:
+    """This gateway's session-mint MAC key: minted once, at the first login.
+
+    None when absent and `create` is false (then no session authenticates).
+    Losing the file ends every session; the next login mints a new key.
+    """
+    from shared.private_storage import create_private_bytes, private_file_problem
+    from shared.verified_file import regular_bytes
+
+    path = session_key_path(home)
+    if create and not path.exists():
+        with suppress(FileExistsError):
+            create_private_bytes(path, (secrets.token_hex(32) + "\n").encode())
+    try:
+        info = path.lstat()
+    except FileNotFoundError:
+        return None
+    identity = (info.st_ino, info.st_mtime_ns, info.st_size)
+    cached = _session_key_cache.get(home)
+    if cached is not None and cached[0] == identity:
+        return cached[1]
+    problem = private_file_problem(path)
+    if problem is None and os.name != "nt" and info.st_mode & 0o077:
+        problem = "is not owner-only"
+    if problem is not None:
+        raise RuntimeError(f"{path}: {problem}")
+    value = regular_bytes(path, max_bytes=4096).decode().strip()
+    if _SESSION_KEY.fullmatch(value) is None:
+        raise RuntimeError(f"{path} does not hold a session key")
+    key = bytes.fromhex(value)
+    _session_key_cache[home] = (identity, key)
+    return key
+
+
+def _mint(key: bytes, kind: str, credential_digest: str) -> str:
+    mac = hmac.new(key, f"{kind}\0{credential_digest}".encode(), hashlib.sha256)
+    return f"{kind}-{mac.hexdigest()[:32]}"
+
+
+def login_mint(password: str, secret: str) -> str | None:
+    """The mint of the credential a login `password` presents, else None.
+
+    The human secret, or the ACTIVE generation's runner API token (a unit's
+    managed browser holds no human secret). The gateway-class token never logs
+    a browser in. Mints this gateway's session key on first use.
+    """
+    from shared.cluster.authority.api import acceptance, bearer_class, token_digest
+    from shared.paths import ava_home
+
+    home = ava_home().resolve()
+    if secret and hmac.compare_digest(password, secret):
+        kind, digest = "human", token_digest(secret)
+    else:
+        accepted = acceptance(home)
+        if bearer_class(f"Bearer {password}", accepted) != "runner":
+            return None
+        kind, digest = "runner", accepted["runner"]
+    key = _session_key(home, create=True)
+    if key is None:
+        raise RuntimeError(f"{session_key_path(home)} vanished while minting a session")
+    return _mint(key, kind, digest)
+
+
+def session_mints(secret: str) -> dict[str, str]:
+    """{mint: credential fact} of the credentials that may back a session now.
+
+    The fact is `user_session` for the human secret and `machine_session:runner`
+    for the active generation's runner token. Empty while no session key
+    exists; the runner mint is absent while no generation is active (a fence).
+    """
+    from shared.cluster.authority.api import acceptance, token_digest
+    from shared.paths import ava_home
+
+    home = ava_home().resolve()
+    key = _session_key(home, create=False)
+    if key is None:
+        return {}
+    mints: dict[str, str] = {}
+    if secret:
+        mints[_mint(key, "human", token_digest(secret))] = _MINT_FACTS["human"]
+    runner = acceptance(home).get("runner")
+    if runner is not None:
+        mints[_mint(key, "runner", runner)] = _MINT_FACTS["runner"]
+    return mints
+
+
+def current_session_fact(pool: Any, session_id: str | None, secret: str) -> str | None:
+    """The credential fact of a valid session whose minting credential is
+    current (`user_session` / `machine_session:runner`), else None: the one
+    session check the auth middleware and `/api/auth/check` share."""
+    from gateway.session_store import session_is_valid, session_mint
+
+    mint = None if session_id is None else session_mint(session_id)
+    if mint is None:
+        return None
+    mints = session_mints(secret)
+    if not session_is_valid(pool, session_id, admitted=mints):
+        return None
+    return mints[mint]
 
 
 def principal_key(principal: AuthPrincipal, method: str, path: str, key: str) -> str:

@@ -8,7 +8,6 @@ to the host's timezone would pass or fail by which machine ran it.
 
 from __future__ import annotations
 
-import hashlib
 import os
 import subprocess
 import sys
@@ -27,6 +26,7 @@ from psycopg import sql
 from psycopg.conninfo import conninfo_to_dict
 
 from services import backup
+from services.gateway_side.backup.passphrase import logical_backup_passphrase
 from services.pitr import logical_dump_names, store_factory
 from services.pitr.checksums import MD5, ObjectChecksum
 from services.pitr.object_store import RemoteObjectAck
@@ -784,9 +784,8 @@ def test_encrypted_artifact_decrypts_to_original_dump(
 
     assert artifact.name.endswith(".dump.enc")
     key_file = bdir / "decrypt.key"
-    key_file.write_text(
-        hashlib.sha256(settings.data_plane.cluster_secret.encode()).hexdigest(), encoding="utf-8"
-    )
+    # The pinned passphrase, as an operator restoring by hand reads it.
+    key_file.write_text(logical_backup_passphrase(), encoding="utf-8")
     key_file.chmod(0o600)
     custom_dump = bdir / "restored.dump"
     decrypted = real_run(

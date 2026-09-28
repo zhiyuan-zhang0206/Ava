@@ -74,7 +74,7 @@ from shared.pg_tools import (
 )
 from shared.platform_backend import get_backend
 from shared.private_storage import write_private_bytes
-from shared.process_env import inherited_process_env
+from shared.process_env import daemon_process_env, inherited_process_env
 from shared.url_secret import url_host
 
 _LOOPBACK_ALIASES = frozenset({"127.0.0.1", "::1", "localhost", "ip6-localhost"})
@@ -523,7 +523,9 @@ def start_redis(
         "--logfile",
         str(data / "redis.log"),
     ]
-    result = subprocess.run(args, check=False, capture_output=True, text=True)
+    result = subprocess.run(
+        args, check=False, capture_output=True, text=True, env=daemon_process_env()
+    )
     if result.returncode != 0:
         print(
             f"  ✗ redis-server failed (rc={result.returncode}): {result.stderr.strip()}",

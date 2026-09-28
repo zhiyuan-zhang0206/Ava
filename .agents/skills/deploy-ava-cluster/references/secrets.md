@@ -24,8 +24,10 @@ generation's machine API token instead (`AVA_API_TOKEN`), which the gateway
 admits for the active generation only, and a runner's `/ops` accepts only its
 generation's tokens. It does not authenticate Postgres, PgBouncer, or Redis:
 the internal data plane always authenticates with its own credentials,
-whatever the bearer. Rotating it (`scripts/rotate_cluster_secret.py`) first
-pins the logical-backup passphrase; keep that pinned file with the backup keys.
+whatever the bearer, nor the logical backups: their passphrase is minted and
+pinned at birth (`$AVA_HOME/backups/logical-backup.passphrase`, keep it with the
+backup keys). Rotate the secret only with `scripts/rotate_cluster_secret.py`;
+the config API refuses to write it.
 
 Postgres application logins are write generations recorded in the gateway's
 private `$AVA_HOME/db-authority/`: one gateway and one runner login inheriting

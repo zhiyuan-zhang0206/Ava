@@ -663,6 +663,8 @@ def test_networked_cutover_rotates_the_bearer_once_before_issuing_bundles(
 
     born = networked
     upsert_env(born.home / ".env", {"AVA_CLUSTER_SECRET": _HUMAN}, audit_site="test")
+    # A home born before births minted a passphrase: it encrypted under sha256(secret).
+    passphrase.pin_path(born.home).unlink()
     dry = cutover.convert_api(born.home, born.record, execute=False)
     assert dry.startswith("api: would pin the logical-backup passphrase and rotate")
     assert dotenv_values(born.home / ".env")["AVA_CLUSTER_SECRET"] == _HUMAN
@@ -695,10 +697,20 @@ def test_networked_cutover_rotates_the_bearer_once_before_issuing_bundles(
     assert api.telemetry == telemetry_token(rotated) != telemetry_token(_HUMAN)
 
 
-def test_a_single_box_keeps_its_bearer(
+def test_a_single_box_keeps_its_bearer_and_pins_its_backup_passphrase(
     born: Born, set_machine_identity: Callable[..., None]
 ) -> None:
+    """A home born before births minted a passphrase, with an empty secret: the
+    step pins a minted passphrase (never the public sha256(""))."""
+    from services.gateway_side.backup import passphrase
+
+    passphrase.pin_path(born.home).unlink()
     set_machine_identity(role="gateway", name="gw")
+    assert cutover.convert_api(born.home, born.record, execute=False).startswith("api: would pin")
+    assert passphrase.pinned(born.home) is None
     outcome = cutover.convert_api(born.home, born.record, execute=True)
-    assert outcome == "api: none (single box keeps its bearer)"
+    assert outcome.startswith("api: single box keeps its bearer")
+    pinned = passphrase.pinned(born.home)
+    assert pinned is not None and pinned != passphrase.LEGACY_EMPTY_SECRET_PASSPHRASE
+    assert dotenv_values(born.home / ".env")["AVA_CLUSTER_SECRET"] == ""
     assert "api" not in cutover.read_journal(born.home)

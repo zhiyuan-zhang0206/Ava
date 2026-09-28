@@ -24,3 +24,13 @@ Before writing, it validates the full affected candidate through
 only local config file. Host fields are locally writable; a pure runner cannot
 write cluster fields locally because its cluster configuration is fetched from
 the gateway.
+
+Keys that decide who authenticates to the cluster, or whether it authenticates
+at all, are read-only on every config write path (the API, the ops op and
+`--local`): `AVA_CLUSTER_SECRET` rotates only through
+`scripts/rotate_cluster_secret.py`, and `AVA_AUTH_MIDDLEWARE_ENABLED` /
+`AVA_ALERTS_WEBHOOK_TOKEN` change only by editing the gateway `.env` on its
+host. Otherwise any authenticated caller, a machine token included, could pick
+a credential that outlives its own admission. Writable secrets are outbound
+credentials (provider, search, chat and backup-store keys) only;
+`tests/shared/test_config_editing.py` pins that classification.

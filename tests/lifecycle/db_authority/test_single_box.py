@@ -31,6 +31,7 @@ from cli.commands.data_plane import bringup
 from cli.commands.data_plane import cluster_instance as ci
 from cli.commands.data_plane import pgbouncer as pooler
 from cli.commands.migrations import cmd_migrations_apply
+from services.gateway_side.backup import passphrase
 from shared import cluster
 from shared.cluster import authority, ownership
 from shared.cluster.authority.api import API_TOKEN_ENV
@@ -141,6 +142,7 @@ def _configure(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Born:
     assert "AVA_RUNNER_DB_PASSWORD" not in values
     (home / ".env").write_text("".join(f"{key}={value}\n" for key, value in values.items()))
     _intent(home, record, values)
+    passphrase.ensure_minted(home)  # as the birth's claim publication pins it
     dp = settings.data_plane
     monkeypatch.setattr(dp, "cluster_secret", "")
     monkeypatch.setattr(dp, "db_url", values["AVA_DB_URL"])

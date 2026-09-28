@@ -8,6 +8,7 @@ import sys
 import types
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 import psycopg
 import pytest
@@ -15,7 +16,9 @@ from langchain_core.messages import HumanMessage
 from langgraph.checkpoint.base import empty_checkpoint
 from langgraph.checkpoint.postgres import PostgresSaver
 
+from services.gateway_side.backup import passphrase
 from shared.config import settings
+from shared.paths import ava_home
 
 _SCRIPT = Path(__file__).parents[2] / "scripts" / "restore_drill.py"
 _SPEC = importlib.util.spec_from_file_location("restore_drill", _SCRIPT)
@@ -115,7 +118,9 @@ def test_run_drill_restores_an_encrypted_artifact_into_throwaway_postgres(
         return None
 
     monkeypatch.setattr(restore_drill.backup, "_publish_offsite", _no_publish)
-    # The session database is not a born home: dump it through an explicit dial.
+    # The session database is not a born home: dump it through an explicit dial,
+    # under the passphrase a gateway birth pins.
+    passphrase.ensure_minted(ava_home())
     artifact = restore_drill.backup.run_backup(db_url=settings.data_plane.db_url)
     report, elapsed = restore_drill.run_drill(artifact)
 
@@ -161,3 +166,23 @@ def test_restore_failure_message_names_the_base_and_the_capacity_knob(
     assert "512 MiB free" in message
     assert "AVA_PG_THROWAWAY_BASE" in message
     assert "PQputCopyData: server closed the connection" in message
+
+
+def test_the_legacy_empty_secret_key_is_only_ever_an_explicit_choice(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The drill decrypts under the pinned passphrase unless the operator names
+    the legacy empty-secret key; the flag reaches decryption and nothing else."""
+    calls: list[tuple[Path | None, bool]] = []
+
+    def drill(artifact: Path | None, *, legacy_empty_secret: bool) -> tuple[Any, float]:
+        calls.append((artifact, legacy_empty_secret))
+        report = restore_drill.RestoreReport(0, 0, 0, 0, 0, 0, "owner")
+        return report, 0.0
+
+    monkeypatch.setattr(restore_drill, "run_drill", drill)
+    artifact = tmp_path / "ava-20260901T030000Z.dump.enc"
+    restore_drill.main([str(artifact)])
+    restore_drill.main([str(artifact), "--legacy-empty-secret-passphrase"])
+    assert calls == [(artifact, False), (artifact, True)]
+    assert capsys.readouterr().out.count("restore drill passed") == 2

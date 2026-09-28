@@ -278,11 +278,20 @@ def _publish_claim(
                 raise RuntimeError("interrupted start reservation is now owned by another home")
             cluster.save_record_locked(rec, path=inputs.registry)
     if data["phase"] == "claiming":
+        if data["record"] is not None:
+            # A gateway's logical backups are encrypted under a passphrase minted
+            # here, independent of its cluster secret (an empty one included).
+            from services.gateway_side.backup import passphrase
+
+            passphrase.ensure_minted(inputs.home)
         upsert_env(inputs.home / ".env", data["env"])
         if data["worktree"]:
             pointer = inputs.checkout / ".ava_home"
             write_text_atomic(pointer, str(inputs.home) + "\n", sync_parent=True)
         data["phase"] = "configured"
+        # `.env` now holds the payload, credentials included; the intent keeps
+        # no copy that a later rotation would leave stale.
+        data["env"] = {}
         _write(inputs.home / INTENT_NAME, data)
 
 

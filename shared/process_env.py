@@ -20,6 +20,27 @@ def inherited_process_env(overrides: Mapping[str, str] | None = None) -> dict[st
     return child
 
 
+# The operator's process mechanics a long-lived native daemon may keep: binary
+# lookup (a bare `redis-server` resolves through the child's PATH), identity,
+# temp dir, timezone and locale (`LC_*` as a prefix).
+_DAEMON_ENV_NAMES = frozenset({"PATH", "HOME", "USER", "LOGNAME", "TMPDIR", "TZ", "LANG"})
+
+
+def daemon_process_env() -> dict[str, str]:
+    """The environment of a long-lived data-plane daemon (PgBouncer, Redis).
+
+    Only the operator's process mechanics cross, never configuration or a
+    credential: the boot pass may have put the gateway login, the write
+    generation and its API token into this process's environment, and a daemon
+    would otherwise keep them until it restarts.
+    """
+    return {
+        name: value
+        for name, value in os.environ.items()
+        if name in _DAEMON_ENV_NAMES or name.startswith("LC_")
+    }
+
+
 def restricted_process_env() -> dict[str, str]:
     """Build the fixed environment for a child that must inherit no authority."""
 

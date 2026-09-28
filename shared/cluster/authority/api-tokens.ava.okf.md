@@ -15,7 +15,7 @@ stays on the gateway.
 | Surface | Admits |
 |---|---|
 | gateway middleware, `/api/bootstrap`, alert/work-failed webhooks | the human secret, or the ACTIVE generation's gateway or runner token (`acceptance`, cached per ledger identity; `gateway.request_principal.cluster_credential` records `cluster_bearer` or `machine_token:<class>`) |
-| `/api/auth/login` | the human secret, or the active runner token (the managed browser's cookie) |
+| `/api/auth/login` | the human secret, or the active runner token (the managed browser's cookie); the session is bound to that credential and ends when it is revoked or rotated (`gateway.request_principal.session_mints`) |
 | a unit's `/ops` (`services/agent_ops/_boot._ops_acceptance`) | digests of its generation's gateway and runner tokens: a remote unit's capability carries the gateway digest, never the gateway token |
 
 A revoked generation's token never authenticates again. The gateway re-reads
@@ -41,7 +41,8 @@ human secret), so it changes only when that secret rotates; remote units
 receive it in their capability.
 
 The human-bearer rotation (`scripts/rotate_cluster_secret.py`, and once at the
-fleet cutover, step `api` of `scripts/cutover_db_authority.py`) first pins the
-logical-backup passphrase (`services/gateway_side/backup/passphrase.py`), then
+fleet cutover, step `api` of `scripts/cutover_db_authority.py`) keeps the
+logical-backup passphrase pinned (`services/gateway_side/backup/passphrase.py`:
+minted at birth, `sha256(secret)` for a home the cutover converts), then
 changes the secret; remote units then need new bundles for the new telemetry
 token. Why: [rollout choices](../../../decisions/2026-09-27-write-generation-rollout-choices.md).

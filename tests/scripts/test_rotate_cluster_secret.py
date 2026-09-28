@@ -1,10 +1,14 @@
-"""Human-bearer rotation pins the logical-backup passphrase before it rotates.
+"""The logical-backup passphrase is pinned, never derived; a bearer rotation keeps it.
 
-Logical backups are encrypted under a passphrase derived from the gateway's
-cluster secret until it first rotates; the rotation pins that passphrase so
-artifacts written before and after it share one key. Every step is journaled
-before its effect, with fingerprints only, and a resumed rotation never
-re-derives the passphrase from the new secret.
+A gateway birth mints and pins the passphrase, so rotating the cluster secret
+never changes the key. A home born earlier encrypted under `sha256(secret)`;
+its cutover pins exactly that (a networked home inside the rotation, a single
+box without rotating), so its earlier artifacts keep decrypting. An empty
+secret's derivation is a public constant, so such a home pins a minted
+passphrase and its earlier artifacts decrypt only through the explicit legacy
+restore option. Every rotation step is journaled before its effect, with
+fingerprints only, and a resumed rotation never re-derives the passphrase from
+the new secret.
 """
 
 from __future__ import annotations
@@ -30,16 +34,34 @@ _OLD = "old-bearer-" + "o" * 32
 _RESTORES = itertools.count()
 
 
-@pytest.fixture
-def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """A gateway home whose `.env` holds `_OLD`, as this process's home."""
+def _home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, secret: str) -> Path:
     path = (tmp_path / "home").resolve()
     path.mkdir(mode=0o700)
-    (path / ".env").write_text(f"AVA_CLUSTER_SECRET={_OLD}\n")
+    (path / ".env").write_text(f"AVA_CLUSTER_SECRET={secret}\n")
     (path / ".env").chmod(0o600)
     monkeypatch.setattr("shared.paths.ava_home", lambda: path)
-    monkeypatch.setattr(settings.data_plane, "cluster_secret", _OLD)
+    monkeypatch.setattr(settings.data_plane, "cluster_secret", secret)
     return path
+
+
+@pytest.fixture
+def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """A gateway home born before births minted a passphrase (none pinned),
+    whose `.env` holds `_OLD`, as this process's home."""
+    return _home(tmp_path, monkeypatch, _OLD)
+
+
+@pytest.fixture
+def born(home: Path) -> Path:
+    """The same home as a birth leaves it: a minted passphrase pinned."""
+    passphrase.ensure_minted(home)
+    return home
+
+
+@pytest.fixture
+def open_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """An empty-secret single box born before births minted a passphrase."""
+    return _home(tmp_path, monkeypatch, "")
 
 
 def _secret(home: Path) -> str:
@@ -77,6 +99,14 @@ def test_rotation_pins_the_passphrase_before_the_secret_changes(home: Path) -> N
         assert value not in recorded
 
 
+def test_a_born_homes_rotation_keeps_its_minted_passphrase(born: Path) -> None:
+    minted = passphrase.pinned(born)
+    done = rotate.advance(born, None, lambda _rotation: None)
+    assert done.state == "done" and _secret(born) != _OLD
+    assert passphrase.pinned(born) == minted
+    assert minted not in (passphrase.derive(_OLD), passphrase.derive(_secret(born)))
+
+
 def _fake_pg_dump(real: Callable[..., Any]) -> Callable[..., Any]:
     """Run the real encryption pipeline over a fake dump (no database needed)."""
 
@@ -90,8 +120,9 @@ def _fake_pg_dump(real: Callable[..., Any]) -> Callable[..., Any]:
 
 
 @pytest.fixture
-def backups(home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Callable[[], Path]:
-    """Take one logical backup through `run_backup` (real openssl encryption)."""
+def backups(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Callable[[], Path]:
+    """Take one logical backup of this process's home through `run_backup`
+    (real openssl encryption)."""
     directory = tmp_path / "backups-db"
     monkeypatch.setattr(backup, "backup_dir", lambda: directory)
     monkeypatch.setattr(backup, "_run_with_progress", _fake_pg_dump(backup._run_with_progress))
@@ -105,39 +136,103 @@ def backups(home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Call
     return take
 
 
-def _restored(artifact: Path) -> bytes:
+def _restored(artifact: Path, *, legacy_empty_secret: bool = False) -> bytes:
     """The restore path's decryption (`decrypt_artifact`, shared by the snapshot
     verification and the restore drill); a fresh output file per call."""
     out = artifact.parent / f"restored-{next(_RESTORES)}.dump"
-    backup.decrypt_artifact(artifact, out)
+    backup.decrypt_artifact(artifact, out, legacy_empty_secret=legacy_empty_secret)
     return out.read_bytes()
 
 
-def test_backups_from_before_and_after_the_rotation_restore_with_one_key(
-    home: Path, backups: Callable[[], Path], monkeypatch: pytest.MonkeyPatch
+def _decrypts_with(artifact: Path, key: str) -> bool:
+    """Whether plain openssl opens `artifact` under `key` (an outsider's attempt)."""
+    key_file = artifact.parent / f"outsider-{next(_RESTORES)}.key"
+    key_file.write_text(key)
+    out = artifact.parent / f"outsider-{next(_RESTORES)}.dump"
+    argv = ["openssl", "enc", "-d", "-aes-256-cbc", "-pbkdf2", "-salt", "-kfile", str(key_file)]
+    proc = subprocess.run(  # noqa: S603 — fixed openssl argv over test-owned files
+        [*argv, "-in", str(artifact), "-out", str(out)], capture_output=True, check=False
+    )
+    return proc.returncode == 0 and out.read_bytes() == b"PGDMP fake dump"
+
+
+def _written_before_the_cutover(
+    backups: Callable[[], Path], monkeypatch: pytest.MonkeyPatch, secret: str
+) -> Path:
+    """An artifact as a home born earlier wrote it: under `sha256(secret)`."""
+    with monkeypatch.context() as scoped:
+        scoped.setattr(passphrase, "logical_backup_passphrase", lambda: passphrase.derive(secret))
+        return backups()
+
+
+def test_rotating_the_secret_never_changes_the_backup_key(
+    born: Path, backups: Callable[[], Path], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     before = backups()
     assert _restored(before) == b"PGDMP fake dump"
-    rotate.advance(home, None, lambda _rotation: None)
-    # The restarted gateway runs with the new secret.
-    monkeypatch.setattr(settings.data_plane, "cluster_secret", _secret(home))
-    after = backups()
-    assert _restored(before) == b"PGDMP fake dump"  # the restore path, old artifact
-    assert _restored(after) == b"PGDMP fake dump"  # the backup path, same pinned key
-    # A second rotation keeps the first pin: the key never changes again.
-    rotate.advance(home, None, lambda _rotation: None)
-    monkeypatch.setattr(settings.data_plane, "cluster_secret", _secret(home))
-    assert _restored(before) == _restored(backups()) == b"PGDMP fake dump"
+    for _ in range(2):
+        rotate.advance(born, None, lambda _rotation: None)
+        # The restarted gateway runs with the new secret.
+        monkeypatch.setattr(settings.data_plane, "cluster_secret", _secret(born))
+        assert _restored(before) == _restored(backups()) == b"PGDMP fake dump"
 
 
-def test_without_a_pin_a_rotated_secret_cannot_restore_older_backups(
+def test_a_home_without_a_pin_has_no_backup_key(home: Path, backups: Callable[[], Path]) -> None:
+    """No derivation fallback: without a pin nothing is written or read."""
+    with pytest.raises(passphrase.PassphrasePinError, match="no logical-backup passphrase"):
+        backups()
+    with pytest.raises(passphrase.PassphrasePinError, match="cutover"):
+        passphrase.logical_backup_passphrase()
+    directory = backup.backup_dir()
+    assert not list(directory.rglob("*.dump.enc")) and not list(directory.rglob(".backup-key-*"))
+
+
+def test_an_empty_secret_home_encrypts_for_real(
+    open_home: Path, backups: Callable[[], Path]
+) -> None:
+    passphrase.ensure_minted(open_home)
+    artifact = backups()
+    assert _restored(artifact) == b"PGDMP fake dump"
+    assert not _decrypts_with(artifact, passphrase.LEGACY_EMPTY_SECRET_PASSPHRASE)
+    assert _decrypts_with(artifact, passphrase.resolve(open_home))
+
+
+def test_the_cutover_pins_what_an_existing_home_encrypted_under(
     home: Path, backups: Callable[[], Path], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The control that makes the pin load-bearing: derivation alone fails."""
-    before = backups()
-    monkeypatch.setattr(settings.data_plane, "cluster_secret", "rotated-" + "n" * 32)
+    """A single box keeps its bearer; its `api` step pins `sha256(secret)`, so the
+    artifacts it wrote before the cutover restore, and a later rotation keeps it."""
+    old = _written_before_the_cutover(backups, monkeypatch, _OLD)
+    assert rotate.pin_single_box(home, execute=False).startswith("api: would pin")
+    assert passphrase.pinned(home) is None
+    outcome = rotate.pin_single_box(home, execute=True)
+    assert outcome.startswith("api: single box keeps its bearer") and "legacy" not in outcome
+    assert passphrase.pinned(home) == passphrase.derive(_OLD) and _secret(home) == _OLD
+    assert _restored(old) == _restored(backups()) == b"PGDMP fake dump"
+    assert rotate.pin_single_box(home, execute=True) == outcome  # a re-run keeps the pin
+    rotate.advance(home, None, lambda _rotation: None)
+    monkeypatch.setattr(settings.data_plane, "cluster_secret", _secret(home))
+    assert _restored(old) == b"PGDMP fake dump"
+
+
+def test_an_empty_secret_home_pins_a_minted_passphrase_at_the_cutover(
+    open_home: Path, backups: Callable[[], Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """sha256("") is public, so the cutover pins a minted passphrase; the
+    artifacts written before decrypt only through the explicit legacy option,
+    which is never tried on its own, and never opens a current artifact."""
+    old = _written_before_the_cutover(backups, monkeypatch, "")
+    outcome = rotate.pin_single_box(open_home, execute=True)
+    assert "--legacy-empty-secret-passphrase" in outcome
+    pinned = passphrase.pinned(open_home)
+    assert pinned is not None and pinned != passphrase.LEGACY_EMPTY_SECRET_PASSPHRASE
+    with pytest.raises(RuntimeError, match="--legacy-empty-secret-passphrase"):
+        _restored(old)
+    assert _restored(old, legacy_empty_secret=True) == b"PGDMP fake dump"
+    current = backups()
+    assert _restored(current) == b"PGDMP fake dump"
     with pytest.raises(RuntimeError, match="backup decrypt exited"):
-        _restored(before)
+        _restored(current, legacy_empty_secret=True)
 
 
 def _crash_after_pin(home: Path, monkeypatch: pytest.MonkeyPatch) -> rotate.Rotation:

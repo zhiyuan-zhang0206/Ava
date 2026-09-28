@@ -66,6 +66,7 @@ from shared.paths import ava_home
 from shared.pg_tools import brew_prefix, is_macos
 from shared.platform import LockTimeoutError
 from shared.proc import process_alive
+from shared.process_env import daemon_process_env
 
 # Transaction-pooling defaults. max_client_conn
 # caps total in-flight psycopg connections through the pooler; default_pool_size is
@@ -502,6 +503,7 @@ def _launch_pooler(listen_port: int, cluster_secret: str, admin_password: str) -
         check=False,
         capture_output=True,
         text=True,
+        env=daemon_process_env(),
     )
     if result.returncode != 0:
         print(

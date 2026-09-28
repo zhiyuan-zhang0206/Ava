@@ -125,3 +125,26 @@ def test_bootstrap_without_a_database_endpoint_refused(
         resp = client.get("/api/bootstrap", headers=_auth())
     assert resp.status_code == 400
     assert "AVA_DB_URL is missing" in resp.json()["detail"]
+
+
+def test_bootstrap_strips_a_remote_managed_planes_provider_password(
+    db_conn, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A remote-managed plane's gateway `.env` holds the provider's owner URL,
+    password included (a local plane's holds the credential-free endpoint, so it
+    cannot tell). Bootstrap serves the endpoint and never that password."""
+    provider_password = "provider-" + "p" * 24
+    (tmp_path / ".env").write_text(
+        f"AVA_DB_URL=postgresql://ava_owner:{provider_password}@db.example.com:5432/ava\n"
+        "AVA_REDIS_URL=redis://ava:runtime@redis.example.com:6379/0\n"
+    )
+    monkeypatch.setattr(rt, "_ava_home", lambda: tmp_path)
+    monkeypatch.setattr(config.settings.data_plane, "cluster_secret", _SECRET)
+    monkeypatch.setattr(type(config.settings.data_plane), "is_remote", property(lambda _s: True))
+    with TestClient(app) as client:
+        resp = client.get("/api/bootstrap", headers=_auth())
+    assert resp.status_code == 200, resp.text
+    served = urlsplit(cast(dict[str, str], resp.json())["AVA_DB_URL"])
+    assert (served.username, served.password) == ("ava_owner", None)
+    assert (served.hostname, served.port, served.path) == ("db.example.com", 5432, "/ava")
+    assert provider_password not in resp.text

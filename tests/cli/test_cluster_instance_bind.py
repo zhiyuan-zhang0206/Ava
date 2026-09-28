@@ -293,6 +293,37 @@ def test_start_redis_binds_loopback_only_without_secret(
     assert conf.endswith('requirepass "redis-admin"\n')
 
 
+def test_the_redis_daemon_inherits_no_ava_authority(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The boot pass may have delivered the gateway login, the generation and
+    the API token to this process; the daemon it spawns keeps none of them."""
+    delivered = {
+        "AVA_DB_URL": "postgresql://ava_g0_gateway:gen-password@127.0.0.1:6433/ava",
+        "AVA_DB_GENERATION": "0",
+        "AVA_API_TOKEN": "gateway-api-token-" + "t" * 32,
+        "AVA_CLUSTER_SECRET": "human-" + "h" * 40,
+        "AVA_REDIS_ADMIN_PASSWORD": "redis-admin",
+    }
+    for key, value in {**delivered, "PATH": "/usr/bin:/bin", "TZ": "Asia/Shanghai"}.items():
+        monkeypatch.setenv(key, value)
+    _wire_redis_start(monkeypatch, tmp_path)
+    envs: list[object] = []
+
+    def _run(cmd: list[str], **kwargs: object) -> object:
+        envs.append(kwargs.get("env"))
+        return type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})()
+
+    monkeypatch.setattr(_ci.subprocess, "run", _run)
+    assert _ci.start_redis(6380, "redis-admin", "redis-runtime", "", "ava") == 0
+    [captured] = envs
+    assert isinstance(captured, dict)
+    env = cast("dict[str, str]", captured)
+    assert env["PATH"] == "/usr/bin:/bin" and env["TZ"] == "Asia/Shanghai"
+    assert not [key for key in env if key.startswith("AVA_")]
+    assert not set(delivered.values()) & set(env.values())
+
+
 @pytest.mark.parametrize(
     ("admin", "runtime"), [("", ""), ("", "redis-runtime"), ("redis-admin", "")]
 )

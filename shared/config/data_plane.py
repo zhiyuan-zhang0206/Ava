@@ -294,11 +294,13 @@ class DataPlaneSettings(EnvSettings):
             "listener binds loopback alone. The internal data plane authenticates "
             "whatever the secret: Postgres/PgBouncer admit only SCRAM write-generation "
             "logins delivered by the launcher, and Redis requires its generated "
-            "passwords."
+            "passwords. Read-only to the config API and CLI: an authenticated caller "
+            "(a machine token included) never chooses the human bearer; rotate it "
+            "with scripts/rotate_cluster_secret.py."
         ),
         json_schema_extra={
             "restart_required": "all",
-            "writable": True,
+            "writable": False,
             "sensitive": True,
             "scope": "cluster-pinned",
             "bootstrap": False,
