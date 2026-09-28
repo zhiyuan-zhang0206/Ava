@@ -279,6 +279,7 @@ def _add_file_sink(path: Path) -> int:
         level="DEBUG",
         rotation=_rotate_by_size_or_day,
         retention="7 days",
+        diagnose=False,
     )
     with contextlib.suppress(OSError):
         path.chmod(0o600)

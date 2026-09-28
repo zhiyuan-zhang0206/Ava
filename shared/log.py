@@ -465,6 +465,7 @@ def _add_postgres_sink(process: str = "unknown", *, agent_id: int | None = None)
         enqueue=False,
         catch=True,
         filter=_event_pipeline_filter,
+        diagnose=False,
     )
     return _postgres_sink_id
 
@@ -507,7 +508,7 @@ def init_agent_process(*, agent_id: int) -> None:
     _configure_windows_event_loop_policy()
     set_process_agent_id(agent_id)
     logger.configure(extra={"agent_id": TURN_SCOPED_AGENT_ID})
-    logger.add(sys.stderr, format=_HUMAN_FORMAT, level="INFO", colorize=True)
+    logger.add(sys.stderr, format=_HUMAN_FORMAT, level="INFO", colorize=True, diagnose=False)
     from shared.paths import logs_dir
 
     _add_file_sink(logs_dir() / f"agent-{agent_id}.log")
@@ -595,7 +596,7 @@ def init_gateway_process(name: str = "gateway") -> None:
     # in the hosted agent-runner — which inits through THIS function — it is
     # what lets each record carry the turn's agent instead of `-`.
     logger.configure(extra={"agent_id": TURN_SCOPED_AGENT_ID})
-    logger.add(sys.stderr, format=_HUMAN_FORMAT, level="INFO", colorize=True)
+    logger.add(sys.stderr, format=_HUMAN_FORMAT, level="INFO", colorize=True, diagnose=False)
     _add_file_sink(logs_dir() / f"{name}.log")
     _add_postgres_sink(process=name)
     _install_stdlib_intercept()
@@ -648,7 +649,7 @@ def init_cli_process(*, name: str) -> None:
     _configure_windows_event_loop_policy()
     from shared.paths import logs_dir
 
-    logger.add(sys.stderr, format=_HUMAN_FORMAT, level="INFO", colorize=True)
+    logger.add(sys.stderr, format=_HUMAN_FORMAT, level="INFO", colorize=True, diagnose=False)
     _add_file_sink(logs_dir() / f"{name}.log")
     _add_postgres_sink(process=name)
     _install_stdlib_intercept()
