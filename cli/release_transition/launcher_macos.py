@@ -140,9 +140,10 @@ def admit_request(request: Request | PitrRequest) -> None:
     """Typed macOS scope, checked before any journal reservation or effect.
 
     A release starts root through the persistent home helper (root_macos.py).
-    Its single-home, same-schema, no-retained-terminal scope is the common
-    release preflight (`LocalTransition.preflight`, `verify_pair`); the helper's
-    finite and seed-report protocols are required when the launch is planned.
+    Its single-home, same-schema scope is the common release preflight
+    (`LocalTransition.preflight`, `verify_pair`), and its stop phase closes
+    terminals as on Linux; the helper's finite and seed-report protocols are
+    required when the launch is planned.
     """
     if isinstance(request, PitrRequest):
         raise ValueError(  # noqa: TRY004 — typed scope refusal on the CLI refusal path

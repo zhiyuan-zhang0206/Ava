@@ -15,12 +15,14 @@ those doors while holding the `.env` lock, before the write it protects.
 Reading the cluster clock means resolving `cluster_tz()`, which needs a built
 `Settings` instance (`shared/config/_lite.py:prepare`, `field_explicitly_set`)
 — `load_ava_env()` plus data-plane source resolution, and on a pure
-agent-runner without a local `.env` yet, a `GET /api/bootstrap` call. Two of
-`snapshot_env`'s callers write `.env` before that is safe to do: `ava enroll`
-writing the runner projection for the first time, and the first `ava start`
-before machine identity is resolved. At both points, loading runtime config
-has side effects this writer cannot afford, and can fail outright — turning a
-best-effort backup into an occasional install-time crash.
+agent-runner without a local `.env` yet, a `GET /api/bootstrap` call. One of
+`snapshot_env`'s callers writes `.env` before that is safe to do: a unit's
+first `ava start`, which publishes the unit's identity keys into `.env`
+(`cli/start_identity.py`) before machine identity is resolved — on a gateway
+home and on a remote agent-runner joining with `--gateway-url` and
+`--db-capability` alike. At that point, loading runtime config has side
+effects this writer cannot afford, and can fail outright — turning a
+best-effort backup into an occasional first-start crash.
 
 ## Decision
 

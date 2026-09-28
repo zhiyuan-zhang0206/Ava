@@ -247,7 +247,7 @@ identical no matter where a bare script is launched. Precedence:
 1. `AVA_HOME` env var — explicit; what a gateway-launched subprocess and the prod
    service sessions set.
 2. checkout == `~/.ava/source` (the prod source) → `~/.ava`.
-3. `<checkout>/.ava_home` pointer file → the home it names. `scripts/install.sh
+3. `<checkout>/.ava_home` pointer file → the home it names. `.venv/bin/ava start
    --worktree` writes this into a dev cluster's worktree (gitignored), so every
    later bare invocation from that worktree resolves to the cluster's own home.
 4. otherwise → **unanchored**: a checkout that claims no cluster (a dev worktree

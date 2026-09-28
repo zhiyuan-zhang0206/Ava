@@ -66,7 +66,7 @@ from dotenv import dotenv_values, load_dotenv
 # checkout. A syntactically valid URL that can never reach a real database (port
 # 1 on loopback), so a stray connection fails loudly instead of silently hitting
 # the prod database the host .env points at. shared/db.connect() detects it and
-# raises an actionable error directing the operator to `install.sh --worktree`.
+# raises an actionable error directing the operator to `.venv/bin/ava start --worktree`.
 UNANCHORED_DB_SENTINEL = "postgresql://unanchored-dev-checkout@127.0.0.1:1/run-ava-start-first"
 
 # The launcher's process profile, recorded by the CLI entry point before it
@@ -200,9 +200,9 @@ def checkout_anchored_home() -> tuple[Path, bool]:
 def _assert_env_agrees_with_checkout(env_home: Path) -> None:
     """Refuse when AVA_HOME names a different home than the checkout claims.
 
-    The 2026-07-31 prod wedge (#1059) in one line: a fleet agent ran
-    `install.sh --worktree` — which wrote the worktree's `.ava_home` correctly —
-    then `cd <worktree> && .venv/bin/ava start` from a shell carrying the prod
+    The 2026-07-31 prod wedge (#1059) in one line: a fleet agent anchored a
+    worktree to its own dev cluster — writing the worktree's `.ava_home` correctly —
+    then ran `cd <worktree> && .venv/bin/ava start` from a shell carrying the prod
     session env. AVA_HOME=~/.ava outranked the pointer written two seconds earlier,
     so the worktree's `migrations/` were applied to the central prod database.
     Every fleet agent inherits that env, so the whole phantom-cluster incident
@@ -369,7 +369,7 @@ def manifest_certification_secret_from_env_file() -> str:
 
 def _identity_env_only() -> frozenset[str]:
     """Machine-identity keys a host may legitimately supply via env alone (the
-    bootstrap handoff / enroll-before-first-start): never dropped when the
+    bootstrap handoff / a remote unit's first start): never dropped when the
     unit's .env does not declare them.
 
     A small helper (not a module constant) so the exemption set cannot drift
@@ -550,7 +550,7 @@ def _enforce_cluster_env_authority() -> None:
     sentinel discipline — keeps the original drop behavior.
 
     Host-scope keys are never in the cluster set (their scope=host fields are per-box facts
-    with no bootstrap source: a not-yet-enrolled runner or the test suites supply them from the
+    with no bootstrap source: a not-yet-started runner or the test suites supply them from the
     environment alone — AVA_GATEWAY_URL / AVA_CLUSTER_SECRET etc. — and popping them would
     silently un-configure the fetch). The per-unit health ports and the unanchored sentinel are
     likewise outside the cluster set: a co-located second unit (or the e2e suite) states its
@@ -571,8 +571,8 @@ def _enforce_cluster_env_authority() -> None:
     Dropping the undeclared flag makes the child fall through to its own files / False, the
     config source stays local-bare, and the leaked flag can never reach an agent runner or
     agent process again. The host-scoped gateway URL key (AVA_GATEWAY_URL) stays exempt for the
-    same reason as the host-scope keys above: enroll writes it to `.env`, but a
-    not-yet-enrolled runner and the test suites supply it from the environment alone, and
+    same reason as the host-scope keys above: a remote unit's first start writes it to
+    `.env`, but a not-yet-started runner and the test suites supply it from the environment alone, and
     dropping that would silently un-configure the fetch.
     """
     # The force/drop families come from the env registry's projections

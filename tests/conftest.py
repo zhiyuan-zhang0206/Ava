@@ -157,7 +157,7 @@ os.environ["AVA_CONFIG_FETCH"] = "skip"
 # naming one home while the executing checkout's `.ava_home` claims another. It
 # refuses because a fleet agent hitting that shape migrated prod (#1059) — but
 # here it is the whole point, so the suite says so explicitly. Without this, the
-# suite would import-error on any worktree that ran `install.sh --worktree` (i.e.
+# suite would import-error on any worktree that ran `ava start --worktree` (i.e.
 # every worktree with its own dev cluster) while passing on a fresh CI clone,
 # which has no pointer. Exported, not set on a fixture, so the subprocesses tests
 # spawn from this checkout (`ava` CLI, e2e gateway) inherit the same permission.

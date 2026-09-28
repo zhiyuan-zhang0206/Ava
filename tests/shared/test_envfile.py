@@ -120,7 +120,7 @@ def test_snapshot_filename_stamps_the_host_clock(
     the 2026-09-28 ruling exception to the 2026-08-27 one-cluster-clock rule
     (decisions/2026-09-28-env-backup-names-use-the-host-clock.md): `.env` is
     written before a process's identity, and its authoritative cluster clock,
-    are established (enroll, first start), and reading the cluster clock there
+    are established (a unit's first `ava start`), and reading the cluster clock there
     means loading runtime config — a `GET /api/bootstrap` on a pure runner —
     which `snapshot_env` cannot afford.
 

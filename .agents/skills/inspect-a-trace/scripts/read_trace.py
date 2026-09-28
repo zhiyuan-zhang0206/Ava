@@ -239,7 +239,7 @@ def _gateway_get(gateway: str, path: str) -> dict:
             "prod source, no .ava_home pointer) -- it owns no cluster, so no gateway's "
             "config or bearer is its to use, and the default gateway URL may be another "
             "cluster's (e.g. this host's production gateway). Anchor it first "
-            "(scripts/install.sh --worktree), or pass an explicit AVA_CLUSTER_SECRET if "
+            "(.venv/bin/ava start --worktree), or pass an explicit AVA_CLUSTER_SECRET if "
             "you mean to dial this gateway anyway."
         )
     headers = {}

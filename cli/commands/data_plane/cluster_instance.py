@@ -156,18 +156,18 @@ def _bind_addrs(cluster_secret: str) -> list[str]:
     when reachable resolves to localhost — the single-box default).
 
     A no-secret cluster binds LOOPBACK ONLY, whatever the reachable address says:
-    with the Postgres data plane unauthenticated (no scram), a non-loopback bind
-    would expose Postgres and its pooler to the LAN. Auth and reachability move
-    together — an operator who wants a LAN-reachable Postgres data plane sets
-    the cluster secret.
+    an empty secret is the single-box posture (its API and `/ops` serve
+    unauthenticated and no other machine dials its data plane), so Postgres and
+    its pooler, though they always authenticate (SCRAM), have no reason to face
+    the LAN. The bearer decides the network posture — an operator who wants a
+    LAN-reachable Postgres data plane sets the cluster secret.
 
     `cluster_secret` is the CALLER-PASSED cluster secret (the same value the hba
     is written from and the pooler is configured with), never read from
     `settings` — a process that inherited a sibling cluster's
     AVA_CLUSTER_SECRET (a shell carrying a different home's environment) must not widen
     a no-secret cluster's bind posture to the LAN. The caller resolves the
-    cluster's own secret (install: the decided secret; `ava start`: the
-    authority-passed .env value)."""
+    cluster's own secret from its authority-passed `.env` value."""
     if not cluster_secret:
         return ["127.0.0.1"]
     host = reachable_host()

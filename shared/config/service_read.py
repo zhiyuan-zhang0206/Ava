@@ -267,11 +267,11 @@ def bootstrap_config_values() -> dict[str, str]:
     Values are unmasked (the caller is an authenticated machine). A field set in
     the gateway's `.env` is served as its raw `.env` text verbatim (already the
     env-string form the recipient re-parses, including a comma-list), read fresh
-    — so a rotated cluster secret reaches an agent on its next restart without
-    the gateway itself restarting. The data-plane URL aliases
+    — so a `.env` edit reaches a recipient on its next restart without the
+    gateway itself restarting. The data-plane URL aliases
     (`AVA_DB_URL` / `AVA_REDIS_URL`) have their loopback host rewritten to this
     gateway's reachable address (`_serve_reachable_data_plane_hosts`) — required
-    for cross-machine enroll. AVA_GATEWAY_OTLP_ENDPOINT is derived from this
+    for a remote unit on another machine. AVA_GATEWAY_OTLP_ENDPOINT is derived from this
     gateway's reachable host and OTLP port; local receiver settings are not
     distributed. A field absent from `.env` is served as its stringified
     boot-time value, except the required DB URL, which must come from this fresh
