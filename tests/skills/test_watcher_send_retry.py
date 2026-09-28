@@ -1,4 +1,5 @@
-"""Hermetic delivery-retry tests for the skill reference watchers.
+"""Hermetic delivery-retry tests for the skill reference watchers, plus the
+ava-dynamic-workflow orchestrator scripts' handoff-dir resolution.
 
 Five reference watchers wake the launching agent with a single send at their
 trigger point: ``watch_idle.py`` (ava-watcher, ava-goal, and ava-fleet), ``watch_work.py``
@@ -10,6 +11,15 @@ the same class as #2663's ci_watcher fix). Each template now retries delivery
 with doubling gaps and exits 2 when every attempt failed. These tests pin the
 retry, the channel routing, and the exhausted-exit contract hermetically: real
 imports, a fake ``ava`` that records sends and can refuse the first N of them.
+
+The handoff-dir tests below (2026-09-28 fix, PR #3550 follow-up P2-1) lock
+`codebase_sweep_lite.py`, `deep_research_lite.py`, `codebase_sweep_orchestrator.py`,
+`deep_research_orchestrator.py`, and `orchestrator_template.py` — all in the
+same `ava-dynamic-workflow/reference/` directory as `gather_files.py` above —
+to `shared.paths.workspace_dir` instead of a hardcoded `Path.home() /
+".ava/workspaces"` that never read `AVA_HOME` at all. On a non-default home
+cluster (a worktree cluster, home `~/.ava-<dir>`) that silently wrote
+scratch/handoff state into the WRONG cluster's workspace tree.
 """
 
 from __future__ import annotations
@@ -26,8 +36,12 @@ from typing import Any
 import pytest
 
 from shared.coding_session_owner import CodingSessionKey, CodingSessionOwner
+from shared.paths import workspace_dir
 
 _REPO = Path(__file__).parents[2]
+_DYNAMIC_WORKFLOW_REFERENCE = (
+    _REPO / "ava_builtins" / "skills" / "ava-dynamic-workflow" / "reference"
+)
 
 
 def _load(name: str, path: Path) -> ModuleType:
@@ -371,3 +385,92 @@ def test_watch_work_terminal_wake_exits_2_on_exhaustion(
         watch_work.watch(str(work))
 
     assert excinfo.value.code == 2
+
+
+# --------------------------------------------------------------------------- #
+# ava-dynamic-workflow orchestrator scripts' handoff dir (P2-1)
+# --------------------------------------------------------------------------- #
+
+
+def _exec_prefix_through(path: Path, target: str, namespace: dict[str, Any]) -> None:
+    """Exec `path`'s top-level statements up to and including its first
+    `target = ...` assignment, then stop.
+
+    The three full orchestrators (`codebase_sweep_orchestrator.py`,
+    `deep_research_orchestrator.py`, `orchestrator_template.py`) run their
+    fork/spawn logic as more top-level statements immediately after the
+    handoff-dir assignment — they are meant to be pasted whole into
+    `execute_code`. Execing the whole file would spawn real agents; stopping
+    right after `target` is assigned is enough to prove how the handoff dir
+    resolves without touching any of that.
+    """
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    prefix: list[ast.stmt] = []
+    for node in tree.body:
+        prefix.append(node)
+        if (
+            isinstance(node, ast.Assign)
+            and len(node.targets) == 1
+            and isinstance(node.targets[0], ast.Name)
+            and node.targets[0].id == target
+        ):
+            break
+    else:
+        raise AssertionError(f"no top-level assignment to {target!r} found in {path}")
+    module = ast.Module(body=prefix, type_ignores=[])
+    ast.fix_missing_locations(module)
+    exec(compile(module, str(path), "exec"), namespace)
+
+
+@pytest.fixture
+def _fake_ava_module(monkeypatch: pytest.MonkeyPatch) -> _FakeAva:
+    """`_FakeAva().self.AGENT_ID` (42) doubles as the top-level `import ava`
+    these reference scripts do — no need for a second fake."""
+    fake = _FakeAva()
+    monkeypatch.setitem(sys.modules, "ava", fake)
+    return fake
+
+
+@pytest.mark.parametrize(
+    ("filename", "target", "suffix"),
+    [
+        ("codebase_sweep_lite.py", "HD", "codebase_sweep_lite"),
+        ("deep_research_lite.py", "HD", "deep_research_lite"),
+    ],
+)
+def test_lite_script_handoff_dir_uses_workspace_dir(
+    _fake_ava_module: _FakeAva, filename: str, target: str, suffix: str
+) -> None:
+    """Importing a lite script only defines functions at module top level
+    (unlike the full orchestrators below), so a full exec is safe here."""
+    namespace: dict[str, Any] = {"__name__": f"{filename}_under_test"}
+    exec(
+        compile(
+            (_DYNAMIC_WORKFLOW_REFERENCE / filename).read_text(encoding="utf-8"), filename, "exec"
+        ),
+        namespace,
+    )
+    assert namespace[target] == workspace_dir(_fake_ava_module.self.AGENT_ID) / suffix
+
+
+@pytest.mark.parametrize(
+    ("filename", "target", "task_var"),
+    [
+        ("codebase_sweep_orchestrator.py", "HANDOFF", "TASK"),
+        ("deep_research_orchestrator.py", "HANDOFF", "TASK"),
+    ],
+)
+def test_full_orchestrator_handoff_dir_uses_workspace_dir(
+    _fake_ava_module: _FakeAva, filename: str, target: str, task_var: str
+) -> None:
+    namespace: dict[str, Any] = {"__name__": f"{filename}_under_test"}
+    _exec_prefix_through(_DYNAMIC_WORKFLOW_REFERENCE / filename, target, namespace)
+    assert namespace[target] == workspace_dir(_fake_ava_module.self.AGENT_ID) / namespace[task_var]
+
+
+def test_orchestrator_template_handoff_dir_uses_workspace_dir(_fake_ava_module: _FakeAva) -> None:
+    namespace: dict[str, Any] = {"__name__": "orchestrator_template_under_test"}
+    _exec_prefix_through(
+        _DYNAMIC_WORKFLOW_REFERENCE / "orchestrator_template.py", "handoff", namespace
+    )
+    assert namespace["handoff"] == workspace_dir(_fake_ava_module.self.AGENT_ID) / "task_handoff"
