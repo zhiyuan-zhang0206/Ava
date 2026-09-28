@@ -258,6 +258,10 @@ def test_attestation_is_one_closure_document_with_the_home_census(
     document.write_text(json.dumps(json.loads(raw) | {"census_empty": False}))
     with pytest.raises(inventory.RefusedError, match="census_empty contradicts"):
         inventory.load_attestation(document)
+    # Its time bounds the rows it covers, compared with database times: never naive.
+    document.write_text(json.dumps(json.loads(raw) | {"attested_at": "2026-09-29T10:00:00"}))
+    with pytest.raises(inventory.RefusedError, match="attested_at"):
+        inventory.load_attestation(document)
 
 
 def test_attestation_refuses_while_the_legacy_health_probe_is_armed(

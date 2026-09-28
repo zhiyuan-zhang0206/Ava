@@ -63,7 +63,7 @@ from typing import Any, Literal, cast
 
 import psutil
 from dotenv import dotenv_values
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from cli.cutover_hold import ADOPTION_JOURNAL
 from scripts.cutover_legacy_jobs import Host, Jobs, discover
@@ -690,7 +690,7 @@ class Attestation(BaseModel):
     machine: str = Field(min_length=1)
     home: str = Field(min_length=1)
     boot_time: float
-    attested_at: str
+    attested_at: AwareDatetime  # when the census was read: the rows it can cover end here
     rows: tuple[AttestedRow, ...]
     other_machines: int
     all_absent: bool

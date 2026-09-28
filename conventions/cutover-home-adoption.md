@@ -91,10 +91,11 @@ business.
    smoke agents, the gateway released before the runners) no single host can
    check, so it stays the operator's.
 6. Close-out (W12): every unit's held first start booted its new agent host,
-   which settles the forced terminates that left identity-less rows fenced as
-   `pointer` at W7. The gateway runs the database-records repair once more
-   with the W7 attestations and a new `--reason`
-   ([late conversion](cutover-db-records.md#late-conversion-at-w12)).
+   which settles the forced terminates of hosted rows that left some
+   identity-less rows fenced as `pointer` at W7. The gateway runs the
+   database-records repair once more with the W7 attestations and a new
+   `--reason`; it mints only rows terminated before their machine's
+   attestation ([late conversion](cutover-db-records.md#late-conversion-at-w12)).
 
 ```bash
 .venv/bin/python scripts/cutover_inventory.py --home ~/.ava --service-path "$REVIEWED_PATH"

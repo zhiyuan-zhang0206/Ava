@@ -41,7 +41,8 @@ images recorded at planning:
   fenced for good (known gaps): conventions/cutover-db-records.md, "Rows left
   fenced". NULL rows stay protocol zero.
 - `identities`: each convertible identity-less terminated row (NULL
-  resources, no complete hosted runtime identity) takes a minted hosted
+  resources, no complete hosted runtime identity, terminated no later than its
+  machine's attestation was taken) takes a minted hosted
   identity (a fresh generation and owner, no pid) so resurrection accepts it,
   which clears it again. Resources stay NULL and no receipt is written. One
   compare-and-swap per machine, backed by its attestation; the journal keeps

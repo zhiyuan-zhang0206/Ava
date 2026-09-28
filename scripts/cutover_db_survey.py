@@ -25,9 +25,12 @@ reads `repair` while convertible or awaiting rows remain, then `fenced` (never
 D-8 also counts the identity-less terminated rows (`IDENTITYLESS`: NULL
 resources and no complete hosted runtime identity, which resurrection refuses)
 per machine and category: `convertible` (its machine's attestation is
-supplied), `awaiting` (a unit remains, no attestation yet), `no_unit` (no
-unit of the machine remains to attest), `paused`, or `pointer` (a lifecycle
-pointer resurrection does not supersede). The last three are fenced.
+supplied and was taken after the row's termination), `awaiting` (a unit
+remains, no attestation yet), `no_unit` (no unit of the machine remains to
+attest), `paused`, `pointer` (a lifecycle pointer resurrection does not
+supersede), or `after_attestation` (terminated after its machine's
+attestation, which therefore does not cover it: the new code writes rows of
+this shape too). The last four are fenced.
 """
 
 from __future__ import annotations
@@ -107,8 +110,8 @@ IDENTITY_IMAGE: LiteralString = (
     "m.incarnation_resources,'status_changed_at',m.status_changed_at)"
 )
 _IDENTITYLESS_ROWS = (
-    f"SELECT m.id, m.machine, {IDENTITY_IMAGE} AS image, {POINTER_CLEARS} AS clear "  # noqa: S608 -- constant fragments
-    f"FROM agents_meta m WHERE {IDENTITYLESS} ORDER BY m.id"
+    f"SELECT m.id, m.machine, {IDENTITY_IMAGE} AS image, {POINTER_CLEARS} AS clear, "  # noqa: S608 -- constant fragments
+    f"m.status_changed_at AS terminated_at FROM agents_meta m WHERE {IDENTITYLESS} ORDER BY m.id"
 )
 _PAUSED = "the machine is paused; no closure evidence exists for it"
 _NO_UNIT = "no unit of its machine remains to attest (retired or unregistered)"
@@ -123,6 +126,10 @@ IDENTITYLESS_CATEGORIES: dict[str, tuple[str, str | None]] = {
     "pointer": (
         "unconvertible",
         _NO_IDENTITY + "its lifecycle pointer names a command resurrection does not supersede",
+    ),
+    "after_attestation": (
+        "inadmissible",
+        _NO_IDENTITY + "terminated after its machine's closure attestation, which cannot cover it",
     ),
 }
 # Verdicts whose agents the runtime keeps refusing after the repair.
@@ -549,7 +556,10 @@ def _identityless(
     conn: psycopg.Connection[Any], found: Survey, inputs: Inputs
 ) -> list[Identityless]:
     """Each identity-less row, judged by its pointer, then its machine's evidence:
-    the machine attestation is the allocation closure its identity mint rests on."""
+    the machine attestation is the allocation closure its identity mint rests on,
+    for rows terminated no later than it was taken (host and database clocks
+    compared; the old stop precedes the attestation by minutes, the new code's
+    first terminations follow it by the whole window)."""
     registered = {
         unit["machine_name"]
         for unit in found.units
@@ -566,6 +576,10 @@ def _identityless(
             item.category = "paused"
         elif item.machine not in inputs.attestations:
             item.category = "awaiting"
+        elif row["terminated_at"] > inputs.attestations[item.machine].attested_at:
+            # The attestation proves the home empty when taken; a later
+            # termination is the new code's, which that document never saw.
+            item.category = "after_attestation"
         judged.append(item)
     return judged
 

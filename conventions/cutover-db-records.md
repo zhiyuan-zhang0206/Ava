@@ -132,11 +132,19 @@ missing generation or owner, or a pid): an agent terminated before the runtime
 incarnation existed. Resurrection refuses it (`runtime_cutover_required`).
 D-8 counts these rows per machine and category (`identityless`, and the
 totals under `counts`): `convertible` (the machine's attestation is
-supplied), `awaiting` (a unit remains, no attestation yet), `no_unit` (every
-unit is retired or none is registered), `paused`, or `pointer` (a lifecycle
-pointer that resurrection would not settle as superseded: anything but an
-unapplied restart or terminate). Only `convertible` rows are written; the
-closure attestation, which proves the home census empty, is their evidence.
+supplied and was taken after the row's termination), `awaiting` (a unit
+remains, no attestation yet), `no_unit` (every unit is retired or none is
+registered), `paused`, `pointer` (a lifecycle pointer that resurrection would
+not settle as superseded: anything but an unapplied restart or terminate), or
+`after_attestation` (terminated after its machine's attestation was taken).
+Only `convertible` rows are written; the closure attestation, which proves the
+home census empty when it was taken, is their evidence, so it covers only rows
+terminated before (`status_changed_at` no later than its `attested_at`). The
+new code writes rows of the same shape, an agent terminated before its first
+admission, and those never qualify. The comparison crosses clocks (the
+database's and the attesting host's), which is safe within minutes: legacy
+terminations precede the attestation by at least the drain, and business,
+the first source of new terminations, stays closed until W11.
 
 ## Rows left fenced
 
@@ -170,7 +178,8 @@ the script exists. What can change a fenced row:
   defers on it whatever identity the row carries: a forced terminate the new
   agent host settles at its first boot converts at the
   [late conversion](#late-conversion-at-w12); any other pointer keeps the row
-  fenced.
+  fenced. `after_attestation` never converts: once the new code runs on its
+  machine, no attestation can prove that home empty.
 - **Every other reason (known gap).** This covers:
   - a row of a machine with no unit left to attest: every unit is retired
     (`--retire-units`, from the run that retires the last one on) or none is
@@ -198,19 +207,22 @@ terminate that was applied but never observed reads `pointer` at W7 and stays
 fenced: resurrection defers on that pointer. The new agent host settles such a
 force when it boots on the row's machine, before its scheduler starts
 (`shared.hosted_force.recover_orphaned_hosted_forces`, logged as
-`hosted boot recovery: observed <n> orphaned force(s)`). It observes the force
-and clears the pointer, and the row reads `convertible` once its machine's
-attestation is supplied. A force whose exec evidence may still be live is
-deferred instead (`hosted boot recovery deferred`) and its row stays fenced.
+`hosted boot recovery: observed <n> orphaned force(s)`), but only for a row
+that kept a hosted kind, generation and owner (identity-less through a
+leftover pid) and a force targeting exactly that pair; every other `pointer`
+row stays fenced. It observes the force and clears the pointer without
+changing the row's status, so the row keeps its termination time and reads
+`convertible` with its machine's attestation. A force whose exec evidence may
+still be live is deferred instead (`hosted boot recovery deferred`) and its
+row stays fenced.
 
 That boot is each unit's held first start (W8, W9), so by W12 every included
 unit has had it. Then, on the gateway:
 
-1. `--check` with the same attestation documents W7 used. For each machine,
-   D-8's `identityless` `convertible` count must not exceed the `pointer`
-   count of W7's final `--check`. The new code writes rows of the same shape
-   (an agent terminated before its first admission), and this run would mint
-   them too: if a count exceeds it, stop and decide before going on.
+1. `--check` with the same attestation documents W7 used. Rows the new code
+   wrote in the same shape (agents terminated since W11 before their first
+   admission) read `after_attestation`: the documents were taken before them,
+   so the run never mints them and they stay fenced.
 2. The dry run with those attestations and a new `--reason`; the same inputs
    as W7's completed run change nothing. Pass no `--pending-json`,
    `--lease-json` or `--retire-units`: W7 applied them, and passing them again
