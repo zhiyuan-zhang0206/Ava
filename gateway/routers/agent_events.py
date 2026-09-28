@@ -9,7 +9,7 @@ Two faces of the same observability stream:
 
 Split out of routers/agents.py (CRUD + lifecycle then; lifecycle later moved
 to routers/agents_lifecycle.py) so each router stays a
-focused unit — same precedent as routers/agent_inspect.py (the per-agent
+focused unit — same precedent as gateway/inspect/router.py (the per-agent
 inspector panel).
 """
 
@@ -23,7 +23,7 @@ from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import StreamingResponse
 
 from gateway import loki_events, loki_query_budget
-from gateway.routers._backend_failure import raise_backend_unavailable
+from gateway._backend_failure import raise_backend_unavailable
 from gateway.routers._eval_guard import deny_isolated_result_read
 from gateway.schemas import AgentEventRow
 from gateway.sse import event_stream

@@ -22,7 +22,7 @@ from uuid import UUID, uuid4
 from fastapi import APIRouter, HTTPException, Query, Request, Response
 from psycopg_pool import ConnectionPool
 
-from gateway import neighbors
+from gateway.inspect import neighbors
 from gateway.routers import agents_forward
 from gateway.routers.agents_forward import _forward_spawn_to_remote
 from gateway.schemas import (

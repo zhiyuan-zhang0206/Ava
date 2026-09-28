@@ -35,13 +35,6 @@ cap-domain exits use `exitType`, `expires`, and `approver`); readers ignore unkn
 
 ## Open
 
-### locality:gateway/routers/agent_inspect.py:gateway/schemas/inspect.py
-- **class**: locality
-- **status**: open
-- **evidence**: `cochange.py`: c=15, confidence 71%; also `gateway/neighbors.py` <-> `gateway/routers/agent_inspect.py` c=8, 73%. Leaked decision: the Inspector read surface (response shape and its bounded-observability read policy) is split by technical layer — model in `gateway/schemas/`, assembly in the router, lineage/degradation in `gateway/neighbors.py`: `242092c9b` (persist observed metrics), `40ddfc499` (liveness fields), `a14902121` / `e8e70a11b` (bounded reads) each moved them together. A same-process layer split (see `future/infra/locality.md` calibration); fix is a vertical slice, and needs a design pass because `gateway/schemas/` feeds codegen.
-- **first-seen**: 2026-09-28 (locality class first run)
-- **last-verified**: 2026-09-28
-
 ### locality:gateway/schemas/__init__.py:shared/api_contracts/contracts.py
 - **class**: locality
 - **status**: open

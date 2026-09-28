@@ -77,6 +77,10 @@ _GENERATED_EXCLUDE = (
 _CONTRACT_BOUNDARIES: tuple[tuple[str, str], ...] = (
     # REST wire shape, carried to the frontend by codegen.
     ("gateway/schemas/", "ui/web/"),
+    # The Inspector response models live in gateway/inspect/schemas.py (its own
+    # functional package, not gateway/schemas/), but they feed the same
+    # OpenAPI-codegen contract with the frontend.
+    ("gateway/inspect/schemas.py", "ui/web/"),
     # The exec child's request/result wire: `exec_protocol` owns it; the child
     # process (`exec_child`) and the parent's exec node family
     # (`agent/graph/_exec*`) are its two ends.
