@@ -76,3 +76,23 @@ checks and records a nonce under one lock, so concurrent copies of one
 request admit once), and a forged proof never burns a nonce. `seal` / `open_sealed`
 (AES-256-GCM under a key derived from the secret, operation and unit) carry a
 payload for exactly one unit in one operation.
+
+## Before remote units (dbgen-8/FC-9)
+
+The coordinator channel carries no remote unit yet (`require_topology`
+refuses them). These must land before it does:
+
+- **Authenticated coordinator responses.** The channel MACs requests only:
+  the unit's client parses any `200` body as an `Instruction`, over plain
+  HTTP to the captured endpoint. An on-path attacker, or anything that
+  answers at that endpoint, can order a unit to `close`, `excluded` or
+  `restore`, and the follower complies, because it checks only the
+  operation, unit, image and maintenance hold: a capability is sealed, an
+  order is not. The plan: the listener MACs every response under its own
+  HKDF label (`response`) over the protocol, operation, unit, the request's
+  nonce, the status and the body's SHA-256, and the client verifies that MAC
+  before it parses anything, refusing a response without one. Covering the
+  request's nonce binds each answer to the one request it answers, so a
+  captured answer cannot be replayed to a later request. The protocol tag
+  (`ava-coordinator/1`) is not frozen into any shipped image yet, so the
+  change needs no second release.
