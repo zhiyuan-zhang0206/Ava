@@ -432,6 +432,24 @@ def _legacy_unowned_forced(db: psycopg.Connection) -> int:
     return aid
 
 
+def _legacy_forced_beside_a_marked_neighbour(db: psycopg.Connection) -> int:
+    """As above while another agent carries both facts: a lifecycle release
+    (its resurrection) and an unowned termination receipt (the force before
+    it). Both facts are per agent, so a neighbour's prove nothing here."""
+    other, _, _, _ = create_agent_row(spawner="user", machine=machine_name())
+    db.commit()
+    assert _unowned_receipt(db, _force(other))
+    agent_wake.resurrect_agent(other, resurrected_by="user")
+    released = db.execute(
+        "SELECT count(*) FROM inbound_messages WHERE agent_id=%s AND kind='resurrect' "
+        "AND payload->'lifecycle_release' = 'true'::jsonb",
+        (other,),
+    ).fetchone()
+    db.commit()
+    assert released == (1,)
+    return _legacy_unowned_forced(db)
+
+
 def _legacy_termination_swept(db: psycopg.Connection) -> int:
     """Terminated with no identity and no receipt, as every row the cutover
     inherits: a later force (a machine-pause sweep) finds it terminated already
@@ -467,6 +485,7 @@ def _earlier_life_receipt(db: psycopg.Connection) -> int:
     "arrange",
     [
         _legacy_unowned_forced,
+        _legacy_forced_beside_a_marked_neighbour,
         _legacy_termination_swept,
         _partial_identity_forced,
         _earlier_life_receipt,
