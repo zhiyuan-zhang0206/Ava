@@ -109,6 +109,11 @@ VERSION = 1
 RECORD = f"{ARCHIVE}/db-records"
 JOURNAL = f"{RECORD}/journal.json"
 STEPS = ("pending", "lease", "posture", "units", "incarnations")
+# Ceilings of the owner session. A leftover transaction holding a row a repair
+# locks (a prepared one survives restarts; D-11) fails that effect instead of
+# hanging the run.
+LOCK_TIMEOUT = "10s"
+STATEMENT_TIMEOUT = "60s"
 _UNITS = TypeAdapter(tuple[RetiredUnit, ...])
 
 
@@ -425,6 +430,21 @@ def _begin(
     )
 
 
+def _ceiling(effect: dict[str, Any], exc: psycopg.Error) -> RuntimeError:
+    """The effect hit a session ceiling; its transaction already rolled back."""
+    if isinstance(exc, psycopg.errors.LockNotAvailable):
+        cause = (
+            f"waited longer than lock_timeout {LOCK_TIMEOUT} for a row it locks; another "
+            "session or a prepared transaction (D-11) holds it"
+        )
+    else:
+        cause = f"ran longer than statement_timeout {STATEMENT_TIMEOUT}, or was cancelled"
+    return RuntimeError(
+        f"{effect['op']}: {cause}. Nothing of this effect committed; resolve the cause, "
+        "then re-run with the same inputs to continue"
+    )
+
+
 def _print_fenced(fenced: list[dict[str, Any]]) -> None:
     """What this run leaves fenced, stated before its first write."""
     total = sum(group["count"] for group in fenced)
@@ -466,8 +486,11 @@ def execute(
     run = runs[-1]
     for step in STEPS:
         for effect in run["effects"][step][len(run["results"][step]) :]:
-            with conn.transaction():
-                result = _HANDLERS[effect["op"]](conn, effect, inputs)
+            try:
+                with conn.transaction():
+                    result = _HANDLERS[effect["op"]](conn, effect, inputs)
+            except (psycopg.errors.LockNotAvailable, psycopg.errors.QueryCanceled) as exc:
+                raise _ceiling(effect, exc) from exc
             run["results"][step].append(result)
             _write_journal(home, journal)
     run["state"] = "done"
@@ -515,8 +538,13 @@ def session(home: Path, registry: Path, *, write: bool) -> Generator[psycopg.Con
 
 
 def prepare_session(conn: psycopg.Connection[Any], *, write: bool) -> None:
-    """UTC renders every recorded timestamp identically across runs; reads see one snapshot."""
+    """UTC renders every recorded timestamp identically across runs; reads see one
+    snapshot; no statement waits on a lock or runs past the session ceilings."""
     conn.execute("SET TIME ZONE 'UTC'")
+    conn.execute(
+        "SELECT set_config('lock_timeout', %s, false), set_config('statement_timeout', %s, false)",
+        (LOCK_TIMEOUT, STATEMENT_TIMEOUT),
+    )
     if not write:
         conn.execute(
             "SET SESSION CHARACTERISTICS AS TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY"

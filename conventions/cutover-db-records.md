@@ -83,7 +83,11 @@ empty.
 Effects run in this order, each in its own transaction, and compare their row
 with the recorded images: the after image means a crashed run already committed
 it (`already`), the before image is applied, anything else stops the run. The
-conversion re-checks every closure guard under the row lock.
+conversion re-checks every closure guard under the row lock. The owner session
+caps lock waits (`lock_timeout` 10 s) and statements (`statement_timeout`
+60 s): an effect that hits a ceiling, for example behind a prepared
+transaction holding its row (D-11), rolls back and stops the run with the
+cause, and the same inputs continue it.
 
 | Step | Effect |
 |---|---|

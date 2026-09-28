@@ -7,6 +7,8 @@ from __future__ import annotations
 # pyright: reportUnusedImport=false
 # ruff: noqa: F811 -- imported pytest fixtures are injected by name.
 import json
+import threading
+import time
 from pathlib import Path
 
 import psycopg
@@ -14,6 +16,7 @@ import pytest
 
 from scripts import cutover_db_records as records
 from scripts import cutover_db_survey as survey_module
+from shared.config import settings
 from tests.lifecycle.cutover.test_db_records import (  # noqa: F401 -- fixtures
     _BOOTSTRAP_OWNED,
     Cluster,
@@ -112,3 +115,46 @@ def test_execute_prints_and_records_what_stays_fenced(
         assert f"1 inadmissible: {reason} (agents {agents[name]})" in printed
     journal = json.loads((cluster.home / records.JOURNAL).read_text())
     assert journal["runs"][0]["fenced"] == expected
+
+
+def test_a_held_row_lock_fails_the_effect_and_the_same_inputs_continue(
+    cluster: Cluster,
+    db_conn: psycopg.Connection,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A leftover transaction (a prepared one survives restarts: D-11) holding
+    a row a repair locks fails that effect within the lock ceiling instead of
+    hanging the run; nothing of the effect commits and the run continues once
+    the holder is gone."""
+    monkeypatch.setattr(records, "LOCK_TIMEOUT", "200ms")
+    inputs = _inputs(tmp_path, cluster)
+    unchanged = _state(db_conn)
+    holder = psycopg.connect(settings.data_plane.db_url)
+    holder.execute("SELECT 1 FROM deployment_state WHERE id=1 FOR UPDATE")
+    release = threading.Timer(5.0, holder.rollback)
+    release.start()
+    try:
+        started = time.monotonic()
+        with pytest.raises(RuntimeError, match=r"pending-clear: waited longer than lock_timeout"):
+            _run(cluster, inputs)
+        assert time.monotonic() - started < 5.0
+    finally:
+        release.cancel()
+        holder.rollback()
+        holder.close()
+    assert _state(db_conn) == unchanged
+    stopped = json.loads((cluster.home / records.JOURNAL).read_text())["runs"][0]
+    assert (stopped["state"], stopped["results"]["pending"]) == ("started", [])
+    run = _run(cluster, inputs)
+    assert run is not None and run["state"] == "done"
+
+
+def test_every_owner_session_carries_the_lock_and_statement_ceilings() -> None:
+    for write in (False, True):
+        with psycopg.connect(settings.data_plane.db_url, autocommit=True) as conn:
+            records.prepare_session(conn, write=write)
+            ceilings = conn.execute(
+                "SELECT current_setting('lock_timeout'), current_setting('statement_timeout')"
+            ).fetchone()
+        assert ceilings == ("10s", "1min")
