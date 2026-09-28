@@ -485,8 +485,8 @@ class TestPoolIsolation:
         monkeypatch.setattr(settings.daemon, "host_max_concurrent_turns", turn_limit)
         monkeypatch.setattr(settings.daemon, "host_db_pool_max_size", 12)
         monkeypatch.setattr(settings.daemon, "host_control_pool_max_size", 3)
-        workload_pool = build_shared_pool("postgresql://unused")
-        control_pool = build_control_pool("postgresql://unused")
+        workload_pool = build_shared_pool()
+        control_pool = build_control_pool()
 
         assert workload_pool is not control_pool
         assert workload_pool.max_size == 12

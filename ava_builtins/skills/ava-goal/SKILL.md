@@ -127,7 +127,7 @@ each round you still need to keep watching. It reads its connection settings fro
 the launching agent's own configuration, so it always listens on the same stream
 the target reports to. It sets `socket_timeout=None` explicitly (redis-py 8
 defaults 5s, which kills the long blocking read the moment the event stream goes
-quiet). If the stream dies anyway, it falls back to polling the agents table
+quiet). If the stream dies anyway, it falls back to polling the target's status
 (`_watch_via_poll`), which also covers the case where the target is already idle
 when the watcher starts.
 

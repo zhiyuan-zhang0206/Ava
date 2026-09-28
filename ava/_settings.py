@@ -101,9 +101,7 @@ class _LazyConnection:
 
 
 def _connect_db() -> "psycopg.Connection":  # noqa: F821  # pyright: ignore[reportUndefinedVariable]
-    import psycopg
-
-    from shared.db import PG_STATEMENT_TIMEOUT_KWARGS
+    from shared.db import connect
 
     if not settings.data_plane.db_url:
         raise RuntimeError("AVA_DB_URL not set — ava DB ops should not be called in container mode")
@@ -116,37 +114,18 @@ def _connect_db() -> "psycopg.Connection":  # noqa: F821  # pyright: ignore[repo
     #    calls all failing in a chain (especially hard to diagnose when
     #    caller forgets rollback)
     # Multi-statement transactions don't go through this conn — the caller
-    # opens its own `psycopg.connect()` (shared/agents/contract.py's spawn_agent /
-    # resurrect_agent already follow this pattern).
+    # opens its own connection.
     #
-    # PG_STATEMENT_TIMEOUT_KWARGS (not `shared.db.connect()`, which dials the pooled URL
-    # and would put every SDK op behind PgBouncer): the same connect-timeout +
-    # keepalive posture as the rest of the cluster's DB access, from that one
-    # constant. `ava.DB` is dialled from inside the agent's exec sandbox, so
-    # without the 5s cap a database that black-holes packets freezes the agent's
-    # tool call on the OS TCP-retransmit timeout with no application-level bound.
-    #
-    # The URL is the pooled front door, and pgbouncer never resets backend
-    # session state between clients — scrub the session back to baseline on
-    # every (re)connect so another client's session-level SET (2026-09-02 P0
-    # read-only pollution) cannot break this connection's writes.
-    #
-    # prepare_threshold=None: no server-side prepared statements on a pooled
-    # dial. This connection lives for the whole process while pgbouncer hands
-    # each transaction a possibly different backend; psycopg3 would prepare a
-    # statement server-side after its 5th execution on one connection, and a
-    # prepared name made on one backend does not exist on the next (2026-09-21:
-    # a watcher's poll wedged this way on `_pg3_0`). See shared.db.connect().
-    conn = psycopg.connect(
-        settings.data_plane.db_url,
-        autocommit=True,
-        prepare_threshold=None,
-        **PG_STATEMENT_TIMEOUT_KWARGS,
-    )
-    from shared.db import _restore_pooled_session
-
-    _restore_pooled_session(conn)
-    return conn
+    # shared.db.connect() owns the rest of the posture, each part load-bearing
+    # here: `ava.DB` is dialled from inside the agent's exec sandbox, so the 5s
+    # connect cap keeps a database that black-holes packets from freezing the
+    # agent's tool call; this connection lives for the whole process while
+    # pgbouncer hands each transaction a possibly different backend, so it never
+    # prepares server-side (2026-09-21: a watcher's poll wedged on `_pg3_0`);
+    # and every (re)connect scrubs the pooled session back to baseline, so
+    # another client's session-level SET (2026-09-02 P0 read-only pollution)
+    # cannot break this connection's writes.
+    return connect(autocommit=True)
 
 
 def _connect_redis() -> "redis.Redis":  # noqa: F821  # pyright: ignore[reportUndefinedVariable]

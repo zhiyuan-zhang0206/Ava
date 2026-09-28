@@ -20,7 +20,7 @@ Runtime notes:
   to.
 - `socket_timeout=None` is mandatory: redis-py 8 defaults it to 5s, which kills
   pubsub.listen()'s long blocking read when the event stream goes quiet. If the
-  stream still dies, the watcher falls back to polling the agents table.
+  stream still dies, the watcher falls back to polling the target's status.
 """
 
 import json
@@ -76,29 +76,22 @@ def _notify(target_id: int) -> None:
 
 
 def _watch_via_poll(target_id: int, interval_s: float = 5.0) -> None:
-    """Fallback: poll the agents table until the target idles, then remind once.
+    """Fallback: poll the target's status until it idles, then remind once.
 
     Used when the event stream is unavailable, when the target may ALREADY be
-    idle before the watcher starts, or when a pubsub read died mid-watch. A
-    transient DB error only skips one round; the 6h `ava.watcher.launch`
-    timeout remains the outer safety bound, so a broken DB also wakes the
-    launching agent eventually (via the watcher's own exit).
+    idle before the watcher starts, or when a pubsub read died mid-watch. It
+    reads the same authoritative status as the event path. A transient read
+    error only skips one round; the 6h `ava.watcher.launch` timeout remains the
+    outer safety bound, so a persistently failing read also wakes the launching
+    agent eventually (via the watcher's own exit).
     """
-    import psycopg
-
     while True:
         try:
-            # prepare_threshold=None: never prepare statements on the pooled front door.
-            with (
-                psycopg.connect(settings.data_plane.db_url, prepare_threshold=None) as conn,
-                conn.cursor() as cur,
-            ):
-                cur.execute("SELECT status FROM agents_meta WHERE id = %s", (target_id,))
-                row = cur.fetchone()
+            idle = ava.agents.get_status(target_id) == IDLE_STATUS
         except Exception:
             time.sleep(interval_s)
             continue
-        if row is not None and row[0] == IDLE_STATUS:
+        if idle:
             _notify(target_id)
             return
         time.sleep(interval_s)

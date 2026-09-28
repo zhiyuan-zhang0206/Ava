@@ -1,10 +1,10 @@
-"""Postgres connection guards, URLs, direct connects, and sync pools."""
+"""Postgres connection guards, URLs, direct connects, and sync + async pools."""
 
 from typing import Any
 from urllib.parse import urlsplit
 
 import psycopg
-from psycopg_pool import ConnectionPool
+from psycopg_pool import AsyncConnectionPool, ConnectionPool
 
 from shared.config import settings
 from shared.dotenv_boot import UNANCHORED_DB_SENTINEL
@@ -44,13 +44,12 @@ class UnanchoredHomeError(RuntimeError):
 # `connect_timeout` matters most where the connect is the *first* thing a process
 # does: against a peer that black-holes packets (dropped, not ECONNREFUSED) an
 # unbounded connect never errors, so the caller reads as "hung" rather than
-# "failed". This constant is therefore the single definition of that posture, and
-# is exported to the call sites that cannot go through `connect()` / `pool()`
-# because they are parameterized on a URL rather than on settings: the agent's own
-# pool kwargs (services/agent_host/pools.py), the boot-time schema assertion
-# (shared/migrations.py:assert_schema_current), `ava.DB` (ava/_settings.py), the
-# SDK shell-session index (ava/shell/sessions.py). Fail-fast behaviour is pinned
-# by tests/shared/test_connect_fail_fast.py.
+# "failed". This constant is therefore the single definition of that posture:
+# `connect()` / `pool()` / `async_pool()` apply it, and it is exported to the
+# admin-plane dials parameterized on a URL rather than on settings (the boot-time
+# schema assertion in shared/migrations.py, the rollout's local admin schema
+# recovery in cli/commands/_update_git.py). Fail-fast behaviour is pinned by
+# tests/shared/test_connect_fail_fast.py.
 PG_KEEPALIVE_KWARGS: dict[str, Any] = {
     "keepalives": 1,
     "keepalives_idle": 30,
@@ -74,10 +73,9 @@ PG_KEEPALIVE_KWARGS: dict[str, Any] = {
 # (cli/commands/migrations.py + the update/rollback wrappers in
 # cli/commands/_update_git.py) dials `connect(direct=True, unbounded=True)` and
 # its DDL runs may legitimately exceed 60s — the migration applier must stay
-# unbounded. Every other connection point in the codebase goes through
-# connect()/pool() (or, in the agent process, reuses this constant explicitly —
-# see services/agent_host/pools.py / ava/_settings.py), so this one constant is the single
-# statement-timeout definition.
+# unbounded. The sanctioned entry points deliver this one ceiling — as `options`
+# on a direct dial, as PG_STATEMENT_TIMEOUT_SET_SQL on a pooled one — so it is
+# the single statement-timeout definition.
 PG_STATEMENT_TIMEOUT_OPTIONS = "-c statement_timeout=60000"
 # The same ceiling as an explicit `SET` — the delivery path that works THROUGH
 # PgBouncer: the pooler drops the libpq `options` startup parameter
@@ -97,11 +95,9 @@ PG_STATEMENT_TIMEOUT_OPTIONS = "-c statement_timeout=60000"
 # `cli/commands/data_plane/pgbouncer.py` also runs it as the pooler's `connect_query` so
 # every pooled backend is bounded at birth regardless of the client's code path.
 PG_STATEMENT_TIMEOUT_SET_SQL = "SET statement_timeout = 60000"
-# The full kwargs the sanctioned entry points pass to psycopg, exported so the
-# runtime connection points (services/agent_host/pools.py pool, ava/_settings.py ava.DB,
-# agent/db.py CAS) can apply the same statement ceiling without re-deriving it.
-# `options` is the direct-connection delivery path (Postgres parses it itself);
-# pooled dials additionally run PG_STATEMENT_TIMEOUT_SET_SQL (see connect/pool).
+# The full kwargs `connect()` / `pool()` pass to psycopg. `options` is the
+# direct-connection delivery path (Postgres parses it itself); pooled dials
+# additionally run PG_STATEMENT_TIMEOUT_SET_SQL (see connect/pool).
 PG_STATEMENT_TIMEOUT_KWARGS: dict[str, Any] = {
     **PG_KEEPALIVE_KWARGS,
     "options": PG_STATEMENT_TIMEOUT_OPTIONS,
@@ -150,12 +146,11 @@ def _restore_pooled_session(conn: psycopg.Connection) -> None:
 
 
 async def _restore_pooled_session_async(conn: psycopg.AsyncConnection) -> None:
-    """Async twin of `_restore_pooled_session` for the host pools.
+    """Async twin of `_restore_pooled_session`: `async_pool()`'s per-borrow check.
 
-    The agent's `AsyncConnectionPool` (services/agent_host/pools.py) is built directly rather
-    than through `pool()`, so its per-borrow liveness check doubles as the
-    baseline scrub here — same RESET ALL + statement ceiling, same discard-on-
-    failure semantics (psycopg_pool replaces a connection whose check raises).
+    The liveness check doubles as the baseline scrub — same RESET ALL +
+    statement ceiling, same discard-on-failure semantics (psycopg_pool replaces
+    a connection whose check raises).
     """
     await conn.execute(PG_POOLED_BASELINE_RESTORE_SQL[0])
     await conn.execute(PG_POOLED_BASELINE_RESTORE_SQL[1])
@@ -426,4 +421,51 @@ def pool(
             if not direct
             else (ConnectionPool.check_connection if check_connections else None)
         ),
+    )
+
+
+def async_pool(
+    pool_class: type[AsyncConnectionPool[psycopg.AsyncConnection]],
+    *,
+    min_size: int,
+    max_size: int,
+    timeout: float,
+    **pool_kwargs: Any,
+) -> AsyncConnectionPool[psycopg.AsyncConnection]:
+    """An unopened async pool on the cluster's access URL (the agent host's pools).
+
+    The async twin of `pool()`. It is returned closed because the caller's event
+    loop opens it (`await pool.open()`). `pool_class` is the `AsyncConnectionPool`
+    subclass to build (the host's `agent.db.LoggingConnectionPool`, which times
+    every borrow) so this module never imports the agent layer; `pool_kwargs`
+    are that subclass's own arguments.
+
+    The transport posture is fixed here: autocommit (the checkpoint saver
+    expects it), `prepare_threshold=None` (borrows hop PgBouncer backends),
+    `PG_KEEPALIVE_KWARGS`, the configured sslmode when the URL is silent, and
+    the baseline-session restore as the per-borrow `check`, which is also what
+    delivers the statement ceiling (PgBouncer drops the `options` startup
+    parameter). See _restore_pooled_session.
+
+    Raises:
+        UnanchoredHomeError: the resolved db_url is the unanchored sentinel.
+    """
+    from shared.config.data_plane import sslmode_for_url
+
+    dp = settings.data_plane
+    sslmode = sslmode_for_url(dp.db_url, dp.db_sslmode)
+    return pool_class(
+        _guard_db_url(dp.db_url),
+        min_size=min_size,
+        max_size=max_size,
+        timeout=timeout,
+        open=False,
+        kwargs={
+            "autocommit": True,
+            "prepare_threshold": None,
+            **({"sslmode": sslmode} if sslmode else {}),
+            **PG_KEEPALIVE_KWARGS,
+        },
+        check=_restore_pooled_session_async,
+        **pool_kwargs,
     )

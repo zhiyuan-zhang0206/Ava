@@ -25,27 +25,12 @@ from shared.agents.messages.inbound_provenance import (
     content_sha256,
     source_assertion_match,
 )
-from shared.db_connections import DEFAULT_POOL_TIMEOUT_S as DEFAULT_POOL_TIMEOUT_S
 from shared.db_connections import PG_KEEPALIVE_KWARGS as PG_KEEPALIVE_KWARGS
-from shared.db_connections import (
-    PG_POOLED_BASELINE_RESTORE_SQL as PG_POOLED_BASELINE_RESTORE_SQL,
-)
-from shared.db_connections import (
-    PG_STATEMENT_TIMEOUT_KWARGS as PG_STATEMENT_TIMEOUT_KWARGS,
-)
-from shared.db_connections import (
-    PG_STATEMENT_TIMEOUT_OPTIONS as PG_STATEMENT_TIMEOUT_OPTIONS,
-)
 from shared.db_connections import (
     PG_STATEMENT_TIMEOUT_SET_SQL as PG_STATEMENT_TIMEOUT_SET_SQL,
 )
-from shared.db_connections import UNANCHORED_DB_SENTINEL as UNANCHORED_DB_SENTINEL
 from shared.db_connections import UnanchoredHomeError as UnanchoredHomeError
-from shared.db_connections import _guard_db_url as _guard_db_url
-from shared.db_connections import _restore_pooled_session as _restore_pooled_session
-from shared.db_connections import (
-    _restore_pooled_session_async as _restore_pooled_session_async,
-)
+from shared.db_connections import async_pool as async_pool
 from shared.db_connections import connect as connect
 from shared.db_connections import direct_db_url as direct_db_url
 from shared.db_connections import pool as pool

@@ -7,7 +7,6 @@ class ChatInboundFact(NamedTuple)
   created_at: datetime
   id: int
   source: str
-DEFAULT_POOL_TIMEOUT_S  (re-export of shared.db_connections.DEFAULT_POOL_TIMEOUT_S)
 class InboundRow(NamedTuple)
   claimed_at: datetime | None = None
   content: str
@@ -19,15 +18,12 @@ class InboundRow(NamedTuple)
   status: str
 NOTICE_FYI_TTL_DAYS = 30
 PG_KEEPALIVE_KWARGS  (re-export of shared.db_connections.PG_KEEPALIVE_KWARGS)
-PG_POOLED_BASELINE_RESTORE_SQL  (re-export of shared.db_connections.PG_POOLED_BASELINE_RESTORE_SQL)
-PG_STATEMENT_TIMEOUT_KWARGS  (re-export of shared.db_connections.PG_STATEMENT_TIMEOUT_KWARGS)
-PG_STATEMENT_TIMEOUT_OPTIONS  (re-export of shared.db_connections.PG_STATEMENT_TIMEOUT_OPTIONS)
 PG_STATEMENT_TIMEOUT_SET_SQL  (re-export of shared.db_connections.PG_STATEMENT_TIMEOUT_SET_SQL)
-UNANCHORED_DB_SENTINEL  (re-export of shared.db_connections.UNANCHORED_DB_SENTINEL)
 UnanchoredHomeError  (re-export of shared.db_connections.UnanchoredHomeError)
 def agent_exists(db: psycopg.Connection, agent_id: int) -> bool
 def agent_is_alive(status: str | None, lease_expires_at: datetime | None) -> bool
 def announce_spawn_prompt(agent_id: int, inbound_id: int, content: str, source: str) -> None
+async_pool  (re-export of shared.db_connections.async_pool)
 connect  (re-export of shared.db_connections.connect)
 def create_agent(db: psycopg.Connection) -> int
 direct_db_url  (re-export of shared.db_connections.direct_db_url)

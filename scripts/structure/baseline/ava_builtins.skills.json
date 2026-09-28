@@ -8,9 +8,5 @@
   },
   "directories": {
     "ava_builtins/skills": 35
-  },
-  "owner_bypasses": {
-    "ava_builtins/skills/ava-goal/reference/watch_idle.py::postgres-dial": 1,
-    "ava_builtins/skills/ava-watcher/reference/watch_idle.py::postgres-dial": 1
   }
 }

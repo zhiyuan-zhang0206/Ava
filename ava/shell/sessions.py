@@ -42,10 +42,7 @@ def _next_session_index_from_db() -> int:
     # number (shared by shells and watchers). Uses `UPDATE ... RETURNING` for
     # concurrency safety. No fallback — raise directly if DB is unavailable or
     # the agent isn't in agents_meta.
-    import psycopg
-
-    from ava._settings import DB_URL
-    from shared.db import PG_STATEMENT_TIMEOUT_KWARGS
+    from shared.db import connect
 
     agent_id = ava.agent_identity.agent_id()
     if agent_id is None:
@@ -56,14 +53,10 @@ def _next_session_index_from_db() -> int:
             "ava.agent_identity.establish). Running a standalone script that imports ava "
             "does not set an agent identity."
         )
-    # PG_KEEPALIVE_KWARGS: this runs inside the agent's exec sandbox, so a
-    # black-holing database would otherwise hang `ava.shell.new()` on the OS
-    # TCP-retransmit timeout instead of raising. Same constant as shared.db.
-    # prepare_threshold=None: never prepare statements on the pooled front door.
-    with (
-        psycopg.connect(DB_URL, prepare_threshold=None, **PG_STATEMENT_TIMEOUT_KWARGS) as conn,
-        conn.cursor() as cur,
-    ):
+    # shared.db.connect(): this runs inside the agent's exec sandbox, so its
+    # connect cap keeps a black-holing database from hanging `ava.shell.new()`
+    # on the OS TCP-retransmit timeout instead of raising.
+    with connect() as conn, conn.cursor() as cur:
         cur.execute("SET TRANSACTION READ WRITE")
         cur.execute(
             "UPDATE agents_meta SET session_index = session_index + 1 "
@@ -144,16 +137,10 @@ def _record_ttl(session_id: int, ttl: float) -> None:
     the caller must abort the creation it just made. `SET TRANSACTION READ
     WRITE` leads the transaction — a pooled backend handed over with
     session-level read-only poison would otherwise reject the write."""
-    import psycopg
-
-    from ava._settings import DB_URL
-    from shared.db import PG_STATEMENT_TIMEOUT_KWARGS
+    from shared.db import connect
 
     try:
-        with (
-            psycopg.connect(DB_URL, prepare_threshold=None, **PG_STATEMENT_TIMEOUT_KWARGS) as conn,
-            conn.cursor() as cur,
-        ):
+        with connect() as conn, conn.cursor() as cur:
             cur.execute("SET TRANSACTION READ WRITE")
             cur.execute(
                 "INSERT INTO agent_shell_ttls (agent_id, session_id, expires_at) "
@@ -406,14 +393,10 @@ def _read_expiry_row(agent_id: int, session_id: int) -> datetime | None:
     """The session's current deadline; None when the row is absent."""
     import psycopg
 
-    from ava._settings import DB_URL
-    from shared.db import PG_STATEMENT_TIMEOUT_KWARGS
+    from shared.db import connect
 
     try:
-        with (
-            psycopg.connect(DB_URL, prepare_threshold=None, **PG_STATEMENT_TIMEOUT_KWARGS) as conn,
-            conn.cursor() as cur,
-        ):
+        with connect() as conn, conn.cursor() as cur:
             cur.execute(
                 "SELECT expires_at FROM agent_shell_ttls WHERE agent_id = %s AND session_id = %s",
                 (agent_id, session_id),
@@ -456,15 +439,11 @@ def _apply_renewal(agent_id: int, session_id: int, ttl: float, prev_expires: dat
     """
     import psycopg
 
-    from ava._settings import DB_URL
-    from shared.db import PG_STATEMENT_TIMEOUT_KWARGS
+    from shared.db import connect
 
     new_expires: datetime | None = None
     try:
-        with (
-            psycopg.connect(DB_URL, prepare_threshold=None, **PG_STATEMENT_TIMEOUT_KWARGS) as conn,
-            conn.cursor() as cur,
-        ):
+        with connect() as conn, conn.cursor() as cur:
             cur.execute("SET TRANSACTION READ WRITE")
             updated = _renewal_update(cur, agent_id, session_id, ttl)
             if updated is not None:
