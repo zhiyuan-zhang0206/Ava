@@ -8,10 +8,12 @@ or revoked through the real operator functions.
 from __future__ import annotations
 
 import socket
+import threading
 import time
 import urllib.error
 import urllib.request
-from collections.abc import Iterator
+from collections.abc import Generator, Iterator
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
@@ -307,8 +309,10 @@ def test_an_oversized_content_length_answers_413_without_reading(
 
 @pytest.fixture
 def bounded(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Channel]:
-    """A listener with a 0.5 s read timeout and room for two requests at once."""
+    """A listener with a 0.5 s read timeout, a 1.5 s whole-request deadline
+    and room for two requests at once."""
     monkeypatch.setattr(listener_module, "READ_TIMEOUT_S", 0.5)
+    monkeypatch.setattr(listener_module, "REQUEST_DEADLINE_S", 1.5)
     monkeypatch.setattr(listener_module, "MAX_CONCURRENT_REQUESTS", 2)
     home = tmp_path.resolve() / "bounded"
     home.mkdir(mode=0o700)
@@ -363,3 +367,46 @@ def test_the_server_header_names_the_protocol_only(channel: Channel) -> None:
     answer = _raw(channel, "GET / HTTP/1.1\r\nHost: x")
     server = [line for line in answer.split(b"\r\n") if line.lower().startswith(b"server:")]
     assert server == [b"Server: ava-coordinator/1"]
+
+
+@contextmanager
+def _trickling(channel: Channel) -> Generator[None]:
+    """Two peers, each sending a request line one byte at a time, each byte
+    well inside the read timeout: together they hold every slot."""
+    address = (channel.endpoint.host, channel.endpoint.port)
+    stop = threading.Event()
+    peers = [socket.create_connection(address) for _ in range(2)]
+
+    def drip(raw: socket.socket) -> None:
+        try:
+            while not stop.wait(0.2):
+                raw.sendall(b"G")
+        except OSError:
+            return  # the listener dropped it
+
+    threads = [threading.Thread(target=drip, args=(raw,), daemon=True) for raw in peers]
+    for thread in threads:
+        thread.start()
+    try:
+        yield
+    finally:
+        stop.set()
+        for thread in threads:
+            thread.join()
+        for raw in peers:
+            raw.close()
+
+
+def test_trickling_peers_hold_no_slot_past_the_request_deadline(bounded: Channel) -> None:
+    """No single read ever waits the read timeout, so only the deadline from
+    accept drops them; then a unit is served again, while they still drip."""
+    with _trickling(bounded):
+        deadline = time.monotonic() + 5
+        while True:
+            try:
+                assert bounded.client().instruction() is None
+                break
+            except CoordinatorAwayError:
+                if time.monotonic() > deadline:
+                    raise
+                time.sleep(0.05)

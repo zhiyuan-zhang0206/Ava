@@ -125,6 +125,17 @@ CLOCKS: dict[str, Clock] = {
         lambda: deploy.UNIT_BUNDLE_MAX_TTL_S,
         "the longest lifetime `issue-unit` seals into a unit capability bundle",
     ),
+    # --- coordinator-channel family (values in shared/deploy_timing.py) ---
+    "COORDINATOR_READ_TIMEOUT_S": Clock(
+        "coordinator-channel",
+        lambda: deploy.COORDINATOR_READ_TIMEOUT_S,
+        "how long one socket read of a coordinator listener request may wait",
+    ),
+    "COORDINATOR_REQUEST_DEADLINE_S": Clock(
+        "coordinator-channel",
+        lambda: deploy.COORDINATOR_REQUEST_DEADLINE_S,
+        "the whole coordinator listener request, from accept to its answer",
+    ),
     # --- agent-lease family (values in shared/deploy_timing.py) ---
     "AGENT_LEASE_TTL_S": Clock(
         "agent-lease",
@@ -238,6 +249,15 @@ CONSTRAINTS: list[Constraint] = [
         "UNIT_BUNDLE_MAX_TTL_S",
         "the default bundle lifetime must be one `issue-unit` accepts, or issuing "
         "a bundle without `--ttl-hours` refuses",
+    ),
+    # --- coordinator-channel family ---
+    Constraint(
+        "<",
+        "COORDINATOR_READ_TIMEOUT_S",
+        "COORDINATOR_REQUEST_DEADLINE_S",
+        "a peer that goes silent is dropped after one read timeout, a trickling "
+        "one at the deadline: a read timeout at or past the deadline never fires, "
+        "and every stalled request would hold its slot for the whole deadline",
     ),
     # --- schedule supervision family ---
     Constraint(
