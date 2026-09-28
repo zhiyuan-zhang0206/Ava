@@ -435,11 +435,11 @@ def _deploy_suppression() -> str | None:
     This home's in-flight release or PITR operation explains it first, while
     its executor's heartbeat is fresh: the probe annotates its output with the
     operation instead of alerting, even while the data plane that holds the
-    deploy lease is down. The episode retains its true start. A lost executor
-    or a recovering operation explains nothing, and neither does the deploy
-    lease it may still hold; an expired or unreadable deploy owner, or a
-    failed operation, explains nothing either, so severity resumes from that
-    same start.
+    deploy lease is down. The episode retains its true start. A lost executor,
+    a recovering operation or a failed (held) one explains nothing, and
+    neither does the deploy lease it may still hold until the lease's TTL; an
+    expired or unreadable deploy owner explains nothing either, so severity
+    resumes from that same start.
     """
     from ops.deploy_window import deploy_in_flight
 
@@ -458,7 +458,7 @@ def executor_lost() -> tuple[str, datetime] | None:
     executor's last sign of life, not from the probe run that noticed it.
     """
     operation = _release_operation()
-    if operation is None or operation.alive:
+    if operation is None or not operation.lost:
         return None
     seen = operation.last_seen.isoformat(timespec="seconds")
     return (

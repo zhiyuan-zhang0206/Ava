@@ -189,3 +189,37 @@ def test_release_operation_annotates_the_outage_it_explains_until_it_fails(
     assert cluster_health._unhealthy(home, message) == 1
     assert [alert["status"] for alert in alerts] == ["firing"]
     assert "alert grading paused" not in capsys.readouterr().err
+
+
+def test_a_held_operation_leaves_no_deploy_lease_to_explain_the_outage(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    alerts: list[dict[str, object]],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A held operation's executor exits on purpose, and its `fleet:<id>` deploy
+    lease outlives it until the lease TTL: neither explains the outage, and the
+    hold is no lost executor either (its own `held` alert is the incident)."""
+    from ops.deploy_window import DeployWindow
+    from tests.lifecycle.transition.test_start_guard import _operation
+
+    path = _operation(tmp_path.resolve() / "home")
+    home = path.parent.parent.parent
+    held = json.loads(path.read_bytes()) | {"phase": "stopping", "error": "injected failure"}
+    path.write_text(json.dumps(held) + "\n")
+
+    def its_own_lease(**_kwargs: object) -> DeployWindow:
+        return DeployWindow(
+            active=True, detail=f"a cluster deploy is in progress — fleet:{path.parent.name}"
+        )
+
+    monkeypatch.setattr("shared.paths.ava_home", lambda: home)
+    monkeypatch.setattr("ops.deploy_window.deploy_in_flight", its_own_lease)
+    message = "FAIL: gateway liveness — health endpoint unreachable or non-200"
+    started_at = datetime.now(UTC) - timedelta(minutes=20)
+    (home / cluster_health.ALERT_STATE_FILE).write_text(f"{message}\n{started_at.isoformat()}\n")
+
+    assert cluster_health_alerts.executor_lost() is None
+    assert cluster_health._unhealthy(home, message) == 1
+    assert [alert["status"] for alert in alerts] == ["firing"]
+    assert "alert grading paused" not in capsys.readouterr().err

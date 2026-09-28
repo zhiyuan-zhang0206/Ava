@@ -146,13 +146,15 @@ class InFlight(NamedTuple):
     (`open_launch_grace`); with no stamp at all, the request's creation.
     `alive` means that is at most `EXECUTOR_HEARTBEAT_TTL_S` old.
     `recovering`: the operation journaled an abort, recovery or rollback
-    decision.
+    decision. `failed`: it recorded an error — a hold, whose executor exited
+    on purpose, or a decision's error until its next phase.
     """
 
     label: str
     alive: bool
     last_seen: datetime
     recovering: bool
+    failed: bool
 
     @property
     def explains(self) -> bool:
@@ -160,21 +162,27 @@ class InFlight(NamedTuple):
 
         A recovering operation's hold is itself worth an alert, in every
         phase after its decision, not only while the decision's error is the
-        journal's latest.
+        journal's latest. A failed one explains nothing: its hold is itself
+        worth an alert.
         """
-        return self.alive and not self.recovering
+        return self.alive and not self.recovering and not self.failed
+
+    @property
+    def lost(self) -> bool:
+        """Its executor stopped stamping without recording a failure."""
+        return not self.alive and not self.failed
 
 
 def operation_in_flight(home: Path, *, now: datetime | None = None) -> InFlight | None:
-    """This home's incomplete operation that has recorded no failure, if any.
+    """This home's incomplete operation, if any; None when none is active or it completed.
 
     It explains an outage of the unit it is replacing only while its executor
     is alive (`InFlight.explains`): a killed, OOM'd or rebooted executor, or
     one that never launched, stops stamping its heartbeat, and its operation
     then explains nothing — the executor is lost. A recovering operation
-    explains nothing either. None when no operation is active, it completed,
-    or it failed (a recorded error): a held operation's executor exited on
-    purpose, and its hold is itself worth an alert.
+    explains nothing either, nor does a failed one (a recorded error): a held
+    operation's executor exited on purpose, so it is never lost, and its hold
+    is itself worth an alert.
     """
     from shared.deploy_timing import EXECUTOR_HEARTBEAT_TTL_S
 
@@ -184,7 +192,7 @@ def operation_in_flight(home: Path, *, now: datetime | None = None) -> InFlight 
     path, encoded = active
     operation = json.loads(encoded)
     _require_operation_identity(home, path, operation)
-    if operation["phase"] == "complete" or operation["error"] is not None:
+    if operation["phase"] == "complete":
         return None
     kind = operation["request"]["kind"]
     created = datetime.fromisoformat(operation["request"]["created_at"])
@@ -195,6 +203,7 @@ def operation_in_flight(home: Path, *, now: datetime | None = None) -> InFlight 
         alive=not stale,
         last_seen=last_seen,
         recovering=bool(operation[kind]["decisions"]),
+        failed=operation["error"] is not None,
     )
 
 

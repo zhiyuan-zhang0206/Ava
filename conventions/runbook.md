@@ -1377,12 +1377,13 @@ so can this home's in-flight release or PITR operation (`$AVA_HOME/updates/activ
 which the probe names in its output even while the data plane is down, but only while
 its executor's heartbeat (`updates/<id>/executor-heartbeat`, stamped every lease-renewal
 round) is fresh and it has journaled no abort, recovery or rollback decision. Once the
-heartbeat (or, before the first one, the operation's creation) is older than
-`EXECUTOR_HEARTBEAT_TTL_S` (300 s), the operation explains nothing and the probe fails on
-its own with `operation executor lost`, graded from the executor's last sign of life:
-nothing will finish that operation, and startup stays refused while it holds the home. A
-failed operation, like missing or unreadable ownership, explains nothing; disk pressure
-remains independent.
+heartbeat (or, before the first one, the stamp its submission and each native dispatch
+leave) is older than `EXECUTOR_HEARTBEAT_TTL_S` (300 s), the operation explains nothing
+and the probe fails on its own with `operation executor lost`, graded from the executor's
+last sign of life: nothing will finish that operation, and startup stays refused while it
+holds the home. A failed (held) operation, like missing or unreadable ownership, explains
+nothing, and neither does the deploy lease it leaves behind until the lease's TTL; disk
+pressure remains independent.
 
 The OS job and CLI probe only observe and alert. They do not invoke rollback,
 maintain release-policy failure counters, or promote pending code to known-good.
