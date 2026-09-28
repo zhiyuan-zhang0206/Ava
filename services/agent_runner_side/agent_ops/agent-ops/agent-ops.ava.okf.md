@@ -34,8 +34,8 @@ The sole resident Ava HTTP process on agent-runner (session `ops`) — Gateway r
 Dependency APIs remain available until existing native actions finish.
 Local service teardown closes new API admission only after the drain; normal
 start resumes the existing hold after readiness. The dispatch pool runs
-`min_size=0` and the shell-closure-notice flush defers while the unit is
-quiesced. A release stops and resumes units through the fleet release
+`min_size=0` and the shell-closure-notice flush waits while the unit is
+quiesced, then delivers once the start releases its hold. A release stops and resumes units through the fleet release
 transition, not through ops kinds. See [[shared/maintenance/maintenance.ava.okf.md|Native pause and maintenance]].
 
 ## Strongly-Typed Wire Layer (`ops/rpc_schemas.py`)
