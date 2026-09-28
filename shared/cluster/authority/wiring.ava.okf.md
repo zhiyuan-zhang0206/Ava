@@ -22,7 +22,8 @@ the ledger's credential digest:
 - `consume`: the gateway login (and, while the API is authenticated, the
   gateway API token) for an operator process the launcher did not inject, only
   after `require_admitted_runtime` (the selected release image's prefix, or the
-  start intent's source checkout).
+  start intent's source checkout); `operator_environment` is that delivery as
+  environment, refused for a launcher-started process.
 
 ## Machine API tokens
 
@@ -96,7 +97,11 @@ and the coordinator channel's authentication:
 - **Launch**: the root launcher delivers `AVA_DB_URL` + `AVA_DB_GENERATION` per
   service class; `shared/dotenv_boot` keeps a delivery naming this home's
   endpoint and consumes the gateway login for an admitted operator process;
-  otherwise the first dial raises `NoDatabaseAuthorityError`.
+  otherwise the first dial raises `NoDatabaseAuthorityError`. The release
+  handoff (`ava cluster update --prepared`) builds no Settings: it takes the
+  same operator login itself and hands it, in the exec environment only, to
+  the executor image's submission, which is not admitted until selected
+  ([[cli/release_handoff/release_handoff.ava.okf.md]]).
 - **Cutover** (`scripts/cutover_db_authority.py`, step `db`):
   `retire_legacy_logins(Cutover)` -> `ensure_groups` -> `ensure_monitor` ->
   `prove_closure` over the

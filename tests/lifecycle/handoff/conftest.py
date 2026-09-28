@@ -2,8 +2,9 @@
 
 The executor image's `venv/bin/python` is a POSIX shell script, not Python: the
 handoff never inspects what it runs, only that the image verifies. Run with the
-fixed v1 entry argv it records its working directory, `AVA_HOME`, its argv and
-(for the stdin source `-`) the exact request bytes under `$HANDOFF_RECORD`,
+fixed v1 entry argv it records its working directory, `AVA_HOME`, its argv, the
+database authority its environment carries (`AVA_DB_URL`, `AVA_DB_GENERATION`)
+and (for the stdin source `-`) the exact request bytes under `$HANDOFF_RECORD`,
 then prints `$HANDOFF_STDOUT` and exits `$HANDOFF_EXIT`. `$HANDOFF_SLEEP`
 replaces it with `sleep` (one process, so a timeout kill leaves nothing).
 """
@@ -13,6 +14,7 @@ from __future__ import annotations
 import hashlib
 import json
 import stat
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -31,6 +33,7 @@ _SCHEMA = b"CREATE TABLE example (id bigint);\n"
 RECORDING_INTERPRETER = b"""#!/bin/sh
 out="$HANDOFF_RECORD"
 { pwd -P; printf '%s\\n' "$AVA_HOME"; printf '%s\\n' "$@"; } > "$out.argv"
+printf '%s\\n' "${AVA_DB_URL-}" "${AVA_DB_GENERATION-}" > "$out.db"
 last=""
 for arg in "$@"; do last="$arg"; done
 if [ "$last" = "-" ]; then cat > "$out.stdin"; fi
@@ -50,9 +53,14 @@ def _canonical(value: object) -> bytes:
 
 
 def build_image(
-    home: Path, label: str, *, interpreter: bytes = RECORDING_INTERPRETER
+    home: Path,
+    label: str,
+    *,
+    interpreter: bytes = RECORDING_INTERPRETER,
+    extra: Mapping[str, bytes] | None = None,
 ) -> ReleaseRef:
-    """A complete image under `home/releases` that `ReleaseRef.verify` accepts."""
+    """A complete image under `home/releases` that `ReleaseRef.verify` accepts;
+    `extra` adds members by their image-relative path."""
     artifact = _digest(label.encode())
     commit = _digest((label + "-commit").encode())[:40]
     schema = _digest(_SCHEMA)
@@ -71,6 +79,7 @@ def build_image(
                 "applied_names": ["__baseline__"],
             }
         ),
+        **(extra or {}),
     }
     for name, contents in files.items():
         path = root / name
@@ -129,6 +138,11 @@ class Store:
 
     def recorded(self) -> list[str]:
         return (self.record.parent / f"{self.record.name}.argv").read_text().splitlines()
+
+    def delivered(self) -> tuple[str, str]:
+        """The executor's `AVA_DB_URL` and `AVA_DB_GENERATION` ('' when unset)."""
+        url, generation = (self.record.parent / f"{self.record.name}.db").read_text().splitlines()
+        return url, generation
 
 
 @pytest.fixture

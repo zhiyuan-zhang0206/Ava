@@ -2,9 +2,19 @@
 
 It reads only the request's envelope, requires the request's home to be the
 home this CLI resolves (settings-free), verifies the executor image in that
-home's store against this host, and replaces this process with the executor's
-`submit` entry. Everything after the exec is candidate code. The contract is
-`shared.api_contracts.release_handoff`.
+home's store against this host, takes this CLI's database authority, and
+replaces this process with the executor's `submit` entry. Everything after the
+exec is candidate code. The contract is `shared.api_contracts.release_handoff`.
+
+The executor image is not the home's selected image until its own operation
+selects it, so no boot pass admits it to a write generation; its submission
+reads the registered units with the login this admitted CLI hands over. This
+CLI never builds Settings, so it takes that login here, exactly as its boot
+pass would have (`shared.dotenv_boot.operator_db_delivery`): the active
+gateway login and its generation marker, in the exec environment only (never
+argv, a file or a log), without the gateway API token. The executor's boot
+pass keeps a delivery naming its home's endpoint. On a home without a ledger
+nothing is added.
 """
 
 from __future__ import annotations
@@ -41,12 +51,30 @@ def _require_own_home(envelope: Envelope) -> None:
         )
 
 
-def _exec_submit(image: VerifiedRelease, envelope: Envelope, source: Path) -> NoReturn:
+def _db_authority() -> dict[str, str]:
+    """The database authority this CLI holds on its (already required) home."""
+    from dotenv import dotenv_values
+
+    from shared import dotenv_boot
+
+    files = {
+        **dotenv_values(dotenv_boot.AVA_ENV_PATH),
+        **dotenv_values(dotenv_boot.AVA_MIRROR_ENV_PATH),
+    }
+    delivery = dotenv_boot.operator_db_delivery(files.get("AVA_DB_URL"), api=False)
+    if isinstance(delivery, str):
+        raise HandoffRefusedError(delivery)
+    return delivery
+
+
+def _exec_submit(
+    image: VerifiedRelease, envelope: Envelope, source: Path, authority: dict[str, str]
+) -> NoReturn:
     os.chdir(image.cwd)
     os.execve(  # noqa: S606 — the verified executor image's fixed v1 entry, no shell
         image.interpreter,
         entry_argv(image, "submit", str(source)),
-        entry_environment(os.environ, envelope.home),
+        entry_environment({**os.environ, **authority}, envelope.home),
     )
 
 
@@ -59,7 +87,8 @@ def run(path: Path) -> int:
         image = envelope.executor.verify(Path(envelope.home), host_abi=current_abi())
         if os.name == "nt":
             raise HandoffRefusedError("the release handoff execs its executor; Windows has no exec")
+        authority = _db_authority()
     except (ValueError, OSError, RuntimeError) as exc:
         sys.stderr.write(f"release update refused: {exc}\n")
         return 2
-    _exec_submit(image, envelope, source)
+    _exec_submit(image, envelope, source, authority)

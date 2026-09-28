@@ -13,6 +13,7 @@ import json
 import os
 import subprocess
 import sys
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -39,8 +40,12 @@ raise SystemExit(main(sys.argv[1:]))
 """
 
 
-def _update(store: Store, request: Path) -> subprocess.CompletedProcess[str]:
-    environment = {**os.environ, "AVA_HOME": str(store.home)}
+def _update(
+    store: Store, request: Path, environment: dict[str, str] | None = None
+) -> subprocess.CompletedProcess[str]:
+    environment = (
+        {**os.environ, "AVA_HOME": str(store.home)} if environment is None else environment
+    )
     return subprocess.run(  # noqa: S603 — this interpreter and a literal guard program
         [
             sys.executable,
@@ -171,3 +176,94 @@ def test_an_unanchored_cli_refuses_the_handoff(
     )
     err = _refusal(store, tmp_path, monkeypatch, capsys, store.request())
     assert "owns no home" in err
+
+
+# ── the previous image's database authority ──────────────────────────────────
+
+_ENDPOINT = "postgresql://ava@127.0.0.1:6433/ava"
+
+
+def _operator_environment(store: Store, **extra: str) -> dict[str, str]:
+    """An operator's shell for this home: no delivered login, no launcher profile."""
+    carried = {
+        key: value
+        for key, value in os.environ.items()
+        if key
+        not in {
+            "AVA_DB_URL",
+            "AVA_DB_GENERATION",
+            "AVA_API_TOKEN",
+            "AVA_PROCESS_PROFILE",
+            "AVA_LAUNCHER_PROFILE",
+        }
+    }
+    return {**carried, "AVA_HOME": str(store.home), **extra}
+
+
+def _born_from(store: Store, checkout: Path, seed: Callable[[Path], Any]) -> Any:
+    """A write-generation home born from `checkout`, selecting no release yet:
+    that checkout is its admitted runtime."""
+    secret = seed(store.home)
+    (store.home / ".env").write_text(f"AVA_DB_URL={_ENDPOINT}\n")
+    intent = store.home / "start-intent.json"
+    intent.write_text(json.dumps({"home": str(store.home), "checkout": str(checkout)}))
+    intent.chmod(0o600)
+    return secret
+
+
+def test_an_admitted_cli_hands_its_gateway_login_to_the_executor(
+    store: Store, tmp_path: Path, seed_write_generation: Callable[[Path], Any]
+) -> None:
+    """The handoff builds no Settings, so no boot pass gave this CLI the login an
+    admitted `ava` holds. It takes it as the home's admitted runtime and the exec
+    carries it, in the environment only, to the executor that is not selected
+    yet and so is admitted to nothing itself."""
+    gateway = _born_from(store, _REPO, seed_write_generation).roles.gateway
+    request = _write(tmp_path, store.request())
+    result = _update(store, request, _operator_environment(store))
+    assert result.returncode == 0, result.stderr
+    assert store.delivered() == (
+        f"postgresql://{gateway.name}:{gateway.password}@127.0.0.1:6433/ava",
+        "0",
+    )
+    assert store.recorded()[2:] == entry_argv_tail("submit", str(request))
+    assert gateway.password not in result.stdout + result.stderr
+
+
+def test_a_delivery_the_cli_already_holds_for_its_home_passes_unchanged(
+    store: Store, tmp_path: Path, seed_write_generation: Callable[[Path], Any]
+) -> None:
+    _born_from(store, _REPO, seed_write_generation)
+    held = "postgresql://ava_g7_gateway:held@127.0.0.1:6433/ava"
+    environment = _operator_environment(store, AVA_DB_URL=held, AVA_DB_GENERATION="7")
+    result = _update(store, _write(tmp_path, store.request()), environment)
+    assert result.returncode == 0, result.stderr
+    assert store.delivered() == (held, "7")
+
+
+@pytest.mark.parametrize(
+    ("runtime", "reason"),
+    [
+        ("foreign", "not the home's source checkout"),
+        ("launched", "only the root launcher delivers database logins"),
+    ],
+)
+def test_a_cli_without_database_authority_refuses_before_any_exec(
+    store: Store,
+    tmp_path: Path,
+    seed_write_generation: Callable[[Path], Any],
+    runtime: str,
+    reason: str,
+) -> None:
+    """A stale runtime, or a CLI a launcher started without a delivery, holds no
+    login to hand over: the handoff refuses by name instead of starting an
+    executor whose first dial would fail."""
+    checkout = tmp_path / "another-checkout" if runtime == "foreign" else _REPO
+    _born_from(store, checkout, seed_write_generation)
+    profile = {"AVA_PROCESS_PROFILE": "agent"} if runtime == "launched" else {}
+    result = _update(
+        store, _write(tmp_path, store.request()), _operator_environment(store, **profile)
+    )
+    assert result.returncode == 2
+    assert "release update refused: " in result.stderr and reason in result.stderr
+    assert not (store.record.parent / f"{store.record.name}.argv").exists()

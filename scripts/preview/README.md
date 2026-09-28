@@ -232,11 +232,13 @@ CAS requires no existing image) and starts it through the same home's ordinary
 systemd boot unit and pinned boot entry. Each transition's request is built at
 its dispatch by the public `ava cluster release request` (the fleet of one,
 with a short captured watch window), run by the then-admitted image: A builds
-A→B, B builds B→A. Public `ava cluster update --prepared` then performs it.
-Each transition must finish in the requested candidate
-direction with a successful, closed finite executor; public resubmission then
-retires that exact executor. A live, failed, recovered or retried operation
-cannot count as a passing transition.
+A→B, B builds B→A. Public `ava cluster update --prepared`, run by that same
+admitted image, then performs it: the previous image's half of the handoff
+receives the database login and execs the executor image's `submit` entry with
+it. Each transition must finish in the requested candidate
+direction with a successful, closed finite executor; public resubmission, run
+by the image the transition selected, then retires that exact executor. A live,
+failed, recovered or retried operation cannot count as a passing transition.
 
 The first post-readiness action is real message/code-execution smoke, followed
 by the explicit-image native observer. Ports, persisted home/configuration,
@@ -256,9 +258,10 @@ current generation's logins (0600, deleted afterwards) and starts a stale writer
 outside root custody that holds an open transaction over direct TCP, then keeps
 reconnecting. After it, `fence-LABEL.json` must show the writer's transaction
 aborted, no later commit, and every captured login refused over TCP, the
-owner-only socket and the pooler. The observer reads stored agents as the
-OS-user administrator: the source checkout is no admitted runtime once an image
-is selected.
+owner-only socket and the pooler. The source checkout is no admitted runtime
+once an image is selected and holds no write-generation login, so the observer's
+stored agents and the completed-work state comparison read one read-only snapshot
+as the OS-user administrator over the owner-only socket.
 
 `release-cycle-proof.json` records phase timings and receipt paths;
 `release-inputs.json` records captured image identities and request hashes.
@@ -269,4 +272,6 @@ native, journal, workload and independent observer evidence. Every command has
 its own timed run log. A failure remains failed even if ordinary cleanup passes.
 Cleanup refuses destruction while an attempted executor has live or unknown
 custody, never retries a transition, and uses normal stop/destroy plus independent
-absence checks. Existing cycle evidence is never overwritten by another run.
+absence checks. Stop and destroy run as the home's admitted runtime: the source
+checkout before any selection, else the selected image, which must be one of the
+two captured images. Existing cycle evidence is never overwritten by another run.

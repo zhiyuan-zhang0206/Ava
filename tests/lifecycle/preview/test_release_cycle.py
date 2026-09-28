@@ -166,6 +166,48 @@ def test_live_executor_blocks_stop_destroy_and_unknown_signals(
     assert not events
 
 
+def test_cleanup_stops_and_destroys_as_the_admitted_runtime_never_the_source_cli(
+    cycle: release_cycle.ReleaseCycle, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Once an image is selected only its runtime holds the home's database
+    authority; the source checkout's `ava stop` is refused at drain and leaves
+    services and the data plane up. Cleanup's stop and destroy are adapter
+    actions that run the home's admitted runtime."""
+    cycle.proof["effects_started"] = True
+    events: list[str] = []
+
+    def adapter(action: str, *_args: str) -> None:
+        events.append(action)
+
+    def generation(action: str, _label: str) -> None:
+        events.append(f"generation-{action}")
+
+    def source_cli(name: str, _args: list[str]) -> None:
+        pytest.fail(f"cleanup ran the source checkout's CLI: {name}")
+
+    def command(name: str, _argv: list[str], **_kwargs: object) -> None:
+        events.append(name)
+
+    def observed(label: str, **_kwargs: object) -> dict[str, Any]:
+        events.append(f"observe-{label}")
+        return {}
+
+    monkeypatch.setattr(cycle, "adapter", adapter)
+    monkeypatch.setattr(cycle, "generation", generation)
+    monkeypatch.setattr(cycle, "cli", source_cli)
+    monkeypatch.setattr(cycle, "command", command)
+    monkeypatch.setattr(cycle, "observe", observed)
+    cycle.cleanup()
+    assert events == [
+        "settle",
+        "generation-stop",
+        "stop",
+        "destroy",
+        "release-verify-stopped",
+        "observe-release-destroyed",
+    ]
+
+
 def test_each_command_rebuilds_its_clean_environment(
     cycle: release_cycle.ReleaseCycle, monkeypatch: pytest.MonkeyPatch
 ) -> None:

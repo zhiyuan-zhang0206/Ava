@@ -28,6 +28,8 @@ import signal
 import subprocess
 import sys
 import time
+from collections.abc import Generator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -81,6 +83,26 @@ class Context:
         if not url:
             raise RuntimeError("preview home has no database endpoint")
         return url.rsplit("/", 1)[1].split("?", 1)[0]
+
+    @contextmanager
+    def read_only(self) -> Generator[psycopg.Connection[Any]]:
+        """One read-only snapshot of this home's database, with its own deadline.
+
+        The OS-user administrator over the owner-only socket (peer), bound to
+        this home's postmaster. The proof runs from the source checkout, which
+        is no admitted runtime once a release image is selected
+        (`require_admitted_runtime`) and so holds no write-generation login.
+        """
+        from psycopg.conninfo import make_conninfo
+
+        from shared.pg_admin import connect, pg_admin_url
+
+        url = make_conninfo(pg_admin_url(self.ports()["postgres"]), dbname=self.database())
+        with connect(url, expected_data_dir=self.home / "pg", connect_timeout=5) as connection:
+            connection.read_only = True
+            connection.isolation_level = psycopg.IsolationLevel.REPEATABLE_READ
+            connection.execute("SET LOCAL statement_timeout = '5s'")
+            yield connection
 
     def path(self, kind: str, label: str) -> Path:
         if _LABEL.fullmatch(label) is None:
@@ -240,12 +262,7 @@ def judge(events: list[dict[str, Any]], held_status: str | None) -> dict[str, An
 
 
 def _held_status(context: Context, xid: int) -> str | None:
-    from psycopg.conninfo import make_conninfo
-
-    from shared.pg_admin import connect, pg_admin_url
-
-    url = make_conninfo(pg_admin_url(context.ports()["postgres"]), dbname=context.database())
-    with connect(url, expected_data_dir=context.home / "pg", autocommit=True) as conn:
+    with context.read_only() as conn:
         row = conn.execute("SELECT txid_status(%s)", (xid,)).fetchone()
     return None if row is None else row[0]
 

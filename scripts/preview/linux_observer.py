@@ -165,24 +165,11 @@ def _data_births(home: Path, ports: dict[str, int]) -> Births:
     return {name: dataclasses.asdict(owner) for name, owner in values.items()}
 
 
-def _stored_agents(run: Path, ports: dict[str, int]) -> list[int]:
-    from psycopg.conninfo import make_conninfo
-
-    from shared.pg_admin import connect, pg_admin_url
-
+def _stored_agents(run: Path) -> list[int]:
     agents = sorted(
         {int(json.loads(path.read_text())["agent"]) for path in run.glob("smoke-*.json")}
     )
-    # The OS-user administrator over the owner-only socket (peer): once a
-    # release image is selected, this source checkout is not the home's
-    # admitted runtime and receives no write-generation login.
-    url = make_conninfo(
-        pg_admin_url(ports["postgres"]), dbname=release_generation.Context(run).database()
-    )
-    with connect(url, expected_data_dir=run / "home" / "pg", connect_timeout=5) as connection:
-        # A read-only transaction with its own deadline, gone with it.
-        connection.read_only = True
-        connection.execute("SET LOCAL statement_timeout = '5s'")
+    with release_generation.Context(run).read_only() as connection:
         present = [
             int(row[0])
             for row in connection.execute(
@@ -327,7 +314,7 @@ def _observe_running(
     _observe_app_ownership(records, ports, result)
     observe_terminals(home, result)
     result["data_births"] = _data_births(home, ports)
-    result["stored_agents"] = _stored_agents(run, ports)
+    result["stored_agents"] = _stored_agents(run)
     result["write_generation"] = release_generation.observe(home)
     _require(
         result["registry_contains_home"] and result["hashes"]["source/.ava_home"],
@@ -392,7 +379,7 @@ def _closed_apps(run: Path, result: Report) -> None:
 
 def _manager_stopped(run: Path, ports: dict[str, int], result: Report) -> None:
     result["data_births"] = _data_births(run / "home", ports)
-    result["stored_agents"] = _stored_agents(run, ports)
+    result["stored_agents"] = _stored_agents(run)
     previous = json.loads((run / "cycle-manager-initial.json").read_text())
     _require(
         {name: OwnedProcess(**row).birth_key() for name, row in result["data_births"].items()}
