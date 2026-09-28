@@ -95,6 +95,11 @@ it("a rejected import falls back to plain text without an unhandled rejection", 
   const unhandled: unknown[] = [];
   const onUnhandledRejection = (reason: unknown) => unhandled.push(reason);
   process.on("unhandledRejection", onUnhandledRejection);
+  // Follow-up P2 from the #3463 QA pass: loadHighlight()'s .catch used to
+  // swallow the rejection with no log line at all, so a chunk-load failure
+  // was indistinguishable from "nothing went wrong" in the console. Silence
+  // the real console.warn (this failure is expected) and assert it fired.
+  const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
 
   try {
     __setHighlighterImportForTests(() => Promise.reject(new Error("chunk load failed")));
@@ -118,11 +123,37 @@ it("a rejected import falls back to plain text without an unhandled rejection", 
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(container.querySelector("pre .token")).toBeNull();
+    expect(warnSpy).toHaveBeenCalled();
   } finally {
     process.off("unhandledRejection", onUnhandledRejection);
+    warnSpy.mockRestore();
   }
 
   expect(unhandled).toEqual([]);
+});
+
+// Locks the single-choke-point dedup: loadHighlight()'s own .catch is part
+// of the `highlightPromise` chain itself, so for one real import attempt it
+// runs exactly once no matter how many call sites share that in-flight
+// promise — several code blocks each firing preloadPythonCodeHighlighter()
+// on hover/focus while one attempt is still in flight must not each log the
+// same underlying failure separately.
+it("warns only once per failed import attempt even with several concurrent preload calls", async () => {
+  const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+  try {
+    __setHighlighterImportForTests(() => Promise.reject(new Error("chunk load failed")));
+
+    await Promise.all([
+      preloadPythonCodeHighlighter(),
+      preloadPythonCodeHighlighter(),
+      preloadPythonCodeHighlighter(),
+    ]);
+
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+  } finally {
+    warnSpy.mockRestore();
+  }
 });
 
 it("retries and highlights on the next call after a prior rejection", async () => {
