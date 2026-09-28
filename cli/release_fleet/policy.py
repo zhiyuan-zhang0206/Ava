@@ -19,6 +19,13 @@ from pydantic import AwareDatetime, Field, field_validator, model_validator
 from cli.release_transition.request import Record
 from shared.maintenance_state import MaintenanceHold
 
+# The largest cohort one release journal (256 KiB) carries through a
+# whole-cohort failure and its recovery. The journal keeps a few ids per agent
+# plus one affected entry: every agent reaped by the drain, then sighted with a
+# runtime error and a quarantine, takes about 238 KB at seven-digit agent ids.
+# tests/lifecycle/release_fleet/test_cohort_ceiling.py drives that failure.
+MAX_COHORT_AGENTS = 2_000
+
 
 def _normalized_absolute(value: str) -> bool:
     """The unit records its own home (`machine_units.home`), in its own
@@ -185,6 +192,17 @@ def drain_report(unit: UnitKey, hold: MaintenanceHold) -> UnitCohort:
 def capture_cohort(
     *, gateway: UnitKey, reports: Sequence[UnitCohort], captured_at: datetime
 ) -> Cohort:
-    """Freeze the eligible cohort from every included unit's drain report."""
+    """Freeze the eligible cohort from every included unit's drain report.
+
+    A cohort above `MAX_COHORT_AGENTS` is refused here, while the release can
+    still abort, rather than holding at `watching` when a whole-cohort failure
+    outgrows the journal.
+    """
+    if (size := sum(len(entry.agents) for entry in reports)) > MAX_COHORT_AGENTS:
+        raise ValueError(
+            f"the release cohort of {size} agents exceeds the ceiling of {MAX_COHORT_AGENTS} "
+            "one release journal carries through a whole-cohort failure; release with "
+            "fewer live agents on the included units"
+        )
     ordered = tuple(sorted(reports, key=lambda entry: entry.unit.order))
     return Cohort(captured_at=captured_at, gateway=gateway, units=ordered)
