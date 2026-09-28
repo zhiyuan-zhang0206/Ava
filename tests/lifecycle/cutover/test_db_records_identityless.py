@@ -33,6 +33,7 @@ from tests.lifecycle.cutover.test_db_records import (  # noqa: F401 -- fixtures
     Cluster,
     _application_owner,
     _attest,
+    _connection,
     _inputs,
     _patched_session,
     _run,
@@ -275,8 +276,12 @@ async def test_the_minted_identity_resurrects_and_admission_takes_it_as_protocol
         )
 
 
-def test_a_row_changed_after_planning_is_left_unchanged(
-    cluster: Cluster, db_conn: psycopg.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def test_a_row_changed_after_planning_is_left_unchanged_and_the_run_says_so(
+    cluster: Cluster,
+    db_conn: psycopg.Connection,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     runner = cluster.runner
     kept, changed = _terminated(db_conn, runner), _terminated(db_conn, runner)
@@ -289,10 +294,18 @@ def test_a_row_changed_after_planning_is_left_unchanged(
             db_conn.commit()
 
     monkeypatch.setattr(records, "_write_journal", change_after_the_plan_is_recorded)
-    run = _run(cluster, _inputs(tmp_path, cluster))
-    assert run["results"]["identities"] == [
-        f"applied: minted 1, left 1 changed row(s) unchanged (agents {changed})"
-    ]
+    inputs = _inputs(tmp_path, cluster)
+    capsys.readouterr()
+    with _connection(write=True) as conn:
+        assert records._run(conn, cluster.home, inputs) == 0
+    partial = f"applied: minted 1, left 1 changed row(s) unchanged (agents {changed})"
+    journal = records.read_journal(cluster.home)
+    assert journal is not None and journal["runs"][-1]["results"]["identities"] == [partial]
+    # The terminal names the partial mint in full; it never reads as a plain success.
+    printed = capsys.readouterr().out
+    assert f"  identities: applied 1\n    ! {partial}\n" in printed
+    assert "! repairs recorded with the exceptions above" in printed
+    assert "✓ repairs recorded" not in printed
     assert _row(db_conn, changed)[1:5] == (None, None, None, 999)
     assert _row(db_conn, kept)[1] == "hosted"
 

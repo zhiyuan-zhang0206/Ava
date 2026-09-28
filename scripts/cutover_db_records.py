@@ -512,7 +512,7 @@ def _print_fenced(fenced: list[dict[str, Any]]) -> None:
     """What this run leaves fenced, stated before its first write."""
     total = sum(group["count"] for group in fenced)
     if not total:
-        print("  no retired-shape row stays fenced.")
+        print("  no retired-shape or identity-less row stays fenced.")
         return
     print(
         f"  {total} agent(s) stay fenced after this run; the runtime keeps refusing them "
@@ -715,11 +715,17 @@ def _run(conn: psycopg.Connection[Any], home: Path, inputs: Inputs) -> int:
     if not any(run["effects"].values()):
         print(f"✓ nothing to repair; the run is recorded in {home / JOURNAL}.")
         return 0
+    noted = False  # a result with a note: a refused conversion, rows a mint left unchanged
     for step in STEPS:
-        outcome = [str(result).split(":", 1)[0] for result in run["results"][step]]
+        results = [str(result) for result in run["results"][step]]
+        outcome = [result.split(":", 1)[0] for result in results]
         counts = ", ".join(f"{name} {outcome.count(name)}" for name in sorted(set(outcome)))
         print(f"  {step}: {counts or 'none'}")
-    print(f"✓ repairs recorded in {home / JOURNAL}; run --check to verify.")
+        for result in (result for result in results if ":" in result):
+            noted = True
+            print(f"    ! {result}")
+    done = "! repairs recorded with the exceptions above" if noted else "✓ repairs recorded"
+    print(f"{done} in {home / JOURNAL}; run --check to verify.")
     return 0
 
 

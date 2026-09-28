@@ -103,6 +103,11 @@ cause, and the same inputs continue it.
 | `incarnations` | `shared.predecessor_closure.close_retired_predecessor` per convertible row: the closed-predecessor form, with the before image, attestation digest, operator and reason recorded on the receipt ([why](../decisions/2026-09-27-existing-agent-closed-predecessor-admission.md)). The journal keeps both before images, the resources and the receipt's payload (NULL included), and both are compared. A row the guards refuse is recorded `refused: <why>` and the run continues. |
 | `identities` | One effect per attested machine: each convertible identity-less terminated row takes `runtime_kind='hosted'`, a minted UUID generation and owner, and `pid=NULL`, so resurrection accepts it; the resurrection clears it again. Resources stay NULL; no receipt or other row is written ([why](../decisions/2026-09-28-legacy-terminated-agents-resurrectable-at-cutover.md)). One compare-and-swap restates every identity-less condition and each row's before image. The result is `applied`, `already` (a continued run finds its minted pair), or names the rows that changed since planning, which it leaves unchanged; the run continues. |
 
+`--execute` prints a count per step and outcome, then every result that
+carries a note in full (a conversion the guards refused, the rows a mint left
+unchanged, `refused: ...` or `applied: minted N, left M ...`), and ends with
+`!` instead of `✓` when any result did.
+
 The pending, lease and posture repairs also require an attestation proving
 closure from every included machine (a unit neither paused nor retired).
 
