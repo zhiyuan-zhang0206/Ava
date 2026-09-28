@@ -226,7 +226,7 @@ from gateway.routers import (
     work_failed as work_failed_router,
 )
 from gateway.schedule_manager import ScheduleManager
-from gateway.session_store import session_is_valid, touch_session
+from gateway.session_store import touch_session
 from shared.agents import AvaAgentError
 from shared.cluster_auth import cookie_name
 from shared.config import settings
@@ -481,7 +481,8 @@ async def _cluster_auth_middleware(
     """Require a valid session cookie OR Bearer token on every API route.
 
     Two auth methods, checked in order:
-    1. Session cookie (``ava_session``) — for browser users who logged in.
+    1. Session cookie (``ava_session``) — for browser users who logged in; it
+       authenticates only while the credential that minted it is current.
     2. ``Authorization: Bearer <token>`` — the human cluster secret (operator
        SDK / scripts), or the active write generation's machine API token that
        the launcher delivers to every service and agent (``AVA_API_TOKEN``).
@@ -494,7 +495,7 @@ async def _cluster_auth_middleware(
       middleware while keeping the cluster secret for internal
       service-to-service auth (ops / agent-host).
     """
-    from gateway.request_principal import AuthPrincipal, cluster_credential
+    from gateway.request_principal import AuthPrincipal, cluster_credential, current_session_fact
 
     # This is set only by credential verification, never by caller/source JSON.
     request.state.auth_principal = None
@@ -520,15 +521,15 @@ async def _cluster_auth_middleware(
     ):
         return await call_next(request)
 
-    # 1. Check session cookie
+    # 1. Check session cookie: valid only while the credential that minted it
+    # is current (a revoked generation's or a rotated secret's sessions end).
     cookie_token = request.cookies.get(cookie_name())
-    if cookie_token and await asyncio.to_thread(
-        session_is_valid,
-        request.app.state.db_pool,
-        cookie_token,
-    ):
+    session_fact = await asyncio.to_thread(
+        current_session_fact, request.app.state.db_pool, cookie_token, secret
+    )
+    if cookie_token and session_fact is not None:
         request.state.auth_principal = AuthPrincipal("cluster", "administrator")
-        request.state.source_verified_by = "user_session"
+        request.state.source_verified_by = session_fact
         origin = request.headers.get("Origin")
         # Origin is checked only after valid cookie auth; without it, the request
         # reaches 401 unless another explicit credential authenticates it.

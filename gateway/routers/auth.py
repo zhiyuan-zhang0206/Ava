@@ -8,7 +8,6 @@ GET  /api/auth/check   — report whether the current session is valid
 from __future__ import annotations
 
 import asyncio
-import hmac
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
@@ -17,18 +16,18 @@ from pydantic import BaseModel
 
 from gateway._cors import session_cookie_secure
 from gateway.error_envelope import error_response
+from gateway.request_principal import current_session_fact, login_mint
 from gateway.session_store import (
     create_session,
     list_sessions,
+    minted_session_id,
     revoke_session,
     session_ids_with_suffix,
-    session_is_valid,
 )
 from shared.cluster_auth import (
     clear_cookie_header,
     cookie_name,
     is_managed_browser_user_agent,
-    new_session_id,
     session_cookie_header,
 )
 from shared.config import settings
@@ -48,27 +47,15 @@ class LoginRequest(BaseModel):
     username: str | None = None
 
 
-def _is_runner_token(password: str) -> bool:
-    """Whether `password` is the active write generation's runner API token.
-
-    The managed browser of an agent-runner holds no human secret; it logs its
-    Chrome in with the machine token its launcher delivered. A revoked
-    generation's token never matches.
-    """
-    from shared.cluster.authority.api import acceptance, bearer_class
-    from shared.paths import ava_home
-
-    accepted = acceptance(ava_home().resolve())
-    return bearer_class(f"Bearer {password}", accepted) == "runner"
-
-
 @router.post("/api/auth/login")
 async def login(body: LoginRequest, request: Request) -> JSONResponse:
     """Authenticate with the cluster secret and receive a session cookie.
 
     Request body: ``{"password": "<cluster-secret>"}``. An agent-runner's
-    managed browser presents the active generation's runner API token instead
-    (`_is_runner_token`); its session is an ordinary session afterwards.
+    managed browser presents the active generation's runner API token instead.
+    The session is bound to the credential that minted it (`login_mint`): it
+    stops authenticating when that generation is revoked or the human secret
+    rotates, whatever its remaining lifetime.
 
     On success, returns ``{"ok": true}`` and sets an HTTP-only session
     cookie whose lifetime is controlled by ``session_ttl_seconds``.
@@ -117,7 +104,8 @@ async def login(body: LoginRequest, request: Request) -> JSONResponse:
             retryable=False,
         )
 
-    if not hmac.compare_digest(password, secret) and not _is_runner_token(password):
+    mint = await asyncio.to_thread(login_mint, password, secret)
+    if mint is None:
         login_limiter.record_failure(ip)
         return error_response(
             request,
@@ -128,7 +116,7 @@ async def login(body: LoginRequest, request: Request) -> JSONResponse:
         )
 
     login_limiter.record_success(ip)
-    session_id = new_session_id()
+    session_id = minted_session_id(mint)
     ttl_seconds = settings.gateway.session_ttl_seconds
     await asyncio.to_thread(
         create_session,
@@ -175,12 +163,13 @@ async def check(request: Request) -> JSONResponse:
     if not settings.gateway.auth_middleware_enabled or not settings.data_plane.cluster_secret:
         return JSONResponse(content={"authenticated": True})
     token = request.cookies.get(cookie_name())
-    authenticated = await asyncio.to_thread(
-        session_is_valid,
+    fact = await asyncio.to_thread(
+        current_session_fact,
         request.app.state.db_pool,
         token,
+        settings.data_plane.cluster_secret,
     )
-    return JSONResponse(content={"authenticated": authenticated})
+    return JSONResponse(content={"authenticated": fact is not None})
 
 
 @router.get("/api/auth/sessions")

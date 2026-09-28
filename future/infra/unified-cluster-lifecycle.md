@@ -252,9 +252,7 @@ Remaining: running that A/B/A on real images in a disposable Linux preview,
 plus a candidate-failure variant; the coordinator listener on the reserved
 port, the handoff's `receipt` and `preflight` entries, and the automated
 per-operation capability exchange, without which networked rollouts keep
-refusing. Browser sessions a managed browser minted with its runner token live
-until their TTL, not only until the generation rotates; binding them to the
-generation needs a session column.
+refusing.
 
 ## Remaining: qualify PITR custody and restart recovery
 

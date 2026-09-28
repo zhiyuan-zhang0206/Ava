@@ -18,8 +18,10 @@ export interface paths {
          * @description Authenticate with the cluster secret and receive a session cookie.
          *
          *     Request body: ``{"password": "<cluster-secret>"}``. An agent-runner's
-         *     managed browser presents the active generation's runner API token instead
-         *     (`_is_runner_token`); its session is an ordinary session afterwards.
+         *     managed browser presents the active generation's runner API token instead.
+         *     The session is bound to the credential that minted it (`login_mint`): it
+         *     stops authenticating when that generation is revoked or the human secret
+         *     rotates, whatever its remaining lifetime.
          *
          *     On success, returns ``{"ok": true}`` and sets an HTTP-only session
          *     cookie whose lifetime is controlled by ``session_ttl_seconds``.

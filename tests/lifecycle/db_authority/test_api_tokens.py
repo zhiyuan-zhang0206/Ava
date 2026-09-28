@@ -27,6 +27,7 @@ from fastapi.testclient import TestClient
 from starlette.requests import Request
 
 from cli.commands.data_plane import bringup
+from gateway import request_principal
 from gateway.request_principal import cluster_credential
 from gateway.routers._webhook_auth import authenticate_webhook
 from ops.service_spec import ServiceSpec, api_access
@@ -185,6 +186,84 @@ def test_login_admits_the_active_runner_token_for_the_managed_browser(gateway: P
         _rotate(gateway)
         assert _login(client, tokens.runner) == 401
         assert _login(client, _tokens(gateway).api.runner) == 200
+
+
+def _cookie_authenticates(client: TestClient, cookie: str) -> tuple[int, bool]:
+    """(`GET /api/agents` status, `/api/auth/check` verdict) presenting only `cookie`."""
+    client.cookies.clear()
+    headers = {"Cookie": f"{cookie_name()}={cookie}"}
+    agents = client.get("/api/agents", headers=headers).status_code
+    check = client.get("/api/auth/check", headers=headers).json()["authenticated"]
+    return agents, check
+
+
+def test_a_runner_minted_session_dies_with_its_generation(gateway: Path) -> None:
+    """A session is only as current as the credential that minted it: the
+    managed browser's cookie stops authenticating the moment the fence revokes
+    the runner token that logged it in, not at the session's expiry."""
+    runner = _tokens(gateway).api.runner
+    with TestClient(config_app()) as client:
+        cookie = client.post("/api/auth/login", json={"password": runner}).cookies[cookie_name()]
+        assert _cookie_authenticates(client, cookie) == (200, True)
+        _rotate(gateway)
+        assert _cookie_authenticates(client, cookie) == (401, False)
+        # A fresh login with the new generation's token authenticates again.
+        renewed = client.post(
+            "/api/auth/login", json={"password": _tokens(gateway).api.runner}
+        ).cookies[cookie_name()]
+        assert _cookie_authenticates(client, renewed) == (200, True)
+
+
+def test_a_human_minted_session_dies_with_the_rotated_secret(
+    gateway: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A browser logged in with the human secret survives a generation rotation
+    (the human bearer is not per-generation) but not a rotation of the secret
+    itself: the restarted gateway admits only sessions its current secret minted."""
+    with TestClient(config_app()) as client:
+        cookie = client.post("/api/auth/login", json={"password": _HUMAN}).cookies[cookie_name()]
+        _rotate(gateway)
+        assert _cookie_authenticates(client, cookie) == (200, True)
+        monkeypatch.setattr(settings.data_plane, "cluster_secret", "rotated-" + "r" * 40)
+        assert _cookie_authenticates(client, cookie) == (401, False)
+
+
+def test_a_session_cookie_names_its_credential_only_through_a_keyed_mac(gateway: Path) -> None:
+    """The cookie travels to the browser, so the mint in it must not let its
+    holder brute-force the human secret offline: it is an HMAC under the
+    gateway's private session key, never a plain digest of the credential."""
+    with TestClient(config_app()) as client:
+        cookie = client.post("/api/auth/login", json={"password": _HUMAN}).cookies[cookie_name()]
+        mint, _, _random = cookie.partition(".")
+        assert mint.startswith("human-")
+        digest = api.token_digest(_HUMAN)
+        unkeyed = hashlib.sha256(f"human\0{digest}".encode()).hexdigest()
+        for leaked in (_HUMAN, digest, unkeyed, hashlib.sha256(digest.encode()).hexdigest()):
+            assert leaked[:16] not in cookie
+        key = request_principal.session_key_path(gateway)
+        assert key.stat().st_mode & 0o777 == 0o600
+        # The mint depends on the key: a new key mints the same credential
+        # differently and ends every session the old key bound.
+        key.unlink()
+        renewed = client.post("/api/auth/login", json={"password": _HUMAN}).cookies[cookie_name()]
+        assert renewed.partition(".")[0] not in (mint, "")
+        assert _cookie_authenticates(client, cookie) == (401, False)
+        assert _cookie_authenticates(client, renewed) == (200, True)
+
+
+def test_a_session_records_which_credential_minted_it(gateway: Path) -> None:
+    """Inbound provenance tells a machine-minted browser session from a human one."""
+    runner = _tokens(gateway).api.runner
+    with TestClient(config_app()) as client:
+        human = client.post("/api/auth/login", json={"password": _HUMAN}).cookies[cookie_name()]
+        client.cookies.clear()
+        machine = client.post("/api/auth/login", json={"password": runner}).cookies[cookie_name()]
+        pool = client.app.state.db_pool  # type: ignore[attr-defined]
+        assert request_principal.current_session_fact(pool, human, _HUMAN) == "user_session"
+        assert (
+            request_principal.current_session_fact(pool, machine, _HUMAN)
+            == "machine_session:runner"
+        )
 
 
 def _webhook_request(authorization: str | None) -> Request:
