@@ -177,7 +177,7 @@ def initial(run: Path) -> None:
     )
 
 
-def admitted_cli(run: Path, *arguments: str) -> None:
+def admitted_cli(run: Path, *arguments: str, timeout: float) -> None:
     """The public CLI as this home's admitted runtime (`require_admitted_runtime`).
 
     Before any selection that is the source checkout. Once an image is selected
@@ -207,7 +207,7 @@ def admitted_cli(run: Path, *arguments: str) -> None:
         cwd=cwd,
         env=local.clean_env()
         | {"AVA_HOME": str(run / "home"), "AVA_CLUSTER_REGISTRY": str(run / "clusters.json")},
-        timeout=900,
+        timeout=timeout,
         check=True,
     )
 
@@ -224,31 +224,23 @@ def _build_request(run: Path, label: str) -> None:
     verb reads the registered units there. The captured bytes are hashed once;
     every later read (dispatch retry, wait, retirement) must match them.
     """
-    source, target = ("a", "b") if label == "ab" else ("b", "a")
-    _, admitted = image_input(run, source)
     inputs = json.loads(regular_bytes(run / "release-inputs.json"))
-    selected = inputs["images"][target]
+    selected = inputs["images"]["b" if label == "ab" else "a"]
     out = run / f"release-{label}-request.json"
-    subprocess.run(  # noqa: S603 — fixed argv, verified image interpreter, no shell
-        admitted.module_argv(
-            "cli.main",
-            "cluster",
-            "release",
-            "request",
-            "--commit",
-            selected["reference"]["source_commit"],
-            "--receipt",
-            selected["receipt"],
-            "--out",
-            str(out),
-            "--watch-s",
-            str(_WATCH_S),
-        ),
-        cwd=admitted.cwd,
-        env=local.clean_env()
-        | {"AVA_HOME": str(run / "home"), "AVA_CLUSTER_REGISTRY": str(run / "clusters.json")},
+    admitted_cli(
+        run,
+        "cluster",
+        "release",
+        "request",
+        "--commit",
+        selected["reference"]["source_commit"],
+        "--receipt",
+        selected["receipt"],
+        "--out",
+        str(out),
+        "--watch-s",
+        str(_WATCH_S),
         timeout=180,
-        check=True,
     )
     request = FleetRequest.model_validate_json(regular_bytes(out))
     if request.executor.model_dump(mode="json") != selected["reference"]:
@@ -273,26 +265,19 @@ def _operation(run: Path, label: str) -> FleetRequest:
 
 
 def dispatch(run: Path, label: str) -> None:
-    reference, image = image_input(run, "b" if label == "ab" else "a")
+    """`update --prepared` as the admitted image: the previous image's half of the
+    handoff (`cli/release_handoff/handoff.py`) receives the database login,
+    verifies the executor and execs its `submit` entry with that login. The
+    first submission therefore runs as A for A→B; the retirement resubmission
+    after the transition runs as B, which it selected."""
+    reference, _ = image_input(run, "b" if label == "ab" else "a")
     if not _requested(run, label):
         _build_request(run, label)
     request = _operation(run, label)
     if request.executor != reference:
         raise RuntimeError("cycle dispatch names a different retained executor")
-    subprocess.run(  # noqa: S603 — public CLI in verified image, no shell or service launcher
-        image.module_argv(
-            "cli.main",
-            "cluster",
-            "update",
-            "--prepared",
-            str(run / f"release-{label}-request.json"),
-        ),
-        cwd=image.cwd,
-        env=local.clean_env()
-        | {"AVA_HOME": request.home, "AVA_CLUSTER_REGISTRY": request.registry},
-        timeout=180,
-        check=True,
-    )
+    request_path = str(run / f"release-{label}-request.json")
+    admitted_cli(run, "cluster", "update", "--prepared", request_path, timeout=180)
 
 
 def _closed_journal(operation: Operation, native: LinuxJob) -> Operation:
@@ -469,7 +454,7 @@ def main() -> None:
             "stop": ("stop", "-y", "--stop-browser"),
             "destroy": ("cluster", "destroy", "--path", str(run / "home")),
         }
-        admitted_cli(run, *cleanup[args.action])
+        admitted_cli(run, *cleanup[args.action], timeout=900)
     elif args.action in {"freeze", "state", "capture", "closed"}:
         from scripts.preview.release_cycle_custody import capture, closed
         from scripts.preview.release_cycle_state import freeze, verify

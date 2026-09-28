@@ -232,11 +232,13 @@ CAS requires no existing image) and starts it through the same home's ordinary
 systemd boot unit and pinned boot entry. Each transition's request is built at
 its dispatch by the public `ava cluster release request` (the fleet of one,
 with a short captured watch window), run by the then-admitted image: A builds
-A→B, B builds B→A. Public `ava cluster update --prepared` then performs it.
-Each transition must finish in the requested candidate
-direction with a successful, closed finite executor; public resubmission then
-retires that exact executor. A live, failed, recovered or retried operation
-cannot count as a passing transition.
+A→B, B builds B→A. Public `ava cluster update --prepared`, run by that same
+admitted image, then performs it: the previous image's half of the handoff
+receives the database login and execs the executor image's `submit` entry with
+it. Each transition must finish in the requested candidate
+direction with a successful, closed finite executor; public resubmission, run
+by the image the transition selected, then retires that exact executor. A live,
+failed, recovered or retried operation cannot count as a passing transition.
 
 The first post-readiness action is real message/code-execution smoke, followed
 by the explicit-image native observer. Ports, persisted home/configuration,

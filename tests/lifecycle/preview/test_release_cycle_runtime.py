@@ -339,45 +339,81 @@ def test_retained_state_is_read_as_the_administrator_never_the_source_login(
     assert connection.statements[0] == "SET LOCAL statement_timeout = '5s'"
 
 
+def _cycle_inputs(run: Path, request: FleetRequest) -> None:
+    """Captured images A (the request's previous) and B (its candidate), no request yet."""
+    images = {
+        name: {
+            "receipt": str(run / f"receipt-{name}.json"),
+            "reference": reference.model_dump(mode="json"),
+            "runtime": {},
+            "fixture": {},
+        }
+        for name, reference in (("a", request.previous), ("b", request.candidate))
+    }
+    (run / "release-inputs.json").write_text(json.dumps({"images": images, "requests": {}}))
+
+
+def _verified(
+    run: Path, request: FleetRequest
+) -> tuple[dict[str, ReleaseRef], dict[str, VerifiedRelease]]:
+    """The captured references A and B and their verified images."""
+    references = {"a": request.previous, "b": request.candidate}
+    images = {
+        name: VerifiedRelease(
+            reference.artifact_digest,
+            reference.manifest_digest,
+            run / name,
+            run / name / "venv/bin/python",
+            run / name / "site",
+        )
+        for name, reference in references.items()
+    }
+    return references, images
+
+
+def _select(run: Path, artifact: str, manifest: str) -> None:
+    """The home's release selection, as a completed transition leaves it."""
+    (run / "home/releases/current-release").write_text(
+        json.dumps({"artifact_digest": artifact, "manifest_digest": manifest})
+    )
+
+
 def _captured_request(request: FleetRequest, label: str = "ab") -> Path:
     import hashlib
 
     run = Path(request.home).parent
+    _cycle_inputs(run, request)
     path = run / f"release-{label}-request.json"
     path.write_text(request.model_dump_json() + "\n")
-    (run / "release-inputs.json").write_text(
-        json.dumps({"requests": {label: {"sha256": hashlib.sha256(path.read_bytes()).hexdigest()}}})
-    )
+    inputs = json.loads((run / "release-inputs.json").read_text())
+    inputs["requests"][label] = {"sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
+    (run / "release-inputs.json").write_text(json.dumps(inputs))
     return run
 
 
-def test_dispatch_reverifies_image_and_invokes_only_public_cli_with_clean_environment(
+def test_dispatch_reverifies_the_executor_and_submits_as_the_admitted_image(
     request_record: FleetRequest, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """`update --prepared` is the previous image's half of the handoff: the
+    home's admitted image (A, selected) receives the database login, verifies
+    the executor and execs its `submit` entry with that login. The executor
+    image B is not selected and holds none (release proof r4)."""
     import subprocess
 
     run = _captured_request(request_record)
-    root = Path(request_record.home) / "releases" / request_record.candidate.artifact_digest
-    image = VerifiedRelease(
-        request_record.candidate.artifact_digest,
-        request_record.candidate.manifest_digest,
-        root,
-        root / "venv/bin/python",
-        root / "site",
-    )
+    references, images = _verified(run, request_record)
     events: list[str] = []
 
     def verified(_run: Path, name: str) -> tuple[ReleaseRef, VerifiedRelease]:
-        assert name == "b"
-        events.append("verify")
-        return request_record.candidate, image
+        events.append(f"verify-{name}")
+        return references[name], images[name]
 
     def command(argv: tuple[str, ...], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         events.append("public CLI")
-        assert argv == image.module_argv(
+        assert argv == images["a"].module_argv(
             "cli.main", "cluster", "update", "--prepared", str(run / "release-ab-request.json")
         )
-        assert kwargs["cwd"] == image.cwd and kwargs["check"]
+        assert kwargs["cwd"] == images["a"].cwd and kwargs["check"] and kwargs["timeout"] == 180
         assert kwargs["env"]["AVA_HOME"] == request_record.home
         assert kwargs["env"]["AVA_CLUSTER_REGISTRY"] == request_record.registry
         assert not {"PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV", "OPENAI_API_KEY"}.intersection(
@@ -388,13 +424,13 @@ def test_dispatch_reverifies_image_and_invokes_only_public_cli_with_clean_enviro
     monkeypatch.setattr(runtime, "image_input", verified)
     monkeypatch.setattr(runtime.subprocess, "run", command)
     runtime.dispatch(run, "ab")
-    assert events == ["verify", "public CLI"]
+    assert events == ["verify-b", "verify-a", "public CLI"]
     (run / "release-ab-request.json").write_text(
         request_record.model_copy(update={"machine": "changed"}).model_dump_json()
     )
     with pytest.raises(RuntimeError, match="request changed"):
         runtime.dispatch(run, "ab")
-    assert events == ["verify", "public CLI", "verify"]
+    assert events == ["verify-b", "verify-a", "public CLI", "verify-b"]
 
 
 def test_fixture_runs_isolated_before_trusting_its_installed_origin(
@@ -516,40 +552,17 @@ def test_prior_generation_closure_records_every_captured_native_identity(
         assert len(evidence["observations"]) == 3
 
 
-def _cycle_inputs(run: Path, request: FleetRequest) -> None:
-    """Captured images A (the request's previous) and B (its candidate), no request yet."""
-    images = {
-        name: {
-            "receipt": str(run / f"receipt-{name}.json"),
-            "reference": reference.model_dump(mode="json"),
-            "runtime": {},
-            "fixture": {},
-        }
-        for name, reference in (("a", request.previous), ("b", request.candidate))
-    }
-    (run / "release-inputs.json").write_text(json.dumps({"images": images, "requests": {}}))
-
-
-def test_dispatch_builds_its_request_with_the_public_verb_in_the_admitted_image(
+def test_dispatch_builds_and_submits_as_the_admitted_image_on_both_submissions(
     request_record: FleetRequest, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A→B's request is built by image A (the admitted runtime, the only one with
-    a database login), once; every later dispatch reuses the captured bytes."""
+    """A→B's request is built once and first submitted by image A, the admitted
+    runtime; after the transition selects B, the completed-only retirement
+    resubmission runs as B. Every later dispatch reuses the captured bytes."""
     import subprocess
 
     run = Path(request_record.home).parent
     _cycle_inputs(run, request_record)
-    images = {
-        name: VerifiedRelease(
-            reference.artifact_digest,
-            reference.manifest_digest,
-            run / name,
-            run / name / "venv/bin/python",
-            run / name / "site",
-        )
-        for name, reference in (("a", request_record.previous), ("b", request_record.candidate))
-    }
-    references = {"a": request_record.previous, "b": request_record.candidate}
+    references, images = _verified(run, request_record)
     monkeypatch.setattr(runtime, "image_input", lambda _run, name: (references[name], images[name]))
     out = run / "release-ab-request.json"
     calls: list[tuple[str, ...]] = []
@@ -558,34 +571,31 @@ def test_dispatch_builds_its_request_with_the_public_verb_in_the_admitted_image(
         calls.append(argv)
         assert kwargs["env"]["AVA_HOME"] == str(run / "home") and "PYTHONPATH" not in kwargs["env"]
         if "request" in argv:
-            assert argv == images["a"].module_argv(
-                "cli.main",
-                "cluster",
-                "release",
-                "request",
-                "--commit",
-                request_record.candidate.source_commit,
-                "--receipt",
-                str(run / "receipt-b.json"),
-                "--out",
-                str(out),
-                "--watch-s",
-                "30",
-            )
             out.write_text(request_record.model_dump_json() + "\n")
-        else:
-            assert argv == images["b"].module_argv(
-                "cli.main", "cluster", "update", "--prepared", str(out)
-            )
         return subprocess.CompletedProcess(argv, 0, "", "")
 
     monkeypatch.setattr(runtime.subprocess, "run", command)
     runtime.dispatch(run, "ab")
+    _select(run, request_record.candidate.artifact_digest, request_record.candidate.manifest_digest)
     runtime.dispatch(run, "ab")  # the completed-only retirement resubmission
-    assert [("request" in argv, "update" in argv) for argv in calls] == [
-        (True, False),
-        (False, True),
-        (False, True),
+    submit = ("cli.main", "cluster", "update", "--prepared", str(out))
+    assert calls == [
+        images["a"].module_argv(
+            "cli.main",
+            "cluster",
+            "release",
+            "request",
+            "--commit",
+            request_record.candidate.source_commit,
+            "--receipt",
+            str(run / "receipt-b.json"),
+            "--out",
+            str(out),
+            "--watch-s",
+            "30",
+        ),
+        images["a"].module_argv(*submit),
+        images["b"].module_argv(*submit),
     ]
     recorded = json.loads((run / "release-inputs.json").read_text())["requests"]["ab"]
     assert recorded["operation"] == str(request_record.path)
@@ -593,7 +603,7 @@ def test_dispatch_builds_its_request_with_the_public_verb_in_the_admitted_image(
 
 
 @pytest.mark.parametrize("selected", [None, "a", "b", "foreign"])
-def test_cleanup_cli_runs_as_the_homes_admitted_runtime(
+def test_the_cli_runs_as_the_homes_admitted_runtime(
     request_record: FleetRequest, monkeypatch: pytest.MonkeyPatch, selected: str | None
 ) -> None:
     """The home's selection decides admission (`require_admitted_runtime`): the
@@ -603,17 +613,7 @@ def test_cleanup_cli_runs_as_the_homes_admitted_runtime(
 
     run = Path(request_record.home).parent
     _cycle_inputs(run, request_record)
-    references = {"a": request_record.previous, "b": request_record.candidate}
-    images = {
-        name: VerifiedRelease(
-            reference.artifact_digest,
-            reference.manifest_digest,
-            run / name,
-            run / name / "venv/bin/python",
-            run / name / "site",
-        )
-        for name, reference in references.items()
-    }
+    references, images = _verified(run, request_record)
     verified: list[str] = []
 
     def image_input(_run: Path, name: str) -> tuple[ReleaseRef, VerifiedRelease]:
@@ -621,16 +621,12 @@ def test_cleanup_cli_runs_as_the_homes_admitted_runtime(
         return references[name], images[name]
 
     monkeypatch.setattr(runtime, "image_input", image_input)
-    pointer = run / "home/releases/current-release"
     if selected is None:
-        pointer.unlink()
+        (run / "home/releases/current-release").unlink()
+    elif selected == "foreign":
+        _select(run, "0" * 64, "b" * 64)
     else:
-        artifact, manifest = (
-            ("0" * 64, "b" * 64)
-            if selected == "foreign"
-            else (references[selected].artifact_digest, references[selected].manifest_digest)
-        )
-        pointer.write_text(json.dumps({"artifact_digest": artifact, "manifest_digest": manifest}))
+        _select(run, references[selected].artifact_digest, references[selected].manifest_digest)
     calls: list[tuple[tuple[str, ...], Path]] = []
 
     def command(argv: tuple[str, ...], **kwargs: Any) -> subprocess.CompletedProcess[str]:
@@ -644,10 +640,10 @@ def test_cleanup_cli_runs_as_the_homes_admitted_runtime(
     monkeypatch.setattr(runtime.subprocess, "run", command)
     if selected == "foreign":
         with pytest.raises(RuntimeError, match="captured"):
-            runtime.admitted_cli(run, "stop", "-y", "--stop-browser")
+            runtime.admitted_cli(run, "stop", "-y", "--stop-browser", timeout=900)
         assert not calls
         return
-    runtime.admitted_cli(run, "stop", "-y", "--stop-browser")
+    runtime.admitted_cli(run, "stop", "-y", "--stop-browser", timeout=900)
     if selected is None:
         source = run / "source"
         expected = (
@@ -675,7 +671,8 @@ def test_cleanup_actions_are_the_ordinary_stop_and_destroy(
     run = tmp_path.resolve()
     calls: list[tuple[Path, tuple[str, ...]]] = []
 
-    def admitted(target: Path, *argv: str) -> None:
+    def admitted(target: Path, *argv: str, timeout: float) -> None:
+        assert timeout == 900
         calls.append((target, argv))
 
     def own_preview(_run: Path) -> None:
