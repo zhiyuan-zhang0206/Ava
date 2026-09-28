@@ -74,7 +74,7 @@ function edge(
 }
 
 // A graph with: a central node (#1) wired by a spawn + a fork + several message
-// edges (so every edge style paints), and an idling node (#2).
+// edges (so every edge kind paints), and an idling node (#2).
 function rosterRow(agent_id: number, over: Partial<AgentRow> = {}): AgentRow {
   return {
     agent_id,
@@ -330,17 +330,9 @@ describe("GraphView", () => {
     expect(onSelect).not.toHaveBeenCalled();
   });
 
-  it("renders every edge gray (message and lineage alike)", async () => {
+  it("renders every edge solid and gray (message, spawn, and fork alike)", async () => {
     // User ruling 2026-08-05: no blue message edges — one muted gray for all.
-    useFleetGraph.mockReturnValue(
-      ok({
-        nodes: [node(1), node(2)],
-        edges: [
-          edge(1, 2, "spawn"),
-          edge(1, 2, "message"),
-        ],
-      }),
-    );
+    useFleetGraph.mockReturnValue(ok(richGraph()));
     const { container } = renderGraph(
       <GraphView selectedAgentId={null} onSelectAgent={vi.fn()} />,
     );
@@ -350,9 +342,10 @@ describe("GraphView", () => {
       'svg[aria-label="Fleet relationship graph"]',
     )!;
     const lines = svg.querySelectorAll("line");
-    expect(lines.length).toBeGreaterThanOrEqual(2);
+    expect(lines.length).toBe(8);
     for (const l of lines) {
       expect(l.getAttribute("class")).toBe("text-muted-foreground");
+      expect(l.getAttribute("stroke-dasharray")).toBeNull();
     }
   });
 
@@ -427,7 +420,7 @@ describe("GraphView", () => {
     expect(screen.getByText("No agents to graph.")).toBeTruthy();
   });
 
-  it("re-parents live descendants to their nearest live ancestor when intermediate parents terminate (user ruling 2026-09-07)", async () => {
+  it.each(["spawn", "fork"] as const)("re-parents %s descendants to their nearest live ancestor with solid edges when intermediate parents terminate", async (kind) => {
     // A(1, live) -> B(2, terminated) -> C(3, live)
     // C is NOT dropped; its lineage edge connects directly to nearest live ancestor A.
     //
@@ -447,6 +440,11 @@ describe("GraphView", () => {
     const { container } = renderGraph(
       <GraphView selectedAgentId={null} onSelectAgent={vi.fn()} />,
       {
+        live: [rosterRow(3, {
+          status: "idling",
+          spawner: kind === "fork" ? "user" : "agent:2",
+          fork_source_agent_id: kind === "fork" ? 2 : null,
+        })],
         terminated: [rosterRow(2, { spawner: "agent:1" })],
       },
     );
@@ -459,6 +457,32 @@ describe("GraphView", () => {
 
     const svg = container.querySelector('svg[aria-label="Fleet relationship graph"]')!;
     expect(svg.querySelectorAll("line").length).toBe(1); // lineage edge re-parented from 1 to 3
+    expect(svg.querySelector("line")!.getAttribute("stroke-dasharray")).toBeNull();
+  });
+
+  it.each([false, true])("renders roster fork lineage as solid with telemetry=%s", async (withTelemetry) => {
+    useFleetGraph.mockReturnValue(ok({
+      nodes: [node(1), node(2)],
+      edges: withTelemetry ? [edge(1, 2, "spawn", { weight: 4 })] : [],
+    }));
+    const { container } = renderGraph(
+      <GraphView selectedAgentId={null} onSelectAgent={vi.fn()} />,
+      {
+        live: [rosterRow(2, {
+          status: "running",
+          spawner: "agent:99",
+          fork_source_agent_id: 1,
+        })],
+      },
+    );
+    await waitFor(() => getNodeLabel(1), { timeout: 4000 });
+    const lines = container.querySelectorAll('svg[aria-label="Fleet relationship graph"] line');
+    expect(lines.length).toBe(1);
+    expect(lines[0].getAttribute("stroke-dasharray")).toBeNull();
+    expect(Number(lines[0].getAttribute("stroke-opacity"))).toBeCloseTo(0.72);
+    expect(Number(lines[0].getAttribute("stroke-width"))).toBeCloseTo(
+      1.2 + Math.sqrt(withTelemetry ? 4 : 2) * 1.2,
+    );
   });
 
   it("fetches one coherent tree on a direct fleet load", async () => {
@@ -558,7 +582,8 @@ describe("GraphView", () => {
           edge(1, 2, "spawn"),
           edge(1, 2, "resurrect"), // same pair, second lineage kind
           edge(1, 3, "spawn"),
-          edge(1, 3, "fork"), // same pair — fork must keep its dashed styling
+          edge(1, 3, "fork"), // same pair — fork also renders solid
+          edge(1, 3, "message"), // same pair, distinct message edge
         ],
       }),
     );
@@ -572,10 +597,11 @@ describe("GraphView", () => {
       'svg[aria-label="Fleet relationship graph"]',
     )!;
     const lines = svg.querySelectorAll("line");
-    // 2 pairs -> 2 lineage lines (not 4, and not an accumulating pile).
-    expect(lines.length).toBe(2);
-    // The spawn+fork pair keeps fork styling; the spawn+resurrect pair does not.
-    expect(svg.querySelectorAll('line[stroke-dasharray="4 3"]').length).toBe(1);
+    // 2 pairs -> 2 lineage lines plus the distinct message line.
+    expect(lines.length).toBe(3);
+    for (const line of lines) {
+      expect(line.getAttribute("stroke-dasharray")).toBeNull();
+    }
   });
 
   it("shows the hover card instantly on mouseenter and hides it on mouseleave", async () => {
