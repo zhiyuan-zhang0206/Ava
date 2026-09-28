@@ -313,6 +313,9 @@ _AUTHORITY_KEYS = {
     "cluster_secret": "AVA_CLUSTER_SECRET",
     "auth_middleware_enabled": "AVA_AUTH_MIDDLEWARE_ENABLED",
     "webhook_token": "AVA_ALERTS_WEBHOOK_TOKEN",
+    # Opens the /mcp authentication surface, where MCP client tokens (bound to
+    # no write generation) authenticate.
+    "mcp_endpoint_enabled": "AVA_MCP_ENDPOINT_ENABLED",
 }
 # Credentials this cluster presents OUTWARD (to model providers, search and
 # chat APIs, backup stores): writable, they confer no authority over the cluster.

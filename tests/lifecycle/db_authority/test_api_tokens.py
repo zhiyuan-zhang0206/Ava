@@ -288,6 +288,26 @@ def test_a_machine_token_cannot_choose_the_human_secret(
     assert not (store / ".env").exists()
 
 
+def test_a_machine_token_cannot_open_the_mcp_endpoint(
+    gateway: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Switching `/mcp` on decides whether MCP client tokens, which outlive
+    every generation, authenticate at all: no config write may choose it."""
+    from shared import runtime_config
+
+    store = tmp_path / "config-store"
+    store.mkdir()
+    monkeypatch.setattr(runtime_config, "_ava_home", lambda: store)
+    monkeypatch.setattr(settings.general, "machine_name", "gateway-host")
+    runner = _tokens(gateway).api.runner
+    with TestClient(config_app()) as client:
+        resp = client.put(
+            "/api/config", json={"mcp_endpoint_enabled": True}, headers=bearer_header(runner)
+        )
+    assert resp.status_code == 400, resp.text
+    assert not (store / ".env").exists()
+
+
 def test_only_a_human_credential_manages_mcp_clients(gateway: Path) -> None:
     """An MCP client token lives in `mcp_clients`, bound to no write generation.
     A generation-bound admission (either machine token, or a session a runner

@@ -16,11 +16,15 @@ The endpoint ships **off** — flag-gated so a cluster that does not use it is
 completely unaffected (off, `/mcp` answers 404):
 
 ```bash
-ava config set AVA_MCP_ENDPOINT_ENABLED=true
-# restart_required=gateway: the flag is read at gateway start
+# in the gateway home's .env, on the gateway host:
+AVA_MCP_ENDPOINT_ENABLED=true
+# then restart the gateway: the flag is read at gateway start
 ```
 
-Enabling it is a cluster config change (`cluster-pinned` scope); do it after
+The flag decides whether MCP client tokens authenticate at all, and those
+tokens outlive every write generation, so no config write sets it: `ava config
+set` (API or `--local`) refuses it and the settings panel shows it read-only,
+as for `AVA_AUTH_MIDDLEWARE_ENABLED`. Edit the gateway `.env` on its host, after
 the rollout that ships the endpoint code.
 
 ## Connect a client
