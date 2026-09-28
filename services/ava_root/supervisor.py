@@ -755,9 +755,10 @@ def _drop_moved_aside(
 def _record_survivors(unit_id: str, generation: _Generation) -> None:
     """Retain the births in a just-reaped leader's group while its number is reserved.
 
-    Never raises, so the watch still publishes the exit. A member missed here
-    is never signalled later; it keeps the group occupied, and the stop then
-    refuses instead of releasing custody.
+    Never raises, so the watch still publishes the exit. A member whose birth
+    cannot be read is left out alone (`group_births`) and never signalled later;
+    it keeps the group occupied, and the stop then refuses instead of releasing
+    custody.
     """
     pgid = generation.proc.pid
     try:

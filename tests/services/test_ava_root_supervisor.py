@@ -501,6 +501,64 @@ async def test_exited_leader_stop_closes_recorded_survivors_and_their_later_chil
     await owner.shutdown()
 
 
+@pytest.mark.parametrize("unreadable", ["access-denied", "no-start-ticks"])
+async def test_an_unreadable_survivor_leaves_its_siblings_recorded_and_closed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, unreadable: str
+) -> None:
+    """One member's birth cannot be read at the reap; its sibling is still recorded.
+
+    The stop closes the recorded sibling. The unreadable member is never
+    signalled: it keeps the group occupied, so the stop refuses, naming it alone.
+    """
+    kept_file, denied_file, trigger = (tmp_path / name for name in ("kept", "denied", "go"))
+    child = "import time; time.sleep(60)"
+    owner = root(
+        tmp_path,
+        "import pathlib,subprocess,sys,time\n"
+        f"kept=subprocess.Popen([sys.executable,'-c',{child!r}])\n"
+        f"denied=subprocess.Popen([sys.executable,'-c',{child!r}])\n"
+        f"pathlib.Path({str(kept_file)!r}).write_text(str(kept.pid))\n"
+        f"pathlib.Path({str(denied_file)!r}).write_text(str(denied.pid))\n"
+        "deadline=time.monotonic()+30\n"
+        f"while not pathlib.Path({str(trigger)!r}).exists() and time.monotonic()<deadline:\n"
+        "    time.sleep(0.01)\n",
+    )
+    await owner.start()
+    spawned: list[psutil.Process] = []
+    try:
+        kept = psutil.Process(await pid_in(kept_file))
+        denied = psutil.Process(await pid_in(denied_file))
+        spawned += [kept, denied]
+        capture = OwnedProcess.capture
+
+        def deny_one(_cls: type[OwnedProcess], process: psutil.Process) -> OwnedProcess:
+            if process.pid != denied.pid:
+                return capture(process)
+            if unreadable == "access-denied":
+                raise psutil.AccessDenied(process.pid)
+            raise RuntimeError(f"cannot capture Linux start ticks for PID {process.pid}")
+
+        monkeypatch.setattr(OwnedProcess, "capture", classmethod(deny_one))
+        trigger.touch()
+        await exited(owner)
+        monkeypatch.undo()
+        generation = owner._units["worker"].generation
+        assert generation is not None and generation.scope_closed_at_exit is False
+        recorded = {item.pid for item in generation.tracked}
+        assert kept.pid in recorded and denied.pid not in recorded
+        with pytest.raises(RuntimeError, match="process group") as refused:
+            await owner.down("worker")
+        assert ended(kept) and not ended(denied)
+        assert f"pids [{denied.pid}]" in str(refused.value)
+        denied.kill()
+        await gone(denied)
+        await owner.down("worker")
+        assert not list((tmp_path / "custody").iterdir())
+    finally:
+        kill_all(spawned)
+    await owner.shutdown()
+
+
 async def test_unconfirmable_exited_birth_retains_custody(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -35,9 +35,11 @@ or Windows containment. Mac permission grants require real signed-helper proof.
 
 Unit exit before stop: root reaps its own leaders. At that reap, while any
 member still reserves the group number, it reads the group: empty means nothing
-of the unit remained; otherwise it records every member's native birth in the
-unit's custody. The record still blocks a cold duplicate root and automatic
-revival. A later stop, or a retry after a refused one, that finds the recorded
+of the unit remained; otherwise it records each member's native birth in the
+unit's custody. A member whose birth it cannot read is left out alone, never
+signalled, and keeps the group occupied. The record still blocks a cold
+duplicate root and automatic revival. A later stop, or a retry after a refused
+one, that finds the recorded
 leader not live (gone, a zombie, or its PID now another birth) never lists the
 group again: once the recorded members exit, another program's group can carry
 that number. A birth it cannot verify keeps custody and names the record and

@@ -6,13 +6,15 @@ when a group number still proves the unit's scope (see `supervisor`).
 
 from __future__ import annotations
 
-import contextlib
+import logging
 
 import psutil
 
 from services.ava_root.custody import ServiceCustody
 from shared.native_process.ownership import OwnedProcess, capture_tree, retain_processes
 from shared.process_group_closure import group_empty, group_members
+
+_log = logging.getLogger(__name__)
 
 
 def group_closed(pgid: int) -> bool:
@@ -51,11 +53,19 @@ def unproven_group(unit_id: str, pgid: int, custody: ServiceCustody) -> RuntimeE
 
 
 def group_births(pgid: int) -> set[OwnedProcess]:
-    """Native births the kernel files under `pgid` now; lineage is the caller's proof."""
+    """Native births the kernel files under `pgid` now; lineage is the caller's proof.
+
+    A member whose birth cannot be read (access denied, or no Linux start ticks)
+    is logged and left out alone, so it is never signalled; the rest still count.
+    """
     members: set[OwnedProcess] = set()
     for pid in group_members(pgid):
-        with contextlib.suppress(psutil.NoSuchProcess):
+        try:
             members.add(OwnedProcess.capture(psutil.Process(pid)))
+        except psutil.NoSuchProcess:
+            continue
+        except (psutil.Error, RuntimeError) as exc:
+            _log.warning("process group %s: member %s not captured: %s", pgid, pid, exc)
     return members
 
 
