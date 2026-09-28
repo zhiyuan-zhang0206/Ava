@@ -237,6 +237,20 @@ def ended(process: psutil.Process) -> bool:
         return True
 
 
+def kill_all(spawned: list[psutil.Process]) -> None:
+    """Kill each test child and everything it forked, so a failed assertion leaks none.
+
+    psutil refuses to signal a PID that now names another birth.
+    """
+    processes = list(spawned)
+    for process in spawned:
+        with contextlib.suppress(psutil.NoSuchProcess):
+            processes.extend(process.children(recursive=True))
+    for process in processes:
+        with contextlib.suppress(psutil.NoSuchProcess):
+            process.kill()
+
+
 async def gone(process: psutil.Process) -> None:
     for _ in range(250):
         if ended(process):
@@ -376,7 +390,10 @@ async def test_exited_leader_stop_closes_recorded_survivors_and_their_later_chil
     survivor = (
         "import os,pathlib,subprocess,sys,time\n"
         f"pathlib.Path({str(survivor_file)!r}).write_text(str(os.getpid()))\n"
-        f"while not pathlib.Path({str(trigger)!r}).exists(): time.sleep(0.01)\n"
+        "deadline=time.monotonic()+30\n"
+        f"while not pathlib.Path({str(trigger)!r}).exists():\n"
+        "    if time.monotonic()>deadline: sys.exit(1)\n"
+        "    time.sleep(0.01)\n"
         + ("os.setpgid(0, 0)\n" if moves_group else "")
         + "late=subprocess.Popen([sys.executable,'-c','import time; time.sleep(60)'])\n"
         f"pathlib.Path({str(late_file)!r}).write_text(str(late.pid))\n"
@@ -386,22 +403,23 @@ async def test_exited_leader_stop_closes_recorded_survivors_and_their_later_chil
         tmp_path, f"import subprocess,sys; subprocess.Popen([sys.executable,'-c',{survivor!r}])"
     )
     await owner.start()
-    survivor_process = psutil.Process(await pid_in(survivor_file))
-    await exited(owner)
-    generation = owner._units["worker"].generation
-    assert generation is not None and generation.scope_closed_at_exit is False
-    assert survivor_process.pid in {item.pid for item in generation.tracked}
-    trigger.touch()
-    late = psutil.Process(await pid_in(late_file))
+    spawned: list[psutil.Process] = []
     try:
+        survivor_process = psutil.Process(await pid_in(survivor_file))
+        spawned.append(survivor_process)
+        await exited(owner)
+        generation = owner._units["worker"].generation
+        assert generation is not None and generation.scope_closed_at_exit is False
+        assert survivor_process.pid in {item.pid for item in generation.tracked}
+        trigger.touch()
+        late = psutil.Process(await pid_in(late_file))
+        spawned.append(late)
         await owner.down("worker")
         assert ended(survivor_process) and ended(late)
         assert not list((tmp_path / "custody").iterdir())
         assert (await row(owner))["last_error"] is None
     finally:
-        for process in (survivor_process, late):
-            with contextlib.suppress(psutil.NoSuchProcess):
-                process.kill()
+        kill_all(spawned)
     await owner.shutdown()
 
 
