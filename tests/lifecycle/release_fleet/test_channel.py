@@ -357,3 +357,9 @@ def test_connections_beyond_the_cap_are_closed_unanswered(bounded: Channel) -> N
             if time.monotonic() > deadline:
                 raise
             time.sleep(0.05)
+
+
+def test_the_server_header_names_the_protocol_only(channel: Channel) -> None:
+    answer = _raw(channel, "GET / HTTP/1.1\r\nHost: x")
+    server = [line for line in answer.split(b"\r\n") if line.lower().startswith(b"server:")]
+    assert server == [b"Server: ava-coordinator/1"]

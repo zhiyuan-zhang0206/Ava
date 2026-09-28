@@ -308,6 +308,10 @@ def _handler(listener: CoordinatorListener) -> type[BaseHTTPRequestHandler]:
         server_version = "ava-coordinator/1"
         timeout = READ_TIMEOUT_S
 
+        def version_string(self) -> str:
+            """The protocol alone: the stdlib default appends the Python version."""
+            return self.server_version
+
         def log_message(self, format: str, *args: object) -> None:
             logger.debug("[release-fleet] listener {}", format % args)
 
