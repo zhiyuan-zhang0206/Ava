@@ -27,9 +27,15 @@ document itself is kept in the cutover record), stored with the before image
 and the operator on the receipt. The conversion compares the exact before
 image, and refuses NULL, current-model values, a live or different runtime on
 the row, an unsettled command, another machine, or a receipt that already
-carries a closure. The ordinary predecessor rule then admits the form once: admission
-rewrites the set for its own incarnation and observes a restart receipt. A
-same-owner continuation refuses it because no host identity is recorded.
+carries a closure. It also refuses a row its successor would still refuse once
+converted (`successor_refusal`, which the read-only survey applies too and
+reports as `unconvertible`): a terminated row must still record exactly the
+closed hosted incarnation with no lifecycle pointer, which is what resurrection
+requires, and an idling row must have its owner released with at most the
+drain's restart as its pointer, the only pointer admission observes. The
+ordinary predecessor rule then admits the form once: admission rewrites the
+set for its own incarnation and observes a restart receipt. A same-owner
+continuation refuses it because no host identity is recorded.
 
 A drained restart leaves NULL or the complete, empty, unfrozen set of exactly
 the incarnation it released (`DRAINED_RESOURCES`). The host drain receipt,

@@ -27,8 +27,10 @@ authority cutover brought the plane up under new custody. Run them with the
 1. **Before the window (T-2).** `--check --legacy-commit <commit every host
    runs>` and store the output. Resolve every `attention` verdict (a pin or
    applied-migration set that would fire a legacy controller, a bootstrap-owned
-   database, prepared transactions). Note D-1 (pending publication) and D-2
-   (deploy lease): their exact JSON is the input of the repair.
+   database, prepared transactions, a legacy updater): the dry run and
+   `--execute` refuse while any remains, naming each check and why. Note D-1
+   (pending publication) and D-2 (deploy lease): their exact JSON is the input
+   of the repair.
 2. **Baseline (W0).** `--check` again; store it with the cutover record.
 3. **Row export (W3, after the gateway's old `ava pause`, before its `ava
    stop`).** Every runner stopped at W2 and the gateway just drained, so the
@@ -44,8 +46,10 @@ authority cutover brought the plane up under new custody. Run them with the
    evidence.
 5. **Repair (W7, after `scripts/cutover_db_authority.py`).** Dry-run with every
    input, resolve every refusal, then add `--execute`. Finally `--check` with
-   the same attestations: D-1, D-2, D-6 and D-8 read `ok`, and every
-   remaining retired-shape row is listed `inadmissible` with its reason.
+   the same attestations: D-1, D-2 and D-6 read `ok`. D-8 reads `ok` only
+   when no retired-shape row remains; otherwise it reads `fenced` with a count
+   per verdict and reason, and `--check` exits 2 ([rows left
+   fenced](#rows-left-fenced)).
 
 ```bash
 P=scripts/cutover_db_records.py
@@ -80,7 +84,11 @@ empty.
 Effects run in this order, each in its own transaction, and compare their row
 with the recorded images: the after image means a crashed run already committed
 it (`already`), the before image is applied, anything else stops the run. The
-conversion re-checks every closure guard under the row lock.
+conversion re-checks every closure guard under the row lock. The owner session
+caps lock waits (`lock_timeout` 10 s) and statements (`statement_timeout`
+60 s): an effect that hits a ceiling, for example behind a prepared
+transaction holding its row (D-11), rolls back and stops the run with the
+cause, and the same inputs continue it.
 
 | Step | Effect |
 |---|---|
@@ -88,28 +96,76 @@ conversion re-checks every closure guard under the row lock.
 | `lease` | Releases the legacy deploy lease (phase `stable`, holder, times and settle hold cleared), only once no pending publication remains. |
 | `posture` | `paused` postures of included hosts become `idle`. Paused machines keep theirs; stranded-hold columns stay for the retired-storage cleanup. A `converging` posture or a live updater lease refuses. |
 | `units` | Deletes the retired `machine_units` rows. Units of paused machines, this gateway's own unit and attested homes refuse. The stale `machines` row itself stays (the cluster machine-delete endpoint removes it). |
-| `incarnations` | `shared.predecessor_closure.close_retired_predecessor` per convertible row: the closed-predecessor form, with the before image, attestation digest, operator and reason recorded on the receipt ([why](../decisions/2026-09-27-existing-agent-closed-predecessor-admission.md)). A row the guards refuse is recorded `refused: <why>` and the run continues. |
+| `incarnations` | `shared.predecessor_closure.close_retired_predecessor` per convertible row: the closed-predecessor form, with the before image, attestation digest, operator and reason recorded on the receipt ([why](../decisions/2026-09-27-existing-agent-closed-predecessor-admission.md)). The journal keeps both before images, the resources and the receipt's payload (NULL included), and both are compared. A row the guards refuse is recorded `refused: <why>` and the run continues. |
 
 The pending, lease and posture repairs also require an attestation proving
 closure from every included machine (a unit neither paused nor retired).
 
-A retired-shape row is `convertible` only with a named incarnation, a released
-or terminated row with no live runtime, a settled receipt (the drain's applied
+A retired-shape row is `convertible` only with a named incarnation, a row its
+successor would take once converted, a settled receipt (the drain's applied
 restart held as the lifecycle pointer, or an applied and observed terminate),
 and an attestation of its machine that proves every recorded identity gone.
-Otherwise it is `awaiting` (no attestation for its machine yet) or
-`inadmissible`: the row still names a live old incarnation, the machine is
-paused, no receipt exists, the pointer names an unsettled command, an identity
-is unattested or malformed. The runtime keeps refusing those rows
-(`resource_fence`, `runtime_cutover_required`). NULL rows are counted and left
-as protocol zero.
+The survey and the conversion judge the row with one rule
+(`shared.predecessor_closure.successor_refusal`), which is the successor's own
+admission: an idling row with its owner released (admission observes only a
+restart pointer), or a terminated row that still records exactly the closed
+hosted incarnation and holds no lifecycle pointer (what resurrection requires).
+Otherwise the row is `awaiting` (no attestation for its machine yet),
+`inadmissible` (it still names a live or different incarnation, the pointer
+names an unsettled command, no receipt exists, the machine is paused, an
+identity is unattested or malformed), or `unconvertible` (a shape no successor
+accepts even after conversion: a terminated row whose runtime identity was
+released or carries no hosted kind, a terminated row still pointing at its
+receipt, a terminate receipt left as an idling row's pointer, a process
+runtime). The runtime keeps refusing those rows (`resource_fence`,
+`runtime_cutover_required`). NULL rows are counted and left as protocol zero.
+
+## Rows left fenced
+
+`--execute` converts only `convertible` rows. Every other retired-shape row
+stays fenced: the runtime keeps refusing its agent (`resource_fence` at
+admission, `runtime_cutover_required` at resurrection). D-8 reads `fenced`
+with a count and example agent ids per verdict and reason, so `--check` keeps
+exiting 2 after the repair. `fenced` is not a refusal: `--execute` prints the
+same summary before its first write and records it in its journal run.
+
+Each run re-reads every row. A row whose state changes is reclassified by the
+next `--check`, and a later run with new inputs converts it, for as long as
+the script exists. What can change a fenced row:
+
+- **`awaiting` or an unattested identity.** Take an attestation for that
+  machine with `--attest` while its home is still stopped, before the new
+  code starts there. A later run with that attestation converts the rows.
+- **A paused machine.** Its rows convert only after the machine is resumed
+  and attested while its home is still stopped; a later run with that
+  attestation converts them. Known gap: if its host posture still reads
+  `paused` (D-6), that run must also repair the posture, and a posture repair
+  requires a closure attestation from every included machine. Once the other
+  machines run the new code, the only such documents are their cutover-time
+  attestations, which no longer describe them. No sound late path exists for
+  such a machine, and its agents stay fenced.
+- **Every other reason (known gap).** This covers:
+  - a row that still names a live or different incarnation after every old
+    host stopped;
+  - a pointer to an unsettled command;
+  - no settled receipt (for example a crash-reaped row, which never had a
+    terminate command);
+  - a malformed value;
+  - every `unconvertible` row.
+
+  No input of this script changes these rows. Conversion would not help an
+  `unconvertible` row either: neither resurrection nor admission accepts its
+  shape. These agents stay fenced until a separate, evidence-backed decision
+  exists. The cutover scripts, and this conversion with them, are deleted
+  after the cutover.
 
 ## Record and recovery
 
 `$AVA_HOME/cutover-rollback/db-records/` (0700) holds `journal.json` (0600) and
 `attestations/<sha256>.json`, each attestation byte-for-byte. The journal is a
-list of runs. A run records its inputs and every planned effect with its before
-image before the first write, then each effect's result. A crashed run
+list of runs. A run records its inputs, the fenced summary it printed (which
+agents stay fenced, per verdict and reason) and every planned effect with its
+before image before the first write, then each effect's result. A crashed run
 continues only with the same inputs; the same inputs as a completed run change
 nothing; new inputs (a late attestation) append a run. Refusals are all
 decided before the first write of a run.

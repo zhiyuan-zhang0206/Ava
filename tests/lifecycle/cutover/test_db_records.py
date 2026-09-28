@@ -13,7 +13,7 @@ from collections.abc import Generator, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Any
+from typing import Any, LiteralString
 from uuid import UUID, uuid4
 
 import psycopg
@@ -24,6 +24,7 @@ from psycopg_pool import AsyncConnectionPool
 from agent.hosted_ownership import admit_hosted_runtime
 from ops.agent_spawn import create_agent_row
 from scripts import cutover_db_records as records
+from scripts import cutover_db_survey as survey_module
 from scripts import cutover_inventory as inventory
 from scripts.cutover_db_survey import FREE_LEASE, Inputs, RetiredUnit, export_rows, survey
 from shared.config import settings
@@ -211,6 +212,18 @@ def cluster(db_conn: psycopg.Connection, tmp_path: Path) -> Iterator[Cluster]:
         yield made
 
 
+# The real D-10 query: the throwaway database is owned by its bootstrap superuser.
+_BOOTSTRAP_OWNED = survey_module._OWNER
+
+
+@pytest.fixture(autouse=True)
+def _application_owner(monkeypatch: pytest.MonkeyPatch) -> None:
+    """D-10 as on a home the data-plane authority cutover converted."""
+    monkeypatch.setattr(
+        survey_module, "_OWNER", "SELECT 'ava_owner' AS owner, false AS owner_is_bootstrap"
+    )
+
+
 def _connection(*, write: bool) -> psycopg.Connection:
     conn = psycopg.connect(settings.data_plane.db_url, autocommit=True)
     records.prepare_session(conn, write=write)
@@ -277,7 +290,7 @@ def test_check_classifies_every_retired_row(cluster: Cluster) -> None:
         agents["drained"]: awaiting,
         agents["terminated"]: awaiting,
         agents["late"]: awaiting,
-        agents["live"]: ("inadmissible", "the row still names a live old incarnation"),
+        agents["live"]: ("inadmissible", "the row still names a live or different incarnation"),
         agents["paused"]: (
             "inadmissible",
             "the machine is paused; no closure evidence exists for it",
@@ -290,7 +303,54 @@ def test_check_classifies_every_retired_row(cluster: Cluster) -> None:
     assert found.counts == {
         "current_model": {GATEWAY: 1},
         "null_protocol_zero": {GATEWAY: 1},
-        "unconverted": {"convertible": 0, "awaiting": 3, "inadmissible": 3},
+        "unconverted": {"convertible": 0, "awaiting": 3, "inadmissible": 3, "unconvertible": 0},
+    }
+
+
+def _ended(
+    db: psycopg.Connection, runner: str, change: LiteralString, *, pointer: bool = False
+) -> int:
+    """A terminated row with its observed terminate receipt, then `change`d."""
+    aid, receipt = _agent(
+        db, runner, resources=_retired(uuid4(), uuid4(), 3131), receipt="terminate", terminated=True
+    )
+    db.execute(
+        f"UPDATE agents_meta SET {change}, lifecycle_command_id=%s WHERE id=%s",  # noqa: S608 -- fixed test fragments
+        (receipt if pointer else None, aid),
+    )
+    return aid
+
+
+def test_check_lists_rows_no_successor_would_take_as_unconvertible(
+    cluster: Cluster, db_conn: psycopg.Connection
+) -> None:
+    """Converting these would leave the agent fenced with no conversion left to
+    retry: resurrection needs the closed hosted incarnation and no pointer."""
+    runner = cluster.runner
+    shapes = {
+        _ended(db_conn, runner, "runtime_kind=NULL, runtime_generation=NULL, runtime_owner=NULL"): (
+            "the terminated row released its runtime identity; resurrection needs the closed "
+            "hosted incarnation"
+        ),
+        _ended(db_conn, runner, "runtime_kind=NULL"): (
+            "the terminated row records no hosted runtime kind; resurrection refuses it"
+        ),
+        _ended(db_conn, runner, "status='terminated'", pointer=True): (
+            "the terminated row still points at its receipt; resurrection defers while any "
+            "lifecycle pointer is set"
+        ),
+    }
+    db_conn.commit()
+    found = _survey(Inputs())
+    verdicts = _verdicts(found)
+    assert {aid: verdicts[aid] for aid in shapes} == {
+        aid: ("unconvertible", reason) for aid, reason in shapes.items()
+    }
+    assert found.counts["unconverted"] == {
+        "convertible": 0,
+        "awaiting": 3,
+        "inadmissible": 3,
+        "unconvertible": 3,
     }
 
 
@@ -310,7 +370,7 @@ def test_check_reports_the_d_series(cluster: Cluster) -> None:
         "D-7": "info",
         "D-8": "repair",
         "D-9": "info",
-        "D-10": "attention",  # the throwaway database is owned by its bootstrap superuser
+        "D-10": "ok",
         "D-11": "ok",
         "D-12": "info",
         "D-13": "info",
@@ -413,7 +473,7 @@ def test_execute_repairs_every_record(
         "lease": FREE_LEASE,
         "postures": {GATEWAY: "idle", cluster.runner: "idle", PAUSED: "paused"},
         "units": sorted([GATEWAY, cluster.runner, PAUSED]),
-        "unconverted": {"convertible": 0, "awaiting": 0, "inadmissible": 3},
+        "unconverted": {"convertible": 0, "awaiting": 0, "inadmissible": 3, "unconvertible": 0},
     }
 
 
@@ -441,7 +501,8 @@ def test_execute_records_the_run_and_the_same_inputs_change_nothing(
     assert len(json.loads((record / "journal.json").read_text())["runs"]) == 1
     after = _survey(inputs).checks
     verdicts = {name: after[name]["verdict"] for name in ("D-1", "D-2", "D-6", "D-8")}
-    assert verdicts == dict.fromkeys(("D-1", "D-2", "D-6", "D-8"), "ok")
+    # The live, paused and unreceipted rows stay fenced: D-8 says so, never `ok`.
+    assert verdicts == dict.fromkeys(("D-1", "D-2", "D-6"), "ok") | {"D-8": "fenced"}
 
 
 async def test_the_converted_agent_carries_its_evidence_and_is_admitted(
@@ -498,6 +559,44 @@ def test_a_crash_after_a_commit_resumes_with_the_same_inputs_only(
     assert run["results"]["incarnations"] == ["already", "applied", "applied"]
     journal = json.loads((cluster.home / records.JOURNAL).read_text())
     assert len(journal["runs"]) == 1
+
+
+def test_the_journal_keeps_each_receipt_payload_and_a_changed_one_stops_the_run(
+    cluster: Cluster, db_conn: psycopg.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The conversion also writes its receipt's payload: that before image is
+    journaled (NULL included) and compared under lock like every other."""
+    terminated = cluster.receipts["terminated"]
+    db_conn.execute("UPDATE inbound_messages SET payload=NULL WHERE id=%s", (terminated,))
+    db_conn.commit()
+    inputs = _inputs(tmp_path, cluster)
+    real = records._write_journal
+
+    def crash_after_first_conversion(home: Path, journal: dict[str, Any]) -> None:
+        if journal["runs"][-1]["results"]["incarnations"]:
+            raise OSError("simulated crash between the commit and the journal write")
+        real(home, journal)
+
+    monkeypatch.setattr(records, "_write_journal", crash_after_first_conversion)
+    with pytest.raises(OSError, match="simulated crash"):
+        _run(cluster, inputs)
+    monkeypatch.setattr(records, "_write_journal", real)
+    effects = json.loads((cluster.home / records.JOURNAL).read_text())["runs"][0]["effects"]
+    assert {e["receipt"]: e["receipt_before"] for e in effects["incarnations"]} == {
+        cluster.receipts["drained"]: _DRAIN,
+        terminated: None,
+        cluster.receipts["late"]: _DRAIN,
+    }
+
+    db_conn.execute("UPDATE inbound_messages SET payload='{}'::jsonb WHERE id=%s", (terminated,))
+    db_conn.commit()
+    with pytest.raises(RuntimeError, match="predecessor-close: the record changed"):
+        _run(cluster, inputs)
+    resources = db_conn.execute(
+        "SELECT incarnation_resources FROM agents_meta WHERE id=%s", (cluster.agents["terminated"],)
+    ).fetchone()
+    db_conn.commit()
+    assert resources is not None and resources[0]["host_process"]["pid"] == 5151
 
 
 def _refusals(cluster: Cluster, inputs: Inputs) -> list[str]:
