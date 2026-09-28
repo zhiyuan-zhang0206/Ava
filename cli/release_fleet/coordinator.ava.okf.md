@@ -61,6 +61,13 @@ instead of judging again.
   and exits; the operator continues with the same `ava cluster update
   --prepared`.
 
+A failure is any `Exception` a phase raises, a database error or a bug
+alike: the route follows the phase, never the class
+(`cli/release_transition/failure.py`). The journal, decision and alert keep
+its class and message, the log its traceback. Only process-ending
+`BaseException`s (`KeyboardInterrupt`, `SystemExit`) pass undecided; a
+continuation resumes from the journaled phase, as after process death.
+
 The lease (`deployment_state`, holder `fleet:<id>`) is taken at
 `dispatching`, re-armed by a continuation before any effect, renewed by a
 thread and released at completion; a lost lease fails the next step. An

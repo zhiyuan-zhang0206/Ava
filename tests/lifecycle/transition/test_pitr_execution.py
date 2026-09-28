@@ -7,6 +7,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
+import psycopg
 import pytest
 
 from cli.release_transition import execute, journal
@@ -28,6 +29,10 @@ def _constant[T](value: T) -> Callable[..., T]:
 
 class Interrupted(BaseException):
     pass
+
+
+class UnlistedError(Exception):
+    """An `Exception` of a class no executor names."""
 
 
 @pytest.mark.parametrize(
@@ -156,8 +161,9 @@ def test_db_down_stop_continuation_uses_persisted_native_receipt_without_sql_dra
     assert observed == ["root absent", receipt]
 
 
+@pytest.mark.parametrize("error", [RuntimeError, psycopg.OperationalError, UnlistedError])
 def test_failed_pitr_start_keeps_action_without_automatic_release_recovery(
-    pitr_request: PitrRequest, monkeypatch: pytest.MonkeyPatch
+    pitr_request: PitrRequest, monkeypatch: pytest.MonkeyPatch, error: type[Exception]
 ) -> None:
     operation = journal.create(pitr_request)
     assert operation.pitr is not None
@@ -172,18 +178,18 @@ def test_failed_pitr_start_keeps_action_without_automatic_release_recovery(
             pass
 
         def start(self, _operation: journal.Operation) -> None:
-            raise RuntimeError("native start failed")
+            raise error("native start failed")
 
     monkeypatch.setattr(transition, "PitrTransition", Failing)
     with (
         journal.exclusive(pitr_request.path) as handle,
-        pytest.raises(RuntimeError, match="native start failed"),
+        pytest.raises(error, match="native start failed"),
     ):
         execute.drive_pitr(handle)
     failed = journal.read_operation(pitr_request.path)
     assert failed.phase == "starting" and failed.direction is None
     assert failed.pitr is not None and failed.pitr.action == "activate"
-    assert failed.error == "RuntimeError: native start failed"
+    assert failed.error == f"{error.__name__}: native start failed"
 
 
 def test_preparation_lease_failure_cannot_mutate_business_state(

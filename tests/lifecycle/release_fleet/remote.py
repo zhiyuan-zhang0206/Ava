@@ -171,17 +171,18 @@ class Gateway(OffDutyGateway):
 
 
 class UnitEffects:
-    """A remote unit's release effects, recorded; `fail` raises in one phase once."""
+    """A remote unit's release effects, recorded; `fail` raises `error` in one phase once."""
 
-    def __init__(self, *, fail: str = "") -> None:
+    def __init__(self, *, fail: str = "", error: type[Exception] = RuntimeError) -> None:
         self.fail = fail
+        self.error = error
         self.events: list[tuple[str, str | None]] = []
 
     def _effect(self, phase: str, operation: Operation) -> None:
         self.events.append((phase, operation.direction))
         if phase == self.fail:
             self.fail = ""
-            raise RuntimeError(f"injected unit failure at {phase}")
+            raise self.error(f"injected unit failure at {phase}")
 
     def quiesce(self, operation: Operation) -> MaintenanceHold:
         self._effect("quiescing", operation)

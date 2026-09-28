@@ -28,7 +28,6 @@ from pathlib import Path
 from typing import Protocol
 
 from cli.release_fleet.client import (
-    CapabilityDeferredError,
     CoordinatorAwayError,
     CoordinatorClient,
     StaleReportError,
@@ -36,6 +35,7 @@ from cli.release_fleet.client import (
 from cli.release_fleet.policy import UnitCohort, drain_report
 from cli.release_fleet.progress import Instruction, Report, ReportState, UnitProgress, next_phase
 from cli.release_fleet.request import UnitRequest
+from cli.release_transition.failure import OperationFailure, failure_detail
 from cli.release_transition.journal import Journal, Operation
 from shared.log import logger
 from shared.maintenance_state import MaintenanceHold
@@ -109,10 +109,6 @@ class DeferredExchange:
 
 def _utc_now() -> datetime:
     return datetime.now(UTC)
-
-
-def _detail(exc: BaseException) -> str:
-    return f"{type(exc).__name__}: {exc}"[:2048]
 
 
 class Follower:
@@ -235,9 +231,15 @@ class Follower:
         """Run the instruction's phases, then answer; a failed effect answers `failed`."""
         try:
             cohort = self._run(instruction)
-        except (OSError, ValueError, RuntimeError, CapabilityDeferredError) as exc:
-            self.journal.fail(_detail(exc))
-            return self._report(instruction, "failed", detail=_detail(exc))
+        except OperationFailure as exc:
+            detail = failure_detail(exc)
+            logger.opt(exception=exc).warning(
+                "[release-fleet] {action} failed: {detail}",
+                action=instruction.action,
+                detail=detail,
+            )
+            self.journal.fail(detail)
+            return self._report(instruction, "failed", detail=detail)
         return self._report(instruction, _ANSWER[instruction.action], cohort=cohort)
 
     def _run(self, instruction: Instruction) -> UnitCohort | None:

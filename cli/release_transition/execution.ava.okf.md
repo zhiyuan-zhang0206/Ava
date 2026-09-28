@@ -19,7 +19,9 @@ captured predecessor once, closes the candidate, then uses the same
 fence/select/authorize/start/observe path. Recovery never chooses another
 target or loops between releases. A failure while fencing, selecting,
 authorizing, resuming or restoring holds for continuation: none is an
-automatic rollback boundary.
+automatic rollback boundary. Every executor (coordinator, follower, PITR)
+treats any `Exception` as a failure and journals it before routing it
+(`failure.py`); only a process-ending `BaseException` passes undecided.
 
 The stop phase closes this unit's writers. Persistent terminals — agent
 shells, coding sessions, watchers, page and schedule runners — do not survive

@@ -13,6 +13,7 @@ from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
+import psycopg
 import pytest
 
 from cli.release_fleet.client import CoordinatorAwayError
@@ -121,6 +122,26 @@ def test_an_answered_instruction_is_answered_again_without_repeating_its_effect(
         follower.follow(quiesce)
     assert effects.events == [("quiescing", "candidate")]
     assert client.reports[0] == client.reports[1]
+
+
+class UnlistedError(Exception):
+    """An `Exception` of a class no executor names."""
+
+
+@pytest.mark.parametrize("error", [RuntimeError, psycopg.OperationalError, UnlistedError])
+def test_a_failed_effect_is_journaled_and_answered_whatever_its_class(
+    tmp_path: Path, error: type[Exception]
+) -> None:
+    request, unit_request = _unit(tmp_path)
+    client = Scripted([])
+    effects = UnitEffects(fail="quiescing", error=error)
+    with exclusive(unit_request.path) as journal:
+        follower = Follower(journal, effects, client, Exchange())  # type: ignore[arg-type]
+        follower.follow(_order(request, unit_request, action="quiesce"))
+    detail = f"{error.__name__}: injected unit failure at quiescing"
+    assert [(r.state, r.detail) for r in client.reports] == [("failed", detail)]
+    failed = read_operation(unit_request.path)
+    assert failed.phase == "quiescing" and failed.error == detail
 
 
 def test_a_silent_coordinator_past_the_lifetime_holds_the_unit(tmp_path: Path) -> None:

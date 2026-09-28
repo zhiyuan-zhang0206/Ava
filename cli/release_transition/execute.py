@@ -13,6 +13,7 @@ from pathlib import Path
 from pydantic import JsonValue
 
 from cli.release_fleet.request import FleetRequest
+from cli.release_transition.failure import OperationFailure, failure_detail
 from cli.release_transition.journal import Journal, Operation, exclusive, read_operation
 from cli.release_transition.request import PitrRequest
 
@@ -136,9 +137,9 @@ def drive_pitr(journal: Journal) -> None:
                     driver.prove(journal)
                     journal.advance("complete")
                 case _:
-                    raise ValueError("unknown PITR execution phase")  # noqa: TRY301 — exhaustive state dispatch
-        except (OSError, ValueError, RuntimeError) as exc:
-            journal.fail(f"{type(exc).__name__}: {exc}"[:2048])
+                    raise ValueError("unknown PITR execution phase")
+        except OperationFailure as exc:
+            journal.fail(failure_detail(exc))
             persist_failure(journal.operation, exc)
             raise
 

@@ -15,6 +15,7 @@ from types import SimpleNamespace
 from typing import Any
 from uuid import uuid4
 
+import psycopg
 import pytest
 
 from cli.release_fleet.policy import FleetPolicy
@@ -75,12 +76,21 @@ class ControllerLost(BaseException):
     """A process death cannot run the executor's exception compensation."""
 
 
+class UnlistedError(Exception):
+    """An `Exception` of a class no executor names."""
+
+
+# A phase failure is routed by its phase, never by its class.
+_FAILURE_CLASSES = [RuntimeError, psycopg.OperationalError, UnlistedError]
+
+
 class Effects(OffDutyGateway):
     def __init__(
         self,
         request: FleetRequest,
         *,
         fail: str = "",
+        error: type[Exception] = RuntimeError,
         crash: bool = False,
         then_crash: str = "",
     ) -> None:
@@ -88,7 +98,7 @@ class Effects(OffDutyGateway):
         self.events: list[tuple[str, Direction | None]] = []
         self.failures: dict[str, type[BaseException]] = {}
         if fail:
-            self.failures[fail] = ControllerLost if crash else RuntimeError
+            self.failures[fail] = ControllerLost if crash else error
         if then_crash:
             self.failures[then_crash] = ControllerLost
         self.selector = "previous"
@@ -209,18 +219,20 @@ def test_candidate_start_failure_closes_candidate_before_selecting_previous(
     assert effects.selector_writes == 2
 
 
+@pytest.mark.parametrize("error", _FAILURE_CLASSES)
 @pytest.mark.parametrize("phase", ["prepared", "quiescing", "stopping"])
 def test_failure_before_the_fence_aborts_and_restores_the_unchanged_previous(
-    request_record: FleetRequest, phase: str
+    request_record: FleetRequest, phase: str, error: type[Exception]
 ) -> None:
     create(request_record)
-    effects = Effects(request_record, fail=phase)
+    effects = Effects(request_record, fail=phase, error=error)
     with exclusive(request_record.path) as journal:
         drive(journal, effects)
     final = read_operation(request_record.path)
     assert final.terminal and final.direction == "candidate"
     assert final.fleet is not None and final.fleet.outcome == "aborted"
     assert [(d.kind, d.phase) for d in final.fleet.decisions] == [("abort", phase)]
+    assert final.fleet.decisions[0].reason == f"{error.__name__}: injected native failure"
     assert final.db_fences == () and final.db_issues == ()
     assert effects.events[-1] == ("restoring", "candidate")
     assert effects.selector_writes == 0
@@ -245,22 +257,25 @@ def test_dispatch_failure_aborts_before_any_unit_is_disturbed(
     assert [e for e, _ in effects.events] == ["prepared", "restoring"]
 
 
+@pytest.mark.parametrize("error", _FAILURE_CLASSES)
 @pytest.mark.parametrize("phase", ["fencing", "selecting", "authorizing", "resuming"])
 def test_failure_after_the_fence_holds_and_never_invents_rollback(
-    request_record: FleetRequest, phase: str
+    request_record: FleetRequest, phase: str, error: type[Exception]
 ) -> None:
     create(request_record)
-    effects = Effects(request_record, fail=phase)
+    effects = Effects(request_record, fail=phase, error=error)
     with (
-        pytest.raises(RuntimeError, match="native failure"),
+        pytest.raises(error, match="native failure"),
         exclusive(request_record.path) as journal,
     ):
         drive(journal, effects)
     interrupted = read_operation(request_record.path)
+    detail = f"{error.__name__}: injected native failure"
     assert interrupted.phase == phase and interrupted.direction == "candidate"
-    assert not interrupted.terminal and interrupted.error is not None
+    assert not interrupted.terminal and interrupted.error == detail
     assert interrupted.fleet is not None
     assert [r.alert.kind for r in interrupted.fleet.alerts] == ["held"]
+    assert interrupted.fleet.alerts[0].alert.summary == f"held at {phase}: {detail}"
     assert all(direction == "candidate" for _, direction in effects.events)
     with exclusive(request_record.path) as journal:
         drive(journal, effects)

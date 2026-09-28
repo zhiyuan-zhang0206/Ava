@@ -14,6 +14,8 @@ acts on the journaled decision instead of re-deciding.
   and the predecessor runs on a new generation, outcome `recovered`.
 - Anything else **holds**: the error is journaled with a `held` alert and the
   executor exits; the operator continues with the same submit command.
+
+A failure is any `Exception`, whatever its class (`cli.release_transition.failure`).
 """
 
 from __future__ import annotations
@@ -36,22 +38,18 @@ from cli.release_fleet.publication import Completion
 from cli.release_fleet.request import FleetRequest
 from cli.release_fleet.units import RemoteUnits
 from cli.release_fleet.workload import Evidence, UnitReport, Verdict, judge_start, judge_watch
+from cli.release_transition.failure import OperationFailure, failure_detail
 from cli.release_transition.journal import Journal, Operation
 from shared.log import logger
 
 Clock = Callable[[], datetime]
 # Cadence of watch-window samples; the last sample always follows the window end.
 _WATCH_SAMPLE_S = 30.0
-_FAILURES = (OSError, ValueError, RuntimeError)
 _RECOVERABLE = frozenset({"starting", "observing", "starting_units"})
 
 
 def _utc_now() -> datetime:
     return datetime.now(UTC)
-
-
-def _detail(exc: BaseException) -> str:
-    return f"{type(exc).__name__}: {exc}"[:2048]
 
 
 def _needs_lease(operation: Operation) -> bool:
@@ -143,7 +141,7 @@ class Coordinator:
                 operation = self.operation
                 try:
                     self._step(operation)
-                except _FAILURES as exc:
+                except OperationFailure as exc:
                     held = not self._failed(operation, exc)
                     self._deliver()
                     if held:
@@ -163,9 +161,12 @@ class Coordinator:
 
     def _failed(self, operation: Operation, exc: BaseException) -> bool:
         """Abort before the fence, recover a failing candidate once, else hold."""
-        detail, now = _detail(exc), self.clock()
+        detail, now = failure_detail(exc), self.clock()
+        # The journal and the alert keep class and message; the log keeps the traceback.
+        logger.opt(exception=exc).warning(
+            "[release-fleet] {phase} failed: {detail}", phase=operation.phase, detail=detail
+        )
         if operation.direction == "candidate" and operation.phase in FLEET_ABORTABLE:
-            logger.warning("[release-fleet] aborting before the fence: {detail}", detail=detail)
             self.journal.abort(detail, at=now)
             return True
         if operation.direction == "candidate" and operation.phase in _RECOVERABLE:
