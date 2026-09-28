@@ -158,13 +158,21 @@ def test_non_prod_first_start_leaves_the_host_link_alone(
     assert (ava_home / "ava").readlink() == checkout / ".venv" / "bin" / "ava"
 
 
-def test_non_prod_first_start_without_link_names_the_checkout_cli(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+def test_non_prod_first_start_creates_no_bare_link_when_none_existed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _, _, bare_link = _first_start_converge(tmp_path, monkeypatch, prod=False)
 
     assert not bare_link.exists()
     assert not bare_link.is_symlink()
+
+
+def test_missing_setup_error_names_the_checkout_cli(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`_print_missing_setup_error`'s first-time-setup example must name this
+    checkout's own `.venv/bin/ava`, since the host-global `ava` cannot reach a
+    home before its first start has linked `$AVA_HOME/ava`."""
     missing: list[_setup_commands._SetupField | _setup_commands._Capability] = [
         c for c in _setup_commands._CAPABILITIES if c.capability != "observability-station"
     ]

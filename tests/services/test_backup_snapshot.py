@@ -52,7 +52,7 @@ def _patch_decrypt_and_listing(
     [(1, "archive listing"), (0, "")],
     ids=("pg-restore-fails", "empty-toc"),
 )
-def test_pre_update_data_snapshot_rejects_unrestorable_dump(
+def test_verify_snapshot_rejects_unrestorable_dump(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, returncode: int, stdout: str
 ) -> None:
     """A decrypted dump must both list successfully and contain a non-empty TOC."""
@@ -66,7 +66,7 @@ def test_pre_update_data_snapshot_rejects_unrestorable_dump(
         _snapshot.verify_snapshot(artifact)
 
 
-def test_pre_update_data_snapshot_rejects_header_only_toc(
+def test_verify_snapshot_rejects_header_only_toc(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """pg_restore's comments alone are not a restorable archive table of contents."""
@@ -79,7 +79,7 @@ def test_pre_update_data_snapshot_rejects_header_only_toc(
         _snapshot.verify_snapshot(artifact)
 
 
-def test_pre_update_data_snapshot_verifies_legacy_gzip_artifact(
+def test_verify_snapshot_accepts_legacy_gzip_artifact(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A pre-double-gzip-removal artifact (decrypted bytes are gzip) still
@@ -95,7 +95,7 @@ def test_pre_update_data_snapshot_verifies_legacy_gzip_artifact(
     _snapshot.verify_snapshot(artifact)  # must not raise
 
 
-def test_pre_update_data_snapshot_rejects_empty_dump(
+def test_verify_snapshot_rejects_empty_dump(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """An empty encrypted artifact is never a restore point."""
