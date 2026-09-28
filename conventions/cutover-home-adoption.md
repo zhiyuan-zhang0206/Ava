@@ -126,6 +126,30 @@ journal's `record-retire` effect, delete `start-intent.json`, and restore `.env`
 from its pre-adoption snapshot in `backups/env/` (moved to
 `cutover-rollback/residue/backups/env/` on a remote unit).
 
+## A legacy stop hold with failure receipts
+
+Adoption keeps only a completed legacy stop's hold: phase `stopped` with no
+unsettled failure receipt. Any other paused journal refuses ("holds a pause
+that is not a completed stop's maintenance hold"). Settle it with the old code,
+before the host's code switch; read the receipts with the old
+`ava maintenance status`.
+
+- The drain failed (phase `preparing`, `draining` or `drained`; the old
+  `ava stop` printed "continuations failed; hold retained"). Fix the named
+  agents' root cause, run the old
+  `ava maintenance repair --operation <holder> --acquired-at <time>` (it
+  records the operator and moves the receipts into `repaired`), then re-run
+  the old `ava stop --yes`: it continues the same hold to `stopped`, and the
+  inventory then reports it adoptable. The repair needs the gateway database,
+  so a runner settles before the gateway's W3 stop.
+- The hold reached `stopped` with a receipt latched after its drain (a turn
+  failing while services stopped). Neither code base has a sanctioned exit:
+  `repair` and `resume --cancel` refuse a started stop, and start and resume
+  refuse unsettled receipts. Never edit the journal by hand. Record the hold
+  and its receipts, then exclude that runner from the window (it stays on the
+  old code, stopped, and `--exclude-unit` at W6 keeps it fenced), or treat it
+  as a no-go on the gateway (R1).
+
 ## Operator follow-up
 
 - Remote units: the archived residue and `.env` snapshots hold gateway
