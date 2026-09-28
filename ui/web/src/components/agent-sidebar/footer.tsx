@@ -31,10 +31,14 @@ import {
   type PluginStatCard as PluginStatCardModel,
 } from "@/lib/plugin-stats";
 import type { StatsDashboard } from "@/lib/types";
-import { FLEX, FLEX_COL } from "@/lib/layout";
+import { FLEX, FLEX_COL, MIN_W_0 } from "@/lib/layout";
 import { cn } from "@/lib/utils";
 
 import { fleetHref } from "./links";
+
+/** Shared by the expanded footer and collapsed rail. */
+export const STATS_POPOVER_CLASS =
+  "z-50 max-h-[var(--radix-popover-content-available-height)] w-80 max-w-[calc(100vw-1.5rem)] overflow-y-auto rounded-md border border-border bg-popover text-popover-foreground shadow-md outline-none";
 
 // ── Stats cards (unchanged 2×3 grid) ──
 
@@ -225,12 +229,10 @@ export function StatsCards({
         // dashboard carried). Not windowed: a plugin value is a point in
         // time, so the window selector deliberately does not apply — the
         // section sits below the windowed grid precisely to say so.
-        <div className="border-t border-border px-3 py-2">
-          <div className="grid grid-cols-2 gap-1">
-            {pluginCards.map((card) => (
-              <PluginStatCard key={card.key} card={card} />
-            ))}
-          </div>
+        <div className="divide-y divide-border/60 border-t border-border px-3">
+          {pluginCards.map((card) => (
+            <PluginStatCard key={card.key} card={card} />
+          ))}
         </div>
       ) : null}
     </div>
@@ -239,8 +241,10 @@ export function StatsCards({
 
 // ── Plugin stat card (task #2911) ──
 
-// One declared plugin card: label + the plugin's own value text + an optional
-// detail line. The empty state ("—") means the card is declared but no value
+// One declared plugin row: label + the plugin's primary value + optional
+// supporting text. Values and details wrap, preserving provider line breaks
+// so reset schedules remain readable without a hover. The empty state ("—")
+// means the card is declared but no value
 // row exists yet (no credential, or no refresh has run); `stale` dims a value
 // whose last write is old, so a stopped refresh cannot pass for a fresh one —
 // the age itself rides the tooltip.
@@ -257,18 +261,19 @@ function PluginStatCard({ card }: { card: PluginStatCardModel }) {
     <div
       title={title}
       className={cn(
-        "gap-0.5 px-2 py-1.5 rounded bg-sidebar-accent/40",
+        "gap-1 py-2.5",
+        MIN_W_0,
         FLEX,
         FLEX_COL,
         card.stale && "opacity-60",
       )}
     >
-      <span className="truncate text-[10px] tracking-wide text-muted-foreground" title={card.label}>
+      <span className="break-words text-xs font-medium text-muted-foreground">
         {card.label}
       </span>
       <span
         className={cn(
-          "font-mono tabular-nums text-sm",
+          "whitespace-pre-line break-words text-sm font-medium leading-5 tabular-nums",
           card.status === "error" && "text-destructive",
           card.status === "warn" && "text-amber-600 dark:text-amber-400",
         )}
@@ -276,7 +281,7 @@ function PluginStatCard({ card }: { card: PluginStatCardModel }) {
         {card.value ?? "—"}
       </span>
       {card.detail ? (
-        <span className="truncate text-[10px] text-muted-foreground" title={card.detail}>
+        <span className="whitespace-pre-line break-words text-xs leading-5 text-muted-foreground">
           {card.detail}
         </span>
       ) : null}
@@ -317,7 +322,7 @@ export function SidebarFooter({ activeAgentId }: { activeAgentId: number | null 
           <Popover.Content
             sideOffset={6}
             align="start"
-            className="z-50 w-64 rounded-md border border-border bg-popover text-popover-foreground shadow-md outline-none"
+            className={STATS_POPOVER_CLASS}
           >
             <StatsCards
               stats={stats}

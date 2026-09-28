@@ -20,7 +20,7 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
-from playwright.sync_api import Browser, Page, Route
+from playwright.sync_api import Browser, Locator, Page, Route, expect
 
 from tests.e2e._ports import FRONTEND_URL
 from tests.e2e._visual_snapshot import assert_visual_snapshot
@@ -173,3 +173,135 @@ def test_mobile_visual_regression(visual_page: Page) -> None:
         test_name="test_mobile_visual_regression",
         name="mobile.png",
     )
+
+
+@pytest.mark.parametrize(
+    "viewport,collapsed", [((1280, 480), False), ((1280, 480), True), ((390, 600), False)]
+)
+def test_plugin_quota_rows_wrap_inside_statistics_popover(
+    visual_page: Page, viewport: tuple[int, int], collapsed: bool
+) -> None:
+    """Reset schedules and long details remain readable in a bounded popover."""
+    page = visual_page
+    width, height = viewport
+    page.set_viewport_size({"width": width, "height": height})
+    _stub_quota_sidebar_dependencies(page)
+    label = "Codex account with a deliberately long display name"
+    reset = "5h reset: 2026-09-29 06:00 UTC+08:00\nWeekly reset: 2026-10-02 06:00 UTC+08:00"
+    detail = "5h remaining 60% · Weekly remaining 30% · Manual resets: 0"
+    declarations = [
+        {
+            "plugin": f"quota-{index}",
+            "id": "usage",
+            "label": label if index == 0 else f"Account {index}",
+        }
+        for index in range(4)
+    ]
+    page.route(
+        "**/api/ui/contributions",
+        lambda route: route.fulfill(json={"stats": declarations, "nav": [], "themes": []}),
+    )
+    page.route(
+        "**/api/stats/dashboard?*",
+        lambda route: route.fulfill(
+            json={
+                "live_count": 1,
+                "window_hours": 24,
+                "tokens": {"input": 0, "output": 0, "cache_read": 0, "cache_hit_pct": 0},
+                "cost_usd": 0,
+                "avg_turn_seconds": None,
+                "warnings": 0,
+                "errors": 0,
+                "warnings_dismissed": 0,
+                "errors_dismissed": 0,
+                "warnings_net": 0,
+                "errors_net": 0,
+                "total_events": 0,
+                "plugin_stats": [
+                    {
+                        **row,
+                        "value": reset,
+                        "detail": detail,
+                        "status": "ok",
+                        "updated_at": "2026-09-28T16:00:00Z",
+                        "updated_by": None,
+                    }
+                    for row in declarations
+                ],
+            }
+        ),
+    )
+    # HomeShell resets a persisted collapsed preference once settings load.
+    # Wait for that write so a cold-entry effect cannot undo our later click.
+    with page.expect_response(
+        lambda response: (
+            response.url.endswith("/api/settings/display.sidebar_collapsed")
+            and response.request.method == "PUT"
+        )
+    ):
+        _open(page, "/")
+    if width < 768:
+        page.get_by_role("button", name="Open sidebar", exact=True).click()
+    elif collapsed:
+        page.get_by_role("button", name="Collapse sidebar", exact=True).click()
+        expect(page.get_by_role("button", name="Expand sidebar", exact=True)).to_be_visible()
+        expect(page.get_by_role("button", name="Collapse sidebar", exact=True)).to_have_count(0)
+    page.get_by_role("button", name="Statistics", exact=True).click()
+    dialog = page.get_by_role("dialog").filter(has=page.get_by_text(label, exact=True))
+    dialog.wait_for(state="visible")
+    bounds = dialog.bounding_box()
+    assert bounds is not None
+    assert 0 <= bounds["x"] <= width - bounds["width"]
+    assert 0 <= bounds["y"] <= height - bounds["height"]
+    assert dialog.evaluate("el => el.scrollWidth <= el.clientWidth")
+    assert dialog.evaluate("el => el.scrollHeight > el.clientHeight")
+    _assert_quota_text_is_readable(dialog, (label, reset, detail))
+
+
+def _assert_quota_text_is_readable(dialog: Locator, texts: tuple[str, ...]) -> None:
+    for text in texts:
+        elements = dialog.get_by_text(text, exact=True)
+        assert elements.count() > 0
+        for element in elements.all():
+            assert element.evaluate("el => el.scrollWidth <= el.clientWidth")
+            assert element.evaluate("el => getComputedStyle(el).textOverflow !== 'ellipsis'")
+    last_detail = dialog.get_by_text(texts[-1], exact=True).last
+    last_detail.scroll_into_view_if_needed()
+    bounds = dialog.bounding_box()
+    last_bounds = last_detail.bounding_box()
+    assert bounds is not None and last_bounds is not None
+    assert bounds["y"] <= last_bounds["y"]
+    assert last_bounds["y"] + last_bounds["height"] <= bounds["y"] + bounds["height"]
+
+
+def _stub_quota_sidebar_dependencies(page: Page) -> None:
+    # A live sidebar reads models even while its spawn picker is closed.
+    # The visual fixture's generic {} response is not a ModelsResponse.
+    page.route(
+        "**/api/models",
+        lambda route: route.fulfill(json={"providers": {}, "models": {}, "default": ""}),
+    )
+    page.route("**/api/presets", lambda route: route.fulfill(json=[]))
+    settings: dict[str, object] = {"display.sidebar_collapsed": True}
+
+    def _settings(route: Route) -> None:
+        if route.request.method == "PUT":
+            key = route.request.url.rsplit("/", 1)[1]
+            payload = route.request.post_data_json
+            assert payload is not None
+            settings[key] = payload["value"]
+            route.fulfill(
+                json={"key": key, "value": settings[key], "updated_at": "2026-09-28T16:00:00Z"}
+            )
+            return
+        route.fulfill(
+            json={
+                "settings": [
+                    {"key": key, "value": value, "updated_at": "2026-09-28T16:00:00Z"}
+                    for key, value in settings.items()
+                ]
+            }
+        )
+
+    page.route("**/api/settings", _settings)
+    page.route("**/api/settings/*", _settings)

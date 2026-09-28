@@ -21,6 +21,11 @@ Three layers: `HomePage` (read-only toast) → `HomeShell` (`useAgents`, activeI
 
 `PageDock` removed—open pages now carried by InspectorPanel's `useAgentPages`.
 
+Plugin statistics use full-width rows: primary `value`, secondary `detail`,
+both wrap and preserve line breaks. No provider parsing. The sidebar popover
+fits the viewport and scrolls within available height; empty/error/stale states
+and update-age tooltips remain.
+
 ## Code blocks
 
 `PythonCode` keeps its highlighter (`prism-react-renderer`, ~85KB) out of
