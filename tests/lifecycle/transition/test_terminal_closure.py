@@ -176,6 +176,63 @@ def test_release_closure_reports_a_sigkill_survivor_after_recording_its_notice(
     assert [notice["name"] for notice in _notices(home)] == [name]
 
 
+class ExecutorLostError(BaseException):
+    """The release executor dies mid-closure: no compensation runs."""
+
+
+def test_an_executor_dying_after_its_first_signal_still_leaves_the_notice(
+    home: Path, monkeypatch: pytest.MonkeyPatch, pty_reaper: PtyReaper
+) -> None:
+    """The notice is the closure's intent, recorded before any signal: an
+    executor that dies after hanging up — before the kill and its post-kill
+    record — still leaves the owner's notice behind."""
+    terminal = PtySessionBackend()
+    _stop_env(monkeypatch, home, terminal)
+    (home / "machine_name").write_text("test-host")
+    name = "ava-agent-987-shell-6008-executor-lost"
+    shell = _start_busy_session(terminal, home, name, _STUBBORN_JOB, pty_reaper)
+    assert _started_jobs(shell, pty_reaper), "the stubborn job never started"
+    operation = str(uuid4())
+
+    def dies_in_the_grace(*_args: object) -> bool:
+        raise ExecutorLostError
+
+    monkeypatch.setattr(strict, "_await_members", dies_in_the_grace)
+    with pytest.raises(ExecutorLostError):
+        strict.close_release_terminals(
+            operation, WHEN, grace_s=0.5, kill_s=10, reason=pty_close_notices.RELEASE_REASON
+        )
+    [notice] = _notices(home)
+    assert notice["name"] == name and notice["operation"] == operation
+
+
+def test_a_busy_shell_that_outlives_its_sigkill_still_gets_its_notice(
+    home: Path, monkeypatch: pytest.MonkeyPatch, pty_reaper: PtyReaper
+) -> None:
+    """A shell the closure may not signal (another user's) is never verified
+    closed, so the post-kill record skips its session and the closure fails;
+    only the intent recorded before any signal tells its owner."""
+    terminal = PtySessionBackend()
+    _stop_env(monkeypatch, home, terminal)
+    (home / "machine_name").write_text("test-host")
+    name = "ava-agent-987-shell-6009-shell-survives"
+    shell = _start_busy_session(terminal, home, name, _STUBBORN_JOB, pty_reaper)
+    assert _started_jobs(shell, pty_reaper), "the stubborn job never started"
+
+    def ignored_hang_up(_terminals: object) -> None:
+        return None
+
+    monkeypatch.setattr(strict, "_hang_up", ignored_hang_up)
+    _unkillable(monkeypatch)
+    with pytest.raises(StopIncompleteError):
+        strict.close_release_terminals(
+            str(uuid4()), WHEN, grace_s=0.3, kill_s=0.3, reason=pty_close_notices.RELEASE_REASON
+        )
+    assert shell.live(), "precondition: the shell outlived the closure"
+    [notice] = _notices(home)
+    assert notice["name"] == name and notice["reason"] == pty_close_notices.RELEASE_REASON
+
+
 def test_release_closure_names_what_outlived_its_kill_in_the_one_notice(
     home: Path, monkeypatch: pytest.MonkeyPatch, pty_reaper: PtyReaper
 ) -> None:
