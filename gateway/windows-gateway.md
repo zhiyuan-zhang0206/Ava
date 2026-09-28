@@ -7,8 +7,8 @@ decision to scope Windows this way is
 
 Available today for a gateway on Windows hardware: run it inside WSL2. That is
 Linux, so the whole Linux path applies unchanged — native pg/redis via
-`ava start --serve-gateway --serve-agent-runner`, or containers via
-`docker-compose.windows.yml`.
+`ava start --serve-gateway --serve-agent-runner`. The container data plane is
+retired ([decision](../decisions/2026-09-28-retire-windows-docker-compose.md)).
 
 ## The four blockers
 
