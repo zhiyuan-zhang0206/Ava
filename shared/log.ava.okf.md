@@ -24,7 +24,7 @@ Every log line is also an **event** in the unified event stream (event-system de
 - `init_agent_process(agent_id)` — kernel: stderr + file `agent-{N}.log` + unified event pipeline (process=`agent-kernel`).
 - `init_subprocess_logger(agent_id)` — exec subprocess: **only** file sink, no stderr (subprocess stderr is captured by the parent and injected as exec_output fed to the LLM; framework logs on stderr would pollute the agent context). Writes the same `agent-{N}.log`.
 - `init_gateway_process(name)` — gateway and every long-running daemon, including agent-host, ops, watchdog, labeler, memory-indexer, heartbeat and maintenance services: stderr + `<name>.log` + unified event pipeline (process=`name`, agent_id NULL on rows); each daemon has its own `<name>.log` for easier postmortem. Also freezes this process's commit — earliest shared seam, see `shared/process_sha.py`.
-- `init_cli_process(name)` — detached CLI subprocess (for example schema reconcile): same sink set as gateway; interactive CLI (TTY) skips.
+- `init_cli_process(name)` — CLI verbs that bring a unit up (`cli-<verb>`), the release executor, the PITR base worker: gateway's sinks, no `service_started` row.
 - All are **idempotent** (`_init_done` process-level guard) — `logger.add` is not idempotent; repeated calls accumulate sinks until fd exhaustion (errno 24); watchdog reusing healthcheck every 60s would hit this, the guard blocks it.
 
 ### Three sink types
@@ -45,9 +45,11 @@ the unified event stream (Loki, which the Stats Dashboard and
 
 - **milvus** has no event pipeline: it is `execvp`ed into a C++ binary that cannot honor
   loguru wiring, so its daemon `dup2`s the log fd over stdout/stderr before exec.
-- **the CLI** initializes only when `AVA_CLI_LOG_NAME` is set. An interactive
-  `ava status` skips initialization, while a supervised CLI process may opt in.
-  CLI `print()` output remains stdout/stderr and belongs to its launch owner's log.
+- **the CLI** opens sinks only for `cli.main._CLI_LOG_NAMES`; `ava status`
+  opens none. CLI `print()` output remains stdout/stderr and belongs to its
+  launch owner's log.
+- **the PITR restore worker** opens none: its environment carries no
+  authority, and every init builds Settings from the home.
 
 **Crash diagnosability**: every daemon wraps `asyncio.run(main())` in a top-level
 `except Exception` that `logger.exception(...)`s before re-raising, so a crash

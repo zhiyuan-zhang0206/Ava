@@ -23,7 +23,6 @@ from __future__ import annotations
 
 import os
 import sys
-from contextlib import suppress
 
 from pydantic import ValidationError
 
@@ -46,30 +45,36 @@ ensure_utf8_stdio()
 ensure_line_buffered_stdio()
 
 
-# Detached CLI invocations can set `AVA_CLI_LOG_NAME` in the child env. When set,
-# we wire the same loguru sinks the long-running daemons use so the
-# child's logged steps land in `~/.ava/logs/<name>.log` + PG
-# `events` (queryable via `/api/cluster/admin/events`). Without
-# this, a stuck command's last words live only in the
-# parent's per-invocation Popen log file, never reaching the cluster
-# admin events surface.
-#
-# Interactive CLI use leaves the env unset and skips init — the
-# extra sinks would write one PG row per `ava status` invocation.
-def _init_detached_cli_logging() -> None:
-    """Initialize detached-command sinks only after settings-free dispatch.
+# The verbs that bring this unit up (every in-process `cmd_start`) open the
+# loguru sinks a service process has, under these names. Importing `shared.log`
+# drops loguru's default handler, so without them every record the start path
+# writes only through loguru is discarded: a skipped pgvector pre-create,
+# untracked migration files that will not be applied. `init_cli_process` adds
+# stderr, `$AVA_HOME/logs/<name>.log` and the event pipeline, and emits no
+# `service_started` row. Other verbs print to the caller's terminal and open
+# none: the event pipeline would carry one row per `ava status`.
+_CLI_LOG_NAMES: dict[tuple[str, ...], str] = {
+    ("start",): "cli-start",
+    ("restart",): "cli-restart",
+    ("maintenance", "start"): "cli-maintenance-start",
+    ("lgtm", "on"): "cli-lgtm",
+    ("lgtm", "off"): "cli-lgtm",
+}
 
-    Importing ``cli.main`` must remain side-effect free for retained-image and
-    bootstrap entries that select their settings-free path inside ``main``.
+
+def _init_cli_logging(args_in: list[str]) -> None:
+    """Open this verb's sinks, once its Settings may be built.
+
+    Building them builds Settings, so `ava start` calls this only after first
+    start published the home's identity, and every other verb after the home
+    gates, right before dispatch. A Settings failure raised here is the one
+    the command would raise, and reaches the same handlers.
     """
-    cli_log_name = os.environ.get("AVA_CLI_LOG_NAME")
-    if cli_log_name:
+    name = _CLI_LOG_NAMES.get(tuple(args_in[:1])) or _CLI_LOG_NAMES.get(tuple(args_in[:2]))
+    if name is not None:
         from shared.log import init_cli_process
 
-        # A supervised CLI child must remain usable while the gateway or DB is
-        # restarting; stderr/file sinks are still useful if the Postgres sink fails.
-        with suppress(Exception):
-            init_cli_process(name=cli_log_name)
+        init_cli_process(name=name)
 
 
 # Settings-lite verbs — they must construct Settings while the gateway is down
@@ -196,8 +201,6 @@ def main(argv: list[str] | None = None) -> int:
         args = _build_parser().parse_args(args_in)
         return args.func(args)
 
-    if args_in[:1] != ["start"]:
-        _init_detached_cli_logging()
     # `ava boot` is what the OS boot job runs on the platforms whose scheduler
     # cannot retry a failed job for us (Linux cron `@reboot`, Windows ONLOGON):
     # `ava start` re-run while the machine is still coming up. Dispatched here,
@@ -256,6 +259,8 @@ def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
     try:
+        if args_in[:1] != ["start"]:
+            _init_cli_logging(args_in)
         return args.func(args)
     except LockTimeoutError as exc:
         print(

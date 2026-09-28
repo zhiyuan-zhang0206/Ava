@@ -588,3 +588,44 @@ def test_a_capture_that_fails_its_own_verification_is_rejected_not_resumed(
     base_candidate.quarantine_candidate_staging(root, work, worker)
     assert ready.exists() is (outcome == "stop")
     assert (root / "base-facts" / f"{candidate.chain_id}.json").exists() is (outcome == "stop")
+
+
+# ─── the worker's own records ───────────────────────────────────────────────
+
+# The worker's real `main`, with its request replaced by a loguru warning:
+# a record written only through loguru, like the ones `shared.db` and
+# `shared.pg_tools` write while a candidate is prepared.
+_WORKER = """
+from services.pitr import base_worker
+from shared.log import logger
+
+
+def request(_argv):
+    logger.warning("base worker probe warning")
+    raise SystemExit(0)
+
+
+base_worker.worker_request = request
+base_worker.main()
+"""
+
+
+def test_the_base_workers_loguru_records_reach_its_stderr_and_log(tmp_path: Path) -> None:
+    """Its stderr is the operation's `stderr.log`, whose tail a failure carries."""
+    import os
+    import re
+
+    home = tmp_path / "home"
+    child = subprocess.run(  # noqa: S603 — this interpreter, fixed code, a private home
+        [sys.executable, "-c", _WORKER],
+        cwd=Path(__file__).resolve().parents[2],
+        env={**os.environ, "AVA_HOME": str(home)},
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
+    )
+    assert child.returncode == 0, child.stderr
+    assert "base worker probe warning" in re.sub(r"\x1b\[[0-9;]*m", "", child.stderr)
+    assert "base worker probe warning" in (home / "logs/pitr-base-worker.log").read_text()
+    assert "service started" not in child.stderr
