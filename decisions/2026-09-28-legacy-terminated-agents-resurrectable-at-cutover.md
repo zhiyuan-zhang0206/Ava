@@ -30,7 +30,7 @@ missing runtime identity directly into the database.
 
 - **What is written.** W7 gains an `identities` step. For each identity-less
   terminated row (status `terminated`, resources NULL, identity incomplete)
-  on a machine whose closure attestation W7 holds, it writes
+  on a machine whose closure attestation the run holds, it writes
   `runtime_kind='hosted'`, a freshly minted UUID generation and owner, and
   `pid=NULL`. Resources stay NULL. No receipt, birth marker, inbound row or
   other evidence is written.
@@ -42,24 +42,58 @@ missing runtime identity directly into the database.
   the same values and a later run never mints again (a minted row is no
   longer identity-less).
 - **Classification.** The survey lists these rows in D-8 per machine and
-  category: `convertible` (the machine's attestation is supplied), `awaiting`
-  (a unit remains, no attestation yet), `no_unit` (no unit of the machine is
-  left to attest), `paused`, and `pointer` (a lifecycle pointer resurrection
-  does not supersede). Only `convertible` rows are written. The rest keep
+  category: `convertible` (the machine's attestation is supplied, was taken
+  no earlier than the row's termination, and names the machine's only unit
+  left), `awaiting` (a unit remains, no attestation yet), `multi_unit` (more
+  than one unit of the machine remains, so its one attestation censuses only
+  one of their homes), `no_unit` (no unit of the machine is left to attest),
+  `paused`, `pointer` (a lifecycle pointer resurrection does not supersede)
+  and `after_attestation` (terminated after its machine's attestation was
+  taken). Only `convertible` rows are written. `awaiting` and `multi_unit`
+  wait for an input (an attestation, a retired stale unit); the rest keep
   refusing and are reported as fenced.
-- **Evidence.** The machine closure attestation (every recorded process
-  absent, the home census empty) is the allocation-closure evidence FC-4a
-  already accepts
+- **The cutoff.** An attestation proves its home empty when it was taken, so
+  it covers only rows terminated no later than its `attested_at`
+  (`status_changed_at` comes from the database's clock, `attested_at` from
+  the host's). At W7 nothing has terminated an agent since the attestations,
+  so the journal's first run refuses while any row reads
+  `after_attestation`: it means clock skew (a host clock behind the
+  database's would fence legacy rows for good) or a process of the home
+  writing after its attestation.
+- **Late conversion (W12).** A `pointer` row whose pointer names a forced
+  terminate that was applied but never observed converts later when the row
+  kept its hosted kind, generation and owner (identity-less through a
+  leftover pid) and the force targets exactly that pair: the new agent host
+  settles such a force at its first boot on the row's machine (each unit's
+  held first start) without changing the row's status, so at W12 a run with
+  the W7 attestations mints it. Rows the new code terminated since
+  W11 read `after_attestation` and are never minted. A run after the first
+  completed one plans no posture effect, so it never touches a unit still
+  held.
+- **Evidence.** The mint rests on two facts only: the attested home's census
+  was empty (no process related to the home, no bound port) when the
+  attestation was taken, and the row was terminated no later than that. This
+  is a strict subset of the allocation-closure evidence FC-4a accepts
   ([2026-09-27](2026-09-27-existing-agent-closed-predecessor-admission.md),
-  "Allocation closure"). A probe on the cutover branch showed that a row
+  "Allocation closure"): FC-4a pairs the attestation with a proof that each
+  recorded `(pid, birth)` of the row is gone and with a settled lifecycle
+  receipt. An identity-less row has neither. Its resources are NULL, so it
+  records no pid and no birth, and the attestation lists none for it (the
+  exported rows cover retired-shape values only). What stands in for them is
+  that an agent gets a runtime only through admission, admission moves the
+  row out of `terminated` (which restamps `status_changed_at`), and so a row
+  terminated before an empty census has no live writer on that home. Because
+  the census covers one home, a machine with a second unit left gets no mint.
+  A probe on the cutover branch showed that a row
   written this way resurrects, that the resurrection CAS clears the identity,
   and that admission then takes the row as protocol zero, on the same path as
   an idling NULL row today. `tests/lifecycle/cutover/test_db_records_identityless.py`
   locks that behavior.
-- **Record.** The W7 journal keeps each row's before image, its minted pair
-  and the attestation digest. The attestation bytes are kept verbatim in the
-  cutover record. Rollback R2 (restoring the cold data directory) is
-  unchanged, because the rows written at W7 are restored with everything else.
+- **Record.** The journal keeps, per run (W7, and W12 appended), each row's
+  before image, its minted pair and the attestation digest. The attestation
+  bytes are kept verbatim in the cutover record. Rollback R2 (restoring the
+  cold data directory) restores the rows written at W7 with everything else,
+  and moves the journal aside: its runs describe the replaced database.
 
 ## Relation to the earlier decisions
 
@@ -74,7 +108,8 @@ This is an explicit exception, not a change of either rule.
 - **2026-09-27 (FC-4a).** FC-4a rejected a birth marker, because a marker
   claims the row was never admitted, which is false for existing agents. It
   also kept NULL resources as protocol zero. This step writes neither a marker
-  nor a resource set, and it rests on the evidence FC-4a accepts. What it adds
+  nor a resource set, and it rests on a strict subset of the evidence FC-4a
+  accepts (see Evidence). What it adds
   is a runtime identity that no admission produced, confined to the gate that
   requires one.
 
@@ -105,8 +140,13 @@ This is an explicit exception, not a change of either rule.
   once, and older pending chats remain dead letters.
 - Rows of a machine without an attestation at W7 still refuse. A later run
   with that machine's attestation, taken while its home is still stopped,
-  mints them. Rows of a machine with no unit left, of a paused machine, or
-  with a blocking lifecycle pointer keep refusing and are listed as fenced.
+  mints them; rows of a machine with a second unit left convert once the
+  stale unit is retired. A `pointer` row converts at W12 when the new agent
+  host settled its force, and keeps refusing otherwise. Rows of a machine
+  with no unit left or of a paused machine, and rows terminated after their
+  machine's attestation (the new code writes this shape too, for an agent
+  terminated before its first admission), keep refusing and are listed as
+  fenced.
 - A minted row cannot be told apart from an ordinary terminated hosted row
-  with NULL resources. The W7 journal is the only record of which rows were
-  minted.
+  with NULL resources. The database-records journal (its W7 run and any
+  later one) is the only record of which rows were minted.

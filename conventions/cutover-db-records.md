@@ -149,7 +149,10 @@ not settle as superseded: anything but an unapplied restart or terminate), or
 `after_attestation` (terminated after its machine's attestation was taken).
 Only `convertible` rows are written; the closure attestation, which proves the
 home census empty when it was taken, is their evidence, so it covers only rows
-terminated before (`status_changed_at` no later than its `attested_at`). The
+terminated before (`status_changed_at` no later than its `attested_at`). That
+is less than a retired-shape conversion proves: such a row records no pid, so
+the attestation lists no process of it, and no receipt settles it
+([why it suffices](../decisions/2026-09-28-legacy-terminated-agents-resurrectable-at-cutover.md)). The
 new code writes rows of the same shape, an agent terminated before its first
 admission, and those never qualify. The comparison crosses clocks (the
 database's `now()` stamps the termination, the attesting host's clock stamps

@@ -55,7 +55,15 @@ Resources stay NULL and no receipt is written. That identity only passes the
 resurrection gate; the resurrection CAS clears it, and the successor is
 admitted as protocol zero like any NULL row. It is never admission evidence
 (`decisions/2026-09-28-legacy-terminated-agents-resurrectable-at-cutover.md`).
-Rows without an attestation, on a machine with no unit or a paused one, or
-with a lifecycle pointer resurrection does not supersede keep refusing.
+Its evidence is narrower than the conversion's: the row records no pid, so
+the mint rests on the attested home's empty census and on the row's
+termination no later than the attestation's `attested_at`. A machine with a
+second unit left gets no mint, and the cutover's first run (W7) refuses while
+a row reads as terminated after its attestation. A row whose lifecycle
+pointer names a forced terminate converts at the W12 late conversion once the
+new agent host settled that force at its first boot. Rows without an
+attestation, on a machine with no unit or a paused one, with any other
+pointer resurrection does not supersede, or terminated after the attestation
+keep refusing.
 
 Why: `decisions/2026-09-27-existing-agent-closed-predecessor-admission.md`.

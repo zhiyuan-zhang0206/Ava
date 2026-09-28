@@ -179,9 +179,16 @@ a terminated row with NULL resources and an incomplete runtime identity gets,
 at W7 and on a machine whose closure attestation the run holds, a minted
 hosted identity (fresh generation and owner, no pid), which only passes the
 resurrection gate and which the resurrection CAS clears. Resources stay NULL;
-no marker or receipt is written. Rows of unattested, paused or unit-less
-machines, and rows with a lifecycle pointer resurrection does not supersede,
-keep refusing.
+no marker or receipt is written. The evidence is the attested home's empty
+census plus the row's termination no later than the attestation, a strict
+subset of FC-4a's (the row records no pid to prove gone), so a machine with a
+second unit left gets no mint, and W7 refuses while any row reads as
+terminated after its attestation (clock skew or a late writer). A row whose
+lifecycle pointer names a forced terminate the new agent host settles at its
+first boot converts at the W12 late conversion, with the W7 attestations.
+Rows of unattested, paused or unit-less machines, rows with any other
+pointer resurrection does not supersede, and rows terminated after their
+machine's attestation (the new code writes that shape too) keep refusing.
 
 ### Proposed database authority boundary
 

@@ -33,7 +33,10 @@ reconciliation is the cutover's identity mint: on an attested machine it
 writes a hosted kind and a fresh generation and owner, which this gate then
 accepts and the resurrection CAS clears
 (`decisions/2026-09-28-legacy-terminated-agents-resurrectable-at-cutover.md`).
-Rows the mint does not reach keep refusing.
+It reaches only rows terminated before their machine's attestation; a row
+whose pointer names a forced terminate is minted at the cutover's W12 late
+conversion once boot recovery settled that force. Rows the mint does not
+reach keep refusing, including rows this runtime terminates in that shape.
 An automatic resurrection that meets such a refusal leaves its inbound queued
 and logs a WARNING naming the reason.
 No process-exit observer adopts those rows or settles a hosted logical lifecycle.
