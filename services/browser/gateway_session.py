@@ -26,6 +26,7 @@ from services.browser.session import (
     inject_session_cookie,
     last_injected_cookie,
 )
+from shared.cluster_auth import client_bearer
 from shared.config import settings
 from shared.log import logger
 from shared.machine import gateway_api_base
@@ -40,19 +41,23 @@ _SESSION_REFRESH_INTERVAL_S = 6 * 3600
 
 
 def _gateway_session_params() -> tuple[str, str] | None:
-    """(gateway_url, cluster_secret) when a gateway session can be minted, else
+    """(gateway_url, login credential) when a gateway session can be minted, else
     None (with a logged reason) — the daemon keeps serving either way, the
-    browser just cannot open auth-gated gateway URLs without the cookie."""
+    browser just cannot open auth-gated gateway URLs without the cookie.
+
+    The credential is this daemon's delivered runner API token (the login
+    accepts the active generation's runner token); the human secret only on a
+    gateway home that runs the daemon without a delivery."""
     try:
         gateway_url = gateway_api_base()
     except Exception as e:  # gateway URL unset on this unit
         logger.warning(f"[browser-mcp] gateway session injection disabled: {e}")
         return None
-    secret = settings.data_plane.cluster_secret
-    if not secret:
-        logger.warning("[browser-mcp] gateway session injection disabled: empty cluster secret")
+    credential = client_bearer(settings.data_plane.cluster_secret)
+    if not credential:
+        logger.warning("[browser-mcp] gateway session injection disabled: the cluster API is open")
         return None
-    return gateway_url, secret
+    return gateway_url, credential
 
 
 async def _inject_gateway_session_once() -> None:

@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import os
 from collections.abc import Iterator
-from datetime import UTC, datetime
 from typing import Any
 
 import psycopg
@@ -35,9 +34,7 @@ from shared.cluster_lock import (
     self_holder,
     settle_update_lock,
     update_lock_holder,
-    update_lock_refusal_detail,
 )
-from shared.cluster_pending_recovery import claim_pending_recovery_lease
 from shared.config import settings
 
 
@@ -230,7 +227,7 @@ def test_stale_recovery_snapshot_cannot_replace_a_reclaimed_lease() -> None:
     assert update_lock_holder() == "new"
 
 
-# ─── the pending-publication takeover + refusal detail (task #4093, slice 1a) ─
+# ─── the pending-publication refusal detail (task #4093, slice 1a) ─
 
 
 def _pending_operation(
@@ -273,144 +270,62 @@ def _seed_pending_rollout(
     db_conn.commit()
 
 
-def test_pending_recovery_claim_replaces_the_dead_rollout(db_conn: psycopg.Connection) -> None:
-    """The takeover replaces only the row whose journaled operation is exactly the
-    one the caller inspected — and preserves the rollout target it was resuming."""
-    operation = _pending_operation()
-    _seed_pending_rollout(db_conn, operation)
-
-    claim = claim_pending_recovery_lease(
-        "recovery:pid7", expected_operation=operation, observed=None
-    )
-
-    assert claim.acquired is True
-    assert claim.previous_holder == "gateway:pid123"
-    assert claim.acquired_at is not None
-    assert claim.target_sha == "e" * 40
-    row = db_conn.execute(
-        "SELECT holder, target_sha, phase, kind, expires_at > clock_timestamp() "
-        "FROM deployment_state WHERE id=1"
-    ).fetchone()
-    assert row == ("recovery:pid7", "e" * 40, "updating", "rollout", True)
+def _acquire_refusals(loguru_records: list[dict[str, Any]], holder: str) -> list[str]:
+    return [
+        r["message"]
+        for r in loguru_records
+        if f"[cluster-lock] acquire by {holder} REFUSED" in r["message"]
+    ]
 
 
-def test_pending_recovery_claim_refuses_a_changed_journal_operation(
-    db_conn: psycopg.Connection,
-) -> None:
-    operation = _pending_operation()
-    _seed_pending_rollout(db_conn, operation)
-    changed = {**operation, "target_sha": "f" * 40}
-
-    claim = claim_pending_recovery_lease("recovery", expected_operation=changed, observed=None)
-
-    assert claim.acquired is False
-    row = db_conn.execute("SELECT holder, target_sha FROM deployment_state WHERE id=1").fetchone()
-    assert row == ("gateway:pid123", "e" * 40)
-
-
-def test_pending_recovery_claim_is_pinned_to_the_observed_dead_identity(
-    db_conn: psycopg.Connection,
-) -> None:
-    """A live-looking lease is replaceable only while BOTH its holder and acquired_at
-    still match the snapshot whose process death was proven — a rollout landing after
-    the proof wins instead of being clobbered."""
-    operation = _pending_operation()
-    _seed_pending_rollout(db_conn, operation, expired=False)
-    row = db_conn.execute("SELECT holder, acquired_at FROM deployment_state WHERE id=1").fetchone()
-    assert row is not None
-
-    stale = claim_pending_recovery_lease(
-        "recovery:stale",
-        expected_operation=operation,
-        observed=(row[0], datetime(2026, 1, 1, tzinfo=UTC)),
-    )
-    assert stale.acquired is False
-
-    claim = claim_pending_recovery_lease(
-        "recovery:fresh", expected_operation=operation, observed=(row[0], row[1])
-    )
-    assert claim.acquired is True
-    assert claim.previous_holder == "gateway:pid123"
-
-
-def test_pending_recovery_claim_refuses_a_settle_hold(db_conn: psycopg.Connection) -> None:
-    """Only an executing rollout qualifies: a settle hold's row is never touched."""
-    operation = _pending_operation()
-    _seed_pending_rollout(db_conn, operation, phase="settling", settle_hosts=["win"])
-
-    claim = claim_pending_recovery_lease("recovery", expected_operation=operation, observed=None)
-
-    assert claim.acquired is False
-
-
-def test_update_lock_refusal_detail_names_the_pending_recovery(
+def test_acquire_refusal_names_the_pending_publication_and_its_owner(
     db_conn: psycopg.Connection, loguru_records: list[dict[str, Any]]
 ) -> None:
-    """The refusal detail and the acquire warning must tell the pending story —
-    not send the operator hunting for a live holder that does not exist."""
+    """The acquire warning must tell the pending story — not send the operator
+    hunting for a live holder that does not exist, nor to a recovery verb that no
+    longer exists. It names the durable fact and its owner: no command clears it;
+    resolving it is a manual cutover repair."""
     _seed_pending_rollout(db_conn, _pending_operation())
 
     assert acquire_update_lock("next-rollout") is False
-    detail = update_lock_refusal_detail()
-    assert "durable pending publication" in detail
-    assert "recover-pending" in detail
 
-    refusals = [
-        r["message"]
-        for r in loguru_records
-        if "[cluster-lock] acquire by next-rollout REFUSED" in r["message"]
-    ]
+    refusals = _acquire_refusals(loguru_records, "next-rollout")
     assert len(refusals) == 1
-    assert "checked recovery" in refusals[0]
+    assert "managed_writer_evidence->'pending'" in refusals[0]
+    assert "no command clears it" in refusals[0]
+    assert "cutover repair" in refusals[0]
+    assert "recover-pending" not in refusals[0]
     assert "a live holder exists" not in refusals[0]
 
 
-def test_update_lock_refusal_detail_names_the_live_holder(db_conn: psycopg.Connection) -> None:
+def test_acquire_refusal_names_the_live_holder(
+    db_conn: psycopg.Connection, loguru_records: list[dict[str, Any]]
+) -> None:
     assert acquire_update_lock("gateway-host:pid81319") is True
     assert acquire_update_lock("second-rollout") is False
 
-    detail = update_lock_refusal_detail()
+    refusals = _acquire_refusals(loguru_records, "second-rollout")
+    assert len(refusals) == 1
+    assert "a live holder exists (gateway-host:pid81319)" in refusals[0]
 
-    assert "gateway-host:pid81319" in detail
-    assert "auto-expires" in detail
 
-
-def test_update_lock_refusal_detail_leads_with_the_live_holder_when_pending_coexists(
+def test_acquire_refusal_leads_with_the_live_holder_when_pending_coexists(
     db_conn: psycopg.Connection, loguru_records: list[dict[str, Any]]
 ) -> None:
-    """A rollout that already opened its journal is normally still running.
+    """A holder that already opened its journal is normally still running.
 
-    The live holder leads — a wait; `recover-pending` would refuse on that live
-    process anyway — and the durable pending publication is the follow-up hint
-    for the case that rollout never completes, never the headline.
+    The live holder leads — a wait — and the durable pending publication is the
+    follow-up fact for the case that holder never completes, never the headline.
     """
     _seed_pending_rollout(db_conn, _pending_operation(), expired=False)
 
     assert acquire_update_lock("next-rollout") is False
-    detail = update_lock_refusal_detail()
-    assert "gateway:pid123" in detail
-    assert "recover-pending" in detail
-    assert detail.index("gateway:pid123") < detail.index("recover-pending")
 
-    refusals = [
-        r["message"]
-        for r in loguru_records
-        if "[cluster-lock] acquire by next-rollout REFUSED" in r["message"]
-    ]
+    refusals = _acquire_refusals(loguru_records, "next-rollout")
     assert len(refusals) == 1
     assert "a live holder exists" in refusals[0]
-    assert "recover-pending" in refusals[0]
-    assert refusals[0].index("a live holder exists") < refusals[0].index("recover-pending")
-
-
-def test_update_lock_refusal_detail_reports_a_free_row_as_a_lost_race(
-    db_conn: psycopg.Connection,
-) -> None:
-    """The third shape: the acquire lost and the row is already free — another
-    orchestration took and released it in between, not a live holder."""
-    assert update_lock_refusal_detail() == (
-        "another orchestration just took the cluster update lock; aborting"
-    )
+    assert "recover-pending" not in refusals[0]
+    assert refusals[0].index("a live holder exists") < refusals[0].index("managed_writer_evidence")
 
 
 # ─── the lease as a readable state, and the settle hold ──────────────────────

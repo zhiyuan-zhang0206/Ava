@@ -1,40 +1,22 @@
-"""`services.healthchecks.lgtm` unit tests — readiness and Loki write-path repair.
-
-The watchdog repairs only the local LGTM backends, so its three readiness
-probes intentionally exclude remote Tempo. Any HTTP status proves a local
-listener is up; only a connection-level failure re-runs the idempotent start
-script immediately. Once listeners answer, three generic Loki write/read probe
-failures trigger the same repair. A body-qualified stuck ingester is force-restarted
-immediately when its storage disk is below the WAL throttle threshold. The check
-self-gates on the $AVA_HOME/lgtm-host marker. Repeated HTTP 429s produce a
-separate advisory warning without a stack restart.
-"""
+"""Native readiness and Loki write/read protocol tests."""
 
 from __future__ import annotations
 
 import email.message
 import io
 import json
-import os
-import shutil
-import subprocess
 import urllib.error
 import urllib.parse
 import urllib.request
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, cast
 
 import pytest
 
-import shared.cluster
-import shared.lgtm_systemd
-import shared.proc
 from services.healthchecks import lgtm as hc
-
-
-@pytest.fixture(autouse=True)
-def _darwin_lifecycle(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(hc.platform, "system", lambda: "Darwin")
+from shared.config import settings
+from shared.daemon_health import DaemonProbe
 
 
 class _Response:
@@ -67,106 +49,19 @@ def test_readiness_probes_ignore_remote_query_urls(
 ) -> None:
     """Remote read endpoints cannot falsely mark a local native service alive."""
     monkeypatch.setattr(
-        hc.settings.observability, "telemetry_loki_url", "http://loki.example:3100/loki/"
+        settings.observability, "telemetry_loki_url", "http://loki.example:3100/loki/"
     )
     monkeypatch.setattr(
-        hc.settings.observability, "telemetry_prometheus_url", "http://prom.example:9090/"
+        settings.observability, "telemetry_prometheus_url", "http://prom.example:9090/"
     )
     monkeypatch.setattr(
-        hc.settings.observability, "telemetry_grafana_url", "http://grafana.example:3003"
+        settings.observability, "telemetry_grafana_url", "http://grafana.example:3003"
     )
     assert hc.readiness_probes() == (
         ("loki", "http://127.0.0.1:3100/ready"),
         ("prometheus", "http://127.0.0.1:9090/-/ready"),
         ("grafana", "http://127.0.0.1:3003/api/health"),
     )
-
-
-def test_endpoint_answers_any_http_status(monkeypatch: pytest.MonkeyPatch) -> None:
-    """An HTTPError (e.g. 503 from a warming-up backend) still proves the
-    listener answered — alive."""
-
-    def _raise(_url, **_kw):
-        raise urllib.error.HTTPError("http://127.0.0.1:3100/ready", 503, "starting", {}, None)  # pyright: ignore[reportArgumentType]
-
-    monkeypatch.setattr(hc._local_http, "open", _raise)  # pyright: ignore[reportUnknownArgumentType]
-    assert hc._endpoint_answers("http://127.0.0.1:3100/ready") is True
-
-
-def test_down_probes_names_connection_failures(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Only the backends whose listener never answered are reported down."""
-
-    class _Resp:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *_a: object) -> None:
-            return None
-
-    def _open(url: str, **_kw: object) -> _Resp:
-        if ":9090" in url:
-            raise OSError("connection refused")
-        return _Resp()
-
-    monkeypatch.setattr(hc._local_http, "open", _open)
-    assert hc.down_probes() == ["prometheus"]
-
-
-def _all_up(_url: str) -> bool:
-    return True
-
-
-def test_probe_statuses_endpoint_only_when_user_bus_unavailable(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """An unreachable user bus (WSL without the logind bus variables) does
-    not make healthy backends read as down: the probe degrades to the
-    endpoint-only verdict, with one stderr note per episode, not one per
-    60-second round (#2096)."""
-    monkeypatch.setattr(hc.platform, "system", lambda: "Linux")
-    monkeypatch.setattr(hc, "_endpoint_answers", _all_up)
-    monkeypatch.setattr(hc, "_bus_unavailable_episode", {"noted": False})
-    stderr = io.StringIO()
-    monkeypatch.setattr(hc.sys, "stderr", stderr)
-
-    def unavailable(_home: object, _name: str) -> None:
-        raise shared.lgtm_systemd.UserBusUnavailableError("no bus")
-
-    def with_pid(_home: object, _name: str) -> int:
-        return 123
-
-    monkeypatch.setattr(shared.lgtm_systemd, "running_pid", unavailable)
-    up = [("loki", True), ("prometheus", True), ("grafana", True)]
-    assert hc.probe_statuses() == up
-    first_note = stderr.getvalue()
-    assert "endpoint-only verdict" in first_note
-    # Same episode: a second round stays quiet.
-    assert hc.probe_statuses() == up
-    assert stderr.getvalue() == first_note
-    # A round that reaches the user manager closes the episode; the next
-    # outage is a new first sight.
-    monkeypatch.setattr(shared.lgtm_systemd, "running_pid", with_pid)
-    assert hc.probe_statuses() == up
-    assert stderr.getvalue() == first_note
-    monkeypatch.setattr(shared.lgtm_systemd, "running_pid", unavailable)
-    assert hc.probe_statuses() == up
-    assert stderr.getvalue().count("endpoint-only verdict") == 2
-
-
-def test_probe_statuses_propagates_non_bus_unit_failures(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Only bus-unavailability degrades the verdict; a genuine lifecycle
-    failure (e.g. a foreign fragment) stays loud."""
-    monkeypatch.setattr(hc.platform, "system", lambda: "Linux")
-    monkeypatch.setattr(hc, "_endpoint_answers", _all_up)
-
-    def foreign(_home: object, _name: str) -> None:
-        raise RuntimeError("Refusing a foreign native LGTM unit: com.ava.loki.slug")
-
-    monkeypatch.setattr(shared.lgtm_systemd, "running_pid", foreign)
-    with pytest.raises(RuntimeError, match="Refusing a foreign native LGTM unit"):
-        hc.probe_statuses()
 
 
 def test_write_path_probe_rejects_400_push(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -197,49 +92,6 @@ def test_write_path_probe_retries_429_with_bounded_backoff(
     assert len(requests) == 3
     assert requests[0] is requests[1] is requests[2]
     assert sleeps == [1, 2]
-
-
-def test_write_path_probe_retry_then_success_resets_counters(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    monkeypatch.setattr(hc, "init_gateway_process", lambda _name: None)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(hc, "is_lgtm_host", lambda: True)
-    monkeypatch.setattr(hc, "down_probes", list)
-    monkeypatch.setattr(hc, "ava_home", lambda: tmp_path)
-    requests: list[urllib.request.Request] = []
-    sleeps: list[int] = []
-
-    def _open(request: urllib.request.Request, **_kwargs: object) -> _Response:
-        requests.append(request)
-        if len(requests) == 1:
-            return _Response(status=429)
-        if len(requests) == 2:
-            return _Response(status=204)
-        body = requests[0].data
-        assert isinstance(body, bytes)
-        payload = cast(dict[str, Any], json.loads(body))
-        marker = payload["resourceLogs"][0]["scopeLogs"][0]["logRecords"][0]["body"]["stringValue"]
-        return _Response(
-            status=200,
-            body=json.dumps({"data": {"result": [{"values": [["1", marker]]}]}}).encode(),
-        )
-
-    def _fail(*_args: object, **_kwargs: object) -> None:
-        pytest.fail("healthy")
-
-    monkeypatch.setattr(hc._local_http, "open", _open)
-    monkeypatch.setattr(hc.time, "sleep", sleeps.append)
-    monkeypatch.setattr(hc.telemetry, "emit", _fail)
-    monkeypatch.setattr(hc, "_restart_stack", lambda: pytest.fail("healthy"))
-    hc._write_counter(2)
-    hc._write_throttle_counter(2)
-
-    hc.main()
-
-    assert len(requests) == 3
-    assert sleeps == [1]
-    assert hc._read_counter() == 0
-    assert hc._read_throttle_counter() == 0
 
 
 def test_write_path_probe_identifies_stuck_ingester(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -367,356 +219,6 @@ def test_write_path_probe_reports_query_request_error(monkeypatch: pytest.Monkey
     assert hc.write_path_probe() == (False, "query_error")
 
 
-def test_write_probe_counter_round_trip_and_corruption(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    monkeypatch.setattr(hc, "ava_home", lambda: tmp_path)
-
-    assert hc._write_probe_counter_path() == tmp_path / "lgtm-write-probe-consecutive-failures"
-    assert hc._read_counter() == 0
-    hc._write_counter(2)
-    assert hc._read_counter() == 2
-    hc._write_probe_counter_path().write_text("not-an-int", encoding="utf-8")
-    assert hc._read_counter() == 0
-    assert hc._write_probe_throttle_counter_path() == (
-        tmp_path / "lgtm-write-probe-consecutive-throttles"
-    )
-    assert hc._read_throttle_counter() == 0
-    hc._write_throttle_counter(2)
-    assert hc._read_throttle_counter() == 2
-    hc._write_probe_throttle_counter_path().write_text("not-an-int", encoding="utf-8")
-    assert hc._read_throttle_counter() == 0
-
-
-def test_restart_runs_start_sh_in_deploy_dir(monkeypatch: pytest.MonkeyPatch) -> None:
-    """`_restart_stack` re-runs the idempotent start.sh in deploy/lgtm."""
-    calls: list[tuple[list[str], Path]] = []
-
-    class _Result:
-        returncode = 0
-        stderr = ""
-
-    def fake_run(cmd: list[str], **kw: object) -> _Result:
-        calls.append((cmd, Path(str(kw["cwd"]))))
-        return _Result()
-
-    monkeypatch.setattr(hc.subprocess, "run", fake_run)
-    assert hc._restart_stack() is True
-    assert len(calls) == 1
-    cmd, cwd = calls[0]
-    assert cmd == ["bash", "start.sh"]
-    assert cwd.parts[-2:] == ("deploy", "lgtm")
-
-
-def test_force_restart_loki_reports_exception_without_raising(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    def _unavailable(*_args: object, **_kwargs: object) -> None:
-        raise OSError("launchctl unavailable")
-
-    monkeypatch.setattr(shared.proc, "run_bounded", _unavailable)
-
-    assert hc._force_restart_loki(tmp_path) is False
-    assert "launchctl unavailable" in capsys.readouterr().err
-
-
-def test_main_noop_without_marker(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Every unmarked host (dev worktree clusters included) must never probe or
-    restart — the native backends belong to another home's singleton."""
-    monkeypatch.setattr(hc, "init_gateway_process", lambda _name: None)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(hc, "is_lgtm_host", lambda: False)
-    probed: list[bool] = []
-    monkeypatch.setattr(hc, "down_probes", lambda: probed.append(True) or [])
-
-    hc.main()
-    assert probed == []
-
-
-def test_write_counter_survives_oserror(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A counter write failure (e.g. full disk) must not crash the round."""
-    monkeypatch.setattr(hc, "_write_probe_counter_path", lambda: Path("/no-such-dir/x"))
-    monkeypatch.setattr(hc, "_write_probe_throttle_counter_path", lambda: Path("/no-such-dir/y"))
-
-    hc._write_counter(3)  # no raise — the lost increment only delays the verdict
-    hc._write_throttle_counter(3)
-
-
-def test_main_restarts_on_down_probe(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """A down backend on the marked host triggers the start.sh re-run; a failed
-    re-run exits non-zero (the watchdog's failure contract)."""
-    monkeypatch.setattr(hc, "init_gateway_process", lambda _name: None)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(hc, "is_lgtm_host", lambda: True)
-    monkeypatch.setattr(hc, "down_probes", lambda: ["loki"])
-    monkeypatch.setattr(hc, "ava_home", lambda: tmp_path)
-    counters: list[int] = []
-    monkeypatch.setattr(hc, "_write_counter", counters.append)
-    write_probed: list[bool] = []
-    monkeypatch.setattr(hc, "write_path_probe", lambda: write_probed.append(True) or (True, "ok"))
-    restarted: list[bool] = []
-    monkeypatch.setattr(hc, "_restart_stack", lambda: restarted.append(True) or True)
-    hc._write_throttle_counter(2)
-
-    hc.main()
-    assert restarted == [True]
-    assert counters == [0]
-    assert hc._read_throttle_counter() == 0
-    assert write_probed == []
-
-    monkeypatch.setattr(hc, "_restart_stack", lambda: False)
-    with pytest.raises(SystemExit) as exc:
-        hc.main()
-    assert exc.value.code == 1
-
-
-def test_main_restarts_on_third_write_probe_failure_and_emits_each_round(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    monkeypatch.setattr(hc, "init_gateway_process", lambda _name: None)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(hc, "is_lgtm_host", lambda: True)
-    monkeypatch.setattr(hc, "down_probes", list)
-    monkeypatch.setattr(hc, "ava_home", lambda: tmp_path)
-    monkeypatch.setattr(hc, "write_path_probe", lambda: (False, "probe_not_visible"))
-    restarts: list[bool] = []
-    monkeypatch.setattr(hc, "_restart_stack", lambda: restarts.append(True) or True)
-    emitted: list[tuple[tuple[object, ...], dict[str, object]]] = []
-
-    def _emit(*args: object, **kwargs: object) -> None:
-        emitted.append((args, kwargs))
-
-    monkeypatch.setattr(hc.telemetry, "emit", _emit)
-
-    hc.main()
-    hc.main()
-    assert restarts == []
-    assert hc._read_counter() == 2
-
-    hc.main()
-    assert restarts == [True]
-    assert hc._read_counter() == 0
-    assert [entry[1]["attributes"] for entry in emitted] == [
-        {"consecutive_failures": 1, "reason": "probe_not_visible"},
-        {"consecutive_failures": 2, "reason": "probe_not_visible"},
-        {"consecutive_failures": 3, "reason": "probe_not_visible"},
-    ]
-    assert all(entry[0] == ("telemetry", "loki_write_path_probe_failed") for entry in emitted)
-    assert all(entry[1]["level"] == "warning" for entry in emitted)
-    assert all(entry[1]["source"] == "system" for entry in emitted)
-    assert "write path probe failed 3 consecutive rounds" in capsys.readouterr().err
-
-
-def test_main_429_preserves_generic_counter_without_restarting(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    monkeypatch.setattr(hc, "init_gateway_process", lambda _name: None)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(hc, "is_lgtm_host", lambda: True)
-    monkeypatch.setattr(hc, "down_probes", list)
-    monkeypatch.setattr(hc, "ava_home", lambda: tmp_path)
-    reason = "push_http_429"
-    monkeypatch.setattr(hc, "write_path_probe", lambda: (False, reason))
-    restarts: list[bool] = []
-    monkeypatch.setattr(hc, "_restart_stack", lambda: restarts.append(True) or True)
-    emitted: list[tuple[tuple[object, ...], dict[str, object]]] = []
-
-    def _emit(*args: object, **kwargs: object) -> None:
-        emitted.append((args, kwargs))
-
-    monkeypatch.setattr(hc.telemetry, "emit", _emit)
-    hc._write_counter(2)
-
-    for _ in range(3):
-        hc.main()
-
-    assert restarts == []
-    assert hc._read_counter() == 2
-    assert hc._read_throttle_counter() == 3
-    assert [entry[0] for entry in emitted] == [("telemetry", "loki_write_path_probe_throttled")]
-    assert emitted[0][1]["attributes"] == {"consecutive_throttles": 3, "reason": reason}
-    assert emitted[0][1]["level"] == "warning"
-    assert emitted[0][1]["source"] == "system"
-
-    reason = "probe_not_visible"
-    hc.main()
-    assert restarts == [True]
-    assert hc._read_counter() == 0
-    assert hc._read_throttle_counter() == 0
-    assert emitted[-1][0] == ("telemetry", "loki_write_path_probe_failed")
-
-
-def test_main_persistent_429_emits_every_30_rounds_and_recovery_resets(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    monkeypatch.setattr(hc, "init_gateway_process", lambda _name: None)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(hc, "is_lgtm_host", lambda: True)
-    monkeypatch.setattr(hc, "down_probes", list)
-    monkeypatch.setattr(hc, "ava_home", lambda: tmp_path)
-    reason = "push_http_429"
-    monkeypatch.setattr(hc, "write_path_probe", lambda: (reason == "ok", reason))
-    monkeypatch.setattr(hc, "_restart_stack", lambda: pytest.fail("throttling cannot restart"))
-    emitted: list[tuple[tuple[object, ...], dict[str, object]]] = []
-
-    def _emit(*args: object, **kwargs: object) -> None:
-        emitted.append((args, kwargs))
-
-    monkeypatch.setattr(hc.telemetry, "emit", _emit)
-
-    for _ in range(61):
-        hc.main()
-    assert hc._read_throttle_counter() == 61
-    assert [entry[1]["attributes"] for entry in emitted] == [
-        {"consecutive_throttles": count, "reason": "push_http_429"} for count in (3, 30, 60)
-    ]
-    assert all(entry[0] == ("telemetry", "loki_write_path_probe_throttled") for entry in emitted)
-
-    reason = "ok"
-    hc.main()
-    assert hc._read_throttle_counter() == 0
-    assert hc._read_counter() == 0
-    reason = "push_http_429"
-    hc.main()
-    hc.main()
-    assert len(emitted) == 3
-    hc.main()
-    assert emitted[-1][1]["attributes"] == {
-        "consecutive_throttles": 3,
-        "reason": "push_http_429",
-    }
-
-
-def test_main_kickstarts_stuck_ingester_when_disk_is_below_threshold(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    class _Usage:
-        total = 100
-        used = 94
-
-    monkeypatch.setattr(hc, "init_gateway_process", lambda _name: None)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(hc, "is_lgtm_host", lambda: True)
-    monkeypatch.setattr(hc, "down_probes", list)
-    monkeypatch.setattr(hc, "ava_home", lambda: tmp_path)
-    monkeypatch.setattr(hc.settings.observability, "lgtm_storage_dir", "")
-    monkeypatch.setattr(hc, "write_path_probe", lambda: (False, "ingester_shutting_down"))
-    inspected: list[Path] = []
-
-    def _disk_usage(path: object) -> _Usage:
-        inspected.append(Path(str(path)))
-        return _Usage()
-
-    monkeypatch.setattr(shutil, "disk_usage", _disk_usage)
-    monkeypatch.setattr(os, "getuid", lambda: 501)
-    calls: list[tuple[list[str], float]] = []
-
-    def _run_bounded(
-        argv: list[str], *, timeout: float, **_kwargs: object
-    ) -> subprocess.CompletedProcess[str]:
-        calls.append((argv, timeout))
-        return subprocess.CompletedProcess(argv, 0, "", "")
-
-    monkeypatch.setattr(shared.proc, "run_bounded", _run_bounded)
-    emitted: list[dict[str, object]] = []
-
-    def _emit(*_args: object, **kwargs: object) -> None:
-        attributes = kwargs["attributes"]
-        if isinstance(attributes, dict):
-            emitted.append(cast(dict[str, object], attributes))
-
-    monkeypatch.setattr(hc.telemetry, "emit", _emit)
-
-    hc.main()
-
-    label = f"com.ava.loki.{shared.cluster.home_slug(tmp_path)}"
-    assert calls == [(["launchctl", "kickstart", "-k", f"gui/501/{label}"], 45)]
-    assert inspected == [(tmp_path / "lgtm/native/data").resolve()]
-    assert hc._read_counter() == 0
-    assert emitted == [{"consecutive_failures": 1, "reason": "ingester_shutting_down"}]
-    assert "force-restarting Loki" in capsys.readouterr().err
-
-
-def test_main_does_not_kickstart_stuck_ingester_at_disk_threshold(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    class _Usage:
-        total = 100
-        used = 95
-
-    monkeypatch.setattr(hc, "init_gateway_process", lambda _name: None)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(hc, "is_lgtm_host", lambda: True)
-    monkeypatch.setattr(hc, "down_probes", list)
-    monkeypatch.setattr(hc, "ava_home", lambda: tmp_path)
-    monkeypatch.setattr(hc.settings.observability, "lgtm_storage_dir", str(tmp_path / "data"))
-    monkeypatch.setattr(hc, "write_path_probe", lambda: (False, "ingester_shutting_down"))
-    inspected: list[Path] = []
-
-    def _disk_usage(path: object) -> _Usage:
-        inspected.append(Path(str(path)))
-        return _Usage()
-
-    def _deny(*_args: object, **_kwargs: object) -> None:
-        pytest.fail("high disk must suppress kickstart")
-
-    def _noop(*_args: object, **_kwargs: object) -> None:
-        return None
-
-    monkeypatch.setattr(shutil, "disk_usage", _disk_usage)
-    monkeypatch.setattr(shared.proc, "run_bounded", _deny)
-    monkeypatch.setattr(hc.telemetry, "emit", _noop)
-
-    hc.main()
-
-    assert inspected == [(tmp_path / "data").resolve()]
-    assert hc._read_counter() == 1
-
-
-def test_main_force_restarts_stuck_ingester_through_systemd(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    class _Usage:
-        total = 100
-        used = 10
-
-    monkeypatch.setattr(hc, "init_gateway_process", lambda _name: None)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(hc, "is_lgtm_host", lambda: True)
-    monkeypatch.setattr(hc, "down_probes", list)
-    monkeypatch.setattr(hc, "ava_home", lambda: tmp_path)
-    monkeypatch.setattr(hc.settings.observability, "lgtm_storage_dir", "")
-    monkeypatch.setattr(hc, "write_path_probe", lambda: (False, "ingester_shutting_down"))
-
-    def _disk_usage(_path: object) -> _Usage:
-        return _Usage()
-
-    monkeypatch.setattr(shutil, "disk_usage", _disk_usage)
-    monkeypatch.setattr(hc.platform, "system", lambda: "Linux")
-    calls: list[tuple[Path, str]] = []
-
-    def _force_restart(home: Path, name: str) -> None:
-        calls.append((home, name))
-
-    def _noop(*_args: object, **_kwargs: object) -> None:
-        return None
-
-    monkeypatch.setattr(shared.lgtm_systemd, "force_restart", _force_restart)
-    monkeypatch.setattr(hc.telemetry, "emit", _noop)
-
-    hc.main()
-
-    assert calls == [(tmp_path, "loki")]
-    assert hc._read_counter() == 0
-
-
-def test_main_successful_write_probe_clears_counter(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    monkeypatch.setattr(hc, "init_gateway_process", lambda _name: None)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(hc, "is_lgtm_host", lambda: True)
-    monkeypatch.setattr(hc, "down_probes", list)
-    monkeypatch.setattr(hc, "ava_home", lambda: tmp_path)
-    monkeypatch.setattr(hc, "write_path_probe", lambda: (True, "ok"))
-    hc._write_counter(2)
-
-    hc.main()
-
-    assert hc._read_counter() == 0
-
-
 def test_is_lgtm_host_accepts_station_capability(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -749,21 +251,30 @@ def test_is_lgtm_host_accepts_station_capability(
     assert hc.is_lgtm_host() is True
 
 
-def test_restart_stack_failure_reports_stdout_and_stderr(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+@pytest.mark.parametrize("status", [301, 401, 500, 503])
+def test_unready_http_cannot_certify_backend(monkeypatch: pytest.MonkeyPatch, status: int) -> None:
+    def response(*_args: object, **_kw: object) -> _Response:
+        return _Response(status=status)
+
+    monkeypatch.setattr(hc._local_http, "open", response)
+    assert not hc._protocol_readiness("loki").alive
+
+
+@pytest.mark.parametrize("database,ready", [("ok", True), ("failed", False)])
+def test_grafana_health_requires_database_ready(
+    monkeypatch: pytest.MonkeyPatch, database: str, ready: bool
 ) -> None:
-    """A failed start.sh re-run surfaces both streams — start.sh gate failures
-    (e.g. loki -verify-config rejection) are stdout log lines, and the watchdog
-    must not swallow the reason."""
+    def response(*_args: object, **_kw: object) -> _Response:
+        return _Response(status=200, body=json.dumps({"database": database}).encode())
 
-    class _Result:
-        returncode = 1
-        stdout = "loki config verify failed\n"
-        stderr = "boom\n"
+    monkeypatch.setattr(hc._local_http, "open", response)
+    assert hc._protocol_readiness("grafana").alive is ready
 
-    monkeypatch.setattr(hc.subprocess, "run", lambda *_a, **_kw: _Result())  # pyright: ignore[reportUnknownArgumentType]
 
-    assert hc._restart_stack() is False
-    captured = capsys.readouterr()
-    assert "loki config verify failed" in captured.err
-    assert "boom" in captured.err
+def test_unowned_listener_is_not_healthy(monkeypatch: pytest.MonkeyPatch) -> None:
+    def not_owned(name: str, _port: int, _protocol: Callable[[], DaemonProbe]) -> DaemonProbe:
+        assert name == "loki"
+        return DaemonProbe.port_taken("foreign process")
+
+    monkeypatch.setattr("services.healthchecks.owned_service.probe_endpoint", not_owned)
+    assert not hc.probe_backend("loki").alive

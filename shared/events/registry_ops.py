@@ -16,6 +16,7 @@ from shared.events.system import (
     AgentRegistry,
     ArchiveFetchDegraded,
     Auth401Rejected,
+    BackupOperationCustody,
     CheckpointTableSizes,
     ConvergeFilePreserved,
     EventClassReopened,
@@ -46,12 +47,13 @@ from shared.events.system import (
     RecoveryDrillFailed,
     ResolutionStatus,
     ResolvedMarker,
+    RootHealthExpected,
+    RootHealthTick,
     ScheduleStalled,
     SseLifecycle,
     StatsDashboardStale,
     TelemetryReadRecovered,
     TelemetryReadStale,
-    WatchdogTick,
 )
 
 _EVENTS_OPS: dict[str, EventSpec] = {
@@ -122,22 +124,7 @@ _EVENTS_OPS: dict[str, EventSpec] = {
         "observation, so the wake had nothing left to do; not a failure",
         tier="observation",
     ),
-    # managed-writer mode (task #4121): the enable-point decision's refusal
-    # marker. `blocked` emits once per blocked decision (the rollout still runs
-    # the legacy flow). Mode transitions are not event-carried -- they are
-    # reconstructed from the audited config write (`env_write`: old and new
-    # value plus the actor) plus the per-rollout telemetry `managed_writer`
-    # field (all three states, including off).
-    "managed_writer_blocked": _audit(
-        "managed_writer_blocked",
-        "managed-writer mode requested but refused entry: a readiness guard is missing or not True; the rollout ran the legacy flow",
-    ),
     # db resilience
-    "schema_mismatch_blocked": _telemetry(
-        "schema_mismatch_blocked",
-        "watchdog held back DB-dependent services for a code/schema/pin mismatch",
-        tier="anomaly",
-    ),
     "db_outage_wait": _telemetry("db_outage_wait", "db outage wait", tier="anomaly"),
     "db_outage_pause": _telemetry("db_outage_pause", "db outage pause", tier="anomaly"),
     "db_outage_reconcile_retry": _telemetry(
@@ -153,9 +140,6 @@ _EVENTS_OPS: dict[str, EventSpec] = {
     "checkpoint_write_failed": _telemetry(
         "checkpoint_write_failed", "checkpoint write failed", tier="anomaly"
     ),
-    "pgbouncer_repaired": _telemetry(
-        "pgbouncer_repaired", "pgbouncer watchdog repair", tier="anomaly"
-    ),
     "editable_pth_repaired": _telemetry(
         "editable_pth_repaired",
         "poisoned editable-install pointer repaired to the prod source root",
@@ -169,11 +153,6 @@ _EVENTS_OPS: dict[str, EventSpec] = {
     "exec_editable_install_poisoned": _telemetry(
         "exec_editable_install_poisoned",
         "poisoned editable install repaired before an exec child spawn",
-        tier="anomaly",
-    ),
-    "source_tree_reset": _telemetry(
-        "source_tree_reset",
-        "prod source checkout reset to the installed commit / cleaned of untracked files",
         tier="anomaly",
     ),
     "lgtm_dashboard_render_failed": _telemetry(
@@ -240,15 +219,7 @@ _EVENTS_OPS: dict[str, EventSpec] = {
     "emergency_compact": _telemetry(
         "emergency_compact", "emergency compaction (overflow self-rescue)", tier="noise"
     ),
-    # watchdog respawn circuit breaker (task #1941)
-    "respawn_breaker_open": _telemetry(
-        "respawn_breaker_open",
-        "watchdog respawn circuit breaker opened — repeated failed respawns held until a probe-alive round",
-        tier="anomaly",
-    ),
-    # root supervisor self-check (P7 W1.2b, task #3338) — the root tree's own
-    # chain episodes and restart breaker, named distinctly from the watchdog
-    # era so the two layers stay attributable during the transition
+    # Root-owned chain episodes and service recovery policy.
     "root_chain_broken": _telemetry(
         "root_chain_broken",
         "root self-check found a managed unit no longer a live child of the root process — one alert per episode, held until intact",
@@ -259,16 +230,10 @@ _EVENTS_OPS: dict[str, EventSpec] = {
         "root health monitor restart breaker opened — repeated non-alive probe rounds held until a probe-alive round",
         tier="anomaly",
     ),
-    # permissions helper healthcheck (task #3393) — the launchd-owned helper's
-    # LWCR-class detection and repair escalation (F5 findings section 6)
+    # Parent-helper diagnosis never grants root authority to replace its ancestor.
     "permissions_helper_unhealthy": _telemetry(
         "permissions_helper_unhealthy",
         "permissions helper failed its healthcheck (ping plus launchd job classification) — one alert per episode, held until a ping-alive round",
-        tier="anomaly",
-    ),
-    "permissions_helper_repair_failed": _telemetry(
-        "permissions_helper_repair_failed",
-        "permissions helper launchd repair (bootout+bootstrap) did not restore ping — escalating; the episode retries under backoff",
         tier="anomaly",
     ),
     "schedule_stalled": _telemetry(
@@ -358,10 +323,21 @@ _EVENTS_OPS: dict[str, EventSpec] = {
         payload=MemorySearchStats,
         tier="noise",
     ),
-    "watchdog_tick": _telemetry(
-        "watchdog_tick",
-        "watchdog completed one full healthcheck and reconcile round",
-        payload=WatchdogTick,
+    "root_health_expected": _telemetry(
+        "root_health_expected",
+        "root health observation rounds expected, including before the first sample",
+        payload=RootHealthExpected,
+        tier="noise",
+    ),
+    "root_diagnostic": _telemetry(
+        "root_diagnostic",
+        "root diagnostic verdict changed; observation only, no recovery authority",
+        tier="anomaly",
+    ),
+    "root_health_tick": _telemetry(
+        "root_health_tick",
+        "root completed one service health and diagnostic observation round",
+        payload=RootHealthTick,
         tier="noise",
     ),
     "pitr_remote_inventory": _telemetry(
@@ -369,6 +345,12 @@ _EVENTS_OPS: dict[str, EventSpec] = {
         "PITR remote object inventory (backend-scoped absolute object and byte state)",
         payload=PitrRemoteInventory,
         tier="noise",
+    ),
+    "backup_operation_custody": _telemetry(
+        "backup_operation_custody",
+        "backup or PITR operation quarantined, blocked on unproven closure, or retired",
+        payload=BackupOperationCustody,
+        tier="anomaly",
     ),
     "recovery_drill_failed": _telemetry(
         "recovery_drill_failed",

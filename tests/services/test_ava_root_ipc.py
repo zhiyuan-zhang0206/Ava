@@ -1,4 +1,4 @@
-"""services.ava_root.ipc + server/client: the K1 wire protocol.
+"""shared.root_control.ipc + server/client: the K1 wire protocol.
 
 One JSON object per line, validated fail-fast on both ends: a malformed
 request or a response that drifts from the agreed shape is rejected at the
@@ -12,10 +12,13 @@ import asyncio
 import json
 from pathlib import Path
 
+import psutil
 import pytest
 
-from services.ava_root.client import RootClient, RootClientError
-from services.ava_root.ipc import (
+from services.ava_root.server import ControlServer
+from shared.native_process.ownership import OwnedProcess
+from shared.root_control.client import RootClient, RootClientError
+from shared.root_control.ipc import (
     ErrorCode,
     ProtocolError,
     RequestPayload,
@@ -27,11 +30,15 @@ from services.ava_root.ipc import (
     parse_request,
     parse_response,
 )
-from services.ava_root.server import ControlServer
+
+
+def _root_row() -> dict[str, object]:
+    owner = OwnedProcess.capture(psutil.Process())
+    return {"pid": owner.pid, "create_time": owner.birth, "starttime": owner.starttime}
 
 
 async def _echo_handler(request: RequestPayload) -> ResponsePayload:
-    return ok_response({"echo": request["verb"]})
+    return ok_response({"echo": request["verb"], "root": _root_row()})
 
 
 class TestEncode:
@@ -51,7 +58,7 @@ class TestParseRequest:
             "name": "gateway",
         }
 
-    @pytest.mark.parametrize("verb", ["status", "upgrade"])
+    @pytest.mark.parametrize("verb", ["status", "shutdown"])
     def test_unnamed_verb(self, verb: str) -> None:
         assert parse_request(encode({"verb": verb})) == {"verb": verb}
 
@@ -75,11 +82,19 @@ class TestParseRequest:
             b'{"verb": "status", "name": "x"}',
             b'{"verb": "status", "name": null}',
             b'{"verb": "up", "name": "x", "extra": 1}',
+            b'{"verb": "up", "name": "x", "payload": {}}',
+            b'{"verb": "resource", "name": "terminal.start"}',
+            b'{"verb": "resource", "name": "", "payload": {}}',
+            b'{"verb": "resource", "name": "terminal.start", "payload": []}',
         ],
     )
     def test_shape_violations_rejected(self, raw: bytes) -> None:
         with pytest.raises(ProtocolError):
             parse_request(raw)
+
+    def test_resource_requires_its_explicit_operation_and_payload(self) -> None:
+        request = {"verb": "resource", "name": "terminal.start", "payload": {"name": "shell"}}
+        assert parse_request(encode(request)) == request
 
 
 class TestParseResponse:
@@ -118,7 +133,7 @@ class TestServerClientRoundtrip:
         try:
             client = RootClient(sock_path, timeout=5.0)
             response = await asyncio.to_thread(client.call, "status")
-            assert response == {"ok": True, "result": {"echo": "status"}}
+            assert response == {"ok": True, "result": {"echo": "status", "root": _root_row()}}
         finally:
             await server.close()
         assert not sock_path.exists()
@@ -132,7 +147,10 @@ class TestServerClientRoundtrip:
             responses = await asyncio.gather(
                 *(asyncio.to_thread(client.call, "status") for _ in range(16))
             )
-            assert all(r == {"ok": True, "result": {"echo": "status"}} for r in responses)
+            assert all(
+                r == {"ok": True, "result": {"echo": "status", "root": _root_row()}}
+                for r in responses
+            )
         finally:
             await server.close()
 
@@ -188,3 +206,161 @@ class TestServerClientRoundtrip:
             writer.close()
         finally:
             await server.close()
+
+
+@pytest.mark.parametrize("field", ["pid", "create_time", "starttime"])
+async def test_status_authenticates_exact_kernel_peer(short_tmp: Path, field: str) -> None:
+    """A socket answering the expected protocol cannot substitute another birth."""
+
+    async def forged(_request: RequestPayload) -> ResponsePayload:
+        row = _root_row()
+        if field == "pid":
+            row[field] = int(str(row[field])) + 100000
+        elif field == "create_time":
+            row[field] = float(str(row[field])) + 1
+            row["starttime"] = None
+        else:
+            row[field] = 1
+        return ok_response({"root": row})
+
+    path = short_tmp / "root.sock"
+    server = ControlServer(path, forged)
+    await server.start()
+    try:
+        with pytest.raises(RootClientError, match="exact native IPC peer"):
+            await asyncio.to_thread(RootClient(path).status)
+    finally:
+        await server.close()
+
+
+@pytest.mark.parametrize("bad", [None, "home", "runtime", "launch", "stopped"])
+async def test_serving_reads_bound_runtime_from_native_peer(
+    short_tmp: Path, monkeypatch: pytest.MonkeyPatch, bad: str | None
+) -> None:
+    """Real local transport plus strict local receipt; no application launch."""
+    from shared import start_serving
+    from shared.runtime_interpreter import LoadedRuntimeIdentity
+
+    short_tmp = short_tmp.resolve()
+    runtime = LoadedRuntimeIdentity(
+        kind="source",
+        code_root=str(short_tmp),
+        interpreter=str(short_tmp / "python"),
+        prefix=str(short_tmp / "venv"),
+        cwd=str(short_tmp),
+        source_digest="f" * 64,
+    )
+    monkeypatch.setattr(start_serving, "ava_home", lambda: short_tmp)
+    monkeypatch.setattr(start_serving, "state_path", lambda: short_tmp / "serving.json")
+    monkeypatch.setattr(start_serving, "_lock_path", lambda: short_tmp / "serving.lock")
+    root = _root_row() | {
+        "running": True,
+        "home": str(short_tmp),
+        "launch_digest": "a" * 64,
+        "runtime": runtime.model_dump(mode="json"),
+    }
+    if bad == "home":
+        root["home"] = str(short_tmp / "foreign")
+    elif bad == "runtime":
+        root["runtime"] = None
+    elif bad == "launch":
+        root["launch_digest"] = None
+    elif bad == "stopped":
+        root["running"] = False
+
+    async def status(_request: RequestPayload) -> ResponsePayload:
+        return ok_response({"root": root})
+
+    path = short_tmp / "run/ava-root/ava-root.sock"
+    server = ControlServer(path, status)
+    await server.start()
+    try:
+        generation = start_serving.begin_start()
+        if bad is None:
+            assert await asyncio.to_thread(start_serving.mark_serving, generation, runtime=runtime)
+            assert await asyncio.to_thread(start_serving.is_serving)
+        else:
+            with pytest.raises((ValueError, RootClientError)):
+                await asyncio.to_thread(start_serving.mark_serving, generation, runtime=runtime)
+            assert not start_serving.is_serving()
+    finally:
+        await server.close()
+
+
+@pytest.mark.parametrize("recorded,captured", [(None, None), (None, 50), (50, None)])
+def test_linux_ipc_requires_both_observed_tick_identities(
+    monkeypatch: pytest.MonkeyPatch, recorded: int | None, captured: int | None
+) -> None:
+    from types import SimpleNamespace
+
+    from shared.root_control import client
+
+    monkeypatch.setattr(client, "sys", SimpleNamespace(platform="linux"))
+
+    def unexpected_liveness(_self: OwnedProcess) -> bool:
+        pytest.fail("missing Linux ticks reached timestamp-based liveness")
+
+    monkeypatch.setattr(OwnedProcess, "live", unexpected_liveness)
+    response = encode(
+        ok_response(
+            {
+                "root": {
+                    "pid": 42,
+                    "create_time": 123.0,
+                    "starttime": recorded,
+                }
+            }
+        )
+    )
+    with pytest.raises(RootClientError, match="requires observed Linux start ticks"):
+        client._validate_status_peer(response, OwnedProcess(42, 123.0, captured))
+
+
+@pytest.mark.parametrize(
+    "platform,recorded,captured,birth,accepted",
+    [
+        ("linux", 50, 50, 999.0, True),
+        ("linux", 51, 50, 123.0, False),
+        ("darwin", None, None, 123.0, True),
+        ("darwin", None, None, 124.0, False),
+    ],
+)
+def test_ipc_native_birth_rules_preserve_platform_authority(
+    monkeypatch: pytest.MonkeyPatch,
+    platform: str,
+    recorded: int | None,
+    captured: int | None,
+    birth: float,
+    accepted: bool,
+) -> None:
+    from types import SimpleNamespace
+
+    from shared.native_process import ownership
+    from shared.root_control import client
+
+    # Both halves of the rule read the platform: the client's tick requirement
+    # and the identity comparison itself.
+    monkeypatch.setattr(client, "sys", SimpleNamespace(platform=platform))
+    monkeypatch.setattr(ownership, "sys", SimpleNamespace(platform=platform))
+
+    def alive(_self: OwnedProcess) -> bool:
+        return True
+
+    monkeypatch.setattr(OwnedProcess, "live", alive)
+    response = encode(
+        ok_response(
+            {
+                "root": {
+                    "pid": 42,
+                    "create_time": birth,
+                    "starttime": recorded,
+                }
+            }
+        )
+    )
+    peer = OwnedProcess(42, 123.0, captured)
+    if accepted:
+        client._validate_status_peer(response, peer)
+    else:
+        with pytest.raises(RootClientError, match="exact native IPC peer"):
+            client._validate_status_peer(response, peer)

@@ -39,7 +39,7 @@ from shared.pg_foreground import (
 )
 from shared.pg_stall_watchdog import fixture_log_artifact_dir, stall_guard
 from shared.platform import IS_MACOS, IS_WINDOWS
-from shared.process_env import inherited_process_env
+from shared.process_env import daemon_process_env
 
 PG_BIN_LINUX = Path("/usr/lib/postgresql/17/bin")
 PG_BIN_WINDOWS = Path("C:\\Program Files\\PostgreSQL\\17\\bin")  # EDB installer default
@@ -124,12 +124,21 @@ _MACOS_PG_LOCALE = "en_US.UTF-8"
 def pg_start_env() -> dict[str, str]:
     """The child environment for starting a Postgres server.
 
-    The caller's live environment, with `LC_ALL` supplied when it carries
+    The operator's process mechanics only (`daemon_process_env`: PATH, home,
+    user, temp dir, timezone, locale), with `LC_ALL` supplied when it carries
     neither `LC_ALL` nor `LANG` (macOS only — see `_MACOS_PG_LOCALE`). Pass
     this as `env=` to the `pg_ctl start` invocation (or a direct `postgres`
     spawn): pg_ctl hands its environment to the postmaster, and the macOS
-    postmaster aborts at startup when that environment has no locale."""
-    env = inherited_process_env()
+    postmaster aborts at startup when that environment has no locale.
+
+    The postmaster outlives the `ava start` that spawns it (it is retained
+    across releases), and that process may hold the delivered gateway login,
+    write generation and API token, the human secret and the Redis admin
+    password; none of it crosses. The commands the postmaster runs need no
+    more: the PITR archive shim finds `python3` through PATH (its shebang) and
+    takes everything else on argv, and the restore drill's `restore_command`
+    names its interpreter by absolute path."""
+    env = daemon_process_env()
     if is_macos() and not env.get("LC_ALL") and not env.get("LANG"):
         env["LC_ALL"] = _MACOS_PG_LOCALE
     return env

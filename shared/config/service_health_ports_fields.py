@@ -27,7 +27,7 @@ from pydantic import Field
 # over /api/bootstrap — and a runner's .env never caches a gateway-served
 # value at all since the 2026-08-01 config refactor (every runner process
 # fetches at startup), so a per-unit port is durable by construction. A
-# co-located second unit states its base once with `ava enroll --health-port-base`;
+# co-located second unit states its base once with `ava start --health-port-base`;
 # `ava start` refuses to launch onto a port another unit already answers on.
 # The sibling `*_health_url` / `*_pidfile` fields were already `host`.
 

@@ -8,7 +8,6 @@ GET  /api/auth/check   — report whether the current session is valid
 from __future__ import annotations
 
 import asyncio
-import hmac
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
@@ -17,18 +16,19 @@ from pydantic import BaseModel
 
 from gateway._cors import session_cookie_secure
 from gateway.error_envelope import error_response
+from gateway.request_principal import current_session_fact, login_mint, session_mints
 from gateway.session_store import (
     create_session,
     list_sessions,
+    minted_session_id,
     revoke_session,
     session_ids_with_suffix,
-    session_is_valid,
+    session_mint,
 )
 from shared.cluster_auth import (
     clear_cookie_header,
     cookie_name,
     is_managed_browser_user_agent,
-    new_session_id,
     session_cookie_header,
 )
 from shared.config import settings
@@ -38,9 +38,11 @@ router = APIRouter()
 
 
 class LoginRequest(BaseModel):
-    """POST /api/auth/login body. `password` is the cluster secret; a missing or
-    empty one falls through to the 401 below rather than a 422. `username` is
-    accepted for Chrome password-manager compatibility but never validated."""
+    """POST /api/auth/login body. `password` is the cluster secret (or, for the
+    managed browser of an agent-runner, the active generation's runner API
+    token); a missing or empty one falls through to the 401 below rather than a
+    422. `username` is accepted for Chrome password-manager compatibility but
+    never validated."""
 
     password: str = ""
     username: str | None = None
@@ -50,7 +52,11 @@ class LoginRequest(BaseModel):
 async def login(body: LoginRequest, request: Request) -> JSONResponse:
     """Authenticate with the cluster secret and receive a session cookie.
 
-    Request body: ``{"password": "<cluster-secret>"}``
+    Request body: ``{"password": "<cluster-secret>"}``. An agent-runner's
+    managed browser presents the active generation's runner API token instead.
+    The session is bound to the credential that minted it (`login_mint`): it
+    stops authenticating when that generation is revoked or the human secret
+    rotates, whatever its remaining lifetime.
 
     On success, returns ``{"ok": true}`` and sets an HTTP-only session
     cookie whose lifetime is controlled by ``session_ttl_seconds``.
@@ -99,7 +105,8 @@ async def login(body: LoginRequest, request: Request) -> JSONResponse:
             retryable=False,
         )
 
-    if not hmac.compare_digest(password, secret):
+    mint = await asyncio.to_thread(login_mint, password, secret)
+    if mint is None:
         login_limiter.record_failure(ip)
         return error_response(
             request,
@@ -110,7 +117,7 @@ async def login(body: LoginRequest, request: Request) -> JSONResponse:
         )
 
     login_limiter.record_success(ip)
-    session_id = new_session_id()
+    session_id = minted_session_id(mint)
     ttl_seconds = settings.gateway.session_ttl_seconds
     await asyncio.to_thread(
         create_session,
@@ -157,26 +164,42 @@ async def check(request: Request) -> JSONResponse:
     if not settings.gateway.auth_middleware_enabled or not settings.data_plane.cluster_secret:
         return JSONResponse(content={"authenticated": True})
     token = request.cookies.get(cookie_name())
-    authenticated = await asyncio.to_thread(
-        session_is_valid,
+    fact = await asyncio.to_thread(
+        current_session_fact,
         request.app.state.db_pool,
         token,
+        settings.data_plane.cluster_secret,
     )
-    return JSONResponse(content={"authenticated": authenticated})
+    return JSONResponse(content={"authenticated": fact is not None})
+
+
+def _sessions_that_authenticate(pool: Any, secret: str) -> list[dict[str, Any]]:
+    """Unrevoked, unexpired sessions whose mint is still admitted: the rows
+    `current_session_fact` would accept. A revoked generation's runner-minted
+    sessions, a rotated secret's, and ids without a mint are dead and omitted."""
+    admitted = session_mints(secret)
+    return [row for row in list_sessions(pool) if session_mint(row["id"]) in admitted]
 
 
 @router.get("/api/auth/sessions")
 async def sessions(request: Request) -> list[dict[str, Any]]:
-    """List active browser sessions, marking the request's current cookie.
+    """List browser sessions that still authenticate, marking the current cookie.
 
-    Only the request's current session keeps its full id; every other row's id
-    is masked to its final 8 characters — enough to tell rows apart and to
-    revoke (the revoke endpoint accepts the suffix), without exposing the full
-    credential of sessions the caller does not hold. Managed-browser sessions
-    are labeled with ``managed`` so they are not mistaken for the caller's own.
+    A session is listed only while the credential that minted it is current,
+    the same test the session check applies, so a security screen never shows
+    a dead session as active. Only the request's current session keeps its full
+    id; every other row's id is masked to its final 8 characters — enough to
+    tell rows apart and to revoke (the revoke endpoint accepts the suffix),
+    without exposing the full credential of sessions the caller does not hold.
+    Managed-browser sessions are labeled with ``managed`` so they are not
+    mistaken for the caller's own.
     """
     current_session_id = request.cookies.get(cookie_name())
-    rows = await asyncio.to_thread(list_sessions, request.app.state.db_pool)
+    rows = await asyncio.to_thread(
+        _sessions_that_authenticate,
+        request.app.state.db_pool,
+        settings.data_plane.cluster_secret,
+    )
     result: list[dict[str, Any]] = []
     for row in rows:
         is_current = row["id"] == current_session_id

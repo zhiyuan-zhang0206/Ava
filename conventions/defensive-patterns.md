@@ -27,9 +27,9 @@ Evidence: [`postmortems/0001`](../postmortems/0001-a-rollout-cannot-deliver-its-
 ### A running process does not adopt a tree checked out underneath it
 
 A daemon, watchdog, orchestrator, or agent keeps executing the code it imported.
-"The file on disk says otherwise" is not a rebuttal. This is why the orchestration
-executing any given rollout is always the old code, and why new orchestration
-behavior takes effect one rollout later than it lands.
+"The file on disk says otherwise" is not a rebuttal. Retain the executing image
+and run replacement from an independently owned executor. A checkout mutation
+cannot upgrade an already running orchestrator.
 Evidence: [`postmortems/0001`](../postmortems/0001-a-rollout-cannot-deliver-its-own-protection.md).
 
 ### A supervisor cannot replace itself from inside its own process tree
@@ -54,9 +54,9 @@ Evidence: [`postmortems/0005`](../postmortems/0005-a-supervisor-cannot-replace-i
 A parameter only arrives if the caller knows to pass it, and on the deciding
 rollout the caller predates the parameter. When a leg needs a new fact, design it
 to **read the fact itself** rather than be handed it — the same fact reached
-entirely inside the new code. Worked example:
-`cli/commands/start.py:_readiness_waiver`, which observes the update lease instead
-of waiting for a `--flag`.
+entirely inside the new code. Persist and verify the operation identity before
+effects; a newly introduced caller flag cannot authorize its own first deployment.
+Current start readiness always requires the complete selected roster to be ready.
 Evidence: [`postmortems/0001`](../postmortems/0001-a-rollout-cannot-deliver-its-own-protection.md).
 
 ### An editable install is a cross-checkout pointer
@@ -64,9 +64,11 @@ Evidence: [`postmortems/0001`](../postmortems/0001-a-rollout-cannot-deliver-its-
 An editable install writes its source path into the **active virtualenv**; the
 working directory does not constrain which environment a polluted
 `VIRTUAL_ENV` selects. Clear that variable for every worktree `uv` command,
-assert long-lived `.pth` targets and their `direct_url.json` records during
-lifecycle convergence, and inspect those targets before deleting a checkout. A read-only emergency guard also needs a
-bounded write window in the legitimate update path, with exact-mode restoration.
+verify `.pth` targets and their `direct_url.json` records when explicitly
+preparing that installation, and inspect those targets before deleting a
+checkout. Startup must not repair a different installation. Any explicit repair
+of protected editable files needs a bounded write window with exact-mode
+restoration; retained runtime images are verified without modification.
 Evidence: [`postmortems/0006`](../postmortems/0006-an-editable-install-is-a-cross-checkout-pointer.md).
 
 ### Isolation that one command can undo is a convention, not a boundary
@@ -190,7 +192,7 @@ Evidence: [`postmortems/0003`](../postmortems/0003-touched-areas-is-not-the-blas
 
 Two producers of the same fact, pinned against each other, feel like a test of
 something nobody would get wrong. `tests/shared/test_cluster_env.py:test_health_port_env_matches_derive_env_for_the_same_base`
-pins `derive_env` (install-time) against `health_port_env` (enroll-time) for one
+pins `derive_env` (first-start) against `health_port_env` (runner-join) for one
 base — and what it caught was not the original bug but the FIX for it: adding
 `agent_host` to the late-health-slot set made the two producers disagree, and
 the guard said so immediately.

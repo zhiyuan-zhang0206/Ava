@@ -117,6 +117,12 @@ _HostGraph = CompiledStateGraph[BaseAgentState, AvaContext, BaseAgentState, Base
 # reaches a running state.
 _UNRUNNABLE_STATUSES = frozenset({"terminated", "restarting"})
 
+# The host's whole stop must fit ava-root's TERM window (`stop_timeout_s`, 10 s,
+# `services/ava_root/supervisor.py`) or root retains custody of it. With Postgres
+# unreachable the release would otherwise wait out the control pool's acquire
+# timeout (30 s). A release that cannot land leaves the leases to expire by TTL.
+_RELEASE_OWNER_TIMEOUT_S = 3.0
+
 
 def kill_terminating_agent_shells(agent_id: int) -> None:
     """Kill every shell session a terminating agent owns on this machine.
@@ -745,7 +751,16 @@ class AgentHost:
         """Drop every cached runtime. The pool, checkpointer and graph belong to
         the daemon that built them and are closed there."""
         self._runtimes.clear()
-        await release_hosted_owner(self._control_pool, self._machine, self._owner, self._in_flight)
+        try:
+            async with asyncio.timeout(_RELEASE_OWNER_TIMEOUT_S):
+                await release_hosted_owner(
+                    self._control_pool, self._machine, self._owner, self._in_flight
+                )
+        except TimeoutError as exc:
+            raise TimeoutError(
+                f"hosted ownership release did not land within {_RELEASE_OWNER_TIMEOUT_S:g}s; "
+                "its leases expire by TTL"
+            ) from exc
 
     async def renew_ownership(self) -> None:
         """Existing daemon health beat also proves idle runtime responsibility.

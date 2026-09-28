@@ -99,6 +99,9 @@ from shared.log_sinks import (
 from shared.log_sinks import (
     _StdlibInterceptHandler as _StdlibInterceptHandler,
 )
+from shared.log_sinks import (
+    add_sink,
+)
 from shared.turn_identity import (
     TURN_SCOPED_AGENT_ID,
     TurnScopedAgentId,
@@ -116,6 +119,7 @@ __all__ = [
     "init_agent_process",
     "init_cli_process",
     "init_gateway_process",
+    "init_restricted_process",
     "init_subprocess_logger",
     "logger",
 ]
@@ -173,14 +177,9 @@ _ROLLOUT_QUIET_EVENTS = frozenset(
     }
 )
 # event='log' lines (stdlib loggers carry no event=) matched by message prefix:
-# the ops manager's per-round "blocked" / "no longer blocked" lines, and the
-# `query cancellation failed: ...` line (source currently only present on some
+# the `query cancellation failed: ...` line (source currently only present on some
 # runner checkouts — the msg prefix is the one stable handle).
-_ROLLOUT_QUIET_MSG_PREFIXES = (
-    "[ops.manager] round blocked by",
-    "[ops.manager] round no longer blocked after",
-    "query cancellation failed",
-)
+_ROLLOUT_QUIET_MSG_PREFIXES = ("query cancellation failed",)
 
 # Deploy-lease read cache for the quieting check. The sink must not dial the DB
 # per record, and the quieting must SURVIVE the short DB blip a rollout itself
@@ -459,13 +458,12 @@ def _add_postgres_sink(process: str = "unknown", *, agent_id: int | None = None)
     live_handlers: Any = cast(Any, logger)._core.handlers  # private `_core` registry
     if _postgres_sink_id is not None and _postgres_sink_id in live_handlers:
         return _postgres_sink_id
-    _postgres_sink_id = logger.add(
+    _postgres_sink_id = add_sink(
         _postgres_sink,
         level="INFO",
         enqueue=False,
         catch=True,
         filter=_event_pipeline_filter,
-        diagnose=False,
     )
     return _postgres_sink_id
 
@@ -508,7 +506,7 @@ def init_agent_process(*, agent_id: int) -> None:
     _configure_windows_event_loop_policy()
     set_process_agent_id(agent_id)
     logger.configure(extra={"agent_id": TURN_SCOPED_AGENT_ID})
-    logger.add(sys.stderr, format=_HUMAN_FORMAT, level="INFO", colorize=True, diagnose=False)
+    add_sink(sys.stderr, format=_HUMAN_FORMAT, level="INFO", colorize=True)
     from shared.paths import logs_dir
 
     _add_file_sink(logs_dir() / f"agent-{agent_id}.log")
@@ -562,6 +560,17 @@ def _configure_windows_event_loop_policy() -> None:
         asyncio.set_event_loop_policy(policy_cls())
 
 
+def _add_stderr_sink_before_settings() -> None:
+    """The human stderr sink, opened before the init imports `shared.paths`.
+
+    That import builds the Settings chain, and the build logs: a configured
+    runner's gateway fetch warns when it continues on a stale config snapshot
+    (`shared/bootstrap.py`). Importing this module dropped loguru's default
+    handler, so a record written before any sink exists is discarded.
+    """
+    add_sink(sys.stderr, format=_HUMAN_FORMAT, level="INFO", colorize=True)
+
+
 def init_gateway_process(name: str = "gateway") -> None:
     """Called once at a gateway-style process startup — the gateway itself
     and every long-running service daemon (agent-host / watchdog / labeler /
@@ -586,8 +595,6 @@ def init_gateway_process(name: str = "gateway") -> None:
     if _init_done:
         return
     _configure_windows_event_loop_policy()
-    from shared.paths import logs_dir
-
     # Bind the deferred agent id explicitly rather than inheriting the
     # module-level default: `init_subprocess_logger` also calls
     # `logger.configure`, which REPLACES the whole extra dict, so the default is
@@ -596,7 +603,9 @@ def init_gateway_process(name: str = "gateway") -> None:
     # in the hosted agent-runner — which inits through THIS function — it is
     # what lets each record carry the turn's agent instead of `-`.
     logger.configure(extra={"agent_id": TURN_SCOPED_AGENT_ID})
-    logger.add(sys.stderr, format=_HUMAN_FORMAT, level="INFO", colorize=True, diagnose=False)
+    _add_stderr_sink_before_settings()
+    from shared.paths import logs_dir
+
     _add_file_sink(logs_dir() / f"{name}.log")
     _add_postgres_sink(process=name)
     _install_stdlib_intercept()
@@ -624,33 +633,55 @@ def init_gateway_process(name: str = "gateway") -> None:
 
 
 def init_cli_process(*, name: str) -> None:
-    """Called once at the top of a detached CLI invocation (gateway
-    `spawn_update` child / watchdog schema reconcile child). Identical
-    sink set to ``init_gateway_process``: stderr (human) + file
-    (``<name>.log``) + unified event pipeline (agent_id NULL).
+    """Called once by the CLI verbs that bring a unit up, by the finite release
+    executor (``cli.release_transition.execute``, name ``release-executor``),
+    whose native launcher keeps its stderr, and by the PITR base worker
+    (``pitr-base-worker``). Identical sink set to ``init_gateway_process``,
+    minus its ``service_started`` row: stderr (human) + file (``<name>.log``)
+    + unified event pipeline (agent_id NULL).
 
-    Skipped for interactive CLI use (``ava status`` from a TTY etc.) —
-    interactive output already lands on the caller's terminal and the
-    extra sinks would clutter ``~/.ava/logs/`` and the event stream
-    with one row per command. The detection contract is "called only
-    when the caller exports ``AVA_CLI_LOG_NAME``", and the caller
-    decides the name (e.g. ``cli-spawn-update-<ts>``).
+    The CLI's verbs are the keys of ``cli.main._CLI_LOG_NAMES`` (``start``,
+    ``restart``, ``maintenance start``, ``lgtm on|off``), which also name each
+    one's file; ``cli.main`` calls this before dispatch. Every other verb
+    (``ava status`` etc.) opens no sink — its output already lands on the
+    caller's terminal, and the extra sinks would clutter ``logs/`` and the
+    event stream with one row per command.
 
     Catches stdlib ``logging.getLogger`` calls from imported modules
     (uvicorn / httpx / anthropic SDK / etc.) — CLI's own ``print()``
     output still lands on stdout/stderr (which the parent's Popen
     captures into its own per-invocation log file). The events
-    sink lets ``/api/cluster/admin/events`` surface a stuck
-    ``ava cluster update`` child's last logged step without ssh into the host.
+    sink lets ``/api/cluster/admin/events`` surface a stuck supervised
+    CLI child's last logged step without ssh into the host.
     """
     global _init_done  # noqa: PLW0603
     if _init_done:
         return
     _configure_windows_event_loop_policy()
+    _add_stderr_sink_before_settings()
     from shared.paths import logs_dir
 
-    logger.add(sys.stderr, format=_HUMAN_FORMAT, level="INFO", colorize=True, diagnose=False)
     _add_file_sink(logs_dir() / f"{name}.log")
     _add_postgres_sink(process=name)
+    _install_stdlib_intercept()
+    _init_done = True
+
+
+def init_restricted_process() -> None:
+    """Called once by a worker that runs with no authority: stderr only.
+
+    The PITR restore worker (`services/pitr/restore_worker.py`) runs in
+    `shared.process_env.restricted_process_env()` — no HOME, no AVA_HOME — so
+    it has no home to write a file sink under and must never build Settings,
+    which would load the home's `.env` and its credentials. Every other init
+    resolves `logs_dir()` and builds Settings, so this one opens only the
+    stderr sink, plain text: the worker's stderr is its operation's
+    `stderr.log`, whose tail a failure carries, never a terminal.
+    """
+    global _init_done  # noqa: PLW0603
+    if _init_done:
+        return
+    _configure_windows_event_loop_policy()
+    add_sink(sys.stderr, format=_HUMAN_FORMAT, level="INFO", colorize=False)
     _install_stdlib_intercept()
     _init_done = True

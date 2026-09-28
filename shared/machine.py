@@ -37,7 +37,7 @@ import enum
 from collections.abc import Iterable
 from typing import Literal
 
-from shared.cluster_auth import bearer_header
+from shared.cluster_auth import bearer_header, client_bearer
 from shared.config import settings
 from shared.paths import ava_home
 
@@ -237,7 +237,7 @@ def reachable_host() -> str:
 
     Precedence:
     1. `settings.general.machine_host` (env `AVA_MACHINE_HOST`), when non-empty
-    2. `$AVA_HOME/machine_host` file (written by `ava enroll --machine-host`)
+    2. `$AVA_HOME/machine_host` file (written by `ava start --machine-host`)
     3. `localhost` — a single box is reachable only at loopback (zero-config).
 
     The operator declares this address; it is not auto-detected, so the codebase
@@ -375,7 +375,7 @@ def _resolve_host() -> str:
         if host:
             return host
     # Zero-config single box: reachable only at loopback. This fallback is last
-    # so the `machine_host` file (written by `ava enroll --machine-host`) wins —
+    # so the `machine_host` file (written by `ava start --machine-host`) wins —
     # the config field's default is empty for the same reason (a non-empty
     # default would shadow the file). A remote runner that wrongly lands here is
     # rejected at registration time by the loopback guard in
@@ -421,7 +421,7 @@ def gateway_api_base() -> str:
     url = _resolve_gateway_url()
     if url is None:
         raise GatewayApiBaseMissing(
-            "gateway_url unset — `ava enroll` writes it on an agent-runner; "
+            "gateway_url unset — `ava start` writes it on an agent-runner; "
             "or `export AVA_GATEWAY_URL=<gateway url>` (a gateway host sets its "
             "own reachable URL there too)."
         )
@@ -429,20 +429,18 @@ def gateway_api_base() -> str:
 
 
 def gateway_auth_headers() -> dict[str, str]:
-    """Auth headers a client presents to the gateway's authenticated surfaces.
+    """Auth headers a client presents to the cluster's authenticated surfaces.
 
-    The cluster secret as a Bearer token, paired with `gateway_api_base` for every
-    client-side call to an authenticated gateway route (`/api/cluster/*`,
-    `/api/agents/*`, `/api/config`, `/api/memory/*`, ...) — which the gateway's auth
-    middleware requires on every route but the bypass set (`/api/health`,
-    `/api/auth/*`) once a cluster secret is set. Empty when no secret is set
-    (dev/test), where the middleware is a no-op, so the same call site works either way.
+    The Bearer paired with `gateway_api_base` for every client-side call to an
+    authenticated gateway route (`/api/cluster/*`, `/api/agents/*`,
+    `/api/config`, `/api/memory/*`, ...) and with the gateway's `/ops` dials: this
+    process's machine API token of the active write generation (delivered by the
+    launcher, or by the boot pass to an admitted operator process), else the
+    human cluster secret (an operator on the gateway home). Empty in the open
+    posture, where the middleware is a no-op, so the same call site works either way.
     """
-    return (
-        bearer_header(settings.data_plane.cluster_secret)
-        if settings.data_plane.cluster_secret
-        else {}
-    )
+    bearer = client_bearer(settings.data_plane.cluster_secret)
+    return bearer_header(bearer) if bearer else {}
 
 
 def _parse_roles(value: str) -> MachineRoles:

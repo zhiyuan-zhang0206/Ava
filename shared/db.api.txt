@@ -18,6 +18,7 @@ class InboundRow(NamedTuple)
   source: str | None
   status: str
 NOTICE_FYI_TTL_DAYS = 30
+NoDatabaseAuthorityError  (re-export of shared.db_connections.NoDatabaseAuthorityError)
 PG_KEEPALIVE_KWARGS  (re-export of shared.db_connections.PG_KEEPALIVE_KWARGS)
 PG_POOLED_BASELINE_RESTORE_SQL  (re-export of shared.db_connections.PG_POOLED_BASELINE_RESTORE_SQL)
 PG_STATEMENT_TIMEOUT_KWARGS  (re-export of shared.db_connections.PG_STATEMENT_TIMEOUT_KWARGS)

@@ -65,6 +65,13 @@ def test_attribute_logger_is_covered():
     assert "passes no `diagnose=False`" in violations[0][1]
 
 
+def test_logger_name_in_any_case_is_covered():
+    # `_global_logger` is tests/gateway/test_log_sink.py's real shape; a name
+    # that breaks the lowercase convention is still a loguru sink.
+    for receiver in ("_global_logger", "LOGGER", "runLogger", "self.Logger"):
+        assert len(_violations(f"{receiver}.add(sink)\n")) == 1, receiver
+
+
 def test_multiline_call_with_diagnose_false_is_clean():
     src = (
         'logger.add(\n    path,\n    serialize=True,\n    level="DEBUG",\n    diagnose=False,\n)\n'

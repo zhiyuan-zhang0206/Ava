@@ -84,22 +84,3 @@ def test_is_alive_rpc_fails(monkeypatch: pytest.MonkeyPatch) -> None:
     respawns instead of certifying a broken milvus forever."""
     _patch_module(monkeypatch, raise_on="rpc")
     assert hc._is_alive() is False
-
-
-def test_restart_invokes_respawn_service(monkeypatch: pytest.MonkeyPatch) -> None:
-    """`_restart_daemon` uses `respawn_service` (same pattern as the other
-    daemon healthchecks)."""
-    calls: list[tuple[str, str]] = []
-    extra_envs: list[dict[str, str]] = []
-
-    def fake_respawn(session: str, cmd: str, _repo: object, **kwargs: object) -> bool:
-        calls.append((session, cmd))
-        env: object = kwargs.get("extra_env", {})
-        extra_envs.append(env if isinstance(env, dict) else {})  # pyright: ignore[reportUnknownArgumentType]
-        return True
-
-    monkeypatch.setattr(hc, "respawn_service", fake_respawn)
-    ok = hc._restart_daemon()
-    assert ok is True
-    assert calls == [("milvus", ".venv/bin/python -m services.milvus.daemon")]
-    assert extra_envs == [{"AVA_PROCESS_PROFILE": "gateway"}]

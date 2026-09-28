@@ -109,7 +109,7 @@ body = {
 }
 r = httpx.post(
     f"{base}/api/presets", json=body,
-    headers={"Authorization": f"Bearer {os.environ['AVA_CLUSTER_SECRET']}"}
+    headers={"Authorization": f"Bearer {os.environ.get('AVA_API_TOKEN', '')}"}
 )
 print(r.status_code, r.text)  # 201 on success; 409 = name taken
 ```

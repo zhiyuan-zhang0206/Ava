@@ -101,4 +101,4 @@ def test_enrolled_process_reads_gateway_policy(monkeypatch: pytest.MonkeyPatch) 
 
     monkeypatch.setattr(bootstrap, "fetch_bootstrap_config", fetch)
     assert sdk_call_policy._read_policy() == SamplingPolicy(sampling_enabled=True, sample_every=2)
-    assert requests == [{"timeout": 2.0, "attempts": 1, "role": "runner"}]
+    assert requests == [{"timeout": 2.0, "attempts": 1}]

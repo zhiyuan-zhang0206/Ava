@@ -14,11 +14,11 @@ tags:
 ## What it is
 
 The primitives for ending a process Ava started. Normal `pause` and `stop`
-use `cli/commands/_maintenance_stop.py` for services: deliver a verified
-graceful signal and wait for actual process exit without implicit escalation.
-Their shared deadline reports an incomplete stop if resources remain. The one
-exception is `stop`'s terminal closure: HUP/TERM to each shell's captured
-session, a bounded grace, then SIGKILL of what is left
+use `cli/commands/service_stop.py`: deliver a verified graceful signal and
+wait for actual process exit without implicit escalation. Their shared deadline
+reports an incomplete stop if resources remain. Persistent terminals are the
+exception: a stop, a release or a PITR activation HUPs/TERMs each shell's
+captured session and SIGKILLs what outlives a bounded grace
 ([[shared/sessions/pty/session-kill.ava.okf.md|session kill]];
 decisions/2026-09-28-stop-escalates-to-sigkill.md). Explicit force may use a
 backend's `kill_session`; non-session processes use `shared/proc.py` primitives.
@@ -46,7 +46,7 @@ without joining stuck executor threads. See [[session-backend.ava.okf.md|session
 
 ### Stop convergence when a service leader is gone
 
-`cli/commands/_maintenance_stop.py` treats a confirmed-dead leader as one step,
+`cli/commands/service_stop.py` treats a confirmed-dead leader as one step,
 not the end of the stop. A live leader still runs its own graceful cleanup
 first; once the leader is confirmed dead, its captured, birth-validated
 descendants are signalled — at most once each, SIGTERM on POSIX — so a
@@ -73,8 +73,9 @@ process is that session's leader, a captured descendant, or a group member, the
 birth pair the stop path itself revalidates, and the best-effort cmdline —
 plus the stop stage (the phase label) that hit the deadline. `stop_services`
 raises it as `StopIncompleteError` (a `TimeoutError`, so every existing catch
-keeps working); `_stop_terminals` reports a process that outlived its SIGKILL
-the same way.
+keeps working). The terminal closure reports a process that outlived its
+SIGKILL the same way, at stage `terminals` (`close_terminals`) or
+`release-terminals` (`close_release_terminals`, a release or PITR).
 
 Reads are best-effort but never dishonest: a process that cannot be inspected
 is listed as unreadable rather than dropped, and a PID recycled since capture
@@ -90,7 +91,7 @@ it back.
 
 ### Stops that do not go through a session
 
-Not every process Ava stops is a named session: the pooler, an orphan holding a unit port, the gate daemon. Those go through `shared/proc.py`'s trio — `process_alive` (probe) / `request_stop` (ask) / `force_kill` (force) — and **must**, because two of the obvious spellings do not survive the crossing to Windows: `os.kill(pid, 0)` *terminates* the target there rather than probing it, and `signal.SIGKILL` is undefined. `cli/commands/data_plane/pgbouncer.py:terminate_verified` is a lower-level escalating stop built on them (ask -> poll -> force -> verdict). Normal pause/stop instead use the non-escalating data-plane boundary in `cli/commands/data_plane/maintenance_stop.py`. A pid this user may not signal is handled the same way on all three legs: alive, undeliverable, reported as a survivor — never an exception out of the middle of a stop. Same file: `kill_process_tree` (parent + descendants, enumerated before the kill) and `run_bounded` (a timeout that bounds the work, not just the wrapper).
+Not every process Ava stops is a named session: the pooler, an orphan holding a unit port, the gate daemon. Those go through `shared/proc.py`'s trio — `process_alive` (probe) / `request_stop` (ask) / `force_kill` (force) — and **must**, because two of the obvious spellings do not survive the crossing to Windows: `os.kill(pid, 0)` *terminates* the target there rather than probing it, and `signal.SIGKILL` is undefined. `cli/commands/data_plane/pgbouncer.py:stop_pgbouncer` captures the exact pooler owner and delegates to its native custodian; an incomplete stop retains custody and fails. Normal pause/stop instead use the non-escalating data-plane boundary in `cli/commands/data_plane/maintenance_stop.py`. A pid this user may not signal is handled the same way on all three legs: alive, undeliverable, reported as a survivor — never an exception out of the middle of a stop. Same file: `kill_process_tree` (parent + descendants, enumerated before the kill) and `run_bounded` (a timeout that bounds the work, not just the wrapper).
 
 ## Entry points
 
@@ -98,7 +99,7 @@ Not every process Ava stops is a named session: the pooler, an orphan holding a 
 - `shared/session_backend.py:SessionBackend.kill_session` — the session stop, per backend
 - `shared/proc.py:process_alive` / `request_stop` / `force_kill` — the non-session trio
 - `shared/proc.py:kill_process_tree` / `run_bounded` — tree teardown and a bounded run
-- `cli/commands/data_plane/pgbouncer.py:terminate_verified` — the escalating stop built on the trio
+- `cli/commands/data_plane/pgbouncer.py:stop_pgbouncer` — exact pooler custody and bounded stop
 
 ## Notes
 

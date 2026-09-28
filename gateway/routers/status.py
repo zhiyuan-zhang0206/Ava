@@ -28,7 +28,7 @@ from gateway import loki_events, loki_query_budget
 from gateway.routers import _loki_shards, _roster_probe, _roster_rows, _stats_dashboard
 from gateway.routers._backend_failure import raise_backend_unavailable
 from gateway.routers._health import get_health
-from gateway.routers._roster_rows import read_stranded_holds, stamp_cluster_globals
+from gateway.routers._roster_rows import stamp_cluster_globals
 from gateway.schemas import (
     ClusterPanel,
     MachineStatus,
@@ -41,13 +41,12 @@ from gateway.schemas import (
     applied_window,
 )
 from ops import cluster_rpc as _cluster_rpc
-from ops.cluster import ClusterStatus, _check_pidfile, current_orchestration
-from ops.cluster import is_paused as cluster_is_paused
-from ops.controllers.schema_mismatch import status as schema_mismatch_status
+from ops.cluster_pause import is_paused as cluster_is_paused
+from ops.cluster_status import ClusterStatus, _check_pidfile
+from ops.schema_mismatch import status as schema_mismatch_status
 from shared.cluster_drift import prod_source_head_sha
 from shared.cluster_lock import DeployLease
 from shared.config import settings
-from shared.last_update import LastUpdate
 from shared.machine import is_agent_runner, is_gateway, is_observability_station, machine_name
 from shared.observability import cluster_label
 from shared.resource_sample import ResourceSample
@@ -426,7 +425,7 @@ async def _probe_agent_runner(
         schema_mismatch=status.schema_mismatch,
         shell_count=status.shell_count,
         agent_host_online=status.agent_host_online,
-        watchdog_online=status.watchdog_online,
+        supervisor_online=status.supervisor_online,
         agent_count=status.agent_count,
         session_count=status.session_count,
         agent_groups=status.agent_groups,
@@ -434,66 +433,22 @@ async def _probe_agent_runner(
     )
 
 
-def _read_cluster_pin() -> str | None:
-    """The cluster pin (`cluster_target_sha`), or None if unset / DB unreachable.
-
-    The pin is a diagnostic overlay on the roster, not load-bearing, so it must
-    not take the whole status panel down. A transient connectivity blip
-    (`OperationalError`, e.g. mid-rollout) degrades silently to "no pin shown". Any
-    other failure — a missing pin row, a schema/permission error — is a real bug,
-    not "no pin", so it is logged loudly (not swallowed silently) before degrading."""
-    import psycopg
-
-    from shared.cluster_pin import get_cluster_target_sha
-
-    try:
-        return get_cluster_target_sha()
-    except psycopg.OperationalError:
-        return None
-    except Exception:
-        _log.exception("reading cluster pin failed (roster pin column will be blank)")
-        return None
-
-
-def _read_known_good() -> str | None:
-    """The cluster's rollback anchor (`last_known_good_sha`), or None when unset /
-    unreadable. Same shape and same degradation as `_read_cluster_pin`.
-
-    Surfaced because it was recorded and never shown anywhere. Without it a
-    rollback presents as the pin simply *changing* to an older commit, with nothing
-    saying that commit is the anchor the cluster deliberately fell back to — half of
-    what made the 2026-07-30 recovery read as an anomaly rather than as the designed
-    behaviour it was.
-    """
-    import psycopg
-
-    from shared.cluster_pin import get_last_known_good_sha
-
-    try:
-        return get_last_known_good_sha()
-    except psycopg.OperationalError:
-        return None
-    except Exception:
-        _log.exception("reading last_known_good_sha failed (the anchor will not be shown)")
-        return None
-
-
 def _read_deploy_lease() -> DeployLease | None:
     """The live deploy lease (`shared.cluster_lock.read_update_lease`), or None when
     the cluster is free / the row cannot be read.
 
-    Read once per roster assembly and stamped onto every row, the same shape as
-    `_read_cluster_pin` and degrading the same way: a hold is a diagnostic overlay,
-    so a transient `OperationalError` (a rollout mid-restart is exactly when this is
-    asked) leaves the `hold` column blank rather than taking the roster down, while
-    any other failure is a real bug and is logged loudly first.
+    Read once per roster assembly and stamped onto every row: a hold is a
+    diagnostic overlay, so a transient `OperationalError` (a host mid-restart is
+    exactly when this is asked) leaves the deploy-hold banner blank rather than
+    taking the roster down, while any other failure is a real bug and is logged
+    loudly first.
 
     Deliberately NOT `ops.deploy_window.deploy_in_flight()`. That call probes every
     machine and, on a converged cluster, *releases* the settle hold — neither belongs
     on a read-only roster GET, and its per-host probes would also answer under the
-    permissive polarity (an unreachable host reads "not deploying") while the column
-    beside `pin` needs the hold's recorded set. Rendering the lease row keeps the
-    roster a display of state rather than a second derivation of it.
+    permissive polarity (an unreachable host reads "not deploying"). Rendering the
+    lease row keeps the roster a display of state rather than a second derivation
+    of it.
     """
     import psycopg
 
@@ -505,33 +460,6 @@ def _read_deploy_lease() -> DeployLease | None:
         return None
     except Exception:
         _log.exception("reading the deploy lease failed (roster hold column will be blank)")
-        return None
-
-
-def _read_last_update() -> LastUpdate | None:
-    """The cluster's last update outcome, or None when unrecorded / unreadable.
-
-    Read once per roster assembly and stamped onto every row, the same shape as
-    `_read_cluster_pin` and `_read_deploy_lease` and degrading the same way: a
-    transient `OperationalError` (a rollout mid-restart is exactly when the status
-    surfaces are asked) leaves the banner off rather than taking the roster down,
-    while any other failure is a real bug and is logged loudly first.
-
-    Degrading to None means "we cannot say", and the surfaces show nothing rather
-    than a green all-clear — the failure mode this record exists to close is a
-    surface that stays quiet about a failed update, so it must not be reintroduced
-    by the reader.
-    """
-    import psycopg
-
-    from shared.last_update import read_last_update
-
-    try:
-        return read_last_update()
-    except psycopg.OperationalError:
-        return None
-    except Exception:
-        _log.exception("reading the last update record failed (the update banner will be blank)")
         return None
 
 
@@ -588,11 +516,7 @@ async def gather_cluster_status(
     rows: list[tuple[str, str | None, list[str], datetime, str | None, datetime | None, bool]],
     local_name: str,
     *,
-    cluster_target_sha: str | None = None,
     deploy_lease: DeployLease | None = None,
-    last_update: LastUpdate | None = None,
-    last_known_good_sha: str | None = None,
-    stranded_holds: dict[str, tuple[datetime, str | None]] | None = None,
 ) -> list[MachineStatus]:
     """Async fan-out: every machine probed in parallel via a status_probe op
     to its ops server (the local machine included — its ops server is dialed
@@ -610,22 +534,16 @@ async def gather_cluster_status(
 
     Rows are the machines-table tuple (name, gateway_url, role, up_since_at,
     description, stopped_at, is_staging); description + stopped_at + is_staging
-    are threaded through unmodified onto each MachineStatus. `cluster_target_sha` (the cluster pin,
-    read once by the caller) stamps each row's `on_pin` verdict. Public because
+    are threaded through unmodified onto each MachineStatus. Public because
     `routers/cluster.py:get_cluster_machines` reuses the same fan-out to back
     ava.agents.list_machines().
 
-    `deploy_lease` (the live lease, likewise read once by the caller) is the other
-    cluster-global fact stamped per row: its `describe()` onto `deploy_hold`, and
-    membership in the live lease's `settle_hosts` list onto each row's `settle_waited_on`.
-    Both are transcribed from the lease row — the fan-out's own probes do not inform
-    them, and nothing here re-derives whether a deploy is in flight.
+    `deploy_lease` (the live lease, read once by the caller) is the cluster-global
+    fact stamped per row: its `describe()` onto `deploy_hold`. It is transcribed
+    from the lease row — the fan-out's own probes do not inform it, and nothing
+    here re-derives whether a deploy is in flight.
 
-    `last_update` is the third such fact, and the one that turns the roster from a
-    set of symptoms into a statement: a head/pin mismatch is shared by a node that
-    missed a rollout, a checkout moved without a restart, and a rollout that failed
-    and rolled back, so the roster carries the recorded outcome rather than leaving
-    every reader to guess which (#1012)."""
+    """
     machines: list[MachineStatus] = []
     probe_coros: list[Any] = []
 
@@ -659,18 +577,7 @@ async def gather_cluster_status(
     if probe_coros:
         machines.extend(await asyncio.gather(*probe_coros))
 
-    # The hold's OWN population, the pin verdict and the rest are applied in one
-    # place (`_roster_rows.stamp_cluster_globals`): a row absent from the hold's
-    # note is "not named by this hold", not "converged", and `stranded_holds` is
-    # the one per-host fact among them (task #3132).
-    return stamp_cluster_globals(
-        machines,
-        cluster_target_sha=cluster_target_sha,
-        deploy_lease=deploy_lease,
-        last_update=last_update,
-        last_known_good_sha=last_known_good_sha,
-        stranded_holds=stranded_holds,
-    )
+    return stamp_cluster_globals(machines, deploy_lease=deploy_lease)
 
 
 def _get_cluster_status(cur: Cursor) -> ClusterPanel:
@@ -700,26 +607,10 @@ def _get_cluster_status(cur: Cursor) -> ClusterPanel:
         cur.fetchall()
     )
 
-    pin = _read_cluster_pin()
     lease = _read_deploy_lease()
-    last_update = _read_last_update()
-    known_good = _read_known_good()
-    stranded_holds = read_stranded_holds()
     local_name = machine_name()
     machines = (
-        asyncio.run(
-            gather_cluster_status(
-                rows,
-                local_name,
-                cluster_target_sha=pin,
-                deploy_lease=lease,
-                last_update=last_update,
-                last_known_good_sha=known_good,
-                stranded_holds=stranded_holds,
-            )
-        )
-        if rows
-        else []
+        asyncio.run(gather_cluster_status(rows, local_name, deploy_lease=lease)) if rows else []
     )
 
     return ClusterPanel(
@@ -728,11 +619,7 @@ def _get_cluster_status(cur: Cursor) -> ClusterPanel:
         current_serve_agent_runner=is_agent_runner(),
         current_serve_observability_station=is_observability_station(),
         current_paused=cluster_is_paused(),
-        current_orchestration=current_orchestration(),
         machines=machines,
-        cluster_target_sha=pin,
-        cluster_last_known_good_sha=known_good,
-        last_update=last_update,
     )
 
 

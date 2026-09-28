@@ -87,7 +87,7 @@ def main() -> None:
     # IPv6 dial instantly.
     host = "" if is_gateway() and settings.data_plane.cluster_secret else "127.0.0.1"
     if host != "127.0.0.1":
-        verify_transport_encryption(settings.data_plane.cluster_secret, host)
+        verify_transport_encryption(host, authenticated=bool(settings.data_plane.cluster_secret))
     if _GATEWAY_UVICORN_WORKERS != 1:
         raise RuntimeError(
             "gateway must run one uvicorn worker because rate limiters are process-local"

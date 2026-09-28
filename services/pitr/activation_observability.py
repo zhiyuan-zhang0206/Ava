@@ -32,7 +32,7 @@ def save_error(home: Path, record: ActivationRecord, exc: BaseException) -> None
     elif "restore" in lowered or "protected proof" in lowered:
         code, detail = "restore_mismatch", "restore proof did not match the candidate"
     elif "restart" in lowered:
-        code, detail = "restart_failure", "typed restart continuation failed"
+        code, detail = "restart_failure", "home operation restart failed"
     else:
         code, detail = "activation_failure", "activation step failed closed"
     logger.exception(

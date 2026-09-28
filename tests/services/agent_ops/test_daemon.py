@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import logging
 import subprocess
 import sys
 import textwrap
@@ -41,42 +40,33 @@ def test_ops_components_degrade_after_no_progress_bound_plus_margin() -> None:
     now = 10_000.0
     wedge_after_s = NO_PROGRESS_TIMEOUT_S + 300.0
     still_safe = health.ops_components(
-        now - wedge_after_s,
-        {"cluster_fetch": ("cluster_fetch", now - wedge_after_s)},
+        {"config_read": ("config_read", now - wedge_after_s)},
         now=now,
     )
-    active_ops = {"cluster_fetch": ("cluster_fetch", now - wedge_after_s - 2)}
+    active_ops = {"config_read": ("config_read", now - wedge_after_s - 2)}
 
     wedged = health.ops_components(
-        now - wedge_after_s - 1,
         active_ops,
         now=now,
     )
 
-    assert [record["status"] for record in still_safe] == ["ok", "ok", "ok"]
+    assert [record["status"] for record in still_safe] == ["ok", "ok"]
     assert wedged == [
         {"name": "loop", "status": "ok", "progress": "serving /ops"},
-        {
-            "name": "update-lock",
-            "status": "degraded",
-            "progress": f"held {wedge_after_s + 1:.0f}s",
-            "detail": f"held for {wedge_after_s + 1:.0f}s",
-        },
         {
             "name": "ops",
             "status": "degraded",
             "progress": "1 active",
-            "detail": f"cluster_fetch running for {wedge_after_s + 2:.0f}s",
+            "detail": f"config_read running for {wedge_after_s + 2:.0f}s",
         },
     ]
     assert health.saturation(active_ops, 4) == 0.25
 
 
 def test_ops_components_report_free_and_no_active_workers() -> None:
-    components = health.ops_components(None, {})
+    components = health.ops_components({})
 
-    assert components[1] == {"name": "update-lock", "status": "ok", "progress": "free"}
-    assert components[2] == {"name": "ops", "status": "ok", "progress": "0 active"}
+    assert components[1] == {"name": "ops", "status": "ok", "progress": "0 active"}
 
 
 # ─── _dispatch routing ─────────────────────────────────────────────────────────
@@ -102,139 +92,6 @@ async def test_dispatch_spawn_launch_calls_launch_agent_op(
     assert status == "completed"
     assert result == {"id": 777}
     assert captured["agent_id"] == 777
-
-
-@pytest.mark.asyncio
-async def test_dispatch_cluster_update_forwards_restart_only(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """cluster_update with restart_only payload -> ops.cluster_update_op(restart_only=True)."""
-    monkeypatch.setattr(daemon, "_db_pool", _stub_pool())
-    seen: dict[str, bool] = {}
-
-    def _fake_update(
-        *,
-        restart_only: bool = False,
-        target_sha: str | None = None,
-        mode: str = "smooth",
-        force_reap: bool = False,
-    ) -> dict[str, str]:
-        seen["restart_only"] = restart_only
-        return {"session": "ava-updater", "log": "/x"}
-
-    monkeypatch.setattr(daemon.ops_cluster, "cluster_update_op", _fake_update)
-    status, _ = await daemon._dispatch("cluster_update", {"restart_only": True})
-    assert status == "completed"
-    assert seen["restart_only"] is True
-
-
-@pytest.mark.asyncio
-async def test_dispatch_cluster_update_defaults_to_full_update(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """cluster_update with empty payload -> ops.cluster_update_op(restart_only=False)."""
-    monkeypatch.setattr(daemon, "_db_pool", _stub_pool())
-    seen: dict[str, bool] = {}
-
-    def _fake_update(
-        *,
-        restart_only: bool = False,
-        target_sha: str | None = None,
-        mode: str = "smooth",
-        force_reap: bool = False,
-    ) -> dict[str, str]:
-        seen["restart_only"] = restart_only
-        return {"session": "ava-updater", "log": "/x"}
-
-    monkeypatch.setattr(daemon.ops_cluster, "cluster_update_op", _fake_update)
-    await daemon._dispatch("cluster_update", {})
-    assert seen["restart_only"] is False
-
-
-@pytest.mark.asyncio
-async def test_dispatch_cluster_update_forwards_target_sha(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """cluster_update payload.target_sha -> ops.cluster_update_op(target_sha=...) so the
-    host force-checks-out the pinned rollout commit."""
-    monkeypatch.setattr(daemon, "_db_pool", _stub_pool())
-    seen: dict[str, object] = {}
-
-    def _fake_update(
-        *,
-        restart_only: bool = False,
-        target_sha: str | None = None,
-        mode: str = "smooth",
-        force_reap: bool = False,
-    ) -> dict[str, str]:
-        seen["target_sha"] = target_sha
-        return {"session": "ava-updater", "log": "/x"}
-
-    monkeypatch.setattr(daemon.ops_cluster, "cluster_update_op", _fake_update)
-    status, _ = await daemon._dispatch("cluster_update", {"target_sha": "PINNEDSHA"})
-    assert status == "completed"
-    assert seen["target_sha"] == "PINNEDSHA"
-
-
-@pytest.mark.asyncio
-async def test_dispatch_cluster_update_rejects_non_str_target_sha(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A malformed target_sha (not a str) fails the op rather than silently coercing."""
-    monkeypatch.setattr(daemon, "_db_pool", _stub_pool())
-    monkeypatch.setattr(
-        daemon.ops_cluster,
-        "cluster_update_op",
-        lambda **_k: pytest.fail("must not dispatch on bad payload"),  # pyright: ignore[reportUnknownArgumentType]
-    )
-    status, result = await daemon._dispatch("cluster_update", {"target_sha": 123})
-    assert status == "failed"
-    # ClusterUpdatePayload validation rejects a non-str target_sha (caught, failed).
-    assert "target_sha" in str(result["error"])
-
-
-@pytest.mark.asyncio
-async def test_dispatch_routes_cluster_resume(monkeypatch: pytest.MonkeyPatch) -> None:
-    """cluster_resume kind -> ops.cluster_resume_op (compensating unpause)."""
-    monkeypatch.setattr(daemon, "_db_pool", _stub_pool())
-    seen: list[tuple[str, datetime]] = []
-
-    def _resume(holder: str, acquired: datetime) -> dict[str, bool]:
-        seen.append((holder, acquired))
-        return {"resumed": True}
-
-    monkeypatch.setattr(
-        daemon.ops_cluster,
-        "cluster_resume_op",
-        _resume,
-    )
-    status, result = await daemon._dispatch(
-        "cluster_resume",
-        {"deploy_holder": "g:pid1", "deploy_acquired_at": "2026-08-25T00:00:00Z"},
-    )
-    assert status == "completed"
-    assert result == {"resumed": True}
-    assert seen[0][0] == "g:pid1"
-
-
-@pytest.mark.asyncio
-async def test_empty_resume_payload_fails_closed(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The legacy empty-resume bridge is retired; an empty payload is malformed."""
-    monkeypatch.setattr(daemon, "_db_pool", _stub_pool())
-    called: list[bool] = []
-
-    def _record_resume(*_args: object, **_kwargs: object) -> dict[str, bool]:
-        called.append(True)
-        return {"resumed": True}
-
-    monkeypatch.setattr(daemon.ops_cluster, "cluster_resume_op", _record_resume)
-
-    status, result = await daemon._dispatch("cluster_resume", {})
-    assert status == "failed"
-    assert "error" in result
-    assert called == []
 
 
 @pytest.mark.asyncio
@@ -551,6 +408,28 @@ async def test_dispatch_shell_capture_shell_not_found_fails(
 
 
 @pytest.mark.asyncio
+async def test_dispatch_resurrect_refusal_fails_with_its_reason(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A resurrection refusal is a durable verdict, returned in the wire form
+    the caller classifies (`ResurrectRefused: <reason>`), not a dispatch crash."""
+    from shared.agents import ResurrectRefused
+
+    monkeypatch.setattr(daemon, "_db_pool", _stub_pool())
+
+    async def _raises(  # type: ignore[no-untyped-def]
+        path, body, pool, *, trigger_inbound_id=None, trigger_inbound_kind=None
+    ):
+        raise ResurrectRefused("runtime_cutover_required")
+
+    monkeypatch.setattr(daemon.ops_lifecycle, "lifecycle_op", _raises)  # pyright: ignore[reportUnknownArgumentType]
+    status, result = await daemon._dispatch(
+        "lifecycle", {"path": "/api/agents/7/resurrect-explicit-v2", "body": {}}
+    )
+    assert (status, result) == ("failed", {"error": "ResurrectRefused: runtime_cutover_required"})
+
+
+@pytest.mark.asyncio
 async def test_dispatch_wire_error_carries_reason(monkeypatch: pytest.MonkeyPatch) -> None:
     """AvaAgentError raised by an op is converted to a failed result with reason field
     so the gateway's _raise_proxied_wire_error_from_payload can re-emit."""
@@ -586,7 +465,7 @@ async def test_dispatch_status_probe_passes_the_daemon_pool(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The steady-state probe reuses the daemon's already-open central DB pool."""
-    from ops.cluster import ClusterStatus
+    from ops.cluster_status import ClusterStatus
 
     pool = _stub_pool()
     seen: list[object] = []
@@ -644,9 +523,9 @@ async def test_ops_route_status_probe_serializes_datetime_fields(
     test keeps guarding the wire serialization even though the current
     `_group_agent_sessions` pre-serializes its shells to JSON-mode dicts.
     """
-    from datetime import UTC, datetime
+    from datetime import UTC
 
-    from ops.cluster import ClusterStatus
+    from ops.cluster_status import ClusterStatus
 
     daemon._dispatch_sem = asyncio.Semaphore(1)
     monkeypatch.setattr(daemon, "_db_pool", _stub_pool())
@@ -689,7 +568,7 @@ async def test_ops_route_completes_with_a_db_down_degraded_status(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """DB-down, including an unreachable paused row, remains HTTP 200 completed."""
-    from ops.cluster import ClusterStatus
+    from ops.cluster_status import ClusterStatus
 
     pool = _stub_pool()
     daemon._dispatch_sem = asyncio.Semaphore(1)
@@ -702,8 +581,6 @@ async def test_ops_route_completes_with_a_db_down_degraded_status(
             serve_gateway=False,
             serve_agent_runner=True,
             paused=False,
-            current_orchestration=None,
-            last_updater_outcome=None,
             resource=None,
         )
 
@@ -716,8 +593,8 @@ async def test_ops_route_completes_with_a_db_down_degraded_status(
     parsed = json.loads(body)
     assert parsed["status"] == "completed"
     assert parsed["result"]["paused"] is False
-    assert parsed["result"]["current_orchestration"] is None
-    assert parsed["result"]["last_updater_outcome"] is None
+    assert "current_orchestration" not in parsed["result"]
+    assert "last_updater_outcome" not in parsed["result"]
     assert parsed["result"]["resource"] is None
     daemon._dispatch_sem = None
 
@@ -730,7 +607,7 @@ async def test_ops_route_non_json_values_degrade_to_str(monkeypatch: pytest.Monk
     The Pydantic arms dump with mode="json"; default=str on the final dumps is
     the last-resort fallback for plain-dict results and any future op.
     """
-    from datetime import UTC, datetime
+    from datetime import UTC
 
     daemon._dispatch_sem = asyncio.Semaphore(1)
 
@@ -870,36 +747,14 @@ def test_main_logs_and_exits_nonzero_on_an_uncaught_crash(tmp_path: Path) -> Non
     assert "crashed" in combined and "db pool exploded" in combined
 
 
-def test_ops_bind_host_all_interfaces_with_secret(monkeypatch: pytest.MonkeyPatch) -> None:
-    """With a cluster secret, /ops binds 0.0.0.0 — no single-vs-multi-host branch.
-    The gateway dials it over the network (or its own loopback self-dial), and the
-    surface is always authenticated with the cluster-secret bearer, so reachability
-    is not trust."""
-    monkeypatch.setattr(daemon.settings.data_plane, "cluster_secret", "s3cret")
-    assert daemon._ops_bind_host() == "0.0.0.0"  # noqa: S104
-
-
-def test_ops_bind_host_loopback_without_secret(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A no-secret cluster serves /ops unauthenticated, so it must bind loopback
-    only — an unauthenticated control surface is never LAN-reachable."""
-    monkeypatch.setattr(daemon.settings.data_plane, "cluster_secret", "")
-    assert daemon._ops_bind_host() == "127.0.0.1"
-
-
-def test_ops_auth_token_is_secret(monkeypatch: pytest.MonkeyPatch) -> None:
-    """With a secret, the token /ops requires is the cluster secret — regardless
-    of bind posture (the gateway presents it on the loopback self-dial too)."""
-    monkeypatch.setattr(daemon.settings.data_plane, "cluster_secret", "s3cret")
-    assert daemon._ops_auth_token() == "s3cret"
-
-
-def test_ops_auth_token_is_none_without_secret(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A no-secret cluster has no token to require: /ops serves unauthenticated
-    (on loopback — see `_ops_bind_host`)."""
-    monkeypatch.setattr(daemon.settings.data_plane, "cluster_secret", "")
-    assert daemon._ops_auth_token() is None
+def test_ops_binds_all_interfaces_only_when_authenticated() -> None:
+    """An authenticated /ops (any acceptance set, even an empty fail-closed one)
+    binds 0.0.0.0; the open posture binds loopback only — an unauthenticated
+    control surface is never LAN-reachable. Which tokens /ops accepts is the
+    write-generation matrix in tests/lifecycle/db_authority/test_api_tokens.py."""
+    assert daemon._ops_bind_host(frozenset({"d" * 64})) == "0.0.0.0"  # noqa: S104
+    assert daemon._ops_bind_host(frozenset()) == "0.0.0.0"  # noqa: S104
+    assert daemon._ops_bind_host(None) == "127.0.0.1"
 
 
 # ─── boot self-registration ────────────────────────────────────────────────────
@@ -1097,7 +952,43 @@ async def test_idempotent_dispatch_replays_without_reexecuting(
 async def test_idempotent_dispatch_same_key_waits_for_slow_running_owner(
     monkeypatch: pytest.MonkeyPatch, ops_pool: object
 ) -> None:
-    """A cluster update retry waits for its still-running owner and replays it."""
+    """A duplicate lifecycle request waits within its bounded budget and replays its owner."""
+    monkeypatch.setattr(daemon, "_db_pool", ops_pool)
+    monkeypatch.setattr(daemon, "_DEDUP_WAIT_STEP_S", 0.01)
+    monkeypatch.setattr(daemon, "_DEDUP_WAIT_ATTEMPTS", 60)
+    calls: dict[str, int] = {}
+    started = asyncio.Event()
+
+    async def _slow_dispatch(
+        kind: str, payload: dict[str, object]
+    ) -> tuple[str, dict[str, object]]:
+        calls["n"] = calls.get("n", 0) + 1
+        started.set()
+        await asyncio.sleep(0.3)
+        return "completed", {"action": "resume", "agent_id": 777}
+
+    monkeypatch.setattr(daemon, "_dispatch", _slow_dispatch)
+    owner = asyncio.create_task(
+        daemon._dispatch_idempotent("lifecycle", {}, "slow-lifecycle", ops_pool)  # type: ignore[arg-type]
+    )
+    await started.wait()
+    duplicate = await daemon._dispatch_idempotent(
+        "lifecycle",
+        {},
+        "slow-lifecycle",
+        ops_pool,  # type: ignore[arg-type]
+    )
+    first = await owner
+
+    assert duplicate == first == ("completed", {"action": "resume", "agent_id": 777})
+    assert calls == {"n": 1}
+
+
+@pytest.mark.asyncio
+async def test_idempotent_dispatch_waiter_fails_after_bounded_wait(
+    monkeypatch: pytest.MonkeyPatch, ops_pool: object
+) -> None:
+    """A duplicate wait expires without executing again or claiming completion."""
     monkeypatch.setattr(daemon, "_db_pool", ops_pool)
     monkeypatch.setattr(daemon, "_DEDUP_WAIT_STEP_S", 0.01)
     monkeypatch.setattr(daemon, "_DEDUP_WAIT_ATTEMPTS", 2)
@@ -1110,63 +1001,24 @@ async def test_idempotent_dispatch_same_key_waits_for_slow_running_owner(
         calls["n"] = calls.get("n", 0) + 1
         started.set()
         await asyncio.sleep(0.3)
-        return "completed", {"session": "ava-updater", "log": "/x"}
+        return "completed", {"action": "resume", "agent_id": 777}
 
     monkeypatch.setattr(daemon, "_dispatch", _slow_dispatch)
     owner = asyncio.create_task(
-        daemon._dispatch_idempotent("cluster_update", {}, "slow-cluster-update", ops_pool)  # type: ignore[arg-type]
-    )
-    await started.wait()
-    duplicate = await daemon._dispatch_idempotent(
-        "cluster_update",
-        {},
-        "slow-cluster-update",
-        ops_pool,  # type: ignore[arg-type]
-    )
-    first = await owner
-
-    assert duplicate == first == ("completed", {"session": "ava-updater", "log": "/x"})
-    assert calls == {"n": 1}
-
-
-@pytest.mark.asyncio
-async def test_idempotent_dispatch_waiter_fails_after_expected_duration(
-    monkeypatch: pytest.MonkeyPatch, ops_pool: object
-) -> None:
-    """An overdue cluster-update owner fails loudly instead of claiming completion."""
-    monkeypatch.setattr(daemon, "_db_pool", ops_pool)
-    monkeypatch.setattr(daemon, "_DEDUP_WAIT_STEP_S", 0.01)
-    monkeypatch.setitem(daemon._DEDUP_EXPECTED_DURATION_S, "cluster_update", 0.02)
-    calls: dict[str, int] = {}
-    started = asyncio.Event()
-
-    async def _slow_dispatch(
-        kind: str, payload: dict[str, object]
-    ) -> tuple[str, dict[str, object]]:
-        calls["n"] = calls.get("n", 0) + 1
-        started.set()
-        await asyncio.sleep(0.3)
-        return "completed", {"session": "ava-updater", "log": "/x"}
-
-    monkeypatch.setattr(daemon, "_dispatch", _slow_dispatch)
-    owner = asyncio.create_task(
-        daemon._dispatch_idempotent("cluster_update", {}, "stuck-cluster-update", ops_pool)  # type: ignore[arg-type]
+        daemon._dispatch_idempotent("lifecycle", {}, "stuck-lifecycle", ops_pool)  # type: ignore[arg-type]
     )
     await started.wait()
     status, result = await daemon._dispatch_idempotent(
-        "cluster_update",
+        "lifecycle",
         {},
-        "stuck-cluster-update",
+        "stuck-lifecycle",
         ops_pool,  # type: ignore[arg-type]
     )
     await owner
 
     assert status == "failed"
     error = str(result["error"])
-    assert "cluster_update" in error
-    assert "running for" in error
-    assert "stuck" in error
-    assert "never completed" not in error
+    assert "never completed" in error
     assert calls == {"n": 1}
 
 
@@ -1362,8 +1214,8 @@ async def _noop_sleep(_seconds: float) -> None:
 async def test_a_blocking_op_does_not_freeze_the_event_loop(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The 2026-08-12 incident in one assertion. A `cluster_update` on the Windows
-    runner stopped returning inside its spawn; because the arm ran inline on the
+    """The 2026-08-12 incident in one assertion. A blocking op on the Windows
+    runner stopped returning; because the arm ran inline on the
     loop it took the whole daemon with it — 2 h 03 m with not one line logged, every
     controller stopped, and the stranded-pause self-heal that exists for exactly
     that situation unable to run.
@@ -1375,14 +1227,14 @@ async def test_a_blocking_op_does_not_freeze_the_event_loop(
     started = threading.Event()
     release = threading.Event()
 
-    def _wedged(**_kw: object) -> dict[str, str]:
+    def _wedged(*_args: object, **_kw: object) -> tuple[str, dict[str, object]]:
         started.set()
         release.wait(timeout=30)
-        return {"session": "ava-updater", "log": "x"}
+        return "completed", {}
 
-    monkeypatch.setattr(daemon.ops_cluster, "cluster_update_op", _wedged)
+    monkeypatch.setattr(daemon, "_dispatch_sync", _wedged)
 
-    task = asyncio.ensure_future(daemon._dispatch("cluster_update", {}))
+    task = asyncio.ensure_future(daemon._dispatch("config_read", {}))
     await asyncio.to_thread(started.wait, 10)
 
     # The loop is still ours: this only completes if nothing is holding it.
@@ -1398,75 +1250,38 @@ async def test_a_blocking_op_does_not_freeze_the_event_loop(
 
 
 @pytest.mark.asyncio
-async def test_a_second_cluster_update_is_refused_not_queued(
+async def test_an_unrelated_op_still_dispatches_while_a_read_is_stuck(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Running the ops off the loop removes the serialization they used to get for
-    free: `ops_concurrency` is 8, so two `cluster_update` POSTs could now interleave
-    through `spawn_update`'s check-then-spawn window — the shape that tore the
-    schtasks XML on win (2026-08-11, #1181).
-
-    Refused rather than queued: a caller that waits behind a stuck update learns
-    nothing for as long as it is stuck, and `ClusterUpdateInProgress` is a verdict
-    its callers already handle."""
-    monkeypatch.setattr(daemon, "_db_pool", _stub_pool())
-    started = threading.Event()
-    release = threading.Event()
-    calls: list[int] = []
-
-    def _wedged(**_kw: object) -> dict[str, str]:
-        calls.append(1)
-        started.set()
-        release.wait(timeout=30)
-        return {"session": "ava-updater", "log": "x"}
-
-    monkeypatch.setattr(daemon.ops_cluster, "cluster_update_op", _wedged)
-
-    first = asyncio.ensure_future(daemon._dispatch("cluster_update", {}))
-    await asyncio.to_thread(started.wait, 10)
-
-    status, result = await daemon._dispatch("cluster_update", {})
-    assert status == "failed"
-    assert "ClusterUpdateInProgress" in str(result["error"])
-
-    release.set()
-    assert (await first)[0] == "completed"
-    assert len(calls) == 1, "the refused dispatch must not have executed the op"
-
-
-@pytest.mark.asyncio
-async def test_an_unrelated_op_still_dispatches_while_an_update_is_stuck(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The property the whole change is for, and the reason the lock covers only
-    `cluster_update`: the compensating `cluster_resume` the gateway sends — and the
-    host's own stranded-pause self-heal — must be able to land while an update is
-    wedged. Under the old inline dispatch they could not, which is why win sat
-    paused for the full two hours."""
+    """A readiness probe stays reachable while an unrelated worker is blocked."""
     monkeypatch.setattr(daemon, "_db_pool", _stub_pool())
     started = threading.Event()
     release = threading.Event()
 
-    def _wedged(**_kw: object) -> dict[str, str]:
+    def _wedged() -> object:
         started.set()
         release.wait(timeout=30)
-        return {"session": "ava-updater", "log": "x"}
+        from ops.rpc_schemas import InventoryReadResult
 
-    monkeypatch.setattr(daemon.ops_cluster, "cluster_update_op", _wedged)
+        return InventoryReadResult(machine="runner", plugins={}, mcp_servers={})
 
-    def _resume(_holder: str, _acquired: datetime) -> dict[str, bool]:
-        return {"resumed": True}
+    monkeypatch.setattr(daemon.ops_inventory, "inventory_read_op", _wedged)
 
-    monkeypatch.setattr(daemon.ops_cluster, "cluster_resume_op", _resume)
+    class _Status:
+        def model_dump(self, *, mode: str) -> dict[str, bool]:
+            del mode
+            return {"ready": True}
 
-    stuck = asyncio.ensure_future(daemon._dispatch("cluster_update", {}))
+    def _status(_pool: object) -> _Status:
+        return _Status()
+
+    monkeypatch.setattr(daemon.ops_cluster, "cluster_status_op", _status)
+
+    stuck = asyncio.ensure_future(daemon._dispatch("inventory_read", {}))
     await asyncio.to_thread(started.wait, 10)
 
-    status, result = await daemon._dispatch(
-        "cluster_resume",
-        {"deploy_holder": "g:pid1", "deploy_acquired_at": "2026-08-25T00:00:00Z"},
-    )
-    assert (status, result) == ("completed", {"resumed": True})
+    status, result = await daemon._dispatch("status_probe", {})
+    assert (status, result) == ("completed", {"ready": True})
 
     release.set()
     await stuck
@@ -1566,38 +1381,6 @@ async def test_config_audit_read_rejects_out_of_range_last(
     status, result = await daemon._dispatch("config_audit_read", {"last": 201})
     assert status == "failed"
     assert "last" in str(result["error"])
-
-
-async def test_a_refused_update_says_how_long_the_holder_has_run(
-    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
-) -> None:
-    """The refusal is logged as well as answered: a growing run of these is the only
-    signal that a worker has wedged while the rest of the host looks healthy."""
-    monkeypatch.setattr(daemon, "_db_pool", _stub_pool())
-    started = threading.Event()
-    release = threading.Event()
-
-    def _wedged(**_kw: object) -> dict[str, str]:
-        started.set()
-        release.wait(timeout=30)
-        return {"session": "ava-updater", "log": "x"}
-
-    monkeypatch.setattr(daemon.ops_cluster, "cluster_update_op", _wedged)
-
-    first = asyncio.ensure_future(daemon._dispatch("cluster_update", {}))
-    await asyncio.to_thread(started.wait, 10)
-
-    with caplog.at_level(logging.WARNING, logger="services.agent_ops.daemon"):
-        _status, result = await daemon._dispatch("cluster_update", {})
-
-    assert "refusing a concurrent cluster_update" in caplog.text
-    assert "refused after" in str(result["detail"])
-    # The wire-error enum belongs to AvaAgentError proxying; this is a dispatch
-    # verdict and must not claim to be one.
-    assert "reason" not in result
-
-    release.set()
-    await first
 
 
 @pytest.mark.asyncio
@@ -1705,30 +1488,3 @@ def test_the_exit_code_survives_the_hard_exit(tmp_path: Path) -> None:
         [sys.executable, "-c", script], capture_output=True, text=True, timeout=30, check=False
     )
     assert done.returncode == 1
-
-
-async def test_close_notice_flush_defers_while_quiesced(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A stop-window unit keeps its undelivered records instead of borrowing a
-    pool the stop just released; the next start re-drives the flush."""
-    from services.agent_ops import close_notices
-    from shared import maintenance
-
-    flushed: list[object] = []
-    state = {"quiesced": True}
-    pool = object()
-
-    def _flush(flush_pool: object) -> int:
-        flushed.append(flush_pool)
-        return 0
-
-    monkeypatch.setattr(close_notices.pty_close_notices, "flush", _flush)
-    monkeypatch.setattr(maintenance, "quiesced", lambda: state["quiesced"])
-
-    await close_notices.deliver(pool)  # type: ignore[arg-type]
-    assert flushed == []
-
-    state["quiesced"] = False
-    await close_notices.deliver(pool)  # type: ignore[arg-type]
-    assert flushed == [pool]

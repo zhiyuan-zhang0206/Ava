@@ -96,7 +96,7 @@ class LoopbackDialUrlRefused(RuntimeError):  # noqa: N818 — state description;
     under the wrong identity (the 2026-07-18 runner incident; the station variant
     is WP4). This is the central-DB integrity guard that stops such a row from ever
     being written, whichever host runs `register_self`; the operator sets
-    `AVA_MACHINE_HOST` (or `ava enroll --machine-host`) to this host's reachable
+    `AVA_MACHINE_HOST` (or `ava start --machine-host`) to this host's reachable
     address.
     """
 
@@ -153,7 +153,7 @@ def _reject_loopback_dial_url(
       and the gateway URL is a remote address → the unit is on another box →
       REJECT before the DB write.
     - gateway URL unresolvable → cannot prove remoteness, so do not reject here (the
-      enroll-time check in `cli/enroll.py` is the primary guard, with both the
+      first-start check in `cli/start_intent.py` is the primary guard, with both the
       gateway URL and the machine-host in hand).
 
     Raises:
@@ -170,8 +170,8 @@ def _reject_loopback_dial_url(
     raise LoopbackDialUrlRefused(
         f"{machine_name()!r} would register a loopback dial URL ({url}) while its "
         f"gateway is remote ({gateway}); the gateway cannot reach it there — it would dial itself. "
-        "Set AVA_MACHINE_HOST (or re-run `ava enroll --machine-host <this host's reachable "
-        "address>`) to this host's private-network address."
+        "Set AVA_MACHINE_HOST in this unit's configuration to its private-network "
+        "address, then restart the unit."
     )
 
 
@@ -547,28 +547,22 @@ def list_all() -> list[tuple[str, str | None]]:
 
 def list_agent_runners() -> list[tuple[str, str | None]]:
     """SELECT (name, gateway_url) FROM machines WHERE role='agent-runner' AND not
-    intentionally stopped — the fan-out target list for a cluster-wide `ava cluster update`.
+    intentionally stopped — the agent-runner target list for cluster-wide fan-outs.
 
     One query for single-box and split alike — no host-mode branch; machines are
     listed purely by capability. A single-box gateway,agent-runner host is
-    included (it carries agent-runner). This is the
-    single SELECT both `ava cluster update`'s fan-out (`cli/commands/update.py:
-    _list_agent_runners`) and any future caller share, so the
-    `'agent-runner' = ANY(role)` predicate lives in one place.
+    included (it carries agent-runner). This is the single SELECT every fan-out
+    caller shares, so the `'agent-runner' = ANY(role)` predicate lives in one place.
 
-    Including the orchestrating host is right for this query and wrong for one of
-    its consumers: the rollout keeps it in Phase 0's fetch and Phase A's pause
-    (idempotent with the local leg) but drops it from the Phase-B fan-out, whose op
-    is not (`cli/commands/_update_orchestration.py:_phase_b_targets`, issue #1151).
-    The exclusion belongs there, at the phase that cannot tolerate it, not here —
-    every other caller wants the full capability list.
+    The calling host is included. A caller whose operation cannot target its own
+    host excludes it at that call site, not here — every other caller wants the
+    full capability list.
 
     `stopped_at IS NOT NULL` rows are excluded: a host that announced an
     intentional stop is not a rollout target, and `register_self()` clears the
-    marker when it returns (the watchdog catch-up then re-triggers its update). An
-    offline host that crashed without deregistering stays in the list and is
-    classified at dial time (unreachable = warn-and-skip in the fan-out, and the
-    Phase-B poll only waits on hosts that acked) — not hidden by query scope.
+    marker when it returns. An offline host that crashed without deregistering
+    stays in the list and is classified at dial time (unreachable = warn-and-skip
+    in the fan-out) — not hidden by query scope.
     `is_staging` rows are excluded the same way: a staging host (operator-set
     flag, `ava cluster mark-staging`) is registered and roster-visible but never
     a rollout target — `ava start` on it clears its `stopped_at` like any host,

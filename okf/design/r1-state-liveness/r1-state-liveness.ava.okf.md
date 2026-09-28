@@ -30,7 +30,7 @@ tags:
 
 **`host_deploy_state`** (host-level, one row per host) — replaces the `cluster_paused` file, `updating.flag`, session probing, updater-log-mtime liveness: `posture` (`idle`/`paused`/`converging`), `updater_lease_expires_at`, `updated_at`.
 
-**Cluster UI marker** (`$AVA_HOME/deploy-state.json`) — the generation-guarded active-maintenance fact used while gateway/app processes are replaced. The lock-winning rollout/restart child writes it before pausing; the parent observes that active marker and publishes its start hint before Phase A. The child CAS-clears the same generation only after the full Phase-B/finalization tail. Host posture/start/lease transitions never mutate it. Gate reads it offline and is the sole App/Updating/Not-Working projector; malformed state fails to Not Working rather than guessing. The lock-winning child that runs this code owns the marker with stable v2 generation/`started_at`; the v1 compatibility this paragraph once carried retired in batch b5 (2026-09-20) — a pre-v2 marker now projects invalid (fail-safe), and rollback to pre-v2 code is outside this marker contract.
+**Cluster UI marker** (`$AVA_HOME/deploy-state.json`) — retired with the in-place updater that wrote it. No lifecycle produces it and Gate does not read it: a release transition stops Gate with the rest of root. A leftover file is inert.
 
 ### Phases: three states, not five
 

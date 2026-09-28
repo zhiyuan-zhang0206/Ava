@@ -19,7 +19,7 @@ hint raises the open-tasks notice (display-only, no state write).
 | Mechanism | Responsibility | File |
 |---|---|---|
 | TanStack Query | All **server data** (agent list, status, timeline snapshots, token, agent pages, inspect) **+ persistent UI preferences** (`display.*`/`behavior.*` in `user_settings`, via `useUserSettings`/`useDebouncedSetting`); SSE merges into cache, no polling | `lib/use-*.ts` |
-| Zustand `store.ts` | **Volatile UI state** (activeId, composer focus token, mobile drawer, toast, open-tasks notice, search) + cluster coordination (`reconnectNonce`/`clusterStranded`); **not persisted** (`persist` middleware removed) | `lib/store.ts` |
+| Zustand `store.ts` | **Volatile UI state** (activeId, composer focus token, mobile drawer, toast, open-tasks notice, search) + cluster coordination (`reconnectNonce`); **not persisted** (`persist` middleware removed) | `lib/store.ts` |
 | Zustand `timeline-store.ts` | **SSE-driven timeline state** (items/turnActive/streamingCode/streamingIds/hasMoreOlder and the compact display buffer); split from `store.ts` so high-frequency code_delta/chat_delta folding only notifies timeline subscribers, not sidebar/spawn/banner | `lib/timeline-store.ts` |
 | localStorage | 7 **per-device values** (not synced): active agent (`ava.active.agent_id`), Fleet mobile tab (`ava.fleet.mobileTab`), and library-managed splits (`ava.fleet.split`, `ava.memory.graph.split`, `ava.home.columns.desktop`, `ava.home.columns.mobile`, `ava.home.inspector.desktop`) | `use-agents.ts`, `fleet-view.tsx`, `memory/graph/page.tsx`, `home-layout.tsx` |
 
@@ -47,7 +47,7 @@ or visibility is lost.
 ## Zustand `store.ts` (Pure UI + Cluster Coordination)
 
 - **UI state**: `activeId`, composer focus token, mobile drawer, mobile inspector overlay (`mobileInspectorOpen`), toast, the terminate open-tasks notice (`openTasksNotice`), search. Spawn selections (`behavior.spawn_*`) and sidebar view mode/sort/stats (`display.sidebar_*`, hooks in `lib/sidebar.ts`) are **not here** — DB settings via `useUserSettings`.
-- **Cluster coordination**: `reconnectNonce` (sole SSE-reconnect lever) and `clusterStranded` (drives `AppConnectionBanner`). Maintenance ownership is never mirrored into Zustand: Gate's persisted snapshot is the fact, while SSE/poll only trigger a latched Gate reload.
+- **Cluster coordination**: `reconnectNonce` is the SSE-reconnect lever. `AppConnectionBanner` reads connection health directly. No maintenance or update state is mirrored into Zustand; a reload while the app is down is answered by Gate's unavailable page.
 
 ## Selected Timeline State
 

@@ -8,7 +8,6 @@ entries for units whose probe never derives from a spec.
 from __future__ import annotations
 
 import importlib
-import logging
 import sys
 import textwrap
 from collections.abc import Callable
@@ -156,19 +155,15 @@ def test_failed_ref_resolution_retries_on_next_resolve(
 # -- spec-derived registration --------------------------------------------------
 
 
-def test_register_specs_membership_gate(caplog: pytest.LogCaptureFixture) -> None:
-    caplog.set_level(logging.DEBUG, logger="services.ava_root.probes")
+def test_register_specs_requires_real_readiness_for_every_selected_unit() -> None:
     registry = ProbeRegistry()
     registry.register_specs(
-        [
-            _Spec("kept", "svc.healthcheck", _alive),
-            _Spec("no-module", None, _alive),
-            _Spec("no-probe", "svc.healthcheck2", None),
-        ]
+        [_Spec("kept", "svc.healthcheck", _alive), _Spec("no-module", None, _alive)]
     )
-    assert registry.unit_ids() == ("kept",)
+    assert registry.unit_ids() == ("kept", "no-module")
     assert registry.resolve("kept") is _alive
-    assert "no-probe" in caplog.text
+    with pytest.raises(ProbeError, match="no readiness probe"):
+        registry.register_specs([_Spec("no-probe", "svc.healthcheck2", None)])
 
 
 def test_register_specs_duplicate_unit_rejected() -> None:

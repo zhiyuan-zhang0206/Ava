@@ -23,8 +23,8 @@ from typing import Any, cast
 import psutil
 
 from shared.log import logger
-from shared.proc_tree import stable_create_time
-from shared.session_record import pid_starttime_ticks
+from shared.native_process import pid_starttime_ticks
+from shared.native_process.ownership import stable_create_time
 from shared.sessions.pty._paths import (
     host_identity,
     host_starttime,

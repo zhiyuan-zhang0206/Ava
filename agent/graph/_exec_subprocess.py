@@ -207,10 +207,25 @@ def _spawn(
         birth_config=birth_config,
         windows_job_gate=windows_job_gate,
     )
+    argv = [sys.executable, "-I", "-B", "-X", "utf8", "-m", "agent.exec_child"]
+    if not IS_WINDOWS:
+        try:
+            return _exec_process.ExecProcessDomain.launch_posix(
+                argv,
+                new_session=True,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                env=env,
+            )
+        except OSError as original:
+            # Native admission failures have ExecDomainBirthError, retaining the
+            # launched handle. An OS spawn failure has no surviving child.
+            raise _ExecNeverStartedError(str(original)) from original
     windows_job = WindowsJob.create() if IS_WINDOWS else None
     try:
-        proc = subprocess.Popen(
-            [sys.executable, "-I", "-B", "-X", "utf8", "-m", "agent.exec_child"],
+        proc = subprocess.Popen(  # noqa: S603 -- fixed isolated Windows entry.
+            argv,
             stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,  # OS-level merge — preserves print/traceback order
@@ -435,7 +450,10 @@ def _retain_late_reader_completion(
     domain = scope.unresolved[request]
 
     async def complete_reader() -> None:
-        await asyncio.to_thread(reader.join)
+        # This is optional observation, not a second join owner. Cancellation
+        # must not strand an executor thread waiting for a detached pipe writer.
+        while reader.is_alive():
+            await asyncio.sleep(0.05)
         if scope.complete(request, domain):
             for path in (request, result, gate):
                 if path is not None:

@@ -9,7 +9,7 @@ secrets; the endpoint and bucket are non-secret settings, so they live in
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import cast
 
@@ -21,7 +21,7 @@ class AliyunCredentials:
     """One RAM AccessKey pair loaded from a validated credentials file."""
 
     access_key_id: str
-    access_key_secret: str
+    access_key_secret: str = field(repr=False)
 
 
 def aliyun_credentials(path: str | Path) -> AliyunCredentials:

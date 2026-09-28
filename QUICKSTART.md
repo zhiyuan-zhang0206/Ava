@@ -16,8 +16,8 @@ the entire cluster.
 | Model API Key | Anthropic (`ANTHROPIC_API_KEY`), DeepSeek (`DEEPSEEK_API_KEY`), or OpenAI (`OPENAI_API_KEY`) |
 | Git | For cloning the repo |
 | A terminal | All commands in this guide run in a terminal |
-| Homebrew (macOS) | `install.sh` provisions Postgres/Redis via Homebrew — install it first: `https://brew.sh` |
-| Non-root user (Linux) | `install.sh` births a per-cluster Postgres via `initdb`, which **refuses to run as root**. Fresh VPS images land you as root — create a user with passwordless sudo first, then run the install as that user: `adduser ava && echo 'ava ALL=(ALL) NOPASSWD:ALL' | sudo tee /etc/sudoers.d/ava && su - ava` |
+| Homebrew (macOS) | `ava start` provisions Postgres/Redis via Homebrew — install it first: `https://brew.sh` |
+| Non-root user (Linux) | `ava start` births a per-cluster Postgres via `initdb`, which **refuses to run as root**. Fresh VPS images land you as root — create a user with passwordless sudo first, then run the install as that user: `adduser ava && echo 'ava ALL=(ALL) NOPASSWD:ALL' | sudo tee /etc/sudoers.d/ava && su - ava` |
 
 
 > **Windows users**: Windows runs the `agent-runner` capability natively — no
@@ -34,24 +34,29 @@ the entire cluster.
 mkdir -p ~/.ava && cd ~/.ava
 git clone https://github.com/zhiyuan-zhang0206/Ava.git source && cd source
 
-# Run the install script (single-machine deployment, no auth on loopback)
-./scripts/install.sh --role gateway,agent-runner
+# Install dependencies + the `ava` CLI; no cluster is created yet
+uv sync
+
+# First start births the cluster AND brings up services (single-machine, no auth on loopback)
+.venv/bin/ava start --serve-gateway --serve-agent-runner --machine-name my-machine
 
 # To opt into auth at birth, run this secure form INSTEAD of the command above:
-printf 'Install cluster secret: ' >&2
-IFS= read -rs AVA_INSTALL_CLUSTER_SECRET
+printf 'Cluster secret: ' >&2
+IFS= read -rs AVA_CLUSTER_SECRET
 printf '\n' >&2
-export AVA_INSTALL_CLUSTER_SECRET
-./scripts/install.sh --role gateway,agent-runner
-unset AVA_INSTALL_CLUSTER_SECRET
+export AVA_CLUSTER_SECRET
+.venv/bin/ava start --serve-gateway --serve-agent-runner --machine-name my-machine
+unset AVA_CLUSTER_SECRET
 ```
 
-`install.sh` automatically installs the dependencies: uv, Python 3.12,
-Postgres 17, Redis, and Node.js (Node is recommended on macOS; the
-web UI and browser tools need it).
+`uv sync` installs the dependencies: uv, Python 3.12, Postgres 17, Redis, and
+Node.js (Node is recommended on macOS; the web UI and browser tools need it).
+The first `ava start` above births the cluster (its own Postgres/Redis, ports,
+`~/.ava/.env`) and brings up services in the same call; its converge phase also
+symlinks `ava` onto PATH at `~/.local/bin`. You'll see `ready` when it succeeds.
 
-> **After install**, reopen your terminal, or run `source ~/.bashrc` (Linux) /
-> `source ~/.zshrc` (macOS), to make the `ava` command available on PATH. If
+> **After first start**, reopen your terminal, or run `source ~/.bashrc` (Linux) /
+> `source ~/.zshrc` (macOS), to make the bare `ava` command available on PATH. If
 > `ava` is still not found (e.g. uv already existed), add it manually:
 > `export PATH="$HOME/.local/bin:$PATH"`.
 
@@ -59,9 +64,8 @@ web UI and browser tools need it).
 
 ## Step 2: Minimal config
 
-The last step of `install.sh` births the cluster: `~/.ava/.env` is already populated
-with database/Redis connection strings, the gateway URL, and role toggles.
-**Edit it directly**
+First start already populated `~/.ava/.env` with database/Redis connection
+strings, the gateway URL, and role toggles. **Edit it directly**
 (do not use `cp .env.example` to overwrite it wholesale — that would clobber these
 derived values). At minimum, add model configuration:
 
@@ -71,9 +75,15 @@ AVA_MODEL=deepseek-flash
 DEEPSEEK_API_KEY=sk-your-key-here
 ```
 
+Then reconcile the running cluster against the edited file:
+
+```bash
+ava start
+```
+
 > On a single box the cluster runs unauthenticated on loopback, so
-> `AVA_CLUSTER_SECRET` is left empty by default. The authenticated birth form
-> in Step 1 keeps the secret out of shell history and process argv. Gateway-only
+> `AVA_CLUSTER_SECRET` is left empty by default. The authenticated first-start
+> form in Step 1 keeps the secret out of shell history and process argv. Gateway-only
 > split deployments mint a secret automatically.
 >
 > For the full config reference, see [`.env.example`](.env.example) and the
@@ -81,18 +91,7 @@ DEEPSEEK_API_KEY=sk-your-key-here
 
 ---
 
-## Step 3: Launch
-
-```bash
-ava start --machine-name my-machine --gateway-url http://localhost:8000
-```
-
-The cluster was already birthed during install (database and ports are ready);
-`ava start` only brings up the services. You'll see `ready` when it succeeds.
-(If the home was never birthed via `install.sh`, `ava start` will error and point
-you to `install.sh` / `ava enroll`.)
-
-Verify:
+## Step 3: Verify
 
 ```bash
 ava status
@@ -150,7 +149,7 @@ A complete Ava cluster is now running on your machine:
 
 ### `ava: command not found`
 
-The install script symlinks `ava` to `~/.local/bin/ava`. Make sure that path is on PATH:
+`ava start`'s converge phase symlinks `ava` to `~/.local/bin/ava` on first run. Make sure that path is on PATH:
 
 ```bash
 export PATH="$HOME/.local/bin:$PATH"
@@ -202,18 +201,21 @@ ava stop
 ### How to update
 
 ```bash
-ava cluster update   # rolls the latest merged main across the cluster
+ava cluster update --prepared /absolute/path/to/request.json
 ```
 
-Never `git pull` + `ava start` on a production checkout — the update path is
-`ava cluster update` only.
+The prepared request captures the exact previous/candidate/executor image
+identities, home/registry, configuration and operation generation to roll out;
+see [the runbook](conventions/runbook.md) for how to produce one. Never
+`git pull` + `ava start` on a production checkout — the update path is
+`ava cluster update --prepared REQUEST` only.
 
 ### Windows-specific
 
 See [Windows setup guide](conventions/windows-setup.md). Common issues:
 - Agent goes offline after a restart → `ava start` registers a logon autostart task; check `schtasks /Query /TN \Ava\`
 - `ava start` refuses with "cannot host a per-cluster data plane" → this host was asked to serve the gateway capability; an enrolled agent-runner never sets `AVA_MACHINE_SERVE_GATEWAY`
-- Gateway reports the machine offline → it dials the address you passed as `ava enroll --machine-host`; confirm it is reachable *from the gateway*
+- Gateway reports the machine offline → it dials the address you passed as `ava start --machine-host`; confirm it is reachable *from the gateway*
 
 ---
 

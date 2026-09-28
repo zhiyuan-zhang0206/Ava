@@ -16,16 +16,17 @@ from unittest.mock import patch
 # subprocesses use -I and cannot see this checkout.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from shared.runtime_abi import current_abi
 from shared.runtime_prepare import (
     CollectorInput,
     FrontendInput,
     PluginInput,
     PrepareInputs,
     _copy_python,
-    _python_input_inventory,
     _verify_plugins,
     inventory_digest,
     prepare_release,
+    python_input_inventory,
     tree_inventory,
     verify_loaded_images,
 )
@@ -33,6 +34,7 @@ from shared.runtime_release import (
     ReleaseRejectedError,
     VerifiedRelease,
     file_sha256,
+    release_abi,
     verify_release,
 )
 
@@ -48,7 +50,6 @@ def prove_checkout_absent(  # noqa: PLR0915 — one guarded checkout-retirement 
     checkout: Path,
     application_name: str,
     release: VerifiedRelease,
-    recovery: VerifiedRelease | None = None,
 ) -> None:
     """Run the existing CLI with no source checkout at its original path."""
     verifier = _copy_proof(root, checkout, "verify_runtime_wheel.py")
@@ -59,10 +60,6 @@ def prove_checkout_absent(  # noqa: PLR0915 — one guarded checkout-retirement 
     inventory_proof = _copy_proof(root, checkout, "prove_release_inventory.py")
     _copy_proof(root, checkout, "prove_runtime_publication_input.py")
     exec_owner = _copy_proof(root, checkout, "prove_exec_owner_installed.py")
-    bootstrap = _copy_proof(root, checkout, "prove_ops_bootstrap.py")
-    updater = _copy_proof(root, checkout, "prove_updater_bootstrap.py")
-    writer_chain = _copy_proof(root, checkout, "prove_managed_writer_chain.py")
-    normal = _copy_proof(root, checkout, "prove_normal_release.py")
     alias = root / "runtime-entry-alias"
     alias.symlink_to(release.root / "venv", target_is_directory=True)
     if (
@@ -215,105 +212,40 @@ def prove_checkout_absent(  # noqa: PLR0915 — one guarded checkout-retirement 
                         path.unlink(missing_ok=True)
                     else:
                         path.write_bytes(body)
-            subprocess.run(  # noqa: S603 — real retained ops entry, isolated old-schema CI database.
-                [
-                    str(release.interpreter),
-                    "-I",
-                    "-B",
-                    str(bootstrap),
-                    release.digest,
-                    release.manifest_digest,
-                    schema,
-                ],
-                cwd=root,
-                env=migration_env,
-                check=True,
-                timeout=600,
-            )
-            if recovery is not None:
-                subprocess.run(  # noqa: S603 — two verified generations, isolated CI unit only.
+            # The start-barrier proof needs a unit with no selected image; this
+            # proof's serving sentinel is not a pointer, so set it aside and put
+            # the exact bytes back for the unchanged-pointer checks below.
+            serving = root / "unit/releases/current-release"
+            sentinel = serving.read_bytes()
+            serving.unlink()
+            try:
+                result = subprocess.run(  # noqa: S603 — CI-only native PG at the prepared image boundary.
                     [
                         str(release.interpreter),
                         "-I",
                         "-B",
-                        str(updater),
-                        release.digest,
-                        release.manifest_digest,
-                        recovery.digest,
-                        recovery.manifest_digest,
-                        schema,
-                    ],
-                    cwd=root,
-                    env=migration_env,
-                    check=True,
-                    # Five isolated cases each repeat full image verification and
-                    # own a separate absolute operation deadline. This bounded
-                    # suite watchdog must not truncate their final evidence write;
-                    # it does not extend any operation's authority.
-                    timeout=1800,
-                )
-            if "AVA_RUNTIME_PROOF_PG" in os.environ:
-                # Linux-only: gated spawns require /proc process identity.
-                subprocess.run(  # noqa: S603 — retained image, isolated CI database, private CI home.
-                    [
-                        str(release.interpreter),
-                        "-I",
-                        "-B",
-                        str(normal),
+                        str(migration),
                         release.digest,
                         release.manifest_digest,
                         schema,
                     ],
                     cwd=root,
                     env=migration_env,
-                    check=True,
-                    # Eighteen isolated cases (success + INJ-1..14, where INJ-14
-                    # covers both clear crash points) each re-verify the image
-                    # twice; round-3 attempt 1 measured ~2 min per case, so the
-                    # suite runs ~40 min on a CI runner -- the watchdog stays
-                    # above the full replay without extending any operation's
-                    # authority.
-                    timeout=3600,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    # Native PG initialization, full schema migration, and admission
+                    # invariant rejection checks can take >180s under noisy runner I/O.
+                    # 600s absorbs that noisy-runner variance without false flakes (task #3281).
+                    timeout=600,
                 )
-            result = subprocess.run(  # noqa: S603 — CI-only native PG at the prepared image boundary.
-                [
-                    str(release.interpreter),
-                    "-I",
-                    "-B",
-                    str(migration),
-                    release.digest,
-                    release.manifest_digest,
-                    schema,
-                ],
-                cwd=root,
-                env=migration_env,
-                capture_output=True,
-                text=True,
-                check=False,
-                # Native PG initialization, full schema migration, and admission
-                # invariant rejection checks can take >180s under noisy runner I/O.
-                # Align budget with bootstrap step (600s) to prevent false flakes (task #3281).
-                timeout=600,
-            )
+            finally:
+                serving.write_bytes(sentinel)
             if result.returncode:
                 # This child has only explicit CI scratch credentials, not the
                 # runner's ambient environment. Retain the actual admission error.
                 raise AssertionError(f"wheel/PG admission failed:\n{result.stderr[-8000:]}")
             (root / "migration-proof.json").write_text(result.stdout)
-            writer_chain_result = subprocess.run(  # noqa: S603 — CI-only isolated schema on the native PG, prepared image boundary.
-                [str(release.interpreter), "-I", "-B", str(writer_chain)],
-                cwd=root,
-                env=migration_env,
-                capture_output=True,
-                text=True,
-                check=False,
-                timeout=600,
-            )
-            if writer_chain_result.returncode:
-                raise AssertionError(
-                    f"managed-writer chain failed:\n{writer_chain_result.stderr[-8000:]}"
-                )
-            (root / "managed-writer-chain-proof.json").write_text(writer_chain_result.stdout)
     finally:
         retired_checkout.rename(checkout)
 
@@ -363,7 +295,7 @@ def prove_copy_race(
     directory_alias.symlink_to(inputs.python_tree / "bin", target_is_directory=True)
     try:
         try:
-            _python_input_inventory(inputs.python_tree)
+            python_input_inventory(inputs.python_tree)
         except ReleaseRejectedError as exc:
             if str(exc) != "Python input directory symlinks are unsupported":
                 raise AssertionError("directory link failed for the wrong reason") from exc
@@ -457,10 +389,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--root", type=Path, required=True)
     parser.add_argument("--python", type=Path, required=True)
     parser.add_argument("--uv", type=Path, required=True)
+    parser.add_argument("--otel-input-digest", required=True)
     return parser.parse_args()
 
 
-def main() -> None:  # noqa: PLR0915 — ordered prepare/retire/failure evidence with one input lifetime.
+def main() -> None:
     args = parse_args()
     root = args.root.resolve()
     source = Path(
@@ -507,7 +440,7 @@ def main() -> None:  # noqa: PLR0915 — ordered prepare/retire/failure evidence
         otel=(
             CollectorInput(
                 root / "otel-input",
-                json.loads((root / "otel-input.json").read_text())["digest"],
+                args.otel_input_digest,
             )
             if (root / "otel-input").is_dir()
             else None
@@ -519,20 +452,6 @@ def main() -> None:  # noqa: PLR0915 — ordered prepare/retire/failure evidence
         ),
     )
     release = prepare_with_diagnostics(store, inputs)
-    recovery = None
-    if "AVA_RUNTIME_PROOF_PG" in os.environ:
-        # Distinct real sealed generations; same application revision deliberately.
-        # This proves the restricted image hop, not old source-version compatibility.
-        recovery_requirements = root / "recovery-requirements.txt"
-        recovery_requirements.write_bytes(requirements.read_bytes() + b"\n# retained A input\n")
-        recovery = prepare_with_diagnostics(
-            store,
-            replace(
-                inputs,
-                requirements=recovery_requirements,
-                requirements_digest=file_sha256(recovery_requirements),
-            ),
-        )
     prove_half_plugin_refusal(store, inputs)
     prove_broken_provider_refusal(inputs, release)
     if serving.read_bytes() != original:
@@ -541,7 +460,7 @@ def main() -> None:  # noqa: PLR0915 — ordered prepare/retire/failure evidence
     # prepared generation does not depend on input wheels or base Python paths.
     private_python.rename(root / "retired-python-input")
     wheels.rename(root / "retired-wheels")
-    prove_checkout_absent(root, checkout, application.name, release, recovery)
+    prove_checkout_absent(root, checkout, application.name, release)
     prove_prepared_frontend(inputs, release, checkout, root)
     verify_loaded_images(release)
     import platform
@@ -550,7 +469,7 @@ def main() -> None:  # noqa: PLR0915 — ordered prepare/retire/failure evidence
         store,
         release.digest,
         manifest_digest=release.manifest_digest,
-        platform_tag=platform.platform(),
+        host_abi=current_abi(),
         schema_digest=inputs.schema_digest,
     )
     # A fresh generation fails after allocation but before venv creation. No
@@ -582,6 +501,7 @@ def main() -> None:  # noqa: PLR0915 — ordered prepare/retire/failure evidence
         "retained_broken_provider_rejected": True,
         "artifact_digest": release.digest,
         "manifest_digest": release.manifest_digest,
+        "abi_tag": release_abi(release).to_json(),
         "platform": platform.platform(),
         "architecture": platform.machine(),
         "python_abi": subprocess.check_output(  # noqa: S603 — verified interpreter.

@@ -29,18 +29,11 @@ RESTART_DECLINED_EXIT_CODE = 3
 # 1 means a start STEP failed — converge, the data plane, migrations, the schema
 # assertion, machine registration — so the host may have no services at all and
 # nothing about it is trustworthy. This code means the sequence completed and the
-# host is up but incompletely: retrying `ava start` is idempotent and reasonable,
-# and the watchdog's keepalive is already armed to revive the stragglers.
+# host is up but incompletely: retrying `ava start` is idempotent and reasonable.
 #
-# It must NOT be 3: the detached updater's recovery ladders
-# (`ops.cluster_deploy._RESTART_RECOVERY_SH` / `_RESTART_RECOVERY_CMD`) read 3 as
-# "nothing was stopped, host still serving -> do NOT start over it". A restart that
-# stopped services and came back with one not serving is the opposite of that, and
-# routing it into the decline branch would leave a half-down host untouched. Being
-# above `RESTART_DECLINED_EXIT_CODE` puts it in those ladders' "may be down ->
-# `ava start`" branch, which is the correct and idempotent response.
+# It must NOT be 3: `RESTART_DECLINED_EXIT_CODE` means "nothing was stopped, host
+# still serving -> do NOT start over it". A restart that stopped services and came
+# back with one not serving is the opposite of that, and routing it into the
+# decline branch would leave a half-down host untouched; the correct response to
+# this code is the idempotent `ava start`.
 SERVICES_NOT_READY_EXIT_CODE = 4
-
-# A temporary pause/stop did not finish. Source/schema were not advanced by its
-# caller, but some services may already have stopped; never report rollback success.
-STOP_INCOMPLETE_EXIT_CODE = 5

@@ -61,7 +61,13 @@ _SUBPROCESS_CALL_RE = re.compile(r"subprocess\.(run|Popen|check_output|check_cal
 
 
 def _gateway_headers() -> dict[str, str]:
-    """Bearer auth from $AVA_HOME/.env when the cluster has a secret set."""
+    """Bearer auth: the process's machine API token (an agent inherits its
+    agent-host's), else the gateway home's secret from $AVA_HOME/.env."""
+    from shared.cluster_auth import delivered_token
+
+    token = delivered_token()
+    if token:
+        return {"Authorization": f"Bearer {token}"}
     env_file = Path(ava_home()) / ".env"
     if not env_file.exists():
         return {}

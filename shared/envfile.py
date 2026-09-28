@@ -6,8 +6,8 @@ converge, e.g. a boot-retry storm, must not manufacture `old == new` records). A
 differing byte still takes the full write path, so normalization of quoted or
 oddly-spaced lines is preserved.
 
-Lives in `shared` (stdlib-only, no settings import) so both `cli.commands.cluster.registry`
-and the settings-free `cli.enroll` can use one copy. `env_line_key` reads a line's key with the
+Lives in `shared` (stdlib-only, no settings import) so lifecycle commands and
+first-start identity preparation share one implementation. `env_line_key` reads a line's key with the
 same grammar the settings parser uses (`export KEY=v` sets `KEY`; #2981).
 """
 
@@ -123,8 +123,6 @@ def snapshot_env(path: Path, *, keep: int = ENV_BACKUP_KEEP) -> Path | None:
     try:
         if not path.exists():
             return None
-        from shared.config import cluster_tz
-
         content = path.read_text()
         if not content.strip():
             return None
@@ -133,19 +131,12 @@ def snapshot_env(path: Path, *, keep: int = ENV_BACKUP_KEEP) -> Path | None:
         existing = sorted(backup_dir.glob(".env.*"))
         if existing and existing[-1].read_text() == content:
             return None
-        # Local-time stamp with microseconds: filename sorts chronologically and
-        # stays unique across rapid successive writes. The zone is cosmetic
-        # (snapshots only sort and dedupe), so a broken `.env` that makes
-        # Settings unconstructable must not block the backup the write depends
-        # on: fall back to the host zone — the same signal cluster_tz() itself
-        # returns when no authoritative timezone is set — instead of letting
-        # the Settings ValidationError escape (it is a ValueError, below the
-        # OSError/RuntimeError best-effort boundary).
-        try:
-            tz = cluster_tz()
-        except (ValueError, RuntimeError):
-            tz = None
-        dest = backup_dir / f".env.{datetime.now().astimezone(tz).strftime('%Y%m%d-%H%M%S-%f')}"
+        # Backups are local filesystem metadata: the stamp is the HOST clock,
+        # not the cluster's (decisions/2026-09-28-env-backup-names-use-the-host-clock.md
+        # — the ruling exception to the 2026-08-27 one-cluster-clock rule). This
+        # writer also runs before first-start identity, so it must not load
+        # runtime Settings to find a cluster clock in the first place.
+        dest = backup_dir / f".env.{datetime.now().astimezone().strftime('%Y%m%d-%H%M%S-%f')}"
         dest.write_text(content)
         ensure_private_file(dest)
         if keep > 0:

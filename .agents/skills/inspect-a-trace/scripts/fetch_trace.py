@@ -37,7 +37,7 @@ Output `trace_raw.json` (contract for read_trace.py):
     }
 
 Otherwise stdlib only. Needs the repo's `shared` package on the path (see
-`_source_root`, below) to resolve `$AVA_HOME` the same checkout-anchored way
+`_common.source_root`) to resolve `$AVA_HOME` the same checkout-anchored way
 every other Ava process does — a guessed `AVA_HOME` here pointed an
 unanchored checkout at prod's `~/.ava/traces` (2026-09-27); runs inside the
 repo venv (`.venv/bin/python`) or any Python 3.12 with `shared`'s deps

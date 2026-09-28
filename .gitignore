@@ -25,8 +25,9 @@ build/
 .pytest_cache/
 
 # Per-checkout home pointer: maps a dev worktree to its cluster's $AVA_HOME so
-# bare invocations resolve the right home (written by `ava gateway up`).
+# bare invocations resolve the right home (written by `ava start`).
 .ava_home
+.ava_home.lock
 
 # Secrets
 .env
@@ -113,6 +114,6 @@ ui/web/junit.xml
 
 # CI-usage attribution ledger — runtime data of scripts/ci_accounting.py,
 # appended on cluster hosts by the c9-daily-report schedule. Gitignored so
-# the source-tree guard stays quiet and `git clean -fd` leaves it in place
-# (the guard's documented contract for gitignored paths).
+# the source-tree guard stays quiet (the guard's documented contract for
+# gitignored paths).
 /scripts/ci_usage/

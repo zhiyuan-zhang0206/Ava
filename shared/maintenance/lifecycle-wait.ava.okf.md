@@ -35,7 +35,7 @@ authority to settle; preparation reclassifies under its locks.
 
 Unfinished lifecycle work belonging to another actor raises a typed
 `LifecycleCollisionError` **before** the capture is persisted, and the caller
-(`ops.agent_pause._prepare`) bounded-waits: it retries under the
+(`ops.agent_pause.prepare`) bounded-waits: it retries under the
 same `(holder, acquired_at)` CAS and row locks until the work resolves, up to
 `settings.gateway.pause_lifecycle_wait_seconds` (default 300s, the same
 drain/Phase-A envelope; 0 refuses immediately), then aborts with the waited

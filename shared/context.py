@@ -102,7 +102,7 @@ class AvaContext:
     # threading each of these through every read site was judged not worth the
     # blast radius (see the module docstring).
 
-    db_url: str = field(default_factory=lambda: settings.data_plane.db_url)
-    redis_url: str = field(default_factory=lambda: settings.data_plane.redis_url)
+    db_url: str = field(default_factory=lambda: settings.data_plane.db_url, repr=False)
+    redis_url: str = field(default_factory=lambda: settings.data_plane.redis_url, repr=False)
     events_channel: str = field(default_factory=lambda: settings.data_plane.events_channel)
     ava_home: Path = field(default_factory=lambda: settings.general.ava_home)

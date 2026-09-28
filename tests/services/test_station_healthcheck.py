@@ -18,6 +18,7 @@ import pytest
 
 import shared.db
 from services.heartbeat import station_probe as hc
+from shared.cluster.authority.api import telemetry_token
 from shared.config import settings
 
 
@@ -117,7 +118,7 @@ def test_resolve_target_none_without_observability_url() -> None:
 
 
 def test_station_answers_bearer_otlp_roundtrip(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A 2xx on POST <url>/v1/traces with the cluster bearer = alive."""
+    """A 2xx on POST <url>/v1/traces with the telemetry bearer = alive."""
     seen: dict[str, object] = {}
 
     class _Resp:
@@ -137,7 +138,8 @@ def test_station_answers_bearer_otlp_roundtrip(monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setattr(urllib.request, "urlopen", _open)
     assert hc._station_answers("http://10.0.0.9:4318") is True
     assert seen["url"] == "http://10.0.0.9:4318/v1/traces"
-    assert seen["auth"] == "Bearer cluster-token"
+    # The cluster's telemetry token (derived from the secret), never the secret.
+    assert seen["auth"] == f"Bearer {telemetry_token('cluster-token')}"
 
 
 def test_station_answers_http_error_is_not_alive(monkeypatch: pytest.MonkeyPatch) -> None:
