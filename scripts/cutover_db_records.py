@@ -151,7 +151,7 @@ def _plan_lease(found: Survey, inputs: Inputs, plan: Plan) -> None:
         )
 
 
-def _plan_postures(found: Survey, inputs: Inputs, plan: Plan) -> None:
+def _plan_postures(found: Survey, inputs: Inputs, plan: Plan, *, later: bool) -> None:
     included = found.included(inputs.retired)
     for row in found.postures:
         if row["machine"] not in included:
@@ -161,7 +161,7 @@ def _plan_postures(found: Survey, inputs: Inputs, plan: Plan) -> None:
                 f"host {row['machine']} carries a legacy updater (posture {row['posture']}, "
                 f"live updater lease {row['updater_live']}); resolve it by hand"
             )
-        elif row["posture"] == "paused":
+        elif row["posture"] == "paused" and not later:
             plan.effects["posture"].append(
                 {"op": "posture-idle", "machine": row["machine"], "before": row["image"]}
             )
@@ -247,20 +247,23 @@ def _plan_identities(found: Survey, inputs: Inputs, plan: Plan) -> None:
         )
 
 
-def plan_repairs(found: Survey, inputs: Inputs, own: tuple[str, str]) -> Plan:
+def plan_repairs(found: Survey, inputs: Inputs, own: tuple[str, str], *, later: bool) -> Plan:
     """Every effect with its before image, and every refusal, before any write.
 
     A check reading `attention` is a premise to resolve first (a legacy pin or
     migration set, a bootstrap-owned database, prepared transactions, a legacy
     updater): each refuses, named with why. D-8 `fenced` does not refuse; the
-    run states and records which agents stay fenced instead.
+    run states and records which agents stay fenced instead. A run after a
+    completed one (`later`) plans no posture effect: the completed run idled
+    every legacy `paused` posture of an included host, so a later `paused` is a
+    held unit's own (a start inside a hold writes it), which never changes here.
     """
     plan = Plan({step: [] for step in STEPS}, [])
     for reason in attention(found.checks):
         plan.refuse(reason)
     _plan_pending(found, inputs, plan)
     _plan_lease(found, inputs, plan)
-    _plan_postures(found, inputs, plan)
+    _plan_postures(found, inputs, plan, later=later)
     _plan_units(found, inputs, plan, own)
     _plan_evidence(found, inputs, plan)
     _plan_incarnations(found, inputs, plan)
@@ -419,6 +422,11 @@ _HANDLERS: dict[str, Handler] = {
 }
 
 
+def completed(journal: dict[str, Any] | None) -> bool:
+    """Whether the journal records a completed run; every run after it is a late one."""
+    return journal is not None and any(run["state"] == "done" for run in journal["runs"])
+
+
 def read_journal(home: Path) -> dict[str, Any] | None:
     from shared.verified_file import regular_bytes
 
@@ -457,7 +465,7 @@ def _store_attestations(home: Path, inputs: Inputs) -> None:
 
 
 def _begin(
-    conn: psycopg.Connection[Any], home: Path, inputs: Inputs, own: tuple[str, str]
+    conn: psycopg.Connection[Any], home: Path, inputs: Inputs, own: tuple[str, str], *, later: bool
 ) -> dict[str, Any]:
     """Plan a new run and record it, every effect with its before image, before any write.
 
@@ -466,7 +474,7 @@ def _begin(
     """
     with conn.transaction():
         found = survey(conn, inputs)
-    plan = plan_repairs(found, inputs, own)
+    plan = plan_repairs(found, inputs, own, later=later)
     if plan.refusals:
         raise RefusedError("; ".join(plan.refusals))
     fenced = fenced_summary(found.classified)
@@ -533,7 +541,7 @@ def execute(
     elif same:
         return runs[-1]
     else:
-        runs.append(_begin(conn, home, inputs, own))
+        runs.append(_begin(conn, home, inputs, own, later=completed(journal)))
         _write_journal(home, journal)
     run = runs[-1]
     for step in STEPS:
@@ -683,7 +691,7 @@ def _print_plan(found: Survey, plan: Plan) -> None:
 def _check(conn: psycopg.Connection[Any], home: Path, inputs: Inputs, rows_out: str | None) -> int:
     with conn.transaction():
         found = survey(conn, inputs)
-    plan = plan_repairs(found, inputs, own_unit(home))
+    plan = plan_repairs(found, inputs, own_unit(home), later=completed(read_journal(home)))
     if rows_out:
         Path(rows_out).write_text(json.dumps(export_rows(found), indent=2) + "\n")
     report = {
@@ -745,7 +753,7 @@ def main(argv: list[str] | None = None) -> int:
                 return _run(conn, home, inputs)
             with conn.transaction():
                 found = survey(conn, inputs)
-            plan = plan_repairs(found, inputs, own_unit(home))
+            plan = plan_repairs(found, inputs, own_unit(home), later=completed(read_journal(home)))
     except RefusedError as exc:
         print(f"✗ refused, nothing changed by this run: {exc}", file=sys.stderr)
         return 1

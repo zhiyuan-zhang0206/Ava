@@ -417,7 +417,7 @@ def test_dry_run_plans_every_repair_with_its_before_image_and_writes_nothing(
 ) -> None:
     unchanged = _state(db_conn)
     inputs = _inputs(tmp_path, cluster)
-    plan = records.plan_repairs(_survey(inputs), inputs, (GATEWAY, str(cluster.home)))
+    plan = records.plan_repairs(_survey(inputs), inputs, (GATEWAY, str(cluster.home)), later=False)
     assert plan.refusals == []
     effects = plan.effects
     assert effects["pending"] == [
@@ -598,8 +598,9 @@ def test_the_journal_keeps_each_receipt_payload_and_a_changed_one_stops_the_run(
     assert resources is not None and resources[0]["host_process"]["pid"] == 5151
 
 
-def _refusals(cluster: Cluster, inputs: Inputs) -> list[str]:
-    return records.plan_repairs(_survey(inputs), inputs, (GATEWAY, str(cluster.home))).refusals
+def _refusals(cluster: Cluster, inputs: Inputs, *, later: bool = False) -> list[str]:
+    own = (GATEWAY, str(cluster.home))
+    return records.plan_repairs(_survey(inputs), inputs, own, later=later).refusals
 
 
 def test_repairs_refuse_without_exact_operator_evidence(

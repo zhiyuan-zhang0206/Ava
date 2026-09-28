@@ -98,7 +98,7 @@ cause, and the same inputs continue it.
 |---|---|
 | `pending` | Removes the durable pending publication. The column returns to SQL NULL when nothing was ever published, else keeps `current`; either result must decode for admission. |
 | `lease` | Releases the legacy deploy lease (phase `stable`, holder, times and settle hold cleared), only once no pending publication remains. |
-| `posture` | `paused` postures of included hosts become `idle`. Paused machines keep theirs; stranded-hold columns stay for the retired-storage cleanup. A `converging` posture or a live updater lease refuses. |
+| `posture` | `paused` postures of included hosts become `idle`, in the journal's first run only: once a run completed, a `paused` posture is a held unit's own (every start inside a hold writes it, W8 and W9 included), and no later run plans a posture effect. Paused machines keep theirs; stranded-hold columns stay for the retired-storage cleanup. A `converging` posture or a live updater lease refuses. |
 | `units` | Deletes the retired `machine_units` rows. Units of paused machines, this gateway's own unit and attested homes refuse. The stale `machines` row itself stays (the cluster machine-delete endpoint removes it). |
 | `incarnations` | `shared.predecessor_closure.close_retired_predecessor` per convertible row: the closed-predecessor form, with the before image, attestation digest, operator and reason recorded on the receipt ([why](../decisions/2026-09-27-existing-agent-closed-predecessor-admission.md)). The journal keeps both before images, the resources and the receipt's payload (NULL included), and both are compared. A row the guards refuse is recorded `refused: <why>` and the run continues. |
 | `identities` | One effect per attested machine: each convertible identity-less terminated row takes `runtime_kind='hosted'`, a minted UUID generation and owner, and `pid=NULL`, so resurrection accepts it; the resurrection clears it again. Resources stay NULL; no receipt or other row is written ([why](../decisions/2026-09-28-legacy-terminated-agents-resurrectable-at-cutover.md)). One compare-and-swap restates every identity-less condition and each row's before image. The result is `applied`, `already` (a continued run finds its minted pair), or names the rows that changed since planning, which it leaves unchanged; the run continues. |
@@ -169,11 +169,9 @@ the script exists. What can change a fenced row:
 - **A paused machine.** Its rows convert only after the machine is resumed
   and attested while its home is still stopped; a later run with that
   attestation converts them. Known gap: if its host posture still reads
-  `paused` (D-6), that run must also repair the posture, and a posture repair
-  requires a closure attestation from every included machine. Once the other
-  machines run the new code, the only such documents are their cutover-time
-  attestations, which no longer describe them. No sound late path exists for
-  such a machine, and its agents stay fenced.
+  `paused` (D-6), nothing repairs it, since only the journal's first run
+  plans posture effects. No sound late path exists for such a machine, and
+  its agents stay fenced.
 - **An identity-less row.** `awaiting` converts as above, with a later
   attestation of its machine. `multi_unit` converts once the attested home is
   the machine's only unit left: retire the units whose home no longer exists
@@ -232,9 +230,12 @@ unit has had it. Then, on the gateway:
 2. The dry run with those attestations and a new `--reason`; the same inputs
    as W7's completed run change nothing. Pass no `--pending-json`,
    `--lease-json` or `--retire-units`: W7 applied them, and passing them again
-   refuses. The plan must hold only `identities` and `incarnations` effects;
-   a `pending`, `lease`, `posture` or `units` effect means the cluster moved
-   since W7: stop.
+   refuses. The plan holds only `identities` and `incarnations` effects. It
+   never holds a `posture` effect: a unit still held (a failed W11 smoke)
+   reads `paused` in D-6, and the run leaves it so. A `pending`, `lease` or
+   `units` effect needs its explicit input; a pending publication or deploy
+   lease recorded since W7 refuses the run instead, which means the cluster
+   moved since W7: stop.
 3. `--execute` with the same arguments, then `--check`: the settled rows are
    gone from `pointer`, and the run is appended to the journal.
 

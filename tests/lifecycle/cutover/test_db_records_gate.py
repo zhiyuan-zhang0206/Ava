@@ -166,6 +166,32 @@ def test_a_run_without_effects_still_records_what_stays_fenced(
     assert _run(cluster, fresh) == run  # the same inputs change nothing
 
 
+def test_a_run_after_a_completed_one_never_changes_a_posture(
+    cluster: Cluster,
+    db_conn: psycopg.Connection,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """W7 idles the legacy `paused` postures. A start inside a hold writes `paused`
+    again (W8, W9); a W12 run while a unit is still held must leave it paused."""
+    inputs = _inputs(tmp_path, cluster)
+    assert [e["machine"] for e in _run(cluster, inputs)["effects"]["posture"]] == [cluster.runner]
+    held = "UPDATE host_deploy_state SET posture='paused', paused_at=now() WHERE machine=%s"
+    db_conn.execute(held, (cluster.runner,))
+    db_conn.commit()
+    unchanged = _state(db_conn)
+    w12 = replace(inputs, reason="W12 late conversion", pending=None, lease=None, retire_units=())
+    with _patched_session(write=False):
+        argv = ["--home", str(cluster.home), "--operator", "op", "--reason", "W12"]
+        argv += [f"--attestation={tmp_path / f'attest-{m}.json'}" for m in sorted(inputs.raw)]
+        capsys.readouterr()
+        assert records.main(argv) == 0
+    assert "  posture: 0 effect(s)" in capsys.readouterr().out
+    run = _run(cluster, w12)
+    assert run["effects"]["posture"] == [] and _state(db_conn) == unchanged
+    assert _refusals(cluster, w12, later=True) == []
+
+
 def test_a_held_row_lock_fails_the_effect_and_the_same_inputs_continue(
     cluster: Cluster,
     db_conn: psycopg.Connection,
