@@ -1,16 +1,22 @@
-"""Cluster-authenticated administration for gateway MCP client credentials."""
+"""Human-authenticated administration for gateway MCP client credentials.
+
+An MCP client token lives in `mcp_clients`, bound to no write generation, so
+only the human secret (its bearer or a session it minted) manages them: a
+machine token or a runner-minted session gets 403 (`require_human_credential`).
+"""
 
 from __future__ import annotations
 
 from datetime import datetime
 from typing import Literal
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
 from gateway import mcp_clients
+from gateway.request_principal import require_human_credential
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_human_credential)])
 
 McpClientScope = Literal["read", "write"]
 

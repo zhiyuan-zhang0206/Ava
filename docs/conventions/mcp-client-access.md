@@ -25,10 +25,12 @@ the rollout that ships the endpoint code.
 
 ## Connect a client
 
-Create one credential per external client through the cluster-authenticated
-admin API. Choose `read` for inspection only, or `write` when the client must
-spawn, message, or terminate agents. The plaintext token appears only in this
-response; the gateway stores its SHA-256 hash:
+Create one credential per external client through the admin API, with the
+human cluster secret (or from a browser session logged in with it). A client
+token outlives every write generation, so a machine API token or a
+runner-minted session gets 403 here. Choose `read` for inspection only, or
+`write` when the client must spawn, message, or terminate agents. The plaintext
+token appears only in this response; the gateway stores its SHA-256 hash:
 
 ```bash
 curl -s http://<gateway-host>/api/mcp/clients \

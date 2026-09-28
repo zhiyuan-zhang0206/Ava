@@ -288,6 +288,52 @@ def test_a_machine_token_cannot_choose_the_human_secret(
     assert not (store / ".env").exists()
 
 
+def test_only_a_human_credential_manages_mcp_clients(gateway: Path) -> None:
+    """An MCP client token lives in `mcp_clients`, bound to no write generation.
+    A generation-bound admission (either machine token, or a session a runner
+    token minted) must not mint one that outlives it, nor list or revoke them;
+    the human secret and the sessions it minted manage them."""
+    from gateway import mcp_clients
+
+    tokens = _tokens(gateway).api
+    with TestClient(config_app()) as client:
+        pool = client.app.state.db_pool  # type: ignore[attr-defined]
+        runner_session = client.post("/api/auth/login", json={"password": tokens.runner})
+        client.cookies.clear()
+        human_session = client.post("/api/auth/login", json={"password": _HUMAN})
+        client.cookies.clear()
+        generation_bound = (
+            bearer_header(tokens.runner),
+            bearer_header(tokens.gateway),
+            {"Cookie": f"{cookie_name()}={runner_session.cookies[cookie_name()]}"},
+        )
+        for headers in generation_bound:
+            minted = client.post(
+                "/api/mcp/clients", json={"name": "minted", "scope": "write"}, headers=headers
+            )
+            assert minted.status_code == 403, minted.text
+            assert client.get("/api/mcp/clients", headers=headers).status_code == 403
+            assert client.post("/api/mcp/clients/1/revoke", headers=headers).status_code == 403
+        assert mcp_clients.list_clients(pool) == []
+
+        human = (
+            bearer_header(_HUMAN),
+            {"Cookie": f"{cookie_name()}={human_session.cookies[cookie_name()]}"},
+        )
+        for index, headers in enumerate(human):
+            created = client.post(
+                "/api/mcp/clients",
+                json={"name": f"human-{index}", "scope": "write"},
+                headers=headers,
+            )
+            assert created.status_code == 200, created.text
+            assert client.get("/api/mcp/clients", headers=headers).status_code == 200
+            revoked = client.post(
+                f"/api/mcp/clients/{created.json()['id']}/revoke", headers=headers
+            )
+            assert revoked.status_code == 200, revoked.text
+
+
 def _webhook_request(authorization: str | None) -> Request:
     headers = [] if authorization is None else [(b"authorization", authorization.encode())]
     return Request({"type": "http", "headers": headers, "client": ("10.0.0.9", 5000)})

@@ -25,8 +25,11 @@ minted) or `machine_session:runner` (one a runner token minted, a unit's managed
 browser). Both bearers authenticate the
 same cluster administrator; a revoked generation's token never matches. Scoped webhook and MCP boundaries establish their own
 `webhook:<provider>` or `mcp_client:<id>` fact after authenticating outside the
-cluster middleware. This fact does not grant authority and is never copied
-from request JSON.
+cluster middleware. The fact is never copied from request JSON, and it grants
+authority in one place only: the MCP client admin routes mint tokens bound to
+no write generation, so `require_human_credential` admits only the human facts
+(`cluster_bearer`, `user_session`) there and answers 403 to a generation-bound
+one. An open API passes, having no credential to tell apart.
 
 Requests explicitly choosing `Idempotency-Scope: principal-v1` namespace their
 key by verified principal, logical method/path, and caller key. The stored key
