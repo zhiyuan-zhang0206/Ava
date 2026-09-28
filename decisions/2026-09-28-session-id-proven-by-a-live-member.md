@@ -66,14 +66,23 @@ The stop keeps its proof current while it waits:
   (`session_tree.refresh`), adding new descendants and proven session members.
   A capture nothing can prove any more is still scanned, so a process left in
   its session is logged.
-- The scan reads session ids last, with a bare `getsid` per pid, newest pids
-  first. A fork-and-exit chain's current hop is the newest process and lives a
-  few milliseconds. Read this way it still exists, and the pass pins it (in a
-  kill, freezes it) about a millisecond later. Read inside a full psutil pass
-  over some 800 processes, it was already gone.
-- A poll is quiet only when its scan read no process in the session, pinned or
-  not, and no captured process lives. A member can fork while that scan runs,
-  so a quiet poll counts only after a second, immediate poll is quiet too.
+- The scan reads session ids last, after the psutil pass, with a bare
+  `getsid` per pid. The sweep takes about 0.2 ms over some 800 processes,
+  against about 16 ms for the psutil pass. A fork-and-exit hop lives a few
+  milliseconds: swept last, it still exists when read, and the pass pins it
+  (in a kill, freezes it) about a millisecond later. Read inside the psutil
+  pass, it was already gone.
+- The sweep runs from the highest pid down. That reads the newest processes
+  first only until pids wrap; after a wrap the newest are the lowest and come
+  last, still within the sweep's fraction of a millisecond. The ordering is a
+  small help, not what makes the scan work.
+- A poll is quiet only when its scan read no non-zombie process in the
+  session, pinned or not, and no captured process lives. The caller's own
+  process does not count: a stop run from inside a session it closes would
+  otherwise hold the grace open for itself. A process the caller may not
+  signal does count; the kill reports it. A member can fork while that scan
+  runs, so a quiet poll counts only after a second, immediate poll is quiet
+  too.
 - The kill leg starts with one more refresh and passes each capture's proof to
   the kill.
 
@@ -123,9 +132,9 @@ session, and whatever outlived the SIGKILL is out of its reach too.
 ## Consequences
 
 - **What escapes.**
-  - A process the stop cannot prove: no captured process alive and no proof
-    renewed in the last second, for example because the stop process stalled
-    for over a second. It is logged once, with its pid and command name, and
+  - A process the stop cannot prove: no captured process alive in the session
+    and no proof renewed in the last second, for example because the stop
+    process stalled for over a second. It is logged once, with its pid and command name, and
     keeps the grace polling until its deadline. The stop's result is unchanged
     by it.
   - A fork-and-exit chain whose hops all die before two consecutive scans

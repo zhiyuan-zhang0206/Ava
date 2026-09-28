@@ -23,13 +23,13 @@ import time
 from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 
 import psutil
 import pytest
 
 from shared.platform import IS_WINDOWS
-from shared.proc_tree import OwnedProcess, stable_create_time
+from shared.proc_tree import OwnedProcess, shown_name, stable_create_time
 from shared.session_record import SessionRecord, pid_starttime_ticks
 from shared.sessions.pty import cli as pty_cli
 from shared.sessions.pty import host as pty_host
@@ -623,3 +623,71 @@ def test_a_session_nothing_proves_is_still_looked_at_and_logged(
     ]
     assert len(warnings) == 1, f"logged once, with its command name: {warnings}"
     assert repr(psutil.Process(orphan).name()) in warnings[0]
+
+
+# The caller alone in a session: its shell leaves, and it asks whether the
+# session still holds a process (a stop run from inside the session it closes).
+_CALLER_IN_SESSION = """
+import os, time, psutil
+from shared.proc_tree import OwnedProcess
+from shared.sessions.pty import session_tree
+shell = OwnedProcess.capture(psutil.Process())
+if os.fork() != 0:
+    os._exit(0)
+while shell.live():
+    time.sleep(0.01)
+capture = session_tree.SessionCapture(shell, [shell], time.monotonic())
+print(session_tree.refresh([capture]), flush=True)
+"""
+
+
+def test_the_caller_does_not_keep_its_own_session_busy() -> None:
+    """A stop run from inside a session it closes (`nohup ava stop` in an
+    agent's shell) reads its own process there. That is not a process the stop
+    could take or wait for, so it does not hold the grace open."""
+    result = subprocess.run(  # noqa: S603 — the test's own interpreter
+        [sys.executable, "-c", _CALLER_IN_SESSION],
+        start_new_session=True,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        cwd=Path(__file__).resolve().parents[3],
+        env={**os.environ, "AVA_CONFIG_FETCH": "skip"},
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "False", "the caller's own process kept its session busy"
+
+
+def test_a_session_row_gone_since_the_scan_still_counts(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A process the scan read in the session but that exited before its pin
+    may have forked on its way out: the poll is not quiet."""
+    reaped: list[int] = []
+    for _ in range(2):
+        process = subprocess.Popen([sys.executable, "-c", ""])
+        process.wait(timeout=30)
+        reaped.append(process.pid)
+    shell = OwnedProcess(reaped[0], 1.0, None)
+    real_scan = session_tree._scan
+
+    def scan() -> session_tree._Table:
+        table = real_scan()
+        table.sessions[reaped[1]] = shell.pid
+        return table
+
+    monkeypatch.setattr(session_tree, "_scan", scan)
+    capture = session_tree.SessionCapture(shell, [shell], None)
+
+    assert session_tree.refresh([capture]) is True, "a row that exited since the read was ignored"
+
+
+def test_a_logged_command_name_is_quoted_and_capped() -> None:
+    """The command name in an unproven-process log line is shown the way the
+    closure notice shows it: quoted, escaped and capped."""
+    name = "evil\nname " + "x" * 200
+    process = cast("psutil.Process", SimpleNamespace(name=lambda: name))
+
+    shown = session_tree._command(process)
+
+    assert shown == shown_name(name)
+    assert "\n" not in shown and "x" * 100 not in shown

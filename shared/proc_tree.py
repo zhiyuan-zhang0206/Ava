@@ -39,6 +39,19 @@ def create_time_matches(live: float, birth: float) -> bool:
     return abs(live - birth) <= _CREATE_TIME_TOLERANCE_S
 
 
+# How much of a process's command name a message or a log line shows. The name
+# can come from the process itself: psutil extends Linux's 15-byte comm with
+# argv[0]'s basename, which has no length limit.
+_SHOWN_NAME_CHARS = 64
+
+
+def shown_name(name: str) -> str:
+    """A process-chosen command name as inert text: quoted, escaped and capped."""
+    if len(name) <= _SHOWN_NAME_CHARS:
+        return repr(name)
+    return f"{name[:_SHOWN_NAME_CHARS]!r}..."
+
+
 def stable_create_time(process: psutil.Process) -> float:
     """The stable start timestamp of a live process: the identity key.
 

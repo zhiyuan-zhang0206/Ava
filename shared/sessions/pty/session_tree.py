@@ -27,16 +27,9 @@ Why the POSIX session is the membership test, not process groups or the tty:
   the descendant walk.
 
 A pass takes a process by its session id only while the id is proven to still
-name the shell's session. The kernel never gives a new session an id another
-session still carries (Linux keeps a pid number allocated while any task holds
-it as its PID, process group or session; XNU's `forkproc` skips a candidate
-that `pgfind`/`session_find` still resolve). So a captured member that still
-is the captured process and still reads the id after the pass's reads — the
-shell itself, or any other — sat in that one session through the whole pass,
-provided the shell's pid is not held by some other process (`_proven`). With
-no such witness left, a proof no older than `_PROOF_FRESH_S` still stands:
-pid reuse cannot land that fast (`shared.proc_tree`). Otherwise the process is
-logged and left alone.
+name the shell's session: a captured member still in it after the pass's
+reads, or a proof under `_PROOF_FRESH_S` old (`_proven`; the kernel argument
+is in session-kill.ava.okf.md). Otherwise the process is logged, left alone.
 
 Kill sequence: pin each member (a psutil object, which refuses a recycled pid,
 plus its `OwnedProcess` birth identity) before any signal and SIGSTOP it,
@@ -70,7 +63,7 @@ from typing import NamedTuple
 import psutil
 
 from shared.log import logger
-from shared.proc_tree import OwnedProcess
+from shared.proc_tree import OwnedProcess, shown_name
 from shared.session_record import pid_starttime_ticks
 
 # How long one freeze pass waits for its SIGSTOPs to land before rescanning.
@@ -168,12 +161,13 @@ class _Table(NamedTuple):
 def _scan() -> _Table:
     """Parent pid per pid, then session id per pid.
 
-    The session ids come last, from a bare getsid(2) per pid, newest pids
-    first. A fork-and-exit chain's current hop is the newest process and
-    lives a few milliseconds: read this way it still exists, and the pass
-    pins (and in a kill, freezes) it about a millisecond later instead of
-    after a full psutil pass over hundreds of processes. The parent map is
-    that much older, which costs nothing: every pin re-reads its parent.
+    The session ids come last, from a bare getsid(2) per pid: ~0.2 ms for
+    ~800 processes against ~16 ms for the psutil pass. Swept after that pass,
+    a fork-and-exit hop of a few ms is read while it exists and pinned (in a
+    kill, frozen) about a millisecond later; every pin re-reads its parent,
+    so the older parent map costs nothing. Highest pid first reads the newest
+    first only until pids wrap; after that they come last, still inside the
+    sweep's fraction of a millisecond.
     """
     started = time.monotonic()
     parents: dict[int, int] = {}
@@ -192,10 +186,14 @@ def _occupied(sessions: dict[int, int], sid: int) -> bool:
     """Whether the scan read a process in session `sid` that was not a zombie.
 
     One gone since the read still counts: it existed, and may have forked on
-    its way out.
+    its way out. The caller itself does not count (`_signallable`): a stop
+    run from inside a session it closes would otherwise hold the grace open
+    for its own process. A process the caller may not signal (a root `sudo`)
+    still counts: it is the session's work, which the grace waits for and
+    the kill then reports as a survivor, exactly as for a captured one.
     """
     for pid, session in sessions.items():
-        if session != sid:
+        if session != sid or not _signallable(pid):
             continue
         try:
             if psutil.Process(pid).status() != psutil.STATUS_ZOMBIE:
@@ -383,7 +381,7 @@ def _proven(members: dict[int, _Member], leader: OwnedProcess, proof: _Proof) ->
 
 def _command(process: psutil.Process) -> str:
     try:
-        return repr(process.name())
+        return shown_name(process.name())
     except psutil.Error:
         return "<unreadable>"
 
