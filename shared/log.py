@@ -632,18 +632,19 @@ def init_gateway_process(name: str = "gateway") -> None:
 
 
 def init_cli_process(*, name: str) -> None:
-    """Called once at the top of a supervised CLI invocation whose launcher
-    exports ``AVA_CLI_LOG_NAME``, and by the finite release executor
-    (``cli.release_transition.execute``, name ``release-executor``), whose
-    native launcher keeps its stderr. Identical sink set to ``init_gateway_process``:
-    stderr (human) + file (``<name>.log``) + unified event pipeline (agent_id NULL).
+    """Called once by the CLI verbs that bring a unit up, by the finite release
+    executor (``cli.release_transition.execute``, name ``release-executor``),
+    whose native launcher keeps its stderr, and by the PITR base worker
+    (``pitr-base-worker``). Identical sink set to ``init_gateway_process``,
+    minus its ``service_started`` row: stderr (human) + file (``<name>.log``)
+    + unified event pipeline (agent_id NULL).
 
-    Skipped for interactive CLI use (``ava status`` from a TTY etc.) —
-    interactive output already lands on the caller's terminal and the
-    extra sinks would clutter ``~/.ava/logs/`` and the event stream
-    with one row per command. The detection contract is "called only
-    when the caller exports ``AVA_CLI_LOG_NAME``", and the caller
-    decides the name.
+    The CLI's verbs are the keys of ``cli.main._CLI_LOG_NAMES`` (``start``,
+    ``restart``, ``maintenance start``, ``lgtm on|off``), which also name each
+    one's file; ``cli.main`` calls this before dispatch. Every other verb
+    (``ava status`` etc.) opens no sink — its output already lands on the
+    caller's terminal, and the extra sinks would clutter ``logs/`` and the
+    event stream with one row per command.
 
     Catches stdlib ``logging.getLogger`` calls from imported modules
     (uvicorn / httpx / anthropic SDK / etc.) — CLI's own ``print()``
