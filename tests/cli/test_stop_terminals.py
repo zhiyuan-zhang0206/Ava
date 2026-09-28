@@ -58,12 +58,17 @@ from tests.cli.test_pause_stop import home as home
 # bash (ignored dispositions survive exec), so TERM never reached it.
 _TERM_OK_JOB = "import time\nprint('job-ready', flush=True)\nwhile True: time.sleep(0.1)\n"
 
+# A job that ignores the closure's HUP and TERM, so only a SIGKILL ends it.
+# Teardown SIGKILLs it (`PtyReaper`), but a test process that is itself killed
+# (a tool's timeout, a lost xdist worker) runs no teardown: the job then ends
+# once the test process that started it is gone, instead of living on as an
+# orphan of init. The pid is this module's importer, the test process itself.
 _STUBBORN_JOB = (
-    "import signal,time\n"
+    "import os,signal,time\n"
     "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
     "signal.signal(signal.SIGHUP, signal.SIG_IGN)\n"
     "print('stubborn-ready', flush=True)\n"
-    "while True: time.sleep(0.1)\n"
+    f"while True: time.sleep(0.1); os.kill({os.getpid()}, 0)\n"
 )
 
 _LOOP_SHELL = "bash -c 'while true; do sleep 1; done'"
