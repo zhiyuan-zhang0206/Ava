@@ -121,6 +121,26 @@ def test_a_remote_unit_birth_pins_no_backup_passphrase(inputs: identity.Identity
     assert passphrase.pinned(runner.home) is None
 
 
+def test_a_published_claim_keeps_no_copy_of_its_credentials(
+    inputs: identity.IdentityInput,
+) -> None:
+    """The intent carries the birth's `.env` payload only while it is claiming,
+    so an interrupted birth resumes the same credentials. Once `.env` holds
+    them the intent drops the payload: no stale copy of the human secret or the
+    Redis passwords outlives a rotation there."""
+    inputs = replace(inputs, roles=frozenset({"gateway"}))
+    identity.prepare_identity(inputs)
+    env = dotenv_values(inputs.home / ".env")
+    credentials = [
+        env[key] for key in ("AVA_CLUSTER_SECRET", "AVA_REDIS_ADMIN_PASSWORD", "AVA_REDIS_PASSWORD")
+    ]
+    assert all(credentials)
+    data = identity.read_intent(inputs.home)
+    assert data is not None and data["phase"] == "configured" and data["env"] == {}
+    raw = (inputs.home / identity.INTENT_NAME).read_text()
+    assert not [value for value in credentials if value and value in raw]
+
+
 def test_stale_inputs_cannot_rebind_checkout_across_private_registries(
     inputs: identity.IdentityInput,
 ) -> None:

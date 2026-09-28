@@ -87,7 +87,7 @@ installed by its start, and never holds the human secret. Older homes convert on
 
 `ava start` is the single idempotent initialization and startup entry. Before
 runtime Settings or native effects, it persists `start-intent.json` (home,
-capabilities, checkout, ports, credentials); repeats retain that identity and
+capabilities, checkout, ports; credentials until `.env` holds them); repeats retain that identity and
 service selection, an interrupted one resumes, and an ambiguous home or
 contradictory pointer refuses. The home is checkout-anchored: explicit `AVA_HOME`,
 the production source path, or the checkout's `.ava_home` pointer (`--worktree`

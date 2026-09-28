@@ -289,6 +289,9 @@ def _publish_claim(
             pointer = inputs.checkout / ".ava_home"
             write_text_atomic(pointer, str(inputs.home) + "\n", sync_parent=True)
         data["phase"] = "configured"
+        # `.env` now holds the payload, credentials included; the intent keeps
+        # no copy that a later rotation would leave stale.
+        data["env"] = {}
         _write(inputs.home / INTENT_NAME, data)
 
 
