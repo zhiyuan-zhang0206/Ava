@@ -51,6 +51,15 @@ UV_WINDOWS_ASSET_SHA256: dict[str, str] = {
 }
 
 
+# The operator-approved PgBouncer build for Linux apt installs (pgdg, Ubuntu
+# 24.04). Homebrew hosts pin the `pgbouncer` formula above. PgBouncer releases
+# change pooled-session semantics (1.26 tracks `default_transaction_read_only`
+# per client), so moving this needs the maintainer's approval.
+# scripts/provision/database.sh (bash, before Python exists) and the CI install
+# action embed the same string; tests/ci/test_pgbouncer_pin.py asserts they match.
+PGBOUNCER_APT_VERSION = "1.26.0-1.pgdg24.04+1"
+
+
 def pinned_brew_formulae() -> set[str] | None:
     """Return Homebrew's pinned formulae, or ``None`` when brew is absent.
 

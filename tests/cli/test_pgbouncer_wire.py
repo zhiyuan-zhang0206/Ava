@@ -29,6 +29,7 @@ from pathlib import Path
 
 import psycopg
 import pytest
+from psycopg import sql
 from psycopg.conninfo import conninfo_to_dict
 from psycopg_pool import AsyncConnectionPool, ConnectionPool
 
@@ -50,7 +51,11 @@ pytestmark = pytest.mark.skipif(
 
 @contextlib.contextmanager
 def _pgbouncer_in_front(
-    pg_url: str, listen_addr: str = "127.0.0.1", pool_size: int = 2
+    pg_url: str,
+    listen_addr: str = "127.0.0.1",
+    pool_size: int = 2,
+    *,
+    read_only_default: bool = False,
 ) -> Generator[str]:
     """Start a transaction-pooling PgBouncer in front of the throwaway Postgres at
     `pg_url`; yield the pooled connection URL. Config mirrors cli/commands/pgbouncer,
@@ -64,7 +69,14 @@ def _pgbouncer_in_front(
 
     `pool_size` sets `default_pool_size` — 2 (the default) makes concurrent
     clients genuinely reuse backends; 1 forces every client onto the same
-    backend, which pollution tests need for determinism."""
+    backend, which pollution tests need for determinism.
+
+    `read_only_default` makes the database's session default read-only before
+    the pooler first connects. PgBouncer >= 1.26 tracks
+    `default_transaction_read_only` from the first backend's report and aligns
+    every client to it, so the default must predate that first backend; one
+    client's `SET` no longer reaches another client, and `RESET ALL` restores
+    this default rather than clearing it."""
     info = conninfo_to_dict(pg_url)
     pg_port = int(str(info["port"]))
     dbname = str(info["dbname"])
@@ -75,6 +87,12 @@ def _pgbouncer_in_front(
     # and cannot bind params; _SECRET is a fixed alnum test constant, so inline it.
     with psycopg.connect(pg_url, autocommit=True) as conn:
         conn.execute(f"ALTER ROLE {role} PASSWORD '{_SECRET}'")
+        if read_only_default:
+            conn.execute(
+                sql.SQL("ALTER DATABASE {} SET default_transaction_read_only = on").format(
+                    sql.Identifier(dbname)
+                )
+            )
 
     from shared.db import PG_STATEMENT_TIMEOUT_SET_SQL
 
@@ -178,30 +196,25 @@ def test_transaction_pooling_never_prepare() -> None:
             assert row is not None and row[0] == i
 
 
-def test_finalize_writes_override_a_poisoned_pooled_backend(
+def test_finalize_writes_override_a_read_only_default(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Finalizer posture and lock writes must override a poisoned backend.
+    """Finalizer posture and lock writes must override a read-only session default.
 
-    This reproduces the rollout-finalizer failure: a prior client sets the
-    backend's default transaction posture read-only, then the tail's two
-    compensating writes must start explicit read-write transactions before DML.
+    The tail's two compensating writes must start explicit read-write
+    transactions before DML, so a read-only default (the rollout-finalizer
+    failure's posture) cannot fail them.
     """
     from shared import config, host_deploy_state
     from shared.cluster_lock import release_update_lock
 
-    # pool_size=1: the poison and the compensating writes are forced onto the
-    # SAME backend — with the shared harness default of 2 the writes could land
-    # on the clean backend and pass without exercising the override (review
-    # follow-up from #5716 on #1428).
-    with postgres() as pg_url, _pgbouncer_in_front(pg_url, pool_size=1) as pooled:
+    with (
+        postgres() as pg_url,
+        _pgbouncer_in_front(pg_url, pool_size=1, read_only_default=True) as pooled,
+    ):
         monkeypatch.setattr(config.settings.data_plane, "db_url", pooled)
-        with psycopg.connect(pooled, autocommit=True, prepare_threshold=None) as reader:
-            reader.execute("SET default_transaction_read_only = on")
-        # Prove the backend is STILL poisoned when the writes run — the raw
-        # dial below does not go through shared.db's baseline restore, so it
-        # must observe the polluter's read_only (keeps this test's teeth even
-        # if a future pgbouncer scrubs on release).
+        # The writes below run under the read-only default — the raw pooled
+        # dial observes it, so a pass proves the override, not a clean backend.
         with psycopg.connect(pooled, autocommit=True, prepare_threshold=None) as probe:
             row = probe.execute("SHOW default_transaction_read_only").fetchone()
             assert row is not None and str(row[0]) == "on"
@@ -372,27 +385,42 @@ def test_async_write_transaction_repairs_async_pool_write() -> None:
         asyncio.run(write_once(pooled))
 
 
-def test_plain_autocommit_write_still_fails_on_poisoned_backend(
+def test_plain_autocommit_write_still_fails_under_a_read_only_default(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The regression test is meaningful: unpostured pooled DML stays rejected."""
+    """The finalizer test has teeth: an unpostured pooled write is rejected there."""
     from shared import config
     from shared.db import connect
 
-    with postgres() as pg_url, _pgbouncer_in_front(pg_url, pool_size=1) as pooled:
+    with (
+        postgres() as pg_url,
+        _pgbouncer_in_front(pg_url, pool_size=1, read_only_default=True) as pooled,
+    ):
         monkeypatch.setattr(config.settings.data_plane, "db_url", pooled)
-        # The dial-time baseline restore (RESET ALL + ceiling) just ran on the
-        # single backend, so the poison must arrive AFTER it, while the poisoner
-        # HOLDS its frontend connection (option B: a clean disconnect would not
-        # scrub, but holding pins the backend and makes the poisoned state
-        # deterministic for the write below).
-        with (
-            connect(autocommit=True) as conn,
-            psycopg.connect(pooled, autocommit=True, prepare_threshold=None) as poisoner,
-        ):
-            poisoner.execute("SET default_transaction_read_only = on")
-            with pytest.raises(psycopg.errors.ReadOnlySqlTransaction):
-                conn.execute("UPDATE deployment_state SET phase = phase WHERE id = 1")
+        with connect(autocommit=True) as conn, pytest.raises(psycopg.errors.ReadOnlySqlTransaction):
+            conn.execute("UPDATE deployment_state SET phase = phase WHERE id = 1")
+
+
+def test_pooler_isolates_one_clients_read_only_posture_from_another() -> None:
+    """PgBouncer >= 1.26 keeps a client's `default_transaction_read_only` to itself.
+
+    With one pooled backend, a client that sets the default read-only and holds
+    its connection shares the backend with a second client, and the second
+    client still sees its own (writable) default: the cross-client leak behind
+    the 2026-09-02 P0 cannot happen in the pooler this repo pins.
+    """
+    with (
+        postgres() as pg_url,
+        _pgbouncer_in_front(pg_url, pool_size=1) as pooled,
+        psycopg.connect(pooled, autocommit=True, prepare_threshold=None) as poisoner,
+        psycopg.connect(pooled, autocommit=True, prepare_threshold=None) as other,
+    ):
+        poisoner.execute("SET default_transaction_read_only = on")
+        row = other.execute("SHOW default_transaction_read_only").fetchone()
+        assert row is not None and str(row[0]) == "off"
+        other.execute("UPDATE deployment_state SET phase = phase WHERE id = 1")
+        row = poisoner.execute("SHOW default_transaction_read_only").fetchone()
+        assert row is not None and str(row[0]) == "on"
 
 
 def _statement_timeout(conn: psycopg.Connection) -> str:
