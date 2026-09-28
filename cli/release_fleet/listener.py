@@ -24,7 +24,9 @@ a body is read only when one plain decimal `Content-Length` declares it
 within `MAX_BODY_BYTES` (otherwise `400` or `413`, nothing read), a socket
 read that waits `READ_TIMEOUT_S` drops the connection, and at most
 `MAX_CONCURRENT_REQUESTS` are served at once (a connection beyond them is
-closed unanswered).
+closed unanswered). Every request that does not authenticate (a wrong route,
+operation or unit, a missing enrollment, a failing proof) gets one uniform
+`401`; the reason is only logged on the coordinator.
 """
 
 from __future__ import annotations
@@ -63,6 +65,11 @@ READ_TIMEOUT_S = 10.0
 # far above a fleet's need; a peer opening more is closed unanswered, which a
 # unit reads as the coordinator being away and retries.
 MAX_CONCURRENT_REQUESTS = 32
+# The one answer to every request that does not authenticate, whatever the
+# reason: a peer without a proof cannot tell a wrong operation, a unit that
+# takes no part, a missing enrollment and a failing proof apart.
+UNAUTHENTICATED = "the coordinator request does not authenticate"
+_LOGGED_PATH = 256
 CAPABILITY_REFUSAL = (
     "the per-operation capability exchange over the coordinator channel is slice dbgen-8"
 )
@@ -99,6 +106,10 @@ class _Refused(Exception):  # noqa: N818 — an HTTP refusal carrying its status
         self.status = status
 
 
+class _Unauthenticated(Exception):  # noqa: N818 — a refusal before authentication
+    """Why a request did not authenticate: logged here, never told to the peer."""
+
+
 def _body_length(declared: list[str]) -> int:
     """The body length one plain decimal `Content-Length` declares (none: 0).
 
@@ -125,7 +136,7 @@ def _proof(headers: Mapping[str, str]) -> RequestProof:
             headers[SIGNATURE_HEADER.lower()],
         )
     except (KeyError, ValueError, ChannelRefusedError) as exc:
-        raise _Refused(HTTPStatus.UNAUTHORIZED, "the request carries no channel proof") from exc
+        raise _Unauthenticated("the request carries no channel proof") from exc
 
 
 class CoordinatorListener:
@@ -189,22 +200,22 @@ class CoordinatorListener:
         parts = path.split("/")
         # "", "v1", "op", <operation>, "unit", <key>[, <verb>]
         if len(parts) not in {6, 7} or parts[1:3] != ["v1", "op"] or parts[4] != "unit":
-            raise _Refused(HTTPStatus.NOT_FOUND, "no such coordinator route")
+            raise _Unauthenticated("no such coordinator route")
         if parts[3] != str(self.operation):
-            raise _Refused(HTTPStatus.NOT_FOUND, "the listener serves another operation")
+            raise _Unauthenticated("the listener serves another operation")
         unit = self._units.get(parts[5])
         if unit is None:
-            raise _Refused(HTTPStatus.NOT_FOUND, "the unit takes no part in this operation")
+            raise _Unauthenticated("the unit takes no part in this operation")
         proof = _proof(headers)
         enrollment = self._enrollment(self.home, UnitIdentity(machine=unit.machine, home=unit.home))
         if enrollment is None:
-            raise _Refused(HTTPStatus.UNAUTHORIZED, "the unit holds no enrollment on this gateway")
+            raise _Unauthenticated("the unit holds no enrollment on this gateway")
         try:
             verify_request(
                 enrollment, proof, window=self._window, method=method, path=path, body=body
             )
         except ChannelRefusedError as exc:
-            raise _Refused(HTTPStatus.UNAUTHORIZED, str(exc)) from exc
+            raise _Unauthenticated(str(exc)) from exc
         return unit
 
     def handle(
@@ -212,10 +223,16 @@ class CoordinatorListener:
     ) -> tuple[HTTPStatus, dict[str, object] | None]:
         """One request's status and JSON body; refusals never change state.
 
-        `headers` are keyed by lowercased name.
+        `headers` are keyed by lowercased name. Every request that does not
+        authenticate gets the same `401`: its reason is only logged here.
         """
         try:
             return self._route(method, path, headers, body)
+        except _Unauthenticated as refused:
+            logger.info(
+                "[release-fleet] listener refused {} {}: {}", method, path[:_LOGGED_PATH], refused
+            )
+            return HTTPStatus.UNAUTHORIZED, {"error": UNAUTHENTICATED}
         except _Refused as refused:
             return refused.status, {"error": str(refused)}
 

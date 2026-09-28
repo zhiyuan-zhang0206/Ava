@@ -132,12 +132,12 @@ def test_a_report_naming_another_unit_is_refused(channel: Channel) -> None:
 def test_a_rotated_or_revoked_enrollment_stops_authenticating_at_once(channel: Channel) -> None:
     captured = channel.client()
     rotate_enrollment(channel.home, _identity(_RUNNER))
-    with pytest.raises(ChannelRefusedError, match="rotated or revoked"):
+    with pytest.raises(ChannelRefusedError, match="does not authenticate"):
         captured.instruction()
     rotated = channel.client(enrollment=ensure_enrollment(channel.home, _identity(_RUNNER)))
     assert rotated.instruction() is None
     revoke_enrollment(channel.home, _identity(_RUNNER))
-    with pytest.raises(ChannelRefusedError, match="holds no enrollment"):
+    with pytest.raises(ChannelRefusedError, match="does not authenticate"):
         rotated.instruction()
 
 
@@ -167,14 +167,51 @@ def test_a_request_outside_the_clock_skew_is_refused(channel: Channel) -> None:
 
 
 def test_another_operation_or_unit_is_not_served(channel: Channel) -> None:
-    with pytest.raises(ChannelRefusedError, match="another operation"):
+    with pytest.raises(ChannelRefusedError, match="does not authenticate"):
         channel.client(operation=uuid4()).instruction()
     stranger = UnitKey(machine="win", home="C:\\Users\\zzy\\.ava")
     enrolled = ensure_enrollment(channel.home, _identity(stranger))
-    with pytest.raises(ChannelRefusedError, match="no part in this operation"):
+    with pytest.raises(ChannelRefusedError, match="does not authenticate"):
         channel.client(enrollment=enrolled, unit=stranger).instruction()
     with pytest.raises(ChannelRefusedError, match="another unit"):
         channel.client(unit=_OTHER)
+
+
+def test_every_unauthenticated_request_gets_one_answer(channel: Channel) -> None:
+    """A peer without a proof cannot tell a wrong operation, a unit that takes no
+    part, a unit without an enrollment and a failing proof apart."""
+    path = route(channel.operation, _RUNNER)
+
+    def signed(target: str, now: float | None = None) -> dict[str, str]:
+        operation = str(channel.operation)
+        return proof_headers(
+            sign_request(
+                channel.enrollment,
+                operation=operation,
+                method="GET",
+                path=target,
+                body=b"",
+                now=now,
+            )
+        )
+
+    spent = signed(path)
+    assert _answer(channel, path, spent)[0] == 204
+    stranger = route(channel.operation, UnitKey(machine="win", home="C:\\Users\\zzy\\.ava"))
+    unenrolled = route(channel.operation, _OTHER)
+    another_operation = route(uuid4(), _RUNNER)
+    answers = {
+        "no such route": _answer(channel, "/v1/nothing", signed("/v1/nothing")),
+        "another operation": _answer(channel, another_operation, signed(another_operation)),
+        "no part in the operation": _answer(channel, stranger, signed(stranger)),
+        "no enrollment": _answer(channel, unenrolled, signed(unenrolled)),
+        "no proof": _answer(channel, path, {}),
+        "forged proof": _answer(channel, path, signed(path) | {"X-Ava-Signature": "0" * 64}),
+        "replayed proof": _answer(channel, path, spent),
+        "stale proof": _answer(channel, path, signed(path, now=time.time() - 3600)),
+    }
+    uniform = (401, b'{"error": "the coordinator request does not authenticate"}')
+    assert answers == dict.fromkeys(answers, uniform)
 
 
 def test_the_capability_exchange_is_deferred_to_dbgen8(channel: Channel) -> None:
@@ -196,6 +233,18 @@ def test_a_closed_listener_is_away_not_refusing(channel: Channel) -> None:
     channel.listener.close()
     with pytest.raises(CoordinatorAwayError):
         client.instruction()
+
+
+def _answer(channel: Channel, path: str, headers: dict[str, str]) -> tuple[int, bytes]:
+    """A GET's status and body."""
+    request = urllib.request.Request(  # noqa: S310 — the test's own loopback listener
+        channel.endpoint.url + path, headers=headers, method="GET"
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=5) as answer:  # noqa: S310 — same URL
+            return answer.status, answer.read()
+    except urllib.error.HTTPError as refused:
+        return refused.code, refused.read()
 
 
 def _status(channel: Channel, path: str, headers: dict[str, str], body: bytes | None = None) -> int:
