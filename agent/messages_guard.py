@@ -43,7 +43,7 @@ Validation model (per the ruling):
   - no deletions — every ``before`` id must survive in ``after``;
   - every survivor sits at the same index with identical content, except
     the last ``before`` message, whose content may change (the ruling's
-    "modify the last message" — exec's tool-call merge and the syntax-fix
+    "modify the last message" — exec's tool-call normalization and the syntax-fix
     plugin both replace it by same id);
   - new messages (ids absent from ``before``) may only form a contiguous
     suffix of ``after`` — no middle insertion.

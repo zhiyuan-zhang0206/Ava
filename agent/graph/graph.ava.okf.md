@@ -22,6 +22,8 @@ after_init → init_context → claim → before_llm → llm → before_exec →
                       standing message head (post-compact tail parked in context_reset)
 ```
 
+For multiple tool calls, `exec` loops to itself until each original ID has a result.
+
 ## Core Responsibilities
 
 - **init_context** (`_init_context.py`): Sole owner of the standing message head (SystemMessage + the ordered context notes). Lays it down whenever `messages` is empty — an agent's first wake, and the turn after any compaction, which routes back here with the post-compact tail parked in `state.context_reset`. A pass-through otherwise.
@@ -29,7 +31,7 @@ after_init → init_context → claim → before_llm → llm → before_exec →
 - **before_llm** (hook container): Runs all registered `register_before_llm` hooks—plugins can modify state or inject extra context
 - **llm** (`llm/node.py`): Owns automatic compaction and normal streaming inference. Both model operations race the durable interrupt. Interrupted compaction discards its result without replacing history or advancing the compact version; completed compaction routes `init_context → claim`. A tagged summary with no later AIMessage gets one ordinary generation before the threshold re-arms; this survives cancellation, new input, and checkpoint recovery. Actual provider overflow still uses circuit-breaker rescue. Normal streaming cancellation discards the partial generation. Streaming-first with one non-streaming fallback; fatal provider errors fail-fast to idle.
 - **before_exec** (hook container): Runs `register_before_exec` hooks—final checkpoint before tool invocation
-- **exec** (`_exec.py`): Runs Python code in one disposable fault-isolation subprocess; cancel/timeout crosses an owned-tree stop → direct-child reap → bounded output-reader join barrier
+- **exec** (`_exec.py`): Executes one pending tool call per graph step in one disposable fault-isolation subprocess. Its state delta commits through LangGraph before `exec -> exec` runs the next call; the final result routes to `after_exec`. Progress comes from existing tool-call/result IDs, with no separate execution cursor or state accumulator; cancel/timeout crosses an owned-tree stop → direct-child reap → bounded output-reader join barrier
 - **after_exec** (hook container): Runs `register_after_exec` hooks—cleanup/recording after execution
 
 ## Interrupting a turn: cancel and terminate

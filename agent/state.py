@@ -119,6 +119,8 @@ class BaseAgentState(BaseModel):
     # single-merge form (guarded_add_messages) stays the working-copy /
     # plugin-update merge.
     messages: Annotated[list[AnyMessage], _MESSAGES_DELTA_CHANNEL] = Field(default_factory=list)
+    pending_exec_notes: list[AnyMessage] = Field(default_factory=list)
+    """Notes/media deferred until all tool results; recovery drains after repair."""
     halted: bool = False
     turn_active: bool = False
     """This invocation is mid-turn (claim routed work). One invocation = one

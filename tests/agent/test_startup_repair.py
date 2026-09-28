@@ -13,6 +13,7 @@ pass wrapper `agent/startup.py:repair_dangling_tool_use_at_startup`.
 from typing import Any, cast
 from unittest.mock import AsyncMock
 
+import pytest
 from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, ToolMessage
 from langchain_core.messages.modifier import RemoveMessage
 from langgraph.graph.message import REMOVE_ALL_MESSAGES, add_messages
@@ -370,6 +371,7 @@ def test_multiple_buried_danglings_all_repaired() -> None:
 class _FakeState:
     def __init__(self, messages: list[Any]) -> None:
         self.messages = messages
+        self.pending_exec_notes: list[AnyMessage] = []
 
 
 _CONFIG = {"configurable": {"thread_id": "236"}}
@@ -383,7 +385,7 @@ async def test_hook_returns_none_when_history_valid() -> None:
 async def test_hook_returns_messages_update_for_buried_dangling() -> None:
     state = _FakeState([_ai_tool_use("c1"), HumanMessage(content="buried")])
     update = await _repair_dangling_tool_pairing(state, None, _CONFIG)  # type: ignore[arg-type]
-    assert update is not None and set(update) == {"messages"}  # pyright: ignore[reportUnknownArgumentType]
+    assert update is not None and set(update) == {"messages", "pending_exec_notes"}  # pyright: ignore[reportUnknownArgumentType]
     assert isinstance(update["messages"][0], RemoveMessage)
 
 
@@ -400,20 +402,21 @@ def test_register_repair_hooks_registers_before_llm() -> None:
 
 
 class _FakeSnapshot:
-    def __init__(self, messages: list[Any]) -> None:
-        self.values = {"messages": messages}
+    def __init__(self, messages: list[Any], pending_notes: list[AnyMessage]) -> None:
+        self.values = {"messages": messages, "pending_exec_notes": pending_notes}
 
 
 class _FakeGraph:
     """Minimal stand-in for the compiled graph: records aupdate_state calls."""
 
-    def __init__(self, messages: list[Any]) -> None:
+    def __init__(self, messages: list[Any], pending_notes: list[AnyMessage] | None = None) -> None:
         self._messages = messages
+        self._pending_notes = pending_notes or []
         self.updates: list[dict[str, Any]] = []
         self.checkpointer = object()
 
     async def aget_state(self, _config: Any) -> _FakeSnapshot:
-        return _FakeSnapshot(self._messages)
+        return _FakeSnapshot(self._messages, self._pending_notes)
 
     async def aupdate_state(self, _config: Any, values: dict[str, Any]) -> None:
         self.updates.append(values)
@@ -472,3 +475,33 @@ async def test_startup_repair_is_noop_for_brand_new_agent() -> None:
     graph = _FakeGraph([])
     await repair_dangling_tool_use_at_startup(graph, agent_id=2)  # type: ignore[arg-type]
     assert graph.updates == []
+
+
+@pytest.mark.parametrize("first_finished", [False, True])
+async def test_startup_repair_flushes_notes_after_all_tool_results(first_finished: bool) -> None:
+    ai = AIMessage(
+        content="",
+        tool_calls=[
+            {"name": "execute_code", "args": {"code": "first()"}, "id": "c1"},
+            {"name": "execute_code", "args": {"code": "second()"}, "id": "c2"},
+        ],
+    )
+    messages: list[AnyMessage] = [ai]
+    if first_finished:
+        messages.append(ToolMessage(content="first done", tool_call_id="c1"))
+    note = HumanMessage(content="deferred context")
+    graph = _FakeGraph(messages, [note])
+    await repair_dangling_tool_use_at_startup(graph, agent_id=1)  # type: ignore[arg-type]
+    update = graph.updates[0]
+    repaired = _full_rebuild(update["messages"])
+    assert [message.tool_call_id for message in repaired[1:3]] == ["c1", "c2"]
+    assert repaired[-1] == note
+    assert update["pending_exec_notes"] == []
+
+
+async def test_repair_hook_drains_notes_when_tool_pairing_already_complete() -> None:
+    state = _FakeState([_ai_tool_use("c1"), ToolMessage(content="done", tool_call_id="c1")])
+    note = HumanMessage(content="deferred context")
+    state.pending_exec_notes = [note]
+    update = await _repair_dangling_tool_pairing(state, None, _CONFIG)  # type: ignore[arg-type]
+    assert update == {"messages": [note], "pending_exec_notes": []}

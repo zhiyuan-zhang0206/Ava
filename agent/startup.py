@@ -433,10 +433,13 @@ async def repair_dangling_tool_use_at_startup(
     """
     config: RunnableConfig = {"configurable": {"thread_id": str(agent_id)}}
     snapshot = await graph.aget_state(config)
-    repairs = dangling_tool_pairing_repairs(snapshot.values.get("messages", []))
+    repairs = dangling_tool_pairing_repairs(
+        snapshot.values.get("messages", []),
+        pending_notes=snapshot.values.get("pending_exec_notes", []),
+    )
     if not repairs:
         return
-    await graph.aupdate_state(config, {"messages": repairs})
+    await graph.aupdate_state(config, {"messages": repairs, "pending_exec_notes": []})
     checkpointer = cast(AsyncPostgresSaver, graph.checkpointer)  # pyright: ignore[reportUnknownMemberType]
     flush = getattr(checkpointer, "_ava_nstep_flush", None)
     if flush is not None:

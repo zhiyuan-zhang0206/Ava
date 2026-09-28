@@ -12,7 +12,7 @@ import builtins
 import keyword
 import re
 from datetime import UTC, datetime
-from typing import Literal
+from typing import Any, Literal
 
 from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig
@@ -67,11 +67,9 @@ def _assumed_persistence_name(
     for message in reversed(previous_messages):
         if not isinstance(message, AIMessage) or not message.tool_calls:
             continue
-        if message.tool_calls[0]["name"] != "execute_code":
-            continue
-        previous_code = first_tool_call_code(message.tool_calls)
-        if whole_name.search(previous_code):
-            return name
+        for call in message.tool_calls:
+            if call["name"] == "execute_code" and whole_name.search(first_tool_call_code([call])):
+                return name
     return None
 
 
@@ -106,6 +104,30 @@ def _rearmed_reminded(state: AgentState) -> tuple[set[str], int]:
     return set(getattr(state, _REMINDED_FIELD)), bookmark
 
 
+def _select_hints(
+    code: str, matched: list[str], reminded: set[str], nameerror_name: str | None
+) -> tuple[list[str], set[str], str | None]:
+    """Choose unsuppressed categories and a once-per-name persistence hint."""
+    # A cell that sleeps while already naming `watcher` is the agent working
+    # with the watcher primitive itself — the wait hint would be noise. Mark
+    # that category seen without emitting its line, so it fires neither now nor
+    # later this context window.
+    silent: set[str] = {"wait"} if "wait" in matched and mentions_watcher(code) else set()
+
+    if turn_settings.agent.sdk_code_reminder_cadence == "every_time":
+        hinted = [cat for cat in matched if cat not in silent]
+    else:
+        hinted = [cat for cat in matched if cat not in reminded and cat not in silent]
+    newly_seen = set(hinted) | (silent - reminded)
+    nameerror_hint = None
+    if nameerror_name is not None:
+        nameerror_category = f"{_NAMEERROR_CATEGORY_PREFIX}{nameerror_name}"
+        if nameerror_category not in reminded:
+            newly_seen.add(nameerror_category)
+            nameerror_hint = _nameerror_persistence_hint(nameerror_name)
+    return hinted, newly_seen, nameerror_hint
+
+
 class _SdkReminderAfterExecHook(Hook):
     """Inject an SDK-primitive or interpreter-persistence note as its own
     system-styled message after the matching execution output.
@@ -126,12 +148,51 @@ class _SdkReminderAfterExecHook(Hook):
     """
 
     async def __call__(
+        self, state: AgentState, runtime: Runtime[AvaContext], config: RunnableConfig, /
+    ) -> dict[str, Any] | None:
+        """Match each result by ID, retaining the per-compaction hint cadence."""
+        ai_index = next(
+            (
+                i
+                for i in range(len(state.messages) - 1, -1, -1)
+                if isinstance(state.messages[i], AIMessage)
+            ),
+            None,
+        )
+        if ai_index is None:
+            return None
+        ai = state.messages[ai_index]
+        assert isinstance(ai, AIMessage)  # noqa: S101
+        outputs = {
+            msg.tool_call_id: msg
+            for msg in state.messages[ai_index + 1 :]
+            if isinstance(msg, ToolMessage)
+        }
+        prior = state.messages[:ai_index]
+        update: dict[str, Any] = {}
+        notes: list[AnyMessage] = []
+        for call in ai.tool_calls:
+            output = outputs.get(call["id"] or "")
+            if output is None:
+                continue
+            single = ai.model_copy(update={"tool_calls": [call]})
+            view = state.model_copy(update={**update, "messages": [*prior, single, output]})
+            delta = await self._for_call(view, runtime, config)
+            if delta:
+                notes.extend(delta.pop("messages", []))
+                update.update(delta)
+            prior = [*prior, single, output]
+        if notes:
+            update["messages"] = notes
+        return update or None
+
+    async def _for_call(
         self,
         state: AgentState,
         _runtime: Runtime[AvaContext],
         _config: RunnableConfig,
         /,
-    ) -> dict | None:
+    ) -> dict[str, Any] | None:
         if len(state.messages) < 2:
             return None
         ai_msg = state.messages[-2]
@@ -157,23 +218,7 @@ class _SdkReminderAfterExecHook(Hook):
 
         reminded, new_bookmark = _rearmed_reminded(state)
 
-        # A cell that sleeps while already naming `watcher` is the agent working
-        # with the watcher primitive itself — the wait hint would be noise. Mark
-        # that category seen without emitting its line, so it fires neither now nor
-        # later this context window.
-        silent = {"wait"} if "wait" in matched and mentions_watcher(code) else set()
-
-        if turn_settings.agent.sdk_code_reminder_cadence == "every_time":
-            hinted = [cat for cat in matched if cat not in silent]
-        else:
-            hinted = [cat for cat in matched if cat not in reminded and cat not in silent]
-        newly_seen = set(hinted) | (silent - reminded)
-        nameerror_hint = None
-        if nameerror_name is not None:
-            nameerror_category = f"{_NAMEERROR_CATEGORY_PREFIX}{nameerror_name}"
-            if nameerror_category not in reminded:
-                newly_seen.add(nameerror_category)
-                nameerror_hint = _nameerror_persistence_hint(nameerror_name)
+        hinted, newly_seen, nameerror_hint = _select_hints(code, matched, reminded, nameerror_name)
         if not newly_seen:
             # Every once-scoped match is already seen this window (or silently
             # suppressed and already marked). The bookmark only advances on a path
@@ -182,7 +227,7 @@ class _SdkReminderAfterExecHook(Hook):
             # bookmark advance.
             return None
 
-        update: dict = {
+        update: dict[str, Any] = {
             _REMINDED_FIELD: reminded | newly_seen,
             _BOOKMARK_FIELD: new_bookmark,
         }
@@ -241,7 +286,7 @@ class _SdkReminderAgentReplyHook(Hook):
         _runtime: Runtime[AvaContext],
         _config: RunnableConfig,
         /,
-    ) -> dict | None:
+    ) -> dict[str, Any] | None:
         if not tail_has_agent_inbound(state.messages):
             return None
 
