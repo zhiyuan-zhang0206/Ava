@@ -187,7 +187,8 @@ def _add_enrollment_parsers(
             "revoke-enrollment",
             _h_cluster_db_authority_revoke_enrollment,
             "on the gateway: delete one unit's enrollment record; the unit can no longer "
-            "authenticate to a release coordinator",
+            "authenticate to a release coordinator (its database login and API token stay "
+            "valid until the write generation rotates)",
         ),
     ):
         verb_p = db_authority_sub.add_parser(verb, help=help_text)

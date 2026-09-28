@@ -113,8 +113,8 @@ by home path. See [[cli/start_identity.ava.okf.md]].
 
 A runner fetches the gateway's authenticated bootstrap configuration before
 recording local identity. Bootstrap serves no database login: `AVA_DB_URL` is the
-credential-free endpoint. The runner's login is a per-unit database capability
-the gateway operator issues and the runner installs at start:
+credential-free endpoint. The runner's login arrives in a capability bundle the
+gateway operator issues for that one unit and the runner installs at start:
 
 ```bash
 # on the gateway (its checkout's CLI), for one unit:
@@ -126,10 +126,10 @@ ava start --db-capability <bundle>        # plus the first-start identity flags
 
 The bundle is sealed (AES-256-GCM) under a transport key printed once; it names
 one unit (machine + home), the endpoint bootstrap serves, the active write
-generation and an expiry (`--ttl-hours`, default 24, at most 72). Start refuses an altered
-bundle, the wrong key, another unit's bundle, an expired one, an older
-generation than the installed one, and a login the cluster rejects (a revoked
-generation); it then writes `$AVA_HOME/db-authority/unit.json` and
+generation and an expiry (`--ttl-hours`, default 24, at most 72). Start refuses
+an altered bundle, the wrong key, another unit's bundle, an expired one, an
+older generation than the installed one, and a login the cluster rejects (a
+revoked generation); it then writes `$AVA_HOME/db-authority/unit.json` and
 `enrollment.json` (0600) and deletes the bundle. A runner without a capability
 refuses to start and names the issue command. Issue is refused while a release
 operation is incomplete and on a remote-managed plane. Networked release
@@ -146,6 +146,22 @@ ava cluster db-authority rotate-enrollment --machine <name> --home <unit $AVA_HO
 ava cluster db-authority revoke-enrollment --machine <name> --home <unit $AVA_HOME>
 # a later issue-unit re-enrolls it with a new secret
 ```
+
+**Guard a bundle like the generation it carries.** Only the enrollment secret
+is the unit's own. The runner login and runner API token are the write
+generation's, shared by every runner unit, and the telemetry token is the
+cluster's until the human secret rotates. A bundle with its transport key
+therefore gives its holder every runner unit's database and API admission for
+that generation (bootstrap, with its Redis runtime URL and provider keys, and
+every unit's `/ops` included). Its machine binding only stops an install on
+the wrong unit by mistake: the installer asserts its own machine name, and the
+credentials work without installing. `revoke-enrollment` cuts the coordinator
+channel only. When a unit is compromised or a bundle and its key are lost,
+rotate the write generation, issue every unit a new bundle and revoke the lost
+unit's enrollment; rotate the human secret (telemetry token), the Redis runtime
+password and the provider keys as well. A networked home cannot rotate its
+write generation until networked release operations land (slices dbgen-8 and
+FC-9). Detail: [[shared/cluster/authority/unit-enrollment.ava.okf.md]].
 
 Its DB/Redis connection facts are not cached locally: every runner process
 fetches them at Settings construction. Start the gateway first, then the
@@ -1279,7 +1295,8 @@ bundle's `AVA_DB_CAPABILITY_KEY` without echoing it, then use `ava start
 --machine-host HOST --db-capability BUNDLE` (the bundle from `ava cluster
 db-authority issue-unit` on the gateway). Bootstrap publishes no database
 credential and not the human secret; the runner's login, API token and
-telemetry token are that unit-bound capability, and a runner never holds
+telemetry token arrive only in that unit's bundle (they are shared by every
+runner unit of the generation), and a runner never holds
 `AVA_CLUSTER_SECRET` (a home that still records it refuses to start). Memory checkout initialization remains
 explicit through `ava memory init`.
 

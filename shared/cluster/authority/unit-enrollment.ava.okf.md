@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Unit enrollment
-description: The per-unit enrollment secret a release coordinator authenticates, its operator rotate/revoke commands, and the coordinator channel's request proofs, replay window and sealing.
+description: The per-unit enrollment secret a release coordinator authenticates, its operator rotate/revoke commands, what a unit capability bundle exposes, and the coordinator channel's request proofs, replay window and sealing.
 tags: [authority, lifecycle]
 ---
 
@@ -20,6 +20,49 @@ is incomplete; the commands print the enrollment id, never the secret:
   bundle and fails channel authentication until then.
 - `ava cluster db-authority revoke-enrollment --machine M --home H`: deletes
   the record; a later `issue-unit` re-enrolls the unit with a new secret.
+
+Both change the coordinator channel only; neither touches the unit's
+database login or API token (below).
+
+## What a bundle exposes
+
+An `issue-unit` bundle is sealed for one unit, but little of what it carries
+is that unit's own:
+
+| Carried | Shared by |
+|---|---|
+| enrollment secret | this unit alone (the coordinator channel key) |
+| runner login (role and password) | every runner unit of the write generation |
+| runner API token | every runner unit of the write generation |
+| gateway API token digest | nobody: a digest admits nothing |
+| telemetry token | every unit, until the human secret rotates |
+
+A stolen bundle with its transport key, like a compromised unit, therefore
+holds until the generation is revoked: the `ava_runner` database privileges;
+a runner API token that the gateway API (a browser login included),
+`/api/bootstrap` (the Redis runtime URL and provider keys) and every unit's
+`/ops` of that generation admit; the OTLP relay ingress; and this unit's
+coordinator identity. Its expiry is the installer's check, not the cipher's,
+and nothing records its use: until it expires it installs on any unit that
+names itself that machine and home.
+
+The machine binding is a guard against mistakes, not against theft:
+`install_bundle` compares the bundle's machine and home with the installing
+unit's own first-start `--machine-name` and home, which that unit asserts
+about itself, and the credentials work without any installation.
+
+`revoke-enrollment` therefore does not contain a compromised unit or a lost
+bundle. Rotate the write generation (a release transition revokes the old
+generation's logins and tokens everywhere), then issue every unit a new
+bundle, and revoke the lost unit's enrollment. What the bundle reached beyond
+the generation rotates separately: the telemetry token with the human secret
+(`scripts/rotate_cluster_secret.py`), the Redis runtime password bootstrap
+served with `scripts/rotate_data_plane_secrets.py --scope runner`, and the
+provider keys at each provider. A networked home cannot run a release
+transition yet (`NETWORKED_REFUSAL`, slices dbgen-8 and FC-9), so until those
+land it has no in-band way to rotate its write generation.
+
+## Coordinator channel
 
 `channel` is the coordinator channel's authentication (the listener itself
 belongs to the fleet transition): a request proof is an HMAC-SHA256 over the

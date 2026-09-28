@@ -1,4 +1,4 @@
-"""Per-unit database capability: manual delivery to a remote agent-runner.
+"""A remote agent-runner's database capability: manual delivery, one bundle per unit.
 
 The bootstrap endpoint serves no database credential. A remote agent-runner
 unit receives the cluster's runner login only through an explicit operator
@@ -28,13 +28,21 @@ refusing until the automated exchange exists.
   gateway token its ops server accepts, and the telemetry relay token. The
   unit never holds the human cluster secret.
 
+A bundle is bound to one unit, but only its enrollment secret is that unit's
+own: the runner login and API token are the write generation's, shared by
+every runner unit, and the telemetry token is the cluster's. The binding
+guards against installing on the wrong unit by mistake, not against theft;
+what a lost bundle exposes and how to contain it:
+`shared/cluster/authority/unit-enrollment.ava.okf.md`.
+
 The enrollment secret is the unit's durable identity toward the gateway: it
 keys the release coordinator channel (`shared.cluster.authority.channel`). The
 gateway keeps its copy in `$AVA_HOME/db-authority/units/<key>.json`, minted
 when the unit first receives a bundle (its join, or the one-time cutover) and
 reused by later bundles. Only an explicit operator command changes it:
 `rotate_enrollment` replaces the secret (the next bundle delivers it) and
-`revoke_enrollment` deletes the record.
+`revoke_enrollment` deletes the record; neither touches the generation's login
+or API token.
 """
 
 from __future__ import annotations

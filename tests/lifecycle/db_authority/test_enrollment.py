@@ -143,6 +143,8 @@ def test_rotate_and_revoke_commands_print_ids_never_secrets(
     assert cluster_cmd.cmd_db_authority_revoke_enrollment(machine=_MACHINE, home=identity.home) == 0
     printed = capsys.readouterr().out
     assert rotated.enrollment_id in printed and rotated.secret not in printed
+    # Revocation cuts the coordinator channel only; the operator is told so.
+    assert "stay valid until the generation rotates" in printed
     assert unit.load_enrollment(on_gateway, identity) is None
     assert cluster_cmd.cmd_db_authority_revoke_enrollment(machine=_MACHINE, home=identity.home) == 1
     assert "holds no enrollment" in capsys.readouterr().err

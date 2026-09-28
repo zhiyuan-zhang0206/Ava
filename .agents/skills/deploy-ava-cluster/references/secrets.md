@@ -31,9 +31,10 @@ Postgres application logins are write generations recorded in the gateway's
 private `$AVA_HOME/db-authority/`: one gateway and one runner login inheriting
 the `NOLOGIN` groups `ava_gateway` / `ava_runner`. The schema owner is `NOLOGIN`
 and the gateway `.env` holds only the credential-free endpoint. A remote runner
-receives the runner login, its API token and the telemetry token only as a
-sealed per-unit capability bundle the gateway operator issues (`ava cluster
-db-authority issue-unit`), installed into its private `$AVA_HOME/db-authority/`;
+receives the runner login, its API token and the telemetry token only in a
+sealed capability bundle the gateway operator issues for that unit (`ava cluster
+db-authority issue-unit`; the login and token are shared by every runner unit of
+the generation), installed into its private `$AVA_HOME/db-authority/`;
 bootstrap never serves a database login or the human secret. Runner Redis has the independent `AVA_REDIS_PASSWORD`, embedded
 only in the bootstrap URL; Redis `default`/`requirepass` uses
 `AVA_REDIS_ADMIN_PASSWORD`, file-only on the gateway. A remote-managed plane
