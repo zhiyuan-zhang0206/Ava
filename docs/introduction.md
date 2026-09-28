@@ -232,7 +232,7 @@ a bare `ava` means the cluster `$AVA_HOME` names (`~/.ava` for prod); a worktree
 | `ava logs` | list live service sessions or tail one |
 | `ava cluster update` | roll the latest merged code across the cluster — the only update path |
 | `ava cluster ls/status/down/destroy` | cluster registry + multi-machine roster |
-| `ava start --no-serve-gateway --serve-agent-runner --gateway-url <url> --db-capability <bundle>` | first start of a split-deployment agent-runner joining a gateway (with the bundle's `AVA_DB_CAPABILITY_KEY` exported) |
+| `.venv/bin/ava start --no-serve-gateway --serve-agent-runner --gateway-url <url> --db-capability <bundle>` | first start of a split-deployment agent-runner joining a gateway (its checkout's CLI — the home's own link does not exist yet; with the bundle's `AVA_DB_CAPABILITY_KEY` exported) |
 | `ava agents` | observe + control agents (ls / cancel / restart / terminate) |
 | `ava schedules` | gateway-supervised schedules (cron jobs agents create and own) |
 | `ava skill install <src>` | install Agent Skills from a git URL or local path |

@@ -119,9 +119,10 @@ gateway operator issues for that one unit and the runner installs at start:
 ```bash
 # on the gateway (its checkout's CLI), for one unit:
 ava cluster db-authority issue-unit --machine <name> --home <unit $AVA_HOME> --out <bundle>
-# carry the 0600 bundle to the unit and the printed transport key separately; then:
+# carry the 0600 bundle to the unit and the printed transport key separately; then, on the
+# unit (its checkout's `.venv/bin/ava` — the home's own CLI link does not exist until this start):
 read -rs AVA_DB_CAPABILITY_KEY && export AVA_DB_CAPABILITY_KEY
-ava start --db-capability <bundle>        # plus the first-start identity flags
+.venv/bin/ava start --db-capability <bundle>        # plus the first-start identity flags
 ```
 
 The bundle is sealed (AES-256-GCM) under a transport key printed once; it names
@@ -1298,9 +1299,10 @@ retires this home's native jobs and registry reservation; `--drop-db` additional
 removes its data directories. It refuses the default production home.
 
 A runner joins through the same first-start entry. Supply the capability
-bundle's `AVA_DB_CAPABILITY_KEY` without echoing it, then use `ava start
---serve-agent-runner --no-serve-gateway --gateway-url URL --machine-name NAME
---machine-host HOST --db-capability BUNDLE` (the bundle from `ava cluster
+bundle's `AVA_DB_CAPABILITY_KEY` without echoing it, then use its checkout's
+`.venv/bin/ava start --serve-agent-runner --no-serve-gateway --gateway-url URL
+--machine-name NAME --machine-host HOST --db-capability BUNDLE` (the home's own
+CLI link does not exist until this start; the bundle comes from `ava cluster
 db-authority issue-unit` on the gateway). Bootstrap publishes no database
 credential and not the human secret; the runner's login, API token and
 telemetry token arrive only in that unit's bundle (they are shared by every
