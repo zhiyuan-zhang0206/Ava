@@ -3,7 +3,8 @@
 A fresh host with no ~/.ava/.env (or one missing required fields) makes
 `Settings()` raise pydantic ValidationError on first `cli.commands` import.
 main() catches it and calls `_print_settings_load_failure`, which must turn the
-raw error into a copy-paste list of the missing AVA_* vars plus the enroll hint.
+raw error into a copy-paste list of the missing AVA_* vars plus the first-start
+hint that joins an agent-runner.
 """
 
 from __future__ import annotations
@@ -32,7 +33,7 @@ def test_friendly_template_lists_missing_vars(capsys):
     # Python attr names get uppercased + AVA_ prefixed to match the field aliases.
     assert "AVA_DB_URL=<value>" in err
     assert "AVA_REDIS_URL=<value>" in err
-    # The enroll path is the recommended fix, not a raw traceback.
+    # The runner's first start is the recommended fix, not a raw traceback.
     assert "ava start --serve-agent-runner" in err
     assert "Traceback" not in err
 

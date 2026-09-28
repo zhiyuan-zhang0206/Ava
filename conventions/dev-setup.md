@@ -134,10 +134,10 @@ the editable build. A failed install is not a transactional rollback of every
 package. The updater retains its existing editable-record recovery and bound.
 
 Index precedence is explicit `UV_DEFAULT_INDEX` / `UV_INDEX_URL`, then uv
-configuration, then `PIP_INDEX_URL`, then pip configuration, then PyPI. The
-installer's explicit `--mirror cn` selects and persists its profile as before;
-without that flag, the helper reads the unit's existing `mirror.env` without
-replacing real environment values. Native command boot preserves this precedence
+configuration, then `PIP_INDEX_URL`, then pip configuration, then PyPI. A
+profile exported into the shell (`scripts/mirrors/cn.env`) is real environment;
+the helper also reads the unit's existing `mirror.env` without replacing real
+environment values. Native command boot preserves this precedence
 across both uv single-index aliases while loading `.env` and `mirror.env`, before
 an update enters the helper. Additional index settings are not merged into them.
 The pip bridge reads only index settings, with global, user, target-venv and

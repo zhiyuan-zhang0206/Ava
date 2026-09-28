@@ -160,12 +160,12 @@ def test_enrolled_runner_with_unreachable_gateway_fails_fast(tmp_path: Path) -> 
     """The configured-runner fail-fast: enrolled (flag + URL) but the gateway is
     unreachable — the import raises BootstrapFetchError naming the remedy.
 
-    The runner flag is DECLARED IN THE UNIT'S .env, as `ava enroll` writes it —
+    The runner flag is DECLARED IN THE UNIT'S .env, as its first start writes it —
     a machine-identity key supplied by env alone is now dropped at
     load_ava_env (#771), so an env-only flag no longer configures the fetch."""
     home = tmp_path / "home"
     home.mkdir()
-    # enroll's bootstrap env: the role flag + gateway URL + cluster secret.
+    # A runner's bootstrap env: the role flag + gateway URL + a bearer.
     (home / ".env").write_text(
         "AVA_MACHINE_SERVE_AGENT_RUNNER=true\n"
         "AVA_GATEWAY_URL=http://127.0.0.1:1\n"  # nothing listens on port 1
@@ -247,7 +247,7 @@ def test_pure_runner_settings_build_fetches_and_overrides(tmp_path: Path) -> Non
         port = server.server_address[1]
         home = tmp_path / "home"
         home.mkdir()
-        # A pre-cutover enroll left stale cluster facts in the .env — tolerated:
+        # An older join left stale cluster facts in the .env — tolerated:
         # the fetch must override them. (AVA_GATEWAY_URL is in derived_env_keys(),
         # so `_enforce_cluster_env_authority` forces the file value over an
         # inherited env — write the real port into the file.)
@@ -311,7 +311,7 @@ def test_runner_daemon_boot_from_session_env_handoff(
         port = server.server_address[1]
         home = tmp_path / "home"
         home.mkdir()
-        # enroll's bootstrap env: gateway URL + cluster secret + the role flag
+        # A runner's bootstrap env: gateway URL + a bearer + the role flag
         # (the ONLY cluster facts a runner's .env holds since 2026-08-01).
         (home / ".env").write_text(
             "AVA_MACHINE_SERVE_AGENT_RUNNER=true\n"

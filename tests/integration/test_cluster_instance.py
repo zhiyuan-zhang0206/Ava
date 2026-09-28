@@ -397,9 +397,9 @@ def test_unix_only_foreign_postgres_same_port_cannot_receive_provisioning(
             )
 
 
-# ─── Task #1113: first-install hba timing + ambient-secret leak ──────────────
+# ─── Task #1113: first-start hba timing + ambient-secret leak ────────────────
 #
-# The bug chain: install-time birth starts pg BEFORE the cluster's .env exists,
+# The bug chain: a first-start birth starts pg BEFORE the cluster's .env exists,
 # so an hba written from ambient `settings` followed an inherited sibling
 # secret, and a rewritten hba was never reloaded into the running server. The
 # fix: the hba/bind follow the caller-passed cluster secret (never ambient
@@ -420,7 +420,7 @@ def _active_hba(pg_port: int) -> list[tuple[str, str]]:
 def test_birth_hba_follows_passed_secret_not_ambient_settings(
     isolated_cluster: tuple[int, int],
 ) -> None:
-    """Install-time birth of a no-secret cluster while the ambient settings carry
+    """First-start birth of a no-secret cluster while the ambient settings carry
     a sibling cluster's secret: the hba has loopback SCRAM lines only (no
     reachable/cidr reach) and the running server refuses a password-less TCP
     dial even for the OS-user superuser."""

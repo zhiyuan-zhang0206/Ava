@@ -551,7 +551,7 @@ def test_enforce_keeps_unanchored_sentinel(monkeypatch: pytest.MonkeyPatch, tmp_
 
 
 @pytest.mark.parametrize(
-    "url", ["redis://undeclared@127.0.0.1:1/0", "redis://install-cluster-boot@127.0.0.1:1/0"]
+    "url", ["redis://undeclared@127.0.0.1:1/0", "redis://first-start-boot@127.0.0.1:1/0"]
 )
 def test_enforce_drops_undeclared_redis_url(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, url: str
@@ -687,8 +687,8 @@ def test_gateway_profile_pops_only_for_gateway(
 
     # The .env file needs the identity keys so _enforce_cluster_env_authority
     # takes its FORCE branch and doesn't wipe them. DEEPSEEK_API_KEY is declared
-    # too — a single-box unit's .env carries every cluster field (install writes
-    # them all), so the FORCE branch keeps it in every profile and the ONLY thing
+    # too — a single-box unit's .env carries every cluster field (its first
+    # start writes them all), so the FORCE branch keeps it in every profile and the ONLY thing
     # that can remove it is the gateway profile pop. (An undeclared cluster key
     # is dropped for every profile — that is the F-s4-4 authority rule, not the
     # profile pop this test guards.)

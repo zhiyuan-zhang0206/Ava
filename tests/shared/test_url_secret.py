@@ -367,7 +367,7 @@ class TestSelfHostDialsLoopback:
         assert s.redis_url == _redis("STALE", host="localhost:6380")
 
     def test_machine_host_file_fallback_matches(self, tmp_path: Path) -> None:
-        # env unset -> the `$AVA_HOME/machine_host` file (written by enroll) wins.
+        # env unset -> the `$AVA_HOME/machine_host` file (the first start's) wins.
         self._isolate(tmp_path, machine_host=None)
         (tmp_path / "machine_host").write_text("gw.host\n")
         s = _settings_with(

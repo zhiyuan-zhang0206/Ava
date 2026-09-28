@@ -86,7 +86,7 @@ def test_every_leaf_subcommand_binds_a_handler_from_its_parser_module() -> None:
         )
 
 
-def test_import_defers_detached_cli_logging_until_dispatch(tmp_path: Path) -> None:
+def test_import_defers_cli_logging_until_dispatch(tmp_path: Path) -> None:
     """A settings-free entry can import the parser before choosing its path."""
     code = """
 import sys
@@ -97,7 +97,7 @@ assert 'shared.config' not in sys.modules
     result = subprocess.run(  # noqa: S603 - fixed interpreter and literal probe.
         [sys.executable, "-B", "-c", code],
         cwd=Path(__file__).resolve().parents[2],
-        env={**os.environ, "HOME": str(tmp_path), "AVA_CLI_LOG_NAME": "retained-entry-test"},
+        env={**os.environ, "HOME": str(tmp_path)},
         capture_output=True,
         text=True,
         timeout=20,
@@ -172,7 +172,7 @@ def prepared(*args):
     assert "shared.dotenv_boot" not in sys.modules, "home resolved before identity"
     prepare(*args)
 start_intent._prepare_start_locked = prepared
-main._init_detached_cli_logging = lambda: None
+main._init_cli_logging = lambda _args: None
 commands = types.ModuleType("cli.commands.start")
 sys.modules["cli.commands.start"] = commands
 calls = []
@@ -662,10 +662,11 @@ def configured():
     assert (home / "start-intent.json").is_file()
     assert (home / ".env").is_file()
     assert Path(os.environ["AVA_CLUSTER_REGISTRY"]).is_file()
-def log():
+def log(args):
+    assert args == ["start"]
     configured()
     calls.append("logging")
-main._init_detached_cli_logging = log
+main._init_cli_logging = log
 def start(**kwargs):
     configured()
     calls.append("runtime")
@@ -686,7 +687,6 @@ assert "shared.config" not in sys.modules
         AVA_HOME=str(tmp_path / "home"),
         AVA_HOME_OVERRIDE="1",
         AVA_CLUSTER_REGISTRY=str(tmp_path / "clusters.json"),
-        AVA_CLI_LOG_NAME="first-start",
         AVA_DB_URL="postgresql://foreign.invalid/forbidden",
         AVA_GATEWAY_URL="http://foreign.invalid",
     )

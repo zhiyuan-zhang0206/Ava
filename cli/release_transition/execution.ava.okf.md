@@ -36,7 +36,10 @@ incomplete operation explain an outage only while that stamp is at most
 `EXECUTOR_HEARTBEAT_TTL_S` old; before the first beat, the stamp the
 submission and each native dispatch leave (`open_launch_grace`). Past it the
 executor is lost (killed, OOM'd, rebooted or never launched) and the probe
-alerts `operation executor lost`, graded from the last stamp.
+alerts `operation executor lost`, graded from the last stamp. A stale stamp
+is lost whatever error the journal records: every exit removes the stamp, a
+hold's included, while an abort or recovery decision's error stands until
+its next phase with the executor still running.
 
 The stop phase closes this unit's writers. Persistent terminals — agent
 shells, coding sessions, watchers, page and schedule runners — do not survive

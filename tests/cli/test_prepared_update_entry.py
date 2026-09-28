@@ -85,7 +85,6 @@ for verb in ('restart', 'rollback', 'cancel', 'recover-pending'):
         **os.environ,
         "HOME": str(tmp_path),
         "AVA_HOME": str(tmp_path / "unit"),
-        "AVA_CLI_LOG_NAME": "prepared-import-guard",
     }
     result = subprocess.run(  # noqa: S603 — fixed interpreter and literal guard program.
         [sys.executable, "-B", "-c", code],

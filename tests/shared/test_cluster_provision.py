@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import os
 import time
+from typing import Any
 from urllib.parse import urlsplit
 
 import psycopg
@@ -265,10 +266,10 @@ def test_ensure_pgvector_extension_precreates_in_cluster_db(
 
 
 def test_ensure_pgvector_extension_noop_on_connect_failure(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, loguru_records: list[dict[str, Any]]
 ) -> None:
     """An unreachable admin connection is a logged no-op (the ensure re-runs on
-    every bring-up), never a birth-killing raise."""
+    every bring-up), never a birth-killing raise. The warning names the cause."""
     from shared.cluster.provision import ensure_pgvector_extension
 
     def boom(url: str, **_kw: object) -> _FakePgConn:
@@ -276,6 +277,8 @@ def test_ensure_pgvector_extension_noop_on_connect_failure(
 
     monkeypatch.setattr(psycopg, "connect", boom)
     ensure_pgvector_extension("ava_ident", base_admin_url="postgresql://admin@/postgres")
+    [warning] = [r for r in loguru_records if "[pgvector] pre-create skipped" in r["message"]]
+    assert "(connection is bad)" in warning["message"]
 
 
 def test_interrupted_empty_database_requires_initialization_authority(_provisioned_db: str) -> None:

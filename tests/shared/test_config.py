@@ -485,7 +485,7 @@ def test_identity_fields_are_read_only() -> None:
 
 def test_host_identity_fields_are_read_only() -> None:
     """Host identity / connection / infra fields are not panel-writable — they're set
-    via install / enroll / `ava start`, not the runtime config panel. (The config
+    by the first `ava start`, not the runtime config panel. (The config
     write path enforces this too; the metadata must agree so the UI shows read-only.)"""
     from shared.config import FIELD_INFOS
 

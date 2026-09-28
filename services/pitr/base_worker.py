@@ -25,6 +25,7 @@ from services.pitr.worker_process import (
     worker_request,
 )
 from shared.config import settings
+from shared.log import init_cli_process
 from shared.paths import ava_home
 from shared.platform import LockTimeoutError
 from shared.process_env import inherited_process_env
@@ -120,6 +121,11 @@ def _commit(
 
 
 def main() -> None:
+    # Importing `shared.log` drops loguru's default handler: without sinks,
+    # every record `shared.db`, `shared.pg_tools` and the candidate code write
+    # is discarded. Stderr is the operation's `stderr.log`, whose tail a
+    # failure carries; the file is `$AVA_HOME/logs/pitr-base-worker.log`.
+    init_cli_process(name="pitr-base-worker")
     request, output = worker_request(sys.argv)
     if set(request) != {"chain_id"}:
         raise ValueError("invalid base worker request")

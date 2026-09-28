@@ -373,8 +373,9 @@ def _all_aliases() -> frozenset[str]:
 
 
 def test_env_registry_imports_on_clean_env_without_config_package() -> None:
-    """Task #1099 regression: importing env_registry first (the install.sh
-    --worktree boot path) must not circular-import through the config package.
+    """Task #1099 regression: importing env_registry first (a first `ava start`
+    prepares identity before any settings) must not circular-import through the
+    config package.
 
     Before the fix, `shared.config_registry` built `FIELD_INFOS` at module
     level, which ran `_build_registry()` during the module import; its deferred
@@ -382,7 +383,7 @@ def test_env_registry_imports_on_clean_env_without_config_package() -> None:
     module (the package __init__ re-imports `field_alias` from it) and raised
     ``ImportError: cannot import name 'field_alias' from partially initialized
     module``. A fresh subprocess with no pre-imported `shared.config`
-    reproduces the exact install.sh --worktree boot order.
+    reproduces that boot order.
     """
     result = subprocess.run(  # fixed argv, repo code, no shell
         [

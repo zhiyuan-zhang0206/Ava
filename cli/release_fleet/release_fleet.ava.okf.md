@@ -83,8 +83,13 @@ across samples add up to the threshold, and a continuation keeps them. An
 error that appears and clears between two samples is not observed. A
 sighting adds a reason, never an observation of liveness. The journal keeps
 per-agent detail as ids (cohort, sightings, alerts) and one small affected
-entry whose unit the cohort names, so a 256 KiB journal still records a
-mass failure of about 4,000 cohort agents and its recovery.
+entry whose unit the cohort names. That still grows with the cohort, so
+`capture_cohort` refuses one above `MAX_COHORT_AGENTS` (2,000): the release
+aborts at `quiescing`, restarting the previous image unchanged, rather than
+holding at `watching` when a failing verdict outgrows the 256 KiB journal.
+The worst failure at the ceiling (every agent reaped, then sighted with a
+runtime error and a quarantine, seven-digit ids) writes about 238 KB
+(`test_cohort_ceiling.py`).
 
 ## Alerts (`alerting.py`)
 

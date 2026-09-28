@@ -254,8 +254,8 @@ def ensure_pgvector_extension(
     except psycopg.OperationalError as exc:
         logger.warning(
             "[pgvector] pre-create skipped: cluster Postgres unreachable over the "
-            "admin connection (%s) — re-attempted on the next bring-up",
-            exc,
+            "admin connection ({exc}) — re-attempted on the next bring-up",
+            exc=exc,
         )
 
 

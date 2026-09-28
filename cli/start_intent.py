@@ -446,9 +446,9 @@ def run_start(args: argparse.Namespace, *, runtime: StartRuntime | None = None) 
             _prepare_start_locked(args, home, runtime)
             if runtime.release is not None:
                 require_start_authorized(home)
-            from cli.main import _init_detached_cli_logging
+            from cli.main import _init_cli_logging
 
-            _init_detached_cli_logging()
+            _init_cli_logging(["start"])
             from cli.commands.start import cmd_start
 
             result = cmd_start(

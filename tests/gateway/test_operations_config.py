@@ -400,7 +400,7 @@ def test_config_write_op_does_not_disturb_non_managed_env(
     isolated_host_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A write touches only the fields named in the patch — a connection value
-    install/enroll wrote into .env (e.g. AVA_DB_URL) is left alone even when a
+    the first start wrote into .env (e.g. AVA_DB_URL) is left alone even when a
     managed field is explicitly unset."""
     monkeypatch.setattr(ops, "machine_name", lambda: "test-machine")
     monkeypatch.setattr(

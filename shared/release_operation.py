@@ -145,6 +145,8 @@ class InFlight(NamedTuple):
     launch-grace stamp its submission and each native dispatch leave
     (`open_launch_grace`); with no stamp at all, the request's creation.
     `alive` means that is at most `EXECUTOR_HEARTBEAT_TTL_S` old.
+    `stamped`: a stamp is on disk. Every executor exit removes it, a hold's
+    included, so a stale one is left only by an executor that died.
     `recovering`: the operation journaled an abort, recovery or rollback
     decision. `failed`: it recorded an error — a hold, whose executor exited
     on purpose, or a decision's error until its next phase.
@@ -153,6 +155,7 @@ class InFlight(NamedTuple):
     label: str
     alive: bool
     last_seen: datetime
+    stamped: bool
     recovering: bool
     failed: bool
 
@@ -169,8 +172,13 @@ class InFlight(NamedTuple):
 
     @property
     def lost(self) -> bool:
-        """Its executor stopped stamping without recording a failure."""
-        return not self.alive and not self.failed
+        """Its executor died, or left without recording a failure.
+
+        A stale stamp is lost whatever the error says: a decision's error
+        stands until the recovery's next phase while its executor runs on.
+        Only a missing stamp with an error is a hold's purposeful exit.
+        """
+        return not self.alive and (self.stamped or not self.failed)
 
 
 def operation_in_flight(home: Path, *, now: datetime | None = None) -> InFlight | None:
@@ -181,8 +189,9 @@ def operation_in_flight(home: Path, *, now: datetime | None = None) -> InFlight 
     one that never launched, stops stamping its heartbeat, and its operation
     then explains nothing — the executor is lost. A recovering operation
     explains nothing either, nor does a failed one (a recorded error): a held
-    operation's executor exited on purpose, so it is never lost, and its hold
-    is itself worth an alert.
+    operation's executor exited on purpose and removed its stamp, so it is
+    never lost, and its hold is itself worth an alert. A decision's error is
+    no hold: an executor killed before the recovery's next phase is lost.
     """
     from shared.deploy_timing import EXECUTOR_HEARTBEAT_TTL_S
 
@@ -202,6 +211,7 @@ def operation_in_flight(home: Path, *, now: datetime | None = None) -> InFlight 
         label=f"{_KIND_LABELS[kind]} operation {path.parent.name} at {operation['phase']}",
         alive=not stale,
         last_seen=last_seen,
+        stamped=os.path.lexists(path.parent / _HEARTBEAT),
         recovering=bool(operation[kind]["decisions"]),
         failed=operation["error"] is not None,
     )

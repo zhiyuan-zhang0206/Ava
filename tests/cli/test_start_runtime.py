@@ -616,7 +616,7 @@ def test_release_run_start_checks_configuration_before_identity_and_settings(
         prepared.append(True)
         change()
 
-    def forbidden_logging() -> None:
+    def forbidden_logging(_args: list[str]) -> None:
         raise AssertionError("changed configuration reached Settings-dependent startup")
 
     # start_intent.run_start's whole point here is a pre-Settings identity bootstrap
@@ -626,7 +626,7 @@ def test_release_run_start_checks_configuration_before_identity_and_settings(
     monkeypatch.setitem(os.environ, "AVA_HOME", str(home))
     monkeypatch.setitem(os.environ, "AVA_CLUSTER_REGISTRY", request.registry)
     monkeypatch.setattr(start_intent, "_prepare_start_locked", prepare)
-    monkeypatch.setattr(main, "_init_detached_cli_logging", forbidden_logging)
+    monkeypatch.setattr(main, "_init_cli_logging", forbidden_logging)
     if change_at == "before-identity":
         change()
     with authorized_start(request.path):

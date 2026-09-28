@@ -1381,9 +1381,11 @@ heartbeat (or, before the first one, the stamp its submission and each native di
 leave) is older than `EXECUTOR_HEARTBEAT_TTL_S` (300 s), the operation explains nothing
 and the probe fails on its own with `operation executor lost`, graded from the executor's
 last sign of life: nothing will finish that operation, and startup stays refused while it
-holds the home. A failed (held) operation, like missing or unreadable ownership, explains
-nothing, and neither does the deploy lease it leaves behind until the lease's TTL; disk
-pressure remains independent.
+holds the home. A stale stamp is lost even while the journal records an error: an abort
+or recovery decision's error stands until its next phase, with the executor still running.
+A failed (held) operation, whose executor removed its stamp on the way out, is not lost;
+like missing or unreadable ownership, it explains nothing, and neither does the deploy lease
+it leaves behind until the lease's TTL; disk pressure remains independent.
 
 The OS job and CLI probe only observe and alert. They do not invoke rollback,
 maintain release-policy failure counters, or promote pending code to known-good.
