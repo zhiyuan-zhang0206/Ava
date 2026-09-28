@@ -17,6 +17,9 @@ live or different incarnation, an unsettled command, no receipt, a paused
 machine, an unattested identity, a malformed value), or `unconvertible` with
 the reason (a shape neither resurrection nor admission accepts even after
 conversion). The conversion itself re-checks every guard under the row lock.
+The last two are `FENCED`: the runtime keeps refusing those agents, so D-8
+reads `repair` while convertible or awaiting rows remain, then `fenced` (never
+`ok`) while any fenced row remains, with a count per verdict and reason.
 """
 
 from __future__ import annotations
@@ -71,6 +74,9 @@ _POSTURES = (
 )
 _MACHINES = "SELECT name, role, paused_at, pause_reason, stopped_at, gateway_url FROM machines"
 _NULLS = "SELECT machine, count(*) FROM agents_meta WHERE incarnation_resources IS NULL GROUP BY 1"
+# Verdicts whose agents the runtime keeps refusing after the repair.
+FENCED = ("inadmissible", "unconvertible")
+_EXAMPLES = 5
 _OWNER = (
     "SELECT r.rolname AS owner, r.oid = 10 AS owner_is_bootstrap FROM pg_database d "
     "JOIN pg_roles r ON r.oid = d.datdba WHERE d.datname = current_database()"
@@ -273,11 +279,24 @@ def _pin(conn: psycopg.Connection[Any], legacy_commit: str | None) -> dict[str, 
     return {"verdict": "ok" if matches else "attention", "pin": pin, "legacy_commit": legacy_commit}
 
 
+def fenced_summary(legacy: list[Legacy]) -> list[dict[str, Any]]:
+    """The fenced rows per (verdict, reason): a count and the first agent ids."""
+    groups: dict[tuple[str, str], list[int]] = {}
+    for item in legacy:
+        if item.verdict in FENCED:
+            groups.setdefault((item.verdict, str(item.reason)), []).append(item.agent_id)
+    return [
+        {"verdict": verdict, "reason": reason, "count": len(agents), "agents": agents[:_EXAMPLES]}
+        for (verdict, reason), agents in sorted(groups.items())
+    ]
+
+
 def _checks(conn: psycopg.Connection[Any], found: Survey, inputs: Inputs) -> dict[str, Any]:
     pending, problem = pending_of(found.evidence), publication_problem(found.evidence)
     owner = rows(conn, _OWNER)[0]
     prepared = value(conn, "SELECT count(*) FROM pg_prepared_xacts")
     unreconciled = [item for item in found.legacy if item.verdict in ("convertible", "awaiting")]
+    fenced = fenced_summary(found.legacy)
     checks: dict[str, dict[str, Any]] = {
         "D-1": {
             "verdict": "repair" if pending is not None else ("attention" if problem else "ok"),
@@ -291,8 +310,9 @@ def _checks(conn: psycopg.Connection[Any], found: Survey, inputs: Inputs) -> dic
         "D-5": {"verdict": "info", "units": found.units, "machines": found.machines},
         "D-6": _postures(found, inputs.retired),
         "D-8": {
-            "verdict": "repair" if unreconciled else "ok",
+            "verdict": "repair" if unreconciled else ("fenced" if fenced else "ok"),
             "counts": found.counts,
+            "fenced": fenced,
             "rows": [item.summary() for item in found.legacy],
         },
         "D-10": {

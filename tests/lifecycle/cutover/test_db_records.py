@@ -24,6 +24,7 @@ from psycopg_pool import AsyncConnectionPool
 from agent.hosted_ownership import admit_hosted_runtime
 from ops.agent_spawn import create_agent_row
 from scripts import cutover_db_records as records
+from scripts import cutover_db_survey as survey_module
 from scripts import cutover_inventory as inventory
 from scripts.cutover_db_survey import FREE_LEASE, Inputs, RetiredUnit, export_rows, survey
 from shared.config import settings
@@ -488,7 +489,55 @@ def test_execute_records_the_run_and_the_same_inputs_change_nothing(
     assert len(json.loads((record / "journal.json").read_text())["runs"]) == 1
     after = _survey(inputs).checks
     verdicts = {name: after[name]["verdict"] for name in ("D-1", "D-2", "D-6", "D-8")}
-    assert verdicts == dict.fromkeys(("D-1", "D-2", "D-6", "D-8"), "ok")
+    # The live, paused and unreceipted rows stay fenced: D-8 says so, never `ok`.
+    assert verdicts == dict.fromkeys(("D-1", "D-2", "D-6"), "ok") | {"D-8": "fenced"}
+
+
+def _owned_by_an_application_owner(monkeypatch: pytest.MonkeyPatch) -> None:
+    """D-10 as on a converted production home (the throwaway database is owned
+    by its bootstrap superuser)."""
+    monkeypatch.setattr(
+        survey_module, "_OWNER", "SELECT 'ava_owner' AS owner, false AS owner_is_bootstrap"
+    )
+
+
+def test_rows_left_fenced_keep_d8_and_the_check_from_reading_clean(
+    cluster: Cluster,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _run(cluster, _inputs(tmp_path, cluster))
+    _owned_by_an_application_owner(monkeypatch)
+    capsys.readouterr()
+    with _patched_session(write=False):
+        code = records.main(["--home", str(cluster.home), "--check"])
+    checks = json.loads(capsys.readouterr().out)["checks"]
+    unclean = {
+        name: c["verdict"] for name, c in checks.items() if c["verdict"] not in ("ok", "info")
+    }
+    assert (code, unclean) == (2, {"D-8": "fenced"})
+    agents = cluster.agents
+    assert checks["D-8"]["fenced"] == [
+        {
+            "verdict": "inadmissible",
+            "reason": "no settled lifecycle receipt for the recorded incarnation",
+            "count": 1,
+            "agents": [agents["unreceipted"]],
+        },
+        {
+            "verdict": "inadmissible",
+            "reason": "the machine is paused; no closure evidence exists for it",
+            "count": 1,
+            "agents": [agents["paused"]],
+        },
+        {
+            "verdict": "inadmissible",
+            "reason": "the row still names a live or different incarnation",
+            "count": 1,
+            "agents": [agents["live"]],
+        },
+    ]
 
 
 async def test_the_converted_agent_carries_its_evidence_and_is_admitted(

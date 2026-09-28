@@ -43,9 +43,10 @@ authority cutover brought the plane up under new custody. Run them with the
    documents to the gateway unchanged; their bytes are the evidence.
 5. **Repair (W7, after `scripts/cutover_db_authority.py`).** Dry-run with every
    input, resolve every refusal, then add `--execute`. Finally `--check` with
-   the same attestations: D-1, D-2, D-6 and D-8 read `ok`, and every
-   remaining retired-shape row is listed `inadmissible` or `unconvertible`
-   with its reason.
+   the same attestations: D-1, D-2 and D-6 read `ok`. D-8 reads `ok` only
+   when no retired-shape row remains; otherwise it reads `fenced` with a count
+   per verdict and reason, and `--check` exits 2 ([rows left
+   fenced](#rows-left-fenced)).
 
 ```bash
 P=scripts/cutover_db_records.py
@@ -111,6 +112,44 @@ released or carries no hosted kind, a terminated row still pointing at its
 receipt, a terminate receipt left as an idling row's pointer, a process
 runtime). The runtime keeps refusing those rows (`resource_fence`,
 `runtime_cutover_required`). NULL rows are counted and left as protocol zero.
+
+## Rows left fenced
+
+`--execute` converts only `convertible` rows. Every other retired-shape row
+stays fenced: the runtime keeps refusing its agent (`resource_fence` at
+admission, `runtime_cutover_required` at resurrection). D-8 reads `fenced`
+with a count and example agent ids per verdict and reason, so `--check` keeps
+exiting 2 after the repair.
+
+Each run re-reads every row. A row whose state changes is reclassified by the
+next `--check`, and a later run with new inputs converts it, for as long as
+the script exists. What can change a fenced row:
+
+- **`awaiting` or an unattested identity.** Take an attestation for that
+  machine with `--attest` while its home is still stopped, before the new
+  code starts there. A later run with that attestation converts the rows.
+- **A paused machine.** Its rows convert only after the machine is resumed
+  and attested while its home is still stopped; a later run with that
+  attestation converts them. Known gap: if its host posture still reads
+  `paused` (D-6), that run must also repair the posture, and a posture repair
+  requires a closure attestation from every included machine. Once the other
+  machines run the new code, the only such documents are their cutover-time
+  attestations, which no longer describe them. No sound late path exists for
+  such a machine, and its agents stay fenced.
+- **Every other reason (known gap).** This covers:
+  - a row that still names a live or different incarnation after every old
+    host stopped;
+  - a pointer to an unsettled command;
+  - no settled receipt (for example a crash-reaped row, which never had a
+    terminate command);
+  - a malformed value;
+  - every `unconvertible` row.
+
+  No input of this script changes these rows. Conversion would not help an
+  `unconvertible` row either: neither resurrection nor admission accepts its
+  shape. These agents stay fenced until a separate, evidence-backed decision
+  exists. The cutover scripts, and this conversion with them, are deleted
+  after the cutover.
 
 ## Record and recovery
 
