@@ -94,7 +94,9 @@ class _Generation:
     tracked: set[OwnedProcess] = field(default_factory=set[OwnedProcess])
     closing: bool = False
     scope_closed_at_exit: bool = False
-    """The leader's group was empty when root reaped it: nothing of the unit remained."""
+    """The leader's group was empty when root reaped it: nothing of the unit remained.
+
+    Otherwise the watch retained the group's members in `tracked` at that reap."""
     exited: asyncio.Event = field(default_factory=asyncio.Event)
 
 
@@ -452,11 +454,14 @@ class Supervisor:
         the final action so waiters never observe a half-processed exit.
         """
         returncode = await generation.proc.wait()
-        # Read right at the reap, before the leader's number can be reused: an
-        # empty group then is the unit's closure; a later group with that
-        # number may be a stranger's.
+        # Read right at the reap, while any member still reserves the leader's
+        # number: an empty group then is the unit's closure, and the members
+        # listed now are the unit's survivors. Once they exit, a later group
+        # with that number may be a stranger's, so no later stop lists it.
         if not isinstance(generation.proc, ApplicationProcess):
             generation.scope_closed_at_exit = _group_closed(generation.proc.pid)
+            if not generation.scope_closed_at_exit:
+                _record_survivors(runtime.manifest.id, generation)
         if runtime.generation is generation:
             runtime.last_exit = _describe_exit(returncode)
             runtime.state = UnitState.STOPPED
@@ -481,7 +486,9 @@ class Supervisor:
         if isinstance(generation.proc, ApplicationProcess):
             await self._stop_job_generation(runtime, generation, generation.proc, force=force)
             return
-        exited = None if generation.closing else _exited_leader(runtime, generation)
+        # Routed by what this stop finds, not by `closing`: a retry after a
+        # refused stop whose leader has since exited must not list the group.
+        exited = _exited_leader(runtime, generation)
         if exited is not None:
             await self._stop_exited_generation(runtime, generation, *exited, force=force)
             return
@@ -497,31 +504,50 @@ class Supervisor:
         *,
         force: bool,
     ) -> None:
-        """Release custody of a leader that exited before any stop captured its scope.
+        """Close what root recorded of a unit whose leader it reaped before this stop.
 
         Root reaps its own leader, so after that reap the recorded birth is
-        positively dead. Whether descendants outlived it was read at the reap:
-        an empty group means nothing of the unit remained. Otherwise the group
-        number stays reserved while any member lives, and a pid is never reused
-        while it is still the process-group ID of a live group (POSIX); so a
-        process now holding the leader's pid proves that group ended, and the
-        group that pid may lead is a stranger's. Neither case signals anything.
-        Surviving descendants go through the ordinary group closure.
+        positively dead, and the watch retained every member of the leader's
+        group while any member still reserved its number. After that the number
+        proves nothing: once those members exit, another program's group can
+        carry it. So this stop never lists the group. It signals only recorded
+        births and their birth-verified descendants (`capture_tree`), each
+        through its own birth check; only explicit force escalates. Once none
+        of them lives, custody is released when the unit's group is proven
+        over: empty at the reap, empty now, or its number now held as a PID by
+        another process (a PID is never reused while it is still the
+        process-group ID of a live group, POSIX), whose group is never
+        signalled. A group still occupied with no recorded birth alive may be a
+        stranger's: custody stays and the stop refuses, naming it.
         """
         await self._await_reap(runtime, generation, identity, custody)
-        if generation.scope_closed_at_exit or psutil.pid_exists(identity.pid):
-            custody.clear()
-            runtime.generation = None
-            runtime.state = UnitState.STOPPED
-            _log.info(
-                "unit %s: recorded birth (pid %s) had exited; custody released",
-                runtime.manifest.id,
-                identity.pid,
-            )
-            return
-        generation.closing = True
-        custody.retain(generation.tracked)
-        await self._stop_posix_generation(runtime, generation, identity, custody, force=force)
+        pgid = identity.pid
+        deadline = monotonic() + self._config.stop_timeout_s
+        while True:
+            living = _recorded_living(generation.tracked)
+            if living:
+                custody.retain(generation.tracked)
+                expired = monotonic() >= deadline
+                if expired and not force:
+                    raise _ownership_retained(runtime.manifest.id, living, pgid)
+                self._signal_all(living, force=expired and force)
+                if expired:
+                    force = False
+                    deadline = monotonic() + self._config.stop_timeout_s
+            elif generation.scope_closed_at_exit or _group_closed(pgid) or psutil.pid_exists(pgid):
+                custody.clear()
+                runtime.generation = None
+                runtime.state = UnitState.STOPPED
+                runtime.last_error = None
+                _log.info(
+                    "unit %s: recorded births of group %s are gone; custody released",
+                    runtime.manifest.id,
+                    pgid,
+                )
+                return
+            elif monotonic() >= deadline:
+                raise _unproven_group(runtime.manifest.id, pgid, custody)
+            await asyncio.sleep(0.05)
 
     async def _await_reap(
         self,
@@ -589,13 +615,16 @@ class Supervisor:
     ) -> None:
         """Bounded TERM, then certified closure of the unit's process group.
 
-        The leader leads the unit's group; its group number stays reserved
-        while any member exists. After the leader is reaped, only the kernel
-        reporting that group empty certifies the stop: a child forked while
-        the leader handled TERM is still a member, so it is captured, signalled
-        like any tracked descendant and must exit too. Only explicit force
-        escalates, and only to those captured members. A member that calls
-        setsid() leaves the group by construction and is not covered.
+        Only a stop that found the leader live runs this: the unreaped leader
+        reserved the group number until its reap inside this bounded stop,
+        which reads the group within that same stop, never after an unbounded gap (a
+        stop that finds the leader already reaped is `_stop_exited_generation`,
+        which never lists the group). After the reap, only the kernel reporting
+        that group empty certifies the stop: a child forked while the leader
+        handled TERM is still a member, so it is captured, signalled like any
+        tracked descendant and must exit too. Only explicit force escalates,
+        and only to those captured members. A member that calls setsid()
+        leaves the group by construction and is not covered.
         """
         self._signal_owned(identity, force=False)
         deadline = monotonic() + self._config.stop_timeout_s
@@ -689,17 +718,60 @@ def _group_closed(pgid: int) -> bool:
         return False
 
 
+def _record_survivors(unit_id: str, generation: _Generation) -> None:
+    """Retain the births in a just-reaped leader's group while its number is reserved.
+
+    Never raises, so the watch still publishes the exit. A member missed here
+    is never signalled later; it keeps the group occupied, and the stop then
+    refuses instead of releasing custody.
+    """
+    pgid = generation.proc.pid
+    try:
+        retain_processes(generation.tracked, _group_births(pgid))
+        if generation.custody is not None:
+            generation.custody.retain(generation.tracked)
+    except (OSError, RuntimeError, psutil.Error) as exc:
+        _log.error("unit %s: group %s survivors not fully recorded at reap: %s", unit_id, pgid, exc)
+
+
+def _recorded_living(tracked: set[OwnedProcess]) -> set[OwnedProcess]:
+    """Retain the verified descendants of live recorded births; return every live one."""
+    for item in {item for item in tracked if item.live()}:
+        retain_processes(tracked, capture_tree(item))
+    return {item for item in tracked if item.live()}
+
+
 def _ownership_retained(unit_id: str, living: set[OwnedProcess], pgid: int) -> RuntimeError:
     survivors = sorted(item.pid for item in living) or group_members(pgid)
     return RuntimeError(f"unit {unit_id} did not stop; ownership retained (pids {survivors})")
 
 
-def _capture_group(tracked: set[OwnedProcess], pgid: int) -> set[OwnedProcess]:
-    """Retain the named members of an occupied unit group; return the live ones."""
+def _unproven_group(unit_id: str, pgid: int, custody: ServiceCustody) -> RuntimeError:
+    try:
+        listed = f"pids {group_members(pgid)}"
+    except OSError as exc:
+        listed = f"members root cannot list ({exc})"
+    return RuntimeError(
+        f"unit {unit_id}: every recorded birth has exited, but process group {pgid} still "
+        f"holds {listed}; its leader was reaped earlier, so that group may now be another "
+        f"program's. Custody retained at {custody.path}. Stop any of those processes that "
+        "belong to this unit and retry the stop; if the rest are another program's, move "
+        "that record aside once no process of this unit remains"
+    )
+
+
+def _group_births(pgid: int) -> set[OwnedProcess]:
+    """Native births the kernel files under `pgid` now; lineage is the caller's proof."""
     members: set[OwnedProcess] = set()
     for pid in group_members(pgid):
         with contextlib.suppress(psutil.NoSuchProcess):
             members.add(OwnedProcess.capture(psutil.Process(pid)))
+    return members
+
+
+def _capture_group(tracked: set[OwnedProcess], pgid: int) -> set[OwnedProcess]:
+    """Retain the named members of an occupied unit group; return the live ones."""
+    members = _group_births(pgid)
     retain_processes(tracked, members)
     return {item for item in members if item.live()}
 

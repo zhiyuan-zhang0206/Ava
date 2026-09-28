@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
 import subprocess
 import sys
@@ -179,7 +180,9 @@ async def test_unexpected_exit_cannot_authorize_cold_duplicate(tmp_path: Path) -
     assert (tmp_path / "custody/worker.json").exists()
     # The owner reaped that exact birth and its group was empty: stop settles it.
     await owner.down("worker")
-    assert (await row(owner))["state"] == "stopped"
+    released = await row(owner)
+    assert released["state"] == "stopped"
+    assert released["last_error"] is None, "the settled record still asks for reconciliation"
     assert not list((tmp_path / "custody").iterdir())
     await owner.shutdown()
 
@@ -203,6 +206,45 @@ async def test_stop_after_unexpected_exit_closes_surviving_descendants(tmp_path:
     await owner.shutdown()
 
 
+def signal_recorder(signals: Path, ready: Path) -> str:
+    """A stranger's code: log every catchable stop signal instead of exiting."""
+    return (
+        "import pathlib,signal,time\n"
+        f"log=pathlib.Path({str(signals)!r})\n"
+        "def record(number, _frame):\n"
+        "    with log.open('a') as out: out.write(f'{number}\\n')\n"
+        "for number in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP, signal.SIGUSR1):\n"
+        "    signal.signal(number, record)\n"
+        f"pathlib.Path({str(ready)!r}).touch()\n"
+        "time.sleep(60)\n"
+    )
+
+
+async def pid_in(path: Path) -> int:
+    """The PID a child writes to `path`, once the write is complete."""
+    for _ in range(250):
+        with contextlib.suppress(FileNotFoundError, ValueError):
+            return int(path.read_text())
+        await asyncio.sleep(0.02)
+    raise AssertionError(f"no PID written to {path}")
+
+
+def ended(process: psutil.Process) -> bool:
+    """Whether `process` exited; a zombie counts, since its reaper is not this test."""
+    try:
+        return not process.is_running() or process.status() == psutil.STATUS_ZOMBIE
+    except psutil.NoSuchProcess:
+        return True
+
+
+async def gone(process: psutil.Process) -> None:
+    for _ in range(250):
+        if ended(process):
+            return
+        await asyncio.sleep(0.02)
+    raise AssertionError(f"pid {process.pid} did not exit")
+
+
 async def test_exited_birth_at_a_reused_pid_never_signals_the_stranger(tmp_path: Path) -> None:
     """The recorded PID now belongs to another birth leading its own group.
 
@@ -213,16 +255,7 @@ async def test_exited_birth_at_a_reused_pid_never_signals_the_stranger(tmp_path:
     await owner.start()
     await exited(owner)
     signals, ready = tmp_path / "stranger-signals", tmp_path / "stranger-ready"
-    code = (
-        "import pathlib,signal,time\n"
-        f"log=pathlib.Path({str(signals)!r})\n"
-        "def record(number, _frame):\n"
-        "    with log.open('a') as out: out.write(f'{number}\\n')\n"
-        "for number in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP, signal.SIGUSR1):\n"
-        "    signal.signal(number, record)\n"
-        f"pathlib.Path({str(ready)!r}).touch()\n"
-        "time.sleep(60)\n"
-    )
+    code = signal_recorder(signals, ready)
     stranger = subprocess.Popen([sys.executable, "-c", code], process_group=0)  # noqa: S603 — disposable test child
     try:
         await wait_file(ready)
@@ -244,6 +277,131 @@ async def test_exited_birth_at_a_reused_pid_never_signals_the_stranger(tmp_path:
     finally:
         stranger.kill()
         stranger.wait(timeout=5)
+    await owner.shutdown()
+
+
+async def reaped_with_survivor(tmp_path: Path, reaped: str) -> tuple[Supervisor, psutil.Process]:
+    """A unit whose leader root reaped while a TERM-ignoring survivor lived on.
+
+    The leader exits on its own, or during a stop that the survivor makes refuse.
+    """
+    survivor_file = tmp_path / "survivor"
+    survivor = (
+        "import os,pathlib,signal,time; signal.signal(signal.SIGTERM, signal.SIG_IGN); "
+        f"pathlib.Path({str(survivor_file)!r}).write_text(str(os.getpid())); time.sleep(60)"
+    )
+    leader_stays = "" if reaped == "unexpected-exit" else "; time.sleep(60)"
+    code = f"import subprocess,sys,time; subprocess.Popen([sys.executable,'-c',{survivor!r}]){leader_stays}"
+    owner = root(tmp_path, code)
+    await owner.start()
+    survivor_process = psutil.Process(await pid_in(survivor_file))
+    if reaped == "refused-stop":
+        with pytest.raises(RuntimeError, match="ownership retained"):
+            await owner.down("worker")
+    await exited(owner)
+    return owner, survivor_process
+
+
+async def stranger_group(tmp_path: Path) -> tuple[int, psutil.Process, Path]:
+    """Another program's group whose leader exited like a classic daemon.
+
+    Returns its number (no process holds it as a PID), its live member, and the
+    file where that member logs any stop signal it receives.
+    """
+    signals, ready, member_file = (tmp_path / name for name in ("signals", "ready", "member"))
+    daemon = (
+        "import pathlib,subprocess,sys; "
+        f"m=subprocess.Popen([sys.executable,'-c',{signal_recorder(signals, ready)!r}]); "
+        f"pathlib.Path({str(member_file)!r}).write_text(str(m.pid))"
+    )
+    stranger = subprocess.Popen([sys.executable, "-c", daemon], process_group=0)  # noqa: S603 — disposable test child
+    assert stranger.wait(timeout=10) == 0, "the stranger's leader must exit and be reaped"
+    member = psutil.Process(await pid_in(member_file))
+    await wait_file(ready)
+    assert os.getpgid(member.pid) == stranger.pid
+    return stranger.pid, member, signals
+
+
+@pytest.mark.parametrize("reaped", ["unexpected-exit", "refused-stop"])
+async def test_exited_leader_never_signals_a_stranger_group_at_its_number(
+    tmp_path: Path, reaped: str
+) -> None:
+    """The unit's group ended after its leader's reap; its number now names another program's group.
+
+    Whether the unit's leader exited on its own or during a refused stop, no
+    later stop lists that group: nothing is signalled, even with force, and
+    custody stays with a refusal that names the group and the record.
+    """
+    owner, survivor = await reaped_with_survivor(tmp_path, reaped)
+    generation = owner._units["worker"].generation
+    assert generation is not None and generation.identity is not None
+    assert generation.scope_closed_at_exit is False
+    survivor.kill()
+    await gone(survivor)
+    pgid, member, signals = await stranger_group(tmp_path)
+    record = tmp_path / "custody/worker.json"
+    try:
+        # The number the stop would read now names the stranger's group.
+        dead = generation.identity
+        generation.identity = OwnedProcess(pgid, dead.birth, dead.starttime)
+        for force in (False, True):
+            with pytest.raises(RuntimeError) as refused:
+                await owner.down("worker", force=force)
+            assert not signals.exists(), "the stranger's member received a signal"
+            message = str(refused.value)
+            for named in (f"process group {pgid}", str(member.pid), str(record), "retry the stop"):
+                assert named in message
+        assert not ended(member)
+        assert record.exists()
+    finally:
+        member.kill()
+        await gone(member)
+    # Once that group has ended, the stop proves the unit's group over.
+    await owner.down("worker")
+    assert not list((tmp_path / "custody").iterdir())
+    await owner.shutdown()
+
+
+@pytest.mark.parametrize("moves_group", [False, True])
+async def test_exited_leader_stop_closes_recorded_survivors_and_their_later_children(
+    tmp_path: Path, moves_group: bool
+) -> None:
+    """A survivor recorded at the reap is closed with a child it forked after that reap.
+
+    The stop reaches both through the survivor's recorded birth, not through
+    the group number, so it still closes them after the survivor moved to a
+    group of its own; then custody is released and no error remains.
+    """
+    survivor_file, trigger, late_file = (tmp_path / name for name in ("survivor", "go", "late"))
+    survivor = (
+        "import os,pathlib,subprocess,sys,time\n"
+        f"pathlib.Path({str(survivor_file)!r}).write_text(str(os.getpid()))\n"
+        f"while not pathlib.Path({str(trigger)!r}).exists(): time.sleep(0.01)\n"
+        + ("os.setpgid(0, 0)\n" if moves_group else "")
+        + "late=subprocess.Popen([sys.executable,'-c','import time; time.sleep(60)'])\n"
+        f"pathlib.Path({str(late_file)!r}).write_text(str(late.pid))\n"
+        "time.sleep(60)\n"
+    )
+    owner = root(
+        tmp_path, f"import subprocess,sys; subprocess.Popen([sys.executable,'-c',{survivor!r}])"
+    )
+    await owner.start()
+    survivor_process = psutil.Process(await pid_in(survivor_file))
+    await exited(owner)
+    generation = owner._units["worker"].generation
+    assert generation is not None and generation.scope_closed_at_exit is False
+    assert survivor_process.pid in {item.pid for item in generation.tracked}
+    trigger.touch()
+    late = psutil.Process(await pid_in(late_file))
+    try:
+        await owner.down("worker")
+        assert ended(survivor_process) and ended(late)
+        assert not list((tmp_path / "custody").iterdir())
+        assert (await row(owner))["last_error"] is None
+    finally:
+        for process in (survivor_process, late):
+            with contextlib.suppress(psutil.NoSuchProcess):
+                process.kill()
     await owner.shutdown()
 
 
