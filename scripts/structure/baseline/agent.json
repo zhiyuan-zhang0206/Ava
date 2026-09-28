@@ -1,0 +1,18 @@
+{
+  "complexity": {
+    "agent/db.py::claim_inbound_batch": 15,
+    "agent/exec_domain_owner.py::run": 28,
+    "agent/hosted_ownership.py::admit_hosted_runtime": 20,
+    "agent/impersonation.py::establish_relay": 16,
+    "agent/impersonation.py::settle_checkpoint": 15,
+    "agent/impersonation.py::supervise_relay": 21,
+    "agent/runloop.py::_handle_fatal_llm_error": 26
+  },
+  "directories": {
+    "agent": 34
+  },
+  "private_imports": {
+    "agent/exec_child.py::shared.log._add_postgres_sink": 1,
+    "agent/impersonation_handoff.py::shared.agents.impersonation._impersonation_store": 2
+  }
+}

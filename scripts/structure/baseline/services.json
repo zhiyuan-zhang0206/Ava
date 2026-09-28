@@ -1,0 +1,8 @@
+{
+  "directories": {
+    "services": 27
+  },
+  "owner_bypasses": {
+    "services/backup.py::postgres-dial": 1
+  }
+}

@@ -61,7 +61,7 @@ _TEST_DIR_RE = re.compile(r"(^|/)(tests?|__tests__)/")
 # One named constant for everything excluded as generated / snapshot / lock
 # content, matched with fnmatch so an exact path and a glob share one list.
 _GENERATED_EXCLUDE = (
-    "scripts/structure/baseline.json",
+    "scripts/structure/baseline/*.json",
     "ui/web/openapi.json",
     "ui/web/src/lib/*-generated.ts",
     "uv.lock",

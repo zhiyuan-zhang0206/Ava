@@ -2,26 +2,40 @@
 
 from __future__ import annotations
 
-import json
 import pathlib
 import subprocess
 
 import pytest
 
 from scripts import lint_code_structure as lcs
+from scripts.structure import baseline_shards
 
-_BASELINE = "scripts/structure/baseline.json"
+_SECTIONS = ("directories", "files", "complexity", "nesting", *lcs._SITE_SECTIONS)
 
 
 def _write_baseline(root: pathlib.Path, data: dict[str, dict[str, int]]) -> pathlib.Path:
-    path = root / _BASELINE
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    return path
+    """Write the baseline as shards under scripts/structure/baseline/, replacing any
+    shard files already there, plus the directory's README.md: read_worktree()
+    requires the directory to exist, and the README is what keeps git tracking it
+    even with zero shards. Returns the shard directory."""
+    directory = root / baseline_shards.SHARD_DIR
+    if directory.is_dir():
+        for path in directory.glob("*.json"):
+            path.unlink()
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / "README.md").write_text("Structure baseline shards.\n", encoding="utf-8")
+    for name, shard in baseline_shards.split(data).items():
+        # Single concatenated string, not chained `/`: keeps an adversarial shard
+        # name from being treated as an absolute-path override that discards
+        # `directory`.
+        (pathlib.Path(f"{directory}/{name}.json")).write_text(
+            baseline_shards.render(shard), encoding="utf-8"
+        )
+    return directory
 
 
 def _read_baseline(root: pathlib.Path) -> dict[str, dict[str, int]]:
-    return json.loads((root / _BASELINE).read_text(encoding="utf-8"))
+    return baseline_shards.merge(baseline_shards.read_worktree(root), _SECTIONS)
 
 
 def _git(root: pathlib.Path, *args: str) -> None:

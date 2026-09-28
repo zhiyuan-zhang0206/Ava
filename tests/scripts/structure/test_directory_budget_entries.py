@@ -2,32 +2,24 @@
 
 from __future__ import annotations
 
-import json
 import pathlib
 
 import pytest
 
 from scripts import lint_code_structure as lcs
+from scripts.structure import baseline_shards
 
 
 @pytest.fixture(autouse=True)
 def _isolated_repo(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Every main() call scans only its own temporary root, with an empty baseline."""
+    """Every main() call scans only its own temporary root, with an empty baseline:
+    the shard directory must exist (read_worktree() fails fast otherwise), so it
+    gets its README.md and no shard files — a legitimate empty baseline."""
     monkeypatch.setattr(lcs, "_REPO_ROOT", tmp_path)
     monkeypatch.delenv("LINT_STRUCTURE_BASELINE_BASE", raising=False)
-    baseline = tmp_path / "scripts/structure/baseline.json"
-    baseline.parent.mkdir(parents=True)
-    sections = (
-        "directories",
-        "files",
-        "complexity",
-        "nesting",
-        "private_imports",
-        "owner_bypasses",
-        "path_imports",
-    )
-    empty = {section: {} for section in sections}
-    baseline.write_text(json.dumps(empty) + "\n", encoding="utf-8")
+    directory = tmp_path / baseline_shards.SHARD_DIR
+    directory.mkdir(parents=True)
+    (directory / "README.md").write_text("Structure baseline shards.\n", encoding="utf-8")
 
 
 def _module(path: pathlib.Path) -> None:

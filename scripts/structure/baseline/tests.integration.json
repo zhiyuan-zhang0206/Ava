@@ -1,0 +1,5 @@
+{
+  "complexity": {
+    "tests/integration/test_grafana_native_runtime.py::test_anonymous_viewer_can_open_tempo_trace_in_explore": 19
+  }
+}

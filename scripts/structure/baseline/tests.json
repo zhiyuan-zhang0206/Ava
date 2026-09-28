@@ -1,0 +1,13 @@
+{
+  "complexity": {
+    "tests/test_lint_marker_contract.py::test_system_note_writers_use_notetag_values": 15
+  },
+  "directories": {
+    "tests": 80
+  },
+  "files": {
+    "tests/conftest.py": 1971,
+    "tests/test_ci_utils.py": 1977,
+    "tests/test_feishu_adapter.py": 1255
+  }
+}

@@ -5,13 +5,13 @@ test_locality_rules.py — this file is about the gate wiring around them."""
 
 from __future__ import annotations
 
-import json
 import pathlib
 import subprocess
 
 import pytest
 
 from scripts import lint_code_structure as lcs
+from scripts.structure import baseline_shards
 
 
 def _write(root: pathlib.Path, name: str, content: str) -> pathlib.Path:
@@ -30,27 +30,35 @@ def _baseline(
     nesting: dict[str, int] | None = None,
     private_imports: dict[str, int] | None = None,
     owner_bypasses: dict[str, int] | None = None,
+    path_imports: dict[str, int] | None = None,
 ) -> pathlib.Path:
-    path = root / "scripts/structure/baseline.json"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(
-            {
-                "directories": directories or {},
-                "files": files or {},
-                "complexity": complexity or {},
-                "nesting": nesting or {},
-                "private_imports": private_imports or {},
-                "owner_bypasses": owner_bypasses or {},
-                "path_imports": {},
-            },
-            indent=2,
-            sort_keys=True,
+    """Write the baseline as shards under scripts/structure/baseline/, replacing any
+    shard files already there. The directory always carries its README.md too:
+    read_worktree() requires the directory to exist, and the README is what keeps
+    git tracking it (and this base revision comparable) even with zero shards."""
+    directory = root / baseline_shards.SHARD_DIR
+    if directory.is_dir():
+        for path in directory.glob("*.json"):
+            path.unlink()
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / "README.md").write_text("Structure baseline shards.\n", encoding="utf-8")
+    data = {
+        "directories": directories or {},
+        "files": files or {},
+        "complexity": complexity or {},
+        "nesting": nesting or {},
+        "private_imports": private_imports or {},
+        "owner_bypasses": owner_bypasses or {},
+        "path_imports": path_imports or {},
+    }
+    for name, shard in baseline_shards.split(data).items():
+        # Single concatenated string, not chained `/`: keeps an adversarial shard
+        # name (e.g. one starting with "/") from being treated as an absolute-path
+        # override that discards `directory`.
+        (pathlib.Path(f"{directory}/{name}.json")).write_text(
+            baseline_shards.render(shard), encoding="utf-8"
         )
-        + "\n",
-        encoding="utf-8",
-    )
-    return path
+    return directory
 
 
 def _git(root: pathlib.Path, *args: str) -> None:
@@ -84,7 +92,7 @@ def _repo(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> pathlib.Pa
 
 def _commit_baseline(repo: pathlib.Path, message: str) -> None:
     _git(repo, "init", "--quiet")
-    _git(repo, "add", "scripts/structure/baseline.json")
+    _git(repo, "add", baseline_shards.SHARD_DIR)
     _git(repo, "commit", "--quiet", "-m", message)
 
 

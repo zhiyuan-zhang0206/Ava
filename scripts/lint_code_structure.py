@@ -104,7 +104,9 @@ else (a local leftover CI never checks out) are excluded. Each directory is
 independent.
 AST rules retain their governed-package scope.
 
-scripts/structure/baseline.json freezes existing over-limit counts. New or growing
+scripts/structure/baseline/*.json freezes existing over-limit counts, one shard per
+directory area (scripts/structure/baseline_shards.py: an entry lives in the shard of
+its directory's first two path components). New or growing
 violations fail; the baseline itself may only lose entries or lower values versus
 the configured base (or merge-base with origin/main, falling back to HEAD).
 After splitting, shrink the relevant baseline values or remove fixed entries
@@ -125,7 +127,6 @@ Use --complexity-warnings-full anywhere in argv to unfold all warning file count
 from __future__ import annotations
 
 import ast
-import json
 import os
 import subprocess
 import sys
@@ -134,14 +135,17 @@ from pathlib import Path
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_REPO_ROOT))
 
-from scripts.structure import locality, path_imports  # noqa: E402 — standalone script
+from scripts.structure import (  # noqa: E402 — standalone script
+    baseline_shards,
+    locality,
+    path_imports,
+)
 from scripts.structure import quality_budget as quality  # noqa: E402 — standalone script
 
 _HARD_CEILING = 800
 # Baseline sections whose frozen `path::target` site counts must match reality exactly.
 _SITE_SECTIONS = (*locality.SECTIONS, path_imports.SECTION)
 _DIRECTORY_CEILING = 20
-_BASELINE_PATH = "scripts/structure/baseline.json"
 
 # AST rules track [tool.importlinter] root_packages; budgets also cover tooling/tests.
 _SCAN_DIRS = (
@@ -382,20 +386,14 @@ def _budget_targets(targets: list[Path]) -> tuple[set[Path], set[Path]]:
     return files, directories
 
 
-def _parse_baseline(text: str, *, allow_legacy: bool = False) -> dict[str, dict[str, int]]:
-    baseline = json.loads(text)
-    budgets = {"directories", "files", *quality.QUALITY_SECTIONS}
-    sections = budgets | set(_SITE_SECTIONS)
-    before_path_imports = budgets | set(locality.SECTIONS)
-    legacy = [budgets, {"directories", "files"}, before_path_imports] if allow_legacy else []
-    if not isinstance(baseline, dict) or set(baseline) not in [sections, *legacy]:
-        raise ValueError(f"expected exactly the sections {sorted(sections)}")
+def _parse_baseline(shards: dict[str, str]) -> dict[str, dict[str, int]]:
+    """Merge the baseline shards (name -> JSON text) and validate every entry."""
+    sections = ("directories", "files", *quality.QUALITY_SECTIONS, *_SITE_SECTIONS)
+    baseline = baseline_shards.merge(shards, sections)
     for kind in quality.QUALITY_SECTIONS:
-        if kind in baseline:
-            quality.validate_quality_entries(kind, baseline[kind], _STRUCTURE_DIRS)
+        quality.validate_quality_entries(kind, baseline[kind], _STRUCTURE_DIRS)
     for kind in _SITE_SECTIONS:
-        if kind in baseline:
-            locality.validate_entries(kind, baseline[kind], _SCAN_DIRS)
+        locality.validate_entries(kind, baseline[kind], _SCAN_DIRS)
     _validate_structure_entries(baseline)
     return baseline
 
@@ -524,9 +522,11 @@ def _section_guard(
     for name in sorted(additions):
         moved_to = _renamed_to(kind, name, renames or {})
         if moved_to is not None:
+            new_key = moved_to + name[len(name.partition("::")[0]) :]
             errors.append(
-                f"{_BASELINE_PATH}: {kind} entry {name} was not migrated after its file "
-                f"moved to {moved_to} — move this key to the new path with the same value"
+                f"{baseline_shards.shard_path(kind, name)}: {kind} entry {name} was not migrated "
+                f"after its file moved to {moved_to} — move this key to {new_key} in "
+                f"{baseline_shards.shard_path(kind, new_key)} with the same value"
             )
             continue
         rule = (
@@ -537,11 +537,13 @@ def _section_guard(
             else "added key without a same-file removal of the same private name: a split, "
             "move or swap cannot carry a frozen site — route it through the door or owner"
         )
-        errors.append(f"{_BASELINE_PATH}: added {kind} entry {name} — {rule}")
+        errors.append(
+            f"{baseline_shards.shard_path(kind, name)}: added {kind} entry {name} — {rule}"
+        )
     for name in sorted(current.keys() & previous.keys()):
         if current[name] > previous[name]:
             errors.append(
-                f"{_BASELINE_PATH}: raised {kind} entry {name} from {previous[name]} "
+                f"{baseline_shards.shard_path(kind, name)}: raised {kind} entry {name} from {previous[name]} "
                 f"to {current[name]} — baseline is shrink-only"
             )
     return errors
@@ -553,34 +555,28 @@ def _baseline_guard(
     try:
         base = _baseline_base()
     except ValueError as exc:
-        return [f"{_BASELINE_PATH}: {exc}"]
-    result = _git("show", f"{base}:{_BASELINE_PATH}")
-    if result.returncode:
+        return [f"{baseline_shards.SHARD_DIR}: {exc}"]
+    shards = baseline_shards.read_at(_REPO_ROOT, base)
+    if shards is None:
         print(
-            f"note: baseline guard skipped: git {base}:{_BASELINE_PATH} unavailable",
+            f"note: baseline guard skipped: git {base}:{baseline_shards.SHARD_DIR} unavailable",
             file=sys.stderr,
         )
         return []
     try:
-        previous = _parse_baseline(result.stdout, allow_legacy=True)
+        previous = _parse_baseline(shards)
     except ValueError as exc:
-        return [f"{_BASELINE_PATH}: invalid base baseline ({base}): {exc}"]
+        return [f"{baseline_shards.SHARD_DIR}: invalid base baseline ({base}): {exc}"]
     errors: list[str] = []
     for kind, entries in baseline.items():
-        if kind not in previous:
-            print(
-                f"note: {kind} baseline guard skipped: section absent at base {base}",
-                file=sys.stderr,
+        errors.extend(
+            _section_guard(
+                kind,
+                entries,
+                _remap_renamed_keys(kind, previous[kind], renames or {}),
+                renames=renames,
             )
-        else:
-            errors.extend(
-                _section_guard(
-                    kind,
-                    entries,
-                    _remap_renamed_keys(kind, previous[kind], renames or {}),
-                    renames=renames,
-                )
-            )
+        )
     return errors
 
 
@@ -707,9 +703,9 @@ def main(argv: list[str] | None = None) -> int:
         else [_REPO_ROOT / d for d in _STRUCTURE_DIRS]
     )
     try:
-        baseline = _parse_baseline((_REPO_ROOT / _BASELINE_PATH).read_text(encoding="utf-8"))
+        baseline = _parse_baseline(baseline_shards.read_worktree(_REPO_ROOT))
     except (OSError, UnicodeDecodeError, ValueError) as exc:
-        print(f"{_BASELINE_PATH}: invalid baseline: {exc}", file=sys.stderr)
+        print(f"{baseline_shards.SHARD_DIR}: invalid baseline: {exc}", file=sys.stderr)
         return 1
     renames = _rename_map_or_empty()
     errors = _baseline_guard(baseline, renames=renames)
