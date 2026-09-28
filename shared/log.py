@@ -559,6 +559,17 @@ def _configure_windows_event_loop_policy() -> None:
         asyncio.set_event_loop_policy(policy_cls())
 
 
+def _add_stderr_sink_before_settings() -> None:
+    """The human stderr sink, opened before the init imports `shared.paths`.
+
+    That import builds the Settings chain, and the build logs: a configured
+    runner's gateway fetch warns when it continues on a stale config snapshot
+    (`shared/bootstrap.py`). Importing this module dropped loguru's default
+    handler, so a record written before any sink exists is discarded.
+    """
+    add_sink(sys.stderr, format=_HUMAN_FORMAT, level="INFO", colorize=True)
+
+
 def init_gateway_process(name: str = "gateway") -> None:
     """Called once at a gateway-style process startup — the gateway itself
     and every long-running service daemon (agent-host / watchdog / labeler /
@@ -583,8 +594,6 @@ def init_gateway_process(name: str = "gateway") -> None:
     if _init_done:
         return
     _configure_windows_event_loop_policy()
-    from shared.paths import logs_dir
-
     # Bind the deferred agent id explicitly rather than inheriting the
     # module-level default: `init_subprocess_logger` also calls
     # `logger.configure`, which REPLACES the whole extra dict, so the default is
@@ -593,7 +602,9 @@ def init_gateway_process(name: str = "gateway") -> None:
     # in the hosted agent-runner — which inits through THIS function — it is
     # what lets each record carry the turn's agent instead of `-`.
     logger.configure(extra={"agent_id": TURN_SCOPED_AGENT_ID})
-    add_sink(sys.stderr, format=_HUMAN_FORMAT, level="INFO", colorize=True)
+    _add_stderr_sink_before_settings()
+    from shared.paths import logs_dir
+
     _add_file_sink(logs_dir() / f"{name}.log")
     _add_postgres_sink(process=name)
     _install_stdlib_intercept()
@@ -645,9 +656,9 @@ def init_cli_process(*, name: str) -> None:
     if _init_done:
         return
     _configure_windows_event_loop_policy()
+    _add_stderr_sink_before_settings()
     from shared.paths import logs_dir
 
-    add_sink(sys.stderr, format=_HUMAN_FORMAT, level="INFO", colorize=True)
     _add_file_sink(logs_dir() / f"{name}.log")
     _add_postgres_sink(process=name)
     _install_stdlib_intercept()

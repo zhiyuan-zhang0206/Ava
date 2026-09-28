@@ -206,6 +206,81 @@ def test_init_gateway_process_emits_service_started() -> None:
     assert kw["host"]  # machine_name() resolves on the test host
 
 
+# ─── records written while an init builds Settings ─────────────────────────
+#
+# `init_cli_process` / `init_gateway_process` resolve `logs_dir()` through
+# `shared.paths`, whose import builds the Settings chain — and a configured
+# runner's Settings build is the gateway fetch, which warns when it continues
+# on a stale config snapshot (`shared/bootstrap.py`). Importing `shared.log`
+# dropped loguru's default handler, so that warning reaches stderr only if the
+# init opened the stderr sink before the import.
+
+_SETTINGS_BUILD_WARNING = r"""
+import sys
+sys.path.insert(0, sys.argv[1])
+import httpx
+from shared import bootstrap
+def unreachable(*_args, **_kwargs):
+    raise httpx.ConnectError("connection refused")
+bootstrap.fetch_bootstrap_config = unreachable
+import shared.log
+assert "shared.config" not in sys.modules
+getattr(shared.log, sys.argv[2])(name="probe")
+"""
+
+
+@pytest.mark.parametrize("init", ["init_cli_process", "init_gateway_process"])
+def test_a_warning_written_while_the_init_builds_settings_reaches_stderr(
+    tmp_path: Path, init: str
+) -> None:
+    import json
+    import os
+    import subprocess
+    import sys
+    import time
+
+    from shared import bootstrap
+
+    home = tmp_path / "home"
+    (home / "run").mkdir(parents=True)
+    (home / "machine_name").write_text("probe-host")  # the gateway init names its host
+    gateway = "http://gateway.invalid:8000"
+    # A configured pure runner: its `.env` carries the role and the gateway URL.
+    (home / ".env").write_text(f"AVA_MACHINE_SERVE_AGENT_RUNNER=true\nAVA_GATEWAY_URL={gateway}\n")
+    (home / ".env").chmod(0o600)
+    (home / "run" / "bootstrap-snapshot.json").write_text(
+        json.dumps(
+            {
+                "v": bootstrap._SNAPSHOT_VERSION,
+                "base_url": gateway,
+                "written_at": time.time() - 10_000,
+                "values": {
+                    "AVA_DB_URL": "postgresql://ava@127.0.0.1:1/ava",
+                    "AVA_REDIS_URL": "redis://127.0.0.1:1/0",
+                },
+            }
+        )
+    )
+    env = {key: value for key, value in os.environ.items() if not key.startswith("AVA_")}
+    env.update(
+        AVA_HOME=str(home),
+        AVA_HOME_OVERRIDE="1",
+        AVA_CLUSTER_REGISTRY=str(tmp_path / "clusters.json"),
+    )
+    child = subprocess.run(  # noqa: S603 — this interpreter, fixed code, a private home
+        [sys.executable, "-I", "-B", "-c", _SETTINGS_BUILD_WARNING, str(_REPO_ROOT), init],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
+    )
+
+    assert child.returncode == 0, child.stderr
+    assert "continuing on the last-known cluster config snapshot" in child.stderr
+
+
 # ─── owner-only log files (audit round-2 up-security-trust P1-1) ───────────
 
 
