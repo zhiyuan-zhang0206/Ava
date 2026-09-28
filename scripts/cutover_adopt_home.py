@@ -462,7 +462,7 @@ def held_start(home: Path, db_capability: str | None = None) -> int:
 
     A remote unit's first start installs its capability bundle (`db_capability`,
     transport key in AVA_DB_CAPABILITY_KEY): it holds no human bearer any more.
-    A gateway's starts only after the database-records repair (W7) recorded a
+    A gateway's start runs only after the database-records repair (W7) recorded a
     completed run: the start writes the host's `paused` posture, which the
     repair's first run would set `idle`. A runner's start joins through that
     gateway's bootstrap, so it cannot precede W7 either.

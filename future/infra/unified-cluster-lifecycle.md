@@ -115,6 +115,30 @@ The cutover must also reconcile any historical `deploy-probe` alert named
 `update failed: host left held`; its retired heartbeat writer no longer resolves
 such records. No runtime alert cleanup was performed by the source deletion.
 
+## Planned: unowned-termination follow-ups
+
+Three changes the
+[unowned-termination decision](../../decisions/2026-09-29-unowned-termination-resurrects.md)
+left for later:
+
+- Record a predecessor-closure refusal as a durable `resource_fence`. Today a
+  managed row whose applied restart a force superseded resurrects, but while
+  the host process its resources record is alive `admit_resources_async`
+  raises `ResourceEvidenceError` outside that conversion: the dispatcher logs
+  `host_turn_crashed` on every wake and no `last_admission_outcome` is
+  written. The conversion changes every predecessor-closure refusal of
+  admission, so it is its own change.
+- In the first migration after the cutover, restate the inline and
+  `COMMENT ON` comments of `agents_meta.last_resurrect_inbound_id` in
+  `db/schema.sql`: `0` is a valid value (born under this runtime, not
+  resurrected since), not only an id a resurrection wrote.
+- Any inbound retention keeps the `inbound_messages` rows that carry
+  `lifecycle_release` (on `resurrect` and `restart` rows) or
+  `unowned_termination` (on `terminate` rows). Deleting them makes
+  resurrection refuse, closed, the rows they vouched for. `db/schema.sql`'s
+  "inbound retention must not erase lifecycle intent" covers the fences, not
+  these markers.
+
 ## Planned: runtime birth and database write admission
 
 Local startup readiness and fleet write authority are distinct proofs. Bind a

@@ -370,6 +370,9 @@ def connect(
 
     Raises:
         UnanchoredHomeError: the resolved db_url is the unanchored sentinel.
+        NoDatabaseAuthorityError: this home keeps a write-generation ledger and
+            the resolved db_url is a credential-free endpoint this process was
+            given no login for (see `_guard_db_url`).
     """
     from shared.config.data_plane import sslmode_for_url
 
@@ -439,6 +442,9 @@ def pool(
 
     Raises:
         UnanchoredHomeError: the resolved db_url is the unanchored sentinel.
+        NoDatabaseAuthorityError: this home keeps a write-generation ledger and
+            the resolved db_url is a credential-free endpoint this process was
+            given no login for (see `_guard_db_url`).
     """
     from shared.config.data_plane import resolved_pool_size, sslmode_for_url
 
@@ -512,6 +518,9 @@ def async_pool(
 
     Raises:
         UnanchoredHomeError: the resolved db_url is the unanchored sentinel.
+        NoDatabaseAuthorityError: this home keeps a write-generation ledger and
+            the resolved db_url is a credential-free endpoint this process was
+            given no login for (see `_guard_db_url`).
     """
     from shared.config.data_plane import sslmode_for_url
 
