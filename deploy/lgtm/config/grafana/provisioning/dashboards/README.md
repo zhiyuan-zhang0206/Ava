@@ -73,7 +73,10 @@ reveal it (user ruling 2026-09-14, task #3362): `(per minute)` on per-minute
 rate panels, `(window)` on panels whose value is a selected-window total or
 average over `$__range`. Rates whose unit is already self-evident (`/ minute`,
 `/s`, TPS, `events/s`) carry no extra qualifier, and smoothing-bucket widths
-stay in panel descriptions.
+stay in panel descriptions. A spec declares its basis in `MetricSpec.time_basis`
+rather than in the title: the registry renders the suffix, and for `per_minute`
+also appends each query part's bucket divisor (`[5m]` -> ` / 5`), so title and
+query cannot drift.
 
 The `PR flow` row (task #2139) reads the daily macmini export job
 (`scripts/pr_flow_export.py`, 00:25 cluster time) back as Prometheus gauges:

@@ -41,6 +41,7 @@ are static Prometheus expressions.
 
 from __future__ import annotations
 
+import re
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -63,6 +64,11 @@ from shared.plugin_metrics_sql import (
 Category = Literal["audit", "telemetry", "log"]
 PanelType = Literal["timeseries", "stat", "barchart", "table", "logs"]
 OutputSurface = Literal["grafana", "inspector"]
+TimeBasis = Literal["per_minute", "window"]
+
+_TIME_BASIS_LABEL: dict[TimeBasis, str] = {"per_minute": "per minute", "window": "window"}
+_BUCKET_WINDOW = re.compile(r"\[(\d+)m\]")
+_TRAILING_DIVISOR = re.compile(r"/\s*\d+\s*$")
 
 # ── errors ────────────────────────────────────────────────────────────────────
 
@@ -136,6 +142,14 @@ class MetricSpec(BaseModel):
         transformations: optional Grafana transformations copied verbatim
             into the panel (e.g. the PR-flow day tables' joinByField +
             organize), for the panels whose rendered shape needs them.
+        time_basis: how the number relates to time, rendered by the registry
+            so the title and the query cannot drift (panel titles state their
+            time basis — user ruling 2026-09-14). ``per_minute``: every query
+            part is one ``[Nm]`` bucket aggregate written without a divisor;
+            rendering appends `` / N`` and the title gains ``(per minute)``.
+            ``window``: every part aggregates over ``$__range`` and the title
+            gains ``(window)``. None when the unit already says it (``/
+            minute``, TPS) or the basis is something else (a trailing gauge).
         output: which surfaces consume this metric — ``grafana`` (dashboard
             JSON, this wave), ``inspector`` (per-agent panels, reserved).
             A query carrying ``{{agent_id}}`` must NOT include ``grafana``.
@@ -192,6 +206,7 @@ class MetricSpec(BaseModel):
     # PR-flow day tables' joinByField + organize).
     transformations: list[dict[str, Any]] | None = None
     thresholds: list[ThresholdStep] | None = None
+    time_basis: TimeBasis | None = None
     output: list[OutputSurface] = ["grafana"]
     plugin: str = ""  # auto-filled at register time
 
@@ -225,12 +240,54 @@ class MetricSpec(BaseModel):
         return self
 
     @model_validator(mode="after")
+    def _time_basis_consistent(self) -> MetricSpec:
+        if self.time_basis is None:
+            return self
+        label = _TIME_BASIS_LABEL[self.time_basis]
+        if re.search(rf"\([^)]*\b{label}\b[^)]*\)", self.title):
+            raise ValueError(
+                f"title spells the time basis {label!r} by hand; time_basis renders it"
+            )
+        parts = [self.query, *(self.targets or [])]
+        if self.time_basis == "window":
+            if not all("$__range" in part for part in parts):
+                raise ValueError(
+                    "time_basis='window' needs every query part to aggregate over $__range"
+                )
+            return self
+        if self.query_type == "sql":
+            raise ValueError("time_basis='per_minute' needs a logql or promql query")
+        for part in parts:
+            _bucket_minutes(part)
+        return self
+
+    @model_validator(mode="after")
     def _promql_is_grafana_only(self) -> MetricSpec:
         """PromQL core tiles have no gateway inspector execution path yet."""
 
         if self.query_type == "promql" and self.output != ["grafana"]:
             raise ValueError("query_type='promql' is currently supported only for grafana output")
         return self
+
+
+def _bucket_minutes(template: str) -> int:
+    """The bucket width of a per-minute query part: its one ``[Nm]`` window.
+
+    Exactly one window keeps the part a single aggregation, so the appended
+    `` / N`` divides all of it; a part that already divides is refused so the
+    divisor has one owner.
+    """
+    windows = _BUCKET_WINDOW.findall(template)
+    if len(windows) != 1:
+        raise ValueError(
+            "time_basis='per_minute' needs exactly one [Nm] bucket window per query "
+            f"part, found {len(windows)}: {template!r}"
+        )
+    if _TRAILING_DIVISOR.search(template):
+        raise ValueError(
+            f"query part already divides by its bucket; time_basis renders the divisor: {template!r}"
+        )
+    return int(windows[0])
 
 
 # ── SQL safety validation ─────────────────────────────────────────────────────
@@ -507,20 +564,35 @@ def _logql_literal(value: str) -> str:
     return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
+def _render_part(template: str, spec: MetricSpec, agent_id: int | None) -> str:
+    rendered = _render_template(template, spec, agent_id)
+    if spec.time_basis == "per_minute":
+        rendered += f" / {_bucket_minutes(template)}"
+    return rendered
+
+
 def render_query(spec: MetricSpec, agent_id: int | None = None) -> str:
     """Render the primary template (``query``) for one surface.
 
     ``{event_name}`` / ``{category}`` are substituted with single-quoted literals
     (the generator writes static JSON — no parameter binding available).
     ``{{agent_id}}`` stays verbatim unless ``agent_id`` is passed (the
-    inspector surface renders it to ``agent_id = <n>``).
+    inspector surface renders it to ``agent_id = <n>``). A ``per_minute``
+    spec's bucket divisor is appended here.
     """
-    return _render_template(spec.query, spec, agent_id)
+    return _render_part(spec.query, spec, agent_id)
 
 
 def render_targets(spec: MetricSpec, agent_id: int | None = None) -> list[str]:
-    """Render every SQL template on the spec (``query`` first, then each
+    """Render every template on the spec (``query`` first, then each
     ``targets`` entry) — one Grafana target per series group."""
     return [render_query(spec, agent_id)] + [
-        _render_template(t, spec, agent_id) for t in (spec.targets or [])
+        _render_part(t, spec, agent_id) for t in (spec.targets or [])
     ]
+
+
+def render_title(spec: MetricSpec) -> str:
+    """The panel title every surface shows: ``title`` plus the time basis."""
+    if spec.time_basis is None:
+        return spec.title
+    return f"{spec.title} ({_TIME_BASIS_LABEL[spec.time_basis]})"

@@ -82,7 +82,8 @@ _GATEWAY_ATTR = {k: f"attributes_{k}" for k in GATEWAY_LATENCY_KEYS}
 core_metrics.register_core_metric(
     MetricSpec(
         name="core_llm_calls",
-        title="LLM calls (window)",
+        title="LLM calls",
+        time_basis="window",
         event_name="llm_usage",
         category="telemetry",
         unit="short",
@@ -101,7 +102,8 @@ core_metrics.register_core_metric(
 core_metrics.register_core_metric(
     MetricSpec(
         name="core_warning",
-        title="Warning (window)",
+        title="Warning",
+        time_basis="window",
         event_name="warning",
         category="telemetry",
         unit="short",
@@ -121,7 +123,8 @@ core_metrics.register_core_metric(
 core_metrics.register_core_metric(
     MetricSpec(
         name="core_error",
-        title="Error (window)",
+        title="Error",
+        time_basis="window",
         event_name="error",
         category="telemetry",
         unit="short",
@@ -204,7 +207,8 @@ core_metrics.register_core_metric(
 core_metrics.register_core_metric(
     MetricSpec(
         name="core_tokens_24h",
-        title="Tokens (window)",
+        title="Tokens",
+        time_basis="window",
         event_name="llm_usage",
         category="telemetry",
         unit="short",
@@ -234,7 +238,8 @@ core_metrics.register_core_metric(
 core_metrics.register_core_metric(
     MetricSpec(
         name="core_llm_input_tokens_24h",
-        title="LLM input tokens (window)",
+        title="LLM input tokens",
+        time_basis="window",
         event_name="llm_usage",
         category="telemetry",
         unit="short",
@@ -257,7 +262,8 @@ core_metrics.register_core_metric(
 core_metrics.register_core_metric(
     MetricSpec(
         name="core_llm_output_tokens_24h",
-        title="LLM output tokens (window)",
+        title="LLM output tokens",
+        time_basis="window",
         event_name="llm_usage",
         category="telemetry",
         unit="short",
@@ -280,7 +286,8 @@ core_metrics.register_core_metric(
 core_metrics.register_core_metric(
     MetricSpec(
         name="core_cache_hit_rate_24h",
-        title="Cache hit (window)",
+        title="Cache hit",
+        time_basis="window",
         event_name="llm_usage",
         category="telemetry",
         unit="percent",
@@ -307,7 +314,8 @@ core_metrics.register_core_metric(
 core_metrics.register_core_metric(
     MetricSpec(
         name="core_avg_turn_duration_24h",
-        title="Avg turn duration (window)",
+        title="Avg turn duration",
+        time_basis="window",
         event_name="turn_end",
         category="telemetry",
         unit="s",
@@ -403,7 +411,8 @@ core_metrics.register_core_metric(
 core_metrics.register_core_metric(
     MetricSpec(
         name="core_token_output_reasoning",
-        title="Token usage — Output + Reasoning (per minute)",
+        title="Token usage — Output + Reasoning",
+        time_basis="per_minute",
         description="Tokens per minute (5-minute buckets / 5): output and reasoning tokens.",
         event_name="llm_usage",
         category="telemetry",
@@ -412,12 +421,12 @@ core_metrics.register_core_metric(
         query=(
             f'sum(sum_over_time({{service_name="unknown_service", event_name={{event_name}}}} | json | '
             f"category={{category}} | "
-            f"unwrap {_LLM_ATTR['out_total']} [5m])) / 5"
+            f"unwrap {_LLM_ATTR['out_total']} [5m]))"
         ),
         targets=[
             f'sum(sum_over_time({{service_name="unknown_service", event_name={{event_name}}}} | json | '
             f"category={{category}} | "
-            f"unwrap {_LLM_ATTR['reasoning']} [5m])) / 5"
+            f"unwrap {_LLM_ATTR['reasoning']} [5m]))"
         ],
         query_type="logql",
         target_names=["out", "reasoning"],
@@ -619,15 +628,15 @@ core_metrics.register_core_metric(
 core_metrics.register_core_metric(
     MetricSpec(
         name="core_event_health",
-        title="Event health — WARNING+ERROR vs total (per minute)",
+        title="Event health — WARNING+ERROR vs total",
+        time_basis="per_minute",
         description="Per-minute event counts — 5-minute count buckets normalized to per minute (bucket count / 5): warning+error+critical vs all telemetry/log events.",
         event_name="event",
         category="telemetry",
         unit="short",
         panel="timeseries",
-        query=event_count(f'{CATEGORY_WITH_LEGACY_LOG} | level=~"warning|error|critical"', "5m")
-        + " / 5",
-        targets=[event_count(CATEGORY_WITH_LEGACY_LOG, "5m") + " / 5"],
+        query=event_count(f'{CATEGORY_WITH_LEGACY_LOG} | level=~"warning|error|critical"', "5m"),
+        targets=[event_count(CATEGORY_WITH_LEGACY_LOG, "5m")],
         query_type="logql",
         target_names=["warn+error", "total"],
         custom={"axisLabel": "events/min"},
@@ -642,7 +651,8 @@ core_metrics.register_core_metric(
 core_metrics.register_core_metric(
     MetricSpec(
         name="core_token_input",
-        title="Token usage — Input (per minute)",
+        title="Token usage — Input",
+        time_basis="per_minute",
         description="Tokens per minute (5-minute buckets / 5): input tokens.",
         event_name="llm_usage",
         category="telemetry",
@@ -651,7 +661,7 @@ core_metrics.register_core_metric(
         query=(
             f'sum(sum_over_time({{service_name="unknown_service", event_name={{event_name}}}} | json | '
             f"category={{category}} | "
-            f"unwrap {_LLM_ATTR['in_total']} [5m])) / 5"
+            f"unwrap {_LLM_ATTR['in_total']} [5m]))"
         ),
         query_type="logql",
         target_names=["in"],
