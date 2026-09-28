@@ -250,18 +250,6 @@ class GeneralSettings(EnvSettings):
         },
     )
 
-    track_mode: Literal["latest", "releases"] = Field(
-        default="latest",
-        alias="AVA_TRACK_MODE",
-        description="What `ava cluster update` converges to: `latest` = the tip of AVA_TRACK_BRANCH (default main); `releases` = the newest dated release tag (vX.Y.Z-YYYYMMDD[HHMM]) — main merges then deploy only at a release cut (scripts/release_cut.py --push).",
-        json_schema_extra={
-            "restart_required": "all",
-            "writable": True,
-            "sensitive": False,
-            "scope": "cluster-pinned",
-        },
-    )
-
     fetch_via_gateway: bool = Field(
         default=False,
         alias="AVA_FETCH_VIA_GATEWAY",

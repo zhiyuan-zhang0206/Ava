@@ -170,7 +170,7 @@ def test_gateway_adoption_completes_the_port_block_and_translates_selection(
     records = legacy.registry_records()
     added = records[str(legacy.home)]["ports"].pop("agent_runner_watchdog")  # a later key
     legacy.registry.write_text(json.dumps(records))
-    dead = {"AVA_CLUSTER", "AVA_RESTARTER_HEALTH_PORT"}
+    dead = {"AVA_CLUSTER", "AVA_RESTARTER_HEALTH_PORT", "AVA_TRACK_MODE"}
     expected_env = {k: v for k, v in legacy.env().items() if k not in dead}
 
     assert _run(legacy, "--execute") == 0

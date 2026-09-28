@@ -265,6 +265,7 @@ def _env(legacy: LegacyHome) -> None:
         "AVA_REDIS_ADMIN_PASSWORD": CANARY,
         "AVA_CLUSTER": "main",
         "AVA_RESTARTER_HEALTH_PORT": "8102",
+        "AVA_TRACK_MODE": "releases",
         MACHINE_KEY: CANARY,
     }
     if legacy.gateway:

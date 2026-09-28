@@ -1,11 +1,10 @@
-"""Dated release-tag parsing + selection, shared by `scripts/release_cut.py` and
-the update track (`AVA_TRACK_MODE=releases`).
+"""Dated release-tag parsing + selection for `scripts/release_cut.py`.
 
 A release tag is `v<major>.<minor>.<patch>-<YYYYMMDD>[HHMM]` — the date suffix
 makes every tag self-dating, so a day with no release simply has no tag. The
 selection rule: highest version wins; on equal versions the later HHMM wins (a
-tag without HHMM is earliest on its day). release_cut mints these tags; the
-update path resolves "the newest release" to pin a rollout to it.
+tag without HHMM is earliest on its day). release_cut mints these tags and
+bumps from the newest one; no update path selects them.
 """
 
 from __future__ import annotations

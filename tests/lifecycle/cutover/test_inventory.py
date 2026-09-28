@@ -37,6 +37,7 @@ _RUNNER_REMOVALS = [
     "AVA_REDIS_PASSWORD",
     "AVA_RESTARTER_HEALTH_PORT",
     "AVA_RUNNER_DB_PASSWORD",
+    "AVA_TRACK_MODE",
 ]
 _RUNNER_RESIDUE = {
     "backups",
@@ -93,6 +94,23 @@ def test_runner_inventory_names_everything_and_prints_no_secret(
     }
     expected_files = {"installed_sha", "run/sessions", "state/hold-watchdog-attempt"}
     assert expected_files <= set(report["legacy_files"])
+
+
+def test_a_dead_key_left_in_the_environment_is_inert(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No setting declares a dead key, so a `.env` that still carries one (before
+    the adoption's `env` step removes it, or after a rollback restored the legacy
+    file) boots, and the key configures nothing: `AVA_TRACK_MODE=releases` no
+    longer selects what an update converges to, and no child receives it."""
+    from shared.config.general import GeneralSettings
+    from shared.env_registry import child_env
+
+    inventory.dead_keys_are_dead()
+    for key in inventory.DEAD_KEYS:
+        monkeypatch.setenv(key, "releases")
+
+    assert not hasattr(GeneralSettings(), "track_mode")
+    for role in ("gateway", "runner", "agent"):
+        assert not set(inventory.DEAD_KEYS) & set(child_env(role, "posix"))
 
 
 def test_inventory_without_a_service_path_explains_the_refusal(

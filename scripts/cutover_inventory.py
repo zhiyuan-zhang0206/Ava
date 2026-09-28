@@ -114,7 +114,7 @@ GATEWAY_ONLY_KEYS = (
 GATEWAY_ONLY_PREFIXES = ("AVA_PITR_",)
 BEARER_KEY = "AVA_CLUSTER_SECRET"
 # Keys no current setting declares; `dead_keys` refuses if the table goes stale.
-DEAD_KEYS = ("AVA_CLUSTER", "AVA_RESTARTER_HEALTH_PORT")
+DEAD_KEYS = ("AVA_CLUSTER", "AVA_RESTARTER_HEALTH_PORT", "AVA_TRACK_MODE")
 DATA_PLANE_PORTS = ("postgres", "redis", "pgbouncer")
 
 _AVA_NAMES = frozenset(
