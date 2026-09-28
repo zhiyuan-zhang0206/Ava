@@ -99,8 +99,25 @@ hold, the managed-resource predecessor rule and the owner CAS are unchanged.
   rows terminated after the attestation as `after_attestation`, although the
   runtime resurrects them.
 - A managed row whose applied restart a force superseded loses that
-  predecessor receipt. It resurrects, but its successor's admission records
-  `resource_fence` unless the dead-empty-host proof holds. The predecessor
-  rule is unchanged here.
-- The column comment on `last_resurrect_inbound_id` does not mention the birth
-  epoch. Changing a column comment needs a migration.
+  predecessor receipt. It resurrects, but while the host process its
+  resources record is alive, the successor's admission fails:
+  `admit_resources_async` raises `ResourceEvidenceError` (no complete
+  predecessor closure) outside the conversion to `resource_fence`, the
+  dispatcher logs `host_turn_crashed` on every wake, and no
+  `last_admission_outcome` is written. Once that host process has exited (a
+  host restart), the dead-empty-host proof admits the successor. Protocol-zero
+  rows (NULL resources) never take this path. The predecessor rule is
+  unchanged here; recording that refusal as `resource_fence` would change
+  every predecessor-closure refusal of admission, so it is a separate change.
+- `0` is a valid value of `last_resurrect_inbound_id`: born under this
+  runtime and not resurrected since. A future `IS [NOT] NULL` reader of the
+  column (such as "was resurrected"), a foreign key or a `CHECK (> 0)` must
+  account for it. The column's comments in `db/schema.sql` (inline and
+  `COMMENT ON`) still say only a resurrection writes it and NULL means none
+  was recorded; changing them needs a migration, so that rides the first
+  migration after the cutover.
+- The origin and the receipt live in `inbound_messages` rows:
+  `lifecycle_release` on `resurrect` and `restart` rows, `unowned_termination`
+  on `terminate` rows. Nothing deletes inbound rows today. A future inbound
+  retention must keep these rows; otherwise resurrection falls back, closed,
+  to refusing the rows they vouched for.
