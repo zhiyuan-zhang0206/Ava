@@ -73,7 +73,7 @@ lifecycle; those items wait for it to land and are then designed on its code.
 4. **More single-owner decisions**, each added to `DECISIONS` only once its
    owner exists: the OS process identity key (pid + kernel start time; one fix
    touched 28 files across exec ownership, the updater, PITR and PTY sessions;
-   natural owner `shared/proc_tree.py`'s `OwnedProcess`) is the next
+   natural owner `shared/native_process/ownership.py`'s `OwnedProcess`) is the next
    candidate — most of its readers sit in files #3479 rewrites.
    `shared/config` as a registration hub needs a design pass first.
 5. **Path imports** (`path_imports`, 5 sites left): the `ava_memory` pool

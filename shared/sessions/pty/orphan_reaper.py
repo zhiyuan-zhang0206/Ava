@@ -154,7 +154,9 @@ def _reap_orphaned_hosts(name: str, *, force_unresponsive: bool = False) -> int:
     SIGKILL-only escape hatch. Its argv and record-identity checks above are the
     authorization boundary. Each host is frozen and its shell's whole session
     (`session_tree`: the shell's tree and POSIX session) dies before the host,
-    so schedule runners cannot escape into their own process groups.
+    so schedule runners cannot escape into their own process groups. Only a
+    survivor this user could signal fails the reap (`TreeKill.stuck`); one it
+    may not signal (a root `sudo` on the pty) is logged and left to its owner.
     """
     hosts = _orphaned_host_processes(name, force_unresponsive=force_unresponsive)
     if not hosts:
@@ -164,12 +166,18 @@ def _reap_orphaned_hosts(name: str, *, force_unresponsive: bool = False) -> int:
         name=name,
         pids=sorted(host.pid for host in hosts),
     )
-    survivors: list[int] = []
+    stuck: list[int] = []
+    denied: list[int] = []
     for host in hosts:
         result = kill_host_tree(host, wait_s=_ORPHAN_HOST_KILL_WAIT_S)
-        survivors += [identity.pid for identity in result.survivors]
-    if survivors:
-        raise RuntimeError(
-            f"recordless pty host {name} survived force-reap: pids={sorted(survivors)}"
+        stuck += [identity.pid for identity in result.stuck]
+        denied += [identity.pid for identity in result.denied]
+    if stuck:
+        raise RuntimeError(f"recordless pty host {name} survived force-reap: pids={sorted(stuck)}")
+    if denied:
+        logger.warning(
+            "pty force-reap of {name} left processes this user may not signal: pids={pids}",
+            name=name,
+            pids=sorted(denied),
         )
     return len(hosts)

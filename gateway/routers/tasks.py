@@ -27,6 +27,7 @@ from gateway.schemas import (
 from shared.db_transaction import write_transaction
 from shared.tasks.task_owner_notifications import TaskOwnerNotification, owner_change_notifications
 from shared.tasks.task_reparent import resolve_reparent
+from shared.tasks.task_rules import first_open_child, is_closed, open_title_holder
 
 router = APIRouter()
 
@@ -296,14 +297,8 @@ def _patch_task_blocking(
                 status_code=422,
                 detail=f"Task {task_id} is the system root task and is immutable.",
             )
-        if body.status in ("done", "cancelled"):
-            cur.execute(
-                "SELECT id, count(*) OVER () FROM agent_tasks "
-                "WHERE parent_id = %s AND status = 'in_progress' "
-                "ORDER BY id LIMIT 1",
-                (task_id,),
-            )
-            active_child = cur.fetchone()
+        if is_closed(body.status):
+            active_child = first_open_child(cur, task_id)
             if active_child is not None:
                 child_id, child_count = active_child
                 raise HTTPException(
@@ -325,12 +320,7 @@ def _patch_task_blocking(
         # A rename must keep the SDK create() invariant: no two in_progress
         # tasks share a title.
         if body.title is not None:
-            cur.execute(
-                "SELECT id, status FROM agent_tasks "
-                "WHERE title = %s AND status = 'in_progress' AND id != %s LIMIT 1",
-                (body.title, task_id),
-            )
-            dup = cur.fetchone()
+            dup = open_title_holder(cur, body.title, exclude_id=task_id)
             if dup is not None:
                 raise HTTPException(
                     status_code=422,

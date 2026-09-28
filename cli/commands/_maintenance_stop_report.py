@@ -122,17 +122,25 @@ class SurvivorInventory:
     survivors: list[StopSurvivor]
     groups: list[int]
 
-    def render(self, *, stage: str) -> str:
-        header = f"remaining process inventory (stage={stage}; nothing was force-killed):"
+    def render(self, *, stage: str, killed: bool = False) -> str:
+        """The printable inventory; `killed` when the survivors outlived a SIGKILL."""
+        outcome = "these outlived their SIGKILL" if killed else "nothing was force-killed"
+        header = f"remaining process inventory (stage={stage}; {outcome}):"
         if not self.survivors and not self.groups:
             return f"{header} no survivor readable at the deadline"
         lines = [header, *(survivor.render() for survivor in self.survivors)]
         if self.groups:
             lines.append(f"  occupied recorded process groups: {sorted(self.groups)}")
-        lines.append(
-            "  recovery: retry the command to reconverge recorded groups, or escalate "
-            "explicitly with `ava stop --force` if the listed process(es) are expendable."
-        )
+        if killed:
+            lines.append(
+                "  recovery: a process that outlives SIGKILL is usually another user's (a "
+                "root `sudo`) or stuck in the kernel; end it as its owner, then retry the command."
+            )
+        else:
+            lines.append(
+                "  recovery: retry the command to reconverge recorded groups, or escalate "
+                "explicitly with `ava stop --force` if the listed process(es) are expendable."
+            )
         return "\n".join(lines)
 
     def payload(self) -> list[dict[str, object]]:

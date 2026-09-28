@@ -33,8 +33,10 @@ POSIX session, a double-forked job included) and each PTY host birth, records
 the `ava stop` closure notice for each busy session's owner (naming the
 release, before any signal), HUPs shells and TERMs jobs, and after the
 policy's `cancel_grace_s` kills each session whole through `session_tree`
-(frozen, children first, shell last); a PTY host still running after its
-session is gone gets SIGKILL to its captured birth. This is the same closure
+(frozen, children first, shell last). A session whose shell the kill ended is
+recorded again under the same dedup key, naming whatever of it outlived its
+SIGKILL, so its owner still gets one notice. A PTY host still running after
+its session is gone gets SIGKILL to its captured birth. This is the same closure
 `ava stop` runs, with the release's bounds. Closure is
 the kernel observation that each is gone and no recorded terminal is live;
 selection checks that evidence again. A survivor fails the phase with its

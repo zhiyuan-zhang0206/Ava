@@ -25,7 +25,9 @@ pairs whose packages differ and whose co-occurrence count and confidence
 both clear a threshold — candidate evidence that the two sides share a
 decision with no single owner. Declared cross-process contract boundaries
 (`_CONTRACT_BOUNDARIES`, e.g. `gateway/schemas/` <-> `ui/web/`, carried by
-codegen) are excluded from pairing; see "Calibration snapshot" in
+codegen) are excluded from pairing, and so is any file the branch tip no
+longer has (paths follow renames to their current name; a deleted file names
+no owner to fix); see "Calibration snapshot" in
 `future/infra/locality.md` (read there, not edited here).
 """
 
@@ -70,7 +72,17 @@ _GENERATED_EXCLUDE = (
 # Declared cross-process contract boundaries: a pair of path prefixes whose
 # co-change is carried by codegen, not a leaked decision. See the module
 # docstring and future/infra/locality.md's "Calibration snapshot".
-_CONTRACT_BOUNDARIES: tuple[tuple[str, str], ...] = (("gateway/schemas/", "ui/web/"),)
+# Declared cross-process contracts: both sides change together by design, so a
+# co-change there is a protocol change, not a leaked decision.
+_CONTRACT_BOUNDARIES: tuple[tuple[str, str], ...] = (
+    # REST wire shape, carried to the frontend by codegen.
+    ("gateway/schemas/", "ui/web/"),
+    # The exec child's request/result wire: `exec_protocol` owns it; the child
+    # process (`exec_child`) and the parent's exec node family
+    # (`agent/graph/_exec*`) are its two ends.
+    ("agent/exec_child.py", "agent/graph/exec_protocol.py"),
+    ("agent/exec_child.py", "agent/graph/_exec"),
+)
 _COMMIT_TYPES = ("fix", "feat", "refactor")
 _TAG_PREFIX_RE = re.compile(r"^\[[^\]]*\]\s*")
 _CONVENTIONAL_RE = re.compile(r"^([a-z]+)(\([^)]*\))?!?:")
@@ -134,14 +146,21 @@ def _commit_type(subject: str) -> str:
     return kind if kind in _COMMIT_TYPES else "other"
 
 
-def _numstat_new_path(raw: str) -> str:
-    """The post-rename path from one numstat path field (`git log -M --numstat`).
+def _numstat_paths(raw: str) -> tuple[str | None, str]:
+    """`(old, new)` from one numstat path field (`git log -M --numstat`); `old`
+    is None unless the line is a rename.
 
     A rename appears either as a full `old => new`, or compacted to a common
-    prefix as `dir/{old => new}/file`; both forms carry the new side.
+    prefix as `dir/{old => new}/file`.
     """
-    collapsed = _RENAME_BRACE_RE.sub(lambda m: m.group(2), raw).replace("//", "/")
-    return collapsed.split(" => ")[-1]
+    if " => " not in raw:
+        return None, raw
+    if _RENAME_BRACE_RE.search(raw):
+        old = _RENAME_BRACE_RE.sub(lambda m: m.group(1), raw).replace("//", "/")
+        new = _RENAME_BRACE_RE.sub(lambda m: m.group(2), raw).replace("//", "/")
+        return old, new
+    old, new = raw.split(" => ", 1)
+    return old, new
 
 
 @dataclass(frozen=True)
@@ -150,14 +169,17 @@ class Commit:
     date: str
     subject: str
     type: str
-    files: list[str]  # deduped, sorted, src-only, post-rename
+    files: list[str]  # deduped, sorted, src-only, named as at the window's newest commit
 
 
-def _raw_commit_blocks(text: str) -> list[tuple[str, str, str, list[str]]]:
+_PathChange = tuple[str | None, str]  # (pre-rename path or None, path in this commit)
+
+
+def _raw_commit_blocks(text: str) -> list[tuple[str, str, str, list[_PathChange]]]:
     """Group numstat output lines under their preceding `@@sha\\tdate\\tsubject`."""
-    blocks: list[tuple[str, str, str, list[str]]] = []
+    blocks: list[tuple[str, str, str, list[_PathChange]]] = []
     header: tuple[str, str, str] | None = None
-    paths: list[str] = []
+    paths: list[_PathChange] = []
     for line in text.splitlines():
         if line.startswith("@@"):
             if header is not None:
@@ -167,23 +189,39 @@ def _raw_commit_blocks(text: str) -> list[tuple[str, str, str, list[str]]]:
             paths = []
         elif line.strip() and header is not None:
             _added, _deleted, raw_path = line.split("\t", 2)
-            paths.append(_numstat_new_path(raw_path))
+            paths.append(_numstat_paths(raw_path))
     if header is not None:
         blocks.append((*header, paths))
     return blocks
 
 
 def _commits_from_log(text: str) -> list[Commit]:
-    return [
-        Commit(
-            sha=sha,
-            date=when,
-            subject=subject,
-            type=_commit_type(subject),
-            files=sorted({f for f in paths if _is_src(f)}),
+    """Commits with every path resolved to its name at the window's newest commit.
+
+    `git log` lists newest first, so a rename is met before the older commits that
+    still use the old name: each rename records `old -> current`, and older paths
+    resolve through it. Co-change then follows a file across renames instead of
+    splitting its history under two names.
+    """
+    current: dict[str, str] = {}
+    commits: list[Commit] = []
+    for sha, when, subject, changes in _raw_commit_blocks(text):
+        files: set[str] = set()
+        for old, path in changes:
+            resolved = current.get(path, path)
+            files.add(resolved)
+            if old is not None:
+                current[old] = resolved
+        commits.append(
+            Commit(
+                sha=sha,
+                date=when,
+                subject=subject,
+                type=_commit_type(subject),
+                files=sorted(f for f in files if _is_src(f)),
+            )
         )
-        for sha, when, subject, paths in _raw_commit_blocks(text)
-    ]
+    return commits
 
 
 def _run_git_log(repo: Path, branch: str, *, days: int | None, commits: int | None) -> str:
@@ -208,6 +246,17 @@ def _run_git_log(repo: Path, branch: str, *, days: int | None, commits: int | No
         cmd, capture_output=True, text=True, check=True, timeout=120
     )
     return result.stdout
+
+
+def _tip_files(repo: Path, branch: str) -> frozenset[str]:
+    result = subprocess.run(  # noqa: S603 - fixed argv, caller-controlled repo/branch only
+        ["git", "-C", str(repo), "ls-tree", "-r", "--name-only", branch],
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=60,
+    )
+    return frozenset(result.stdout.splitlines())
 
 
 def _head_sha(repo: Path, branch: str) -> str:
@@ -316,11 +365,20 @@ def _strong_pairs(
     pair_counts: Counter[tuple[str, str]],
     touch_counts: Counter[str],
     *,
+    tip_files: frozenset[str],
     min_support: int,
     min_confidence: float,
 ) -> list[PairRow]:
+    """Pairs clearing both thresholds whose files both still exist at the tip.
+
+    A deleted file names no owner to move a decision into — its record is
+    history, not a finding (renames are already folded into the current name
+    by `_commits_from_log`).
+    """
     rows: list[PairRow] = []
     for (a, b), c in pair_counts.items():
+        if a not in tip_files or b not in tip_files:
+            continue
         n_a, n_b = touch_counts[a], touch_counts[b]
         confidence = c / min(n_a, n_b)
         if c >= min_support and confidence >= min_confidence:
@@ -371,6 +429,7 @@ def _build_report(
     branch: str,
     window: str,
     head: str,
+    tip_files: frozenset[str],
     min_support: int,
     min_confidence: float,
 ) -> Report:
@@ -378,7 +437,11 @@ def _build_report(
     paired = _paired_commits(commits)
     pair_counts, touch_counts = _cochange_counts(paired)
     strong = _strong_pairs(
-        pair_counts, touch_counts, min_support=min_support, min_confidence=min_confidence
+        pair_counts,
+        touch_counts,
+        tip_files=tip_files,
+        min_support=min_support,
+        min_confidence=min_confidence,
     )
     return Report(
         repo=repo,
@@ -473,7 +536,9 @@ def main(argv: list[str] | None = None) -> int:
     argv = argv if argv is not None else sys.argv[1:]
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repo", default=str(_REPO_ROOT), help="repo root (default: this repo)")
-    parser.add_argument("--branch", default="main")
+    # origin/main, not the local `main`: this repo works in worktrees off a fetched
+    # origin, and the shared local `main` ref is routinely far behind it.
+    parser.add_argument("--branch", default="origin/main")
     window = parser.add_mutually_exclusive_group()
     window.add_argument(
         "--days", type=int, help=f"rolling window in days (default {_DEFAULT_DAYS})"
@@ -494,6 +559,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         log_text = _run_git_log(repo, args.branch, days=days, commits=args.commits)
         head = _head_sha(repo, args.branch)
+        tip_files = _tip_files(repo, args.branch)
     except subprocess.CalledProcessError as exc:
         stderr = exc.stderr.strip() if exc.stderr else str(exc)
         print(f"error: git log failed for {repo} ({args.branch}): {stderr}", file=sys.stderr)
@@ -505,6 +571,7 @@ def main(argv: list[str] | None = None) -> int:
         branch=args.branch,
         window=window_desc,
         head=head,
+        tip_files=tip_files,
         min_support=args.min_support,
         min_confidence=args.min_confidence,
     )
