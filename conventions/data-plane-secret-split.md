@@ -7,7 +7,7 @@ internal data plane always authenticates, whatever the bearer
 | Authority | Holder | Purpose |
 |---|---|---|
 | `AVA_CLUSTER_SECRET` | Gateway only | Human/operator bearer for the gateway API and frontend login (never served by bootstrap, never held by a remote unit); empty = unauthenticated user-facing API and `/ops`, loopback-only listeners |
-| `AVA_API_TOKEN` (launch environment only) | Each launched service, admitted operator processes | The write generation's machine API token of the process's class: the gateway admits the active generation's tokens, a unit's `/ops` its generation's two; delivered only while the API is authenticated |
+| `AVA_API_TOKEN` (launch environment; also `$AVA_HOME/run/ava-root/manifests.json`, 0600) | Each launched service, admitted operator processes | The write generation's machine API token of the process's class: the gateway admits the active generation's tokens, a unit's `/ops` its generation's two; delivered only while the API is authenticated. The manifest copy is root's own record of what it launched — it persists until the next start rewrites it, and is inert once a release fence revokes the generation |
 | `$AVA_HOME/backups/logical-backup.passphrase` (0600) | Gateway home | The logical-backup passphrase: minted and pinned at birth (a home born earlier pinned `sha256(secret)` at its cutover), never derived and never changed by a secret rotation ([decision](../decisions/2026-09-28-backup-passphrase-minted-at-birth.md)); **backup-critical**: it is the only key to every logical backup |
 | OS user over the owner-only socket (`peer`) | Gateway host | Postgres administrator: provisioning, migrations (acting as the NOLOGIN schema owner), grants, the authority fence |
 | OS user mapped to `ava_monitor` (`peer map=ava_monitor`) | Gateway host's OTel collector | Password-less statistics reader (`pg_read_all_stats`, CONNECT); not a write generation, so no credential exists and rollouts leave it alone |
@@ -26,10 +26,12 @@ and `ava_g<n>_runner`, which inherit the `NOLOGIN` groups `ava_gateway` /
 Delivery:
 
 - The root launcher puts each DB-using service's class login into that
-  service's launch environment only (`AVA_DB_URL` plus the non-secret
+  service's launch environment (`AVA_DB_URL` plus the non-secret
   `AVA_DB_GENERATION`); gateway-profile services get the gateway login, runner
   and agent processes the runner login. The launch digest binds the generation
-  number and credential digest, never a password.
+  number and credential digest, never a password. The same login also lands at
+  rest, 0600, in `$AVA_HOME/run/ava-root/manifests.json` — root's own launched-unit
+  record, rewritten on the next start and inert after the next release fence.
 - An operator process on the gateway home (the `ava` CLI, a script, an OS job)
   receives the gateway login only while it runs the home's admitted runtime:
   the selected release image, or the source checkout the home was born from.

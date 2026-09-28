@@ -59,26 +59,26 @@ Windows unit carries `agent-runner` only
 ([setup](conventions/windows-setup.md)). Rationale + the remaining slice:
 [`future/infra/embedded-per-cluster-data-plane.md`](future/infra/embedded-per-cluster-data-plane.md).
 
-**Auth follows the authority boundary.** `AVA_CLUSTER_SECRET` is the gateway's human
-bearer (API, frontend login); it stays on the gateway and rotates only explicitly
-(`scripts/rotate_cluster_secret.py`; backups use a birth-pinned passphrase). An EMPTY
-secret (single-box default) leaves the API, `/ops` and frontend unauthenticated and binds
-every data-plane listener to loopback; a set secret adds this host's reachable address for
-Postgres and its pooler (Redis stays loopback, off-box inbound via the relay bridge). The
-internal data plane always authenticates: Postgres and PgBouncer admit only SCRAM
-application logins (the OS-user administrator and the collector's password-less
-monitoring role use `peer` on the owner-only socket), and Redis requires its generated
-passwords. Application processes never hold schema-owner or admin credentials: the owner
-is NOLOGIN, and each rollout's write generation — one gateway and one runner login
-inheriting the NOLOGIN groups `ava_gateway` / `ava_runner`, plus one machine API token per
-class, recorded in `$AVA_HOME/db-authority/` — is delivered only in the launch environment
-of the admitted runtime (`AVA_DB_URL`, `AVA_API_TOKEN`); `.env` holds the credential-free
-endpoint. Machine callers present their API token: the gateway admits the active
-generation's tokens (never a revoked one), an ops server its generation's two. Bootstrap serves
-configuration only: a remote agent-runner gets its runner login, API and telemetry tokens in a sealed
-bundle its start installs (`ava cluster db-authority issue-unit`), all shared across runner units (only
-the bundle's enrollment secret is per unit), and never holds the human secret. Older homes convert
-once: `scripts/cutover_db_authority.py` (a networked home also rotates the human secret there).
+**Auth follows the authority boundary.** `AVA_CLUSTER_SECRET` is the gateway's human bearer (API,
+frontend login); it stays on the gateway and rotates only explicitly
+(`scripts/rotate_cluster_secret.py`; backups use a birth-pinned passphrase). An EMPTY secret
+(single-box default) leaves the API, `/ops` and frontend unauthenticated and binds every data-plane
+listener to loopback; a set secret adds this host's reachable address for Postgres and its pooler
+(Redis stays loopback, off-box inbound via the relay bridge). The internal data plane always
+authenticates: Postgres and PgBouncer admit only SCRAM application logins (the OS-user administrator
+and the collector's password-less monitoring role use `peer` on the owner-only socket), and Redis
+requires its generated passwords. Application processes never hold schema-owner or admin credentials:
+the owner is NOLOGIN, and each rollout's write generation — one gateway and one runner login
+inheriting the NOLOGIN groups `ava_gateway` / `ava_runner`, plus one machine API token per class,
+recorded in `$AVA_HOME/db-authority/` — is delivered in the launch environment of the admitted runtime
+(`AVA_DB_URL`, `AVA_API_TOKEN`) and, at 0600, in `$AVA_HOME/run/ava-root/manifests.json` until the
+next start rewrites it, inert after the next fence; `.env` holds the credential-free endpoint. Machine
+callers present their API token: the gateway admits the active generation's tokens (never a revoked
+one), an ops server its generation's two. Bootstrap serves configuration only: a remote agent-runner
+gets its runner login, API and telemetry tokens in a sealed bundle its start installs (`ava cluster
+db-authority issue-unit`), all shared across runner units (only the bundle's enrollment secret is per
+unit), and never holds the human secret. Older homes convert once: `scripts/cutover_db_authority.py`
+(a networked home also rotates the human secret there).
 
 | Path | Role |
 |---|---|
