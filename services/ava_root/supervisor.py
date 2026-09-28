@@ -22,6 +22,14 @@ from typing import Protocol
 import psutil
 
 from services.ava_root.custody import ServiceCustody, require_clear
+from services.ava_root.group_scope import (
+    capture_group,
+    group_births,
+    group_closed,
+    ownership_retained,
+    recorded_living,
+    unproven_group,
+)
 from services.ava_root.manifest import (
     DesiredState,
     RestartPolicy,
@@ -37,7 +45,7 @@ from shared.env_registry import (
 )
 from shared.native_process.ownership import OwnedProcess, capture_tree, retain_processes
 from shared.process_env import inherited_process_env
-from shared.process_group_closure import group_empty, group_members
+from shared.process_group_closure import group_empty
 from shared.root_control.ipc import (
     ErrorCode,
     RequestPayload,
@@ -459,7 +467,7 @@ class Supervisor:
         # listed now are the unit's survivors. Once they exit, a later group
         # with that number may be a stranger's, so no later stop lists it.
         if not isinstance(generation.proc, ApplicationProcess):
-            generation.scope_closed_at_exit = _group_closed(generation.proc.pid)
+            generation.scope_closed_at_exit = group_closed(generation.proc.pid)
             if not generation.scope_closed_at_exit:
                 _record_survivors(runtime.manifest.id, generation)
         if runtime.generation is generation:
@@ -524,17 +532,17 @@ class Supervisor:
         pgid = identity.pid
         deadline = monotonic() + self._config.stop_timeout_s
         while True:
-            living = _recorded_living(generation.tracked)
+            living = recorded_living(generation.tracked)
             if living:
                 custody.retain(generation.tracked)
                 expired = monotonic() >= deadline
                 if expired and not force:
-                    raise _ownership_retained(runtime.manifest.id, living, pgid)
+                    raise ownership_retained(runtime.manifest.id, living, pgid)
                 self._signal_all(living, force=expired and force)
                 if expired:
                     force = False
                     deadline = monotonic() + self._config.stop_timeout_s
-            elif generation.scope_closed_at_exit or _group_closed(pgid) or psutil.pid_exists(pgid):
+            elif generation.scope_closed_at_exit or group_closed(pgid) or psutil.pid_exists(pgid):
                 custody.clear()
                 runtime.generation = None
                 runtime.state = UnitState.STOPPED
@@ -546,7 +554,7 @@ class Supervisor:
                 )
                 return
             elif monotonic() >= deadline:
-                raise _unproven_group(runtime.manifest.id, pgid, custody)
+                raise unproven_group(runtime.manifest.id, pgid, custody)
             await asyncio.sleep(0.05)
 
     async def _await_reap(
@@ -637,13 +645,13 @@ class Supervisor:
                     runtime.generation = None
                     runtime.state = UnitState.STOPPED
                     return
-                living = _capture_group(generation.tracked, identity.pid)
+                living = capture_group(generation.tracked, identity.pid)
             for item in living:
                 retain_processes(generation.tracked, capture_tree(item))
             custody.retain(generation.tracked)
             expired = monotonic() >= deadline
             if expired and not force:
-                raise _ownership_retained(runtime.manifest.id, living, identity.pid)
+                raise ownership_retained(runtime.manifest.id, living, identity.pid)
             if not identity.live() or expired:
                 self._signal_all(living, force=expired and force)
             if expired:
@@ -710,14 +718,6 @@ def _exited_leader(
         ) from exc
 
 
-def _group_closed(pgid: int) -> bool:
-    """Whether a just-reaped leader's group is empty; an unreadable group is not."""
-    try:
-        return group_empty(pgid)
-    except OSError:
-        return False
-
-
 def _record_survivors(unit_id: str, generation: _Generation) -> None:
     """Retain the births in a just-reaped leader's group while its number is reserved.
 
@@ -727,53 +727,11 @@ def _record_survivors(unit_id: str, generation: _Generation) -> None:
     """
     pgid = generation.proc.pid
     try:
-        retain_processes(generation.tracked, _group_births(pgid))
+        retain_processes(generation.tracked, group_births(pgid))
         if generation.custody is not None:
             generation.custody.retain(generation.tracked)
     except (OSError, RuntimeError, psutil.Error) as exc:
         _log.error("unit %s: group %s survivors not fully recorded at reap: %s", unit_id, pgid, exc)
-
-
-def _recorded_living(tracked: set[OwnedProcess]) -> set[OwnedProcess]:
-    """Retain the verified descendants of live recorded births; return every live one."""
-    for item in {item for item in tracked if item.live()}:
-        retain_processes(tracked, capture_tree(item))
-    return {item for item in tracked if item.live()}
-
-
-def _ownership_retained(unit_id: str, living: set[OwnedProcess], pgid: int) -> RuntimeError:
-    survivors = sorted(item.pid for item in living) or group_members(pgid)
-    return RuntimeError(f"unit {unit_id} did not stop; ownership retained (pids {survivors})")
-
-
-def _unproven_group(unit_id: str, pgid: int, custody: ServiceCustody) -> RuntimeError:
-    try:
-        listed = f"pids {group_members(pgid)}"
-    except OSError as exc:
-        listed = f"members root cannot list ({exc})"
-    return RuntimeError(
-        f"unit {unit_id}: every recorded birth has exited, but process group {pgid} still "
-        f"holds {listed}; its leader was reaped earlier, so that group may now be another "
-        f"program's. Custody retained at {custody.path}. Stop any of those processes that "
-        "belong to this unit and retry the stop; if the rest are another program's, move "
-        "that record aside once no process of this unit remains"
-    )
-
-
-def _group_births(pgid: int) -> set[OwnedProcess]:
-    """Native births the kernel files under `pgid` now; lineage is the caller's proof."""
-    members: set[OwnedProcess] = set()
-    for pid in group_members(pgid):
-        with contextlib.suppress(psutil.NoSuchProcess):
-            members.add(OwnedProcess.capture(psutil.Process(pid)))
-    return members
-
-
-def _capture_group(tracked: set[OwnedProcess], pgid: int) -> set[OwnedProcess]:
-    """Retain the named members of an occupied unit group; return the live ones."""
-    members = _group_births(pgid)
-    retain_processes(tracked, members)
-    return {item for item in members if item.live()}
 
 
 def _describe_exit(returncode: int) -> str:
