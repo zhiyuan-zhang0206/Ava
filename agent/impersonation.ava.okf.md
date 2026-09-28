@@ -49,6 +49,12 @@ an accepted intent whose target was replaced receives the existing explicit
 through the database lifecycle trigger. New runtime incarnations read the same
 lease before normal execution. Database-clock expiry and explicit release
 begin durable handoff before reopening the ordinary input path.
+Termination also queues ordered native system notes: impersonation interrupted,
+then completed termination. Ordinary claim renders these before the resurrection
+marker. Resurrection and its prompt use the database clock after locking the
+agent; claim orders by creation time and id, including equal-time notes.
+The closing lease reason drives the bound relay's best-effort executor notice
+without reopening its expired inbox authority.
 
 Cancel requests remain pending in the external inbox while held. The controller
 stops its current work and explicitly acknowledges the request; an unacknowledged
