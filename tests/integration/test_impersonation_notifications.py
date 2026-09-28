@@ -1,6 +1,5 @@
 """Lease renewal reminders and ordered termination interruption notices."""
 
-import shlex
 import sys
 from contextlib import contextmanager
 from typing import Any, cast
@@ -33,25 +32,9 @@ from shared.turn_identity import bind_turn_identity
 from tests.impersonation_support import recorded_tree
 
 
-@pytest.mark.parametrize(
-    ("machine", "home", "stopped_home", "null_home"),
-    [
-        ("macbook-air", "/Users/owner/.ava", None, None),
-        ("ubuntu-runner", "/home/owner/.ava", None, None),
-        ("unregistered", None, None, None),
-        ("macbook-air", "/Users/live/.ava", "/Users/stopped/.ava", None),
-        ("macbook-air", "/Users/live-newest/.ava", None, "/Users/null-uptime/.ava"),
-    ],
-)
-@pytest.mark.parametrize("invoked_python", [None, "/Users/runner/preview source/.venv/bin/python"])
-def test_reminder_uses_request_interpreter_or_legacy_machine_home(
-    db_conn: psycopg.Connection,
-    machine: str,
-    home: str | None,
-    stopped_home: str | None,
-    null_home: str | None,
-    invoked_python: str | None,
-) -> None:
+def test_reminder_commands_are_bare_ava(db_conn: psycopg.Connection) -> None:
+    """The renewal reminder names no interpreter or home: a bare `ava` resolves
+    through the executor's inherited AVA_HOME."""
     agent_id = create_agent(db_conn)
     owner = RuntimeIncarnation(agent_id, uuid4(), uuid4())
     db_conn.execute(
@@ -66,37 +49,17 @@ def test_reminder_uses_request_interpreter_or_legacy_machine_home(
         caller=CallerIdentity(kind="external_agent", subject="codex", instance="test"),
         ttl_seconds=300,
         reason="Handle the next message",
-        process_metadata={
-            **recorded_tree(),
-            **({"invoked_python": invoked_python} if invoked_python is not None else {}),
-        },
+        process_metadata={**recorded_tree(), "invoked_python": "/preview source/.venv/bin/python"},
         relay_provider="codex",
         relay_thread_id=str(uuid4()),
     )
     leases.accept(lease["id"], agent_id, owner, "Handoff brief")
     leases.activate(lease["id"], owner)
     db_conn.execute(
-        "UPDATE agent_impersonations SET machine=%s, "
-        "expires_at=clock_timestamp()+interval '4 minutes' WHERE id=%s",
-        (machine, lease["id"]),
+        "UPDATE agent_impersonations SET expires_at=clock_timestamp()+interval '4 minutes' "
+        "WHERE id=%s",
+        (lease["id"],),
     )
-    if stopped_home is not None:
-        db_conn.execute(
-            "INSERT INTO machine_units(machine_name,home,up_since_at,stopped_at) "
-            "VALUES(%s,%s,clock_timestamp()+interval '1 minute',clock_timestamp())",
-            (machine, stopped_home),
-        )
-    if null_home is not None:
-        db_conn.execute(
-            "INSERT INTO machine_units(machine_name,home,up_since_at) VALUES(%s,%s,NULL)",
-            (machine, null_home),
-        )
-    if home is not None:
-        db_conn.execute(
-            "INSERT INTO machine_units(machine_name,home,up_since_at) "
-            "VALUES(%s,%s,clock_timestamp())",
-            (machine, home),
-        )
     db_conn.commit()
     with pool(max_size=2) as reaper_pool:
         assert remind_expiring_impersonations(reaper_pool) == 1
@@ -106,33 +69,16 @@ def test_reminder_uses_request_interpreter_or_legacy_machine_home(
     ).fetchone()
     assert reminder is not None
     content: str = reminder[0]
-    _assert_reminder_commands(content, invoked_python, home, stopped_home, null_home)
     # The renew suggestion repeats the lease's own window, not a fixed hour.
-    assert f"renew 0 --agent {agent_id} --ttl 300\n" in content
-
-
-def _assert_reminder_commands(
-    content: str,
-    invoked_python: str | None,
-    home: str | None,
-    stopped_home: str | None,
-    null_home: str | None,
-) -> None:
-    python = invoked_python or (
-        f"{home}/source/.venv/bin/python" if home else "~/.ava/source/.venv/bin/python"
-    )
-    prefix = f"{shlex.quote(python) if invoked_python else python} -m cli impersonate"
-    assert f"\n{prefix} renew" in content
-    assert f"\n{prefix} release" in content
+    assert f"\nava impersonate renew 0 --agent {agent_id} --ttl 300\n" in content
+    assert f"\nava impersonate release 0 --agent {agent_id} --summary ..." in content
+    assert "-m cli" not in content
+    assert ".venv" not in content
     assert sys.executable not in content
-    if stopped_home is not None:
-        assert stopped_home not in content
-    if null_home is not None:
-        assert null_home not in content
 
 
 @pytest.mark.parametrize("bad", [7, "", "  ", ["python"]])
-def test_request_rejects_an_interpreter_reminders_cannot_quote(
+def test_request_rejects_a_malformed_invoked_python(
     db_conn: psycopg.Connection, bad: object
 ) -> None:
     agent_id = create_agent(db_conn)

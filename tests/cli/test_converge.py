@@ -31,35 +31,25 @@ def _ctx(repo: Path, ava_home: Path, roles=None):
     return converge_host.ConvergeCtx(repo=repo, ava_home=ava_home, roles=roles)  # pyright: ignore[reportUnknownArgumentType]
 
 
-def test_ensure_ava_symlink_creates_and_is_idempotent(home, tmp_path: Path):
-    repo = tmp_path / "repo"
-    (repo / ".venv" / "bin").mkdir(parents=True)
-    (repo / ".venv" / "bin" / "ava").write_text("#!/bin/sh\n")
-    ctx = _ctx(repo, home)  # pyright: ignore[reportUnknownArgumentType]
-
-    converge_host._ensure_ava_symlink(ctx)
+def test_ensure_ava_launcher_links_bare_ava_to_the_launcher(home: Path, tmp_path: Path) -> None:
     link = home / ".local" / "bin" / "ava"
-    assert link.is_symlink()  # pyright: ignore[reportUnknownMemberType]
-    assert link.readlink() == repo / ".venv" / "bin" / "ava"  # pyright: ignore[reportUnknownMemberType]
-
-    converge_host._ensure_ava_symlink(ctx)  # second run must not raise
-    assert link.readlink() == repo / ".venv" / "bin" / "ava"  # pyright: ignore[reportUnknownMemberType]
-
-
-def test_ensure_ava_symlink_repoints_stale_link(home, tmp_path: Path):
-    link = home / ".local" / "bin" / "ava"
-    link.parent.mkdir(parents=True)  # pyright: ignore[reportUnknownMemberType]
-    link.symlink_to(  # pyright: ignore[reportUnknownMemberType]
-        tmp_path / "old" / ".venv" / "bin" / "ava"
-    )  # stale target  # pyright: ignore[reportUnknownMemberType]
-
+    link.parent.mkdir(parents=True)
+    link.symlink_to(tmp_path / "old" / ".venv" / "bin" / "ava")  # a checkout CLI link
     repo = tmp_path / "repo"
-    (repo / ".venv" / "bin").mkdir(parents=True)
-    (repo / ".venv" / "bin" / "ava").write_text("#!/bin/sh\n")
+    converge_host._ensure_ava_launcher(_ctx(repo, home))
+    assert link.readlink() == repo / "scripts" / "ava-launcher.sh"
+    converge_host._ensure_ava_launcher(_ctx(repo, home))  # idempotent
+    assert link.readlink() == repo / "scripts" / "ava-launcher.sh"
 
-    converge_host._ensure_ava_symlink(_ctx(repo, home))  # pyright: ignore[reportUnknownArgumentType]
 
-    assert link.readlink() == repo / ".venv" / "bin" / "ava"  # pyright: ignore[reportUnknownMemberType]
+def test_ensure_home_cli_link_names_this_checkouts_cli(home: Path, tmp_path: Path) -> None:
+    ava_home = tmp_path / "cluster-home"
+    (ava_home / "ava").parent.mkdir(parents=True)
+    (ava_home / "ava").symlink_to(tmp_path / "stale" / ".venv" / "bin" / "ava")
+    repo = tmp_path / "repo"
+    converge_host._ensure_home_cli_link(_ctx(repo, ava_home))
+    assert (ava_home / "ava").readlink() == repo / ".venv" / "bin" / "ava"
+    assert not (home / ".local").exists()  # the home records only itself
 
 
 def test_ensure_local_bin_on_path_block_is_idempotent(home, tmp_path: Path):

@@ -10,7 +10,6 @@ from __future__ import annotations
 import asyncio
 import shlex
 import subprocess
-import sys
 from collections.abc import Callable
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
@@ -232,8 +231,8 @@ def test_empty_start_message_falls_back_to_the_activation_hint() -> None:
     run(inbox, Listener(inbox), emitted.append)
     assert len(emitted) == 1
     assert "Ava control active" in emitted[0]
-    ack = shlex.join([sys.executable, "-m", "cli", "impersonate", "ack", str(LEASE_ID)])
-    inbox_cmd = shlex.join([sys.executable, "-m", "cli", "impersonate", "inbox", str(LEASE_ID)])
+    ack = shlex.join(["ava", "impersonate", "ack", str(LEASE_ID)])
+    inbox_cmd = shlex.join(["ava", "impersonate", "inbox", str(LEASE_ID)])
     assert ack in emitted[0]
     assert inbox_cmd in emitted[0]
     assert "agents timeline" not in emitted[0]

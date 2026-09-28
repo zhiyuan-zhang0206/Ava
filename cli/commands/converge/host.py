@@ -1,9 +1,9 @@
 """Idempotent host convergence for the ava lifecycle.
 
 Bring a machine to the host-level state the current code expects: the `ava`
-symlink on PATH, ~/.local/bin on PATH, the $AVA_HOME dir skeleton, fresh plugin
-config images. Run by `cmd_start` (so `ava cluster update` inherits it via its
-trailing start), and standalone via `ava converge`.
+launcher on PATH, ~/.local/bin on PATH, the $AVA_HOME dir skeleton and its own
+CLI link, fresh plugin config images. Run by `cmd_start` (so `ava cluster update`
+inherits it via its trailing start), and standalone via `ava converge`.
 """
 
 # Host setup that used to live only in install.sh never reached already-deployed
@@ -41,7 +41,8 @@ from cli.commands.converge._steps import (
 from cli.commands.converge._steps import (
     _backfill_health_port_keys_step,
     _ensure_ava_home_dirs,
-    _ensure_ava_symlink,
+    _ensure_ava_launcher,
+    _ensure_home_cli_link,
     _ensure_local_bin_on_path,
     _ensure_pg_binaries_step,
     _ensure_prod_editable_dir_protection,
@@ -382,6 +383,9 @@ CONVERGE_STEPS: tuple[ConvergeStep, ...] = (
     # Warning-only ownership preflight must run before every write-capable step:
     # root-owned paths otherwise fail before converge can print the exact repair.
     ConvergeStep("$AVA_HOME ownership preflight", _ensure_ownership_preflight),
+    # The home's own CLI link first: prod_source_dir(), read by the source-tree
+    # steps below, resolves the checkout from it when $AVA_HOME/source is absent.
+    ConvergeStep("$AVA_HOME/ava CLI link", _ensure_home_cli_link),
     # Reset the prod checkout before any other step reads the tree: a tampered
     # tree would make every later step misbehave, and resetting first means the
     # rest of converge runs against the installed commit.
@@ -393,7 +397,7 @@ CONVERGE_STEPS: tuple[ConvergeStep, ...] = (
         host_global=True,
     ),
     ConvergeStep("prod editable exec gate", _ensure_prod_editable_exec_gate, host_global=True),
-    ConvergeStep("ava symlink on PATH", _ensure_ava_symlink, host_global=True),
+    ConvergeStep("ava launcher on PATH", _ensure_ava_launcher, host_global=True),
     ConvergeStep("~/.local/bin on PATH", _ensure_local_bin_on_path, host_global=True),
     ConvergeStep("$AVA_HOME dir skeleton", _ensure_ava_home_dirs),
     # Codex and Claude Code own their global homes. This prod-only host step

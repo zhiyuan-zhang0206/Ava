@@ -45,26 +45,22 @@ _FETCH_TIMEOUT_S = 30.0
 
 
 def prod_source_dir() -> Path | None:
-    """The installed prod source checkout, layout-independent.
+    """The installed source checkout of this unit, layout-independent.
 
-    Resolved from `$AVA_HOME/source` first, with the host `ava` symlink
-    (`~/.local/bin/ava` → `<source>/.venv/bin/ava`) as fallback. The home-first
-    order is load-bearing for co-located clusters (e.g. a preview gateway
-    `~/.ava-preview` on the same host as the prod runner `~/.ava`): the symlink
-    points at PROD's source on every unit layout, so reading it from the
-    secondary unit would report PROD's HEAD as its own and raise a false
-    off-pin warning. The symlink fallback still covers the gateway-only layout
-    (`$AVA_HOME=~/.ava_gateway` with the checkout at `/opt/ava/source`), where
-    `$AVA_HOME/source` does not exist. The symlink is never repointed by a dev
-    cluster, so from a dev worktree this still reports PROD's source (the
-    worktree's own home has no `source/` child and its checkout is not under
-    `~/.local/bin/ava`)."""
+    Resolved from `$AVA_HOME/source` first, then from the home's own CLI link
+    (`$AVA_HOME/ava` → `<source>/.venv/bin/ava`, written at every converge). Both
+    are facts the home records about itself, so a co-located cluster (e.g. a
+    preview gateway `~/.ava-preview` on the same host as the prod runner
+    `~/.ava`) reports its own HEAD, never another cluster's. The link covers the
+    gateway-only layout (`$AVA_HOME=~/.ava_gateway` with the checkout at
+    `/opt/ava/source`), where `$AVA_HOME/source` does not exist."""
     from shared.paths import ava_home
 
-    home_source = ava_home() / "source"
+    home = ava_home()
+    home_source = home / "source"
     if (home_source / ".git").exists():
         return home_source
-    link = Path.home() / ".local" / "bin" / "ava"
+    link = home / "ava"
     with contextlib.suppress(OSError, IndexError):
         if link.is_symlink():
             # <source>/.venv/bin/ava → parents: [bin, .venv, <source>]

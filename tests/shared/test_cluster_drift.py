@@ -77,28 +77,32 @@ def test_branch_drift_feature_branch(monkeypatch: pytest.MonkeyPatch, tmp_path: 
     assert prod_source_branch_drift() == "ava-7/fix"
 
 
-def test_prod_source_dir_resolves_from_ava_symlink(
+def test_prod_source_dir_resolves_from_the_home_cli_link(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """_prod_source_dir follows ~/.local/bin/ava → <source>/.venv/bin/ava, so it finds
-    the real install source regardless of $AVA_HOME layout (the cloud's source is at
-    /opt/ava/source while $AVA_HOME is ~/.ava_gateway)."""
+    """Without `$AVA_HOME/source`, the home's own CLI link (`$AVA_HOME/ava` →
+    `<source>/.venv/bin/ava`) names the checkout — the gateway-only layout keeps
+    its source at /opt/ava/source while $AVA_HOME is ~/.ava_gateway."""
     source = tmp_path / "opt" / "ava" / "source"
     ava_bin = source / ".venv" / "bin" / "ava"
     ava_bin.parent.mkdir(parents=True)
     ava_bin.write_text("#!/bin/sh\n")
-    link = tmp_path / "home" / ".local" / "bin" / "ava"
-    link.parent.mkdir(parents=True)
-    link.symlink_to(ava_bin)
-    monkeypatch.setattr("pathlib.Path.home", classmethod(lambda _cls: tmp_path / "home"))  # pyright: ignore[reportUnknownArgumentType]
+    home = tmp_path / "avahome"
+    home.mkdir()
+    (home / "ava").symlink_to(ava_bin)
+    monkeypatch.setattr("shared.paths.ava_home", lambda: home)
     assert _prod_source_dir() == source
 
 
-def test_prod_source_dir_falls_back_to_ava_home(
+def test_prod_source_dir_ignores_the_host_launcher_link(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """No ava symlink → fall back to $AVA_HOME/source."""
-    monkeypatch.setattr("pathlib.Path.home", classmethod(lambda _cls: tmp_path / "nohome"))  # pyright: ignore[reportUnknownArgumentType]
+    """The host's bare `ava` belongs to no cluster: with neither `$AVA_HOME/source`
+    nor `$AVA_HOME/ava`, the answer is the home's own (absent) source."""
+    link = tmp_path / "home" / ".local" / "bin" / "ava"
+    link.parent.mkdir(parents=True)
+    link.symlink_to(tmp_path / "prod" / "source" / "scripts" / "ava-launcher.sh")
+    monkeypatch.setattr("pathlib.Path.home", classmethod(lambda _cls: tmp_path / "home"))  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr("shared.paths.ava_home", lambda: tmp_path / "avahome")
     assert _prod_source_dir() == tmp_path / "avahome" / "source"
 

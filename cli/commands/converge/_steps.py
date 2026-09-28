@@ -17,19 +17,37 @@ from shared.private_storage import converge_private_tree, ensure_private_file
 # --- host-wiring steps (no preconditions) ---------------------------------
 
 
-def _ensure_ava_symlink(ctx: ConvergeCtx) -> None:
-    # On Windows the `ava` entry point is `.venv\Scripts\ava.exe`, reached via the
-    # uv/venv on PATH (or the install.ps1 shim) — there is no `~/.local/bin/ava`
-    # symlink model, and symlink creation needs admin/dev-mode. Skip.
-    if not get_backend().supports_ava_symlink():
-        return
-    target = ctx.repo / ".venv" / "bin" / "ava"
-    link = Path.home() / ".local" / "bin" / "ava"
+def _ensure_symlink(link: Path, target: Path) -> None:
     link.parent.mkdir(parents=True, exist_ok=True)
     if link.is_symlink() and link.readlink() == target:
         return
     link.unlink(missing_ok=True)
     link.symlink_to(target)
+
+
+def _ensure_ava_launcher(ctx: ConvergeCtx) -> None:
+    """The host's bare `ava` -> `scripts/ava-launcher.sh`, which runs `$AVA_HOME/ava`.
+
+    On Windows the `ava` entry point is `.venv\\Scripts\\ava.exe`, reached via the
+    uv/venv on PATH (or the install.ps1 shim) — there is no `~/.local/bin/ava`
+    symlink model, and symlink creation needs admin/dev-mode. Skip.
+    """
+    if not get_backend().supports_ava_symlink():
+        return
+    _ensure_symlink(
+        Path.home() / ".local" / "bin" / "ava", ctx.repo / "scripts" / "ava-launcher.sh"
+    )
+
+
+def _ensure_home_cli_link(ctx: ConvergeCtx) -> None:
+    """`$AVA_HOME/ava` -> this checkout's venv `ava`: the home names its own CLI.
+
+    The host launcher runs whatever this link names, so a bare `ava` in any shell
+    that inherited `AVA_HOME` reaches this cluster. The home records only itself.
+    """
+    if not get_backend().supports_ava_symlink():
+        return
+    _ensure_symlink(ctx.ava_home / "ava", ctx.repo / ".venv" / "bin" / "ava")
 
 
 _PATH_BEGIN = "# >>> ava path >>>"
