@@ -232,6 +232,13 @@ def workspace_dir(agent_id: int) -> Path:
     by the framework — cleanup is an ops decision. Cross-agent sharing happens
     by passing absolute paths in messages, not by writing into each other's
     workspace."""
+    if agent_id is None:  # pyright: ignore[reportUnnecessaryComparison] — guards a bad call, type hint alone won't catch it at runtime
+        raise ValueError(
+            "workspace_dir(None) — pass a real agent_id. Check "
+            "ava.agent_identity.agent_id() is not None first (pre-bootstrap has no "
+            "workspace); callers that need a pre-bootstrap fallback use Path.home() "
+            "explicitly instead of calling workspace_dir()."
+        )
     target = ava_home() / "workspaces" / str(agent_id)
     target.mkdir(parents=True, exist_ok=True)
     return target
