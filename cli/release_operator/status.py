@@ -1,6 +1,7 @@
 """`ava cluster release status` — read-only view of this home's release state.
 
-It reads the currently selected release (`cli.release_operator.current`), the
+It reads the currently selected release (`cli.release_operator.current`; one
+that no longer verifies is reported as unverifiable, with the reason), the
 cluster release state a completed fleet operation published
 (`releases/fleet-state.json`, gateway homes only) and, if one is under way or
 was last run, this home's operation journal: on the gateway the fleet journal
@@ -138,23 +139,32 @@ def _published(home: Path) -> dict[str, Any] | None:
     }
 
 
+def _current(home: Path) -> dict[str, str] | None:
+    """The verified selection, or why it no longer verifies: a corrupted or
+    malformed image must not hide the operation journal from the operator."""
+    try:
+        found = current_release(home)
+    except (ValueError, OSError, RuntimeError, KeyError) as exc:
+        return {"unverifiable": f"{type(exc).__name__}: {exc}"}
+    if found is None:
+        return None
+    return {
+        "artifact_digest": found[0].artifact_digest,
+        "manifest_digest": found[0].manifest_digest,
+        "schema_digest": found[0].schema_digest,
+        "source_commit": found[0].source_commit,
+    }
+
+
 def _status_body(*, operation: str | None) -> dict[str, Any]:
     from shared.machine import machine_name
     from shared.paths import ava_home
 
     home = ava_home()
-    found = current_release(home)
     return {
         "home": str(home),
         "machine": machine_name(),
-        "current": None
-        if found is None
-        else {
-            "artifact_digest": found[0].artifact_digest,
-            "manifest_digest": found[0].manifest_digest,
-            "schema_digest": found[0].schema_digest,
-            "source_commit": found[0].source_commit,
-        },
+        "current": _current(home),
         "published": _published(home),
         "operation": _operation_body(home, operation),
     }
@@ -165,6 +175,8 @@ def _render(body: dict[str, Any]) -> str:
     current = body["current"]
     if current is None:
         lines.append("current release: none (not yet adopted)")
+    elif "unverifiable" in current:
+        lines.append(f"current release: unverifiable ({current['unverifiable']})")
     else:
         lines.append(
             f"current release: commit {current['source_commit']} "

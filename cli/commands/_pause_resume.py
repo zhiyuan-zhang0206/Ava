@@ -4,7 +4,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from functools import wraps
 
-from shared import maintenance, start_serving
+from cli.cutover_hold import CutoverHold, held_start_command, standing_hold
+from shared import maintenance, pause_owner, start_serving
 
 
 @dataclass(frozen=True)
@@ -25,6 +26,35 @@ def exclusive_resources[**P, R](operation: Callable[P, R]) -> Callable[P, R]:
             return operation(*args, **kwargs)
 
     return wrapped
+
+
+def _start_held_for_cutover(
+    cutover: CutoverHold,
+    current: pause_owner.PauseOwnerSnapshot,
+    start: Callable[[], int | StartDelegation],
+) -> int | StartDelegation:
+    """Start inside the standing cutover hold and keep it; the go/no-go gate releases it.
+
+    Before the cutover's held first start (phase `stopped`) the unit refuses:
+    on a gateway that start must follow the database-records repair.
+    """
+    from shared.paths import ava_home
+
+    assert current.maintenance is not None  # noqa: S101 — snapshot() only returns maintenance holds
+    if current.maintenance.phase not in {"starting", "ready"}:
+        raise RuntimeError(
+            f"the cutover hold {cutover.holder} stands in phase {current.maintenance.phase}; "
+            f"its first start is {held_start_command(ava_home())} (a remote unit adds "
+            "`--db-capability BUNDLE`), and an ordinary start never releases it"
+        )
+    with maintenance.authorized_start(cutover.holder, cutover.acquired_at):
+        result = start()
+    if result == 0:
+        print(
+            f"\n→ cutover hold {cutover.holder} kept: business stays closed until the "
+            f"go/no-go gate releases it with `{cutover.resume_command()}`"
+        )
+    return result
 
 
 def resume_after_start[**P](start: Callable[P, int | StartDelegation]) -> Callable[P, int]:
@@ -53,6 +83,8 @@ def resume_after_start[**P](start: Callable[P, int | StartDelegation]) -> Callab
         if maintenance.start_authorized():
             return start(*args, **kwargs)
         assert current.holder is not None and current.acquired_at is not None  # noqa: S101
+        if (cutover := standing_hold(ava_home())) is not None:
+            return _start_held_for_cutover(cutover, current, lambda: start(*args, **kwargs))
         with maintenance.authorized_start(current.holder, current.acquired_at):
             result = start(*args, **kwargs)
         if result == 0 and start_serving.is_serving():

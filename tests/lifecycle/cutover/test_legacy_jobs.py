@@ -128,3 +128,42 @@ def test_cron_removal_keeps_every_other_line_and_a_preimage(make_legacy: Make) -
     assert jobs.remove_cron_lines(host, ours, archive) == 0
     assert legacy.scheduler.crontab() == [line for line in before if line not in ours]
     assert (archive / "crontab.before").read_text().splitlines() == before
+
+
+def _failing_systemctl(host: jobs.Host, tmp_path: Path) -> jobs.Host:
+    """A user manager without a bus, as over SSH without lingering."""
+    broken = tmp_path / "systemctl-broken"
+    broken.write_text('#!/bin/sh\necho "Failed to connect to bus: No medium found" >&2\nexit 1\n')
+    broken.chmod(0o755)
+    commands = tuple(
+        (name, str(broken) if name == "systemctl" else path) for name, path in host.commands
+    )
+    return replace(host, commands=commands)
+
+
+def test_a_user_unit_whose_manager_fails_raises_and_stays_in_place(
+    make_legacy: Make, tmp_path: Path
+) -> None:
+    legacy = make_legacy(roles=("gateway", "agent-runner"), platform="linux")
+    host = legacy.scheduler.host()
+    unit = next(unit for unit in jobs.discover(legacy.home, host).units if unit.scope == "user")
+    with pytest.raises(RuntimeError, match="connect to bus"):
+        jobs.retire_unit(_failing_systemctl(host, tmp_path), unit, tmp_path / "archive")
+    assert Path(unit.path).exists()
+    assert not (tmp_path / "archive" / unit.unit).exists()
+
+
+def test_a_retired_unit_is_not_disabled_again_on_reentry(make_legacy: Make) -> None:
+    """A crash after the unit file moved: the re-run only reloads its manager."""
+    legacy = make_legacy(roles=("gateway", "agent-runner"), platform="linux")
+    host = legacy.scheduler.host()
+    archive = legacy.home / "cutover-rollback" / "os-jobs"
+    for unit in jobs.discover(legacy.home, host).units:
+        jobs.retire_unit(host, unit, archive)
+        jobs.retire_unit(host, unit, archive)
+        disable = (
+            f"sudo -n systemctl disable --now {unit.unit}"
+            if unit.scope == "system"
+            else f"systemctl --user disable --now {unit.unit}"
+        )
+        assert legacy.scheduler.calls().count(disable) == 1, disable

@@ -91,8 +91,12 @@ release before: `activate_release(expected_current=None)` plus
 `scripts/preview/release_cycle_runtime.py::initial` already performs for the
 preview's own captured bundle, generalized to a real home/registry and a
 real `PreparationReceipt` file. Requires a stopped root
-(`cli.commands.root_driver.require_root_absent`) and refuses if a release is
-already selected (that is `request` + `ava cluster update`'s job).
+(`cli.commands.root_driver.require_root_absent`) and refuses if another
+release is already selected (that is `request` + `ava cluster update`'s job).
+The selection commits before the boot action installs; if the install fails
+(`sudo -n` wanting a password) or the process dies in between, re-running
+adopt with the same receipt keeps the selection and finishes the install. It
+holds the home's start-intent and lifecycle locks throughout.
 
 Linux only. The persistent macOS home helper only ever starts inside an
 existing release operation (`cli.release_transition.root_macos`); there is no
@@ -118,7 +122,9 @@ published release state, and it rejoins only through a converge operation.
 ava cluster release status [--operation OPERATION_ID] [--json]
 ```
 
-Read-only. Reports the currently selected release (if any), the published
+Read-only. Reports the currently selected release (if any; one that no
+longer verifies, a corrupted member or malformed manifest, is reported as
+unverifiable with the reason, and the rest still renders), the published
 cluster release state (`releases/fleet-state.json`: current release,
 last-known-good, stale units, rejections) and, by default, this home's active
 operation journal (`$AVA_HOME/updates/active`): the fleet journal's phase,

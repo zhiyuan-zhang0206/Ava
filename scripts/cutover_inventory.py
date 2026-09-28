@@ -50,6 +50,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import socket
 import sys
 from collections.abc import Mapping, Sequence
@@ -62,13 +63,13 @@ import psutil
 from dotenv import dotenv_values
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
+from cli.cutover_hold import ADOPTION_JOURNAL
 from scripts.cutover_legacy_jobs import Host, Jobs, discover
 from shared import cluster
 from shared.port_block import LEGACY_AVA_PORTS, PORT_OFFSETS
 
 VERSION = 1
 ARCHIVE = "cutover-rollback"
-JOURNAL = f"{ARCHIVE}/adopt-home.json"
 _JOURNAL_KEYS = {"version", "home", "cutover_id", "created_at", "inputs", "hold", "steps"}
 
 # Inert legacy files (plan section "Inert files and residue"); directories move whole.
@@ -125,6 +126,13 @@ _SECRET_WORDS = ("pass", "secret", "token", "key")
 
 class RefusedError(RuntimeError):
     """The home is not in a state this script can attribute or convert."""
+
+
+# Identity is adopted, never minted; the attestation is keyed by this name too.
+NO_MACHINE_NAME = (
+    "no persisted machine name: write this unit's name (its `machine_units` row on the "
+    "gateway) to $AVA_HOME/machine_name, or declare AVA_MACHINE_NAME in its .env, first"
+)
 
 
 @dataclass(frozen=True)
@@ -184,7 +192,7 @@ def registry_path(home: Path, explicit: str | None) -> Path:
 def read_journal(home: Path) -> dict[str, Any] | None:
     from shared.verified_file import regular_bytes
 
-    path = home / JOURNAL
+    path = home / ADOPTION_JOURNAL
     try:
         data: object = json.loads(regular_bytes(path))
     except FileNotFoundError:
@@ -422,17 +430,30 @@ def _argv_summary(argv: list[str]) -> str:
 
 
 def census(facts: Facts, exempt: set[int]) -> None:
-    """Every live process related to the home, except this process's own lineage."""
-    skip = _lineage() | exempt
+    """Every live process related to the home, except this process's own lineage.
+
+    An ancestor that is itself an Ava process of the home (its PTY host, an
+    agent host) refuses instead: the census would skip exactly the process the
+    old stop should have ended. The operator's shell (cwd in the home) stays
+    exempt.
+    """
+    lineage = _lineage()
     attrs = ["pid", "name", "cwd", "exe", "cmdline", "create_time"]
     for process in psutil.process_iter(attrs):
         info: dict[str, Any] = process.info  # pyright: ignore[reportAttributeAccessIssue] — psutil sets info
-        if info["pid"] in skip:
+        if info["pid"] in exempt:
             continue
         relations = _relations(facts.home, info, process)
         if not relations:
             continue
         kind = _kind(facts, info)
+        if info["pid"] in lineage:
+            if info["pid"] != os.getpid() and kind == "ava":
+                raise RefusedError(
+                    f"this script runs inside Ava process {info['pid']} ({info['name']}) of "
+                    f"{facts.home}; run it from a login shell outside the home's processes"
+                )
+            continue
         facts.processes.append(
             {
                 "pid": info["pid"],
@@ -578,27 +599,51 @@ def _journal_summary(journal: dict[str, Any] | None) -> dict[str, str] | None:
     return {name: step["state"] for name, step in journal["steps"].items()}
 
 
-def attest(rows: list[dict[str, Any]], machine: str, facts: Facts) -> dict[str, Any]:
+# Legacy rows hold `stable_create_time` at write time: the macOS kernel start
+# time, or on Linux start ticks plus the `/proc/stat` boot time of that moment,
+# which a wall-clock step moves. A live reading this close is the recorded
+# process; a wider window only widens the fail-closed `alive`.
+_BIRTH_WINDOW_S = 5.0
+# A clock step moves the reported boot time as well, so only a birth this far
+# before the current boot proves that the boot ended.
+_BOOT_MARGIN_S = 300.0
+
+
+def row_verdict(pid: int, birth: float, boot: float, platform: str = sys.platform) -> str:
+    """`absent` or `boot_changed` only when the recorded process is provably gone.
+
+    A live pid is compared through the same primitive the legacy code wrote the
+    birth with. Its identity is either confirmed (`alive`), disproved (a birth
+    before this boot, or a different macOS kernel start time: a reused pid), or
+    left `unknown`: a Linux reading moves with wall-clock steps.
+    """
+    from shared.native_process.ownership import stable_create_time
+
+    try:
+        live = stable_create_time(psutil.Process(pid))
+    except psutil.NoSuchProcess:
+        return "absent"
+    except psutil.Error:
+        return "unknown"
+    if abs(live - birth) <= _BIRTH_WINDOW_S:
+        return "alive"
+    if birth < boot - _BOOT_MARGIN_S:
+        return "boot_changed"
+    return "absent" if platform == "darwin" else "unknown"
+
+
+def attest(
+    rows: list[dict[str, Any]], machine: str, facts: Facts, *, platform: str = sys.platform
+) -> dict[str, Any]:
     """This machine's closure attestation: is every recorded `(pid, birth)` of its
-    rows provably gone, and does the home's live census show no Ava process and
-    no bound port? One document per machine covers all of its rows."""
+    rows provably gone, and does the home's live census show no related process
+    and no bound port? One document per machine covers all of its rows."""
     boot = psutil.boot_time()
-    attested: list[dict[str, Any]] = []
-    for row in rows:
-        if row["machine"] != machine:
-            continue
-        pid, birth = int(row["pid"]), float(row["birth"])
-        if birth < boot:
-            state = "boot_changed"
-        else:
-            try:
-                alive = abs(psutil.Process(pid).create_time() - birth) < 0.01
-                state = "alive" if alive else "absent"
-            except psutil.NoSuchProcess:
-                state = "absent"
-            except psutil.Error:
-                state = "unknown"
-        attested.append({**row, "verdict": state})
+    attested = [
+        {**row, "verdict": row_verdict(int(row["pid"]), float(row["birth"]), boot, platform)}
+        for row in rows
+        if row["machine"] == machine
+    ]
     return {
         "version": VERSION,
         "machine": machine,
@@ -618,7 +663,9 @@ ABSENT_VERDICTS = frozenset({"absent", "boot_changed"})
 
 
 def _census_empty(processes: Sequence[Mapping[str, Any]], listeners: Sequence[object]) -> bool:
-    return not listeners and all(proc["kind"] != "ava" for proc in processes)
+    """No bound port and no process related to the home, Ava service or not: a
+    survivor of the old stop (an execution root, a terminal child) is user code."""
+    return not listeners and not processes
 
 
 class AttestedRow(BaseModel):
@@ -679,6 +726,16 @@ def load_attestation(path: Path) -> tuple[Attestation, bytes]:
         raise RefusedError(f"{path} is not a closure attestation: {exc}") from exc
 
 
+def persisted_machine(home: Path) -> str:
+    """The machine name the home persisted (`.env` or `machine_name`); never minted."""
+    from cli.start_intent import _stored
+
+    machine = _stored(home).get("AVA_MACHINE_NAME")
+    if not machine:
+        raise RefusedError(NO_MACHINE_NAME)
+    return machine
+
+
 def own_checkout() -> Path:
     return Path(__file__).resolve().parents[1]
 
@@ -697,10 +754,8 @@ def main(argv: list[str] | None = None, *, host: Host | None = None) -> int:
         registry = registry_path(home, args.registry)
         facts = gather(home, registry, own_checkout(), host or Host.current(), inputs)
         if args.attest:
-            from cli.start_intent import _stored
-
             rows = json.loads(Path(args.attest).read_text())
-            report = attest(rows, _stored(home)["AVA_MACHINE_NAME"], facts)
+            report = attest(rows, persisted_machine(home), facts)
             print(json.dumps(report, indent=2, sort_keys=True))
             return 0 if report["all_absent"] and report["census_empty"] else 2
         report = verdict(facts, inputs)

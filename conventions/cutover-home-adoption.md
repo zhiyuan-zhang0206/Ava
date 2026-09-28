@@ -14,12 +14,22 @@ are deleted with the other `scripts/cutover_*` scripts after the cutover:
   bound ports, a reviewed-PATH candidate, the refusals, and the exact plan
   adoption would execute now.
 - `scripts/cutover_adopt_home.py` executes that plan. Dry-run is the default;
-  `--execute` adopts; `--start` performs the held first start.
+  `--execute` adopts; `--start` performs the held first start. `--execute`
+  also requires `--expect-mode gateway|remote-unit`: the mode is inferred from
+  the capability files alone, and a remote unit's adoption strips credentials
+  and moves `pg/`, `backups/` and `secrets/`, so a mismatch refuses.
 
 Run both with the `.venv` of the checkout that owns the home (`$AVA_HOME/source`
-for production, or a checkout whose `.ava_home` names the home). Never run them
-against a home you are not converting, and never run bare `ava start` during the
-window: an ordinary start releases a standing maintenance hold after readiness.
+for production, or a checkout whose `.ava_home` names the home). A home with
+its own `source` checkout adopts and starts only from it; a throwaway
+worktree whose `.ava_home` names it (the T-3 dry-run) may only plan, so the
+intent never records a disposable checkout. Never run them against a home you
+are not converting. While the cutover hold the adoption
+journal records stands, an ordinary start never releases it
+(`cli/cutover_hold.py`): before the held first start (`--start`) a bare
+`ava start` refuses and names that command, and after it (for example the
+autostart job after a reboot) a bare start brings the unit up still held. Only
+the go/no-go gate's `ava maintenance resume` opens business.
 
 ## Order within the runbook
 
@@ -29,9 +39,17 @@ window: an ordinary start releases a standing maintenance hold after readiness.
    dry-run. Resolve every refusal before the window. `--attest ROWS.json`
    prints this machine's one closure attestation for the database-records
    repair: each of its recorded legacy `(pid, birth)` identities absent or
-   predating the current boot, plus the home census (no Ava process, no bound
-   port). Run it after the host's old stop, over the rows exported after the
-   W3 drain ([database records](cutover-db-records.md)).
+   predating the current boot, plus the home census (no process related to the
+   home, Ava service or not, and no bound port). A live pid proves nothing
+   unless its birth, read with the primitive the legacy code wrote it with,
+   rules it out: a reading within 5 s is the recorded process, a Linux reading
+   further off stays `unknown` (wall-clock steps move it), and only a birth
+   300 s before the current boot reads `boot_changed`. Close every shell or
+   tool whose working directory is inside the home first; the script's own
+   shell is exempt, but both scripts refuse to run inside an Ava process of
+   the home (its terminal, an agent), whose census would skip that process.
+   Run it after the host's old stop, over the rows exported after the W3
+   drain ([database records](cutover-db-records.md)).
 2. Disarm and stop with the old code (runbook W1 to W3). The adoption refuses
    while any Ava process of the home is alive or a data-plane port is bound.
 3. Gateway (W5): `--execute`, then the data-plane authority cutover
@@ -49,7 +67,8 @@ window: an ordinary start releases a standing maintenance hold after readiness.
 ```bash
 .venv/bin/python scripts/cutover_inventory.py --home ~/.ava --service-path "$REVIEWED_PATH"
 .venv/bin/python scripts/cutover_adopt_home.py --home ~/.ava --service-path "$REVIEWED_PATH"
-.venv/bin/python scripts/cutover_adopt_home.py --home ~/.ava --service-path "$REVIEWED_PATH" --execute
+.venv/bin/python scripts/cutover_adopt_home.py --home ~/.ava --service-path "$REVIEWED_PATH" \
+    --execute --expect-mode remote-unit    # gateway on the gateway
 .venv/bin/python scripts/cutover_adopt_home.py --home ~/.ava --start
 ```
 
@@ -91,7 +110,11 @@ kept helper excepted), a pidfile naming one, a bound data-plane port, a destroy
 intent, a start intent this adoption did not write, a pause that is not a
 completed stop's maintenance hold, crontab lines nobody can attribute, an
 unreadable crontab, a missing or unnormalized `AVA_SERVICE_PATH` or one that
-differs from the declared value, a gateway without a registry record or data
+differs from the declared value, a home without a persisted machine name
+(neither `machine_name` nor `AVA_MACHINE_NAME`: write the unit's
+`machine_units` name into `$AVA_HOME/machine_name` first; the fleet plan
+expects this on company-air and company-mini, and `--attest` needs the same
+name), a gateway without a registry record or data
 plane URLs, a remote unit without a gateway URL, `.env` and record port
 conflicts, disagreeing capability declarations, a new port that collides, and
 an archive path that is already taken.
@@ -103,6 +126,30 @@ journal's `record-retire` effect, delete `start-intent.json`, and restore `.env`
 from its pre-adoption snapshot in `backups/env/` (moved to
 `cutover-rollback/residue/backups/env/` on a remote unit).
 
+## A legacy stop hold with failure receipts
+
+Adoption keeps only a completed legacy stop's hold: phase `stopped` with no
+unsettled failure receipt. Any other paused journal refuses ("holds a pause
+that is not a completed stop's maintenance hold"). Settle it with the old code,
+before the host's code switch; read the receipts with the old
+`ava maintenance status`.
+
+- The drain failed (phase `preparing`, `draining` or `drained`; the old
+  `ava stop` printed "continuations failed; hold retained"). Fix the named
+  agents' root cause, run the old
+  `ava maintenance repair --operation <holder> --acquired-at <time>` (it
+  records the operator and moves the receipts into `repaired`), then re-run
+  the old `ava stop --yes`: it continues the same hold to `stopped`, and the
+  inventory then reports it adoptable. The repair needs the gateway database,
+  so a runner settles before the gateway's W3 stop.
+- The hold reached `stopped` with a receipt latched after its drain (a turn
+  failing while services stopped). Neither code base has a sanctioned exit:
+  `repair` and `resume --cancel` refuse a started stop, and start and resume
+  refuse unsettled receipts. Never edit the journal by hand. Record the hold
+  and its receipts, then exclude that runner from the window (it stays on the
+  old code, stopped, and `--exclude-unit` at W6 keeps it fenced), or treat it
+  as a no-go on the gateway (R1).
+
 ## Operator follow-up
 
 - Remote units: the archived residue and `.env` snapshots hold gateway
@@ -113,6 +160,6 @@ from its pre-adoption snapshot in `backups/env/` (moved to
   gateway's other backup keys), archive the runner copies encrypted and
   offline, then delete `cutover-rollback/residue/`.
 - Keep the hosts awake and on AC until the holds are released: after the first
-  start the new converge registers the autostart job again, and a reboot runs
-  an ordinary start, which would release the hold.
+  start the new converge registers the autostart job again. A reboot's ordinary
+  start keeps the cutover hold, but the unit is down until it is ready again.
 - Delete `cutover-rollback/` after the agreed retention period.

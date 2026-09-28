@@ -87,22 +87,57 @@ def test_refuses_off_linux_naming_macos_release_start(
     assert code == 2
 
 
-def test_refuses_when_a_release_is_already_selected(
-    home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def test_refuses_when_another_release_is_already_selected(
+    home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     _as_linux(monkeypatch)
-    reference = build_image(home, "already-selected")
+    selected = build_image(home, "already-selected")
     activate_release(
         home / "releases",
-        reference.artifact_digest,
+        selected.artifact_digest,
         expected_current=None,
-        manifest_digest=reference.manifest_digest,
+        manifest_digest=selected.manifest_digest,
         host_abi=current_abi(),
-        schema_digest=reference.schema_digest,
+        schema_digest=selected.schema_digest,
     )
-    receipt = _stub_receipt(monkeypatch, tmp_path, reference)
+    receipt = _stub_receipt(monkeypatch, tmp_path, build_image(home, "candidate"))
+    calls = _stub_install(monkeypatch)
+
     code = adopt_module.cmd_release_adopt(receipt=receipt)
+
     assert code == 2
+    assert "already selects another release" in capsys.readouterr().err
+    assert current_pointer(home / "releases") == (
+        selected.artifact_digest,
+        selected.manifest_digest,
+    )
+    assert calls == []
+
+
+def test_a_failed_install_is_finished_by_rerunning_adopt(
+    home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The selection is committed before the boot action; a failure between the
+    two (`sudo -n` wanting a password) must leave a home the same verb finishes,
+    not one that neither adopt, a source start nor a request can move."""
+    _as_linux(monkeypatch)
+    reference = build_image(home, "candidate")
+    receipt = _stub_receipt(monkeypatch, tmp_path, reference)
+
+    def refused(*, context: BootUnitContext, action: BootStartAction) -> None:
+        raise RuntimeError("sudo: a password is required")
+
+    monkeypatch.setattr(root_service, "install", refused)
+    assert adopt_module.cmd_release_adopt(receipt=receipt) == 2
+    failure = capsys.readouterr().err
+    selected = (reference.artifact_digest, reference.manifest_digest)
+    assert current_pointer(home / "releases") == selected
+
+    calls = _stub_install(monkeypatch)
+    assert adopt_module.cmd_release_adopt(receipt=receipt) == 0
+    assert current_pointer(home / "releases") == selected
+    assert len(calls) == 1 and reference.source_commit in calls[0][1].argv
+    assert "re-run `ava cluster release adopt" in failure
 
 
 def test_missing_receipt_file_refuses_cleanly(
