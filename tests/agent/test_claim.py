@@ -1053,7 +1053,7 @@ async def test_claim_unknown_kind_raises(
         assert not lifecycle_only
         return [ClaimedInbound(id=99, agent_id=tid, content="x", kind="bogus", source="system")]
 
-    monkeypatch.setattr("agent.graph._claim.claim_inbound_batch", fake_claim)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("agent.graph.claim.node.claim_inbound_batch", fake_claim)  # pyright: ignore[reportUnknownArgumentType]
 
     with pytest.raises(ValueError, match="Unknown inbound kind"):
         await claim_node(
@@ -1512,7 +1512,7 @@ async def test_claim_terminate_vetoed_by_pending_inbound_after_claim(
             )
         ]
 
-    monkeypatch.setattr("agent.graph._claim.claim_inbound_batch", fake_claim)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("agent.graph.claim.node.claim_inbound_batch", fake_claim)  # pyright: ignore[reportUnknownArgumentType]
 
     cmd = await claim_node(
         AgentState(messages=[SystemMessage(content="sys")]),
@@ -1578,7 +1578,7 @@ async def test_claim_same_batch_newer_chat_vetoes_the_terminate(
             ),
         ]
 
-    monkeypatch.setattr("agent.graph._claim.claim_inbound_batch", fake_claim)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("agent.graph.claim.node.claim_inbound_batch", fake_claim)  # pyright: ignore[reportUnknownArgumentType]
 
     cmd = await claim_node(
         AgentState(messages=[SystemMessage(content="sys")]),
@@ -2370,7 +2370,7 @@ async def test_claim_fork_kind_appends_identity_marker_and_continues(
     _insert_inbound_kind(db_conn, tid, "", "fork", source="agent:7")
     monkeypatch = pytest.MonkeyPatch()
     monkeypatch.setattr(
-        "agent.graph._claim_dispatch.fork_notes",
+        "agent.graph.claim._dispatch.fork_notes",
         lambda: [system_note_message(content="Your Agent ID is N.", tag=NoteTag.AGENT_ID)],
     )
     try:
@@ -2433,7 +2433,7 @@ async def test_claim_fork_strips_inherited_source_notes(
     inherited = [SystemMessage(content="sys"), old_id, old_mem, old_preload, cluster_index]
     monkeypatch = pytest.MonkeyPatch()
     monkeypatch.setattr(
-        "agent.graph._claim_dispatch.fork_notes",
+        "agent.graph.claim._dispatch.fork_notes",
         lambda: [
             system_note_message(content="Your Agent ID is N.", tag=NoteTag.AGENT_ID),
             system_note_message(content="the new agent's memory", tag=NoteTag.AGENT_MEMORY),
@@ -2700,7 +2700,7 @@ async def test_claim_mixed_batch_publishes_only_chat_ids(
 def test_by_who_self_returns_yourself():
     """source 'self' (ava.self.terminate/restart self-invocation) → 'yourself'.
     Lock down that the literal 'self' cannot be mutated to 'SELF' / 'XXselfXX' / '' etc. by mutmut."""
-    from agent.graph._claim import _by_who
+    from agent.graph.claim.node import _by_who
 
     assert _by_who("self") == "yourself"
 
@@ -2709,7 +2709,7 @@ def test_by_who_uppercase_self_passthrough():
     """source is case-sensitive — 'SELF' does not match the 'self' branch, falls back to
     return original value. `_by_who` does not do case-folding (to avoid mistakenly treating
     'Self' / 'SELF' as self-trigger)."""
-    from agent.graph._claim import _by_who
+    from agent.graph.claim.node import _by_who
 
     assert _by_who("SELF") == "SELF"
     assert _by_who("Self") == "Self"
@@ -2719,7 +2719,7 @@ def test_by_who_uppercase_self_passthrough():
 def test_by_who_external_source_passthrough():
     """Non self source ('user' / 'agent:42' / 'system')
     returns as-is — the marker text shows who triggered it at a glance."""
-    from agent.graph._claim import _by_who
+    from agent.graph.claim.node import _by_who
 
     assert _by_who("user") == "user"
     assert _by_who("user") == "user"
@@ -2730,7 +2730,7 @@ def test_by_who_external_source_passthrough():
 def test_by_who_self_prefix_does_not_match_self():
     """'self_xxx' / 'selfish' should not be recognized as 'self' (literal == comparison,
     not startswith)."""
-    from agent.graph._claim import _by_who
+    from agent.graph.claim.node import _by_who
 
     # anti-regression: changing to startswith("self") would make this test fail
     assert _by_who("selfish") == "selfish"
@@ -2743,7 +2743,7 @@ def test_by_who_self_prefix_does_not_match_self():
 
 def test_render_restart_completed_marker_system_update_no_by_clause():
     """source='system:update' → 'updated and restarted' with no trailing 'by ...' noise."""
-    from agent.graph._claim import _render_restart_completed_marker
+    from agent.graph.claim.node import _render_restart_completed_marker
 
     text = _render_restart_completed_marker("system:update")
     assert "updated and restarted" in text
@@ -2752,7 +2752,7 @@ def test_render_restart_completed_marker_system_update_no_by_clause():
 
 def test_render_restart_completed_marker_plain_self_unchanged():
     """source='self' (ordinary restart, not update) → 'restarted by yourself', no 'updated'."""
-    from agent.graph._claim import _render_restart_completed_marker
+    from agent.graph.claim.node import _render_restart_completed_marker
 
     text = _render_restart_completed_marker("self")
     assert "restarted by yourself" in text
@@ -2761,7 +2761,7 @@ def test_render_restart_completed_marker_plain_self_unchanged():
 
 def test_render_restart_completed_marker_external_source_unchanged():
     """Non-update sources → plain 'restarted by <source>' wording."""
-    from agent.graph._claim import _render_restart_completed_marker
+    from agent.graph.claim.node import _render_restart_completed_marker
 
     text = _render_restart_completed_marker("user")
     assert "restarted by user" in text
@@ -3125,8 +3125,8 @@ async def test_claim_node_idle_enter_publishes_full_window_snapshot(
 
     from langchain_core.messages import SystemMessage
 
-    from agent.graph import _claim
-    from agent.graph._claim import claim_node
+    from agent.graph.claim import node as claim_node_mod
+    from agent.graph.claim.node import claim_node
 
     tid = spawn_agent()
 
@@ -3134,7 +3134,7 @@ async def test_claim_node_idle_enter_publishes_full_window_snapshot(
     async def _stub_impl(_state, _runtime, _config):
         return Command(goto="end")
 
-    monkeypatch.setattr(_claim, "_claim_node_impl", _stub_impl)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(claim_node_mod, "_claim_node_impl", _stub_impl)  # pyright: ignore[reportUnknownArgumentType]
 
     pub = MagicMock()
     state = AgentState()
@@ -3168,7 +3168,7 @@ def test_claim_will_idle_shares_the_impl_and_wrapper_contract() -> None:
 
     from langchain_core.messages import HumanMessage, SystemMessage
 
-    from agent.graph._claim import claim_will_idle
+    from agent.graph.claim.node import claim_will_idle
     from agent.messages import system_note_message
     from agent.state_channels import CIRCUIT_REASON_BILLING, CircuitState
     from shared.message_kwargs import NoteTag

@@ -19,7 +19,7 @@ Per open row:
 
 ## Trigger points
 
-- **Heartbeat** (`agent/graph/_claim_dispatch.py:_handle_heartbeat`) — every check-in of an IDLE agent (~5 min)
+- **Heartbeat** (`agent/graph/claim/_dispatch.py:_handle_heartbeat`) — every check-in of an IDLE agent (~5 min)
 - **Periodic** (`agent/startup.py:page_reconcile_loop`) — every heartbeat interval regardless of idle/busy: busy agents get no heartbeats, so without this a busy agent's pages stay dead for as long as its turn lasts (2026-09-01 incident: ~4h). The boot scan covers t=0; the loop covers everything after.
 - **Hosted daemon** (`services/agent_host/daemon.py:_page_reconcile_forever`) — the daemon scans every heartbeat interval with the first pass immediately at start (`reconcile_all_open_pages`). Each per-agent pass runs under `bind_turn_identity`: the daemon process has no agent identity, and the re-serve arm reads `ava.agent_identity.agent_id()` — without the bind the registration POST would target /agents/None and pages would never heal.
 

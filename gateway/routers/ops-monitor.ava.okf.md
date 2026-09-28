@@ -47,7 +47,7 @@ unified emitter (`shared/telemetry/emitter.py`) → OTLP export, zero schema cha
 - `shared/event_publisher.py` — `AgentEventPublisher` sheds → `sse_drop`
 - `shared/telemetry/emitter.py` — emitter queue-full shedding (`event_log_drop`) →
   `event_log_drop`; `init_gateway_process` boot → `service_started`
-- `agent/graph/_llm.py` + `agent/observe.py` — whole-call wall-clock →
+- `agent/graph/llm/node.py` + `agent/observe.py` — whole-call wall-clock →
   `llm_usage.latency_ms` → Prometheus histogram + counters (OTLP)
 
 ## Extensibility

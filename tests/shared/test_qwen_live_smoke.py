@@ -127,7 +127,7 @@ def _live_provider(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def _stream(model: str, text: str, *, thinking_disabled: bool) -> AIMessage:
-    """Stream one turn and accumulate it exactly as `agent/graph/_llm.py` does.
+    """Stream one turn and accumulate it exactly as `agent/graph/llm/node.py` does.
 
     Chunk accumulation followed by `message_chunk_to_message` is what preserves
     usage_metadata on the committed message — reproducing it here is the point,

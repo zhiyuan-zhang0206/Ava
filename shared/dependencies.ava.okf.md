@@ -12,7 +12,7 @@ tags:
 The shared-layer domain map below complements the public
 [[entry-points.ava.okf.md|entry points]].
 
-- [[shared/lm/lm.ava.okf.md]] — LLM provider abstraction layer, used by agent/graph/_llm.py via factory to build chat models
+- [[shared/lm/lm.ava.okf.md]] — LLM provider abstraction layer, used by agent/graph/llm/node.py via factory to build chat models
 - [[agents-contract.ava.okf.md]] — agent ↔ gateway state/exception/wire protocol contract
 - [[shared/message_kwargs.ava.okf.md]] — typed `ava_*` metadata inside a message's `additional_kwargs`
 - [[shared/agents/messages/inbound-provenance.ava.okf.md]] — non-enforcing credential, transport, content-hash, and source-assertion facts on gateway inbounds

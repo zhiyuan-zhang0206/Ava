@@ -30,7 +30,7 @@ triggering SDK import side effects — same rationale as `shared/exit_codes.py`.
 
 All roles carry `agent_id: int`. The extra fields below are the payload.
 
-### Kernel streaming (`agent/graph/_callbacks.py`, `_llm.py`, `_exec.py`)
+### Kernel streaming (`agent/graph/_callbacks.py`, `llm/node.py`, `_exec.py`)
 
 | Role | When | Extra fields |
 |---|---|---|
@@ -54,7 +54,7 @@ heuristic. Cold-loaded pre-compact history never enters the SSE merge path; it
 prefixes the local position with `s<rank>.<boundary_checkpoint_id>.` so retained
 segments stay globally distinct.
 
-### Turn lifecycle (`services/agent_host/host.py`, `agent/graph/_claim.py`)
+### Turn lifecycle (`services/agent_host/host.py`, `agent/graph/claim/node.py`)
 
 | Role | When | Extra fields |
 |---|---|---|

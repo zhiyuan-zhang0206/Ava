@@ -13,7 +13,7 @@ from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool, ConnectionPool
 
 from agent.db import ClaimedInbound, claim_inbound_batch
-from agent.graph._claim_dispatch import _BatchState, _handle_restart
+from agent.graph.claim._dispatch import _BatchState, _handle_restart
 from agent.hosted_ownership import (
     admit_hosted_runtime,
     apply_hosted_lifecycle,

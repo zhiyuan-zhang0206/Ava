@@ -40,7 +40,7 @@ _USAGE = {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15}
 FORK_PROMPT = "fork-redirect: drop the old task and summarize instead"
 
 # Substring the claim node writes into the fork identity marker (see
-# agent/graph/_claim.py FORK case): "...You have been forked from agent:M...".
+# agent/graph/claim/node.py FORK case): "...You have been forked from agent:M...".
 _MARKER_SUBSTR = "forked from agent:"
 
 # Sentinel the forked agent replies with iff both marker and prompt were in its
@@ -83,7 +83,7 @@ class _ForkContextModel(ScriptedFakeChatModel):
         run_manager: AsyncCallbackManagerForLLMRun | None = None,
         **kwargs: Any,
     ) -> AsyncIterator[ChatGenerationChunk]:
-        # The agent's llm node consumes `astream` only (agent/graph/_llm.py); the
+        # The agent's llm node consumes `astream` only (agent/graph/llm/node.py); the
         # sync `_stream` is never reached, so it keeps the base script behavior.
         yield self._make_chunk(self._verdict(messages))
 

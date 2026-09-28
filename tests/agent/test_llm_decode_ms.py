@@ -24,7 +24,7 @@ import pytest
 from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage
 
 from agent.graph._callbacks import RedisStreamHandler
-from agent.graph._llm_stream import _consume_stream_with_stall_timeout, _stream_with_cache_retry
+from agent.graph.llm._stream import _consume_stream_with_stall_timeout, _stream_with_cache_retry
 from agent.lm_cache import LlmInvocation
 from ava_builtins.plugins.lm_google import gemini_cache
 from ava_builtins.plugins.lm_google.gemini_cache import CacheRef
@@ -65,7 +65,7 @@ def _patch_prepare(monkeypatch: pytest.MonkeyPatch, invocation_factory):
     async def _fake_prepare(llm, messages):
         return invocation_factory(llm)
 
-    monkeypatch.setattr("agent.graph._llm_stream.prepare_invocation", _fake_prepare)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("agent.graph.llm._stream.prepare_invocation", _fake_prepare)  # pyright: ignore[reportUnknownArgumentType]
 
 
 async def test_consume_stream_records_first_last_timestamps(
@@ -74,7 +74,7 @@ async def test_consume_stream_records_first_last_timestamps(
     """The stream records (first, last) chunk-arrival timestamps; decode window
     = last - first regardless of how the loop consumed the clock."""
     clock = _FakeClock()
-    monkeypatch.setattr("agent.graph._llm_stream.time.monotonic", clock)
+    monkeypatch.setattr("agent.graph.llm._stream.time.monotonic", clock)
 
     async def _stream() -> AsyncIterator[AIMessageChunk]:
         clock.t = 1005.0
@@ -120,7 +120,7 @@ async def test_stream_with_cache_retry_stamps_decode_ms(monkeypatch: pytest.Monk
     """Happy path: handler.llm_decode_ms = (last - first) * 1000, stamped
     alongside llm_latency_ms after the successful attempt."""
     clock = _FakeClock()
-    monkeypatch.setattr("agent.graph._llm_stream.time.monotonic", clock)
+    monkeypatch.setattr("agent.graph.llm._stream.time.monotonic", clock)
 
     async def _stream() -> AsyncIterator[AIMessageChunk]:
         clock.t = 1005.0
@@ -145,7 +145,7 @@ async def test_empty_stream_decode_ms_none(monkeypatch: pytest.MonkeyPatch) -> N
     """No chunks at all → decode_ms stays None (latency still stamped)."""
 
     clock = _FakeClock()
-    monkeypatch.setattr("agent.graph._llm_stream.time.monotonic", clock)
+    monkeypatch.setattr("agent.graph.llm._stream.time.monotonic", clock)
 
     async def _empty() -> AsyncIterator[AIMessageChunk]:
         if False:  # pragma: no cover — never yields
@@ -196,7 +196,7 @@ async def test_stale_cache_retry_uses_second_attempt_window(
     """Stale-cache retry: the FIRST attempt's partial/failed window is
     discarded — decode_ms comes from the successful second attempt only."""
     clock = _FakeClock()
-    monkeypatch.setattr("agent.graph._llm_stream.time.monotonic", clock)
+    monkeypatch.setattr("agent.graph.llm._stream.time.monotonic", clock)
 
     class _StaleCacheError(Exception):
         pass

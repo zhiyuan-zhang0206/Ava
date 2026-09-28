@@ -98,8 +98,8 @@ heavy = sorted(
     if name
     in (
         "agent.graph._build",
-        "agent.graph._claim",
-        "agent.graph._llm",
+        "agent.graph.claim.node",
+        "agent.graph.llm.node",
         "agent.graph._exec",
     )
 )

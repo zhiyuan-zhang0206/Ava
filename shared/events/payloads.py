@@ -107,7 +107,7 @@ class LlmUsage(TypedDict):
 
 
 class TurnEnd(TypedDict):
-    """`turn_end` payload — agent/graph/_llm.py."""
+    """`turn_end` payload — agent/graph/llm/node.py."""
 
     ok: bool
     duration_seconds: float
@@ -130,7 +130,7 @@ class LlmRetry(TypedDict):
 
 
 class StreamStalledRetry(TypedDict):
-    """`stream_stalled_retry` payload — agent/graph/_llm_stream.py.
+    """`stream_stalled_retry` payload — agent/graph/llm/_stream.py.
 
     The stalled stream's provider identity and shape, so stalls are countable
     per vendor/model — the provider-health dimension the LLM telemetry
@@ -151,7 +151,7 @@ class StreamStalledRetry(TypedDict):
 
 
 class StreamStallPairTerminated(TypedDict):
-    """`stream_stall_pair_terminated` payload — agent/graph/_llm_stream.py.
+    """`stream_stall_pair_terminated` payload — agent/graph/llm/_stream.py.
 
     The call-terminating stall pair (the stream segment and its non-streaming
     fallback both expired) carries the same provider identity as the

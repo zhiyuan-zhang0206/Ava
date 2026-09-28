@@ -1,6 +1,6 @@
 """Shared fixtures for tests/agent/.
 
-`fake_cancel_event` replaces _llm_cancel / _exec's `subscribe_interrupt` — lets tests
+`fake_cancel_event` replaces llm._cancel / _exec's `subscribe_interrupt` — lets tests
 trigger the cancel race directly via `event.set()`, avoiding a real DB inbound
 watcher (slow + flaky). The production path always goes through RAII subscribe
 (inbound Redis pub/sub); this fixture only affects name bindings in the import
@@ -33,7 +33,7 @@ def fake_cancel_event(monkeypatch: pytest.MonkeyPatch) -> InterruptEvent:
     ) -> AsyncGenerator[InterruptEvent]:
         yield event
 
-    monkeypatch.setattr("agent.graph._llm_cancel.subscribe_interrupt", fake_subscribe)
+    monkeypatch.setattr("agent.graph.llm._cancel.subscribe_interrupt", fake_subscribe)
     monkeypatch.setattr("agent.graph._exec.subscribe_interrupt", fake_subscribe)
     monkeypatch.setattr("agent.hooks.compact.subscribe_interrupt", fake_subscribe)
     return event

@@ -2,7 +2,7 @@
 
 Holds the ClaimGoto vocabulary (the four targets claim itself routes to), the
 routing-gated kinds (_ROUTING_KINDS), and the single batch-winner resolution
-(_Routing / resolve_routing). Extracted from agent/graph/_claim.py (Task
+(_Routing / resolve_routing). Extracted from agent/graph/claim/node.py (Task
 #1006 split — the lifecycle-routing axis).
 
 Routing semantics (preserved verbatim from the original claim module):

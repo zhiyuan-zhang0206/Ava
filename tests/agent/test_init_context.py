@@ -343,7 +343,7 @@ async def test_a_compaction_in_the_same_pass_keeps_its_summary_and_its_head(
     assert (
         isinstance(hook_update, dict) and "messages" not in hook_update
     )  # Both hooks defer to the model operation.
-    from agent.graph._llm import llm_node
+    from agent.graph.llm.node import llm_node
 
     cmd = await llm_node(state, _runtime(aops_pool), _config(tid))
     assert cmd.goto == "init_context"

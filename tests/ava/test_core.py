@@ -374,14 +374,14 @@ class TestRestartCompletedMarker:
     """`_render_restart_completed_marker` payload rendering — PR-E adds `with config {…}` suffix."""
 
     def test_marker_no_payload(self) -> None:
-        from agent.graph._claim import _render_restart_completed_marker
+        from agent.graph.claim.node import _render_restart_completed_marker
 
         msg = _render_restart_completed_marker("self", None)
         assert "restarted by yourself" in msg
         assert "with config" not in msg
 
     def test_marker_with_overlay(self) -> None:
-        from agent.graph._claim import _render_restart_completed_marker
+        from agent.graph.claim.node import _render_restart_completed_marker
 
         msg = _render_restart_completed_marker(
             "self", {"config_overlay": {"auto_compact_fraction": 0.7}}
@@ -391,7 +391,7 @@ class TestRestartCompletedMarker:
 
     def test_marker_system_update_with_overlay(self) -> None:
         """system:update source + overlay simultaneously — marker has updated wording + overlay diff."""
-        from agent.graph._claim import _render_restart_completed_marker
+        from agent.graph.claim.node import _render_restart_completed_marker
 
         msg = _render_restart_completed_marker(
             "system:update",
@@ -404,7 +404,7 @@ class TestRestartCompletedMarker:
         """Credential-like overlay keys render as <redacted> — the marker lands in
         the checkpoint / timeline / LLM context, so it must not carry a second
         plaintext copy of a value like an api_key (2026-08-08 audit, P1-3)."""
-        from agent.graph._claim import _render_restart_completed_marker
+        from agent.graph.claim.node import _render_restart_completed_marker
 
         msg = _render_restart_completed_marker(
             "user",

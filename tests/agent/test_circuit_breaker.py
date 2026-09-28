@@ -839,8 +839,8 @@ async def test_completed_turn_resets_the_streak_and_clears_the_marker(
 ) -> None:
     """The completed-turn UPDATE is the single reset: it clears the corpse
     marker, the recovery-breaker streak, and the recorded reject reason
-    together (agent/graph/_llm.py)."""
-    from agent.graph._llm import _persist_last_active
+    together (agent/graph/llm/node.py)."""
+    from agent.graph.llm.node import _persist_last_active
 
     child_id = spawn_agent(spawner="user")
     db_conn.execute(

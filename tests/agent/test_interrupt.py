@@ -462,7 +462,7 @@ async def test_auto_compaction_cancels_at_llm_node_without_replacing_context(
     from langchain_core.messages import HumanMessage
     from langgraph.runtime import Runtime
 
-    from agent.graph._llm import llm_node
+    from agent.graph.llm.node import llm_node
     from agent.state import AgentState, CompactState
     from shared.context import AvaContext
     from shared.lm.context_budget import ContextBudget
@@ -563,9 +563,9 @@ async def test_compaction_returns_through_claim_then_generates_before_compacting
     from langgraph.runtime import Runtime
     from langgraph.types import Command
 
-    from agent.graph._claim import claim_node
     from agent.graph._init_context import init_context_node
-    from agent.graph._llm import llm_node
+    from agent.graph.claim.node import claim_node
+    from agent.graph.llm.node import llm_node
     from agent.hooks.compact import _compact_reminder, auto_compact_will_fire
     from agent.state import AgentState, checkpoint_msgpack_allowlist
     from shared.context import AvaContext

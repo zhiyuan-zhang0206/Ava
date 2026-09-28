@@ -46,7 +46,7 @@ turns into a session by it) plus `ava.turn` (the per-process turn counter).
 
 claim_idle_wait_span() (used by the agent claim node) ends the open LangChain
 node span (`execute_task claim`) before the node parks in
-`agent/graph/_claim_batch._wait_for_batch` and records the idle park as an
+`agent/graph/claim/_batch._wait_for_batch` and records the idle park as an
 explicit `claim idle-wait` span, so an idle wait shows as a labeled span
 instead of a giant opaque node span in the trace.
 

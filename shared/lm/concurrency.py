@@ -14,7 +14,7 @@ Two acquire flavors, both pass-through when the provider is unconfigured:
   invoke paths (`shared/lm/call.py` `invoke_text`); safe across worker
   threads (ava.understand's thread pool).
 - `async_acquire(provider)` — an `asyncio.Semaphore` for the streaming
-  agent path (`agent/graph/_llm.py` `_stream_with_cache_retry`); created
+  agent path (`agent/graph/llm/_stream.py` `_stream_with_cache_retry`); created
   lazily on first use so no event-loop binding happens at import time.
 
 Provider keys are the model-prefix keys of `shared/lm/factory.py` with any
@@ -29,7 +29,7 @@ for an account-level concurrency ceiling is client-side concurrency control
 (primary) + exponential-backoff retry (secondary). Default off (2026-09-16,
 task #3590): with no cap the provider's own 429/billing signal stays visible
 through `llm_provider_error`, and the retry/backoff path in
-`agent/graph/_llm.py` remains the backstop; the mechanism stays available for
+`agent/graph/llm/node.py` remains the backstop; the mechanism stays available for
 operators who must protect an account's concurrency ceiling.
 
 Caveat: a slot held by one LLM call is not

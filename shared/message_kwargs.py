@@ -7,7 +7,7 @@ message kind) is the contract. `AvaMsgType` is the discriminator the read side
 dispatches on, and `read_ava_kwargs` is the single convergence point that gives
 a message's kwargs the typed view.
 
-Writers live in `agent/messages.py` (+ `agent/graph/_claim.py`, `_llm.py`);
+Writers live in `agent/messages.py` (+ `agent/graph/claim/node.py`, `agent/graph/llm/node.py`);
 readers in `shared/agents/history/timeline.py`, `gateway/context_breakdown.py`,
 `agent/graph/memory_recall.py`. It sits in `shared/` (leaf) so both the agent
 and the gateway import it without an agent <-> gateway package cycle.

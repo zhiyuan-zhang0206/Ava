@@ -1,7 +1,7 @@
 """Compact-flow scenario — UI-triggered (force) compact with backend summary.
 
 Script (one shared fake instance; the compaction summary call consumes the
-NEXT turn — agent/graph/_claim_dispatch.py `_handle_compact_request` calls
+NEXT turn — agent/graph/claim/_dispatch.py `_handle_compact_request` calls
 `generate_summary(state.messages, ctx.llm)` with the agent's own LLM):
   turn 1: reply to the user's first message (gives the conversation content)
   turn 2: the compaction summary text (consumed by the Compaction LLM call)

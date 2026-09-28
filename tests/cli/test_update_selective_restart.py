@@ -41,7 +41,10 @@ class TestClassifyChange:
         assert _up._classify_change(["gateway/app.py", "shared/db.py"]) == (False, True)
 
     def test_both(self) -> None:
-        assert _up._classify_change(["ui/web/src/x.tsx", "agent/graph/_claim.py"]) == (True, True)
+        assert _up._classify_change(["ui/web/src/x.tsx", "agent/graph/claim/node.py"]) == (
+            True,
+            True,
+        )
 
     def test_docs_only_is_neither(self) -> None:
         assert _up._classify_change(["conventions/runbook.md", "README.md"]) == (False, False)
