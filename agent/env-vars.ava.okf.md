@@ -62,5 +62,5 @@ Environment variables propagate along two paths:
 
 ## Notes
 
-- `AVA_AGENT_ID` should be read inside graph nodes via `agent_id_from_config` from `RunnableConfig.configurable.thread_id`, not accessed directly via `ava.self.AGENT_ID` (noted at the top of `agent/graph/_llm.py`)
+- `AVA_AGENT_ID` should be read inside graph nodes via `agent_id_from_config` from `RunnableConfig.configurable.thread_id`, not accessed directly via `ava.self.AGENT_ID` (noted at the top of `agent/graph/llm/node.py`)
 - `AVA_SDK_DISABLE` allows per-agent disabling of specific SDK modules (e.g., MCP daemon)

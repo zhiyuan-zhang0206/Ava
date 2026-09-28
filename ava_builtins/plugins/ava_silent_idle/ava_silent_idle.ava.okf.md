@@ -49,7 +49,7 @@ register_before_llm(silent_idle_continue_before_llm)
 
 ## Configuration
 
-- Consecutive silent counting guard in the kernel (`agent/graph/_llm.py`)
+- Consecutive silent counting guard in the kernel (`agent/graph/llm/node.py`)
 - No additional plugin-level configuration
 
 ## Notes

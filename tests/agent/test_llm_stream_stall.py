@@ -26,7 +26,7 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import ExecutionInfo, Runtime
 
 from agent.graph import llm_node
-from agent.graph._llm_stream import _consume_llm, _consume_stream_with_stall_timeout
+from agent.graph.llm._stream import _consume_llm, _consume_stream_with_stall_timeout
 from agent.graph.llm_errors import (
     LLMRetryBudgetExceededError,
     LLMStreamStallPairError,
@@ -154,7 +154,7 @@ async def test_total_timeout_falls_back_while_chunks_keep_arriving(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A drip-fed stream cannot evade the per-attempt total-duration ceiling."""
-    import agent.graph._llm_stream as stream_module
+    import agent.graph.llm._stream as stream_module
 
     clock = [0.0]
     fallback_called = False
@@ -196,7 +196,7 @@ async def test_total_timeout_falls_back_while_chunks_keep_arriving(
 
 
 async def test_stream_below_total_timeout_is_unchanged(monkeypatch: pytest.MonkeyPatch) -> None:
-    import agent.graph._llm_stream as stream_module
+    import agent.graph.llm._stream as stream_module
 
     clock = [0.0]
 
@@ -225,7 +225,7 @@ async def test_stream_below_total_timeout_is_unchanged(monkeypatch: pytest.Monke
 
 async def test_none_disables_stream_total_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
     """The helper's None contract permits an intentionally unbounded caller."""
-    import agent.graph._llm_stream as stream_module
+    import agent.graph.llm._stream as stream_module
 
     clock = [0.0]
 

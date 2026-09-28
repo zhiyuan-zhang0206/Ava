@@ -36,7 +36,7 @@ Message formats exchanged between agent, LLM, users, and other agents. `messages
 
 ### Chat Inbound Assembly (`_chat_inbound.py`)
 - Assembles `kind='chat'` inbound rows into `HumanMessage`: plain text via envelope wrapper as string message; multimodal inbound places text as first block, then uploads referenced images as native base64 blocks inline to the model
-- Split out from `_claim.py`, focused on multimodal image inline path
+- Split out from `claim/node.py`, focused on multimodal image inline path
 
 ## Key Dependencies
 

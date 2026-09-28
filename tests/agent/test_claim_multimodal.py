@@ -1,4 +1,4 @@
-"""agent/graph/_claim.py:_build_chat_inbound — text vs multimodal delivery.
+"""agent/graph/_chat_inbound.py:build_chat_inbound — text vs multimodal delivery.
 
 Pure unit over the message builder (no DB / no graph run). Verifies a plain
 chat inbound still becomes an envelope-wrapped string HumanMessage, and a

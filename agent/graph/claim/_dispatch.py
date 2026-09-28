@@ -38,7 +38,7 @@ from shared.live_events import Cancelled
 from shared.log import logger
 from shared.message_kwargs import AvaMsgType, read_ava_kwargs
 
-from ._claim_routing import _ROUTING_KINDS, ClaimGoto, _Routing
+from ._routing import _ROUTING_KINDS, ClaimGoto, _Routing
 
 
 @dataclass

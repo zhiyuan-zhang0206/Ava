@@ -17,8 +17,8 @@ from pydantic import BaseModel
 
 from agent import impersonation
 from agent import state as states
-from agent.graph._claim import claim_node
 from agent.graph._exec import exec_node
+from agent.graph.claim.node import claim_node
 from agent.hosted_ownership import admit_hosted_runtime
 from agent.impersonation import flush_checkpoint, protect_native_hooks, settle_checkpoint
 from agent.startup import wrap_saver_writes_with_nstep_interval

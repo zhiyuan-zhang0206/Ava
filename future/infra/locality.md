@@ -66,7 +66,10 @@ lifecycle; those items wait for it to land and are then designed on its code.
    `observability`, `data_plane`, `cluster`, `converge`), with converge steps
    living beside the domain they converge. The remaining `lifecycle/` and
    `update/` split waits for #3479, which deletes and renames most of those
-   modules; so does `shared/` (231), the largest over-budget directory. The
+   modules; so does `shared/` (231), the largest over-budget directory.
+   `agent/graph` is down to 35: one package per node, with `claim/` and `llm/`
+   done; the exec family (`_exec*`, 10 modules) is next and waits for #3479,
+   which rewrites four of them. The
    `python -m cli.commands._*` process entry points are a cross-version
    contract (the ops server composes the command a possibly different checkout
    runs) and do not move without an expand-contract step.

@@ -32,18 +32,19 @@ all plugin fields; using module attribute + deferred annotation evaluation
 picks up the dynamic class rebound by build_agent_state.
 Module layout (Task #1004 >800-line split): streaming consumption, the cancel
 race, chunk assembly + final-message validation, and the error taxonomy /
-consecutive-error tracking live in the sibling modules ``_llm_stream.py`` /
-``_llm_cancel.py`` / ``_llm_chunk.py`` / ``llm_errors.py``; this module keeps
-the node entry + turn dispatch (``llm_node``, ``_llm_node_impl``). ``_llm_cancel``
-imports ``LlmGoto`` from here, so ``_race_stream_vs_cancel`` is imported lazily
-inside ``_llm_node_impl`` rather than at module top (keeps the import graph
-acyclic).
+consecutive-error tracking live in the sibling modules ``_stream.py`` /
+``_cancel.py`` / ``_chunk.py`` (all in this ``llm/`` package) plus the parent
+package's ``llm_errors.py``; this module keeps the node entry + turn dispatch
+(``llm_node``, ``_llm_node_impl``). ``_cancel`` imports ``LlmGoto`` from here,
+so ``_race_stream_vs_cancel`` is imported lazily inside ``_llm_node_impl``
+rather than at module top (keeps the import graph acyclic). The immutable base
+system prompt + lazy SDK overview capture live in the parent package's
+``_base_prompt.py``, imported lazily by ``system_prompt.build_system_prompt``.
 """
 
 from __future__ import annotations
 
 import contextlib
-import io
 import time
 from datetime import UTC, datetime
 from typing import Any, Literal, NoReturn, cast
@@ -53,10 +54,21 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 from langgraph.types import Command
 
-# Import the SDK for system-prompt introspection. Graph nodes read the agent
-# identity from RunnableConfig; SDK calls use the host's bound turn identity.
-import ava
 from agent import state as _state
+from agent.graph._callbacks import RedisStreamHandler
+from agent.graph.llm_errors import (
+    FatalLLMStreamError,
+    FatalProviderError,
+    LLMRetryBudgetExceededError,
+    LLMStreamStallPairError,
+    _check_consecutive_error_cap,
+    _check_stall_pair_cap,
+    _clear_consecutive_errors,
+    _reset_stall_pair_streak,
+    _stall_pair_streak_active,
+)
+from agent.graph.node_log import node_lifecycle
+from agent.graph.tool_calls import code_from_args
 from agent.hooks.compact import auto_compact_for_llm
 from agent.nodes import AFTER_EXEC, BEFORE_EXEC
 from agent.observe import log_llm_usage
@@ -73,82 +85,8 @@ from shared.lm.usage import CACHE_MECHANISM_MIXED, CACHE_SCOPE_EXPLICIT_BLOCK
 from shared.log import logger
 from shared.message_kwargs import read_ava_kwargs
 
-from ._callbacks import RedisStreamHandler
-from ._llm_chunk import _assemble_final_message
-from ._llm_stream import _stream_with_cache_retry
-from .llm_errors import (
-    FatalLLMStreamError,
-    FatalProviderError,
-    LLMRetryBudgetExceededError,
-    LLMStreamStallPairError,
-    _check_consecutive_error_cap,
-    _check_stall_pair_cap,
-    _clear_consecutive_errors,
-    _reset_stall_pair_streak,
-    _stall_pair_streak_active,
-)
-from .node_log import node_lifecycle
-from .tool_calls import code_from_args
-
-
-def _capture_ava_overview() -> str:
-    """Emit the `# ava` overview — the public SDK surface as a name + docstring index.
-
-    `ava.help(ava)` renders ava's own docstring plus one entry per public
-    top-level namespace — both the static ones (agents / monitor / self /
-    schedule / memory / files / shell / skills / ...) and any a plugin
-    registered at runtime — each as `from . import X` + that module's docstring.
-    Underscore-private members don't appear. Registered namespaces are listed
-    too on purpose: a plugin promotes its *members* in its own section, but the
-    namespace itself must show here so it's discoverable even if the plugin adds
-    no section — otherwise a top-level namespace could silently vanish. This is
-    the natural "what's my SDK" index; full per-namespace detail (function
-    signatures) stays on demand via `ava.help(ava.X)`.
-
-    Scope is driven by `AVA_SDK_DISABLE`: a disabled namespace is removed from
-    `ava` entirely, so it simply doesn't appear here — e.g. SWE-Bench disables
-    monitor / schedule / self / agents / skills and the overview narrows to
-    match, no framework change needed.
-
-    Duplication note: namespaces a plugin promotes in detail via its own
-    `register_system_prompt_section` (ava_code → cwd / files / shell) still
-    appear here at index level (name + docstring); the plugin section adds the
-    function stubs *without* repeating the docstring (help(ava.X) drops a
-    submodule target's own docstring — see ava._format_module_stub).
-    """
-    buf = io.StringIO()
-    with contextlib.redirect_stdout(buf):
-        ava.help(ava)
-    return buf.getvalue()
-
-
-# At module top-level execution time, ava plugins are not yet loaded (order: import
-# _llm → module top → main() → build_graph() → load_extensions()). So capture is
-# deferred to the build_system_prompt() call site — by then plugins are loaded
-# and each plugin's `register_system_prompt_section` has already registered.
-#
-# No cache: build_system_prompt() is called only once in an agent's lifetime
-# when the first _claim sees state.messages empty; afterward SystemMessage is
-# persisted into state.messages[0] and reused across restart — cache hit rate
-# is 1/1, no point.
-def _get_ava_overview() -> str:
-    return _capture_ava_overview()
-
-
-# _BASE_SYSTEM_PROMPT is the immutable core of the system prompt.
-# The {_AVA_OVERVIEW} placeholder is filled by _get_ava_overview() lazy capture
-# the first time build_system_prompt() is called — by then load_extensions() has
-# run and all plugin namespaces are visible.
-# Plugins inject extension content via register_system_prompt_section().
-_BASE_SYSTEM_PROMPT = """\
-You are Ava, an agent that acts by writing Python code — call the
-`execute_code(code: str)` tool — each call runs in an ephemeral interpreter. To idle, do not output any
-tool calls.
-
-Before using any `ava.*` function, you must explicitly `import ava` in your code.
-
-{_AVA_OVERVIEW}"""
-
+from ._chunk import _assemble_final_message
+from ._stream import _stream_with_cache_retry
 
 # llm_node normal → BEFORE_EXEC; cancel / no-tool-call halt → AFTER_EXEC
 # (halted=True makes after_exec route back to claim). Type narrow catches illegal goto.
@@ -590,11 +528,11 @@ async def _llm_node_impl(
     # usage_metadata; `message_chunk_to_message` converts to AIMessage.
     chunks: list[AIMessageChunk] = []
 
-    # Lazy import: `_llm_cancel` imports `LlmGoto` from this module at its top
-    # level, so a top-level `from ._llm_cancel import ...` here would be a
+    # Lazy import: `_cancel` imports `LlmGoto` from this module at its top
+    # level, so a top-level `from ._cancel import ...` here would be a
     # circular import (Task #1004 split). sys.modules serves it after the
     # first turn — no per-turn cost.
-    from ._llm_cancel import _race_stream_vs_cancel
+    from ._cancel import _race_stream_vs_cancel
 
     cancelled_cmd = await _race_stream_vs_cancel(
         ctx,

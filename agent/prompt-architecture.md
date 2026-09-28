@@ -58,7 +58,7 @@ multi-tool agent (e.g. Claude Code's per-tool `##` catalog): Ava has one tool
 guidance is the *spine* (base + SDK overview + plugin sections), folded into
 Capabilities rather than standing as its own section.
 
-- **Core base prompt** — `agent/graph/_llm.py:_BASE_SYSTEM_PROMPT`: the
+- **Core base prompt** — `agent/graph/_base_prompt.py:_BASE_SYSTEM_PROMPT`: the
   code-as-action contract (`execute_code`, speak via text content, empty
   tool-call = idle) plus the `help(ava)` SDK overview.
 - **Core expanded SDK reference** — `agent/graph/system_prompt.py:_sdk_expand_section`,

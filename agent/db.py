@@ -510,7 +510,7 @@ async def has_pending_inbound_after(
     claiming a batch, a pending row newer than the whole batch means the world
     moved while the exit was being decided — the terminate must yield so the
     fresh message gets processed instead of being stranded by the process death
-    (see the veto block in `agent/graph/_claim.py` claim_node routing).
+    (see the veto block in `agent/graph/claim/node.py` claim_node routing).
     """
     async with pool.connection() as conn, conn.cursor() as cur:
         await cur.execute(

@@ -1,7 +1,7 @@
 {
   "directories": {
     "agent": 34,
-    "agent/graph": 42,
+    "agent/graph": 35,
     "ava": 34,
     "ava_builtins/skills": 35,
     "cli/commands": 35,
@@ -38,7 +38,7 @@
     "tests/agent/test_compact.py": 1142,
     "tests/agent/test_impersonation.py": 935,
     "tests/agent/test_llm_factory.py": 1689,
-    "tests/agent/test_llm_helpers.py": 1145,
+    "tests/agent/test_llm_helpers.py": 1146,
     "tests/agent/test_state_slot.py": 936,
     "tests/agent/test_syntax_fix.py": 1677,
     "tests/agent/test_syntax_fix_helpers.py": 860,
@@ -113,13 +113,13 @@
   "complexity": {
     "agent/db.py::claim_inbound_batch": 15,
     "agent/exec_domain_owner.py::run": 28,
-    "agent/graph/_claim_decide.py::decide": 35,
-    "agent/graph/_claim_dispatch.py::dispatch_batch": 21,
-    "agent/graph/_claim_routing.py::resolve_routing": 22,
     "agent/graph/_exec_owned_run.py::run_owned": 47,
-    "agent/graph/_llm.py::llm_node": 19,
-    "agent/graph/_llm_stream.py::_consume_stream_with_stall_timeout": 17,
+    "agent/graph/claim/_decide.py::decide": 35,
+    "agent/graph/claim/_dispatch.py::dispatch_batch": 21,
+    "agent/graph/claim/_routing.py::resolve_routing": 22,
     "agent/graph/exec_output.py::wrap_code_output": 18,
+    "agent/graph/llm/_stream.py::_consume_stream_with_stall_timeout": 17,
+    "agent/graph/llm/node.py::llm_node": 19,
     "agent/graph/memory_recall.py::passive_memory_recall": 15,
     "agent/hooks/_registry.py::make_hook_runner.<locals>.run": 17,
     "agent/hosted_ownership.py::admit_hosted_runtime": 20,
@@ -142,6 +142,9 @@
     "ava_builtins/plugins/ava_sdk_reminder/agent_runtime.py::_SdkReminderAfterExecHook.__call__": 23,
     "ava_builtins/plugins/lm_google/gemini_cache.py::get_or_create_cache": 16,
     "ava_builtins/plugins/lm_google/provider.py::build": 18,
+    "ava_builtins/skill_support/gmail/smtp.py::forward": 15,
+    "ava_builtins/skill_support/gmail/smtp.py::reply": 18,
+    "ava_builtins/skill_support/self_evolution/record.py::build_record": 57,
     "ava_builtins/skills/ava-self-evolution/reference/daily_scan.py::render": 38,
     "ava_builtins/skills/ava-use-other-agents/reference/spawn_claude.py::main": 19,
     "ava_builtins/skills/ava-use-other-agents/reference/spawn_codex.py::main": 19,
@@ -454,10 +457,7 @@
     "tests/shared/test_uvicorn_stdlib_intercept.py::test_gateway_uvicorn_run_passes_log_config_none": 23,
     "tests/shared/test_winproc_launch.py::test_new_session_spawns_a_control_steward_bound_to_the_record_identity": 21,
     "tests/skills/test_impersonation_launch.py::test_self_takeover_bootstrap_inlines_brief_and_links_real_guide": 17,
-    "tests/test_lint_marker_contract.py::test_system_note_writers_use_notetag_values": 15,
-    "ava_builtins/skill_support/self_evolution/record.py::build_record": 57,
-    "ava_builtins/skill_support/gmail/smtp.py::forward": 15,
-    "ava_builtins/skill_support/gmail/smtp.py::reply": 18
+    "tests/test_lint_marker_contract.py::test_system_note_writers_use_notetag_values": 15
   },
   "nesting": {
     "agent/hooks/_registry.py::make_hook_runner.<locals>.run": 7,

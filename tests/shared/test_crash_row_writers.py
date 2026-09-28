@@ -75,7 +75,7 @@ def test_marker_clear_sites_are_enumerated() -> None:
         if _MARKER_CLEAR.search(path.read_text(encoding="utf-8"))
     }
     assert clearers == {
-        "agent/graph/_llm.py",  # a completed LLM turn — the single reset
+        "agent/graph/llm/node.py",  # a completed LLM turn — the single reset
         "ops/agent_wake.py",  # the resurrect transition (per-death)
     }
 

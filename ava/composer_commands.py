@@ -32,7 +32,7 @@ that is the prompt's meaning playing out, not a case for the mechanism to
 predict, intercept, or warn about.
 
 Commands are also sendable **agent-to-agent**: any chat inbound runs through
-`expand_command` in the receiver's claim node (`agent/graph/_claim.py`), so
+`expand_command` in the receiver's claim node (`agent/graph/claim/node.py`), so
 `ava.agents.send_message(peer, "/demo:brainstorming …")` (or
 `spawn(prompt=…)`) delivers a *named, described* intent — a command is an
 addressable prompt function, not just a human UI macro. Peers discover the

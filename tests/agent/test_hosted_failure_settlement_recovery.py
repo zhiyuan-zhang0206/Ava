@@ -17,7 +17,7 @@ from psycopg_pool import AsyncConnectionPool
 
 from agent import db as agent_db
 from agent import state as states
-from agent.graph._claim import claim_node
+from agent.graph.claim.node import claim_node
 from agent.graph.llm_errors import FatalProviderError
 from agent.hooks.compact import COMPACT_MAX_ATTEMPTS
 from agent.impersonation import flush_checkpoint
@@ -72,7 +72,7 @@ async def test_abort_survives_database_loss_before_halted_state_write(
     ancestor, agent, owner = await _admitted_descendant(db_conn, aops_pool)
     model_calls: list[str] = []
     summary = AsyncMock(side_effect=RuntimeError("summary unavailable"))
-    monkeypatch.setattr("agent.graph._claim_dispatch.generate_summary", summary)
+    monkeypatch.setattr("agent.graph.claim._dispatch.generate_summary", summary)
 
     async def model(state: states.AgentState) -> Command[Any]:
         assert not state.halted

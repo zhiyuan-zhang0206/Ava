@@ -63,7 +63,7 @@ provider default) maps per branch onto what each provider accepts via
 fast at build time instead of as a provider 400 mid-run.
 
 Streaming / usage_metadata: providers attach `usage_metadata` on the final
-chunk; `AIMessageChunk += chunk` accumulation in `agent/graph/_llm.py::llm_node`
+chunk; `AIMessageChunk += chunk` accumulation in `agent/graph/llm/node.py::llm_node`
 is followed by `message_chunk_to_message` to preserve usage; an assert before
 entering state guards that metadata is not empty.
 """

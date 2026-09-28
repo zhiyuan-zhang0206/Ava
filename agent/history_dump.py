@@ -1,7 +1,7 @@
 """Pre-compact history dump — JSONL snapshot of the full conversation.
 
 Every compaction path — the claim node's agent-/user-triggered compact
-(``_claim_decide``) and the before_llm auto-compact hook (``agent/hooks/compact.py``)
+(``claim/_decide.py``) and the before_llm auto-compact hook (``agent/hooks/compact.py``)
 — writes the complete pre-compact ``state.messages`` to a JSONL file under the agent
 workspace (``<workspace>/message-history/<start>__<end>.jsonl``) and injects a system
 note in the fresh post-compact context pointing at the dump.
@@ -63,7 +63,7 @@ def _earliest_message_ts(messages: list[AnyMessage]) -> datetime | None:
 
     Every message shape but the SystemMessage carries the stamp (the
     ``agent/messages.py`` builders and the AIMessage stamp in
-    ``agent/graph/_llm.py``), so this is the moment the round's context began.
+    ``agent/graph/llm/node.py``), so this is the moment the round's context began.
     An unparseable value is skipped rather than sinking the whole dump; a
     stamp-less history falls back to the compaction moment at the caller.
     """

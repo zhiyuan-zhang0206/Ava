@@ -130,7 +130,7 @@ async def test_cold_idle_resume_uses_pointer_without_an_extra_model_call(
     from langgraph.graph import START, StateGraph
 
     from agent import state as states
-    from agent.graph._claim import claim_node
+    from agent.graph.claim.node import claim_node
     from shared.context import AvaContext
 
     agent = _agent(db_conn)

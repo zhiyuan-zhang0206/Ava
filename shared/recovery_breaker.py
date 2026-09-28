@@ -12,7 +12,7 @@ the explicit human override.
 source of truth for "halted": incremented when a turn ends with a
 permanent-class ``FatalProviderError`` (``agent/runloop.py``), reset to 0 by
 the completed-turn UPDATE that clears ``last_turn_fatal_at``
-(``agent/graph/_llm.py::_persist_last_active``). The latest rejection's
+(``agent/graph/llm/node.py::_persist_last_active``). The latest rejection's
 reason class lives beside the count in ``agents_meta.last_permanent_reject_reason``
 (written with the increment, cleared with the streak). Gates read the streak
 (``RECOVERY_BREAKER_CLEAR``), never the wake-suppression window alone: a claim

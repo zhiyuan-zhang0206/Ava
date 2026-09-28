@@ -286,7 +286,7 @@ async def test_heartbeat_runs_page_reconcile(monkeypatch: pytest.MonkeyPatch) ->
     """HEARTBEAT handler probes the agent's pages (Task #973: live agents must
     self-heal pages killed by a cluster rollout — boot recovery never runs)."""
     from agent.db import ClaimedInbound
-    from agent.graph._claim import _BatchState, _handle_heartbeat
+    from agent.graph.claim.node import _BatchState, _handle_heartbeat
 
     calls: list[tuple[object, int, object | None]] = []
 

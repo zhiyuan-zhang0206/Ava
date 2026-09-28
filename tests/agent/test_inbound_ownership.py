@@ -13,7 +13,7 @@ from agent.db import (
     finalize_claimed_inbounds,
     reconcile_claimed_inbounds,
 )
-from agent.graph._claim_batch import _defer_chats_to_pending
+from agent.graph.claim._batch import _defer_chats_to_pending
 from agent.hosted_ownership import admit_hosted_runtime
 from agent.inbound_ownership import RuntimeOwnershipLostError, lock_inbound_owner
 from shared.db import create_agent
