@@ -25,7 +25,9 @@ pairs whose packages differ and whose co-occurrence count and confidence
 both clear a threshold — candidate evidence that the two sides share a
 decision with no single owner. Declared cross-process contract boundaries
 (`_CONTRACT_BOUNDARIES`, e.g. `gateway/schemas/` <-> `ui/web/`, carried by
-codegen) are excluded from pairing; see "Calibration snapshot" in
+codegen) are excluded from pairing, and so is any file the branch tip no
+longer has (paths follow renames to their current name; a deleted file names
+no owner to fix); see "Calibration snapshot" in
 `future/infra/locality.md` (read there, not edited here).
 """
 
@@ -246,6 +248,17 @@ def _run_git_log(repo: Path, branch: str, *, days: int | None, commits: int | No
     return result.stdout
 
 
+def _tip_files(repo: Path, branch: str) -> frozenset[str]:
+    result = subprocess.run(  # noqa: S603 - fixed argv, caller-controlled repo/branch only
+        ["git", "-C", str(repo), "ls-tree", "-r", "--name-only", branch],
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=60,
+    )
+    return frozenset(result.stdout.splitlines())
+
+
 def _head_sha(repo: Path, branch: str) -> str:
     result = subprocess.run(  # noqa: S603 - fixed argv, caller-controlled repo/branch only
         ["git", "-C", str(repo), "rev-parse", "--short", branch],
@@ -352,11 +365,20 @@ def _strong_pairs(
     pair_counts: Counter[tuple[str, str]],
     touch_counts: Counter[str],
     *,
+    tip_files: frozenset[str],
     min_support: int,
     min_confidence: float,
 ) -> list[PairRow]:
+    """Pairs clearing both thresholds whose files both still exist at the tip.
+
+    A deleted file names no owner to move a decision into — its record is
+    history, not a finding (renames are already folded into the current name
+    by `_commits_from_log`).
+    """
     rows: list[PairRow] = []
     for (a, b), c in pair_counts.items():
+        if a not in tip_files or b not in tip_files:
+            continue
         n_a, n_b = touch_counts[a], touch_counts[b]
         confidence = c / min(n_a, n_b)
         if c >= min_support and confidence >= min_confidence:
@@ -407,6 +429,7 @@ def _build_report(
     branch: str,
     window: str,
     head: str,
+    tip_files: frozenset[str],
     min_support: int,
     min_confidence: float,
 ) -> Report:
@@ -414,7 +437,11 @@ def _build_report(
     paired = _paired_commits(commits)
     pair_counts, touch_counts = _cochange_counts(paired)
     strong = _strong_pairs(
-        pair_counts, touch_counts, min_support=min_support, min_confidence=min_confidence
+        pair_counts,
+        touch_counts,
+        tip_files=tip_files,
+        min_support=min_support,
+        min_confidence=min_confidence,
     )
     return Report(
         repo=repo,
@@ -532,6 +559,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         log_text = _run_git_log(repo, args.branch, days=days, commits=args.commits)
         head = _head_sha(repo, args.branch)
+        tip_files = _tip_files(repo, args.branch)
     except subprocess.CalledProcessError as exc:
         stderr = exc.stderr.strip() if exc.stderr else str(exc)
         print(f"error: git log failed for {repo} ({args.branch}): {stderr}", file=sys.stderr)
@@ -543,6 +571,7 @@ def main(argv: list[str] | None = None) -> int:
         branch=args.branch,
         window=window_desc,
         head=head,
+        tip_files=tip_files,
         min_support=args.min_support,
         min_confidence=args.min_confidence,
     )
