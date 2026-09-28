@@ -14,11 +14,13 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+import time
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
+import psutil
 import psycopg
 import pytest
 from dotenv import dotenv_values
@@ -91,7 +93,42 @@ def _legacy_pooler(home: Path, pg_port: int, listen_port: int) -> None:
         capture_output=True,
         timeout=10,
     )
-    ci._wait_for_reachable_bind()
+    # `-d` returns before the daemon writes its pidfile. Until it has, a stop
+    # (a test that never touches the pooler reaches teardown within
+    # milliseconds) finds no pooler and leaves the daemon running.
+    deadline = time.monotonic() + 10
+    while True:
+        try:
+            owner = ownership.pooler(pooler.ini_path(), pooler.pidfile_path())
+            ownership.require_listener(owner, listen_port)
+            return
+        except RuntimeError:
+            if time.monotonic() > deadline:
+                raise
+            time.sleep(0.05)
+
+
+def _kill_leftover_poolers() -> None:
+    """SIGKILL every PgBouncer still running on this home's config.
+
+    Found by its `-d` argument, not its pidfile, so a pooler whose stop found
+    no pidfile (a setup that failed before the daemon wrote it) is stopped too;
+    the config path belongs to this test alone.
+    """
+    ini = pooler.ini_path().resolve()
+    leftovers: list[psutil.Process] = []
+    for process in psutil.process_iter(["name"]):
+        if process.info["name"] != "pgbouncer":
+            continue
+        try:
+            argv = process.cmdline()
+            # A relative `-d` resolves against the daemon's own directory.
+            if (Path(process.cwd()) / argv[argv.index("-d") + 1]).resolve() == ini:
+                process.kill()
+                leftovers.append(process)
+        except (psutil.Error, ValueError, IndexError):
+            continue
+    psutil.wait_procs(leftovers, timeout=5)
 
 
 def _provision_legacy(port: int) -> None:
@@ -160,12 +197,15 @@ def legacy(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Legacy]:
         yield legacy
     finally:
         monkeypatch.setattr(settings.general, "ava_home", str(home))
-        pooler.stop_pgbouncer(force=True)
-        subprocess.run(  # noqa: S603 — resolved pg_ctl + test-owned data dir
-            [ci._pg_bin("pg_ctl"), "-D", str(home / "pg"), "-m", "immediate", "stop"],
-            check=False,
-            capture_output=True,
-        )
+        try:
+            pooler.stop_pgbouncer(force=True)
+        finally:
+            _kill_leftover_poolers()
+            subprocess.run(  # noqa: S603 — resolved pg_ctl + test-owned data dir
+                [ci._pg_bin("pg_ctl"), "-D", str(home / "pg"), "-m", "immediate", "stop"],
+                check=False,
+                capture_output=True,
+            )
 
 
 def _role(legacy: Legacy, name: str) -> tuple[bool, bool] | None:
