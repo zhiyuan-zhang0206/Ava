@@ -21,7 +21,7 @@ from shared.tasks.priority import Priority
 
 # Canonical columns + JOIN. last_active_at is the agent's REAL-activity clock
 # (agents_meta.last_active_at, written by the agent process on every completed
-# LLM turn — agent/graph/_llm.py) with a spawned_at fallback for brand-new
+# LLM turn — agent/graph/llm/node.py) with a spawned_at fallback for brand-new
 # rows; last_inbound_at is MAX(inbound_messages.created_at) across all kinds
 # (chat / lifecycle / compact all count as "when did anyone last talk to it"),
 # with the same fallback. The two diverge exactly for an agent grinding on a

@@ -34,7 +34,7 @@ from langgraph.graph.message import REMOVE_ALL_MESSAGES
 from langgraph.runtime import Runtime
 from psycopg_pool import AsyncConnectionPool
 
-from agent.graph._claim import BEFORE_LLM, END, claim_node
+from agent.graph.claim.node import BEFORE_LLM, END, claim_node
 from agent.hooks.compact import (
     COMPACT_MAX_ATTEMPTS,
     COMPACTION_INSTRUCTION,

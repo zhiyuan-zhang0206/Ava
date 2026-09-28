@@ -98,7 +98,7 @@ context for compaction and to END for idle or lifecycle control. Routing uses
   observers skip that check, preserving capacity for ownership and lifecycle.
   Queries spend the existing backoff budget and create no background tasks.
   Persistent checkpoint unavailability still prevents a completed durable pause.
-- `agent/graph/_llm.py` streams model inference with retry and cancellation.
+- `agent/graph/llm/node.py` streams model inference with retry and cancellation.
 - `agent/graph/_exec.py` runs `execute_code` in a disposable subprocess with an
   owned POSIX process group or Windows Job Object. Cleanup reaps its child and
   joins the output reader; this isolation is independent of host scheduling.

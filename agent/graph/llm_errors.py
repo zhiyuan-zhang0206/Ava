@@ -7,9 +7,9 @@ optional ``FatalProviderError``), the per-process consecutive-error tracker
 that bounds deterministic retry loops, and the stall-pair streak that bounds
 the delayed retry schedule for two-adjacent-stall terminations.
 
-Split out of ``_llm.py`` (Task #1004 >800-line outlier) — a leaf dependency of
-``_llm_stream`` / ``_llm_cancel`` / ``_llm_chunk``; nothing here imports back
-into ``_llm.py``.
+Split out of ``llm/node.py`` (Task #1004 >800-line outlier) — a leaf dependency
+of ``llm/_stream.py`` / ``llm/_cancel.py`` / ``llm/_chunk.py``; nothing here
+imports back into ``llm/node.py``.
 """
 
 from __future__ import annotations

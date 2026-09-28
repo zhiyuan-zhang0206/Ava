@@ -995,7 +995,7 @@ async def test_real_runner_compaction_wins_no_note(
     assert cmd.goto == "llm"
     hook_update = cast("dict[str, object]", cmd.update)
     assert isinstance(hook_update, dict) and "messages" not in hook_update
-    from agent.graph._llm import llm_node
+    from agent.graph.llm.node import llm_node
 
     cmd = await llm_node(state, _runtime_for_runner(), _config())
     update = cmd.update

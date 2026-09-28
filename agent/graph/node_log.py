@@ -254,7 +254,7 @@ async def node_lifecycle(
 
     `full_window=True` forces the full tail-window snapshot path (used by the
     claim node's turn-end fallback — the only race-free view of a finished
-    turn when the frontend may have missed events; see _claim.py). The cursor
+    turn when the frontend may have missed events; see claim/node.py). The cursor
     advances to `len(messages)` either way, so a subsequent incremental
     snapshot picks up exactly the next commits.
     """

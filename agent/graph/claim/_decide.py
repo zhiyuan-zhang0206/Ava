@@ -1,13 +1,13 @@
 """Post-dispatch decision for the claim node: short-circuit rules → one Command.
 
-Extracted from agent/graph/_claim.py (Task #1006 split). Every return path
+Extracted from agent/graph/claim/node.py (Task #1006 split). Every return path
 flows through decide() — the original's eight return points collapse to one;
 the ``halted`` formula appears exactly once. Chain: cancel path → veto
 re-entry → idle-restart gate → compact path → normal fallthrough (with the
 END snapshot flag).
 
 State typing follows the agent/graph/_exec.py module-docstring pattern
-(``_state.AgentState`` + deferred annotations) — see _claim.py docstring.
+(``_state.AgentState`` + deferred annotations) — see node.py docstring.
 """
 
 from __future__ import annotations
@@ -21,9 +21,9 @@ from langgraph.types import Command
 
 from agent import state as _state
 from agent.db import ClaimedInbound, finalize_claimed_inbounds
-from agent.graph._claim_batch import _defer_chats_to_pending
-from agent.graph._claim_dispatch import _BatchState
-from agent.graph._claim_routing import ClaimGoto, _Routing
+from agent.graph.claim._batch import _defer_chats_to_pending
+from agent.graph.claim._dispatch import _BatchState
+from agent.graph.claim._routing import ClaimGoto, _Routing
 from agent.history_dump import dump_history, history_dump_note
 from agent.hooks.compact import (
     CompactionFailedError,

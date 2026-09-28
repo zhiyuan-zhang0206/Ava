@@ -11,9 +11,9 @@ schedule instead of burning the provider's stalled segments.
 invalidation + one plain-path retry, concurrency-limiter slot, latency/decode
 stamps).
 
-Split out of ``_llm.py`` (Task #1004 >800-line outlier) — the provider-facing
+Split out of ``node.py`` (Task #1004 >800-line outlier) — the provider-facing
 side of the llm node; it feeds chunks into a caller-owned list that
-``_llm_chunk`` later assembles.
+``_chunk`` later assembles.
 """
 
 from __future__ import annotations
@@ -26,18 +26,17 @@ from typing import cast
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, AIMessageChunk, AnyMessage
 
-from agent.lm_cache import prepare_invocation
-from shared.config import settings
-from shared.config.turn_view import turn_settings
-from shared.log import logger
-
-from ._callbacks import RedisStreamHandler
-from .llm_errors import (
+from agent.graph._callbacks import RedisStreamHandler
+from agent.graph.llm_errors import (
     LLMStreamStallPairError,
     LLMStreamStallTimeoutError,
     _is_fatal_provider_error_type,
     _parse_provider_error_type,
 )
+from agent.lm_cache import prepare_invocation
+from shared.config import settings
+from shared.config.turn_view import turn_settings
+from shared.log import logger
 
 
 async def _consume_llm(

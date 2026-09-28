@@ -3,19 +3,22 @@
 Submodules split by node (one file per node); leading underscore marks
 package-private, no underscore marks a module promoted to a real public door
 (other packages import it directly — plugin registration points, the exec
-child's protocol, etc.):
+child's protocol, etc.). Two node families are subpackages, one package per
+node (`claim/`, `llm/`) — each package door (`__init__.py`) is docstring-only,
+so `claim_node` / `llm_node` are re-exported from their `node.py`:
 
-  - `_claim.py`        — claim node: pipeline orchestrator (long await + dispatch by inbound kind)
-  - `_claim_batch.py`  — claim batch acquisition: idle wait loop, trim, chat deferral
-  - `_claim_routing.py`— claim lifecycle routing: ClaimGoto + batch winner resolution
-  - `_claim_dispatch.py` — claim per-kind dispatch: batch state, markers, handlers
-  - `_claim_decide.py` — claim post-dispatch decision → single Command
-  - `_claim_present.py`— claim display: SSE publishing for the frontend timeline
-  - `_llm.py`          — llm node (stream + cancel = discard partial turn)
-  - `_llm_stream.py`   — llm streaming consumption (stall timeouts, non-stream fallback, cache retry)
-  - `_llm_cancel.py`   — llm streaming-vs-cancel race (partial turn discard)
-  - `_llm_chunk.py`    — llm chunk assembly + final-message validation
-  - `llm_errors.py`    — llm stream error taxonomy + consecutive-error tracking
+  - `claim/node.py`      — claim node: pipeline orchestrator (long await + dispatch by inbound kind)
+  - `claim/_batch.py`    — claim batch acquisition: idle wait loop, trim, chat deferral
+  - `claim/_routing.py`  — claim lifecycle routing: ClaimGoto + batch winner resolution
+  - `claim/_dispatch.py` — claim per-kind dispatch: batch state, markers, handlers
+  - `claim/_decide.py`   — claim post-dispatch decision → single Command
+  - `claim/_present.py`  — claim display: SSE publishing for the frontend timeline
+  - `llm/node.py`        — llm node (stream + cancel = discard partial turn)
+  - `llm/_stream.py`     — llm streaming consumption (stall timeouts, non-stream fallback, cache retry)
+  - `llm/_cancel.py`     — llm streaming-vs-cancel race (partial turn discard)
+  - `llm/_chunk.py`      — llm chunk assembly + final-message validation
+  - `llm_errors.py`      — llm stream error taxonomy + consecutive-error tracking
+  - `_base_prompt.py`   — immutable base system prompt + lazily captured `ava` SDK overview
   - `_exec.py`         — exec node (one disposable subprocess per execute_code call)
   - `exec_output.py`   — code execution output envelope: format / truncate / overflow-to-file
   - `_exec_alerts.py`  — best-effort operator alert for boot-phase exec child crashes
@@ -40,20 +43,20 @@ if TYPE_CHECKING:
     # stays lazy — the node set is a heavy import on paths (the exec child) that
     # never use these names (agent/graph/__init__.py in `_TYPE_CHECKING_ALLOWED`).
     from ._build import build_graph as build_graph
-    from ._claim import claim_node as claim_node
     from ._exec import exec_node as exec_node
-    from ._llm import llm_node as llm_node
+    from .claim.node import claim_node as claim_node
     from .exec_output import EXEC_CANCEL_NOTE as EXEC_CANCEL_NOTE
+    from .llm.node import llm_node as llm_node
 
 # Eager `from ._build import build_graph` used to run on every `agent.graph`
 # import — pulling the full node set (build/claim/llm/exec and their trees)
 # into every shell/files exec child. Resolve on first attribute access instead.
 _LAZY_EXPORTS = {
     "build_graph": "._build",
-    "claim_node": "._claim",
+    "claim_node": ".claim.node",
     "exec_node": "._exec",
     "EXEC_CANCEL_NOTE": ".exec_output",
-    "llm_node": "._llm",
+    "llm_node": ".llm.node",
 }
 
 # Static checkers see the real signatures through the TYPE_CHECKING block

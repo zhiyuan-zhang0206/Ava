@@ -73,4 +73,4 @@ LangChain types `AIMessage(Chunk).content` weakly as `str | list[str | dict[str,
 - **Anthropic prompt caching**: claude branch passes `cache_control: ephemeral`; system + eligible blocks cached 5 min server-side. No facade — submodules imported directly.
 - **Qwen**: graded by a token budget, not a level enum, so the knob rides the `enable_thinking` switch (mimo's binary `none`/`high`). Endpoint is CONFIG (`AVA_DASHSCOPE_BASE_URL`) — a dedicated workspace host is unreachable from the public default, and region changes reprice. Verified live 2026-08-20: thinking-off honored, and the streamed usage frame carries `cached_tokens` → `cache_read`. Explicit `cache_control` tier unwired.
 
-- Key deps: [[llm.ava.okf.md]] (agent/graph/_llm.py calls `build_chat_model`)
+- Key deps: [[llm.ava.okf.md]] (agent/graph/llm/node.py calls `build_chat_model`)

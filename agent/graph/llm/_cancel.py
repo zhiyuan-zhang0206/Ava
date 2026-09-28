@@ -7,8 +7,8 @@ fires first discards the partial generation and returns the halted Command
 propagates exceptions (consecutive-error tracking + provider-error
 classification applied) and returns None.
 
-Split out of ``_llm.py`` (Task #1004 >800-line outlier). Imports ``LlmGoto``
-from ``_llm.py`` (the node module owns the goto type); ``_llm.py`` therefore
+Split out of ``node.py`` (Task #1004 >800-line outlier). Imports ``LlmGoto``
+from ``node.py`` (the node module owns the goto type); ``node.py`` therefore
 imports this module lazily inside ``_llm_node_impl`` to keep the import graph
 acyclic.
 """
@@ -20,15 +20,19 @@ from typing import Any
 
 from langgraph.types import Command
 
+from agent.graph._callbacks import RedisStreamHandler
+from agent.graph.interrupt import ModelInterruptedError, interruptible_model, subscribe_interrupt
+from agent.graph.llm_errors import (
+    LLMStreamError,
+    _classify_and_log_provider_error,
+    _record_consecutive_error,
+)
 from agent.nodes import AFTER_EXEC
 from shared.context import AvaContext
 from shared.live_events import Cancelled
 from shared.log import logger
 
-from ._callbacks import RedisStreamHandler
-from ._llm import LlmGoto
-from .interrupt import ModelInterruptedError, interruptible_model, subscribe_interrupt
-from .llm_errors import LLMStreamError, _classify_and_log_provider_error, _record_consecutive_error
+from .node import LlmGoto
 
 
 async def _race_stream_vs_cancel(

@@ -2,7 +2,7 @@
 
 A "silent idle" is a turn where the model produced reasoning (thinking blocks /
 reasoning tokens) but emitted no text and no tool_call: the agent appears stuck
-at reasoning. The kernel (agent/graph/_llm.py) handles such a turn by keeping
+at reasoning. The kernel (agent/graph/llm/node.py) handles such a turn by keeping
 the reasoning in context and looping straight back to the LLM
 (halted=False -> claim's multi-step continue path) instead of wasting tokens on
 a blind re-stream, bounded by a per-process consecutive-count guard.
