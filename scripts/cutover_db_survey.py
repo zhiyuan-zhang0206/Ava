@@ -593,6 +593,26 @@ def _identityless(
     return judged
 
 
+def clock_refusal(found: Survey) -> str | None:
+    """Why the journal's first run (W7) must not go on: a row reads `after_attestation`.
+
+    Nothing terminates an agent between the attestations and W7 (business is
+    closed from W3 to W11), so such a row means the attesting host's clock
+    trails the database's, whose `now()` stamps termination, or a process of
+    that home wrote after its attestation. Either way the cutoff cannot be
+    trusted for that machine. A later run (W12) expects such rows.
+    """
+    late = [item.machine for item in found.identityless if item.category == "after_attestation"]
+    if not late:
+        return None
+    return (
+        f"{len(late)} identity-less row(s) on {', '.join(sorted(set(late)))} read "
+        "after_attestation in the first run, when nothing terminates an agent: the attesting "
+        "host's clock trails the database's (compare them), or a process of the home wrote "
+        "after the attestation; fix the cause, then take that machine's attestation again"
+    )
+
+
 def _identityless_counts(judged: list[Identityless]) -> dict[str, int]:
     """The identity-less rows per category, every category listed."""
     categories = [item.category for item in judged]

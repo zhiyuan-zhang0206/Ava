@@ -66,6 +66,7 @@ from scripts.cutover_db_survey import (
     Survey,
     attention,
     cleared_publication,
+    clock_refusal,
     export_rows,
     fenced_summary,
     pending_of,
@@ -257,10 +258,13 @@ def plan_repairs(found: Survey, inputs: Inputs, own: tuple[str, str], *, later: 
     completed one (`later`) plans no posture effect: the completed run idled
     every legacy `paused` posture of an included host, so a later `paused` is a
     held unit's own (a start inside a hold writes it), which never changes here.
+    The first run also refuses while a row reads `after_attestation` (`clock_refusal`).
     """
     plan = Plan({step: [] for step in STEPS}, [])
     for reason in attention(found.checks):
         plan.refuse(reason)
+    if not later and (skew := clock_refusal(found)) is not None:
+        plan.refuse(skew)
     _plan_pending(found, inputs, plan)
     _plan_lease(found, inputs, plan)
     _plan_postures(found, inputs, plan, later=later)

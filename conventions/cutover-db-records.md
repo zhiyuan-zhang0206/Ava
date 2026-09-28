@@ -46,7 +46,9 @@ authority cutover brought the plane up under new custody. Run them with the
    registered: that probe can start the old code after the document is taken.
    Copy the documents to the gateway unchanged; their bytes are the evidence.
 5. **Repair (W7, after `scripts/cutover_db_authority.py`).** Dry-run with every
-   input, resolve every refusal, then add `--execute`. Finally `--check` with
+   input, resolve every refusal, then add `--execute`. In the dry run D-8's
+   `counts.identityless.after_attestation` reads 0: the journal's first run
+   refuses otherwise (see the clock comparison below). Finally `--check` with
    the same attestations: D-1, D-2 and D-6 read `ok`. D-8 reads `ok` only
    when no retired-shape or identity-less row remains; otherwise it reads
    `fenced` with a count per verdict and reason, and `--check` exits 2 ([rows
@@ -150,9 +152,18 @@ home census empty when it was taken, is their evidence, so it covers only rows
 terminated before (`status_changed_at` no later than its `attested_at`). The
 new code writes rows of the same shape, an agent terminated before its first
 admission, and those never qualify. The comparison crosses clocks (the
-database's and the attesting host's), which is safe within minutes: legacy
-terminations precede the attestation by at least the drain, and business,
-the first source of new terminations, stays closed until W11.
+database's `now()` stamps the termination, the attesting host's clock stamps
+`attested_at`, just after it read the census). Legacy terminations precede
+the attestation by at least the drain, and business, the first source of new
+terminations, stays closed from W3 until W11, so at W7 no row can read
+`after_attestation`. The journal's first run refuses while one does, naming
+the machines: that host's clock trails the database's (a row terminated
+before the attestation would stay fenced for good), or a process of the home
+wrote after its attestation (which then proves nothing). Compare the clocks
+or find the writer, then take that machine's attestation again. A host clock
+running ahead of the database's could only let rows terminated after the
+attestation through: at W7 none exist, and at W12 it would take hours of skew
+to reach the first row the new code terminated (after W11).
 
 ## Rows left fenced
 

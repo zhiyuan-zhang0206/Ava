@@ -36,6 +36,7 @@ from tests.lifecycle.cutover.test_db_records import (  # noqa: F401 -- fixtures
     _connection,
     _inputs,
     _patched_session,
+    _refusals,
     _run,
     _state,
     _survey,
@@ -344,12 +345,16 @@ def test_a_row_terminated_after_its_machines_attestation_is_never_minted(
 ) -> None:
     """The attestation proves the home empty when it was taken, so it covers only
     rows terminated before. A row terminated later (the new code's agents take
-    the same shape) stays fenced, also in a later run with the same documents."""
+    the same shape) stays fenced in the W12 run with the same documents."""
     runner = cluster.runner
     covered = _terminated(db_conn, runner)
     idling, _, _, _ = create_agent_row(spawner="user", machine=runner)
     db_conn.commit()
     inputs = _inputs(tmp_path, cluster)
+    run = _run(cluster, inputs)
+    assert [row["agent_id"] for row in run["effects"]["identities"][0]["rows"]] == [covered]
+    assert _row(db_conn, covered)[1] == "hosted"
+
     db_conn.execute(
         "UPDATE agents_meta SET status='terminated', termination_source='user', "
         "incarnation_resources=NULL WHERE id=%s",
@@ -358,24 +363,34 @@ def test_a_row_terminated_after_its_machines_attestation_is_never_minted(
     db_conn.commit()
     born_later = _terminated(db_conn, runner)
     late = {idling: _row(db_conn, idling), born_later: _row(db_conn, born_later)}
-    assert _categories(inputs) == {
-        covered: "convertible",
-        idling: "after_attestation",
-        born_later: "after_attestation",
-    }
-
-    run = _run(cluster, inputs)
-
-    assert [row["agent_id"] for row in run["effects"]["identities"][0]["rows"]] == [covered]
-    assert _row(db_conn, covered)[1] == "hosted"
-    assert {aid: _row(db_conn, aid) for aid in late} == late
     # The W12 late conversion: the same documents, a new reason, no cluster-wide input.
     w12 = replace(inputs, reason="W12 late conversion", pending=None, lease=None, retire_units=())
+    assert _categories(w12) == dict.fromkeys(late, "after_attestation")
     assert _run(cluster, w12)["effects"]["identities"] == []
     assert {aid: _row(db_conn, aid) for aid in late} == late
     d8 = _survey(w12).checks["D-8"]
     reason = "terminated after its machine's closure attestation"
     assert [g["agents"] for g in d8["fenced"] if reason in g["reason"]] == [[idling, born_later]]
+
+
+def test_the_first_run_refuses_while_a_row_reads_after_attestation(
+    cluster: Cluster, db_conn: psycopg.Connection, tmp_path: Path
+) -> None:
+    """Nothing terminates an agent between the attestations and W7, so there a row
+    terminated after its machine's attestation means the host clock trails the
+    database's (or a late writer): the cutoff cannot be trusted, and W7 refuses."""
+    inputs = _inputs(tmp_path, cluster)
+    skewed = _terminated(db_conn, cluster.runner)
+    assert _categories(inputs) == {skewed: "after_attestation"}
+    unchanged = _state(db_conn)
+    expected = f"1 identity-less row(s) on {cluster.runner} read after_attestation in the first run"
+    (refusal,) = _refusals(cluster, inputs)
+    assert refusal.startswith(expected) and "clock trails the database's" in refusal
+    with pytest.raises(records.RefusedError, match=r"read after_attestation in the first run"):
+        _run(cluster, inputs)
+    assert _state(db_conn) == unchanged
+    assert not (cluster.home / records.JOURNAL).exists()
+    assert _refusals(cluster, inputs, later=True) == []  # W12 expects such rows
 
 
 def test_the_mint_happens_once(
