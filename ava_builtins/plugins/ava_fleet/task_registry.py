@@ -15,6 +15,7 @@ import ava.agents
 from ava.sdk_validation import coerce_str, coerce_typed
 from shared.tasks.task_owner_notifications import owner_change_notifications
 from shared.tasks.task_reparent import resolve_reparent
+from shared.tasks.task_rules import is_closed, open_title_holder
 from shared.tasks.task_timestamps import render_task_timestamps
 
 if TYPE_CHECKING:
@@ -156,7 +157,7 @@ def _ensure_parent_exists(cur: psycopg.Cursor, parent: int) -> None:
             f"task 1 is not the system root task -- the root is {what}; "
             "pass its id for a top-level task"
         )
-    if row[2] in ("done", "cancelled"):
+    if is_closed(row[2]):
         raise ValueError(
             f"parent task {parent} is {row[2]} — a closed task cannot be the "
             "parent of a new task; reopen it or pass the system root task id "
@@ -182,11 +183,7 @@ def _insert_task(
     the same task twice (#60, #253)."""
     import psycopg  # per-call: keeps the psycopg stack off plugin autoload (task #3816)
 
-    cur.execute(
-        "SELECT id, status FROM agent_tasks WHERE title = %s AND status = 'in_progress' LIMIT 1",
-        (title,),
-    )
-    existing = cur.fetchone()
+    existing = open_title_holder(cur, title)
     if existing is not None:
         raise ValueError(
             f"task with title {title!r} already exists (task #{existing[0]} is {existing[1]}) — "

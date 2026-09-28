@@ -240,6 +240,7 @@ _TYPE_CHECKING_ALLOWED: frozenset[str] = frozenset(
         "ava_builtins/plugins/ava_fleet/task_registry.py",
         "ava_builtins/plugins/ava_fleet/_task_update.py",
         "shared/tasks/task_reparent.py",
+        "shared/tasks/task_rules.py",
     }
 )
 
