@@ -231,9 +231,11 @@ def _prepare_resurrect_attempt(
         # lifecycle command is settled as superseded right here (issue #2158),
         # and a command that never applied cannot defer this resurrection. A
         # refusal below rolls the whole transaction back - fence included.
+        # Stamp after the lock: a transaction begun before termination committed
+        # must not sort its resurrection ahead of the interruption notices.
         cur.execute(
-            "INSERT INTO inbound_messages (agent_id, content, kind, source) "
-            "VALUES (%s, '', 'resurrect', %s) RETURNING id",
+            "INSERT INTO inbound_messages (agent_id, content, kind, source, created_at) "
+            "VALUES (%s, '', 'resurrect', %s, clock_timestamp()) RETURNING id",
             (agent_id, resurrected_by),
         )
         resurrect_row = cur.fetchone()
@@ -254,8 +256,8 @@ def _prepare_resurrect_attempt(
         )
         if prompt is not None:
             cur.execute(
-                "INSERT INTO inbound_messages (agent_id, content, kind, source) "
-                "VALUES (%s, %s, 'chat', %s)",
+                "INSERT INTO inbound_messages (agent_id, content, kind, source, created_at) "
+                "VALUES (%s, %s, 'chat', %s, clock_timestamp())",
                 (agent_id, prompt, resurrected_by),
             )
         prepared_event = _stage_resurrect_event(

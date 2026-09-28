@@ -212,4 +212,8 @@ non-automatic session it also queues a
 plain-language note that starts a resumed turn. The action does not stop the
 external executor process. If the native runtime itself is wedged, terminating
 the agent is the stronger fallback: the termination trigger revokes the session,
-and the agent can then be resurrected.
+and the agent can then be resurrected. Its inbox records an impersonation
+interruption note followed by a completed-termination note, ahead of the next
+resurrection marker. The bound relay also reports that termination interrupted
+the takeover through its usual host transport. Executor delivery is best-effort
+when the relay or external session is unavailable; it never delays revocation.

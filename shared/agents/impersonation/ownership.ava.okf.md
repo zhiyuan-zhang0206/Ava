@@ -19,6 +19,24 @@ then activates. Only one executor owns decisions. A new native incarnation
 reconciles preparation; active control survives native restarts. Administrative
 restart/terminate still reach the native dispatcher; termination revokes control.
 Legacy live requests retain their original consent flow during an upgrade.
+
+Every status transition to `terminated` atomically expires open sessions and
+closes manifest admission. The trigger queues a native impersonation interruption
+note followed by a completed-termination note, including when native execution
+is drained. Both precede the next resurrection marker; the graph's acceptance
+acknowledgement describes the earlier intent separately. Termination dismisses
+renewal reminders and records `terminated: agent was terminated` on the session.
+An authenticated bound relay reads that terminal metadata and sends an
+interruption notice through its existing host transport before exiting, including
+if termination won before its first heartbeat. No ordinary inbox read, delivery
+reservation, ACK or renewal is allowed after termination. Executor delivery is
+best-effort: a missing relay or failed transport never blocks revocation or
+resurrects the owner. A relay process emits once and exits; a separately restarted
+relay can repeat the same session-scoped notice. Repeated status writes add no
+native notices once the session is closed. Restart preserves the lease.
+The native pair carries `impersonation_termination_notice: true`; the watchdog
+preserves these notes through long terminated periods for later resurrection.
+
 The gateway force-expire endpoint closes only the open session number supplied
 by its caller. It records an operator cause and actor, dismisses reminders,
 queues a resumed-turn note for a live non-automatic session, and publishes a
