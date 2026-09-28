@@ -311,6 +311,36 @@ def test_a_row_changed_after_planning_is_left_unchanged_and_the_run_says_so(
     assert _row(db_conn, kept)[1] == "hosted"
 
 
+def test_a_pointer_applied_after_planning_keeps_its_row_unminted(
+    cluster: Cluster, db_conn: psycopg.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The before image holds the pointer's id, not its command's state. A restart
+    applied between planning and the mint no longer settles as superseded, so
+    resurrection would defer on it: the compare-and-swap restates the pointer
+    condition itself and leaves the row unchanged."""
+    aid = _terminated(db_conn, cluster.runner, pointer="pending")
+    real = records._write_journal
+
+    def apply_the_restart_after_the_plan_is_recorded(home: Path, journal: dict[str, Any]) -> None:
+        real(home, journal)
+        if not any(journal["runs"][-1]["results"].values()):
+            db_conn.execute(
+                "UPDATE inbound_messages SET status='claimed', claimed_at=now(), applied_at=now(), "
+                "target_generation=%s, target_owner=%s "
+                "WHERE id=(SELECT lifecycle_command_id FROM agents_meta WHERE id=%s)",
+                (uuid4(), uuid4(), aid),
+            )
+            db_conn.commit()
+
+    monkeypatch.setattr(records, "_write_journal", apply_the_restart_after_the_plan_is_recorded)
+    unchanged = _row(db_conn, aid)
+    run = _run(cluster, _inputs(tmp_path, cluster))
+    assert run["results"]["identities"] == [
+        f"refused: left 1 changed row(s) unchanged (agents {aid})"
+    ]
+    assert _row(db_conn, aid) == unchanged
+
+
 def test_rows_without_their_machines_attestation_stay_unchanged(
     cluster: Cluster, db_conn: psycopg.Connection, tmp_path: Path
 ) -> None:
