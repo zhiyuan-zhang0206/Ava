@@ -27,6 +27,7 @@ from shared.config import settings
 from shared.native_process import pid_starttime_ticks
 from shared.session_backend import PosixProcSessionBackend, PtySessionBackend
 from shared.session_record import SessionRecord
+from tests.e2e._proc import kill_group_if_alive
 
 Launcher = Callable[[str, str], subprocess.Popen[str]]
 
@@ -96,10 +97,9 @@ def launch(home: Path) -> Iterator[Callable[[str, str], subprocess.Popen[str]]]:
 
     yield create
     for proc in processes:
-        if proc.poll() is None:
-            # Test fixture cleanup alone may kill the exact private process group
-            # it created, after the assertions prove strict stop left it alive.
-            os.killpg(proc.pid, signal.SIGKILL)
+        # Test fixture cleanup alone may kill the exact private process group it
+        # created, after the assertions prove strict stop left it alive.
+        kill_group_if_alive(proc)
         proc.wait(timeout=5)
         if proc.stdout:
             proc.stdout.close()

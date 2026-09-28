@@ -38,7 +38,9 @@ from agent.graph._exec_result import _ExecCrashed
 from agent.graph._exec_stream import StreamingTextIO
 from agent.graph._exec_subprocess import _collect_child, _spawn
 from shared.native_process.ownership import OwnedProcess
+from shared.posixproc import _group_empty
 from shared.turn_identity import HostedTurnResources, bind_hosted_resources
+from tests.e2e._proc import kill_group_or_prove_already_gone
 
 _AGENT_ID = 424242
 
@@ -72,19 +74,17 @@ async def _assert_group_gone(pgid: int, timeout_s: float = 5.0) -> None:
 
     ``killpg(pgid, 0)`` keeps succeeding while any member — including a
     zombie awaiting its reaper — remains in the group table, so a one-shot
-    ``ProcessLookupError`` expectation races the OS reaper. Poll until ESRCH;
-    reaping completes well within the bound.
+    ``ProcessLookupError`` expectation races the OS reaper; poll instead.
+    ``_group_empty`` is the same production check ``shared.posixproc`` uses:
+    macOS answers a zombie-only group's ``killpg(pgid, 0)`` with EPERM, not
+    ESRCH, so a raw ``except ProcessLookupError`` here would leave that EPERM
+    uncaught instead of falling through to its psutil member scan.
     """
     deadline = time.monotonic() + timeout_s
-    while True:
-        try:
-            os.killpg(pgid, 0)
-        except ProcessLookupError:
-            return
+    while not _group_empty(pgid):
         if time.monotonic() >= deadline:
-            break
+            raise AssertionError(f"process group {pgid} still present after exec teardown")
         await asyncio.sleep(0.05)
-    raise AssertionError(f"process group {pgid} still present after exec teardown")
 
 
 async def test_grace_expiry_waits_on_popen_once(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -461,8 +461,10 @@ async def test_runner_cancelled_owners_leave_no_exec_process_group(
         await _assert_tree_gone([descendant_pid])
         await _assert_group_gone(proc.pid)
     finally:
-        with contextlib.suppress(ProcessLookupError):
+        try:
             os.killpg(proc.pid, signal.SIGKILL)
+        except (PermissionError, ProcessLookupError) as exc:
+            kill_group_or_prove_already_gone(proc, exc)
         with contextlib.suppress(subprocess.TimeoutExpired):
             proc.wait(timeout=5.0)
 
