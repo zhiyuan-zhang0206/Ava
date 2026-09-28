@@ -139,9 +139,21 @@ before the host's code switch; read the receipts with the old
   agents' root cause, run the old
   `ava maintenance repair --operation <holder> --acquired-at <time>` (it
   records the operator and moves the receipts into `repaired`), then re-run
-  the old `ava stop --yes`: it continues the same hold to `stopped`, and the
-  inventory then reports it adoptable. The repair needs the gateway database,
+  the old `ava stop --yes`. The repair **releases** that hold ("hold
+  released"): the unit's posture returns to `idle`, admission reopens and
+  the drained agents are woken. The re-run stop then drains again under a
+  fresh holder (`local-pause:<machine>:<pid>:<uuid>`) and takes that new hold
+  to `stopped`; the inventory reports the new one adoptable, and it is the
+  generation the adoption records. The repair needs the gateway database,
   so a runner settles before the gateway's W3 stop.
+
+  Between the repair and the re-run stop, business is briefly open again on
+  that unit while the rest of the fleet stays closed: its agents may run
+  turns and rewrite their rows. Consequences for the window: re-run the stop
+  at once and budget a second drain for that unit; take the W3 row export
+  ([database records](cutover-db-records.md)) only after that unit's last
+  drain completed, since the rows must be final; and record the reopening
+  and the new holder in the cutover record.
 - **Known gap:** the hold reached `stopped` with a receipt latched after its
   drain (a turn failing while services stopped). Neither code base has a
   sanctioned exit: `repair` and `resume --cancel` refuse a started stop, and
