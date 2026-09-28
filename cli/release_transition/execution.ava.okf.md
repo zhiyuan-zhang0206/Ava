@@ -23,6 +23,14 @@ automatic rollback boundary. Every executor (coordinator, follower, PITR)
 treats any `Exception` as a failure and journals it before routing it
 (`failure.py`); only a process-ending `BaseException` passes undecided.
 
+The executor's `main` opens its log sinks first (`shared.log.init_cli_process`,
+name `release-executor`): stderr, which the native adapter keeps (the
+transient unit's systemd journal; launchd's `updates/<id>/executor/a<N>/stderr.log`),
+the JSONL file `$AVA_HOME/logs/release-executor.log`, and the event pipeline
+(JSONL mirror and OTLP, never the database). A routed failure's traceback,
+missed heartbeat and lease rounds and the listener's refusal reasons land
+there.
+
 While it runs, the executor stamps `updates/<id>/executor-heartbeat` from a
 thread every `LEASE_RENEW_INTERVAL_S` and removes it when it leaves
 (`shared/release_operation.py::executor_heartbeat`). The health probe lets an

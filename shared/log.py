@@ -619,7 +619,9 @@ def init_gateway_process(name: str = "gateway") -> None:
 
 def init_cli_process(*, name: str) -> None:
     """Called once at the top of a supervised CLI invocation whose launcher
-    exports ``AVA_CLI_LOG_NAME``. Identical sink set to ``init_gateway_process``:
+    exports ``AVA_CLI_LOG_NAME``, and by the finite release executor
+    (``cli.release_transition.execute``, name ``release-executor``), whose
+    native launcher keeps its stderr. Identical sink set to ``init_gateway_process``:
     stderr (human) + file (``<name>.log``) + unified event pipeline (agent_id NULL).
 
     Skipped for interactive CLI use (``ava status`` from a TTY etc.) —

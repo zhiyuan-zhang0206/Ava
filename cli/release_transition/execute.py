@@ -16,6 +16,7 @@ from cli.release_fleet.request import FleetRequest
 from cli.release_transition.failure import OperationFailure, failure_detail
 from cli.release_transition.journal import Journal, Operation, exclusive, read_operation
 from cli.release_transition.request import PitrRequest
+from shared.log import init_cli_process
 from shared.release_operation import executor_heartbeat
 
 
@@ -156,7 +157,16 @@ def drive_pitr(journal: Journal) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--operation", type=Path, required=True)
-    execute(parser.parse_args().operation)
+    operation = parser.parse_args().operation
+    # Importing `shared.log` drops loguru's default handler, so without this
+    # every record the executor writes (a routed failure's traceback, missed
+    # heartbeat and lease rounds, the listener's refusal reasons) is discarded.
+    # Stderr is what the native adapter keeps: the transient unit's systemd
+    # journal, launchd's `executor/a<N>/stderr.log`. The launch environment
+    # pins `AVA_HOME`, so the file is `$AVA_HOME/logs/release-executor.log`.
+    # The event pipeline never needs the database this executor may stop.
+    init_cli_process(name="release-executor")
+    execute(operation)
     return 0
 
 
