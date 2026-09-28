@@ -28,12 +28,18 @@ intent before each ledger transition, a non-secret receipt after it.
   holds, never closes.
 - **authorizing** (target selected, root absent): `Issue(minting)` records the
   number the ledger will allocate, then mint (secret, `pending`, the two
-  LOGIN roles), a fresh pooler serving exactly the pair, a pooled `SELECT 1` as
-  each login, ledger `active`, and `Issue(authorized)` with its credential
-  digest. A retry reconciles the recorded number exactly or holds; a foreign
-  pending generation or another allocation refuses before any effect.
+  LOGIN roles), a direct `SELECT 1` as each login on the home's Postgres,
+  ledger `active`, and `Issue(authorized)` with its credential digest. A retry
+  reconciles the recorded number exactly or holds; a foreign pending
+  generation or another allocation refuses before any effect. No pooler is
+  born here: a process the finite executor forks shares its native custody
+  (on Linux the transient unit's cgroup, `KillMode=control-group`) and dies
+  when the executor exits.
 - **starting**: the stage refuses unless the ledger's active generation is
   this direction's authorized issue, so the launch delivers and binds only it.
+  Its ordinary start, run by the root boot owner, births the fresh pooler
+  serving exactly that pair and proves a pooled login of each before any
+  service launches (`complete_gateway_data_plane`), as every start does.
 - **restoring** (an abort): nothing was fenced or minted; the stage refuses
   unless the active generation is still the one `prepared` recorded.
 - **observing / resuming**: after readiness the stage proves the issued

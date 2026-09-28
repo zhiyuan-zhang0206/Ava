@@ -5,11 +5,11 @@ the fleet coordinator from `prepared` to `complete` as its finite executor
 does (`adopt_executor_authority`, then `run_coordinator`'s loop). Real: the
 fleet inventory gate over `machine_units` / `machines`, the reservation and
 configuration gates, the cluster deploy lease in `deployment_state`, the
-write-generation fence and admission (pooler restart, termination census),
-every shared-core sample (administrator `SELECT 1`, Redis `PING`, the issued
-generation, `verify_active`), the cohort agent's liveness row, alert rows
-through the alerts ingest, and `releases/fleet-state.json`. Only the
-application root is a stand-in: no image runs here.
+write-generation fence and admission (termination census, the start's fresh
+pooler), every shared-core sample (administrator `SELECT 1`, Redis `PING`,
+the issued generation, `verify_active`), the cohort agent's liveness row,
+alert rows through the alerts ingest, and `releases/fleet-state.json`. Only
+the application root is a stand-in: no image runs here.
 """
 
 from __future__ import annotations
@@ -24,6 +24,7 @@ from uuid import uuid4
 
 import pytest
 
+from cli.commands.data_plane import bringup
 from cli.commands.data_plane import pgbouncer as pooler
 from cli.release_fleet.coordinator import Coordinator
 from cli.release_fleet.gateway import DeployLease, GatewayUnit, read_state
@@ -116,6 +117,10 @@ class RootlessGateway(GatewayUnit):
 
     def start(self, journal: Journal) -> None:
         release_authority.require_issued(journal.operation)
+        # The stage's ordinary start, not the executor, serves the issued pair.
+        bringup._ensure_pooler(
+            self.born.record, "ava", self.home, authority.active_generation(self.home)
+        )
 
     def observe(self, operation: Operation) -> None:
         return

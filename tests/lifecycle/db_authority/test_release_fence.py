@@ -4,11 +4,13 @@ A single-box home born by the real start steps (`test_single_box.born`, empty
 cluster secret) runs a real release journal through `authority.fence` and
 `authority.authorize`: the effects are the real `write_generation` ones
 (revoke + sweep, pooler stop with escalation, termination census, prune, mint,
-pooler restart, pooled proof, activate). Old writers are held across the fence
-the ways stale code holds them. A process death is injected after every
-catalog, pooler and ledger boundary; the continuation must finish the same
-generation. The finite executor's own authority (`adopt_executor_authority`)
-dials the owner-only socket acting as the gateway group.
+direct proof, activate). The finite executor births no pooler: the stage's
+ordinary start under the root boot owner does (`_ordinary_start`). Old writers
+are held across the fence the ways stale code holds them. A process death is
+injected after every catalog, pooler and ledger boundary; the continuation
+must finish the same generation. The finite executor's own authority
+(`adopt_executor_authority`) dials the owner-only socket acting as the gateway
+group.
 """
 
 from __future__ import annotations
@@ -134,6 +136,12 @@ def _pooler_birth() -> Any:
     return ownership.pooler(pooler.ini_path(), pooler.pidfile_path())
 
 
+def _ordinary_start(born: Born) -> None:
+    """The stage's data-plane step (`complete_gateway_data_plane`), which runs
+    under the root boot owner: a pooler serving exactly the active pair."""
+    bringup._ensure_pooler(born.record, "ava", born.home, authority.active_generation(born.home))
+
+
 def test_preflight_admits_exactly_one_served_generation(born: Born) -> None:
     assert write_generation.preflight_write_authority().number == 0
     userlist = born.home / "pgbouncer" / "userlist.txt"
@@ -250,6 +258,12 @@ def test_the_admitted_generation_is_the_only_writer_behind_a_fresh_pooler(
     issue = admitted.issue("candidate")
     assert issue is not None and issue.state == "authorized" and issue.number == 1
     assert issue.generation is not None
+    # The finite executor births no long-lived data-plane process: a pooler it
+    # forked would share the executor's native custody (its systemd cgroup,
+    # KillMode=control-group) and die when the executor exits.
+    assert _pooler_birth() is None
+    assert not pooler.pgbouncer_listener_reachable(born.pooler_port, "no-pooler-answers")
+    _ordinary_start(born)
     after = _pooler_birth()
     assert before is not None and after is not None and after.pid != before.pid
     new = _logins(born)
@@ -268,6 +282,7 @@ def test_failed_candidate_is_fenced_and_the_predecessor_runs_on_a_new_generation
     generation_zero = _logins(born)
     _fence(release)
     _authorize(release, _CANDIDATE)
+    _ordinary_start(born)
     generation_one = _logins(born)
     held = psycopg.connect(born.dsn("runner"), prepare_threshold=None)
     held.execute("SELECT 1")
@@ -289,6 +304,7 @@ def test_failed_candidate_is_fenced_and_the_predecessor_runs_on_a_new_generation
         ("previous", 2),
     ]
     assert recovered.fence("previous") is not None
+    _ordinary_start(born)
     for login in (*generation_zero.values(), *generation_one.values()):
         _refused_everywhere(born, login)
     ledger = authority.require_ledger(born.home)
@@ -326,7 +342,6 @@ _FENCE_DEATHS = {
 }
 _ISSUE_DEATHS = {
     "minted": _dies_after(authority, "mint_generation"),
-    "pooler-serving": _dies_after(bringup, "_ensure_pooler"),
     "proven": _dies_after(bringup, "prove_generation_logins"),
     "activated": _dies_after(authority, "activate"),
 }
@@ -360,6 +375,7 @@ def test_death_after_each_boundary_continues_the_same_generation(
         1,
         issue.generation.credential_digest,
     )
+    _ordinary_start(born)
     for login in old.values():
         _refused_everywhere(born, login)
     write_generation.verify_write_generation(1, issue.generation.credential_digest)
@@ -466,6 +482,7 @@ def test_observation_refuses_a_surviving_fenced_session(born: Born, release: Fle
     connected) makes observation hold, even though every login answers."""
     _fence(release)
     admitted = _authorize(release, _CANDIDATE)
+    _ordinary_start(born)
     issue = admitted.issue("candidate")
     assert issue is not None and issue.generation is not None
     digest = issue.generation.credential_digest
@@ -506,6 +523,7 @@ def test_preview_stale_writer_probe_proves_the_fence(born: Born, release: FleetR
         release_generation.probe(context, "ab")
         _fence(release)
         _authorize(release, _CANDIDATE)
+        _ordinary_start(born)
         release_generation.fenced(context, "ab")
     finally:
         release_generation.stop(context, "all")

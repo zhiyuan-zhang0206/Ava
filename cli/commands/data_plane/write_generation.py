@@ -127,23 +127,32 @@ def fence_write_generation(authority: OperationAuthority) -> WriteFence:
 def admit_write_generation(authority: OperationAuthority) -> Generation:
     """Mint (or exactly reconcile) the operation's generation and admit it.
 
-    Mint (secret, then ledger `pending`, then the two LOGIN roles) -> a pooler
-    serving exactly that pair (a changed userlist restarts it) -> a pooled
-    `SELECT 1` as each login -> ledger `active`. Every step is idempotent, so
-    a retry continues the same number and never mints another.
+    Mint (secret, then ledger `pending`, then the two LOGIN roles) -> a direct
+    `SELECT 1` as each login on the home's own Postgres -> ledger `active`.
+    Every step is idempotent, so a retry continues the same number and never
+    mints another.
+
+    The finite executor births no pooler here (the fence stopped the old one):
+    a process it forks shares its native custody, on Linux the transient
+    unit's cgroup (`KillMode=control-group`), and dies when the executor
+    exits. The stage's ordinary start, run by the root boot owner, births the
+    fresh pooler serving exactly this pair and proves a pooled login of each
+    before any service launches (`complete_gateway_data_plane`); observation
+    proves it again (`verify_write_generation`).
     """
     from cli.commands.data_plane.bringup import (
-        _ensure_pooler,
         admin_session,
         db_endpoint,
         prove_generation_logins,
     )
+    from shared.cluster import record_postgres_port
     from shared.cluster.authority import (
         activate,
         mint_generation,
         require_ledger,
         verify_generation,
     )
+    from shared.url_secret import url_with_port
 
     home, record, database = _write_authority()
     with admin_session(record, database) as conn:
@@ -151,8 +160,8 @@ def admit_write_generation(authority: OperationAuthority) -> Generation:
         generation = require_ledger(home).unrevoked
         if generation is None:
             raise AuthorityRefusedError("the operation minted no write generation")
-        _ensure_pooler(record, database, home, generation)
-        prove_generation_logins(home, generation, db_endpoint())
+        direct = url_with_port(db_endpoint(), record_postgres_port(record))
+        prove_generation_logins(home, generation, direct)
         return activate(home, authority, verify_generation(conn, home))
 
 

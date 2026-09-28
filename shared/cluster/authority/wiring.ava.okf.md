@@ -121,7 +121,9 @@ and the coordinator channel's authentication:
   lock, with `OperationAuthority(operation, direction)`): preflight
   `check_invariant` -> `fencing`: `revoke` -> owned pooler stopped (escalating;
   no listener left) -> `close_revoked` -> `prune` -> `authorizing`:
-  `mint_generation` -> pooler serving the pending pair -> a pooled `SELECT 1`
-  as each login -> `activate`; observation re-checks the invariant and that
-  `stale_sessions` is empty. The journal records each step's intent and
-  receipt ([[cli/release_transition/write-generations.ava.okf.md|release write generations]]).
+  `mint_generation` -> a direct `SELECT 1` as each login -> `activate`; the
+  stage's ordinary start (root boot owner, never the finite executor) births
+  the pooler serving the active pair and proves a pooled login of each;
+  observation re-checks the invariant and that `stale_sessions` is empty. The
+  journal records each step's intent and receipt
+  ([[cli/release_transition/write-generations.ava.okf.md|release write generations]]).

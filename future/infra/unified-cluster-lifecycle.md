@@ -239,10 +239,10 @@ slot exist ([handoff](../../cli/release_handoff/release_handoff.ava.okf.md)).
 
 The single-box release transition fences and admits generations: `fencing`
 revokes the active generation, stops the owned pooler and proves closure by
-census; `authorizing` mints the next number for the selected image behind a
-fresh pooler; start and observation bind exactly that generation; the finite
-executor dials the owner-only socket as the administrator acting as the
-gateway group
+census; `authorizing` mints the next number for the selected image; start
+births a fresh pooler serving it under the root boot owner, and start and
+observation bind exactly that generation; the finite executor dials the
+owner-only socket as the administrator acting as the gateway group
 ([release write generations](../../cli/release_transition/write-generations.ava.okf.md)).
 A recovery fences the failed candidate's generation before the predecessor
 gets a new one. The Linux preview's release A/B/A records the generation

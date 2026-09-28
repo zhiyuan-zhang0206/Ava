@@ -40,6 +40,9 @@ MODES = ("running", "manager-running", "stopped", "manager-stopped", "destroyed"
 Report = dict[str, Any]
 Births = dict[str, dict[str, Any]]
 _DATA_SERVICES = frozenset({"postgres", "redis", "pgbouncer"})
+# A finite release executor's transient unit (`cli/release_transition/launcher_linux.py`)
+# runs with KillMode=control-group: systemd empties its cgroup when the executor exits.
+_EXECUTOR_UNIT = re.compile(r"/system\.slice/ava-update\.[^/]+\.service(/.*)?")
 
 
 def _require(condition: object, detail: str) -> None:
@@ -162,7 +165,21 @@ def _data_births(home: Path, ports: dict[str, int]) -> Births:
     values = {"postgres": pg, "redis": cache, "pgbouncer": pool}
     for name, owner in values.items():
         ownership.require_listener(owner, ports[name])
+    _require_outside_executors(values)
     return {name: dataclasses.asdict(owner) for name, owner in values.items()}
+
+
+def _require_outside_executors(births: dict[str, OwnedProcess]) -> None:
+    """No data-plane birth lives in a finite release executor's cgroup, where it
+    would die with the executor (the r6 pooler did)."""
+    from shared.os_boot_unit import process_cgroup
+
+    for name, owner in births.items():
+        cgroup = process_cgroup(owner.pid)
+        _require(
+            _EXECUTOR_UNIT.fullmatch(cgroup) is None,
+            f"{name} (pid {owner.pid}) lives in finite release executor cgroup {cgroup}",
+        )
 
 
 def _stored_agents(run: Path) -> list[int]:
