@@ -515,8 +515,9 @@ def test_root_child_env_beyond_the_launch_inputs_is_only_ambient(
 
     `launch_input_keys` is a positive list, so a non-ambient key a delivery
     adds would silently stay out of the launch digest; this names it instead.
-    Every ambient candidate and the finalizer projection are set, so the
-    result does not depend on what this host's environment carries.
+    Every key the registry declares (each passthrough row, every settings
+    alias) and the finalizer projection are set, including keys forwarded only
+    when present, so what this catches does not depend on this host's environment.
     """
     from shared import env_registry
 
@@ -527,8 +528,13 @@ def test_root_child_env_beyond_the_launch_inputs_is_only_ambient(
         | env_registry.WINDOWS_SYSTEM_ENV_KEYS
         | {"PYTHONUTF8"}
     )
-    paths = {"HOME", *env_registry._TEMP_DIR_KEYS}
-    for key in ambient:
+    declared = (
+        {row.key for row in env_registry._PASSTHROUGH_ROWS}
+        | set(env_registry.FIELD_ALIASES.values())
+        | {env_registry.MANIFEST_CERTIFICATION_FINALIZER_ENV, "PYTHONUTF8"}
+    )
+    paths = {"HOME", "PATH", *env_registry._TEMP_DIR_KEYS}
+    for key in declared:
         monkeypatch.setenv(key, str(tmp_path) if key in paths else "ambient")
     monkeypatch.setattr(driver.settings.general, "service_path", str(tmp_path / "tools"))
 
