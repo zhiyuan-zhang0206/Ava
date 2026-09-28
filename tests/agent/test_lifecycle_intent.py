@@ -6,7 +6,7 @@ import psycopg
 import pytest
 from psycopg_pool import AsyncConnectionPool
 
-from agent.lifecycle_intent import accept_lifecycle_intent, settle_superseded_intent
+from agent.ownership.lifecycle_intent import accept_lifecycle_intent, settle_superseded_intent
 from shared.db import insert_inbound_message
 from shared.db_transaction import async_write_transaction
 from shared.turn_identity import bind_turn_identity

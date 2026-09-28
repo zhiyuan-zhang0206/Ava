@@ -205,6 +205,6 @@ AGENT_REPLY_HINT = (
     "`ava.agents.send_message(agent_id, content)`. See `help(ava.agents)`."
 )
 
-# tail_has_agent_inbound moved to agent/messages.py (the read-side counterpart
+# tail_has_agent_inbound moved to agent/messages/__init__.py (the read-side counterpart
 # to inbound_message); ava_compact's compact reminder also needs it to defer to
 # the agent-reply note, so it lives in the framework, not this plugin.

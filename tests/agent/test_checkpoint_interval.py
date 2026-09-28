@@ -24,7 +24,7 @@ from langgraph.graph import END, START, StateGraph
 from psycopg_pool import AsyncConnectionPool
 from typing_extensions import TypedDict
 
-from agent.messages_guard import guarded_delta_reducer
+from agent.messages.guard import guarded_delta_reducer
 from agent.startup import wrap_saver_writes_with_nstep_interval
 from shared.config.agent_runtime import AgentRuntimeSettings
 

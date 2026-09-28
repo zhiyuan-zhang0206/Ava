@@ -261,7 +261,7 @@ async def test_unfixable_syntax_does_not_skip_sibling(
     monkeypatch: pytest.MonkeyPatch,
     fake_cancel_event: InterruptEvent,
 ) -> None:
-    from agent.messages_guard import guarded_add_messages
+    from agent.messages.guard import guarded_add_messages
     from ava_builtins.plugins.ava_syntax_fix import agent_runtime as syntax
 
     state = _state("return", 'print("sibling ran")')

@@ -49,10 +49,10 @@ from langgraph.runtime import Runtime
 from psycopg_pool import AsyncConnectionPool
 
 from agent.graph.interrupt import ModelInterruptedError, interruptible_model, subscribe_interrupt
-from agent.history_dump import dump_history, history_dump_note
 from agent.hooks import Hook, register_before_llm
 from agent.hooks.compact_events import emit_compact_finished, emit_compact_started
-from agent.lm_cache import ainvoke_with_cache_retry
+from agent.hooks.history_dump import dump_history, history_dump_note
+from agent.llm.cache import ainvoke_with_cache_retry
 from agent.messages import (
     COMPACT_SUMMARY_HEADER,
     NoteTag,
@@ -95,7 +95,7 @@ def compose_summary_message(summary: str) -> str:
     behalf when its context is replaced. Shared by every compact path so the
     framing is identical across forced / command / spontaneous compaction.
     The header itself (with the rationale for its wording) lives in
-    `agent/messages.py:COMPACT_SUMMARY_HEADER` — the read-side classifier
+    `agent/messages/__init__.py:COMPACT_SUMMARY_HEADER` — the read-side classifier
     (gateway/context_breakdown.py) keys on it too."""
     return f"{COMPACT_SUMMARY_HEADER}\n\n{summary}"
 

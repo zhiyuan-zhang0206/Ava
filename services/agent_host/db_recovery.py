@@ -12,7 +12,7 @@ from langgraph.graph.state import CompiledStateGraph
 from psycopg_pool import AsyncConnectionPool, PoolTimeout
 
 from agent.impersonation import flush_checkpoint
-from agent.inbound_ownership import RuntimeOwnershipLostError
+from agent.ownership.inbound import RuntimeOwnershipLostError
 from agent.startup import (
     reconcile_claimed_inbounds_at_startup,
     repair_dangling_tool_use_at_startup,

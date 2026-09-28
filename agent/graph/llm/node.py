@@ -70,8 +70,8 @@ from agent.graph.llm_errors import (
 from agent.graph.node_log import node_lifecycle
 from agent.graph.tool_calls import code_from_args
 from agent.hooks.compact import auto_compact_for_llm
+from agent.llm.usage import log_llm_usage
 from agent.nodes import AFTER_EXEC, BEFORE_EXEC
-from agent.observe import log_llm_usage
 from agent.state_channels import CircuitState
 from agent.turn_progress import mark_turn_progress
 from shared.config import settings

@@ -43,7 +43,7 @@ from pydantic import BaseModel, Field
 
 import ava
 from agent.graph._exec import _exec_node_impl
-from agent.messages_guard import MessagesMutationError
+from agent.messages.guard import MessagesMutationError
 from agent.state import (
     AttachEntry,
     AttachState,

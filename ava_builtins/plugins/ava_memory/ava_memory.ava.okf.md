@@ -30,7 +30,7 @@ register_before_llm(passive_memory_recall_before_llm)
 
 **Trigger conditions**:
 - **Feature gate**: `settings.passive_memory_recall_enabled` (env `AVA_PASSIVE_MEMORY_RECALL`) — the entire hook is a no-op when it is off; its default and the cluster opt-out are in [[ava_builtins/plugins/ava_memory/memory-recall.ava.okf.md]]
-- Positive gate `tail_has_user_inbound` (`agent/messages.py:223-232`): **since last AIMessage** any inbound whose source **does not start with `agent:`** triggers — user / system / schedule / watcher / shell sources **all pass**, **only peer agent (`agent:` prefix) is excluded**; no non-empty text check, not "most recent one", but scans tail inbound
+- Positive gate `tail_has_user_inbound` (`agent/messages/__init__.py:223-232`): **since last AIMessage** any inbound whose source **does not start with `agent:`** triggers — user / system / schedule / watcher / shell sources **all pass**, **only peer agent (`agent:` prefix) is excluded**; no non-empty text check, not "most recent one", but scans tail inbound
 - If auto-compact hook would also trigger in the same turn, **defers** (returns None) — `messages` have add_messages reducer that merges, without failing loud, but auto-compact's REMOVE_ALL full replacement is order-sensitive and would swallow the same-turn appended note
 
 **Behavior**:

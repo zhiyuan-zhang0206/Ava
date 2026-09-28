@@ -16,7 +16,7 @@ The host shares one compiled graph and logical `services/agent_host/pooled_check
 checkpointer. Each cursor leases its own pool connection and delegates pipeline,
 transaction and cancellation cleanup to LangGraph's saver for that connection.
 Unrelated agents can therefore read and write concurrently. The N-step wrapper
-in `agent/startup.py` still serializes writes and flushes for the same thread.
+in `agent/startup/__init__.py` still serializes writes and flushes for the same thread.
 
 Active agents have no default admission limit: `AVA_HOST_MAX_CONCURRENT_TURNS=0`
 allows another agent to start while existing agents wait on models or tools.

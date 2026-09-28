@@ -34,7 +34,7 @@ from langgraph.graph.message import (
     _messages_delta_reducer,
 )
 
-from agent.messages_guard import (
+from agent.messages.guard import (
     MessagesMutationError,
     guarded_add_messages,
     guarded_delta_reducer,

@@ -239,11 +239,11 @@ ignore_imports = [
     "services.agent_host.host -> agent.graph.node_log",
     # Database recovery retains and repairs the original fenced continuation.
     "services.agent_host.db_recovery -> agent.impersonation",
-    "services.agent_host.db_recovery -> agent.inbound_ownership",
+    "services.agent_host.db_recovery -> agent.ownership.inbound",
     # The settlement boundary catches the inbound-owner fence's refusal at a
     # settled abort, so a replaced runtime makes the reconcile pass a logged
     # no-op instead of a second turn failure.
-    "services.agent_host.settlement -> agent.inbound_ownership",
+    "services.agent_host.settlement -> agent.ownership.inbound",
     "services.agent_host.* -> agent.hosted_ownership",
     # The corpse reaper is the other half of the hosted ownership machinery
     # (split out of agent.hosted_ownership at its 800-line budget ceiling):

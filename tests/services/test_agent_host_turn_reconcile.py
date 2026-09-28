@@ -21,7 +21,7 @@ import pytest
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from psycopg_pool import AsyncConnectionPool
 
-from agent.inbound_ownership import RuntimeOwnershipLostError
+from agent.ownership.inbound import RuntimeOwnershipLostError
 from services.agent_host import settlement as settlement_mod
 from shared.config import settings
 from shared.runtime_incarnation import RuntimeIncarnation

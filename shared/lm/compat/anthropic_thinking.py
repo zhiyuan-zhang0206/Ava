@@ -28,7 +28,7 @@ class ThinkingTokensChatAnthropic(ChatAnthropic):
     """ChatAnthropic that retains `thinking_tokens` in `usage_metadata`.
 
     Overrides the single chunk-conversion seam so downstream consumers
-    (`agent.observe.log_llm_usage`, `agent.graph.llm.node._finalize_turn_observability`,
+    (`agent.llm.usage.log_llm_usage`, `agent.graph.llm.node._finalize_turn_observability`,
     `shared.agents.history.timeline`, `gateway.inspect.router`) all see a non-zero
     `reasoning` count — no other file needs to change.
     """

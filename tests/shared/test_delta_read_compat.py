@@ -31,7 +31,7 @@ from langgraph.graph.message import REMOVE_ALL_MESSAGES, add_messages
 from psycopg.rows import DictRow
 from psycopg_pool import AsyncConnectionPool
 
-from agent.messages_guard import guarded_delta_reducer
+from agent.messages.guard import guarded_delta_reducer
 from agent.startup import reconcile_claimed_inbounds_at_startup
 from ops.agent_spawn import _copy_checkpoint_chain
 from shared.agents.history.checkpoint import (

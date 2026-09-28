@@ -7,7 +7,7 @@ Anthropic-compat providers to reject every turn with 400 (agent 167 2026-06-06;
 agents 236/238 2026-07-13; agent 5333 2026-08-31).
 
 Covers `agent/hooks/repair.py` (shared helper + before_llm hook) and the boot
-pass wrapper `agent/startup.py:repair_dangling_tool_use_at_startup`.
+pass wrapper `agent/startup/__init__.py:repair_dangling_tool_use_at_startup`.
 """
 
 from typing import Any, cast
