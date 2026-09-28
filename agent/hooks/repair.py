@@ -156,19 +156,22 @@ def _synthetic_tool_result(tool_call_id: str) -> ToolMessage:
     )
 
 
-def dangling_tool_pairing_repairs(messages: Sequence[AnyMessage]) -> list[Any]:
+def dangling_tool_pairing_repairs(
+    messages: Sequence[AnyMessage], *, pending_notes: Sequence[AnyMessage] = ()
+) -> list[Any]:
     """Return one full rebuild enforcing exactly one result per tool_call id.
 
     Redundant tool_results are dropped first. Every remaining tool_use without
     a kept result anywhere later receives a synthetic [interrupted] result
     immediately after its trailing ToolMessage run. `[]` means the complete
-    history satisfies the global pairing rule.
+    history satisfies the global pairing rule and there are no deferred notes.
+    Recovery appends deferred exec notes after the repaired tool results.
     """
     redundant_indices = set(_redundant_tool_results(messages))
     survivors = [message for i, message in enumerate(messages) if i not in redundant_indices]
     dangling = _unpaired_tool_calls(survivors)
     if not redundant_indices and not dangling:
-        return []
+        return list(pending_notes)
     # Insertion point per dangling AIMessage: after the trailing run of
     # ToolMessages already pairing some of its tool_calls.
     inserts: dict[int, list[ToolMessage]] = {}
@@ -181,7 +184,7 @@ def dangling_tool_pairing_repairs(messages: Sequence[AnyMessage]) -> list[Any]:
     for k, m in enumerate(survivors):
         rebuilt.append(m)
         rebuilt.extend(inserts.get(k, ()))
-    return rebuilt
+    return [*rebuilt, *pending_notes]
 
 
 class _RepairDanglingToolPairingHook(Hook):
@@ -198,7 +201,9 @@ class _RepairDanglingToolPairingHook(Hook):
         config: RunnableConfig,
         /,
     ) -> dict | None:
-        repairs = dangling_tool_pairing_repairs(state.messages)
+        repairs = dangling_tool_pairing_repairs(
+            state.messages, pending_notes=state.pending_exec_notes
+        )
         if not repairs:
             return None
         logger.warning(
@@ -206,7 +211,7 @@ class _RepairDanglingToolPairingHook(Hook):
             event="dangling_tool_pairing_repaired",
             agent_id=agent_id_from_config(config),
         )
-        return {"messages": repairs}
+        return {"messages": repairs, "pending_exec_notes": []}
 
 
 # Module-level singleton — the registered instance. `register_repair_hooks`

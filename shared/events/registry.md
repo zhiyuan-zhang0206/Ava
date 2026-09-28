@@ -24,7 +24,7 @@ generated from it and never hand-synced. event_names that violate the naming rul
 | mechanism | table/channel | registered event_names | destination |
 |------|------|-------------|------|
 | audit (category=audit) | `events` | 29 | event stream |
-| telemetry (category=telemetry) | `events` | 223 | event stream |
+| telemetry (category=telemetry) | `events` | 222 | event stream |
 | log (category=log) | `events` | 12 | event stream |
 | file-only (destination=file) | file log | 1 | file only (not the stream) |
 | SSE live | Redis → frontend (not persisted) | 31 role | live projection |
@@ -96,7 +96,7 @@ Emit sites and consumers: see the comments at each emit point.
 | `managed_writer_pre_stop_aborted` | the exact pre-stop abort cleared a never-effective pending publication and its lease | business | — | events |
 | `managed_writer_blocked` | managed-writer mode requested but refused entry: a readiness guard is missing or not True; the rollout ran the legacy flow | business | — | events |
 
-## 3. Telemetry events (category=telemetry, 223)
+## 3. Telemetry events (category=telemetry, 222)
 
 Telemetry-side event name resolution (`shared/log.py`): **explicit `event=` →
 `label=` fallback → default `"log"`**. Payload = logger extra fields + `msg`
@@ -119,7 +119,6 @@ consumers: see the comments at each emit point.
 | `stream_stall_pair_terminated` | two adjacent stream stalls (stream segment + non-streaming fallback) terminated the call early; retried on the delayed stall schedule | anomaly | vendor, model, stage, timeout_s | — | events |
 | `stream_overloaded_retry` | stream overloaded, retried | anomaly | — | LLM_ERROR | events |
 | `thinking_block_sanitized` | thinking block sanitized | noise | — | — | events |
-| `multiple_tool_calls_merged` | concurrent tool calls merged | observation | — | — | events |
 | `llm_cancelled` | LLM call cancelled | anomaly | — | — | events |
 | `exec` | execute_code succeeded | observation | body, ok, duration_seconds | — | events |
 | `exec_failed` | execute_code failed | anomaly | exc_type, body | — | events |

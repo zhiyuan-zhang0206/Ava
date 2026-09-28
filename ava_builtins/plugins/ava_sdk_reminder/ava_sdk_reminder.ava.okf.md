@@ -28,7 +28,7 @@ sdk_reminder_after_exec = _SdkReminderAfterExecHook()
 register_after_exec(sdk_reminder_after_exec)
 ```
 
-Code is taken from `last_msg.tool_calls`, read via the shared `first_tool_call_code` (`agent/graph/tool_calls.py`,
+Each call in the latest assistant message is matched to its ToolMessage by ID, including batches followed by notes or media. Code is read via the shared `first_tool_call_code` (`agent/graph/tool_calls.py`,
 a strongly-typed extractor on the langchain `ToolCall` TypedDict). Detects four categories of native Python usage and injects reminders:
 
 | Category | Detection pattern | Suggested SDK primitive |
@@ -42,7 +42,7 @@ The four categories share `sdk_code_reminder_cadence`: `once_per_compaction` tra
 
 ### Assumed-persistence NameErrors (after_exec hook)
 
-When the execution output contains a `NameError: name 'X' is not defined` traceback line (including Python's optional suggestion suffix), the hook searches earlier assistant `execute_code` calls for `X` as a whole identifier. If found, it explains that each cell runs in a fresh interpreter. The current cell is excluded, keywords and builtins are ignored, and each name is recorded as `nameerror:X` so it fires at most once per context window and re-arms after compact.
+When the execution output contains a `NameError: name 'X' is not defined` traceback line (including Python's optional suggestion suffix), the hook searches earlier assistant `execute_code` calls for `X` as a whole identifier. If found, it explains that each cell runs in a fresh interpreter. Earlier calls in the same batch also count; the current cell is excluded, keywords and builtins are ignored, and each name is recorded as `nameerror:X` so it fires at most once per context window and re-arms after compact.
 
 ### Turn-taking reminder (before_llm hook)
 

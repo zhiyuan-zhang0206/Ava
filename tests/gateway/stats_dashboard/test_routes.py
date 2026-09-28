@@ -11,7 +11,6 @@ populated via INSERT of real rows.
 
 from __future__ import annotations
 
-import time
 from collections import Counter
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
@@ -62,10 +61,10 @@ _STALE_EVENT = "stats_dashboard_stale"
 
 
 class _CacheClock:
-    """Deterministic cache clock over `_stats_dashboard._monotonic`."""
+    """Zero-origin clock: integer TTL advances stay exact across test runs."""
 
     def __init__(self) -> None:
-        self._t = time.monotonic()
+        self._t = 0.0
 
     def __call__(self) -> float:
         return self._t

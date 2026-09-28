@@ -28,7 +28,7 @@ syntax_fix_before_exec = _SyntaxFixHook()
 register_before_exec(syntax_fix_before_exec)
 ```
 
-Code is taken from the last `AIMessage.tool_calls` (via `first_tool_call_code` extraction, not the hook parameter).
+Each `execute_code` call in the last `AIMessage.tool_calls` is repaired independently. IDs and sibling calls are preserved, and only the matching content block is updated.
 Multi-stage pipeline: the main pipeline in `plugin.py`, followed by a batch of deterministic fix batteries
 (`_deterministic_fixes.py`), and finally compile validation + LLM fallback.
 
@@ -68,7 +68,7 @@ first compile-passing fix wins—prevents "legitimate code corrupted" or "greedy
 ### 7. compile validation + LLM fallback
 
 `compile()` pre-check; if still failing, calls `_llm_repair_syntax` to let the model fix it (only adopted if its result compiles),
-if that still fails, injects the compile error as a ToolMessage, letting the agent repair itself.
+if that still fails, a single-call turn returns a compile-error ToolMessage directly. In a multi-call turn, the ordinary child reports that call's syntax error while sibling calls still execute.
 
 ## Key dependencies
 
