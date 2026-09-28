@@ -34,12 +34,14 @@ def state(run: Path, agent: int) -> dict[str, Any]:
     with _connection(run) as connection:
         row = connection.execute(
             "SELECT a.id, a.created_at, m.machine, m.born_spawner, m.birth_config, "
-            "m.config_overlay, m.status, m.closed_at FROM agents a "
+            "m.config_overlay, m.status FROM agents a "
             "JOIN agents_meta m ON m.id=a.id WHERE a.id=%s",
             (agent,),
         ).fetchone()
-        if row is None or row[-2] != "terminated" or row[-1] is None:
-            raise RuntimeError("proof agent has not completed durable final termination")
+        # Terminate has no closed state: `status` alone records it
+        # (decisions/2026-09-27-terminate-has-no-closed-state.md).
+        if row is None or row[-1] != "terminated":
+            raise RuntimeError("proof agent has not completed durable termination")
         content: dict[str, Any] = {"identity": list(row)}
         for table in ("checkpoints", "checkpoint_blobs", "checkpoint_writes"):
             content[table] = sorted(
@@ -80,7 +82,7 @@ def freeze(run: Path, label: str) -> None:
     try:
         response = httpx.post(
             f"{config['gateway_url']}/api/agents/{agent}/terminate",
-            json={"force": False, "final": True},
+            json={"force": False},
             timeout=90,
         )
         require_success(response)

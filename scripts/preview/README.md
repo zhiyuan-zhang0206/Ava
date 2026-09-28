@@ -225,7 +225,7 @@ wheel is an explicit proof dependency; it is never injected through PYTHONPATH
 or treated as a production model provider.
 
 The scenario closes only its completed smoke agents through the normal graceful
-final-terminate API, waits for durable termination and native terminal closure,
+terminate API, waits for durable termination and native terminal closure,
 and retains identity/configuration/checkpoint digests. Source stop keeps the
 private data plane alive. Public `ava cluster release adopt` selects A (the
 CAS requires no existing image) and starts it through the same home's ordinary

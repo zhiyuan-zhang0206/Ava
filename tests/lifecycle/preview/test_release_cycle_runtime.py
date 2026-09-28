@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, NoReturn
 
 import pytest
@@ -210,9 +211,7 @@ def test_termination_acceptance_never_substitutes_for_native_closure(
 
     def accepted(url: str, **kwargs: Any) -> httpx.Response:
         calls.append(kwargs)
-        return httpx.Response(
-            200, json={"status": "enqueued", "closed": True}, request=httpx.Request("POST", url)
-        )
+        return httpx.Response(200, json={"status": "enqueued"}, request=httpx.Request("POST", url))
 
     def retained() -> None:
         raise RuntimeError("native execution resource remains")
@@ -228,9 +227,52 @@ def test_termination_acceptance_never_substitutes_for_native_closure(
     monkeypatch.setattr(service_stop, "require_no_terminals", retained)
     with pytest.raises(TimeoutError, match="native closure"):
         state.freeze(tmp_path, "a")
-    assert len(calls) == 1 and calls[0]["json"] == {"force": False, "final": True}
+    assert len(calls) == 1 and calls[0]["json"] == {"force": False}
     evidence = json.loads((tmp_path / "release-frozen-a.json").read_text())
     assert evidence["result"] == "failed" and "native execution" in evidence["pending"]
+
+
+class _TerminatedAgent:
+    """The proof connection over agent 5: `terminated`, `closed_at` left NULL.
+
+    Terminate has no closed state (decisions/2026-09-27-terminate-has-no-closed-state.md),
+    so nothing stamps `agents_meta.closed_at` any more.
+    """
+
+    columns: dict[str, object] = {  # noqa: RUF012 — a read-only fixture row
+        "a.id": 5,
+        "a.created_at": "2026-09-28T00:00:00+00:00",
+        "m.machine": "proof",
+        "m.born_spawner": "user",
+        "m.birth_config": "{}",
+        "m.config_overlay": "{}",
+        "m.status": "terminated",
+        "m.closed_at": None,
+    }
+
+    def __enter__(self) -> _TerminatedAgent:
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        return None
+
+    def execute(self, query: object, _params: tuple[object, ...]) -> Any:
+        if not isinstance(query, str):  # a checkpoint table's rows
+            return iter([('{"checkpoint": 1}',)])
+        selected = query.removeprefix("SELECT ").split(" FROM ")[0].split(", ")
+        row = tuple(self.columns[column] for column in selected)
+        return SimpleNamespace(fetchone=lambda: row)
+
+
+def test_a_terminated_agent_is_durably_closed_without_a_closed_at_stamp(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def connection(_run: Path) -> _TerminatedAgent:
+        return _TerminatedAgent()
+
+    monkeypatch.setattr(state, "_connection", connection)
+    observed = state.state(tmp_path, 5)
+    assert observed["agent"] == 5 and observed["rows"]["checkpoints"] == 1
 
 
 def _captured_request(request: FleetRequest, label: str = "ab") -> Path:
