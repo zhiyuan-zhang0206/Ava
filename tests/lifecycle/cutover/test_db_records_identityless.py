@@ -23,7 +23,7 @@ from agent.hosted_ownership import admit_hosted_runtime
 from ops import agent_wake
 from ops.agent_spawn import create_agent_row
 from scripts import cutover_db_records as records
-from scripts.cutover_db_survey import Inputs
+from scripts.cutover_db_survey import Inputs, RetiredUnit
 from shared.agents import ResurrectRefused
 from shared.db import insert_inbound_message
 from tests.lifecycle.cutover.test_db_records import (  # noqa: F401 -- fixtures
@@ -159,6 +159,7 @@ def test_check_prints_each_category_per_machine(
     assert d8["counts"]["identityless"] == {
         "convertible": 2,
         "awaiting": 1,
+        "multi_unit": 0,
         "no_unit": 2,
         "paused": 0,
         "pointer": 0,
@@ -170,6 +171,38 @@ def test_check_prints_each_category_per_machine(
         UNREGISTERED: {"no_unit": 1},
         cluster.runner: {"convertible": 2},
     }
+
+
+def test_one_attestation_never_mints_for_a_machine_with_another_unit_left(
+    cluster: Cluster, db_conn: psycopg.Connection, tmp_path: Path
+) -> None:
+    """The attestation's census covers the one home it names. While another unit
+    of its machine remains, nothing proves that home empty, so the machine's rows
+    wait; retiring the unit whose home is gone makes the attested home its only
+    one, and a later run mints them."""
+    runner = cluster.runner
+    second = f"/homes/{runner}/second/.ava"
+    db_conn.execute(
+        "INSERT INTO machine_units(machine_name, home, serve_gateway, serve_agent_runner, url, "
+        "up_since_at) VALUES(%s, %s, false, true, 'http://x', now())",
+        (runner, second),
+    )
+    db_conn.commit()
+    aid = _terminated(db_conn, runner)
+    unchanged = _row(db_conn, aid)
+    inputs = _inputs(tmp_path, cluster)
+    (item,) = _survey(inputs).identityless
+    assert (item.category, item.verdict) == ("multi_unit", "awaiting")
+
+    assert _run(cluster, inputs)["effects"]["identities"] == []
+    assert _row(db_conn, aid) == unchanged
+    fresh = replace(inputs, pending=None, lease=None, retire_units=())
+    assert _survey(fresh).checks["D-8"]["verdict"] == "repair"  # not fenced: an input resolves it
+
+    moved = (RetiredUnit(machine=runner, home=second, evidence="home moved"),)
+    later = _run(cluster, replace(fresh, retire_units=moved))
+    assert [row["agent_id"] for row in later["effects"]["identities"][0]["rows"]] == [aid]
+    assert _row(db_conn, aid)[1] == "hosted"
 
 
 def _no_wake(_agent_id: int, _payload: str) -> None:

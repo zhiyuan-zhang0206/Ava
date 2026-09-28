@@ -26,11 +26,12 @@ D-8 also counts the identity-less terminated rows (`IDENTITYLESS`: NULL
 resources and no complete hosted runtime identity, which resurrection refuses)
 per machine and category: `convertible` (its machine's attestation is
 supplied and was taken after the row's termination), `awaiting` (a unit
-remains, no attestation yet), `no_unit` (no unit of the machine remains to
-attest), `paused`, `pointer` (a lifecycle pointer resurrection does not
-supersede), or `after_attestation` (terminated after its machine's
-attestation, which therefore does not cover it: the new code writes rows of
-this shape too). The last four are fenced.
+remains, no attestation yet), `multi_unit` (more than one unit of its machine
+remains, and the machine's one attestation censuses only one home), `no_unit`
+(no unit of the machine remains to attest), `paused`, `pointer` (a lifecycle
+pointer resurrection does not supersede), or `after_attestation` (terminated
+after its machine's attestation, which therefore does not cover it: the new
+code writes rows of this shape too). The last four are fenced.
 """
 
 from __future__ import annotations
@@ -121,6 +122,11 @@ _NO_IDENTITY = "terminated with no runtime identity; "
 IDENTITYLESS_CATEGORIES: dict[str, tuple[str, str | None]] = {
     "convertible": ("convertible", None),
     "awaiting": ("awaiting", _NO_IDENTITY + _UNATTESTED),
+    "multi_unit": (
+        "awaiting",
+        _NO_IDENTITY + "its machine keeps more than one unit, and its one attestation "
+        "proves only one home empty",
+    ),
     "no_unit": ("inadmissible", _NO_IDENTITY + _NO_UNIT),
     "paused": ("inadmissible", _NO_IDENTITY + _PAUSED),
     "pointer": (
@@ -559,21 +565,24 @@ def _identityless(
     the machine attestation is the allocation closure its identity mint rests on,
     for rows terminated no later than it was taken (host and database clocks
     compared; the old stop precedes the attestation by minutes, the new code's
-    first terminations follow it by the whole window)."""
-    registered = {
-        unit["machine_name"]
-        for unit in found.units
-        if (unit["machine_name"], unit["home"]) not in inputs.retired
-    }
+    first terminations follow it by the whole window). The attestation's census
+    covers one home, so it stands for the machine only while that is its one
+    unit left: the mint has no per-row process proof to fall back on."""
+    units: dict[str, int] = {}
+    for unit in found.units:
+        if (unit["machine_name"], unit["home"]) not in inputs.retired:
+            units[unit["machine_name"]] = units.get(unit["machine_name"], 0) + 1
     judged: list[Identityless] = []
     for row in rows(conn, _IDENTITYLESS_ROWS):
         item = Identityless(row["id"], row["machine"], row["image"])
         if not row["clear"]:
             item.category = "pointer"
-        elif item.machine not in registered:
+        elif item.machine not in units:
             item.category = "no_unit"
         elif item.machine in found.paused:
             item.category = "paused"
+        elif units[item.machine] > 1:
+            item.category = "multi_unit"
         elif item.machine not in inputs.attestations:
             item.category = "awaiting"
         elif row["terminated_at"] > inputs.attestations[item.machine].attested_at:

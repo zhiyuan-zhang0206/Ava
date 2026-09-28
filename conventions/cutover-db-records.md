@@ -133,7 +133,10 @@ incarnation existed. Resurrection refuses it (`runtime_cutover_required`).
 D-8 counts these rows per machine and category (`identityless`, and the
 totals under `counts`): `convertible` (the machine's attestation is
 supplied and was taken after the row's termination), `awaiting` (a unit
-remains, no attestation yet), `no_unit` (every unit is retired or none is
+remains, no attestation yet), `multi_unit` (more than one unit of the machine
+remains: its one attestation censuses only the home it names, and the mint
+has no per-row process proof, so it covers no row of that machine),
+`no_unit` (every unit is retired or none is
 registered), `paused`, `pointer` (a lifecycle pointer that resurrection would
 not settle as superseded: anything but an unapplied restart or terminate), or
 `after_attestation` (terminated after its machine's attestation was taken).
@@ -172,7 +175,10 @@ the script exists. What can change a fenced row:
   attestations, which no longer describe them. No sound late path exists for
   such a machine, and its agents stay fenced.
 - **An identity-less row.** `awaiting` converts as above, with a later
-  attestation of its machine. `paused` needs the machine resumed first, with
+  attestation of its machine. `multi_unit` converts once the attested home is
+  the machine's only unit left: retire the units whose home no longer exists
+  (`--retire-units`, with the attestation, at W7); while two homes of the
+  machine are live, none of its rows converts. `paused` needs the machine resumed first, with
   the same posture gap. `no_unit` never converts: no attestation can cover
   it. `pointer` converts only once its pointer is gone, since resurrection
   defers on it whatever identity the row carries: a forced terminate the new
