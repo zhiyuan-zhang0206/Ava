@@ -693,7 +693,7 @@ def main() -> None:
         from shared.paths import mcp_daemon_shared_socket
 
         socket_path = mcp_daemon_shared_socket()
-    logger.add(sys.stderr, format="{message}")
+    logger.add(sys.stderr, format="{message}", diagnose=False)
     # Refuse to start over a LIVE socket: unlink+rebind here is what turns the
     # serving daemon into a ghost when a respawn storm races the previous
     # instance's exit (Task #1142). The healthcheck's probe answers a ping, so

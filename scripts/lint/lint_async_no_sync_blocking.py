@@ -36,7 +36,7 @@ import ast
 import sys
 from pathlib import Path
 
-_ROOT = Path(__file__).resolve().parent.parent
+_ROOT = Path(__file__).resolve().parent.parent.parent
 _SCAN_DIRS = ("gateway", "ops")
 
 # Sync callable attribute-names that must not appear un-awaited in an async body.

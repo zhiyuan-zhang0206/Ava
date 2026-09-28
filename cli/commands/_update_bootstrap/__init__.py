@@ -632,6 +632,7 @@ def execute_bootstrap_hop(plan: PreparedBootstrapHop, generation: str) -> int:
         format="{message}",
         level="INFO",
         filter=lambda record: record["message"].startswith("bootstrap_hop_phase "),
+        diagnose=False,
     )
     try:
         return _execute_bootstrap_hop(plan, generation)

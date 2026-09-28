@@ -638,6 +638,7 @@ def main(argv: list[str] | None = None) -> int:
         format="{time:HH:mm:ss.SSS} <level>{level: <5}</level> {message}",
         level="INFO",
         colorize=False,
+        diagnose=False,
     )
 
     if not _NAME_RE.fullmatch(name):
