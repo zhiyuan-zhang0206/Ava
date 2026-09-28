@@ -91,7 +91,7 @@ _sync_span = local()
 
 @dataclass(eq=False)
 class RecoveryReconstructionScope:
-    """One recovery's sole message-list cache entry, never a graph state snapshot."""
+    """One turn/recovery's message-list cache entry, never a graph state snapshot."""
 
     saver: AsyncPostgresSaver
     thread_id: str
@@ -170,6 +170,16 @@ def recovery_reconstruction_scope(
     if not getattr(saver, "_ava_delta_read_compat", False):
         # A saver without delta reads has no reconstruction to cache.
         yield None
+        return
+    current = _recovery_scope.get()
+    if (
+        current is not None
+        and current.active
+        and current.saver is saver
+        and current.thread_id == thread_id
+    ):
+        # Database recovery inside an admitted turn shares its existing scope.
+        yield current
         return
     _install_recovery_invalidation(saver)
     scope = RecoveryReconstructionScope(saver=saver, thread_id=thread_id)
