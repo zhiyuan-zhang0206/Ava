@@ -41,7 +41,9 @@ that pid and birth exists or that the host booted after the birth (extra row
 fields are echoed back), plus the home's process census and bound ports. The
 database-records repair stores the document verbatim and records its sha256
 as the machine's closure evidence (`load_attestation`). Exit status 0 when
-every row is absent and the census is empty, 2 otherwise.
+every row is absent and the census is empty, 2 otherwise; it refuses (1) while
+the home's legacy health probe is registered, which can start the old code
+after the document is taken.
 
 Both cutover scripts are one-time and are deleted after the cutover.
 """
@@ -736,6 +738,17 @@ def persisted_machine(home: Path) -> str:
     return machine
 
 
+def _require_disarmed(facts: Facts) -> None:
+    """An attestation of a home whose legacy health probe is armed proves nothing
+    lasting: the probe can start the old code once the document is taken."""
+    from scripts.cutover_adopt_plan import step_state
+
+    assert facts.jobs is not None  # noqa: S101 — gathered before attesting
+    probe = facts.jobs.health_probe_refusal()
+    if probe is not None and step_state(facts, "jobs") is None:
+        raise RefusedError(probe)
+
+
 def own_checkout() -> Path:
     return Path(__file__).resolve().parents[1]
 
@@ -754,6 +767,7 @@ def main(argv: list[str] | None = None, *, host: Host | None = None) -> int:
         registry = registry_path(home, args.registry)
         facts = gather(home, registry, own_checkout(), host or Host.current(), inputs)
         if args.attest:
+            _require_disarmed(facts)
             rows = json.loads(Path(args.attest).read_text())
             report = attest(rows, persisted_machine(home), facts)
             print(json.dumps(report, indent=2, sort_keys=True))

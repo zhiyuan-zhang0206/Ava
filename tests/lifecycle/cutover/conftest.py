@@ -351,8 +351,9 @@ def _jobs(legacy: LegacyHome) -> None:
         _plist(scheduler, label)
         scheduler.load(label)
     home, other = legacy.home, legacy.sibling
+    # This home's health probe is already unregistered (runbook W1, which only
+    # the old gateway's own start undoes): `arm_health_probe` registers it again.
     cron = [
-        f"*/5 * * * * AVA_HOME={home} /x/ava cluster health-probe --auto-rollback  # ava-health-probe.{slug}",
         f"* * * * * AVA_HOME={home} /x/ava cluster watchdog-probe --role gateway  # ava-watchdog-probe.gateway.{slug}",
         f"*/5 * * * * AVA_HOME={home} /x/ava cluster hold-watchdog  # ava-hold-watchdog.{slug}",
         f"@reboot AVA_HOME={home} /x/ava boot  # ava-autostart.{slug}",
@@ -372,6 +373,18 @@ def _jobs(legacy: LegacyHome) -> None:
     }
     for path, text in units.items():
         _write(path, text)
+
+
+def arm_health_probe(legacy: LegacyHome) -> str:
+    """Register this home's legacy auto-rollback probe again, as every start of the
+    old gateway does; returns the crontab line."""
+    line = (
+        f"*/5 * * * * AVA_HOME={legacy.home} /x/ava cluster health-probe --auto-rollback "
+        f"--threshold 3 # ava-health-probe.{legacy.slug}"
+    )
+    crontab = legacy.scheduler.state / "crontab"
+    crontab.write_text(crontab.read_text() + line + "\n")
+    return line
 
 
 def build_legacy_home(root: Path, roles: tuple[str, ...], platform: str) -> LegacyHome:

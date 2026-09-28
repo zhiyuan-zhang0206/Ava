@@ -10,13 +10,14 @@ import pytest
 
 from scripts import cutover_legacy_jobs as jobs
 from shared.cluster import home_slug
-from tests.lifecycle.cutover.conftest import LegacyHome
+from tests.lifecycle.cutover.conftest import LegacyHome, arm_health_probe
 
 Make = Callable[..., LegacyHome]
 
 
 def test_exact_slug_ignores_a_sibling_whose_slug_extends_ours(make_legacy: Make) -> None:
     legacy = make_legacy()
+    arm_health_probe(legacy)
     sibling = home_slug(legacy.sibling)
     assert sibling.startswith(legacy.slug)  # the prefix trap is real in this fixture
     found = jobs.discover(legacy.home, legacy.scheduler.host())
@@ -120,6 +121,7 @@ def test_linux_units_retire_exactly_through_their_managers(make_legacy: Make) ->
 
 def test_cron_removal_keeps_every_other_line_and_a_preimage(make_legacy: Make) -> None:
     legacy = make_legacy()
+    arm_health_probe(legacy)
     host = legacy.scheduler.host()
     before = legacy.scheduler.crontab()
     ours = tuple(line.line for line in jobs.discover(legacy.home, host).cron)

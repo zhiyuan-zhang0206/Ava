@@ -282,6 +282,11 @@ def _job_refusals(facts: Facts) -> list[str]:
     reasons = [f"crontab line nobody can attribute: {line}" for line in facts.jobs.ambiguous]
     if facts.jobs.crontab_error is not None:
         reasons.append(facts.jobs.crontab_error)
+    # Before the `jobs` step, the probe's name is the legacy one: after it, the
+    # new converge registers the reused name.
+    probe = facts.jobs.health_probe_refusal()
+    if probe is not None and step_state(facts, "jobs") is None:
+        reasons.append(probe)
     return reasons
 
 

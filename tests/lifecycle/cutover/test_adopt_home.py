@@ -16,7 +16,13 @@ from cli.start_identity import read_intent
 from scripts import cutover_adopt_home as adopt
 from shared import pause_owner
 from shared.cluster import home_slug
-from tests.lifecycle.cutover.conftest import CANARY, MACHINE_KEY, SERVICE_PATH, LegacyHome
+from tests.lifecycle.cutover.conftest import (
+    CANARY,
+    MACHINE_KEY,
+    SERVICE_PATH,
+    LegacyHome,
+    arm_health_probe,
+)
 
 Make = Callable[..., LegacyHome]
 
@@ -150,7 +156,7 @@ def _assert_gateway_jobs(legacy: LegacyHome) -> None:
     ]
     calls = legacy.scheduler.calls()
     units = [i for i, call in enumerate(calls) if call.startswith(("systemctl", "sudo"))]
-    assert calls.index("crontab -") < min(units)  # the auto-rollback probe goes first
+    assert calls.index("crontab -") < min(units)  # the watchdog lines go first
 
 
 def test_gateway_adoption_completes_the_port_block_and_translates_selection(
@@ -519,6 +525,19 @@ _REFUSALS: dict[str, tuple[tuple[str, ...], Callable[[LegacyHome], object], str]
         "disagree",
     ),
     "new-port-collision": (("gateway", "agent-runner"), _colliding_new_port, "collides"),
+    # W1 unregistered it; every start of the old gateway registers it again.
+    "rearmed-health-probe": (
+        ("gateway", "agent-runner"),
+        arm_health_probe,
+        "legacy health probe is registered",
+    ),
+    "rearmed-health-probe-launchd": (
+        ("gateway", "agent-runner"),
+        lambda h: (
+            h.scheduler.root / "LaunchAgents" / f"com.ava.{h.slug}.health-probe.plist"
+        ).write_text("<plist/>"),
+        "health-probe): unregister it",
+    ),
 }
 
 
@@ -539,6 +558,24 @@ def test_ambiguous_or_live_state_refuses_before_any_effect(
     assert "adoption refused, nothing changed" in err and message in err
     assert legacy.snapshot() == before
     assert not (legacy.home / "cutover-rollback" / "adopt-home.json").exists()
+
+
+def test_the_new_codes_probe_after_the_jobs_step_never_refuses(
+    make_legacy: Make, capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    """Once the `jobs` step retired the legacy jobs, the probe name is the new
+    converge's registration: neither the attestation nor the plan refuses it."""
+    from scripts import cutover_inventory as inventory
+
+    legacy = make_legacy(roles=("gateway", "agent-runner"), platform="linux")
+    assert _run(legacy, "--execute") == 0
+    capsys.readouterr()
+    arm_health_probe(legacy)
+    rows = tmp_path / "rows.json"
+    rows.write_text("[]")
+    argv = ["--home", str(legacy.home), "--registry", str(legacy.registry), "--attest", str(rows)]
+    assert inventory.main(argv, host=legacy.scheduler.host()) == 0
+    assert json.loads(capsys.readouterr().out)["census_empty"]
 
 
 def test_missing_service_path_refuses_and_is_never_inferred(

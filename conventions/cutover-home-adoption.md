@@ -41,7 +41,9 @@ business.
 1. Before the window, on every host: run the inventory, choose
    `AVA_SERVICE_PATH` from its `service_path_candidate` (virtualenv, home and
    injected directories already removed; review it), and run the adoption
-   dry-run. Resolve every refusal before the window. `--attest ROWS.json`
+   dry-run. Resolve every refusal before the window, except the two the window
+   itself clears: live home processes (W2, W3) and, on a gateway, its legacy
+   health probe (W1). `--attest ROWS.json`
    prints this machine's one closure attestation for the database-records
    repair: each of its recorded legacy `(pid, birth)` identities absent or
    predating the current boot, plus the home census (no process related to the
@@ -57,6 +59,16 @@ business.
    drain ([database records](cutover-db-records.md)).
 2. Disarm and stop with the old code (runbook W1 to W3). The adoption refuses
    while any Ava process of the home is alive or a data-plane port is bound.
+   W1 unregisters the gateway's health probe (old
+   `ava cluster health-probe-unregister`), whose `--auto-rollback` would roll
+   the stopped home back and start the old code. Every start of the old
+   gateway registers it again (its lifespan does), a watchdog restart
+   included: never restart the old gateway after W1, and run the old
+   unregister once more right before the gateway's old stop (W3), after which
+   nothing registers it. The closure attestation and the adoption refuse while
+   the probe is registered. Found at the adoption, it means the old gateway
+   started after its attestation, so that attestation and the W3 row export
+   no longer describe the home: roll back (R1) and repeat W1 to W3.
 3. Gateway (W5): `--execute`, then the data-plane authority cutover
    (`scripts/cutover_db_authority.py`, see
    [convert an existing home](data-plane-secret-split.md#convert-an-existing-home)),
@@ -137,7 +149,7 @@ acts and `done` after:
 
 | Step | Effect |
 |---|---|
-| `jobs` | Retires this home's legacy OS jobs: crontab lines first (they carry the Linux auto-rollback probe and the watchdogs), then launchd labels in disarm order (health probe, watchdog probes, hold watchdog, autostart, Gate, LGTM, logs, packages, PR flow), then Linux units (`ava-boot.<slug>.service` through `sudo -n`, Gate and LGTM user units). The permissions helper is kept; the new converge rebuilds and reloads it. |
+| `jobs` | Retires this home's legacy OS jobs: crontab lines first (they carry the watchdogs; the auto-rollback health probe must already be gone, see the refusals), then launchd labels in disarm order (health probe, watchdog probes, hold watchdog, autostart, Gate, LGTM, logs, packages, PR flow), then Linux units (`ava-boot.<slug>.service` through `sudo -n`, Gate and LGTM user units). The permissions helper is kept; the new converge rebuilds and reloads it. |
 | `hold` | Adopts the maintenance hold a completed legacy `ava stop` left (phase `stopped`) as the cutover hold, so the final resume wakes exactly the agents that stop drained. Without one, it archives an inert resumed pause-owner journal and creates a fresh cutover hold in phase `stopped`. |
 | `files` | Moves inert legacy files aside: `installed_sha`, `deploy-state.json`, `cluster_paused`, probe counters, updater locks and flags, session records, the hold-watchdog attempt, stale `run/*.pid`, the legacy boot script. |
 | `selection` | Translates a non-empty `disabled_services` into `service-selection.json` (`except` mode) and moves the legacy file aside. |
@@ -195,7 +207,8 @@ journal re-verifies and changes nothing. A different `--service-path`,
 Refusals, all before the first effect: a live Ava process of the home (the
 kept helper excepted), a pidfile naming one, a bound data-plane port, a destroy
 intent, a start intent this adoption did not write, a pause that is not a
-completed stop's maintenance hold, crontab lines nobody can attribute, an
+completed stop's maintenance hold, a registered legacy health probe (before
+the `jobs` step), crontab lines nobody can attribute, an
 unreadable crontab, a missing or unnormalized `AVA_SERVICE_PATH` or one that
 differs from the declared value, a home without a persisted machine name
 (neither `machine_name` nor `AVA_MACHINE_NAME`: write the unit's

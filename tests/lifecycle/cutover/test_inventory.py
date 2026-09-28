@@ -13,7 +13,7 @@ import pytest
 
 from scripts import cutover_inventory as inventory
 from shared.native_process.ownership import stable_create_time
-from tests.lifecycle.cutover.conftest import CANARY, SERVICE_PATH, LegacyHome
+from tests.lifecycle.cutover.conftest import CANARY, SERVICE_PATH, LegacyHome, arm_health_probe
 
 Make = Callable[..., LegacyHome]
 
@@ -258,6 +258,28 @@ def test_attestation_is_one_closure_document_with_the_home_census(
     document.write_text(json.dumps(json.loads(raw) | {"census_empty": False}))
     with pytest.raises(inventory.RefusedError, match="census_empty contradicts"):
         inventory.load_attestation(document)
+
+
+def test_attestation_refuses_while_the_legacy_health_probe_is_armed(
+    make_legacy: Make, capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    """W1 unregisters the auto-rollback probe; a start of the old gateway since
+    re-registers it, and armed it can roll the stopped home back and start the
+    old code once this document is taken. W1 again, then it attests."""
+    legacy = make_legacy(roles=("gateway", "agent-runner"), platform="linux")
+    line = arm_health_probe(legacy)
+    rows = tmp_path / "rows.json"
+    rows.write_text("[]")
+    argv = ["--home", str(legacy.home), "--registry", str(legacy.registry), "--attest", str(rows)]
+    assert inventory.main(argv, host=legacy.scheduler.host()) == 1
+    err = capsys.readouterr().err
+    assert "legacy health probe is registered" in err and line in err
+    crontab = legacy.scheduler.state / "crontab"
+    crontab.write_text("".join(f"{kept}\n" for kept in legacy.scheduler.crontab() if kept != line))
+
+    code, report, _raw = _report(legacy, capsys, "--attest", str(rows))
+
+    assert code == 0 and report["census_empty"] and report["all_absent"]
 
 
 def test_non_canonical_home_is_refused(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:

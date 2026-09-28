@@ -14,7 +14,9 @@ sibling home whose slug starts with this slug keeps its jobs.
 updater or roll back first: the gateway health probe (`--auto-rollback`), the
 watchdog probes (they revive watchdogs that host the pin and schema
 self-update controllers) and the hold watchdog (it runs hold recovery). The
-permissions helper is kept; the new converge rebuilds, re-signs and reloads it.
+health probe must already be gone when evidence of a stopped home is taken
+(`Jobs.health_probe_refusal`). The permissions helper is kept; the new
+converge rebuilds, re-signs and reloads it.
 
 Some labels are reused by the current code (health probe, autostart, logs,
 packages, PR flow, the Linux boot unit): after adoption and a first start they
@@ -182,6 +184,29 @@ class Jobs:
 
     def empty(self) -> bool:
         return not (self.launchd or self.cron or self.units)
+
+    def health_probe_refusal(self) -> str | None:
+        """Why this home cannot be attested or adopted yet: a legacy health probe
+        is registered for it. None when none is.
+
+        W1 unregisters the probe before the first stop. Only the old code
+        registers it again, and every start of the old gateway does (its
+        lifespan re-registers it with `--auto-rollback`), so one found after W1
+        means the old gateway started since. Armed, it rolls the stopped home
+        back and starts the old code, after any evidence taken of that home.
+        """
+        entries = [
+            *(job.label for job in self.launchd if job.kind == "health-probe"),
+            *(line.line for line in self.cron if line.kind == "health-probe"),
+        ]
+        if not entries:
+            return None
+        return (
+            f"the legacy health probe is registered ({'; '.join(entries)}): unregister it "
+            "with the old code (`ava cluster health-probe-unregister`, runbook W1). Found "
+            "after W1 it means the old gateway started again, which re-registers it; see "
+            "conventions/cutover-home-adoption.md"
+        )
 
 
 def launchd_labels(slug: str) -> tuple[tuple[str, str], ...]:
