@@ -21,7 +21,7 @@ from typing import Any, cast
 import psycopg
 from psycopg.rows import dict_row
 
-from shared.agents.impersonation._impersonation_store import ImpersonationError, lock_lease
+from shared.agents.impersonation import ImpersonationError, lock_lease
 from shared.agents.impersonation_manifest_alerts import (
     _has_slow_open_participant,
     _is_old_pending,

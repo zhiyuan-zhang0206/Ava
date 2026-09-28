@@ -15,8 +15,6 @@
   },
   "private_imports": {
     "gateway/routers/_machine_pause.py::ops.ops_lifecycle._force_mark_terminated": 1,
-    "gateway/routers/agents.py::ops.ops_lifecycle._spawn_prechecks_blocking": 1,
-    "gateway/routers/agents_lifecycle.py::shared.agents.impersonation._impersonation_store": 1,
     "gateway/routers/status.py::ops.cluster._check_pidfile": 1
   }
 }

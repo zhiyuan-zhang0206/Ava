@@ -33,7 +33,7 @@ from gateway.schemas import (
     ModelsResponse,
 )
 from ops.agent_spawn import create_agent_row
-from ops.ops_lifecycle import _spawn_prechecks_blocking
+from ops.ops_launch import spawn_prechecks_blocking
 from ops.rpc_schemas import (
     ConfigNormalization,
     LaunchAgentRequest,
@@ -416,7 +416,7 @@ async def create_and_launch_agent(
     # fork_checkpoint resolution stays gateway-side: LangGraph checkpoints are
     # append-only and "latest" drifts under concurrent writes, so the gateway
     # resolves an explicit id before creating the row.
-    fork_checkpoint = await asyncio.to_thread(_spawn_prechecks_blocking, body, pool)
+    fork_checkpoint = await asyncio.to_thread(spawn_prechecks_blocking, body, pool)
     new_id, birth_config, prompt_inbound_id, launch_attempt_id = await asyncio.to_thread(
         create_agent_row,
         spawner=body.spawner,
