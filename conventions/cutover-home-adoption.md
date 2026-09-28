@@ -73,6 +73,11 @@ business.
    (`scripts/cutover_db_authority.py`, see
    [convert an existing home](data-plane-secret-split.md#convert-an-existing-home)),
    the [database records repair](cutover-db-records.md), then `--start` (W8).
+   `--start` refuses on a gateway until the repair recorded a completed run,
+   with the check `--resume` makes (W11): the start writes the host's `paused`
+   posture, which the repair's first run would set `idle`. A runner's
+   `--start` has no such check; it joins through the gateway's bootstrap,
+   which serves only once the gateway's own held start ran.
 4. Each runner (W9): check out the new commit, `--execute`, then
    `--start --db-capability <bundle>` with the bundle the gateway's data-plane
    cutover issued for it (step `remote-units`) and its transport key in

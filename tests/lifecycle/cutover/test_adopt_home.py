@@ -22,6 +22,7 @@ from tests.lifecycle.cutover.conftest import (
     SERVICE_PATH,
     LegacyHome,
     arm_health_probe,
+    record_repair,
 )
 
 Make = Callable[..., LegacyHome]
@@ -628,6 +629,7 @@ def test_held_start_runs_start_inside_the_hold_and_leaves_it_closed(
     assert adopt.main(argv, checkout=legacy.checkout) == 1
     assert "adoption is not complete" in capsys.readouterr().err
     assert _run(legacy, "--execute", "--cutover-id", "c3") == 0
+    record_repair(legacy.home, "done")  # W7 precedes a gateway's held first start
     monkeypatch.setattr(settings.general, "ava_home", str(legacy.home))
     seen: list[tuple[bool, str]] = []
 
@@ -659,6 +661,7 @@ def test_held_start_does_not_mark_ready_when_the_start_fails(
 
     legacy = make_legacy(roles=("gateway", "agent-runner"))
     assert _run(legacy, "--execute") == 0
+    record_repair(legacy.home, "done")
     monkeypatch.setattr(settings.general, "ava_home", str(legacy.home))
 
     def failed_start(_args: object) -> int:

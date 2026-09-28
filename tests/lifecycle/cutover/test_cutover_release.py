@@ -13,7 +13,6 @@ import argparse
 import json
 from collections.abc import Callable
 from datetime import datetime
-from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
@@ -25,7 +24,7 @@ from scripts import cutover_db_records as records
 from shared import maintenance, pause_owner, start_serving
 from shared.config import settings
 from shared.maintenance_state import MaintenanceHold
-from tests.lifecycle.cutover.conftest import SERVICE_PATH, LegacyHome
+from tests.lifecycle.cutover.conftest import SERVICE_PATH, LegacyHome, record_repair
 from tests.lifecycle.cutover.test_cutover_hold import _adopted, _bare_start
 
 Make = Callable[..., LegacyHome]
@@ -149,13 +148,6 @@ def _release(legacy: LegacyHome) -> int:
     return adopt.main(["--home", str(legacy.home), "--resume"], checkout=legacy.checkout)
 
 
-def _record_repair(home: Path, state: str) -> None:
-    run = {"state": state, "adoption": records.adoption(home.resolve())}
-    journal = {"version": records.VERSION, "home": str(home.resolve()), "runs": [run]}
-    (home / records.JOURNAL).parent.mkdir(parents=True, exist_ok=True)
-    (home / records.JOURNAL).write_text(json.dumps(journal))
-
-
 def test_the_go_no_go_step_releases_a_ready_gateway_after_its_records_repair(
     make_legacy: Make, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -166,13 +158,13 @@ def test_the_go_no_go_step_releases_a_ready_gateway_after_its_records_repair(
     _ready(holder, at)
     assert _release(legacy) == 1
     assert "database-records repair (W7) recorded no run" in capsys.readouterr().err
-    _record_repair(legacy.home, "started")
+    record_repair(legacy.home, "started")
     assert _release(legacy) == 1
     assert "run is incomplete" in capsys.readouterr().err
     assert maintenance.business_paused()
     wake.assert_not_called()
     (legacy.home / records.JOURNAL).unlink()
-    _record_repair(legacy.home, "done")
+    record_repair(legacy.home, "done")
 
     assert _release(legacy) == 0
 
@@ -201,3 +193,40 @@ def test_a_remote_unit_needs_no_records_repair_of_its_own(
     assert _release(legacy) == 0
 
     assert pause_owner.read().status == "resumed"
+
+
+def test_a_gateways_held_first_start_waits_for_its_records_repair(
+    make_legacy: Make, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The held start writes the host's `paused` posture, and the repair's
+    first run sets every `paused` posture idle (W7 before W8). Until that run
+    completed the start refuses and changes nothing. A runner's held start has
+    no such gate (`test_a_remote_units_held_start_installs_its_capability_bundle`):
+    it joins through the gateway's bootstrap, served only after this start."""
+    import cli.start_intent
+
+    legacy, holder, at = _adopted(make_legacy, monkeypatch)
+    starts: list[object] = []
+
+    def started(args: object) -> int:
+        starts.append(args)
+        return 0
+
+    monkeypatch.setattr(cli.start_intent, "run_start", started)
+    monkeypatch.setattr(start_serving, "is_serving", lambda: True)
+    argv = ["--home", str(legacy.home), "--start"]
+    assert adopt.main(argv, checkout=legacy.checkout) == 1
+    assert "(W7) recorded no run" in capsys.readouterr().err
+    record_repair(legacy.home, "started")
+    assert adopt.main(argv, checkout=legacy.checkout) == 1
+    assert "run is incomplete" in capsys.readouterr().err
+    held = maintenance.require_operation(holder, at).maintenance
+    assert starts == [] and held is not None and held.phase == "stopped"
+    (legacy.home / records.JOURNAL).unlink()
+    record_repair(legacy.home, "done")
+
+    assert adopt.main(argv, checkout=legacy.checkout) == 0
+
+    held = maintenance.require_operation(holder, at).maintenance
+    assert len(starts) == 1 and held is not None and held.phase == "ready"
+    assert maintenance.business_paused()

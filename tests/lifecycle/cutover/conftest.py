@@ -421,6 +421,16 @@ def build_legacy_home(root: Path, roles: tuple[str, ...], platform: str) -> Lega
     return legacy
 
 
+def record_repair(home: Path, state: str) -> None:
+    """A database-records (W7) journal of this adoption whose one run is `state`."""
+    from scripts import cutover_db_records as records
+
+    run = {"state": state, "adoption": records.adoption(home.resolve())}
+    journal = {"version": records.VERSION, "home": str(home.resolve()), "runs": [run]}
+    (home / records.JOURNAL).parent.mkdir(parents=True, exist_ok=True)
+    (home / records.JOURNAL).write_text(json.dumps(journal))
+
+
 # The reviewed --service-path must already be normalized (admit_service_path).
 # On a usrmerge Linux /bin and /sbin resolve to /usr/bin and /usr/sbin, so the
 # raw macOS-shaped list is not; normalize it on the host running the suite.

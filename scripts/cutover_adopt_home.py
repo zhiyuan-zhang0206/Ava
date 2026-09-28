@@ -26,15 +26,16 @@ and `done` with the effects it applied. A re-run continues from the journal
 nothing. A re-run must name the same inputs.
 
 `--start` performs the held first start after adoption (and, on a gateway,
-after the data-plane authority cutover): the ordinary `ava start` inside the
-cutover hold's authorized-start boundary, moving the hold `stopped ->
-starting -> ready`. Business stays closed until the operator releases the
-hold at the go/no-go gate with `--resume`, its one exit: it refuses unless the
-adoption completed, the hold is `ready` and, on a gateway, the database-records
-repair recorded a completed run, then resumes exactly that hold. No ordinary
-path releases the cutover hold (`cli.cutover_hold`): before this held first
-start an ordinary start refuses, afterwards (a reboot's autostart) it starts
-held, and `ava cluster recover` and `ava maintenance resume` refuse it.
+after the data-plane authority cutover and the database-records repair, which
+it checks): the ordinary `ava start` inside the cutover hold's authorized-start
+boundary, moving the hold `stopped -> starting -> ready`. Business stays
+closed until the operator releases the hold at the go/no-go gate with
+`--resume`, its one exit: it refuses unless the adoption completed, the hold is
+`ready` and, on a gateway, the database-records repair recorded a completed
+run, then resumes exactly that hold. No ordinary path releases the cutover
+hold (`cli.cutover_hold`): before this held first start an ordinary start
+refuses, afterwards (a reboot's autostart) it starts held, and
+`ava cluster recover` and `ava maintenance resume` refuse it.
 
 Run from the checkout that owns the home:
 
@@ -461,6 +462,10 @@ def held_start(home: Path, db_capability: str | None = None) -> int:
 
     A remote unit's first start installs its capability bundle (`db_capability`,
     transport key in AVA_DB_CAPABILITY_KEY): it holds no human bearer any more.
+    A gateway's starts only after the database-records repair (W7) recorded a
+    completed run: the start writes the host's `paused` posture, which the
+    repair's first run would set `idle`. A runner's start joins through that
+    gateway's bootstrap, so it cannot precede W7 either.
     """
     from shared import pause_owner
 
@@ -477,6 +482,12 @@ def held_start(home: Path, db_capability: str | None = None) -> int:
     if phase not in {"stopped", "starting", "ready"}:
         raise RefusedError(f"the cutover hold is in phase {phase}, not a held start phase")
     if phase != "ready":
+        if "gateway" in _adopted_roles(home) and (missing := _records_repair_missing(home)):
+            raise RefusedError(
+                f"{missing}. A gateway's held first start (W8) follows that repair: run "
+                "scripts/cutover_db_records.py --execute to completion first; this start "
+                "writes the host's `paused` posture, which the repair's first run sets idle"
+            )
         rc = _start_inside_hold(home, holder, at, phase, db_capability)
         if rc != 0:
             return rc
