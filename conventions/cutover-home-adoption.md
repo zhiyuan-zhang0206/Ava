@@ -28,7 +28,8 @@ intent never records a disposable checkout. Never run them against a home you
 are not converting. While the cutover hold the adoption
 journal records stands, an ordinary start never releases it
 (`cli/cutover_hold.py`): before the held first start (`--start`) a bare
-`ava start` refuses and names that command, and after it (for example the
+`ava start` refuses and names that command, as does `ava maintenance start`
+with the hold's exact generation, and after it (for example the
 autostart job after a reboot) a bare start brings the unit up still held. A
 held first start that failed or was not ready leaves phase `starting`; the
 next start that passes readiness, `--start` or a bare one, completes it to

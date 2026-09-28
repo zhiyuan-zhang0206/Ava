@@ -144,6 +144,65 @@ def test_any_other_hold_is_still_released_by_an_ordinary_start(
     unpause.assert_called_once_with()
 
 
+_LATER = ("local-stop:legacy-box:9", datetime.fromisoformat("2026-10-01T00:00:00+00:00"))
+
+
+@pytest.mark.parametrize(
+    ("case", "refused"),
+    [
+        ("cutover-stopped", True),
+        ("cutover-unreadable-journal", True),
+        ("cutover-starting", False),
+        ("later-unreadable-journal", False),
+    ],
+)
+def test_maintenance_start_is_no_side_door_around_the_held_first_start(
+    make_legacy: Make, monkeypatch: pytest.MonkeyPatch, case: str, refused: bool
+) -> None:
+    """`ava maintenance start` with the cutover hold's exact generation refuses
+    in phase `stopped`, as an ordinary start does: at W6 a gateway still owes
+    the records repair (W7), which the held first start waits for. A damaged
+    journal keeps a `cutover:` hold refused; a later hold still starts, the
+    documented way out of such a journal. From `starting` on it starts held."""
+    from cli.commands import maintenance as maintenance_command
+
+    legacy, holder, at = _adopted(make_legacy, monkeypatch)
+    if case == "cutover-starting":
+        maintenance.set_phase(holder, at, "starting")
+    if case == "later-unreadable-journal":
+        holder, at = _LATER
+        owner = {
+            "state": "paused",
+            "holder": holder,
+            "acquired_at": at.isoformat(),
+            "maintenance": MaintenanceHold("stopped").encode(),
+        }
+        (legacy.home / "run" / "deploy-pause-owner.json").write_text(json.dumps(owner))
+    if case.endswith("unreadable-journal"):
+        journal = legacy.home / "cutover-rollback" / "adopt-home.json"
+        journal.write_text(journal.read_text()[:40])
+    starts: list[bool] = []
+
+    def cmd_start(*, persist_services: bool) -> int:
+        starts.append(maintenance.start_authorized())
+        return 0
+
+    monkeypatch.setattr("cli.commands.start.cmd_start", cmd_start)
+    monkeypatch.setattr(start_serving, "is_serving", lambda: True)
+
+    if refused:
+        with pytest.raises(RuntimeError, match=r"cutover_adopt_home\.py --home .* --start") as exc:
+            maintenance_command._start(holder, at)
+        assert str(legacy.home) in str(exc.value)
+    else:
+        assert maintenance_command._start(holder, at) == 0
+
+    held = maintenance.require_operation(holder, at).maintenance
+    assert held is not None and held.phase == ("stopped" if refused else "ready")
+    assert starts == ([] if refused else [True])
+    assert maintenance.business_paused()
+
+
 def _journal_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, adopted: bool) -> Path:
     home = tmp_path / "home"
     (home / "run").mkdir(parents=True)

@@ -22,7 +22,7 @@ from cli.commands.service_stop import (
     stop_data_plane,
     stop_services,
 )
-from cli.cutover_hold import resume_refusal
+from cli.cutover_hold import resume_refusal, start_refusal
 from ops.agent_pause import _hold, drain, prepare
 from shared import hold_driver, maintenance, maintenance_cohort, pause_owner, start_serving
 from shared.db import connect
@@ -70,11 +70,14 @@ def stop(
 
 def _start(holder: str, at: datetime) -> int:
     from cli.commands.start import cmd_start
+    from shared.paths import ava_home
 
     hold = _hold(holder, at)
     if hold.phase not in ("stopped", "starting"):
         raise RuntimeError("maintenance start requires a stopped unit")
     if hold.phase == "stopped":
+        if refusal := start_refusal(ava_home(), holder, at):
+            raise RuntimeError(refusal)
         maintenance.set_phase(holder, at, "starting")
     with maintenance.authorized_start(holder, at):
         result = cmd_start(persist_services=False)

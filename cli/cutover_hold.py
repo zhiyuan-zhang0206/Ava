@@ -9,7 +9,8 @@ the script's `--resume` step (`release_command`), which checks the cutover's
 own records first.
 
 - Before the held first start (phase `stopped`) an ordinary start refuses and
-  names `cutover_adopt_home.py --start`. On a gateway that start follows the
+  names `cutover_adopt_home.py --start`, and so does `ava maintenance start`
+  with the hold's exact generation. On a gateway that start follows the
   data-plane cutover and the database-records repair.
 - After it (phase `starting` or `ready`) an ordinary start brings the unit up
   and keeps the hold. One that passes readiness completes a `starting` hold (a
@@ -97,23 +98,74 @@ def resume_refusal(home: Path, holder: str, acquired_at: datetime) -> str | None
     `cutover:<id>`, a name no later hold takes, so damage to the journal opens
     no exit around the go/no-go step.
     """
+    return _exact_holder_refusal(
+        home,
+        holder,
+        acquired_at,
+        unreadable=(
+            f"a `{CUTOVER_HOLDER_PREFIX}` hold never resumes without it. Repair the "
+            f"journal; the go/no-go gate releases the cutover hold with {release_command(home)}"
+        ),
+        proceeding=f"resuming {holder} as named",
+        recorded=(
+            f"{holder} is the fleet cutover's hold, which `ava maintenance resume` never "
+            f"releases; the go/no-go gate releases it with {release_command(home)}"
+        ),
+    )
+
+
+def start_refusal(home: Path, holder: str, acquired_at: datetime) -> str | None:
+    """Why `ava maintenance start` must not start `(holder, acquired_at)` from
+    phase `stopped`; None when it is not the recorded cutover hold.
+
+    That start is the cutover's held first start, which on a gateway waits for
+    the database-records repair (W7 before W8) and on a remote unit installs
+    its capability bundle, so this verb refuses it as an ordinary start does.
+    From phase `starting` on, it starts held as an ordinary start does. An
+    unreadable journal is read as `resume_refusal` reads it: a later hold
+    starts as named, a `cutover:<id>` hold stays refused.
+    """
+    return _exact_holder_refusal(
+        home,
+        holder,
+        acquired_at,
+        unreadable=(
+            f"a `{CUTOVER_HOLDER_PREFIX}` hold never starts without it. Repair the journal; "
+            f"its first start is {held_start_command(home)}"
+        ),
+        proceeding=f"starting {holder} as named",
+        recorded=(
+            f"{holder} is the fleet cutover's hold in phase stopped; its first start is "
+            f"{held_start_command(home)} (a remote unit adds `--db-capability BUNDLE`), "
+            "never `ava maintenance start`"
+        ),
+    )
+
+
+def _exact_holder_refusal(
+    home: Path,
+    holder: str,
+    acquired_at: datetime,
+    *,
+    unreadable: str,
+    proceeding: str,
+    recorded: str,
+) -> str | None:
+    """`recorded` when `(holder, acquired_at)` is the journal's cutover hold.
+
+    An unreadable journal refuses a `cutover:<id>` holder with `unreadable`
+    and lets any other holder through, printing `proceeding`.
+    """
     try:
-        recorded = recorded_hold(home)
+        journal = recorded_hold(home)
     except RuntimeError as exc:
         if holder.startswith(CUTOVER_HOLDER_PREFIX):
-            return (
-                f"{exc}; a `{CUTOVER_HOLDER_PREFIX}` hold never resumes without it. "
-                f"Repair the journal; the go/no-go gate releases the cutover hold with "
-                f"{release_command(home)}"
-            )
-        print(f"  ! {exc}; resuming {holder} as named", file=sys.stderr)
+            return f"{exc}; {unreadable}"
+        print(f"  ! {exc}; {proceeding}", file=sys.stderr)
         return None
-    if recorded is None or (recorded.holder, recorded.acquired_at) != (holder, acquired_at):
+    if journal is None or (journal.holder, journal.acquired_at) != (holder, acquired_at):
         return None
-    return (
-        f"{holder} is the fleet cutover's hold, which `ava maintenance resume` never "
-        f"releases; the go/no-go gate releases it with {release_command(home)}"
-    )
+    return recorded
 
 
 def start_instruction(home: Path) -> str:
