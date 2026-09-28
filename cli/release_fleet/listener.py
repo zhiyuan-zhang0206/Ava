@@ -21,7 +21,10 @@ idempotent: a report names the instruction it answers.
 
 Before any proof is checked, what an unauthenticated peer can cost is bounded:
 a body is read only when one plain decimal `Content-Length` declares it
-within `MAX_BODY_BYTES` (otherwise `400` or `413`, nothing read).
+within `MAX_BODY_BYTES` (otherwise `400` or `413`, nothing read), a socket
+read that waits `READ_TIMEOUT_S` drops the connection, and at most
+`MAX_CONCURRENT_REQUESTS` are served at once (a connection beyond them is
+closed unanswered).
 """
 
 from __future__ import annotations
@@ -29,11 +32,13 @@ from __future__ import annotations
 import json
 import queue
 import re
+import socket
 import threading
 from collections.abc import Callable, Iterable, Mapping
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from typing import Any
 from uuid import UUID
 
 from pydantic import ValidationError
@@ -51,6 +56,13 @@ from shared.log import logger
 
 MAX_BODY_BYTES = 64 * 1024
 _DECIMAL = re.compile(r"[0-9]+")
+# How long one socket read may wait: a unit sends each request whole, so only
+# a stalled or hostile peer waits this long, and its connection is dropped.
+READ_TIMEOUT_S = 10.0
+# Requests served at once. Each unit's follower holds at most one, so this is
+# far above a fleet's need; a peer opening more is closed unanswered, which a
+# unit reads as the coordinator being away and retries.
+MAX_CONCURRENT_REQUESTS = 32
 CAPABILITY_REFUSAL = (
     "the per-operation capability exchange over the coordinator channel is slice dbgen-8"
 )
@@ -59,6 +71,8 @@ ENROLLMENT_HEADER = "X-Ava-Enrollment"
 TIMESTAMP_HEADER = "X-Ava-Timestamp"
 NONCE_HEADER = "X-Ava-Nonce"
 SIGNATURE_HEADER = "X-Ava-Signature"
+# What socketserver hands a request handler (a TCP server: the socket).
+_Request = socket.socket | tuple[bytes, socket.socket]
 
 
 def unit_key(unit: UnitKey) -> str:
@@ -146,9 +160,7 @@ class CoordinatorListener:
 
     def start(self, host: str, port: int) -> tuple[str, int]:
         """Bind and serve in a daemon thread; the bound address."""
-        handler = _handler(self)
-        self._server = ThreadingHTTPServer((host, port), handler)
-        self._server.daemon_threads = True
+        self._server = _BoundedServer((host, port), _handler(self), MAX_CONCURRENT_REQUESTS)
         self._thread = threading.Thread(
             target=self._server.serve_forever, name="fleet-listener", daemon=True
         )
@@ -242,9 +254,42 @@ class CoordinatorListener:
         return HTTPStatus.ACCEPTED, {"accepted": report.instruction}
 
 
+class _BoundedServer(ThreadingHTTPServer):
+    """One daemon thread per request, at most `slots` at once; a connection
+    beyond them is closed unanswered."""
+
+    daemon_threads = True
+
+    def __init__(
+        self,
+        address: tuple[str, int],
+        handler: type[BaseHTTPRequestHandler],
+        slots: int,
+    ) -> None:
+        super().__init__(address, handler)
+        self._slots = threading.BoundedSemaphore(slots)
+
+    def process_request(self, request: _Request, client_address: Any) -> None:
+        if not self._slots.acquire(blocking=False):
+            self.shutdown_request(request)
+            return
+        try:
+            super().process_request(request, client_address)
+        except BaseException:
+            self._slots.release()
+            raise
+
+    def process_request_thread(self, request: _Request, client_address: Any) -> None:
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            self._slots.release()
+
+
 def _handler(listener: CoordinatorListener) -> type[BaseHTTPRequestHandler]:
     class Handler(BaseHTTPRequestHandler):
         server_version = "ava-coordinator/1"
+        timeout = READ_TIMEOUT_S
 
         def log_message(self, format: str, *args: object) -> None:
             logger.debug("[release-fleet] listener {}", format % args)

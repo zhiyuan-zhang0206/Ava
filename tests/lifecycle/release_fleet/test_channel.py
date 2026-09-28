@@ -18,6 +18,7 @@ from uuid import uuid4
 
 import pytest
 
+from cli.release_fleet import listener as listener_module
 from cli.release_fleet.client import (
     CapabilityDeferredError,
     CoordinatorAwayError,
@@ -253,3 +254,57 @@ def test_an_oversized_content_length_answers_413_without_reading(
     path = route(channel.operation, _RUNNER, "/report")
     answer = _raw(channel, f"POST {path} HTTP/1.1\r\nHost: x\r\nContent-Length: {length}", b"x")
     assert answer.startswith(b"HTTP/1.0 413 "), answer
+
+
+@pytest.fixture
+def bounded(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Channel]:
+    """A listener with a 0.5 s read timeout and room for two requests at once."""
+    monkeypatch.setattr(listener_module, "READ_TIMEOUT_S", 0.5)
+    monkeypatch.setattr(listener_module, "MAX_CONCURRENT_REQUESTS", 2)
+    home = tmp_path.resolve() / "bounded"
+    home.mkdir(mode=0o700)
+    served = Channel(home)
+    try:
+        yield served
+    finally:
+        served.listener.close()
+
+
+def _stall(channel: Channel) -> socket.socket:
+    """A connection that sent half a request line and nothing more."""
+    raw = socket.create_connection((channel.endpoint.host, channel.endpoint.port))
+    raw.settimeout(5)
+    raw.sendall(b"GET /v1/op/")
+    return raw
+
+
+def _closed_unanswered(raw: socket.socket) -> bool:
+    try:
+        return raw.recv(4096) == b""
+    except ConnectionResetError:
+        return True
+
+
+def test_a_stalled_connection_is_dropped_after_the_read_timeout(bounded: Channel) -> None:
+    with _stall(bounded) as raw:
+        assert _closed_unanswered(raw)  # within the 0.5 s timeout, not the test's 5 s
+
+
+def test_connections_beyond_the_cap_are_closed_unanswered(bounded: Channel) -> None:
+    path = route(bounded.operation, _RUNNER)
+    request = f"GET {path} HTTP/1.1\r\nHost: x\r\n\r\n".encode()
+    address = (bounded.endpoint.host, bounded.endpoint.port)
+    with _stall(bounded), _stall(bounded), socket.create_connection(address) as third:
+        third.settimeout(5)
+        third.sendall(request)
+        assert _closed_unanswered(third)
+    # The stalled requests end and free their slots: a unit is served again.
+    deadline = time.monotonic() + 5
+    while True:
+        try:
+            assert bounded.client().instruction() is None
+            break
+        except CoordinatorAwayError:
+            if time.monotonic() > deadline:
+                raise
+            time.sleep(0.05)
