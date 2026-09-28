@@ -1,6 +1,6 @@
 """Per-machine steward: stage, commit, push, create PR.
 
-Usage: $AVA_HOME/source/.venv/bin/python steward.py -m "memory: <machine> <date> local sync"
+Usage: python steward.py -m "memory: <machine> <date> local sync"
 
 The multi-host flow: each machine runs this on its own checkout, creating a
 PR from machine-<name> → main. It never merges — that is the arbiter's job.

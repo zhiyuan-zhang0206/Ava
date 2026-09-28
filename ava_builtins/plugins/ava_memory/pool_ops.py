@@ -4,7 +4,8 @@ Imported by the consolidation scripts under `skills/scripts/` (`consolidate.py`,
 `steward.py`, `arbiter_merge.py`, `gen_indexes.py`, `rebuild_memory_index.py`)
 as `ava_builtins.plugins.ava_memory.pool_ops`, so a run needs the checkout's
 venv (`ava_builtins` importable) — `consolidation/SKILL.md` invokes them with
-that venv's `python`, not a bare `python3`. Still stdlib + subprocess only, no
+a bare `python`, which an agent's shell resolves to that venv (the venv's
+`bin/` leads the PATH every agent process inherits). Still stdlib + subprocess only, no
 `shared` import: `ava_home()` does not use the checkout-anchored home
 resolution the rest of the repo uses (`shared.dotenv_boot`), for the reason
 below.
