@@ -23,7 +23,7 @@ import psycopg
 import pytest
 from loguru import logger
 
-from shared.log_sinks import _add_file_sink
+from shared.log_sinks import _add_file_sink, add_sink
 
 # Not a real credential — a fixture value chosen to be unmistakable in a diff/log.
 _SENTINEL = "SENTINEL-PASSWORD"
@@ -80,3 +80,12 @@ def test_psycopg_connect_dsn_password_is_not_rendered_into_the_sink(_file_sink: 
         pytest.fail("connect to 127.0.0.1:1 unexpectedly succeeded")
     content = _file_sink.read_text(encoding="utf-8")
     assert _SENTINEL not in content
+
+
+def test_add_sink_refuses_an_explicit_diagnose_request() -> None:
+    """A caller asking for `diagnose=True` fails loud and registers no sink."""
+    received: list[str] = []
+    with pytest.raises(ValueError, match="diagnose=True is forbidden"):
+        add_sink(received.append, diagnose=True)
+    logger.info("must reach no refused sink")
+    assert received == []
