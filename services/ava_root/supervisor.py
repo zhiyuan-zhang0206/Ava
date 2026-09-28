@@ -102,9 +102,10 @@ class _Generation:
     tracked: set[OwnedProcess] = field(default_factory=set[OwnedProcess])
     closing: bool = False
     scope_closed_at_exit: bool = False
-    """The leader's group was empty when root reaped it: nothing of the unit remained.
+    """The leader's group was empty when the watch read it after the reap.
 
-    Otherwise the watch retained the group's members in `tracked` at that reap."""
+    Nothing of the unit remained. Otherwise the watch retained the group's
+    members in `tracked` at that read."""
     exited: asyncio.Event = field(default_factory=asyncio.Event)
 
 
@@ -462,10 +463,13 @@ class Supervisor:
         the final action so waiters never observe a half-processed exit.
         """
         returncode = await generation.proc.wait()
-        # Read right at the reap, while any member still reserves the leader's
-        # number: an empty group then is the unit's closure, and the members
-        # listed now are the unit's survivors. Once they exit, a later group
-        # with that number may be a stranger's, so no later stop lists it.
+        # asyncio's child watcher reaped the leader with waitpid a few loop
+        # turns before this resumes, on every POSIX host. A live member keeps the
+        # number reserved, so an empty group is the unit's closure and the
+        # members listed are its survivors; only a group that empties inside
+        # that window, its number then taken by another process, misleads this
+        # read. Once the survivors exit, a later group with that number may be a
+        # stranger's, so no later stop signals by it.
         if not isinstance(generation.proc, ApplicationProcess):
             generation.scope_closed_at_exit = group_closed(generation.proc.pid)
             if not generation.scope_closed_at_exit:
@@ -495,7 +499,8 @@ class Supervisor:
             await self._stop_job_generation(runtime, generation, generation.proc, force=force)
             return
         # Routed by what this stop finds, not by `closing`: a retry after a
-        # refused stop whose leader has since exited must not list the group.
+        # refused stop whose leader has since exited must not signal by the
+        # group number.
         exited = _exited_leader(runtime, generation)
         if exited is not None:
             await self._stop_exited_generation(runtime, generation, *exited, force=force)
@@ -515,14 +520,16 @@ class Supervisor:
         """Close what root recorded of a unit whose leader it reaped before this stop.
 
         Root reaps its own leader, so after that reap the recorded birth is
-        positively dead, and the watch retained every member of the leader's
-        group while any member still reserved its number. After that the number
-        proves nothing: once those members exit, another program's group can
-        carry it. So this stop never lists the group. It signals only recorded
-        births and their birth-verified descendants (`capture_tree`), each
-        through its own birth check; only explicit force escalates. Once none
-        of them lives, custody is released when the unit's group is proven
-        over: empty at the reap, empty now, or its number now held as a PID by
+        positively dead, and the watch retained the members of the leader's
+        group it read just after that reap. After that the number proves
+        nothing: once those members exit, another program's group can carry
+        it. So this stop never signals by the group number: nothing it
+        signals, captures or adopts comes from a group listing, which only
+        names the group in a refusal. It signals only recorded births and
+        their birth-verified descendants (`capture_tree`), each through its
+        own birth check; only explicit force escalates. Once none of them
+        lives, custody is released when the unit's group is proven over: empty
+        when read after the reap, empty now, or its number now held as a PID by
         another process (a PID is never reused while it is still the
         process-group ID of a live group, POSIX), whose group is never
         signalled. A group still occupied with no recorded birth alive may be a
@@ -632,14 +639,15 @@ class Supervisor:
 
         Only a stop that found the leader live runs this: the unreaped leader
         reserved the group number until its reap inside this bounded stop,
-        which reads the group within that same stop, never after an unbounded gap (a
-        stop that finds the leader already reaped is `_stop_exited_generation`,
-        which never lists the group). After the reap, only the kernel reporting
-        that group empty certifies the stop: a child forked while the leader
-        handled TERM is still a member, so it is captured, signalled like any
-        tracked descendant and must exit too. Only explicit force escalates,
-        and only to those captured members. A member that calls setsid()
-        leaves the group by construction and is not covered.
+        which reads the group within that same stop, never after an unbounded
+        gap (a stop that finds the leader already reaped is
+        `_stop_exited_generation`, which never signals by the group number).
+        After the reap, only the kernel reporting that group empty certifies
+        the stop: a child forked while the leader handled TERM is still a
+        member, so it is captured, signalled like any tracked descendant and
+        must exit too. Only explicit force escalates, and only to those
+        captured members. A member that calls setsid() leaves the group by
+        construction and is not covered.
         """
         self._signal_owned(identity, force=False)
         deadline = monotonic() + self._config.stop_timeout_s

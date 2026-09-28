@@ -343,8 +343,8 @@ async def test_exited_leader_never_signals_a_stranger_group_at_its_number(
     """The unit's group ended after its leader's reap; its number now names another program's group.
 
     Whether the unit's leader exited on its own or during a refused stop, no
-    later stop lists that group: nothing is signalled, even with force, and
-    custody stays with a refusal that names the group and the record.
+    later stop signals by that number: nothing is signalled, even with force,
+    and custody stays with a refusal that names the group and the record.
     """
     owner, survivor = await reaped_with_survivor(tmp_path, reaped)
     generation = owner._units["worker"].generation

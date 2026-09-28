@@ -33,23 +33,27 @@ The native Linux CI test exercises actual manager adoption, root TERM closure,
 and retention of a data-process stand-in. It does not prove database durability
 or Windows containment. Mac permission grants require real signed-helper proof.
 
-Unit exit before stop: root reaps its own leaders. At that reap, while any
-member still reserves the group number, it reads the group: empty means nothing
-of the unit remained; otherwise it records each member's native birth in the
-unit's custody. A member whose birth it cannot read is left out alone, never
-signalled, and keeps the group occupied. The record still blocks a cold
-duplicate root and automatic revival. A later stop, or a retry after a refused
-one, that finds the recorded
-leader not live (gone, a zombie, or its PID now another birth) never lists the
-group again: once the recorded members exit, another program's group can carry
-that number. A birth it cannot verify keeps custody and names the record and
-next step. Otherwise it signals only the recorded births and their
-birth-verified descendants, force staying explicit. Once none lives, custody is
-released when the unit's group is proven over: empty at the reap, empty now, or
-its number now held as a PID by another process (a PID is never reused while it
-is still the process-group ID of a live group, POSIX), whose group is never
-signalled. An occupied group with no recorded birth alive may be a stranger's:
-custody stays and the stop refuses, naming the group, its PIDs and the record.
+Unit exit before stop: root reaps its own leaders, then reads the group a few
+event-loop turns later (asyncio's child watcher reaps with `waitpid` first, on
+macOS and Linux alike). A live member keeps the number reserved, so empty means
+nothing of the unit remained; otherwise root records each member's native birth
+in the unit's custody. Only a group that empties inside that window, its number
+then taken by another process, misleads the read. A member whose birth root
+cannot read is left out alone, never signalled, and keeps the group occupied.
+The record still blocks a cold duplicate root and automatic revival. A later
+stop, or a retry after a refused one, that finds the recorded leader not live
+(gone, a zombie, or its PID now another birth) never signals by the group
+number: once the recorded members exit, another program's group can carry it,
+so nothing signalled, captured or adopted comes from a group listing, which
+only names the group in a refusal. A birth it cannot verify keeps custody and
+names the record and next step. Otherwise it signals only the recorded births
+and their birth-verified descendants, force staying explicit. Once none lives,
+custody is released when the unit's group is proven over: empty at that read,
+empty now, or its number now held as a PID by another process (a PID is never
+reused while it is still the process-group ID of a live group, POSIX), whose
+group is never signalled. An occupied group with no recorded birth alive may be
+a stranger's: custody stays and the stop refuses, naming the group, its PIDs
+and the record.
 Moving that record aside is the operator's word that no process of the unit
 remains: with no recorded birth alive, the next stop, or root's own TERM, drops
 the generation without a signal; a live recorded birth keeps the refusal.
