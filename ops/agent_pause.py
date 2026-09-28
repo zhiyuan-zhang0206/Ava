@@ -33,6 +33,9 @@ _log = logging.getLogger(__name__)
 
 PAUSE_TIMEOUT_SECONDS = 300.0
 
+# Every hold a local pause or stop takes is named with this prefix.
+STOP_HOLDER_PREFIX = "local-pause:"
+
 # The retry cadence for the bounded wait on an in-flight agent lifecycle
 # command (task #3591). Every attempt re-runs cohort preparation inside its
 # row-locked transaction, so the interval trades retry cost against how
@@ -496,7 +499,8 @@ def pause_agents(
         if driver is not None:
             pause_owner.refresh_driver(holder, at, driver=driver)
     else:
-        holder, at = f"local-pause:{machine_name()}:{os.getpid()}:{uuid4()}", datetime.now(UTC)
+        holder = f"{STOP_HOLDER_PREFIX}{machine_name()}:{os.getpid()}:{uuid4()}"
+        at = datetime.now(UTC)
     if (
         current.status != "paused"
         or current.maintenance is None

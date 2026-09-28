@@ -120,6 +120,28 @@ def test_an_unreadable_journal_keeps_the_exact_holder_resume_as_the_way_out(
     assert pause_owner.read().status == "resumed"
 
 
+def test_an_unreadable_journal_never_resumes_a_cutover_holder(
+    make_legacy: Make, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Only a created cutover hold is named `cutover:<id>`, and no later hold
+    takes that prefix: damage to the journal re-opens no exact-holder resume
+    that would skip the go/no-go step's checks."""
+    legacy, holder, at = _adopted(make_legacy, monkeypatch)
+    assert holder.startswith("cutover:")
+    _ready(holder, at)
+    journal = legacy.home / "cutover-rollback" / "adopt-home.json"
+    journal.write_text(journal.read_text()[:40])
+    wake = _release_seams(monkeypatch, frozenset({"gateway", "agent-runner"}))
+
+    with pytest.raises(RuntimeError, match="unreadable adoption journal") as refused:
+        maintenance_command.run(_resume_args(holder, at))
+
+    assert f"cutover_adopt_home.py --home {legacy.home} --resume" in str(refused.value)
+    wake.assert_not_called()
+    assert maintenance.business_paused()
+    assert pause_owner.read().matches(holder, at)
+
+
 def _release(legacy: LegacyHome) -> int:
     return adopt.main(["--home", str(legacy.home), "--resume"], checkout=legacy.checkout)
 
