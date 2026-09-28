@@ -105,8 +105,8 @@ request builder runs in the admitted image until FC-7b.
 
 Ruled on 2026-09-28
 ([decision](../../decisions/2026-09-28-fleet-coordinator-ruled-details.md)):
-`stopping` is the plan's `closing`; `starting` + `observing` its
-`starting_gateway` — the code's names win. Units' barrier deadlines are
+the phases keep the code's names: `stopping` closes the writers, and
+`starting` + `observing` bring the gateway unit up. Units' barrier deadlines are
 journaled in their instruction, and a continuation keeps the original
 deadline rather than recomputing one, adding only a 30 s re-answer window. An
 abort at `prepared` completes as `aborted` rather than refusing.
