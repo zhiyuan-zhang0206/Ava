@@ -96,7 +96,7 @@ structured metadata.
 - `query_events()` / `count_events()` / `attribute_aggregate()` /
   `count_event_classes()` — called by `gateway/routers/agent_events.py`,
   `gateway/routers/cluster.py`, `gateway/routers/events.py`,
-  `gateway/routers/run_timeline.py`, `gateway/routers/agent_inspect.py`,
+  `gateway/routers/run_timeline.py`, `gateway/inspect/router.py`,
   and `gateway/routers/status.py` (`/api/stats/dashboard`).
 
 ## Notes

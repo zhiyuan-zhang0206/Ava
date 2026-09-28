@@ -20,8 +20,8 @@ from typing import Annotated, Literal, cast
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
 
+from gateway._backend_failure import raise_backend_unavailable
 from gateway.routers import _run_timeline_events
-from gateway.routers._backend_failure import raise_backend_unavailable
 from gateway.routers._eval_guard import deny_isolated_result_read
 from gateway.routers.run_timeline_strip import router as strip_router
 from gateway.routers.run_timeline_strip import strip_for_window_or_none

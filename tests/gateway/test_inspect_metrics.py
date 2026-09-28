@@ -9,7 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from gateway.app import app
-from gateway.routers import _inspect_metrics
+from gateway.inspect import _metrics
 from shared.metrics.observed_metrics import MetricObservation, write_observations
 
 
@@ -30,10 +30,10 @@ def _read(
     end: datetime,
     *,
     collection: datetime | None = None,
-) -> _inspect_metrics.MetricsSnapshot:
+) -> _metrics.MetricsSnapshot:
     born = conn.execute("SELECT spawned_at FROM agents_meta WHERE id=%s", (agent_id,)).fetchone()
     assert born is not None
-    return _inspect_metrics._read_snapshot(
+    return _metrics._read_snapshot(
         conn, agent_id, start, end, born[0], collection or start - timedelta(seconds=1)
     )
 
@@ -268,7 +268,7 @@ def test_statistics_http_does_not_read_logs_or_current_state(
     db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from gateway import loki_events
-    from gateway.routers import agent_inspect
+    from gateway.inspect import router as inspect_router
 
     now = datetime.now(UTC)
     aid = _agent(db_conn, now)
@@ -279,7 +279,7 @@ def test_statistics_http_does_not_read_logs_or_current_state(
 
     for name in ("query_events", "query_projected_lines", "attribute_aggregate"):
         monkeypatch.setattr(loki_events, name, forbidden)
-    monkeypatch.setattr(agent_inspect, "db_rows_blocking", forbidden)
+    monkeypatch.setattr(inspect_router, "db_rows_blocking", forbidden)
     with TestClient(app) as client:
         response = client.get(f"/api/agents/{aid}/inspect/statistics")
     assert response.status_code == 200, response.text
@@ -301,7 +301,7 @@ def test_statistics_read_invokes_the_coverage_note(
         assert spawned_at is not None
         seen.append(agent_id)
 
-    monkeypatch.setattr(_inspect_metrics, "note_inspect_metrics_coverage", _record)
+    monkeypatch.setattr(_metrics, "note_inspect_metrics_coverage", _record)
     with TestClient(app) as client:
         response = client.get(f"/api/agents/{aid}/inspect/statistics")
     assert response.status_code == 200, response.text

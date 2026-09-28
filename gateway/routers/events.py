@@ -38,7 +38,7 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from gateway import loki_events, loki_query_budget
-from gateway.routers._backend_failure import raise_backend_unavailable
+from gateway._backend_failure import raise_backend_unavailable
 from gateway.routers._eval_guard import deny_isolated_result_read
 from gateway.schemas import EventRow, EventsMeta, EventsResponse
 from shared.config import settings

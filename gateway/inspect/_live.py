@@ -87,7 +87,7 @@ def notice_blocking(pool: ConnectionPool[Any], agent_id: int) -> OpenNotice | No
     """Read the agent's single unexpired open notice, if one exists.
 
     The full row, including `task_id` — the inspector widget resolver
-    (`gateway/routers/_plugin_inspector.py`) reads the same notice to decide
+    (`gateway/inspect/_plugin_widgets.py`) reads the same notice to decide
     whether the agent's task button has a target."""
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(

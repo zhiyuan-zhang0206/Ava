@@ -204,13 +204,17 @@ class SourceGraph:
         return annotations
 
     def route_classes(self):
-        for path in (self.root / "gateway/routers").rglob("*.py"):
-            module = ".".join(path.relative_to(self.root).with_suffix("").parts)
-            for func in self.nodes(module):
-                if not isinstance(func, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                    continue
-                for annotation in self.route_annotations(func):
-                    self.expression(module, annotation)
+        # `gateway/routers/` holds most FastAPI routers; `gateway/inspect/`
+        # is the Inspector's own functional package (router.py mounted the
+        # same way — see gateway/app.py) and carries its own route file too.
+        for routers_dir in ("gateway/routers", "gateway/inspect"):
+            for path in (self.root / routers_dir).rglob("*.py"):
+                module = ".".join(path.relative_to(self.root).with_suffix("").parts)
+                for func in self.nodes(module):
+                    if not isinstance(func, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                        continue
+                    for annotation in self.route_annotations(func):
+                        self.expression(module, annotation)
         return self.classes
 
     def schema_sources(self, components, generated):

@@ -4,7 +4,7 @@ The registration half of the inspector-widget surface (design: task #2909).
 A plugin declares what the panel shows for **every agent** from its own Python
 half, at import time, exactly like ``shared/plugin_metrics.py``: the gateway
 imports each enabled plugin's ``inspector.py`` under its ``PluginContext``
-(``gateway/routers/_plugin_inspector.py``) and serves the resolved widgets per
+(``gateway/inspect/_plugin_widgets.py``) and serves the resolved widgets per
 agent from ``GET /api/agents/{id}/inspect/widgets``.
 
 **The console never executes plugin code or markup.** A widget is closed-set
@@ -125,7 +125,7 @@ def clear_registry() -> None:
 def drop_plugin_inspect_widgets(plugin: str) -> list[str]:
     """Drop every widget registered by ``plugin``; return the dropped ids.
 
-    The gateway's inspector loader (`gateway/routers/_plugin_inspector.py`)
+    The gateway's inspector loader (`gateway/inspect/_plugin_widgets.py`)
     calls this after a failed ``inspector.py`` import: registration is not
     transactional, so without the cleanup a module that raised mid-way would
     leave its partial entries registered while every retry of the fixed file
