@@ -53,7 +53,7 @@ def build(ctx: BuildContext) -> BaseChatModel:
     """mimo-* branch: ReasoningContentChatModel (OpenAI-compatible).
     Auth uses the `api-key` header; deep thinking on/off rides top-level
     `thinking` in the POST body via `mimo_extra_body`."""
-    from shared.lm.reasoning_compat import ReasoningContentChatModel
+    from shared.lm.compat.openai_reasoning import ReasoningContentChatModel
 
     # Xiaomi MiMo API is OpenAI-compatible (https://api.xiaomimimo.com/v1).
     # Auth uses the `api-key` header (not the standard `Authorization: Bearer`).

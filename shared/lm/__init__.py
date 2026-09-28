@@ -11,7 +11,7 @@ plugins: `shared/lm/model-providers-as-plugins.md`.
 - `provider_api` — the provider-plugin contract (`ProviderBinding`,
                 `BuildContext`, `register`) + the plugin-side registration
                 state the factory dispatches through.
-- `_plugin_providers` — the shared-layer loader importing every enabled
+- `plugin_providers` — the shared-layer loader importing every enabled
                 plugin's `provider.py` once per process.
 - `pricing`   — per-model rate table + `tally_tokens` / `cost_usd`.
 - `billing`   — one trace-safe `ava.billing.*` span per completed provider call.

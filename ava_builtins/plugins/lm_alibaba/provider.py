@@ -56,7 +56,7 @@ def build(ctx: BuildContext) -> BaseChatModel:
     """qwen* branch: ReasoningContentChatModel (OpenAI-compatible).
     Thinking on/off rides top-level `enable_thinking` via extra_body; there is
     no graded effort field on this endpoint (`qwen_extra_body`)."""
-    from shared.lm.reasoning_compat import ReasoningContentChatModel
+    from shared.lm.compat.openai_reasoning import ReasoningContentChatModel
 
     # Alibaba Cloud Model Studio (DashScope) serves Qwen on an OpenAI-compatible
     # endpoint with standard `Authorization: Bearer` auth. The host is CONFIG,

@@ -51,7 +51,7 @@ def build(ctx: BuildContext) -> BaseChatModel:
     `output_config.effort` via extra_body; `none` maps onto thinking
     disabled (the endpoint's effort vocabulary has no off level).
     """
-    from shared.lm.anthropic_compat import ThinkingTokensChatAnthropic
+    from shared.lm.compat.anthropic_thinking import ThinkingTokensChatAnthropic
 
     # Use DeepSeek's anthropic-compatible endpoint via ChatAnthropic client.
     # Not langchain-deepseek (1.0.1 reasoning_content roundtrip bug).

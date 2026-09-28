@@ -35,7 +35,7 @@ def build(ctx: BuildContext) -> BaseChatModel:
     their endpoint rejects thinking.type=disabled with a 400 (error code
     1210), so sending the body would fail the call rather than honor the
     intent."""
-    from shared.lm.reasoning_compat import ReasoningContentChatModel
+    from shared.lm.compat.openai_reasoning import ReasoningContentChatModel
 
     # Zhipu GLM API is OpenAI-compatible (https://open.bigmodel.cn/api/paas/v4),
     # standard `Authorization: Bearer` auth. GLM 5.2 streams thinking in the

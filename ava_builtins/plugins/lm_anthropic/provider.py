@@ -87,7 +87,7 @@ def build(ctx: BuildContext) -> BaseChatModel:
     wire returns thinking text the timeline can render. Reasoning effort
     rides the `effort` field, gated per model.
     """
-    from shared.lm.anthropic_compat import ThinkingTokensChatAnthropic
+    from shared.lm.compat.anthropic_thinking import ThinkingTokensChatAnthropic
 
     # Fail fast on missing key — the same posture as every other provider
     # branch. Without it, ChatAnthropic reads ANTHROPIC_API_KEY from env
