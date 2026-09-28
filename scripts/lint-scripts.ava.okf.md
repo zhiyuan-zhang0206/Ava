@@ -23,6 +23,7 @@ Code and document guards, mostly invoked by `.pre-commit-config.yaml` and CI:
 - `lint_clock_lattice.py` — lattice-vocabulary timing constants (STALL / GRACE / REAP / BUDGET / WEDGED / NO_PROGRESS / LOCK_TTL / UPDATER_LEASE / SETTLE_TTL / LAUNCH_CONFIRM / LEASE_TTL / LEASE_RENEW / SCAN_INTERVAL) may only be defined in the clock-lattice family modules (`shared/timing.py` / `boot_timing.py` / `deploy_timing.py` / `stop_timing.py` / `schedule_timing.py` / `cluster_lock.py` / `host_deploy_state.py`), as aliases of a registered clock, or with an explicit stated exemption — a bare `_SOME_REAP_GRACE_S` outside the lattice is the 2026-07-30 spawn incident's seedling; the lattice topology itself lives in `shared/timing.py`
 - `lint_time_bomb.py` — tests may not exactly assert a value derived from a repo fixed-instant constant (`datetime(2026, …)`) when the derivation can reach the real clock (unpinned `now=`/`at=`, or an opaque `client.get(...)`); pin the clock, use a tolerance, or opt out with `# time-bomb-ok:` — the 2026-08-30 pair of deterministic-red long-window tests (agent-inspect, events-rollup). Source half: a function accepting a clock parameter must thread it into fixed-instant window boundaries (the 2026-08-30 rollup bomb: `compute_rollup(now_utc=...)` reaching `split_index_label_window` without `now=`; that seam has since been removed). Fixture half: a fixed calendar literal (`"2026-09-06"`, `date(2026, 6, 9)`, `datetime(2026, 7, 22, 18, tzinfo=UTC)`) bound to a window-shaped name (`day`, `date`, `since`, `until`, `window_start`, `window_end`) as a dict value, keyword argument, or plain assignment must derive from the clock or carry the marker — the 2026-09-13 queue-level red
 - `lint_pool_keepalives.py` — every psycopg pool must carry `PG_KEEPALIVE_KWARGS` (AST-based, so it sees through `AsyncConnectionPool[T](...)` subscripts and `LoggingConnectionPool` subclasses). Sync pools get it by calling `shared.db.pool()`; the async pools that have no factory unpack the constant. Pool connections are long-lived, so a missing keepalive is invisible until a woken-from-sleep borrow stalls minutes on the OS TCP-retransmit timeout
+- [[scripts/lint/lint.ava.okf.md|scripts/lint/]] — `lint_logger_add_diagnose.py` (logger.add diagnose=False) and `lint_async_no_sync_blocking.py` overviews
 - `lint_fixture_scope.py` — a pytest fixture may not mutate a process global at a scope that outlives its blast radius. Two rules, both AST: (1) `scope="session"` outside the root `tests/conftest.py` plus any write to `os.environ` / a `settings` field / a module global — its teardown fires at end-of-session, not on leaving the fixture's own directory, so every test collected after that directory runs with the mutated value (this is how `tests/e2e/`'s env layering disarmed `tests/test_home_isolation.py` on `main` while CI stayed green); (2) `scope="package"` in a directory with no `__init__.py`, where `_pytest.fixtures.get_scope_package` finds no `Package` node and silently returns the SESSION node — the keyword reads correctly and does nothing. `tests/conftest.py` is the only exemption (its session scope IS its blast radius); a session fixture that owns only an expensive resource and hands it back through the return value is not flagged
 - `lint_agent_docstrings.py`, `lint_agents_md_size.py`, `lint_doc_roster.py`, `lint_doc_symbols.py` (`ava.*` refs), `lint_doc_anchors.py` (code anchors, resolved against the AST), `lint_skill_descriptions.py`, `lint_skill_md_size.py` — document / SDK / skill guards
 - `lint_note_tags.py` — bidirectional NoteTag / timeline-marker contract: every backend tag has a frontend dispatch branch and every lifecycle, memory, or note dispatch member is a live backend tag
@@ -33,28 +34,25 @@ Code and document guards, mostly invoked by `.pre-commit-config.yaml` and CI:
 ## CLI contract (explicit targets)
 
 The `lint_*.py` gates that take explicit path arguments share one contract — a
-typo'd target must never pass as a silent empty scan, and an out-of-repo target
-must scan rather than crash:
+typo'd target must never scan silently, and an out-of-repo target scans rather
+than crashes:
 
-- **No arguments** — scan the script's default scope (its `_SCAN_DIRS`, the
-  git-tracked file list, ...).
-- **Explicit arguments must resolve to an existing path.** Any argument that
-  does not is a hard error: `error: target path(s) not found: <argument(s)>` on
-  stderr, exit 1. Resolution is per-script: absolute paths are used as-is; a
-  relative path is resolved against the repo root first with a caller-cwd
-  fallback (`lint_no_cjk` / `lint_no_tailnet`), against the repo root only
-  (`lint_time_bomb`), or against the caller's cwd (the other scripts; pre-commit
-  passes absolute paths).
-- **Out-of-repo targets are scanned.** An existing target outside the repository
-  is scanned under its absolute path. Scope-anchored scripts
-  (`lint_code_structure` / `lint_fixture_scope` / `lint_no_plugin_wrap`) keep
-  their own scope filter: a target or member outside it is skipped silently
-  (rc 0). Directory targets enumerate their members
-  (`lint_turn_scoped_config` takes `.py` files only: a directory argument scans
-  nothing); an unreadable member (a dangling `*.py` symlink, non-UTF-8 content)
-  is skipped like any unreadable file. One index caveat: `lint_time_bomb`
-  resolves callees through its repo-scoped index, so an out-of-repo source
-  file's source half silently passes (rc 0) — only its test half, which reads
-  the target directly, applies.
+- **No arguments** — scan the default scope (`_SCAN_DIRS`, the git-tracked
+  file list, ...).
+- **Explicit arguments must resolve.** A missing one is a hard error:
+  `error: target path(s) not found: <argument(s)>` on stderr, exit 1.
+  Resolution is per-script: absolute paths are used as-is; a relative path
+  resolves against the repo root with a caller-cwd fallback (`lint_no_cjk` /
+  `lint_no_tailnet`), against the repo root only (`lint_time_bomb`), or
+  against the caller's cwd (the rest; pre-commit passes absolute paths).
+- **Out-of-repo targets scan under their absolute path.** Scope-anchored
+  scripts (`lint_code_structure` / `lint_fixture_scope` / `lint_no_plugin_wrap`)
+  keep their own filter: a target outside it is skipped silently (rc 0).
+  Directory targets enumerate members (`lint_turn_scoped_config` takes `.py`
+  files only — a directory argument scans nothing); an unreadable member (a
+  dangling `*.py` symlink, non-UTF-8 content) is skipped like any unreadable
+  file. `lint_time_bomb` resolves callees through its repo-scoped index, so an
+  out-of-repo source file's source half silently passes (rc 0) — only its
+  test half, which reads the target directly, applies.
 
 Parent: [[scripts/scripts.ava.okf.md|scripts]].
