@@ -101,7 +101,11 @@ kept helper excepted), a pidfile naming one, a bound data-plane port, a destroy
 intent, a start intent this adoption did not write, a pause that is not a
 completed stop's maintenance hold, crontab lines nobody can attribute, an
 unreadable crontab, a missing or unnormalized `AVA_SERVICE_PATH` or one that
-differs from the declared value, a gateway without a registry record or data
+differs from the declared value, a home without a persisted machine name
+(neither `machine_name` nor `AVA_MACHINE_NAME`: write the unit's
+`machine_units` name into `$AVA_HOME/machine_name` first; the fleet plan
+expects this on company-air and company-mini, and `--attest` needs the same
+name), a gateway without a registry record or data
 plane URLs, a remote unit without a gateway URL, `.env` and record port
 conflicts, disagreeing capability declarations, a new port that collides, and
 an archive path that is already taken.

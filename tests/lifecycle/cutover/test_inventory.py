@@ -267,3 +267,20 @@ def test_non_canonical_home_is_refused(tmp_path: Path, capsys: pytest.CaptureFix
     link.symlink_to(real)
     assert inventory.main(["--home", str(link)]) == 1
     assert "canonical" in capsys.readouterr().err
+
+
+def test_attesting_without_a_persisted_machine_name_names_the_fix(
+    make_legacy: Make, capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    legacy = make_legacy()
+    (legacy.home / "machine_name").unlink()
+    rows = tmp_path / "rows.json"
+    rows.write_text("[]")
+    assert (
+        inventory.main(
+            ["--home", str(legacy.home), "--registry", str(legacy.registry), "--attest", str(rows)],
+            host=legacy.scheduler.host(),
+        )
+        == 1
+    )
+    assert "no persisted machine name" in capsys.readouterr().err

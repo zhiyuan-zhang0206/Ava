@@ -33,6 +33,7 @@ from typing import Any
 
 from scripts.cutover_inventory import (
     DISABLED_SERVICES,
+    NO_MACHINE_NAME,
     PAUSE_OWNER,
     SELECTION,
     Facts,
@@ -240,6 +241,8 @@ def _service_path_refusals(facts: Facts, inputs: Inputs) -> list[str]:
 def _mode_refusals(facts: Facts) -> list[str]:
     if not facts.roles:
         return []
+    if not facts.stored.get("AVA_MACHINE_NAME"):
+        return [NO_MACHINE_NAME]
     if facts.gateway:
         reasons = [] if facts.record else ["gateway home has no registry record"]
         missing = [key for key in ("AVA_DB_URL", "AVA_REDIS_URL") if not facts.env.get(key)]

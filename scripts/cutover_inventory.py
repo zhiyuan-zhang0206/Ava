@@ -127,6 +127,13 @@ class RefusedError(RuntimeError):
     """The home is not in a state this script can attribute or convert."""
 
 
+# Identity is adopted, never minted; the attestation is keyed by this name too.
+NO_MACHINE_NAME = (
+    "no persisted machine name: write this unit's name (its `machine_units` row on the "
+    "gateway) to $AVA_HOME/machine_name, or declare AVA_MACHINE_NAME in its .env, first"
+)
+
+
 @dataclass(frozen=True)
 class Inputs:
     """Operator-supplied adoption inputs; nothing here is inferred from the caller."""
@@ -705,6 +712,16 @@ def load_attestation(path: Path) -> tuple[Attestation, bytes]:
         raise RefusedError(f"{path} is not a closure attestation: {exc}") from exc
 
 
+def persisted_machine(home: Path) -> str:
+    """The machine name the home persisted (`.env` or `machine_name`); never minted."""
+    from cli.start_intent import _stored
+
+    machine = _stored(home).get("AVA_MACHINE_NAME")
+    if not machine:
+        raise RefusedError(NO_MACHINE_NAME)
+    return machine
+
+
 def own_checkout() -> Path:
     return Path(__file__).resolve().parents[1]
 
@@ -723,10 +740,8 @@ def main(argv: list[str] | None = None, *, host: Host | None = None) -> int:
         registry = registry_path(home, args.registry)
         facts = gather(home, registry, own_checkout(), host or Host.current(), inputs)
         if args.attest:
-            from cli.start_intent import _stored
-
             rows = json.loads(Path(args.attest).read_text())
-            report = attest(rows, _stored(home)["AVA_MACHINE_NAME"], facts)
+            report = attest(rows, persisted_machine(home), facts)
             print(json.dumps(report, indent=2, sort_keys=True))
             return 0 if report["all_absent"] and report["census_empty"] else 2
         report = verdict(facts, inputs)

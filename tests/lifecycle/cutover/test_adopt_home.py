@@ -438,6 +438,12 @@ _REFUSALS: dict[str, tuple[tuple[str, ...], Callable[[LegacyHome], object], str]
         "no gateway URL",
     ),
     "gateway-without-record": (("gateway", "agent-runner"), _drop_record, "no registry record"),
+    # Plan 1.2: company-air and company-mini carry no machine_name file.
+    "no-machine-name": (
+        ("agent-runner",),
+        lambda h: (h.home / "machine_name").unlink(),
+        "no persisted machine name",
+    ),
     "data-plane-bound": (
         ("gateway", "agent-runner"),
         lambda h: _listen(h.ports["redis"]),
