@@ -337,17 +337,13 @@ def kill_all() -> int:
 
 
 def renew(id: int, *, ttl: float) -> datetime:
-    """Extend a live session's TTL deadline by `ttl` seconds.
+    """Move a live session's TTL deadline to now + `ttl` seconds.
 
-    The deadline moves to now + ttl — never stacked on the current deadline.
-    `ttl` is required, capped at 24h per call; renewal has no lifetime cap.
-    Only this agent's live, not-yet-expired sessions can renew — a watcher
-    session renews exactly the same way (it is just a shell session). This
-    only moves the session's own reclamation deadline; it does not touch the
-    generated script's own end (a cron's `_END`, a launch's watchdog timer,
-    an at's fire moment) — renewing cannot extend a schedule past what the
-    script itself will stop at, and because a call is capped at 24h it can
-    actually pull a standing cron's reclaim earlier than its declared end.
+    Never stacked on the current deadline; `ttl` is capped at 24h per call and
+    renewal has no lifetime cap. Only your own live, unexpired sessions renew —
+    watcher sessions included. Only the reclamation deadline moves, never the
+    script's own end (a cron's `_END`, a launch's watchdog, an at's fire time),
+    so a 24h-capped renewal can pull a standing cron's reclaim earlier.
 
     Returns:
         The new deadline (DB clock).
