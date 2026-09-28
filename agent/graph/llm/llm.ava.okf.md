@@ -1,7 +1,7 @@
 ---
 type: doc
 title: LLM Interface
-description: Ava agent's LLM invocation layer — tool schema definition (`agent/llm.py`) and LLM streaming reasoning node (`agent/graph/llm/node.py`). single-tool architecture, streaming-first with one non-streaming fallback.
+description: Ava agent's LLM invocation layer — tool schema definition (`agent/llm/__init__.py`) and LLM streaming reasoning node (`agent/graph/llm/node.py`). single-tool architecture, streaming-first with one non-streaming fallback.
 tags: []
 ---
 
@@ -9,11 +9,11 @@ tags: []
 
 ## What it is
 
-Ava agent's LLM invocation layer — containing tool schema definition (`agent/llm.py`) and the LLM streaming reasoning node (`agent/graph/llm/node.py`). Follows a **single-tool** architecture: only one `execute_code` tool, all capabilities accessible via Python namespace.
+Ava agent's LLM invocation layer — containing tool schema definition (`agent/llm/__init__.py`) and the LLM streaming reasoning node (`agent/graph/llm/node.py`). Follows a **single-tool** architecture: only one `execute_code` tool, all capabilities accessible via Python namespace.
 
 ## Core responsibilities
 
-- **Tool Schema** (`agent/llm.py`): `@tool("execute_code")` defines `execute_code(code: str) -> str`, consumed by `bind_tools` via its name + docstring + arg types. Docstring explicitly states that `ava` is no longer auto-imported — agent must explicitly `import ava`
+- **Tool Schema** (`agent/llm/__init__.py`): `@tool("execute_code")` defines `execute_code(code: str) -> str`, consumed by `bind_tools` via its name + docstring + arg types. Docstring explicitly states that `ava` is no longer auto-imported — agent must explicitly `import ava`
 - **LLM Node** (`agent/graph/llm/node.py`): streaming LLM reasoning
   - Normal (has tool_call): `Command(goto="before_exec")`
   - No tool_call stop-turn / cancel: `Command(update={halted: True}, goto="after_exec")` (returns to claim to wait for next inbound, process does not exit)
@@ -35,7 +35,7 @@ Ava agent's LLM invocation layer — containing tool schema definition (`agent/l
 
 ## Entry points
 
-- `agent/llm.py:execute_code` — tool schema definition
+- `agent/llm/__init__.py:execute_code` — tool schema definition
 - `agent/graph/llm/node.py:llm_node()` — LLM node (`_llm_node_impl` is the implementation body)
 - `agent/graph/llm/_stream.py:_consume_llm()` — unified streaming/non-streaming entry
 - `shared/lm/errors.py:classify_error()` — cross-provider classification of provider exceptions (transient/permanent/unknown)

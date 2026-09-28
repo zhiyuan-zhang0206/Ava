@@ -9,7 +9,7 @@
 - `reconcile_claimed_inbounds_at_startup` — the inbound reconcile: finalize
   any 'claimed' inbound rows the agent's last settled runtime step left
   behind (cold admission, database recovery, or a hosted abort settlement)
-- `_notify_desktop_permissions_at_startup` — surface broken Screen Recording
+- `notify_desktop_permissions_at_startup` — surface broken Screen Recording
   or Accessibility permission (detected at converge) to the user, exactly once
 - `reconcile_open_pages` — probe every open page's server and restore it
   (re-serve dead serve_dir pages, close dead no-dir pages); runs at boot,
@@ -19,6 +19,9 @@
   per-agent interval throttle
 - `_close_dead_show_pages` — close dead no-serve_dir rows in one
   transaction with a re-serve notice to the agent (deduped per 6h)
+
+The dead-page recovery writes and notifications live in the package-private
+`_page_reconcile.py`; the page restore contract is `page-restore.ava.okf.md`.
 """
 
 from __future__ import annotations
@@ -39,22 +42,22 @@ from langgraph.constants import PUSH
 from langgraph.graph.state import CompiledStateGraph
 from psycopg_pool import AsyncConnectionPool
 
-from agent._page_reconcile import (
+from agent.hooks.repair import dangling_tool_pairing_repairs
+from agent.startup._page_reconcile import (
     _PAGE_RECOVERY_MIN_INTERVAL_S as _PAGE_RECOVERY_MIN_INTERVAL_S,
 )
-from agent._page_reconcile import (
+from agent.startup._page_reconcile import (
     _PAGE_RECOVERY_NOTICE_PREFIX as _PAGE_RECOVERY_NOTICE_PREFIX,
 )
-from agent._page_reconcile import (
+from agent.startup._page_reconcile import (
     _close_dead_show_pages,
 )
-from agent._page_reconcile import (
+from agent.startup._page_reconcile import (
     _page_recovery_notice as _page_recovery_notice,
 )
-from agent._page_reconcile import (
+from agent.startup._page_reconcile import (
     _recent_page_recovery_notice as _recent_page_recovery_notice,
 )
-from agent.hooks.repair import dangling_tool_pairing_repairs
 from shared.log import logger
 
 
@@ -451,7 +454,7 @@ async def repair_dangling_tool_use_at_startup(
     )
 
 
-async def _notify_desktop_permissions_at_startup() -> None:
+async def notify_desktop_permissions_at_startup() -> None:
     """Surface broken helper desktop permissions via ava.ui.notify, once.
 
     The converge preflight writes independent Screen Recording and

@@ -476,7 +476,7 @@ def _fallback_human_item(msg_idx: int, content: str, created_at: str) -> Timelin
     """Catch-all for HumanMessages no explicit branch above claims.
 
     All current framework-injected HumanMessages are tagged with ava_msg_type
-    via agent/messages.py helpers and take a branch above; anything landing
+    via agent/messages/__init__.py helpers and take a branch above; anything landing
     here renders as a system_marker the frontend flags red (UnknownMarkerChip)
     — fail-loud, don't silently mis-render. Retired marker types also land
     here: e.g. the old LLM-cancel marker (cancels no longer record anything),

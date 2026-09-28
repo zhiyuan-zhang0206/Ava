@@ -18,7 +18,7 @@ config and plugin config are context-bound before `boot_agent_scope()` builds
 the model and restores state. The effective order is explicit overlay, then
 birth config, then current cluster config.
 
-`agent/startup.py` provides the shared recovery and saver operations:
+`agent/startup/__init__.py` provides the shared recovery and saver operations:
 
 - Reconcile claimed inbounds against the actual checkpoint.
 - Repair crash-left unpaired tool uses/results.
@@ -37,4 +37,4 @@ only the accepted control path can complete its own drain.
 - [[admission.ava.okf.md]] — runtime ownership and admission
 - [[../loop.ava.okf.md]] — host turn loop
 - [[../state.ava.okf.md]] — checkpoint persistence
-- [[../page-restore.ava.okf.md]] — page reconciliation
+- [[page-restore.ava.okf.md]] — page reconciliation

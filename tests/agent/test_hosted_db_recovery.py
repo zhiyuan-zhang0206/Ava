@@ -21,7 +21,7 @@ from psycopg_pool import AsyncConnectionPool, PoolTimeout
 from agent import state as states
 from agent.db import claim_inbound_batch
 from agent.hosted_ownership import admit_hosted_runtime
-from agent.inbound_ownership import RuntimeOwnershipLostError
+from agent.ownership.inbound import RuntimeOwnershipLostError
 from agent.startup import wrap_saver_writes_with_nstep_interval
 from ops.agent_spawn import create_agent_row
 from services.agent_host import db_recovery

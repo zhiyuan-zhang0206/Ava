@@ -32,7 +32,7 @@ from psycopg_pool import AsyncConnectionPool
 
 from agent import state as states
 from agent.db import claim_inbound_batch
-from agent.inbound_ownership import RuntimeOwnershipLostError
+from agent.ownership.inbound import RuntimeOwnershipLostError
 from agent.startup import reconcile_claimed_inbounds_at_startup
 from services.agent_host import settlement as settlement_mod
 from shared.agents.history.delta_read_compat import wrap_saver_reads_with_delta_reconstruction

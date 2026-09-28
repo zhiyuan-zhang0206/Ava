@@ -22,7 +22,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
 from pydantic import BaseModel, Field
 
-from agent.messages_guard import guarded_add_messages, guarded_delta_reducer
+from agent.messages.guard import guarded_add_messages, guarded_delta_reducer
 from agent.state import (
     _MESSAGES_DELTA_CHANNEL,
     _MESSAGES_DELTA_SNAPSHOT_FREQUENCY,

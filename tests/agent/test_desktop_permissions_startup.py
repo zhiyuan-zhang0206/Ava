@@ -1,4 +1,4 @@
-"""Tests for agent.startup._notify_desktop_permissions_at_startup.
+"""Tests for agent.startup.notify_desktop_permissions_at_startup.
 
 Screen Recording and Accessibility keep separate status files from converge to
 startup. This test module pins their shared one-notice delivery and per-file
@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from agent.startup import _notify_desktop_permissions_at_startup
+from agent.startup import notify_desktop_permissions_at_startup
 from shared.host.converge.accessibility import (
     AccessibilityState,
     AccessibilityStatus,
@@ -79,7 +79,7 @@ class TestNotifyDesktopPermissionsAtStartup:
     ):
         _patch_status_homes(monkeypatch, tmp_path)
 
-        await _notify_desktop_permissions_at_startup()
+        await notify_desktop_permissions_at_startup()
 
         assert fake_ui.calls == []
 
@@ -90,7 +90,7 @@ class TestNotifyDesktopPermissionsAtStartup:
         _patch_status_homes(monkeypatch, tmp_path)
         write_screen_capture_status(_SCREEN_FAULT)
 
-        await _notify_desktop_permissions_at_startup()
+        await notify_desktop_permissions_at_startup()
 
         assert fake_ui.calls == [
             {
@@ -109,7 +109,7 @@ class TestNotifyDesktopPermissionsAtStartup:
         _patch_status_homes(monkeypatch, tmp_path)
         write_accessibility_status(_ACCESSIBILITY_FAULT)
 
-        await _notify_desktop_permissions_at_startup()
+        await notify_desktop_permissions_at_startup()
 
         assert fake_ui.calls == [
             {
@@ -128,7 +128,7 @@ class TestNotifyDesktopPermissionsAtStartup:
         write_screen_capture_status(_SCREEN_FAULT)
         write_accessibility_status(_ACCESSIBILITY_FAULT)
 
-        await _notify_desktop_permissions_at_startup()
+        await notify_desktop_permissions_at_startup()
 
         assert fake_ui.calls == [
             {
@@ -159,7 +159,7 @@ class TestNotifyDesktopPermissionsAtStartup:
 
         monkeypatch.setattr(ava_module, "ui", FailingUI(), raising=False)
 
-        await _notify_desktop_permissions_at_startup()
+        await notify_desktop_permissions_at_startup()
 
         assert read_screen_capture_status() == _SCREEN_FAULT
         assert read_accessibility_status() == _ACCESSIBILITY_FAULT
@@ -177,7 +177,7 @@ class TestNotifyDesktopPermissionsAtStartup:
             screen_capture_status_file_path().with_suffix(".processing")
         )
 
-        await _notify_desktop_permissions_at_startup()
+        await notify_desktop_permissions_at_startup()
 
         assert fake_ui.calls == [
             {
@@ -197,7 +197,7 @@ class TestNotifyDesktopPermissionsAtStartup:
         write_screen_capture_status(ScreenCaptureStatus(state=ScreenCaptureState.AVAILABLE))
         write_accessibility_status(AccessibilityStatus(state=AccessibilityState.GRANTED))
 
-        await _notify_desktop_permissions_at_startup()
+        await notify_desktop_permissions_at_startup()
 
         assert fake_ui.calls == []
         assert read_screen_capture_status() is None

@@ -315,7 +315,7 @@ async def _handle_heartbeat(
     shell sessions, which are outside rollout service teardown. Probing on
     each heartbeat (default 5 min) remains the catch-all for server death:
     dead serve_dir pages are re-served and dead no-dir pages are closed.
-    The periodic page_reconcile_loop (agent/startup.py) covers busy agents
+    The periodic page_reconcile_loop (agent/startup/__init__.py) covers busy agents
     whose heartbeats never arrive; this pass keeps the idle-agent cadence.
     Best-effort; reconcile never raises.
 
@@ -484,7 +484,7 @@ def _fork_rebuild_prefix(state: _state.AgentState) -> list[BaseMessage]:
     notes are dropped.
 
     Mid-history `RemoveMessage(id=...)` deletion is forbidden by the
-    append-only ruling (task #1256, `agent/messages_guard.py`); the full wipe
+    append-only ruling (task #1256, `agent/messages/guard.py`); the full wipe
     is the one sanctioned deletion shape, and the guard's rebuild check only
     demands that survivors keep content + relative order — dropping the
     source notes and splicing the grafted own-copies afterwards satisfies it.

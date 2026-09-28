@@ -58,12 +58,12 @@ counts or write volume). The write switch runs in the next user-supervised windo
   allowlist (`agent/state.py`). In production, every blob row is `type='msgpack'`.
 - Durability: default `"async"` — one checkpoint row per super-step
   (node boundary); a turn spans several super-steps.
-- N-step wrapper `wrap_saver_writes_with_nstep_interval` (`agent/startup.py:212`,
+- N-step wrapper `wrap_saver_writes_with_nstep_interval` (`agent/startup/__init__.py:212`,
   interval = `AVA_CHECKPOINT_INTERVAL`, default 4):
   - retained steps (`step % 4 == 0`) and non-`loop`/`update` sources (input, fork) write;
     skipped steps write nothing.
   - On retained/flush writes it merges the checkpoint's full `channel_versions` into
-    `new_versions` (`_versions_with_current_blobs`, `agent/startup.py:189`). Because the
+    `new_versions` (`_versions_with_current_blobs`, `agent/startup/__init__.py:189`). Because the
     saver writes a blob for every channel listed there (values are present in
     `channel_values`), **each retained checkpoint persists the current full value of every
     channel whose version changed since the last write** — this fixed a dangling-reference bug but is exactly the full-rewrite
@@ -82,7 +82,7 @@ counts or write volume). The write switch runs in the next user-supervised windo
 ### 1.2 Measured per-checkpoint volumes (scratch Postgres, real saver + wrapper code)
 
 Harness: local scratch cluster, `AsyncPostgresSaver` + `build_checkpoint_serde()` +
-`wrap_saver_writes_with_nstep_interval` (imported from `agent/startup.py`), one message
+`wrap_saver_writes_with_nstep_interval` (imported from `agent/startup/__init__.py`), one message
 pair of known size appended per super-step (image case: one incompressible 25 MB payload).
 Byte counts are `octet_length` of inserted rows (raw; `pg_column_size` undercounts
 compressible content because TOAST pzips it).
@@ -370,7 +370,7 @@ throughout):
    `get_tuple`/`aget_tuple` (folded values injected); `shared/agents/history/checkpoint.py` readers
    (messages / count with reconstruct fallback / segment / full / by-trace);
    `ava/external_state.load_snapshot`; fork chain copy (`_copy_checkpoint_chain`, writes
-   chain included); `agent/startup.py` inbound reconciliation; `scripts/restore_drill.py`;
+   chain included); `agent/startup/__init__.py` inbound reconciliation; `scripts/restore_drill.py`;
    the self-evolution recorder. Vanilla data passes through unchanged — verified inert on
    real production read paths (production-clone subset, wrapped == native x5). Deployed to
    every machine 2026-09-13 (`30df11a83`).
@@ -469,7 +469,7 @@ re-evaluate the placement under the normal rule.
 
 - Scratch harness: local `initdb` cluster on port 55432 (never production), the real
   `AsyncPostgresSaver` + `build_checkpoint_serde()` + the real
-  `wrap_saver_writes_with_nstep_interval` imported from `agent/startup.py`; a minimal
+  `wrap_saver_writes_with_nstep_interval` imported from `agent/startup/__init__.py`; a minimal
   StateGraph with `DeltaChannel` for the delta runs. Scripts and raw per-call JSON live with
   the author (#6095), beside the pre-cutover drill suite (behavioral matrix, crash replay,
   production-clone subset + closure check) and its raw outputs; the numbers above are

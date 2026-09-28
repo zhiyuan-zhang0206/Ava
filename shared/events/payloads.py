@@ -61,7 +61,7 @@ LLM_ERROR_FAMILY = "LLM_ERROR"
 
 
 class LlmUsage(TypedDict):
-    """`llm_usage` payload — agent/observe.py:log_llm_usage.
+    """`llm_usage` payload — agent/llm/usage.py:log_llm_usage.
 
     ``cost_usd`` / ``price_miss`` / ``price_hit`` / ``price_out`` are the
     usage-time price snapshot (user principle: cost is billed incrementally

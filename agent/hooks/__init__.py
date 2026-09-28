@@ -32,6 +32,9 @@ Submodules:
 - `agent.hooks.repair` — dangling tool_use/tool_result pairing crash recovery: shared
   detection/rebuild helper + the built-in before_llm repair hook
   (`register_repair_hooks()`, called from `build_graph`).
+- `agent.hooks.history_dump` — the pre-compact JSONL dump of the full
+  conversation, written by every compaction path (the claim node's and
+  `agent.hooks.compact`'s) before the history is wiped.
 """
 
 from ._registry import (

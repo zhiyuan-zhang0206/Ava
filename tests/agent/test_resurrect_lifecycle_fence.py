@@ -19,7 +19,7 @@ from psycopg_pool import AsyncConnectionPool, ConnectionPool
 
 from agent.db import claim_inbound_batch
 from agent.hosted_ownership import admit_hosted_runtime, apply_hosted_lifecycle
-from agent.lifecycle_intent import accept_lifecycle_intent
+from agent.ownership.lifecycle_intent import accept_lifecycle_intent
 from ops.agent_wake import resurrect_agent
 from ops.ops_exit import _force_terminate_transaction
 from ops.resurrection_retry import ResurrectExitDeferredError

@@ -56,9 +56,9 @@ from agent.graph._attach_drain import build_attach_drain
 from agent.graph.node_log import flush_node_exit_aggregate, node_lifecycle
 from agent.impersonation import claim_gate
 from agent.impersonation_handoff import resume_note_pending
-from agent.inbound_ownership import RuntimeOwnershipLostError
 from agent.messages import has_conversation
 from agent.nodes import BEFORE_LLM, CLAIM, END
+from agent.ownership.inbound import RuntimeOwnershipLostError
 from ava.security import discard_inbound_findings
 from shared.context import AvaContext, agent_id_from_config
 

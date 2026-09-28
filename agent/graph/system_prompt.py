@@ -14,7 +14,7 @@ from collections.abc import Callable
 from types import ModuleType, SimpleNamespace
 from typing import Any
 
-from agent.history_dump import workspace_section_hint
+from agent.hooks.history_dump import workspace_section_hint
 from shared import plugin_activation, plugin_contributions
 from shared.config import settings
 from shared.config.turn_view import turn_settings

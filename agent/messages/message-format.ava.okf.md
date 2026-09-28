@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Message Format
-description: Message formats exchanged between agent, LLM, users, and other agents. `messages.py` defines inbound message construction; `_chat_inbound.py`
+description: Message formats exchanged between agent, LLM, users, and other agents. `agent/messages/` defines inbound message construction; `_chat_inbound.py`
 tags: []
 ---
 
@@ -9,7 +9,7 @@ tags: []
 
 ## What it is
 
-Message formats exchanged between agent, LLM, users, and other agents. `messages.py` defines construction of various messages; `_chat_inbound.py` assembles `kind='chat'` inbound rows into HumanMessage (including inline multimodal images).
+Message formats exchanged between agent, LLM, users, and other agents. `agent/messages/` defines construction of various messages; `_chat_inbound.py` assembles `kind='chat'` inbound rows into HumanMessage (including inline multimodal images).
 
 ## Message Types
 
@@ -45,8 +45,8 @@ Message formats exchanged between agent, LLM, users, and other agents. `messages
 - [[context-window.ava.okf.md]] — message history is the main consumer of the context window
 
 ## Entry Points
-- `agent/messages.py:inbound_message(*, content, source, inbound_id, created_at=, image_urls=)` — envelope-wrapped inbound message
-- `agent/messages.py:system_note_message(...)` — system notification (with `NoteTag`)
-- `agent/messages.py:exec_output_message(...)` — execution output
-- `agent/messages.py:attach_message(...)` — attached media for the next turn
+- `agent/messages/__init__.py:inbound_message(*, content, source, inbound_id, created_at=, image_urls=)` — envelope-wrapped inbound message
+- `agent/messages/__init__.py:system_note_message(...)` — system notification (with `NoteTag`)
+- `agent/messages/__init__.py:exec_output_message(...)` — execution output
+- `agent/messages/__init__.py:attach_message(...)` — attached media for the next turn
 - `agent/graph/_chat_inbound.py` — chat inbound → HumanMessage assembly (multimodal inline)

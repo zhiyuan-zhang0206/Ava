@@ -25,7 +25,7 @@ from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage
 
 from agent.graph._callbacks import RedisStreamHandler
 from agent.graph.llm._stream import _consume_stream_with_stall_timeout, _stream_with_cache_retry
-from agent.lm_cache import LlmInvocation
+from agent.llm.cache import LlmInvocation
 from ava_builtins.plugins.lm_google import gemini_cache
 from ava_builtins.plugins.lm_google.gemini_cache import CacheRef
 

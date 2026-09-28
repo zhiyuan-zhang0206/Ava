@@ -19,6 +19,10 @@ Convention for adding a new metadata type:
 Serialization: LangGraph PostgresSaver msgpack goes through standard
 langchain message classes, automatically entering SAFE_MSGPACK_TYPES
 allowlist — does not trigger deserialize warning.
+
+`agent.messages.guard` is the other half of the message vocabulary: how the
+stored message list may change (the append-only invariant the `messages`
+channel reducers enforce). This door does not import it.
 """
 
 from __future__ import annotations

@@ -35,6 +35,7 @@ Together with SDK wraps (the `ava.extend.wrap` registration primitive in `ava/sd
 - `agent/hooks/_registry.py:register_before_llm()` / `register_before_exec()` / `register_after_exec()` / `register_after_init()` — Accept `Hook` instances
 - `agent/hooks/_registry.py:make_hook_runner()` — Called at graph build time
 - `agent/hooks/__init__.py` — Public API re-exports (`Hook`, `HookName`, `HOOKS`, three `register_*`, `make_hook_runner`)
+- `agent/hooks/history_dump.py:dump_history()` — pre-compact JSONL dump of the full conversation, written by both compaction paths (`agent/graph/claim/_decide.py` and `agent/hooks/compact.py`) before the history is wiped
 
 ## Notes
 
