@@ -341,7 +341,7 @@ async def claim_inbound_batch(
                 "WHERE id=%s AND wake_suppressed_until IS NOT NULL",
                 (agent_id,),
             )
-    rows.sort(key=lambda r: r[6])  # created_at FIFO (index follows SELECT column count)
+    rows.sort(key=lambda r: (r[6], r[0]))  # created_at FIFO, id breaks timestamp ties
     return [ClaimedInbound.from_row(r) for r in rows]
 
 

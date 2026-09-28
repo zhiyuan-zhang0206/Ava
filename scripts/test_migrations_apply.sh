@@ -223,6 +223,14 @@ BEGIN
                      AND manifest_admission_closed_at IS NOT NULL) THEN
         RAISE EXCEPTION 'agent termination did not close the lease manifest admission';
     END IF;
+    IF (SELECT rejection_reason FROM agent_impersonations
+        WHERE id='00000000-0000-0000-0000-000000000007')
+        IS DISTINCT FROM 'terminated: agent was terminated'
+       OR (SELECT array_agg(payload->>'note_tag' ORDER BY created_at,id)
+           FROM inbound_messages WHERE agent_id=991007 AND kind='system_note')
+           IS DISTINCT FROM ARRAY['impersonation','lifecycle_terminate']::text[] THEN
+        RAISE EXCEPTION 'termination interruption notices missing or out of order';
+    END IF;
 END $$;
 
 -- Lifecycle status transitions preserve spawn lineage, even when the parent is
