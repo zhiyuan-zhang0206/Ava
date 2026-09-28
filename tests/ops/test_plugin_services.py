@@ -146,3 +146,61 @@ def test_broken_services_py_is_skipped_and_others_still_load(
     assert any(
         "brokenplugin" in r["message"] and "failed to load" in r["message"] for r in loguru_records
     )
+
+
+@pytest.mark.parametrize("prior", [False, True])
+def test_external_service_healthcheck_loads_without_agent_bootstrap(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, prior: bool
+) -> None:
+    """Discovery supplies the exact module identity used by the watchdog."""
+    import importlib
+    import sys
+    from types import ModuleType
+
+    name = "quota_service_probe"
+    dotted = f"plugins.{name}.services"
+    if prior:
+        monkeypatch.setitem(sys.modules, dotted, ModuleType(dotted))
+    else:
+        monkeypatch.delitem(sys.modules, dotted, raising=False)
+    plugin_dir = tmp_path / name
+    plugin_dir.mkdir()
+    (plugin_dir / "services.py").write_text(
+        "from __future__ import annotations\n"
+        "from dataclasses import dataclass\n"
+        "from ops.service_spec import ServiceSpec\n"
+        "@dataclass\n"
+        "class Sample:\n"
+        "    value: int = 1\n"
+        "def main():\n"
+        "    return Sample().value\n"
+        "def services():\n"
+        "    return (ServiceSpec(session='quota-probe', cmd='noop',\n"
+        "            capabilities=frozenset({'agent-runner'}), requires_db=True,\n"
+        "            healthcheck_module=__name__),)\n"
+    )
+    monkeypatch.setattr(pc, "installed_plugin_dirs", lambda: {name: plugin_dir})
+    declared = spec._plugin_services()
+    assert len(declared) == 1
+    assert declared[0].healthcheck_module == dotted
+    assert importlib.import_module(dotted).main() == 1
+
+
+@pytest.mark.parametrize("prior", [False, True])
+def test_failed_service_import_does_not_publish_partial_module(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, prior: bool
+) -> None:
+    import sys
+    from types import ModuleType
+
+    dotted = "plugins.quota_failed_probe.services"
+    previous = ModuleType(dotted) if prior else None
+    if previous is None:
+        monkeypatch.delitem(sys.modules, dotted, raising=False)
+    else:
+        monkeypatch.setitem(sys.modules, dotted, previous)
+    services_py = tmp_path / "services.py"
+    services_py.write_text("PARTIAL = True\nraise RuntimeError('broken collector')\n")
+    with pytest.raises(RuntimeError, match="broken collector"):
+        spec._load_plugin_module("quota_failed_probe", services_py)
+    assert sys.modules.get(dotted) is previous
