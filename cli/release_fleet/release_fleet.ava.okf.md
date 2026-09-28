@@ -80,7 +80,11 @@ sighting of each fact in the window (`first_sightings`,
 `FleetProgress.window_facts`) and judges it with every later sample: an
 agent affected mid-window keeps the release from known-good, errors spread
 across samples add up to the threshold, and a continuation keeps them. An
-error that appears and clears between two samples is not observed.
+error that appears and clears between two samples is not observed. A
+sighting adds a reason, never an observation of liveness. The journal keeps
+per-agent detail as ids (cohort, sightings, alerts) and one small affected
+entry whose unit the cohort names, so a 256 KiB journal still records a
+mass failure of about 4,000 cohort agents and its recovery.
 
 ## Alerts (`alerting.py`)
 

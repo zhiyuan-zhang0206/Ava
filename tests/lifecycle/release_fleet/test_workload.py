@@ -19,6 +19,7 @@ from cli.release_fleet.workload import (
     Evidence,
     UnitReport,
     Verdict,
+    WindowFact,
     first_sightings,
     judge_start,
     judge_watch,
@@ -423,12 +424,42 @@ def test_incoherent_verdicts_are_refused(fields: dict[str, object]) -> None:
 
 def test_a_window_journals_each_agents_first_sighting_of_each_fact_once() -> None:
     """A fact already sighted in the window adds nothing; a new fact of the
-    same agent does; a sighting from before the window is no longer known."""
+    same agent does; a sighting from before the window is no longer known.
+    One sample's sightings of one fact are one entry of agent ids."""
     error = _errors((1,), at(40))[0]
     quarantine = error.model_copy(update={"runtime_error": False, "quarantined": True})
     later = _errors((1, 2), at(70))
-    assert first_sightings((), (error,), since=RESUMED) == (error,)
-    assert first_sightings((error,), later, since=RESUMED) == (later[1],)
-    assert first_sightings((error,), (quarantine,), since=RESUMED) == (quarantine,)
-    assert first_sightings((error,), later, since=at(50)) == later
+    [seen] = first_sightings((), (error,), since=RESUMED)
+    assert seen == WindowFact(fact="runtime_error", at=at(40), agents=(1,))
+    assert first_sightings((seen,), later, since=RESUMED) == (
+        WindowFact(fact="runtime_error", at=at(70), agents=(2,)),
+    )
+    assert first_sightings((seen,), (quarantine,), since=RESUMED) == (
+        WindowFact(fact="quarantined", at=at(40), agents=(1,)),
+    )
+    assert first_sightings((seen,), later, since=at(50)) == (
+        WindowFact(fact="runtime_error", at=at(70), agents=(1, 2)),
+    )
     assert first_sightings((), agents_live(at(70), (1, 2)), since=RESUMED) == ()
+
+
+def test_what_the_window_saw_adds_reasons_but_never_liveness() -> None:
+    """A journaled sighting keeps its agent affected after a later sample no
+    longer shows it, and never stands in for an observation of the agent."""
+    cohort = two_units(gateway_agents=(1, 2))
+    seen = (
+        WindowFact(fact="runtime_error", at=at(40), agents=(1,)),
+        WindowFact(fact="runtime_error", at=WATCH_END, agents=(2,)),
+    )
+    evidence = Evidence(
+        since=RESUMED,
+        units=units_ready(WATCH_END),
+        agents=agents_live(WATCH_END, (1,)),
+        facts=seen,
+        core=core_ok(WATCH_END),
+    )
+    verdict = judge_watch(POLICY, cohort, evidence, direction="candidate", now=WATCH_END)
+    assert [(a.agent, a.reasons) for a in verdict.affected] == [
+        (1, ("runtime_error",)),
+        (2, ("runtime_error", "unobserved")),
+    ]

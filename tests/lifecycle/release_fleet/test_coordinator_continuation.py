@@ -196,6 +196,23 @@ def test_errors_spread_over_the_window_add_up_to_the_threshold(
     assert (decision.kind, decision.phase) == ("recover", "watching")
 
 
+def test_a_mass_failure_of_a_large_cohort_still_recovers(request_record: FleetRequest) -> None:
+    """Every agent of a 2,000-agent cohort shows a fatal turn in the first watch
+    sample: what the window saw and the recover verdict both fit the journal,
+    so the candidate recovers instead of holding at `watching`."""
+    create(request_record)
+    cohort = tuple(range(1, 2001))
+    effects = FatalTurnsMidWindow(request_record, fatal={1: cohort})
+    effects.cohort_agents = cohort
+    with exclusive(request_record.path) as journal:
+        drive(journal, effects)
+    final = read_operation(request_record.path)
+    assert final.fleet is not None and final.fleet.outcome == "recovered"
+    assert [(d.kind, d.phase) for d in final.fleet.decisions] == [("recover", "watching")]
+    [recover] = [v for v in final.fleet.verdicts if v.action == "recover"]
+    assert [a.agent for a in recover.affected] == list(cohort)
+
+
 def test_what_the_window_saw_survives_executor_death(
     request_record: FleetRequest, monkeypatch: pytest.MonkeyPatch
 ) -> None:
