@@ -34,7 +34,10 @@ Delivery:
   receives the gateway login only while it runs the home's admitted runtime:
   the selected release image, or the source checkout the home was born from.
   Anything else keeps the credential-free endpoint and its first dial fails
-  with `NoDatabaseAuthorityError`.
+  with `NoDatabaseAuthorityError`. The one hand-over is the release handoff:
+  the admitted CLI passes that login (no API token) in the exec environment to
+  the executor image's submission, which is not selected yet; the finite
+  executor it launches holds no login and dials as the OS-user administrator.
 - Bootstrap serves no database credential: its `AVA_DB_URL` is the
   credential-free endpoint (a remote-managed provider URL loses its password),
   and a runner strips any password an older gateway still serves. A remote

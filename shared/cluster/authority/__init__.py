@@ -38,6 +38,9 @@ from shared.cluster.authority.delivery import (
     ensure_pooler_admin as ensure_pooler_admin,
 )
 from shared.cluster.authority.delivery import (
+    operator_environment as operator_environment,
+)
+from shared.cluster.authority.delivery import (
     read_pooler_admin as read_pooler_admin,
 )
 from shared.cluster.authority.delivery import (

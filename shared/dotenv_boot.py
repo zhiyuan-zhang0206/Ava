@@ -690,41 +690,37 @@ def _is_delivered_generation(file_url: str | None) -> bool:
     return delivered is not None and delivered == _endpoint_key(file_url)
 
 
-def _deliver_operator_authority(endpoint: str | None) -> None:
-    """Give an operator process on a write-generation home its gateway login.
-
-    Processes the root launcher starts carry their class login in the launch
-    environment. An operator process (the `ava` CLI, a script, an OS job) on
-    the gateway home has none; it receives the active gateway login (and, while
-    the API is authenticated, the gateway API token) only when it runs the
-    home's admitted runtime (`shared.cluster.authority.consume`:
-    the selected release image, or the source checkout the home was born
-    from). A launcher-context process that arrived without a delivery, or a
-    refused runtime, keeps the credential-free endpoint and records why, so its
-    first dial fails with that reason. Homes without a ledger are untouched.
-    """
-    global _db_authority_refusal  # noqa: PLW0603 — per-process boot authority result
-    _db_authority_refusal = None
-    if not _ANCHORED or not endpoint or os.environ.get(_GENERATION_ENV):
-        return
+def operator_db_delivery(endpoint: str | None, *, api: bool) -> dict[str, str] | str:
+    """This operator process's gateway login on its home as environment, or why
+    it holds none (`shared.cluster.authority.operator_environment`). Nothing for
+    an unanchored process, a home without a ledger, or over a delivery naming
+    this home's `endpoint` that the process already carries."""
     home = _HOME.expanduser().resolve()
+    if not _ANCHORED or not endpoint or _is_delivered_generation(endpoint):
+        return {}
     if not (home / "db-authority" / "ledger.json").exists():
-        return
-    context = _launcher_context()
-    if context is not None:
-        _db_authority_refusal = (
-            f"this {context}-profile process was launched without a delivered write "
-            "generation; only the root launcher delivers database logins"
-        )
-        return
-    from shared.cluster.authority import AuthorityRefusedError, consume
+        return {}
+    from shared.cluster.authority import AuthorityRefusedError, operator_environment
 
     try:
-        grant = consume(home, "gateway")
-    except (AuthorityRefusedError, ValueError, OSError) as exc:
-        _db_authority_refusal = f"no database authority for this process: {exc}"
+        return operator_environment(home, endpoint, launcher=_launcher_context(), api=api)
+    except AuthorityRefusedError as exc:
+        return str(exc)
+
+
+def _deliver_operator_authority(endpoint: str | None) -> None:
+    """Give an operator process on a write-generation home its gateway login
+    (`operator_db_delivery`). A delivery it carries stays; a refused process
+    keeps the credential-free endpoint and records why, so its first dial names it."""
+    global _db_authority_refusal  # noqa: PLW0603 — per-process boot authority result
+    _db_authority_refusal = None
+    if os.environ.get(_GENERATION_ENV):
         return
-    os.environ.update(grant.environment(endpoint, api=bool(os.environ.get("AVA_CLUSTER_SECRET"))))
+    delivery = operator_db_delivery(endpoint, api=bool(os.environ.get("AVA_CLUSTER_SECRET")))
+    if isinstance(delivery, str):
+        _db_authority_refusal = delivery
+    else:
+        os.environ.update(delivery)
 
 
 def _keeps_undeclared_db_url(value: str | None) -> bool:

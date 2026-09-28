@@ -45,8 +45,27 @@ on stdin.
 - **CLI** (`handoff.run`): `ava cluster update --prepared REQUEST` reads the
   envelope without loading Settings, refuses a request whose home is not the
   home this CLI resolves (explicit `AVA_HOME`, production source, or the
-  checkout's `.ava_home`), verifies the executor and replaces its own process
-  with the executor's `submit` entry (POSIX `execve`; Windows refuses).
+  checkout's `.ava_home`), verifies the executor, takes its own database
+  authority and replaces its own process with the executor's `submit` entry
+  (POSIX `execve`; Windows refuses).
+- **Database authority across the exec.** The executor image is not the
+  home's selected image until its operation selects it, so its boot pass
+  admits it to no write generation, yet its submission reads the registered
+  units. The CLI, running the home's admitted runtime, takes the login its
+  skipped boot pass would have delivered (`shared.dotenv_boot.operator_db_delivery`):
+  the active gateway login and its generation marker (`AVA_DB_URL`,
+  `AVA_DB_GENERATION`), without the gateway API token. It travels only in the
+  exec environment (never argv, a file or a log); the executor's boot pass
+  keeps a delivery naming its home's endpoint. A CLI with no authority to hand
+  over (a stale image, a launcher-started process without a delivery) refuses
+  before the exec; a home without a ledger adds nothing. This is the caller's
+  environment of the v1 contract, so nothing in it changed: an executor that
+  predates the delivery keeps or overrides the variables through its own boot
+  pass, and a previous image that predates it hands over none, which the
+  executor refuses by name before creating an operation. The finite executor
+  the submission launches receives none of this: its launch environment is
+  fixed, and it dials as the OS-user administrator
+  ([[cli/release_transition/execution.ava.okf.md]]).
 - **Ops** (`release_image_exec`, `ops/ops_cluster.py`): `{entry, image,
   request}` with the request base64-encoded. The unit's ops server requires
   the envelope to name its own home and machine and `image` as executor,

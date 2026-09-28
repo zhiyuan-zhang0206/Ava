@@ -10,8 +10,9 @@ reads them through here, bound to the ledger's credential digest:
   one service's launch environment (``write_grant``); only ``number`` and
   ``credential_digest`` reach launch digests and journals;
 - an operator process on the gateway home that no launcher injected
-  (``consume``), admitted only while it runs the home's admitted runtime: the
-  selected release image, or the source checkout the home was born from.
+  (``consume``, as environment ``operator_environment``), admitted only while
+  it runs the home's admitted runtime: the selected release image, or the
+  source checkout the home was born from.
 """
 
 from __future__ import annotations
@@ -220,3 +221,30 @@ def consume(home: Path, cls: GenerationClass) -> WriteGrant:
     code_root = Path(__file__).resolve().parents[3]
     require_admitted_runtime(home, code_root=code_root, prefix=Path(sys.prefix))
     return write_grant(home, cls)
+
+
+def operator_environment(
+    home: Path, endpoint: str, *, launcher: str | None, api: bool
+) -> dict[str, str]:
+    """The environment delivery of an operator process on the gateway ``home``.
+
+    Processes the root launcher starts carry their class login in the launch
+    environment. An operator process (the ``ava`` CLI, a script, an OS job)
+    that no launcher started (``launcher``, the launcher profile its process
+    tree descends from, is None) receives the active gateway login dialing
+    ``endpoint`` (and, when ``api``, the gateway API token) only while it runs
+    the home's admitted runtime (``consume``).
+
+    Raises:
+        AuthorityRefusedError: why this process receives nothing.
+    """
+    if launcher is not None:
+        raise AuthorityRefusedError(
+            f"this {launcher}-profile process was launched without a delivered write "
+            "generation; only the root launcher delivers database logins"
+        )
+    try:
+        grant = consume(home, "gateway")
+    except (AuthorityRefusedError, ValueError, OSError) as exc:
+        raise AuthorityRefusedError(f"no database authority for this process: {exc}") from exc
+    return grant.environment(endpoint, api=api)
