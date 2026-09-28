@@ -17,6 +17,8 @@ from pathlib import Path
 
 import psutil
 
+from shared.posixproc import _group_empty
+
 
 def listener_evidence(port: int, phase: str) -> dict[str, object]:
     """Native identities at one port; unreadable visibility is not absence proof."""
@@ -97,6 +99,55 @@ def wait_for_port(host: str, port: int, timeout: float = 30.0, *, label: str) ->
     )
 
 
+def kill_group_or_prove_already_gone(
+    proc: subprocess.Popen[bytes] | subprocess.Popen[str], exc: OSError
+) -> None:
+    """After a teardown `killpg` refusal, prove the group is gone rather than
+    shrugging the refusal off.
+
+    Every caller spawns `proc` with `start_new_session=True`, so its pgid
+    equals its pid, and calls this only once its own `killpg` already raised
+    `PermissionError` or `ProcessLookupError`. Under load, the leader can
+    finish exiting in the gap between a caller's own liveness check and its
+    `killpg` call — its earlier SIGTERM completing, or racing this teardown
+    outright — leaving a zombie that is the group's sole member. macOS answers
+    `killpg` on such a zombie-only group with EPERM, not ESRCH (measured: 0/20
+    in isolation, 3/3 under 8 CPU-saturating processes) — the same case
+    `shared.posixproc._group_empty` already carries a fallback for.
+
+    Both halves must hold before the refusal reads as "already gone": the
+    leader itself has actually exited (bounded `wait`, not just believed to),
+    and no other member of its process group is still live. Either check
+    failing re-raises the original OSError — an unexplained refusal is a real
+    teardown failure, not a race to ignore.
+    """
+    try:
+        proc.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        raise AssertionError(
+            f"killpg({proc.pid}, ...) raised {exc!r} but the leader never exited"
+        ) from exc
+    if not _group_empty(proc.pid):
+        raise AssertionError(
+            f"killpg({proc.pid}, ...) raised {exc!r} but its process group still has live members"
+        ) from exc
+
+
+def kill_group_if_alive(proc: subprocess.Popen[bytes] | subprocess.Popen[str]) -> None:
+    """SIGKILL `proc`'s process group if it is still alive, else do nothing.
+
+    A convenience wrapper around `kill_group_or_prove_already_gone` for a
+    caller with no escalation ladder of its own — a fixture that, once its own
+    assertions proved anything left of `proc`'s group should die, only ever
+    needs the one hard kill.
+    """
+    if proc.poll() is None:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except (PermissionError, ProcessLookupError) as exc:
+            kill_group_or_prove_already_gone(proc, exc)
+
+
 _SIGKILL_GRACE_SEC = 2.0
 
 
@@ -154,13 +205,17 @@ def managed_proc(
         _LIVE_SERVERS.pop(label, None)
         try:
             if proc.poll() is None:
-                with contextlib.suppress(ProcessLookupError):
+                try:
                     os.killpg(proc.pid, stop_signal)
+                except (PermissionError, ProcessLookupError) as exc:
+                    kill_group_or_prove_already_gone(proc, exc)
                 try:
                     proc.wait(timeout=stop_timeout)
                 except subprocess.TimeoutExpired:
-                    with contextlib.suppress(ProcessLookupError):
+                    try:
                         os.killpg(proc.pid, signal.SIGKILL)
+                    except (PermissionError, ProcessLookupError) as exc:
+                        kill_group_or_prove_already_gone(proc, exc)
                     # Short grace after SIGKILL (default 2s) -- SIGKILL cannot be
                     # ignored; reaping is sub-second. Still timed out means D state /
                     # NFS / zombie wedged; raise diagnostic.
