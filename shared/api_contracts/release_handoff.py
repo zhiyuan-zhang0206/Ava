@@ -15,9 +15,9 @@ request kinds and fields without a second release.
 
 | Field | Meaning |
 |---|---|
-| `version` | `1`: the handoff envelope version |
+| `version` | the JSON integer `1` (not `true`, `1.0` or `"1"`): the handoff envelope version |
 | `kind` | the request kind; opaque to the reader |
-| `id` | the operation id |
+| `id` | the operation id, a canonical lowercase UUID string |
 | `home` | the absolute canonical home the request belongs to |
 | `machine` | the machine name of that home's unit |
 | `executor` | the image that runs the request on this host (`ReleaseImageRef` fields; later fields ignored) |
@@ -33,6 +33,7 @@ returns `{entry, result}`; every wire model is closed (`extra="forbid"`).
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Annotated, Any, Literal
@@ -49,6 +50,7 @@ ENTRY_MODULE = "cli.release_handoff"
 # The largest request document one handoff carries (base64 on the wire).
 RELEASE_REQUEST_MAX_BYTES = 1024 * 1024
 _SHA256 = r"^[0-9a-f]{64}$"
+_CANONICAL_UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 
 
 class HandoffRefusedError(ValueError):
@@ -112,6 +114,13 @@ class EnvelopeImage(ReleaseImageRef):
 
 
 class Envelope(BaseModel):
+    """The v1 envelope fields of a request document, each in its exact JSON spelling.
+
+    `strict=True` alone still admits JSON `true` and `1.0` for `Literal[1]` and
+    any UUID spelling (uppercase, unhyphenated, braced, `urn:uuid:`) for `id`;
+    a frozen reader can never be tightened later, so both are pinned here.
+    """
+
     model_config = ConfigDict(extra="ignore", frozen=True, strict=True)
 
     version: Literal[1]
@@ -120,6 +129,20 @@ class Envelope(BaseModel):
     home: str
     machine: Annotated[str, Field(min_length=1, max_length=128)]
     executor: EnvelopeImage
+
+    @field_validator("version", mode="before")
+    @classmethod
+    def exact_version(cls, value: object) -> object:
+        if type(value) is not int:
+            raise ValueError("the envelope version must be the JSON integer 1")
+        return value
+
+    @field_validator("id", mode="before")
+    @classmethod
+    def canonical_id(cls, value: object) -> object:
+        if not isinstance(value, str) or _CANONICAL_UUID.fullmatch(value) is None:
+            raise ValueError("the envelope id must be a canonical lowercase UUID string")
+        return value
 
     @field_validator("home")
     @classmethod

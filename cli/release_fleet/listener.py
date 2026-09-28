@@ -18,17 +18,29 @@ proof keyed by the unit's enrollment secret, checked against the gateway's
 current record (a rotated or revoked enrollment stops at once) inside one
 replay window per run. A continuation starts a new window, so every route is
 idempotent: a report names the instruction it answers.
+
+Before any proof is checked, what an unauthenticated peer can cost is bounded:
+a body is read only when one plain decimal `Content-Length` declares it
+within `MAX_BODY_BYTES` (otherwise `400` or `413`, nothing read), a socket
+read that waits `READ_TIMEOUT_S` drops the connection, and at most
+`MAX_CONCURRENT_REQUESTS` are served at once (a connection beyond them is
+closed unanswered). Every request that does not authenticate (a wrong route,
+operation or unit, a missing enrollment, a failing proof) gets one uniform
+`401`; the reason is only logged on the coordinator.
 """
 
 from __future__ import annotations
 
 import json
 import queue
+import re
+import socket
 import threading
 from collections.abc import Callable, Iterable, Mapping
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from typing import Any
 from uuid import UUID
 
 from pydantic import ValidationError
@@ -45,6 +57,19 @@ from shared.cluster.authority.unit import Enrollment, UnitIdentity, load_enrollm
 from shared.log import logger
 
 MAX_BODY_BYTES = 64 * 1024
+_DECIMAL = re.compile(r"[0-9]+")
+# How long one socket read may wait: a unit sends each request whole, so only
+# a stalled or hostile peer waits this long, and its connection is dropped.
+READ_TIMEOUT_S = 10.0
+# Requests served at once. Each unit's follower holds at most one, so this is
+# far above a fleet's need; a peer opening more is closed unanswered, which a
+# unit reads as the coordinator being away and retries.
+MAX_CONCURRENT_REQUESTS = 32
+# The one answer to every request that does not authenticate, whatever the
+# reason: a peer without a proof cannot tell a wrong operation, a unit that
+# takes no part, a missing enrollment and a failing proof apart.
+UNAUTHENTICATED = "the coordinator request does not authenticate"
+_LOGGED_PATH = 256
 CAPABILITY_REFUSAL = (
     "the per-operation capability exchange over the coordinator channel is slice dbgen-8"
 )
@@ -53,6 +78,8 @@ ENROLLMENT_HEADER = "X-Ava-Enrollment"
 TIMESTAMP_HEADER = "X-Ava-Timestamp"
 NONCE_HEADER = "X-Ava-Nonce"
 SIGNATURE_HEADER = "X-Ava-Signature"
+# What socketserver hands a request handler (a TCP server: the socket).
+_Request = socket.socket | tuple[bytes, socket.socket]
 
 
 def unit_key(unit: UnitKey) -> str:
@@ -79,6 +106,26 @@ class _Refused(Exception):  # noqa: N818 — an HTTP refusal carrying its status
         self.status = status
 
 
+class _Unauthenticated(Exception):  # noqa: N818 — a refusal before authentication
+    """Why a request did not authenticate: logged here, never told to the peer."""
+
+
+def _body_length(declared: list[str]) -> int:
+    """The body length one plain decimal `Content-Length` declares (none: 0).
+
+    Checked before any body byte is read or any proof verified: a negative,
+    signed, non-decimal or repeated length is a 400, one past the cap a 413.
+    """
+    if not declared:
+        return 0
+    if len(declared) > 1 or _DECIMAL.fullmatch(declared[0]) is None:
+        raise _Refused(HTTPStatus.BAD_REQUEST, "the request declares no valid Content-Length")
+    value = declared[0]
+    if len(value) > len(str(MAX_BODY_BYTES)) or int(value) > MAX_BODY_BYTES:
+        raise _Refused(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, "body too large")
+    return int(value)
+
+
 def _proof(headers: Mapping[str, str]) -> RequestProof:
     """The proof from `headers`, whose names are lowercased (HTTP names are caseless)."""
     try:
@@ -89,7 +136,7 @@ def _proof(headers: Mapping[str, str]) -> RequestProof:
             headers[SIGNATURE_HEADER.lower()],
         )
     except (KeyError, ValueError, ChannelRefusedError) as exc:
-        raise _Refused(HTTPStatus.UNAUTHORIZED, "the request carries no channel proof") from exc
+        raise _Unauthenticated("the request carries no channel proof") from exc
 
 
 class CoordinatorListener:
@@ -124,9 +171,7 @@ class CoordinatorListener:
 
     def start(self, host: str, port: int) -> tuple[str, int]:
         """Bind and serve in a daemon thread; the bound address."""
-        handler = _handler(self)
-        self._server = ThreadingHTTPServer((host, port), handler)
-        self._server.daemon_threads = True
+        self._server = _BoundedServer((host, port), _handler(self), MAX_CONCURRENT_REQUESTS)
         self._thread = threading.Thread(
             target=self._server.serve_forever, name="fleet-listener", daemon=True
         )
@@ -155,22 +200,22 @@ class CoordinatorListener:
         parts = path.split("/")
         # "", "v1", "op", <operation>, "unit", <key>[, <verb>]
         if len(parts) not in {6, 7} or parts[1:3] != ["v1", "op"] or parts[4] != "unit":
-            raise _Refused(HTTPStatus.NOT_FOUND, "no such coordinator route")
+            raise _Unauthenticated("no such coordinator route")
         if parts[3] != str(self.operation):
-            raise _Refused(HTTPStatus.NOT_FOUND, "the listener serves another operation")
+            raise _Unauthenticated("the listener serves another operation")
         unit = self._units.get(parts[5])
         if unit is None:
-            raise _Refused(HTTPStatus.NOT_FOUND, "the unit takes no part in this operation")
+            raise _Unauthenticated("the unit takes no part in this operation")
         proof = _proof(headers)
         enrollment = self._enrollment(self.home, UnitIdentity(machine=unit.machine, home=unit.home))
         if enrollment is None:
-            raise _Refused(HTTPStatus.UNAUTHORIZED, "the unit holds no enrollment on this gateway")
+            raise _Unauthenticated("the unit holds no enrollment on this gateway")
         try:
             verify_request(
                 enrollment, proof, window=self._window, method=method, path=path, body=body
             )
         except ChannelRefusedError as exc:
-            raise _Refused(HTTPStatus.UNAUTHORIZED, str(exc)) from exc
+            raise _Unauthenticated(str(exc)) from exc
         return unit
 
     def handle(
@@ -178,10 +223,16 @@ class CoordinatorListener:
     ) -> tuple[HTTPStatus, dict[str, object] | None]:
         """One request's status and JSON body; refusals never change state.
 
-        `headers` are keyed by lowercased name.
+        `headers` are keyed by lowercased name. Every request that does not
+        authenticate gets the same `401`: its reason is only logged here.
         """
         try:
             return self._route(method, path, headers, body)
+        except _Unauthenticated as refused:
+            logger.info(
+                "[release-fleet] listener refused {} {}: {}", method, path[:_LOGGED_PATH], refused
+            )
+            return HTTPStatus.UNAUTHORIZED, {"error": UNAUTHENTICATED}
         except _Refused as refused:
             return refused.status, {"error": str(refused)}
 
@@ -220,17 +271,55 @@ class CoordinatorListener:
         return HTTPStatus.ACCEPTED, {"accepted": report.instruction}
 
 
+class _BoundedServer(ThreadingHTTPServer):
+    """One daemon thread per request, at most `slots` at once; a connection
+    beyond them is closed unanswered."""
+
+    daemon_threads = True
+
+    def __init__(
+        self,
+        address: tuple[str, int],
+        handler: type[BaseHTTPRequestHandler],
+        slots: int,
+    ) -> None:
+        super().__init__(address, handler)
+        self._slots = threading.BoundedSemaphore(slots)
+
+    def process_request(self, request: _Request, client_address: Any) -> None:
+        if not self._slots.acquire(blocking=False):
+            self.shutdown_request(request)
+            return
+        try:
+            super().process_request(request, client_address)
+        except BaseException:
+            self._slots.release()
+            raise
+
+    def process_request_thread(self, request: _Request, client_address: Any) -> None:
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            self._slots.release()
+
+
 def _handler(listener: CoordinatorListener) -> type[BaseHTTPRequestHandler]:
     class Handler(BaseHTTPRequestHandler):
         server_version = "ava-coordinator/1"
+        timeout = READ_TIMEOUT_S
+
+        def version_string(self) -> str:
+            """The protocol alone: the stdlib default appends the Python version."""
+            return self.server_version
 
         def log_message(self, format: str, *args: object) -> None:
             logger.debug("[release-fleet] listener {}", format % args)
 
         def _serve(self, method: str) -> None:
-            length = int(self.headers.get("Content-Length") or 0)
-            if length > MAX_BODY_BYTES:
-                self._answer(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, {"error": "body too large"})
+            try:
+                length = _body_length(self.headers.get_all("Content-Length") or [])
+            except _Refused as refused:
+                self._answer(refused.status, {"error": str(refused)})
                 return
             body = self.rfile.read(length) if length else b""
             headers = {name.lower(): value for name, value in self.headers.items()}

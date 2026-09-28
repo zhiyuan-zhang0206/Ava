@@ -1,9 +1,11 @@
 # Join a runner through first start
 
 A runner joins an already-serving gateway. Its identity is its local home and
-gateway URL; its database login, machine API token and telemetry token are a
-per-unit capability the gateway operator issues. It never holds the gateway's
-human cluster secret, and it creates no local cluster data plane.
+gateway URL; its database login, machine API token and telemetry token arrive
+in a capability bundle the gateway operator issues for this unit (the login and
+API token are the write generation's, shared by every runner unit, so guard the
+bundle and its transport key accordingly). It never holds the gateway's human
+cluster secret, and it creates no local cluster data plane.
 
 On the gateway, issue the unit's capability bundle (0600) and note the transport
 key it prints once:

@@ -414,6 +414,8 @@ def cmd_db_authority_revoke_enrollment(*, machine: str, home: str) -> int:
 
     The unit can no longer authenticate to a release coordinator; a later
     `issue-unit` for it mints a new enrollment (an explicit re-enrollment).
+    Its database login and API token are the write generation's and stay
+    valid until the generation rotates.
     """
     changed = _change_enrollment("revoke-enrollment", machine, home)
     if changed is None:
@@ -421,7 +423,9 @@ def cmd_db_authority_revoke_enrollment(*, machine: str, home: str) -> int:
     unit, enrollment_id = changed
     print(
         f"✓ enrollment {enrollment_id} of {unit} revoked; the unit can no longer "
-        "authenticate to a release coordinator (a later issue-unit re-enrolls it)"
+        "authenticate to a release coordinator (a later issue-unit re-enrolls it). "
+        "Its database login and API token belong to the write generation and stay "
+        "valid until the generation rotates."
     )
     return 0
 

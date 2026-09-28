@@ -20,10 +20,13 @@ reader of the new form first, use it one release later).
 The contract lives in the settings-free `shared/api_contracts/release_handoff.py`
 (envelope reader, exec argv, wire models), so the ops server can serve it too.
 
-Every request document carries `version` (`1`), `kind`, `id`, `home`
-(absolute, canonical), `machine` and `executor`, the image that runs the
-request on this host (`artifact_digest`, `manifest_digest`, `schema_digest`,
-`source_commit`). The reader ignores every other field and every unknown kind,
+Every request document carries `version` (the JSON integer `1`), `kind`,
+`id` (a canonical lowercase UUID string), `home` (absolute, canonical),
+`machine` and `executor`, the image that runs the request on this host
+(`artifact_digest`, `manifest_digest`, `schema_digest`, `source_commit`). Each
+is read in its exact JSON type: a reader frozen into an image can never be
+tightened, so `true`, `1.0` or `"1"` for the version and any other UUID
+spelling are refused now. The reader ignores every other field and every unknown kind,
 so a newer candidate may add request kinds (a fleet request) and fields without
 a second release. The executor is verified with the reader's own image
 verification: full inventory hashes, packaged source identity, and the image's

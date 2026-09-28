@@ -49,6 +49,8 @@ carries a login to another home:
   and reused by later bundles; deleting that record revokes it. Refused on a
   pure runner, a remote-managed plane (no generation exists there), a home
   without an active generation, and while a release operation is incomplete.
+  Only the enrollment is the unit's own; the login and tokens are shared
+  ([what a bundle exposes](unit-enrollment.ava.okf.md#what-a-bundle-exposes)).
 - **Install** (unit, `ava start --db-capability FILE`, key in
   `AVA_DB_CAPABILITY_KEY`, popped at once): `open_bundle` refuses anything that
   fails authentication or has expired; the join's bootstrap fetch presents the

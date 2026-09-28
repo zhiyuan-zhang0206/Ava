@@ -11,7 +11,11 @@ the unit and operation they were sealed for. No database is needed.
 from __future__ import annotations
 
 import dataclasses
-from collections.abc import Callable
+import secrets
+import sys
+import threading
+import time
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -139,6 +143,8 @@ def test_rotate_and_revoke_commands_print_ids_never_secrets(
     assert cluster_cmd.cmd_db_authority_revoke_enrollment(machine=_MACHINE, home=identity.home) == 0
     printed = capsys.readouterr().out
     assert rotated.enrollment_id in printed and rotated.secret not in printed
+    # Revocation cuts the coordinator channel only; the operator is told so.
+    assert "stay valid until the generation rotates" in printed
     assert unit.load_enrollment(on_gateway, identity) is None
     assert cluster_cmd.cmd_db_authority_revoke_enrollment(machine=_MACHINE, home=identity.home) == 1
     assert "holds no enrollment" in capsys.readouterr().err
@@ -243,6 +249,75 @@ def test_a_forged_request_does_not_burn_the_nonce(enrolled: unit.Enrollment) -> 
     with pytest.raises(channel.ChannelRefusedError, match="does not authenticate"):
         _verify(enrolled, dataclasses.replace(proof, signature="0" * 64), window)
     _verify(enrolled, proof, window)
+
+
+@pytest.fixture
+def eager_switching() -> Iterator[None]:
+    """Switch threads every microsecond, so a check-then-act race shows at once."""
+    interval = sys.getswitchinterval()
+    sys.setswitchinterval(1e-6)
+    try:
+        yield
+    finally:
+        sys.setswitchinterval(interval)
+
+
+def _proof(timestamp: int, nonce: str | None = None) -> channel.RequestProof:
+    return channel.RequestProof("a" * 32, timestamp, nonce or secrets.token_hex(16), "b" * 64)
+
+
+def _race(window: channel.ReplayWindow, proofs: list[channel.RequestProof], now: int) -> list[str]:
+    """Admit `proofs` from one thread each, released together; each outcome."""
+    start = threading.Barrier(len(proofs))
+    outcomes: list[str] = []
+
+    def admit(proof: channel.RequestProof) -> None:
+        start.wait()
+        try:
+            window.admit("unit", proof, now)
+        except channel.ChannelRefusedError:
+            outcomes.append("replay")
+        except Exception as exc:  # any other exception is the finding: record its type
+            outcomes.append(type(exc).__name__)
+        else:
+            outcomes.append("admitted")
+
+    threads = [threading.Thread(target=admit, args=(proof,)) for proof in proofs]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    return outcomes
+
+
+@pytest.mark.usefixtures("eager_switching")
+def test_handler_threads_share_one_window_without_losing_a_request() -> None:
+    """Concurrent admissions over stale entries each prune and admit, none raises."""
+    stale, now = 1_000_000, 1_000_000 + channel.MAX_SKEW_S + 1
+    for _ in range(100):
+        window = channel.ReplayWindow("op")
+        for _ in range(300):
+            window.admit("unit", _proof(stale), stale)
+        assert _race(window, [_proof(now) for _ in range(4)], now) == ["admitted"] * 4
+
+
+class _SlowMembership(dict[tuple[str, str], int]):
+    """A replay record whose membership check yields before it answers, so every
+    racing admission runs between another's check and its insert."""
+
+    def __contains__(self, key: object) -> bool:
+        found = super().__contains__(key)
+        time.sleep(0.05)
+        return found
+
+
+def test_one_nonce_is_admitted_once_however_many_threads_race() -> None:
+    now = 1_000_000
+    window = channel.ReplayWindow("op")
+    window._seen = _SlowMembership()
+    replayed = _proof(now)
+    outcomes = _race(window, [replayed] * 4, now)
+    assert sorted(outcomes) == ["admitted", "replay", "replay", "replay"]
 
 
 def test_a_request_outside_the_clock_skew_refuses(enrolled: unit.Enrollment) -> None:

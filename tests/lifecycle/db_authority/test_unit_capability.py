@@ -12,6 +12,7 @@ step. The tamper, binding and boot-pass checks need no database.
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import subprocess
@@ -40,6 +41,7 @@ from shared.cluster.authority.api import API_TOKEN_ENV
 from shared.config import settings
 from shared.config.service_read import served_db_endpoint
 from shared.db_connections import NoDatabaseAuthorityError, _guard_db_url
+from shared.deploy_timing import UNIT_BUNDLE_MAX_TTL_S
 from tests.lifecycle.db_authority import test_single_box as _single_box
 from tests.lifecycle.db_authority.test_single_box import Born, _refused
 
@@ -161,6 +163,23 @@ def test_an_expired_bundle_is_refused(gateway: Path, runner_home: Path) -> None:
     issued = _issue(gateway, runner_home, ttl_s=60, now=time.time() - 120)
     with pytest.raises(unit.UnitCapabilityError, match="expired"):
         _open(issued)
+
+
+@pytest.mark.parametrize(
+    "ttl_s",
+    [0.0, -1.0, math.nan, UNIT_BUNDLE_MAX_TTL_S + 1, math.inf],
+    ids=["zero", "negative", "nan", "one-past-the-cap", "infinite"],
+)
+def test_issue_refuses_a_lifetime_outside_the_cap(
+    gateway: Path, runner_home: Path, ttl_s: float
+) -> None:
+    with pytest.raises(unit.UnitCapabilityError, match="lifetime"):
+        _issue(gateway, runner_home, ttl_s=ttl_s)
+
+
+def test_issue_takes_up_to_the_capped_lifetime(gateway: Path, runner_home: Path) -> None:
+    issued = _issue(gateway, runner_home, ttl_s=UNIT_BUNDLE_MAX_TTL_S, now=1_000_000.0)
+    assert issued.expires_at == 1_000_000.0 + UNIT_BUNDLE_MAX_TTL_S
 
 
 def test_issue_needs_an_active_generation(tmp_path: Path, runner_home: Path) -> None:
