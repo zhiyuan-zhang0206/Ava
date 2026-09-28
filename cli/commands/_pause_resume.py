@@ -36,24 +36,37 @@ def _start_held_for_cutover(
     """Start inside the standing cutover hold and keep it; the go/no-go gate releases it.
 
     Before the cutover's held first start (phase `stopped`) the unit refuses:
-    on a gateway that start must follow the database-records repair.
+    on a gateway that start must follow the database-records repair. A start
+    that passes readiness completes a `starting` hold to `ready`, the held first
+    start's own last step, so a failed first start is finished by the next one
+    that serves (the autostart after a reboot included).
     """
     from shared.paths import ava_home
 
     assert current.maintenance is not None  # noqa: S101 — snapshot() only returns maintenance holds
-    if current.maintenance.phase not in {"starting", "ready"}:
+    phase = current.maintenance.phase
+    if phase not in {"starting", "ready"}:
         raise RuntimeError(
-            f"the cutover hold {cutover.holder} stands in phase {current.maintenance.phase}; "
+            f"the cutover hold {cutover.holder} stands in phase {phase}; "
             f"its first start is {held_start_command(ava_home())} (a remote unit adds "
             "`--db-capability BUNDLE`), and an ordinary start never releases it"
         )
     with maintenance.authorized_start(cutover.holder, cutover.acquired_at):
         result = start()
-    if result == 0:
+    if result != 0:
+        return result
+    if not start_serving.is_serving():
         print(
-            f"\n→ cutover hold {cutover.holder} kept: business stays closed until the "
-            f"go/no-go gate releases it with `{cutover.resume_command()}`"
+            f"\n→ cutover hold {cutover.holder} kept in phase {phase}: the unit is not "
+            "serving, so its release waits for a start that passes readiness"
         )
+        return result
+    if phase == "starting":
+        maintenance.set_phase(cutover.holder, cutover.acquired_at, "ready")
+    print(
+        f"\n→ cutover hold {cutover.holder} kept: business stays closed until the "
+        f"go/no-go gate releases it with `{cutover.resume_command()}`"
+    )
     return result
 
 

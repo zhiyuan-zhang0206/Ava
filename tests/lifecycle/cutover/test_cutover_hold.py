@@ -77,6 +77,34 @@ def test_a_start_after_the_held_first_start_keeps_the_cutover_hold(
     assert "hold released" not in out
 
 
+@pytest.mark.parametrize("serving", [True, False])
+def test_a_start_that_passes_readiness_completes_a_starting_cutover_hold(
+    make_legacy: Make,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    serving: bool,
+) -> None:
+    """A failed or unready held first start leaves phase `starting`. The next start
+    that passes readiness inside the hold (the autostart after a reboot) completes
+    it to `ready`, so the release command it prints is accepted; a start that is
+    not serving leaves `starting` and prints no release command."""
+    _legacy, holder, at = _adopted(make_legacy, monkeypatch)
+    maintenance.set_phase(holder, at, "starting")
+    start, unpause, authorized = _bare_start(monkeypatch)
+    monkeypatch.setattr(start_serving, "is_serving", lambda: serving)
+    capsys.readouterr()
+
+    assert start() == 0
+
+    assert authorized == [True]
+    unpause.assert_not_called()
+    current = maintenance.require_operation(holder, at)
+    assert current.maintenance is not None
+    assert current.maintenance.phase == ("ready" if serving else "starting")
+    assert maintenance.business_paused()
+    assert ("maintenance resume" in capsys.readouterr().out) == serving
+
+
 def test_a_start_before_the_held_first_start_refuses_and_names_it(
     make_legacy: Make, monkeypatch: pytest.MonkeyPatch
 ) -> None:

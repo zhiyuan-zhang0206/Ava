@@ -28,8 +28,10 @@ are not converting. While the cutover hold the adoption
 journal records stands, an ordinary start never releases it
 (`cli/cutover_hold.py`): before the held first start (`--start`) a bare
 `ava start` refuses and names that command, and after it (for example the
-autostart job after a reboot) a bare start brings the unit up still held. Only
-the go/no-go gate's `ava maintenance resume` opens business.
+autostart job after a reboot) a bare start brings the unit up still held. A
+held first start that failed or was not ready leaves phase `starting`; the
+next start that passes readiness, `--start` or a bare one, completes it to
+`ready`. Only the go/no-go gate's `ava maintenance resume` opens business.
 
 ## Order within the runbook
 

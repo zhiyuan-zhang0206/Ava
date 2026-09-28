@@ -10,7 +10,8 @@ through the `ava maintenance resume` command the held first start prints.
   names `cutover_adopt_home.py --start`. On a gateway that start follows the
   data-plane cutover and the database-records repair.
 - After it (phase `starting` or `ready`) an ordinary start brings the unit up
-  and keeps the hold.
+  and keeps the hold. One that passes readiness completes a `starting` hold (a
+  failed or unready held first start) to `ready`, as the held first start does.
 
 Any other hold, including a later stop's on an adopted home, keeps the
 ordinary release. Deleted with the `scripts/cutover_*` scripts after the
