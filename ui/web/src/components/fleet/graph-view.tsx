@@ -86,9 +86,8 @@ function findNearestLiveAncestor(
   agentId: number,
   byId: Map<number, LineageAgentInfo>,
   liveIds: Set<number>,
-): { ancestorId: number | null; isFork: boolean } {
+): number | null {
   let currId = agentId;
-  let directIsFork = false;
   const visited = new Set<number>();
 
   for (;;) {
@@ -99,22 +98,17 @@ function findNearestLiveAncestor(
     if (!node) break;
 
     const parentId = node.fork_source_agent_id ?? parentIdOf(node.spawner);
-    const isFork = node.fork_source_agent_id != null;
-
-    if (currId === agentId) {
-      directIsFork = isFork;
-    }
 
     if (parentId == null) break;
 
     if (liveIds.has(parentId)) {
-      return { ancestorId: parentId, isFork: directIsFork };
+      return parentId;
     }
 
     currId = parentId;
   }
 
-  return { ancestorId: null, isFork: directIsFork };
+  return null;
 }
 
 export function GraphView({
@@ -213,8 +207,7 @@ export function GraphView({
   // reconciliation leave orphaned <line> nodes behind on every layout tick:
   // stale copies of the same edge accumulate at old coordinates, floating in
   // space and overlapping (the "extra dangling edges" bug). Merge the lineage
-  // family into one edge per pair — strongest weight wins, fork styling wins
-  // if any member was a fork.
+  // family into one solid edge per pair — strongest weight wins.
   const edges = useMemo<ForceGraphEdge[]>(() => {
     const byPair = new Map<string, ForceGraphEdge>();
 
@@ -230,7 +223,6 @@ export function GraphView({
           from,
           to,
           kind: e.event_type === "message" ? "message" : "lineage",
-          dashed: e.event_type === "fork",
           weight: e.weight,
         });
       } else {
@@ -238,7 +230,6 @@ export function GraphView({
           from,
           to,
           kind: existing.kind,
-          dashed: existing.dashed === true || e.event_type === "fork",
           weight: Math.max(existing.weight, e.weight),
         });
       }
@@ -248,7 +239,7 @@ export function GraphView({
     // its nearest live ancestor so that intermediate terminated nodes do not break
     // lineage ties (matching tree semantics: A -> B(term) -> C => A -> C).
     for (const node of liveNodes) {
-      const { ancestorId, isFork } = findNearestLiveAncestor(
+      const ancestorId = findNearestLiveAncestor(
         node.agent_id,
         lineageById,
         liveIds,
@@ -261,7 +252,6 @@ export function GraphView({
             from: ancestorId,
             to: node.agent_id,
             kind: "lineage",
-            dashed: isFork,
             weight: 2.0,
           });
         } else {
@@ -269,7 +259,6 @@ export function GraphView({
             from: ancestorId,
             to: node.agent_id,
             kind: existing.kind,
-            dashed: existing.dashed === true || isFork,
             weight: Math.max(existing.weight, 2.0),
           });
         }
