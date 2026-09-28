@@ -95,6 +95,7 @@ $AVA_HOME/source/.venv/bin/python $AVA_HOME/skills/gmail/reference/feed.py draft
 | Error | Cause / Solution |
 |------|------------|
 | `could not read Keychain entry` | No `ava-gmail-imap` entry created; follow step 3 of the setup above to create one |
+| Headless agent, no Keychain access | Falls back to a plain-text app password file at `~/.ava/secrets/gmail-app-password` (machine-level, same as the Keychain entry — not per-cluster) |
 | `IMAP login failed` | App Password expired (regenerate) or IMAP not enabled |
 | `SMTP login failed` | Same as above; the same App Password is used for SMTP |
 | `Gmail refused the search ...` | Used unsupported search operator; switch to syntax supported by X-GM-RAW |
