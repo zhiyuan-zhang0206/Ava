@@ -334,8 +334,8 @@ def test_current_field_values_decodes_empty_nodecode_list(
 def test_auth_middleware_set_roundtrips_through_env(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ):
-    """`ava config set auth_middleware_enabled` writes the key the model
-    actually reads. The field's alias used to fall back to its upper-cased
+    """A `.env` write of auth_middleware_enabled (the e2e harness's knob; the
+    config API refuses it) writes the key the model actually reads. The field's alias used to fall back to its upper-cased
     NAME (AUTH_MIDDLEWARE_ENABLED), which a validation_alias-only field never
     listens on — a written value was silently lost and the panel never served
     the file value."""

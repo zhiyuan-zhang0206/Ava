@@ -78,11 +78,12 @@ class AlertsSettings(EnvSettings):
             "`X-Alerts-Token` on "
             "POST /api/alerts. Empty = the ingest endpoint trusts loopback "
             "callers only (Grafana is co-located); set it when the gateway is "
-            "reachable from another host."
+            "reachable from another host. It admits callers to this gateway, so "
+            "the config API never writes it: edit the gateway `.env` on its host."
         ),
         json_schema_extra={
             "restart_required": "gateway",
-            "writable": True,
+            "writable": False,
             "sensitive": True,
             "scope": "cluster-pinned",
         },

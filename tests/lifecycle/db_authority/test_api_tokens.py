@@ -266,6 +266,28 @@ def test_a_session_records_which_credential_minted_it(gateway: Path) -> None:
         )
 
 
+def test_a_machine_token_cannot_choose_the_human_secret(
+    gateway: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A runner token authenticates the administrator, but it must not turn a
+    generation-bound admission into a human bearer of its choosing."""
+    from shared import runtime_config
+
+    store = tmp_path / "config-store"
+    store.mkdir()
+    monkeypatch.setattr(runtime_config, "_ava_home", lambda: store)
+    monkeypatch.setattr(settings.general, "machine_name", "gateway-host")
+    runner = _tokens(gateway).api.runner
+    with TestClient(config_app()) as client:
+        resp = client.put(
+            "/api/config",
+            json={"cluster_secret": "chosen-" + "c" * 40},
+            headers=bearer_header(runner),
+        )
+    assert resp.status_code == 400, resp.text
+    assert not (store / ".env").exists()
+
+
 def _webhook_request(authorization: str | None) -> Request:
     headers = [] if authorization is None else [(b"authorization", authorization.encode())]
     return Request({"type": "http", "headers": headers, "client": ("10.0.0.9", 5000)})

@@ -487,11 +487,13 @@ class GatewaySettings(EnvSettings):
             "tests (every request passes without auth while the cluster keeps its "
             "secret). An EMPTY AVA_CLUSTER_SECRET also serves the API without "
             "auth — that is the single-box no-secret posture, distinct from this "
-            "test knob."
+            "test knob. The config API never writes it (an authenticated caller "
+            "must not switch authentication off): the e2e harness sets it in the "
+            "environment."
         ),
         json_schema_extra={
             "restart_required": "all",
-            "writable": True,
+            "writable": False,
             "sensitive": False,
             "scope": "cluster-pinned",
         },
