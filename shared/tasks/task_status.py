@@ -5,6 +5,9 @@ Single source of truth for the three states: the SDK validation
 the `agent_tasks.status` DB CHECK (tests/test_db_check_enum_sync.py locks
 db/schema.sql to this enum), and the OpenAPI enum the frontend types are
 generated from all reference this one StrEnum, so none of them can drift.
+This module owns the vocabulary only; the registry's transition rules built on
+top of it (what counts as closed, the open-child-blocks-close check, the
+duplicate-title check) are owned by `shared/tasks/task_rules.py`.
 
 `"ongoing"` is deliberately absent (user ruling 2026-09-15): it was never a
 needed state — the system root task is permanently `in_progress` and immutable,

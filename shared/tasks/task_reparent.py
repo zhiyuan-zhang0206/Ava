@@ -13,6 +13,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from shared.tasks.task_rules import is_closed
+
 if TYPE_CHECKING:
     # Annotation-only; keeping the import out of the module graph lets the fleet
     # plugin autoload stay off psycopg (task #3816).
@@ -44,7 +46,7 @@ def resolve_reparent(cur: psycopg.Cursor, task_id: int, parent_id: int | None) -
         row = cur.fetchone()
         if row is None:
             raise ValueError(f"parent task {effective} does not exist")
-        if row[1] in ("done", "cancelled"):
+        if is_closed(row[1]):
             raise ValueError(
                 f"task {task_id} cannot be moved under a closed parent "
                 f"#{effective} ({row[1]}) — a closed task never gains children; "

@@ -35,13 +35,6 @@ cap-domain exits use `exitType`, `expires`, and `approver`); readers ignore unkn
 
 ## Open
 
-### locality:ava_builtins/plugins/ava_fleet/task_registry.py:gateway/routers/tasks.py
-- **class**: locality
-- **status**: open
-- **evidence**: `scripts/structure/cochange.py` (90-day window on origin/main, 2026-09-28): c=10, confidence 67%. Leaked decision: the task status vocabulary and its close rules have two owners — the agent-facing plugin (`task_registry.py`, `_STATUSES` validation) and the gateway API (`routers/tasks.py` filtering/validation) each re-encode them, while `shared/tasks/task_status.py` exists as the shared definition. `09b80a407` (drop the `ongoing` status) edited the vocabulary in both; `39822f4f7` (reject closing a parent with open children) and `08d95882b` did the same for the close rule. Fix: `shared/tasks` owns the vocabulary and the transition check; both sides call it.
-- **first-seen**: 2026-09-28 (locality class first run)
-- **last-verified**: 2026-09-28
-
 ### locality:ava_builtins/plugins/ava_code/metrics.py:ava_builtins/plugins/ava_memory/metrics.py
 - **class**: locality
 - **status**: open
