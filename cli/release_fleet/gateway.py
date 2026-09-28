@@ -100,12 +100,19 @@ class DeployLease:
         self._renewer: threading.Thread | None = None
 
     def hold(self) -> None:
-        """Take the lease, or re-arm this operation's own after an executor restart."""
-        from shared.cluster_lock import acquire_update_lock, renew_update_lock
+        """Take the lease, or re-arm this operation's own after an executor restart.
+
+        Only a live lease this operation already holds is renewed: renewing a
+        free one reports it lost ("the lease is not theirs"), which is not what
+        a first hold means. Both writes stay compare-and-set, so a lease taken
+        between the read and the write still refuses.
+        """
+        from shared.cluster_lock import acquire_update_lock, renew_update_lock, update_lock_holder
 
         if self._renewer is not None:
             return
-        if not (renew_update_lock(self.holder) or acquire_update_lock(self.holder, kind="update")):
+        rearmed = update_lock_holder() == self.holder and renew_update_lock(self.holder)
+        if not (rearmed or acquire_update_lock(self.holder, kind="update")):
             raise RuntimeError(
                 "the cluster deploy lease is held by another operation, or a publication is pending"
             )

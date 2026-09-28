@@ -52,12 +52,13 @@ def _held(monkeypatch: pytest.MonkeyPatch, answers: Iterator[bool | None]) -> De
 
     monkeypatch.setattr(cluster_lock, "acquire_update_lock", acquired)
     lease = DeployLease(uuid4())
+    monkeypatch.setattr(cluster_lock, "update_lock_holder", lambda: lease.holder)
     lease.hold()
     return lease
 
 
 def _forever(*first: bool | None, then: bool | None) -> Iterator[bool | None]:
-    yield True  # `hold` re-arms by renewing first
+    yield True  # `hold` re-arms its own live lease by renewing
     yield from first
     while True:
         yield then
@@ -94,6 +95,44 @@ def test_the_fleet_lease_answered_not_ours_is_lost_at_once(
     with pytest.raises(RuntimeError, match="lost its cluster deploy lease"):
         lease.require()
     lease.release()
+
+
+def _recorded(monkeypatch: pytest.MonkeyPatch, holder: str | None) -> list[str]:
+    """Patch the lease seams to record calls; the live holder reads as `holder`."""
+    calls: list[str] = []
+
+    def renew(_holder: str, **_kwargs: object) -> bool:
+        calls.append("renew")
+        return True
+
+    def acquire(_holder: str, **_kwargs: object) -> bool:
+        calls.append("acquire")
+        return True
+
+    monkeypatch.setattr(cluster_lock, "update_lock_holder", lambda: holder)
+    monkeypatch.setattr(cluster_lock, "renew_update_lock", renew)
+    monkeypatch.setattr(cluster_lock, "acquire_update_lock", acquire)
+    monkeypatch.setattr(cluster_lock, "release_update_lock", lambda _holder: None)
+    return calls
+
+
+def test_a_first_hold_acquires_without_probing_by_renewal(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A renewal of a lease nobody holds reports it lost ("the lease is not
+    theirs"); A/B/A run 6 logged exactly that right before its first acquire."""
+    calls = _recorded(monkeypatch, None)
+    lease = DeployLease(uuid4())
+    lease.hold()
+    assert calls[0] == "acquire"
+    lease.release()
+
+
+def test_an_executor_restart_rearms_its_own_live_lease(monkeypatch: pytest.MonkeyPatch) -> None:
+    operation = uuid4()
+    calls = _recorded(monkeypatch, f"fleet:{operation}")
+    lease = DeployLease(operation)
+    lease.hold()
+    lease.release()
+    assert "acquire" not in calls and calls[0] == "renew"
 
 
 def test_pitr_activation_survives_a_missed_round(monkeypatch: pytest.MonkeyPatch) -> None:

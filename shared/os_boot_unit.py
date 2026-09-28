@@ -362,7 +362,8 @@ def uninstall(home: Path | None = None) -> list[str]:
 
     Safe when nothing is installed, and safe to call on non-systemd hosts (a
     no-op): `ava cluster destroy` runs it unconditionally with the other OS
-    jobs. Removes only this home's exact unit path.
+    jobs. Removes only this home's exact unit path, then resets the failed
+    record systemd keeps listing for a removed unit whose last stop failed.
     """
     if not IS_LINUX:
         return []
@@ -370,12 +371,25 @@ def uninstall(home: Path | None = None) -> list[str]:
 
     home = home if home is not None else ava_home()
     steps: list[str] = []
+    name = unit_name(home)
     destination = unit_path(home)
     if destination.exists():
-        _privileged_or_raise(
-            ["systemctl", "disable", "--now", unit_name(home)], f"stop {unit_name(home)}"
-        )
+        _privileged_or_raise(["systemctl", "disable", "--now", name], f"stop {name}")
         _privileged_or_raise(["rm", "-f", str(destination)], f"remove {destination}")
         _privileged_or_raise(["systemctl", "daemon-reload"], "systemctl daemon-reload")
         steps.append(f"removed {destination}")
+    if _failed_record(name):
+        _privileged_or_raise(["systemctl", "reset-failed", name], f"reset-failed {name}")
+        steps.append(f"cleared the failed record of {name}")
     return steps
+
+
+def _failed_record(name: str) -> bool:
+    """A failed unit outlives its removed file as a `not-found failed` record
+    until reset; checked also when a previous removal left one behind."""
+    if not systemd_running():
+        return False
+    result = _systemctl("show", "--property=ActiveState", "--value", name)
+    if result.returncode:
+        raise RuntimeError(f"cannot observe {name}: {result.stderr.strip()}")
+    return result.stdout.strip() == "failed"
