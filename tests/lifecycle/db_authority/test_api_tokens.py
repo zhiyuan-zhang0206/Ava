@@ -266,6 +266,32 @@ def test_a_session_records_which_credential_minted_it(gateway: Path) -> None:
         )
 
 
+def test_the_sessions_list_shows_only_sessions_that_authenticate(gateway: Path) -> None:
+    """`/api/auth/sessions` lists what the session check would still admit: a
+    runner-minted session leaves the list when the fence revokes its generation,
+    and an id without a mint (the pre-mint format) never appears."""
+    from gateway.session_store import create_session
+    from shared.cluster_auth import new_session_id
+
+    runner = _tokens(gateway).api.runner
+    with TestClient(config_app()) as client:
+        pool = client.app.state.db_pool  # type: ignore[attr-defined]
+        machine = client.post("/api/auth/login", json={"password": runner}).cookies[cookie_name()]
+        client.cookies.clear()
+        human = client.post("/api/auth/login", json={"password": _HUMAN}).cookies[cookie_name()]
+        client.cookies.clear()
+        create_session(pool, new_session_id(), 3600, "legacy-browser", "10.0.0.9")
+
+        def listed() -> set[str]:
+            response = client.get("/api/auth/sessions", headers=bearer_header(_HUMAN))
+            assert response.status_code == 200, response.text
+            return {row["id"] for row in response.json()}
+
+        assert listed() == {machine[-8:], human[-8:]}
+        _rotate(gateway)
+        assert listed() == {human[-8:]}
+
+
 def test_a_machine_token_cannot_choose_the_human_secret(
     gateway: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

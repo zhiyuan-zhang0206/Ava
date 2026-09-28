@@ -79,7 +79,7 @@
     "/api/auth/sessions": {
       "get": {
         "summary": "Sessions",
-        "description": "List active browser sessions, marking the request's current cookie.\n\nOnly the request's current session keeps its full id; every other row's id\nis masked to its final 8 characters — enough to tell rows apart and to\nrevoke (the revoke endpoint accepts the suffix), without exposing the full\ncredential of sessions the caller does not hold. Managed-browser sessions\nare labeled with ``managed`` so they are not mistaken for the caller's own.",
+        "description": "List browser sessions that still authenticate, marking the current cookie.\n\nA session is listed only while the credential that minted it is current,\nthe same test the session check applies, so a security screen never shows\na dead session as active. Only the request's current session keeps its full\nid; every other row's id is masked to its final 8 characters — enough to\ntell rows apart and to revoke (the revoke endpoint accepts the suffix),\nwithout exposing the full credential of sessions the caller does not hold.\nManaged-browser sessions are labeled with ``managed`` so they are not\nmistaken for the caller's own.",
         "operationId": "sessions_api_auth_sessions_get",
         "responses": {
           "200": {
