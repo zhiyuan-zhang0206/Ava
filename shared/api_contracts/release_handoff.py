@@ -11,7 +11,9 @@ configuration loads.
 
 **Envelope.** Every request document carries these top-level fields; the
 reader ignores every other field and kind, so a newer candidate can add
-request kinds and fields without a second release.
+request kinds and fields without a second release. By the same design a v1
+reader silently ignores a new field, so any field meant to constrain what
+the previous image does must bump `version`.
 
 | Field | Meaning |
 |---|---|
