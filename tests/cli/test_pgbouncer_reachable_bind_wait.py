@@ -21,6 +21,7 @@ What is asserted here — the decision logic around `ensure_pgbouncer`:
 from __future__ import annotations
 
 from types import SimpleNamespace
+from typing import cast
 from unittest.mock import Mock
 
 import pytest
@@ -186,6 +187,54 @@ def test_fresh_start_with_public_listener_is_success(
 
     assert rc == 0
     assert "✓ pgbouncer started" in capsys.readouterr().out
+
+
+# Delivered to an operator's `ava start` by the boot pass; a daemon it spawns
+# must not keep them in its environment until it restarts.
+_AUTHORITY_ENV = {
+    "AVA_DB_URL": "postgresql://ava_g0_gateway:gen-password@127.0.0.1:6433/ava",
+    "AVA_DB_GENERATION": "0",
+    "AVA_API_TOKEN": "gateway-api-token-" + "t" * 32,
+    "AVA_CLUSTER_SECRET": "human-" + "h" * 40,
+    "AVA_REDIS_ADMIN_PASSWORD": "redis-admin-" + "r" * 20,
+    "AVA_HOME": "/Users/operator/.ava",
+}
+
+
+def test_the_pooler_daemon_inherits_no_ava_authority(
+    monkeypatch: pytest.MonkeyPatch, _noop_write: None
+) -> None:
+    for key, value in {**_AUTHORITY_ENV, "PATH": "/usr/bin:/bin", "LANG": "C.UTF-8"}.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.setattr(_pb, "_wait_for_reachable_bind_gated", lambda _secret: True)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_pb.ownership, "pooler", Mock(return_value=None))
+    monkeypatch.setattr(_pb, "_admin_reachable", lambda *_a, **_kw: True)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_pb, "pgbouncer_public_listener_reachable", lambda *_a, **_kw: True)  # pyright: ignore[reportUnknownArgumentType]
+    envs: list[object] = []
+
+    def _run(cmd: list[str], **kwargs: object) -> object:
+        assert cmd[1] == "-d"
+        envs.append(kwargs.get("env"))
+        return type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})()
+
+    monkeypatch.setattr(_pb.subprocess, "run", _run)
+    assert (
+        _pb.ensure_pgbouncer(
+            pg_port=5433,
+            listen_port=6433,
+            db_name="ava_main",
+            cluster_secret=_SECRET,
+            userlist=_USERLIST,
+            admin_password=_ADMIN,
+        )
+        == 0
+    )
+    [captured] = envs
+    assert isinstance(captured, dict)
+    env = cast("dict[str, str]", captured)
+    assert env["PATH"] == "/usr/bin:/bin" and env["LANG"] == "C.UTF-8"
+    assert not [key for key in env if key.startswith("AVA_")]
+    assert not set(_AUTHORITY_ENV.values()) & set(env.values())
 
 
 # ── the reload-vs-restart decision ───────────────────────────────────────────
