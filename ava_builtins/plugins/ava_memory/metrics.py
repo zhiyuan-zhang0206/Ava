@@ -37,34 +37,14 @@ the empty-recall share, reported as its inverse framing (the hit-rate proxy).
 """
 
 from shared.events.contract import PASSIVE_RECALL_KEYS, RECALL_FILTER_KEYS
+from shared.metrics.metrics_logql import CATEGORY_WITH_LEGACY_LOG, event_count
 from shared.plugin_metrics import MetricSpec, ThresholdStep, register_metric
-
-# The event stream + json pipeline every template starts with. The selector
-# matches the unified emitter's OTLP resource (gateway/loki_events._SELECTOR).
-# event_name/agent_id are promoted stream labels (2026-08-23 cutover), so
-# event-scoped queries match them inside the selector (via `_count`'s `event`
-# matcher); `| json` stays for the level/category/attributes fields.
-_SEL = '{service_name="unknown_service"}'
 
 # Attribute labels are derived from the payload-key contract (a renamed
 # payload key fails loudly here instead of silently NULLing out) — the same
 # pattern the core panels use (_LLM_ATTR etc.).
 _RECALL_ATTR = {k: f"attributes_{k}" for k in RECALL_FILTER_KEYS}
 _PASSIVE_RECALL_ATTR = {k: f"attributes_{k}" for k in PASSIVE_RECALL_KEYS}
-
-# Category filter: keep the |log alternative for pre-convention rows (the
-# core panels' pattern). {category_re} renders the category UNQUOTED for the
-# regex.
-_CAT = 'category=~"{category_re}|log"'
-
-
-def _count(pipeline: str, window: str, matchers: str | None = None) -> str:
-    """One count_over_time series — every count wraps in sum(...) (see the
-    module docstring for the series-cap note). ``matchers`` carries the promoted
-    event_name stream-label matcher (e.g. ``'event_name={event_name}'``): it
-    is matched inside the stream selector, not after ``| json``."""
-    selector = _SEL if matchers is None else f'{{service_name="unknown_service", {matchers}}}'
-    return f"sum(count_over_time({selector} | json | {pipeline} [{window}]))"
 
 
 register_metric(
@@ -81,7 +61,10 @@ register_metric(
         category="telemetry",
         unit="ops",
         panel="timeseries",
-        query=_count(f'{_CAT} | level="info"', "5m", matchers="event_name={event_name}") + " / 5",
+        query=event_count(
+            f'{CATEGORY_WITH_LEGACY_LOG} | level="info"', "5m", matchers="event_name={event_name}"
+        )
+        + " / 5",
         query_type="logql",
         target_names=["runs"],
         output=["grafana"],
@@ -93,12 +76,12 @@ register_metric(
 def _passive_recall_average_ms(field: str) -> str:
     """Average one recall leg's successful duration in a five-minute bucket."""
     attr = _PASSIVE_RECALL_ATTR[field]
-    successful = f'{_CAT} | level="info" | {attr}!=""'
+    successful = f'{CATEGORY_WITH_LEGACY_LOG} | level="info" | {attr}!=""'
     numerator = (
         f'sum(sum_over_time({{service_name="unknown_service", event_name={{event_name}}}} | json | '
         f"{successful} | unwrap {attr} [5m]))"
     )
-    denominator = _count(successful, "5m", matchers="event_name={event_name}")
+    denominator = event_count(successful, "5m", matchers="event_name={event_name}")
     return f"{numerator} / {denominator}"
 
 
@@ -158,13 +141,16 @@ register_metric(
         panel="timeseries",
         query=(
             f"100 * {
-                _count(
-                    _CAT + ' | level="info" | ' + _RECALL_ATTR['body'] + ' =~ ".*-> 0 kept.*"',
+                event_count(
+                    CATEGORY_WITH_LEGACY_LOG
+                    + ' | level="info" | '
+                    + _RECALL_ATTR['body']
+                    + ' =~ ".*-> 0 kept.*"',
                     '5m',
                     matchers='event_name={event_name}',
                 )
             }"
-            f" / {_count(_CAT + ' | level="info"', '5m', matchers='event_name={event_name}')}"
+            f" / {event_count(CATEGORY_WITH_LEGACY_LOG + ' | level="info"', '5m', matchers='event_name={event_name}')}"
         ),
         query_type="logql",
         target_names=["empty %"],
@@ -192,8 +178,8 @@ register_metric(
             ThresholdStep(color="red", value=25.0),
         ],
         query=(
-            f"100 * {_count(_CAT + ' | level="warning"', '5m', matchers='event_name={event_name}')}"
-            f" / {_count(_CAT, '5m', matchers='event_name={event_name}')}"
+            f"100 * {event_count(CATEGORY_WITH_LEGACY_LOG + ' | level="warning"', '5m', matchers='event_name={event_name}')}"
+            f" / {event_count(CATEGORY_WITH_LEGACY_LOG, '5m', matchers='event_name={event_name}')}"
         ),
         query_type="logql",
         target_names=["anomaly %"],
@@ -215,7 +201,11 @@ register_metric(
         category="telemetry",
         unit="short",
         panel="stat",
-        query=_count(f'{_CAT} | level="warning"', "$__range", matchers="event_name={event_name}"),
+        query=event_count(
+            f'{CATEGORY_WITH_LEGACY_LOG} | level="warning"',
+            "$__range",
+            matchers="event_name={event_name}",
+        ),
         query_type="logql",
         target_names=["failures"],
         output=["grafana"],
@@ -237,8 +227,8 @@ register_metric(
         category="telemetry",
         unit="ops",
         panel="timeseries",
-        query=_count(
-            f'{_CAT} | level="info" | {{{{agent_id}}}}',
+        query=event_count(
+            f'{CATEGORY_WITH_LEGACY_LOG} | level="info" | {{{{agent_id}}}}',
             "$__interval",
             matchers="event_name={event_name}",
         ),

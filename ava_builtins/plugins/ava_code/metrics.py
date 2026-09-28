@@ -27,29 +27,8 @@ panels' pattern); the pre-convention PG rows were backfilled by the
 accompanying migration, Loki rows keep their emit-time category.
 """
 
+from shared.metrics.metrics_logql import CATEGORY_WITH_LEGACY_LOG, event_count
 from shared.plugin_metrics import MetricSpec, register_metric
-
-# The event stream + json pipeline every template starts with. The selector
-# matches the unified emitter's OTLP resource (gateway/loki_events._SELECTOR).
-# event_name/agent_id are promoted stream labels (2026-08-23 cutover), so
-# event-scoped queries match them inside the selector (via `_count`'s `event`
-# matcher); `| json` stays for the level/category/attributes fields.
-_SEL = '{service_name="unknown_service"}'
-
-# Category filter: the 2026-08-05 convention moved syntax_fix from log to
-# telemetry — keep the |log alternative for pre-convention rows (core-panel
-# pattern). {category_re} renders the category UNQUOTED for the regex.
-_CAT = 'category=~"{category_re}|log"'
-
-
-def _count(pipeline: str, window: str, matchers: str | None = None) -> str:
-    """One count_over_time series — every count wraps in sum(...) (see the
-    module docstring for the series-cap note). ``matchers`` carries the promoted
-    event_name stream-label matcher (e.g. ``'event_name={event_name}'``): it
-    is matched inside the stream selector, not after ``| json``."""
-    selector = _SEL if matchers is None else f'{{service_name="unknown_service", {matchers}}}'
-    return f"sum(count_over_time({selector} | json | {pipeline} [{window}]))"
-
 
 register_metric(
     MetricSpec(
@@ -64,7 +43,8 @@ register_metric(
         category="telemetry",
         unit="short",
         panel="timeseries",
-        query=_count(_CAT, "5m", matchers="event_name={event_name}") + " / 5",
+        query=event_count(CATEGORY_WITH_LEGACY_LOG, "5m", matchers="event_name={event_name}")
+        + " / 5",
         query_type="logql",
         target_names=["fixes"],
         output=["grafana"],
@@ -83,7 +63,7 @@ register_metric(
         category="telemetry",
         unit="short",
         panel="stat",
-        query=_count(_CAT, "$__range", matchers="event_name={event_name}"),
+        query=event_count(CATEGORY_WITH_LEGACY_LOG, "$__range", matchers="event_name={event_name}"),
         query_type="logql",
         target_names=["fixes"],
         output=["grafana"],

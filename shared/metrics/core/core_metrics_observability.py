@@ -67,37 +67,18 @@ from shared.events.contract import (
     TURN_END_KEYS,
 )
 from shared.metrics.core import core_metrics
+from shared.metrics.metrics_logql import event_count
 from shared.plugin_metrics import MetricSpec
 
 # ── LogQL fragments (Task #1280) ──────────────────────────────────────────────
-# The event stream + json pipeline every template starts with. Attribute
-# labels are derived from the payload-key contract (a renamed payload key
-# fails loudly here instead of silently NULLing out).
+# Attribute labels are derived from the payload-key contract (a renamed
+# payload key fails loudly here instead of silently NULLing out).
 _LLM_ATTR = {k: f"attributes_{k}" for k in LLM_USAGE_KEYS}
 _TURN_ATTR = {k: f"attributes_{k}" for k in TURN_END_KEYS}
 _HALT_ATTR = {k: f"attributes_{k}" for k in HALT_KEYS}
 _FIX_ATTR = {k: f"attributes_{k}" for k in SYNTAX_FIX_KEYS}
 _FRONTEND_ATTR = {k: f"attributes_{k}" for k in FRONTEND_INTERACTION_KEYS}
 _SDK_ATTR = {k: f"attributes_{k}" for k in SDK_CALL_KEYS}
-
-# The event-stream base selector. event_name/agent_id are promoted stream
-# labels (2026-08-23 cutover), so event-scoped queries match them inside the
-# selector (via ``_count``'s ``event`` matcher); `| json` stays for the
-# level/category/attributes fields, which are not stream labels.
-_SEL = '{service_name="unknown_service"}'
-
-
-def _count(pipeline: str, window: str, matchers: str | None = None) -> str:
-    """One count_over_time series — every count wraps in sum(...): the
-    unknown_service family has >500 streams over a day, and an unaggregated
-    count_over_time hits Loki's per-query series cap (alert-rules note).
-
-    ``matchers`` carries the promoted event_name/agent_id stream-label matcher
-    (e.g. ``'event_name={event_name}'`` or ``'event_name=~"a|b"'``): indexed-era
-    reads match those labels inside the stream selector
-    (shared/loki_index_labels.py), not after ``| json``."""
-    selector = _SEL if matchers is None else f'{{service_name="unknown_service", {matchers}}}'
-    return f"sum(count_over_time({selector} | json | {pipeline} [{window}]))"
 
 
 # ── LLM ──────────────────────────────────────────────────────────────────────
@@ -174,13 +155,16 @@ core_metrics.register_core_metric(
         unit="short",
         panel="timeseries",
         query_type="logql",
-        query=_count("category={category}", "5m", matchers='event_name="llm_provider_error"')
+        query=event_count("category={category}", "5m", matchers='event_name="llm_provider_error"')
         + " / 5",
         targets=[
-            _count("category={category}", "5m", matchers='event_name="stream_stalled_retry"')
+            event_count("category={category}", "5m", matchers='event_name="stream_stalled_retry"')
             + " / 5",
-            _count("category={category}", "5m", matchers='event_name="llm_turn_aborted"') + " / 5",
-            _count("category={category}", "5m", matchers='event_name="stream_overloaded_retry"')
+            event_count("category={category}", "5m", matchers='event_name="llm_turn_aborted"')
+            + " / 5",
+            event_count(
+                "category={category}", "5m", matchers='event_name="stream_overloaded_retry"'
+            )
             + " / 5",
         ],
         target_names=["provider_error", "stalled_retry", "turn_aborted", "overloaded_retry"],
@@ -250,8 +234,8 @@ core_metrics.register_core_metric(
         panel="timeseries",
         query_type="logql",
         query=(
-            f"100 * {_count(f'category={{category}} | {_TURN_ATTR["ok"]}="true"', '5m', matchers='event_name={event_name}')}"
-            f" / {_count('category={category}', '5m', matchers='event_name={event_name}')}"
+            f"100 * {event_count(f'category={{category}} | {_TURN_ATTR["ok"]}="true"', '5m', matchers='event_name={event_name}')}"
+            f" / {event_count('category={category}', '5m', matchers='event_name={event_name}')}"
         ),
         target_names=["ok_pct"],
         output=["grafana", "inspector"],
@@ -343,7 +327,7 @@ core_metrics.register_core_metric(
         unit="short",
         panel="timeseries",
         query_type="logql",
-        query=_count("category={category}", "5m", matchers="event_name={event_name}") + " / 5",
+        query=event_count("category={category}", "5m", matchers="event_name={event_name}") + " / 5",
         target_names=["compactions/min"],
         output=["grafana"],
         thresholds=[],
@@ -372,27 +356,28 @@ core_metrics.register_core_metric(
         unit="short",
         panel="timeseries",
         query_type="logql",
-        query=_count("category={category}", "5m", matchers="event_name={event_name}") + " / 5",
+        query=event_count("category={category}", "5m", matchers="event_name={event_name}") + " / 5",
         targets=[
-            _count(
+            event_count(
                 "category={category}",
                 "5m",
                 matchers='event_name=~"exec_failed|exec[(]failed[)]"',
             )
             + " / 5",
-            _count(
+            event_count(
                 "category={category}",
                 "5m",
                 matchers='event_name=~"exec_timeout|exec[(]timeout[)]"',
             )
             + " / 5",
-            _count(
+            event_count(
                 "category={category}",
                 "5m",
                 matchers='event_name=~"exec_cancelled|exec[(]cancelled[)]"',
             )
             + " / 5",
-            _count("category={category}", "5m", matchers='event_name="exec_node_timeout"') + " / 5",
+            event_count("category={category}", "5m", matchers='event_name="exec_node_timeout"')
+            + " / 5",
             # other: every exec* event outside the known spellings. Stream
             # selector matchers are full-string regexes, so the selector
             # keeps exactly the named spellings out (the pre-selector
@@ -402,7 +387,7 @@ core_metrics.register_core_metric(
             # volume (~3x the ok rate) would dominate and misread as unknown
             # exec failures; its transfer-cost display is tracked separately
             # (task #2174).
-            _count(
+            event_count(
                 "category={category}",
                 "5m",
                 matchers=(
@@ -448,38 +433,38 @@ core_metrics.register_core_metric(
         unit="short",
         panel="timeseries",
         query_type="logql",
-        query=_count(
+        query=event_count(
             f'category={{category}} | {_FIX_ATTR["fixes"]}=~".*ruff_format.*"',
             "5m",
             matchers="event_name={event_name}",
         )
         + " / 5",
         targets=[
-            _count(
+            event_count(
                 f'category={{category}} | {_FIX_ATTR["fixes"]}=~".*ruff.*" | {_FIX_ATTR["fixes"]}!~".*ruff_format.*"',
                 "5m",
                 matchers="event_name={event_name}",
             )
             + " / 5",
-            _count(
+            event_count(
                 f'category={{category}} | {_FIX_ATTR["fixes"]}=~".*invalid_escape.*"',
                 "5m",
                 matchers="event_name={event_name}",
             )
             + " / 5",
-            _count(
+            event_count(
                 f'category={{category}} | {_FIX_ATTR["fixes"]}=~".*missing_imports.*"',
                 "5m",
                 matchers="event_name={event_name}",
             )
             + " / 5",
-            _count(
+            event_count(
                 f'category={{category}} | {_FIX_ATTR["fixes"]}=~".*chinese_punct.*"',
                 "5m",
                 matchers="event_name={event_name}",
             )
             + " / 5",
-            _count(
+            event_count(
                 f'category={{category}} | {_FIX_ATTR["fixes"]}=~".*bracket_matching.*"',
                 "5m",
                 matchers="event_name={event_name}",
@@ -487,7 +472,7 @@ core_metrics.register_core_metric(
             + " / 5",
             # other: missing/none/unknown kinds — !~ matches lines where the
             # label is absent (empty), which is the SQL `IS NULL` branch.
-            _count(
+            event_count(
                 f"category={{category}} | "
                 f'{_FIX_ATTR["fixes"]}!~".*(ruff|invalid_escape|missing_imports|chinese_punct|bracket_matching).*"',
                 "5m",
@@ -660,20 +645,20 @@ core_metrics.register_core_metric(
         unit="short",
         panel="timeseries",
         query_type="logql",
-        query=_count(
+        query=event_count(
             f'category={{category}} | {_HALT_ATTR["body"]}="no tool_call (idle)"',
             "5m",
             matchers="event_name={event_name}",
         )
         + " / 5",
         targets=[
-            _count(
+            event_count(
                 f'category={{category}} | {_HALT_ATTR["body"]}=~".*compact.*"',
                 "5m",
                 matchers="event_name={event_name}",
             )
             + " / 5",
-            _count(
+            event_count(
                 f'category={{category}} | {_HALT_ATTR["body"]}=~"lifecycle .*"',
                 "5m",
                 matchers="event_name={event_name}",
@@ -681,7 +666,7 @@ core_metrics.register_core_metric(
             + " / 5",
             # other: not idle/compact/lifecycle (missing body matches too —
             # the SQL `body IS NULL` branch).
-            _count(
+            event_count(
                 f"category={{category}} | "
                 f'{_HALT_ATTR["body"]}!="no tool_call (idle)" | '
                 f'{_HALT_ATTR["body"]}!~".*compact.*" | '
@@ -719,7 +704,9 @@ for event_name, title, target_name, panel_id, order in (
             unit="short",
             panel="stat",
             query_type="logql",
-            query=_count("category={category}", "$__range", matchers="event_name={event_name}"),
+            query=event_count(
+                "category={category}", "$__range", matchers="event_name={event_name}"
+            ),
             target_names=[target_name],
             panel_id=panel_id,
             section="Fleet",
@@ -744,7 +731,7 @@ core_metrics.register_core_metric(
         unit="short",
         panel="timeseries",
         query_type="logql",
-        query=_count(
+        query=event_count(
             "category={category} | {{agent_id}}",
             "$__interval",
             matchers="event_name={event_name}",
