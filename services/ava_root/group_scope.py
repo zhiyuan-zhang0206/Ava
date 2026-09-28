@@ -29,12 +29,14 @@ def group_closed(pgid: int) -> bool:
 def group_over(pgid: int, *, empty_at_exit: bool) -> bool:
     """Whether the group a reaped unit leader led has ended; nothing is signalled.
 
-    It has when it was empty at the read after the reap, is empty now, its
-    number is now held as a PID by another process (a PID is never reused
-    while it is still the process-group ID of a live group, POSIX), or the
-    group carrying that number now lies in another session (`_foreign_session`).
+    It has when it was empty at the read after the reap, its number is now
+    held as a PID by another process (a PID is never reused while it is still
+    the process-group ID of a live group, POSIX), the group carrying that
+    number now lies in another session (`_foreign_session`), or it is empty
+    now. Emptiness is read last: a group that empties during the slower reads
+    before it still counts as over, and a refusal follows the reading it reports.
     """
-    return empty_at_exit or group_closed(pgid) or psutil.pid_exists(pgid) or _foreign_session(pgid)
+    return empty_at_exit or psutil.pid_exists(pgid) or _foreign_session(pgid) or group_closed(pgid)
 
 
 def _foreign_session(pgid: int) -> bool:

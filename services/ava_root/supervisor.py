@@ -543,13 +543,14 @@ class Supervisor:
         pgid = identity.pid
         deadline = monotonic() + self._config.stop_timeout_s
         while True:
+            # Judged as each poll begins, so a refusal rests on reads taken after the deadline.
+            expired = monotonic() >= deadline
             living = recorded_living(generation.tracked)
             if not os.path.lexists(custody.path):
                 _drop_moved_aside(runtime, custody, living)
                 return
             if living:
                 custody.retain(generation.tracked)
-                expired = monotonic() >= deadline
                 if expired and not force:
                     raise ownership_retained(runtime.manifest.id, living, pgid)
                 self._signal_all(living, force=expired and force)
@@ -567,7 +568,7 @@ class Supervisor:
                     pgid,
                 )
                 return
-            elif monotonic() >= deadline:
+            elif expired:
                 raise unproven_group(runtime.manifest.id, pgid, custody)
             await asyncio.sleep(0.05)
 
