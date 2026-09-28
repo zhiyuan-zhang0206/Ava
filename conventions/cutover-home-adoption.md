@@ -248,12 +248,15 @@ journal's `record-retire` effect, delete `start-intent.json`, and restore `.env`
 from its pre-adoption snapshot in `backups/env/` (moved to
 `cutover-rollback/residue/backups/env/` on a remote unit). Last, move
 `cutover-rollback/adopt-home.json` aside (keep it, renamed, as the record of
-what was undone): while it records the adoption, a retry would take the home
-as adopted, and the attestation and adoption would skip their guard against a
-re-armed legacy health probe. The inventory, the attestation and the adoption
-refuse a journal whose `intent` step is `done` while the home has no start
-intent; a rollback of a partial adoption leaves no such mark, so move its
-journal aside all the same.
+what was undone), whatever step the adoption reached: a completed one, or
+one that stopped partway (a step failed or the run crashed). While it exists,
+a retry would take the home as adopted or continue the recorded run, and once
+it records the `jobs` step (`started` or `done`) the attestation and the
+adoption skip their guard against a re-armed legacy health probe. Only a
+journal whose `intent` step is `done` while the home has no start intent is
+refused (by the inventory, the attestation and the adoption); a partial
+adoption's journal is accepted without a word, so moving it aside is the only
+thing that re-arms that guard.
 
 Rollback after the data-plane cutover (R2, before any `--resume`): stop the
 new code fully on every unit (`ava stop --yes`, data plane included), then on
