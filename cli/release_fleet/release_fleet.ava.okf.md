@@ -90,7 +90,8 @@ Events: `unit_failed`, `unit_unknown` (per unit, with its agents),
 (source `release-fleet`, the shape `shared.alerts.upsert_alert` ingests),
 plus the out-of-band webhook and an observer-agent notice when the route
 names them. The webhook URL stays in `$AVA_HOME/secrets/<webhook_file>`, never
-in the request. The coordinator journals each alert by `key` at first
+in the request; that file must be this user's and mode 0600, or delivery
+refuses it. The coordinator journals each alert by `key` at first
 emission and re-delivers from the journal, so a retry keeps `starts_at`.
 Each hold is its own alert (a `held` key carries its time): an operation
 held again after the operator continued it alerts again.
