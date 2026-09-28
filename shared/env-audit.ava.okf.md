@@ -37,7 +37,7 @@ tags: []
   `.env.audit.armed` marker (a no-op upsert neither records nor arms — with the byte-level skip it
   is not a write), so deletion, emptiness, corruption, or a missing digest in an armed
   history is reported and rebuilt rather than silently returning to the fresh-home state.
-  `check_env_integrity()` is the guard: a fresh install/enrollment has neither marker nor history
+  `check_env_integrity()` is the guard: a freshly born or joined home has neither marker nor history
   and remains unarmed by design; otherwise the guard takes the same `.env` lock as the writers,
   compares the current digest, and on mismatch appends one self-rate-limited `unauthorized` record,
   emits `env_unauthorized_write` (audit/anomaly), and logs an error. The guard runs at the gateway

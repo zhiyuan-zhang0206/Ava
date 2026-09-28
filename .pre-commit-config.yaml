@@ -322,7 +322,7 @@ repos:
         name: check doc references (CLI flags + relative links resolve)
         language: system
         entry: .venv/bin/python scripts/check_doc_references.py
-        files: (\.md$|^cli/(main|enroll)\.py$|^scripts/(check_doc_references\.py|.*\.sh)$)
+        files: (\.md$|^cli/main\.py$|^scripts/(check_doc_references\.py|.*\.sh)$)
         pass_filenames: false
 
       - id: check-narrative-facts

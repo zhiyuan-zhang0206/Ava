@@ -140,7 +140,7 @@ def _bounded_stdout(argv: list[str]) -> str | None:
     None is "no answer" — a missing binary, a timeout, a non-zero exit, or
     empty output — never evidence about the fact being probed. ``shared.proc``
     is imported lazily because this module must stay importable without
-    ``shared.config`` (the install/enroll-time callers depend on that) and
+    ``shared.config`` (the converge-time callers depend on that) and
     ``shared.proc`` reaches it through ``shared.paths``."""
     from shared.proc import run_bounded
 
@@ -201,11 +201,11 @@ def browser_incapability() -> str | None:
 
 
 def browser_deps_incapability() -> str | None:
-    """Settings-free capability check for install/enroll-time use.
+    """Settings-free capability check for converge-time use.
 
     Same three prongs, same order, same reason strings as
-    ``browser_incapability()``, minus the AVA_CHROME_BINARY override — enroll
-    runs on a fresh host before Settings can be built, so it cannot read the
+    ``browser_incapability()``, minus the AVA_CHROME_BINARY override — converge
+    may run on a fresh host before Settings can be built, so it cannot read the
     override. Callers that have Settings use ``browser_incapability()``.
     """
     if not display_available():

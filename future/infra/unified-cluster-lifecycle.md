@@ -51,7 +51,7 @@ are not implementation requirements for this revision.
    application root and access the database through its own process. The
    one-host stop phase closes them (see
    [release execution](../../cli/release_transition/execution.ava.okf.md));
-   each fleet unit must run the same closure at `closing`.
+   each fleet unit must run the same closure at `stopping`.
 5. Exercise upgrade and recovery in disposable clusters, including paired
    migrations and writes made after upgrade. A down migration alone does not
    prove those writes remain usable by the retained release.

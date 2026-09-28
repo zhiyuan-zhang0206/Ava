@@ -130,7 +130,7 @@ def env_override_values(*, local: bool = False) -> dict[str, Any]:
     `remote_writable` UNLESS `local` (a self-target edit), since `writable` already
     means "a human may edit it on its own host" and `remote_writable` only gates
     editing a *remote* host's field. That keeps read-only fields (`db_url`) out and,
-    for a remote target, the connection / identity values install/enroll wrote — so
+    for a remote target, the connection / identity values the first `ava start` wrote — so
     the whole set round-trips back through a PUT without rejection.
     """
     from shared import runtime_config
