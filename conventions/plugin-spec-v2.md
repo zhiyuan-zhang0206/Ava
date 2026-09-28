@@ -388,3 +388,19 @@ as "no manifest, installed" — no migration, no silent re-trust. The manifest
 file and the registry row stay bound by `manifest_hash`: the registry is *what
 is installed*, the manifest is *what it claims to be* — a third party that
 lies in the manifest is caught by the scan gate + trust tier, unchanged.
+
+
+### Cluster collectors
+
+Account-level usage and balance collection belongs to plugin services, not
+agent hooks. A slow account API must not delay an agent's initialization,
+inbound claim, or execution. Declare a periodic collector in `services.py`
+through `ServiceSpec`; it publishes shared `plugin_stats` rows even while agents
+are idle or paused. Hosts read their own credentials and never copy tokens into
+agent state or the shared statistics table.
+
+An external plugin may define the watchdog's `main()` in `services.py` and set
+`healthcheck_module=__name__`. Ops registers that exact module before executing
+it, so the watchdog can import it without an agent having loaded the plugin.
+Keep the declaration/healthcheck surface lightweight and load the provider
+collector only inside the separate service process.
