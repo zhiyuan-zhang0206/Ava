@@ -366,7 +366,7 @@ def test_registry_disk_form_is_home_keyed(monkeypatch: pytest.MonkeyPatch, tmp_p
 
 def test_unit_port_map_overlays_health_ports(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     """unit_port_map = the cluster's port block overlaid by this unit's health
-    ports (the per-unit layer `ava enroll --health-port-base` moves). This is
+    ports (the per-unit layer `ava start --health-port-base` moves). This is
     the exact set the start preflight scans and `ava stop`'s orphan sweep
     reaps (Task #965) — one composition, two consumers."""
     import shared.daemon_health as _dh

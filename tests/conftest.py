@@ -123,8 +123,8 @@ if sys.platform == "darwin":
 #     fixture exists, so no fixture-based guard can reach it. Today the source
 #     is role-derived and the suite pins AVA_CONFIG_FETCH=skip (above), which
 #     closes the same hole.
-#   - `cli.start_refresh` / `cli.enroll` bind AVA_ENV_PATH from the same module,
-#     so `tests/cli` rewrote the operator's real `~/.ava/.env`. That happened
+#   - the CLI's `.env` writers bind AVA_ENV_PATH from the same module, so
+#     `tests/cli` rewrote the operator's real `~/.ava/.env`. That happened
 #     three times on one dev box in a single night (2026-07-28/29), during a
 #     production rollout, and was non-damaging only because the gateway happened
 #     to be healthy each time.
@@ -1601,9 +1601,9 @@ def _guard_process_exec(monkeypatch: pytest.MonkeyPatch) -> None:
     exec is never intended from a test: the production call sites are either a
     dedicated `__main__` that runs in a subprocess (`shared._reparent`,
     `services.browser.daemon`, `services.milvus.daemon`) or a CLI re-exec. Tests
-    that assert an exec *would* have happened patch `os.execv` themselves inside
-    the test body (`tests/cli/test_start_refresh.py`) — last-write-wins over this
-    default, restored LIFO at teardown.
+    that assert an exec *would* have happened patch `os.exec*` themselves
+    inside the test body (`tests/lifecycle/transition/test_pitr_execution.py`)
+    — last-write-wins over this default, restored LIFO at teardown.
 
     `os._exit` is deliberately NOT guarded: it is the correct call in a forked
     child (`shared._reparent`), and hijacking it there would resurrect a pytest
@@ -1633,11 +1633,11 @@ def _guard_bootstrap_fetch(monkeypatch: pytest.MonkeyPatch) -> None:
     The guard above stops an exec, but the fetch happens first: a pure
     agent-runner's Settings build calls `inject_config_from_gateway()` at
     import, and on an enrolled dev box that is a live GET /api/bootstrap
-    against the real cluster gateway. This guard sits at the cause. Enroll
-    also funnels through `shared.bootstrap.fetch_bootstrap_config` (the only
-    caller of this module's `dial_get`); nothing is written until that fetch
-    returns, so refusing the dial blocks the whole chain: no request to the
-    gateway, no enroll state.
+    against the real cluster gateway. This guard sits at the cause. A runner's
+    first start also funnels through `shared.bootstrap.fetch_bootstrap_config`
+    (the only caller of this module's `dial_get`); nothing is written until that
+    fetch returns, so refusing the dial blocks the whole chain: no request to
+    the gateway, no joined state.
 
     That chain is not theoretical. On an enrolled runner — serve_gateway unset,
     gateway URL in the real `~/.ava/.env`, which is every dev box joined to a

@@ -179,7 +179,7 @@ def test_ensure_checkpoint_schema_creates_tables_owned_by_identity(runner_db: st
                 assert owner == (identity,), f"{table} must be owned by {identity}"
 
         # The runner grants now target the freshly-created tables — the birth order
-        # install_cluster uses (checkpoint schema first, grants second).
+        # a cluster's provisioning uses (checkpoint schema first, grants second).
         _grant_runner(runner_db, identity)
         with psycopg.connect(
             url_with_userinfo(

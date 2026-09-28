@@ -56,7 +56,7 @@ def test_derive_env_ports_and_urls(tmp_path: Path):
     assert env["AVA_CLUSTER_SECRET"] == "sekret"  # noqa: S105 — test fixture, not a real secret
     assert env["AVA_GATEWAY_PORT"] == "18000"
     # a gateway box reaches its own gateway over loopback (self-call); the address
-    # remote runners dial is handed out at enroll, never stored here
+    # remote runners dial is given at their first start, never stored here
     assert env["AVA_GATEWAY_URL"] == "http://localhost:18000"
     assert env["AVA_GATEWAY_HEALTH_URL"] == "http://localhost:18000/api/health"
     assert env["AVA_FRONTEND_HEALTHCHECK_URL"] == "http://localhost:18001"
@@ -273,9 +273,10 @@ def test_health_port_env_derives_the_block_from_a_base():
 def test_health_port_env_matches_derive_env_for_the_same_base(tmp_path: Path):
     """The two producers of an `AVA_*_HEALTH_PORT` set agree value-for-value.
 
-    `derive_env` writes a cluster's own block at install; `health_port_env` writes
-    a unit's block at enroll. Two code paths, one layout — a drift would put a
-    co-located unit's ports somewhere the operator did not read off `ava cluster ls`."""
+    `derive_env` writes a cluster's own block at its birth; `health_port_env`
+    writes a unit's block from `ava start --health-port-base`. Two code paths,
+    one layout — a drift would put a co-located unit's ports somewhere the
+    operator did not read off `ava cluster ls`."""
     installed = cluster.derive_env(
         _rec(tmp_path),
         base_db_url="postgresql://ava:p@localhost:5432/ava",
@@ -317,7 +318,7 @@ def test_health_port_tables_in_sync():
     assert set(daemon_health._HEALTH_PORT_OVERRIDES) == svcs
     assert set(daemon_health.DEFAULT_PORTS) == svcs
     # every health daemon lives in the block table (offsets 16/17 for the two
-    # late daemons), so enroll / derive / preflight all move it
+    # late daemons), so `--health-port-base` / derive / preflight all move it
     assert svcs <= set(PORT_OFFSETS)
     # the legacy fallback is the LEGACY_AVA_PORTS subset, by construction
     assert {svc: LEGACY_AVA_PORTS[svc] for svc in svcs} == daemon_health.DEFAULT_PORTS

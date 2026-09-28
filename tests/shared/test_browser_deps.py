@@ -59,7 +59,7 @@ def test_install_nodejs_short_circuits_when_npx_is_present(monkeypatch: pytest.M
 def test_install_nodejs_runs_the_shared_provisioner_and_rechecks_npx(
     monkeypatch: pytest.MonkeyPatch, platform: str
 ) -> None:
-    """POSIX repair uses install.sh's provisioner, then reports the real PATH state."""
+    """POSIX repair runs `scripts/provision/node.sh`, then reports the real PATH state."""
     npx_available = False
     calls: list[tuple[list[str], dict[str, object]]] = []
     monkeypatch.setattr(browser_deps, "sys", SimpleNamespace(platform=platform))

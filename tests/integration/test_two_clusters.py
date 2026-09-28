@@ -1,15 +1,15 @@
 """Two-cluster isolation: ports (including each cluster's own pg/redis instance).
 
-Simulates two sequential install-time cluster births on a single host (via the
+Simulates two sequential first-start cluster births on a single host (via the
 real `ensure_record`) and asserts the core isolation guarantee: the two
 home-keyed records are completely disjoint — distinct port blocks, so distinct
 pg/redis instances. (There are no per-cluster db names to compare: every
 cluster's own single-tenant instance uses the fixed `ava` identifier, carried by
 its `.env` URLs as data.)
 
-The full end-to-end verification (real docker + enroll + agent spawn
-through the ops server) is a manual step documented in the runbook; it requires
-docker and live host ports and is therefore not run in CI.
+The full end-to-end verification (real data planes + a runner's first start +
+agent spawn through the ops server) is a manual step documented in the runbook;
+it requires live host processes and ports and is therefore not run in CI.
 """
 
 from pathlib import Path

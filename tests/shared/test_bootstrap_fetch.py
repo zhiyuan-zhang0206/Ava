@@ -92,8 +92,8 @@ def test_inject_config_updates_environ(
 def test_inject_derives_missing_gateway_health_url(
     monkeypatch: pytest.MonkeyPatch, _snapshot_home: Path
 ) -> None:
-    """A pure runner probes the remote gateway, never localhost, when enroll
-    carries no explicit health override."""
+    """A pure runner probes the remote gateway, never localhost, when its first
+    start carried no explicit health override."""
     monkeypatch.setitem(os.environ, "AVA_GATEWAY_URL", "http://gateway.tailnet:8123/")
     monkeypatch.delitem(os.environ, "AVA_GATEWAY_HEALTH_URL", raising=False)
     monkeypatch.setattr(
