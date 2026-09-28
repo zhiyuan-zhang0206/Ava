@@ -99,6 +99,9 @@ from shared.log_sinks import (
 from shared.log_sinks import (
     _StdlibInterceptHandler as _StdlibInterceptHandler,
 )
+from shared.log_sinks import (
+    add_sink,
+)
 from shared.turn_identity import (
     TURN_SCOPED_AGENT_ID,
     TurnScopedAgentId,
@@ -454,7 +457,7 @@ def _add_postgres_sink(process: str = "unknown", *, agent_id: int | None = None)
     live_handlers: Any = cast(Any, logger)._core.handlers  # private `_core` registry
     if _postgres_sink_id is not None and _postgres_sink_id in live_handlers:
         return _postgres_sink_id
-    _postgres_sink_id = logger.add(
+    _postgres_sink_id = add_sink(
         _postgres_sink,
         level="INFO",
         enqueue=False,
@@ -502,7 +505,7 @@ def init_agent_process(*, agent_id: int) -> None:
     _configure_windows_event_loop_policy()
     set_process_agent_id(agent_id)
     logger.configure(extra={"agent_id": TURN_SCOPED_AGENT_ID})
-    logger.add(sys.stderr, format=_HUMAN_FORMAT, level="INFO", colorize=True)
+    add_sink(sys.stderr, format=_HUMAN_FORMAT, level="INFO", colorize=True)
     from shared.paths import logs_dir
 
     _add_file_sink(logs_dir() / f"agent-{agent_id}.log")
@@ -590,7 +593,7 @@ def init_gateway_process(name: str = "gateway") -> None:
     # in the hosted agent-runner — which inits through THIS function — it is
     # what lets each record carry the turn's agent instead of `-`.
     logger.configure(extra={"agent_id": TURN_SCOPED_AGENT_ID})
-    logger.add(sys.stderr, format=_HUMAN_FORMAT, level="INFO", colorize=True)
+    add_sink(sys.stderr, format=_HUMAN_FORMAT, level="INFO", colorize=True)
     _add_file_sink(logs_dir() / f"{name}.log")
     _add_postgres_sink(process=name)
     _install_stdlib_intercept()
@@ -644,7 +647,7 @@ def init_cli_process(*, name: str) -> None:
     _configure_windows_event_loop_policy()
     from shared.paths import logs_dir
 
-    logger.add(sys.stderr, format=_HUMAN_FORMAT, level="INFO", colorize=True)
+    add_sink(sys.stderr, format=_HUMAN_FORMAT, level="INFO", colorize=True)
     _add_file_sink(logs_dir() / f"{name}.log")
     _add_postgres_sink(process=name)
     _install_stdlib_intercept()

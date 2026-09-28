@@ -24,8 +24,17 @@ GATEWAY_GROUP = "ava_gateway"
 RUNNER_GROUP = "ava_runner"
 
 RoleName = Annotated[str, StringConstraints(pattern=r"^[a-z_][a-z0-9_]{0,62}$")]
+# Credential digest — a one-way sha256 over the secret file's bytes, never
+# reversible into a login — is deliberately excluded from this hiding: it is
+# the safe-to-log fingerprint the whole authority library uses in launch
+# digests and journals (see `shared/cluster/authority/ledger.py:credential_digest`).
 Digest = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
-Verifier = Annotated[str, StringConstraints(pattern=r"^SCRAM-SHA-256\$\d+:[A-Za-z0-9+/=]+\$")]
+# repr=False: a SCRAM stored verifier is derived from the role's password and
+# is not meant to be displayed — hiding it here covers every field typed
+# `Verifier` in one place (`RoleSecret.verifier`, `PoolerAdmin.verifier`).
+Verifier = Annotated[
+    str, StringConstraints(pattern=r"^SCRAM-SHA-256\$\d+:[A-Za-z0-9+/=]+\$"), Field(repr=False)
+]
 
 
 class AuthorityRefusedError(RuntimeError):
@@ -207,7 +216,7 @@ class Ledger(_Record):
 
 class RoleSecret(_Record):
     name: RoleName
-    password: str = Field(min_length=32, max_length=256)
+    password: str = Field(min_length=32, max_length=256, repr=False)
     verifier: Verifier
 
 
@@ -228,8 +237,8 @@ class ApiTokens(_Record):
     environment, so a stale caller loses the API with its database login.
     """
 
-    gateway: str = Field(min_length=32, max_length=256)
-    runner: str = Field(min_length=32, max_length=256)
+    gateway: str = Field(min_length=32, max_length=256, repr=False)
+    runner: str = Field(min_length=32, max_length=256, repr=False)
 
     def of(self, cls: GenerationClass) -> str:
         return self.gateway if cls == "gateway" else self.runner

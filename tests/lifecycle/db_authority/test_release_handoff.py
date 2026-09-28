@@ -369,6 +369,14 @@ def test_each_release_crosses_its_image_boundary_with_exactly_the_authority_it_n
     passwords.append(_release(cycle, cycle.b, cycle.a, monkeypatch, capsys))
     generations.append(authority.active_generation(cycle.home).number)
     assert generations == [0, 1, 2]
+    # `_release`'s returned password is each release's OUTGOING login (the one
+    # handed to the executor before it mints the NEXT generation — see
+    # `_release`'s docstring), so `passwords` above never actually captured
+    # generation 2's own credential, minted at the end of the second release
+    # and never returned anywhere. Read it directly so it is checked too.
+    final_generation = authority.active_generation(cycle.home)
+    final_secret = authority.read_secret(cycle.home, final_generation)
+    passwords += [final_secret.roles.gateway.password, final_secret.roles.runner.password]
     state = read_state(cycle.home)
     assert state is not None and state.current.source_commit == cycle.a.source_commit
     # No login ever reached an argv, a native command, the journal, output or logs.

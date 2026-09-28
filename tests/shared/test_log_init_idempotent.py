@@ -7,6 +7,8 @@ Guard makes repeated calls silent skip, consistent with three functions docstrin
 
 from __future__ import annotations
 
+import ast
+import re
 from collections.abc import Iterator
 from pathlib import Path
 from unittest.mock import patch
@@ -219,3 +221,163 @@ def test_add_file_sink_tightens_permissions(tmp_path: Path) -> None:
     finally:
         slog.logger.remove(sink_id)
         log_path.unlink()
+
+
+# ─── every loguru sink forces diagnose=False (P1 security fix) ─────────────
+#
+# loguru's own default is `diagnose=True`: on a formatted exception it renders
+# every local variable's value from every frame of the traceback into the
+# sink's output — not just the traceback text. A release-executor failure
+# captured a `RoleSecret` in a stack frame, and `logger.opt(exception=exc)`
+# printed that secret's plaintext password to stderr (systemd journal) and to
+# `release-executor.log` (2026-09, PR #3479 review, P1); a `psycopg.connect(dsn)`
+# failure logged via `logger.exception(...)` leaks a password-bearing DSN the
+# same way. `shared.log_sinks.add_sink` is the one seam that forces
+# `diagnose=False` on every sink (see its docstring) — this is the standing
+# guard that no non-test call site reaches `logger.add(...)` directly without
+# it, so the leak class cannot be silently reintroduced.
+
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+_DIAGNOSE_SCAN_DIRS = (
+    "agent",
+    "ava",
+    "ava_builtins",
+    "cli",
+    "gateway",
+    "ops",
+    "scripts",
+    "services",
+    "shared",
+)
+# `shared/log_sinks.py` defines `add_sink` — the one call site allowed to omit
+# a literal `diagnose=False` keyword, because it forces the value onto
+# `kwargs` before unpacking (an AST scan cannot see through that), and it IS
+# the enforcement point every other call site routes through instead.
+_DIAGNOSE_EXEMPT_FILE = "shared/log_sinks.py"
+_DIAGNOSE_TEST_PATTERNS = (
+    re.compile(r"(^|/)tests?/"),
+    re.compile(r"(^|/)test_[^/]+\.py$"),
+    re.compile(r"_test\.py$"),
+)
+
+
+def _is_logger_add_call(func: ast.expr) -> bool:
+    """True for `<name-ending-in-"logger">.add(...)` — `logger.add`,
+    `_logger.add`, `_global_logger.add`, etc."""
+    if not isinstance(func, ast.Attribute) or func.attr != "add":
+        return False
+    receiver = func.value
+    if isinstance(receiver, ast.Name):
+        return receiver.id.lower().endswith("logger")
+    if isinstance(receiver, ast.Attribute):
+        return receiver.attr.lower().endswith("logger")
+    return False
+
+
+def _has_diagnose_false(call: ast.Call) -> bool:
+    """A literal `diagnose=False` keyword — a name or expression this scan
+    cannot see through does not count, same posture as
+    scripts/lint_pool_keepalives.py's `**PG_KEEPALIVE_KWARGS` check."""
+    for kw in call.keywords:
+        if kw.arg != "diagnose":
+            continue
+        return isinstance(kw.value, ast.Constant) and kw.value.value is False
+    return False
+
+
+def _logger_add_violations(src: str) -> list[int]:
+    """Line numbers of `logger.add(...)` calls missing a literal `diagnose=False`."""
+    tree = ast.parse(src)
+    return [
+        node.lineno
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and _is_logger_add_call(node.func)
+        and not _has_diagnose_false(node)
+    ]
+
+
+def test_logger_add_scanner_flags_a_bare_call() -> None:
+    # Verbatim shape of the defect: stderr registered with loguru's default.
+    assert _logger_add_violations('logger.add(sys.stderr, level="INFO")\n') == [1]
+
+
+def test_logger_add_scanner_accepts_literal_diagnose_false() -> None:
+    assert _logger_add_violations("logger.add(sys.stderr, diagnose=False)\n") == []
+
+
+def test_logger_add_scanner_rejects_explicit_diagnose_true() -> None:
+    assert _logger_add_violations("logger.add(sys.stderr, diagnose=True)\n") == [1]
+
+
+def test_logger_add_scanner_does_not_trust_a_non_literal_diagnose() -> None:
+    assert _logger_add_violations("logger.add(sys.stderr, diagnose=SOME_FLAG)\n") == [1]
+
+
+def test_logger_add_scanner_covers_aliased_receiver_names() -> None:
+    # tests/gateway/test_log_sink.py's real shape: `_global_logger.add(...)`.
+    assert _logger_add_violations('_global_logger.add(sink, level="INFO")\n') == [1]
+
+
+def test_logger_add_scanner_ignores_unrelated_add_calls() -> None:
+    assert _logger_add_violations("counter.add(1)\nmy_set.add(x)\n") == []
+
+
+def test_no_repo_logger_add_call_skips_diagnose_false() -> None:
+    """Every non-test `logger.add(...)` call site in the scanned packages
+    either passes a literal `diagnose=False` or is the one enforcement point
+    (`shared/log_sinks.py:add_sink`)."""
+    violations: list[str] = []
+    for directory in _DIAGNOSE_SCAN_DIRS:
+        root = _REPO_ROOT / directory
+        if not root.is_dir():
+            continue
+        for path in sorted(root.rglob("*.py")):
+            rel = path.relative_to(_REPO_ROOT).as_posix()
+            if rel == _DIAGNOSE_EXEMPT_FILE:
+                continue
+            if any(pattern.search(rel) for pattern in _DIAGNOSE_TEST_PATTERNS):
+                continue
+            try:
+                text = path.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError):
+                continue
+            violations += [f"{rel}:{lineno}" for lineno in _logger_add_violations(text)]
+    assert violations == [], (
+        "logger.add(...) without diagnose=False — route through "
+        f"shared.log_sinks.add_sink instead: {violations}"
+    )
+
+
+def test_a_password_bearing_dsn_failure_via_logger_exception_never_leaks() -> None:
+    """The second leak path the PR #3479 review confirmed independently of
+    `RoleSecret`: `psycopg.connect(dsn)` against a password-bearing DSN, on
+    connect failure, logged via `logger.exception(...)`. `connect()` itself
+    is a real function in a real file, so diagnose's `linecache`-based
+    per-frame annotation applies to it directly, no subprocess needed —
+    this test's own line (`psycopg.connect(dsn, ...)`) is also a real
+    source line referencing `dsn`, which is exactly the shape that would
+    leak if this sink's `diagnose` were not forced off."""
+    import psycopg
+
+    captured: list[str] = []
+
+    def _capture(message: object) -> None:
+        captured.append(str(message))
+
+    sink_id = slog.add_sink(_capture, level="DEBUG")
+    sentinel = "SENTINEL-DSN-PASSWORD-9876543210"
+    dsn = f"postgresql://u:{sentinel}@127.0.0.1:1/x"
+    try:
+        try:
+            psycopg.connect(dsn, connect_timeout=2)
+        except Exception:
+            slog.logger.exception("db connect failed")
+        else:
+            pytest.fail("connect to an unassigned port must fail")
+    finally:
+        slog.logger.remove(sink_id)
+
+    blob = "\n".join(captured)
+    assert "db connect failed" in blob
+    assert sentinel not in blob

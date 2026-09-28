@@ -56,10 +56,10 @@ class RotationState:
     it includes both the old and replacement Redis passwords."""
 
     scope: str
-    old_redis_admin_password: str
-    new_redis_admin_password: str
-    old_redis_password: str
-    new_redis_password: str
+    old_redis_admin_password: str = field(repr=False)
+    new_redis_admin_password: str = field(repr=False)
+    old_redis_password: str = field(repr=False)
+    new_redis_password: str = field(repr=False)
     redis_port: int
     redis_host: str
     redis_user: str

@@ -102,7 +102,9 @@ MachineName = Annotated[
     str, StringConstraints(min_length=1, max_length=255, pattern=r"^[^\x00-\x1f\x7f]+$")
 ]
 Hex32 = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{32}$")]
-Secret = Annotated[str, Field(min_length=32, max_length=256)]
+# repr=False covers every field typed `Secret` in one place (`Enrollment.secret`,
+# `UnitApi.token`, `UnitApi.telemetry`, `UnitCapability.password`).
+Secret = Annotated[str, Field(min_length=32, max_length=256, repr=False)]
 
 
 class UnitCapabilityError(AuthorityRefusedError):

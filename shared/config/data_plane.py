@@ -146,6 +146,7 @@ class AgentProfileOwnerDbUrlRefusedError(ValueError):
 class DataPlaneSettings(EnvSettings):
     db_url: str = Field(
         alias="AVA_DB_URL",
+        repr=False,  # carries the write generation's login password as userinfo
         description="The cluster's ONE database access URL, dialed as-is by every "
         "process. Its port is chosen at URL generation (install / converge) by "
         "AVA_PGBOUNCER_ENABLED: the PgBouncer listener port when pooling is on "
@@ -163,6 +164,7 @@ class DataPlaneSettings(EnvSettings):
 
     redis_url: str = Field(
         alias="AVA_REDIS_URL",
+        repr=False,
         description="Redis connection URL. Carries the runtime ACL user's password "
         "as userinfo, so it is sensitive.",
         json_schema_extra={
@@ -285,6 +287,7 @@ class DataPlaneSettings(EnvSettings):
     cluster_secret: str = Field(
         default="",
         alias="AVA_CLUSTER_SECRET",
+        repr=False,
         description=(
             "The gateway's human/control-plane bearer (gateway API, frontend login). "
             "It stays on the gateway: machine callers present their write "
@@ -310,6 +313,7 @@ class DataPlaneSettings(EnvSettings):
     redis_admin_password: str = Field(
         default="",
         alias="AVA_REDIS_ADMIN_PASSWORD",
+        repr=False,
         description=(
             "Password for Redis's default administrative user and requirepass. "
             "Minted at first start for every local data plane, including an empty "

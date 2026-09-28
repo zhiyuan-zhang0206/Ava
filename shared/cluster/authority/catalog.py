@@ -8,7 +8,7 @@ module never opens a connection and never infers authority from a role name.
 from __future__ import annotations
 
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
@@ -52,7 +52,10 @@ class RoleFacts:
     bypassrls: bool
     connection_limit: int
     valid_until: datetime | None
-    password: str | None
+    # `pg_authid.rolpassword` — a SCRAM verifier, not the plaintext login, but
+    # still credential material; hidden from repr for the same reason as
+    # `RoleSecret.verifier` (shared/cluster/authority/model.py).
+    password: str | None = field(repr=False)
     configured: bool
     depended: bool
     owns: bool

@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import json
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -52,7 +52,7 @@ class PoolerAdmin(BaseModel):
 
     model_config = ConfigDict(extra="forbid", strict=True, frozen=True)
 
-    password: str = Field(min_length=32, max_length=256)
+    password: str = Field(min_length=32, max_length=256, repr=False)
     verifier: Verifier
 
 
@@ -122,8 +122,8 @@ class WriteGrant:
     number: int
     credential_digest: str
     role: str
-    password: str
-    api_token: str
+    password: str = field(repr=False)
+    api_token: str = field(repr=False)
 
     def dsn(self, endpoint: str) -> str:
         """``endpoint`` (the home's credential-free URL) dialed as this login."""

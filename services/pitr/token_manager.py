@@ -14,7 +14,7 @@ from __future__ import annotations
 import json
 import os
 import tempfile
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Protocol, cast
@@ -25,8 +25,8 @@ class TokenState:
     """One durable token pair. ``expires_at`` is the access token's wall
     clock, timezone-aware."""
 
-    access_token: str
-    refresh_token: str | None
+    access_token: str = field(repr=False)
+    refresh_token: str | None = field(repr=False)
     expires_at: datetime
 
     def __post_init__(self) -> None:

@@ -89,7 +89,7 @@ import secrets
 import socket
 import stat
 import sys
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Literal, cast
 from urllib.parse import unquote, urlsplit
@@ -179,10 +179,10 @@ def _record(home: Path, step: str, state: str, *, api: dict[str, Any] | None = N
 class RedisEnv:
     """The home's persisted Redis credentials, read from its `.env` file."""
 
-    url: str
-    admin: str
-    runtime: str
-    cluster_secret: str
+    url: str = field(repr=False)
+    admin: str = field(repr=False)
+    runtime: str = field(repr=False)
+    cluster_secret: str = field(repr=False)
 
     @classmethod
     def read(cls, home: Path) -> RedisEnv:
@@ -370,11 +370,11 @@ def convert_redis(home: Path, port: int, *, execute: bool) -> str:
 class DbEnv:
     """The home's database endpoint and legacy credentials, read from `.env`."""
 
-    url: str
+    url: str = field(repr=False)
     owner: str
     database: str
     legacy_keys: tuple[str, ...]
-    cluster_secret: str
+    cluster_secret: str = field(repr=False)
 
     @classmethod
     def read(cls, home: Path) -> DbEnv:
