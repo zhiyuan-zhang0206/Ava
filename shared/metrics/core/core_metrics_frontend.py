@@ -10,18 +10,10 @@ from __future__ import annotations
 
 from shared.events.contract import FRONTEND_INTERACTION_KEYS
 from shared.metrics.core import core_metrics
+from shared.metrics.metrics_logql import event_count
 from shared.plugin_metrics import MetricSpec
 
-_SEL = '{service_name="unknown_service"}'
 _FRONTEND_ATTR = {k: f"attributes_{k}" for k in FRONTEND_INTERACTION_KEYS}
-
-
-def _count(pipeline: str, window: str, matchers: str | None = None) -> str:
-    """One count_over_time series — every count wraps in sum(...): the
-    unknown_service family has >500 streams over a day, and an unaggregated
-    count_over_time hits Loki's per-query series cap (alert-rules note)."""
-    selector = _SEL if matchers is None else f'{{service_name="unknown_service", {matchers}}}'
-    return f"sum(count_over_time({selector} | json | {pipeline} [{window}]))"
 
 
 core_metrics.register_core_metric(
@@ -41,7 +33,7 @@ core_metrics.register_core_metric(
         unit="short",
         panel="timeseries",
         query_type="logql",
-        query=_count(
+        query=event_count(
             'category={category} | source="user"',
             "5m",
             matchers="event_name={event_name}",

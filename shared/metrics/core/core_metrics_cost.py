@@ -13,16 +13,16 @@ from __future__ import annotations
 
 from shared.events.contract import LLM_USAGE_KEYS
 from shared.metrics.core import core_metrics
+from shared.metrics.metrics_logql import EVENT_NAME_SELECTOR
 from shared.plugin_metrics import MetricSpec
 
-_SEL_EV = '{service_name="unknown_service", event_name={event_name}}'
 _LLM_ATTR = {k: f"attributes_{k}" for k in LLM_USAGE_KEYS}
 
 
 def _llm_cost(window: str) -> str:
     """Usage-time LLM cost snapshots over one Grafana/Loki range vector."""
     return (
-        f"sum(sum_over_time({_SEL_EV} | json | "
+        f"sum(sum_over_time({EVENT_NAME_SELECTOR} | json | "
         f"category={{category}} | "
         f"unwrap {_LLM_ATTR['cost_usd']} [{window}]))"
     )
