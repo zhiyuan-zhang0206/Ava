@@ -25,6 +25,13 @@ from shared.incarnation_resources import ResourceBirth
 from shared.machine import machine_name
 
 
+def test_unwrapped_saver_does_not_opt_into_reconstruction_cache() -> None:
+    saver = Mock()
+    with recovery_reconstruction_scope(saver, "no-delta-wrapper") as scope:
+        assert scope is None
+    assert saver.mock_calls == []
+
+
 @pytest.mark.parametrize("needs_repair", [False, True])
 async def test_cold_repair_and_invocation_share_only_unchanged_messages(
     aops_pool: AsyncConnectionPool, monkeypatch: pytest.MonkeyPatch, needs_repair: bool

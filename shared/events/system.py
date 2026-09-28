@@ -58,6 +58,24 @@ class HookTiming(TypedDict):
     hook_ms: dict[str, float]
 
 
+class DeltaMessageSuffix(TypedDict):
+    """Message-write transfer totals, including the final batch's unused prefix.
+
+    The optional snapshot seed is excluded; the enclosing reconstruction span
+    counts it together with every fetched write body.
+    """
+
+    thread_id: str
+    checkpoint_ns: str
+    checkpoint_id: str
+    candidate_writes: int
+    fetched_rows: int
+    fetched_bytes: int
+    body_batches: int
+    retained_writes: int
+    reset_found: bool
+
+
 class ResolvedMarker(TypedDict, total=False):
     """`warning_resolved` / `error_resolved` payload, supporting two eras.
 

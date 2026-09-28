@@ -187,11 +187,12 @@ def _resets_messages(value: Any) -> bool:
 
 
 def _fetch_suffix(
-    saver: BasePostgresSaver, keys: _Rows, thread: str, namespace: str
+    saver: BasePostgresSaver, keys: _Rows, thread: str, namespace: str, target: str
 ) -> Generator[_Query, _Rows, tuple[_Rows, bool]]:
     rows: _Rows = []
     body_bytes = body_rows = body_batches = 0
     reset = False
+    decode = getattr(saver, "_ava_delta_reset_decode", saver.serde.loads_typed)
     for batch in _body_batches(keys):
         fetched = yield (
             _WRITE_BODIES_SQL,
@@ -203,6 +204,7 @@ def _fetch_suffix(
                 namespace,
             ),
         )
+        _observe_history_rows(saver, fetched)
         if len(fetched) != len(batch):
             raise RuntimeError("message history changed while reading its write bodies")
         body_batches += 1
@@ -210,7 +212,7 @@ def _fetch_suffix(
         body_bytes += sum(len(row["blob"]) for row in fetched)
         for row in fetched:
             rows.append(row)
-            if _resets_messages(saver.serde.loads_typed((row["type"], row["blob"]))):
+            if _resets_messages(decode((row["type"], row["blob"]))):
                 reset = True
                 break
         if reset:
@@ -220,6 +222,7 @@ def _fetch_suffix(
         event="delta_message_suffix",
         thread_id=thread,
         checkpoint_ns=namespace,
+        checkpoint_id=target,
         candidate_writes=len(keys),
         fetched_rows=body_rows,
         fetched_bytes=body_bytes,
@@ -228,6 +231,13 @@ def _fetch_suffix(
         reset_found=reset,
     )
     return rows, reset
+
+
+def _observe_history_rows(saver: BasePostgresSaver, rows: _Rows) -> None:
+    """Report transferred bodies before the reader discards an obsolete prefix."""
+    observer = getattr(saver, "_ava_delta_history_rows", None)
+    if observer is not None:
+        observer(rows)
 
 
 def _history_queries(
@@ -261,12 +271,14 @@ def _history_queries(
     )
     chain = chains["messages"]
     keys = yield _WRITE_KEYS_SQL, (chain, thread, namespace)
-    rows, reset = yield from _fetch_suffix(saver, keys, thread, namespace)
+    rows, reset = yield from _fetch_suffix(saver, keys, thread, namespace, target)
     if reset:
         seeds["messages"] = None
         seed_inline.clear()
     if seeds["messages"] is not None and "messages" not in seed_inline:
-        rows.extend((yield _SEED_SQL, (thread, namespace, seeds["messages"])))
+        seed_rows = yield _SEED_SQL, (thread, namespace, seeds["messages"])
+        _observe_history_rows(saver, seed_rows)
+        rows.extend(seed_rows)
     return saver._build_delta_channels_writes_history(
         channels=["messages"],
         chain_by_ch=chains,
