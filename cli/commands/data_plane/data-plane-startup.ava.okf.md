@@ -57,7 +57,11 @@ restart it (a reload never revokes a user). A live pooler with closed listeners
 retains custody: normal start cannot repeat its shutdown signal or escalate to
 force. A graceful stop timeout fails without killing the survivor.
 
-PgBouncer and Redis are spawned with `shared.process_env.daemon_process_env`:
-the operator's PATH, home, user, temp dir, timezone and locale only. The
-gateway login, write generation and API token the boot pass delivered to
-`ava start` never reach a long-lived daemon's environment.
+PgBouncer and Redis are spawned with `shared.process_env.daemon_process_env`,
+and the Postgres postmaster with `shared.pg_tools.pg_start_env` (the same set
+plus the macOS locale fallback): the operator's PATH, home, user, temp dir,
+timezone and locale only. The gateway login, write generation and API token
+the boot pass delivered to `ava start`, and the human secret and Redis admin
+password `.env` gives it, never reach a data-plane daemon's environment. The
+PITR `archive_command` (the shim, which finds `python3` through PATH) and the
+restore drill's `restore_command` (an absolute interpreter) need nothing more.

@@ -142,8 +142,8 @@ def health_port(name: str) -> int:
     allowed).
 
     The fallback is deliberate but loud (F-s4-12): the 8100s are a SHARED
-    segment, so a unit that never declared a per-unit block (no enroll
-    ``--health-port-base``, no ``AVA_<NAME>_HEALTH_PORT`` in its own .env)
+    segment, so a unit that never declared a per-unit block (no
+    ``ava start --health-port-base``, no ``AVA_<NAME>_HEALTH_PORT`` in its own .env)
     quietly joins whatever co-located units also fell back — the exact
     2026-07-24/26 incident shape. The first fallback per daemon per process
     logs a warning naming the fix.

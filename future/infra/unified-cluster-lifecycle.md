@@ -51,7 +51,7 @@ are not implementation requirements for this revision.
    application root and access the database through its own process. The
    one-host stop phase closes them (see
    [release execution](../../cli/release_transition/execution.ava.okf.md));
-   each fleet unit must run the same closure at `closing`.
+   each fleet unit must run the same closure at `stopping`.
 5. Exercise upgrade and recovery in disposable clusters, including paired
    migrations and writes made after upgrade. A down migration alone does not
    prove those writes remain usable by the retained release.
@@ -388,6 +388,18 @@ contained ([what a bundle exposes](../../shared/cluster/authority/unit-enrollmen
 This is a known gap, and closing it is a required deliverable of dbgen-8
 (user ruling, 2026-09-28): dbgen-8 does not land until a networked cluster can
 rotate its write generation and re-issue every unit's capability.
+
+No real-process test runs a gateway with its cluster secret set against a
+runner's real `/ops` and spawns an agent through it. The e2e stack blanks the
+secret (`tests/e2e/conftest.py`): its directly started services mint no write
+generation, and with a secret set `/ops` accepts only a generation's machine
+tokens, so every spawn would be refused. The authenticated path is covered
+only piecewise: the gateway and ops acceptance matrix in
+`tests/lifecycle/db_authority/test_api_tokens.py`, run against an in-process
+app and a bare ops listener. This is a known gap and a hard gate of the FC-10
+production cutover rehearsal: the rehearsal runs on a cluster with its secret
+set and proves gateway -> `/ops` -> spawn end to end before production is
+switched.
 
 Current local serving proofs do not complete this plan. Acceptance requires
 normal teardown, interrupted recovery and release A/B/A evidence, removal of

@@ -165,6 +165,34 @@ def session_mints(secret: str) -> dict[str, str]:
     return mints
 
 
+# The facts of the human cluster secret: its bearer and the sessions it minted.
+# Every other fact (`machine_token:<class>`, `machine_session:runner`) is bound
+# to a write generation and dies with it.
+HUMAN_CREDENTIAL_FACTS = frozenset({"cluster_bearer", _MINT_FACTS["human"]})
+
+
+def require_human_credential(request: Request) -> None:
+    """Route dependency: 403 unless the human secret authenticated `request`.
+
+    Guards routes that mint a credential outliving any write generation (MCP
+    client tokens): a generation-bound admission must not leave behind a
+    credential its own revocation cannot end. An open API (no secret, or the
+    middleware switched off) has no credential to tell apart and passes.
+    """
+    from fastapi import HTTPException
+
+    from shared.config import settings
+
+    if not settings.gateway.auth_middleware_enabled or not settings.data_plane.cluster_secret:
+        return
+    if getattr(request.state, "source_verified_by", None) not in HUMAN_CREDENTIAL_FACTS:
+        raise HTTPException(
+            status_code=403,
+            detail="requires the human cluster secret or a session it minted; "
+            "a write generation's credential cannot manage credentials that outlive it",
+        )
+
+
 def current_session_fact(pool: Any, session_id: str | None, secret: str) -> str | None:
     """The credential fact of a valid session whose minting credential is
     current (`user_session` / `machine_session:runner`), else None: the one

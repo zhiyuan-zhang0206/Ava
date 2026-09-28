@@ -38,7 +38,7 @@ _GATEWAY_URL_KEYS = ("AVA_GATEWAY_URL",)
 
 def _anchored_gateway_base() -> str | None:
     """This checkout's own home gateway identity: its persisted ``gateway_url``
-    file first (machine identity, written at first start / enroll), then the
+    file first (machine identity, written at the home's first `ava start`), then the
     home `.env` aliases. None when the home carries no identity yet (fresh
     install before first start) or when the checkout is unanchored — an
     unanchored checkout has NO home of its own; its rule-4 scratch home carries

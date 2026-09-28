@@ -34,7 +34,7 @@ database posture is a status projection, not this gate's authority.
 - **Failure feedback delivery**: authenticated CI, QA, and merge failure events are deduplicated durably, then delivered to the author through chat auto-resurrection, the nearest live birth ancestor, or a task-registry alert
 - **Schedule keep-alive**: built-in ScheduleManager, keeping schedule resident processes alive in their own sessions (not a timer trigger — timing logic is inside the script, the manager only ensures stay-up)
 - **Cluster ops API**: cluster, config, inventory, metrics, system and other management endpoints
-- **MCP control plane**: revocable scoped tokens guard default-off `/mcp`; cluster-authenticated `/api/mcp/clients` manages them
+- **MCP control plane**: revocable scoped tokens guard default-off `/mcp`; human-credential-only `/api/mcp/clients` manages them
 - **Per-agent command views**: `GET /api/commands?agent_id=` resolves the agent's runner then asks its `agent_skill_view` op for the command catalog that runner discovers from its own converged load dir plus the agent's persisted cwd; an unavailable, unknown, or version-skewed runner falls back to the gateway-local catalog
 - **Authentication and browser-origin policy**: server-side `web_sessions` + bearer-secret auth, exact-origin CORS checks, and the Secure cookie policy — [[web-sessions.ava.okf.md]].
 - **Inbound provenance**: gateway-created inbounds persist the server-verified credential kind, ingress transport, exact-content SHA-256, and a nullable agent source/token comparison. These are audit facts only and never reject delivery — [[shared/agents/messages/inbound-provenance.ava.okf.md]].

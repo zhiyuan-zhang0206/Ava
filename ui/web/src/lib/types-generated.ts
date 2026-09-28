@@ -99,13 +99,16 @@ export interface paths {
         };
         /**
          * Sessions
-         * @description List active browser sessions, marking the request's current cookie.
+         * @description List browser sessions that still authenticate, marking the current cookie.
          *
-         *     Only the request's current session keeps its full id; every other row's id
-         *     is masked to its final 8 characters — enough to tell rows apart and to
-         *     revoke (the revoke endpoint accepts the suffix), without exposing the full
-         *     credential of sessions the caller does not hold. Managed-browser sessions
-         *     are labeled with ``managed`` so they are not mistaken for the caller's own.
+         *     A session is listed only while the credential that minted it is current,
+         *     the same test the session check applies, so a security screen never shows
+         *     a dead session as active. Only the request's current session keeps its full
+         *     id; every other row's id is masked to its final 8 characters — enough to
+         *     tell rows apart and to revoke (the revoke endpoint accepts the suffix),
+         *     without exposing the full credential of sessions the caller does not hold.
+         *     Managed-browser sessions are labeled with ``managed`` so they are not
+         *     mistaken for the caller's own.
          */
         get: operations["sessions_api_auth_sessions_get"];
         put?: never;
@@ -3180,7 +3183,7 @@ export interface paths {
          *     `git bundle` of HEAD (full real ancestry, so a bootstrapped machine branch
          *     is a true descendant of `main` and converges cleanly when a memory remote
          *     is configured later). A fresh agent-runner whose memory remote is not
-         *     configured (headless enroll, no GitHub credentials) fetches this over its
+         *     configured (a headless remote runner, no GitHub credentials) fetches this over its
          *     gateway URL and clones it as its initial pool, so the shared index and
          *     notes reach its agents without GitHub. Untracked machine-local paths
          *     (`.cache`, `.githooks`, …) never ride a bundle — git only carries the

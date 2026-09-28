@@ -225,7 +225,7 @@ _PASSTHROUGH_ROWS = (
 # The health-port services (one Settings field each: `<svc>_health_port`,
 # alias `AVA_<SVC>_HEALTH_PORT`, scope=host). Adding a daemon with a health
 # port = one line here + the field in shared/config/services.py; every
-# consumer (derive_env, daemon_health, enroll, port_preflight, dotenv_boot's
+# consumer (derive_env, daemon_health, start, port_preflight, dotenv_boot's
 # force set) follows automatically.
 _HEALTH_PORT_SERVICES: tuple[str, ...] = (
     "labeler",
@@ -242,7 +242,8 @@ _HEALTH_PORT_SERVICES: tuple[str, ...] = (
     # per-unit health-port model and kept static legacy ports (8110/8111),
     # outside PORT_OFFSETS — `--health-port-base` did not move them, so two
     # co-located units collided on the shared default. They now sit in the
-    # block (offsets 16/17) like every other health daemon: enroll writes them,
+    # block (offsets 16/17) like every other health daemon: `ava start
+    # --health-port-base` writes them,
     # preflight checks them, derive_env materializes them.
     "delivery_watchdog",
     "im_bridge",
@@ -296,7 +297,7 @@ def health_port_env(base: int) -> dict[str, str]:
 # 8106) line up with PORT_OFFSETS 3/4/6/7 onto one fake "base" (8099) — so
 # consistency alone cannot tell a legacy unit from a block unit. Every real
 # block base is operator-chosen or allocated at >= BLOCK_START (18000),
-# hand-pinned enroll bases included (win: 18114, WSL2 default: 20027), so a
+# hand-pinned bases included (win: 18114, WSL2 default: 20027), so a
 # solved base below this floor is a legacy pin sequence, never a block.
 _HEALTH_PORT_BLOCK_FLOOR = 15000
 

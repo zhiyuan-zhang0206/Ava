@@ -75,7 +75,7 @@ def browser_deps_warning(reason: str) -> str:
         )
     elif reason.startswith("no Chrome"):
         repair = (
-            "| Install Google Chrome (after enroll, AVA_CHROME_BINARY         |\n"
+            "| Install Google Chrome (after the first start, AVA_CHROME_BINARY|\n"
             "| can point at an existing binary).                              |\n"
         )
     else:

@@ -63,7 +63,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
     bash /tmp/install-cli-tools.sh && rm /tmp/install-cli-tools.sh
 
-# ── Layer 3: node 22 (provision/node.sh — shared with install.sh / CI) ────────────────
+# ── Layer 3: node 22 (provision/node.sh — shared with the converge browser step) ─────
 # Ubuntu 24.04 defaults to node 18; the script upgrades to 22 via nodesource.
 COPY scripts/provision/_lib.sh scripts/provision/node.sh /tmp/provision/
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \

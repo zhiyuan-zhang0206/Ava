@@ -16,13 +16,14 @@ from pydantic import BaseModel
 
 from gateway._cors import session_cookie_secure
 from gateway.error_envelope import error_response
-from gateway.request_principal import current_session_fact, login_mint
+from gateway.request_principal import current_session_fact, login_mint, session_mints
 from gateway.session_store import (
     create_session,
     list_sessions,
     minted_session_id,
     revoke_session,
     session_ids_with_suffix,
+    session_mint,
 )
 from shared.cluster_auth import (
     clear_cookie_header,
@@ -172,18 +173,33 @@ async def check(request: Request) -> JSONResponse:
     return JSONResponse(content={"authenticated": fact is not None})
 
 
+def _sessions_that_authenticate(pool: Any, secret: str) -> list[dict[str, Any]]:
+    """Unrevoked, unexpired sessions whose mint is still admitted: the rows
+    `current_session_fact` would accept. A revoked generation's runner-minted
+    sessions, a rotated secret's, and ids without a mint are dead and omitted."""
+    admitted = session_mints(secret)
+    return [row for row in list_sessions(pool) if session_mint(row["id"]) in admitted]
+
+
 @router.get("/api/auth/sessions")
 async def sessions(request: Request) -> list[dict[str, Any]]:
-    """List active browser sessions, marking the request's current cookie.
+    """List browser sessions that still authenticate, marking the current cookie.
 
-    Only the request's current session keeps its full id; every other row's id
-    is masked to its final 8 characters — enough to tell rows apart and to
-    revoke (the revoke endpoint accepts the suffix), without exposing the full
-    credential of sessions the caller does not hold. Managed-browser sessions
-    are labeled with ``managed`` so they are not mistaken for the caller's own.
+    A session is listed only while the credential that minted it is current,
+    the same test the session check applies, so a security screen never shows
+    a dead session as active. Only the request's current session keeps its full
+    id; every other row's id is masked to its final 8 characters — enough to
+    tell rows apart and to revoke (the revoke endpoint accepts the suffix),
+    without exposing the full credential of sessions the caller does not hold.
+    Managed-browser sessions are labeled with ``managed`` so they are not
+    mistaken for the caller's own.
     """
     current_session_id = request.cookies.get(cookie_name())
-    rows = await asyncio.to_thread(list_sessions, request.app.state.db_pool)
+    rows = await asyncio.to_thread(
+        _sessions_that_authenticate,
+        request.app.state.db_pool,
+        settings.data_plane.cluster_secret,
+    )
     result: list[dict[str, Any]] = []
     for row in rows:
         is_current = row["id"] == current_session_id

@@ -583,12 +583,15 @@ class GatewaySettings(EnvSettings):
             "Serve the cluster control plane as an MCP server over Streamable "
             "HTTP at /mcp on the gateway (design task #1212, step 1). Off by "
             "default — an additive surface; the existing mcp-daemon path and "
-            "`ava mcp serve` (stdio) are unaffected either way. The endpoint is "
-            "auth-gated by the same cluster middleware as every API route."
+            "`ava mcp serve` (stdio) are unaffected either way. Only an MCP "
+            "client token authenticates /mcp, and such a token outlives every "
+            "write generation, so switching the endpoint decides whether those "
+            "tokens authenticate at all: no config write sets it (not the API, "
+            "the ops op or `--local`); edit the gateway `.env` on its host."
         ),
         json_schema_extra={
             "restart_required": "gateway",
-            "writable": True,
+            "writable": False,
             "sensitive": False,
             "scope": "cluster-pinned",
         },

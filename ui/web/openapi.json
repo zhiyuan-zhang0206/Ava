@@ -79,7 +79,7 @@
     "/api/auth/sessions": {
       "get": {
         "summary": "Sessions",
-        "description": "List active browser sessions, marking the request's current cookie.\n\nOnly the request's current session keeps its full id; every other row's id\nis masked to its final 8 characters — enough to tell rows apart and to\nrevoke (the revoke endpoint accepts the suffix), without exposing the full\ncredential of sessions the caller does not hold. Managed-browser sessions\nare labeled with ``managed`` so they are not mistaken for the caller's own.",
+        "description": "List browser sessions that still authenticate, marking the current cookie.\n\nA session is listed only while the credential that minted it is current,\nthe same test the session check applies, so a security screen never shows\na dead session as active. Only the request's current session keeps its full\nid; every other row's id is masked to its final 8 characters — enough to\ntell rows apart and to revoke (the revoke endpoint accepts the suffix),\nwithout exposing the full credential of sessions the caller does not hold.\nManaged-browser sessions are labeled with ``managed`` so they are not\nmistaken for the caller's own.",
         "operationId": "sessions_api_auth_sessions_get",
         "responses": {
           "200": {
@@ -5809,7 +5809,7 @@
     "/api/memory/pool": {
       "get": {
         "summary": "Get Memory Pool",
-        "description": "Download the consolidated memory pool as a git bundle.\n\nServes `gateway_memory_dir()` — the consolidated checkout on `main` — as a\n`git bundle` of HEAD (full real ancestry, so a bootstrapped machine branch\nis a true descendant of `main` and converges cleanly when a memory remote\nis configured later). A fresh agent-runner whose memory remote is not\nconfigured (headless enroll, no GitHub credentials) fetches this over its\ngateway URL and clones it as its initial pool, so the shared index and\nnotes reach its agents without GitHub. Untracked machine-local paths\n(`.cache`, `.githooks`, …) never ride a bundle — git only carries the\ntracked tree. Sits behind the normal Bearer/session middleware like every\n/api route. `X-Pool-Head` carries the checkout's HEAD sha so the receiver\ncan verify what it cloned is the advertised snapshot.",
+        "description": "Download the consolidated memory pool as a git bundle.\n\nServes `gateway_memory_dir()` — the consolidated checkout on `main` — as a\n`git bundle` of HEAD (full real ancestry, so a bootstrapped machine branch\nis a true descendant of `main` and converges cleanly when a memory remote\nis configured later). A fresh agent-runner whose memory remote is not\nconfigured (a headless remote runner, no GitHub credentials) fetches this over its\ngateway URL and clones it as its initial pool, so the shared index and\nnotes reach its agents without GitHub. Untracked machine-local paths\n(`.cache`, `.githooks`, …) never ride a bundle — git only carries the\ntracked tree. Sits behind the normal Bearer/session middleware like every\n/api route. `X-Pool-Head` carries the checkout's HEAD sha so the receiver\ncan verify what it cloned is the advertised snapshot.",
         "operationId": "get_memory_pool_api_memory_pool_get",
         "responses": {
           "200": {

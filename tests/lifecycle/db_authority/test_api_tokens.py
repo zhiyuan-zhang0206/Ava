@@ -266,6 +266,32 @@ def test_a_session_records_which_credential_minted_it(gateway: Path) -> None:
         )
 
 
+def test_the_sessions_list_shows_only_sessions_that_authenticate(gateway: Path) -> None:
+    """`/api/auth/sessions` lists what the session check would still admit: a
+    runner-minted session leaves the list when the fence revokes its generation,
+    and an id without a mint (the pre-mint format) never appears."""
+    from gateway.session_store import create_session
+    from shared.cluster_auth import new_session_id
+
+    runner = _tokens(gateway).api.runner
+    with TestClient(config_app()) as client:
+        pool = client.app.state.db_pool  # type: ignore[attr-defined]
+        machine = client.post("/api/auth/login", json={"password": runner}).cookies[cookie_name()]
+        client.cookies.clear()
+        human = client.post("/api/auth/login", json={"password": _HUMAN}).cookies[cookie_name()]
+        client.cookies.clear()
+        create_session(pool, new_session_id(), 3600, "legacy-browser", "10.0.0.9")
+
+        def listed() -> set[str]:
+            response = client.get("/api/auth/sessions", headers=bearer_header(_HUMAN))
+            assert response.status_code == 200, response.text
+            return {row["id"] for row in response.json()}
+
+        assert listed() == {machine[-8:], human[-8:]}
+        _rotate(gateway)
+        assert listed() == {human[-8:]}
+
+
 def test_a_machine_token_cannot_choose_the_human_secret(
     gateway: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -286,6 +312,72 @@ def test_a_machine_token_cannot_choose_the_human_secret(
         )
     assert resp.status_code == 400, resp.text
     assert not (store / ".env").exists()
+
+
+def test_a_machine_token_cannot_open_the_mcp_endpoint(
+    gateway: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Switching `/mcp` on decides whether MCP client tokens, which outlive
+    every generation, authenticate at all: no config write may choose it."""
+    from shared import runtime_config
+
+    store = tmp_path / "config-store"
+    store.mkdir()
+    monkeypatch.setattr(runtime_config, "_ava_home", lambda: store)
+    monkeypatch.setattr(settings.general, "machine_name", "gateway-host")
+    runner = _tokens(gateway).api.runner
+    with TestClient(config_app()) as client:
+        resp = client.put(
+            "/api/config", json={"mcp_endpoint_enabled": True}, headers=bearer_header(runner)
+        )
+    assert resp.status_code == 400, resp.text
+    assert not (store / ".env").exists()
+
+
+def test_only_a_human_credential_manages_mcp_clients(gateway: Path) -> None:
+    """An MCP client token lives in `mcp_clients`, bound to no write generation.
+    A generation-bound admission (either machine token, or a session a runner
+    token minted) must not mint one that outlives it, nor list or revoke them;
+    the human secret and the sessions it minted manage them."""
+    from gateway import mcp_clients
+
+    tokens = _tokens(gateway).api
+    with TestClient(config_app()) as client:
+        pool = client.app.state.db_pool  # type: ignore[attr-defined]
+        runner_session = client.post("/api/auth/login", json={"password": tokens.runner})
+        client.cookies.clear()
+        human_session = client.post("/api/auth/login", json={"password": _HUMAN})
+        client.cookies.clear()
+        generation_bound = (
+            bearer_header(tokens.runner),
+            bearer_header(tokens.gateway),
+            {"Cookie": f"{cookie_name()}={runner_session.cookies[cookie_name()]}"},
+        )
+        for headers in generation_bound:
+            minted = client.post(
+                "/api/mcp/clients", json={"name": "minted", "scope": "write"}, headers=headers
+            )
+            assert minted.status_code == 403, minted.text
+            assert client.get("/api/mcp/clients", headers=headers).status_code == 403
+            assert client.post("/api/mcp/clients/1/revoke", headers=headers).status_code == 403
+        assert mcp_clients.list_clients(pool) == []
+
+        human = (
+            bearer_header(_HUMAN),
+            {"Cookie": f"{cookie_name()}={human_session.cookies[cookie_name()]}"},
+        )
+        for index, headers in enumerate(human):
+            created = client.post(
+                "/api/mcp/clients",
+                json={"name": f"human-{index}", "scope": "write"},
+                headers=headers,
+            )
+            assert created.status_code == 200, created.text
+            assert client.get("/api/mcp/clients", headers=headers).status_code == 200
+            revoked = client.post(
+                f"/api/mcp/clients/{created.json()['id']}/revoke", headers=headers
+            )
+            assert revoked.status_code == 200, revoked.text
 
 
 def _webhook_request(authorization: str | None) -> Request:
