@@ -135,13 +135,19 @@ def test_the_launch_grace_runs_from_submission_not_from_the_request(
     def plan_launch(_path: Path, _image: object) -> dict[str, JsonValue]:
         return {"kind": LINUX, "job": "retained-external-executor"}
 
+    def no_receipt(*, mode: str) -> dict[str, JsonValue]:
+        del mode
+        return {}
+
     def launch(_record: dict[str, JsonValue]) -> SimpleNamespace:
         at_dispatch.append((operation_in_flight(home), health_alerts.executor_lost()))
-        return SimpleNamespace(model_dump=lambda **_kwargs: {})
+        return SimpleNamespace(model_dump=no_receipt)
 
-    host = SimpleNamespace(plan_launch=plan_launch, launch=launch)
+    def this_host(_request: FleetRequest) -> SimpleNamespace:
+        return SimpleNamespace(plan_launch=plan_launch, launch=launch)
+
     monkeypatch.setattr(paths, "ava_home", lambda: home)
-    monkeypatch.setattr(native, "for_host", lambda _request: host)
+    monkeypatch.setattr(native, "for_host", this_host)
     monkeypatch.setattr(submit, "GatewayUnit", Inputs)
     submitted = datetime.now(UTC)
     submit.submit_request(request)
@@ -158,7 +164,11 @@ def test_a_native_dispatch_restarts_the_launch_grace(
     home = path.parent.parent.parent
     _readback_seams(monkeypatch, planned)
     observations = iter([{"LoadState": "not-found"}, _properties(planned), _properties(planned)])
-    monkeypatch.setattr(linux, "_properties", lambda _unit: next(observations))
+
+    def next_properties(_unit: str) -> dict[str, str]:
+        return next(observations)
+
+    monkeypatch.setattr(linux, "_properties", next_properties)
     at_dispatch: list[InFlight | None] = []
 
     def systemd_run(
