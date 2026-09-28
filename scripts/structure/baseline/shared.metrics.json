@@ -1,0 +1,6 @@
+{
+  "complexity": {
+    "shared/metrics/metrics_aggregate.py::_row_reductions": 24,
+    "shared/metrics/metrics_aggregate.py::_sections_from_aggregate": 31
+  }
+}

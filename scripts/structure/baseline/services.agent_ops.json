@@ -1,0 +1,8 @@
+{
+  "complexity": {
+    "services/agent_ops/dispatch_sync.py::dispatch_sync": 20
+  },
+  "owner_bypasses": {
+    "services/agent_ops/bootstrap.py::postgres-dial": 1
+  }
+}

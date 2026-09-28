@@ -3,20 +3,19 @@
 Unit coverage of `path_imports.measure` (which forms count, which do not, and the
 ava_builtins/ scope), then the gate lifecycle through lcs.main(): a new site
 fails, a frozen one passes, a fixed one fails as stale, and the base-revision
-guard admits the section once and then refuses any new key.
+guard refuses any new key once it can actually compare against a real base.
 """
 
 from __future__ import annotations
 
 import ast
-import json
 import pathlib
 import subprocess
 
 import pytest
 
 from scripts import lint_code_structure as lcs
-from scripts.structure import path_imports
+from scripts.structure import baseline_shards, path_imports
 
 _SKILL = "ava_builtins/skills/demo/reference/run.py"
 
@@ -87,6 +86,16 @@ def _write(root: pathlib.Path, name: str, content: str) -> None:
 
 
 def _baseline(root: pathlib.Path, frozen: dict[str, int] | None) -> None:
+    """Write the baseline as shards, plus the shard directory's README.md:
+    read_worktree() requires the directory to exist, and the README is what
+    keeps git tracking it (and a committed base comparable) even with zero
+    shards."""
+    directory = root / baseline_shards.SHARD_DIR
+    if directory.is_dir():
+        for path in directory.glob("*.json"):
+            path.unlink()
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / "README.md").write_text("Structure baseline shards.\n", encoding="utf-8")
     sections: dict[str, dict[str, int]] = {
         kind: {}
         for kind in (
@@ -100,7 +109,12 @@ def _baseline(root: pathlib.Path, frozen: dict[str, int] | None) -> None:
     }
     if frozen is not None:
         sections["path_imports"] = frozen
-    _write(root, "scripts/structure/baseline.json", json.dumps(sections, indent=2) + "\n")
+    for name, shard in baseline_shards.split(sections).items():
+        # Single concatenated string, not chained `/`: keeps an adversarial shard
+        # name from being treated as an absolute-path override.
+        (pathlib.Path(f"{directory}/{name}.json")).write_text(
+            baseline_shards.render(shard), encoding="utf-8"
+        )
 
 
 def _commit(root: pathlib.Path, message: str) -> None:
@@ -169,16 +183,19 @@ def test_a_fixed_path_import_fails_until_its_entry_is_removed(
     )
 
 
-def test_the_section_is_admitted_once_when_the_base_lacks_it(
+def test_a_new_key_is_refused_even_when_no_base_shard_ever_named_the_section(
     _repo: pathlib.Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
+    """No shard file carries a fixed set of sections: a section with zero entries
+    anywhere in a shard's history is indistinguishable from one explicitly frozen
+    empty, so a freshly introduced key gets no one-time grace period."""
     _baseline(_repo, None)
-    _commit(_repo, "Base without the path_imports section")
+    _commit(_repo, "Base with no path_imports entries anywhere")
     _write(_repo, _SKILL, _HACK)
     _baseline(_repo, {_KEY: 1})
 
-    assert lcs.main([]) == 0
-    assert capsys.readouterr().out == ""
+    assert lcs.main([]) == 1
+    assert f"added path_imports entry {_KEY} — baseline is shrink-only" in (capsys.readouterr().out)
 
 
 def test_a_new_key_is_refused_once_the_section_exists_at_the_base(

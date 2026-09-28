@@ -1,0 +1,5 @@
+{
+  "complexity": {
+    "shared/deploy/git/worktree_guard.py::find_live_anchors": 17
+  }
+}

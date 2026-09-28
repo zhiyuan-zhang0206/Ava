@@ -90,7 +90,10 @@ def _run_capture(root: pathlib.Path | None, *extra: str) -> tuple[int, str]:
         ("ui/web/src/components/Foo.test.tsx", False),  # *.test.*
         ("ui/web/src/__tests__/foo.tsx", False),  # __tests__/
         ("docs/foo.md", False),  # not a src extension
-        ("scripts/structure/baseline.json", False),  # generated (exact + not src ext anyway)
+        (
+            "scripts/structure/baseline/agent.graph.json",
+            False,
+        ),  # generated (glob + not src ext anyway)
         ("ui/web/openapi.json", False),  # generated
         ("ui/web/src/lib/api-generated.ts", False),  # generated glob
         ("db/schema.sql", False),  # generated

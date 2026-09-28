@@ -1,0 +1,21 @@
+{
+  "complexity": {
+    "ava/_gateway_transport.py::post": 17,
+    "ava/files.py::read": 19,
+    "ava/impersonation_replay.py::consume_recorded_events": 16
+  },
+  "directories": {
+    "ava": 36
+  },
+  "nesting": {
+    "ava/_mcps_daemon.py::_handle_client": 7
+  },
+  "owner_bypasses": {
+    "ava/_settings.py::postgres-dial": 1,
+    "ava/external_state.py::postgres-dial": 1
+  },
+  "private_imports": {
+    "ava/_settings.py::shared.db._restore_pooled_session": 1,
+    "ava/impersonation_replay.py::shared.agents.impersonation._impersonation_store": 1
+  }
+}

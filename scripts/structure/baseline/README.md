@@ -1,0 +1,18 @@
+# Structure baseline shards
+
+This directory holds the structure lint's frozen baseline, split into one
+shard file per directory area — `<shard>.json`, named after the first two
+components of an entry's directory (`agent/graph/x.py` files under
+`agent.graph.json`; a `directories` entry's key is itself the directory, so
+`shared` lives in `shared.json`). See `scripts/structure/baseline_shards.py`
+for the exact rule (`shard_of`) and `scripts/lint_code_structure.py` for how
+the shards are merged, validated and compared against the base revision. An
+entry filed under the wrong shard fails the gate.
+
+This README is committed even when every shard is empty (all structural debt
+paid off): git does not track empty directories, so without it a fully clean
+baseline directory would vanish from the tree and become indistinguishable
+from a revision that predates the sharded baseline entirely — the very commit
+where the shrink-only guard should start comparing against an empty baseline.
+Keeping this file here means the directory, and an empty baseline, are always
+visible to git.

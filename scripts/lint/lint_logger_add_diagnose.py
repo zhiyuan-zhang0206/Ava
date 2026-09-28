@@ -7,7 +7,7 @@ pre-commit hook.
 
 Lives under `scripts/lint/` rather than directly under `scripts/`, alongside
 `lint_async_no_sync_blocking.py` — `scripts/` sits at its frozen 20+-entry
-directory-budget ceiling (`scripts/structure/baseline.json`), so adding this
+directory-budget ceiling (`scripts/structure/baseline/scripts.json`), so adding this
 file directly there needed a same-PR relocation to net to zero. Not (yet) a
 wholesale move of every `scripts/lint_*.py`.
 

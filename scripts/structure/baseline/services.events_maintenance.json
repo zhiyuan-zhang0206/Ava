@@ -1,0 +1,7 @@
+{
+  "complexity": {
+    "services/events_maintenance/jsonl_replay.py::aggregate_rollup_file": 15,
+    "services/events_maintenance/observed_metrics.py::replay_jsonl": 18,
+    "services/events_maintenance/rollup.py::_day_aggregates": 15
+  }
+}

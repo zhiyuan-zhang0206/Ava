@@ -12,6 +12,7 @@ from unittest.mock import Mock
 import pytest
 
 from scripts import lint_code_structure as lcs
+from scripts.structure import baseline_shards
 from scripts.structure import quality_budget as quality
 
 
@@ -22,6 +23,19 @@ def _write(root: pathlib.Path, name: str, n_lines: int) -> pathlib.Path:
     return path
 
 
+def _clear_baseline_dir(root: pathlib.Path) -> pathlib.Path:
+    """The shard directory, emptied of any shard files already there (created if
+    absent) and carrying its README.md — read_worktree() requires the directory
+    to exist, and the README is what keeps git tracking it even with zero shards."""
+    directory = root / baseline_shards.SHARD_DIR
+    if directory.is_dir():
+        for path in directory.glob("*.json"):
+            path.unlink()
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / "README.md").write_text("Structure baseline shards.\n", encoding="utf-8")
+    return directory
+
+
 def _baseline(
     root: pathlib.Path,
     *,
@@ -30,24 +44,22 @@ def _baseline(
     complexity: dict[str, int] | None = None,
     nesting: dict[str, int] | None = None,
 ) -> pathlib.Path:
-    path = root / "scripts/structure/baseline.json"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(
-            {
-                "directories": directories or {},
-                "files": files or {},
-                "complexity": complexity or {},
-                "nesting": nesting or {},
-                **{kind: {} for kind in ("private_imports", "owner_bypasses", "path_imports")},
-            },
-            indent=2,
-            sort_keys=True,
+    """Write the baseline as shards under scripts/structure/baseline/."""
+    directory = _clear_baseline_dir(root)
+    data = {
+        "directories": directories or {},
+        "files": files or {},
+        "complexity": complexity or {},
+        "nesting": nesting or {},
+        **{kind: {} for kind in ("private_imports", "owner_bypasses", "path_imports")},
+    }
+    for name, shard in baseline_shards.split(data).items():
+        # String concat, not `/`: a test-only key can produce a shard name
+        # starting with "/", which `directory / name` would treat as absolute.
+        (pathlib.Path(f"{directory}/{name}.json")).write_text(
+            baseline_shards.render(shard), encoding="utf-8"
         )
-        + "\n",
-        encoding="utf-8",
-    )
-    return path
+    return directory
 
 
 def _entries(root: pathlib.Path, name: str, count: int) -> pathlib.Path:
@@ -226,7 +238,7 @@ def test_baseline_guard_against_real_git_head(
     baseline[kind][name] = frozen
     _baseline(tmp_path, **baseline)
     _git(tmp_path, "init", "--quiet")
-    _git(tmp_path, "add", "scripts/structure/baseline.json")
+    _git(tmp_path, "add", baseline_shards.SHARD_DIR)
     _git(tmp_path, "commit", "--quiet", "-m", "Freeze baseline")
     if change == "added":
         extra = "tests/new.py" if kind == "files" else "tests/new"
@@ -274,43 +286,7 @@ def test_non_git_checkout_skips_guard(
     assert "baseline guard skipped" in capsys.readouterr().err
 
 
-@pytest.mark.parametrize(
-    "data",
-    [
-        "not JSON",
-        "[]",
-        "{}",
-        '{"files": {}}',
-        '{"files": {}, "directories": {}, "extra": {}}',
-        '{"files": [], "directories": {}}',
-        '{"files": {}, "directories": []}',
-        '{"files": {"tests/big.py": true}, "directories": {}}',
-        '{"files": {"tests/big.py": "801"}, "directories": {}}',
-        '{"files": {"tests/big.py": 801.5}, "directories": {}}',
-        '{"files": {}, "directories": {"tests/package": "21"}}',
-        '{"files": {"../big.py": 801}, "directories": {}}',
-        '{"files": {"/tests/big.py": 801}, "directories": {}}',
-        '{"files": {"tests/big.txt": 801}, "directories": {}}',
-    ],
-)
-def test_invalid_baseline_is_an_actionable_error(
-    tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str], data: str
-) -> None:
-    if data.startswith('{"files":') and '"directories":' in data:
-        parsed = json.loads(data)
-        parsed.update(complexity={}, nesting={})
-        data = json.dumps(parsed)
-    (tmp_path / "scripts/structure/baseline.json").write_text(data, encoding="utf-8")
-    assert lcs.main([]) == 1
-    assert "scripts/structure/baseline.json: invalid baseline" in capsys.readouterr().err
-
-
-def test_missing_baseline_is_an_actionable_error(
-    tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    (tmp_path / "scripts/structure/baseline.json").unlink()
-    assert lcs.main([]) == 1
-    assert "scripts/structure/baseline.json: invalid baseline" in capsys.readouterr().err
+# Malformed/misfiled/missing baseline shards: test_baseline_shard_validity_gate.py.
 
 
 def test_directory_with_unreadable_member_is_skipped(
@@ -341,9 +317,10 @@ def test_explicit_missing_target_is_an_error(
 def test_explicit_out_of_scope_target_is_silent_but_guard_still_runs(
     tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str], target_is_directory: bool
 ) -> None:
+    _baseline(tmp_path)
     _git(tmp_path, "init", "--quiet")
-    _git(tmp_path, "add", "scripts/structure/baseline.json")
-    _git(tmp_path, "commit", "--quiet", "-m", "Freeze empty baseline")
+    _git(tmp_path, "add", baseline_shards.SHARD_DIR)
+    _git(tmp_path, "commit", "--quiet", "-m", "Freeze baseline")
     directory = _entries(tmp_path, "docs", 21)
     path = _write(directory, "oversized.py", 801)
     args = [str(directory if target_is_directory else path)]
@@ -483,7 +460,7 @@ def _nested(depth: int) -> str:
 
 
 def _commit_baseline(root: pathlib.Path) -> None:
-    _git(root, "add", "scripts/structure/baseline.json")
+    _git(root, "add", baseline_shards.SHARD_DIR)
     _git(root, "commit", "--quiet", "-m", "Baseline snapshot")
 
 
@@ -548,13 +525,10 @@ def test_quality_baseline_entry_validation(
 
 @pytest.mark.parametrize("value", [True, "15", 15.0, None, []])
 @pytest.mark.parametrize("kind", ["complexity", "nesting"])
-def test_quality_baseline_requires_integers(
-    tmp_path: pathlib.Path, kind: str, value: object
-) -> None:
-    data = json.loads(_baseline(tmp_path).read_text())
-    data[kind] = {"tests/q.py::f": value}
+def test_quality_baseline_requires_integers(kind: str, value: object) -> None:
+    data = {kind: {"tests/q.py::f": value}}
     with pytest.raises(ValueError, match=f"invalid {kind} entry"):
-        lcs._parse_baseline(json.dumps(data))
+        lcs._parse_baseline({"tests": json.dumps(data)})
 
 
 def test_function_qualnames_duplicates_and_lambda_exclusion() -> None:
@@ -755,32 +729,28 @@ def test_explicit_unresolvable_base_fails(
     assert f"LINT_STRUCTURE_BASELINE_BASE={ref!r} cannot resolve" in capsys.readouterr().out
 
 
-@pytest.mark.parametrize("previous,rc", [("legacy", 0), ("legacy_raise", 1), ("malformed", 1)])
-def test_guard_accepts_legacy_schema_but_rejects_invalid_base(
+@pytest.mark.parametrize("previous,rc", [("valid", 0), ("raised", 1), ("malformed", 1)])
+def test_guard_rejects_an_invalid_base_baseline(
     tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str], previous: str, rc: int
 ) -> None:
-    path = _baseline(tmp_path)
-    path.write_text(
-        json.dumps({"files": {"tests/old.py": 805}, "directories": {}})
-        if previous != "malformed"
-        else '{"files": {}, "directories": [], "complexity": {}}'
-    )
+    # A malformed base shard: "invalid base baseline", not "invalid baseline".
+    if previous == "malformed":
+        directory = _clear_baseline_dir(tmp_path)
+        (directory / "tests.json").write_text("not JSON", encoding="utf-8")
+    else:
+        _baseline(tmp_path, files={"tests/old.py": 805})
     _git(tmp_path, "init", "--quiet")
     _commit_baseline(tmp_path)
-    _baseline(
-        tmp_path,
-        files={"tests/old.py": 806 if previous == "legacy_raise" else 805},
-        complexity={"tests/q.py::f": 15},
-        nesting={"tests/q.py::f": 6},
-    )
+    _baseline(tmp_path, files={"tests/old.py": 806 if previous == "raised" else 805})
+
     assert lcs.main([]) == rc
     captured = capsys.readouterr()
     if previous == "malformed":
         assert "invalid base baseline" in captured.out
+    elif previous == "raised":
+        assert "raised files entry tests/old.py" in captured.out
     else:
-        assert "complexity baseline guard skipped: section absent at base" in captured.err
-        assert "nesting baseline guard skipped: section absent at base" in captured.err
-        assert ("raised files entry" in captured.out) == (previous == "legacy_raise")
+        assert captured.out == ""
 
 
 def test_ast_and_radon_share_one_parse(

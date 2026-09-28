@@ -1,0 +1,11 @@
+{
+  "complexity": {
+    "services/browser/mcp_daemon.py::ChromeMcpDaemon._affinity_call": 16,
+    "services/browser/mcp_daemon.py::_handle_client": 15,
+    "services/browser/page_lifecycle.py::reap_dead_agent_pages": 17,
+    "services/browser/probe.py::_probe_browser": 17
+  },
+  "nesting": {
+    "services/browser/mcp_daemon.py::_handle_client": 7
+  }
+}
