@@ -11,6 +11,8 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+from shared.deploy_timing import UNIT_BUNDLE_MAX_TTL_S, UNIT_BUNDLE_TTL_S
+
 
 def _h_cluster_update(args: argparse.Namespace) -> int:
     from cli.release_handoff.handoff import run
@@ -218,7 +220,11 @@ def _add_db_authority_parser(
         "--out", required=True, help="bundle path to create (refused when it exists)"
     )
     issue_unit_p.add_argument(
-        "--ttl-hours", type=float, default=24.0, help="bundle lifetime in hours (default: 24)"
+        "--ttl-hours",
+        type=float,
+        default=UNIT_BUNDLE_TTL_S / 3600,
+        help=f"bundle lifetime in hours (default: {UNIT_BUNDLE_TTL_S / 3600:g}, "
+        f"at most {UNIT_BUNDLE_MAX_TTL_S / 3600:g})",
     )
     issue_unit_p.set_defaults(func=_h_cluster_db_authority_issue_unit)
     _add_enrollment_parsers(db_authority_sub)

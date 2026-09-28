@@ -126,7 +126,7 @@ ava start --db-capability <bundle>        # plus the first-start identity flags
 
 The bundle is sealed (AES-256-GCM) under a transport key printed once; it names
 one unit (machine + home), the endpoint bootstrap serves, the active write
-generation and an expiry (`--ttl-hours`, default 24). Start refuses an altered
+generation and an expiry (`--ttl-hours`, default 24, at most 72). Start refuses an altered
 bundle, the wrong key, another unit's bundle, an expired one, an older
 generation than the installed one, and a login the cluster rejects (a revoked
 generation); it then writes `$AVA_HOME/db-authority/unit.json` and

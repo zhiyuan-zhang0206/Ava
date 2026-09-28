@@ -36,8 +36,9 @@ magnitude slower: production rollouts of 2026-08-06..12 converged `win` inside
 longest leg observed, not a first-principles ceiling; what has to stay true is
 the invariant above, which `shared.timing` checks.
 
-The module also holds the agent-lease family and the `ava start` readiness
-clocks; each constant's comment names its consumer.
+The module also holds the agent-lease family, the `ava start` readiness
+clocks and a remote unit's capability bundle lifetime; each constant's
+comment names its consumer.
 """
 
 from __future__ import annotations
@@ -146,3 +147,13 @@ CRITICAL_SERVICE_SESSIONS = frozenset({"gate", "gateway", "frontend", "agent-hos
 # `cli.commands._probe._notify_non_critical_unready_services`), so the
 # downgrade never goes silent.
 NON_CRITICAL_SERVICE_READY_TIMEOUT_S = 45.0
+
+# How long a unit capability bundle (`ava cluster db-authority issue-unit`,
+# `shared.cluster.authority.unit.issue_bundle`) stays installable: the default
+# `--ttl-hours`, and the most it may ask for. A bundle is carried by hand to one
+# unit (a join, the cutover), so a day covers the trip and three cover a
+# weekend. The expiry is the installer's check, not the cipher's: it bounds how
+# long an old bundle can be installed, not what a stolen bundle and its
+# transport key disclose.
+UNIT_BUNDLE_TTL_S = 24 * 3600.0
+UNIT_BUNDLE_MAX_TTL_S = 72 * 3600.0

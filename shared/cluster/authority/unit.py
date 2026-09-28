@@ -78,13 +78,13 @@ from shared.cluster.authority.ledger import (
     read_secret,
 )
 from shared.cluster.authority.model import AuthorityRefusedError, Digest, RoleName
+from shared.deploy_timing import UNIT_BUNDLE_MAX_TTL_S
 from shared.private_storage import write_private_bytes
 from shared.url_secret import url_with_userinfo
 
 # The operator supplies the transport key through this environment variable
 # (from a non-echoing prompt); `ava start` pops it before anything is forwarded.
 CAPABILITY_KEY_ENV = "AVA_DB_CAPABILITY_KEY"
-DEFAULT_TTL_S = 24 * 3600
 _FORMAT = "ava-db-capability/1"
 _MAX_BUNDLE_BYTES = 64 * 1024
 _KEY_BYTES = 32
@@ -380,8 +380,11 @@ def issue_bundle(
     """
     if urlsplit(endpoint).password is not None:
         raise UnitCapabilityError("a capability names the credential-free endpoint")
-    if ttl_s <= 0:
-        raise UnitCapabilityError("a bundle's lifetime must be positive")
+    if not 0 < ttl_s <= UNIT_BUNDLE_MAX_TTL_S:  # also refuses NaN
+        raise UnitCapabilityError(
+            "a bundle's lifetime must be positive and at most "
+            f"{UNIT_BUNDLE_MAX_TTL_S / 3600:g} hours"
+        )
     generation = active_generation(home)
     secret = read_secret(home, generation)
     api = (

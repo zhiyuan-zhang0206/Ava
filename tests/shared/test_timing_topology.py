@@ -72,6 +72,15 @@ def test_legacy_adoption_silence_is_floored_by_the_renewal_beat(
     )
 
 
+def test_a_default_bundle_lifetime_past_the_cap_is_reported(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`issue-unit` without `--ttl-hours` must issue a bundle it accepts."""
+    monkeypatch.setattr(deploy, "UNIT_BUNDLE_TTL_S", deploy.UNIT_BUNDLE_MAX_TTL_S + 1)
+    failures = validate_clock_lattice()
+    assert any("UNIT_BUNDLE_TTL_S <= UNIT_BUNDLE_MAX_TTL_S" in f for f in failures)
+
+
 def test_renewal_clock_is_the_agent_hosts_actual_beat() -> None:
     """The lattice must check the renewal beat that runs, not a second number
     (it once registered 60 s while the agent host renewed every 15 s)."""

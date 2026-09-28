@@ -108,6 +108,17 @@ CLOCKS: dict[str, Clock] = {
         "how long `ava start` waits for a non-critical service before it stops "
         "blocking the start (reported and alerted instead)",
     ),
+    # --- unit-bundle family (values in shared/deploy_timing.py) ---
+    "UNIT_BUNDLE_TTL_S": Clock(
+        "unit-bundle",
+        lambda: deploy.UNIT_BUNDLE_TTL_S,
+        "a unit capability bundle's default lifetime (`issue-unit --ttl-hours`)",
+    ),
+    "UNIT_BUNDLE_MAX_TTL_S": Clock(
+        "unit-bundle",
+        lambda: deploy.UNIT_BUNDLE_MAX_TTL_S,
+        "the longest lifetime `issue-unit` seals into a unit capability bundle",
+    ),
     # --- agent-lease family (values in shared/deploy_timing.py) ---
     "AGENT_LEASE_TTL_S": Clock(
         "agent-lease",
@@ -206,6 +217,14 @@ CONSTRAINTS: list[Constraint] = [
         "the settle hold shares the whole-run no-progress definition — it lapses "
         "when the host it waits for has outlived the longest legitimate leg, "
         "never before",
+    ),
+    # --- unit-bundle family ---
+    Constraint(
+        "<=",
+        "UNIT_BUNDLE_TTL_S",
+        "UNIT_BUNDLE_MAX_TTL_S",
+        "the default bundle lifetime must be one `issue-unit` accepts, or issuing "
+        "a bundle without `--ttl-hours` refuses",
     ),
     # --- schedule supervision family ---
     Constraint(
