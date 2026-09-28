@@ -60,9 +60,9 @@ any signal:
   fork-and-exit chain keeps it current while scans keep reading its hops.
 
 Anything else is logged once, with pid and command name, and left running.
-The scan reads session ids last, with a bare getsid, newest pids first, so a
-short-lived hop is read while it exists and pinned (in a kill, frozen) about a
-millisecond later. A parent vouches for a child only
+The scan reads session ids last, with a bare getsid sweep (~0.2 ms, against
+~16 ms for the psutil pass before it), so a short-lived hop is read while it
+exists and pinned (in a kill, frozen) about a millisecond later. A parent vouches for a child only
 while it still is the captured process, so a member's recycled pid adds
 nobody.
 
@@ -119,7 +119,8 @@ A normal `ava stop` (`cli/commands/_temporary_stop.py`) captures each shell's
 session with `capture_session` before any signal, HUPs the shells and TERMs
 the rest. Each grace poll `refresh`es every capture with one scan, keeping its
 proof current. A poll is quiet only when no captured process lives and the
-scan read nothing in the session, pinned or not; it counts only once a second,
+scan read no non-zombie process in the session but the caller, pinned or not;
+it counts only once a second,
 immediate poll is quiet too, since a member can fork while the first scan
 runs. A capture nothing can prove any more is still scanned and its
 session's processes logged. What is left after
