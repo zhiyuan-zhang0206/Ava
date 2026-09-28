@@ -32,7 +32,6 @@ on:
       - 'shared/managed_writer_barrier.py'
       - 'shared/daemon_http.py'
       - 'shared/transport_encryption.py'
-      - 'services/agent_ops/bootstrap.py'
       - 'scripts/prove_native_launcher_reads.py'
       - 'tests/shared/test_native_job_observation.py'
       - 'tests/shared/test_managed_writer_observation.py'
