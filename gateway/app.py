@@ -95,14 +95,12 @@ from gateway.error_handlers import (
 from gateway.error_handlers import (
     _cors_headers as _cors_headers,
 )
+from gateway.inspect import router as inspect_router
 from gateway.routers import (
     _machine_pause as machine_pause_router,
 )
 from gateway.routers import (
     agent_events as agent_events_router,
-)
-from gateway.routers import (
-    agent_inspect as agent_inspect_router,
 )
 from gateway.routers import (
     agents as agents_router,
@@ -726,7 +724,7 @@ app.include_router(agents_lifecycle_router.router)
 app.include_router(agents_state_router.router)
 app.include_router(agent_events_router.router)
 app.include_router(computer_traces_router.router)
-app.include_router(agent_inspect_router.router)
+app.include_router(inspect_router.router)
 app.include_router(shell_router.router)
 app.include_router(timeline_router.router)
 app.include_router(system_router.router)

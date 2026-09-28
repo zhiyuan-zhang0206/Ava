@@ -3,7 +3,7 @@
 FastAPI TestClient + real ava_test DB + FakeLoki. Task #180 (LGTM cutover):
 the retired `agent_neighbors` SQL function read the frozen `events` table
 and silently returned no peers; the walk now runs in Python over the event
-stream (gateway/neighbors.py) — audit edge rows stitch the Loki archive stream
+stream (gateway/inspect/neighbors.py) — audit edge rows stitch the Loki archive stream
 (task #1281, all pre-cutover events) with the live tail. Covered here end to
 end: undirected ties, permanent lineage weights (spawn/fork/resurrect, no
 time decay) vs decaying message weights (send_message, EXP(-k*days)),
@@ -22,8 +22,9 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
-from gateway import loki_events, neighbors
+from gateway import loki_events
 from gateway.app import app
+from gateway.inspect import neighbors
 from shared.loki_index_labels import ARCHIVE_FREEZE_AT
 from tests.gateway.loki_fake import FakeLoki
 
@@ -759,7 +760,7 @@ def test_live_tail_read_is_bounded_and_cached_parts_never_requery(
     assert len(live_calls) == 1
     call = live_calls[0]
     assert call["timeout_s"] == neighbors._LIVE_READ_TIMEOUT_S
-    # `from_` is the bare ARCHIVE_FREEZE_AT constant (gateway/neighbors.py
+    # `from_` is the bare ARCHIVE_FREEZE_AT constant (gateway/inspect/neighbors.py
     # `_fetch_loki_edges`), never folded against now — only `to=now` moves. The
     # TestClient above just starts the app lifespan for `db_pool`; no request.
     assert call["from_"] == ARCHIVE_FREEZE_AT  # time-bomb-ok: constant floor, no clock fold

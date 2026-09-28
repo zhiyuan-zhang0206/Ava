@@ -6,7 +6,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
-from gateway.routers._inspect_cache import InspectCacheFullError, InspectQueryCache
+from gateway.inspect._cache import InspectCacheFullError, InspectQueryCache
 
 
 def test_inspect_cache_admission_bounds_concurrent_loads() -> None:

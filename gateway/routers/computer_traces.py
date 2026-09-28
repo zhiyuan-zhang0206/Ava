@@ -18,7 +18,7 @@ import httpx
 from fastapi import APIRouter, HTTPException, Query
 
 from gateway import loki_events, loki_query_budget
-from gateway.routers._backend_failure import raise_backend_unavailable
+from gateway._backend_failure import raise_backend_unavailable
 
 router = APIRouter()
 

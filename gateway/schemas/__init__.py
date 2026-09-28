@@ -11,6 +11,24 @@ their unchanged OpenAPI names, so `cli` validates them without importing up into
 `gateway`.
 """
 
+from gateway.inspect.schemas import (
+    AgentActivity,
+    AgentCost,
+    AgentInspectLive,
+    AgentInspectStatistics,
+    AgentStats,
+    AgentTps,
+    BornChainResponse,
+    BornChainRow,
+    HeartbeatInfo,
+    HeartbeatLastPause,
+    InspectWidgetResult,
+    InspectWidgetTask,
+    MetricPoint,
+    NeighborRow,
+    NeighborsResponse,
+    PluginMetricResult,
+)
 from gateway.schemas.agents import (
     AgentRow,
 )
@@ -38,24 +56,6 @@ from gateway.schemas.fleet_graph import (
 from gateway.schemas.frontend_telemetry import (
     FrontendInteractionIn,
     FrontendTelemetryBatch,
-)
-from gateway.schemas.inspect import (
-    AgentActivity,
-    AgentCost,
-    AgentInspectLive,
-    AgentInspectStatistics,
-    AgentStats,
-    AgentTps,
-    BornChainResponse,
-    BornChainRow,
-    HeartbeatInfo,
-    HeartbeatLastPause,
-    InspectWidgetResult,
-    InspectWidgetTask,
-    MetricPoint,
-    NeighborRow,
-    NeighborsResponse,
-    PluginMetricResult,
 )
 from gateway.schemas.inventory import (
     InventoryAggregate,

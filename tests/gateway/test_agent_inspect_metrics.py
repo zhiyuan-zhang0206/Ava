@@ -28,8 +28,8 @@ from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from gateway.app import app
-from gateway.routers import _plugin_metrics
-from gateway.routers._plugin_metrics import (
+from gateway.inspect import _plugin_metrics
+from gateway.inspect._plugin_metrics import (
     _render_metric_query,
     _translate_macros,
 )

@@ -12,7 +12,7 @@ from fastapi.testclient import TestClient
 
 from gateway import loki_events
 from gateway.app import app
-from gateway.routers import agent_inspect
+from gateway.inspect import router as inspect_router
 from services.heartbeat import JITTER_SPAN_S, STALE_PENDING_S
 from shared.config import settings
 
@@ -129,7 +129,7 @@ def test_inspect_live_returns_only_window_independent_fields(
             "shells": [{"id": 5, "name": "live-shell", "created_at": None, "uptime_seconds": 42}]
         }
 
-    monkeypatch.setattr(agent_inspect._cluster_rpc, "dispatch_to_machine", dispatch)
+    monkeypatch.setattr(inspect_router._cluster_rpc, "dispatch_to_machine", dispatch)
     with TestClient(app) as client:
         response = client.get(f"/api/agents/{aid}/inspect/live")
 
@@ -185,9 +185,9 @@ def test_inspect_live_probe_failure_is_unavailable_not_empty_success(
     db_conn.commit()
 
     async def unreachable(*args: object, **kwargs: object) -> dict[str, object]:
-        raise agent_inspect._cluster_rpc.ClusterOpUnreachable("connect failed")
+        raise inspect_router._cluster_rpc.ClusterOpUnreachable("connect failed")
 
-    monkeypatch.setattr(agent_inspect._cluster_rpc, "dispatch_to_machine", unreachable)
+    monkeypatch.setattr(inspect_router._cluster_rpc, "dispatch_to_machine", unreachable)
     with TestClient(app) as client:
         response = client.get(f"/api/agents/{aid}/inspect/live")
     assert response.status_code == 200
@@ -205,7 +205,7 @@ def test_inspect_live_distinguishes_valid_empty_from_missing_shell_data(
     async def probe(*args: object, **kwargs: object) -> dict[str, object]:
         return {} if malformed else {"shells": []}
 
-    monkeypatch.setattr(agent_inspect._cluster_rpc, "dispatch_to_machine", probe)
+    monkeypatch.setattr(inspect_router._cluster_rpc, "dispatch_to_machine", probe)
     with TestClient(app) as client:
         if malformed:
             with pytest.raises(KeyError, match="shells"):
@@ -252,7 +252,7 @@ def test_inspect_shells_probed_on_agents_machine(
     """shells come from a `shell_probe` op dispatched to the agent's machine —
     a remote runner's live shells appear exactly like a local one's (no local
     session probing in the gateway)."""
-    from gateway.routers import agent_inspect as inspect_mod
+    from gateway.inspect import router as inspect_mod
 
     aid = _insert_agent(db_conn)
     with db_conn.cursor() as cur:
@@ -321,7 +321,7 @@ def test_inspect_shells_carry_ttl_deadline_from_gateway_db(
             ]
         }
 
-    monkeypatch.setattr(agent_inspect._cluster_rpc, "dispatch_to_machine", _fake_dispatch)
+    monkeypatch.setattr(inspect_router._cluster_rpc, "dispatch_to_machine", _fake_dispatch)
 
     with TestClient(app) as client:
         body = client.get(f"/api/agents/{aid}/inspect/live").json()
@@ -335,7 +335,7 @@ def test_inspect_shells_degrade_to_empty_on_unreachable(
 ) -> None:
     """An unreachable machine (or unregistered name) degrades to an empty shell
     list — the inspector shows 'None open' instead of 503ing the whole panel."""
-    from gateway.routers import agent_inspect as inspect_mod
+    from gateway.inspect import router as inspect_mod
     from ops import cluster_rpc
 
     aid = _insert_agent(db_conn)
@@ -361,7 +361,7 @@ def test_inspect_shells_degrade_to_empty_on_failed_op(
 ) -> None:
     """A version-skewed runner that does not know the op reports 'failed' —
     same graceful degradation to an empty shell list."""
-    from gateway.routers import agent_inspect as inspect_mod
+    from gateway.inspect import router as inspect_mod
     from ops import cluster_rpc
 
     aid = _insert_agent(db_conn)
@@ -429,7 +429,7 @@ def test_inspect_heartbeat_zero_jitter_span_disables_jitter(
     `NULLIF(span, 0)` collapse (QA #952 b): the projection guards the modulo,
     so the endpoint still serves next_at = last_active + idle_threshold with no
     jitter term instead of ZeroDivisionError-ing the inspect response."""
-    monkeypatch.setattr("gateway.routers._inspect_live.JITTER_SPAN_S", 0)
+    monkeypatch.setattr("gateway.inspect._live.JITTER_SPAN_S", 0)
     aid = _insert_agent(db_conn, status="idling", status_changed_s_ago=120)
     db_conn.commit()
     with TestClient(app) as client:

@@ -25,8 +25,8 @@ from psycopg_pool import ConnectionPool
 from pydantic import ValidationError
 
 from gateway import loki_events, loki_query_budget
+from gateway._backend_failure import raise_backend_unavailable
 from gateway.routers import _loki_shards, _roster_probe, _roster_rows, _stats_dashboard
-from gateway.routers._backend_failure import raise_backend_unavailable
 from gateway.routers._health import get_health
 from gateway.routers._roster_rows import read_stranded_holds, stamp_cluster_globals
 from gateway.schemas import (

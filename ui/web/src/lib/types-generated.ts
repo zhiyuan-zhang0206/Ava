@@ -1077,7 +1077,7 @@ export interface paths {
          *     the neighbor count, strongest first. The tie graph reads the unified event
          *     stream (task #180 LGTM cutover): audit edge events stitch the frozen PG
          *     `events` archive with the Loki live tail and the walks run in Python
-         *     (gateway/neighbors.py) — the retired `agent_neighbors` SQL function died
+         *     (gateway/inspect/neighbors.py) — the retired `agent_neighbors` SQL function died
          *     with the frozen table it read.
          *
          *     404: agent_id does not exist (AgentNotFound -> handler returns 404 + reason).
@@ -1120,7 +1120,7 @@ export interface paths {
          *     template without an agent id -> 400 (unreachable here — the id is a path
          *     param). 404 when the agent does not exist. The frontend panel polls this
          *     every 5s like the parent /inspect. Implementation in
-         *     ``gateway/routers/_plugin_metrics.py``.
+         *     ``gateway/inspect/_plugin_metrics.py``.
          */
         get: operations["get_agent_plugin_metrics_api_agents__agent_id__inspect_metrics_get"];
         put?: never;
@@ -1151,7 +1151,7 @@ export interface paths {
          *     and projects each widget, dropping a button whose target did not resolve
          *     and a widget left without buttons. Unknown agents return 404 like the
          *     rest of the /inspect family. Implementation in
-         *     ``gateway/routers/_plugin_inspector.py``.
+         *     ``gateway/inspect/_plugin_widgets.py``.
          */
         get: operations["get_agent_inspect_widgets_api_agents__agent_id__inspect_widgets_get"];
         put?: never;

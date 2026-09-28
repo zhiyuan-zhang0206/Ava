@@ -28,7 +28,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from gateway.app import app
-from gateway.routers import _plugin_inspector
+from gateway.inspect import _plugin_widgets
 from shared.plugin_context import PluginContext
 from shared.plugin_inspector import (
     InspectWidgetSpec,
@@ -62,7 +62,7 @@ def _patch_loader(monkeypatch: pytest.MonkeyPatch, *specs: InspectWidgetSpec) ->
     def _loaded() -> list[InspectWidgetSpec]:
         return list(specs)
 
-    monkeypatch.setattr(_plugin_inspector, "_load_inspect_widgets", _loaded)
+    monkeypatch.setattr(_plugin_widgets, "_load_inspect_widgets", _loaded)
 
 
 def _insert_agent(db: psycopg.Connection, label: str = "t") -> int:
@@ -283,7 +283,7 @@ def test_widgets_keep_registration_order(
 
 
 def _shipped_fleet_module() -> Any:
-    path = _plugin_inspector._PLUGINS_DIR / "ava_fleet" / "inspector.py"
+    path = _plugin_widgets._PLUGINS_DIR / "ava_fleet" / "inspector.py"
     assert path.is_file(), "ava_fleet must ship inspector.py for this test"
     return path
 
@@ -304,9 +304,9 @@ def _seed_fleet_widget() -> None:
 def test_loader_imports_shipped_fleet_widget(monkeypatch: pytest.MonkeyPatch) -> None:
     module = _shipped_fleet_module()
     _seed_fleet_widget()
-    monkeypatch.setattr(_plugin_inspector, "_enabled_inspector_modules", lambda: [module])
+    monkeypatch.setattr(_plugin_widgets, "_enabled_inspector_modules", lambda: [module])
 
-    specs = _plugin_inspector._load_inspect_widgets()
+    specs = _plugin_widgets._load_inspect_widgets()
     assert [(s.plugin, s.id, s.kind, s.order) for s in specs] == [
         ("ava_fleet", "today-tasks", "taskList", 150)
     ]
@@ -321,8 +321,8 @@ def test_loader_filters_widgets_of_disabled_plugins(monkeypatch: pytest.MonkeyPa
     def _no_modules() -> list[Any]:
         return []
 
-    monkeypatch.setattr(_plugin_inspector, "_enabled_inspector_modules", _no_modules)
-    assert _plugin_inspector._load_inspect_widgets() == []
+    monkeypatch.setattr(_plugin_widgets, "_enabled_inspector_modules", _no_modules)
+    assert _plugin_widgets._load_inspect_widgets() == []
 
 
 def test_enabled_modules_skips_a_disabled_plugin(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -346,13 +346,13 @@ def test_enabled_modules_skips_a_disabled_plugin(monkeypatch: pytest.MonkeyPatch
         plugins={"ava_fleet": plugins_config.PluginEntry(enabled=True)}
     )
     monkeypatch.setattr(plugins_config, "load_for_runtime", _loader(enabled))
-    assert _plugin_inspector._enabled_inspector_modules() == [module]
+    assert _plugin_widgets._enabled_inspector_modules() == [module]
 
     disabled = plugins_config.PluginsConfig(
         plugins={"ava_fleet": plugins_config.PluginEntry(enabled=False)}
     )
     monkeypatch.setattr(plugins_config, "load_for_runtime", _loader(disabled))
-    assert _plugin_inspector._enabled_inspector_modules() == []
+    assert _plugin_widgets._enabled_inspector_modules() == []
 
 
 def test_loader_skips_a_plugin_whose_inspector_fails_to_import(
@@ -368,9 +368,9 @@ def test_loader_skips_a_plugin_whose_inspector_fails_to_import(
     import shared.telemetry
 
     good = _shipped_fleet_module()
-    bad = _plugin_inspector._PLUGINS_DIR / "broken_plugin" / "inspector.py"
+    bad = _plugin_widgets._PLUGINS_DIR / "broken_plugin" / "inspector.py"
     _seed_fleet_widget()
-    monkeypatch.setattr(_plugin_inspector, "_enabled_inspector_modules", lambda: [bad, good])
+    monkeypatch.setattr(_plugin_widgets, "_enabled_inspector_modules", lambda: [bad, good])
 
     events: list[tuple[str, dict[str, object]]] = []
 
@@ -394,14 +394,14 @@ def test_loader_skips_a_plugin_whose_inspector_fails_to_import(
         return real_import_module(name, *args, **kwargs)
 
     monkeypatch.setattr(
-        _plugin_inspector, "importlib", SimpleNamespace(import_module=fake_import_module)
+        _plugin_widgets, "importlib", SimpleNamespace(import_module=fake_import_module)
     )
 
     # A half-executed module must not survive the failed import.
     leftover = "ava_builtins.plugins.broken_plugin.inspector"
     sys.modules[leftover] = ModuleType(leftover)
     try:
-        specs = _plugin_inspector._load_inspect_widgets()  # must not raise
+        specs = _plugin_widgets._load_inspect_widgets()  # must not raise
         assert leftover not in sys.modules
     finally:
         sys.modules.pop(leftover, None)
@@ -418,8 +418,8 @@ def test_loader_skips_a_plugin_whose_inspector_fails_to_import(
     assert "ModuleNotFoundError" in str(attrs[0]["error"])
 
     # every plugin broken -> still no raise, an empty registry
-    monkeypatch.setattr(_plugin_inspector, "_enabled_inspector_modules", lambda: [bad])
-    assert _plugin_inspector._load_inspect_widgets() == []
+    monkeypatch.setattr(_plugin_widgets, "_enabled_inspector_modules", lambda: [bad])
+    assert _plugin_widgets._load_inspect_widgets() == []
 
 
 def test_loader_drops_partial_widget_registrations_and_recovers(
@@ -442,11 +442,11 @@ def test_loader_drops_partial_widget_registrations_and_recovers(
     )
     inspector_py.write_text(source + "raise RuntimeError('inspector boom')\n", encoding="utf-8")
 
-    monkeypatch.setattr(_plugin_inspector, "_enabled_inspector_modules", lambda: [inspector_py])
+    monkeypatch.setattr(_plugin_widgets, "_enabled_inspector_modules", lambda: [inspector_py])
     shipped_path = importlib.import_module("ava_builtins.plugins").__path__
     monkeypatch.setattr("ava_builtins.plugins.__path__", [*shipped_path, str(tmp_path)])
 
-    assert _plugin_inspector._load_inspect_widgets() == []  # must not raise
+    assert _plugin_widgets._load_inspect_widgets() == []  # must not raise
     assert [s for s in registered_inspect_widgets() if s.plugin == "drop_partial_insp"] == []
     assert any(
         "drop_partial_insp" in r["message"] and "failed to load" in r["message"]
@@ -454,5 +454,5 @@ def test_loader_drops_partial_widget_registrations_and_recovers(
     )
 
     inspector_py.write_text(source, encoding="utf-8")
-    specs = _plugin_inspector._load_inspect_widgets()
+    specs = _plugin_widgets._load_inspect_widgets()
     assert [(s.plugin, s.id) for s in specs] == [("drop_partial_insp", "drop_partial_widget")]

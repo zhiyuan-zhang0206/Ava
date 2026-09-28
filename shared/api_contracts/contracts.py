@@ -265,7 +265,7 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
         pause=PauseSemantics.CONTROL_PLANE,
         note="gateway identity and database liveness — start must prove readiness before releasing its hold",
     ),
-    # ── gateway/routers/agent_inspect.py ───────────────────────────────────
+    # ── gateway/inspect/router.py ───────────────────────────────────
     ("GET", "/api/agents/{agent_id}/inspect/statistics"): RouteContract(),
     ("GET", "/api/agents/{agent_id}/inspect/live"): RouteContract(
         note="uncached live skeleton — cheap window-independent inspector fields",

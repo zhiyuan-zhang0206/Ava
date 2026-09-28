@@ -19,6 +19,7 @@ from starlette.responses import Response
 
 import gateway._auth401_log as auth401_log
 from gateway import loki_events, loki_query_budget, prom_metrics
+from gateway._backend_failure import raise_backend_unavailable
 from gateway._cors import cors_allowed_origins
 from gateway.app import (
     _ava_agent_error_handler,
@@ -32,7 +33,6 @@ from gateway.app import (
     _unhandled_exception_handler,
 )
 from gateway.error_envelope import request_trace_middleware
-from gateway.routers._backend_failure import raise_backend_unavailable
 from gateway.schemas import ErrorEnvelope
 from shared import config
 from shared.agents import AgentNotFound, AvaAgentError, ErrorReason

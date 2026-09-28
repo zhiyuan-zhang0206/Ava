@@ -156,7 +156,7 @@ panels, pet widgets) without growing the declaration vocabulary.
 
 | Type | Declaration | Frontend behavior |
 |---|---|---|
-| `agentInspect` section | `{title, source, render: markdown\|kv\|table\|page}` | appends a section to the agent-inspect view (`gateway/routers/agent_inspect.py` feeds it); `source` is a path under the plugin's mount, fetched through the proxy and rendered by a generic markdown/kv/table renderer; `render: page` embeds the iframe with `?agent_id=` |
+| `agentInspect` section | `{title, source, render: markdown\|kv\|table\|page}` | appends a section to the agent-inspect view (`gateway/inspect/router.py` feeds it); `source` is a path under the plugin's mount, fetched through the proxy and rendered by a generic markdown/kv/table renderer; `render: page` embeds the iframe with `?agent_id=` |
 | `nav` entry | `{location: sidebar\|settings\|fleet-toolbar, label, icon, page}` | a nav entry opening the plugin's page in an iframe |
 | `stat` card | `{id, label}` | one card in the sidebar Statistics panel; the declaration carries identity + label, the value is runtime data the plugin writes into `plugin_stats` keyed by `plugin/id` (see U6 below) |
 | `theme` | `{name, tokens, darkTokens?}` | registers a skin — see below |
