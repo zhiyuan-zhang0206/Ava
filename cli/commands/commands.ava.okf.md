@@ -55,7 +55,9 @@ admission. `data_plane/_pooler_stop.OwnedPooler` owns
 ordinary pooler stop admission for maintenance and startup recovery: exact native
 birth and listener proof precede a durable stop intent and the first SIGINT
 (`WAIT_FOR_SERVERS`). Retries and already-closed listeners only wait; PgBouncer
-would interpret another shutdown signal as immediate termination. An explicit
+would interpret another shutdown signal as immediate termination. A birth that
+finishes its drain and exits while its listeners are being scanned is stopped,
+not a foreign listener. An explicit
 force request alone permits a kill, with a separate bounded settle wait when
 the graceful deadline is spent. The data-plane stop requests [owned PostgreSQL](../../shared/cluster/postgres.ava.okf.md) fast shutdown (SIGINT), so neither waits on idle client connections a drained state
 cannot protect (issue #2307). When the data-plane phase still fails after the
