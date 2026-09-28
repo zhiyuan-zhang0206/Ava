@@ -226,6 +226,20 @@ journal's `record-retire` effect, delete `start-intent.json`, and restore `.env`
 from its pre-adoption snapshot in `backups/env/` (moved to
 `cutover-rollback/residue/backups/env/` on a remote unit).
 
+Rollback after the data-plane cutover (R2, before any `--resume`): stop the
+new code fully on every unit (`ava stop --yes`, data plane included), then on
+the gateway replace `pg/` with the cold copy taken at W3 and restore the
+pre-adoption `.env` from the W3 copy of the home configuration (`backups/env/`
+holds it too, until its 20-snapshot rotation drops it). For Redis and
+PgBouncer that `.env` is all R2 restores: every legacy start renders
+`redis/redis.conf` (its `requirepass`), `pgbouncer/pgbouncer.ini` and
+`pgbouncer/userlist.txt` from it and re-affirms the Redis runtime user with
+its password, replacing whatever the data-plane cutover wrote there, as long
+as no Redis or pooler of the new code still runs. Move `db-authority/` aside
+as well: its journal records the conversion done, so a later
+`scripts/cutover_db_authority.py` would take a plane that is legacy again as
+converted. Then R1 on every host.
+
 ### An unreadable adoption journal
 
 The journal is written atomically, so only a hand edit or disk damage makes it
