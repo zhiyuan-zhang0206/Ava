@@ -15,7 +15,6 @@
     "services/pitr": 66,
     "shared": 231,
     "shared/config": 40,
-    "shared/lm": 24,
     "tests": 80,
     "tests/agent": 132,
     "tests/ava": 62,

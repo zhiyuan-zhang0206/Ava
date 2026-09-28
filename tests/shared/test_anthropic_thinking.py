@@ -1,4 +1,4 @@
-"""shared/lm/anthropic_compat.py — ThinkingTokensChatAnthropic preserves thinking_tokens.
+"""shared/lm/compat/anthropic_thinking.py — ThinkingTokensChatAnthropic preserves thinking_tokens.
 
 Verifies that the _make_message_chunk_from_anthropic_event override captures
 output_tokens_details.thinking_tokens from the message_delta stream event
@@ -12,7 +12,7 @@ from unittest.mock import MagicMock
 import pytest
 from langchain_core.messages import AIMessageChunk, UsageMetadata
 
-from shared.lm.anthropic_compat import ThinkingTokensChatAnthropic
+from shared.lm.compat.anthropic_thinking import ThinkingTokensChatAnthropic
 
 
 def _message_delta_event(*, thinking_tokens: int) -> MagicMock:
