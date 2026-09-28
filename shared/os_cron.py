@@ -204,11 +204,12 @@ def ava_binary_path() -> str:
     """The absolute path to the `ava` binary of THIS CHECKOUT.
 
     The checkout is the anchor, not PATH. A job spec written by a worktree's code
-    must run that worktree's binary, and prod's `~/.local/bin/ava` is a symlink to
-    the prod checkout's venv binary anyway — so resolving the venv directly names
-    the same file for prod and the correct file everywhere else. `shutil.which`
-    survives only as the fallback for an install with no venv (a global pip
-    install).
+    must run that worktree's binary, and the host's global `ava` on PATH only
+    forwards to whichever cluster `AVA_HOME` names (via that home's own
+    `$AVA_HOME/ava` link, refusing without `AVA_HOME`) — so resolving the venv
+    directly names the correct file for every checkout, prod included.
+    `shutil.which` survives only as the fallback for an install with no venv (a
+    global pip install).
 
     Why the order matters: `which` resolves against the CALLING process's PATH,
     which under `uv run` / an activated venv is whatever checkout the caller came
