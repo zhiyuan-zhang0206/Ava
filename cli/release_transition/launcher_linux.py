@@ -11,6 +11,7 @@ import hashlib
 import os
 import re
 import subprocess
+import time
 from pathlib import Path
 from typing import Literal
 
@@ -48,6 +49,10 @@ _PROPERTIES = (
     "SubState",
     "Result",
 )
+# systemd reaps an exited main process and records its status promptly; an
+# observation that saw MainPID first waits this long for that record.
+_EXIT_SETTLE_S = 10.0
+_SETTLE_POLL_S = 0.1
 
 
 class LinuxLaunch(Record):
@@ -285,28 +290,67 @@ def _require_definition(launch: LinuxLaunch, properties: dict[str, str]) -> None
 
 
 def _cgroup(pid: int) -> str:
-    for line in (Path("/proc") / str(pid) / "cgroup").read_text().splitlines():
+    try:
+        lines = (Path("/proc") / str(pid) / "cgroup").read_text().splitlines()
+    except (FileNotFoundError, ProcessLookupError):
+        raise psutil.NoSuchProcess(pid) from None
+    for line in lines:
         hierarchy, controllers, path = line.split(":", 2)
         if hierarchy == "0" or "name=systemd" in controllers.split(","):
             return path
     raise RuntimeError("native executor has no observable systemd cgroup")
 
 
-def _owner(launch: LinuxLaunch, pid: int) -> OwnedProcess:
-    process = psutil.Process(pid)
-    owner = OwnedProcess.capture(process)
-    if (
-        owner.starttime is None
-        or not owner.live()
-        or process.ppid() != 1
-        or process.uids().real != launch.uid
-        or process.cwd() != launch.cwd
-        or process.cmdline() != launch.argv
-        or _cgroup(pid) != launch.cgroup
-        or not owner.live()
-    ):
+def _owner(launch: LinuxLaunch, pid: int) -> OwnedProcess | None:
+    """The executor's live main process, or None once it has exited.
+
+    systemd names MainPID before this read, so the process can exit in between:
+    gone, or a zombie until the manager reaps it (psutil's ZombieProcess is a
+    NoSuchProcess). That is the executor finishing, not lost custody; the
+    caller reads the manager's settled exit. A live process outside the
+    captured launch still refuses.
+    """
+    try:
+        process = psutil.Process(pid)
+        owner = OwnedProcess.capture(process)
+        if not owner.live():
+            return None
+        inside = (
+            owner.starttime is not None
+            and process.ppid() == 1
+            and process.uids().real == launch.uid
+            and process.cwd() == launch.cwd
+            and process.cmdline() == launch.argv
+            and _cgroup(pid) == launch.cgroup
+        )
+        # Facts read while the process exits are partial (a zombie has no argv).
+        if not owner.live():
+            return None
+    except psutil.NoSuchProcess:
+        return None
+    if not inside:
         raise RuntimeError("executor is outside captured native birth, argv or cgroup custody")
     return owner
+
+
+def _settled_exit(launch: LinuxLaunch, running: dict[str, str]) -> dict[str, str]:
+    """The manager's record of a main process that exited under observation.
+
+    Until systemd reaps the process, MainPID still names it. The same
+    invocation must then report no main process within the bound; anything
+    else retains custody.
+    """
+    deadline = time.monotonic() + _EXIT_SETTLE_S
+    while True:
+        settled = _properties(launch.unit)
+        _require_definition(launch, settled)
+        if settled["InvocationID"] != running["InvocationID"]:
+            raise RuntimeError("executor changed during native observation; retain custody")
+        if settled["MainPID"] == "0":
+            return settled
+        if settled["MainPID"] != running["MainPID"] or time.monotonic() >= deadline:
+            raise RuntimeError("executor exit is not settled by its manager; retain custody")
+        time.sleep(_SETTLE_POLL_S)
 
 
 def _require_empty_cgroup(launch: LinuxLaunch, observed: str) -> None:
@@ -324,6 +368,12 @@ def _require_empty_cgroup(launch: LinuxLaunch, observed: str) -> None:
         raise RuntimeError("finished executor still owns native child processes")
 
 
+def _require_manager_cgroup(launch: LinuxLaunch, properties: dict[str, str]) -> None:
+    cgroup = properties["ControlGroup"]
+    if cgroup != launch.cgroup and (properties["MainPID"] != "0" or cgroup != ""):
+        raise RuntimeError("executor manager cgroup differs from journaled unit")
+
+
 def readback(record: dict[str, JsonValue]) -> LinuxJob:
     """Observe the retained unit; absence/ambiguity refuses instead of respawning."""
     launch = _admitted(record, verify=False)
@@ -332,12 +382,15 @@ def readback(record: dict[str, JsonValue]) -> LinuxJob:
     if re.fullmatch(r"[0-9a-f]{32}", before["InvocationID"]) is None:
         raise RuntimeError("native executor has no invocation identity")
     pid = int(before["MainPID"])
-    cgroup = before["ControlGroup"]
-    if cgroup != launch.cgroup and (pid != 0 or cgroup != ""):
-        raise RuntimeError("executor manager cgroup differs from journaled unit")
+    _require_manager_cgroup(launch, before)
     owner = _owner(launch, pid) if pid else None
+    if pid and owner is None:
+        # The main process exited after the manager named it.
+        before = _settled_exit(launch, before)
+        pid = 0
+        _require_manager_cgroup(launch, before)
     if not pid:
-        _require_empty_cgroup(launch, cgroup)
+        _require_empty_cgroup(launch, before["ControlGroup"])
     after = _properties(launch.unit)
     for key in ("MainPID", "InvocationID", "ControlGroup", "ActiveState", "SubState"):
         if before[key] != after[key]:

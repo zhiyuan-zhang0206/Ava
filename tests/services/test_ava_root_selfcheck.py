@@ -290,11 +290,11 @@ async def test_integration_detects_a_disarmed_death_and_refuses_a_duplicate(
 
     # An unexplained death requires reconciliation, never a duplicate: the
     # dead generation's custody blocks `up()` (no new pid; the unit reports
-    # down with the refusal), and shutdown refuses to call the uncaptured
-    # scope stopped.
+    # down with the refusal), and without its own reap observation shutdown
+    # refuses to call the uncaptured scope stopped.
     result = cast("list[dict[str, object]]", (await supervisor.up("svc"))["units"])
     assert result[0]["action"] == "failed"
     assert result[0]["pid"] is None
     assert "custody" in str(result[0]["error"])
-    with pytest.raises(RuntimeError, match="exited before scope capture; custody retained"):
+    with pytest.raises(RuntimeError, match="never observed its reap; custody retained"):
         await supervisor.shutdown()

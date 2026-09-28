@@ -453,6 +453,24 @@ def session_forward_keys() -> frozenset[str]:
     return _scope_aliases("host") - {MANIFEST_CERTIFICATION_SECRET_ENV}
 
 
+@lru_cache(maxsize=1)
+def launch_input_keys() -> frozenset[str]:
+    """The env keys a root generation's launch digest binds, and nothing else.
+
+    Declared launch inputs: the host-scope settings (AVA_HOME, machine
+    identity, health ports, the admitted service PATH, the certification
+    proof), PATH and VIRTUAL_ENV as the delivery rebuilds them from the
+    runtime, and the finalizer ticket. The ambient host facts `child_env`
+    copies from whoever launched it (display, HOME/USER/LOGNAME, temp dirs,
+    proxy, Windows system keys) are not: a service manager injects its own —
+    systemd `User=` sets USER and LOGNAME, launchd adds TMPDIR — so an observer
+    running with the fixed stage environment would name a different generation
+    for the same launch. Positive list: a key a delivery adds later stays out
+    of the digest until it is declared here.
+    """
+    return _scope_aliases("host") | _OS_CANONICAL_KEYS | {MANIFEST_CERTIFICATION_FINALIZER_ENV}
+
+
 def manifest_certification_secret_env() -> dict[str, str]:
     """Return the proof's one-purpose projection for the agent-host finalizer.
 

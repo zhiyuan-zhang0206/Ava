@@ -54,7 +54,10 @@ The executor uses `Type=exec`, `Restart=no`, `RemainAfterExit=yes`, and
 is involved. Systemd starts the process in its own `/system.slice` cgroup. The
 readback checks the native unit definition, structured D-Bus ExecStart and
 environment, invocation identity, and kernel PID/start ticks, UID, parent, cwd,
-argv and cgroup. A finished parent requires an empty cgroup, including nested
+argv and cgroup. A main process that exits after systemd named its MainPID
+(gone, or a zombie not yet reaped) is the executor finishing: readback waits,
+bounded, for the same invocation's recorded exit and reports that; an unsettled
+or replaced invocation retains custody. A finished parent requires an empty cgroup, including nested
 descendants (`cgroup.events`); exit status alone does not prove closure or a
 successful release transition. The operation retains the first native identity
 instead of replacing its birth receipt with a later exit observation.

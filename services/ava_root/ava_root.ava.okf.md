@@ -26,7 +26,7 @@ adding a rule file is a configuration change, while backend data writes are not.
 This is validation of mutable paths, not atomic exclusion of concurrent writers.
 Release publication must provide that exclusion or immutable configuration copies.
 The private root
-`launch_digest` binds the exact environment dictionary passed to root, the
+`launch_digest` binds root's declared launch environment (`launch_input_keys`), the
 home's authoritative `.env` and plugin configuration files, and the development
 source snapshot (tracked plus nonignored untracked files) at start admission;
 root exposes that digest with its native birth in status, without exposing
@@ -87,30 +87,8 @@ protocol, client and native pipe/custody primitives sit below every consumer:
 
 ## Closure and uncertainty
 
-Root records custody before spawning and preserves captured native births before
-signals. Normal stop is bounded TERM and exact observed closure; only explicit
-force permits KILL. Failed closure retains custody and blocks a replacement.
-
-POSIX units each lead a process group (setpgid; same session and macOS
-responsible process). Stop is certified only once the leader is reaped and the
-kernel reports that group empty (`process_group_closure.group_empty`): a
-child forked during TERM must exit too, or stop refuses with its PID; only force
-kills it. `setsid()` escapes by construction; exec domains keep their own groups.
-Root also keeps its control transport alive after failed ordinary shutdown;
-new service or resource birth remains closed. An operator can inspect the same
-owner, explicitly close its captured domains, then request shutdown again.
-Native birth checks reject PID reuse. Missing IPC is unknown, never proof of
-absence or readiness. Terminal and execution resources keep their own existing
-ownership contracts and are not renamed application service sessions.
-
-Linux `KillMode=process` deliberately signals root alone so independently owned
-Postgres, Redis, and PgBouncer siblings can survive application-root shutdown.
-Root must close its own application tree. An abrupt root death can leave children;
-retained custody blocks cold duplicate launch, but automatic orphan recovery and
-proof of independently detached execution-domain closure remain unimplemented.
-The native Linux CI test exercises actual manager adoption, root TERM closure,
-and retention of a data-process stand-in. It does not prove database durability
-or Windows containment. Mac permission grants require real signed-helper proof.
+Stop certification, retained custody, and release of a leader that exited
+before any stop: [[services/ava_root/closure.ava.okf.md]].
 
 
 ## Exact serving generation

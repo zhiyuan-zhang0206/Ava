@@ -39,7 +39,10 @@ def stage_environment(home: Path, registry: Path, home_dir: Path) -> tuple[tuple
 
     The service PATH declaration is read from the home's persisted settings.
     No caller credential, editable import path, or shell startup file travels.
-    Start and observation share it, so the root launch digest is reproducible.
+    On Linux the start action runs inside the boot unit, whose manager adds
+    variables of its own (`User=` sets USER and LOGNAME); the root launch
+    digest binds only declared launch inputs (`launch_input_keys`), so the
+    observer still derives the digest the start recorded.
     """
     return (
         ("HOME", str(home_dir)),

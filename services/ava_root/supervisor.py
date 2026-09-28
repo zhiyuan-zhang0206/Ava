@@ -93,6 +93,8 @@ class _Generation:
     custody: ServiceCustody | None = None
     tracked: set[OwnedProcess] = field(default_factory=set[OwnedProcess])
     closing: bool = False
+    scope_closed_at_exit: bool = False
+    """The leader's group was empty when root reaped it: nothing of the unit remained."""
     exited: asyncio.Event = field(default_factory=asyncio.Event)
 
 
@@ -450,13 +452,18 @@ class Supervisor:
         the final action so waiters never observe a half-processed exit.
         """
         returncode = await generation.proc.wait()
+        # Read right at the reap, before the leader's number can be reused: an
+        # empty group then is the unit's closure; a later group with that
+        # number may be a stranger's.
+        if not isinstance(generation.proc, ApplicationProcess):
+            generation.scope_closed_at_exit = _group_closed(generation.proc.pid)
         if runtime.generation is generation:
             runtime.last_exit = _describe_exit(returncode)
             runtime.state = UnitState.STOPPED
             if not generation.closing:
                 runtime.last_error = "unexpected exit; native custody requires reconciliation"
-        # A dead leader cannot prove that its descendants are gone. Only the
-        # stop owner releases custody after observing its captured scope close.
+        # Only a stop owner releases custody (`_stop_exited_generation` for an
+        # unexpected exit); until then it blocks revival and a duplicate root.
         generation.exited.set()
 
     async def _stop_unit(self, runtime: _UnitRuntime, *, force: bool = False) -> None:
@@ -474,8 +481,70 @@ class Supervisor:
         if isinstance(generation.proc, ApplicationProcess):
             await self._stop_job_generation(runtime, generation, generation.proc, force=force)
             return
+        exited = None if generation.closing else _exited_leader(runtime, generation)
+        if exited is not None:
+            await self._stop_exited_generation(runtime, generation, *exited, force=force)
+            return
         identity, custody = self._capture_posix_stop(runtime, generation)
         await self._stop_posix_generation(runtime, generation, identity, custody, force=force)
+
+    async def _stop_exited_generation(
+        self,
+        runtime: _UnitRuntime,
+        generation: _Generation,
+        identity: OwnedProcess,
+        custody: ServiceCustody,
+        *,
+        force: bool,
+    ) -> None:
+        """Release custody of a leader that exited before any stop captured its scope.
+
+        Root reaps its own leader, so after that reap the recorded birth is
+        positively dead. Whether descendants outlived it was read at the reap:
+        an empty group means nothing of the unit remained. Otherwise the group
+        number stays reserved while any member lives, and a pid is never reused
+        while it is still the process-group ID of a live group (POSIX); so a
+        process now holding the leader's pid proves that group ended, and the
+        group that pid may lead is a stranger's. Neither case signals anything.
+        Surviving descendants go through the ordinary group closure.
+        """
+        await self._await_reap(runtime, generation, identity, custody)
+        if generation.scope_closed_at_exit or psutil.pid_exists(identity.pid):
+            custody.clear()
+            runtime.generation = None
+            runtime.state = UnitState.STOPPED
+            _log.info(
+                "unit %s: recorded birth (pid %s) had exited; custody released",
+                runtime.manifest.id,
+                identity.pid,
+            )
+            return
+        generation.closing = True
+        custody.retain(generation.tracked)
+        await self._stop_posix_generation(runtime, generation, identity, custody, force=force)
+
+    async def _await_reap(
+        self,
+        runtime: _UnitRuntime,
+        generation: _Generation,
+        identity: OwnedProcess,
+        custody: ServiceCustody,
+    ) -> None:
+        """Wait (bounded) for the watch task to reap the exited leader.
+
+        Without that reap root has no group reading taken before the leader's
+        number could be reused, so it cannot judge the unit's scope.
+        """
+        watch = runtime.watch_task
+        if not generation.exited.is_set() and watch is not None and not watch.done():
+            with contextlib.suppress(TimeoutError):
+                await asyncio.wait_for(generation.exited.wait(), self._config.stop_timeout_s)
+        if not generation.exited.is_set():
+            raise RuntimeError(
+                f"unit {runtime.manifest.id}: recorded birth (pid {identity.pid}) exited but "
+                f"root never observed its reap; custody retained at {custody.path}. Once no "
+                "process of this unit remains, move that record aside and retry the stop"
+            )
 
     async def _stop_job_generation(
         self,
@@ -504,10 +573,6 @@ class Supervisor:
         identity, custody = generation.identity, generation.custody
         if identity is None or custody is None:
             raise RuntimeError(f"unit {runtime.manifest.id} has unacknowledged native birth")
-        if not generation.closing and not identity.live():
-            raise RuntimeError(
-                f"unit {runtime.manifest.id} exited before scope capture; custody retained"
-            )
         retain_processes(generation.tracked, capture_tree(identity))
         custody.retain(generation.tracked)
         generation.closing = True
@@ -592,6 +657,36 @@ class Supervisor:
         if runtime.last_error is not None:
             result["error"] = runtime.last_error
         return result
+
+
+def _exited_leader(
+    runtime: _UnitRuntime, generation: _Generation
+) -> tuple[OwnedProcess, ServiceCustody] | None:
+    """The recorded leader and its custody when that birth is positively not live
+    (gone, a zombie, or its PID now another birth); None while it runs.
+
+    An identity that cannot be verified keeps custody and names the next step.
+    """
+    identity, custody = generation.identity, generation.custody
+    if identity is None or custody is None:
+        raise RuntimeError(f"unit {runtime.manifest.id} has unacknowledged native birth")
+    try:
+        return None if identity.live() else (identity, custody)
+    except RuntimeError as exc:
+        raise RuntimeError(
+            f"unit {runtime.manifest.id}: cannot confirm whether its recorded birth "
+            f"(pid {identity.pid}) still runs: {exc}; custody retained at {custody.path}. "
+            f"Inspect pid {identity.pid}; once no process of this unit remains, move that "
+            "record aside and retry the stop"
+        ) from exc
+
+
+def _group_closed(pgid: int) -> bool:
+    """Whether a just-reaped leader's group is empty; an unreadable group is not."""
+    try:
+        return group_empty(pgid)
+    except OSError:
+        return False
 
 
 def _ownership_retained(unit_id: str, living: set[OwnedProcess], pgid: int) -> RuntimeError:

@@ -47,8 +47,12 @@ def test_development_generation_includes_dirty_and_untracked_source(tmp_path: Pa
     (tmp_path / "ignored").mkdir()
     (tmp_path / "ignored" / "build").write_text("generated")
     assert source_digest(tmp_path) == initial
-    assert launch_digest(tmp_path, {"PRIVATE": "first"}, home=tmp_path) != launch_digest(
-        tmp_path, {"PRIVATE": "second"}, home=tmp_path
+    assert launch_digest(tmp_path, {"AVA_MACHINE_NAME": "first"}, home=tmp_path) != launch_digest(
+        tmp_path, {"AVA_MACHINE_NAME": "second"}, home=tmp_path
+    )
+    # An ambient key is no launch input: whoever launches may add its own.
+    assert launch_digest(tmp_path, {"USER": "first"}, home=tmp_path) == launch_digest(
+        tmp_path, {"USER": "second"}, home=tmp_path
     )
     home = tmp_path / "ignored" / "home"
     home.mkdir()
