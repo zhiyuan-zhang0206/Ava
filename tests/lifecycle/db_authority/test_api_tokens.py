@@ -11,12 +11,14 @@ the gateway checks run the real app against the suite's database.
 
 from __future__ import annotations
 
+import ast
 import asyncio
 import hashlib
 import json
 import os
 from collections.abc import Callable, Iterator
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 from uuid import uuid4
 
@@ -259,6 +261,111 @@ def test_ops_posture_follows_the_api(gateway: Path, monkeypatch: pytest.MonkeyPa
     monkeypatch.setattr(settings.data_plane, "cluster_secret", _HUMAN)
     monkeypatch.setattr(type(settings.data_plane), "is_remote", property(lambda _self: True))
     assert ops_boot._ops_acceptance() == frozenset({api.token_digest(_HUMAN)})
+
+
+_REPO = Path(__file__).resolve().parents[3]
+_PRODUCTION = (
+    "agent",
+    "ava",
+    "ava_builtins",
+    "cli",
+    "gateway",
+    "ops",
+    "scripts",
+    "services",
+    "shared",
+)
+
+
+class _Calls(ast.NodeVisitor):
+    """The innermost enclosing function of every call to `name` (`receiver.name` if given)."""
+
+    def __init__(self, name: str, receiver: str | None) -> None:
+        self.name, self.receiver = name, receiver
+        self.scope: list[str] = []
+        self.found: list[str] = []
+
+    def visit_FunctionDef(self, node: ast.FunctionDef | ast.AsyncFunctionDef) -> None:
+        self.scope.append(node.name)
+        self.generic_visit(node)
+        self.scope.pop()
+
+    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+        self.visit_FunctionDef(node)
+
+    def visit_Call(self, node: ast.Call) -> None:
+        func = node.func
+        if isinstance(func, ast.Name):
+            hit = self.receiver is None and func.id == self.name
+        elif isinstance(func, ast.Attribute) and func.attr == self.name:
+            owner = func.value.id if isinstance(func.value, ast.Name) else None
+            hit = self.receiver is None or owner == self.receiver
+        else:
+            hit = False
+        if hit:
+            self.found.append(self.scope[-1] if self.scope else "<module>")
+        self.generic_visit(node)
+
+
+def _callers(name: str, *, receiver: str | None = None) -> list[str]:
+    """`path::function` of every call to `name` in production code."""
+    sites: set[str] = set()
+    for top in _PRODUCTION:
+        for path in (_REPO / top).rglob("*.py"):
+            source = path.read_text(encoding="utf-8")
+            if name not in source:
+                continue
+            calls = _Calls(name, receiver)
+            calls.visit(ast.parse(source))
+            rel = path.relative_to(_REPO).as_posix()
+            sites.update(f"{rel}::{function}" for function in calls.found)
+    return sorted(sites)
+
+
+def test_ops_reads_its_acceptance_once_so_only_a_root_stopped_fence_revokes() -> None:
+    """`/ops` takes its acceptance at daemon boot (`_ops_acceptance`); the gateway
+    re-reads it per request. "A revoked generation's token never authenticates
+    again" holds for `/ops` only because no revocation runs while the daemon
+    does. The ledger revokes in exactly one place, reached only through the
+    release fence, whose effect `LocalTransition.fence` runs after
+    `require_root_absent` (next test). A new caller here must stop the ops
+    daemon first, or `/ops` must read its acceptance per request."""
+    assert _callers("begin_revoke") == ["shared/cluster/authority/fence.py::revoke"]
+    assert _callers("revoke") == [
+        "cli/commands/data_plane/write_generation.py::fence_write_generation"
+    ]
+    assert _callers("fence_write_generation") == ["cli/release_transition/authority.py::fence"]
+    assert _callers("fence", receiver="authority") == ["cli/release_transition/local.py::fence"]
+
+
+def test_the_release_fence_revokes_only_after_root_and_its_services_are_gone(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`require_root_absent` proves root down and every service it birthed (the
+    ops daemon included) positively cleaned up; the fence revokes nothing before."""
+    from cli.commands import root_driver
+    from cli.release_transition import authority as release_authority
+    from cli.release_transition.local import LocalTransition
+
+    events: list[str] = []
+
+    def root_present() -> None:
+        events.append("root checked")
+        raise RuntimeError("root service custody requires reconciliation")
+
+    def revoked(_journal: object) -> None:
+        events.append("revoked")
+
+    monkeypatch.setattr(root_driver, "require_root_absent", root_present)
+    monkeypatch.setattr(release_authority, "fence", revoked)
+    transition = object.__new__(LocalTransition)
+    transition.request = SimpleNamespace(require_configuration=lambda: None)  # type: ignore[assignment]
+    with pytest.raises(RuntimeError, match="custody"):
+        transition.fence(SimpleNamespace())  # type: ignore[arg-type]
+    assert events == ["root checked"]
+    monkeypatch.setattr(root_driver, "require_root_absent", lambda: events.append("root gone"))
+    transition.fence(SimpleNamespace())  # type: ignore[arg-type]
+    assert events == ["root checked", "root gone", "revoked"]
 
 
 @pytest.fixture
