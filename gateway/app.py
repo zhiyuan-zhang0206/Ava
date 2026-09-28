@@ -473,6 +473,25 @@ def _prune_session_last_touch(now: float) -> None:
             _session_last_touch.pop(session_id, None)
 
 
+async def _cookie_session(request: Request, secret: str) -> tuple[str, str] | None:
+    """The request's session cookie and its credential fact, when it authenticates.
+
+    Valid only while the credential that minted the session is current (a
+    revoked generation's or a rotated secret's sessions end). Only a request
+    carrying a cookie consults the session store: bearer and anonymous
+    requests never pay its thread hop.
+    """
+    from gateway.request_principal import current_session_fact
+
+    cookie_token = request.cookies.get(cookie_name())
+    if not cookie_token:
+        return None
+    fact = await asyncio.to_thread(
+        current_session_fact, request.app.state.db_pool, cookie_token, secret
+    )
+    return None if fact is None else (cookie_token, fact)
+
+
 @app.middleware("http")
 async def _cluster_auth_middleware(
     request: Request,
@@ -495,7 +514,7 @@ async def _cluster_auth_middleware(
       middleware while keeping the cluster secret for internal
       service-to-service auth (ops / agent-host).
     """
-    from gateway.request_principal import AuthPrincipal, cluster_credential, current_session_fact
+    from gateway.request_principal import AuthPrincipal, cluster_credential
 
     # This is set only by credential verification, never by caller/source JSON.
     request.state.auth_principal = None
@@ -521,13 +540,10 @@ async def _cluster_auth_middleware(
     ):
         return await call_next(request)
 
-    # 1. Check session cookie: valid only while the credential that minted it
-    # is current (a revoked generation's or a rotated secret's sessions end).
-    cookie_token = request.cookies.get(cookie_name())
-    session_fact = await asyncio.to_thread(
-        current_session_fact, request.app.state.db_pool, cookie_token, secret
-    )
-    if cookie_token and session_fact is not None:
+    # 1. Check session cookie.
+    session = await _cookie_session(request, secret)
+    if session is not None:
+        cookie_token, session_fact = session
         request.state.auth_principal = AuthPrincipal("cluster", "administrator")
         request.state.source_verified_by = session_fact
         origin = request.headers.get("Origin")
