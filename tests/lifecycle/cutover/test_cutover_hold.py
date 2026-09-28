@@ -32,6 +32,7 @@ def _adopted(
     legacy = make_legacy(roles=("gateway", "agent-runner"))
     argv = ["--home", str(legacy.home), "--registry", str(legacy.registry)]
     argv += ["--service-path", SERVICE_PATH, "--execute", "--cutover-id", "c9"]
+    argv += ["--expect-mode", "gateway"]
     assert adopt.main(argv, host=legacy.scheduler.host(), checkout=legacy.checkout) == 0
     monkeypatch.setattr(settings.general, "ava_home", str(legacy.home))
     hold = json.loads((legacy.home / "cutover-rollback" / "adopt-home.json").read_text())["hold"]

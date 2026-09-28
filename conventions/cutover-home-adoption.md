@@ -14,11 +14,17 @@ are deleted with the other `scripts/cutover_*` scripts after the cutover:
   bound ports, a reviewed-PATH candidate, the refusals, and the exact plan
   adoption would execute now.
 - `scripts/cutover_adopt_home.py` executes that plan. Dry-run is the default;
-  `--execute` adopts; `--start` performs the held first start.
+  `--execute` adopts; `--start` performs the held first start. `--execute`
+  also requires `--expect-mode gateway|remote-unit`: the mode is inferred from
+  the capability files alone, and a remote unit's adoption strips credentials
+  and moves `pg/`, `backups/` and `secrets/`, so a mismatch refuses.
 
 Run both with the `.venv` of the checkout that owns the home (`$AVA_HOME/source`
-for production, or a checkout whose `.ava_home` names the home). Never run them
-against a home you are not converting. While the cutover hold the adoption
+for production, or a checkout whose `.ava_home` names the home). A home with
+its own `source` checkout adopts and starts only from it; a throwaway
+worktree whose `.ava_home` names it (the T-3 dry-run) may only plan, so the
+intent never records a disposable checkout. Never run them against a home you
+are not converting. While the cutover hold the adoption
 journal records stands, an ordinary start never releases it
 (`cli/cutover_hold.py`): before the held first start (`--start`) a bare
 `ava start` refuses and names that command, and after it (for example the
@@ -59,7 +65,8 @@ the go/no-go gate's `ava maintenance resume` opens business.
 ```bash
 .venv/bin/python scripts/cutover_inventory.py --home ~/.ava --service-path "$REVIEWED_PATH"
 .venv/bin/python scripts/cutover_adopt_home.py --home ~/.ava --service-path "$REVIEWED_PATH"
-.venv/bin/python scripts/cutover_adopt_home.py --home ~/.ava --service-path "$REVIEWED_PATH" --execute
+.venv/bin/python scripts/cutover_adopt_home.py --home ~/.ava --service-path "$REVIEWED_PATH" \
+    --execute --expect-mode remote-unit    # gateway on the gateway
 .venv/bin/python scripts/cutover_adopt_home.py --home ~/.ava --start
 ```
 

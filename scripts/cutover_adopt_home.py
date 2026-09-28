@@ -37,8 +37,15 @@ it starts held.
 Run from the checkout that owns the home:
 
     .venv/bin/python scripts/cutover_adopt_home.py --home ~/.ava --service-path P
-    .venv/bin/python scripts/cutover_adopt_home.py --home ~/.ava --service-path P --execute
+    .venv/bin/python scripts/cutover_adopt_home.py --home ~/.ava --service-path P \
+        --execute --expect-mode gateway|remote-unit
     .venv/bin/python scripts/cutover_adopt_home.py --home ~/.ava --start
+
+`--execute` names the mode the operator expects (`--expect-mode`); the mode
+the capability files imply must match, since a remote unit's adoption strips
+its credentials and moves `pg/`, `backups/` and `secrets/`. A home with its
+own `source` checkout adopts and starts only from it: a throwaway checkout
+whose `.ava_home` names the home serves the dry-run only.
 
 A remote unit's `.env` loses the human bearer (`AVA_CLUSTER_SECRET`) with the
 other gateway-only keys; its held start installs the unit capability bundle the
@@ -95,14 +102,37 @@ from shared.private_storage import ensure_private_dir, write_private_bytes
 _AUDIT = "cutover_adopt_home"
 
 
-def require_owning_checkout(home: Path, checkout: Path) -> None:
+def require_owning_checkout(home: Path, checkout: Path, *, effects: bool) -> None:
+    """The checkout the intent records must be the one the home's services run.
+
+    A throwaway checkout whose `.ava_home` names the home may plan (the T-3
+    dry-run); a home with its own `source` checkout (production) adopts and
+    starts only from it, so no intent is bound to a disposable path.
+    """
     pointer = checkout / ".ava_home"
     bound = pointer.is_file() and pointer.read_text().strip() == str(home)
-    if checkout != home / "source" and not bound:
+    source = home / "source"
+    if checkout != source and not bound:
         raise RefusedError(
-            f"run this script from the checkout that owns {home} ({home / 'source'} or a "
+            f"run this script from the checkout that owns {home} ({source} or a "
             f"checkout whose .ava_home names it), not {checkout}"
         )
+    if effects and source.is_dir() and checkout != source:
+        raise RefusedError(
+            f"{home} runs from {source}: --execute and --start run only from it; "
+            f"{checkout} may only plan the adoption"
+        )
+
+
+def mode_refusal(facts: Facts, expected: str) -> str | None:
+    """The mode is inferred from capability files; the operator states it too."""
+    mode = "gateway" if facts.gateway else "remote-unit"
+    if mode == expected:
+        return None
+    return (
+        f"--expect-mode {expected}, but {facts.home} reads as a {mode} "
+        f"(roles {', '.join(facts.roles) or 'none'}); check its machine_serve_* files"
+    )
 
 
 def _write_journal(home: Path, journal: dict[str, Any]) -> None:
@@ -387,7 +417,13 @@ def _complete(journal: dict[str, Any] | None) -> bool:
 
 
 def execute(
-    home: Path, registry: Path, checkout: Path, host: Host, inputs: Inputs, cutover_id: str
+    home: Path,
+    registry: Path,
+    checkout: Path,
+    host: Host,
+    inputs: Inputs,
+    cutover_id: str,
+    expect_mode: str,
 ) -> dict[str, Any]:
     """Adopt `home`; refusals raise before this run changes anything."""
     journal = read_journal(home)
@@ -400,6 +436,8 @@ def execute(
     facts = gather(home, registry, checkout, host, inputs)
     facts.journal = journal
     reasons = refusals(facts, inputs)
+    if (mismatch := mode_refusal(facts, expect_mode)) is not None:
+        reasons.append(mismatch)
     if reasons:
         raise RefusedError("; ".join(reasons))
     if journal is None:
@@ -476,9 +514,7 @@ def _print_plan(report: dict[str, Any]) -> None:
         print(f"  ✗ refused: {reason}")
 
 
-def main(
-    argv: list[str] | None = None, *, host: Host | None = None, checkout: Path | None = None
-) -> int:
+def _arguments(argv: list[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0] if __doc__ else None)
     parser.add_argument("--home", required=True, help="the home to adopt (explicit)")
     parser.add_argument("--service-path", help="the reviewed AVA_SERVICE_PATH to record")
@@ -490,16 +526,30 @@ def main(
     parser.add_argument("--keep-secret", action="append", default=[], help="secrets/ entry to keep")
     parser.add_argument("--cutover-id", help="names the cutover hold (default: minted)")
     parser.add_argument("--json", action="store_true", help="dry-run: print the full JSON verdict")
+    parser.add_argument(
+        "--expect-mode",
+        choices=("gateway", "remote-unit"),
+        help="required with --execute: the mode the operator expects this home to adopt as",
+    )
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--execute", action="store_true", help="perform the adoption")
     mode.add_argument("--start", action="store_true", help="held first start after adoption")
     args = parser.parse_args(argv)
     if args.db_capability is not None and not args.start:
         parser.error("--db-capability belongs to --start")
+    if args.execute and args.expect_mode is None:
+        parser.error("--execute requires --expect-mode gateway|remote-unit")
+    return args
+
+
+def main(
+    argv: list[str] | None = None, *, host: Host | None = None, checkout: Path | None = None
+) -> int:
+    args = _arguments(argv)
     try:
         home = canonical_home(args.home)
         owner = checkout or own_checkout()
-        require_owning_checkout(home, owner)
+        require_owning_checkout(home, owner, effects=args.execute or args.start)
         if args.start:
             return held_start(home, args.db_capability)
         inputs = Inputs(args.service_path, tuple(args.keep_secret))
@@ -510,7 +560,7 @@ def main(
 
             cutover_id = args.cutover_id or datetime.now(UTC).strftime("adopt-%Y%m%dT%H%M%SZ")
             with file_lock(home / "start-intent.lock", timeout_s=30):
-                journal = execute(home, registry, owner, host, inputs, cutover_id)
+                journal = execute(home, registry, owner, host, inputs, cutover_id, args.expect_mode)
             hold = journal["hold"]
             print(f"✓ adoption complete; cutover hold {hold['holder']} @ {hold['acquired_at']}.")
             print(f"  next: this script --home {home} --start (after any data-plane cutover)")
@@ -522,6 +572,9 @@ def main(
         inputs = reconcile_inputs(journal, inputs, registry, owner)
         facts = gather(home, registry, owner, host, inputs)
         report = verdict(facts, inputs)
+        if args.expect_mode and (mismatch := mode_refusal(facts, args.expect_mode)):
+            report["refusals"].append(mismatch)
+            report["adoptable"] = False
     except RefusedError as exc:
         print(f"✗ adoption refused, nothing changed by this run: {exc}", file=sys.stderr)
         return 1

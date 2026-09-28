@@ -21,10 +21,16 @@ from tests.lifecycle.cutover.conftest import CANARY, MACHINE_KEY, SERVICE_PATH, 
 Make = Callable[..., LegacyHome]
 
 
+def _mode(legacy: LegacyHome) -> str:
+    return "gateway" if legacy.gateway else "remote-unit"
+
+
 def _run(legacy: LegacyHome, *extra: str, service_path: bool = True) -> int:
     argv = ["--home", str(legacy.home), "--registry", str(legacy.registry), *extra]
     if service_path:
         argv += ["--service-path", SERVICE_PATH]
+    if "--execute" in extra:
+        argv += ["--expect-mode", _mode(legacy)]
     return adopt.main(argv, host=legacy.scheduler.host(), checkout=legacy.checkout)
 
 
@@ -302,6 +308,7 @@ def test_a_continuation_refuses_different_inputs(
     monkeypatch.setattr(adopt, "_record_retire", crash)
     assert _run(legacy, "--execute") == 1
     argv = ["--home", str(legacy.home), "--registry", str(legacy.registry), "--execute"]
+    argv += ["--expect-mode", "remote-unit"]
     assert (
         adopt.main(
             [*argv, "--service-path", "/usr/bin:/bin"],
@@ -324,8 +331,52 @@ def test_main_refuses_a_checkout_that_does_not_own_the_home(
     make_legacy: Make, capsys: pytest.CaptureFixture[str]
 ) -> None:
     legacy = make_legacy()
-    assert adopt.main(["--home", str(legacy.home), "--execute"]) == 1
+    argv = ["--home", str(legacy.home), "--execute", "--expect-mode", "remote-unit"]
+    assert adopt.main(argv) == 1
     assert "checkout that owns" in capsys.readouterr().err
+    assert not (legacy.home / "cutover-rollback").exists()
+
+
+def test_a_throwaway_checkout_may_plan_but_never_adopt_a_home_with_its_own_source(
+    make_legacy: Make, capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    """A T-3 dry-run needs a throwaway worktree whose `.ava_home` names the
+    home; an `--execute` from it would bind the production intent to that
+    disposable path, which a later release start uses."""
+    legacy = make_legacy()
+    throwaway = tmp_path / "throwaway"
+    throwaway.mkdir()
+    (throwaway / ".ava_home").write_text(f"{legacy.home}\n")
+    argv = ["--home", str(legacy.home), "--registry", str(legacy.registry)]
+    argv += ["--service-path", SERVICE_PATH]
+    host = legacy.scheduler.host()
+    assert adopt.main(argv, host=host, checkout=throwaway) == 0
+    capsys.readouterr()
+    execute = [*argv, "--execute", "--expect-mode", "remote-unit"]
+    assert adopt.main(execute, host=host, checkout=throwaway) == 1
+    assert str(legacy.home / "source") in capsys.readouterr().err
+    assert adopt.main([*argv, "--start"], host=host, checkout=throwaway) == 1
+    assert not (legacy.home / "cutover-rollback").exists()
+
+
+@pytest.mark.parametrize(
+    ("roles", "wrong"), [(("agent-runner",), "gateway"), (("gateway",), "remote-unit")]
+)
+def test_execute_requires_the_expected_mode(
+    make_legacy: Make, capsys: pytest.CaptureFixture[str], roles: tuple[str, ...], wrong: str
+) -> None:
+    """The mode is inferred from capability files alone, and a remote unit's
+    adoption strips credentials and moves `pg/`, `backups/` and `secrets/`."""
+    legacy = make_legacy(roles=roles)
+    argv = ["--home", str(legacy.home), "--registry", str(legacy.registry)]
+    argv += ["--service-path", SERVICE_PATH, "--execute"]
+    host = legacy.scheduler.host()
+    with pytest.raises(SystemExit):
+        adopt.main(argv, host=host, checkout=legacy.checkout)
+    before = legacy.snapshot()
+    assert adopt.main([*argv, "--expect-mode", wrong], host=host, checkout=legacy.checkout) == 1
+    assert f"--expect-mode {wrong}" in capsys.readouterr().err
+    assert legacy.snapshot() == before
     assert not (legacy.home / "cutover-rollback").exists()
 
 
