@@ -265,6 +265,62 @@ def test_uninstall_removes_only_this_homes_paths(
     assert unit.exists()
 
 
+def _manager_reports(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, active_state: str
+) -> tuple[Path, list[list[str]]]:
+    """A systemd host whose manager reports `active_state` for the boot unit."""
+    units = tmp_path / "etc-systemd"
+    units.mkdir(exist_ok=True)
+    monkeypatch.setattr(os_boot_unit, "SYSTEM_UNIT_DIR", units)
+    monkeypatch.setattr(os_boot_unit, "IS_LINUX", True)
+    monkeypatch.setattr(os_boot_unit, "systemd_running", lambda: True)
+    recorded: list[list[str]] = []
+
+    def fake_privileged(
+        argv: list[str], *, timeout: float = 120.0
+    ) -> subprocess.CompletedProcess[str]:
+        recorded.append(argv)
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    def show(*args: str, timeout: float = 30.0) -> subprocess.CompletedProcess[str]:
+        del timeout
+        assert args[:3] == ("show", "--property=ActiveState", "--value"), args
+        return subprocess.CompletedProcess(["systemctl", *args], 0, f"{active_state}\n", "")
+
+    monkeypatch.setattr(os_boot_unit, "privileged", fake_privileged)
+    monkeypatch.setattr(os_boot_unit, "_systemctl", show)
+    return units, recorded
+
+
+def test_uninstall_leaves_no_failed_record_behind(
+    ctx: BootUnitContext, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A boot unit whose stop failed stays listed as `not-found failed` after its
+    file is removed and the manager reloaded (A/B/A run 6's destroy)."""
+    units, recorded = _manager_reports(monkeypatch, tmp_path, "failed")
+    name = unit_name(ctx.home)
+    (units / name).write_text(render_unit(ctx))
+
+    steps = uninstall(ctx.home)
+
+    reset = ["systemctl", "reset-failed", name]
+    assert recorded.index(["systemctl", "daemon-reload"]) < recorded.index(reset)
+    assert steps[-1] == f"cleared the failed record of {name}"
+    # A residue a previous destroy left (no file any more) is cleared too.
+    (units / name).unlink()  # what the mocked `rm -f` would have done
+    recorded.clear()
+    assert uninstall(ctx.home) == [f"cleared the failed record of {name}"]
+    assert recorded == [reset]
+
+
+def test_uninstall_resets_nothing_it_did_not_leave_failed(
+    ctx: BootUnitContext, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _units, recorded = _manager_reports(monkeypatch, tmp_path, "inactive")
+    assert uninstall(ctx.home) == []
+    assert recorded == []
+
+
 def test_privileged_translates_a_missing_sudo(monkeypatch: pytest.MonkeyPatch) -> None:
     """A host without sudo must fail actionably (RuntimeError with guidance),
     not surface a raw FileNotFoundError traceback through the CLI wrappers."""
