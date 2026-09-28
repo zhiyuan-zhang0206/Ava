@@ -354,6 +354,20 @@ def test_gateway_home_ops_accepts_its_generation_never_the_human_secret(gateway:
     assert asyncio.run(_ops_status(ops_boot._ops_acceptance(), tokens.gateway)) == 401
 
 
+def test_gateway_home_ops_fails_closed_while_no_generation_is_active(gateway: Path) -> None:
+    """During a fence no generation is active: a secret gateway home's /ops then
+    accepts no bearer at all, and still binds as an authenticated server. It
+    never falls back to the open, unauthenticated posture (None)."""
+    tokens = _tokens(gateway).api
+    operation = authority.OperationAuthority(operation=uuid4(), direction="candidate")
+    ledger.begin_revoke(gateway, operation)
+    acceptance = ops_boot._ops_acceptance()
+    assert acceptance == frozenset()
+    assert ops_boot._ops_bind_host(acceptance) == "0.0.0.0"  # noqa: S104
+    for token in (tokens.gateway, tokens.runner, _HUMAN, None):
+        assert asyncio.run(_ops_status(acceptance, token)) == 401
+
+
 def test_ops_posture_follows_the_api(gateway: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings.data_plane, "cluster_secret", "")
     assert ops_boot._ops_acceptance() is None
