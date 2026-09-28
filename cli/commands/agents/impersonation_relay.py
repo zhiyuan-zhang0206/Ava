@@ -190,6 +190,13 @@ def _ended(
 ) -> bool:
     if snapshot.status not in _TERMINAL:
         return False
+    if snapshot.status == "expired" and snapshot.end_reason == "terminated: agent was terminated":
+        emit(
+            f"Ava impersonation interrupted: agent={agent_id} lease={lease_id}. "
+            "The agent was terminated. Do not use this identity. "
+            "Unacknowledged messages remain pending."
+        )
+        return True
     if snapshot.status != "released":
         emit(
             f"Ava control {snapshot.status}: agent={agent_id} lease={lease_id}. "
@@ -510,7 +517,10 @@ def cmd_relay(args: argparse.Namespace) -> int:
                 return await asyncio.to_thread(reserve_delivery, str(lease_id), token, ids)
 
             if not await asyncio.to_thread(_write_heartbeat, lease_id, token):
-                return  # lease already terminal; nothing to relay
+                # Termination can win between startup's lease read and beat.
+                # Terminal metadata is readable; ordinary inbox authority stays closed.
+                _ended(await read_inbox(), args.agent_id, session_id, emit)
+                return
             heartbeat = asyncio.create_task(_heartbeat_loop(lease_id, token))
             try:
                 listener = shared.redis_listener.RedisInboundListener(

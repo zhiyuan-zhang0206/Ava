@@ -103,6 +103,8 @@ def dead_letter_stale_pending_terminated(pool: ConnectionPool, threshold_s: floa
 
     Post-termination chats remain pending for the G4 resurrect-retry path; only
     one-shot lifecycle notices with no remaining consumer are dead-lettered.
+    Impersonation termination notices belong to the next resurrection's native
+    history, so their explicit marker preserves them regardless of age.
     """
     with write_transaction(pool) as conn, conn.cursor() as cur:
         cur.execute(
@@ -112,6 +114,9 @@ def dead_letter_stale_pending_terminated(pool: ConnectionPool, threshold_s: floa
             "  AND am.status = 'terminated' "
             "  AND m.status = 'pending' "
             "  AND m.kind IN ('terminate', 'system_note', 'restart_completed') "
+            "  AND NOT (m.kind='system_note' AND m.source='system:impersonation' "
+            "           AND COALESCE(m.payload->'impersonation_termination_notice' "
+            "                        = 'true'::jsonb, false)) "
             "  AND m.created_at < now() - make_interval(secs => %s)",
             (threshold_s,),
         )
