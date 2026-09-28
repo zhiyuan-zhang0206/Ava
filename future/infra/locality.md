@@ -79,10 +79,3 @@ lifecycle; those items wait for it to land and are then designed on its code.
    natural owner `shared/proc_tree.py`'s `OwnedProcess`) is the next
    candidate — most of its readers sit in files #3479 rewrites.
    `shared/config` as a registration hub needs a design pass first.
-5. **Path imports** (`path_imports`, 5 sites left): the `ava_memory` pool
-   scripts are deliberately portable — bare `python3` on a machine with only
-   the copied skill and the pool checkout, no Ava source tree — which is why
-   they still add their own directory to `sys.path`. Moving their helpers into
-   the plugin package would drop that property; keeping it as a reasoned
-   allowlist entry, or inlining the helpers, are the alternatives. Every other
-   built-in skill's shared code lives in `ava_builtins/skill_support/`.
