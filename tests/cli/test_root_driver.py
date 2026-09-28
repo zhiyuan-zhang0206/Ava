@@ -508,6 +508,41 @@ def test_root_launch_digest_ignores_service_manager_injections(
     assert changed != observed
 
 
+def test_root_child_env_beyond_the_launch_inputs_is_only_ambient(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Every key root hands its units is a declared launch input or an ambient host fact.
+
+    `launch_input_keys` is a positive list, so a non-ambient key a delivery
+    adds would silently stay out of the launch digest; this names it instead.
+    Every ambient candidate and the finalizer projection are set, so the
+    result does not depend on what this host's environment carries.
+    """
+    from shared import env_registry
+
+    ambient = (
+        env_registry.HOST_PASSTHROUGH_KEYS
+        | env_registry._TEMP_DIR_KEYS
+        | env_registry.NETWORK_PROXY_KEYS
+        | env_registry.WINDOWS_SYSTEM_ENV_KEYS
+        | {"PYTHONUTF8"}
+    )
+    paths = {"HOME", *env_registry._TEMP_DIR_KEYS}
+    for key in ambient:
+        monkeypatch.setenv(key, str(tmp_path) if key in paths else "ambient")
+    monkeypatch.setattr(driver.settings.general, "service_path", str(tmp_path / "tools"))
+
+    def finalizer() -> dict[str, str]:
+        return {
+            env_registry.MANIFEST_CERTIFICATION_SECRET_ENV: "proof",
+            env_registry.MANIFEST_CERTIFICATION_FINALIZER_ENV: "1",
+        }
+
+    monkeypatch.setattr(env_registry, "manifest_certification_secret_env", finalizer)
+    undeclared = set(driver.root_child_env()) - env_registry.launch_input_keys() - ambient
+    assert not undeclared, f"declare these in launch_input_keys or as ambient: {sorted(undeclared)}"
+
+
 @pytest.mark.parametrize("loaded", [False, True])
 def test_unusable_helper_socket_requires_positive_native_absence(
     monkeypatch: pytest.MonkeyPatch, loaded: bool

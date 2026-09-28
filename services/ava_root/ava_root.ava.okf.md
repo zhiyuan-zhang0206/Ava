@@ -30,8 +30,11 @@ The private root
 home's authoritative `.env` and plugin configuration files, and the development
 source snapshot (tracked plus nonignored untracked files) at start admission;
 root exposes that digest with its native birth in status, without exposing
-secrets. The deployment glue selects services and supplies health and diagnostic
-participants: [[services/ava_root_glue/ava_root_glue.ava.okf.md]]. The generic
+secrets. Ambient keys root still hands every unit (proxy, DISPLAY, HOME,
+USER/LOGNAME, TMPDIR and the other temp dirs, Windows system keys) are outside
+the digest: a start that differs only in them reuses the running generation,
+which keeps the values it started with, instead of refusing. The deployment
+glue selects services and supplies health and diagnostic participants: [[services/ava_root_glue/ava_root_glue.ava.okf.md]]. The generic
 root does not know rollout publication authority or cluster installation.
 Development source remains mutable after admission; this check does not certify
 an immutable running release or seal ignored dependency directories.
