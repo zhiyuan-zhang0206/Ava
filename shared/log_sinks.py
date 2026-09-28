@@ -197,6 +197,36 @@ _HUMAN_FORMAT = (
 )
 
 
+def add_sink(sink: Any, /, **kwargs: Any) -> int:
+    """`logger.add(sink, ...)` with `diagnose` forced off.
+
+    Every loguru sink in this codebase must be registered through this helper
+    (or pass a literal `diagnose=False` itself — the repo-wide AST scan in
+    `tests/shared/test_log_init_idempotent.py::test_no_repo_logger_add_call_skips_diagnose_false`
+    enforces this for every non-test callsite under the scanned dirs). loguru's
+    own default is `diagnose=True`: on a formatted exception it renders every
+    local variable's value from every frame of the traceback into the sink's
+    output — not just the traceback text. A release-executor failure captured a
+    `RoleSecret` in a stack frame, and `logger.opt(exception=exc)` printed that
+    secret's plaintext password to stderr (systemd journal) and to the
+    `release-executor.log` file sink (2026-09, PR #3479 review, P1); a
+    `psycopg.connect(dsn)` failure logged via `logger.exception(...)` leaks a
+    password-bearing DSN the same way. `backtrace` (how many stack frames are
+    shown — never their values) carries no secret-leak risk on its own and is
+    left at loguru's default.
+
+    Raises if a caller explicitly asks for `diagnose=True` — that request is
+    never honored, so failing loud beats a silently-ignored kwarg.
+    """
+    if kwargs.get("diagnose"):
+        raise ValueError(
+            "diagnose=True is forbidden on log sinks: it renders local variable "
+            "values (including secrets) into exception output"
+        )
+    kwargs["diagnose"] = False
+    return logger.add(sink, **kwargs)
+
+
 _FILE_SINK_SIZE_LIMIT = 100 * 1024 * 1024
 
 
@@ -273,7 +303,7 @@ def _add_file_sink(path: Path) -> int:
     path.parent.mkdir(parents=True, exist_ok=True)
     with contextlib.suppress(OSError):
         path.parent.chmod(0o700)
-    sink_id = logger.add(
+    sink_id = add_sink(
         path,
         serialize=True,
         level="DEBUG",

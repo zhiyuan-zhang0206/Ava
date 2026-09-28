@@ -47,6 +47,7 @@ import psutil
 
 from shared import session_log
 from shared.log import logger
+from shared.log_sinks import add_sink
 from shared.native_process.ownership import OwnedProcess, stable_create_time
 from shared.session_record import SessionRecord
 from shared.sessions.pty import session_tree
@@ -633,7 +634,7 @@ def main(argv: list[str] | None = None) -> int:
     # stderr lands in $AVA_HOME/logs/<name>.host.log (the _reparent
     # redirect); no DB/file sinks — a session host must keep running when
     # the cluster's data plane is down, and never pays a settings build.
-    logger.add(
+    add_sink(
         sys.stderr,
         format="{time:HH:mm:ss.SSS} <level>{level: <5}</level> {message}",
         level="INFO",
