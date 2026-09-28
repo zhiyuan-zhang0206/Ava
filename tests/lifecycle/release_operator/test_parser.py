@@ -106,6 +106,33 @@ def test_request_accepts_an_explicit_receipt_and_watch_window() -> None:
     assert (args.receipt, args.watch_s) == ("/x/receipt.json", 60)
 
 
+def test_request_accepts_an_alert_route_and_an_acknowledged_rejection() -> None:
+    parser = build_parser()
+    base = ["cluster", "release", "request", "--commit", "a" * 40, "--out", "/x/out.json"]
+    args = parser.parse_args(base)
+    assert (args.alert_agent, args.alert_webhook_file, args.acknowledged_rejection) == (
+        None,
+        None,
+        None,
+    )
+    args = parser.parse_args(
+        [
+            *base,
+            "--alert-agent",
+            "1818",
+            "--alert-webhook-file",
+            "release-webhook",
+            "--acknowledged-rejection",
+            "4d2f7a3e-6c1b-4f0e-9a8d-2b5c7e9f1a03",
+        ]
+    )
+    assert (args.alert_agent, args.alert_webhook_file, args.acknowledged_rejection) == (
+        1818,
+        "release-webhook",
+        "4d2f7a3e-6c1b-4f0e-9a8d-2b5c7e9f1a03",
+    )
+
+
 def test_exclude_requires_operation_unit_and_reason() -> None:
     parser = build_parser()
     with pytest.raises(SystemExit):

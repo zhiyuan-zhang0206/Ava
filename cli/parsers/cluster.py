@@ -130,6 +130,9 @@ def _h_cluster_release_request(args: argparse.Namespace) -> int:
         reason=args.reason,
         receipt=Path(args.receipt) if args.receipt is not None else None,
         watch_s=args.watch_s,
+        alert_agent=args.alert_agent,
+        alert_webhook_file=args.alert_webhook_file,
+        acknowledged_rejection=args.acknowledged_rejection,
     )
 
 
@@ -281,6 +284,27 @@ def _add_release_parser(cluster_sub: argparse._SubParsersAction[argparse.Argumen
         type=int,
         default=None,
         help="the post-resume watch window in seconds (default: the fleet policy's)",
+    )
+    request_p.add_argument(
+        "--alert-agent",
+        type=int,
+        default=None,
+        metavar="AGENT_ID",
+        help="also notify this observing agent of every fleet alert (it only observes)",
+    )
+    request_p.add_argument(
+        "--alert-webhook-file",
+        default=None,
+        metavar="NAME",
+        help="also POST every fleet alert to the webhook URL held in the owner-only "
+        "$AVA_HOME/secrets/NAME (0600); it reaches a person while the cluster is down",
+    )
+    request_p.add_argument(
+        "--acknowledged-rejection",
+        default=None,
+        metavar="OPERATION_ID",
+        help="request a candidate an earlier operation rejected: name that exact "
+        "(latest) rejecting operation",
     )
     request_p.set_defaults(func=_h_cluster_release_request)
 
