@@ -103,7 +103,10 @@ def _app_password() -> str:
     #
     # Reads from the macOS Keychain first; when that is unavailable (e.g. a
     # headless agent without GUI access), falls back to a plain-text file at
-    # ~/.ava/secrets/gmail-app-password.
+    # ~/.ava/secrets/gmail-app-password. This is deliberately machine-level, not
+    # cluster-scoped via resolve_ava_home(): the Keychain entry it mirrors is
+    # itself per-OS-user, and secrets living in per-machine ~/.ava/secrets/*.env
+    # is the documented convention (conventions/dev-setup.md).
     try:
         return _keychain("-w").strip().replace(" ", "")
     except GmailError:
