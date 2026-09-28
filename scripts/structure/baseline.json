@@ -187,7 +187,6 @@
     "gateway/_loki_event_rows.py::count_events": 15,
     "gateway/_loki_logql.py::_agg_pipeline": 18,
     "gateway/_loki_logql.py::_build_logql": 21,
-    "gateway/app.py::_cluster_auth_middleware": 15,
     "gateway/context_breakdown.py::bucket_messages": 16,
     "gateway/prom_metrics.py::query_range": 16,
     "gateway/routers/_inspect_metrics.py::_read_snapshot": 20,

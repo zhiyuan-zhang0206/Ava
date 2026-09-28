@@ -77,6 +77,21 @@ class OwnedPooler:
             raise RuntimeError("PgBouncer native birth changed before signal")
         return process
 
+    def _listeners(self) -> frozenset[int] | None:
+        """This birth's validated listeners, or None once it has exited.
+
+        A retained drain finishes on its own, and a busy host's socket scan is
+        slow enough for the birth to exit while its listeners are scanned: a
+        gone birth leaves nothing to stop. A live one beside a foreign listener
+        still refuses.
+        """
+        try:
+            return ownership.require_listener(self.identity, self.port, required=False)
+        except RuntimeError:
+            if self.identity.live():
+                raise
+            return None
+
     def _request_stop(self, deadline: float) -> None:
         budget = deadline - time.monotonic()
         if budget <= 0:
@@ -84,7 +99,9 @@ class OwnedPooler:
         with file_lock(self.config.with_name("stop-intent.lock"), timeout_s=budget):
             if not self.identity.live():
                 return
-            listeners = ownership.require_listener(self.identity, self.port, required=False)
+            listeners = self._listeners()
+            if listeners is None:
+                return
             requested = self._stop_requested()
             admitted = bool(listeners) and not requested
             # Record before signalling, including when a previous native caller
@@ -121,8 +138,7 @@ class OwnedPooler:
                 return True
         if not force:
             return False
-        if not self.identity.live():
+        if not self.identity.live() or self._listeners() is None:
             return True
-        ownership.require_listener(self.identity, self.port, required=False)
         self._process().kill()
         return self._wait(time.monotonic() + 0.5)

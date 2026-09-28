@@ -190,6 +190,39 @@ def test_repeated_normal_stop_preserves_waiting_transaction(
     assert not custodian.identity.live()
 
 
+@pytest.mark.parametrize(("force", "budget"), [(False, 5.0), (True, -1.0)])
+def test_a_drain_that_finishes_during_the_listener_scan_is_stopped(
+    native_pooler: tuple[OwnedPooler, str, str],
+    monkeypatch: pytest.MonkeyPatch,
+    force: bool,
+    budget: float,
+) -> None:
+    """A retained drain can complete while a retry (or the force leg) scans the
+    pooler's listeners — a busy host's socket scan outlasts the pooler's exit:
+    the birth that exits mid-scan is stopped, never a foreign listener."""
+    custodian, pooled, direct = native_pooler
+    scan = ownership.strict_listeners_on
+    with contextlib.closing(psycopg.connect(pooled)) as client:
+        client.execute("INSERT INTO pooler_stop_receipt VALUES (7)")
+        # The open transaction retains the drain for the whole budget; the budget
+        # only has to outlast one listener scan before the signal (lsof on macOS).
+        assert not custodian.stop(deadline=time.monotonic() + 2)
+
+        def drain_finishes_during_scan(port: int) -> list[int]:
+            client.commit()
+            deadline = time.monotonic() + 5
+            while custodian.identity.live():
+                assert time.monotonic() < deadline, "private pooler did not finish its drain"
+                time.sleep(0.01)
+            return scan(port)
+
+        monkeypatch.setattr(ownership, "strict_listeners_on", drain_finishes_during_scan)
+        assert custodian.stop(deadline=time.monotonic() + budget, force=force)
+    with psycopg.connect(direct) as conn:
+        assert conn.execute("SELECT value FROM pooler_stop_receipt").fetchone() == (7,)
+    assert not custodian.identity.live()
+
+
 @pytest.mark.parametrize("force_budget", [0.2, -1.0])
 def test_explicit_force_can_finish_a_retained_drain(
     native_pooler: tuple[OwnedPooler, str, str], force_budget: float
