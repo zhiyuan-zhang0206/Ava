@@ -27,8 +27,12 @@ unregistered existing resources, or a terminal destroy intent refuses startup.
 
 `ava start --worktree` creates a gateway and runner with an isolated home and port
 block. Explicit capabilities initialize other layouts. A remote runner uses the
-same entry with `--gateway-url` and a bearer supplied through the environment;
-the gateway projection must identify the runner DB role. First-start configuration
+same entry with `--gateway-url` and `--db-capability` (a sealed bundle minted by
+`ava cluster db-authority issue-unit`, opened with its transport key from
+`AVA_DB_CAPABILITY_KEY`); the bundle's machine API token authenticates the join
+and, once verified, installs the unit's runner DB login and API token — a remote
+runner never holds the human cluster secret (`AVA_CLUSTER_SECRET`; its presence
+in a remote unit's `.env` refuses startup). First-start configuration
 can come from `--config-file`; home, credentials and derived resource identity
 cannot be overridden by generic configuration. Reusing a different configuration
 file for the same recorded initialization refuses.
