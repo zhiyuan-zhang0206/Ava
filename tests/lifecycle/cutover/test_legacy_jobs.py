@@ -167,3 +167,36 @@ def test_a_retired_unit_is_not_disabled_again_on_reentry(make_legacy: Make) -> N
             else f"systemctl --user disable --now {unit.unit}"
         )
         assert legacy.scheduler.calls().count(disable) == 1, disable
+
+
+def test_units_installed_by_hand_are_never_attributed(make_legacy: Make) -> None:
+    """The production gateway also runs units no code registers: the Tempo trace
+    store and its stall pulse (user units) and an egress-shaping template unit.
+    Its PR-flow line carries an older unslugged comment before its slugged
+    marker. The table owns only the names legacy code registered: the PR-flow
+    line is ours through its exact marker, the hand-installed units never are."""
+    legacy = make_legacy(roles=("gateway", "agent-runner"), platform="linux")
+    root, slug, home = legacy.scheduler.root, legacy.slug, legacy.home
+    by_hand = {
+        root / "user-units" / f"com.ava.tempo.{slug}.service",
+        root / "user-units" / "com.ava.tempo-pulse.service",
+        root / "user-units" / "com.ava.tempo-pulse.timer",
+        root / "system-units" / "ava-gateway-egress@.service",
+    }
+    for path in by_hand:
+        path.write_text("[Unit]\n")
+    pr_flow = (
+        f"25 0 * * * AVA_HOME={home} /bin/sh -c '{home}/source/.venv/bin/python "
+        f"{home}/source/scripts/pr_flow_export.py' >> {home}/logs/pr-flow.out.log 2>&1  "
+        f"# # ava-pr-flow  # ava-pr-flow.{slug}"
+    )
+    crontab = legacy.scheduler.state / "crontab"
+    crontab.write_text(crontab.read_text() + pr_flow + "\n")
+
+    found = jobs.discover(home, legacy.scheduler.host())
+
+    assert {unit.unit for unit in found.units}.isdisjoint(path.name for path in by_hand)
+    assert [(line.kind, line.marked) for line in found.cron if line.line == pr_flow] == [
+        ("pr-flow", True)
+    ]
+    assert found.ambiguous == ()

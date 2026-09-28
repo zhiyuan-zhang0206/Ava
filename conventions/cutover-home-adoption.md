@@ -151,6 +151,38 @@ The run ends by passing the adopted home through the same identity preparation
 `$AVA_HOME/cutover-rollback/` (`home-files/`, `residue/`, `os-jobs/` with the
 plists, unit files and `crontab.before`), private to the OS user.
 
+### Units installed by hand
+
+The `jobs` step matches only the names legacy code registered. The production
+gateway also carries units installed by hand, which no code registers, the new
+code included. The adoption leaves them in place:
+
+| Unit | What it is | In the window |
+|---|---|---|
+| `com.ava.tempo.<slug>.service` (user) | The Tempo trace store the collector exports to (`AVA_TELEMETRY_TEMPO_ENDPOINT`, `AVA_TELEMETRY_TEMPO_QUERY_URL`), listening on `127.0.0.1` ports 3200, 14318 and 9095; binary, configuration and data under `$AVA_HOME/lgtm/tempo/` | Stop it after the gateway's old stop (W3), before its closure attestation, and start it again once the held first start (W8) passed, or after a rollback's old start |
+| `com.ava.tempo-pulse.timer` and `.service` (user) | Every 5 minutes `$AVA_HOME/bin/tempo-pulse.sh` probes Tempo, restarts it after three failed probes and reports the restart with `ava agents send` | Stop the timer with Tempo; start it after Tempo |
+| `ava-gateway-egress@.service` (system template, one enabled instance per network interface) | Egress traffic shaping with `tc` from `/etc/ava/gateway-egress.conf`: a oneshot with no process, no home path, no port and no Ava verb | Untouched |
+
+Tempo's process runs from inside the home, and so does a pulse run: while
+either is alive the home census is not empty, the attestation does not prove
+closure and the adoption refuses (`live home process ... must stop first`).
+Nothing else conflicts with the new code: no port of the home's block is
+Tempo's, the native Loki's gRPC port (default 9095) keeps the override the
+gateway's `.env` declares (`AVA_LGTM_LOKI_GRPC_PORT`), the new code touches
+only `lgtm/native/` of the home's `lgtm/`, and it keeps the `ava agents send`
+verb the pulse calls. Stop, do not disable: a reboot inside the window starts
+both again, so stop them again before an attestation or adoption.
+
+```bash
+systemctl --user stop com.ava.tempo-pulse.timer "com.ava.tempo.$SLUG.service"    # W3, after the old stop
+systemctl --user start "com.ava.tempo.$SLUG.service" com.ava.tempo-pulse.timer   # after W8, or R1/R2
+```
+
+The PR-flow crontab line carries an older unslugged `# ava-pr-flow` comment in
+its command, before its marker `# ava-pr-flow.<slug>`. It is one line, owned
+through that exact marker: W1 removes it by marker and the adoption retires it
+whole. No separate unslugged line exists.
+
 ## Journal and recovery
 
 `$AVA_HOME/cutover-rollback/adopt-home.json` (0600) records the inputs, the
