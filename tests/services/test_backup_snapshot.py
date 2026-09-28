@@ -19,10 +19,6 @@ from services.gateway_side.backup import snapshot as _snapshot
 from shared.platform import LockTimeoutError
 
 
-def _snapshot_progress(line: str) -> None:
-    sys.stdout.write(f"→ pre-update data snapshot: {line}\n")
-
-
 def _activation_progress(line: str) -> None:
     sys.stdout.write(f"→ pre-activation data snapshot: {line}\n")
 
@@ -49,87 +45,6 @@ def _patch_decrypt_and_listing(
     monkeypatch.setattr(backup, "decrypt_artifact", _decrypt)
     monkeypatch.setattr(shared.pg_tools, "pg_tool", _pg_restore_path)
     monkeypatch.setattr(_snapshot, "run_bounded", _run_bounded)
-
-
-def test_pre_update_data_snapshot_narrates_the_dump_on_stdout(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    """The dump's heartbeat reaches stdout — what the rollout `tee` turns into the
-    log the stall watchdog reads — so a slow snapshot reads as progress, not silence."""
-    dump = tmp_path / "pre-update.dump"
-
-    def _run_backup(
-        *,
-        timeout_s: float,
-        pre_update: bool,
-        publish: bool,
-        progress: Callable[[str], None] | None = None,
-    ) -> Path:
-        _ = timeout_s, pre_update, publish
-        assert progress is not None
-        progress("pg_dump started (bounded at 20 min)")
-        progress("pg_dump 61s, 512.4 MiB written")
-        return dump
-
-    def _no_verify(_artifact: Path) -> None:
-        pass
-
-    monkeypatch.setattr(backup, "run_backup", _run_backup)
-    monkeypatch.setattr(_snapshot, "verify_snapshot", _no_verify)
-
-    assert _snapshot.create_pre_update_snapshot(progress=_snapshot_progress) == dump
-
-    out = capsys.readouterr().out
-    assert "→ pre-update data snapshot: started (dump bounded at 20 min)" in out
-    assert "→ pre-update data snapshot: pg_dump started (bounded at 20 min)" in out
-    assert "→ pre-update data snapshot: pg_dump 61s, 512.4 MiB written" in out
-    assert f"→ pre-update data snapshot: {dump} (verified)" in out
-
-
-def test_pre_update_data_snapshot_wraps_backup_failure(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A migration-bearing rollout fails before the stop when pg_dump cannot run."""
-
-    def _run_backup(
-        *,
-        timeout_s: float,
-        pre_update: bool,
-        publish: bool,
-        progress: Callable[[str], None] | None = None,
-    ) -> Path:
-        _ = timeout_s, publish, progress
-        assert pre_update is True
-        raise RuntimeError("pg_dump failed")
-
-    monkeypatch.setattr(backup, "run_backup", _run_backup)
-
-    with pytest.raises(RuntimeError, match="could not create pre-update data snapshot"):
-        _snapshot.create_pre_update_snapshot(progress=_snapshot_progress)
-
-
-def test_pre_update_data_snapshot_never_exposes_backup_db_url(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A pg_dump failure cannot leak its credential-bearing argv into rollout logs."""
-    db_url = "postgresql://ava:secret-token@db.example/ava"
-
-    def _run_backup(
-        *,
-        timeout_s: float,
-        pre_update: bool,
-        publish: bool,
-        progress: Callable[[str], None] | None = None,
-    ) -> Path:
-        _ = pre_update, publish, progress
-        raise subprocess.TimeoutExpired(["pg_dump", "--dbname", db_url], timeout_s)
-
-    monkeypatch.setattr(backup, "run_backup", _run_backup)
-
-    with pytest.raises(RuntimeError) as caught:
-        _snapshot.create_pre_update_snapshot(progress=_snapshot_progress)
-
-    assert db_url not in str(caught.value)
 
 
 @pytest.mark.parametrize(
@@ -196,97 +111,14 @@ def test_pre_update_data_snapshot_rejects_empty_dump(
         _snapshot.verify_snapshot(artifact)
 
 
-def test_pre_update_data_snapshot_holds_backup_lock_through_verification(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The scheduled writer cannot sweep or replace a dump before its TOC check finishes."""
-    dump = tmp_path / "pre-update.dump"
-    dump.write_bytes(b"custom-pg-dump")
-    events: list[str] = []
-
-    @contextmanager
-    def _backup_lock(*, timeout_s: float) -> Generator[None]:
-        assert timeout_s == min(_snapshot.LOCK_HEARTBEAT_S, _snapshot.DUMP_TIMEOUT_S)
-        events.append("lock-enter")
-        try:
-            yield
-        finally:
-            events.append("lock-exit")
-
-    def _run_backup(
-        *,
-        timeout_s: float,
-        pre_update: bool,
-        publish: bool,
-        progress: Callable[[str], None] | None = None,
-    ) -> Path:
-        assert callable(progress)
-        assert timeout_s == _snapshot.DUMP_TIMEOUT_S
-        assert pre_update is True
-        assert publish is False
-        events.append("dump")
-        return dump
-
-    def _verify(artifact: Path) -> None:
-        assert artifact == dump
-        events.append("verify")
-
-    monkeypatch.setattr(backup, "backup_lock", _backup_lock, raising=False)
-    monkeypatch.setattr(backup, "run_backup", _run_backup)
-    monkeypatch.setattr(_snapshot, "verify_snapshot", _verify)
-
-    assert _snapshot.create_pre_update_snapshot(progress=_snapshot_progress) == dump
-    assert events == ["lock-enter", "dump", "verify", "lock-exit"]
-
-
-def test_pre_update_data_snapshot_lock_wait_narrates_heartbeats(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    """A contended backup lock narrates one line per heartbeat chunk — the wait
-    is not log silence — and the snapshot proceeds once the lock frees."""
-    dump = tmp_path / "pre-update.dump"
-    dump.write_bytes(b"custom-pg-dump")
-    attempts: list[float] = []
-    held_chunks = 2
-
-    @contextmanager
-    def _backup_lock(*, timeout_s: float) -> Generator[None]:
-        attempts.append(timeout_s)
-        if len(attempts) <= held_chunks:
-            raise LockTimeoutError("another backup holds it")
-        yield
-
-    def _run_backup(
-        *,
-        timeout_s: float,
-        pre_update: bool,
-        publish: bool,
-        progress: Callable[[str], None] | None = None,
-    ) -> Path:
-        _ = timeout_s, pre_update, publish, progress
-        return dump
-
-    def _no_verify(_artifact: Path) -> None:
-        pass
-
-    monkeypatch.setattr(backup, "backup_lock", _backup_lock)
-    monkeypatch.setattr(backup, "run_backup", _run_backup)
-    monkeypatch.setattr(_snapshot, "verify_snapshot", _no_verify)
-
-    assert _snapshot.create_pre_update_snapshot(progress=_snapshot_progress) == dump
-
-    assert attempts == [_snapshot.LOCK_HEARTBEAT_S] * (held_chunks + 1)
-    out = capsys.readouterr().out
-    assert out.count("→ pre-update data snapshot: waiting for the backup lock") == held_chunks
-    assert "another backup is writing)" in out
-
-
-def test_pre_update_data_snapshot_lock_wait_gives_up_at_the_total_budget(
+def test_pre_activation_snapshot_lock_wait_gives_up_at_the_total_budget(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """A lock held for the whole budget still expires — the raise names the
-    total `DUMP_TIMEOUT_S`, not the final `LOCK_HEARTBEAT_S`
-    chunk — and the dump never starts."""
+    total `DUMP_TIMEOUT_S`, not the final `LOCK_HEARTBEAT_S` chunk — and the
+    dump never starts. Exercises `_narrated_backup_lock`'s budget-exhaustion
+    path through the surviving caller (the pre-update variant that used to
+    cover this had no production caller and was removed as dead code)."""
     clock = [0.0]
     attempts: list[float] = []
 
@@ -307,12 +139,18 @@ def test_pre_update_data_snapshot_lock_wait_gives_up_at_the_total_budget(
     monkeypatch.setattr(backup, "run_backup", _unexpected_backup)
 
     with pytest.raises(LockTimeoutError, match=f"within {_snapshot.DUMP_TIMEOUT_S:.0f}s"):
-        _snapshot.create_pre_update_snapshot(progress=_snapshot_progress)
+        _snapshot.create_pre_activation_snapshot(
+            operation_id="11111111-1111-1111-1111-111111111111",
+            db_url="dbname=ava",
+            progress=_activation_progress,
+        )
 
     expected_chunks = int(_snapshot.DUMP_TIMEOUT_S / _snapshot.LOCK_HEARTBEAT_S)
     assert attempts == [_snapshot.LOCK_HEARTBEAT_S] * expected_chunks
     out = capsys.readouterr().out
-    assert out.count("→ pre-update data snapshot: waiting for the backup lock") == expected_chunks
+    assert (
+        out.count("→ pre-activation data snapshot: waiting for the backup lock") == expected_chunks
+    )
 
 
 def test_pre_activation_snapshot_uses_activation_kind(

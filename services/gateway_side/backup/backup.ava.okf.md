@@ -35,12 +35,11 @@ host's: reading a host timezone can make a current dump appear to be future.
 - `services/backup.py` — `run_backup()` dumps, publishes and prunes in-process for snapshot callers; `run_backup(staging=...)` writes the scheduler worker's artifact into its private controls
 - `services/backup_scheduler/worker.py` — the dump and logical restore-drill operation kinds, their sanitizers, and `commit_scheduled_backup()`
 - `services/gateway_side/backup/intermediates.py` — `sweep_closed_partials()`, the closed-intermediate sweep every backup run applies to the backup directory
-- `services/gateway_side/backup/snapshot.py` — `create_pre_update_snapshot()`
-  creates a local recovery dump; `create_pre_activation_snapshot()` creates the
-  operation-scoped PITR logical floor with its existing off-site publication.
-  Both retain the reentrant backup lock through `verify_snapshot()`, which
-  decrypts the artifact, handles legacy gzip and requires a nonempty
-  `pg_restore --list` table of contents. Callers provide progress sinks;
+- `services/gateway_side/backup/snapshot.py` — `create_pre_activation_snapshot()`
+  creates the operation-scoped PITR logical floor with its existing off-site
+  publication, retaining the reentrant backup lock through `verify_snapshot()`,
+  which decrypts the artifact, handles legacy gzip and requires a nonempty
+  `pg_restore --list` table of contents. The caller provides a progress sink;
   lock waits and dump stages remain bounded and visible. Git/schema policy
   stays with the caller, outside this backup-owned module.
 - Physical PITR — WAL archiving, base chains, the gated GCS uploader, and the dry-run retention planner over both this module's `ava-logical/` pool and the PITR prefix — is its own node: [[services/pitr/pitr.ava.okf.md|Physical PITR]]; every layer is default-off, and remote deletion stays impossible until an operator arms the deletion role.

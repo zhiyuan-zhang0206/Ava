@@ -15,11 +15,14 @@ was shorter than the dangerous one**: Phase B polled each agent-runner back for 
 most a POSIX-era 120 s, and a host that outran that was written off while its
 checkout had moved and its processes had not. The orchestration returns, the
 `finally` releases, and the cluster is open in exactly the state a second deploy must
-not start into. Two things close that: `settle_update_lock` keeps the lease held
-across the window, and `shared.deploy_timing` removes the mismatch that opened it —
-one no-progress definition shared by the poll, the settle TTL and the host-local
-stall reaper, plus a lease renewed while the orchestration runs so its TTL is no
-longer a budget the rollout has to fit inside.
+not start into. Two things close that: a **settle hold** (`shared.cluster_lock`'s
+settle fields; its writer went with the old phase-based orchestration and has been
+removed as dead code — the read side, `settle_hosts_converged` below, remains live
+for a future writer) keeps the lease held across the window, and
+`shared.deploy_timing` removes the mismatch that opened it — one no-progress
+definition shared by the poll, the settle TTL and the host-local stall reaper, plus
+a lease renewed while the orchestration runs so its TTL is no longer a budget the
+rollout has to fit inside.
 
 ## The two signals, and why the polarity differs between them
 

@@ -32,10 +32,29 @@ from shared.cluster_lock import (
     release_update_lock,
     renew_update_lock,
     self_holder,
-    settle_update_lock,
+    settle_note,
     update_lock_holder,
 )
 from shared.config import settings
+
+
+def _seed_settle_hold(
+    db_conn: psycopg.Connection, holder: str, hosts: list[str], *, ttl_s: float = SETTLE_TTL_S
+) -> None:
+    """Land a settle hold directly, mirroring the write the retired
+    `settle_update_lock` (no production caller — removed as dead code) used to
+    perform, so tests of the still-live read side (`release_settle_hold`,
+    `DeployLease.is_settle_hold`/`awaits`, `renew_update_lock`'s settle-hold
+    refusal) do not need that production function to exist."""
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "UPDATE deployment_state "
+            "SET expires_at = now() + make_interval(secs => %s), "
+            "    settle_note = %s, settle_hosts = %s, settle_started_at = now(), phase = 'settling' "
+            "WHERE id = 1 AND holder = %s",
+            (ttl_s, settle_note(hosts), sorted(hosts), holder),
+        )
+    db_conn.commit()
 
 
 @pytest.fixture(autouse=True)
@@ -137,21 +156,19 @@ def test_expired_lock_with_pending_publication_requires_publication_recovery(
         assert acquire_update_lock("ordinary-rollout") is False
         assert claim_recovery_lock("ordinary-recovery", observed=None).acquired is False
         release_update_lock("gateway:pid123")
-        assert settle_update_lock("gateway:pid123", hosts=["runner"]) is False
         row = db_conn.execute(
             "SELECT holder, phase, settle_hosts FROM deployment_state WHERE id=1"
         ).fetchone()
         assert row == ("gateway:pid123", "updating", None)
 
-        # Both refusals must name the pending publication — the warning must not
+        # The refusal must name the pending publication — the warning must not
         # assert the reclaim story for this designed refusal (task #2683).
         refusals = [
             r["message"]
             for r in loguru_records
             if "not held by gateway:pid123 at release" in r["message"]
-            or "settle hold by gateway:pid123 did not land" in r["message"]
         ]
-        assert len(refusals) == 2
+        assert len(refusals) == 1
         assert all("durable pending publication refuses the transition" in m for m in refusals)
         assert not any("reclaimed past TTL" in m for m in refusals)
 
@@ -352,12 +369,14 @@ def test_expired_lease_reads_as_free() -> None:
     assert read_update_lease() is None
 
 
-def test_settle_hold_keeps_the_lease_past_the_holders_exit() -> None:
-    """A rollout that ends with a host still converging keeps the cluster held on a
-    shorter TTL instead of releasing — the 2026-07-29 gap a second `ava cluster update` walked
-    into. The reason rides in the structured settle fields, and the lease stays un-acquirable."""
+def test_settle_hold_keeps_the_lease_past_the_holders_exit(db_conn: psycopg.Connection) -> None:
+    """A settle hold (its writer had no remaining caller and was removed as dead
+    code — `_seed_settle_hold` reproduces its write here) keeps the cluster held on
+    a shorter TTL instead of releasing — the 2026-07-29 gap a second `ava cluster
+    update` walked into. The reason rides in the structured settle fields, and the
+    lease stays un-acquirable."""
     assert acquire_update_lock("gateway-host:pid81319", ttl_s=1800.0) is True
-    assert settle_update_lock("gateway-host:pid81319", hosts=["wsl"], ttl_s=900.0) is True
+    _seed_settle_hold(db_conn, "gateway-host:pid81319", ["wsl"], ttl_s=900.0)
 
     lease = read_update_lease()
     assert lease is not None
@@ -375,7 +394,9 @@ def test_settle_hold_keeps_the_lease_past_the_holders_exit() -> None:
     assert acquire_update_lock("gateway-host:pid99999") is False  # still guards the cluster
 
 
-def test_a_settle_hold_is_read_as_awaiting_exactly_the_hosts_it_names() -> None:
+def test_a_settle_hold_is_read_as_awaiting_exactly_the_hosts_it_names(
+    db_conn: psycopg.Connection,
+) -> None:
     """`DeployLease.awaits` is the discrimination a healer needs and the lease alone
     could not give it: an *executing* rollout means stand back, a settle hold naming
     this host means this host's convergence is the remaining work (issue #1020).
@@ -390,7 +411,7 @@ def test_a_settle_hold_is_read_as_awaiting_exactly_the_hosts_it_names() -> None:
     assert executing.settle_hosts is None
     assert executing.awaits("wsl") is False, "a rollout executing right now permits nobody"
 
-    assert settle_update_lock("gateway-host:pid81319", hosts=["wsl", "laptop-host"]) is True
+    _seed_settle_hold(db_conn, "gateway-host:pid81319", ["wsl", "laptop-host"])
     hold = read_update_lease()
     assert hold is not None
     assert hold.awaits("laptop-host") is True
@@ -403,43 +424,10 @@ def test_a_settle_hold_is_read_as_awaiting_exactly_the_hosts_it_names() -> None:
     assert empty.awaits("laptop-host") is False
 
 
-def test_settle_hold_leaves_the_holder_string_parseable() -> None:
-    """The reason must NOT be folded into `holder`: `ops.ops_cluster` parses that
-    column as `<machine>:pid<N>` to decide whether the holder process is still alive,
-    and a decorated holder would fail the parse and be treated as live — making
-    `ava cluster recover` refuse to break a hold whose owner is definitively gone.
-    """
-    from ops.ops_cluster import _lock_holder_is_live
-
-    assert acquire_update_lock("othermachine:pid4242") is True
-    settle_update_lock("othermachine:pid4242", hosts=["wsl"])
-    lease = read_update_lease()
-    assert lease is not None
-    # Still parseable as machine:pidN — a foreign machine is conservatively "live",
-    # which is the answer only a successful parse can produce.
-    assert _lock_holder_is_live(lease.holder) is True
-
-
-def test_settle_hold_by_a_non_holder_is_refused(
-    loguru_records: list[dict[str, Any]],
-) -> None:
-    """Holder-scoped like release: a straggler must not shorten a lease that has
-    already been reclaimed by a new owner to a settle window; the WARNING names
-    the reclaim, never the pending-publication refusal (task #2683)."""
-    assert acquire_update_lock("A") is True
-    assert settle_update_lock("B", hosts=["wsl"]) is False
-    lease = read_update_lease()
-    assert lease is not None and lease.settle_hosts is None
-    assert any(
-        "settle hold by B did not land" in r["message"] and "reclaimed past TTL" in r["message"]
-        for r in loguru_records
-    )
-
-
-def test_acquire_clears_a_previous_settle_fact() -> None:
+def test_acquire_clears_a_previous_settle_fact(db_conn: psycopg.Connection) -> None:
     """A fresh deploy must not inherit the last one's settle fact."""
     assert acquire_update_lock("A", ttl_s=-1.0) is True
-    settle_update_lock("A", hosts=["wsl"], ttl_s=-1.0)  # expired settle hold
+    _seed_settle_hold(db_conn, "A", ["wsl"], ttl_s=-1.0)  # expired settle hold
     assert acquire_update_lock("B") is True  # reclaims the lapsed lease
     lease = read_update_lease()
     assert (
@@ -450,9 +438,9 @@ def test_acquire_clears_a_previous_settle_fact() -> None:
     )
 
 
-def test_release_clears_the_settle_fact() -> None:
+def test_release_clears_the_settle_fact(db_conn: psycopg.Connection) -> None:
     assert acquire_update_lock("A") is True
-    settle_update_lock("A", hosts=["wsl"])
+    _seed_settle_hold(db_conn, "A", ["wsl"])
     release_update_lock("A")
     assert read_update_lease() is None
     assert acquire_update_lock("B") is True
@@ -492,12 +480,12 @@ def test_renewal_by_a_non_holder_is_refused() -> None:
     assert update_lock_holder() == "A"
 
 
-def test_renewal_never_re_arms_a_settle_hold() -> None:
+def test_renewal_never_re_arms_a_settle_hold(db_conn: psycopg.Connection) -> None:
     """`settle_hosts IS NOT NULL` is the stronger guard. A settle hold's whole value is that it
     ENDS — on convergence or on SETTLE_TTL_S — so a stray renewal from a straggler
     would convert a stated waiting period into an unbounded hold on the cluster."""
     assert acquire_update_lock("A") is True
-    assert settle_update_lock("A", hosts=["win"]) is True
+    _seed_settle_hold(db_conn, "A", ["win"])
     assert renew_update_lock("A", ttl_s=99999.0) is False
     lease = read_update_lease()
     assert lease is not None and lease.settle_hosts is not None
@@ -580,24 +568,6 @@ def test_acquire_without_kind_leaves_kind_null() -> None:
         assert kind is None
 
 
-def test_settle_enters_settling_with_structured_hosts() -> None:
-    """A settle hold lands phase='settling' with the waiting hosts in the structured
-    `settle_hosts` array and a human-readable `settle_note` sentence — one fact, two
-    renderings."""
-    assert acquire_update_lock("A") is True
-    assert settle_update_lock("A", hosts=["wsl", "mac"]) is True
-    with psycopg.connect(settings.data_plane.db_url, autocommit=True) as conn, conn.cursor() as cur:
-        cur.execute(
-            "SELECT phase, settle_hosts, settle_note, settle_started_at "
-            "FROM deployment_state WHERE id=1"
-        )
-        phase, hosts, settle_note, settle_started_at = cur.fetchone()  # type: ignore[misc]
-        assert phase == "settling"
-        assert hosts == ["mac", "wsl"]  # sorted by settle_note()
-        assert settle_note == "settling, waiting for: mac, wsl"
-        assert settle_started_at is not None  # the telemetry anchor (C3, task #2189)
-
-
 def test_release_returns_to_stable_and_clears_kind() -> None:
     assert acquire_update_lock("A", kind="restart") is True
     release_update_lock("A")
@@ -609,9 +579,9 @@ def test_release_returns_to_stable_and_clears_kind() -> None:
         assert holder is None
 
 
-def test_release_settle_hold_returns_to_stable() -> None:
+def test_release_settle_hold_returns_to_stable(db_conn: psycopg.Connection) -> None:
     assert acquire_update_lock("A") is True
-    assert settle_update_lock("A", hosts=["wsl"]) is True
+    _seed_settle_hold(db_conn, "A", ["wsl"])
     assert release_settle_hold("A") is True
     with psycopg.connect(settings.data_plane.db_url, autocommit=True) as conn, conn.cursor() as cur:
         cur.execute(
@@ -640,23 +610,23 @@ def test_release_settle_hold_refuses_a_plain_executing_lease() -> None:
     assert update_lock_holder() == "A"
 
 
-def test_read_lease_carries_kind() -> None:
+def test_read_lease_carries_kind(db_conn: psycopg.Connection) -> None:
     """DeployLease exposes kind so consumers can say WHAT is running, not just that
     something is."""
     assert acquire_update_lock("A", kind="rollout") is True
     lease = read_update_lease()
     assert lease is not None and lease.kind == "rollout"
-    settle_update_lock("A", hosts=["wsl"])
+    _seed_settle_hold(db_conn, "A", ["wsl"])
     lease2 = read_update_lease()
     assert lease2 is not None and lease2.kind == "rollout"  # kind survives a settle
 
 
-def test_release_and_settle_land_when_the_pooler_is_down(
+def test_release_lands_when_the_pooler_is_down(
     db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The rollout tail must not depend on the pooler a data-plane stop has just
     taken down (issue #2307): with the pooled URL dead — the half-shut-pooler
-    shape — release and settle still land through the direct dial."""
+    shape — release still lands through the direct dial."""
     import shared.db_connections
     from tests._containers import _free_port
 
@@ -674,13 +644,3 @@ def test_release_and_settle_land_when_the_pooler_is_down(
     release_update_lock("A")
     row = db_conn.execute("SELECT holder FROM deployment_state WHERE id=1").fetchone()
     assert row == (None,)
-
-    # A fresh lease for the settle leg, seeded directly (the pooler is down).
-    db_conn.execute(
-        "UPDATE deployment_state SET phase='updating', holder='B', "
-        "acquired_at=now(), expires_at=now()+interval '5 minutes' WHERE id=1"
-    )
-    db_conn.commit()
-    assert settle_update_lock("B", hosts=["runner-a"]) is True
-    row = db_conn.execute("SELECT phase, settle_hosts FROM deployment_state WHERE id=1").fetchone()
-    assert row == ("settling", ["runner-a"])

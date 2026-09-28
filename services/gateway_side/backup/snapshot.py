@@ -149,49 +149,6 @@ def _narrated_backup_lock(
         yield
 
 
-def create_pre_update_snapshot(*, progress: Callable[[str], None]) -> Path:
-    """Create and verify a local logical dump before a migration-bearing update."""
-    from services.backup import run_backup
-
-    progress(f"started (dump bounded at {DUMP_TIMEOUT_S / 60:.0f} min)")
-
-    # Hold the same lock as the daily writer through the restore listing. A
-    # verified dump must remain untouched until this function hands its path to
-    # recovery; otherwise a scheduled writer can sweep its partial or replace
-    # the same-second target between creation and verification. A contended
-    # take is retried in narrated chunks — not one silent 20-minute wait.
-    with _narrated_backup_lock(
-        timeout_s=DUMP_TIMEOUT_S,
-        heartbeat_s=LOCK_HEARTBEAT_S,
-        progress=progress,
-    ):
-        try:
-            dump_path = run_backup(
-                timeout_s=DUMP_TIMEOUT_S,
-                pre_update=True,
-                publish=False,
-                progress=progress,
-            )
-        except subprocess.TimeoutExpired:
-            raise RuntimeError(
-                "could not create pre-update data snapshot: pg_dump timed out after "
-                f"{DUMP_TIMEOUT_S:.0f}s"
-            ) from None
-        except Exception as exc:
-            # pg_dump's argv includes the direct DB URL. Do not stringify or
-            # chain its failure into a rollout log.
-            raise RuntimeError(
-                f"could not create pre-update data snapshot: pg_dump failed ({type(exc).__name__})"
-            ) from None
-
-        verify_snapshot(dump_path)
-        # The verified path goes to the rollout output: without it, a snapshot
-        # is invisible in the log (run_backup writes to its own daemon stream)
-        # and an operator can mistake it for an unscheduled backup.
-        progress(f"{dump_path} (verified)")
-        return dump_path
-
-
 def create_pre_activation_snapshot(
     *, operation_id: str, db_url: str, progress: Callable[[str], None]
 ) -> Path:

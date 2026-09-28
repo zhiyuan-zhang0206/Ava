@@ -111,18 +111,4 @@ def test_release_settle_hold_never_touches_an_executing_lease() -> None:
     assert "holder = %s" in sql
 
 
-def test_settle_hold_leaves_the_holder_string_parseable() -> None:
-    """`ops.ops_cluster._lock_holder_is_live` parses the holder as `<machine>:pid<N>`.
-    A holder decorated with the reason would fail that parse, read as live, and make
-    `ava cluster recover` refuse to break a hold whose owner is provably dead — which
-    is why the reason lives in `settle_note`."""
-    import inspect
-
-    from shared import cluster_lock
-
-    src = inspect.getsource(cluster_lock.settle_update_lock)
-    assert "SET expires_at" in src
-    assert "holder = %s" in src and "SET holder" not in src
-
-
 # ─── the poll renews the lease it is running under ───────────────────────────

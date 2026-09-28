@@ -46,9 +46,12 @@ a host whose checkout + `uv sync` + restart outruns that is left mid-transition 
 the orchestration exits — while that host is still swapping its processes. Releasing
 there is what let a second `ava cluster update` start into a half-transitioned cluster on
 2026-07-29, force-terminating two agents that had done nothing wrong. So an
-orchestration that ends with hosts still converging calls `settle_update_lock`
-instead of releasing: the lease stays held, on its own TTL, with the settle fields
-recording who it is waiting for. See `SETTLE_TTL_S`.
+orchestration that ends with hosts still converging holds the lease instead of
+releasing it — a **settle hold**: the lease stays held, on its own TTL, with the
+settle fields recording who it is waiting for. See `SETTLE_TTL_S`. (The old
+phase-based orchestration this was written for is retired; no current caller
+takes a settle hold. The read side — `DeployLease.is_settle_hold`/`awaits`,
+`release_settle_hold` — stays live for a future writer.)
 
 **A settle hold is not the same instruction to a healer as a running rollout, and the
 settle fields are what tell them apart.** "A deploy is mutating the cluster" means stand
@@ -126,15 +129,15 @@ class DeployLease:
     # Optional keeps legacy/test-constructed snapshots readable; a real DB read
     # always supplies it.
     acquired_at: datetime | None = None
-    # When the settle hold started (server-side now() at settle_update_lock), and
-    # how long it has already been held, computed server-side like `held_for_s` so
-    # cross-host clock skew never distorts the number (C3, task #2189). Both None
-    # on a lease carrying no settle fact.
+    # When the settle hold started (server-side now() when the hold was taken),
+    # and how long it has already been held, computed server-side like
+    # `held_for_s` so cross-host clock skew never distorts the number (C3, task
+    # #2189). Both None on a lease carrying no settle fact.
     settle_started_at: datetime | None = None
     settle_elapsed_s: float | None = None
     # The settle hold's structured waiting set — the machine-readable record of
     # WHICH hosts the hold waits for. None on a lease carrying no settle fact (an
-    # executing orchestration); `settle_update_lock` writes it together with
+    # executing orchestration); a settle-hold write sets it together with
     # `settle_note` and `settle_started_at` in one statement.
     settle_hosts: list[str] | None = None
     # The hold's one human-readable sentence ("settling, waiting for: h1, h2"),
@@ -144,7 +147,7 @@ class DeployLease:
     @property
     def is_settle_hold(self) -> bool:
         """True when this lease is a **settle hold** — the structured settle fact
-        (`settle_hosts`) is present, exactly as `settle_update_lock` writes it."""
+        (`settle_hosts`) is present."""
         return self.settle_hosts is not None
 
     def awaits(self, machine: str) -> bool:
@@ -604,65 +607,6 @@ def claim_recovery_lock(
             holder=recovery_holder,
         )
     return RecoveryClaim(acquired=acquired, previous_holder=previous_holder)
-
-
-def settle_update_lock(holder: str, *, hosts: list[str], ttl_s: float = SETTLE_TTL_S) -> bool:
-    """Keep the lease held after `holder` has stopped executing, for a bounded settle
-    window, because the cluster is still converging. Returns True if the hold landed.
-
-    Called instead of `release_update_lock` when a rollout's Phase B poll gave up on
-    a host that had *acked* its self-update — that host's checkout has moved and its
-    processes have not, which is the exact state a second deploy must not start into
-    (the 2026-07-29 incident). A host that never acked is not covered and must not be:
-    it never began transitioning, so a permanently-offline agent-runner cannot hold
-    the cluster hostage on every rollout.
-
-    Holder-scoped like `release_update_lock`, and for the same reason: if the lease
-    was already reclaimed past its TTL, the new owner's hold must not be shortened to
-    a settle window by a straggler. Durable pending publication also refuses this
-    generic transition because changing the phase would invalidate its exact
-    operation while retaining its evidence.
-
-    `holder` is left **exactly** as it was, never decorated with the reason — the
-    dead-holder probe in `ops.ops_cluster._lock_holder_is_live` parses it as
-    `<machine>:pid<N>`, and a decorated holder would fail that parse and be read as
-    live, which would make `ava cluster recover` refuse to break a hold whose owner
-    is definitively gone. The reason goes in `settle_note`, which is what `describe()`
-    renders.
-    """
-    sentence = settle_note(hosts)
-    sorted_hosts = sorted(hosts)  # one order in the sentence and the array
-    # direct=True: same post-stop durability as `release_update_lock` — the
-    # settle conversion also runs in the rollout tail (issue #2307).
-    with write_transaction(direct=True) as conn, conn.cursor() as cur:
-        # The settle fact lands as structured columns only — the `settle_hosts`
-        # array (the truth every reader branches on), `settle_note` (the
-        # human-readable sentence), and `settle_started_at` (the C3 telemetry
-        # anchor).
-        cur.execute(
-            "UPDATE deployment_state "
-            "SET expires_at = now() + make_interval(secs => %s), "
-            "    settle_note = %s, settle_hosts = %s, settle_started_at = now(), phase = 'settling' "
-            "WHERE id = 1 AND holder = %s "
-            "AND COALESCE(managed_writer_evidence->'pending','null'::jsonb) = 'null'::jsonb",
-            (ttl_s, sentence, sorted_hosts, holder),
-        )
-        held = cur.rowcount == 1
-        if held:
-            logger.warning(
-                "[cluster-lock] HELD past {holder}'s exit for a {ttl:.0f}s settle window: {settle_note}",
-                holder=holder,
-                ttl=ttl_s,
-                settle_note=sentence,
-            )
-        else:
-            logger.warning(
-                "settle hold by {holder} did not land — {reason}. The cluster is "
-                "unguarded while it settles.",
-                holder=holder,
-                reason=_transition_refusal_reason(cur, holder),
-            )
-        return held
 
 
 def release_settle_hold(holder: str) -> bool:
