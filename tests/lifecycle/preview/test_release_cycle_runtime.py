@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Generator
+from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, NoReturn
@@ -17,6 +19,7 @@ from cli.release_transition.native import LINUX
 from cli.release_transition.request import ReleaseRef
 from scripts.preview import release_cycle_runtime as runtime
 from scripts.preview import release_cycle_state as state
+from scripts.preview import release_generation
 from shared.native_process.ownership import OwnedProcess
 from shared.os_boot_unit import BootStartAction, BootUnitContext
 from shared.runtime_release import VerifiedRelease
@@ -250,15 +253,23 @@ class _TerminatedAgent:
         "m.closed_at": None,
     }
 
+    def __init__(self) -> None:
+        self.read_only = False
+        self.isolation_level: object = None
+        self.statements: list[object] = []
+
     def __enter__(self) -> _TerminatedAgent:
         return self
 
     def __exit__(self, *_exc: object) -> None:
         return None
 
-    def execute(self, query: object, _params: tuple[object, ...]) -> Any:
+    def execute(self, query: object, _params: tuple[object, ...] = ()) -> Any:
+        self.statements.append(query)
         if not isinstance(query, str):  # a checkpoint table's rows
             return iter([('{"checkpoint": 1}',)])
+        if query.startswith("SET LOCAL "):
+            return None
         selected = query.removeprefix("SELECT ").split(" FROM ")[0].split(", ")
         row = tuple(self.columns[column] for column in selected)
         return SimpleNamespace(fetchone=lambda: row)
@@ -267,12 +278,65 @@ class _TerminatedAgent:
 def test_a_terminated_agent_is_durably_closed_without_a_closed_at_stamp(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    def connection(_run: Path) -> _TerminatedAgent:
+    def connection(_context: object) -> _TerminatedAgent:
         return _TerminatedAgent()
 
-    monkeypatch.setattr(state, "_connection", connection)
+    monkeypatch.setattr(release_generation.Context, "read_only", connection)
     observed = state.state(tmp_path, 5)
     assert observed["agent"] == 5 and observed["rows"]["checkpoints"] == 1
+
+
+def test_retained_state_is_read_as_the_administrator_never_the_source_login(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Once an image is selected the source checkout is no admitted runtime and
+    holds only the credential-free pooler endpoint: dialing it fails with
+    `fe_sendauth: no password supplied` (release proof r3, `state --label a`).
+    Retained state is read by the OS-user administrator over this home's
+    owner-only socket, bound to its postmaster, in one read-only snapshot."""
+    import psycopg
+    from psycopg.conninfo import conninfo_to_dict
+
+    from shared import pg_admin
+    from shared.config import settings
+
+    run = tmp_path.resolve()
+    (run / "home").mkdir()
+    (run / "home/.env").write_text("AVA_DB_URL=postgresql://127.0.0.1:6432/ava_preview\n")
+    (run / "config.json").write_text(json.dumps({"ports": {"postgres": 5433, "pgbouncer": 6432}}))
+    monkeypatch.setattr(settings.data_plane, "db_url", "postgresql://127.0.0.1:6432/ava_preview")
+
+    def unauthenticated(*_args: object, **_kwargs: object) -> NoReturn:
+        raise psycopg.OperationalError("fe_sendauth: no password supplied")
+
+    monkeypatch.setattr(psycopg, "connect", unauthenticated)
+    connection = _TerminatedAgent()
+    dials: list[tuple[dict[str, Any], Path | None]] = []
+
+    @contextmanager
+    def administrator(
+        url: str, *, expected_data_dir: Path | None = None, **_kwargs: object
+    ) -> Generator[_TerminatedAgent]:
+        dials.append((conninfo_to_dict(url), expected_data_dir))
+        yield connection
+
+    socket = run / "socket"
+
+    def socket_url(port: int) -> str:
+        return f"postgresql://os-user@/postgres?host={socket}&port={port}"
+
+    monkeypatch.setattr(pg_admin, "connect", administrator)
+    monkeypatch.setattr(pg_admin, "pg_admin_url", socket_url)
+    assert state.state(run, 5)["rows"]["checkpoints"] == 1
+    assert dials == [
+        (
+            {"user": "os-user", "host": str(socket), "port": "5433", "dbname": "ava_preview"},
+            run / "home/pg",
+        )
+    ]
+    assert connection.read_only
+    assert connection.isolation_level == psycopg.IsolationLevel.REPEATABLE_READ
+    assert connection.statements[0] == "SET LOCAL statement_timeout = '5s'"
 
 
 def _captured_request(request: FleetRequest, label: str = "ab") -> Path:
@@ -526,6 +590,104 @@ def test_dispatch_builds_its_request_with_the_public_verb_in_the_admitted_image(
     recorded = json.loads((run / "release-inputs.json").read_text())["requests"]["ab"]
     assert recorded["operation"] == str(request_record.path)
     runtime.wait_executor(run, "ba", cleanup=True)  # never requested: nothing to settle
+
+
+@pytest.mark.parametrize("selected", [None, "a", "b", "foreign"])
+def test_cleanup_cli_runs_as_the_homes_admitted_runtime(
+    request_record: FleetRequest, monkeypatch: pytest.MonkeyPatch, selected: str | None
+) -> None:
+    """The home's selection decides admission (`require_admitted_runtime`): the
+    source checkout before any image, else exactly the selected captured image,
+    verified again. A selection outside the captured pair is refused unrun."""
+    import subprocess
+
+    run = Path(request_record.home).parent
+    _cycle_inputs(run, request_record)
+    references = {"a": request_record.previous, "b": request_record.candidate}
+    images = {
+        name: VerifiedRelease(
+            reference.artifact_digest,
+            reference.manifest_digest,
+            run / name,
+            run / name / "venv/bin/python",
+            run / name / "site",
+        )
+        for name, reference in references.items()
+    }
+    verified: list[str] = []
+
+    def image_input(_run: Path, name: str) -> tuple[ReleaseRef, VerifiedRelease]:
+        verified.append(name)
+        return references[name], images[name]
+
+    monkeypatch.setattr(runtime, "image_input", image_input)
+    pointer = run / "home/releases/current-release"
+    if selected is None:
+        pointer.unlink()
+    else:
+        artifact, manifest = (
+            ("0" * 64, "b" * 64)
+            if selected == "foreign"
+            else (references[selected].artifact_digest, references[selected].manifest_digest)
+        )
+        pointer.write_text(json.dumps({"artifact_digest": artifact, "manifest_digest": manifest}))
+    calls: list[tuple[tuple[str, ...], Path]] = []
+
+    def command(argv: tuple[str, ...], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        calls.append((tuple(argv), kwargs["cwd"]))
+        assert kwargs["check"]
+        assert kwargs["env"]["AVA_HOME"] == str(run / "home")
+        assert kwargs["env"]["AVA_CLUSTER_REGISTRY"] == str(run / "clusters.json")
+        assert not {"PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV"}.intersection(kwargs["env"])
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    monkeypatch.setattr(runtime.subprocess, "run", command)
+    if selected == "foreign":
+        with pytest.raises(RuntimeError, match="captured"):
+            runtime.admitted_cli(run, "stop", "-y", "--stop-browser")
+        assert not calls
+        return
+    runtime.admitted_cli(run, "stop", "-y", "--stop-browser")
+    if selected is None:
+        source = run / "source"
+        expected = (
+            str(source / ".venv/bin/python"),
+            "-m",
+            "cli.main",
+            "stop",
+            "-y",
+            "--stop-browser",
+        )
+        assert calls == [(expected, source)] and not verified
+    else:
+        image = images[selected]
+        argv = image.module_argv("cli.main", "stop", "-y", "--stop-browser")
+        assert calls == [(argv, image.cwd)] and verified == [selected]
+
+
+@pytest.mark.parametrize(
+    ("action", "arguments"),
+    [("stop", ("stop", "-y", "--stop-browser")), ("destroy", ("cluster", "destroy", "--path"))],
+)
+def test_cleanup_actions_are_the_ordinary_stop_and_destroy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, action: str, arguments: tuple[str, ...]
+) -> None:
+    run = tmp_path.resolve()
+    calls: list[tuple[Path, tuple[str, ...]]] = []
+
+    def admitted(target: Path, *argv: str) -> None:
+        calls.append((target, argv))
+
+    def own_preview(_run: Path) -> None:
+        pass
+
+    monkeypatch.setattr(runtime.sys, "platform", "linux")
+    monkeypatch.setattr(runtime.sys, "argv", ["release_cycle_runtime", str(run), action])
+    monkeypatch.setattr(runtime, "_require_context", own_preview)
+    monkeypatch.setattr(runtime, "admitted_cli", admitted)
+    runtime.main()
+    home = (str(run / "home"),) if action == "destroy" else ()
+    assert calls == [(run, (*arguments, *home))]
 
 
 @pytest.mark.parametrize("change", ["commit", "schema"])

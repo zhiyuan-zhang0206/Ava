@@ -177,6 +177,41 @@ def initial(run: Path) -> None:
     )
 
 
+def admitted_cli(run: Path, *arguments: str) -> None:
+    """The public CLI as this home's admitted runtime (`require_admitted_runtime`).
+
+    Before any selection that is the source checkout. Once an image is selected
+    only that image receives the home's database authority, and the source
+    checkout's CLI is refused at its first dial; the selection must name one of
+    the two captured images, verified again here, never an unknown one.
+    """
+    selected = current_pointer(run / "home/releases")
+    if selected is None:
+        source = run / "source"
+        argv: tuple[str, ...] = (str(source / ".venv/bin/python"), "-m", "cli.main", *arguments)
+        cwd = source
+    else:
+        images = json.loads(regular_bytes(run / "release-inputs.json"))["images"]
+        names = [
+            name
+            for name, row in images.items()
+            if (row["reference"]["artifact_digest"], row["reference"]["manifest_digest"])
+            == selected
+        ]
+        if len(names) != 1:
+            raise RuntimeError(f"the home selects no captured cycle image: {selected[0]}")
+        _, image = image_input(run, names[0])
+        argv, cwd = image.module_argv("cli.main", *arguments), image.cwd
+    subprocess.run(  # noqa: S603 — fixed argv, admitted verified interpreter, no shell
+        argv,
+        cwd=cwd,
+        env=local.clean_env()
+        | {"AVA_HOME": str(run / "home"), "AVA_CLUSTER_REGISTRY": str(run / "clusters.json")},
+        timeout=900,
+        check=True,
+    )
+
+
 def _requested(run: Path, label: str) -> bool:
     inputs = json.loads(regular_bytes(run / "release-inputs.json"))
     return label in inputs["requests"]
@@ -379,6 +414,8 @@ def main() -> None:
             "wait",
             "retired",
             "settle",
+            "stop",
+            "destroy",
             "freeze",
             "state",
             "capture",
@@ -427,6 +464,12 @@ def main() -> None:
         if (run / "release-inputs.json").exists():
             for label in ("ab", "ba"):
                 wait_executor(run, label, cleanup=True)
+    elif args.action in {"stop", "destroy"}:
+        cleanup = {
+            "stop": ("stop", "-y", "--stop-browser"),
+            "destroy": ("cluster", "destroy", "--path", str(run / "home")),
+        }
+        admitted_cli(run, *cleanup[args.action])
     elif args.action in {"freeze", "state", "capture", "closed"}:
         from scripts.preview.release_cycle_custody import capture, closed
         from scripts.preview.release_cycle_state import freeze, verify

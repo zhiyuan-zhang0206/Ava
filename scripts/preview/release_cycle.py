@@ -304,8 +304,10 @@ class ReleaseCycle:
         # A stale-writer probe left by a failed transition is a writer too.
         self.generation("stop", "all")
         try:
-            self.cli("release-stop", ["stop", "-y", "--stop-browser"])
-            self.cli("release-destroy", ["cluster", "destroy", "--path", str(self.preview.home)])
+            # The home's admitted runtime: once an image is selected, the source
+            # checkout's CLI holds no database authority and is refused at drain.
+            self.adapter("stop")
+            self.adapter("destroy")
             self.command(
                 "release-verify-stopped",
                 [

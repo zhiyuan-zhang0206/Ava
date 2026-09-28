@@ -530,11 +530,46 @@ def test_preview_observer_reads_stored_agents_as_the_administrator_across_rotati
     from scripts.preview import linux_observer
 
     run = born.home.parent
-    ports = {"postgres": born.pg_port, "pgbouncer": born.pooler_port}
+    (run / "config.json").write_text(
+        json.dumps({"ports": {"postgres": born.pg_port, "pgbouncer": born.pooler_port}})
+    )
     with psycopg.connect(born.dsn("gateway"), prepare_threshold=None, autocommit=True) as conn:
         conn.execute("INSERT INTO agents (id) VALUES (950001)")
     (run / "smoke-release-a.json").write_text(json.dumps({"agent": 950001}))
-    assert linux_observer._stored_agents(run, ports) == [950001]
+    assert linux_observer._stored_agents(run) == [950001]
     _fence(release)
     _authorize(release, _CANDIDATE)
-    assert linux_observer._stored_agents(run, ports) == [950001]
+    assert linux_observer._stored_agents(run) == [950001]
+
+
+def test_preview_state_reads_retained_work_as_the_administrator_across_rotations(
+    born: Born, release: FleetRequest, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The preview's completed-work comparison (scripts/preview/release_cycle_state.py)
+    runs from the source checkout, which holds only the credential-free endpoint
+    once a release image is selected. It reads the retained agent over the
+    owner-only socket, identically before and after a rotation, and cannot write."""
+    from scripts.preview import release_cycle_state, release_generation
+
+    run = born.home.parent
+    (run / "config.json").write_text(
+        json.dumps({"ports": {"postgres": born.pg_port, "pgbouncer": born.pooler_port}})
+    )
+    with psycopg.connect(born.dsn("gateway"), prepare_threshold=None, autocommit=True) as conn:
+        conn.execute("INSERT INTO agents (id) VALUES (950002)")
+        conn.execute("INSERT INTO agents_meta (id, status) VALUES (950002, 'terminated')")
+        conn.execute(
+            "INSERT INTO checkpoints (thread_id, checkpoint_id, checkpoint)"
+            " VALUES ('950002', 'retained', '{}')"
+        )
+    monkeypatch.setattr(settings.data_plane, "db_url", born.endpoint())
+    before = release_cycle_state.state(run, 950002)
+    assert before["rows"] == {"checkpoints": 1, "checkpoint_blobs": 0, "checkpoint_writes": 0}
+    _fence(release)
+    _authorize(release, _CANDIDATE)
+    assert release_cycle_state.state(run, 950002) == before
+    with (
+        release_generation.Context(run).read_only() as conn,
+        pytest.raises(psycopg.errors.ReadOnlySqlTransaction),
+    ):
+        conn.execute("DELETE FROM checkpoints WHERE thread_id = '950002'")

@@ -9,29 +9,20 @@ from pathlib import Path
 from typing import Any
 
 import httpx
-import psycopg
 from psycopg import sql
 
-from scripts.preview import local
+from scripts.preview import local, release_generation
 from scripts.preview.linux_observer import _require_private_endpoint
 from scripts.preview.runtime import require_success
 
 
-def _connection(run: Path) -> psycopg.Connection[Any]:
-    from shared.config import settings
-
-    config = json.loads((run / "config.json").read_text())
-    _require_private_endpoint(settings.data_plane.db_url, config["ports"]["pgbouncer"])
-    connection = psycopg.connect(settings.data_plane.db_url, connect_timeout=5)
-    connection.read_only = True
-    connection.isolation_level = psycopg.IsolationLevel.REPEATABLE_READ
-    connection.execute("SET LOCAL statement_timeout = '5s'")
-    return connection
-
-
 def state(run: Path, agent: int) -> dict[str, Any]:
-    """Hash closed identity/configuration and all retained checkpoint rows."""
-    with _connection(run) as connection:
+    """Hash closed identity/configuration and all retained checkpoint rows.
+
+    One read-only snapshot as this home's database administrator: after image
+    selection the source checkout running this holds no write-generation login.
+    """
+    with release_generation.Context(run).read_only() as connection:
         row = connection.execute(
             "SELECT a.id, a.created_at, m.machine, m.born_spawner, m.birth_config, "
             "m.config_overlay, m.status FROM agents a "

@@ -256,9 +256,10 @@ current generation's logins (0600, deleted afterwards) and starts a stale writer
 outside root custody that holds an open transaction over direct TCP, then keeps
 reconnecting. After it, `fence-LABEL.json` must show the writer's transaction
 aborted, no later commit, and every captured login refused over TCP, the
-owner-only socket and the pooler. The observer reads stored agents as the
-OS-user administrator: the source checkout is no admitted runtime once an image
-is selected.
+owner-only socket and the pooler. The source checkout is no admitted runtime
+once an image is selected and holds no write-generation login, so the observer's
+stored agents and the completed-work state comparison read one read-only snapshot
+as the OS-user administrator over the owner-only socket.
 
 `release-cycle-proof.json` records phase timings and receipt paths;
 `release-inputs.json` records captured image identities and request hashes.
@@ -269,4 +270,6 @@ native, journal, workload and independent observer evidence. Every command has
 its own timed run log. A failure remains failed even if ordinary cleanup passes.
 Cleanup refuses destruction while an attempted executor has live or unknown
 custody, never retries a transition, and uses normal stop/destroy plus independent
-absence checks. Existing cycle evidence is never overwritten by another run.
+absence checks. Stop and destroy run as the home's admitted runtime: the source
+checkout before any selection, else the selected image, which must be one of the
+two captured images. Existing cycle evidence is never overwritten by another run.
