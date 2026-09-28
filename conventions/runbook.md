@@ -383,7 +383,12 @@ refused by `ava start` before any native effect until it is converted once: stop
 application (`ava stop --keep-infra`), then run
 `.venv/bin/python scripts/cutover_db_authority.py --home <home>` (dry-run) and again with
 `--execute` from the checkout that owns the home, then `ava start`
-([details](data-plane-secret-split.md#convert-an-existing-home)). Settings never rewrites a
+([details](data-plane-secret-split.md#convert-an-existing-home)). A home in the fleet
+cutover is the exception: while its cutover hold stands, an ordinary start never releases
+that hold (it refuses before the held first start and keeps the hold after it), so start it
+with `scripts/cutover_adopt_home.py --home <home> --start` (the held first start) after the
+[database records repair](cutover-db-records.md), never bare `ava start`
+([cutover home adoption](cutover-home-adoption.md)). Settings never rewrites a
 database credential. On the same load, a data-plane URL whose host is this machine's own
 reachable address (`AVA_MACHINE_HOST`) dials `127.0.0.1` instead
 (`shared/config/data_plane.py`): self-dial never leaves the box. The `.env` value,
@@ -1369,8 +1374,14 @@ classification. A disabled agent-host or native maintenance hold cannot hide a l
 global population: the probe still exits 1 and grades that outage. A live cluster
 deploy can pause explained alert grading while retaining the episode's true start;
 so can this home's in-flight release or PITR operation (`$AVA_HOME/updates/active`),
-which the probe names in its output even while the data plane is down. A failed
-operation, like missing or unreadable ownership, explains nothing; disk pressure
+which the probe names in its output even while the data plane is down, but only while
+its executor's heartbeat (`updates/<id>/executor-heartbeat`, stamped every lease-renewal
+round) is fresh and it has journaled no abort, recovery or rollback decision. Once the
+heartbeat (or, before the first one, the operation's creation) is older than
+`EXECUTOR_HEARTBEAT_TTL_S` (300 s), the operation explains nothing and the probe fails on
+its own with `operation executor lost`, graded from the executor's last sign of life:
+nothing will finish that operation, and startup stays refused while it holds the home. A
+failed operation, like missing or unreadable ownership, explains nothing; disk pressure
 remains independent.
 
 The OS job and CLI probe only observe and alert. They do not invoke rollback,
@@ -1574,15 +1585,19 @@ remote unit holds it, and machine API tokens rotate with every write
 generation. The fleet cutover rotates it once (`scripts/cutover_db_authority.py`,
 step `api`); otherwise run
 [`scripts/rotate_cluster_secret.py`](../scripts/rotate_cluster_secret.py)
-(`--execute`) only after a bearer leak. Both first pin the logical-backup
-passphrase to `$AVA_HOME/backups/logical-backup.passphrase` — derived from the
-pre-rotation secret, so every earlier logical backup keeps decrypting — and only
-then write the new secret; each step is journaled with fingerprints, never
-secrets. **The pinned file is backup-critical material**: losing it together
-with the old secret makes every earlier logical backup unreadable; keep a copy
-with the gateway's backup keys. Restart the gateway, then issue every remote
-unit a new capability bundle (its telemetry token derives from the secret). It
-does not change Postgres, Redis, ACLs, or PgBouncer.
+(`--execute`) only after a bearer leak. Rotating the secret never touches the
+logical-backup passphrase `$AVA_HOME/backups/logical-backup.passphrase`: a gateway
+home's birth mints and pins it, independent of the secret; a home born earlier pins
+`sha256(secret)` once, in the cutover's `api` step before that step rotates, so every
+earlier logical backup keeps decrypting (an empty-secret home pins a minted one instead).
+Both scripts verify the pin before they write
+the new secret, and journal each step with fingerprints, never secrets.
+**The pinned file is backup-critical material**: nothing re-derives it, and losing it
+makes every logical backup of the home unreadable; escrow a copy with the gateway's
+backup keys ([decision](../decisions/2026-09-28-backup-passphrase-minted-at-birth.md),
+[passphrase](../services/gateway_side/backup/passphrase.ava.okf.md)). Restart the
+gateway, then issue every remote unit a new capability bundle (its telemetry token
+derives from the secret). It does not change Postgres, Redis, ACLs, or PgBouncer.
 
 Routine data-plane rotation is independent and uses
 [`scripts/rotate_data_plane_secrets.py`](../scripts/rotate_data_plane_secrets.py):

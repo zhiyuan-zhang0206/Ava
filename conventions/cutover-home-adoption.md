@@ -142,13 +142,14 @@ before the host's code switch; read the receipts with the old
   the old `ava stop --yes`: it continues the same hold to `stopped`, and the
   inventory then reports it adoptable. The repair needs the gateway database,
   so a runner settles before the gateway's W3 stop.
-- The hold reached `stopped` with a receipt latched after its drain (a turn
-  failing while services stopped). Neither code base has a sanctioned exit:
-  `repair` and `resume --cancel` refuse a started stop, and start and resume
-  refuse unsettled receipts. Never edit the journal by hand. Record the hold
-  and its receipts, then exclude that runner from the window (it stays on the
-  old code, stopped, and `--exclude-unit` at W6 keeps it fenced), or treat it
-  as a no-go on the gateway (R1).
+- **Known gap:** the hold reached `stopped` with a receipt latched after its
+  drain (a turn failing while services stopped). Neither code base has a
+  sanctioned exit: `repair` and `resume --cancel` refuse a started stop, and
+  start and resume refuse unsettled receipts. Never edit the journal by hand.
+  Until an exit exists, record the hold and its receipts, then exclude that
+  runner from the window (it stays on the old code, stopped, and
+  `--exclude-unit` at W6 keeps it fenced), or treat it as a no-go on the
+  gateway (R1).
 
 ## Operator follow-up
 
@@ -156,7 +157,7 @@ before the host's code switch; read the receipts with the old
   credentials and backups. Confirm the gateway holds its own copies (the backup
   encryption key first: after the gateway's `api` cutover step that is the
   pinned `$AVA_HOME/backups/logical-backup.passphrase`, the only key to every
-  pre-rotation logical backup once the old secret is gone — escrow it with the
+  logical backup of the home, earlier and later — escrow it with the
   gateway's other backup keys), archive the runner copies encrypted and
   offline, then delete `cutover-rollback/residue/`.
 - Keep the hosts awake and on AC until the holds are released: after the first

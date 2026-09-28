@@ -381,6 +381,13 @@ for per-unit credential delivery (dbgen-8) and converge (FC-9). Health alerts
 remain active; removing an old decision path is not evidence that its
 replacement is complete.
 
+Until then a networked cluster has no in-band way to rotate its write
+generation, so a compromised unit or a lost capability bundle cannot be
+contained ([what a bundle exposes](../../shared/cluster/authority/unit-enrollment.ava.okf.md#what-a-bundle-exposes)).
+This is a known gap, and closing it is a required deliverable of dbgen-8
+(user ruling, 2026-09-28): dbgen-8 does not land until a networked cluster can
+rotate its write generation and re-issue every unit's capability.
+
 Current local serving proofs do not complete this plan. Acceptance requires
 normal teardown, interrupted recovery and release A/B/A evidence, removal of
 legacy paths, reviewed changes and green CI before the production cutover.

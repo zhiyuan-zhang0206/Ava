@@ -107,7 +107,8 @@ sessions.
 ## Delivery and wiring
 
 How the active generation reaches the pooler, launched services, operator
-processes and remote agent-runner units (`unit`: sealed per-unit bundles), and
+processes and remote agent-runner units (`unit`: a sealed bundle issued per unit,
+whose login and tokens every runner unit shares), and
 where birth, ordinary start and the cutover call this library (API tokens:
 [[shared/cluster/authority/api-tokens.ava.okf.md|machine API tokens]]):
 [[shared/cluster/authority/wiring.ava.okf.md|Write-generation delivery and wiring]].

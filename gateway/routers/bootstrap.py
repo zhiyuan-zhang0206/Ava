@@ -12,9 +12,11 @@ does.
 
 It never serves a database login (`AVA_DB_URL` is the credential-free
 endpoint) nor the human cluster secret (`AVA_CLUSTER_SECRET` is not a
-bootstrap field). A unit's login and API token arrive only through the
-per-unit capability the gateway operator issues
-(`ava cluster db-authority issue-unit`).
+bootstrap field). A unit's login and API token arrive only in the capability
+bundle the gateway operator issues for that unit
+(`ava cluster db-authority issue-unit`). Both are the write generation's,
+shared by every runner unit, and the bundle's telemetry token is the
+cluster's; only the bundle's enrollment secret is the unit's own.
 """
 
 from __future__ import annotations

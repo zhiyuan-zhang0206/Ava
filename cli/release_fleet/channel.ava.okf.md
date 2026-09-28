@@ -102,10 +102,9 @@ must be fixed before dbgen-8 relaxes that gate:
   cancel_grace_s + drain_s` (130 s by default), but a unit's own stop is the
   `close_s` wait, the 90 s root stop (`local.py`), the cancel grace and the
   kill legs (about 160 s), so the strict barrier aborts spuriously.
-- **A negative `Content-Length` pins a listener thread.** The listener
-  reads to EOF on a negative length, and its sockets have no timeout, so an
-  unauthenticated peer can hold handler threads. Reject `length < 0` and
-  set a socket timeout (being fixed in `listener.py` separately).
+
+The channel's own gap (coordinator responses are not authenticated) is listed
+in [unit enrollment](../../shared/cluster/authority/unit-enrollment.ava.okf.md#before-remote-units-dbgen-8fc-9).
 
 ## Candidate reference
 

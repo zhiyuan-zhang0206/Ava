@@ -105,6 +105,7 @@ from shared.cluster import get_record, identity_from_url, record_redis_port
 from shared.cluster.derive import REDIS_PASSWORD_ENV
 from shared.cluster.registry import ClusterRecord
 from shared.config import settings
+from shared.deploy_timing import UNIT_BUNDLE_TTL_S
 from shared.envfile import upsert_env
 from shared.paths import ava_home
 from shared.private_storage import ensure_private_dir, write_private_bytes
@@ -581,7 +582,6 @@ class UnitPlan:
     include: tuple[tuple[str, str], ...] = ()
     exclude: tuple[tuple[str, str], ...] = ()
     bundle_dir: Path | None = None
-    ttl_s: float = 24 * 3600
 
     @staticmethod
     def parse(value: str) -> tuple[str, str]:
@@ -674,7 +674,7 @@ def _issue_bundles(home: Path, plan: UnitPlan, bundle_dir: Path) -> list[str]:
             unit=unit,
             endpoint=served_db_endpoint(),
             cluster_secret=cluster_secret,
-            ttl_s=plan.ttl_s,
+            ttl_s=UNIT_BUNDLE_TTL_S,
         )
         target = bundle_dir / f"{machine}-{unit.key[:12]}.bundle"
         target.unlink(missing_ok=True)

@@ -74,11 +74,11 @@ inheriting the NOLOGIN groups `ava_gateway` / `ava_runner`, plus one machine API
 class, recorded in `$AVA_HOME/db-authority/` — is delivered only in the launch environment
 of the admitted runtime (`AVA_DB_URL`, `AVA_API_TOKEN`); `.env` holds the credential-free
 endpoint. Machine callers present their API token: the gateway admits the active
-generation's tokens (never a revoked one), an ops server its generation's two. Bootstrap
-serves configuration only: a remote agent-runner receives its runner login, API token and
-telemetry token as a sealed per-unit capability (`ava cluster db-authority issue-unit`)
-installed by its start, and never holds the human secret. Older homes convert once:
-`scripts/cutover_db_authority.py` (a networked home also rotates the human secret there).
+generation's tokens (never a revoked one), an ops server its generation's two. Bootstrap serves
+configuration only: a remote agent-runner gets its runner login, API and telemetry tokens in a sealed
+bundle its start installs (`ava cluster db-authority issue-unit`), all shared across runner units (only
+the bundle's enrollment secret is per unit), and never holds the human secret. Older homes convert
+once: `scripts/cutover_db_authority.py` (a networked home also rotates the human secret there).
 
 | Path | Role |
 |---|---|

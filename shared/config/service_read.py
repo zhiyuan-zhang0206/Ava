@@ -284,10 +284,11 @@ def bootstrap_config_values() -> dict[str, str]:
 
     `AVA_DB_URL` is served as the CREDENTIAL-FREE endpoint (`served_db_endpoint`):
     bootstrap hands out configuration, never a database login. A remote
-    agent-runner receives its runner login only through the explicit per-unit
-    capability the gateway operator issues (`shared.cluster.authority.unit`), so a
-    stale runner holding the bearer cannot reacquire the current write
-    generation here.
+    agent-runner receives its runner login only in the capability bundle the
+    gateway operator issues for that unit (`shared.cluster.authority.unit`; the
+    login is the write generation's, shared by every runner unit), so a stale
+    runner holding the bearer cannot reacquire the current write generation
+    here.
     """
     from pydantic import SecretStr
 
