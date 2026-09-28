@@ -42,16 +42,17 @@ box keeps its secret, and an empty one pins a minted passphrase instead.
 
 Step `remote-units` (networked homes only): every `machine_units` row other
 than this gateway unit is a remote unit whose runners held the owner-era
-`ava_runner` login (the `db` step fenced it) and copies of the Redis admin
-password. The operator classifies each one explicitly: `--unit MACHINE:HOME`
+`ava_runner` login (the `db` step fenced it) and copies of both Redis
+passwords. The operator classifies each one explicitly: `--unit MACHINE:HOME`
 (included: a sealed bundle for generation 0 — runner login, API admission,
 enrollment secret — in `--bundle-dir`, its transport key printed once) or
 `--exclude-unit MACHINE:HOME` (paused or offline: no bundle, it stays fenced
 until a later issue-unit). Units of paused machines must be excluded; an
-unclassified or unknown unit refuses. The step also rotates the Redis admin
-password, staged in `db-authority/redis-admin.pending` so a crash resumes
-with the same value, then applied live, persisted to `redis.conf` and `.env`.
-A single box has no remote unit and the step is a no-op.
+unclassified or unknown unit refuses. The step also rotates both Redis
+passwords, each staged in `db-authority/redis-<admin|runtime>.pending` so a
+crash resumes with the same value, applied live and persisted to `.env` (the
+admin one also to `redis.conf`); runners fetch the new runtime URL from
+bootstrap. A single box has no remote unit and the step is a no-op.
 
 Dry-run is the default and changes nothing. `--execute` requires the home's
 application root to be absent, no persistent terminals and no active release
@@ -62,21 +63,9 @@ credentials, a Redis password the home does not record, a journal that
 contradicts the `.env` or the ledger) is refused, never repaired.
 
 Run it from the checkout that owns the home, in a gateway context (an adopted
-home is already stopped), then start the home as the script's last line names:
-
-    ava stop --keep-infra
-    .venv/bin/python scripts/cutover_db_authority.py --home <home>
-    .venv/bin/python scripts/cutover_db_authority.py --home <home> --execute
-
-A networked home adds the classification and the bundle directory:
-
-    .venv/bin/python scripts/cutover_db_authority.py --home <home> --execute \
-        --unit mini:/Users/u/.ava --exclude-unit win:C:\\Users\\u\\.ava \
-        --bundle-dir <private dir>
-
-Each runner installs its bundle at its held first start on the new code
-(`scripts/cutover_adopt_home.py --start --db-capability <bundle>`, transport
-key in `AVA_DB_CAPABILITY_KEY`), after the adoption cleaned its home.
+home is already stopped), then start the home as the script's last line names.
+Commands and flags: conventions/data-plane-secret-split.md; each runner installs
+its bundle at its held first start (conventions/cutover-home-adoption.md).
 """
 
 from __future__ import annotations
@@ -627,33 +616,49 @@ def _require_classified(plan: UnitPlan, remote: Units, paused: Units) -> None:
         raise CutoverRefusedError("included units need --bundle-dir for their bundles")
 
 
-def _pending_admin(home: Path) -> str:
-    """The staged next Redis admin password, created once (0600)."""
-    path = home / "db-authority" / "redis-admin.pending"
+def _pending(home: Path, name: str) -> str:
+    """The staged next Redis `name` password, created once (0600)."""
+    path = home / "db-authority" / f"redis-{name}.pending"
     if not path.exists():
         write_private_bytes(path, (secrets.token_urlsafe(32) + "\n").encode())
     return regular_bytes(path).decode().strip()
 
 
-def _rotate_redis_admin(home: Path, port: int) -> None:
-    """Replace the Redis admin password every runner home may hold a copy of."""
+def _rotate_redis(home: Path, port: int) -> None:
+    """Replace both Redis passwords: runner homes, their residue and the W3 copies
+    hold the admin one and the runtime one (bootstrap served it to every runner)."""
     from cli.commands.data_plane import cluster_instance as instance
+    from shared.cluster import ensure_cluster_redis_acl
 
     env = RedisEnv.read(home)
-    pending = _pending_admin(home)
-    if not _authenticates(port, pending):
+    admin, runtime = _pending(home, "admin"), _pending(home, "runtime")
+    if not _authenticates(port, admin):
         if not _authenticates(port, env.admin):
             raise CutoverRefusedError(
                 "Redis accepts neither this home's admin password nor the staged one"
             )
         with _probe_client(port, password=env.admin) as client:
-            client.config_set("requirepass", pending)
-    instance._write_redis_conf(instance.redis_data_dir(), pending)
-    upsert_env(home / ".env", {_ADMIN_ENV: pending}, audit_site="cutover_db_authority")
-    if env.admin != pending and _authenticates(port, env.admin):
-        raise RuntimeError("Redis still accepts the previous admin password")
+            client.config_set("requirepass", admin)
+    instance._write_redis_conf(instance.redis_data_dir(), admin)
+    ensure_cluster_redis_acl(
+        env.identity,
+        redis_admin_url=f"redis://default:{admin}@127.0.0.1:{port}",
+        runtime_password=runtime,
+        channel_prefix=settings.data_plane.events_channel.removesuffix(":events"),
+        expected_data_dir=instance.redis_data_dir(),
+    )
+    url = url_with_userinfo(env.url, env.identity, runtime)
+    upsert_env(
+        home / ".env",
+        {_ADMIN_ENV: admin, REDIS_PASSWORD_ENV: runtime, _URL_ENV: url},
+        audit_site="cutover_db_authority",
+    )
+    for old, new, user in ((env.admin, admin, None), (env.runtime, runtime, env.identity)):
+        if old != new and _authenticates(port, old, user):
+            raise RuntimeError(f"Redis accepts the replaced password of user {user or 'default'}")
     _verify(port, RedisEnv.read(home), instance.redis_data_dir())
-    (home / "db-authority" / "redis-admin.pending").unlink()
+    for name in ("admin", "runtime"):
+        (home / "db-authority" / f"redis-{name}.pending").unlink()
 
 
 def _issue_bundles(home: Path, plan: UnitPlan, bundle_dir: Path) -> list[str]:
@@ -686,7 +691,7 @@ def _issue_bundles(home: Path, plan: UnitPlan, bundle_dir: Path) -> list[str]:
 def convert_remote_units(
     home: Path, record: ClusterRecord, plan: UnitPlan, *, execute: bool
 ) -> str:
-    """Classify the remote units, rotate Redis admin and issue their bundles."""
+    """Classify the remote units, rotate both Redis passwords and issue bundles."""
     from cli.commands.data_plane import cluster_instance as instance
     from shared.cluster import record_postgres_port
 
@@ -706,19 +711,14 @@ def convert_remote_units(
     if state == "done":
         return f"remote-units: verified, bundles were issued ({observed})"
     if not execute:
-        return f"remote-units: would rotate the Redis admin password and issue bundles ({observed})"
+        return f"remote-units: would rotate both Redis passwords and issue bundles ({observed})"
     _record(home, "remote-units", "issuing")
-    _rotate_redis_admin(home, record_redis_port(record))
+    _rotate_redis(home, record_redis_port(record))
     lines = [] if plan.bundle_dir is None else _issue_bundles(home, plan, plan.bundle_dir)
     _record(home, "remote-units", "done")
     excluded = ", ".join(f"{m}:{h}" for m, h in plan.exclude) or "none"
-    return "\n".join(
-        [
-            "remote-units: Redis admin rotated; excluded units stay fenced "
-            f"({excluded}); bundles (carry each with its key; shown once):",
-            *lines,
-        ]
-    )
+    head = f"remote-units: Redis passwords rotated; excluded units stay fenced ({excluded}); "
+    return "\n".join([head + "bundles (carry each with its key; shown once):", *lines])
 
 
 def admitted_record(home: Path) -> ClusterRecord:

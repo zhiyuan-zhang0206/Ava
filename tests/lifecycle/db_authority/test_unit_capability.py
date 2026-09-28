@@ -20,7 +20,7 @@ import time
 from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 from urllib.parse import urlsplit
 from uuid import uuid4
 
@@ -620,6 +620,20 @@ def _assert_redis_admin_rotated(born: Born, old_admin: str) -> str:
     return new_admin
 
 
+def _assert_redis_runtime_rotated(born: Born, old_runtime: str) -> None:
+    """Runner homes, their residue and the W3 copies hold the runtime password too:
+    it must stop authenticating, and the URL bootstrap serves carries the new one."""
+    redis_port = born.record.ports["redis"]
+    values = dotenv_values(born.home / ".env")
+    url = urlsplit(values["AVA_REDIS_URL"] or "")
+    user, new_runtime = url.username, values["AVA_REDIS_PASSWORD"]
+    assert user and new_runtime and new_runtime != old_runtime
+    assert url.password == new_runtime
+    assert not cutover._authenticates(redis_port, old_runtime, user)
+    assert cutover._authenticates(redis_port, new_runtime, user)
+    assert not (born.home / "db-authority" / "redis-runtime.pending").exists()
+
+
 def _assert_one_bundle_for_mini(outcome: str, bundles: Path) -> None:
     [(path, key)] = re.findall(r"(\S+\.bundle) transport key (\S+)", outcome)
     assert Path(path).parent == bundles
@@ -630,12 +644,15 @@ def _assert_one_bundle_for_mini(outcome: str, bundles: Path) -> None:
     assert issued.capability.generation.number == 0
 
 
-def test_networked_cutover_rotates_redis_admin_and_issues_one_bundle_per_unit(
+def test_networked_cutover_rotates_both_redis_passwords_and_issues_one_bundle_per_unit(
     networked: Born, tmp_path: Path
 ) -> None:
     born = networked
     redis_port = born.record.ports["redis"]
-    old_admin = born.values["AVA_REDIS_ADMIN_PASSWORD"]
+    old_admin, old_runtime = (
+        born.values["AVA_REDIS_ADMIN_PASSWORD"],
+        born.values["AVA_REDIS_PASSWORD"],
+    )
     bundles = tmp_path / "bundles"
     classified = cutover.UnitPlan(include=(_MINI,), exclude=(_WIN,), bundle_dir=bundles)
     dry = cutover.convert_remote_units(born.home, born.record, classified, execute=False)
@@ -644,6 +661,7 @@ def test_networked_cutover_rotates_redis_admin_and_issues_one_bundle_per_unit(
     try:
         outcome = cutover.convert_remote_units(born.home, born.record, classified, execute=True)
         new_admin = _assert_redis_admin_rotated(born, old_admin)
+        _assert_redis_runtime_rotated(born, old_runtime)
         assert cutover.read_journal(born.home)["remote-units"] == "done"
         _assert_one_bundle_for_mini(outcome, bundles)
         # A repeat is a verified no-op: no second rotation, no new bundles.
@@ -654,6 +672,44 @@ def test_networked_cutover_rotates_redis_admin_and_issues_one_bundle_per_unit(
         _redis_shutdown(
             redis_port, dotenv_values(born.home / ".env")["AVA_REDIS_ADMIN_PASSWORD"] or ""
         )
+
+
+def test_an_interrupted_rotation_resumes_with_the_staged_passwords(
+    networked: Born, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Redis took both new passwords, then `.env` failed to record them: the re-run
+    applies the same staged values instead of minting others."""
+    born = networked
+    redis_port = born.record.ports["redis"]
+    staged = born.home / "db-authority"
+    plan = cutover.UnitPlan(include=(_MINI,), exclude=(_WIN,), bundle_dir=tmp_path / "bundles")
+    upsert = cutover.upsert_env
+    monkeypatch.setattr(cutover, "upsert_env", MagicMock(side_effect=OSError("disk full")))
+    try:
+        with pytest.raises(OSError, match="disk full"):
+            cutover.convert_remote_units(born.home, born.record, plan, execute=True)
+        admin, runtime = (
+            (staged / f"redis-{name}.pending").read_text().strip() for name in ("admin", "runtime")
+        )
+        assert cutover.read_journal(born.home)["remote-units"] == "issuing"
+        monkeypatch.setattr(cutover, "upsert_env", upsert)
+        cutover.convert_remote_units(born.home, born.record, plan, execute=True)
+        values = dotenv_values(born.home / ".env")
+        assert (values["AVA_REDIS_ADMIN_PASSWORD"], values["AVA_REDIS_PASSWORD"]) == (
+            admin,
+            runtime,
+        )
+        assert not list(staged.glob("redis-*.pending"))
+    finally:
+        for password in {born.values["AVA_REDIS_ADMIN_PASSWORD"], _env_admin(born)}:
+            _redis_shutdown(redis_port, password)
+
+
+def _env_admin(born: Born) -> str:
+    pending = born.home / "db-authority" / "redis-admin.pending"
+    if pending.exists():
+        return pending.read_text().strip()
+    return dotenv_values(born.home / ".env")["AVA_REDIS_ADMIN_PASSWORD"] or ""
 
 
 def test_a_single_box_has_no_remote_units(

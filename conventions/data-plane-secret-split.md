@@ -121,11 +121,15 @@ application root and persistent terminals. The steps run in order:
 - `remote-units` reads `machine_units`: every unit other than this gateway unit
   must be classified exactly once, `--unit MACHINE:HOME` (included) or
   `--exclude-unit MACHINE:HOME` (paused or offline; it stays fenced); units of
-  paused machines must be excluded. It rotates the Redis admin password (runner
-  homes hold copies of it; staged in `db-authority/redis-admin.pending` so a
-  crash resumes with the same value, applied with `CONFIG SET requirepass`,
-  persisted to `redis.conf` and `.env`, the old password proven refused) and
-  writes one sealed bundle per included unit into `--bundle-dir` (an
+  paused machines must be excluded. It rotates both Redis passwords, since
+  runner homes, their archived residue and the pre-cutover backups hold copies
+  of each: the admin one (applied with `CONFIG SET requirepass`, persisted to
+  `redis.conf` and `.env`) and the runtime ACL one (re-affirmed on the ACL user,
+  persisted to `.env` and `AVA_REDIS_URL`; runners fetch the new URL from
+  bootstrap at their next start). Each is staged in
+  `db-authority/redis-<admin|runtime>.pending` so a crash resumes with the same
+  value, and each old password is proven refused. It then writes one sealed
+  bundle per included unit into `--bundle-dir` (an
   owner-only directory), printing each transport key once; bundles issued after
   `api` carry the rotated telemetry token and the generation's API admission.
   A single box has no remote unit and the step is a no-op.

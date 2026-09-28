@@ -111,7 +111,7 @@ and the coordinator channel's authentication:
   networked home inside the one human-bearer rotation
   (`scripts/rotate_cluster_secret.advance`, journaled as fingerprints). Step
   `remote-units` (networked homes): explicit classification of every other
-  `machine_units` row -> Redis admin rotation -> one `issue_bundle` per
+  `machine_units` row -> Redis admin and runtime rotation -> one `issue_bundle` per
   included unit (after `api`, so bundles carry the rotated telemetry token).
 - **Monitoring** is not delivered: the collector's PostgreSQL receiver
   (`cli/commands/observability/otel_collector.py`) dials the owner-only socket as

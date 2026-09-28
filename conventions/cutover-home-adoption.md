@@ -124,7 +124,7 @@ held units prove, on every included unit:
   the out-of-band channel;
 - an empty legacy census on every host (the inventory lists no legacy job);
 - the stale-writer probe: the pre-cutover runner database login, human bearer
-  and Redis admin password (the W3 copies) are refused.
+  and both Redis passwords (the W3 copies) are refused.
 
 That agents run on this commit is proven before the window: the cutover
 rehearsal (FC-10) at exactly this commit spawns agents through gateway →
