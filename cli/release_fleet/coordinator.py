@@ -52,6 +52,10 @@ def _utc_now() -> datetime:
     return datetime.now(UTC)
 
 
+class HeldVerdictError(RuntimeError):
+    """A journaled `hold` verdict, executed: its alerts were journaled with it."""
+
+
 def _needs_lease(operation: Operation) -> bool:
     """Every phase from `quiescing` on runs under the cluster deploy lease.
 
@@ -173,7 +177,9 @@ class Coordinator:
             self.journal.recover(detail, at=now)
             self._decision_alerts()
             return True
-        self._with_alerts((self._alert("held", now, f"held at {operation.phase}: {detail}"),))
+        if not isinstance(exc, HeldVerdictError):
+            summary = f"held at {operation.phase}: {detail}"
+            self._with_alerts((self._alert("held", now, summary),))
         self.journal.fail(detail)
         return False
 
@@ -370,7 +376,7 @@ class Coordinator:
             renewed = verdict.decided_at if verdict.stage == "watch" else None
             self.journal.recover(reason, at=verdict.decided_at, maintenance_at=renewed)
             return
-        raise RuntimeError(f"release held for the operator: {reason}")
+        raise HeldVerdictError(f"release held for the operator: {reason}")
 
     def _marked(self, verdict: Verdict) -> tuple[UnitStatus, ...]:
         """Failed and unknown units leave the operation; their agents stay affected."""

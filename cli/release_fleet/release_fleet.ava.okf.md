@@ -85,6 +85,8 @@ plus the out-of-band webhook and an observer-agent notice when the route
 names them. The webhook URL stays in `$AVA_HOME/secrets/<webhook_file>`, never
 in the request. The coordinator journals each alert by `key` at first
 emission and re-delivers from the journal, so a retry keeps `starts_at`.
+Each hold is its own alert (a `held` key carries its time): an operation
+held again after the operator continued it alerts again.
 Without the database only the webhook can land.
 
 ## Known-good publication (`publication.py`)

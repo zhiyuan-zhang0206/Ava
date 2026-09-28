@@ -54,8 +54,14 @@ class FleetAlert(Record):
 
     @property
     def key(self) -> str:
-        """Stable identity of one alert within one operation."""
+        """Stable identity of one alert within one operation.
+
+        Every hold is its own episode: an operation the operator continued
+        that holds again alerts again, so a `held` alert is keyed by its time.
+        """
         subject = "*" if self.unit is None else self.unit.label
+        if self.kind == "held":
+            subject = self.at.isoformat()
         return f"{self.operation}:{self.kind}:{subject}"
 
     @property
