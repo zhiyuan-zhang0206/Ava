@@ -13,14 +13,14 @@ mechanism: a laptop-grade runner that sleeps or changes networks wakes holding
 dead TCP flows, and a query already in flight on a borrowed half-dead socket has
 no application-level bound — it waits out the OS TCP-retransmit timeout.
 
-`shared.db.pool()` merges those kwargs for every sync pool, so the fix for a call
-site is normally "call `shared.db.pool()`". Two pools legitimately cannot: the
-agent's `LoggingConnectionPool` and the eval driver's pools are **async**
-(`AsyncConnectionPool`), a different class with a different lifecycle, and
-`shared.db` has no async pool factory. Those spell out
-`{..., **PG_KEEPALIVE_KWARGS}` themselves, which is what this lint accepts —
-`PG_KEEPALIVE_KWARGS` stays the single definition of the *values* even where it
-cannot be the single definition of the *call*.
+`shared.db.pool()` merges those kwargs for every sync pool and
+`shared.db.async_pool()` for every async one (the agent host passes its
+`LoggingConnectionPool` in as the pool class), so the fix for a call site is
+normally "call the factory", which the locality lint's `postgres-dial` rule also
+demands. A construction anywhere else must at least spell out
+`{..., **PG_KEEPALIVE_KWARGS}`, which is what this lint accepts:
+`PG_KEEPALIVE_KWARGS` stays the single definition of the *values* even where a
+site is not the single definition of the *call*.
 
 Without this check the invariant is "three call sites each remembered", which is
 exactly the state that produced the defect: the sync pools in `shared/log.py`,

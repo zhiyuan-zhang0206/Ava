@@ -467,10 +467,7 @@ async def run() -> None:
     land_cluster_extensions()
     load_process_extensions()
 
-    workload_pool, control_pool = (
-        build_shared_pool(settings.data_plane.db_url),
-        build_control_pool(settings.data_plane.db_url),
-    )
+    workload_pool, control_pool = build_shared_pool(), build_control_pool()
     liveness = Liveness(_LIVENESS_TIMEOUT_S)
     beat: asyncio.Task[None] | None = None
     health = None

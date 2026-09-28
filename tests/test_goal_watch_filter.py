@@ -1,7 +1,8 @@
 """Goal watchers treat lifecycle SSE as a hint and read authoritative status.
 
 No Redis or real gateway is needed: tests serialize the actual event model and
-observe whether the watcher requests the target's current status.
+observe whether the watcher requests the target's current status. The poll
+fallback reads that same status, never the database directly.
 """
 
 from __future__ import annotations
@@ -10,6 +11,7 @@ import importlib.util
 import json
 from collections.abc import Callable
 from pathlib import Path
+from types import ModuleType
 from typing import Any
 
 import pytest
@@ -26,8 +28,8 @@ _SNIPPET_PATHS = (
 _FIXTURE_PATH = _REPO_ROOT / "tests" / "fixtures" / "events" / "agent_updated.json"
 
 
-def _load_is_target_idle(path: str) -> Callable[[dict[str, Any], int], bool]:
-    """Import `_is_target_idle` straight from the skill's reference snippet.
+def _load_snippet(path: str) -> ModuleType:
+    """Import the skill's reference snippet as a module.
 
     Importing the snippet runs only its top-level definitions (the
     `if __name__ == "__main__"` block does not fire on import), so this does not
@@ -37,7 +39,11 @@ def _load_is_target_idle(path: str) -> Callable[[dict[str, Any], int], bool]:
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    fn: Callable[[dict[str, Any], int], bool] = vars(module)["_is_target_idle"]
+    return module
+
+
+def _load_is_target_idle(path: str) -> Callable[[dict[str, Any], int], bool]:
+    fn: Callable[[dict[str, Any], int], bool] = vars(_load_snippet(path))["_is_target_idle"]
     return fn
 
 
@@ -87,3 +93,25 @@ def test_other_events_do_not_fetch_status(
 
     monkeypatch.setattr(ava.agents, "get_status", forbidden)
     assert is_target_idle(event, 42) is False
+
+
+@pytest.mark.parametrize("path", _SNIPPET_PATHS)
+def test_poll_fallback_reads_status_until_idle(monkeypatch: pytest.MonkeyPatch, path: str) -> None:
+    """The fallback polls the authoritative status and skips a round on a read error."""
+    module = _load_snippet(path)
+    replies: list[str | Exception] = [RuntimeError("gateway restarting"), "running", "idling"]
+    requested: list[int] = []
+    notified: list[int] = []
+
+    def get_status(agent_id: int) -> str:
+        requested.append(agent_id)
+        reply = replies.pop(0)
+        if isinstance(reply, Exception):
+            raise reply
+        return reply
+
+    monkeypatch.setattr(ava.agents, "get_status", get_status)
+    monkeypatch.setattr(module, "_notify", notified.append)
+    vars(module)["_watch_via_poll"](42, interval_s=0)
+    assert requested == [42, 42, 42]
+    assert notified == [42]

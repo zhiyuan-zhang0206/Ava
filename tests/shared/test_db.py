@@ -11,9 +11,11 @@ from __future__ import annotations
 import asyncio
 import json
 import time
+from typing import Any, cast
 
 import psycopg
 import pytest
+from psycopg_pool import AsyncConnectionPool
 
 from shared import db, db_connections
 from shared.config import settings
@@ -34,6 +36,44 @@ def test_pool_refuses_unanchored_sentinel(monkeypatch: pytest.MonkeyPatch) -> No
     monkeypatch.setattr(settings.data_plane, "db_url", UNANCHORED_DB_SENTINEL)
     with pytest.raises(db.UnanchoredHomeError):
         db.pool()
+
+
+def test_async_pool_refuses_unanchored_sentinel(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings.data_plane, "db_url", UNANCHORED_DB_SENTINEL)
+    with pytest.raises(db.UnanchoredHomeError):
+        db.async_pool(AsyncConnectionPool, min_size=0, max_size=1, timeout=1.0)
+
+
+def test_async_pool_fixes_the_transport_posture(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The async pool carries `pool()`'s posture: autocommit, no prepared
+    statements, keepalives, the configured sslmode when the URL is silent, and
+    the pooled-session scrub on every borrow. It comes back unopened (the
+    caller's event loop opens it), and the caller's subclass gets its own
+    arguments."""
+    monkeypatch.setattr(settings.data_plane, "db_url", "postgresql://u@127.0.0.1:1/x")
+    monkeypatch.setattr(settings.data_plane, "db_sslmode", "require")
+    captured: dict[str, object] = {}
+
+    class _FakePool:
+        def __init__(self, conninfo: str, **kw: object) -> None:
+            captured.update(kw, conninfo=conninfo)
+
+    db.async_pool(cast(Any, _FakePool), pool_name="probe", min_size=0, max_size=3, timeout=2.0)
+    assert captured == {
+        "conninfo": "postgresql://u@127.0.0.1:1/x",
+        "min_size": 0,
+        "max_size": 3,
+        "timeout": 2.0,
+        "open": False,
+        "kwargs": {
+            "autocommit": True,
+            "prepare_threshold": None,
+            "sslmode": "require",
+            **db.PG_KEEPALIVE_KWARGS,
+        },
+        "check": db_connections._restore_pooled_session_async,
+        "pool_name": "probe",
+    }
 
 
 def _seed_agent(db_conn: psycopg.Connection, status: str, *, live_lease: bool = True) -> int:
