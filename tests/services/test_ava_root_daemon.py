@@ -280,6 +280,26 @@ def test_failed_shutdown_retains_owner_and_requires_explicit_closure(short_tmp: 
             _kill_quietly(child)
 
 
+def test_termination_after_unit_exit_releases_custody_and_exits(short_tmp: Path) -> None:
+    """A unit that exited before any stop does not hold root past SIGTERM.
+
+    systemd's root boot unit sets SendSIGKILL=no: TERM is the only stop, so a
+    root that kept the dead unit's custody would never exit.
+    """
+    command = [sys.executable, "-c", "pass"]
+    manifests = _write_manifests(short_tmp, [{"id": "svc", "exec": command, "restart": "never"}])
+    run_dir = short_tmp / "run"
+    with _daemon(run_dir, manifests) as (root, log):
+        client = _wait_ready(run_dir, root, log)
+        _wait_for(
+            lambda: _units_of(client.status())[0]["pid"] is None, "unit did not exit on its own"
+        )
+        assert (run_dir / "custody/svc.json").exists()
+        root.terminate()
+        assert root.wait(timeout=10) == 0, _read_log(log)
+    assert not list((run_dir / "custody").iterdir())
+
+
 def test_lock_dies_with_the_daemon_and_is_not_inherited_by_units(short_tmp: Path) -> None:
     """A released lock is not permission to duplicate orphaned application services."""
     run_dir = short_tmp / "run"

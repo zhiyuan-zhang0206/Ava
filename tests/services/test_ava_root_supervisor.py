@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any, cast
@@ -14,6 +15,7 @@ import pytest
 from services.ava_root.inputs import InputSeal
 from services.ava_root.manifest import RestartPolicy, UnitManifest, UnitRegistry
 from services.ava_root.supervisor import Supervisor, SupervisorConfig
+from shared.native_process.ownership import OwnedProcess
 
 
 def root(tmp_path: Path, code: str, *, env: tuple[tuple[str, str], ...] = ()) -> Supervisor:
@@ -156,19 +158,115 @@ async def test_stop_closes_captured_descendant_after_leader_exits(tmp_path: Path
     await owner.shutdown()
 
 
+async def exited(owner: Supervisor) -> None:
+    """Wait until root's watch task has processed the unit's own exit."""
+    for _ in range(100):
+        if (await row(owner))["state"] == "stopped":
+            return
+        await asyncio.sleep(0.02)
+    raise AssertionError("unit did not exit on its own")
+
+
 async def test_unexpected_exit_cannot_authorize_cold_duplicate(tmp_path: Path) -> None:
     owner = root(tmp_path, "import time; time.sleep(0.05)")
     await owner.start()
-    await asyncio.sleep(0.15)
+    await exited(owner)
     status = await row(owner)
-    assert status["pid"] is None
     assert "custody" in status["last_error"]
     other = root(tmp_path, "raise AssertionError('must not spawn')")
     with pytest.raises(RuntimeError, match="custody requires reconciliation"):
         await other.start()
-    with pytest.raises(RuntimeError, match="exited before scope capture"):
-        await owner.shutdown()
     assert (tmp_path / "custody/worker.json").exists()
+    # The owner reaped that exact birth and its group was empty: stop settles it.
+    await owner.down("worker")
+    assert (await row(owner))["state"] == "stopped"
+    assert not list((tmp_path / "custody").iterdir())
+    await owner.shutdown()
+
+
+async def test_stop_after_unexpected_exit_closes_surviving_descendants(tmp_path: Path) -> None:
+    child_file = tmp_path / "child"
+    code = f"import subprocess,sys,pathlib; child=subprocess.Popen([sys.executable,'-c','import time; time.sleep(60)']); pathlib.Path({str(child_file)!r}).write_text(str(child.pid))"
+    owner = root(tmp_path, code)
+    await owner.start()
+    await wait_file(child_file)
+    await exited(owner)
+    child = psutil.Process(int(child_file.read_text()))
+    try:
+        assert child.is_running()
+        await owner.down("worker")
+        assert not child.is_running() or child.status() == psutil.STATUS_ZOMBIE
+        assert not list((tmp_path / "custody").iterdir())
+    finally:
+        if child.is_running():
+            child.kill()
+    await owner.shutdown()
+
+
+async def test_exited_birth_at_a_reused_pid_never_signals_the_stranger(tmp_path: Path) -> None:
+    """The recorded PID now belongs to another birth leading its own group.
+
+    The recorded birth is positively dead, so its custody is released; the
+    stranger is never signalled, captured, or adopted.
+    """
+    owner = root(tmp_path, "pass")
+    await owner.start()
+    await exited(owner)
+    signals, ready = tmp_path / "stranger-signals", tmp_path / "stranger-ready"
+    code = (
+        "import pathlib,signal,time\n"
+        f"log=pathlib.Path({str(signals)!r})\n"
+        "def record(number, _frame):\n"
+        "    with log.open('a') as out: out.write(f'{number}\\n')\n"
+        "for number in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP, signal.SIGUSR1):\n"
+        "    signal.signal(number, record)\n"
+        f"pathlib.Path({str(ready)!r}).touch()\n"
+        "time.sleep(60)\n"
+    )
+    stranger = subprocess.Popen([sys.executable, "-c", code], process_group=0)  # noqa: S603 — disposable test child
+    try:
+        await wait_file(ready)
+        generation = owner._units["worker"].generation
+        assert generation is not None and generation.identity is not None
+        assert generation.custody is not None
+        dead = generation.identity
+        # The kernel handed the recorded PID to the stranger; the record keeps
+        # the dead birth. Survivors at reap would otherwise send the stop to
+        # the group that now carries that number.
+        generation.identity = OwnedProcess(stranger.pid, dead.birth, dead.starttime)
+        generation.tracked = {generation.identity}
+        generation.custody.retain(generation.tracked)
+        generation.scope_closed_at_exit = False
+        await owner.down("worker")
+        assert stranger.poll() is None
+        assert not signals.exists(), "the stranger received a signal"
+        assert not list((tmp_path / "custody").iterdir())
+    finally:
+        stranger.kill()
+        stranger.wait(timeout=5)
+    await owner.shutdown()
+
+
+async def test_unconfirmable_exited_birth_retains_custody(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    owner = root(tmp_path, "pass")
+    await owner.start()
+    await exited(owner)
+
+    def unverifiable(self: OwnedProcess) -> bool:
+        raise RuntimeError(f"cannot verify process identity for PID {self.pid}")
+
+    monkeypatch.setattr(OwnedProcess, "live", unverifiable)
+    record = tmp_path / "custody/worker.json"
+    with pytest.raises(RuntimeError) as refused:
+        await owner.down("worker")
+    message = str(refused.value)
+    assert "cannot verify process identity" in message
+    assert str(record) in message and "retry" in message
+    assert record.exists()
+    monkeypatch.undo()
+    await owner.shutdown()
 
 
 async def test_unacknowledged_intent_blocks_launch_without_signals(tmp_path: Path) -> None:
