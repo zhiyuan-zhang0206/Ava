@@ -47,8 +47,8 @@ cohort), stopping (units close, then the gateway: `close_s`,
 `judge_start`), resuming, watching (`judge_watch` every 30 s until
 `watch_s` after resume), complete. Every decision is journaled before it
 acts: the cohort before its alerts, a verdict with its alerts and unit marks
-before its recovery or commit; a continuation executes a journaled verdict
-instead of judging again.
+before its recovery or commit; a continuation after executor death executes
+a journaled verdict instead of judging again.
 
 - **Abort** (before the fence): `restoring` restarts the unchanged previous
   image on generation n, recorded read-only at `prepared`; outcome
@@ -59,7 +59,10 @@ instead of judging again.
 - **Hold**: any other failure (fencing, selecting, authorizing, resuming,
   restoring, the previous direction) journals the error and a `held` alert
   and exits; the operator continues with the same `ava cluster update
-  --prepared`.
+  --prepared`, which re-runs the held step. A hold verdict whose hold was
+  carried out (its error recorded) is judged again rather than replayed;
+  one journaled just before executor death is still carried out first. A
+  step that holds again raises a new `held` alert.
 
 A failure is any `Exception` a phase raises, a database error or a bug
 alike: the route follows the phase, never the class
@@ -70,8 +73,10 @@ continuation resumes from the journaled phase, as after process death.
 
 The lease (`deployment_state`, holder `fleet:<id>`) is taken at
 `dispatching`, re-armed by a continuation before any effect, renewed by a
-thread and released at completion; a lost lease fails the next step. An
-abort decided at `prepared` or `dispatching` needs no lease.
+thread and released at completion; a lost lease fails the next step. A
+renewal that raises is a missed round, retried until the lease could lapse
+before the next one; one answered "not yours" loses it at once. An abort
+decided at `prepared` or `dispatching` needs no lease.
 
 ## Gateway evidence, publication and alerts
 
@@ -84,7 +89,10 @@ representation yet, so no agent is reported quarantined. Completion writes
 `releases/fleet-state.json` once per operation (`publication.publish`).
 Alerts are journaled by key at first emission; each delivery (alert row,
 webhook, observer notice; `delivery.py`) is journaled once it lands and
-retried at the next boundary otherwise.
+retried at the next boundary otherwise. Completion does not wait on a
+delivery that keeps failing: an alert still undelivered then is logged as an
+error and stays in the journal, where `ava cluster release status` lists the
+routes it has not reached.
 
 ## Recorded choices
 

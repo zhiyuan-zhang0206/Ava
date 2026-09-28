@@ -19,6 +19,7 @@ from cli.release_fleet.workload import (
     Evidence,
     UnitReport,
     Verdict,
+    first_sightings,
     judge_start,
     judge_watch,
 )
@@ -418,3 +419,16 @@ def test_incoherent_verdicts_are_refused(fields: dict[str, object]) -> None:
     }
     with pytest.raises(ValidationError):
         Verdict.model_validate(base | fields)
+
+
+def test_a_window_journals_each_agents_first_sighting_of_each_fact_once() -> None:
+    """A fact already sighted in the window adds nothing; a new fact of the
+    same agent does; a sighting from before the window is no longer known."""
+    error = _errors((1,), at(40))[0]
+    quarantine = error.model_copy(update={"runtime_error": False, "quarantined": True})
+    later = _errors((1, 2), at(70))
+    assert first_sightings((), (error,), since=RESUMED) == (error,)
+    assert first_sightings((error,), later, since=RESUMED) == (later[1],)
+    assert first_sightings((error,), (quarantine,), since=RESUMED) == (quarantine,)
+    assert first_sightings((error,), later, since=at(50)) == later
+    assert first_sightings((), agents_live(at(70), (1, 2)), since=RESUMED) == ()

@@ -14,6 +14,8 @@
 from __future__ import annotations
 
 import json
+import os
+import stat
 import urllib.request
 from pathlib import Path
 
@@ -44,13 +46,22 @@ def _alert_row(row: AlertRow) -> None:
 
 
 def webhook_url(home: Path, url_file: str) -> str:
-    """The owner-only secrets file's single https or http URL."""
+    """The owner-only secrets file's single https or http URL.
+
+    The URL is usually a bearer in itself, so the file must be this user's
+    and no one else's to read or write (0600); anything wider is refused.
+    """
     from shared.private_storage import private_file_problem
     from shared.verified_file import regular_bytes
 
     path = home / "secrets" / url_file
     if problem := private_file_problem(path):
         raise ValueError(f"fleet alert webhook file {problem}")
+    info = path.lstat()
+    if info.st_uid != os.geteuid() or stat.S_IMODE(info.st_mode) & 0o077:
+        raise ValueError(
+            f"fleet alert webhook file {path} must be owner-only: owned by this user, mode 0600"
+        )
     url = regular_bytes(path, max_bytes=_MAX_URL_BYTES).decode().strip()
     if not url.startswith(("https://", "http://")) or any(c.isspace() for c in url):
         raise ValueError("the fleet alert webhook file holds no single http(s) URL")

@@ -9,7 +9,8 @@ status: current
 
 `maintenance.quiesced()` (phases `drained` through `ready`) is the stop window
 read by local background loops: the host daemon holds off ownership renewal and
-page reconciliation, and the ops daemon defers its shell-closure-notice flush.
+page reconciliation, and the ops daemon's shell-closure-notice flush waits for
+the hold to release.
 None of them may borrow the database across the window; an unreadable owner
 reads as quiesced, the same refuse-new-work posture the journal itself enforces
 by raising. The host's pending-turn scan reads the narrower

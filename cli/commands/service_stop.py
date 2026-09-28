@@ -493,9 +493,9 @@ def close_terminals(deadline: float, operation: str, acquired_at: datetime) -> N
     Busy sessions whose shell is verified gone — a job the SIGKILL cut short
     included — leave a durable closure notice for their owner agent (issue
     #2044): the gateway and ops server are already down by now, so the notice
-    is delivered at the next ops-daemon startup. That holds when a process
-    outlived the SIGKILL too (the notice names it) and when another session
-    keeps the stop incomplete (`_closed`).
+    is delivered by the next ops daemon once its start releases the hold. That
+    holds when a process outlived the SIGKILL too (the notice names it) and
+    when another session keeps the stop incomplete (`_closed`).
     """
     if sys.platform == "win32":
         backend = get_shell_backend()

@@ -23,6 +23,7 @@ Evidence is the coordinator's own observation, never the legacy health probe:
 from __future__ import annotations
 
 import threading
+import time
 from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
@@ -86,8 +87,10 @@ class DeployLease:
     reclaimer can judge it provably gone: a continuation re-arms it by renewing
     as the same holder, and a dead coordinator's lease lapses only by its TTL.
     A thread renews it every `LEASE_RENEW_INTERVAL_S` (the PITR activation
-    renewer's cadence); a renewal that does not land marks the lease lost, and
-    the coordinator fails its next step on it.
+    renewer's cadence). A renewal that raises is a missed round, retried until
+    the lease could lapse before the next one (`cluster_lock.lease_may_lapse`);
+    one answered "not yours", or failures lasting that long, mark the lease
+    lost, and the coordinator fails its next step on it.
     """
 
     def __init__(self, operation: UUID) -> None:
@@ -110,17 +113,22 @@ class DeployLease:
         self._renewer.start()
 
     def _renew(self) -> None:
-        from shared.cluster_lock import renew_update_lock
+        from shared.cluster_lock import lease_may_lapse, renew_update_lock
         from shared.deploy_timing import LEASE_RENEW_INTERVAL_S
 
+        renewed = time.monotonic()
         while not self._stop.wait(LEASE_RENEW_INTERVAL_S):
             try:
                 owned = renew_update_lock(self.holder)
-            except Exception:  # a failed renewal is a lost lease
+            except Exception as exc:  # a missed round is not fatal until the lease may lapse
+                logger.warning("[release-fleet] deploy lease renewal missed: {exc}", exc=exc)
+                if not lease_may_lapse(time.monotonic() - renewed):
+                    continue
                 owned = False
             if not owned:
                 self._lost.set()
                 return
+            renewed = time.monotonic()
 
     def require(self) -> None:
         if self._lost.is_set():

@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 import json
+import os
+from pathlib import Path
+
+import pytest
 
 from cli.release_fleet.alerting import (
     AgentNotice,
@@ -14,6 +18,7 @@ from cli.release_fleet.alerting import (
     recovered_alert,
     verdict_alerts,
 )
+from cli.release_fleet.delivery import webhook_url
 from cli.release_fleet.policy import AlertRoute
 from cli.release_fleet.workload import Evidence, UnitReport, judge_start, judge_watch
 from shared.alerts import fingerprint, parse_ts
@@ -164,3 +169,38 @@ def test_a_full_route_adds_the_webhook_and_the_observer_agent() -> None:
     assert (body["event"], body["severity"], body["agents"]) == ("held", "critical", [3, 4])
     assert notice.agent == 1818
     assert notice.text == f"[release {OPERATION}] critical held: held for the operator"
+
+
+_URL = "https://hooks.example/fleet/0123456789abcdef"
+
+
+def _webhook_file(home: Path, mode: int) -> Path:
+    secrets = home / "secrets"
+    secrets.mkdir(mode=0o755)
+    path = secrets / "release-webhook"
+    path.write_text(_URL + "\n")
+    path.chmod(mode)
+    return path
+
+
+def test_an_owner_only_webhook_file_names_the_webhook(tmp_path: Path) -> None:
+    _webhook_file(tmp_path, 0o600)
+    assert webhook_url(tmp_path, "release-webhook") == _URL
+
+
+@pytest.mark.parametrize("mode", [0o644, 0o640, 0o604, 0o620])
+def test_a_webhook_file_others_may_read_or_write_is_refused(tmp_path: Path, mode: int) -> None:
+    """The URL is a bearer in itself: a group- or world-accessible file is refused."""
+    _webhook_file(tmp_path, mode)
+    with pytest.raises(ValueError, match="owner-only"):
+        webhook_url(tmp_path, "release-webhook")
+
+
+def test_a_webhook_file_another_user_owns_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _webhook_file(tmp_path, 0o600)
+    uid = os.geteuid()
+    monkeypatch.setattr(os, "geteuid", lambda: uid + 1)
+    with pytest.raises(ValueError, match="owner-only"):
+        webhook_url(tmp_path, "release-webhook")

@@ -70,7 +70,7 @@ from typing import Any, Literal
 
 import shared.db
 from shared.db_transaction import write_transaction
-from shared.deploy_timing import NO_PROGRESS_TIMEOUT_S
+from shared.deploy_timing import LEASE_RENEW_INTERVAL_S, NO_PROGRESS_TIMEOUT_S
 from shared.log import logger
 
 # Crash-reclaim bound and nothing else: how long a holder that *died* blocks the
@@ -353,6 +353,19 @@ def acquire_update_lock(
                 reason=_acquire_refusal_reason(cur),
             )
         return acquired
+
+
+def lease_may_lapse(since_renewed_s: float) -> bool:
+    """Whether a lease last renewed `since_renewed_s` ago could expire before the next round.
+
+    The renewing side of `shared.deploy_timing`'s invariant: a renewal that
+    raises (a slow database, one dropped connection) is a missed round and
+    never fatal by itself; the renewer keeps its lease and tries again until
+    its lease could lapse before the next attempt lands, and only then counts
+    it lost. A renewal that returns False — another holder, or it expired —
+    is lost at once.
+    """
+    return since_renewed_s + LEASE_RENEW_INTERVAL_S >= LOCK_TTL_S
 
 
 def renew_update_lock(holder: str, *, ttl_s: float = LOCK_TTL_S) -> bool:

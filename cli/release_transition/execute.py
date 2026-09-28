@@ -16,6 +16,7 @@ from cli.release_fleet.request import FleetRequest
 from cli.release_transition.failure import OperationFailure, failure_detail
 from cli.release_transition.journal import Journal, Operation, exclusive, read_operation
 from cli.release_transition.request import PitrRequest
+from shared.release_operation import executor_heartbeat
 
 
 def execute(path: Path) -> None:
@@ -40,23 +41,31 @@ def execute(path: Path) -> None:
         if journal.operation.launch != operation.launch:
             raise RuntimeError("release executor belongs to a retired native launch attempt")
         journal.record_native(_executor_receipt(operation.launch))
-        if isinstance(request, PitrRequest):
-            from cli.release_transition.pitr.inputs import require_inputs
-            from shared.release_operation import authorized_pitr
+        # The health probe trusts the journal to explain an outage only while
+        # this stamp is fresh (shared.release_operation.operation_in_flight).
+        with executor_heartbeat(path):
+            _drive(journal, path)
 
-            require_inputs(journal.operation)
-            with authorized_pitr(path, journal.pitr_record_write):
-                drive_pitr(journal)
-        elif isinstance(request, FleetRequest):
-            from cli.release_fleet.coordinator import run_coordinator
-            from cli.release_transition.authority import adopt_executor_authority
 
-            adopt_executor_authority(Path(request.home))
-            run_coordinator(journal)
-        else:
-            from cli.release_fleet.follower import run_follower
+def _drive(journal: Journal, path: Path) -> None:
+    request = journal.operation.request
+    if isinstance(request, PitrRequest):
+        from cli.release_transition.pitr.inputs import require_inputs
+        from shared.release_operation import authorized_pitr
 
-            run_follower(journal)
+        require_inputs(journal.operation)
+        with authorized_pitr(path, journal.pitr_record_write):
+            drive_pitr(journal)
+    elif isinstance(request, FleetRequest):
+        from cli.release_fleet.coordinator import run_coordinator
+        from cli.release_transition.authority import adopt_executor_authority
+
+        adopt_executor_authority(Path(request.home))
+        run_coordinator(journal)
+    else:
+        from cli.release_fleet.follower import run_follower
+
+        run_follower(journal)
 
 
 def _executor_receipt(launch: dict[str, JsonValue]) -> dict[str, JsonValue]:

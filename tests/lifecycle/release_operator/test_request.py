@@ -13,10 +13,12 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
+from uuid import UUID
 
 import pytest
 
 import shared.cluster as cluster_pkg
+from cli.release_fleet.policy import AlertRoute
 from cli.release_fleet.request import FleetRequest
 from cli.release_operator import request as request_module
 from cli.release_operator.layout import receipt_path
@@ -175,6 +177,78 @@ def test_an_explicit_receipt_and_watch_window_are_captured(
         commit="f" * 40, out=tmp_path / "other.json", exclude=(), reason=None, receipt=elsewhere
     )
     assert code == 2
+
+
+_REJECTING = UUID("4d2f7a3e-6c1b-4f0e-9a8d-2b5c7e9f1a03")
+
+
+def _webhook_secret(home: Path, mode: int = 0o600) -> None:
+    (home / "secrets").mkdir(mode=0o700)
+    secret = home / "secrets" / "release-webhook"
+    secret.write_text("https://hooks.example/fleet/0123456789abcdef\n")
+    secret.chmod(mode)
+
+
+def test_an_alert_route_and_an_acknowledged_rejection_are_captured(
+    home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The out-of-band webhook, the observing agent and the re-request of a
+    rejected candidate are operator choices the request carries."""
+    previous = build_image(home, "previous")
+    candidate = build_image(home, "candidate")
+    _select(home, previous)
+    _stub_receipt(monkeypatch, home, candidate)
+    _webhook_secret(home)
+    out = tmp_path / "out.json"
+    code = request_module.cmd_release_request(
+        commit=candidate.source_commit,
+        out=out,
+        exclude=(),
+        reason=None,
+        alert_agent=1818,
+        alert_webhook_file="release-webhook",
+        acknowledged_rejection=str(_REJECTING),
+    )
+    assert code == 0
+    policy = FleetRequest.model_validate_json(out.read_bytes()).policy
+    assert policy.alert_route == AlertRoute(recipient_agent=1818, webhook_file="release-webhook")
+    assert policy.acknowledged_rejection == _REJECTING
+
+
+@pytest.mark.parametrize(
+    ("mode", "rejection", "message"),
+    [
+        (None, None, "No such file"),
+        (0o644, None, "owner-only"),
+        (0o600, "not-an-operation", "UUID"),
+    ],
+)
+def test_an_unusable_alert_route_or_rejection_refuses_before_writing(
+    home: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    mode: int | None,
+    rejection: str | None,
+    message: str,
+) -> None:
+    previous = build_image(home, "previous")
+    candidate = build_image(home, "candidate")
+    _select(home, previous)
+    _stub_receipt(monkeypatch, home, candidate)
+    if mode is not None:
+        _webhook_secret(home, mode)
+    out = tmp_path / "out.json"
+    code = request_module.cmd_release_request(
+        commit=candidate.source_commit,
+        out=out,
+        exclude=(),
+        reason=None,
+        alert_webhook_file="release-webhook",
+        acknowledged_rejection=rejection,
+    )
+    assert code == 2 and message in capsys.readouterr().err
+    assert not out.exists()
 
 
 def test_malshaped_commit_refuses(home: Path, tmp_path: Path) -> None:

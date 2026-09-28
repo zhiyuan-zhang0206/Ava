@@ -47,7 +47,8 @@ again by commit alone.
 
 ```bash
 ava cluster release request --commit FULL_COMMIT_SHA --out REQUEST_JSON \
-  [--receipt RECEIPT_JSON] [--exclude MACHINE:HOME ... --reason R] [--watch-s S]
+  [--receipt RECEIPT_JSON] [--exclude MACHINE:HOME ... --reason R] [--watch-s S] \
+  [--alert-agent AGENT_ID] [--alert-webhook-file NAME] [--acknowledged-rejection OPERATION_ID]
 ```
 
 Builds the gateway home's `FleetRequest`: `previous` is this home's currently
@@ -62,7 +63,13 @@ with the operator's user name), and any other unit would take part, which
 refuses naming slice dbgen-8 (its receipt and capability travel over the
 handoff and the coordinator channel). A single box is a fleet of one.
 `--watch-s` shortens the captured watch window; every other policy bound
-keeps its `FleetPolicy` default. `verify_pair` still refuses a
+keeps its `FleetPolicy` default. The policy's alert route and oscillation
+guard are the operator's too: `--alert-agent` adds an observing agent's
+notice to every fleet alert, `--alert-webhook-file NAME` the out-of-band
+webhook whose URL the owner-only `$AVA_HOME/secrets/NAME` holds (checked
+here: a missing or group/other-accessible file refuses), and
+`--acknowledged-rejection` names the latest operation that rejected the
+candidate, the only way to request a rejected candidate again. `verify_pair` still refuses a
 schema-changing transition.
 
 The written file is handed to `ava cluster update --prepared REQUEST_JSON`;
@@ -116,6 +123,7 @@ cluster release state (`releases/fleet-state.json`: current release,
 last-known-good, stale units, rejections) and, by default, this home's active
 operation journal (`$AVA_HOME/updates/active`): the fleet journal's phase,
 decisions, verdicts, every unit's inclusion, last instruction and answer, and
-alerts with their deliveries, or a remote unit's instruction and answer. An
+alerts with the deliveries that landed and the routes each has not reached,
+or a remote unit's instruction and answer. An
 explicit `--operation` reads that journal directly. No lock is taken and
 nothing is written.

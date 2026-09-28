@@ -167,6 +167,40 @@ class _Assessment(NamedTuple):
     threshold_exceeded: bool
 
 
+def first_sightings(
+    known: tuple[AgentReport, ...], sampled: tuple[AgentReport, ...], *, since: datetime
+) -> tuple[AgentReport, ...]:
+    """The samples that show an agent's runtime error or quarantine not yet known.
+
+    Such a fact is definitive — it can only grow within the interval — but
+    the signal it is read from is not: a completed turn clears the fatal-turn
+    mark. The coordinator journals each first sighting since `since` and
+    judges it with every later sample, so a window never forgets it.
+    """
+    seen = {
+        (report.agent, fact)
+        for report in known
+        if report.observed_at >= since
+        for fact in _facts(report)
+    }
+    sightings: list[AgentReport] = []
+    for sample in sampled:
+        facts = {(sample.agent, fact) for fact in _facts(sample)}
+        if facts - seen:
+            sightings.append(sample)
+            seen |= facts
+    return tuple(sightings)
+
+
+def _facts(sample: AgentReport) -> set[AffectedReason]:
+    shown: set[AffectedReason] = set()
+    if sample.runtime_error:
+        shown.add("runtime_error")
+    if sample.quarantined:
+        shown.add("quarantined")
+    return shown
+
+
 def judge_start(
     policy: FleetPolicy,
     cohort: Cohort,
@@ -347,10 +381,8 @@ def _sample_reasons(
 ) -> set[AffectedReason]:
     """Errors and quarantines anywhere in the interval; liveness only at its close."""
     reasons: set[AffectedReason] = set()
-    if any(sample.runtime_error for sample in samples):
-        reasons.add("runtime_error")
-    if any(sample.quarantined for sample in samples):
-        reasons.add("quarantined")
+    for sample in samples:
+        reasons |= _facts(sample)
     if final and (liveness := _liveness(samples, fresh_from)) is not None:
         reasons.add(liveness)
     return reasons

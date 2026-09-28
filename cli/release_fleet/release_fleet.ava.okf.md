@@ -74,6 +74,13 @@ refused there because agents resume afterwards. Before the window ends only
 facts that can only grow count (recorded unit failures, runtime errors,
 quarantines, failed core samples), so an early recovery is the end decision
 made early. Recovery happens at most once: the previous direction holds.
+The signal an agent fact is read from does not grow (a completed turn clears
+`last_turn_fatal_at`), so the coordinator journals each agent's first
+sighting of each fact in the window (`first_sightings`,
+`FleetProgress.window_facts`) and judges it with every later sample: an
+agent affected mid-window keeps the release from known-good, errors spread
+across samples add up to the threshold, and a continuation keeps them. An
+error that appears and clears between two samples is not observed.
 
 ## Alerts (`alerting.py`)
 
@@ -83,8 +90,11 @@ Events: `unit_failed`, `unit_unknown` (per unit, with its agents),
 (source `release-fleet`, the shape `shared.alerts.upsert_alert` ingests),
 plus the out-of-band webhook and an observer-agent notice when the route
 names them. The webhook URL stays in `$AVA_HOME/secrets/<webhook_file>`, never
-in the request. The coordinator journals each alert by `key` at first
+in the request; that file must be this user's and mode 0600, or delivery
+refuses it. The coordinator journals each alert by `key` at first
 emission and re-delivers from the journal, so a retry keeps `starts_at`.
+Each hold is its own alert (a `held` key carries its time): an operation
+held again after the operator continued it alerts again.
 Without the database only the webhook can land.
 
 ## Known-good publication (`publication.py`)

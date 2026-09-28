@@ -14,8 +14,14 @@ accounted for, read-only:
 
 A single box is a fleet of one. `--watch-s` shortens the captured watch
 window (the preview's cycle uses it); every other policy bound keeps its
-`FleetPolicy` default. The written file is handed to `ava cluster update
---prepared`; nothing here submits or dispatches it.
+`FleetPolicy` default. `--alert-agent` and `--alert-webhook-file` route the
+fleet's alerts to an observing agent and to the out-of-band webhook whose URL
+the owner-only `$AVA_HOME/secrets/<file>` holds (checked now, so a missing or
+readable secret refuses here, not at the first alert);
+`--acknowledged-rejection` names the operation that rejected the candidate,
+the only way to request a rejected candidate again. The written file is
+handed to `ava cluster update --prepared`; nothing here submits or
+dispatches it.
 """
 
 from __future__ import annotations
@@ -27,10 +33,10 @@ import sys
 from collections.abc import Collection
 from datetime import UTC, datetime
 from pathlib import Path
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from cli.release_fleet.inventory import NETWORKED_REFUSAL, check_inventory, registered_units
-from cli.release_fleet.policy import FleetPolicy, UnitKey
+from cli.release_fleet.policy import AlertRoute, FleetPolicy, UnitKey
 from cli.release_fleet.request import Exclusion, FleetRequest
 from cli.release_operator.current import current_release
 from cli.release_operator.layout import receipt_path, require_commit_shape
@@ -105,6 +111,28 @@ def _exclusions(
     return tuple(exclusions)
 
 
+def _policy(
+    home: Path,
+    *,
+    watch_s: int | None,
+    alert_agent: int | None,
+    alert_webhook_file: str | None,
+    acknowledged_rejection: str | None,
+) -> FleetPolicy:
+    """The captured policy: the operator's choices over `FleetPolicy`'s defaults."""
+    from cli.release_fleet.delivery import webhook_url
+
+    route = AlertRoute(recipient_agent=alert_agent, webhook_file=alert_webhook_file)
+    if route.webhook_file is not None:
+        webhook_url(home, route.webhook_file)
+    chosen: dict[str, object] = {"alert_route": route}
+    if watch_s is not None:
+        chosen["watch_s"] = watch_s
+    if acknowledged_rejection is not None:
+        chosen["acknowledged_rejection"] = UUID(acknowledged_rejection)
+    return FleetPolicy.model_validate(chosen)
+
+
 def _build_request(
     *,
     commit: str,
@@ -112,6 +140,9 @@ def _build_request(
     exclude: tuple[str, ...],
     reason: str | None,
     watch_s: int | None,
+    alert_agent: int | None = None,
+    alert_webhook_file: str | None = None,
+    acknowledged_rejection: str | None = None,
 ) -> FleetRequest:
     from shared.cluster import registry_path
     from shared.machine import machine_name
@@ -131,7 +162,13 @@ def _build_request(
         raise ValueError("the prepared candidate is already this home's active release")
     gateway = UnitKey(machine=machine_name(), home=str(home))
     registered, _machines, paused = registered_units()
-    policy = FleetPolicy() if watch_s is None else FleetPolicy(watch_s=watch_s)
+    policy = _policy(
+        home,
+        watch_s=watch_s,
+        alert_agent=alert_agent,
+        alert_webhook_file=alert_webhook_file,
+        acknowledged_rejection=acknowledged_rejection,
+    )
     request = FleetRequest(
         id=uuid4(),
         home=str(home),
@@ -170,10 +207,20 @@ def cmd_release_request(
     reason: str | None,
     receipt: Path | None = None,
     watch_s: int | None = None,
+    alert_agent: int | None = None,
+    alert_webhook_file: str | None = None,
+    acknowledged_rejection: str | None = None,
 ) -> int:
     try:
         request = _build_request(
-            commit=commit, receipt=receipt, exclude=exclude, reason=reason, watch_s=watch_s
+            commit=commit,
+            receipt=receipt,
+            exclude=exclude,
+            reason=reason,
+            watch_s=watch_s,
+            alert_agent=alert_agent,
+            alert_webhook_file=alert_webhook_file,
+            acknowledged_rejection=acknowledged_rejection,
         )
         _write_request(out, request)
     except (ValueError, OSError, RuntimeError) as exc:

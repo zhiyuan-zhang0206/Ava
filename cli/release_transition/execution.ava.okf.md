@@ -23,6 +23,15 @@ automatic rollback boundary. Every executor (coordinator, follower, PITR)
 treats any `Exception` as a failure and journals it before routing it
 (`failure.py`); only a process-ending `BaseException` passes undecided.
 
+While it runs, the executor stamps `updates/<id>/executor-heartbeat` from a
+thread every `LEASE_RENEW_INTERVAL_S` and removes it when it leaves
+(`shared/release_operation.py::executor_heartbeat`). The health probe lets an
+incomplete operation explain an outage only while that stamp (or, before the
+first one, the operation's creation) is at most `EXECUTOR_HEARTBEAT_TTL_S`
+old; past it the executor is lost — killed, OOM'd, rebooted or never
+launched — and the probe alerts `operation executor lost`, graded from the
+last stamp.
+
 The stop phase closes this unit's writers. Persistent terminals — agent
 shells, coding sessions, watchers, page and schedule runners — do not survive
 a release ([decision](../../decisions/2026-09-27-fleet-release-and-cutover-policies.md)

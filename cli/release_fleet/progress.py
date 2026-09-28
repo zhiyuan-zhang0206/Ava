@@ -22,10 +22,10 @@ from uuid import UUID
 
 from pydantic import AwareDatetime, Field, JsonValue, model_validator
 
-from cli.release_fleet.alerting import FleetAlert
-from cli.release_fleet.policy import Cohort, UnitCohort, UnitKey
+from cli.release_fleet.alerting import FleetAlert, deliveries
+from cli.release_fleet.policy import AlertRoute, Cohort, UnitCohort, UnitKey
 from cli.release_fleet.request import FleetRequest, UnitRequest
-from cli.release_fleet.workload import Verdict
+from cli.release_fleet.workload import AgentReport, Verdict
 from cli.release_transition.authority_evidence import GenerationRef
 from cli.release_transition.request import Digest, Record
 from shared.cluster.authority.model import Direction
@@ -276,6 +276,14 @@ class AlertRecord(Record):
     alert: FleetAlert
     delivered: tuple[Literal["alert_row", "webhook", "agent"], ...] = ()
 
+    def undelivered(self, route: AlertRoute) -> tuple[str, ...]:
+        """The routes this alert has not reached yet."""
+        return tuple(
+            delivery.kind
+            for delivery in deliveries(self.alert, route)
+            if delivery.kind not in self.delivered
+        )
+
 
 class Decision(Record):
     kind: Literal["abort", "recover"]
@@ -309,6 +317,10 @@ class FleetProgress(Record):
     cohort: Cohort | None = None
     started_at: AwareDatetime | None = None
     resumed_at: AwareDatetime | None = None
+    # The watch window's first sighting of each agent's runtime error or
+    # quarantine (`workload.first_sightings`): a later sample no longer shows
+    # it, but the window never forgets it.
+    window_facts: tuple[AgentReport, ...] = ()
     verdicts: tuple[Verdict, ...] = ()
     alerts: tuple[AlertRecord, ...] = ()
     decisions: tuple[Decision, ...] = ()
@@ -352,6 +364,7 @@ class FleetProgress(Record):
         _set_once(self.admitted, after.admitted, "admitted generation")
         _set_once(self.cohort, after.cohort, "cohort")
         _set_once(self.outcome, after.outcome, "outcome")
+        _prefix(self.window_facts, after.window_facts, "window facts")
         _prefix(self.verdicts, after.verdicts, "verdicts")
         _prefix(self.decisions, after.decisions, "decisions")
         if [r.alert for r in after.alerts[: len(self.alerts)]] != [r.alert for r in self.alerts]:

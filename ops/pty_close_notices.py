@@ -15,10 +15,12 @@ notice is that closure's intent and an interrupted executor cannot lose it.
 Once a session's shell is verified gone, its notice names any process of the
 session that outlived its SIGKILL — a release's by rewriting its intent record
 under the same dedup key.
-The ops daemon flushes the journal at its next startup: a notice for a live
-owner becomes a system inbound message, one for a terminated/restarting owner
-is dropped without delivery (a closure notice must never resurrect a dead
-agent — the TTL reaper's boundary, gateway/ttl_reaper.py:83).
+The ops daemon flushes the journal at its next startup, once that start has
+released its maintenance hold (`services/agent_ops/close_notices.py`): a
+notice for a live owner becomes a system inbound message, one for a
+terminated/restarting owner is dropped without delivery (a closure notice
+must never resurrect a dead agent — the TTL reaper's boundary,
+gateway/ttl_reaper.py:83).
 
 One file per (machine, agent_id, session_id, shell-birth) dedup key: a stop
 retry or a CLI re-entry overwrites the same record instead of stacking a
