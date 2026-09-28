@@ -217,3 +217,39 @@ def test_what_the_window_saw_survives_executor_death(
         drive(journal, effects)
     final = read_operation(request_record.path)
     assert final.fleet is not None and final.fleet.outcome == "degraded"
+
+
+def test_an_alert_undelivered_at_completion_is_logged_and_kept_for_status(
+    request_record: FleetRequest,
+    monkeypatch: pytest.MonkeyPatch,
+    loguru_records: list[dict[str, Any]],
+) -> None:
+    """Completion does not wait for a delivery that keeps failing, but it
+    never drops one silently: the error is logged, and the journal keeps the
+    alert with the routes it has not reached, which `release status` shows."""
+    from cli.release_operator import status as status_module
+    from shared import machine as shared_machine
+    from shared import paths as shared_paths
+
+    create(request_record)
+    effects = Effects(request_record, fail="starting")
+    effects.undeliverable = {"recovering"}
+    with exclusive(request_record.path) as journal:
+        drive(journal, effects)
+    assert read_operation(request_record.path).terminal
+    errors = [r["message"] for r in loguru_records if r["level"].name == "ERROR"]
+    assert any("recovering" in message and "undelivered" in message for message in errors)
+
+    monkeypatch.setattr(shared_paths, "ava_home", lambda: Path(request_record.home))
+    monkeypatch.setattr(shared_machine, "machine_name", lambda: request_record.machine)
+
+    def nothing_selected(_home: Path) -> None:
+        return None
+
+    monkeypatch.setattr(status_module, "current_release", nothing_selected)
+    body = status_module._status_body(operation=str(request_record.id))
+    alerts = body["operation"]["fleet"]["alerts"]
+    assert {a["kind"]: a["undelivered"] for a in alerts} == {
+        "recovering": ["alert_row"],
+        "recovered": [],
+    }

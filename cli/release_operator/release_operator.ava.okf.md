@@ -123,6 +123,7 @@ cluster release state (`releases/fleet-state.json`: current release,
 last-known-good, stale units, rejections) and, by default, this home's active
 operation journal (`$AVA_HOME/updates/active`): the fleet journal's phase,
 decisions, verdicts, every unit's inclusion, last instruction and answer, and
-alerts with their deliveries, or a remote unit's instruction and answer. An
+alerts with the deliveries that landed and the routes each has not reached,
+or a remote unit's instruction and answer. An
 explicit `--operation` reads that journal directly. No lock is taken and
 nothing is written.

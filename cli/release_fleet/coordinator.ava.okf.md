@@ -87,7 +87,10 @@ representation yet, so no agent is reported quarantined. Completion writes
 `releases/fleet-state.json` once per operation (`publication.publish`).
 Alerts are journaled by key at first emission; each delivery (alert row,
 webhook, observer notice; `delivery.py`) is journaled once it lands and
-retried at the next boundary otherwise.
+retried at the next boundary otherwise. Completion does not wait on a
+delivery that keeps failing: an alert still undelivered then is logged as an
+error and stays in the journal, where `ava cluster release status` lists the
+routes it has not reached.
 
 ## Recorded choices
 

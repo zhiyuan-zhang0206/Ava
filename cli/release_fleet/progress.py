@@ -22,8 +22,8 @@ from uuid import UUID
 
 from pydantic import AwareDatetime, Field, JsonValue, model_validator
 
-from cli.release_fleet.alerting import FleetAlert
-from cli.release_fleet.policy import Cohort, UnitCohort, UnitKey
+from cli.release_fleet.alerting import FleetAlert, deliveries
+from cli.release_fleet.policy import AlertRoute, Cohort, UnitCohort, UnitKey
 from cli.release_fleet.request import FleetRequest, UnitRequest
 from cli.release_fleet.workload import AgentReport, Verdict
 from cli.release_transition.authority_evidence import GenerationRef
@@ -275,6 +275,14 @@ class AlertRecord(Record):
 
     alert: FleetAlert
     delivered: tuple[Literal["alert_row", "webhook", "agent"], ...] = ()
+
+    def undelivered(self, route: AlertRoute) -> tuple[str, ...]:
+        """The routes this alert has not reached yet."""
+        return tuple(
+            delivery.kind
+            for delivery in deliveries(self.alert, route)
+            if delivery.kind not in self.delivered
+        )
 
 
 class Decision(Record):

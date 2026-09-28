@@ -17,9 +17,11 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from cli.release_fleet.policy import AlertRoute
 from cli.release_fleet.progress import FleetProgress, UnitProgress
+from cli.release_fleet.request import FleetRequest
 from cli.release_operator.current import current_release
-from cli.release_transition.journal import read_operation
+from cli.release_transition.journal import Operation, read_operation
 from shared.verified_file import regular_bytes
 
 
@@ -52,12 +54,19 @@ def _operation_body(home: Path, operation: str | None) -> dict[str, Any] | None:
         "attempt": journal.attempt,
         "launch_attempted": journal.launch_attempted,
         "error": journal.error,
-        "fleet": None if journal.fleet is None else _fleet(journal.fleet),
+        "fleet": None if journal.fleet is None else _fleet(journal.fleet, _route(journal)),
         "unit": None if journal.unit is None else _unit(journal.unit),
     }
 
 
-def _fleet(progress: FleetProgress) -> dict[str, Any]:
+def _route(operation: Operation) -> AlertRoute:
+    request = operation.request
+    if not isinstance(request, FleetRequest):
+        raise TypeError("fleet progress belongs to a fleet request")
+    return request.policy.alert_route
+
+
+def _fleet(progress: FleetProgress, route: AlertRoute) -> dict[str, Any]:
     return {
         "outcome": progress.outcome,
         "maintenance_at": progress.maintenance_at.isoformat(),
@@ -94,6 +103,7 @@ def _fleet(progress: FleetProgress) -> dict[str, Any]:
                 "kind": r.alert.kind,
                 "unit": None if r.alert.unit is None else r.alert.unit.label,
                 "delivered": list(r.delivered),
+                "undelivered": list(r.undelivered(route)),
             }
             for r in progress.alerts
         ],
@@ -178,6 +188,11 @@ def _render(body: dict[str, Any]) -> str:
     fleet = operation["fleet"]
     if fleet is not None:
         lines.append(f"  outcome={fleet['outcome']} decisions={fleet['decisions']}")
+        lines.extend(
+            f"  alert {a['kind']} undelivered to {', '.join(a['undelivered'])}"
+            for a in fleet["alerts"]
+            if a["undelivered"]
+        )
         lines.extend(
             f"  unit {u['unit']}: {u['inclusion']} instruction={u['instruction']} "
             f"answered={u['answered']} reason={u['reason']}"

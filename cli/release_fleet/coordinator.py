@@ -439,10 +439,26 @@ class Coordinator:
         }
 
     def _complete(self, completion: Completion) -> None:
-        """Publish, tell every unit, deliver, then complete; each step is idempotent."""
+        """Publish, tell every unit, deliver, then complete; each step is idempotent.
+
+        Completion does not wait on a delivery that keeps failing, but never
+        drops one silently: each alert still undelivered is logged as an
+        error, and the journal keeps it with the routes it has not reached
+        (`ava cluster release status` shows them).
+        """
         self.gateway.publish(completion)
         self.units.finish(self.journal, completion.outcome)
         self._deliver()
+        route = self.request.policy.alert_route
+        for record in self.progress.alerts:
+            if missing := record.undelivered(route):
+                logger.error(
+                    "[release-fleet] {kind} alert {key} undelivered at completion ({missing}); "
+                    "kept in the operation journal (`ava cluster release status`)",
+                    kind=record.alert.kind,
+                    key=record.alert.key,
+                    missing=", ".join(missing),
+                )
         self.journal.complete(completion.outcome)
         self.gateway.lease.release()
 
