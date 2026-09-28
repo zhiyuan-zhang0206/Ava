@@ -16,10 +16,13 @@ def write_transaction(
 ) -> Generator[psycopg.Connection, None, None]:
     """Open one transaction explicitly allowed to write.
 
-    PgBouncer can assign a client a backend whose session state another client
-    changed to default read-only. Declare this transaction writable as its first
-    statement before DML, pinning the borrowed backend until the context commits
-    or rolls back. Pool connections must not use autocommit.
+    The session may default to read-only without this client asking: a pooler
+    that does not track `default_transaction_read_only` per client (PgBouncer
+    before 1.26; a remote-managed data plane's pooler is not ours to pin) hands
+    over what another client SET, and a database or role default survives the
+    pooled session scrub. Declare this transaction writable as its first
+    statement before DML, pinning the borrowed backend until the context
+    commits or rolls back. Pool connections must not use autocommit.
 
     `direct=True` dials the real Postgres instead of the pooler, for the
     admin-plane tail writers that must still land when a maintenance stop has
@@ -46,9 +49,9 @@ async def async_write_transaction(  # noqa: UP047 - preserve the pool connection
 ) -> AsyncGenerator[_CT, None]:
     """Borrow one async connection for an explicitly writable transaction.
 
-    PgBouncer can reuse a backend whose prior client left its default transaction
-    read-only. Async pool connections use autocommit, so open a transaction before
-    declaring it writable and yielding it for DML.
+    The session may default to read-only without this client asking (see
+    `write_transaction`). Async pool connections use autocommit, so open a
+    transaction before declaring it writable and yielding it for DML.
     """
     async with pool.connection(timeout=timeout) as conn, conn.transaction():
         await conn.execute("SET TRANSACTION READ WRITE")
