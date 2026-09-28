@@ -298,7 +298,7 @@ def test_a_row_changed_after_planning_is_left_unchanged_and_the_run_says_so(
     inputs = _inputs(tmp_path, cluster)
     capsys.readouterr()
     with _connection(write=True) as conn:
-        assert records._run(conn, cluster.home, inputs) == 0
+        assert records._run(conn, cluster.home, inputs) == 2  # complete, with a noted result
     partial = f"applied: minted 1, left 1 changed row(s) unchanged (agents {changed})"
     journal = records.read_journal(cluster.home)
     assert journal is not None and journal["runs"][-1]["results"]["identities"] == [partial]

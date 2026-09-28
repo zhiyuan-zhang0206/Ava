@@ -110,6 +110,13 @@ carries a note in full (a conversion the guards refused, the rows a mint left
 unchanged, `refused: ...` or `applied: minted N, left M ...`), and ends with
 `!` instead of `✓` when any result did.
 
+Exit status, every mode: 0 is clean. 1 is a refusal (nothing changed) or an
+incomplete run (continue it with the same inputs). 2 means the result needs
+the operator's review: `--check` with a check neither `ok` nor `info`, a dry
+run with a refusal, or an `--execute` run with a noted result. That run is
+recorded complete (the W11 gate accepts it), and the same inputs only print
+it again: review each noted row as a [row left fenced](#rows-left-fenced).
+
 The pending, lease and posture repairs also require an attestation proving
 closure from every included machine (a unit neither paused nor retired).
 

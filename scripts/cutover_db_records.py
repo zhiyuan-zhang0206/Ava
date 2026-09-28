@@ -745,7 +745,7 @@ def _run(conn: psycopg.Connection[Any], home: Path, inputs: Inputs) -> int:
             print(f"    ! {result}")
     done = "! repairs recorded with the exceptions above" if noted else "✓ repairs recorded"
     print(f"{done} in {home / JOURNAL}; run --check to verify.")
-    return 0
+    return 2 if noted else 0  # like --check's 2: complete, but its noted rows need review
 
 
 def _parser() -> argparse.ArgumentParser:

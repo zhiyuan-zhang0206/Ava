@@ -497,6 +497,8 @@ def test_execute_records_the_run_and_the_same_inputs_change_nothing(
     assert (record / "journal.json").stat().st_mode & 0o777 == 0o600
 
     assert _run(cluster, inputs) == run
+    with _connection(write=True) as conn:
+        assert records._run(conn, cluster.home, inputs) == 0  # every result clean
     assert len(json.loads((record / "journal.json").read_text())["runs"]) == 1
     after = _survey(inputs).checks
     verdicts = {name: after[name]["verdict"] for name in ("D-1", "D-2", "D-6", "D-8")}
