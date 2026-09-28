@@ -57,10 +57,11 @@ Three values anchor every command in this skill:
   from any other process tree is refused — never move control to a helper. Run control
   commands directly in the executor session's own shell: the caller's ancestor chain must
   contain the recorded executor anchor within 8 levels — deeper wrapping fails closed.
-- **The cluster executable** — use the `ava` CLI and Python interpreter of the
-  cluster that hosts the agent (the checkout path was given to you, typically
-  `<checkout>/.venv/bin/ava`). A bare `ava` on `PATH` can belong to a different
-  cluster; the wrong executable cannot see this lease.
+- **The cluster executable** — run the commands as given, with a bare `ava`. It acts
+  on the cluster your `AVA_HOME` names: launched by an Ava agent, you inherited
+  that agent's `AVA_HOME`; in a terminal of your own, export the hosting
+  cluster's home first. Without `AVA_HOME`, or with an `ava` that belongs to
+  another cluster, the command refuses rather than guess.
 
 Check state any time:
 

@@ -87,10 +87,10 @@ cluster's secret.
 
 ## Operate it
 
-Always through the cluster's **own** `ava`. A bare `ava` on that host's PATH
-belongs to a different checkout and acts on a different home, and
-`AVA_HOME=~/.ava-preview` does not redirect it — the boot refuses an env var
-that contradicts the checkout's own claim
+Through the cluster's **own** CLI: its checkout's `.venv/bin/ava`, or a bare
+`ava` with `AVA_HOME` exported to the preview's home (the host launcher runs
+`$AVA_HOME/ava`, which the preview's converge links). A checkout's own CLI
+still refuses an `AVA_HOME` that contradicts the checkout's claim
 (`shared/dotenv_boot.py:_assert_env_agrees_with_checkout`).
 
 ```bash

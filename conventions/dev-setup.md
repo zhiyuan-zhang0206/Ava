@@ -74,8 +74,8 @@ The location-addressed entrypoint is **`.venv/bin/ava`, run from inside the
 worktree** (the `./ffmpeg` analog — a literal path into this checkout, no resident
 `uv run` wrapper). `uv sync` does the editable package install and creates that
 console script, so `.venv/bin/ava` runs the worktree's code live; the host-global
-`ava` on PATH always means prod and is never shadowed (converge skips the
-host-global symlink/PATH wiring for dev clusters). There is deliberately **no
+`ava` on PATH runs whichever cluster `$AVA_HOME` names (a dev cluster's converge
+links its own `$AVA_HOME/ava` but skips the host-global launcher/PATH wiring). There is deliberately **no
 `./ava` / global `ava-<name>` dev shim** — addressing is by location: the `.venv`
 physically lives in this worktree (a literal `./ava` is also blocked: the repo root
 already has an `ava/` package dir).

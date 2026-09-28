@@ -1,7 +1,6 @@
 """Bootstrap contract for a coding process launched to replace its Ava owner."""
 
 import shlex
-import sys
 from pathlib import Path
 
 # The generated request command spells out both former defaults because the CLI
@@ -30,11 +29,11 @@ def bootstrap_message(
     """Name both identities explicitly and inline the briefing in the launch message."""
     if provider not in _EXECUTOR_LABELS or not name.strip():
         raise ValueError("A takeover needs a session name and a codex/claude/dsh provider")
+    # A bare `ava`: the executor inherits AVA_HOME, and the host launcher runs
+    # that cluster's own CLI (scripts/ava-launcher.sh).
     command = shlex.join(
         [
-            sys.executable,
-            "-m",
-            "cli",
+            "ava",
             "impersonate",
             "request",
             "--agent",

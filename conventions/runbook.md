@@ -452,11 +452,12 @@ the migrate step.
 
 `repo` here is the checkout the running `ava` belongs to (resolved from where its `cli` source
 lives, `cli/commands/_repo.py:_repo_root`), **not** the current directory — so a given `ava` always
-targets the same cluster no matter where you run it. `install.sh` bootstraps the `ava` symlink into
-`~/.local/bin/ava` (a .env-free bash step, so it works on a fresh host before secrets are filled);
-the converge phase re-ensures it — and applies the rest of the host wiring — on every
-`ava start` / `ava cluster update`. That global `ava` always means prod. For dev, run
-`.venv/bin/ava` inside the worktree (which resolves the worktree's own `ava`).
+targets the same cluster no matter where you run it. `install.sh` links `~/.local/bin/ava` to
+`scripts/ava-launcher.sh` (a .env-free bash step, so it works on a fresh host before secrets are
+filled); the converge phase re-ensures it, links each cluster's own `$AVA_HOME/ava` to its checkout's
+CLI, and applies the rest of the host wiring on every `ava start` / `ava cluster update`. That global
+`ava` runs `$AVA_HOME/ava` and refuses without `AVA_HOME`. For dev, run `.venv/bin/ava` inside the
+worktree, or export the dev cluster's `AVA_HOME`.
 
 The converge phase (`cli/commands/converge/host.py:converge_host`) is idempotent — run
 by `cmd_start`, so `ava cluster update` re-applies it on every upgrade. One gateway

@@ -150,11 +150,13 @@ A complete Ava cluster is now running on your machine:
 
 ### `ava: command not found`
 
-The install script symlinks `ava` to `~/.local/bin/ava`. Make sure that path is on PATH:
+The prod install links `~/.local/bin/ava` to the ava launcher, which runs the CLI of
+the cluster `$AVA_HOME` names. Put that path on PATH and name your cluster:
 
 ```bash
 export PATH="$HOME/.local/bin:$PATH"
-# To make it permanent, add the line above to ~/.bashrc or ~/.zshrc
+export AVA_HOME="$HOME/.ava"
+# To make them permanent, add both lines to ~/.bashrc or ~/.zshrc
 ```
 
 ### `ava start` says "AVA_CLUSTER_SECRET is required"
