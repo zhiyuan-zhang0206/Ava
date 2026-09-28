@@ -145,3 +145,35 @@ def test_a_live_executor_still_pauses_grading(
 
     assert cluster_health.run_health_probe() == 1
     assert _sent_alerts == []
+
+
+def test_a_recovering_operation_explains_nothing_past_its_first_phase(
+    _all_checks_pass: None,
+    _home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    _sent_alerts: list[str],
+) -> None:
+    """A recovery's hold is itself worth an alert. The decision records an
+    error, but the recovery's first `advance` clears it; the journaled
+    decision is what keeps the operation from explaining the outage."""
+    path = _journal(_home, created_at=datetime.now(UTC) - timedelta(hours=1), phase="fencing")
+    payload = json.loads(path.read_bytes())
+    payload["direction"] = "previous"
+    decided = datetime.now(UTC) - timedelta(minutes=20)
+    payload["fleet"]["decisions"] = [
+        {
+            "kind": "recover",
+            "phase": "starting",
+            "reason": "candidate failed",
+            "at": decided.isoformat(),
+        }
+    ]
+    path.write_text(json.dumps(payload) + "\n")
+    _beat(path, datetime.now(UTC))
+    monkeypatch.setattr(cluster_health, "_gateway_liveness_with_retry", lambda: False)
+    monkeypatch.setattr(cluster_health, "_data_plane_abnormal", lambda: False)
+    _write_aged_alert_state(_home, _LIVENESS_FAILURE, age=timedelta(minutes=30))
+
+    assert cluster_health.run_health_probe() == 1
+    [alert] = _sent_alerts
+    assert "gateway liveness" in alert

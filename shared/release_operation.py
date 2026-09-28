@@ -143,23 +143,36 @@ class InFlight(NamedTuple):
 
     `last_seen` is the executor's last heartbeat or, before its first one, the
     operation's creation (the launch grace). `alive` means that is at most
-    `EXECUTOR_HEARTBEAT_TTL_S` old.
+    `EXECUTOR_HEARTBEAT_TTL_S` old. `recovering`: the operation journaled an
+    abort, recovery or rollback decision.
     """
 
     label: str
     alive: bool
     last_seen: datetime
+    recovering: bool
+
+    @property
+    def explains(self) -> bool:
+        """Whether it explains an outage: a live executor on the planned path.
+
+        A recovering operation's hold is itself worth an alert, in every
+        phase after its decision, not only while the decision's error is the
+        journal's latest.
+        """
+        return self.alive and not self.recovering
 
 
 def operation_in_flight(home: Path, *, now: datetime | None = None) -> InFlight | None:
     """This home's incomplete operation that has recorded no failure, if any.
 
     It explains an outage of the unit it is replacing only while its executor
-    is alive: a killed, OOM'd or rebooted executor, or one that never
-    launched, stops stamping its heartbeat, and its operation then explains
-    nothing — the executor is lost. A failed or recovering operation (a
-    recorded error) explains nothing either: its hold is itself worth an
-    alert. None when no operation is active or it completed.
+    is alive (`InFlight.explains`): a killed, OOM'd or rebooted executor, or
+    one that never launched, stops stamping its heartbeat, and its operation
+    then explains nothing — the executor is lost. A recovering operation
+    explains nothing either. None when no operation is active, it completed,
+    or it failed (a recorded error): a held operation's executor exited on
+    purpose, and its hold is itself worth an alert.
     """
     from shared.deploy_timing import EXECUTOR_HEARTBEAT_TTL_S
 
@@ -171,12 +184,15 @@ def operation_in_flight(home: Path, *, now: datetime | None = None) -> InFlight 
     _require_operation_identity(home, path, operation)
     if operation["phase"] == "complete" or operation["error"] is not None:
         return None
-    label = _KIND_LABELS[operation["request"]["kind"]]
+    kind = operation["request"]["kind"]
     created = datetime.fromisoformat(operation["request"]["created_at"])
     last_seen = max(created, _heartbeat(path) or created)
     stale = (now or datetime.now(UTC)) - last_seen > timedelta(seconds=EXECUTOR_HEARTBEAT_TTL_S)
     return InFlight(
-        f"{label} operation {path.parent.name} at {operation['phase']}", not stale, last_seen
+        label=f"{_KIND_LABELS[kind]} operation {path.parent.name} at {operation['phase']}",
+        alive=not stale,
+        last_seen=last_seen,
+        recovering=bool(operation[kind]["decisions"]),
     )
 
 

@@ -436,15 +436,16 @@ def _deploy_suppression() -> str | None:
     its executor's heartbeat is fresh: the probe annotates its output with the
     operation instead of alerting, even while the data plane that holds the
     deploy lease is down. The episode retains its true start. A lost executor
-    explains nothing, and neither does the deploy lease it may still hold; an
-    expired or unreadable deploy owner, or a failed operation, explains nothing
-    either, so severity resumes from that same start.
+    or a recovering operation explains nothing, and neither does the deploy
+    lease it may still hold; an expired or unreadable deploy owner, or a
+    failed operation, explains nothing either, so severity resumes from that
+    same start.
     """
     from ops.deploy_window import deploy_in_flight
 
     operation = _release_operation()
     if operation is not None:
-        return operation.label if operation.alive else None
+        return operation.label if operation.explains else None
     window = deploy_in_flight()
     return window.detail if window.active else None
 
