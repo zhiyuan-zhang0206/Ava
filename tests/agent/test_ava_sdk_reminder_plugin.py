@@ -1,34 +1,5 @@
-"""`plugins.ava_sdk_reminder` tests — the two hooks that surface a one-time hint
-when the agent reaches for a native-Python equivalent of an SDK primitive.
-
-Both hooks are graph-edge nodes: they read the message tail + their own plugin
-fields straight off the `state` arg and return a delta dict (no exec-turn state
-plumbing). So these tests build a dynamic AgentState instance with the plugin
-fields and call the hook functions directly, mirroring the
-`_compact_reminder` tests in test_compact.py.
-
-Covered:
-- after_exec (code categories shell/wait/files/http): first hit injects the
-  hint as a separate system-note (leaving the exec-output message untouched) +
-  marks; second hit no-ops; multi-category cell lists all in CATEGORIES order;
-  a compaction re-arms; tail-shape / empty-code no-ops; the pure
-  detect_categories matcher — literal masking (string/comment/f-string spans
-  never trigger) and the content-only files trigger (listing/managing via
-  stdlib + content via ava.files never triggers). A sleep cell that already names `watcher` marks
-  the wait category seen WITHOUT emitting (the agent is using the watcher
-  primitive itself) while any other matched category still hints; the pure
-  mentions_watcher matcher; the shell hint's inlined signature + docstring are
-  pinned to the live wrapped `ava.shell.run`.
-- after_exec (assumed-persistence NameError): an undefined identifier hints
-  only when its whole name appeared in an earlier execute_code cell; the
-  current cell, builtins, keywords, disabled config, and repeated same-name
-  failures stay silent.
-- before_llm (agent_reply): first inbound from another agent injects a
-  system-note + marks; second no-ops; a compaction re-arms; user/ui inbound
-  no-ops; the note defers when auto-compact would fire the same turn (it would
-  clobber / be clobbered by compaction's message replacement) and fires
-  normally; the pure tail_has_agent_inbound
-  matcher (incl. stop-at-prior-AIMessage boundary).
+"""SDK reminder contracts: per-call code hints and persistence NameErrors,
+with per-compaction cadence; agent-reply hints on agent-sourced inbound.
 """
 
 import inspect
@@ -1086,3 +1057,32 @@ def test_tail_has_agent_inbound_user_only_no_ai_false():
     """Only a user inbound, no AIMessage -> False."""
     msgs: list[AnyMessage] = [inbound_message(content="hi", source="user", inbound_id=2)]
     assert tail_has_agent_inbound(msgs) is False
+
+
+@pytest.mark.parametrize(
+    "codes,outputs,expected",
+    [
+        (["subprocess.run(['ls'])", "open('file')"], ["ok", "ok"], {"shell", "files"}),
+        (
+            ["shared_name = 1", "print(shared_name)"],
+            ["ok", _nameerror_output("shared_name")],
+            {"nameerror:shared_name"},
+        ),
+    ],
+)
+async def test_multiple_calls_match_results_by_id(
+    _loaded: Any, codes: list[str], outputs: list[str], expected: set[str]
+):
+    ai = AIMessage(
+        content="",
+        tool_calls=[
+            {"name": "execute_code", "args": {"code": code}, "id": str(i)}
+            for i, code in enumerate(codes)
+        ],
+    )
+    results = [ToolMessage(content=output, tool_call_id=str(i)) for i, output in enumerate(outputs)]
+    state = _state([ai, *results, HumanMessage(content="attachment")])
+    result = await _loaded.sdk_reminder_after_exec(state, _runtime(), _config())
+    assert result is not None
+    assert result["ava_sdk_reminder__reminded"] == expected
+    assert len(result["messages"]) == len(expected)

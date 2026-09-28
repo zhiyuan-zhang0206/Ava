@@ -2,9 +2,9 @@
 
 Each execute_code call runs in a fresh child process (`agent/exec_child.py`),
 so a stuck native call is SIGKILLable without touching the agent process
-(issue #184). All paths return Command(goto="after_exec") — under cycling
-topology after_exec always routes to claim, which decides whether to wait or
-continue multi-step based on pending inbound + state.halted.
+(issue #184). Each graph step executes one call and returns its delta to LangGraph.
+Pending calls route back to exec after that commit; the completed batch routes to
+after_exec, then claim, which decides whether to wait or continue the turn.
 
 Core mechanisms:
   - Subprocess backend (`agent/graph/_exec_subprocess.py`): the parent spawns
@@ -58,11 +58,11 @@ from __future__ import annotations
 import asyncio
 import time
 from collections.abc import Awaitable, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Any, Literal
 
-from langchain_core.messages import AIMessage, AnyMessage
+from langchain_core.messages import AIMessage, AnyMessage, ToolCall, ToolMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 from langgraph.types import Command
@@ -72,7 +72,7 @@ from agent.graph._attach_drain import build_attach_message
 from agent.graph._attach_merge import merge_attachments
 from agent.graph._exec_notes import merge_exec_notes
 from agent.messages import exec_output_message
-from agent.nodes import AFTER_EXEC
+from agent.nodes import AFTER_EXEC, EXEC
 from agent.state import AttachState, _validate_plugin_state_keys
 from ava.security import SecurityFindingEntry, take_findings
 from shared.config import settings
@@ -100,10 +100,10 @@ from .exec_output import crashed_no_output_body, wrap_code_output
 from .exec_protocol import ResultPayload
 from .interrupt import subscribe_interrupt
 from .node_log import node_lifecycle
-from .tool_calls import merge_multiple_execute_code_tool_calls
+from .tool_calls import code_from_args, normalize_tool_calls
 
-# exec_node always goto AFTER_EXEC (under the cycling topology, halted is routed by after_exec)
-ExecGoto = Literal["after_exec"]
+# Each exec step commits one call; remaining calls return to EXEC before AFTER_EXEC.
+ExecGoto = Literal["exec", "after_exec"]
 
 # The `_ExecResult` sum type — 5 mutually exclusive variants + a shared output
 # field — lives in `_exec_result.py` (moved there so the exec-subprocess
@@ -116,16 +116,6 @@ ExecGoto = Literal["after_exec"]
 # constructed directly, skipping the cancelled/timed_out branches — the
 # "lifecycle always wins" race decision moved from dispatch site to
 # construction site; exec_node match no longer has to consider the race.
-
-
-@dataclass(frozen=True)
-class _ExecCall:
-    """Resolved execute_code invocation; `state_messages_update` carries the
-    merged tool-call message (when the multi-call merge fired)."""
-
-    code: str
-    tool_call_id: str
-    state_messages_update: list[AnyMessage]
 
 
 async def exec_node(
@@ -144,59 +134,6 @@ async def exec_node(
         agent_id=agent_id_from_config(config),
     ):
         return await _exec_node_impl(state, runtime, config)
-
-
-def _resolve_exec_call(state: _state.AgentState, agent_id: int) -> _ExecCall | Command[ExecGoto]:
-    """Extract the execute_code tool call from the previous AIMessage.
-
-    Single-tool wire format: the model must call Python via tool_calls[0]
-    (bare content form is deprecated); tool_call_id pairs with the ToolMessage
-    sent back. Returns an error Command (unknown-tool ToolMessage so the next
-    round can retry), raises ValueError on the no-tool_calls path, else the
-    resolved `_ExecCall`.
-    """
-    last = state.messages[-1]
-    fixed_last = (
-        merge_multiple_execute_code_tool_calls(
-            last,
-            agent_id=agent_id,
-            location="exec_node",
-        )
-        if isinstance(last, AIMessage)
-        else None
-    )
-    state_messages_update: list[AnyMessage] = []
-    if fixed_last is not None:
-        last = fixed_last
-        state_messages_update.append(fixed_last)
-    tool_calls = getattr(last, "tool_calls", None)
-    if not tool_calls:
-        raise ValueError(
-            f"exec_node: previous AIMessage has no tool_calls (type={type(last).__name__}). "
-            f"Model must call the execute_code tool; should not reach this path"
-        )
-    # Anthropic-compat providers (e.g. DeepSeek) don't grammar-constrain the
-    # tool name to the registered set, so the model can hallucinate calling SDK
-    # functions like `ava.files.edit` as tools. Surface as ToolMessage so the
-    # next round can retry, instead of letting `["code"]` KeyError-crash exec.
-    first = tool_calls[0]
-    if first["name"] != "execute_code" or "code" not in first["args"]:
-        err = exec_output_message(
-            content=f"unknown tool {first['name']!r}; only `execute_code(code: str)` is registered",
-            tool_call_id=first["id"],
-            exit_code=0,
-            created_at=datetime.now(UTC),
-        )
-        state_messages_update.append(err)
-        return Command[ExecGoto](
-            update={"messages": state_messages_update, "halted": False},
-            goto=AFTER_EXEC,
-        )
-    return _ExecCall(
-        code=first["args"]["code"],
-        tool_call_id=first["id"],
-        state_messages_update=state_messages_update,
-    )
 
 
 async def _exec_with_node_shield(
@@ -442,40 +379,41 @@ def _attach_model(ctx: AvaContext) -> str:
     return getattr(ctx.llm, "model_name", None) or turn_settings.lm.llm_model
 
 
-async def _exec_node_impl(
+async def _exec_single_call(
     state: _state.AgentState,
-    runtime: Runtime[AvaContext],
-    config: RunnableConfig,
-) -> Command[ExecGoto]:
-    """Body of `exec_node`, extracted so `node_lifecycle` can wrap an enter/exit event."""
-    ctx = runtime.context
+    ctx: AvaContext,
+    agent_id: int,
+    call: ToolCall,
+    exec_msg_idx: int,
+    parent_findings: list[SecurityFindingEntry],
+) -> tuple[dict[str, Any], bool]:
+    """Execute one invocation; return its state delta and whether it compacted."""
     assert ctx.event_publisher is not None, (  # noqa: S101
         "_exec_node_impl requires ctx.event_publisher"
     )
-    agent_id = agent_id_from_config(config)
-
-    # exec_msg_idx = position the ToolMessage(exec_output) will land at — after
-    # exec_node returns Command, LangGraph appends, so `len(state.messages)` is
-    # that position. Computed before ExecStart so the frontend creates the
-    # code_output placeholder as soon as exec begins.
-    exec_msg_idx = len(state.messages)
+    # Deferring notes/media keeps result positions consecutive. Streaming and
+    # checkpoint reconstruction must use those same positions.
     ctx.event_publisher.emit(
         ExecStart(agent_id=agent_id, item_id=f"{exec_msg_idx}.0").model_dump_json()
     )
 
-    # Claim-side inbound scans run in this parent process before the exec child
-    # exists. Drain their explicitly attributed findings before every exit path
-    # below, so an unknown-tool response cannot leak them into a later turn.
-    parent_findings = take_findings()
-    resolved = _resolve_exec_call(state, agent_id)
-    if isinstance(resolved, Command):
-        # Unknown-tool path: the error ToolMessage is already in the update list.
-        assert resolved.update is not None  # noqa: S101 — _resolve_exec_call builds this update
-        resolved.update["messages"] = merge_exec_notes(
-            resolved.update["messages"], None, parent_findings
+    state_messages_update: list[AnyMessage] = []
+    if call["name"] != "execute_code" or "code" not in call["args"]:
+        error = exec_output_message(
+            content=f"unknown tool {call['name']!r}; only `execute_code(code: str)` is registered",
+            tool_call_id=call["id"] or "",
+            exit_code=0,
+            created_at=datetime.now(UTC),
         )
-        return resolved
-    state_messages_update = resolved.state_messages_update
+        ctx.event_publisher.emit(
+            ExecOutput(
+                agent_id=agent_id, item_id=f"{exec_msg_idx}.0", content=str(error.content)
+            ).model_dump_json()
+        )
+        return {
+            "messages": merge_exec_notes([error], None, parent_findings),
+            "halted": False,
+        }, False
 
     # Streaming chunks and the final ExecOutput share the same item_id
     # computed above; the frontend uses it to append chunks to the same
@@ -494,7 +432,13 @@ async def _exec_node_impl(
         envelope_findings,
         envelope_attachments,
         envelope_sdk_calls,
-    ) = await _run_agent_code(state, ctx, agent_id, resolved.code, chunk_publisher)
+    ) = await _run_agent_code(
+        state,
+        ctx,
+        agent_id,
+        code_from_args(call["args"], source=f"tool_call {call['id']!r}"),
+        chunk_publisher,
+    )
     halted, result_text, exit_code_for_msg = _dispatch_exec_result(
         result, ctx, agent_id, referenced_messages=state.messages
     )
@@ -524,7 +468,7 @@ async def _exec_node_impl(
 
         msg = exec_output_message(
             content=result_text,
-            tool_call_id=resolved.tool_call_id,
+            tool_call_id=call["id"] or "",
             exit_code=exit_code_for_msg,
             cancelled=isinstance(result, _ExecCancelled),
             timed_out=isinstance(result, _ExecTimedOut),
@@ -555,4 +499,92 @@ async def _exec_node_impl(
         if attach_msg is not None:
             state_messages_update.append(attach_msg)
             update["attach"] = AttachState()
-    return Command[ExecGoto](update=update, goto=AFTER_EXEC)
+    return update, compact_halt
+
+
+def _remaining_exec_calls(
+    messages: Sequence[AnyMessage],
+) -> tuple[list[AnyMessage], list[ToolCall]]:
+    """Derive progress from committed result IDs, without a separate cursor."""
+    completed: set[str] = set()
+    for message in reversed(messages):
+        if isinstance(message, ToolMessage):
+            completed.add(message.tool_call_id)
+        elif isinstance(message, AIMessage):
+            normalized = normalize_tool_calls(message)
+            calls = (normalized or message).tool_calls
+            if not calls:
+                raise ValueError("exec_node: previous AIMessage has no tool_calls")
+            return (
+                [normalized] if normalized is not None else [],
+                [call for call in calls if (call["id"] or "") not in completed],
+            )
+    raise ValueError("exec_node: no preceding AIMessage")
+
+
+def _skipped_call_results(
+    calls: Sequence[ToolCall], ctx: AvaContext, agent_id: int, start_index: int
+) -> list[ToolMessage]:
+    """Pair calls left unexecuted by a lifecycle halt or cancellation."""
+    assert ctx.event_publisher is not None  # noqa: S101
+    results: list[ToolMessage] = []
+    for ordinal, call in enumerate(calls):
+        message = exec_output_message(
+            content="Not executed: an earlier tool call halted or cancelled this turn.",
+            tool_call_id=call["id"] or "",
+            exit_code=-1,
+            created_at=datetime.now(UTC),
+        )
+        results.append(message)
+        ctx.event_publisher.emit(
+            ExecOutput(
+                agent_id=agent_id,
+                item_id=f"{start_index + ordinal}.0",
+                content=str(message.content),
+            ).model_dump_json()
+        )
+    return results
+
+
+async def _exec_node_impl(
+    state: _state.AgentState,
+    runtime: Runtime[AvaContext],
+    config: RunnableConfig,
+) -> Command[ExecGoto]:
+    """Run one call; LangGraph owns reducer application and the next snapshot."""
+    parent_findings = take_findings()
+    replacements, calls = _remaining_exec_calls(state.messages)
+    if not calls:
+        # Recovery may already have paired the interrupted remainder.
+        return Command[ExecGoto](
+            update={"messages": state.pending_exec_notes, "pending_exec_notes": []},
+            goto=AFTER_EXEC,
+        )
+    agent_id = agent_id_from_config(config)
+    delta, compacted = await _exec_single_call(
+        state, runtime.context, agent_id, calls[0], len(state.messages), parent_findings
+    )
+    if compacted:
+        delta["pending_exec_notes"] = []
+        return Command[ExecGoto](update=delta, goto=AFTER_EXEC)
+
+    results = [message for message in delta["messages"] if isinstance(message, ToolMessage)]
+    notes = merge_exec_notes(
+        state.pending_exec_notes,
+        [message for message in delta["messages"] if not isinstance(message, ToolMessage)],
+        [],
+    )
+    if delta["halted"]:
+        results.extend(
+            _skipped_call_results(
+                calls[1:], runtime.context, agent_id, len(state.messages) + len(results)
+            )
+        )
+    elif len(calls) > 1:
+        delta["messages"] = replacements + results
+        delta["pending_exec_notes"] = notes
+        return Command[ExecGoto](update=delta, goto=EXEC)
+
+    delta["messages"] = replacements + results + notes
+    delta["pending_exec_notes"] = []
+    return Command[ExecGoto](update=delta, goto=AFTER_EXEC)

@@ -45,14 +45,13 @@ def merge_exec_notes(
 ) -> list[AnyMessage]:
     """Merge in-memory system notes into the exec's messages delta.
 
-    `state_messages_update` already ends with the exec-result ToolMessage;
-    Security-warning notes (when scanning is enabled) are appended before the
-    plugin's context notes, all after the ToolMessage and preserving the
-    tool_use -> tool_result adjacency invariant (see module docstring).
+    Security-warning notes (when scanning is enabled) precede the plugin's
+    context notes. The exec node defers notes until all tool results commit,
+    preserving tool_use -> tool_result adjacency (see module docstring).
 
     Args:
-        state_messages_update: the exec delta assembled so far (merged
-            AIMessage + exec-result ToolMessage).
+        state_messages_update: this call's exec-result ToolMessage, or notes
+            already deferred in `pending_exec_notes` by earlier calls.
         plugin_messages: messages the plugin wrote to the base `messages`
             channel this turn (context-file notes), or None.
         findings: security findings drained from ava.security's in-memory

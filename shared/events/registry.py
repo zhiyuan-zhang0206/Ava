@@ -255,9 +255,6 @@ _EVENTS_RUNTIME: dict[str, EventSpec] = {
     "thinking_block_sanitized": _telemetry(
         "thinking_block_sanitized", "thinking block sanitized", tier="noise"
     ),
-    "multiple_tool_calls_merged": _telemetry(
-        "multiple_tool_calls_merged", "concurrent tool calls merged"
-    ),
     "llm_cancelled": _telemetry("llm_cancelled", "LLM call cancelled", tier="anomaly"),
     # exec lifecycle
     "exec": _telemetry("exec", "execute_code succeeded", payload=ExecPayload),

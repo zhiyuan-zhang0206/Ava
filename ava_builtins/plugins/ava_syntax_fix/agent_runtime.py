@@ -11,21 +11,21 @@ from __future__ import annotations
 
 from typing import Any
 
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, ToolCall
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 from loguru import logger
 
 from agent.graph.tool_calls import (
     first_tool_call_code,
-    merge_multiple_execute_code_tool_calls,
-    replace_single_execute_code,
+    normalize_tool_calls,
+    replace_execute_code,
 )
 from agent.hooks import Hook, register_before_exec
 from agent.messages import exec_output_message
 from agent.state import AgentState
 from shared.config.turn_view import turn_settings
-from shared.context import AvaContext, agent_id_from_config
+from shared.context import AvaContext
 
 from ._deterministic_fixes import apply_all_deterministic_fixes
 from ._escapes import _fix_invalid_escapes
@@ -163,12 +163,11 @@ def _maybe_ruff_format(code: str) -> tuple[str, bool]:
 def _finalize_success(
     fixed_msg: AIMessage,
     fixes_applied: list[str],
-    merged_msg: AIMessage | None,
     before_code: str | None = None,
 ) -> dict[str, object] | None:
     """Emit the fixed message, or None to pass the original through untouched
-    when nothing changed and no merge occurred."""
-    if not fixes_applied and merged_msg is None:
+    when nothing changed."""
+    if not fixes_applied:
         return None
 
     if fixes_applied:
@@ -229,7 +228,7 @@ async def _handle_compile_failure(
             fixes=fixes_applied,
             note=f"llm_repair: {e}",
         )
-        return {"messages": [replace_single_execute_code(last_msg, repaired)]}
+        return {"messages": [replace_execute_code(last_msg, tool_call_id, repaired)]}
 
     logger.info(
         "[{label}] compile_failed: {msg} (fixes: {fixes})",
@@ -240,6 +239,11 @@ async def _handle_compile_failure(
     # Unfixable -- surface the error to the agent so it retries, skipping the
     # subprocess. Format mimics Python's native traceback.
     error_text = "Code execution output:\n\n" + rendered_error + "\n"
+
+    if len(last_msg.tool_calls) > 1:
+        # Let the ordinary child return this call's syntax error. Skipping the
+        # whole exec node would strand the other calls without results.
+        return {"messages": [fixed_msg]}
 
     tool_msg = exec_output_message(
         content=error_text,
@@ -254,67 +258,52 @@ async def _handle_compile_failure(
     }
 
 
+async def _fix_call(last_msg: AIMessage, call: ToolCall) -> dict[str, Any] | None:
+    """Repair one invocation without inspecting or rewriting sibling code."""
+    if call["name"] != "execute_code":
+        return None
+    code = first_tool_call_code([call])
+    if not code:
+        return None
+    fixed_code, fixes_applied = _apply_fix_pipeline(code)
+    fixed_msg = replace_execute_code(last_msg, call["id"], fixed_code)
+    try:
+        compile(fixed_code, "<agent_code>", "exec")
+    except SyntaxError as e:
+        return await _handle_compile_failure(
+            e, fixed_code, fixes_applied, last_msg, fixed_msg, call["id"] or ""
+        )
+    return _finalize_success(fixed_msg, fixes_applied, before_code=code)
+
+
 class _SyntaxFixHook(Hook):
-    """Auto-fix common Python syntax errors before subprocess execution.
+    """Repair each execute_code invocation separately, preserving IDs and order.
 
-    Pipeline: Chinese punctuation -> missing imports -> ruff --fix -> compile().
-
-    - If code is valid after fixes: same-ID AIMessage replacement, silent.
-    - If code is still broken: inject a ToolMessage with the compile() error
-      and skip the subprocess (goto after_exec). Agent retries immediately.
+    An unfixable single call can skip exec with a compile-error ToolMessage.
+    In a multi-call message, its child returns the error while siblings run.
     """
 
     async def __call__(
         self,
         state: AgentState,
         _runtime: Runtime[AvaContext],
-        config: RunnableConfig,
+        _config: RunnableConfig,
         /,
-    ) -> dict | None:
-        last_msg = state.messages[-1]
-        if not isinstance(last_msg, AIMessage):
+    ) -> dict[str, Any] | None:
+        original = state.messages[-1]
+        if not isinstance(original, AIMessage):
             return None
-
-        merged_msg = merge_multiple_execute_code_tool_calls(
-            last_msg,
-            agent_id=agent_id_from_config(config),
-            location="before_exec",
-        )
-        if merged_msg is not None:
-            last_msg = merged_msg
-
-        tool_calls = last_msg.tool_calls
-        code = first_tool_call_code(tool_calls)
-        if not code:
-            if merged_msg is not None:
-                return {"messages": [merged_msg]}
-            return None
-
-        fixed_code, fixes_applied = _apply_fix_pipeline(code)
-
-        # Build fixed AIMessage (same ID = in-place replacement by add_messages).
-        # The tool_use block inside content is updated in sync too; otherwise
-        # LangChain may still carry the old code / extra tool_use blocks when
-        # converting to an Anthropic payload.
-        fixed_msg = replace_single_execute_code(last_msg, fixed_code)
-
-        # Step 7: compile() pre-check.
-        # Catches syntax errors + semantic errors (duplicate args, break outside
-        # loop, etc.) that ast.parse() would miss. Uses '<agent_code>' as
-        # filename so error messages reference the right source.
-        try:
-            compile(fixed_code, "<agent_code>", "exec")
-        except SyntaxError as e:
-            return await _handle_compile_failure(
-                e,
-                fixed_code,
-                fixes_applied,
-                last_msg,
-                fixed_msg,
-                tool_calls[0]["id"] or "",
-            )
-
-        return _finalize_success(fixed_msg, fixes_applied, merged_msg, before_code=code)
+        last_msg = normalize_tool_calls(original) or original
+        changed = last_msg is not original
+        for call in last_msg.tool_calls:
+            result = await _fix_call(last_msg, call)
+            if result is None:
+                continue
+            if "goto" in result:
+                return result
+            last_msg = result["messages"][0]
+            changed = True
+        return {"messages": [last_msg]} if changed else None
 
 
 syntax_fix_before_exec = _SyntaxFixHook()
