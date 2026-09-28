@@ -512,7 +512,7 @@ def clear_registry() -> None:
 def drop_plugin_metrics(plugin: str) -> list[str]:
     """Drop every registration made by ``plugin``; return the dropped names.
 
-    The in-process metrics loader (`gateway/routers/_plugin_metrics.py`) calls
+    The in-process metrics loader (`gateway/inspect/_plugin_metrics.py`) calls
     this after a failed ``metrics.py`` import: registration is not
     transactional, so without the cleanup a module that raised mid-way would
     leave its partial entries serving while every retry of the fixed file

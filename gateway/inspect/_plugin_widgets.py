@@ -1,6 +1,6 @@
 """Inspector plugin-widget loading + per-agent resolution — helper for agent_inspect (task #2909).
 
-Not a router: ``gateway/routers/agent_inspect.py`` mounts the single endpoint
+Not a router: ``gateway/inspect/router.py`` mounts the single endpoint
 ``GET /api/agents/{id}/inspect/widgets`` and delegates the blocking work here
 (kept as its own module so agent_inspect stays under the per-file line budget).
 The extension surface of the inspector panel: a plugin embeds widgets for

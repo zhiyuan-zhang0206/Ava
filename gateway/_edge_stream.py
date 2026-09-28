@@ -1,7 +1,7 @@
 """Edge-stream constants shared by the fleet graph and the neighbors walk.
 
 Both readers query the same audit edge events from Loki
-(gateway/routers/fleet_graph.py and gateway/neighbors.py); defining the
+(gateway/routers/fleet_graph.py and gateway/inspect/neighbors.py); defining the
 constants once here keeps the two readers from drifting.
 """
 

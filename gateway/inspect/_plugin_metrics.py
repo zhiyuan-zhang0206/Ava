@@ -1,6 +1,6 @@
 """Inspector plugin-metric execution — helper for agent_inspect (W13b).
 
-Not a router: ``gateway/routers/agent_inspect.py`` mounts the single endpoint
+Not a router: ``gateway/inspect/router.py`` mounts the single endpoint
 ``GET /api/agents/{id}/inspect/metrics`` and delegates the blocking work here
 (kept as its own module so agent_inspect stays under the per-file line budget).
 The inspector surface of the plugin metric system (W13, PR #1374): build the
@@ -75,7 +75,7 @@ _MAX_METRIC_ROWS = 500
 # can put anything whitelisted inside the parens, it is discarded wholesale.
 # The double `AT TIME ZONE 'UTC'` round-trip (timestamptz -> naive UTC wall
 # clock -> back to timestamptz) truncates the bucket in UTC while keeping the
-# result a tz-aware timestamptz: `MetricPoint.ts` (gateway/schemas/inspect.py)
+# result a tz-aware timestamptz: `MetricPoint.ts` (gateway/inspect/schemas.py)
 # is fed this column directly, and a naive result would silently serialize
 # without a UTC offset.
 _MACRO_TIMEGROUP = (

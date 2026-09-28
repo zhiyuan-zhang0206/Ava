@@ -14,11 +14,11 @@ from opentelemetry import metrics
 from psycopg import Error as DatabaseError
 from psycopg_pool import ConnectionPool, PoolTimeout
 
-from gateway import loki_query_budget, neighbors
-from gateway.routers import _inspect_metrics, _plugin_inspector, _plugin_metrics
-from gateway.routers._backend_failure import raise_backend_unavailable
-from gateway.routers._inspect_cache import InspectCacheFullError, InspectQueryCache
-from gateway.routers._inspect_live import db_rows_blocking, notice_blocking, project_heartbeat
+from gateway import loki_query_budget
+from gateway._backend_failure import raise_backend_unavailable
+from gateway.inspect import _metrics, _plugin_metrics, _plugin_widgets, neighbors
+from gateway.inspect._cache import InspectCacheFullError, InspectQueryCache
+from gateway.inspect._live import db_rows_blocking, notice_blocking, project_heartbeat
 from gateway.schemas import (
     AgentInspectLive,
     AgentInspectStatistics,
@@ -127,7 +127,7 @@ async def _probe_agent_shells(
 # in-flight requests share a read; completed values are not kept behind a TTL.
 _INSPECT_RESPONSE_TIMEOUT_S = 15.0
 _InspectKey = tuple[int, int | None]
-_inspect_query_cache = InspectQueryCache[_InspectKey, _inspect_metrics.MetricsSnapshot](
+_inspect_query_cache = InspectQueryCache[_InspectKey, _metrics.MetricsSnapshot](
     max_entries=32,
     max_inflight=32,
     max_concurrent_loads=4,
@@ -140,12 +140,12 @@ async def _inspect_rows_cached_async(
     hours: StatsWindowHours | None,
     *,
     spawned_at: datetime,
-) -> _inspect_metrics.MetricsSnapshot:
+) -> _metrics.MetricsSnapshot:
     key = (agent_id, None if hours is None else int(hours))
     try:
         return await _inspect_query_cache.get_or_load_async(
             key,
-            lambda: _inspect_metrics.inspect_snapshot(pool, agent_id, hours, spawned_at=spawned_at),
+            lambda: _metrics.inspect_snapshot(pool, agent_id, hours, spawned_at=spawned_at),
             ttl_s=0,
             now=time_mod.monotonic,
         )
@@ -286,7 +286,7 @@ def get_agent_neighbors(
     the neighbor count, strongest first. The tie graph reads the unified event
     stream (task #180 LGTM cutover): audit edge events stitch the frozen PG
     `events` archive with the Loki live tail and the walks run in Python
-    (gateway/neighbors.py) — the retired `agent_neighbors` SQL function died
+    (gateway/inspect/neighbors.py) — the retired `agent_neighbors` SQL function died
     with the frozen table it read.
 
     404: agent_id does not exist (AgentNotFound -> handler returns 404 + reason).
@@ -375,7 +375,7 @@ async def get_agent_plugin_metrics(agent_id: int, request: Request) -> list[Plug
     template without an agent id -> 400 (unreachable here — the id is a path
     param). 404 when the agent does not exist. The frontend panel polls this
     every 5s like the parent /inspect. Implementation in
-    ``gateway/routers/_plugin_metrics.py``.
+    ``gateway/inspect/_plugin_metrics.py``.
     """
     return await asyncio.to_thread(
         _plugin_metrics.metrics_for_agent, request.app.state.db_pool, agent_id
@@ -395,8 +395,8 @@ async def get_agent_inspect_widgets(agent_id: int, request: Request) -> list[Ins
     and projects each widget, dropping a button whose target did not resolve
     and a widget left without buttons. Unknown agents return 404 like the
     rest of the /inspect family. Implementation in
-    ``gateway/routers/_plugin_inspector.py``.
+    ``gateway/inspect/_plugin_widgets.py``.
     """
     return await asyncio.to_thread(
-        _plugin_inspector.widgets_for_agent, request.app.state.db_pool, agent_id
+        _plugin_widgets.widgets_for_agent, request.app.state.db_pool, agent_id
     )

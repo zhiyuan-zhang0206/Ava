@@ -19,8 +19,8 @@ from typing import Any
 import psycopg
 import pytest
 
-from gateway import inspect_metrics_health as imh
-from gateway.schemas.inspect_metrics import InspectMetricsMetadata, MetricEvidence
+from gateway.inspect import _metrics_health as imh
+from gateway.inspect.schemas import InspectMetricsMetadata, MetricEvidence
 
 T0 = datetime(2026, 9, 17, 10, 0, tzinfo=UTC)
 T1 = datetime(2026, 9, 17, 12, 0, tzinfo=UTC)  # collection started

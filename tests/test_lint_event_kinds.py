@@ -116,7 +116,7 @@ _SQL_OR_DYNAMIC_KINDS = frozenset(
         "pause_orphan_claim_settled",  # shared/maintenance_cohort.py:_emit_orphan_settlements
         "update_straggler_reaped",  # ops/agent_pause.py:_reap_agents (positional emit)
         # Positional emit from the frozen-archive reader (task #2004).
-        "archive_fetch_degraded",  # gateway/neighbors.py:_emit_archive_degraded
+        "archive_fetch_degraded",  # gateway/inspect/neighbors.py:_emit_archive_degraded
         # The fleet-graph stale-serving fallback (task #3925): one positional
         # emit per degradation episode behind the route's emitter.
         "fleet_graph_stale",  # gateway/routers/fleet_graph.py:_emit_stale (positional emit)

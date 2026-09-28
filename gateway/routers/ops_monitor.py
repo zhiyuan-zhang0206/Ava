@@ -23,8 +23,8 @@ import httpx
 from fastapi import APIRouter, Query, Request
 
 from gateway import loki_query_budget, prom_metrics
+from gateway._backend_failure import raise_backend_unavailable
 from gateway.ops_series_lgtm import fetch_ops_series
-from gateway.routers._backend_failure import raise_backend_unavailable
 from gateway.schemas.ops import OpsMonitorReport
 
 router = APIRouter()
