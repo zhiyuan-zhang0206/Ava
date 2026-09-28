@@ -31,7 +31,7 @@ import { FLEX, OVERFLOW_HIDDEN } from "@/lib/layout";
 // uniform — every task node passes score 0 per user ruling 2026-08-09 #1070,
 // so the band collapses to the minimum radius). `ghost` marks structurally
 // required hidden parents (tasks only) — rendered dimmed with a dashed
-// outline. `dashed` marks fork lineage edges in the agent graph.
+// outline. All graph edges are solid.
 
 export interface ForceGraphNode {
   readonly id: number;
@@ -67,7 +67,6 @@ export interface ForceGraphEdge {
   /** "lineage" = spawn/fork/resurrect (agents) / parent-child (tasks). */
   readonly kind: "lineage" | "message";
   readonly weight: number;
-  readonly dashed?: boolean;
 }
 
 // Node size: radius = minR + (maxR - minR) * sqrt(score / maxScore). sqrt
@@ -556,7 +555,6 @@ export const ForceGraph = memo(function ForceGraph({
                   stroke="currentColor"
                   strokeOpacity={opacity}
                   strokeWidth={sw}
-                  strokeDasharray={e.dashed ? "4 3" : undefined}
                 />
               );
             })}
