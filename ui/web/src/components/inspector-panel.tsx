@@ -28,6 +28,7 @@ import { formatTokens } from "@/lib/format-number";
 import { useNow } from "@/lib/use-now";
 import { useBreakpoint } from "@/lib/breakpoint";
 import { useAgentPages } from "@/lib/use-agent-pages";
+import { useAgentRoster } from "@/lib/use-agents";
 import { useInspectorHours, useInspectorOpen } from "@/lib/inspector-panel-store";
 import {
   fetchWindowedInspect,
@@ -768,17 +769,19 @@ function ActivitySection({ inspect }: { inspect: AgentInspectStatistics }) {
  * gateway-owned derived liveness state colors the HeartPulse icon when
  * offline. The "every N" badge and old "Last judged" cell remain omitted.
  */
-/** Lifecycle status → its agentRow label. The conversation header used to
+/** Agent status → its agentRow label. The conversation header used to
  *  capitalize the raw value; the status renders in Liveness now (task #3904). */
 const STATUS_LABEL_KEY: Record<string, string> = {
   running: "statusRunning",
   idling: "statusIdling",
+  impersonated: "statusImpersonated",
   restarting: "statusRestarting",
   terminated: "statusTerminated",
 };
 
 function LivenessSection({ inspect }: { inspect: AgentInspectLive }) {
   const { liveness_state: state, heartbeat, spawned_at } = inspect;
+  const { data: roster } = useAgentRoster();
   const offline = state === "offline";
   const t = useTranslations("inspector");
   const tStatus = useTranslations("agentRow");
@@ -787,7 +790,13 @@ function LivenessSection({ inspect }: { inspect: AgentInspectLive }) {
     due: t("due"),
   });
   const lastPause = heartbeat.last_pause;
-  const statusKey = STATUS_LABEL_KEY[inspect.status];
+  // The native lifecycle stays idling during takeover. Reuse the fleet's
+  // active-lease projection and its SSE-repaired cache for the selected agent.
+  const impersonated =
+    inspect.status !== "terminated" &&
+    roster?.agents.find((agent) => agent.agent_id === inspect.agent_id)?.status === "impersonated";
+  const status = impersonated ? "impersonated" : inspect.status;
+  const statusKey = STATUS_LABEL_KEY[status];
   return (
     <Section icon={<HeartPulse className={cn("size-3", offline && "text-destructive")} />} title={t("sectionLiveness")}>
       <div className="grid grid-cols-2 gap-1">
@@ -808,7 +817,7 @@ function LivenessSection({ inspect }: { inspect: AgentInspectLive }) {
         <Metric label={t("metricMachine")} value={inspect.machine} />
         <Metric
           label={t("metricStatus")}
-          value={statusKey ? tStatus(statusKey as Parameters<typeof tStatus>[0]) : inspect.status}
+          value={statusKey ? tStatus(statusKey as Parameters<typeof tStatus>[0]) : status}
         />
       </div>
     </Section>
