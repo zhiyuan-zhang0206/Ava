@@ -17,8 +17,12 @@ from langgraph.graph.message import REMOVE_ALL_MESSAGES
 from langgraph.types import Overwrite
 
 from shared import checkpoint_postgres_walks as history
-from shared.agents.history.delta_read_compat import _fold_history
+from shared.agents.history.delta_read_compat import (
+    _fold_history,
+    wrap_saver_reads_with_delta_reconstruction,
+)
 from shared.config import settings
+from shared.events.contract import EVENTS, payload_keys
 
 
 def _checkpoint(saver: PostgresSaver, parent: Any, *, seed: Any = None) -> Any:
@@ -59,9 +63,12 @@ def _record_bodies(
         def __init__(self, cursor: Any) -> None:
             self.cursor = cursor
 
-        def execute(self, sql: str, params: Any, *, binary: bool) -> Any:
+        def execute(self, sql: str, params: Any, *, binary: bool = True) -> Any:
             assert binary
             return self.cursor.execute(sql, params, binary=binary)
+
+        def fetchone(self) -> Any:
+            return self.cursor.fetchone()
 
         def fetchall(self) -> Any:
             rows = self.cursor.fetchall()
@@ -192,3 +199,106 @@ def test_batch_bound_keeps_one_oversized_write_intact() -> None:
     batches = list(history._body_batches(keys))
     assert [len(batch) for batch in batches] == [1, 1, 1, 1]
     assert [item for batch in batches for item in batch] == keys
+
+
+def _history_events(records: list[Any], thread: str) -> dict[str, Any]:
+    return {
+        record["extra"]["event"]: record["extra"]
+        for record in records
+        if record["extra"].get("thread_id") == thread
+    }
+
+
+@pytest.mark.parametrize(
+    "reset,expected_ids,expected_counts",
+    [(False, ["seed", "discarded", "summary"], (2, 3, 2)), (True, ["summary"], (2, 2, 1))],
+)
+def test_transfer_event_and_reconstruction_span_include_overfetch(
+    db_conn: psycopg.Connection,
+    monkeypatch: pytest.MonkeyPatch,
+    loguru_records: list[Any],
+    reset: bool,
+    expected_ids: list[str],
+    expected_counts: tuple[int, int, int],
+) -> None:
+    with PostgresSaver.from_conn_string(settings.data_plane.db_url) as saver:
+        thread = str(uuid4())
+        root = _checkpoint(
+            saver,
+            {"configurable": {"thread_id": thread, "checkpoint_ns": ""}},
+            seed=_DeltaSnapshot([_message("seed", 900_000)]),
+        )
+        write = _checkpoint(saver, root)
+        value = (
+            [RemoveMessage(id=REMOVE_ALL_MESSAGES), _message("summary")]
+            if reset
+            else [_message("summary")]
+        )
+        saver.put_writes(
+            write, [("messages", [_message("discarded", 10_000)]), ("messages", value)], "reset"
+        )
+        target = _checkpoint(saver, write)
+        wrap_saver_reads_with_delta_reconstruction(cast(AsyncPostgresSaver, saver))
+        with _record_bodies(saver, monkeypatch) as bodies:
+            restored = saver.get_tuple(target)
+        assert restored is not None
+        assert [m.id for m in restored.checkpoint["channel_values"]["messages"]] == expected_ids
+        events = _history_events(loguru_records, thread)
+        suffix, span = events["delta_message_suffix"], events["delta_read_compat"]
+        fetched_bytes = sum(len(blob) for batch in bodies for blob in batch)
+        assert (span["stage2_blob_bytes"], suffix["fetched_bytes"]) == (
+            fetched_bytes,
+            sum(map(len, bodies[0])),
+        )
+        assert (
+            suffix["fetched_rows"],
+            span["stage2_rows"],
+            suffix["retained_writes"],
+        ) == expected_counts
+        assert (span["stage1_pages"], span["stage1_rows"]) == (1, 3)
+        assert span["reset_decode_ms"] > 0
+        assert 0 < span["decode_ms"] <= span["history_build_ms"]
+        assert suffix["checkpoint_id"] == restored.checkpoint["id"]
+        assert set(payload_keys("delta_message_suffix")) <= suffix.keys()
+
+
+def test_message_suffix_event_contract() -> None:
+    spec = EVENTS["delta_message_suffix"]
+    assert (spec.category, spec.tier, spec.retention_class) == (
+        "telemetry",
+        "noise",
+        "telemetry",
+    )
+    assert set(payload_keys("delta_message_suffix")) == {
+        "thread_id",
+        "checkpoint_ns",
+        "checkpoint_id",
+        "candidate_writes",
+        "fetched_rows",
+        "fetched_bytes",
+        "body_batches",
+        "retained_writes",
+        "reset_found",
+    }
+
+
+def test_reset_decode_failure_reports_its_phase_and_transferred_rows(
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, loguru_records: list[Any]
+) -> None:
+    with PostgresSaver.from_conn_string(settings.data_plane.db_url) as saver:
+        thread = str(uuid4())
+        root = _checkpoint(saver, {"configurable": {"thread_id": thread, "checkpoint_ns": ""}})
+        saver.put_writes(root, [("messages", [_message("unreadable")])], "write")
+        target = _checkpoint(saver, root)
+
+        def fail_decode(_value: Any) -> Any:
+            raise ValueError("reset probe cannot decode")
+
+        monkeypatch.setattr(saver.serde, "loads_typed", fail_decode)
+        wrap_saver_reads_with_delta_reconstruction(cast(AsyncPostgresSaver, saver))
+        with pytest.raises(ValueError, match="reset probe cannot decode"):
+            saver.get_tuple(target)
+        span = _history_events(loguru_records, thread)["delta_read_compat"]
+        assert span["outcome"] == "error" and span["failed_phase"] == "reset_decode"
+        assert span["stage2_rows"] == 1 and span["stage2_blob_bytes"] > 0
+        assert span["reset_decode_ms"] > 0 and span["decode_ms"] == 0
