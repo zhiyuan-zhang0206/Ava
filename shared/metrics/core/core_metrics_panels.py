@@ -66,28 +66,15 @@ from __future__ import annotations
 
 from shared.events.contract import DELIVERY_STALLED_KEYS, GATEWAY_LATENCY_KEYS, LLM_USAGE_KEYS
 from shared.metrics.core import core_metrics
+from shared.metrics.metrics_logql import CATEGORY_WITH_LEGACY_LOG, event_count
 from shared.plugin_metrics import MetricSpec, ThresholdStep
 
 # ── LogQL fragments (Task #1280) ──────────────────────────────────────────────
-# The event stream + json pipeline every template starts with. Attribute
-# labels are derived from the payload-key contract (a renamed payload key
-# fails loudly here instead of silently NULLing out). event_name/agent_id
-# are promoted stream labels (2026-08-23 cutover): event-scoped queries
-# match them in the selector; | json stays for level/category/attributes.
-_SEL = '{service_name="unknown_service"}'
-_SEL_EV = '{service_name="unknown_service", event_name={event_name}}'
+# Attribute labels are derived from the payload-key contract (a renamed
+# payload key fails loudly here instead of silently NULLing out).
 _LLM_ATTR = {k: f"attributes_{k}" for k in LLM_USAGE_KEYS}
 _DELIVERY_ATTR = {k: f"attributes_{k}" for k in DELIVERY_STALLED_KEYS}
 _GATEWAY_ATTR = {k: f"attributes_{k}" for k in GATEWAY_LATENCY_KEYS}
-
-
-def _count(pipeline: str, window: str, matchers: str | None = None) -> str:
-    """One count_over_time series — every count wraps in sum(...): the
-    unknown_service family has >500 streams over a day, and an unaggregated
-    count_over_time hits Loki's per-query series cap (alert-rules note).
-    ``event`` = promoted event_name/agent_id matcher in the stream selector."""
-    selector = _SEL if matchers is None else f'{{service_name="unknown_service", {matchers}}}'
-    return f"sum(count_over_time({selector} | json | {pipeline} [{window}]))"
 
 
 # ── stat panels (8-wide, three per row) ───────────────────────────────
@@ -100,7 +87,7 @@ core_metrics.register_core_metric(
         category="telemetry",
         unit="short",
         panel="stat",
-        query=_count("category={category}", "$__range", matchers="event_name={event_name}"),
+        query=event_count("category={category}", "$__range", matchers="event_name={event_name}"),
         query_type="logql",
         target_names=["calls"],
         width=8,
@@ -119,7 +106,7 @@ core_metrics.register_core_metric(
         category="telemetry",
         unit="short",
         panel="stat",
-        query=_count('category=~"{category_re}|log" | level="warning"', "$__range"),
+        query=event_count(f'{CATEGORY_WITH_LEGACY_LOG} | level="warning"', "$__range"),
         query_type="logql",
         target_names=["warning"],
         field_defaults={"color": {"mode": "fixed", "fixedColor": "orange"}},
@@ -139,7 +126,7 @@ core_metrics.register_core_metric(
         category="telemetry",
         unit="short",
         panel="stat",
-        query=_count('category=~"{category_re}|log" | level=~"error|critical"', "$__range"),
+        query=event_count(f'{CATEGORY_WITH_LEGACY_LOG} | level=~"error|critical"', "$__range"),
         query_type="logql",
         target_names=["error"],
         options={"noValue": "0"},
@@ -355,18 +342,18 @@ core_metrics.register_core_metric(
         category="telemetry",
         unit="short",
         panel="barchart",
-        query=_count(
+        query=event_count(
             f'category=~"{{category_re}}|log" | {_DELIVERY_ATTR["age_s"]} < 60',
             "$__range",
             matchers="event_name={event_name}",
         ),
         targets=[
-            _count(
+            event_count(
                 f'category=~"{{category_re}}|log" | {_DELIVERY_ATTR["age_s"]} >= 60 | {_DELIVERY_ATTR["age_s"]} < 600',
                 "$__range",
                 matchers="event_name={event_name}",
             ),
-            _count(
+            event_count(
                 f'category=~"{{category_re}}|log" | {_DELIVERY_ATTR["age_s"]} >= 600',
                 "$__range",
                 matchers="event_name={event_name}",
@@ -615,7 +602,8 @@ core_metrics.register_core_metric(
         category="telemetry",
         unit="short",
         panel="barchart",
-        query=_count("category={category}", "30m", matchers="event_name={event_name}") + " / 30",
+        query=event_count("category={category}", "30m", matchers="event_name={event_name}")
+        + " / 30",
         query_type="logql",
         target_names=["calls"],
         # The legacy red-80 step was constant-red noise on the 30-minute
@@ -637,9 +625,9 @@ core_metrics.register_core_metric(
         category="telemetry",
         unit="short",
         panel="timeseries",
-        query=_count('category=~"{category_re}|log" | level=~"warning|error|critical"', "5m")
+        query=event_count(f'{CATEGORY_WITH_LEGACY_LOG} | level=~"warning|error|critical"', "5m")
         + " / 5",
-        targets=[_count('category=~"{category_re}|log"', "5m") + " / 5"],
+        targets=[event_count(CATEGORY_WITH_LEGACY_LOG, "5m") + " / 5"],
         query_type="logql",
         target_names=["warn+error", "total"],
         custom={"axisLabel": "events/min"},
