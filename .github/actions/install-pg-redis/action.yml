@@ -22,7 +22,7 @@ runs:
       uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: /tmp/apt-archives
-        key: apt-pg17-redis-pgbouncer-${{ runner.os }}-v5
+        key: apt-pg17-redis-pgbouncer-${{ runner.os }}-v6
 
     - name: Install (pgdg repo, cached archives, timeout+retry)
       shell: bash
@@ -65,12 +65,14 @@ runs:
           -o APT::Get::List-Cleanup=0
         )
         archives=(-o Dir::Cache::archives=/tmp/apt-archives)
-        # PgBouncer is pinned: an unreviewed pgdg release changes pooled-session
-        # semantics the wire fixtures assert (1.26.0 stopped keeping a poisoned
-        # `default_transaction_read_only` on the pooled backend). Moving the pin
-        # is a dependency upgrade and needs the maintainer's approval; the cache
-        # key above bumps with it so no archived .deb of another version survives.
-        pgbouncer_version="1.25.2-1.pgdg24.04+1"
+        # PgBouncer is pinned: a pgdg release changes pooled-session semantics the
+        # wire fixtures assert (1.26 tracks `default_transaction_read_only`, so one
+        # client's SET no longer reaches another's session). Moving the pin is a
+        # dependency upgrade and needs the maintainer's approval; the cache key
+        # above bumps with it so no archived .deb of another version survives.
+        # scripts/provision/database.sh pins the same version (asserted equal by
+        # tests/ci/test_pgbouncer_pin.py).
+        pgbouncer_version="1.26.0-1.pgdg24.04+1"
         pkgs=(postgresql-17 redis-server postgresql-17-pgvector "pgbouncer=${pgbouncer_version}")
 
         sudo sh -c 'echo "deb http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
@@ -141,4 +143,4 @@ runs:
       uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: /tmp/apt-archives
-        key: apt-pg17-redis-pgbouncer-${{ runner.os }}-v5
+        key: apt-pg17-redis-pgbouncer-${{ runner.os }}-v6
