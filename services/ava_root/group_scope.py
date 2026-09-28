@@ -45,7 +45,8 @@ def unproven_group(unit_id: str, pgid: int, custody: ServiceCustody) -> RuntimeE
         f"holds {listed}; its leader was reaped earlier, so that group may now be another "
         f"program's. Custody retained at {custody.path}. Stop any of those processes that "
         "belong to this unit and retry the stop; if the rest are another program's, move "
-        "that record aside once no process of this unit remains"
+        "that record aside once no process of this unit remains and retry the stop, which "
+        "then drops this unit's generation without a signal"
     )
 
 

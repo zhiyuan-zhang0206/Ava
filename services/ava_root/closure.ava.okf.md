@@ -48,5 +48,8 @@ its number now held as a PID by another process (a PID is never reused while it
 is still the process-group ID of a live group, POSIX), whose group is never
 signalled. An occupied group with no recorded birth alive may be a stranger's:
 custody stays and the stop refuses, naming the group, its PIDs and the record.
+Moving that record aside is the operator's word that no process of the unit
+remains: with no recorded birth alive, the next stop, or root's own TERM, drops
+the generation without a signal; a live recorded birth keeps the refusal.
 Released custody lets root exit on TERM alone, as the Linux boot unit's
 `SendSIGKILL=no` requires.

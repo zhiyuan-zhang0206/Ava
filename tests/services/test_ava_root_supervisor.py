@@ -376,6 +376,84 @@ async def test_exited_leader_never_signals_a_stranger_group_at_its_number(
     await owner.shutdown()
 
 
+async def test_moving_the_record_aside_settles_an_unproven_group_without_a_signal(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The refusal's escape works on the running root, which keeps its generation in memory.
+
+    A stranger's group holds the unit's number, so the stop refuses. Once the
+    operator moves the record aside with no recorded birth alive, the retried
+    stop drops the generation, the stranger receives nothing, and root's own
+    shutdown completes.
+    """
+    owner, survivor = await reaped_with_survivor(tmp_path, "unexpected-exit")
+    spawned = [survivor]
+    try:
+        generation = owner._units["worker"].generation
+        assert generation is not None and generation.identity is not None
+        survivor.kill()
+        await gone(survivor)
+        pgid, member, signals = await stranger_group(tmp_path)
+        spawned.append(member)
+        dead = generation.identity
+        generation.identity = OwnedProcess(pgid, dead.birth, dead.starttime)
+        with pytest.raises(RuntimeError, match=f"process group {pgid}"):
+            await owner.down("worker")
+        (tmp_path / "custody/worker.json").rename(tmp_path / "worker.json.aside")
+        await owner.down("worker")
+        assert owner._units["worker"].generation is None
+        released = await row(owner)
+        assert released["state"] == "stopped" and released["last_error"] is None
+        assert "operator moved the custody record aside" in caplog.text
+        await owner.shutdown()
+        assert not signals.exists(), "the stranger's member received a signal"
+        assert not ended(member)
+    finally:
+        kill_all(spawned)
+
+
+async def test_a_moved_aside_record_never_drops_a_live_recorded_birth(tmp_path: Path) -> None:
+    """Without its record, root cannot record custody before a signal, so it refuses.
+
+    Even with force, the recorded survivor keeps running and the generation
+    stays; restoring the record lets the explicit force stop close it.
+    """
+    owner, survivor = await reaped_with_survivor(tmp_path, "unexpected-exit")
+    record, aside = tmp_path / "custody/worker.json", tmp_path / "worker.json.aside"
+    try:
+        record.rename(aside)
+        for force in (False, True):
+            with pytest.raises(RuntimeError, match="moved aside") as refused:
+                await owner.down("worker", force=force)
+            assert str(survivor.pid) in str(refused.value)
+        assert not ended(survivor)
+        assert owner._units["worker"].generation is not None
+        aside.rename(record)
+        await owner.down("worker", force=True)
+        await gone(survivor)
+        assert not list((tmp_path / "custody").iterdir())
+    finally:
+        kill_all([survivor])
+    await owner.shutdown()
+
+
+async def test_unobserved_reap_refuses_until_the_record_is_moved_aside(tmp_path: Path) -> None:
+    owner = root(tmp_path, "import time; time.sleep(0.05)")
+    await owner.start()
+    await exited(owner)
+    generation = owner._units["worker"].generation
+    assert generation is not None
+    generation.exited.clear()  # as if root never observed its leader's reap
+    record = tmp_path / "custody/worker.json"
+    with pytest.raises(RuntimeError, match="never observed its reap") as refused:
+        await owner.down("worker")
+    assert str(record) in str(refused.value)
+    record.rename(tmp_path / "worker.json.aside")
+    await owner.down("worker")
+    assert owner._units["worker"].generation is None
+    await owner.shutdown()
+
+
 @pytest.mark.parametrize("moves_group", [False, True])
 async def test_exited_leader_stop_closes_recorded_survivors_and_their_later_children(
     tmp_path: Path, moves_group: bool

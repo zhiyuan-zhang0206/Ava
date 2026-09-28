@@ -526,13 +526,19 @@ class Supervisor:
         another process (a PID is never reused while it is still the
         process-group ID of a live group, POSIX), whose group is never
         signalled. A group still occupied with no recorded birth alive may be a
-        stranger's: custody stays and the stop refuses, naming it.
+        stranger's: custody stays and the stop refuses, naming it. Moving the
+        record aside is the operator's word that no process of the unit
+        remains; with no recorded birth alive, the generation is dropped
+        without a signal (`_drop_moved_aside`).
         """
         await self._await_reap(runtime, generation, identity, custody)
         pgid = identity.pid
         deadline = monotonic() + self._config.stop_timeout_s
         while True:
             living = recorded_living(generation.tracked)
+            if not os.path.lexists(custody.path):
+                _drop_moved_aside(runtime, custody, living)
+                return
             if living:
                 custody.retain(generation.tracked)
                 expired = monotonic() >= deadline
@@ -567,13 +573,14 @@ class Supervisor:
         """Wait (bounded) for the watch task to reap the exited leader.
 
         Without that reap root has no group reading taken before the leader's
-        number could be reused, so it cannot judge the unit's scope.
+        number could be reused, so it cannot judge the unit's scope; only a
+        record the operator moved aside lets the stop go on without it.
         """
         watch = runtime.watch_task
         if not generation.exited.is_set() and watch is not None and not watch.done():
             with contextlib.suppress(TimeoutError):
                 await asyncio.wait_for(generation.exited.wait(), self._config.stop_timeout_s)
-        if not generation.exited.is_set():
+        if not generation.exited.is_set() and os.path.lexists(custody.path):
             raise RuntimeError(
                 f"unit {runtime.manifest.id}: recorded birth (pid {identity.pid}) exited but "
                 f"root never observed its reap; custody retained at {custody.path}. Once no "
@@ -713,9 +720,36 @@ def _exited_leader(
         raise RuntimeError(
             f"unit {runtime.manifest.id}: cannot confirm whether its recorded birth "
             f"(pid {identity.pid}) still runs: {exc}; custody retained at {custody.path}. "
-            f"Inspect pid {identity.pid}; once no process of this unit remains, move that "
-            "record aside and retry the stop"
+            f"Inspect pid {identity.pid}: stop it if it is still this unit's process, and retry "
+            "the stop once that pid has exited or its identity can be read. Moving the record "
+            "aside does not settle a birth root cannot verify"
         ) from exc
+
+
+def _drop_moved_aside(
+    runtime: _UnitRuntime, custody: ServiceCustody, living: set[OwnedProcess]
+) -> None:
+    """Drop an exited unit's generation whose custody record the operator moved aside.
+
+    Moving it aside declares that no process of the unit remains. Root takes
+    that only while no recorded birth lives, and signals nothing; a live
+    recorded birth keeps the refusal, since custody is recorded before signals.
+    """
+    if living:
+        raise RuntimeError(
+            f"unit {runtime.manifest.id}: custody record {custody.path} was moved aside, but "
+            f"recorded births still run (pids {sorted(item.pid for item in living)}). Restore "
+            "the record and retry the stop, or stop those processes and retry"
+        )
+    runtime.generation = None
+    runtime.state = UnitState.STOPPED
+    runtime.last_error = None
+    _log.warning(
+        "unit %s: the operator moved the custody record aside (%s); generation dropped "
+        "without a signal",
+        runtime.manifest.id,
+        custody.path,
+    )
 
 
 def _record_survivors(unit_id: str, generation: _Generation) -> None:
