@@ -50,6 +50,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import socket
 import sys
 from collections.abc import Mapping, Sequence
@@ -429,17 +430,30 @@ def _argv_summary(argv: list[str]) -> str:
 
 
 def census(facts: Facts, exempt: set[int]) -> None:
-    """Every live process related to the home, except this process's own lineage."""
-    skip = _lineage() | exempt
+    """Every live process related to the home, except this process's own lineage.
+
+    An ancestor that is itself an Ava process of the home (its PTY host, an
+    agent host) refuses instead: the census would skip exactly the process the
+    old stop should have ended. The operator's shell (cwd in the home) stays
+    exempt.
+    """
+    lineage = _lineage()
     attrs = ["pid", "name", "cwd", "exe", "cmdline", "create_time"]
     for process in psutil.process_iter(attrs):
         info: dict[str, Any] = process.info  # pyright: ignore[reportAttributeAccessIssue] — psutil sets info
-        if info["pid"] in skip:
+        if info["pid"] in exempt:
             continue
         relations = _relations(facts.home, info, process)
         if not relations:
             continue
         kind = _kind(facts, info)
+        if info["pid"] in lineage:
+            if info["pid"] != os.getpid() and kind == "ava":
+                raise RefusedError(
+                    f"this script runs inside Ava process {info['pid']} ({info['name']}) of "
+                    f"{facts.home}; run it from a login shell outside the home's processes"
+                )
+            continue
         facts.processes.append(
             {
                 "pid": info["pid"],

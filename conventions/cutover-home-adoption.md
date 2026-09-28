@@ -46,8 +46,10 @@ the go/no-go gate's `ava maintenance resume` opens business.
    further off stays `unknown` (wall-clock steps move it), and only a birth
    300 s before the current boot reads `boot_changed`. Close every shell or
    tool whose working directory is inside the home first; the script's own
-   ancestry is exempt. Run it after the host's old stop, over the rows exported
-   after the W3 drain ([database records](cutover-db-records.md)).
+   shell is exempt, but both scripts refuse to run inside an Ava process of
+   the home (its terminal, an agent), whose census would skip that process.
+   Run it after the host's old stop, over the rows exported after the W3
+   drain ([database records](cutover-db-records.md)).
 2. Disarm and stop with the old code (runbook W1 to W3). The adoption refuses
    while any Ava process of the home is alive or a data-plane port is bound.
 3. Gateway (W5): `--execute`, then the data-plane authority cutover

@@ -284,3 +284,27 @@ def test_attesting_without_a_persisted_machine_name_names_the_fix(
         == 1
     )
     assert "no persisted machine name" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("mode", ["verdict", "attest"])
+def test_running_inside_an_ava_process_of_the_home_refuses(
+    make_legacy: Make,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    mode: str,
+) -> None:
+    """Run from the home's own terminal, the census would skip its PTY host as
+    one of the script's ancestors and read the home as empty."""
+    import os
+
+    legacy = make_legacy()
+    pty_host = legacy.spawn("shared.sessions.pty.host")
+    monkeypatch.setattr(inventory, "_lineage", lambda: {os.getpid(), pty_host.pid})
+    rows = tmp_path / "rows.json"
+    rows.write_text("[]")
+    extra = ["--attest", str(rows)] if mode == "attest" else ["--service-path", SERVICE_PATH]
+    argv = ["--home", str(legacy.home), "--registry", str(legacy.registry), *extra]
+    assert inventory.main(argv, host=legacy.scheduler.host()) == 1
+    err = capsys.readouterr().err
+    assert f"inside Ava process {pty_host.pid}" in err
