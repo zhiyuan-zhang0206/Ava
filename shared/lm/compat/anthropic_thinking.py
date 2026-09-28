@@ -12,7 +12,7 @@ is always empty for all `ChatAnthropic`-routed models (claude-*, deepseek-*), so
 the raw `message_delta` event BEFORE `_create_usage_metadata` drops it, and
 supplements the chunk's `usage_metadata.output_token_details.reasoning`.
 
-This is the Anthropic-side mirror of `shared/lm/reasoning_compat.py`
+This is the Anthropic-side mirror of `shared/lm/compat/openai_reasoning.py`
 (`ReasoningContentChatModel` for ChatOpenAI).
 """
 
