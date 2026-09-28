@@ -1,16 +1,22 @@
 """The logical-backup passphrase: one resolution for every writer and reader.
 
 Every pg-backup artifact is encrypted (`openssl enc -aes-256-cbc -pbkdf2`)
-under one passphrase. Until the gateway's human cluster secret first rotates,
-that passphrase is derived from the secret (`sha256(secret)`, hex). A bearer
-rotation (the fleet cutover's `api` step, or the emergency
-`scripts/rotate_cluster_secret.py`) first PINS the then-current passphrase to
-`$AVA_HOME/backups/logical-backup.passphrase` (0600); from then on the pinned
-passphrase is the key for writers and readers alike, so artifacts written
-before and after any number of rotations share it.
+under one passphrase, the one PINNED at
+`$AVA_HOME/backups/logical-backup.passphrase` (0600). It is independent of the
+cluster secret (decisions/2026-09-28-backup-passphrase-minted-at-birth.md):
 
-The pinned file is backup-critical material: losing it together with the
-pre-rotation secret makes every logical backup unreadable. It belongs with the
+- a gateway home's birth mints a random one (`ensure_minted`), whatever its
+  secret, so an empty-secret single box encrypts for real;
+- a home born before that pins, once, in the cutover's `api` step
+  (`pin_existing_home`), the passphrase it has encrypted under so far:
+  `sha256(secret)`; an empty-secret home gets a minted one instead, since
+  `sha256("")` is a public constant (`LEGACY_EMPTY_SECRET_PASSPHRASE`, which
+  only an explicit restore option ever uses);
+- rotating the secret never touches it.
+
+Writers and readers never derive a passphrase: a home without a pin has no
+logical-backup key and refuses. The pinned file is backup-critical material:
+losing it makes every logical backup unreadable, so it belongs with the
 gateway's other backup-key copies.
 """
 
@@ -19,6 +25,9 @@ from __future__ import annotations
 import hashlib
 import os
 import re
+import secrets
+import tempfile
+from contextlib import suppress
 from pathlib import Path
 
 from shared.private_storage import private_file_problem, write_private_bytes
@@ -29,7 +38,7 @@ _PASSPHRASE = re.compile(r"^[0-9a-f]{64}$")
 
 
 class PassphrasePinError(RuntimeError):
-    """The pinned passphrase is unreadable, malformed, or contradicts a pin request."""
+    """The pinned passphrase is missing, unreadable, malformed, or contradicts a pin request."""
 
 
 def pin_path(home: Path) -> Path:
@@ -37,8 +46,19 @@ def pin_path(home: Path) -> Path:
 
 
 def derive(cluster_secret: str) -> str:
-    """The passphrase a never-rotated home derives from its human secret."""
+    """The passphrase a home born before minted passphrases derived from its secret."""
     return hashlib.sha256(cluster_secret.encode()).hexdigest()
+
+
+# What an empty-secret home encrypted under before it pinned a minted passphrase:
+# a public constant, so those artifacts were never confidential. Only an
+# explicit restore option (`--legacy-empty-secret-passphrase`) decrypts with it.
+LEGACY_EMPTY_SECRET_PASSPHRASE = derive("")
+
+
+def mint() -> str:
+    """A fresh random passphrase (256 bits), in the pinned file's format."""
+    return secrets.token_hex(32)
 
 
 def fingerprint(passphrase: str) -> str:
@@ -62,16 +82,23 @@ def pinned(home: Path) -> str | None:
     return value
 
 
-def resolve(home: Path, cluster_secret: str) -> str:
-    """The passphrase every artifact of `home` is encrypted under."""
+def resolve(home: Path) -> str:
+    """The passphrase every artifact of `home` is encrypted under; never derived."""
     value = pinned(home)
-    return derive(cluster_secret) if value is None else value
+    if value is None:
+        raise PassphrasePinError(
+            f"no logical-backup passphrase is pinned at {pin_path(home)}: a gateway home "
+            "mints one at birth, and a home born earlier pins one in the cutover's `api` "
+            "step (scripts/cutover_db_authority.py)"
+        )
+    return value
 
 
 def pin(home: Path, passphrase: str) -> None:
     """Pin `passphrase` once; an existing pin must be exactly it (never replaced).
 
-    The caller holds the rotation's lock and has journaled this intent.
+    The caller serializes pinning for `home` (birth under the start lock, the
+    cutover or a rotation under its journal).
     """
     if _PASSPHRASE.fullmatch(passphrase) is None:
         raise PassphrasePinError("a logical-backup passphrase is 64 lowercase hex characters")
@@ -83,9 +110,60 @@ def pin(home: Path, passphrase: str) -> None:
         raise PassphrasePinError(f"{pin_path(home)} pins another passphrase")
 
 
+def ensure_minted(home: Path) -> None:
+    """Birth: pin a freshly minted passphrase unless one is already pinned.
+
+    An interrupted birth that already pinned keeps its passphrase.
+    """
+    if pinned(home) is None:
+        pin(home, mint())
+
+
+def pin_existing_home(home: Path, cluster_secret: str) -> str:
+    """Pin the passphrase of a home born before births minted one; return it.
+
+    An existing pin is kept. Otherwise the home has encrypted under
+    `sha256(secret)`, which is pinned so every earlier artifact keeps
+    decrypting; an empty secret's derivation is the public
+    `LEGACY_EMPTY_SECRET_PASSPHRASE`, so that home pins a minted one and its
+    earlier artifacts decrypt only through the explicit legacy restore option.
+    """
+    value = pinned(home)
+    if value is None:
+        value = derive(cluster_secret) if cluster_secret else mint()
+        pin(home, value)
+    return value
+
+
 def logical_backup_passphrase() -> str:
     """This home's logical-backup passphrase (see the module docstring)."""
-    from shared.config import settings
     from shared.paths import ava_home
 
-    return resolve(ava_home(), settings.data_plane.cluster_secret)
+    return resolve(ava_home())
+
+
+LEGACY_RESTORE_HINT = (
+    "an artifact an empty-secret home wrote before its cutover pinned a minted passphrase "
+    "decrypts only with the explicit --legacy-empty-secret-passphrase of scripts/restore_drill.py"
+)
+
+
+def write_key_file(directory: Path, *, legacy_empty_secret: bool = False) -> Path:
+    """Write the logical-backup passphrase to a new private temporary key file.
+
+    The pinned passphrase, or `LEGACY_EMPTY_SECRET_PASSPHRASE` when the caller
+    explicitly asks for it (never as a fallback). The key never reaches argv;
+    the caller removes the file.
+    """
+    value = LEGACY_EMPTY_SECRET_PASSPHRASE if legacy_empty_secret else logical_backup_passphrase()
+    fd, name = tempfile.mkstemp(prefix=".backup-key-", dir=directory)
+    path = Path(name)
+    try:
+        os.fchmod(fd, 0o600)
+        with os.fdopen(fd, "w", encoding="ascii") as key_file:
+            key_file.write(value)
+    except BaseException:
+        with suppress(OSError):
+            path.unlink(missing_ok=True)
+        raise
+    return path

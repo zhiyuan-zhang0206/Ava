@@ -185,13 +185,20 @@ def _scratch_space_requirement(raw_dump: Path) -> int:
 
 
 def run_drill(
-    artifact: Path | None = None, *, foreground: bool = False, scratch_root: Path | None = None
+    artifact: Path | None = None,
+    *,
+    foreground: bool = False,
+    scratch_root: Path | None = None,
+    legacy_empty_secret: bool = False,
 ) -> tuple[RestoreReport, float]:
     """Run the complete decrypt, restore, and verification drill.
 
     `scratch_root` places the decrypted dump inside a caller-owned private
     directory, so a caller that proves the drill's closure can remove it even
-    when the drill was killed before its own cleanup.
+    when the drill was killed before its own cleanup. `legacy_empty_secret`
+    decrypts with the public key an empty-secret home used before its cutover
+    pinned a minted passphrase (`backup.decrypt_artifact`); only an operator
+    asks for it, for such an artifact.
     """
     artifact = artifact or _newest_artifact()
     if not artifact.is_file():
@@ -200,7 +207,7 @@ def run_drill(
     with tempfile.TemporaryDirectory(prefix="ava-restore-drill-", dir=scratch_root) as tmp:
         scratch = Path(tmp)
         raw_dump = scratch / "backup.dump"
-        backup.decrypt_artifact(artifact, raw_dump)
+        backup.decrypt_artifact(artifact, raw_dump, legacy_empty_secret=legacy_empty_secret)
         # Legacy artifacts carry a gzip layer; current ones are raw archives.
         backup.gunzip_if_needed(raw_dump)
         required = _scratch_space_requirement(raw_dump)
@@ -216,11 +223,21 @@ def run_drill(
     return report, time.monotonic() - started
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description="Restore and verify an encrypted Ava DB backup.")
     parser.add_argument("artifact", nargs="?", type=Path, help="managed .dump.enc artifact")
-    args = parser.parse_args()
-    report, elapsed = run_drill(args.artifact)
+    parser.add_argument(
+        "--legacy-empty-secret-passphrase",
+        action="store_true",
+        help=(
+            "decrypt with sha256(''), the public key an empty-secret home used before its "
+            "cutover pinned a minted passphrase (never tried unless given)"
+        ),
+    )
+    args = parser.parse_args(argv)
+    report, elapsed = run_drill(
+        args.artifact, legacy_empty_secret=args.legacy_empty_secret_passphrase
+    )
     print(
         "restore drill passed: "
         f"agents={report.agents} checkpoints={report.checkpoints} "

@@ -61,7 +61,7 @@ Windows unit carries `agent-runner` only
 
 **Auth follows the authority boundary.** `AVA_CLUSTER_SECRET` is the gateway's human
 bearer (API, frontend login); it stays on the gateway and rotates only explicitly
-(`scripts/rotate_cluster_secret.py` pins the logical-backup passphrase first). An EMPTY
+(`scripts/rotate_cluster_secret.py`; backups use a birth-pinned passphrase). An EMPTY
 secret (single-box default) leaves the API, `/ops` and frontend unauthenticated and binds
 every data-plane listener to loopback; a set secret adds this host's reachable address for
 Postgres and its pooler (Redis stays loopback, off-box inbound via the relay bridge). The

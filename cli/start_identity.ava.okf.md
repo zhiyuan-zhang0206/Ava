@@ -17,7 +17,10 @@ homes even when they use separate registries; stale first-start inputs cannot
 replace an existing binding. Pointer publication and retirement share that lock.
 Registry paths cannot alias lifecycle data or locks, and registry lock waits are
 bounded so contention cannot indefinitely consume a lifecycle operation.
-An interrupted claim resumes the same ports and credentials. Conflicting identity,
+An interrupted claim resumes the same ports and credentials. A gateway claim
+also pins a minted logical-backup passphrase before it publishes `.env`
+(`services/gateway_side/backup/passphrase.ensure_minted`; an interrupted birth
+keeps the first one). Conflicting identity,
 unregistered existing resources, or a terminal destroy intent refuses startup.
 
 `ava start --worktree` creates a gateway and runner with an isolated home and port

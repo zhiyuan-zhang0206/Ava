@@ -32,13 +32,13 @@ owner and runner passwords are removed. A home born with a ledger is only
 verified. Any release request prepared before the cutover no longer matches its
 configuration digest and must be prepared again.
 
-Step `api` (networked homes only): runners now authenticate with their write
-generation's machine API token, so the human `AVA_CLUSTER_SECRET` they hold
-copies of rotates once here. The rotation (`scripts/rotate_cluster_secret`,
-recorded in this journal as fingerprints only) first pins the logical-backup
-passphrase to `$AVA_HOME/backups/logical-backup.passphrase` — backup-critical:
-earlier logical backups decrypt only with it. The telemetry relay token derives
-from the secret and changes once too. A single box keeps its secret.
+Step `api`: runners now authenticate with their write generation's machine API
+token, so on a networked home the human `AVA_CLUSTER_SECRET` they hold copies
+of rotates once here (`scripts/rotate_cluster_secret`, journaled as
+fingerprints), with the telemetry relay token derived from it. Every home first
+pins its logical-backup passphrase to `$AVA_HOME/backups/logical-backup.passphrase`
+(backup-critical): `sha256(secret)`, so earlier backups keep decrypting; a single
+box keeps its secret, and an empty one pins a minted passphrase instead.
 
 Step `remote-units` (networked homes only): every `machine_units` row other
 than this gateway unit is a remote unit whose runners held the owner-era
@@ -554,7 +554,7 @@ def convert_api(home: Path, record: ClusterRecord, *, execute: bool) -> str:
                 return "api: would decide once PostgreSQL runs"
             raise RuntimeError("the owned PostgreSQL is not running; `ava stop --keep-infra`")
         if not _remote_inventory(record, DbEnv.read(home).database, home)[0]:
-            return "api: none (single box keeps its bearer)"
+            return bearer.pin_single_box(home, execute=execute)
     if not execute:
         verb = "verify" if state == "done" else "pin the logical-backup passphrase and rotate"
         return f"api: would {verb} AVA_CLUSTER_SECRET (journal={state or 'none'})"

@@ -224,8 +224,8 @@ API is authenticated. Remote units never hold the human secret (bootstrap does
 not serve it); their OTLP relay uses a telemetry token derived from it
 ([API tokens](../../shared/cluster/authority/api-tokens.ava.okf.md)).
 Existing homes convert through the one-time `scripts/cutover_db_authority.py`
-(steps `redis`, `db`, and for networked homes `api` — the one bearer rotation,
-after pinning the logical-backup passphrase — and `remote-units`;
+(steps `redis`, `db`, `api` — pinning the logical-backup passphrase, plus the
+one bearer rotation on a networked home — and `remote-units`;
 [credential split](../../conventions/data-plane-secret-split.md#convert-an-existing-home)).
 
 The unit enrollment secret (minted at a unit's first bundle: its join or the

@@ -15,12 +15,16 @@ secret (only fingerprints):
 
 1. Stage the next secret in ``backups/secret-rotation/bearer.pending`` (0600).
 2. Journal ``pinning``: the old and new bearer fingerprints and the fingerprint
-   of the logical-backup passphrase about to be pinned.
-3. Pin that passphrase (``services/gateway_side/backup/passphrase``): the one
-   the home encrypts under now, so every earlier logical backup keeps
-   decrypting after the secret changes. An existing pin is kept.
+   of the logical-backup passphrase the home keeps.
+3. Verify that pin (``services/gateway_side/backup/passphrase``). A home has
+   one from its birth or its cutover, and the secret never touches it; only a
+   home the cutover is converting still encrypts under ``sha256(secret)``,
+   which is pinned here so every earlier logical backup keeps decrypting.
 4. Journal ``pinned``. Only then write the new secret into the gateway ``.env``.
 5. Journal ``done`` and delete the staged secret.
+
+A single box keeps its bearer through the cutover: its ``api`` step only pins
+the passphrase (``pin_single_box``).
 
 A crash resumes from the journal: an unpinned passphrase is derived only from
 the recorded pre-rotation secret, a pinned one is only verified against its
@@ -154,6 +158,21 @@ def _write_secret(home: Path, rotation: Rotation) -> None:
     upsert_env(home / ".env", {_SECRET_ENV: staged}, audit_site=_AUDIT)
     if bearer_fingerprint(_current_secret(home)) != rotation.new:
         raise RuntimeError("the new secret did not read back from .env")
+
+
+def pin_single_box(home: Path, *, execute: bool) -> str:
+    """The cutover's `api` step on a single box: it keeps its bearer and only
+    pins its logical-backup passphrase (`passphrase.pin_existing_home`)."""
+    if not execute:
+        return "api: would pin the logical-backup passphrase (single box keeps its bearer)"
+    secret = _current_secret(home)
+    passphrase.pin_existing_home(home, secret)
+    legacy = "" if secret else f"; {passphrase.LEGACY_RESTORE_HINT}"
+    return (
+        "api: single box keeps its bearer; the logical-backup passphrase is pinned at "
+        f"{passphrase.pin_path(home)} (backup-critical: keep it with the gateway's backup "
+        f"keys){legacy}"
+    )
 
 
 def advance(home: Path, rotation: Rotation | None, save: Callable[[Rotation], None]) -> Rotation:

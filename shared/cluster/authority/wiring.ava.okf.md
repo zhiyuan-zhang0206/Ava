@@ -99,9 +99,10 @@ and the coordinator channel's authentication:
   `retire_legacy_logins(Cutover)` -> `ensure_groups` -> `ensure_monitor` ->
   `prove_closure` over the
   legacy roles -> ledger -> generation 0 -> pooler -> proof -> `activate` ->
-  invariant -> credential-free `.env`. Step `api` (networked homes): the one
-  human-bearer rotation (`scripts/rotate_cluster_secret.advance`, journaled
-  as fingerprints: pin the logical-backup passphrase, then rotate). Step
+  invariant -> credential-free `.env`. Step `api`: pin the logical-backup
+  passphrase (`sha256(secret)`, or a minted one for an empty secret); on a
+  networked home inside the one human-bearer rotation
+  (`scripts/rotate_cluster_secret.advance`, journaled as fingerprints). Step
   `remote-units` (networked homes): explicit classification of every other
   `machine_units` row -> Redis admin rotation -> one `issue_bundle` per
   included unit (after `api`, so bundles carry the rotated telemetry token).

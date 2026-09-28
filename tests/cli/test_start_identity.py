@@ -83,6 +83,44 @@ def test_repeat_preserves_identity_credentials_and_bytes(inputs: identity.Identi
     assert all(env[k] for k in keys)
 
 
+def test_a_gateway_birth_pins_a_minted_logical_backup_passphrase(
+    inputs: identity.IdentityInput, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Logical backups are encrypted under a passphrase the birth mints and pins
+    (0600), independent of the cluster secret: an empty-secret single box gets
+    a random one, never the public sha256(""). An interrupted birth keeps it."""
+    from services.gateway_side.backup import passphrase
+
+    upsert = identity.upsert_env
+
+    def crash(*_a: object, **_k: object) -> None:
+        raise OSError("power loss")
+
+    monkeypatch.setattr(identity, "upsert_env", crash)
+    with pytest.raises(OSError, match="power loss"):
+        identity.prepare_identity(inputs)
+    minted = passphrase.pinned(inputs.home)
+    assert minted is not None and minted != passphrase.LEGACY_EMPTY_SECRET_PASSPHRASE
+    assert passphrase.pin_path(inputs.home).stat().st_mode & 0o777 == 0o600
+    monkeypatch.setattr(identity, "upsert_env", upsert)
+    identity.prepare_identity(inputs)
+    assert dotenv_values(inputs.home / ".env")["AVA_CLUSTER_SECRET"] == ""
+    assert passphrase.resolve(inputs.home) == minted
+
+
+def test_a_remote_unit_birth_pins_no_backup_passphrase(inputs: identity.IdentityInput) -> None:
+    """Only a gateway runs logical backups; a joining agent-runner holds no key."""
+    from services.gateway_side.backup import passphrase
+
+    runner = replace(
+        inputs,
+        roles=frozenset({"agent-runner"}),
+        values={**inputs.values, "AVA_GATEWAY_URL": "http://10.0.0.7:8000"},
+    )
+    identity.prepare_identity(runner)
+    assert passphrase.pinned(runner.home) is None
+
+
 def test_stale_inputs_cannot_rebind_checkout_across_private_registries(
     inputs: identity.IdentityInput,
 ) -> None:

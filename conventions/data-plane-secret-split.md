@@ -8,7 +8,7 @@ internal data plane always authenticates, whatever the bearer
 |---|---|---|
 | `AVA_CLUSTER_SECRET` | Gateway only | Human/operator bearer for the gateway API and frontend login (never served by bootstrap, never held by a remote unit); empty = unauthenticated user-facing API and `/ops`, loopback-only listeners |
 | `AVA_API_TOKEN` (launch environment only) | Each launched service, admitted operator processes | The write generation's machine API token of the process's class: the gateway admits the active generation's tokens, a unit's `/ops` its generation's two; delivered only while the API is authenticated |
-| `$AVA_HOME/backups/logical-backup.passphrase` (0600) | Gateway home, once its bearer has rotated | The pinned logical-backup passphrase (the pre-rotation secret's derivation); **backup-critical**: with the old secret gone it is the only key to earlier logical backups |
+| `$AVA_HOME/backups/logical-backup.passphrase` (0600) | Gateway home | The logical-backup passphrase: minted and pinned at birth (a home born earlier pinned `sha256(secret)` at its cutover), never derived and never changed by a secret rotation ([decision](../decisions/2026-09-28-backup-passphrase-minted-at-birth.md)); **backup-critical**: it is the only key to every logical backup |
 | OS user over the owner-only socket (`peer`) | Gateway host | Postgres administrator: provisioning, migrations (acting as the NOLOGIN schema owner), grants, the authority fence |
 | OS user mapped to `ava_monitor` (`peer map=ava_monitor`) | Gateway host's OTel collector | Password-less statistics reader (`pg_read_all_stats`, CONNECT); not a write generation, so no credential exists and rollouts leave it alone |
 | `$AVA_HOME/db-authority/` (0700; files 0600) | Gateway home | `ledger.json` (owner, groups, active generation), `generations/<n>.json` (the write generation's two logins with passwords and SCRAM verifiers, and its two machine API tokens), `pooler-admin.json` (PgBouncer admin console `ava_pooler_admin`), `units/<key>.json` (each remote unit's enrollment secret) |
@@ -90,16 +90,20 @@ application root and persistent terminals. The steps run in order:
   that pair, proves both logins, activates the generation, checks the catalog
   invariant, and only then rewrites `.env` (credential-free `AVA_DB_URL`; the
   owner and runner passwords removed). A superuser owner is refused first.
-- `api` (networked homes only; a single box keeps its secret): every runner
-  holds a copy of `AVA_CLUSTER_SECRET`, and from now on it authenticates with
-  its generation's API token, so the secret rotates once. The rotation
-  (`scripts/rotate_cluster_secret.advance`, recorded in this journal as
-  fingerprints only) pins the logical-backup passphrase derived from the
-  pre-rotation secret to `$AVA_HOME/backups/logical-backup.passphrase` before it
-  writes the new secret, so every earlier logical backup keeps decrypting. That
-  file is backup-critical: verify the gateway's copy with its other backup keys
-  before any runner copy of the old material is archived and removed. The
-  telemetry relay token derives from the secret and changes here exactly once.
+- `api`: every home first pins its logical-backup passphrase to
+  `$AVA_HOME/backups/logical-backup.passphrase`: `sha256(secret)`, what it has
+  encrypted under so far, so every earlier logical backup keeps decrypting (an
+  existing pin is kept; an empty secret pins a minted one, and its earlier
+  artifacts restore only with
+  `scripts/restore_drill.py --legacy-empty-secret-passphrase`). A single box
+  keeps its secret. On a networked home every runner holds a copy of
+  `AVA_CLUSTER_SECRET` and from now on authenticates with its generation's API
+  token, so the secret rotates once (`scripts/rotate_cluster_secret.advance`,
+  recorded in this journal as fingerprints only, pinning before it writes the
+  new secret). The pinned file is backup-critical: verify the gateway's copy
+  with its other backup keys before any runner copy of the old material is
+  archived and removed. The telemetry relay token derives from the secret and
+  changes here exactly once.
 - `remote-units` reads `machine_units`: every unit other than this gateway unit
   must be classified exactly once, `--unit MACHINE:HOME` (included) or
   `--exclude-unit MACHINE:HOME` (paused or offline; it stays fenced); units of
@@ -170,8 +174,9 @@ never hold it. Rotate it only for a confirmed leak:
 
 The script stages the next secret (`backups/secret-rotation/bearer.pending`),
 journals the rotation as fingerprints (`backups/secret-rotation/bearer.json`),
-pins the logical-backup passphrase on the first rotation (an existing pin is
-kept), and only then writes the new secret into the gateway `.env`; a re-run
+verifies the pinned logical-backup passphrase (the secret never touches it;
+only a home the cutover is converting pins `sha256(secret)` here), and only
+then writes the new secret into the gateway `.env`; a re-run
 resumes an interrupted rotation from its journal. Restart the gateway, then
 issue every remote unit a new capability bundle: its telemetry relay token
 derives from the secret. New browser logins use the new secret.
