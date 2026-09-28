@@ -13,6 +13,7 @@ from pathlib import Path
 
 from cli.start_runtime import StartRuntime
 from shared import start_inputs
+from shared.env_registry import launch_input_keys
 from shared.runtime_interpreter import source_digest
 
 
@@ -34,8 +35,15 @@ def _write_generation(home: Path) -> dict[str, object] | None:
 def launch_digest(
     repo: Path, environment: dict[str, str], *, home: Path, runtime: StartRuntime | None = None
 ) -> str:
-    """Bind source, transport environment, authoritative on-disk configuration and
-    the delivered write generation (its number and credential digest only)."""
+    """Bind source, the declared launch inputs of the transport environment,
+    authoritative on-disk configuration and the delivered write generation (its
+    number and credential digest only).
+
+    Ambient keys a service manager or shell adds to the environment are not
+    launch inputs (`launch_input_keys`), so the boot unit's start action and a
+    fixed-environment observer derive the same digest for one launch.
+    """
+    inputs = launch_input_keys()
     payload = {
         "source": source_digest(repo)
         if runtime is None or runtime.release is None
@@ -44,7 +52,7 @@ def launch_digest(
             "manifest": runtime.release.manifest_digest,
             "commit": runtime.source_commit,
         },
-        "environment": environment,
+        "environment": {key: value for key, value in environment.items() if key in inputs},
         "configuration": start_inputs.configuration_digest(home),
         "write_generation": _write_generation(home),
     }

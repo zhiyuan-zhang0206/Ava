@@ -452,6 +452,58 @@ def test_root_launch_path_uses_home_declaration_across_callers(
     assert driver.root_child_env() != interactive
 
 
+# What each service manager adds to its job's environment on its own. systemd
+# with `User=` sets USER/LOGNAME/SHELL, plus its invocation bookkeeping; a
+# launchd job also gets its per-user TMPDIR, the agent socket and XPC names.
+_SERVICE_MANAGER_INJECTIONS = {
+    "systemd User=": {
+        "USER": "ava-owner",
+        "LOGNAME": "ava-owner",
+        "SHELL": "/bin/sh",
+        "INVOCATION_ID": "0" * 32,
+        "JOURNAL_STREAM": "8:12345",
+        "SYSTEMD_EXEC_PID": "4242",
+    },
+    "launchd": {
+        "USER": "ava-owner",
+        "LOGNAME": "ava-owner",
+        "SHELL": "/bin/zsh",
+        "TMPDIR": "/private/var/folders/xy/T/",
+        "SSH_AUTH_SOCK": "/private/tmp/com.apple.launchd.x/Listeners",
+        "XPC_SERVICE_NAME": "0",
+        "XPC_FLAGS": "0x0",
+        "OSLogRateLimit": "64",
+    },
+}
+
+
+@pytest.mark.parametrize("manager", sorted(_SERVICE_MANAGER_INJECTIONS))
+def test_root_launch_digest_ignores_service_manager_injections(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, manager: str
+) -> None:
+    """The started root and the stage observer derive one launch digest.
+
+    The start action runs inside the boot unit, whose manager injects variables
+    of its own; the observer runs with the fixed stage environment only. Both
+    sides must still name the same immutable generation.
+    """
+    from cli.commands import start_generation
+
+    monkeypatch.setattr(driver.settings.general, "service_path", str(tmp_path / "tools"))
+    monkeypatch.setattr(start_generation, "source_digest", lambda _repo: "source")
+    injected = _SERVICE_MANAGER_INJECTIONS[manager]
+    for key in injected:
+        monkeypatch.delenv(key, raising=False)
+    observed = start_generation.launch_digest(tmp_path, driver.root_child_env(), home=tmp_path)
+    for key, value in injected.items():
+        monkeypatch.setenv(key, value)
+    started = start_generation.launch_digest(tmp_path, driver.root_child_env(), home=tmp_path)
+    assert started == observed
+    monkeypatch.setattr(driver.settings.general, "service_path", str(tmp_path / "changed"))
+    changed = start_generation.launch_digest(tmp_path, driver.root_child_env(), home=tmp_path)
+    assert changed != observed
+
+
 @pytest.mark.parametrize("loaded", [False, True])
 def test_unusable_helper_socket_requires_positive_native_absence(
     monkeypatch: pytest.MonkeyPatch, loaded: bool

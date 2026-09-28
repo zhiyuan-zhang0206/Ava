@@ -26,7 +26,7 @@ adding a rule file is a configuration change, while backend data writes are not.
 This is validation of mutable paths, not atomic exclusion of concurrent writers.
 Release publication must provide that exclusion or immutable configuration copies.
 The private root
-`launch_digest` binds the exact environment dictionary passed to root, the
+`launch_digest` binds root's declared launch environment (`launch_input_keys`), the
 home's authoritative `.env` and plugin configuration files, and the development
 source snapshot (tracked plus nonignored untracked files) at start admission;
 root exposes that digest with its native birth in status, without exposing
