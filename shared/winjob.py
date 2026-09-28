@@ -109,6 +109,10 @@ def _kernel32() -> Any:
     api.AssignProcessToJobObject.restype = _BOOL
     api.CloseHandle.argtypes = [wintypes.HANDLE]
     api.CloseHandle.restype = _BOOL
+    api.OpenProcess.argtypes = [_DWORD, _BOOL, _DWORD]
+    api.OpenProcess.restype = wintypes.HANDLE
+    api.WaitForSingleObject.argtypes = [wintypes.HANDLE, _DWORD]
+    api.WaitForSingleObject.restype = _DWORD
     api.TerminateJobObject.argtypes = [wintypes.HANDLE, _DWORD]
     api.TerminateJobObject.restype = _BOOL
     api.QueryInformationJobObject.argtypes = [
@@ -130,7 +134,7 @@ def _get_last_error() -> int:
     return get_last_error()
 
 
-def _last_error(action: str, code: int | None = None) -> OSError:
+def last_error(action: str, code: int | None = None) -> OSError:
     if code is None:
         code = _get_last_error()
     return OSError(code, f"{action} failed with Win32 error {code}")
@@ -143,17 +147,17 @@ class WindowsJob:
         self._handle: int | None = handle
 
     @classmethod
-    def create(cls) -> WindowsJob:
+    def create(cls, *, allow_breakaway: bool = True) -> WindowsJob:
         """Create an empty job that kills members when its last handle closes."""
         api = _kernel32()
         raw_handle = api.CreateJobObjectW(None, None)
         if not raw_handle:
-            raise _last_error("CreateJobObjectW")
+            raise last_error("CreateJobObjectW")
         handle = int(raw_handle)
         info = _ExtendedLimitInformation()
-        info.BasicLimitInformation.LimitFlags = (
-            _JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE | _JOB_OBJECT_LIMIT_BREAKAWAY_OK
-        )
+        info.BasicLimitInformation.LimitFlags = _JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+        if allow_breakaway:
+            info.BasicLimitInformation.LimitFlags |= _JOB_OBJECT_LIMIT_BREAKAWAY_OK
         ok = api.SetInformationJobObject(
             wintypes.HANDLE(handle),
             _JOB_OBJECT_EXTENDED_LIMIT_INFORMATION,
@@ -163,7 +167,7 @@ class WindowsJob:
         if not ok:
             code = _get_last_error()
             api.CloseHandle(wintypes.HANDLE(handle))
-            raise _last_error("SetInformationJobObject", code)
+            raise last_error("SetInformationJobObject", code)
         return cls(handle)
 
     @property
@@ -188,7 +192,42 @@ class WindowsJob:
         if not _kernel32().AssignProcessToJobObject(
             wintypes.HANDLE(handle), wintypes.HANDLE(int(process_handle))
         ):
-            raise _last_error("AssignProcessToJobObject")
+            raise last_error("AssignProcessToJobObject")
+
+    def active_processes(self) -> int:
+        """Query native membership; failure never means the Job is empty."""
+        accounting = _BasicAccountingInformation()
+        if not _kernel32().QueryInformationJobObject(
+            wintypes.HANDLE(self.handle),
+            _JOB_OBJECT_BASIC_ACCOUNTING_INFORMATION,
+            ctypes.byref(accounting),
+            ctypes.sizeof(accounting),
+            None,
+        ):
+            raise last_error("QueryInformationJobObject accounting")
+        return int(accounting.ActiveProcesses)
+
+    def member_pids(self) -> set[int]:
+        """Bounded native membership snapshot, including orphaned descendants."""
+        capacity = 4096
+        buffer = ctypes.create_string_buffer(8 + capacity * ctypes.sizeof(_SIZE_T))
+        if not _kernel32().QueryInformationJobObject(
+            wintypes.HANDLE(self.handle),
+            3,
+            buffer,
+            len(buffer),
+            None,
+        ):
+            raise last_error("QueryInformationJobObject members")
+        assigned, returned = (_DWORD * 2).from_buffer(buffer)
+        if assigned > capacity or returned > capacity or assigned != returned:
+            raise RuntimeError("Job membership exceeded its bound or changed during inspection")
+        return set((_SIZE_T * returned).from_buffer(buffer, 8))
+
+    def terminate(self) -> None:
+        """Explicitly force the original Job; the caller must still observe closure."""
+        if not _kernel32().TerminateJobObject(wintypes.HANDLE(self.handle), 1):
+            raise last_error("TerminateJobObject")
 
     def close(self) -> None:
         """Close exactly once; the close hard-stops all non-breakaway members."""
@@ -199,7 +238,7 @@ class WindowsJob:
         # a recycled numeric handle is more dangerous than surfacing the error.
         self._handle = None
         if not _kernel32().CloseHandle(wintypes.HANDLE(handle)):
-            raise _last_error("CloseHandle")
+            raise last_error("CloseHandle")
 
     def terminate_and_confirm(self, deadline: float) -> None:
         """Observe zero active members before releasing the original Job handle.
@@ -224,7 +263,7 @@ class WindowsJob:
 def _terminate_and_observe_job(handle: int, deadline: float) -> None:
     api = _kernel32()
     if not api.TerminateJobObject(wintypes.HANDLE(handle), 1):
-        raise _last_error("TerminateJobObject")
+        raise last_error("TerminateJobObject")
     while True:
         accounting = _BasicAccountingInformation()
         if not api.QueryInformationJobObject(
@@ -234,7 +273,7 @@ def _terminate_and_observe_job(handle: int, deadline: float) -> None:
             ctypes.sizeof(accounting),
             None,
         ):
-            raise _last_error("QueryInformationJobObject")
+            raise last_error("QueryInformationJobObject")
         if accounting.ActiveProcesses == 0:
             return
         remaining = deadline - time.monotonic()

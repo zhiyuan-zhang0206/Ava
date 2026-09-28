@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import os
 import subprocess
+import sys
 from dataclasses import dataclass
+from pathlib import Path
 
 import psutil
 import pytest
@@ -275,3 +277,46 @@ def test_strict_listeners_raises_when_lsof_is_unreachable(
 
     with pytest.raises(port_preflight.ListenerDiscoveryError, match="lsof is not on PATH"):
         port_preflight.strict_listeners_on(6433)
+
+
+def test_process_mentions_reads_the_cwd_when_argv_carries_no_marker(tmp_path: Path) -> None:
+    """A service launched with a relative argv is still attributed through its cwd;
+    a marker none of argv/exe/cwd carries, and a gone pid, are never ours."""
+    unit = tmp_path / "unit"
+    unit.mkdir()
+    child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"], cwd=unit)
+    try:
+        assert port_preflight.process_mentions(child.pid, (str(unit.resolve()),))
+        assert not port_preflight.process_mentions(child.pid, (str(tmp_path / "foreign"),))
+    finally:
+        child.kill()
+        child.wait(timeout=5)
+    assert not port_preflight.process_mentions(child.pid, (str(unit.resolve()),))
+
+
+@pytest.mark.parametrize(
+    ("owners", "expected"),
+    [
+        ((), False),
+        ((101, 102), True),
+        ((101, 103), False),
+    ],
+)
+def test_listener_is_ours_requires_every_listener_to_mention_a_marker(
+    monkeypatch: pytest.MonkeyPatch, owners: tuple[int, ...], expected: bool
+) -> None:
+    """No listener is not ours, and one foreign listener makes the port foreign."""
+    ours = {101, 102}
+
+    def _listeners_on(port: int) -> list[int]:
+        assert port == 6433
+        return list(owners)
+
+    def _process_mentions(pid: int, markers: tuple[str, ...]) -> bool:
+        assert markers == ("/unit",)
+        return pid in ours
+
+    monkeypatch.setattr(port_preflight, "listeners_on", _listeners_on)
+    monkeypatch.setattr(port_preflight, "process_mentions", _process_mentions)
+
+    assert port_preflight.listener_is_ours(6433, ("/unit",)) is expected

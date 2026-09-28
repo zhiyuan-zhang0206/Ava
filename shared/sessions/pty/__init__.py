@@ -26,3 +26,9 @@ Four modules:
 - ``screen.py`` — the pyte wrapper: incremental UTF-8 decode, raw byte ring
   buffer, screen-parity capture rendering.
 """
+
+from shared.sessions.pty._paths import host_identity, host_starttime
+
+# The package door for callers outside `shared.sessions.pty` that verify a
+# recorded host process (maintenance stop's terminal custody).
+__all__ = ["host_identity", "host_starttime"]

@@ -12,8 +12,7 @@ from pathlib import Path
 import psycopg
 import pytest
 
-from ops import cluster_status
-from ops.controllers import schema_mismatch
+from ops import cluster_status, schema_mismatch
 from ops.rpc_schemas import SessionInfo
 from shared.cluster_lock import DeployLease
 from shared.host_deploy_state import HostDeployState
@@ -82,23 +81,24 @@ def snapshot_dependencies(
     def _no_sessions() -> tuple[list[SessionInfo], int, int]:
         return [], 0, 0
 
-    def _no_log(_session: str) -> None:
-        return None
-
     monkeypatch.setattr(cluster_status, "_check_pidfile", _dead_pidfile)
     monkeypatch.setattr(cluster_status, "_collect_sessions", _no_sessions)
 
     def _no_agents(_conn: object) -> int:
         return 0
 
+    def _applied(_conn: object) -> set[str]:
+        return {"baseline"}
+
     monkeypatch.setattr(cluster_status, "_count_local_agents", _no_agents)
+    monkeypatch.setattr(schema_mismatch, "applied_migration_names", _applied)
+    monkeypatch.setattr(schema_mismatch, "required_migration_set", lambda: {"baseline"})
     monkeypatch.setattr(cluster_status, "machine_name", lambda: "win")
     monkeypatch.setattr(cluster_status, "is_gateway", lambda: False)
     monkeypatch.setattr(cluster_status, "is_agent_runner", lambda: True)
     monkeypatch.setattr(cluster_status, "is_observability_station", lambda: False)
     monkeypatch.setattr("shared.cluster_drift.prod_source_head_sha", lambda: None)
     monkeypatch.setattr("shared.process_sha.get", lambda: None)
-    monkeypatch.setattr("ops.updater_outcome._newest_log", _no_log)
     return state, lease
 
 
@@ -202,11 +202,7 @@ def test_status_snapshot_uses_one_connection_while_sampling_resources(
         schema_connections.append(schema_conn)
         return {"baseline"}
 
-    def _pin(*, conn: object) -> None:
-        schema_connections.append(conn)
-
     monkeypatch.setattr(schema_mismatch, "applied_migration_names", _applied)
-    monkeypatch.setattr(schema_mismatch, "get_cluster_target_sha", _pin)
     monkeypatch.setattr(schema_mismatch, "required_migration_set", lambda: {"baseline"})
 
     monkeypatch.setattr("shared.db.connect", _connect)
@@ -218,11 +214,10 @@ def test_status_snapshot_uses_one_connection_while_sampling_resources(
 
     assert connect_calls == 1
     assert state_connections == [conn]
-    assert lease_connections == [conn]
-    assert schema_connections == [conn, conn]
+    assert lease_connections == []
+    assert schema_connections == [conn]
     assert sample_calls == 1
     assert snapshot.paused is True
-    assert snapshot.current_orchestration == "rollout"
     assert snapshot.resource == _RESOURCE
 
 
@@ -257,7 +252,7 @@ def test_status_snapshot_borrows_pool_once_with_a_bounded_timeout(
 
     assert pool.timeouts == [2.0]
     assert state_connections == [conn]
-    assert lease_connections == [conn]
+    assert lease_connections == []
     assert snapshot.paused is True
 
 
@@ -298,7 +293,7 @@ def test_two_status_snapshots_do_not_cache_db_or_resource_reads(
 
     assert pool.timeouts == [2.0, 2.0]
     assert state_reads == 2
-    assert lease_reads == 2
+    assert lease_reads == 0
     assert sample_reads == 2
 
 
@@ -317,10 +312,43 @@ def test_status_snapshot_degrades_when_the_pool_cannot_reach_db(
 
     assert pool.timeouts == [2.0]
     assert snapshot.paused is True  # A missing DB snapshot cannot claim readiness.
-    assert snapshot.current_orchestration is None
-    assert snapshot.last_updater_outcome is None
     assert snapshot.agent_count == 0
     assert snapshot.resource == _RESOURCE
+    assert snapshot.schema_mismatch is not None
+    assert snapshot.schema_mismatch.kind == "unavailable"
+    assert "status database snapshot failed" in snapshot.schema_mismatch.detail
+
+
+def test_status_snapshot_preserves_invalid_real_catalog_diagnosis(
+    db_conn: psycopg.Connection,
+    monkeypatch: pytest.MonkeyPatch,
+    snapshot_dependencies: tuple[HostDeployState, DeployLease],
+) -> None:
+    from shared.migrations import applied_migration_names
+
+    state, lease = snapshot_dependencies
+    pool = _Pool(db_conn)
+
+    def _state(_machine: str | None = None, *, conn: object | None = None) -> HostDeployState:
+        assert conn is db_conn
+        return state
+
+    def _lease(*, conn: object | None = None) -> DeployLease:
+        assert conn is db_conn
+        return lease
+
+    monkeypatch.setattr("shared.host_deploy_state.read", _state)
+    monkeypatch.setattr("shared.cluster_lock.read_update_lease", _lease)
+    monkeypatch.setattr("shared.resource_sample.resource_sample", lambda: _RESOURCE)
+    monkeypatch.setattr(schema_mismatch, "applied_migration_names", applied_migration_names)
+    with db_conn.transaction(force_rollback=True):
+        db_conn.execute("ALTER TABLE schema_migrations RENAME COLUMN name TO unexpected_name")
+        snapshot = cluster_status.status_snapshot(pool=pool)
+        assert snapshot.schema_mismatch is not None
+        assert snapshot.schema_mismatch.kind == "invalid-migration-layout"
+        assert "unrecognized shape" in snapshot.schema_mismatch.detail
+        assert snapshot.resource == _RESOURCE
+        assert pool.timeouts == [2.0]
 
 
 def test_resource_sample_failure_still_degrades_to_none_from_worker(
@@ -421,8 +449,8 @@ def test_agent_host_liveness_is_probed_only_on_a_runner(
     monkeypatch.setattr(cluster_status, "is_agent_runner", lambda: runner)
     monkeypatch.setattr(cluster_status, "_check_pidfile", check)
 
-    def no_deploy(_pool: object) -> tuple[None, None, int, None]:
-        return None, None, 0, None
+    def no_deploy(_pool: object) -> tuple[None, int, None]:
+        return None, 0, None
 
     monkeypatch.setattr(cluster_status, "_read_deploy_snapshot", no_deploy)
     monkeypatch.setattr(cluster_status, "_read_resource_sample", lambda: None)

@@ -792,27 +792,13 @@ class TestEscalate:
         assert len(_open_notices(db_conn, owner)) == 1
 
 
-def test_healthcheck_respawn_cmd_module_is_importable() -> None:
-    """Smoke-test the watchdog respawn chain (audit round 2, P1): the
-    healthcheck's `-m <module>` respawn command broke silently when the
-    plugins moved into ava_builtins/ — a stale module string never fails an
-    import check at deploy time, so the watchdog could never revive the
-    daemon after a crash. Pin the actual literal in healthcheck.py to a
-    module that resolves, and make sure the pre-move path is gone."""
+def test_service_command_module_is_importable() -> None:
+    """The canonical root service command resolves after plugin relocation."""
     import importlib.util
-    import re
-    from pathlib import Path
 
-    from ava_builtins.plugins.ava_fleet.task_maintenance import healthcheck
+    from ava_builtins.plugins.ava_fleet.services import services
 
-    src = Path(healthcheck.__file__).read_text()
-    m = re.search(r"\.venv/bin/python -m ([\w.]+)", src)
-    assert m, "no `-m <module>` respawn cmd found in healthcheck.py"
-    module = m.group(1)
-    assert importlib.util.find_spec(module) is not None, (
-        f"respawn cmd module {module!r} is not importable — the watchdog "
-        "can never revive task-maintenance"
-    )
-    assert not module.startswith("plugins."), (
-        f"respawn cmd {module!r} still uses the pre-ava_builtins path"
-    )
+    service = next(item for item in services() if item.session == "task-maintenance")
+    module = service.cmd.split(" -m ", 1)[1]
+    assert importlib.util.find_spec(module) is not None
+    assert module.startswith("ava_builtins.plugins.")

@@ -152,7 +152,7 @@ def test_broken_services_py_is_skipped_and_others_still_load(
 def test_external_service_healthcheck_loads_without_agent_bootstrap(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, prior: bool
 ) -> None:
-    """Discovery supplies the exact module identity used by the watchdog."""
+    """Discovery supplies the exact module identity root health monitoring imports."""
     import importlib
     import sys
     from types import ModuleType

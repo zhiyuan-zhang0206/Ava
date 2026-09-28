@@ -1,8 +1,15 @@
-"""PostgreSQL-backed browser sessions with short positive-result caching."""
+"""PostgreSQL-backed browser sessions with short positive-result caching.
+
+A session id is `<mint>.<random>`: the mint names the credential that logged
+the browser in (`gateway.request_principal.login_mint`). Validity is the row
+(unrevoked, unexpired) AND a mint the caller still admits, so a session never
+outlives the credential that minted it.
+"""
 
 from __future__ import annotations
 
 from collections import OrderedDict
+from collections.abc import Collection
 from contextlib import suppress
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -10,6 +17,7 @@ from typing import Any
 from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
 
+from shared.cluster_auth import new_session_id
 from shared.db_transaction import write_transaction
 
 _CACHE_TTL = timedelta(seconds=30)
@@ -21,6 +29,17 @@ _session_cache: OrderedDict[str, tuple[datetime, datetime]] = OrderedDict()
 
 def _now() -> datetime:
     return datetime.now(UTC)
+
+
+def minted_session_id(mint: str) -> str:
+    """A new opaque session id bound to `mint` (256 random bits after it)."""
+    return f"{mint}.{new_session_id()}"
+
+
+def session_mint(session_id: str) -> str | None:
+    """The mint a session id carries, or None for an id without one."""
+    mint, dot, rest = session_id.partition(".")
+    return mint if dot and mint and rest else None
 
 
 def create_session(
@@ -46,10 +65,13 @@ def session_is_valid(
     pool: ConnectionPool[Any],
     session_id: str | None,
     *,
+    admitted: Collection[str],
     now: datetime | None = None,
 ) -> bool:
-    """Whether an opaque session exists, is unrevoked, and has not expired."""
-    if not session_id:
+    """Whether a session carries an `admitted` mint, exists, is unrevoked and
+    has not expired. A mint no longer admitted is refused before the cache and
+    the database are consulted."""
+    if not session_id or session_mint(session_id) not in admitted:
         return False
     checked_at = now if now is not None else _now()
     cached = _session_cache.get(session_id)

@@ -82,7 +82,7 @@ upload, checksum, and conditional retry machinery). It performs immutable
 generation-zero creates, verifies CRC32C/generation/metadata, and fsyncs a local
 ACK before deleting local staging or spool data. It never deletes remote objects.
 Activation remains default-off and operator-owned: it journals the environment and
-`ALTER SYSTEM` changes, continues through the existing whole-cluster restart, proves
+`ALTER SYSTEM` changes, restarts through its finite PITR operation, proves
 an exact writer-smoke WAL through a durable ACK and independent viewer, then forces and
 restores one operation-scoped base chain. Existing verified pre-update `pg_dump`
 remains mandatory and is never pruned by physical-backup retention.

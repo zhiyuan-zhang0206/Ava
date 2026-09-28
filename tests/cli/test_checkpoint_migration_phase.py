@@ -24,33 +24,92 @@ def _seed_checkpoint_versions(conn: psycopg.Connection) -> None:
     conn.commit()
 
 
+class _FakeCursor:
+    def __init__(self, owner: str) -> None:
+        self._owner = owner
+
+    def __enter__(self) -> _FakeCursor:
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        return None
+
+    def execute(self, query: str) -> _FakeCursor:
+        assert query == "SELECT current_user"
+        return self
+
+    def fetchone(self) -> tuple[str]:
+        return (self._owner,)
+
+
+class _FakeAdminConnection:
+    """The admin socket as `owner_session` sees it: the startup role is honored."""
+
+    autocommit = False
+
+    def __init__(self, owner: str) -> None:
+        self._owner = owner
+
+    def __enter__(self) -> _FakeAdminConnection:
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        return None
+
+    def cursor(self, **_kwargs: object) -> _FakeCursor:
+        return _FakeCursor(self._owner)
+
+    def commit(self) -> None:
+        return None
+
+
 @pytest.fixture
 def migration_phase(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     import shared.db
     import shared.migrations
-    from shared import cluster
+    from shared import cluster, pg_admin
+    from shared.cluster import ownership
 
     calls: list[str] = []
     conn = object()
+    admin_conn = _FakeAdminConnection("ava")
+    authority = pg_admin.OwnerAuthority(
+        admin_url="postgresql://admin@/postgres?host=/tmp/ava-pg-test&port=5999",
+        database="ava",
+        owner="ava",
+        data_dir=Path("/home/pg"),
+    )
 
     @contextmanager
     def fake_connect(**kwargs: object) -> Generator[object, None, None]:
         calls.append(f"connect:{kwargs}")
         yield conn
 
+    def fake_admin_connect(url: str, **kwargs: object) -> _FakeAdminConnection:
+        assert url == authority.conninfo
+        calls.append(f"admin:{kwargs}")
+        return admin_conn
+
     def fake_dependency_gate() -> None:
         calls.append("dependency")
 
     def fake_ava_migrations(got: object) -> list[str]:
-        assert got is conn
+        assert got in (conn, admin_conn)
         calls.append("ava")
         return ["20260823T000000_example"]
 
-    def fake_checkpoint_assertion(url: str) -> None:
-        calls.append(f"checkpoint:{url}")
+    def fake_checkpoint_assertion(url: str, **kwargs: object) -> None:
+        calls.append(f"checkpoint:{url}:{kwargs}")
 
+    def record_ownership(_conn: object, data: Path) -> None:
+        assert data == authority.data_dir
+        calls.append("ownership")
+
+    monkeypatch.setattr(ownership, "require_postgres_connection", record_ownership)
     monkeypatch.setattr(shared.db, "connect", fake_connect)
     monkeypatch.setattr(shared.db, "direct_db_url", lambda: "postgresql://direct/ava")
+    monkeypatch.setattr(pg_admin, "local_owner_authority", lambda: authority)
+    monkeypatch.setattr(pg_admin.psycopg, "connect", fake_admin_connect)
     monkeypatch.setattr(shared.migrations, "apply_pending_migrations", fake_ava_migrations)
     monkeypatch.setattr(
         cluster, "assert_checkpoint_dependency_pinned", fake_dependency_gate, raising=False
@@ -64,18 +123,103 @@ def migration_phase(monkeypatch: pytest.MonkeyPatch) -> list[str]:
 def test_start_phase_verifies_checkpoint_schema_after_ava_migrations(
     migration_phase: list[str],
 ) -> None:
-    """All capabilities share this read-only post-migration checkpoint gate."""
+    """A locally owned plane migrates as the admin acting as the owner, then
+    every capability shares the read-only post-migration checkpoint gate."""
     from cli.commands.migrations import cmd_migrations_apply
+    from shared import pg_admin
 
+    authority = pg_admin.local_owner_authority()
     applied = cmd_migrations_apply()
 
     assert migration_phase == [
         "dependency",
-        "connect:{'direct': True, 'unbounded': True}",
+        "admin:{}",
+        "ownership",
         "ava",
-        "checkpoint:postgresql://direct/ava",
+        f"checkpoint:{authority.conninfo}:{{'expected_data_dir': {authority.data_dir!r}}}",
     ]
     assert applied == ["20260823T000000_example"]
+
+
+def test_foreign_connected_postgres_refuses_before_migration_ddl(
+    migration_phase: list[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from cli.commands.migrations import cmd_migrations_apply
+    from shared.cluster import ownership
+
+    def refuse(_conn: object, _data: Path) -> None:
+        raise RuntimeError("foreign connected backend")
+
+    monkeypatch.setattr(ownership, "require_postgres_connection", refuse)
+    with pytest.raises(RuntimeError, match="foreign connected backend"):
+        cmd_migrations_apply()
+    assert "ava" not in migration_phase
+
+
+def test_admin_session_without_owner_role_refuses_before_migration_ddl(
+    migration_phase: list[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A dial that dropped the startup role (a pooler) would create
+    superuser-owned objects; the owner check refuses before any DDL."""
+    from cli.commands.migrations import cmd_migrations_apply
+    from shared import pg_admin
+
+    def superuser_dial(_url: str, **_kwargs: object) -> _FakeAdminConnection:
+        return _FakeAdminConnection("postgres")
+
+    monkeypatch.setattr(pg_admin.psycopg, "connect", superuser_dial)
+    with pytest.raises(RuntimeError, match="did not assume schema owner"):
+        cmd_migrations_apply()
+    assert "ava" not in migration_phase
+
+
+def test_remote_managed_migration_preserves_explicit_provider_authority(
+    migration_phase: list[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from cli.commands.migrations import cmd_migrations_apply
+    from shared import pg_admin
+    from shared.config import settings
+
+    monkeypatch.setattr(settings.data_plane, "db_url", "postgresql://owner@db.example/ava")
+    monkeypatch.setattr(settings.data_plane, "redis_url", "redis://cache.example/0")
+    monkeypatch.setattr(
+        pg_admin, "local_owner_authority", lambda: pytest.fail("remote plane has no admin")
+    )
+    assert cmd_migrations_apply() == ["20260823T000000_example"]
+    assert migration_phase == [
+        "dependency",
+        "connect:{'direct': True, 'unbounded': True}",
+        "ava",
+        "checkpoint:postgresql://direct/ava:{}",
+    ]
+
+
+def _bind_private_database(conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Point the owner authority at the session database's own postmaster.
+
+    The session Postgres is a throwaway without a home launch receipt, so the
+    native custody proof is replaced by a same-instance check: the admin dial
+    must reach the data directory the authority names.
+    """
+    from shared import pg_admin
+    from shared.cluster import ownership
+    from shared.config import settings
+
+    row = conn.execute(
+        "SELECT current_setting('data_directory'), current_database(), current_user"
+    ).fetchone()
+    assert row is not None
+    directory, database, owner = Path(row[0]), row[1], row[2]
+
+    def guard(actual: psycopg.Connection, data: Path) -> None:
+        reached = actual.execute("SELECT current_setting('data_directory')").fetchone()
+        assert data == directory and reached == (str(directory),)
+
+    authority = pg_admin.OwnerAuthority(
+        admin_url=settings.data_plane.db_url, database=database, owner=owner, data_dir=directory
+    )
+    monkeypatch.setattr(ownership, "require_postgres_connection", guard)
+    monkeypatch.setattr(pg_admin, "local_owner_authority", lambda: authority)
 
 
 def test_real_start_phase_converges_ava_then_is_idempotent(
@@ -83,14 +227,12 @@ def test_real_start_phase_converges_ava_then_is_idempotent(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Real PG proves both migration domains are exact on repeated starts."""
-    import shared.db
     from cli.commands.migrations import cmd_migrations_apply
-    from shared.config import settings
     from shared.migrations import required_migration_set
 
+    _bind_private_database(db_conn, monkeypatch)
     db_conn.execute("DELETE FROM machine_units")
     _seed_checkpoint_versions(db_conn)
-    monkeypatch.setattr(shared.db, "direct_db_url", lambda: settings.data_plane.db_url)
 
     cmd_migrations_apply()
 
@@ -115,14 +257,12 @@ def test_dependency_drift_fails_before_any_database_change(
     """
     from langgraph.checkpoint.postgres import PostgresSaver
 
-    import shared.db
     from cli.commands.migrations import cmd_migrations_apply
     from shared.cluster.provision import CheckpointDependencyDriftError
-    from shared.config import settings
 
+    _bind_private_database(db_conn, monkeypatch)
     db_conn.execute("DELETE FROM machine_units")
     _seed_checkpoint_versions(db_conn)
-    monkeypatch.setattr(shared.db, "direct_db_url", lambda: settings.data_plane.db_url)
     cmd_migrations_apply()
     ava_before = db_conn.execute("SELECT name FROM schema_migrations").fetchall()
     checkpoint_before = db_conn.execute("SELECT v FROM checkpoint_migrations").fetchall()

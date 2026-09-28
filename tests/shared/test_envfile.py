@@ -1,4 +1,8 @@
+import os
+import time
+from datetime import datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -100,28 +104,70 @@ def test_snapshot_backs_up_content_0600(tmp_path: Path):
     assert oct(dest.stat().st_mode)[-3:] == "600"
 
 
-def test_snapshot_filename_stamps_cluster_clock(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    """The backup filename's wall clock follows the cluster timezone (user
-    ruling 2026-08-27), so an operator reading backup names sees the same
-    clock as every other surface."""
+# A backup instant's calendar date in these two zones never agrees: the gap
+# between UTC+14 and UTC-12 is 26 hours, more than a full day, so one zone has
+# always already rolled past its own midnight relative to the other — proven
+# for every real instant, not just the moment a test happens to run (verified
+# by brute force across 200k random instants spanning 20 years).
+_HOST_ZONE = "Pacific/Kiritimati"  # UTC+14, no DST
+_DECOY_CLUSTER_ZONE = "Etc/GMT+12"  # UTC-12, no DST
 
-    import datetime as _dt
-    from zoneinfo import ZoneInfo
 
-    monkeypatch.setattr(
-        settings, "general", GeneralSettings.model_construct(timezone="Asia/Shanghai")
-    )
-    env = tmp_path / ".env"
-    env.write_text("SECRET=abc\n")
-    # Snapshot before/after the call so the midnight boundary cannot race the
-    # assertion: the stamp must be the cluster-zone wall date at call time.
-    before = _dt.datetime.now(ZoneInfo("Asia/Shanghai"))
-    dest = snapshot_env(env)
-    after = _dt.datetime.now(ZoneInfo("Asia/Shanghai"))
-    assert dest is not None
-    stamp = dest.name[len(".env.") :].split("-")[0]  # YYYYMMDD
-    assert len(stamp) == 8
-    assert stamp in {before.strftime("%Y%m%d"), after.strftime("%Y%m%d")}
+def test_snapshot_filename_stamps_the_host_clock(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The backup filename's wall clock is the HOST's, never the cluster's —
+    the 2026-09-28 ruling exception to the 2026-08-27 one-cluster-clock rule
+    (decisions/2026-09-28-env-backup-names-use-the-host-clock.md): `.env` is
+    written before a process's identity, and its authoritative cluster clock,
+    are established (a unit's first `ava start`), and reading the cluster clock there
+    means loading runtime config — a `GET /api/bootstrap` on a pure runner —
+    which `snapshot_env` cannot afford.
+
+    Pins the process to a host zone 26 hours from a decoy
+    `settings.general.timezone` (see `_HOST_ZONE` / `_DECOY_CLUSTER_ZONE`
+    above: far enough apart that their calendar dates never agree, at any
+    instant) and asserts the stamp follows the HOST date, never the decoy's —
+    deterministic under both `TZ=UTC` and the runner's own default zone, since
+    the host zone is pinned explicitly rather than inherited from the
+    environment.
+    """
+    if not hasattr(time, "tzset"):
+        pytest.skip("time.tzset is POSIX-only")
+
+    original_tz = os.environ.get("TZ")
+    try:
+        monkeypatch.setenv("TZ", _HOST_ZONE)
+        time.tzset()
+        monkeypatch.setattr(
+            settings,
+            "general",
+            GeneralSettings.model_construct(timezone=_DECOY_CLUSTER_ZONE),
+        )
+        env = tmp_path / ".env"
+        env.write_text("SECRET=abc\n")
+        # Snapshot before/after the call so the pinned host zone's own
+        # midnight boundary cannot race the assertion.
+        before = datetime.now().astimezone()
+        dest = snapshot_env(env)
+        after = datetime.now().astimezone()
+        decoy_now = datetime.now(ZoneInfo(_DECOY_CLUSTER_ZONE))
+
+        assert dest is not None
+        stamp = dest.name[len(".env.") :].split("-")[0]  # YYYYMMDD
+        assert len(stamp) == 8
+        assert stamp in {before.strftime("%Y%m%d"), after.strftime("%Y%m%d")}
+        assert stamp != decoy_now.strftime("%Y%m%d")
+    finally:
+        # monkeypatch's own TZ-env undo does not re-run tzset(), so the C
+        # library's cached zone would otherwise leak into later tests (the
+        # same gotcha tests/shared/test_cluster_tz.py's _restore_process_tz
+        # documents).
+        if original_tz is None:
+            os.environ.pop("TZ", None)
+        else:
+            os.environ["TZ"] = original_tz
+        time.tzset()
 
 
 def test_snapshot_dedupes_identical(tmp_path: Path):

@@ -26,6 +26,7 @@ from typing import cast
 import pytest
 
 from shared import daemon_health
+from shared.cluster.authority.api import token_digest
 from shared.health_schema import DEGRADED, OK, component
 from shared.paths import ava_home
 
@@ -295,14 +296,13 @@ async def _ok_route(_body: bytes) -> tuple[int, bytes, str]:
 
 @pytest.mark.asyncio
 async def test_extra_route_requires_auth_when_token_set() -> None:
-    """auth_token set: an extra route rejects a missing / wrong bearer with 401,
-    accepts the matching one."""
+    """auth_digests set: a missing / wrong bearer gets 401; a listed digest's token passes."""
     port = _find_free_port()
     server = await daemon_health.start_health_server(
         "ops",
         port=port,
         extra_routes={("POST", "/ops"): _ok_route},
-        auth_token="s3cret",  # noqa: S106 — test fixture, not a real secret
+        auth_digests=frozenset({token_digest("s3cret")}),
     )
     try:
         s_none, _ = await _http_request(port, "POST", "/ops", body=b"{}")
@@ -325,7 +325,7 @@ async def test_healthz_unauthenticated_even_with_auth_token() -> None:
         "ops",
         port=port,
         extra_routes={("POST", "/ops"): _ok_route},
-        auth_token="s3cret",  # noqa: S106 — test fixture, not a real secret
+        auth_digests=frozenset({token_digest("s3cret")}),
     )
     try:
         status, _ = await _http_get(port, "/healthz")  # no Authorization header
@@ -336,7 +336,7 @@ async def test_healthz_unauthenticated_even_with_auth_token() -> None:
 
 @pytest.mark.asyncio
 async def test_extra_route_open_when_no_auth_token() -> None:
-    """No auth_token (the loopback daemons): extra routes need no bearer."""
+    """No auth_digests (the loopback daemons): extra routes need no bearer."""
     port = _find_free_port()
     server = await daemon_health.start_health_server(
         "memory_indexer", port=port, extra_routes={("POST", "/ops"): _ok_route}

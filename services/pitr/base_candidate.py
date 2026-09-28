@@ -7,18 +7,15 @@ import json
 import os
 import re
 import shutil
-import signal
 import subprocess
-import sys
 import tempfile
 import threading
 import time
 from collections.abc import Mapping
-from contextlib import suppress
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Protocol
+from typing import Any
 
 import psutil
 import psycopg
@@ -34,23 +31,20 @@ from services.pitr.base_manifest import (
 from services.pitr.base_object_store import RestartableStreamingObjectStore
 from services.pitr.base_stream import BASE_MAGIC, load_or_create_source, snapshot_candidate
 from services.pitr.checksums import CRC32C, KNOWN_CHECKSUM_ALGOS
+from services.pitr.operation_custody import NativeProcess, OperationWorker, owned_receipts
 from services.pitr.space_budget import CandidateSpaceBudget, require_candidate_space
-from shared.db import direct_db_url
+from services.pitr.worker_process import StopSignal
+from shared.pg_admin import OwnerAuthority, local_owner_authority
 from shared.pg_tools import pg_tool
-from shared.proc_tree import create_time_matches, stable_create_time
 
 
 class BaseCandidateError(RuntimeError):
     pass
 
 
-class StopSignal(Protocol):
-    def is_set(self) -> bool: ...
-
-    def wait(self, timeout: float | None = None) -> bool: ...
-
-
-_PARTIAL_NAME = re.compile(r"^\.(?:\d{8}T\d{6}Z|activation-\d{8}T\d{6}Z-[0-9a-f-]{36})\.partial$")
+# The owner state of a completed capture that failed its own verification or
+# loading: quarantine discards it instead of keeping it for resumption.
+REJECTED = "rejected"
 
 
 @dataclass(frozen=True)
@@ -87,15 +81,15 @@ def _atomic_json(path: Path, value: Mapping[str, object]) -> None:
         staged.unlink(missing_ok=True)
 
 
-def _migration_set_sha256(db_url: str) -> str:
-    with psycopg.connect(db_url) as conn, conn.cursor() as cur:
+def _migration_set_sha256(conn: psycopg.Connection[Any]) -> str:
+    with conn.cursor() as cur:
         cur.execute("SELECT name FROM schema_migrations ORDER BY name")
         names = [str(row[0]) for row in cur.fetchall()]
     return hashlib.sha256("\n".join(names).encode()).hexdigest()
 
 
-def _server_facts(db_url: str) -> tuple[int, str, int, int, str]:
-    with psycopg.connect(db_url) as conn, conn.cursor() as cur:
+def _server_facts(conn: psycopg.Connection[Any]) -> tuple[int, str, int, int, str]:
+    with conn.cursor() as cur:
         cur.execute(
             "SELECT current_setting('server_version_num'), system_identifier, "
             "timeline_id, bytes_per_wal_segment, current_database() FROM pg_control_system(), "
@@ -162,12 +156,12 @@ def _validate_replication_hba(replication: Mapping[str, object]) -> None:
     connection". Fail closed BEFORE the backup when no loaded rule covers the
     PITR role, so the operator sees an actionable cause instead of a bare exit
     code."""
-    from services.pitr.activation_runtime import pitr_admin_url
+    from services.pitr.activation_runtime import pitr_admin_session
 
     role = str(replication.get("user") or "")
     host = str(replication.get("host") or "")
     try:
-        with psycopg.connect(pitr_admin_url()) as conn, conn.cursor() as cur:
+        with pitr_admin_session() as conn, conn.cursor() as cur:
             cur.execute(
                 "SELECT database, user_name, error FROM pg_hba_file_rules "
                 "WHERE type <> 'local' AND address IS NOT NULL"
@@ -195,20 +189,6 @@ def _validate_replication_hba(replication: Mapping[str, object]) -> None:
     )
 
 
-def _matching_process(pid: int, created_at: float, expected_token: str) -> psutil.Process | None:
-    try:
-        process = psutil.Process(pid)
-        if not create_time_matches(stable_create_time(process), created_at):
-            return None
-        if expected_token not in " ".join(process.cmdline()):
-            return None
-        return process
-    except psutil.AccessDenied as exc:
-        raise BaseCandidateError("cannot verify base candidate owner identity") from exc
-    except (psutil.NoSuchProcess, psutil.ZombieProcess):
-        return None
-
-
 def _remove_tree(path: Path) -> None:
     if path.is_symlink() or not path.is_dir():
         raise BaseCandidateError(f"refusing to remove unexpected candidate path: {path.name}")
@@ -217,108 +197,45 @@ def _remove_tree(path: Path) -> None:
 
 
 def _recover_owned_partials(root: Path) -> None:
-    candidates = root / "base-candidates"
-    if not candidates.exists():
-        return
-    for partial in candidates.glob(".*.partial"):
-        if not _PARTIAL_NAME.fullmatch(partial.name):
-            raise BaseCandidateError(f"unknown base candidate partial: {partial.name}")
-        chain_id = partial.name.removeprefix(".").removesuffix(".partial")
-        owner = root / "base-facts" / f"{chain_id}.owner.json"
-        if not owner.is_file():
-            raise BaseCandidateError(f"base candidate partial lacks owner evidence: {partial.name}")
-        try:
-            evidence = json.loads(owner.read_text())
-            state = str(evidence["state"])
-            deadline = float(evidence["deadline"])
-        except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
-            raise BaseCandidateError("invalid base candidate owner evidence") from exc
-        if state == "spawning":
-            if time.time() < deadline:
-                raise BaseCandidateError(f"base candidate spawn is unresolved for {chain_id}")
-        elif state == "running":
-            try:
-                pid = int(evidence["pid"])
-                pgid = int(evidence["pgid"])
-                created_at = float(evidence["created_at"])
-                expected_token = str(evidence["expected_token"])
-            except (KeyError, TypeError, ValueError) as exc:
-                raise BaseCandidateError("invalid running capture evidence") from exc
-            process = _matching_process(pid, created_at, expected_token)
-            if process is not None:
-                if time.time() < deadline:
-                    raise BaseCandidateError(f"base candidate owner is still active for {chain_id}")
-                _stop_owned_group(process, pgid)
-        else:
-            raise BaseCandidateError("unknown base candidate owner state")
-        _remove_tree(partial)
-        owner.unlink()
-        _fsync_dir(owner.parent)
-
-
-def _stop_owned_group(leader: psutil.Process, pgid: int) -> None:
-    try:
-        if os.getpgid(leader.pid) != pgid or pgid == os.getpgrp():
-            raise BaseCandidateError("refusing to signal an unowned backup process group")
-    except ProcessLookupError:
-        return
-    deadline = time.monotonic() + 20
-    with suppress(ProcessLookupError):
-        os.killpg(pgid, signal.SIGTERM)
-    grace_end = min(deadline, time.monotonic() + 5)
-    while _group_members(pgid) and time.monotonic() < grace_end:
-        time.sleep(0.1)
-    while _group_members(pgid) and time.monotonic() < deadline:
-        with suppress(ProcessLookupError):
-            os.killpg(pgid, signal.SIGKILL)
-        time.sleep(0.1)
-    if _group_members(pgid):
-        raise BaseCandidateError("backup process group retained live descendants")
-
-
-def _group_members(pgid: int) -> list[psutil.Process]:
-    members: list[psutil.Process] = []
-    for process in psutil.process_iter(["pid"]):
-        try:
-            if os.getpgid(process.pid) == pgid:
-                members.append(process)
-        except (ProcessLookupError, PermissionError, psutil.NoSuchProcess):
-            continue
-    return members
-
-
-def _stop_process(process: subprocess.Popen[bytes]) -> None:
-    try:
-        leader = psutil.Process(process.pid)
-    except psutil.NoSuchProcess:
-        process.wait()
-        return
-    owned: dict[tuple[int, float], psutil.Process] = {
-        (member.pid, stable_create_time(member)): member
-        for member in [leader, *leader.children(recursive=True)]
-    }
-    for member in reversed(list(owned.values())):
-        with suppress(psutil.NoSuchProcess):
-            member.terminate()
-    deadline = time.monotonic() + 20
-    alive = list(owned.values())
-    while alive and time.monotonic() < deadline:
-        with suppress(psutil.NoSuchProcess):
-            for member in leader.children(recursive=True):
-                owned[(member.pid, stable_create_time(member))] = member
-        _, alive = psutil.wait_procs(
-            list(owned.values()), timeout=min(0.25, max(0, deadline - time.monotonic()))
+    partials = list((root / "base-candidates").glob(".*.partial"))
+    owners = list((root / "base-facts").glob("*.owner.json"))
+    if partials or owners:
+        raise BaseCandidateError(
+            "base candidate has unresolved operation evidence; `ava pitr operations "
+            "retire` must prove its worker closed, never receipt-based adoption: "
+            f"{sorted(path.name for path in partials + owners)}"
         )
-        if time.monotonic() + 5 >= deadline:
-            for member in alive:
-                with suppress(psutil.NoSuchProcess):
-                    member.kill()
-    if alive:
-        raise BaseCandidateError("backup subprocess tree retained live descendants")
-    try:
-        process.wait(timeout=0)
-    except subprocess.TimeoutExpired as exc:
-        raise BaseCandidateError("backup process leader was not reaped") from exc
+
+
+def quarantine_candidate_staging(root: Path, work: Path, worker: OperationWorker | None) -> None:
+    """After proven closure, drop a worker's plaintext copy and keep its receipts.
+
+    An incomplete `.partial` copy of PGDATA never survives its writer. A
+    completed `.ready` capture keeps its facts and plan so the next worker can
+    resume it without another multi-hour capture, unless its worker rejected
+    it: a tree that failed its own verification or loading would fail every
+    resumption. The owner receipt moves into the quarantined controls, which
+    frees the chain for the next worker.
+    """
+    facts = root / "base-facts"
+    owners = sorted(facts.glob("*.owner.json")) if facts.is_dir() else []
+    for owner, evidence in owned_receipts(owners, work, worker):
+        chain_id = str(evidence["chain_id"])
+        if not re.fullmatch(r"[0-9A-Za-z-]+", chain_id):
+            raise BaseCandidateError("base candidate owner names an invalid chain")
+        partial = root / "base-candidates" / f".{chain_id}.partial"
+        if partial.exists() or partial.is_symlink():
+            _remove_tree(partial)
+        ready = root / "base-candidates" / f"{chain_id}.ready"
+        if evidence["state"] == REJECTED and (ready.exists() or ready.is_symlink()):
+            _remove_tree(ready)
+        if not ready.exists():
+            (facts / f"{chain_id}.json").unlink(missing_ok=True)
+            (root / "base-plans" / f"{chain_id}.plan.json").unlink(missing_ok=True)
+        receipts = work / "business"
+        receipts.mkdir(mode=0o700, exist_ok=True)
+        shutil.move(owner, receipts / owner.name)
+        _fsync_dir(facts)
 
 
 def _output_suffix(stdout: bytes | None, stderr: bytes | None) -> str:
@@ -336,50 +253,35 @@ def _output_suffix(stdout: bytes | None, stderr: bytes | None) -> str:
     return f": {' | '.join(tails)}" if tails else ""
 
 
-def _run_capture(command: list[str], *, env: dict[str, str], owner: Path, stop: StopSignal) -> None:
-    deadline = time.time() + 6 * 3600
-    wrapped = [
-        sys.executable,
-        "-m",
-        "services.pitr.capture_exec",
-        "--owner",
-        str(owner),
-        "--deadline",
-        str(deadline),
-        "--",
-        *command,
-    ]
-    # Both pipes are drained only at exit (communicate below), not during the
-    # poll loop: without --progress, pg_basebackup emits far less than the
-    # 64 KiB pipe buffer, so the child cannot block on a full pipe in
-    # practice. Output beyond the buffer would only surface as the six-hour
-    # bound firing with the drained tail in the message — accepted over a
-    # reader thread, which this diagnostic path does not need.
-    process = subprocess.Popen(  # noqa: S603
-        wrapped,
+def _run_tool(
+    command: list[str],
+    *,
+    stop: StopSignal,
+    env: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess[bytes]:
+    # These are trusted foreground children of the operation worker. Reaping a
+    # tool does not release the worker's group pin; its controller closes all
+    # inherited descendants before accepting output or retiring artifacts.
+    process = subprocess.Popen(  # noqa: S603 -- exact tool argv.
+        command,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         env=env,
-        start_new_session=False,
     )
-    while process.poll() is None:
-        if stop.wait(0.25):
-            _stop_process(process)
-            stdout, stderr = process.communicate()
-            raise BaseCandidateError(
-                f"base candidate capture was stopped{_output_suffix(stdout, stderr)}"
-            )
-        if time.time() >= deadline:
-            _stop_process(process)
-            stdout, stderr = process.communicate()
-            raise BaseCandidateError(
-                f"pg_basebackup exceeded its six-hour bound{_output_suffix(stdout, stderr)}"
-            )
-    stdout, stderr = process.communicate()
+    deadline = time.monotonic() + 6 * 3600
+    while True:
+        if stop.is_set() or time.monotonic() >= deadline:
+            raise BaseCandidateError("backup tool stopped or exceeded its six-hour bound")
+        try:
+            stdout, stderr = process.communicate(timeout=0.25)
+            break
+        except subprocess.TimeoutExpired:
+            continue
     if process.returncode != 0:
         raise BaseCandidateError(
-            f"pg_basebackup exited {process.returncode}{_output_suffix(stdout, stderr)}"
+            f"{command[0]} exited {process.returncode}{_output_suffix(stdout, stderr)}"
         )
+    return subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
 
 
 def _birth_candidate(
@@ -387,40 +289,20 @@ def _birth_candidate(
     root: Path,
     chain_id: str,
     budget: CandidateSpaceBudget,
-    db_url: str,
     replication_db_url: str,
     stop: StopSignal,
 ) -> tuple[Path, CandidateFacts]:
     partial = root / "base-candidates" / f".{chain_id}.partial"
     ready = root / "base-candidates" / f"{chain_id}.ready"
     facts_path = root / "base-facts" / f"{chain_id}.json"
-    owner_path = root / "base-facts" / f"{chain_id}.owner.json"
     conninfo, password = _passwordless_conninfo(replication_db_url)
     with backup_lock(timeout_s=0):
         partial.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         (root / "base-facts").mkdir(parents=True, exist_ok=True, mode=0o700)
         _recover_owned_partials(root)
         require_candidate_space(partial.parent, budget)
-        _validate_replication_contract(db_url, replication_db_url)
-        postgres_major, system_id, wal_segment_size, timeline, database_name = _server_facts(db_url)
-        facts = CandidateFacts(
-            postgres_major,
-            system_id,
-            wal_segment_size,
-            timeline,
-            _migration_set_sha256(db_url),
-            database_name,
-        )
-        current = psutil.Process()
-        _atomic_json(
-            owner_path,
-            {
-                "state": "spawning",
-                "pid": current.pid,
-                "created_at": stable_create_time(current),
-                "deadline": time.time() + 30,
-            },
-        )
+        facts = _capture_facts(local_owner_authority(), replication_db_url)
+        _record_owner(root, chain_id)
         partial.mkdir(mode=0o700)
         command = [
             str(pg_tool("pg_basebackup")),
@@ -437,62 +319,95 @@ def _birth_candidate(
             "--dbname",
             conninfo,
         ]
-        try:
-            _run_capture(
-                command,
-                env={"PGPASSWORD": password} if password else {},
-                owner=owner_path,
-                stop=stop,
-            )
-            _verify_candidate(partial, stop)
-            _atomic_json(facts_path, asdict(facts))
-            partial.replace(ready)
-            _fsync_dir(ready.parent)
-        except BaseException as exc:
-            if partial.exists():
-                try:
-                    _remove_tree(partial)
-                except BaseException:
-                    evidence = json.loads(owner_path.read_text())
-                    evidence.update({"state": "cleanup_failed", "error": str(exc)})
-                    _atomic_json(owner_path, evidence)
-                    raise
-            facts_path.unlink(missing_ok=True)
-            raise
-        finally:
-            if ready.exists() or not partial.exists():
-                owner_path.unlink(missing_ok=True)
+        _run_tool(command, env={"PGPASSWORD": password} if password else {}, stop=stop)
+        _verify_candidate(partial, stop)
+        _atomic_json(facts_path, asdict(facts))
+        partial.replace(ready)
+        _fsync_dir(ready.parent)
     return ready, facts
 
 
-def _verify_candidate(path: Path, stop: StopSignal) -> None:
-    # Same pipe-bound acceptance as _run_capture: pg_verifybackup's report is
-    # a few lines, far below the pipe buffer, drained at exit.
-    verify = subprocess.Popen(  # noqa: S603
-        [str(pg_tool("pg_verifybackup")), "--no-parse-wal", str(path)],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        start_new_session=False,
+def _capture_facts(owner: OwnerAuthority, replication_db_url: str) -> CandidateFacts:
+    """The capture-time identity facts, read as this home's schema owner.
+
+    The administrator acting as the owner over the home's own socket
+    (`shared.pg_admin`) is custody-checked against the home's postmaster and
+    needs no write-generation login; the replication URL must name the same
+    server port.
+    """
+    _validate_replication_contract(owner.conninfo, replication_db_url)
+    with owner.session() as conn:
+        postgres_major, system_id, wal_segment_size, timeline, database_name = _server_facts(conn)
+        migration_set_sha256 = _migration_set_sha256(conn)
+    return CandidateFacts(
+        postgres_major,
+        system_id,
+        wal_segment_size,
+        timeline,
+        migration_set_sha256,
+        database_name,
     )
-    deadline = time.monotonic() + 6 * 3600
-    while verify.poll() is None:
-        if stop.wait(0.25):
-            _stop_process(verify)
-            stdout, stderr = verify.communicate()
-            raise BaseCandidateError(
-                f"base candidate verification was stopped{_output_suffix(stdout, stderr)}"
-            )
-        if time.monotonic() >= deadline:
-            _stop_process(verify)
-            stdout, stderr = verify.communicate()
-            raise BaseCandidateError(
-                f"pg_verifybackup exceeded its six-hour bound{_output_suffix(stdout, stderr)}"
-            )
-    stdout, stderr = verify.communicate()
-    if verify.returncode != 0:
-        raise BaseCandidateError(
-            f"pg_verifybackup exited {verify.returncode}{_output_suffix(stdout, stderr)}"
-        )
+
+
+def _record_owner(root: Path, chain_id: str, state: str = "running") -> None:
+    """Bind candidate staging to this worker; the controller commits only its own."""
+    owner = root / "base-facts" / f"{chain_id}.owner.json"
+    if owner.exists() or owner.is_symlink():
+        raise BaseCandidateError("base candidate owner evidence already exists")
+    _atomic_json(
+        owner,
+        {
+            "state": state,
+            "native": NativeProcess.capture(psutil.Process()).value(),
+            "pgid": os.getpgrp(),
+            "chain_id": chain_id,
+        },
+    )
+
+
+def _set_owner_state(root: Path, chain_id: str, state: str) -> None:
+    owner = root / "base-facts" / f"{chain_id}.owner.json"
+    evidence = json.loads(owner.read_text())
+    if not NativeProcess.from_value(evidence["native"]).same_birth(
+        NativeProcess.capture(psutil.Process())
+    ):
+        raise BaseCandidateError("base candidate owner belongs to another worker")
+    _atomic_json(owner, {**evidence, "state": state})
+
+
+def _loaded_capture(
+    root: Path, chain_id: str, ready: Path, facts: CandidateFacts | None, stop: StopSignal
+) -> CandidateFacts:
+    """Verify and load a completed capture; a failure rejects the tree for good.
+
+    A stop is not a verdict on the tree, so it stays resumable. Any other
+    failure here (corruption, missing or contradicting facts) would fail
+    every resumption, so the worker marks the capture rejected before raising.
+    """
+    try:
+        if facts is None:
+            facts = _load_facts(root, chain_id)
+            _verify_candidate(ready, stop)
+        _check_capture(ready, facts)
+    except Exception:
+        _set_owner_state(root, chain_id, REJECTED)
+        raise
+    return facts
+
+
+def _check_capture(ready: Path, facts: CandidateFacts) -> None:
+    native_manifest = ready / "backup_manifest"
+    if not native_manifest.is_file():
+        raise BaseCandidateError("pg_basebackup omitted backup_manifest")
+    system_id, _start_lsn, wal_ranges = parse_native_manifest(native_manifest)
+    if system_id != facts.system_identifier:
+        raise BaseCandidateError("backup manifest system identifier changed during capture")
+    if wal_ranges[0].timeline != facts.timeline:
+        raise BaseCandidateError("backup manifest starts on a different live timeline")
+
+
+def _verify_candidate(path: Path, stop: StopSignal) -> None:
+    _run_tool([str(pg_tool("pg_verifybackup")), "--no-parse-wal", str(path)], stop=stop)
 
 
 def _load_facts(root: Path, chain_id: str) -> CandidateFacts:
@@ -507,6 +422,7 @@ def reconcile_completed_candidates(root: Path, *, key: bytes, key_id: str) -> No
     candidates = root / "base-candidates"
     if not candidates.exists():
         return
+    _finish_retiring_trees(root)
     for ready in candidates.glob("*.ready"):
         chain_id = ready.name.removesuffix(".ready")
         manifest = root / "base-manifests" / f"{chain_id}.candidate.json"
@@ -557,19 +473,88 @@ def reconcile_completed_candidates(root: Path, *, key: bytes, key_id: str) -> No
         ):
             raise BaseCandidateError("completed candidate cleanup evidence does not match")
         _remove_tree(ready)
-        plan_path.unlink(missing_ok=True)
-        _fsync_dir(plan_path.parent)
-        (root / "base-facts" / f"{chain_id}.json").unlink(missing_ok=True)
-        _fsync_dir(root / "base-facts")
+        _remove_commit_staging(root, chain_id)
+
+
+def _finish_retiring_trees(root: Path) -> None:
+    """A torn removal after the manifest committed is garbage, never evidence."""
+    for retiring in (root / "base-candidates").glob(".*.retiring"):
+        chain_id = retiring.name.removeprefix(".").removesuffix(".retiring")
+        if not (root / "base-manifests" / f"{chain_id}.candidate.json").is_file():
+            raise BaseCandidateError("retiring candidate tree lacks its committed manifest")
+        _remove_tree(retiring)
+        _remove_commit_staging(root, chain_id)
+
+
+def _remove_commit_staging(root: Path, chain_id: str) -> None:
+    for staged in (
+        root / "base-plans" / f"{chain_id}.plan.json",
+        root / "base-facts" / f"{chain_id}.json",
+    ):
+        if staged.parent.is_dir():
+            staged.unlink(missing_ok=True)
+            _fsync_dir(staged.parent)
 
 
 def reconcile_runtime_state(root: Path, *, key: bytes, key_id: str) -> None:
+    """Worker-side guard: refuse unsettled evidence, then finish committed cleanup."""
     with backup_lock(timeout_s=0):
         _recover_owned_partials(root)
         reconcile_completed_candidates(root, key=key, key_id=key_id)
 
 
-def create_base_candidate(
+def reconcile_committed_cleanup(root: Path, *, key: bytes, key_id: str) -> None:
+    """Scheduler-side cleanup of committed trees only.
+
+    Another operation's unsettled staging is its own kind's custody question
+    (quarantine or a blocked control root), never a reason to stall this.
+    """
+    with backup_lock(timeout_s=0):
+        reconcile_completed_candidates(root, key=key, key_id=key_id)
+
+
+def _resumable_candidate(root: Path, forced_chain_id: str | None) -> Path | None:
+    """The single captured tree still lacking a manifest, if one exists."""
+    candidates = root / "base-candidates"
+    resumable = [
+        path
+        for path in (sorted(candidates.glob("*.ready")) if candidates.exists() else [])
+        if not (
+            root / "base-manifests" / f"{path.name.removesuffix('.ready')}.candidate.json"
+        ).exists()
+    ]
+    if forced_chain_id is not None and any(
+        path.name != f"{forced_chain_id}.ready" for path in resumable
+    ):
+        raise BaseCandidateError("unrelated base candidate is already in flight")
+    if len(resumable) > 1:
+        raise BaseCandidateError("multiple unfinished base candidates require operator review")
+    return resumable[0] if resumable else None
+
+
+def discard_resumable_candidate(root: Path, chain_id: str, *, confirm: bool) -> Path:
+    """Remove one unfinished capture an operator judged stale; without `confirm`, check.
+
+    The caller holds the base-candidate kind lock with no blocked operation,
+    so no worker can own the tree. A committed chain (reconciliation removes
+    its tree) and one that an unsettled owner receipt still claims refuse.
+    """
+    if not re.fullmatch(r"[0-9A-Za-z-]+", chain_id):
+        raise BaseCandidateError(f"invalid chain id {chain_id!r}")
+    ready = root / "base-candidates" / f"{chain_id}.ready"
+    if ready.is_symlink() or not ready.is_dir():
+        raise BaseCandidateError(f"no unfinished capture at {ready}")
+    if (root / "base-manifests" / f"{chain_id}.candidate.json").exists():
+        raise BaseCandidateError(f"{chain_id} is committed; reconciliation removes its tree")
+    if (root / "base-facts" / f"{chain_id}.owner.json").exists():
+        raise BaseCandidateError(f"an unsettled operation still owns {chain_id}; retire it first")
+    if confirm:
+        _remove_tree(ready)
+        _remove_commit_staging(root, chain_id)
+    return ready
+
+
+def prepare_base_candidate(
     *,
     root: Path,
     prefix: str,
@@ -577,38 +562,23 @@ def create_base_candidate(
     key_id: str,
     store: RestartableStreamingObjectStore,
     budget: CandidateSpaceBudget,
-    db_url: str | None = None,
     replication_db_url: str,
     stop: StopSignal | None = None,
     now: datetime | None = None,
     forced_chain_id: str | None = None,
 ) -> CandidateManifest:
-    """Create one candidate. This module cannot mark a chain protected."""
+    """Prepare uploaded candidate evidence; the controller commits after closure."""
 
-    db_url = direct_db_url() if db_url is None else db_url
     now = datetime.now(UTC) if now is None else now.astimezone(UTC)
-    candidates = root / "base-candidates"
     stop = threading.Event() if stop is None else stop
     reconcile_runtime_state(root, key=key, key_id=key_id)
-    resumable = sorted(candidates.glob("*.ready")) if candidates.exists() else []
-    resumable = [
-        path
-        for path in resumable
-        if not (
-            root / "base-manifests" / f"{path.name.removesuffix('.ready')}.candidate.json"
-        ).exists()
-    ]
-    if forced_chain_id is not None:
-        unrelated = [path for path in resumable if path.name != f"{forced_chain_id}.ready"]
-        if unrelated:
-            raise BaseCandidateError("unrelated base candidate is already in flight")
-    if len(resumable) > 1:
-        raise BaseCandidateError("multiple unfinished base candidates require operator review")
-    if resumable:
-        ready = resumable[0]
+    resumable = _resumable_candidate(root, forced_chain_id)
+    if resumable is not None:
+        ready = resumable
         chain_id = ready.name.removesuffix(".ready")
-        facts = _load_facts(root, chain_id)
-        _verify_candidate(ready, stop)
+        # Operator retirement removed the prior owner; this worker now owns it.
+        _record_owner(root, chain_id, "verifying")
+        facts = _loaded_capture(root, chain_id, ready, None, stop)
     else:
         chain_id = forced_chain_id or now.strftime("%Y%m%dT%H%M%SZ")
         if forced_chain_id is not None and not re.fullmatch(
@@ -619,29 +589,26 @@ def create_base_candidate(
             root=root,
             chain_id=chain_id,
             budget=budget,
-            db_url=db_url,
             replication_db_url=replication_db_url,
             stop=stop,
         )
-    native_manifest = ready / "backup_manifest"
-    if not native_manifest.is_file():
-        raise BaseCandidateError("pg_basebackup omitted backup_manifest")
-    system_id, start_lsn, wal_ranges = parse_native_manifest(native_manifest)
-    if system_id != facts.system_identifier:
-        raise BaseCandidateError("backup manifest system identifier changed during capture")
-    if wal_ranges[0].timeline != facts.timeline:
-        raise BaseCandidateError("backup manifest starts on a different live timeline")
+        _loaded_capture(root, chain_id, ready, facts, stop)
+    system_id, start_lsn, wal_ranges = parse_native_manifest(ready / "backup_manifest")
     end_lsn = wal_ranges[-1].end_lsn
-    _, candidate_sha = snapshot_candidate(ready)
-    object_name = f"{prefix.rstrip('/')}/base/{chain_id}/{candidate_sha}/base.tar.zst.enc"
     plan_path = root / "base-plans" / f"{chain_id}.plan.json"
-    source, plan = load_or_create_source(
-        ready,
-        plan_path=plan_path,
-        key=key,
-        key_id=key_id,
-        object_name=object_name,
-    )
+    try:  # A tree that cannot be hashed or planned is rejected like one that fails verification.
+        _, candidate_sha = snapshot_candidate(ready)
+        object_name = f"{prefix.rstrip('/')}/base/{chain_id}/{candidate_sha}/base.tar.zst.enc"
+        source, plan = load_or_create_source(
+            ready,
+            plan_path=plan_path,
+            key=key,
+            key_id=key_id,
+            object_name=object_name,
+        )
+    except Exception:
+        _set_owner_state(root, chain_id, REJECTED)
+        raise
     metadata = {
         "ava-candidate-sha256": plan.candidate_sha256,
         "ava-ciphertext-size": str(plan.ciphertext_size),
@@ -682,13 +649,36 @@ def create_base_candidate(
         native_manifest_container_pin_token=ack.pin_token,
         migration_set_sha256=facts.migration_set_sha256,
     )
-    manifest_path = root / "base-manifests" / f"{chain_id}.candidate.json"
     if stop.is_set():
-        raise BaseCandidateError("base candidate lost ownership before manifest publication")
-    _atomic_json(manifest_path, json.loads(candidate.to_json()))
-    _remove_tree(ready)
-    plan_path.unlink()
-    _fsync_dir(plan_path.parent)
-    (root / "base-facts" / f"{chain_id}.json").unlink()
-    _fsync_dir(root / "base-facts")
+        raise BaseCandidateError("base candidate lost ownership before returning its result")
     return candidate
+
+
+def commit_base_candidate(root: Path, candidate: CandidateManifest, worker: NativeProcess) -> None:
+    """Commit prepared output from this closed worker, then retire exact staging."""
+    chain_id = candidate.chain_id
+    owner = root / "base-facts" / f"{chain_id}.owner.json"
+    original = owner.read_bytes()
+    evidence = json.loads(original)
+    if evidence["chain_id"] != chain_id or not NativeProcess.from_value(
+        evidence["native"]
+    ).same_birth(worker):
+        raise BaseCandidateError("base candidate belongs to another operation worker")
+    ready = root / "base-candidates" / f"{chain_id}.ready"
+    _, digest = snapshot_candidate(ready)
+    if digest != candidate.base_object.source_sha256:
+        raise BaseCandidateError("prepared candidate changed before controller commit")
+    native_digest = hashlib.sha256((ready / "backup_manifest").read_bytes()).hexdigest()
+    if native_digest != candidate.native_manifest_sha256 or owner.read_bytes() != original:
+        raise BaseCandidateError("prepared candidate evidence changed before controller commit")
+    manifest_path = root / "base-manifests" / f"{chain_id}.candidate.json"
+    _atomic_json(manifest_path, json.loads(candidate.to_json()))
+    # Rename before removal: a crash mid-removal leaves a `.retiring` tree that
+    # reconciliation deletes, never a torn `.ready` it cannot verify.
+    retiring = ready.with_name(f".{chain_id}.retiring")
+    ready.rename(retiring)
+    _fsync_dir(retiring.parent)
+    _remove_tree(retiring)
+    _remove_commit_staging(root, chain_id)
+    owner.unlink()
+    _fsync_dir(owner.parent)

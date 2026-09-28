@@ -2,54 +2,14 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
 import yaml
 
+from shared.lgtm_local import NATIVE_SERVICES
 
-@dataclass(frozen=True)
-class _NativeService:
-    arguments: tuple[str, ...]
-    gomemlimit: str | None
-    archive_member: str | None
-    binary_path: str
-    uses_run_script: bool = False
-
-
-_NATIVE_CONSTANTS: dict[str, _NativeService] = {
-    "loki": _NativeService(
-        arguments=("-config.file={config}/loki.yaml",),
-        gomemlimit="2GiB",
-        archive_member="loki-darwin-arm64",
-        binary_path="bin/loki",
-    ),
-    "prometheus": _NativeService(
-        arguments=(
-            "--config.file={config}/prometheus.yml",
-            "--storage.tsdb.path={data}/prom",
-            "--storage.tsdb.retention.time=180h",
-            "--storage.tsdb.retention.size=8GB",
-            "--web.enable-otlp-receiver",
-            "--web.listen-address={lgtm_listen_host}:{lgtm_prometheus_port}",
-        ),
-        gomemlimit="1GiB",
-        archive_member="prometheus-3.13.2.darwin-arm64/prometheus",
-        binary_path="bin/prometheus",
-    ),
-    "grafana": _NativeService(
-        arguments=(
-            "server",
-            "--config={config}/grafana.ini",
-            "--homepath={homepath}",
-        ),
-        gomemlimit=None,
-        archive_member=None,
-        binary_path="grafana-home/bin/grafana",
-        uses_run_script=True,
-    ),
-}
+_NATIVE_CONSTANTS = NATIVE_SERVICES
 
 
 def load_versions(repo: Path, tag: str) -> dict[str, dict[str, str]]:

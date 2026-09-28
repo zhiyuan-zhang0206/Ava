@@ -16,7 +16,7 @@ from ctypes import wintypes
 from pathlib import Path
 from typing import Any
 
-from shared.winjob import WindowsJob, _kernel32, _last_error
+from shared.winjob import WindowsJob, _kernel32, last_error
 
 
 class _StartupInfo(ctypes.Structure):
@@ -55,7 +55,7 @@ class _ProcessInfo(ctypes.Structure):
     ]
 
 
-def _process_api() -> Any:
+def process_api() -> Any:
     api = _kernel32()
     api.InitializeProcThreadAttributeList.argtypes = [
         ctypes.c_void_p,
@@ -92,16 +92,25 @@ def _process_api() -> Any:
     return api
 
 
-def _start_in_job(
-    api: Any, job: WindowsJob, handles: list[int], argv: list[str], cleanup: contextlib.ExitStack
+def start_in_job(
+    api: Any,
+    job: WindowsJob,
+    handles: list[int],
+    argv: list[str],
+    cleanup: contextlib.ExitStack,
+    *,
+    env: dict[str, str] | None = None,
+    cwd: str | None = None,
+    private_console: bool = False,
+    command_line: str | None = None,
 ) -> _ProcessInfo:
     size = ctypes.c_size_t()
     api.InitializeProcThreadAttributeList(None, 2, 0, ctypes.byref(size))
     if not size.value:
-        raise _last_error("size process attribute list")
+        raise last_error("size process attribute list")
     buffer = ctypes.create_string_buffer(size.value)
     if not api.InitializeProcThreadAttributeList(buffer, 2, 0, ctypes.byref(size)):
-        raise _last_error("initialize process attribute list")
+        raise last_error("initialize process attribute list")
     with contextlib.ExitStack() as attributes:
         attributes.callback(api.DeleteProcThreadAttributeList, buffer)
         jobs = (wintypes.HANDLE * 1)(job.handle)
@@ -111,27 +120,44 @@ def _start_in_job(
             if not api.UpdateProcThreadAttribute(
                 buffer, 0, attribute, values, ctypes.sizeof(values), None, None
             ):
-                raise _last_error("update process attribute")
+                raise last_error("update process attribute")
         startup = _StartupInfoEx()
         startup.info.cb = ctypes.sizeof(startup)
         startup.info.flags = 0x100  # STARTF_USESTDHANDLES
+        if private_console:
+            startup.info.flags |= 1  # STARTF_USESHOWWINDOW; SW_HIDE is zero.
         startup.info.stdin, startup.info.stdout, startup.info.stderr = handles
         startup.attributes = ctypes.addressof(buffer)
         process = _ProcessInfo()
-        command = ctypes.create_unicode_buffer(subprocess.list2cmdline(argv))
+        command = ctypes.create_unicode_buffer(
+            subprocess.list2cmdline(argv) if command_line is None else command_line
+        )
+        environment = None
+        flags = 0x00080010 if private_console else 0x08080000
+        if env is not None:
+            if any("\0" in key + value or "=" in key for key, value in env.items()):
+                raise ValueError("invalid native child environment")
+            environment = ctypes.create_unicode_buffer(
+                "\0".join(
+                    f"{key}={value}"
+                    for key, value in sorted(env.items(), key=lambda item: item[0].upper())
+                )
+                + "\0"
+            )
+            flags |= 0x400  # CREATE_UNICODE_ENVIRONMENT
         if not api.CreateProcessW(
             argv[0],
             command,
             None,
             None,
             1,
-            0x08080000,
-            None,
-            None,
+            flags,
+            environment,
+            cwd,
             ctypes.byref(startup),
             ctypes.byref(process),
         ):
-            raise _last_error("create helper in job")
+            raise last_error("create helper in job")
         cleanup.callback(api.CloseHandle, process.process)
         cleanup.callback(api.CloseHandle, process.thread)
         return process
@@ -146,7 +172,7 @@ def run_job_process(argv: list[str], *, timeout: float) -> subprocess.CompletedP
     if not argv or not Path(argv[0]).is_absolute():
         raise ValueError("helper interpreter must be an absolute loaded-image path")
     deadline = time.monotonic() + timeout
-    api = _process_api()
+    api = process_api()
     with contextlib.ExitStack() as cleanup:
         job = WindowsJob.create()
         cleanup.callback(job.close)
@@ -156,7 +182,7 @@ def run_job_process(argv: list[str], *, timeout: float) -> subprocess.CompletedP
         handles = [msvcrt.get_osfhandle(file.fileno()) for file in (source, output, errors)]
         for handle in handles:
             os.set_handle_inheritable(handle, True)  # noqa: FBT003 - positional-only Win32 API
-        process = _start_in_job(api, job, handles, argv, cleanup)
+        process = start_in_job(api, job, handles, argv, cleanup)
         remaining_ms = max(0, int((deadline - time.monotonic()) * 1000))
         waited = api.WaitForSingleObject(process.process, remaining_ms)
         if waited == 258:  # WAIT_TIMEOUT: no job handle is inherited by children.
@@ -165,10 +191,10 @@ def run_job_process(argv: list[str], *, timeout: float) -> subprocess.CompletedP
                 raise RuntimeError("timed-out helper did not exit after Job close")
             raise subprocess.TimeoutExpired(argv, timeout)
         if waited != 0:
-            raise _last_error("wait for helper")
+            raise last_error("wait for helper")
         code = ctypes.c_uint32()
         if not api.GetExitCodeProcess(process.process, ctypes.byref(code)):
-            raise _last_error("read helper exit code")
+            raise last_error("read helper exit code")
         job.close()  # also remove descendants if a helper unexpectedly spawned any
         output.seek(0)
         errors.seek(0)

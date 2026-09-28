@@ -15,11 +15,19 @@ from gateway import session_store
 from gateway.session_store import (
     create_session,
     list_sessions,
+    minted_session_id,
     revoke_session,
     session_is_valid,
     touch_session,
 )
 from shared.config import settings
+
+_MINT = "human-" + "0" * 32
+_ADMITTED = frozenset({_MINT})
+
+
+def _id(name: str) -> str:
+    return f"{_MINT}.{name}"
 
 
 @pytest.fixture
@@ -46,12 +54,12 @@ def _clear_session_cache() -> Iterator[None]:
 def test_create_validate_revoke_lifecycle(
     pool: ConnectionPool[psycopg.Connection[Any]],
 ) -> None:
-    create_session(pool, "session-one", 3600, "test-agent", "127.0.0.1")
+    create_session(pool, _id("session-one"), 3600, "test-agent", "127.0.0.1")
 
-    assert session_is_valid(pool, "session-one") is True
-    assert revoke_session(pool, "session-one") is True
-    assert session_is_valid(pool, "session-one") is False
-    assert revoke_session(pool, "session-one") is False
+    assert session_is_valid(pool, _id("session-one"), admitted=_ADMITTED) is True
+    assert revoke_session(pool, _id("session-one")) is True
+    assert session_is_valid(pool, _id("session-one"), admitted=_ADMITTED) is False
+    assert revoke_session(pool, _id("session-one")) is False
     assert revoke_session(pool, "missing") is False
 
 
@@ -83,14 +91,15 @@ def test_cache_never_outlives_row_expiry(
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(
             "INSERT INTO web_sessions (id, expires_at) VALUES (%s, %s)",
-            ("short-session", expires_at),
+            (_id("short-session"), expires_at),
         )
 
-    assert session_is_valid(pool, "short-session", now=checked_at) is True
+    assert session_is_valid(pool, _id("short-session"), admitted=_ADMITTED, now=checked_at) is True
     assert (
         session_is_valid(
             pool,
-            "short-session",
+            _id("short-session"),
+            admitted=_ADMITTED,
             now=expires_at + timedelta(microseconds=1),
         )
         is False
@@ -101,8 +110,8 @@ def test_valid_cache_hit_does_not_borrow_connection(
     pool: ConnectionPool[psycopg.Connection[Any]],
 ) -> None:
     checked_at = datetime.now(UTC)
-    create_session(pool, "cached-session", 3600, "", "")
-    assert session_is_valid(pool, "cached-session", now=checked_at) is True
+    create_session(pool, _id("cached-session"), 3600, "", "")
+    assert session_is_valid(pool, _id("cached-session"), admitted=_ADMITTED, now=checked_at) is True
 
     class FailingPool:
         def connection(self) -> None:
@@ -111,11 +120,51 @@ def test_valid_cache_hit_does_not_borrow_connection(
     assert (
         session_is_valid(
             FailingPool(),  # type: ignore[arg-type]
-            "cached-session",
+            _id("cached-session"),
+            admitted=_ADMITTED,
             now=checked_at + timedelta(seconds=1),
         )
         is True
     )
+
+
+def test_a_session_whose_mint_is_no_longer_admitted_is_refused_before_any_lookup(
+    pool: ConnectionPool[psycopg.Connection[Any]],
+) -> None:
+    """The minting credential is checked first: a live row (even a cached one)
+    whose mint the caller no longer admits is refused without a database borrow,
+    as is an id that carries no mint at all."""
+    checked_at = datetime.now(UTC)
+    create_session(pool, _id("rotated-away"), 3600, "", "")
+    assert session_is_valid(pool, _id("rotated-away"), admitted=_ADMITTED, now=checked_at)
+
+    class FailingPool:
+        def connection(self) -> None:
+            raise AssertionError("an unadmitted mint borrowed a database connection")
+
+    refused: tuple[tuple[str, frozenset[str]], ...] = (
+        (_id("rotated-away"), frozenset({"runner-" + "1" * 32})),
+        (_id("rotated-away"), frozenset[str]()),
+        ("rotated-away", _ADMITTED),  # no mint
+        (f"{_MINT}.", _ADMITTED),
+    )
+    for session_id, admitted in refused:
+        assert (
+            session_is_valid(
+                FailingPool(),  # type: ignore[arg-type]
+                session_id,
+                admitted=admitted,
+                now=checked_at + timedelta(seconds=1),
+            )
+            is False
+        )
+
+
+def test_minted_ids_carry_their_mint_and_fresh_randomness() -> None:
+    first, second = minted_session_id(_MINT), minted_session_id(_MINT)
+    assert first != second
+    assert session_store.session_mint(first) == _MINT == session_store.session_mint(second)
+    assert len(first.partition(".")[2]) >= 43  # 256 random bits, base64url
 
 
 def test_touch_advances_last_seen_at(
@@ -213,15 +262,20 @@ def test_session_cache_evicts_least_recently_used_entry(
     """A long-lived gateway retains only the most recently used session cache entries."""
     monkeypatch.setattr(session_store, "_SESSION_CACHE_MAX_ENTRIES", 2)
     checked_at = datetime.now(UTC)
-    for session_id in ("first", "second", "third"):
+    for session_id in (_id("first"), _id("second"), _id("third")):
         create_session(pool, session_id, 3600, "", "")
 
-    assert session_is_valid(pool, "first", now=checked_at) is True
-    assert session_is_valid(pool, "second", now=checked_at) is True
-    assert session_is_valid(pool, "first", now=checked_at + timedelta(seconds=1)) is True
-    assert session_is_valid(pool, "third", now=checked_at) is True
+    assert session_is_valid(pool, _id("first"), admitted=_ADMITTED, now=checked_at) is True
+    assert session_is_valid(pool, _id("second"), admitted=_ADMITTED, now=checked_at) is True
+    assert (
+        session_is_valid(
+            pool, _id("first"), admitted=_ADMITTED, now=checked_at + timedelta(seconds=1)
+        )
+        is True
+    )
+    assert session_is_valid(pool, _id("third"), admitted=_ADMITTED, now=checked_at) is True
 
-    assert list(session_store._session_cache) == ["first", "third"]
+    assert list(session_store._session_cache) == [_id("first"), _id("third")]
 
 
 def test_session_cache_tolerates_an_entry_evicted_while_touched(
@@ -236,11 +290,16 @@ def test_session_cache_tolerates_an_entry_evicted_while_touched(
 
     checked_at = datetime.now(UTC)
     cache = _EvictedOnTouch(
-        {"racing-session": (checked_at + timedelta(seconds=30), checked_at + timedelta(hours=1))}
+        {
+            _id("racing-session"): (
+                checked_at + timedelta(seconds=30),
+                checked_at + timedelta(hours=1),
+            )
+        }
     )
     monkeypatch.setattr(session_store, "_session_cache", cache)
 
-    assert session_is_valid(pool, "racing-session", now=checked_at) is True
+    assert session_is_valid(pool, _id("racing-session"), admitted=_ADMITTED, now=checked_at) is True
 
 
 def test_session_cache_tolerates_an_entry_evicted_after_db_lookup(
@@ -253,10 +312,10 @@ def test_session_cache_tolerates_an_entry_evicted_after_db_lookup(
             self.pop(key)
             super().move_to_end(key, last=last)
 
-    create_session(pool, "racing-db-session", 3600, "", "")
+    create_session(pool, _id("racing-db-session"), 3600, "", "")
     monkeypatch.setattr(session_store, "_session_cache", _EvictedOnTouch())
 
-    assert session_is_valid(pool, "racing-db-session") is True
+    assert session_is_valid(pool, _id("racing-db-session"), admitted=_ADMITTED) is True
 
 
 def test_session_ids_with_suffix_matches_active_rows_only(

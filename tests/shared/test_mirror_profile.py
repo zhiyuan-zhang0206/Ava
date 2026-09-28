@@ -1,8 +1,9 @@
-"""The `--mirror NAME` profiles and how they load.
+"""The mirror profiles and how they load.
 
-`install.sh --mirror NAME` sources `scripts/mirrors/NAME.env` and copies it to
-`~/.ava/mirror.env`, which `shared.dotenv_boot.load_ava_env` loads after `.env`.
-These tests pin two things the design leans on: the `cn` profile carries the
+An operator exports `scripts/mirrors/NAME.env` into the shell that acquires
+dependencies; a unit's existing `$AVA_HOME/mirror.env` is what
+`shared.dotenv_boot.load_ava_env` loads after `.env`. These tests pin two things
+the design leans on: the `cn` profile carries the
 package-manager index/registry vars, and a mirror var loaded from the file never
 overrides one already in the real environment (precedence: env > .env > mirror.env).
 """

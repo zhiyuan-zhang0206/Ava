@@ -14,7 +14,7 @@ clients:
 scrape_configs:
   # Ava session stdout — $AVA_HOME/logs/*.out.log (host bind, read-only).
   # One stream per session: the `service` label is the session name
-  # (ava-gateway, ava-rollout, ava-frontend, ava-agent-<id>, ava-schedule-<id>,
+  # (ava-gateway, ava-frontend, ava-agent-<id>, ava-schedule-<id>,
   # agent shells ava-agent-<id>-shell-<n>-<task>, ...). The job label groups
   # the whole scrape for LogQL ({job="ava-sessions"}).
   #
@@ -35,23 +35,4 @@ scrape_configs:
           expression: '/(?P<service>[^/]+)\.out\.log$'
       - labels:
           service:
-      - decolorize:
-
-  # Orchestration sessions (updater / rollout) tee their stdout to
-  # <session>-<epoch>.log on POSIX instead of <name>.out.log (the backend's
-  # own .out.log is only written on Windows), so they get their own globs
-  # with a static service label. Same decolorize treatment.
-  - job_name: ava-orchestration
-    static_configs:
-      - targets: [localhost]
-        labels:
-          job: ava-orchestration
-          service: ava-updater
-          __path__: /var/log/ava/updater-*.log
-      - targets: [localhost]
-        labels:
-          job: ava-orchestration
-          service: ava-rollout
-          __path__: /var/log/ava/rollout-*.log
-    pipeline_stages:
       - decolorize:

@@ -1,12 +1,9 @@
 """Agent liveness pass — gateway-owned derivation of `agents_meta.liveness_state`.
 
 The heartbeat daemon (gateway, one per cluster) runs this pass on a slow cadence.
-It closes the gap behind Task #1174: every corpse detector that reads the
-process lease (`ops.controllers.respawn` reaper, wedged, revive) is
-machine-scoped — it runs on the agent's own host, so when that host drops
-offline (network partition / power-off) nobody reads the lease, and
-`agents_meta.status` sits at 'idling'/'running' while the frontend shows a dead
-agent as online.
+It combines machine reachability with the process lease so a host that drops
+offline cannot leave an agent displayed as online solely because its durable
+`agents_meta.status` still reads 'idling' or 'running'.
 
 Two signals, merged per agent:
 

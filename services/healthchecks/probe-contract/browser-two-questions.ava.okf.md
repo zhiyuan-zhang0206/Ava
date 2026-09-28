@@ -1,19 +1,25 @@
 ---
 type: doc
-title: Browser healthcheck's two questions
-description: A CDP 200 answers neither identity nor supervision — the probe asks argv ownership + socket holder, and browser.py maps each verdict combination, including an intentional macOS readiness wait and the GUI-domain context heal, to the safe action.
+title: Browser protocol and ownership evidence
+description: CDP success must be bound to the browser generation captured by root.
 tags:
 - ops
 ---
 
-# Browser healthcheck's two questions
+# Browser protocol and ownership evidence
 
-A CDP 200 answers neither of the questions that matter. It cannot tell the supervised Chrome from an orphan holding the same port — and `services/browser/daemon.py` deliberately refuses to launch while that port is served, so a CDP-only check stayed green forever with no browser under supervision — and it cannot tell OUR Chrome from another unit's, because CDP carries no field we control (measured: `/json/version` returns browser/protocol/UA/V8/WebKit strings and a per-launch websocket uuid; `DevToolsActivePort` is written only for an auto-assigned port).
+CDP answers whether a browser protocol responds; it does not identify the
+supervisor that owns it. The browser protocol probe checks the response and
+profile facts, while the roster's `owned_service.probe_endpoint` wrapper verifies
+the listener belongs to root's captured browser generation before and after that
+probe. A same-profile orphan is not an owned service. Root never adopts or kills
+it based on binary or profile similarity.
 
-So `services/browser/probe.py` asks identity a different way — a Chrome whose argv carries this cluster's `--user-data-dir` (the positive token `services/browser/orphan.py` established) **and** which holds the LISTEN socket on the CDP port — and `browser.py` asks supervision separately. The probe also validates the `/json/version` BODY, and an unusable answer is still evidence about the PORT: a 200 whose body is not valid JSON carrying `Browser` proves an occupant holds the port (the wedged-DevTools shape of the 2026-09-09 macmini swap-pressure outage — orphaned Chrome answered 200 with an empty body for ~8 minutes while a status-only check stayed green), so the verdict then comes from the same identity arms: our own wedged endpoint reads `DOWN` (the sweep + rebuild heals it), and an occupant that is not ours reads `PORT_TAKEN` — never a respawn churn once per round (task #2692).
+The browser reachability diagnostic runs its temporary canary inside the same
+ownership envelope and contrasts it with a host request. It reports browser-only
+failure, while an unusable CDP channel or failed host baseline is unavailable.
+The temporary target is closed in finally. Diagnostic failure cannot restart
+Chrome or discard user tabs.
 
-- verdict `PORT_TAKEN` (someone else's Chrome, or ownership unconfirmable) → report at ERROR, exit `EXIT_PORT_TAKEN`, **never respawn**. Asked first: our own session being alive does not make a respawn able to bind a port another netns won.
-- session-dead, whatever the probe says (ours-alive OR CDP-dead — a `DOWN` can hide a wedged orphan still holding the port) → sweep the identity-verified Chrome (a no-op when none is left) and rebuild the session. A plain respawn cannot win while an orphan holds the port: the daemon refuses to launch a second Chrome on it. On macOS, when the healthcheck's own chain is outside the GUI login session, the rebuild goes through the GUI domain instead (below).
-- session-alive + CDP-dead + current macOS readiness marker → report **DEGRADED** and preserve the waiting session; the daemon is deliberately waiting for a GUI session and usable login Keychain, not crashed.
-- … but a marker marked `context_missing` (this process chain is outside the GUI login session — `launchctl managername` ≠ `Aqua`, where a respawn from an agent/SSH chain lands and securityd denies every Keychain query) is the one wait that waiting cannot fix → stop the stuck session and kickstart the cluster's GUI-domain autostart job (`shared.os_autostart.relaunch_via_gui_domain`), at most twice per episode; a session-gone round inside the relaunch window defers its in-context rebuild so the relaunch is not undone (task #3149). Since task #3346 the same stop + kick is the healthcheck's rebuild route whenever this chain runs outside the GUI login session: the session-gone sweep and the live-session respawn below both go through it (`respawn_service` is not reached, so no context-less session is re-created), the success line is a WARNING naming the trigger (`context-missing` / `session-gone` / `cdp-down`) and the cumulative attempt total, and the in-place respawn stands only while the heal has no budget left.
-- session-alive + CDP-dead without that marker → respawn (`respawn_service` kills the stale session first) — through the GUI domain when this chain is outside the GUI login session (task #3346). Carve-out: when the live session itself was (re)spawned within `_RESPAWN_GRACE_S` (300s, read off the session record the backend already serves — `session_started_at`, refreshed by every rebuild path), the round **defers** instead of rebuilding (`waiting-for-cdp-warmup`, episode-gated INFO): under memory pressure a fresh Chrome's CDP endpoint outlasts both the probe timeout and the 60s round, and the per-round rebuild kept killing the Chrome the previous round had launched (2026-09-15 churn: 53 rebuilds in one pressure window, task #3559). The deferral is bounded by the grace — past it the respawn runs exactly as before — and an unreadable age falls through to the respawn: verdict-side and non-failable, so the "nothing failable ahead of the respawn" rule ([[services/healthchecks/probe-contract/main-ordering.ava.okf.md]]) holds.
+macOS permission ancestry is established before root starts the browser; a
+healthcheck does not kickstart a GUI-domain job or replace root's helper parent.

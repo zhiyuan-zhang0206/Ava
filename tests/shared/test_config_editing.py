@@ -302,3 +302,66 @@ def test_manifest_certification_secret_stays_locally_provisionable() -> None:
     assert meta.sensitive is True
     assert field_editable(meta, local=True) is True
     assert field_editable(meta, local=False) is False
+
+
+# Keys that decide who authenticates to this cluster, or whether it
+# authenticates at all. An authenticated caller (any machine token included)
+# must never choose them through a config write: the human bearer rotates only
+# through scripts/rotate_cluster_secret.py, the others by editing the gateway
+# `.env` on its host.
+_AUTHORITY_KEYS = {
+    "cluster_secret": "AVA_CLUSTER_SECRET",
+    "auth_middleware_enabled": "AVA_AUTH_MIDDLEWARE_ENABLED",
+    "webhook_token": "AVA_ALERTS_WEBHOOK_TOKEN",
+    # Opens the /mcp authentication surface, where MCP client tokens (bound to
+    # no write generation) authenticate.
+    "mcp_endpoint_enabled": "AVA_MCP_ENDPOINT_ENABLED",
+}
+# Credentials this cluster presents OUTWARD (to model providers, search and
+# chat APIs, backup stores): writable, they confer no authority over the cluster.
+_OUTBOUND_CREDENTIALS = {
+    "ANTHROPIC_API_KEY",
+    "BRAVE_API_KEY",
+    "DASHSCOPE_API_KEY",
+    "DEEPSEEK_API_KEY",
+    "GEMINI_API_KEY",
+    "GLM_API_KEY",
+    "JINA_API_KEY",
+    "MIMO_API_KEY",
+    "MOONSHOT_API_KEY",
+    "OPENAI_API_KEY",
+    "AVA_FEISHU_APP_SECRET",
+    "AVA_TELEGRAM_BOT_TOKEN",
+    "AVA_PITR_BAIDU_TOKEN_FILE",
+    "AVA_PITR_OSS_CREDENTIALS_FILE",
+    "AVA_PITR_OSS_DELETE_CREDENTIALS_FILE",
+    "AVA_PITR_OSS_VIEWER_CREDENTIALS_FILE",
+    # Host-local proof, usable only together with a database login the fence
+    # revokes (shared/agents/impersonation/manifest-certification.ava.okf.md).
+    "AVA_IMPERSONATION_EVENT_MANIFEST_CERTIFICATION_SECRET",
+}
+
+
+@pytest.mark.parametrize("field", sorted(_AUTHORITY_KEYS))
+def test_every_config_write_refuses_an_authority_key(field: str) -> None:
+    """Setting or unsetting an authority key is a violation on the local and the
+    machine-addressed path alike, so nothing is written."""
+    metas = {meta.name: meta for meta in get_config_metadata()}
+    assert metas[field].env_var == _AUTHORITY_KEYS[field]
+    for value in ("chosen-by-the-caller-" + "x" * 32, None):
+        for is_remote in (False, True):
+            plan = ConfigPatchPlan.parse({field: value}, metas, is_remote=is_remote)
+            assert plan.violations == (field,)
+            assert not plan.cluster_writes and not plan.cluster_removals
+
+
+def test_every_writable_secret_is_an_outbound_credential() -> None:
+    """A newly added sensitive field a config write may set must be classified
+    here: an outbound credential stays writable, anything that authenticates
+    callers to this cluster is read-only."""
+    writable_secrets = {
+        meta.env_var
+        for meta in get_config_metadata()
+        if meta.sensitive and (meta.writable or meta.remote_writable)
+    }
+    assert writable_secrets == _OUTBOUND_CREDENTIALS

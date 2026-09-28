@@ -2,12 +2,56 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 
 from shared.config import settings
-from shared.process_env import inherited_process_env
 
-BACKENDS = ("loki", "prometheus", "grafana")
+
+@dataclass(frozen=True)
+class _NativeService:
+    arguments: tuple[str, ...]
+    gomemlimit: str | None
+    archive_member: str | None
+    binary_path: str
+    uses_run_script: bool = False
+
+
+NATIVE_SERVICES: dict[str, _NativeService] = {
+    "loki": _NativeService(
+        arguments=("-config.file={config}/loki.yaml",),
+        gomemlimit="2GiB",
+        archive_member="loki-darwin-arm64",
+        binary_path="bin/loki",
+    ),
+    "prometheus": _NativeService(
+        arguments=(
+            "--config.file={config}/prometheus.yml",
+            "--storage.tsdb.path={data}/prom",
+            "--storage.tsdb.retention.time=180h",
+            "--storage.tsdb.retention.size=8GB",
+            "--web.enable-otlp-receiver",
+            "--web.listen-address={lgtm_listen_host}:{lgtm_prometheus_port}",
+        ),
+        gomemlimit="1GiB",
+        archive_member="prometheus-3.13.2.darwin-arm64/prometheus",
+        binary_path="bin/prometheus",
+    ),
+    "grafana": _NativeService(
+        arguments=(
+            "server",
+            "--config={config}/grafana.ini",
+            "--homepath={homepath}",
+        ),
+        gomemlimit=None,
+        archive_member=None,
+        binary_path="grafana-home/bin/grafana",
+        uses_run_script=True,
+    ),
+}
+
+
+BACKENDS = tuple(NATIVE_SERVICES)
 
 # Each backend's own supported health/readiness path. Local lifecycle probes
 # must use these, NOT the root URL: Grafana's root redirects to the public
@@ -48,8 +92,38 @@ def backend_urls() -> dict[str, str]:
     return urls
 
 
-def lifecycle_environment() -> dict[str, str]:
-    """Pass resolved native listeners to the Darwin source script."""
-    return inherited_process_env(
-        {f"AVA_NATIVE_{name.upper()}_URL": url for name, url in backend_urls().items()}
-    )
+def storage_dir(home: Path) -> Path:
+    """The explicit local observation data volume, retained across service stops."""
+    configured = settings.observability.lgtm_storage_dir.strip()
+    return Path(configured).expanduser().resolve() if configured else home / "lgtm/native/data"
+
+
+def service_argv(home: Path, name: str) -> tuple[str, ...]:
+    """One native invocation, launched only as an ava-root unit."""
+    native = home.resolve() / "lgtm/native"
+    spec = NATIVE_SERVICES[name]
+    if spec.uses_run_script:
+        return (str(native / "grafana/run.sh"),)
+    substitutions = {
+        "config": str(native / "config"),
+        "data": str(storage_dir(home)),
+        "homepath": str(native / "grafana-home"),
+        "lgtm_listen_host": settings.observability.lgtm_listen_host,
+        "lgtm_prometheus_port": str(settings.observability.lgtm_prometheus_port),
+    }
+    return (str(binary_path(home, name)), *(s.format(**substitutions) for s in spec.arguments))
+
+
+def service_input_paths(home: Path, name: str) -> tuple[Path, ...]:
+    """Declare the complete configuration tree; durable data is not a birth input."""
+    native = home / "lgtm/native"
+    paths = [native / f"version-{name}", native / f"platform-{name}", native / "config"]
+    if name == "grafana":
+        paths.extend([native / "grafana/run.sh", native / "grafana/admin_password"])
+    return tuple(paths)
+
+
+def service_environment(name: str) -> dict[str, str]:
+    """Process environment independent of the manifest's typed input seals."""
+    limit = NATIVE_SERVICES[name].gomemlimit
+    return {} if limit is None else {"GOMEMLIMIT": limit}

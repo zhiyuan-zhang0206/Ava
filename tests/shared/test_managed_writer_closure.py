@@ -20,13 +20,12 @@ from shared.managed_writer_closure import (
 )
 from shared.managed_writer_observation import (
     ExpectedLauncher,
-    ExpectedProcess,
     ExpectedSession,
     ExpectedUnitWriters,
-    ProcessVerdict,
     SessionVerdict,
 )
 from shared.native_job_observation import LauncherObservation
+from shared.process_evidence import ExpectedProcess, ProcessVerdict
 
 DIGEST = "a" * 64
 OTHER_DIGEST = "b" * 64

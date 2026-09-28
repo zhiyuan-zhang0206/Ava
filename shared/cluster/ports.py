@@ -57,6 +57,7 @@ class ClusterPorts(TypedDict):
     im_bridge: NotRequired[int]
     page_server: NotRequired[int]
     agent_host: NotRequired[int]
+    coordinator: NotRequired[int]  # Fleet release coordinator listener (operation-scoped).
     pg_backup: NotRequired[int]
     pitr_uploader: NotRequired[int]
     pitr_base_backup: NotRequired[int]
@@ -77,7 +78,7 @@ def _record_port(rec: cluster.ClusterRecord, key: str) -> int:
     return port
 
 
-def _port_free(port: int) -> bool:
+def port_free(port: int) -> bool:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
@@ -102,7 +103,7 @@ def allocate_ports(existing_bases: set[int]) -> ClusterPorts:
         # start. Overlap is the honest test.
         if any(base - (BLOCK_SIZE - 1) <= eb <= base + (BLOCK_SIZE - 1) for eb in existing_bases):
             continue
-        if all(cluster._port_free(base + off) for off in PORT_OFFSETS.values()):
+        if all(cluster.port_free(base + off) for off in PORT_OFFSETS.values()):
             # PORT_OFFSETS' keys ARE the ClusterPorts service names; the dynamic
             # comprehension is the runtime source of that closed set.
             return cast("ClusterPorts", {svc: base + off for svc, off in PORT_OFFSETS.items()})
@@ -166,7 +167,7 @@ def record_health_port(rec: cluster.ClusterRecord, svc: str) -> int:
     This is the install-time producer only. A health port is a per-UNIT fact
     (`shared.env_registry.health_port_env_aliases()`), so nothing hands this value to another
     unit — a second unit sharing the machine's localhost namespace states its own
-    base instead (`ava enroll --health-port-base`).
+    base instead (`ava start --health-port-base`).
 
     The default home keeps its fixed legacy value; every other record carries
     the port. A missing key on an allocated record is a corrupt record —

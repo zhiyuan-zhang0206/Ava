@@ -173,7 +173,7 @@ trace the event stream only summarizes.
 |---|---|
 | Loki | `http://127.0.0.1:3100` (`/loki/api/v1/query_range`, `/loki/api/v1/query`) |
 | Grafana | `http://localhost:3003` (anonymous viewer; datasource uid `loki`) |
-| Gateway | `http://localhost:8000/api/events` (bearer `AVA_CLUSTER_SECRET`) |
+| Gateway | `http://localhost:8000/api/events` (bearer `AVA_API_TOKEN` or the gateway's `AVA_CLUSTER_SECRET`) |
 
 `ava lgtm status` reports the marker, containers, and readiness probes; the
 whole stack only exists on the host holding the `$AVA_HOME/lgtm-host` marker.

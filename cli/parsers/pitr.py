@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from collections.abc import Callable
 
 
 def _target_wall_arg(value: str) -> str:
@@ -48,6 +49,24 @@ def _h_pitr_multipart_abort(args: argparse.Namespace) -> int:
         credentials_file=args.credentials_file,
         confirm=args.confirm,
     )
+
+
+def _h_pitr_operations_status(_args: argparse.Namespace) -> int:
+    from cli.commands.data_plane.pitr import cmd_pitr_operations_status
+
+    return cmd_pitr_operations_status()
+
+
+def _h_pitr_operations_retire(args: argparse.Namespace) -> int:
+    from cli.commands.data_plane.pitr import cmd_pitr_operations_retire
+
+    return cmd_pitr_operations_retire(confirm=args.confirm)
+
+
+def _h_pitr_operations_discard_candidate(args: argparse.Namespace) -> int:
+    from cli.commands.data_plane.pitr import cmd_pitr_operations_discard_candidate
+
+    return cmd_pitr_operations_discard_candidate(chain=args.chain, confirm=args.confirm)
 
 
 def _h_pitr_retention_inspect(_args: argparse.Namespace) -> int:
@@ -98,6 +117,43 @@ def _h_pitr_snapshot_retire(args: argparse.Namespace) -> int:
     return cmd_pitr_snapshot_retire(args.table)
 
 
+def _add_operations_parser(
+    pitr_sub: argparse._SubParsersAction[argparse.ArgumentParser],
+    status: Callable[[argparse.Namespace], int],
+    retire: Callable[[argparse.Namespace], int],
+) -> None:
+    operations = pitr_sub.add_parser(
+        "operations",
+        help="inspect backup/PITR operation custody and retire blocked operations",
+    )
+    operations_sub = operations.add_subparsers(dest="operations_cmd", required=True)
+    operations_status = operations_sub.add_parser(
+        "status", help="show blocked operation kinds and quarantined operations"
+    )
+    operations_status.set_defaults(func=status)
+    operations_retire = operations_sub.add_parser(
+        "retire",
+        help="re-prove group closure of blocked operations, then quarantine them",
+    )
+    operations_retire.add_argument(
+        "--confirm",
+        action="store_true",
+        help="quarantine every proven operation; without it the command only previews",
+    )
+    operations_retire.set_defaults(func=retire)
+    discard = operations_sub.add_parser(
+        "discard-candidate",
+        help="remove one unfinished base capture that blocks activation or keeps failing",
+    )
+    discard.add_argument("chain", metavar="CHAIN", help="the unfinished capture's chain id")
+    discard.add_argument(
+        "--confirm",
+        action="store_true",
+        help="remove the capture; without it the command only checks it",
+    )
+    discard.set_defaults(func=_h_pitr_operations_discard_candidate)
+
+
 def _add_pitr_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     pitr = sub.add_parser("pitr", help="inspect PITR evidence and archive rollback snapshots")
     pitr_sub = pitr.add_subparsers(dest="pitr_cmd", required=True)
@@ -133,7 +189,7 @@ def _add_pitr_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -
         "--scratch",
         metavar="DIR",
         required=True,
-        help="fresh scratch directory; kept as the evidence tree",
+        help="fresh scratch directory (relative to the current directory); kept as evidence",
     )
     # task #4092 cli-default inventory: conservative replay bound — the drill
     # never forces, so a longer default only costs the operator's own wait; the
@@ -146,6 +202,7 @@ def _add_pitr_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -
         help="bound for postmaster start and replay to the target",
     )
     drill.set_defaults(func=_h_pitr_drill)
+    _add_operations_parser(pitr_sub, _h_pitr_operations_status, _h_pitr_operations_retire)
     retention = pitr_sub.add_parser(
         "retention", help="inspect the retention dry-run plan and operate its deletion gate"
     )

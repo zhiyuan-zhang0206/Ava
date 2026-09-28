@@ -37,7 +37,7 @@ def _stub_backend(monkeypatch: pytest.MonkeyPatch, *, has_session: bool) -> None
 def _stub_root_client(
     monkeypatch: pytest.MonkeyPatch, *, response: object = None, unreachable: bool = False
 ) -> None:
-    from services.ava_root.client import RootClientError
+    from shared.root_control.client import RootClientError
 
     class _Client:
         def __init__(self, socket_path: Path, *, timeout: float = 1.0) -> None:
@@ -48,7 +48,7 @@ def _stub_root_client(
                 raise RootClientError("no root answers")
             return response
 
-    monkeypatch.setattr("services.ava_root.client.RootClient", _Client)
+    monkeypatch.setattr("shared.root_control.client.RootClient", _Client)
 
 
 def _root_response(*, state: str, pid: int, unit_id: str = "agent-host") -> dict[str, object]:
@@ -264,7 +264,7 @@ def test_ops_quiescent_session_gate_does_not_consult_the_tree(
     def _explode(*_args: object, **_kwargs: object) -> object:
         raise AssertionError("root consulted although the session records ops")
 
-    monkeypatch.setattr("services.ava_root.client.RootClient", _explode)
+    monkeypatch.setattr("shared.root_control.client.RootClient", _explode)
     calls: list[str] = []
     _stub_ops_wait(monkeypatch, tmp_path, calls=calls)
     agent_pause_probe.ops_quiescent(1.0)

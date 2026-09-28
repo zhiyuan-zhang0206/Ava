@@ -49,6 +49,11 @@ Checks:
    already-exists — whether the baseline is missing the change at all is the
    smoke convergence gate's question). Heuristic by design — a tripwire for the
    convention, not a SQL parser.
+9. **no role switching** — neither `db/schema.sql` nor any migration may
+   `SET ROLE`, `RESET ROLE` or change the session authorization. Both run as
+   the OS-user administrator acting as the schema owner (`shared.pg_admin`);
+   switching away would create admin-owned objects or run with superuser
+   rights the owner never had. Comments and quoted text are ignored.
 
 Deliberately **no** continuity / next-number / cross-branch-collision checks:
 timestamp names are collision-free by construction, which is the whole point of
@@ -247,6 +252,28 @@ def _mask_nonstatic_sql(text: str) -> tuple[str, list[tuple[int, int]]]:
         position += 1
 
     return "".join(masked), do_spans
+
+
+_ROLE_SWITCH_RE = re.compile(
+    r"\b(?:SET\s+(?:SESSION\s+|LOCAL\s+)?(?:ROLE|SESSION\s+AUTHORIZATION)"
+    r"|RESET\s+(?:ROLE|SESSION\s+AUTHORIZATION))\b",
+    re.IGNORECASE,
+)
+
+
+def _check_no_role_switch() -> list[str]:
+    """Baseline and migrations must keep the owner role they are applied as."""
+    errors: list[str] = []
+    for path in [SCHEMA_SQL, *sorted(MIGRATIONS_DIR.glob("*.sql"))]:
+        masked, _ = _mask_nonstatic_sql(path.read_text(encoding="utf-8"))
+        for match in _ROLE_SWITCH_RE.finditer(masked):
+            lineno = masked.count("\n", 0, match.start()) + 1
+            errors.append(
+                f"{path.name}:{lineno}: {' '.join(match.group(0).split())} — schema SQL "
+                "runs as the admin acting as the schema owner; switching role would "
+                "create admin-owned objects or escalate to superuser"
+            )
+    return errors
 
 
 def _timestamp_valid(stem: str) -> bool:
@@ -731,6 +758,7 @@ def main() -> int:
     errors.extend(_check_down_if_exists())
     errors.extend(_check_backfill_snapshot_drop_plans())
     errors.extend(_check_folded_strict_without_seed())
+    errors.extend(_check_no_role_switch())
 
     if errors:
         print("migration lint failed:", file=sys.stderr)

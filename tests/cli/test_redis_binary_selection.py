@@ -1,4 +1,4 @@
-"""A home's Redis tools stay selected across clean boot and polluted updater envs."""
+"""A home's Redis tools stay selected across a boot whose inherited env is polluted."""
 
 from __future__ import annotations
 
@@ -36,9 +36,7 @@ def _home(path: Path, selected: Path | None) -> Path:
     return path
 
 
-def _probe(
-    home: Path, system_bin: Path, *, inherited: str = "", entry: str = "boot"
-) -> dict[str, Any]:
+def _probe(home: Path, system_bin: Path, *, inherited: str = "") -> dict[str, Any]:
     # Explicitly isolated config; no Ava imports in this child can dial production.
     env = {
         "HOME": str(home.parent),
@@ -61,28 +59,20 @@ print(json.dumps({
     'versions': [subprocess.check_output([tool, '--version'], text=True).strip() for tool in tools],
 }))
 """
-    if entry == "update":
-        # Run the same real environment builder as the fresh updater start child.
-        code = (
-            "import subprocess, sys\n"
-            "from shared.rollout_handoff import child_process_env\n"
-            f"raise SystemExit(subprocess.call([sys.executable, '-c', {code!r}], env=child_process_env()))\n"
-        )
-    elif entry == "boot":
-        # Real boot retry owner, replacing only `ava start` with the safe resolver
-        # probe. It still launches a fresh interpreter with cron's inherited env.
-        code = (
-            "import subprocess, sys\n"
-            "from cli import boot_retry\n"
-            "run = subprocess.run\n"
-            "def probe(command, **kwargs):\n"
-            "    assert command[:4] == [sys.executable, '-m', 'cli.main', 'start']\n"
-            f"    result = run([sys.executable, '-c', {code!r}], check=False)\n"
-            "    assert result.returncode == 0\n"
-            "    return result\n"
-            "boot_retry.subprocess.run = probe\n"
-            "raise SystemExit(boot_retry.run_boot([]))\n"
-        )
+    # Real boot retry owner, replacing only `ava start` with the safe resolver
+    # probe. It still launches a fresh interpreter with cron's inherited env.
+    code = (
+        "import subprocess, sys\n"
+        "from cli import boot_retry\n"
+        "run = subprocess.run\n"
+        "def probe(command, **kwargs):\n"
+        "    assert command[:4] == [sys.executable, '-m', 'cli.main', 'start']\n"
+        f"    result = run([sys.executable, '-c', {code!r}], check=False)\n"
+        "    assert result.returncode == 0\n"
+        "    return result\n"
+        "boot_retry.subprocess.run = probe\n"
+        "raise SystemExit(boot_retry.run_boot([]))\n"
+    )
     result = subprocess.run(  # noqa: S603 — fixed interpreter and test-owned source/config.
         [sys.executable, "-c", code],
         env=env,
@@ -96,20 +86,19 @@ print(json.dumps({
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="Redis server is POSIX-only")
-@pytest.mark.parametrize("entry", ["boot", "update"])
-def test_home_selection_survives_clean_boot_and_polluted_update(tmp_path: Path, entry: str) -> None:
+def test_home_selection_survives_a_polluted_boot_env(tmp_path: Path) -> None:
     selected = _tools(tmp_path / "Redis 8" / "bin", "selected-8")
     system_bin = _tools(tmp_path / "system-bin", "system-7")
     target = _home(tmp_path / "gateway", selected)
     sibling = _home(tmp_path / "preview", None)
     sibling_bytes = (sibling / ".env").read_bytes()
 
-    actual = _probe(target, system_bin, inherited="/wrong/parent/bin", entry=entry)
+    actual = _probe(target, system_bin, inherited="/wrong/parent/bin")
     assert actual["configured"] == str(selected)
     assert actual["tools"] == [str(selected / name) for name in ("redis-server", "redis-cli")]
     assert actual["versions"] == ["selected-8", "selected-8"]
 
-    other = _probe(sibling, system_bin, inherited=str(selected), entry=entry)
+    other = _probe(sibling, system_bin, inherited=str(selected))
     assert other["configured"] == ""
     assert other["tools"] == ["redis-server", "redis-cli"]
     assert other["versions"] == ["system-7", "system-7"]

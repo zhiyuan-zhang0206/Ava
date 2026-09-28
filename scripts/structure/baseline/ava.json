@@ -5,7 +5,7 @@
     "ava/impersonation_replay.py::consume_recorded_events": 16
   },
   "directories": {
-    "ava": 36
+    "ava": 34
   },
   "nesting": {
     "ava/_mcps_daemon.py::_handle_client": 7

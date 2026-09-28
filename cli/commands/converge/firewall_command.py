@@ -1,7 +1,7 @@
 """`ava firewall` — the standalone face of the ALF allowlist manifest.
 
 The converge step (`firewall.ensure_firewall_allowlist`) converges the
-allowlist automatically on every `ava start` / `ava update`. These verbs give an
+allowlist automatically on every source `ava start`. These verbs give an
 operator the same machinery on demand, without a full converge:
 
 - `ava firewall status` — read-only: verdict, manifest coverage, stale rules,

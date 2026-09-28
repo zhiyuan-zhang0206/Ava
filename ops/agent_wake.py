@@ -6,7 +6,7 @@ from typing import Literal
 import psycopg
 from psycopg import sql
 
-from ops.resurrection_retry import ResurrectExitDeferredError
+from ops.resurrection_retry import ResurrectSettlementDeferredError, hosted_resurrection_target
 from ops.resurrection_retry import ResurrectTriggerStaleError as ResurrectTriggerStaleError
 from ops.resurrection_retry import lock_active_home_machine as _lock_active_home_machine
 from shared import telemetry
@@ -22,21 +22,41 @@ from shared.audit_events import prepare_event_log
 from shared.config import field_alias, get_field, settings
 from shared.db import fetch_one, publish_inbound_wake
 from shared.db_transaction import write_transaction
-from shared.lifecycle_termination_observe import observe_applied_termination
 from shared.live_announce import publish_agent_updated_sync
 from shared.log import logger
 from shared.machine import machine_name
+from shared.runtime_incarnation import RuntimeIncarnation
+
+# The exact retained hosted identity, or (all three NULL) a never-admitted row
+# whose fresh-INSERT birth marker is still unconsumed.
+_RESURRECTION_TARGET = (
+    "runtime_kind IS NOT DISTINCT FROM %s AND runtime_generation IS NOT DISTINCT FROM %s "
+    "AND runtime_owner IS NOT DISTINCT FROM %s "
+    "AND (runtime_kind IS NOT NULL OR incarnation_resources->>'state'='unadmitted')"
+)
 
 
 def _transition_terminated_to_unclaimed_idling(
     cur: psycopg.Cursor,
     agent_id: int,
+    incarnation: RuntimeIncarnation | None,
     *,
     trigger_inbound_id: int | None,
     trigger_inbound_kind: Literal["chat", "compact_request", "system_note"] | None,
 ) -> datetime:
-    """Run the one final resurrection CAS with a fully static SQL shape."""
-    base_params = (AgentStatus.IDLING, agent_id, AgentStatus.TERMINATED)
+    """Run the one final resurrection CAS with a fully static SQL shape.
+
+    `incarnation` None is a fresh hosted birth: the CAS re-proves, under the
+    row lock, that no runtime identity exists and the birth marker is intact.
+    """
+    base_params = (
+        AgentStatus.IDLING,
+        agent_id,
+        AgentStatus.TERMINATED,
+        None if incarnation is None else "hosted",
+        None if incarnation is None else incarnation.generation,
+        None if incarnation is None else incarnation.owner,
+    )
     if trigger_inbound_id is not None:
         from shared.lifecycle_acceptance import (
             FAILED_RESTART_FOR_CURRENT_TARGET,
@@ -52,7 +72,8 @@ def _transition_terminated_to_unclaimed_idling(
                 "last_turn_fatal_at = NULL, "
                 "runtime_generation = NULL, runtime_owner = NULL, runtime_kind = NULL, "
                 "runtime_protocol_version = 0 "
-                "WHERE id = %s AND status = %s "
+                "WHERE id = %s AND status = %s AND {} "
+                "AND pid IS NULL AND lifecycle_command_id IS NULL "
                 "AND NOT {} "
                 "AND (agents_meta.wake_suppressed_until IS NULL "
                 "     OR agents_meta.wake_suppressed_until < now()) "
@@ -65,6 +86,7 @@ def _transition_terminated_to_unclaimed_idling(
                 "    AND m.id > COALESCE(agents_meta.last_force_terminate_inbound_id, 0)"
                 ") RETURNING status_changed_at"
             ).format(
+                sql.SQL(_RESURRECTION_TARGET),
                 sql.SQL(FAILED_RESTART_FOR_CURRENT_TARGET),
                 sql.SQL(RECOVERY_BREAKER_CLEAR),
                 sql.SQL(SYSTEM_REAPED_CRASH_ROW),
@@ -73,12 +95,15 @@ def _transition_terminated_to_unclaimed_idling(
         )
     else:
         cur.execute(
-            "UPDATE agents_meta SET status = %s, pid = NULL, started_at = NULL, "
-            "termination_source = NULL, lease_expires_at = NULL, "
-            "last_turn_fatal_at = NULL, "
-            "runtime_generation = NULL, runtime_owner = NULL, runtime_kind = NULL, "
-            "runtime_protocol_version = 0 "
-            "WHERE id = %s AND status = %s RETURNING status_changed_at",
+            sql.SQL(
+                "UPDATE agents_meta SET status = %s, pid = NULL, started_at = NULL, "
+                "termination_source = NULL, lease_expires_at = NULL, "
+                "last_turn_fatal_at = NULL, "
+                "runtime_generation = NULL, runtime_owner = NULL, runtime_kind = NULL, "
+                "runtime_protocol_version = 0 "
+                "WHERE id = %s AND status = %s AND {} "
+                "AND pid IS NULL AND lifecycle_command_id IS NULL RETURNING status_changed_at"
+            ).format(sql.SQL(_RESURRECTION_TARGET)),
             base_params,
         )
     transition_row = cur.fetchone()
@@ -161,7 +186,8 @@ def _prepare_resurrect_attempt(
     with write_transaction() as conn, conn.cursor() as cur:
         latched_machine = _lock_active_home_machine(cur, agent_id)
         cur.execute(
-            "SELECT status,machine,permanent_reject_streak,last_permanent_reject_reason "
+            "SELECT status,machine,permanent_reject_streak,last_permanent_reject_reason,"
+            "runtime_kind,runtime_generation,runtime_owner,pid,incarnation_resources "
             "FROM agents_meta WHERE id = %s FOR UPDATE",
             (agent_id,),
         )
@@ -175,6 +201,9 @@ def _prepare_resurrect_attempt(
             raise ResurrectAlreadyAlive(
                 f"agent {agent_id} is in {current.value!r} state, not 'terminated'"
             )
+        incarnation = hosted_resurrection_target(
+            agent_id, kind=row[4], generation=row[5], owner=row[6], pid=row[7], resources=row[8]
+        )
         if billing_recovery:
             from shared.recovery_breaker import (
                 HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS,
@@ -197,7 +226,7 @@ def _prepare_resurrect_attempt(
                 raise ResurrectBudgetExhausted(
                     f"agent {agent_id} has exhausted its auto-resurrect budget"
                 )
-        # The resurrection inbound is inserted before the observation check so
+        # The resurrection inbound is inserted before the settlement check so
         # its id can fence the new incarnation's epoch: every earlier unapplied
         # lifecycle command is settled as superseded right here (issue #2158),
         # and a command that never applied cannot defer this resurrection. A
@@ -213,13 +242,15 @@ def _prepare_resurrect_attempt(
         if resurrect_row is None:
             raise RuntimeError("resurrect lifecycle inbound INSERT returned no id")
         supersede_lifecycle_for_resurrect(conn, agent_id, resurrect_row[0])
-        if not observe_applied_termination(conn, agent_id, machine_name()):
-            raise ResurrectExitDeferredError(
-                "outstanding lifecycle target has not been observed ended"
+        cur.execute("SELECT lifecycle_command_id FROM agents_meta WHERE id=%s", (agent_id,))
+        if fetch_one(cur, "resurrect: locked lifecycle pointer")[0] is not None:
+            raise ResurrectSettlementDeferredError(
+                "outstanding hosted lifecycle command has not settled"
             )
         _transition_terminated_to_unclaimed_idling(
             cur,
             agent_id,
+            incarnation,
             trigger_inbound_id=trigger_inbound_id,
             trigger_inbound_kind=trigger_inbound_kind,
         )
@@ -277,7 +308,11 @@ def resurrect_agent(
     trigger_inbound_kind: Literal["chat", "compact_request", "system_note"] | None = None,
     billing_recovery: bool = False,
 ) -> int:
-    """Atomically restore native intent and enqueue lifecycle plus optional chat.
+    """Resume a terminated hosted incarnation and enqueue lifecycle plus optional chat.
+
+    Historical process/unknown runtimes and incomplete hosted identities require
+    explicit cutover reconciliation. Only the hosted lifecycle owner settles an
+    applied command; resurrection never infers its completion from process exit.
 
     Pending-work callers name the exact post-termination inbound. Its ID and
     the latest force-termination fence are checked under the metadata row lock,

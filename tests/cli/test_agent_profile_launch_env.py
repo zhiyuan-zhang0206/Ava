@@ -1,58 +1,58 @@
-"""Agent-profile service sessions receive runner database credentials."""
+"""Agent-profile root manifests bind the runner credential to that child only.
 
-from __future__ import annotations
+This is the remote-managed gateway plane's provider projection: no write
+generation exists there, so only the agent-profile child receives the
+provider runner login. A pure agent-runner delivers its installed unit
+capability instead (tests/lifecycle/db_authority/test_unit_capability.py).
+"""
 
 from pathlib import Path
 
 import pytest
 
-import cli.commands._session_lifecycle as lifecycle
+from cli.commands import root_driver
 from ops.service_spec import _AGENT_RUNNER, ServiceSpec
-from shared.machine import MachineRoles
+from services.ava_root.manifest import load_manifests
+from services.ava_root_glue.manifests import generate
 
 
-def test_launch_roster_projects_runner_url_for_agent_profile(
+def test_root_manifest_projects_runner_url_for_agent_profile(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    spec = ServiceSpec(
+    agent = ServiceSpec(
         session="agent-host",
         cmd=".venv/bin/python -m services.agent_host.daemon",
         capabilities=_AGENT_RUNNER,
         requires_db=True,
         profile="agent",
     )
-    captured: list[dict[str, str] | None] = []
-
-    def _roster(_roles: MachineRoles, _skip: set[str]) -> tuple[ServiceSpec, ...]:
-        return (spec,)
-
-    def _has_session(_session: str) -> bool:
-        return False
-
-    def _project(_url: str) -> str:
-        return "postgresql://ava_runner:runner-password@127.0.0.1:5433/ava"
-
-    monkeypatch.setattr(lifecycle, "_launch_roster", _roster)
-    monkeypatch.setattr(lifecycle, "_has_session", _has_session)
-    monkeypatch.setattr(
-        lifecycle,
-        "runner_db_url_projection",
-        _project,
+    ops = ServiceSpec(
+        session="ops",
+        cmd=".venv/bin/python -m services.agent_ops",
+        capabilities=_AGENT_RUNNER,
+        requires_db=True,
     )
+    projected = "postgresql://ava_runner:fixture@127.0.0.1:1/ava"
 
-    def _new_session(
-        _session: str, _cmd: str, _cwd: Path, *, extra_env: dict[str, str] | None = None
-    ) -> bool:
-        captured.append(extra_env)
-        return True
+    def _fake_projection() -> str:
+        return projected
 
-    monkeypatch.setattr(lifecycle, "_new_session", _new_session)
+    from shared.config import settings
 
-    lifecycle._launch_sessions(frozenset({"agent-runner"}), set(), tmp_path)
-
-    assert captured == [
-        {
-            "AVA_PROCESS_PROFILE": "agent",
-            "AVA_DB_URL": "postgresql://ava_runner:runner-password@127.0.0.1:5433/ava",
-        }
-    ]
+    monkeypatch.setattr("shared.bootstrap.config_source_is_local", lambda: True)
+    monkeypatch.setattr(type(settings.data_plane), "is_remote", property(lambda _self: True))
+    monkeypatch.setattr(root_driver, "runner_db_url_projection", _fake_projection)
+    environments = {spec.session: root_driver._service_extra_env(spec) for spec in (agent, ops)}
+    path = generate(
+        tmp_path / "manifest.json",
+        capabilities=["agent-runner"],
+        repo_root=tmp_path,
+        specs=(agent, ops),
+        environments=environments,
+    )
+    units = {unit.id: unit for unit in load_manifests(path).units}
+    assert dict(units["agent-host"].env) == {
+        "AVA_PROCESS_PROFILE": "agent",
+        "AVA_DB_URL": projected,
+    }
+    assert "AVA_DB_URL" not in dict(units["ops"].env)

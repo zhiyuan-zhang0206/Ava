@@ -23,6 +23,7 @@ AgentSpawned  (re-export of shared.events.payloads.AgentSpawned)
 Any  (re-export of typing.Any)
 ArchiveFetchDegraded  (re-export of shared.events.system.ArchiveFetchDegraded)
 Auth401Rejected  (re-export of shared.events.system.Auth401Rejected)
+BackupOperationCustody  (re-export of shared.events.system.BackupOperationCustody)
 CODE_KEYS = ...
 Category  (re-export of shared.events.payloads.Category)
 CheckpointTableSizes  (re-export of shared.events.system.CheckpointTableSizes)
@@ -104,6 +105,8 @@ RecoveryDrillFailed  (re-export of shared.events.system.RecoveryDrillFailed)
 ResolutionStatus  (re-export of shared.events.system.ResolutionStatus)
 ResolvedMarker  (re-export of shared.events.system.ResolvedMarker)
 RetentionClass  (re-export of shared.events.payloads.RetentionClass)
+RootHealthExpected  (re-export of shared.events.system.RootHealthExpected)
+RootHealthTick  (re-export of shared.events.system.RootHealthTick)
 SDK_CALL_KEYS = ...
 SERVICE_STARTED_KEYS = ...
 SSE_DROP_KEYS = ...
@@ -130,7 +133,6 @@ TelemetryReadStale  (re-export of shared.events.system.TelemetryReadStale)
 TurnEnd  (re-export of shared.events.payloads.TurnEnd)
 TypedDict  (re-export of typing.TypedDict)
 UTC  (re-export of datetime.UTC)
-WatchdogTick  (re-export of shared.events.system.WatchdogTick)
 def category_for_kind(event_name: str) -> Category
 dataclass  (re-export of dataclasses.dataclass)
 datetime  (re-export of datetime.datetime)
@@ -486,6 +488,10 @@ class ArchiveFetchDegraded(TypedDict)
   route: str
 class Auth401Rejected(TypedDict)
   count: int
+class BackupOperationCustody(TypedDict)
+  custody: str
+  detail: str
+  operation: str
 class CheckpointTableSizes(TypedDict)
   blobs_bytes: int
   blobs_live: int
@@ -663,6 +669,12 @@ class ResolvedMarker(TypedDict, total=False)
   resolved_by: NotRequired[int]
   source: NotRequired[str]
   target_event_id: NotRequired[int]
+class RootHealthExpected(TypedDict)
+  expected_since_timestamp_seconds: float
+  home_id: str
+class RootHealthTick(TypedDict)
+  home_id: str
+  last_tick_timestamp_seconds: float
 class ScheduleStalled(TypedDict)
   schedule_id: int
   stalled_seconds: float
@@ -687,5 +699,3 @@ class TelemetryReadStale(TypedDict)
   signal: str
   source: str
   threshold_s: int
-class WatchdogTick(TypedDict)
-  last_tick_timestamp_seconds: float

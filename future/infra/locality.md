@@ -40,7 +40,7 @@ Most of what remains sits in files the long-running unified-cluster-lifecycle
 branch (#3479) rewrites — its data-plane credentials, updater and process
 lifecycle; those items wait for it to land and are then designed on its code.
 
-1. **Postgres door burn-down** (`owner_bypasses`, 29 modules / 61 sites).
+1. **Postgres door burn-down** (`owner_bypasses`, 19 modules / 29 sites).
    Extend `shared.db.connect()` / `pool()` so the door owns the transport
    posture while the caller owns the target (an explicit URL for provisioning,
    PITR, and restore drills), and add the async pool factory the agent host
@@ -51,7 +51,7 @@ lifecycle; those items wait for it to land and are then designed on its code.
    `shared/db_connections.py` (owner-admin, executor-admin and
    generation-login dials) and most of the dialing modules — design the named
    entry points on its version.
-2. **Reach-in burn-down** (`private_imports`, 48 keys / 51 sites / 41 files).
+2. **Reach-in burn-down** (`private_imports`, 23 keys / 25 sites / 20 files).
    Every remaining key sits in a file #3479 rewrites. Highest yield once it
    lands: `shared.agents.impersonation._impersonation_store` (5 sites), then
    `shared.runtime_publication_input` and `shared.managed_writer_publication`
@@ -76,6 +76,6 @@ lifecycle; those items wait for it to land and are then designed on its code.
 4. **More single-owner decisions**, each added to `DECISIONS` only once its
    owner exists: the OS process identity key (pid + kernel start time; one fix
    touched 28 files across exec ownership, the updater, PITR and PTY sessions;
-   natural owner `shared/proc_tree.py`'s `OwnedProcess`) is the next
+   natural owner `shared/native_process/ownership.py`'s `OwnedProcess`) is the next
    candidate — most of its readers sit in files #3479 rewrites.
    `shared/config` as a registration hub needs a design pass first.

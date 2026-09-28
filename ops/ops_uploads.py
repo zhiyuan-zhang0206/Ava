@@ -19,7 +19,6 @@ from __future__ import annotations
 import logging
 
 from ops.rpc_schemas import UploadReceivePayload, UploadReceiveResult
-from shared.config import settings
 from shared.http_dial import get as http_get
 from shared.machine import gateway_api_base
 from shared.private_storage import write_private_bytes
@@ -37,16 +36,15 @@ def upload_receive_op(payload: UploadReceivePayload) -> UploadReceiveResult:
             failed — surfaced as a 'failed' op result the gateway degrades
             (it still delivers the notification with the gateway-side URL).
     """
-    from shared.cluster_auth import bearer_header
+    from shared.machine import gateway_auth_headers
 
     name = sanitize_upload_name(payload.name)
     dest = agent_upload_dir(payload.agent_id)
     target = dest / name
 
     url = f"{gateway_api_base().rstrip('/')}/api/agents/{payload.agent_id}/uploads/{name}"
-    secret = settings.data_plane.cluster_secret
     try:
-        resp = http_get(url, headers=bearer_header(secret) if secret else {}, timeout=60.0)
+        resp = http_get(url, headers=gateway_auth_headers(), timeout=60.0)
         resp.raise_for_status()
     except Exception as exc:  # httpx.HTTPError + friends
         raise OSError(f"pull upload {url!r} failed: {exc}") from exc

@@ -272,9 +272,8 @@ than the policy row it just read. Boot already requires the cluster DB (the
 checkpointer), so this adds no new liveness dependency; if the DB is down,
 agents were not booting anyway.
 
-**`ava enroll`** changes not at all — which is the point. An enrolled runner's
-cluster identity is the gateway URL + secret; its extension state is no longer
-part of its identity, because it has none: first `ava start` after enroll
+**Runner first start** binds the gateway URL and secret as identity. Extension
+state remains outside that identity: the same `ava start`
 probes capabilities, registers them, and materializes exactly what the cluster
 says. A new machine is fungible by construction — no "did we remember to
 install the skills here" step, which is the drift-generator today.

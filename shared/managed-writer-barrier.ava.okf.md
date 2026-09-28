@@ -32,9 +32,9 @@ abandoned operation, requires a different live operation and challenge plus new
 complete closure, and keeps births frozen. The takeover producer must positively
 observe old-holder exit before obtaining that lease; expiry is not that evidence.
 Cached or mismatched acknowledgements cannot replace pending or authorize rollback.
-The operator entrance to that checked recovery is `ava cluster recover-pending`
-(`ops/publication_recovery.py`); while the trusted per-unit closure producer is
-not yet connected it refuses before touching the lease.
+The retired checked-recovery CLI/RPC entrance is absent. These transaction
+fences remain consumed by runtime admission until the database-authority
+replacement; generic recovery must not erase a pending operation.
 
 The current-publication commit producer is not connected: bootstrap observations
 are not normal ready-service readbacks, and historical version-1 collections are

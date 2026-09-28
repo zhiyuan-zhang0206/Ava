@@ -4,17 +4,12 @@ Gateway-internal — agent processes no longer import this module. The agent SDK
 (`ava.agents.*`) calls the gateway over HTTP. `resurrect` remains reachable here
 as an internal op used by `resurrect_if_terminated` (no dedicated endpoint).
 
-The two halves of the lifecycle live beside this module and are re-exported from
-it, so every existing `from ops.agents import ...` keeps working:
+The entry points are re-exported from their owning modules:
 
-- `ops/agent_spawn.py` — **birth**: a new agents_meta row (`create_agent_row`, gateway-side),
+- `ops/agent_spawn.py` creates a new metadata row (`create_agent_row`),
   optionally forked from another agent's checkpoint (`latest_checkpoint_id`).
-- `ops/agent_wake.py` — **wake**: an existing row back into a running process
-  (`resurrect_agent` / `respawn_agent`).
-
-Either way the *mechanics* of actually launching a detached native child
-process and confirming it came up live in `ops/agent_launch.py`
-(`_launch_agent_process` / `_launch_or_force_terminated` / `_require_released_agent_session`).
+- `ops/agent_wake.py` resurrects a terminated hosted incarnation
+  (`resurrect_agent`) after its original lifecycle command settles.
 
 One durable agent identity is served by its home agent-host. Spawn and
 resurrection commit native intent and messages before publishing a wake;

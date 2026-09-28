@@ -10,6 +10,7 @@ from psycopg_pool import AsyncConnectionPool, PoolTimeout
 
 from services.agent_host.dispatcher import PendingInboundWake
 from shared import maintenance
+from shared.resource_admission import DRAINED_RESOURCES
 
 FailureFences = dict[int, tuple[str | None, datetime | None]]
 
@@ -67,13 +68,13 @@ async def record_drained(pool: AsyncConnectionPool, owner: UUID, agent_id: int) 
         async with pool.connection() as conn:
             row = await (
                 await conn.execute(
-                    "SELECT 1 FROM agents_meta m JOIN inbound_messages i "
+                    "SELECT 1 FROM agents_meta m JOIN inbound_messages i "  # noqa: S608 -- constant SQL fragment
                     "ON i.id=m.lifecycle_command_id AND i.agent_id=m.id "
                     "WHERE m.id=%s AND i.id=%s AND i.kind='restart' "
                     "AND i.status='claimed' AND i.applied_at IS NOT NULL "
                     "AND i.target_owner=%s "
                     "AND i.observed_at IS NULL AND m.runtime_owner IS NULL "
-                    "AND m.incarnation_resources IS NULL",
+                    f"AND {DRAINED_RESOURCES}",
                     (agent_id, command_id, owner),
                 )
             ).fetchone()

@@ -6,7 +6,7 @@
     "tests": 80
   },
   "files": {
-    "tests/conftest.py": 1971,
+    "tests/conftest.py": 1911,
     "tests/test_ci_utils.py": 1977,
     "tests/test_feishu_adapter.py": 1255
   }

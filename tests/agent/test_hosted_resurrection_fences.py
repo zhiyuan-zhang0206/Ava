@@ -98,7 +98,9 @@ async def test_same_pid_different_birth_requires_exact_predecessor_exit(
     aid, _command, owner, resources = await _resurrected(db_conn, aops_pool)
     assert resources.host_process is not None
     prior_process = resources.host_process.model_copy(
-        update={"birth": resources.host_process.birth + 1}
+        update={"starttime": resources.host_process.starttime + 1}
+        if resources.host_process.starttime is not None
+        else {"birth": resources.host_process.birth + 1}
     )
     resources = resources.model_copy(update={"host_process": prior_process})
     db_conn.execute(

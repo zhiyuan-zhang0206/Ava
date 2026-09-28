@@ -59,8 +59,7 @@ def test_new_session_login_shell_wraps(monkeypatch: pytest.MonkeyPatch, unit_hom
     on any argv."""
     calls: list[tuple] = []
 
-    def fake_new(name, cmd, cwd, *, env, stderr_append=None, gate_fd=None, receipt=None):
-        del gate_fd, receipt  # the legacy path passes the gated pair as None
+    def fake_new(name, cmd, cwd, *, env, stderr_append=None):
         calls.append((name, cmd, cwd, env))  # pyright: ignore[reportUnknownMemberType]
         return True
 
@@ -107,9 +106,8 @@ def test_new_session_no_login_shell_passthrough(monkeypatch: pytest.MonkeyPatch)
     caller owns PATH/venv semantics, same as the legacy backend's no-login path."""
     captured: dict[str, object] = {}
 
-    def fake_new(name, cmd, cwd, *, env, stderr_append=None, gate_fd=None, receipt=None):
+    def fake_new(name, cmd, cwd, *, env, stderr_append=None):
         captured["cmd"] = cmd
-        assert gate_fd is None and receipt is None
         return True
 
     monkeypatch.setattr(posixproc, "new_session", fake_new)  # pyright: ignore[reportUnknownArgumentType]
@@ -119,52 +117,6 @@ def test_new_session_no_login_shell_passthrough(monkeypatch: pytest.MonkeyPatch)
     )
     assert ok is True
     assert captured["cmd"] == "mycmd --flag"
-
-
-def test_new_session_forwards_the_gated_pair(monkeypatch: pytest.MonkeyPatch, unit_home: Path):
-    """The gated pair reaches the supervisor unmodified — the backend adds no
-    interpretation, and the default path carries None/None."""
-    captured: dict[str, object] = {}
-
-    def fake_new(name, cmd, cwd, *, env, stderr_append=None, gate_fd=None, receipt=None):
-        captured["gate_fd"] = gate_fd
-        captured["receipt"] = receipt
-        return True
-
-    monkeypatch.setattr(posixproc, "new_session", fake_new)  # pyright: ignore[reportUnknownArgumentType]
-
-    receipt_file = Path(unit_home) / "run" / "updater-spawn" / "g" / "ava-svc.1.receipt.json"
-    ok = _backend().new_session(
-        "ava-svc",
-        "mycmd --flag",
-        Path("/repo"),
-        env={"PATH": "/bin"},
-        login_shell=False,
-        gate_fd=7,
-        receipt=(receipt_file, "n1"),
-    )
-    assert ok is True
-    assert captured == {"gate_fd": 7, "receipt": (receipt_file, "n1")}
-
-
-def test_shell_backend_refuses_a_gated_spawn(tmp_path: Path):
-    """Interactive-shell backends have no gated spawn; a gated request must be
-    refused loudly, never launched unguarded (design R1/R8)."""
-    receipt_file = tmp_path / "ava-refused.receipt.json"
-    with pytest.raises(NotImplementedError):
-        get_shell_backend().new_session(
-            "ava-x",
-            "mycmd",
-            Path("/repo"),
-            env={},
-            login_shell=False,
-            gate_fd=7,
-            receipt=(receipt_file, "n1"),
-        )
-    with pytest.raises(NotImplementedError):
-        WinprocSessionBackend().new_session(
-            "ava-x", "mycmd", Path("/repo"), env={}, gate_fd=7, receipt=(receipt_file, "n1")
-        )
 
 
 def test_posix_backend_keeps_its_own_log_file():

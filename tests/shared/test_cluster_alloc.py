@@ -45,7 +45,7 @@ def test_per_cluster_pg_redis_ports():
 def test_allocated_block_includes_pg_redis(monkeypatch: pytest.MonkeyPatch):
     """A freshly allocated (non-main) block gives pg/redis their own ports inside
     the block, distinct from every other service and from each other."""
-    monkeypatch.setattr(cluster, "_port_free", lambda _: True)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(cluster, "port_free", lambda _: True)  # pyright: ignore[reportUnknownArgumentType]
     ports = cluster.allocate_ports(existing_bases=set())
     assert ports["postgres"] == 18011
     assert ports["redis"] == 18012
@@ -53,23 +53,26 @@ def test_allocated_block_includes_pg_redis(monkeypatch: pytest.MonkeyPatch):
 
 
 def test_allocate_ports_first_block(monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setattr(cluster, "_port_free", lambda _: True)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(cluster, "port_free", lambda _: True)  # pyright: ignore[reportUnknownArgumentType]
     ports = cluster.allocate_ports(existing_bases=set())
     assert ports["gateway"] == 18000
     assert ports["milvus"] == 18008
     assert ports.get("memory_search") == 18024
+    # The release coordinator listener reuses the vacated offset 20.
+    assert ports.get("coordinator") == 18020
+    assert cluster.LEGACY_AVA_PORTS["coordinator"] == 8121
 
 
 def test_allocate_ports_skips_used_base(monkeypatch: pytest.MonkeyPatch):
     """An existing record's exact base is skipped; with BLOCK_SIZE=27 the next
     candidate is 18027 (the two capability watchdog health listeners extended
     the block after the R3 page_server, hosted-runner, and backup additions;
-    offset 20 remains deliberately vacant; overlap-aware skipping lives in
-    test_cluster_env).
+    the release coordinator reuses the vacated offset 20; overlap-aware
+    skipping lives in test_cluster_env).
 
     Concrete on purpose, like its sibling in test_cluster_env: a block growth
     must force someone to re-check allocation rather than slide past a
     derived assertion."""
-    monkeypatch.setattr(cluster, "_port_free", lambda _: True)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(cluster, "port_free", lambda _: True)  # pyright: ignore[reportUnknownArgumentType]
     ports = cluster.allocate_ports(existing_bases={18000})
     assert ports["gateway"] == 18027

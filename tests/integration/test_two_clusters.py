@@ -1,15 +1,15 @@
 """Two-cluster isolation: ports (including each cluster's own pg/redis instance).
 
-Simulates two sequential install-time cluster births on a single host (via the
+Simulates two sequential first-start cluster births on a single host (via the
 real `ensure_record`) and asserts the core isolation guarantee: the two
 home-keyed records are completely disjoint — distinct port blocks, so distinct
 pg/redis instances. (There are no per-cluster db names to compare: every
 cluster's own single-tenant instance uses the fixed `ava` identifier, carried by
 its `.env` URLs as data.)
 
-The full end-to-end verification (real docker + enroll + agent spawn
-through the ops server) is a manual step documented in the runbook; it requires
-docker and live host ports and is therefore not run in CI.
+The full end-to-end verification (real data planes + a runner's first start +
+agent spawn through the ops server) is a manual step documented in the runbook;
+it requires live host processes and ports and is therefore not run in CI.
 """
 
 from pathlib import Path
@@ -17,7 +17,7 @@ from typing import cast
 
 import pytest
 
-from cli.commands.cluster.registry import ensure_record
+from cli.start_identity import IdentityInput, prepare_identity
 from shared import cluster
 from shared.port_block import BLOCK_SIZE
 
@@ -29,14 +29,24 @@ def test_two_clusters_disjoint_ports_db(monkeypatch: pytest.MonkeyPatch, tmp_pat
     )
     monkeypatch.setattr(  # pyright: ignore[reportUnknownArgumentType]
         cluster,
-        "_port_free",
+        "port_free",
         lambda _p: True,  # pyright: ignore[reportUnknownArgumentType]
     )
 
     h1, h2 = tmp_path / ".ava-t1", tmp_path / ".ava-t2"
-    r1, created1 = ensure_record(h1)
-    r2, created2 = ensure_record(h2)
-    assert created1 and created2
+    for home in (h1, h2):
+        prepare_identity(
+            IdentityInput(
+                home,
+                tmp_path / "clusters.json",
+                tmp_path,
+                False,
+                frozenset({"gateway", "agent-runner"}),
+                {"AVA_MACHINE_NAME": home.name},
+            )
+        )
+    records = cluster.load_registry()
+    r1, r2 = records[str(h1)], records[str(h2)]
     p1 = cast("dict[str, int]", r1.ports)
     p2 = cast("dict[str, int]", r2.ports)
 

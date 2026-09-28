@@ -319,32 +319,6 @@ def test_rollout_quiet_db_outage_events(
         assert level == "info", f"{event} should be quieted to INFO"
 
 
-def test_rollout_quiet_ops_manager_round_blocked(
-    monkeypatch: pytest.MonkeyPatch,
-    sink_logger,
-) -> None:
-    """The ops manager's stdlib-logged 'round blocked' line (event='log', no
-    event=) is quieted by message prefix while a deploy holds the lease."""
-    import shared.log as slog
-
-    monkeypatch.setattr(slog, "_deploy_in_progress", lambda: True)
-    sink_logger.warning(  # pyright: ignore[reportUnknownMemberType]
-        "[ops.manager] round blocked by pause (scope=all), roster NOT fully "
-        "reconciled — 12 consecutive round(s)"
-    )
-    _event, agent_id, level, _payload = _last_event()
-    assert level == "info"
-    assert agent_id is None  # still a gateway/ops line, not an agent event
-
-    # ERROR escalation (>10 consecutive rounds) is quieted the same way.
-    sink_logger.error(  # pyright: ignore[reportUnknownMemberType]
-        "[ops.manager] round blocked by schema (scope=all), roster NOT fully "
-        "reconciled — 15 consecutive round(s)"
-    )
-    _event, _agent_id, level, _payload = _last_event()
-    assert level == "info"
-
-
 def test_rollout_quiet_query_cancellation(
     monkeypatch: pytest.MonkeyPatch,
     sink_logger,

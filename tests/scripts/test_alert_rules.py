@@ -57,7 +57,7 @@ _EXPECTED_UIDS = {
     "ava-ops-llm-stall-pair",
     "ava-ops-llm-stall-burst",
     "ava-ops-gateway-metrics-silent",
-    "ava-ops-watchdog-tick-stale",
+    "ava-ops-root-health-stale",
     "ava-ops-checkpoint-blobs-warning",
     "ava-ops-checkpoint-blobs-error",
     "ava-ops-checkpoint-blobs-freshness",
@@ -89,6 +89,8 @@ _EXPECTED_UIDS = {
     "ava-ops-memory-search-rows-critical",
     # recovery posture — scheduled-proof failure and remote retention growth
     "ava-ops-recovery-drill-failed",
+    "ava-ops-backup-operation-blocked",
+    "ava-ops-backup-operation-quarantined",
     "ava-ops-pitr-storage-growth",
     # alerting stack health — remote Tempo scrape target (task #3330)
     "ava-ops-tempo-backend-down",
@@ -117,7 +119,7 @@ def _load_groups() -> list[dict[str, Any]]:
     assert [group["name"] for group in groups] == ["ava-ops", "ava-ops-slow"]
     assert [group["folder"] for group in groups] == ["Ava", "Ava"]
     assert [group["interval"] for group in groups] == ["1m", "5m"]
-    assert [len(group["rules"]) for group in groups] == [31, 10]
+    assert [len(group["rules"]) for group in groups] == [33, 10]
     return groups
 
 
@@ -365,22 +367,22 @@ def test_gateway_metrics_silence_rule_uses_heartbeat_counter() -> None:
     assert rule["execErrState"] == "OK"
 
 
-def test_watchdog_tick_staleness_tracks_each_recent_capability() -> None:
-    """A live process is insufficient when its watchdog round is wedged.
+def test_root_health_tick_staleness_tracks_each_recent_root_home() -> None:
+    """A live process is insufficient when its root round is wedged.
 
-    Keep the capability's ``machine`` / ``process`` dimensions through the
+    Keep the root home's ``machine`` / ``home_id`` / ``process`` dimensions through the
     historical/current set subtraction so one silent gateway or runner is
-    named, while a retired capability naturally leaves the 24-hour set.
+    named, while a retired root home naturally leaves the 24-hour set.
     """
     rules = {r["uid"]: r for r in _load_rules()}
-    rule = rules["ava-ops-watchdog-tick-stale"]
+    rule = rules["ava-ops-root-health-stale"]
     expr = _exprs(rule, "prometheus")[0]
-    assert "ava_watchdog_tick_last_tick_timestamp_seconds" in expr
+    assert "ava_root_health_tick_last_tick_timestamp_seconds" in expr
     assert "max_over_time" in expr
-    assert "[24h]" in expr
+    assert "ava_root_health_expected_expected_since_timestamp_seconds[24h]" in expr
     assert "[3m]" in expr
-    assert "unless on(machine, process)" in expr
-    assert "max by (machine, process)" in expr
+    assert "unless on(machine, home_id, process)" in expr
+    assert "max by (machine, home_id, process)" in expr
     assert _threshold_params(rule) == [[0]]
     assert rule["for"] == "0m"
     assert rule["noDataState"] == "OK"

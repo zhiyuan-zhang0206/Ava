@@ -1,6 +1,0 @@
-{
-  "agent_id": 0,
-  "role": "cluster_update_started",
-  "kind": "rollout",
-  "origin": "user"
-}

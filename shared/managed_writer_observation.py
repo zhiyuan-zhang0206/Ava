@@ -17,24 +17,21 @@ from typing import Literal
 from uuid import UUID, uuid4
 from xml.parsers.expat import ExpatError
 
-import psutil
 from pydantic import AwareDatetime, Field, ValidationError
 
-from shared.managed_writer_barrier import Digest, EvidenceModel, ManagedUnit
+from shared.managed_writer_barrier import ManagedUnit
 from shared.native_job_observation import (
     LauncherObservation,
     NativeReadUnavailableError,
     observe_crontab,
     observe_launchd,
 )
-from shared.proc_tree import create_time_matches, stable_create_time
-from shared.session_record import pid_starttime_ticks
-
-
-class ExpectedProcess(EvidenceModel):
-    pid: int = Field(gt=0)
-    create_time: float = Field(gt=0, allow_inf_nan=False)
-    starttime: int | None = Field(default=None, gt=0)
+from shared.process_evidence import (
+    Digest,
+    EvidenceModel,
+    ExpectedProcess,
+    observe_process,
+)
 
 
 class ExpectedSession(EvidenceModel):
@@ -82,38 +79,6 @@ class ExpectedUnitWriters(EvidenceModel):
             home=self.home,
             inventory_digest=hashlib.sha256(body.encode()).hexdigest(),
         )
-
-
-ProcessVerdict = Literal["alive", "exited", "identity_mismatch", "unknown"]
-
-
-def observe_process(expected: ExpectedProcess) -> ProcessVerdict:
-    """A reused PID is not the expected process and is not silently accepted.
-
-    A /proc entry that vanished between psutil's validation and the identity
-    read is the exit itself (the process was reaped in between) — `exited`,
-    not a lost observation; a pid that still exists but could not be read
-    stays `unknown`.
-    """
-    try:
-        process = psutil.Process(expected.pid)
-        if expected.starttime is not None:
-            actual = pid_starttime_ticks(expected.pid)
-            if actual is None:
-                if psutil.pid_exists(expected.pid):
-                    return "unknown"
-                return "exited"
-            if actual != expected.starttime:
-                return "identity_mismatch"
-        elif not create_time_matches(stable_create_time(process), expected.create_time):
-            # A reading within tolerance is still the expected process; only a
-            # moved birth (reuse) is a mismatch.
-            return "identity_mismatch"
-        return "exited" if process.status() == psutil.STATUS_ZOMBIE else "alive"
-    except psutil.NoSuchProcess:
-        return "exited"
-    except (psutil.AccessDenied, OSError):
-        return "unknown"
 
 
 SessionVerdict = Literal["absent", "record_present", "identity_mismatch", "unknown"]

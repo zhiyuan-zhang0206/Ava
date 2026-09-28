@@ -224,16 +224,12 @@ from gateway.routers import (
     work_failed as work_failed_router,
 )
 from gateway.schedule_manager import ScheduleManager
-from gateway.session_store import session_is_valid, touch_session
+from gateway.session_store import touch_session
 from shared.agents import AvaAgentError
-from shared.cluster_auth import (
-    cookie_name,
-    verify_bearer,
-)
+from shared.cluster_auth import cookie_name
 from shared.config import settings
 from shared.context import AvaContext
 from shared.lm.plugin_providers import ensure_provider_plugins_loaded
-from shared.machine import machine_name
 from shared.os_cron import register_os_cron
 
 _log = logging.getLogger(__name__)
@@ -296,8 +292,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
     # Register the OS-level health-probe cron (launchd plist on macOS, crontab
     # on Linux). This is the primary registration path — every gateway start
-    # refreshes the plist, so an `ava cluster update` that changes the probe command
-    # (e.g. adds --auto-rollback) takes effect on the next gateway restart
+    # refreshes the health probe command on the next gateway restart
     # without relying on the converge phase. Idempotent.
     try:
         await asyncio.to_thread(register_os_cron)
@@ -310,29 +305,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     app.state.schedule_manager = ScheduleManager(app.state.db_pool)
     await app.state.schedule_manager.start()
 
-    # Built-in schedules (schedules/manifest.json) — provisioned on boot
-    # so a fresh install comes up with its product schedules (self-evolution,
-    # memory) enabled and its cluster-operator schedules (trace-ship-tempo)
-    # present but disabled, per the pre-open-source policy ruling (2026-08-11).
-    # Idempotent create-if-missing: existing rows are never touched, so an
-    # operator's edits survive every boot and a deliberately deleted built-in
-    # comes back with its manifest default. Best-effort — a missing or corrupt
-    # manifest must not take the gateway down; the reconcile loop launches any
-    # newly created enabled schedule within a poll tick.
-    try:
-        from shared.daemon.schedules.builtin_schedules import provision_builtin_schedules
-
-        def _provision() -> list[str]:
-            # Connection acquisition included: `pool.connection()` blocks and
-            # must not run on the event loop.
-            with app.state.db_pool.connection() as conn:
-                return provision_builtin_schedules(conn)
-
-        created = await asyncio.to_thread(_provision)
-        if created:
-            _log.info("provisioned built-in schedules: %s", ", ".join(created))
-    except Exception:
-        _log.warning("built-in schedule provisioning failed", exc_info=True)
+    # Automatic seeding is explicit configuration; unseeded previews still use
+    # the normal manager and schedule APIs without launching background workloads.
+    await app.state.schedule_manager.provision_builtins()
 
     # Config migrations (the retired override layers -> .env) run in the converge
     # phase before the gateway process starts, so by the time this Settings is
@@ -396,78 +371,11 @@ app = FastAPI(
 # deliberate declaration, not an incident patch.
 
 
-_PAUSE_READ_TTL_S = 1.0
-"""How long a pause-posture read is cached. A 1s-stale judgment is fine for
-the 503 gate (the pause fan-out itself is a multi-second rollout step, and
-R1's lease semantics tolerate sub-second staleness); the cache is what keeps
-the middleware off the DB for the steady state — one pool borrow + SELECT per
-second per gateway process instead of one per request."""
+async def _cluster_is_paused(_request: Request) -> bool:
+    """Read this home's durable admission state without a stale posture cache."""
+    from shared.maintenance import business_paused
 
-_pause_cache: list[tuple[float, bool] | None] = [None]
-"""``(expires_at_monotonic, paused)`` — the last posture read and when it
-expires. A one-element list so the async reader can update it without a
-`global` statement (ruff PLW0603); the middleware is the only writer."""
-
-_pause_inflight: list[asyncio.Future[bool] | None] = [None]
-"""One shared expired-cache posture read; followers await this Future."""
-
-
-async def _cluster_is_paused(request: Request) -> bool:
-    """Whether this host's posture is `paused`, read off the event loop.
-
-    The posture row lives in the central DB and is read by the gateway's 503
-    middleware on every request (audit P1-1: the old path opened a fresh
-    non-pooled connection and ran a synchronous SELECT directly on the event
-    loop — a slow DB froze the whole gateway exactly when pause matters
-    most). This version borrows the reserved control-plane pool, runs the
-    read in the threadpool, caches it for `_PAUSE_READ_TTL_S`, and shares one
-    in-flight read when the cache expires.
-
-    A read failure reads as NOT paused — the same conservative direction the
-    old flag-file stat had (an unreadable flag was an absent flag). Offline
-    maintenance projection comes from the cluster orchestrator's durable Gate
-    marker, not this host posture read.
-    """
-    now = time.monotonic()
-    cached = _pause_cache[0]
-    if cached is not None and now < cached[0]:
-        return cached[1]
-    inflight = _pause_inflight[0]
-    if inflight is not None:
-        return await asyncio.shield(inflight)
-
-    def _read_posture() -> bool:
-        try:
-            with request.app.state.control_db_pool.connection() as conn, conn.cursor() as cur:
-                cur.execute(
-                    "SELECT posture FROM host_deploy_state WHERE machine = %s",
-                    (machine_name(),),
-                )
-                row = cur.fetchone()
-            return row is not None and row[0] == "paused"
-        except Exception:
-            _log.warning(
-                "[cluster] pause posture read failed; reading as not paused",
-                exc_info=True,
-            )
-            return False
-
-    async def _read_and_cache() -> bool:
-        paused = await asyncio.to_thread(_read_posture)
-        _pause_cache[0] = (now + _PAUSE_READ_TTL_S, paused)
-        return paused
-
-    # A canceled request stops awaiting this one worker read but does not
-    # cancel it for concurrent middleware followers.
-    task = asyncio.create_task(_read_and_cache())
-    _pause_inflight[0] = task
-
-    def _clear_inflight(done: asyncio.Future[bool]) -> None:
-        if _pause_inflight[0] is done:
-            _pause_inflight[0] = None
-
-    task.add_done_callback(_clear_inflight)
-    return await asyncio.shield(task)
+    return await asyncio.to_thread(business_paused)
 
 
 # AtLeastOnceWithKey dedup (doorplate ①): generic keyed routes store/replay a
@@ -487,18 +395,19 @@ async def _cluster_pause_middleware(
     request: Request,
     call_next: Callable[[Request], Awaitable[Response]],
 ) -> Response:
-    """While this host's posture is `paused`, short-circuit SDK / UI /
-    data-plane requests to 503 so the caller sees "cluster updating, retry
-    shortly" and the request does not punch through to business logic that
-    might step on a migrating schema.
+    """During this home's journal-owned stop window, refuse business requests.
+
+    Drain keeps SDK dependencies available; stop/start phases fence them until
+    the same durable admission hold is released. Control-plane routes bypass
+    the journal read, including when the record needs explicit repair.
 
     Exempt: every route whose doorplate declares CONTROL_PLANE (the
     /api/cluster/* control plane and the Grafana alerting webhook).
     Everything else 503.
     """
-    if await _cluster_is_paused(request) and not _pause_policy.should_bypass_pause(
+    if not _pause_policy.should_bypass_pause(
         request.method, request.url.path
-    ):
+    ) and await _cluster_is_paused(request):
         return error_response(
             request,
             code="cluster_updating",
@@ -514,8 +423,9 @@ async def _cluster_pause_middleware(
 # reachable without auth. Health is probed by each host on the private
 # network; login is how the browser obtains a session cookie.
 # Every other API route requires either a valid session cookie or a
-# Bearer token carrying the cluster secret — unless the cluster has no secret
-# at all (no-auth posture) or the middleware is disabled for e2e.
+# Bearer token carrying the cluster secret or a machine API token of the active
+# write generation — unless the cluster has no secret at all (no-auth posture)
+# or the middleware is disabled for e2e.
 _AUTH_BYPASS_PATHS: frozenset[str] = frozenset(
     {
         "/api/health",
@@ -561,6 +471,25 @@ def _prune_session_last_touch(now: float) -> None:
             _session_last_touch.pop(session_id, None)
 
 
+async def _cookie_session(request: Request, secret: str) -> tuple[str, str] | None:
+    """The request's session cookie and its credential fact, when it authenticates.
+
+    Valid only while the credential that minted the session is current (a
+    revoked generation's or a rotated secret's sessions end). Only a request
+    carrying a cookie consults the session store: bearer and anonymous
+    requests never pay its thread hop.
+    """
+    from gateway.request_principal import current_session_fact
+
+    cookie_token = request.cookies.get(cookie_name())
+    if not cookie_token:
+        return None
+    fact = await asyncio.to_thread(
+        current_session_fact, request.app.state.db_pool, cookie_token, secret
+    )
+    return None if fact is None else (cookie_token, fact)
+
+
 @app.middleware("http")
 async def _cluster_auth_middleware(
     request: Request,
@@ -569,8 +498,11 @@ async def _cluster_auth_middleware(
     """Require a valid session cookie OR Bearer token on every API route.
 
     Two auth methods, checked in order:
-    1. Session cookie (``ava_session``) — for browser users who logged in.
-    2. ``Authorization: Bearer <secret>`` — for SDK / agent / script callers.
+    1. Session cookie (``ava_session``) — for browser users who logged in; it
+       authenticates only while the credential that minted it is current.
+    2. ``Authorization: Bearer <token>`` — the human cluster secret (operator
+       SDK / scripts), or the active write generation's machine API token that
+       the launcher delivers to every service and agent (``AVA_API_TOKEN``).
 
     Two states serve the API unauthenticated, both first-class:
     - ``cluster_secret`` empty — a no-secret cluster is fully unauthenticated by
@@ -580,7 +512,7 @@ async def _cluster_auth_middleware(
       middleware while keeping the cluster secret for internal
       service-to-service auth (ops / agent-host).
     """
-    from gateway.request_principal import AuthPrincipal
+    from gateway.request_principal import AuthPrincipal, cluster_credential
 
     # This is set only by credential verification, never by caller/source JSON.
     request.state.auth_principal = None
@@ -606,15 +538,12 @@ async def _cluster_auth_middleware(
     ):
         return await call_next(request)
 
-    # 1. Check session cookie
-    cookie_token = request.cookies.get(cookie_name())
-    if cookie_token and await asyncio.to_thread(
-        session_is_valid,
-        request.app.state.db_pool,
-        cookie_token,
-    ):
+    # 1. Check session cookie.
+    session = await _cookie_session(request, secret)
+    if session is not None:
+        cookie_token, session_fact = session
         request.state.auth_principal = AuthPrincipal("cluster", "administrator")
-        request.state.source_verified_by = "user_session"
+        request.state.source_verified_by = session_fact
         origin = request.headers.get("Origin")
         # Origin is checked only after valid cookie auth; without it, the request
         # reaches 401 unless another explicit credential authenticates it.
@@ -645,11 +574,12 @@ async def _cluster_auth_middleware(
             )
         return await call_next(request)
 
-    # 2. Check Bearer token
-    authorization = request.headers.get("Authorization")
-    if verify_bearer(authorization, secret):
+    # 2. Check Bearer token: the human secret, or the active write generation's
+    # machine API token (a revoked generation's never authenticates).
+    verified_by = cluster_credential(request.headers.get("Authorization"), secret)
+    if verified_by is not None:
         request.state.auth_principal = AuthPrincipal("cluster", "administrator")
-        request.state.source_verified_by = "cluster_bearer"
+        request.state.source_verified_by = verified_by
         return await call_next(request)
 
     _log_auth401_rejection(request)

@@ -32,9 +32,6 @@ from gateway.inspect.schemas import (
 from gateway.schemas.agents import (
     AgentRow,
 )
-from gateway.schemas.cluster import (
-    ClusterOpRequest,
-)
 from gateway.schemas.commands import (
     CommandItem,
 )
@@ -209,7 +206,6 @@ __all__ = [
     "BornChainResponse",
     "BornChainRow",
     "CancelRequest",
-    "ClusterOpRequest",
     "ClusterPanel",
     "CommandItem",
     "CompactEnqueued",

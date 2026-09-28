@@ -17,7 +17,8 @@ from services.permissions_helper import client
 from services.permissions_helper.client import PermissionsHelperError
 from shared import helper_chain_guard, helperproc
 from shared.helper_chain_guard import parent_chain_intact
-from shared.session_record import SessionRecord, pid_starttime_ticks
+from shared.native_process import pid_starttime_ticks
+from shared.session_record import SessionRecord
 
 
 def _current_process_record(*, generation: str | None = None) -> SessionRecord:

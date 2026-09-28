@@ -7,7 +7,7 @@
     "tests/scripts": 53
   },
   "files": {
-    "tests/scripts/test_alert_rules.py": 1151,
+    "tests/scripts/test_alert_rules.py": 1150,
     "tests/scripts/test_check_model_updates.py": 899
   }
 }

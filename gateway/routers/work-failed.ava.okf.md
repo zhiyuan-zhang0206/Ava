@@ -13,7 +13,8 @@ tags:
 `POST /api/work-failed` accepts `repo`, `ref`, `commit_sha`, `stage`,
 `summary`, `author_agent_id`, and a producer-stable `dedup_key`. It uses the
 same scoped webhook authentication as alert ingestion: the configured alert
-webhook token, the cluster bearer, or tokenless loopback trust. The gateway
+webhook token, a cluster bearer (the human secret or the active write
+generation's machine API token), or tokenless loopback trust. The gateway
 records the credential result as inbound provenance; payload fields can never
 assert it. Producers obtain `author_agent_id` from the exact
 `Co-authored-by: Ava #<id>` commit trailer at their own boundary; the gateway

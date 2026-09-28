@@ -37,6 +37,28 @@ def held() -> bool:
     return snapshot() is not None
 
 
+def business_paused() -> bool:
+    """Fence HTTP only after fleet drain reaches this unit's stop window.
+
+    The same durable journal that releases agent admission controls HTTP. A
+    database posture projection or cached read cannot prolong a completed resume.
+    Drained local agents do not imply remote continuations have finished their
+    SDK calls, so only the following stop/start phases close business requests.
+    Unknown or incomplete pause records keep them closed until explicit repair.
+    """
+    try:
+        current = pause_owner.read()
+    except OSError:
+        return True
+    if current.status == "invalid":
+        return True
+    if current.status != "paused":
+        return False
+    if current.maintenance is None:
+        return True
+    return current.maintenance.phase in {"stopping", "stopped", "starting", "ready"}
+
+
 # The stop window's phases: the drain has landed, or the unit is mid-stop /
 # mid-start. `preparing`/`draining` stay live — an already-admitted turn may
 # still be counted down and must finish; `ready` is included so a resume's

@@ -7,6 +7,19 @@ tree with one provider anchor and callers that attest (or do not) against it.
 
 from typing import Any
 
+from shared.native_process import native_boot_id
+
+
+def native_identity(birth: float) -> dict[str, object]:
+    """Explicit synthetic process evidence within this test host's boot scope."""
+    import sys
+
+    return {
+        "created_at": birth,
+        "starttime": int(birth * 100) if sys.platform == "linux" else None,
+        "boot_id": native_boot_id(),
+    }
+
 
 def recorded_tree() -> dict[str, Any]:
     """A recorded controller tree with one provider anchor (codex)."""
@@ -14,21 +27,21 @@ def recorded_tree() -> dict[str, Any]:
         "pid": 4242,
         "name": "python3.12",
         "executable": "/usr/bin/python3.12",
-        "created_at": 1000.0,
+        **native_identity(1000.0),
         "parent_pid": 4241,
         "ancestors": [
             {
                 "pid": 4241,
                 "name": "zsh",
                 "executable": "/bin/zsh",
-                "created_at": 999.0,
+                **native_identity(999.0),
                 "parent_pid": 4240,
             },
             {
                 "pid": 4240,
                 "name": "codex",
                 "executable": "/opt/codex",
-                "created_at": 998.0,
+                **native_identity(998.0),
                 "parent_pid": 1,
             },
         ],
@@ -44,6 +57,8 @@ def attested_caller(lease: dict[str, Any]) -> dict[str, Any]:
             "name": recorded["name"],
             "executable": recorded["executable"],
             "created_at": recorded["created_at"],
+            "starttime": recorded["starttime"],
+            "boot_id": recorded["boot_id"],
         }
     ]
     chain.extend(dict(node) for node in recorded["ancestors"])
@@ -51,7 +66,7 @@ def attested_caller(lease: dict[str, Any]) -> dict[str, Any]:
         "pid": 5000,
         "name": "python3.12",
         "executable": "/usr/bin/python3.12",
-        "created_at": 2000.0,
+        **native_identity(2000.0),
         "parent_pid": recorded["pid"],
         "ancestors": chain,
     }
@@ -63,7 +78,7 @@ def unrelated_caller() -> dict[str, Any]:
         "pid": 6000,
         "name": "python3.12",
         "executable": "/usr/bin/python3.12",
-        "created_at": 3000.0,
+        **native_identity(3000.0),
         "parent_pid": 1,
         "ancestors": [],
     }

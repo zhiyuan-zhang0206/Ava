@@ -100,7 +100,7 @@ def _run_capture(root: pathlib.Path | None, *extra: str) -> tuple[int, str]:
         ("shared/foo.api.txt", False),  # generated glob (*.api.txt is not a src ext either)
         ("ui/web/src/lib/api.ts", True),
         ("migrations/20260101T000000_x.sql", True),
-        ("scripts/install.sh", True),
+        ("scripts/install-cli-tools.sh", True),
     ],
 )
 def test_is_src_classification(rel_path: str, expected: bool) -> None:

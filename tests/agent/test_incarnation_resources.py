@@ -5,6 +5,7 @@ import time
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
+import psutil
 import psycopg
 import pytest
 from psycopg.types.json import Jsonb
@@ -24,6 +25,11 @@ from shared.incarnation_resources import (
     register_exec,
 )
 from shared.runtime_incarnation import RuntimeIncarnation
+
+
+def _process(pid: int, birth: float) -> ResourceProcess:
+    captured = ResourceProcess.capture(psutil.Process())
+    return captured.model_copy(update={"pid": pid, "birth": birth})
 
 
 def _admitted(conn: psycopg.Connection) -> RuntimeIncarnation:
@@ -90,8 +96,8 @@ def test_registration_and_attachment_require_exact_live_owner(db_conn: psycopg.C
             register_exec(db_conn, wrong, _entry())
     attached = entry.model_copy(
         update={
-            "owner_process": ResourceProcess(pid=100, birth=1.0),
-            "root_process": ResourceProcess(pid=101, birth=2.0),
+            "owner_process": _process(100, 1.0),
+            "root_process": _process(101, 2.0),
         }
     )
     with db_conn.transaction():
@@ -115,8 +121,8 @@ def test_force_freezes_registered_set_and_blocks_later_permit(db_conn: psycopg.C
             entry,
             entry.model_copy(
                 update={
-                    "owner_process": ResourceProcess(pid=100, birth=1.0),
-                    "root_process": ResourceProcess(pid=101, birth=2.0),
+                    "owner_process": _process(100, 1.0),
+                    "root_process": _process(101, 2.0),
                 }
             ),
         )
@@ -199,8 +205,8 @@ def test_unchanged_locked_row_expiring_lease_never_permits_exec(
                             entry,
                             entry.model_copy(
                                 update={
-                                    "owner_process": ResourceProcess(pid=100, birth=1.0),
-                                    "root_process": ResourceProcess(pid=101, birth=2.0),
+                                    "owner_process": _process(100, 1.0),
+                                    "root_process": _process(101, 2.0),
                                 }
                             ),
                         )

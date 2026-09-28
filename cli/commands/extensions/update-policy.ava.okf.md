@@ -33,8 +33,8 @@ One pass that makes this machine's channel-backed **skill** packages match
 their sources (design §5.3; plugin/MCP applies land in P2):
 
 - **core channel** (repo-native content): `git ls-remote` the checkout's remote
-  → fetch commit objects when the ref moved (never the working tree — the same
-  objects-only contract as `shared.cluster_drift.prod_source_fetch`) →
+  → fetch commit objects when the ref moved (objects only, never the working
+  tree) →
   `git diff --name-only <applied_rev> <head> -- <path>` picks the packages that
   changed → `git archive` into `$AVA_HOME/skills/.<name>.new` → gates → staged
   swap (marker-protected subtrees carried; the replaced tree is kept as

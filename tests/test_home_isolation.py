@@ -75,10 +75,10 @@ def _e2e_restore_list() -> frozenset[str]:
 def test_env_path_is_not_the_operators_real_dotenv() -> None:
     """The bound `.env` path is the session's tmpfs home, not `~/.ava/.env`.
 
-    This is the single fact everything else follows from — `cli.enroll` writes
-    to `AVA_ENV_PATH`, so if it points at the real home a test can rewrite the
-    operator's live cluster config (the pre-2026-08-01 `cli.start_refresh` did
-    the same on every `ava start`).
+    This is the single fact everything else follows from — boot loads
+    `AVA_ENV_PATH` and force-assigns its cluster keys, and the CLI's `.env`
+    writers land beside it, so if it points at the real home a test can read or
+    rewrite the operator's live cluster config.
     """
     bound = Path(shared.dotenv_boot.AVA_ENV_PATH)
     assert bound != _real_home_env(), (

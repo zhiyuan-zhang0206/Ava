@@ -115,7 +115,7 @@ class FirewallVerdict(StrEnum):
     """What the audit found. Only `RULES_MISSING` asks the operator for anything.
 
     The four quiet verdicts are not one "OK" value because they are quiet for
-    different reasons, and a caller explaining an `OFF_BOX_UNREACHABLE` rollout
+    different reasons, and a caller explaining an off-box reachability failure
     needs to tell them apart: `FIREWALL_OFF` *rules the firewall out* as the
     cause and redirects the operator to the address configuration, which a bare
     boolean could not do.
@@ -235,9 +235,9 @@ def _covered(binary: Path, rules: dict[str, bool]) -> bool:
     Accepting either is the asymmetry worth choosing deliberately. A false *alarm*
     is expensive — it prints a scary block on a host that is fine, on every
     `ava start`, until an operator learns to ignore this step, at which point the
-    real occurrence is invisible too. A false *silence* costs one `OFF_BOX_UNREACHABLE`
-    report, which now runs this same audit and will at least say the firewall was
-    checked. So when the evidence is ambiguous, stay quiet.
+    real occurrence is invisible too. A false *silence* costs one off-box
+    reachability failure, which `ava firewall status` diagnoses with this same
+    audit. So when the evidence is ambiguous, stay quiet.
     """
     if rules.get(str(binary), False):
         return True

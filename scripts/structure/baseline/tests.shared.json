@@ -8,7 +8,6 @@
     "tests/shared/test_event_contract.py::test_payload_keys_are_the_declared_attribute_contract": 24,
     "tests/shared/test_gateway_consumer_guard.py::_kind_closure": 18,
     "tests/shared/test_gateway_consumer_guard.py::_repo_internal_import_closure": 15,
-    "tests/shared/test_host_deploy_state.py::test_stranded_hold_mark_is_set_once_and_clear_releases_it": 15,
     "tests/shared/test_impersonation.py::test_operator_force_expire_closes_only_observed_session": 23,
     "tests/shared/test_impersonation_delivery.py::test_real_relay_uses_snapshotted_config_across_restart": 17,
     "tests/shared/test_impersonation_delivery.py::test_two_attempts_each_get_a_full_window_then_native_observes_expiry": 16,
@@ -20,22 +19,20 @@
     "tests/shared/test_winproc_launch.py::test_new_session_spawns_a_control_steward_bound_to_the_record_identity": 21
   },
   "directories": {
-    "tests/shared": 271
+    "tests/shared": 266
   },
   "files": {
-    "tests/shared/pty/test_pty_sessions_cli.py": 1444,
-    "tests/shared/test_config.py": 1715,
+    "tests/shared/pty/test_pty_sessions_cli.py": 1436,
+    "tests/shared/test_config.py": 1705,
     "tests/shared/test_daemon_health.py": 923,
-    "tests/shared/test_dotenv_boot.py": 1126,
-    "tests/shared/test_editable_install.py": 884,
+    "tests/shared/test_dotenv_boot.py": 969,
+    "tests/shared/test_editable_install.py": 883,
     "tests/shared/test_impersonation.py": 1205,
     "tests/shared/test_machines.py": 849,
     "tests/shared/test_memory_repo.py": 846,
-    "tests/shared/test_posixproc.py": 840,
-    "tests/shared/test_provider_plugins.py": 952,
-    "tests/shared/test_runner_role.py": 1061,
-    "tests/shared/test_service_respawn.py": 880,
-    "tests/shared/test_telemetry_otlp.py": 1276
+    "tests/shared/test_provider_plugins.py": 949,
+    "tests/shared/test_runner_role.py": 1035,
+    "tests/shared/test_telemetry_otlp.py": 1169
   },
   "nesting": {
     "tests/shared/test_gateway_consumer_guard.py::_kind_closure": 6,

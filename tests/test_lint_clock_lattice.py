@@ -182,3 +182,51 @@ def test_directory_with_non_utf8_member_is_skipped(
     (pkg / "viol.py").write_text("_MY_STALL_TIMEOUT_S = 5\n", encoding="utf-8")
     assert _lint.main([str(pkg)]) == 1
     assert "_MY_STALL_TIMEOUT_S" in capsys.readouterr().err
+
+
+# --- stale allowlist entries fail a full scan ---------------------------------
+
+
+def test_real_allowlists_are_current() -> None:
+    assert _lint._stale_allowlist_entries() == []
+
+
+def test_exemption_for_a_deleted_file_is_stale(scan_tmp, monkeypatch) -> None:
+    monkeypatch.setattr(_lint, "_FAMILY_MODULES", ())
+    monkeypatch.setattr(_lint, "_INDEPENDENT_CLOCKS", {("shared/gone.py", "_REAP_S"): "why"})
+    errs = _lint._stale_allowlist_entries()
+    assert len(errs) == 1
+    assert "shared/gone.py" in errs[0] and "_REAP_S" in errs[0]
+
+
+def test_exemption_for_a_removed_constant_is_stale(scan_tmp, monkeypatch) -> None:
+    _write(scan_tmp, "shared/proc.py", "_OTHER_GRACE_S = 1.0\n")
+    monkeypatch.setattr(_lint, "_FAMILY_MODULES", ())
+    monkeypatch.setattr(
+        _lint, "_INDEPENDENT_CLOCKS", {("shared/proc.py", "_TERMINATE_GRACE_S"): "why"}
+    )
+    errs = _lint._stale_allowlist_entries()
+    assert len(errs) == 1
+    assert "no module-level _TERMINATE_GRACE_S" in errs[0]
+
+
+def test_live_exemption_and_family_module_are_current(scan_tmp, monkeypatch) -> None:
+    _write(scan_tmp, "shared/proc.py", "_TERMINATE_GRACE_S: float = 1.0\n")
+    _write(scan_tmp, "shared/timing.py", "CLOCKS = {}\n")
+    monkeypatch.setattr(_lint, "_FAMILY_MODULES", ("shared/timing.py",))
+    monkeypatch.setattr(
+        _lint, "_INDEPENDENT_CLOCKS", {("shared/proc.py", "_TERMINATE_GRACE_S"): "why"}
+    )
+    assert _lint._stale_allowlist_entries() == []
+
+
+def test_full_scan_fails_on_a_stale_family_module(
+    scan_tmp, monkeypatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Only the argument-free full scan (pre-commit, CI) judges the allowlists."""
+    monkeypatch.setattr(_lint, "_FAMILY_MODULES", ("shared/retired_timing.py",))
+    monkeypatch.setattr(_lint, "_INDEPENDENT_CLOCKS", {})
+    assert _lint.main([]) == 1
+    assert "stale _FAMILY_MODULES entry" in capsys.readouterr().err
+    ok = _write(scan_tmp, "ok.py", "value = 1\n")
+    assert _lint.main([str(ok)]) == 0

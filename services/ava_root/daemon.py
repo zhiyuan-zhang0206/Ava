@@ -1,43 +1,10 @@
-"""Entry point: wire a supervisor and a control server, own the process.
+"""Launch one root-owned service tree and its control socket.
 
-Run: `python -m services.ava_root --run-dir DIR --manifests FILE [--wiring module:attr]`
-
-The daemon owns exactly one tree (the instance lock enforces it), serves the
-K1 control protocol on `<run-dir>/ava-root.sock`, and stops the whole tree on
-SIGTERM/SIGINT. What launches *this* process (the OS edge) is out of scope —
-this program is deliberately launchable by hand, by a test, or later by the
-platform adapter.
-
-Process contract for an OS-edge launcher (the K3 face this program freezes):
-
-- **Launch**: `python -m services.ava_root --run-dir DIR --manifests FILE`.
-  The run directory is created when missing.
-- **Ready**: the control socket appearing on disk — the server starts only
-  after the tree is up.
-- **Stop**: SIGTERM (or SIGINT) triggers the graceful stop of the whole tree,
-  then exit 0; SIGHUP is ignored (no reloads — reloads go through upgrade).
-- **Upgrade**: `upgrade` (K1) makes this daemon exec-replace itself — same
-  pid, same argv, environment carrying the takeover marker — once the accepted
-  response is flushed. The successor validates `<run-dir>/handoff.json`
-  against its own pid (exec keeps the pid), attaches the still-running units
-  without respawning them, and rebinds the control socket. Between the exec
-  and the rebind, K1 refuses connections for well under a second. A failed
-  handoff write is answered as an error (no exec happens); an exec failure
-  exits 1.
-- **Exit codes**: 0 = clean stop; 1 = startup refused (malformed manifests, a
-  broken wiring reference, or another live supervisor already owns the run dir
-  — a keeper launching into a held tree must read that as "already running",
-  not as a crash) or an upgrade exec failure (the launch edge then restarts a
-  cold generation).
-- **Run-dir layout**: `ava-root.lock` (instance lock, held for the process
-  lifetime), `ava-root.sock` (control socket, mode 0600),
-  `logs/<unit>/output.log` (per-unit directory; output appended across
-  generations, the directory is the seam for naming/rotation policy).
-- **Wiring hook (optional)**: `--wiring module:attr` imports a
-  deployment-side module and calls its attribute once with a `WiringContext`;
-  the returned participant(s) start with the tree and stop (reverse order)
-  before it. Without the flag the daemon imports nothing extra and behaves
-  exactly as before. Contract: `services/ava_root/wiring.py`.
+The instance lock prevents competing roots; retained native custody prevents
+cold replacement after owner loss. Socket availability acknowledges the control
+plane only: readiness comes from each service's ownership-bound protocol probe.
+SIGTERM/SIGINT requests graceful tree closure; failed closure retains custody.
+Release replacement stops the old root before launching another interpreter.
 """
 
 from __future__ import annotations
@@ -45,16 +12,13 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
-import os
 import signal
 import sys
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import NoReturn
+from types import FrameType
 
-from services.ava_root.handoff import discard_handoff, load_handoff
-from services.ava_root.ipc import RequestPayload, Verb
 from services.ava_root.manifest import ManifestError, load_manifests
 from services.ava_root.server import ControlServer
 from services.ava_root.singleton import (
@@ -71,7 +35,14 @@ from services.ava_root.wiring import (
     start_participants,
     stop_participants,
 )
-from shared.process_env import consume_process_marker, inherited_process_env
+from shared.root_control.ipc import (
+    ErrorCode,
+    RequestPayload,
+    ResponsePayload,
+    Verb,
+    error_response,
+    ok_response,
+)
 
 _log = logging.getLogger("ava_root")
 
@@ -118,58 +89,10 @@ def parse_args(argv: Sequence[str] | None = None) -> DaemonOptions:
     )
 
 
-# The exec handoff marker: the one piece of process state that must cross the
-# `execve` boundary of an in-place upgrade. It rides the environment through
-# `shared.process_env` — the seam built for exactly this class (Settings is
-# per-process configuration loaded at import time; this marker lives only
-# between one generation's exec and its successor's startup).
-_HANDOFF_ENV = "AVA_ROOT_HANDOFF"
-
-
-def _take_takeover_marker() -> bool:
-    """Consume the exec-handoff marker this process was launched with, if any."""
-    return consume_process_marker(_HANDOFF_ENV, armed_value="1")
-
-
-def _takeover_env() -> dict[str, str]:
-    """The environment for a replacement generation: this one plus the marker."""
-    return inherited_process_env({_HANDOFF_ENV: "1"})
-
-
-def _exec_upgrade(exec_args: Sequence[str]) -> NoReturn:
-    """Replace this process image with a fresh generation (same pid, same args).
-
-    Called only after the accepted upgrade response has been flushed. On
-    success this never returns — `execve` keeps the pid, the parent, and the
-    inherited children, so the successor attaches the same units. An exec
-    failure exits the process with status 1: the launch edge's keepalive then
-    starts a cold generation (resolving the old tree's fate is G4's recovery
-    territory, not silently re-adopted here).
-    """
-    argv = [sys.executable, "-m", "services.ava_root", *exec_args]
-    _log.info("upgrade: exec replacement now (pid stays %s)", os.getpid())
-    try:
-        os.execve(  # noqa: S606 — replaces this process image with the same trusted interpreter
-            sys.executable, argv, _takeover_env()
-        )
-    except OSError as exc:
-        _log.error(
-            "upgrade: exec failed: %s — exiting; the launch edge restarts a cold generation",
-            exc,
-        )
-        logging.shutdown()
-        os._exit(1)
-    os._exit(1)  # unreachable: execve replaces the image or raises
-
-
-async def run(options: DaemonOptions, *, exec_args: Sequence[str]) -> int:
+async def run(options: DaemonOptions) -> int:
     """Bring up one tree and serve until a stop signal arrives."""
     registry = load_manifests(options.manifests_path)
     lock_fd = acquire_instance_lock(options.run_dir)
-    takeover = _take_takeover_marker()
-    handoff = load_handoff(
-        options.run_dir, expected_writer_pid=os.getpid(), takeover_marker=takeover
-    )
     log_dir = options.run_dir / "logs"
     supervisor = Supervisor(registry, run_dir=options.run_dir)
     context = WiringContext(
@@ -183,47 +106,62 @@ async def run(options: DaemonOptions, *, exec_args: Sequence[str]) -> int:
     participants = load_wiring(options.wiring, context)
     socket_path = options.run_dir / _SOCKET_NAME
     stop = asyncio.Event()
+    retiring = False
+
+    def request_stop() -> None:
+        nonlocal retiring
+        retiring = True
+        stop.set()
+
+    async def dispatch(request: RequestPayload) -> ResponsePayload:
+        if request["verb"] == Verb.SHUTDOWN:
+            return ok_response({"shutdown_requested": True})
+        if retiring and request["verb"] in {Verb.UP, Verb.RESTART, Verb.RESOURCE}:
+            return error_response(ErrorCode.INVALID_REQUEST, "root is stopping; admission closed")
+        if request["verb"] == Verb.RESOURCE:
+            if "name" not in request or "payload" not in request:
+                return error_response(ErrorCode.INVALID_REQUEST, "resource fields missing")
+            handler = context.resource_handlers.get(request["name"])
+            if handler is None:
+                return error_response(ErrorCode.INVALID_REQUEST, "resource operation unavailable")
+            try:
+                return ok_response(await handler(request["payload"]))
+            except RuntimeError as exc:
+                return error_response(ErrorCode.INVALID_REQUEST, str(exc))
+        return await supervisor.dispatch(request)
 
     def after_response(request: RequestPayload) -> None:
-        """Exec exactly once the accepted upgrade response is flushed."""
-        if request.get("verb") != Verb.UPGRADE.value:
-            return
-        if not supervisor.take_pending_upgrade():
-            return
-        if stop.is_set():
-            _log.warning("upgrade exec skipped: the daemon is already shutting down")
-            return
-        _exec_upgrade(exec_args)
+        if request["verb"] == Verb.SHUTDOWN:
+            request_stop()
 
-    server = ControlServer(socket_path, supervisor.dispatch, after_response=after_response)
+    server = ControlServer(socket_path, dispatch, after_response=after_response)
     loop = asyncio.get_running_loop()
-    for signum in (signal.SIGTERM, signal.SIGINT):
-        loop.add_signal_handler(signum, stop.set)
+
+    def stop_signal(_signum: int, _frame: FrameType | None) -> None:
+        loop.call_soon_threadsafe(request_stop)
+
+    if sys.platform == "win32":
+        for signum in (signal.SIGTERM, signal.SIGINT, signal.SIGBREAK):
+            signal.signal(signum, stop_signal)
+    else:
+        for signum in (signal.SIGTERM, signal.SIGINT):
+            loop.add_signal_handler(signum, request_stop)
     # SIGHUP does not reload anything; ignoring it keeps a stray terminal
-    # hangup from killing the tree (reloads go through the upgrade protocol).
-    loop.add_signal_handler(signal.SIGHUP, lambda: _log.info("SIGHUP ignored"))
+    # hangup from killing the tree; release replacement is an outer-owner action.
+    if sys.platform != "win32":
+        loop.add_signal_handler(signal.SIGHUP, lambda: _log.info("SIGHUP ignored"))
     started: list[WiringParticipant] = []
     try:
-        await supervisor.start(handoff=handoff)
-        if handoff is not None:
-            discard_handoff(options.run_dir)
+        await supervisor.start()
         await server.start()
         started = await start_participants(participants)
-        if started:
-            _log.info(
-                "ava-root ready: %d unit(s), socket %s, %d wired participant(s)",
-                len(registry.units),
-                socket_path,
-                len(started),
-            )
-        else:
-            _log.info(
-                "ava-root ready: %d unit(s), socket %s",
-                len(registry.units),
-                socket_path,
-            )
-        await stop.wait()
-        _log.info("stop signal received; stopping the tree")
+        _log.info(
+            "ava-root ready: %d unit(s), socket %s, %d wired participant(s)",
+            len(registry.units),
+            socket_path,
+            len(started),
+        )
+        await _close_tree(stop, started, supervisor)
     finally:
         # Participants first: their loops touch the tree, so they stop while it
         # (and the control server) still exist. A failing stop never blocks the
@@ -235,6 +173,30 @@ async def run(options: DaemonOptions, *, exec_args: Sequence[str]) -> int:
     return 0
 
 
+async def _close_tree(
+    stop: asyncio.Event,
+    started: list[WiringParticipant],
+    supervisor: Supervisor,
+) -> None:
+    """Keep original native custody and control alive when graceful closure fails.
+
+    Exiting root would strand POSIX custody or implicitly force native Job
+    members. Admission stays closed; only another explicit operator request
+    attempts closure again. No retry timer or alternate service owner exists.
+    """
+    while True:
+        await stop.wait()
+        stop.clear()
+        await stop_participants(started)
+        started.clear()
+        try:
+            await supervisor.shutdown()
+        except Exception:
+            _log.exception("root retains custody after failed shutdown")
+        else:
+            return
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Daemon entry point; returns the process exit code."""
     logging.basicConfig(
@@ -244,7 +206,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     tokens = list(sys.argv[1:] if argv is None else argv)
     options = parse_args(tokens)
     try:
-        return asyncio.run(run(options, exec_args=tokens))
+        return asyncio.run(run(options))
     except (ManifestError, AlreadyRunningError, WiringError) as exc:
         _log.error("%s", exc)
         return 1

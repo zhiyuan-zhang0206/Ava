@@ -478,6 +478,7 @@ class PhysicalBackupSettings(EnvSettings):
     pitr_replication_db_url: str = Field(
         default="",
         alias="AVA_PITR_REPLICATION_DB_URL",
+        repr=False,
         description="Local least-privilege REPLICATION role URL used only by pg_basebackup.",
         json_schema_extra={
             "restart_required": "gateway",

@@ -311,7 +311,7 @@ def test_a_real_cluster_data_dir_is_never_a_throwaway_dir(
     (throwaway_root / "pg").mkdir()
     assert pg_tools._resolved_throwaway_dir(throwaway_root / "pg") is None
     # A worktree cluster home can even *contain* the prefix (`~/.ava-pg-<worktree>`,
-    # which is exactly what `install.sh --worktree` names this branch's own home).
+    # which is exactly what `ava start --worktree` names this branch's own home).
     # Still refused: the name must START with the prefix, and no cluster home is a
     # child of the throwaway root.
     worktree_home = tmp_path / ".ava-pg-worktree"
