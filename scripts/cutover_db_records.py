@@ -237,6 +237,7 @@ def _plan_incarnations(found: Survey, inputs: Inputs, plan: Plan) -> None:
                 "receipt": item.receipt,
                 "attestation_sha256": inputs.digest(item.machine),
                 "before": item.before,
+                "receipt_before": item.receipt_before,
                 "after": after.model_dump(mode="json"),
             }
         )
@@ -340,6 +341,14 @@ def _close_predecessor(
     ours = {"before": effect["before"], "attestation_sha256": effect["attestation_sha256"]}
     if current == effect["after"] and closure and {key: closure[key] for key in ours} == ours:
         return "already"
+    # The conversion also writes the receipt's payload: compare its before image
+    # under the locks the conversion takes, metadata row first.
+    _locked(conn, "SELECT id FROM agents_meta WHERE id=%s", aid)
+    if (
+        _locked(conn, "SELECT payload FROM inbound_messages WHERE id=%s", receipt)
+        != effect["receipt_before"]
+    ):
+        raise _changed(effect)
     evidence = ClosureEvidence(
         machine=effect["machine"],
         attestation_sha256=effect["attestation_sha256"],

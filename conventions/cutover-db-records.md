@@ -95,7 +95,7 @@ cause, and the same inputs continue it.
 | `lease` | Releases the legacy deploy lease (phase `stable`, holder, times and settle hold cleared), only once no pending publication remains. |
 | `posture` | `paused` postures of included hosts become `idle`. Paused machines keep theirs; stranded-hold columns stay for the retired-storage cleanup. A `converging` posture or a live updater lease refuses. |
 | `units` | Deletes the retired `machine_units` rows. Units of paused machines, this gateway's own unit and attested homes refuse. The stale `machines` row itself stays (the cluster machine-delete endpoint removes it). |
-| `incarnations` | `shared.predecessor_closure.close_retired_predecessor` per convertible row: the closed-predecessor form, with the before image, attestation digest, operator and reason recorded on the receipt ([why](../decisions/2026-09-27-existing-agent-closed-predecessor-admission.md)). A row the guards refuse is recorded `refused: <why>` and the run continues. |
+| `incarnations` | `shared.predecessor_closure.close_retired_predecessor` per convertible row: the closed-predecessor form, with the before image, attestation digest, operator and reason recorded on the receipt ([why](../decisions/2026-09-27-existing-agent-closed-predecessor-admission.md)). The journal keeps both before images, the resources and the receipt's payload (NULL included), and both are compared. A row the guards refuse is recorded `refused: <why>` and the run continues. |
 
 The pending, lease and posture repairs also require an attestation proving
 closure from every included machine (a unit neither paused nor retired).

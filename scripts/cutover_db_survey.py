@@ -60,7 +60,8 @@ LEASE_JSON = "jsonb_build_object(" + ",".join(f"'{c}',{c}" for c in LEASE_COLUMN
 FREE_LEASE: dict[str, Any] = dict.fromkeys(LEASE_COLUMNS) | {"phase": "stable"}
 EVIDENCE = "SELECT managed_writer_evidence FROM deployment_state WHERE id=1"
 _RECEIPT = (
-    "SELECT i.id, i.kind, COALESCE(i.payload ? 'cutover_closure', false) FROM inbound_messages i "  # noqa: S608 -- constant SQL fragment
+    "SELECT i.id, i.kind, COALESCE(i.payload ? 'cutover_closure', false), i.payload "  # noqa: S608 -- constant SQL fragment
+    "FROM inbound_messages i "
     f"JOIN agents_meta m ON m.id=i.agent_id WHERE {PREDECESSOR_RECEIPT} "
     "ORDER BY (i.id=m.lifecycle_command_id) DESC NULLS LAST, i.id LIMIT 1"
 )
@@ -156,6 +157,7 @@ class Legacy:
     closed: tuple[UUID, UUID] | None = None
     identities: list[dict[str, Any]] = field(default_factory=list[dict[str, Any]])
     receipt: int | None = None
+    receipt_before: Any = None  # the receipt's payload, which the conversion also writes
     verdict: str = "convertible"
     reason: str | None = None
 
@@ -164,8 +166,12 @@ class Legacy:
         return self
 
     def summary(self) -> dict[str, Any]:
-        """Everything but the before image (it is in the journal of a conversion)."""
-        return {key: value for key, value in vars(self).items() if key != "before"}
+        """Everything but the before images (they are in the journal of a conversion)."""
+        return {
+            key: value
+            for key, value in vars(self).items()
+            if key not in ("before", "receipt_before")
+        }
 
 
 @dataclass
@@ -414,12 +420,15 @@ def _named_incarnation(resources: dict[str, object]) -> tuple[UUID, UUID] | None
 
 
 def _settled(
-    conn: psycopg.Connection[Any], agent_id: int, closed: tuple[UUID, UUID]
+    conn: psycopg.Connection[Any], legacy: Legacy, closed: tuple[UUID, UUID]
 ) -> SettledReceipt | None:
     """The predecessor receipt: the drain's applied restart held as the lifecycle
     pointer (preferred), else an applied and observed terminate."""
-    found = conn.execute(_RECEIPT, (agent_id, *closed)).fetchone()
-    return None if found is None else SettledReceipt(*found)
+    found = conn.execute(_RECEIPT, (legacy.agent_id, *closed)).fetchone()
+    if found is None:
+        return None
+    legacy.receipt, legacy.receipt_before = found[0], found[3]
+    return SettledReceipt(*found[:3])
 
 
 def _classify(conn: psycopg.Connection[Any], row: dict[str, Any], paused: set[str]) -> Legacy:
@@ -433,8 +442,7 @@ def _classify(conn: psycopg.Connection[Any], row: dict[str, Any], paused: set[st
     if identities is None:
         return legacy.refuse("a recorded process identity is malformed")
     legacy.identities = identities
-    receipt = _settled(conn, legacy.agent_id, legacy.closed)
-    legacy.receipt = None if receipt is None else receipt.id
+    receipt = _settled(conn, legacy, legacy.closed)
     shape = SuccessorRow(**{name: row[name] for name in _SUCCESSOR_FIELDS})
     refusal = successor_refusal(shape, legacy.closed, receipt)
     if refusal is not None:

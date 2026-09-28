@@ -561,6 +561,44 @@ def test_a_crash_after_a_commit_resumes_with_the_same_inputs_only(
     assert len(journal["runs"]) == 1
 
 
+def test_the_journal_keeps_each_receipt_payload_and_a_changed_one_stops_the_run(
+    cluster: Cluster, db_conn: psycopg.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The conversion also writes its receipt's payload: that before image is
+    journaled (NULL included) and compared under lock like every other."""
+    terminated = cluster.receipts["terminated"]
+    db_conn.execute("UPDATE inbound_messages SET payload=NULL WHERE id=%s", (terminated,))
+    db_conn.commit()
+    inputs = _inputs(tmp_path, cluster)
+    real = records._write_journal
+
+    def crash_after_first_conversion(home: Path, journal: dict[str, Any]) -> None:
+        if journal["runs"][-1]["results"]["incarnations"]:
+            raise OSError("simulated crash between the commit and the journal write")
+        real(home, journal)
+
+    monkeypatch.setattr(records, "_write_journal", crash_after_first_conversion)
+    with pytest.raises(OSError, match="simulated crash"):
+        _run(cluster, inputs)
+    monkeypatch.setattr(records, "_write_journal", real)
+    effects = json.loads((cluster.home / records.JOURNAL).read_text())["runs"][0]["effects"]
+    assert {e["receipt"]: e["receipt_before"] for e in effects["incarnations"]} == {
+        cluster.receipts["drained"]: _DRAIN,
+        terminated: None,
+        cluster.receipts["late"]: _DRAIN,
+    }
+
+    db_conn.execute("UPDATE inbound_messages SET payload='{}'::jsonb WHERE id=%s", (terminated,))
+    db_conn.commit()
+    with pytest.raises(RuntimeError, match="predecessor-close: the record changed"):
+        _run(cluster, inputs)
+    resources = db_conn.execute(
+        "SELECT incarnation_resources FROM agents_meta WHERE id=%s", (cluster.agents["terminated"],)
+    ).fetchone()
+    db_conn.commit()
+    assert resources is not None and resources[0]["host_process"]["pid"] == 5151
+
+
 def _refusals(cluster: Cluster, inputs: Inputs) -> list[str]:
     return records.plan_repairs(_survey(inputs), inputs, (GATEWAY, str(cluster.home))).refusals
 
