@@ -14,6 +14,7 @@ import type * as PrismReactRenderer from "prism-react-renderer";
 import type { Highlight as HighlightComponentType, PrismTheme } from "prism-react-renderer";
 
 import { CopyButton } from "@/components/copy-button";
+import { errMsg } from "@/lib/errors";
 
 // prism-react-renderer is ~85KB uncompressed — too large to ship in the "/"
 // route's initial bundle (ui/web/scripts/check-first-load-js.mjs budget).
@@ -56,6 +57,13 @@ function loadHighlight(): Promise<typeof HighlightComponentType> {
       // the plain-text fallback for the rest of the session. Clearing the
       // cache here lets the next call retry the import from scratch.
       highlightPromise = null;
+      // This .catch is part of the `highlightPromise` chain itself — for a
+      // given import attempt it runs exactly once, no matter how many call
+      // sites (idle prefetch, hover/focus intent on several code blocks, a
+      // fresh mount) share the same in-flight promise. That makes it the one
+      // place to log: a single console.warn here reports every real failure
+      // exactly once, with no separate dedup bookkeeping needed.
+      console.warn(`[python-code] failed to load syntax highlighter chunk: ${errMsg(err)}`);
       throw err;
     });
   return highlightPromise;
@@ -78,7 +86,13 @@ function loadHighlight(): Promise<typeof HighlightComponentType> {
 export function preloadPythonCodeHighlighter(): Promise<void> {
   return loadHighlight().then(
     () => undefined,
-    () => undefined,
+    () => {
+      // No logging here: loadHighlight()'s own .catch has already reported
+      // this attempt's failure once, and it's attached to `highlightPromise`
+      // before this handler ever subscribes to it — so by the time this runs
+      // the failure has already been logged. This only swallows the
+      // rejection so it doesn't surface as an unhandled promise rejection.
+    },
   );
 }
 
