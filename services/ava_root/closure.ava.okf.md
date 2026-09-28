@@ -20,7 +20,13 @@ construction; exec domains keep their own groups.
 Root also keeps its control transport alive after failed ordinary shutdown;
 new service or resource birth remains closed. One unit's refusal never halts
 that shutdown: every unit is still stopped in order, a refused one keeping its
-generation and custody, and all refusals are reported together. An operator can
+generation and custody, and all refusals are reported together. A refused
+unit's parent is therefore stopped while that unit keeps running, whereas
+`down` ends at the first refusal and leaves that unit's parents up: the one
+exception to children before parents. Production never meets it. The glue
+attaches every unit to root (`services/ava_root_glue/manifests.py`), so no
+unit has a parent unit, and root spawns every unit itself, so even a nested
+parent's stop would not reach a child unit's processes. An operator can
 inspect the same owner, explicitly close its captured domains, then request
 shutdown again.
 Native birth checks reject PID reuse. Missing IPC is unknown, never proof of
