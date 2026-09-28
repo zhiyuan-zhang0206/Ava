@@ -30,7 +30,7 @@ from pathlib import Path
 
 import psycopg
 import pytest
-from psycopg.conninfo import conninfo_to_dict
+from psycopg.conninfo import conninfo_to_dict, make_conninfo
 from psycopg_pool import AsyncConnectionPool, ConnectionPool
 
 from cli.commands.data_plane.pgbouncer import pgbouncer_bin
@@ -146,6 +146,12 @@ def _pgbouncer_in_front(
             pid = int((tmp / "pgbouncer.pid").read_text().strip())
             os.kill(pid, signal.SIGTERM)
         shutil.rmtree(tmp, ignore_errors=True)
+
+
+def _admin_console_url(pooled: str) -> str:
+    """The admin console of a `_pgbouncer_in_front` pooler, dialed as the
+    pooler admin — its only `admin_users` entry (the pooled role is refused)."""
+    return make_conninfo(pooled, user=POOLER_ADMIN, password=_SECRET, dbname="pgbouncer")
 
 
 def test_scram_client_auth_and_pooled_select() -> None:
