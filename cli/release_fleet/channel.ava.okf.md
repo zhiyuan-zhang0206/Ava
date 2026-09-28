@@ -75,6 +75,38 @@ Without its coordinator it holds its phase up to a 24 h lifetime.
   `authorizing` phase;
 - relaxing `require_topology` for units that hold an enrollment.
 
+## Before remote units (dbgen-8/FC-9)
+
+Known defects on the remote-unit path, unreachable while `require_topology`
+refuses every remote unit (found by the PR #3479 adversarial review); each
+must be fixed before dbgen-8 relaxes that gate:
+
+- **The barrier judges deadlines before draining answers.**
+  `RemoteUnits.barrier` evaluates `_marks` (deadlines) before
+  `_journal_answers` drains the listener's queue. At `quiescing` the
+  gateway's own bounded drain runs between `instruct` and `barrier`, so a
+  unit that answered in time is judged silent and the release aborts before
+  the fence. Journal the queued answers at the top of every barrier
+  iteration.
+- **A unit's own clock stamps the evidence.** `RemoteUnits.unit_reports`
+  turns the unit-supplied `Report.at` into `UnitReport.observed_at`; a unit
+  clock ahead of the gateway's makes `workload._require_coherent` raise
+  ("evidence cannot be newer than the verdict"), so clock skew recovers or
+  holds the release. Stamp the listener's receive time instead.
+- **The follower's watch answer is fake liveness.** `Follower.follow`
+  re-stamps a journaled `watch` answer with a fresh `at` without observing
+  the unit's root, so a dead unit keeps reporting ready through the window.
+  Re-observe the root before re-stamping.
+- **The unit `close` bound is below a unit's worst-case stop.**
+  `Coordinator._stopping` bounds the `close` barrier by `close_s +
+  cancel_grace_s + drain_s` (130 s by default), but a unit's own stop is the
+  `close_s` wait, the 90 s root stop (`local.py`), the cancel grace and the
+  kill legs (about 160 s), so the strict barrier aborts spuriously.
+- **A negative `Content-Length` pins a listener thread.** The listener
+  reads to EOF on a negative length, and its sockets have no timeout, so an
+  unauthenticated peer can hold handler threads. Reject `length < 0` and
+  set a socket timeout (being fixed in `listener.py` separately).
+
 ## Candidate reference
 
 The ops kind needs a unit's candidate image reference before the gateway can
