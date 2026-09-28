@@ -81,6 +81,6 @@ the rest of the `_`-prefixed steps are enumerated in
 
 ## Notes
 
-- Prod `ava` = `~/.local/bin/ava` → symlink to the prod checkout, acting on `~/.ava`; in a dev worktree, `.venv/bin/ava` acts on that worktree's cluster (via the `.ava_home` pointer).
+- Bare `ava` = `~/.local/bin/ava` → `scripts/ava-launcher.sh`: runs `$AVA_HOME/ava` (the home's own CLI link), refuses without either; a checkout's `.venv/bin/ava` acts on its own cluster (`.ava_home` pointer).
 - Each cluster has its own pg/redis; isolation is home-directory isolation (instances under `$AVA_HOME` + port blocks), not db names / redis indexes in a shared instance.
 - Children: [[cli/cluster.ava.okf.md]] (the `ava cluster` verb group) · [[cli/install_cluster.ava.okf.md]] (install-time birth) · [[cli/commands/commands.ava.okf.md]] (the module split) · [[cli/commands/extensions/packages.ava.okf.md]] (the plugins / skill / mcp package surface) · [[cli/mcp_server.ava.okf.md]] (`ava mcp serve` — this cluster AS an MCP server).

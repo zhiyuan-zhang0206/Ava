@@ -12,7 +12,8 @@
 # under $AVA_HOME/pg itself (no system data dir to bootstrap). See
 # conventions/windows-setup.md.
 #
-# All paths share: uv + Python 3.12, locked Python installation, ~/.local/bin/ava symlink.
+# All paths share: uv + Python 3.12, locked Python installation; the prod install
+# also links ~/.local/bin/ava to the ava launcher (scripts/ava-launcher.sh).
 #
 # --role is REQUIRED — a comma-separated capability set, no default. A single box
 # carries any subset on one unit (owns the data plane AND runs agents); split
@@ -41,7 +42,7 @@
 # only bring-up.
 #
 # --worktree births a dev worktree's own cluster and skips every host-global step
-# (brew/apt, the install-dir guard, the ~/.local/bin symlink; --mirror is
+# (brew/apt, the install-dir guard, the ~/.local/bin/ava link; --mirror is
 # refused). Identity is the path: home defaults to ~/.ava-<checkout-dir>
 # (derived from this script's checkout, never the cwd) and --path is the only
 # override — there is no name flag. Runs the locked Python installer, births the cluster
@@ -285,12 +286,16 @@ warn_browser_deps() {
 # common_host_wiring: shared by both roles.
 #   - installs uv + Python 3.12 if missing
 #   - installs the canonical lock through the configured machine index
-#   - symlinks .venv/bin/ava into ~/.local/bin for the prod cluster only
+#   - links ~/.local/bin/ava to the ava launcher for the prod install only
 #   - ensures ~/.local/bin is on PATH for the rest of this script
 # ===========================================================================
 link_bare_ava() {
+    # The host's bare `ava` is scripts/ava-launcher.sh: it runs $AVA_HOME/ava,
+    # the CLI link each cluster keeps in its own home (written at converge), and
+    # refuses when AVA_HOME is unset. It serves every cluster alike, so only the
+    # prod install points it; any other install leaves it alone.
     local bare_link="$HOME/.local/bin/ava"
-    local checkout_ava="$PWD/.venv/bin/ava"
+    local launcher="$PWD/scripts/ava-launcher.sh"
     local prod_home="${HOME}/.ava"
     local install_home="${_AVA_HOME%/}"
     while [[ "$install_home" == */ && "$install_home" != "/" ]]; do
@@ -301,22 +306,14 @@ link_bare_ava() {
     done
 
     if [ "$install_home" = "$prod_home" ]; then
+        mkdir -p "$(dirname "$bare_link")"
         # -n prevents ln from following a symlink whose target is a directory.
-        ln -sfn "$checkout_ava" "$bare_link"
+        ln -sfn "$launcher" "$bare_link"
         return 0
     fi
-
-    if [ -L "$bare_link" ]; then
-        local current_target
-        current_target="$(readlink "$bare_link")"
-        [ "$current_target" = "$checkout_ava" ] && return 0
-        echo "install.sh: WARNING non-prod install left $bare_link pointing at '$current_target'." >&2
-    elif [ -e "$bare_link" ]; then
-        echo "install.sh: WARNING non-prod install left existing $bare_link untouched (not a symlink)." >&2
-    else
-        echo "install.sh: WARNING non-prod install did not create $bare_link (no symlink exists)." >&2
+    if [ ! -e "$bare_link" ] && [ ! -L "$bare_link" ]; then
+        echo "install.sh: note: this host has no bare \`ava\` ($bare_link); run $PWD/.venv/bin/ava." >&2
     fi
-    echo "  Re-link prod with: ln -sfn \"$HOME/.ava/source/.venv/bin/ava\" \"$HOME/.local/bin/ava\"" >&2
 }
 
 common_host_wiring() {
@@ -451,14 +448,16 @@ print_next_steps() {
             echo "serve flags from --role)."
             echo "Next: add AVA_MODEL + its provider key to $_AVA_HOME/.env (see .env.example"
             echo "for the template — do not copy it wholesale over the derived values), then start:"
-            echo "  ava start --machine-name <name> --gateway-url <url>"
+            echo "  $PWD/.venv/bin/ava start --machine-name <name> --gateway-url <url>"
+            echo "(a bare \`ava\` acts on the cluster \$AVA_HOME names: export AVA_HOME=$_AVA_HOME)"
             ;;
         *)
             echo "agent-runner install complete."
             echo "Next: enroll this machine with the gateway, then start it:"
             echo "  read AVA_CLUSTER_SECRET without echo, export it, then run:"
-            echo "  ava enroll --gateway <url> --machine-name <name> --machine-host <this-host-addr>"
-            echo "  ava start"
+            echo "  $PWD/.venv/bin/ava enroll --gateway <url> --machine-name <name> --machine-host <this-host-addr>"
+            echo "  $PWD/.venv/bin/ava start"
+            echo "(a bare \`ava\` acts on the cluster \$AVA_HOME names: export AVA_HOME=$_AVA_HOME)"
             echo "(get <url> + <secret> from the gateway operator; enroll presents the secret to the gateway's authenticated /api/bootstrap, which returns this host's config)"
             ;;
     esac
@@ -466,7 +465,7 @@ print_next_steps() {
 
 # ===========================================================================
 # worktree mode: birth a dev worktree's own cluster — no host-global steps.
-#   Skips brew/apt, the install-dir guard, the ~/.local/bin symlink. Does:
+#   Skips brew/apt, the install-dir guard, the ~/.local/bin/ava link. Does:
 #   locked Python install + cluster birth (registry + its own pg/redis + .env — a
 #   single-machine birth, so NO-AUTH with an empty secret by default, or the
 #   AVA_INSTALL_CLUSTER_SECRET the caller states; never inherited from prod) + the
