@@ -26,6 +26,7 @@ from services.ava_root.group_scope import (
     capture_group,
     group_births,
     group_closed,
+    group_over,
     ownership_retained,
     recorded_living,
     unproven_group,
@@ -525,17 +526,17 @@ class Supervisor:
         nothing: once those members exit, another program's group can carry
         it. So this stop never signals by the group number: nothing it
         signals, captures or adopts comes from a group listing, which only
-        names the group in a refusal. It signals only recorded births and
-        their birth-verified descendants (`capture_tree`), each through its
-        own birth check; only explicit force escalates. Once none of them
-        lives, custody is released when the unit's group is proven over: empty
-        when read after the reap, empty now, or its number now held as a PID by
-        another process (a PID is never reused while it is still the
-        process-group ID of a live group, POSIX), whose group is never
-        signalled. A group still occupied with no recorded birth alive may be a
-        stranger's: custody stays and the stop refuses, naming it. Moving the
-        record aside is the operator's word that no process of the unit
-        remains; with no recorded birth alive, the generation is dropped
+        reads the group's session or names it in a refusal. It signals only
+        recorded births and their birth-verified descendants (`capture_tree`),
+        each through its own birth check; only explicit force escalates. Once
+        none of them lives, custody is released when the unit's group is
+        proven over (`group_over`): empty when read after the reap or now, its
+        number now held as a PID, or the group carrying it now in another
+        session; no such group is ever signalled. A group still occupied in
+        root's own session, or in one root cannot read, may hold unrecorded
+        processes of the unit: custody stays and the stop refuses, naming it.
+        Moving the record aside is the operator's word that no process of the
+        unit remains; with no recorded birth alive, the generation is dropped
         without a signal (`_drop_moved_aside`).
         """
         await self._await_reap(runtime, generation, identity, custody)
@@ -555,7 +556,7 @@ class Supervisor:
                 if expired:
                     force = False
                     deadline = monotonic() + self._config.stop_timeout_s
-            elif generation.scope_closed_at_exit or group_closed(pgid) or psutil.pid_exists(pgid):
+            elif group_over(pgid, empty_at_exit=generation.scope_closed_at_exit):
                 custody.clear()
                 runtime.generation = None
                 runtime.state = UnitState.STOPPED

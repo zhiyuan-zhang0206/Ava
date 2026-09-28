@@ -45,15 +45,24 @@ stop, or a retry after a refused one, that finds the recorded leader not live
 (gone, a zombie, or its PID now another birth) never signals by the group
 number: once the recorded members exit, another program's group can carry it,
 so nothing signalled, captured or adopted comes from a group listing, which
-only names the group in a refusal. A birth it cannot verify keeps custody and
-names the record and next step. Otherwise it signals only the recorded births
-and their birth-verified descendants, force staying explicit. Once none lives,
-custody is released when the unit's group is proven over: empty at that read,
-empty now, or its number now held as a PID by another process (a PID is never
-reused while it is still the process-group ID of a live group, POSIX), whose
-group is never signalled. An occupied group with no recorded birth alive may be
-a stranger's: custody stays and the stop refuses, naming the group, its PIDs
-and the record.
+only reads the group's session or names it in a refusal. A birth it cannot
+verify keeps custody and names the record and next step. Otherwise it signals
+only the recorded births and their birth-verified descendants, force staying
+explicit. Once none lives, custody is released when the unit's group is proven
+over (`group_scope.group_over`): empty at that read, empty now, its number now
+held as a PID by another process (a PID is never reused while it is still the
+process-group ID of a live group, POSIX), or the group carrying it now in
+another session. That last proof holds because root leads its own session in
+every launch (the direct start's `start_new_session`, which the Linux boot
+unit's start also uses, and the macOS helper's `POSIX_SPAWN_SETSID`), units
+only change group, and POSIX keeps a group inside one session: a classic
+daemon (fork, setsid, fork) that later takes the number holds no process of
+the unit. One member decides, its session read before its group and both
+bracketed by its birth; a failed read proves nothing. None of these groups is
+ever signalled. A group still occupied in root's session, or in one root
+cannot read, with no recorded birth alive may hold unrecorded processes of the
+unit: custody stays and the stop refuses, naming the group, its PIDs and the
+record.
 Moving that record aside is the operator's word that no process of the unit
 remains: with no recorded birth alive, the next stop, or root's own TERM, drops
 the generation without a signal; a live recorded birth keeps the refusal.

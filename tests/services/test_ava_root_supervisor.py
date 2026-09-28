@@ -7,6 +7,7 @@ import contextlib
 import os
 import subprocess
 import sys
+from functools import partial
 from pathlib import Path
 from typing import Any, cast
 
@@ -343,9 +344,13 @@ async def reaped_with_survivor(tmp_path: Path, reaped: str) -> tuple[Supervisor,
     return owner, survivor_process
 
 
-async def stranger_group(tmp_path: Path) -> tuple[int, psutil.Process, Path]:
+async def stranger_group(
+    tmp_path: Path, *, own_session: bool = False
+) -> tuple[int, psutil.Process, Path]:
     """Another program's group whose leader exited like a classic daemon.
 
+    The group forms in this process's session, which is root's in these tests;
+    with `own_session` its leader calls setsid() first (fork, setsid, fork).
     Returns its number (no process holds it as a PID), its live member, and the
     file where that member logs any stop signal it receives.
     """
@@ -355,12 +360,46 @@ async def stranger_group(tmp_path: Path) -> tuple[int, psutil.Process, Path]:
         f"m=subprocess.Popen([sys.executable,'-c',{signal_recorder(signals, ready)!r}]); "
         f"pathlib.Path({str(member_file)!r}).write_text(str(m.pid))"
     )
-    stranger = subprocess.Popen([sys.executable, "-c", daemon], process_group=0)  # noqa: S603 — disposable test child
+    stranger = subprocess.Popen(  # noqa: S603 — disposable test child
+        [sys.executable, "-c", daemon],
+        start_new_session=own_session,
+        process_group=None if own_session else 0,
+    )
     assert stranger.wait(timeout=10) == 0, "the stranger's leader must exit and be reaped"
     member = psutil.Process(await pid_in(member_file))
-    await wait_file(ready)
-    assert os.getpgid(member.pid) == stranger.pid
+    try:
+        await wait_file(ready)
+        assert os.getpgid(member.pid) == stranger.pid
+        assert (os.getsid(member.pid) != os.getsid(0)) is own_session
+    except BaseException:
+        kill_all([member])
+        raise
     return stranger.pid, member, signals
+
+
+async def stranger_at_number(
+    tmp_path: Path, reaped: str, *, own_session: bool
+) -> tuple[Supervisor, int, psutil.Process, Path]:
+    """A unit reaped with a survivor that has since exited; a stranger's group carries its number.
+
+    The kernel may hand the unit's group number to another program once its
+    survivors exit; the recorded leader is pointed at the stranger's number as
+    if it had. Returns root, that number, the stranger's member and its signal log.
+    """
+    owner, survivor = await reaped_with_survivor(tmp_path, reaped)
+    try:
+        generation = owner._units["worker"].generation
+        assert generation is not None and generation.identity is not None
+        assert generation.scope_closed_at_exit is False
+        survivor.kill()
+        await gone(survivor)
+        pgid, member, signals = await stranger_group(tmp_path, own_session=own_session)
+    except BaseException:
+        kill_all([survivor])
+        raise
+    dead = generation.identity
+    generation.identity = OwnedProcess(pgid, dead.birth, dead.starttime)
+    return owner, pgid, member, signals
 
 
 @pytest.mark.parametrize("reaped", ["unexpected-exit", "refused-stop"])
@@ -369,24 +408,14 @@ async def test_exited_leader_never_signals_a_stranger_group_at_its_number(
 ) -> None:
     """The unit's group ended after its leader's reap; its number now names another program's group.
 
-    Whether the unit's leader exited on its own or during a refused stop, no
-    later stop signals by that number: nothing is signalled, even with force,
-    and custody stays with a refusal that names the group and the record.
+    That group lies in root's own session, so root cannot tell it from the
+    unit's. Whether the unit's leader exited on its own or during a refused
+    stop, no later stop signals by that number: nothing is signalled, even with
+    force, and custody stays with a refusal that names the group and the record.
     """
-    owner, survivor = await reaped_with_survivor(tmp_path, reaped)
-    spawned = [survivor]
+    owner, pgid, member, signals = await stranger_at_number(tmp_path, reaped, own_session=False)
     record = tmp_path / "custody/worker.json"
     try:
-        generation = owner._units["worker"].generation
-        assert generation is not None and generation.identity is not None
-        assert generation.scope_closed_at_exit is False
-        survivor.kill()
-        await gone(survivor)
-        pgid, member, signals = await stranger_group(tmp_path)
-        spawned.append(member)
-        # The number the stop would read now names the stranger's group.
-        dead = generation.identity
-        generation.identity = OwnedProcess(pgid, dead.birth, dead.starttime)
         for force in (False, True):
             with pytest.raises(RuntimeError) as refused:
                 await owner.down("worker", force=force)
@@ -397,11 +426,118 @@ async def test_exited_leader_never_signals_a_stranger_group_at_its_number(
         assert not ended(member)
         assert record.exists()
     finally:
-        kill_all(spawned)
+        kill_all([member])
     await gone(member)
     # Once that group has ended, the stop proves the unit's group over.
     await owner.down("worker")
     assert not list((tmp_path / "custody").iterdir())
+    await owner.shutdown()
+
+
+@pytest.mark.parametrize("reaped", ["unexpected-exit", "refused-stop"])
+async def test_a_group_in_another_session_at_the_number_is_released_without_a_signal(
+    tmp_path: Path, reaped: str
+) -> None:
+    """A classic daemon (fork, setsid, fork) holds the unit's group number.
+
+    Its group lies in another session, so it holds no process of the unit:
+    the stop releases custody without signalling it, and root's own shutdown,
+    which stops the tree the same way, completes.
+    """
+    owner, _pgid, member, signals = await stranger_at_number(tmp_path, reaped, own_session=True)
+    try:
+        await owner.down("worker")
+        assert owner._units["worker"].generation is None
+        assert (await row(owner))["last_error"] is None
+        assert not list((tmp_path / "custody").iterdir())
+        await owner.shutdown()
+        assert not signals.exists(), "the stranger's member received a signal"
+        assert not ended(member)
+    finally:
+        kill_all([member])
+
+
+async def test_a_group_whose_session_root_cannot_read_keeps_custody(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Root cannot read the session of the group at the unit's number, so it refuses.
+
+    The stranger receives nothing; once its session reads again, the stop releases.
+    """
+    owner, pgid, member, signals = await stranger_at_number(
+        tmp_path, "unexpected-exit", own_session=True
+    )
+    getsid = os.getsid
+
+    def denied(pid: int) -> int:
+        if pid == member.pid:
+            raise PermissionError(f"session of {pid} not readable")
+        return getsid(pid)
+
+    try:
+        monkeypatch.setattr(os, "getsid", denied)
+        with pytest.raises(RuntimeError, match=f"process group {pgid}"):
+            await owner.down("worker")
+        assert (tmp_path / "custody/worker.json").exists()
+        monkeypatch.undo()
+        await owner.down("worker")
+        assert not list((tmp_path / "custody").iterdir())
+        assert not signals.exists(), "the stranger's member received a signal"
+        assert not ended(member)
+    finally:
+        kill_all([member])
+    await owner.shutdown()
+
+
+@pytest.mark.parametrize(
+    ("read", "own_session"),
+    [("outside-the-group", False), ("setsid-between-reads", False), ("birth-changed", True)],
+)
+async def test_only_one_birth_read_inside_the_group_proves_another_session(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, read: str, own_session: bool
+) -> None:
+    """Reads that do not place one birth inside the group prove nothing.
+
+    The member's reads are faked: its PID now names a process of another
+    session outside the group; it calls setsid() between root's reads of its
+    session and its group; or its PID names another birth once both are read.
+    Each time the stop refuses and signals nothing.
+    """
+    owner, pgid, member, signals = await stranger_at_number(
+        tmp_path, "unexpected-exit", own_session=own_session
+    )
+    getsid, getpgid, live = os.getsid, os.getpgid, OwnedProcess.live
+    reads: list[str] = []
+
+    def placement(kind: str, pid: int) -> int:
+        real = getsid(pid) if kind == "session" else getpgid(pid)
+        if pid != member.pid:
+            return real
+        reads.append(kind)
+        if read == "outside-the-group":
+            return 1
+        if read == "setsid-between-reads" and len(reads) > 1:
+            return member.pid  # it now leads a session and a group of its own
+        return real
+
+    def reborn(identity: OwnedProcess) -> bool:
+        return identity.pid != member.pid and live(identity)
+
+    try:
+        monkeypatch.setattr(os, "getsid", partial(placement, "session"))
+        monkeypatch.setattr(os, "getpgid", partial(placement, "group"))
+        if read == "birth-changed":
+            monkeypatch.setattr(OwnedProcess, "live", reborn)
+        with pytest.raises(RuntimeError, match=f"process group {pgid}"):
+            await owner.down("worker")
+        monkeypatch.undo()
+        assert reads, "root never read the member"
+        assert not signals.exists(), "the stranger's member received a signal"
+        assert not ended(member)
+    finally:
+        kill_all([member])
+    await gone(member)
+    await owner.down("worker")
     await owner.shutdown()
 
 
@@ -410,22 +546,15 @@ async def test_moving_the_record_aside_settles_an_unproven_group_without_a_signa
 ) -> None:
     """The refusal's escape works on the running root, which keeps its generation in memory.
 
-    A stranger's group holds the unit's number, so the stop refuses. Once the
-    operator moves the record aside with no recorded birth alive, the retried
-    stop drops the generation, the stranger receives nothing, and root's own
-    shutdown completes.
+    A stranger's group in root's session holds the unit's number, so the stop
+    refuses. Once the operator moves the record aside with no recorded birth
+    alive, the retried stop drops the generation, the stranger receives
+    nothing, and root's own shutdown completes.
     """
-    owner, survivor = await reaped_with_survivor(tmp_path, "unexpected-exit")
-    spawned = [survivor]
+    owner, pgid, member, signals = await stranger_at_number(
+        tmp_path, "unexpected-exit", own_session=False
+    )
     try:
-        generation = owner._units["worker"].generation
-        assert generation is not None and generation.identity is not None
-        survivor.kill()
-        await gone(survivor)
-        pgid, member, signals = await stranger_group(tmp_path)
-        spawned.append(member)
-        dead = generation.identity
-        generation.identity = OwnedProcess(pgid, dead.birth, dead.starttime)
         with pytest.raises(RuntimeError, match=f"process group {pgid}"):
             await owner.down("worker")
         (tmp_path / "custody/worker.json").rename(tmp_path / "worker.json.aside")
@@ -438,7 +567,7 @@ async def test_moving_the_record_aside_settles_an_unproven_group_without_a_signa
         assert not signals.exists(), "the stranger's member received a signal"
         assert not ended(member)
     finally:
-        kill_all(spawned)
+        kill_all([member])
 
 
 async def test_a_moved_aside_record_never_drops_a_live_recorded_birth(tmp_path: Path) -> None:
