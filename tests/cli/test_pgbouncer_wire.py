@@ -196,6 +196,27 @@ def test_transaction_pooling_never_prepare() -> None:
             assert row is not None and row[0] == i
 
 
+@contextlib.contextmanager
+def _read_only_default_pooler(pg_url: str, pool_size: int = 2) -> Generator[str]:
+    """A pooler whose every session defaults to read-only, checked before yielding.
+
+    The forcing condition for the explicit `SET TRANSACTION READ WRITE`
+    declarations. PgBouncer >= 1.26 keeps one client's `SET
+    default_transaction_read_only` from reaching another, so an unasked-for
+    read-only default now comes from outside the client: a pooler that does not
+    track the parameter (a remote-managed data plane's), or a database or role
+    default, which is what this reproduces. `RESET ALL` restores such a default
+    rather than clearing it, so the session scrub cannot help and only the
+    explicit declaration gets a write through. The probe proves the condition is
+    live, so a passing write is the declaration's doing.
+    """
+    with _pgbouncer_in_front(pg_url, pool_size=pool_size, read_only_default=True) as pooled:
+        with psycopg.connect(pooled, autocommit=True, prepare_threshold=None) as probe:
+            row = probe.execute("SHOW default_transaction_read_only").fetchone()
+            assert row is not None and str(row[0]) == "on"
+        yield pooled
+
+
 def test_finalize_writes_override_a_read_only_default(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -208,89 +229,62 @@ def test_finalize_writes_override_a_read_only_default(
     from shared import config, host_deploy_state
     from shared.cluster_lock import release_update_lock
 
-    with (
-        postgres() as pg_url,
-        _pgbouncer_in_front(pg_url, pool_size=1, read_only_default=True) as pooled,
-    ):
+    with postgres() as pg_url, _read_only_default_pooler(pg_url, pool_size=1) as pooled:
         monkeypatch.setattr(config.settings.data_plane, "db_url", pooled)
-        # The writes below run under the read-only default — the raw pooled
-        # dial observes it, so a pass proves the override, not a clean backend.
-        with psycopg.connect(pooled, autocommit=True, prepare_threshold=None) as probe:
-            row = probe.execute("SHOW default_transaction_read_only").fetchone()
-            assert row is not None and str(row[0]) == "on"
         host_deploy_state.set_posture("idle")
         release_update_lock("pgbouncer-finalizer-test")
 
 
-def test_recovery_claim_overrides_a_poisoned_pooled_backend(
+def test_recovery_claim_overrides_a_read_only_default(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Recovery can lock a lease on a backend a previous client made read-only."""
+    """Recovery can lock a lease in a session that defaults to read-only."""
     from shared import config
     from shared.cluster_lock import claim_recovery_lock
 
-    with postgres() as pg_url, _pgbouncer_in_front(pg_url) as pooled:
+    with postgres() as pg_url, _read_only_default_pooler(pg_url) as pooled:
         monkeypatch.setattr(config.settings.data_plane, "db_url", pooled)
-        with psycopg.connect(pooled, autocommit=True, prepare_threshold=None) as reader:
-            reader.execute("SET default_transaction_read_only = on")
-
         claim = claim_recovery_lock("pgbouncer-recovery-test", observed=None)
 
     assert claim.acquired is True
 
 
-def _poison_pooled_backends(pooled: str) -> None:
-    """Set read-only defaults on both backends in the two-slot test pool.
-
-    The first explicit transaction keeps one backend occupied while the second
-    autocommit client sets the other backend's session default. Committing the
-    first then releases two poisoned backends for deterministic follow-up writes.
-    """
-    with (
-        psycopg.connect(pooled, autocommit=True, prepare_threshold=None) as first,
-        psycopg.connect(pooled, autocommit=True, prepare_threshold=None) as second,
-    ):
-        first.execute("BEGIN")
-        first.execute("SET default_transaction_read_only = on")
-        second.execute("SET default_transaction_read_only = on")
-        first.execute("COMMIT")
+def _direct_writer(pg_url: str) -> psycopg.Connection:
+    """A direct setup/verify connection that writes despite a read-only default."""
+    return psycopg.connect(pg_url, options="-c default_transaction_read_only=off")
 
 
 def _insert_agent(pg_url: str) -> int:
     """Insert one agent for foreign-keyed PgBouncer wire-test rows."""
-    with psycopg.connect(pg_url) as conn:
+    with _direct_writer(pg_url) as conn:
         row = conn.execute("INSERT INTO agents DEFAULT VALUES RETURNING id").fetchone()
         assert row is not None
         return int(row[0])
 
 
-def test_write_transaction_repairs_connect_write(
+def test_write_transaction_overrides_a_read_only_default_on_connect(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Rule A writes (`shared.cluster_lock`'s update-lock acquire/release)
-    survive poisoned backends."""
+    land in sessions that default to read-only."""
     from shared import config
     from shared.cluster_lock import acquire_update_lock, release_update_lock
 
-    with postgres() as pg_url, _pgbouncer_in_front(pg_url) as pooled:
+    with postgres() as pg_url, _read_only_default_pooler(pg_url) as pooled:
         monkeypatch.setattr(config.settings.data_plane, "db_url", pooled)
-        _poison_pooled_backends(pooled)
-
         assert acquire_update_lock("pgbouncer-wire-test") is True
         release_update_lock("pgbouncer-wire-test")
 
 
-def test_schedule_provision_repairs_connect_write_on_poisoned_backend(
+def test_schedule_provision_overrides_a_read_only_default(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """R3 Rule A schedule provisioning declares direct writes read-write."""
     from cli.commands.management.schedules import cmd_schedules_provision
     from shared import config
 
-    with postgres() as pg_url, _pgbouncer_in_front(pg_url) as pooled:
+    with postgres() as pg_url, _read_only_default_pooler(pg_url) as pooled:
         monkeypatch.setattr(config.settings.data_plane, "db_url", pooled)
-        _poison_pooled_backends(pooled)
-
         assert cmd_schedules_provision() == 0
 
         with psycopg.connect(pg_url) as verify:
@@ -298,7 +292,7 @@ def test_schedule_provision_repairs_connect_write_on_poisoned_backend(
         assert row is not None and int(row[0]) > 0
 
 
-def test_write_transaction_repairs_pooled_borrow_write(
+def test_write_transaction_overrides_a_read_only_default_on_pool_borrow(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Rule B's pool-borrow DELETE declares its transaction writable first."""
@@ -306,16 +300,15 @@ def test_write_transaction_repairs_pooled_borrow_write(
     from shared import config
     from shared.db import pool
 
-    with postgres() as pg_url, _pgbouncer_in_front(pg_url) as pooled:
+    with postgres() as pg_url, _read_only_default_pooler(pg_url) as pooled:
         monkeypatch.setattr(config.settings.data_plane, "db_url", pooled)
         agent_id = _insert_agent(pg_url)
-        with psycopg.connect(pg_url) as setup:
+        with _direct_writer(pg_url) as setup:
             setup.execute(
                 "INSERT INTO agent_shell_ttls (agent_id, session_id, expires_at) "
                 "VALUES (%s, %s, now())",
                 (agent_id, 7),
             )
-        _poison_pooled_backends(pooled)
         db_pool = pool(min_size=1, max_size=2)
         try:
             _delete_shell_row_blocking(db_pool, agent_id, 7, interrupted=False)
@@ -330,17 +323,16 @@ def test_write_transaction_repairs_pooled_borrow_write(
         assert row is None
 
 
-def test_session_touch_repairs_pooled_borrow_on_poisoned_backend() -> None:
+def test_session_touch_overrides_a_read_only_default() -> None:
     """R3 Rule B session writes declare a raw pool borrow read-write first."""
     from gateway.session_store import touch_session
 
-    with postgres() as pg_url, _pgbouncer_in_front(pg_url) as pooled:
-        with psycopg.connect(pg_url) as setup:
+    with postgres() as pg_url, _read_only_default_pooler(pg_url) as pooled:
+        with _direct_writer(pg_url) as setup:
             setup.execute(
                 "INSERT INTO web_sessions (id, expires_at) VALUES (%s, now() + interval '1 hour')",
                 ("pgbouncer-session-touch",),
             )
-        _poison_pooled_backends(pooled)
         db_pool = ConnectionPool(
             pooled,
             min_size=1,
@@ -361,7 +353,7 @@ def test_session_touch_repairs_pooled_borrow_on_poisoned_backend() -> None:
         assert row is not None and row[0] is not None
 
 
-def test_async_write_transaction_repairs_async_pool_write() -> None:
+def test_async_write_transaction_overrides_a_read_only_default() -> None:
     """Rule C opens an explicit read-write transaction on an autocommit pool."""
     from shared.db_transaction import async_write_transaction
 
@@ -380,22 +372,18 @@ def test_async_write_transaction_repairs_async_pool_write() -> None:
         finally:
             await db_pool.close()
 
-    with postgres() as pg_url, _pgbouncer_in_front(pg_url) as pooled:
-        _poison_pooled_backends(pooled)
+    with postgres() as pg_url, _read_only_default_pooler(pg_url) as pooled:
         asyncio.run(write_once(pooled))
 
 
 def test_plain_autocommit_write_still_fails_under_a_read_only_default(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The finalizer test has teeth: an unpostured pooled write is rejected there."""
+    """The read-only-default tests have teeth: an unpostured pooled write is rejected."""
     from shared import config
     from shared.db import connect
 
-    with (
-        postgres() as pg_url,
-        _pgbouncer_in_front(pg_url, pool_size=1, read_only_default=True) as pooled,
-    ):
+    with postgres() as pg_url, _read_only_default_pooler(pg_url, pool_size=1) as pooled:
         monkeypatch.setattr(config.settings.data_plane, "db_url", pooled)
         with connect(autocommit=True) as conn, pytest.raises(psycopg.errors.ReadOnlySqlTransaction):
             conn.execute("UPDATE deployment_state SET phase = phase WHERE id = 1")
@@ -535,25 +523,40 @@ def test_admin_probe_reaches_the_bound_address_only() -> None:
         assert _admin_reachable(listen_port, "ava_citest", _SECRET, host="127.0.0.1") is False
 
 
-# ── 2026-09-02 P0: pooled session-GUC pollution (read-only backend) ──────────
+# ── Pooled session-GUC pollution (2026-09-02 P0) ────────────────────────────
 #
 # pgbouncer transaction pooling hands any backend to any client transaction and
-# does NOT reset backend session state on the ordinary release path (measured on
-# 1.25.2 with always=0: the reset runs only in the SV_ACTIVE window). A
-# polluter's session-level
-# `SET default_transaction_read_only = on` therefore leaks onto shared backends
-# and the next borrower's writes fail with ReadOnlySqlTransaction — the
-# 2026-09-02 P0 that 500'd the agent message / schedule-stop APIs. The client
-# side must scrub the session back to baseline on every pooled use; these tests
-# pin that contract end to end.
+# does NOT reset backend session state on the ordinary release path (the reset
+# runs only in the SV_ACTIVE window, always=0). A session-level SET therefore
+# stays on the shared backend for the next borrower. PgBouncer >= 1.26 tracks
+# the parameters PostgreSQL reports to clients per client, which closed the
+# read-only vector of the 2026-09-02 P0 (500s on the agent message /
+# schedule-stop APIs) for the pooler this repo pins; parameters PostgreSQL
+# does not report (search_path, statement_timeout, lock_timeout, work_mem, …)
+# still leak, and a remote-managed data plane's pooler may track nothing. The
+# client side must scrub the session back to baseline on every pooled use;
+# these tests pin that contract end to end with an untracked poison.
+
+_POISON_SQL = ("SET search_path = nowhere", "SET statement_timeout = 0")
 
 
 def _poison_backend(pooled: str) -> None:
-    """One client session-SETs read_only on a pooled connection and disconnects
-    cleanly — the exact pollution vector of the 2026-09-02 P0. With a
-    single-backend pooler the next borrower is forced onto the poisoned backend."""
+    """Leave untracked session GUCs on the single pooled backend, then prove
+    they reached the next client.
+
+    One client breaks name resolution (every unqualified statement now fails
+    with UndefinedTable) and lifts the statement ceiling, then disconnects
+    cleanly. A raw client that runs no scrub must observe both on the same
+    backend: if a future pooler or PostgreSQL starts tracking them, this fails
+    loudly instead of letting the scrub tests below pass against a clean
+    backend. The raw client resets nothing, so the backend stays poisoned."""
     with psycopg.connect(pooled, autocommit=True, prepare_threshold=None) as polluter:
-        polluter.execute("SET default_transaction_read_only = on")
+        for statement in _POISON_SQL:
+            polluter.execute(statement)
+    with psycopg.connect(pooled, autocommit=True, prepare_threshold=None) as raw:
+        row = raw.execute("SHOW search_path").fetchone()
+        assert row is not None and str(row[0]) == "nowhere"
+        assert _statement_timeout(raw) == "0"
 
 
 def test_pooled_borrow_scrubs_a_poisoned_backend(
@@ -561,8 +564,8 @@ def test_pooled_borrow_scrubs_a_poisoned_backend(
 ) -> None:
     """Pool-level regression: a borrower must never inherit another client's
     session-level SET. The pool's `check` hook (every borrow) restores the
-    baseline session, so a write after a poison succeeds — and the borrowed
-    session reads `default_transaction_read_only = off`."""
+    baseline session, so the borrowed session resolves names and carries the
+    statement ceiling again, and an unqualified write succeeds."""
     import shared.db as shared_db
     from shared import config
 
@@ -576,11 +579,11 @@ def test_pooled_borrow_scrubs_a_poisoned_backend(
             with pool.connection() as conn:
                 conn.execute("SELECT 1")
             _poison_backend(pooled)
-            with pool.connection() as conn, conn.cursor() as cur:
-                row = cur.execute("SHOW default_transaction_read_only").fetchone()
-                assert row is not None and str(row[0]) == "off"
-                cur.execute("CREATE TEMP TABLE pgb_poison_probe(i int)")
-                cur.execute("INSERT INTO pgb_poison_probe VALUES (1)")
+            with pool.connection() as conn:
+                row = conn.execute("SHOW search_path").fetchone()
+                assert row is not None and str(row[0]) != "nowhere"
+                assert _statement_timeout(conn) == "1min"
+                conn.execute("UPDATE deployment_state SET phase = phase WHERE id = 1")
         finally:
             pool.close()
 
@@ -590,7 +593,7 @@ def test_message_insert_and_schedule_stop_survive_a_poisoned_backend(
 ) -> None:
     """P0 batch-5 regression: the agent message INSERT and the schedule stop
     UPDATE — the two API writes the user saw 500 — succeed when pgbouncer hands
-    their transaction a backend another client polluted read-only. Runs the real
+    their transaction a backend another client left polluted. Runs the real
     write helpers through the sanctioned pool path against a poisoned
     single-backend pooler."""
     import shared.db as shared_db
