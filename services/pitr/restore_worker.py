@@ -18,6 +18,7 @@ from services.pitr.restore_proof import (
 )
 from services.pitr.store_factory import construct_store_group
 from services.pitr.worker_process import worker_request, worker_secrets
+from shared.log import init_restricted_process
 
 
 def _object(value: object) -> dict[str, Any]:
@@ -128,6 +129,11 @@ def _run_drill(
 
 
 def main() -> None:
+    # Importing `shared.log` drops loguru's default handler: without a sink,
+    # every record `shared.pg_tools` and the restore code write is discarded.
+    # Stderr is the operation's `stderr.log`; this worker holds no home, so it
+    # opens no file sink.
+    init_restricted_process()
     request, output = worker_request(sys.argv)
     run(request, output, worker_secrets())
 

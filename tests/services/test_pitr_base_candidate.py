@@ -629,3 +629,44 @@ def test_the_base_workers_loguru_records_reach_its_stderr_and_log(tmp_path: Path
     assert "base worker probe warning" in re.sub(r"\x1b\[[0-9;]*m", "", child.stderr)
     assert "base worker probe warning" in (home / "logs/pitr-base-worker.log").read_text()
     assert "service started" not in child.stderr
+
+
+# The restore worker's real `main`, with its request replaced by a loguru
+# warning: a record written only through loguru, like the ones `shared.pg_tools`
+# writes while a candidate is restored.
+_RESTORE_WORKER = """
+import sys
+from services.pitr import restore_worker
+from shared.log import logger
+
+
+def request(_argv):
+    logger.warning("restore worker probe warning")
+    raise SystemExit(1 if "shared.config" in sys.modules else 0)
+
+
+restore_worker.worker_request = request
+restore_worker.main()
+"""
+
+
+def test_the_restore_workers_loguru_records_reach_its_stderr_without_settings() -> None:
+    """Its stderr is the operation's `stderr.log`, whose tail a failure carries.
+    The worker runs with no authority (no HOME, no AVA_HOME), so its sink opens
+    without building Settings."""
+    from shared.process_env import restricted_process_env
+
+    environment = restricted_process_env()
+    assert "HOME" not in environment and not any(name.startswith("AVA_") for name in environment)
+    child = subprocess.run(  # noqa: S603 — this interpreter, fixed code, the restricted env
+        [sys.executable, "-c", _RESTORE_WORKER],
+        cwd=Path(__file__).resolve().parents[2],
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
+    )
+    assert child.returncode == 0, child.stderr
+    assert "restore worker probe warning" in child.stderr
+    assert "\x1b[" not in child.stderr  # a file, never a terminal
