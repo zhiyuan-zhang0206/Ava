@@ -158,8 +158,21 @@ def _capture_groups(records: dict[str, SessionRecord]) -> tuple[int, ...]:
 
 
 def require_no_terminals() -> None:
-    # A PTY host can remain alive after its shell exits. The ordinary listing
-    # intentionally omits that retained record, so inspect both recorded births.
+    """Refuse maintenance while any terminal is present (`live_terminals`)."""
+    terminals = live_terminals()
+    if terminals:
+        raise RuntimeError(
+            "persistent terminals/schedules require their own completed-work boundary; "
+            f"maintenance will not kill or replay them: {terminals}"
+        )
+
+
+def live_terminals() -> list[str]:
+    """This unit's terminals still present, by name, sorted.
+
+    A PTY host can remain alive after its shell exits. The ordinary listing
+    intentionally omits that retained record, so both recorded births count.
+    """
     terminals: list[str] = []
     for path in (run_dir() / "pty").glob("*.json"):
         record = SessionRecord.read(path)
@@ -178,11 +191,7 @@ def require_no_terminals() -> None:
         # These are the SDK and ScheduleManager's existing terminal name shapes.
         listed = [name for name in listed if _TERMINAL_NAME.match(name)]
     terminals.extend(listed)
-    if terminals:
-        raise RuntimeError(
-            "persistent terminals/schedules require their own completed-work boundary; "
-            f"maintenance will not kill or replay them: {sorted(set(terminals))}"
-        )
+    return sorted(set(terminals))
 
 
 def service_names(backend: SessionBackend, *, keep_terminals: bool = False) -> list[str]:

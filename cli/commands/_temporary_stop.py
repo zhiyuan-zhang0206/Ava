@@ -61,9 +61,12 @@ class _Terminal:
     """One persistent shell a stop closes, with everything captured as its session's."""
 
     name: str
-    shell: OwnedProcess
-    members: set[OwnedProcess]
+    capture: session_tree.SessionCapture
     busy: bool
+
+    @property
+    def shell(self) -> OwnedProcess:
+        return self.capture.leader
 
 
 def _capture_terminals(names: list[str]) -> list[_Terminal]:
@@ -80,9 +83,9 @@ def _capture_terminals(names: list[str]) -> list[_Terminal]:
         if record is None:
             continue
         shell = OwnedProcess(record.pid, record.create_time, record.starttime)
-        members = session_tree.session_members(shell)
-        if members:
-            terminals.append(_Terminal(name, shell, set(members), busy=len(members) > 1))
+        capture = session_tree.capture_session(shell)
+        if capture.members:
+            terminals.append(_Terminal(name, capture, busy=len(capture.members) > 1))
     return terminals
 
 
@@ -97,21 +100,29 @@ def _hang_up(terminals: list[_Terminal]) -> None:
     """
     session_tree.terminate([terminal.shell for terminal in terminals], signal.SIGHUP)
     for terminal in terminals:
-        session_tree.terminate(terminal.members - {terminal.shell})
+        session_tree.terminate(set(terminal.capture.members) - {terminal.shell})
 
 
 def _await_members(terminals: list[_Terminal], until: float) -> bool:
     """Wait for every captured member to exit; False when `until` passes first.
 
-    A live member's new descendants join its session's capture on every poll,
-    so a child forked during the grace dies with the rest.
+    Each poll folds each session's newcomers into its capture
+    (`session_tree.refresh`): a live member's new descendants, and anything
+    else in the session while its id is proven — a helper a job forked on TERM
+    and orphaned before the next poll included. A member can fork while the
+    poll that finds it gone is still scanning, so a quiet poll only counts
+    once a second one, whose scan began after every member was gone, is quiet
+    too.
     """
+    captures = [terminal.capture for terminal in terminals]
+    quiet = False
     while True:
-        live = [(t, identity) for t in terminals for identity in list(t.members) if identity.live()]
-        if not live:
-            return True
-        for terminal, identity in live:
-            terminal.members |= capture_tree(identity)
+        if not session_tree.refresh(captures):
+            if quiet:
+                return True
+            quiet = True
+            continue
+        quiet = False
         left = until - time.monotonic()
         if left <= 0:
             return False
@@ -119,13 +130,22 @@ def _await_members(terminals: list[_Terminal], until: float) -> bool:
 
 
 def _kill_leftovers(terminals: list[_Terminal]) -> list[tuple[_Terminal, OwnedProcess]]:
-    """SIGKILL each session's remaining membership; return what outlived it."""
+    """SIGKILL each session's remaining membership; return what outlived it.
+
+    One last refresh first, so every kill starts from its session's newest
+    capture and proof; a session that can yield nothing more is skipped.
+    """
+    session_tree.refresh(terminal.capture for terminal in terminals)
     survivors: list[tuple[_Terminal, OwnedProcess]] = []
     for terminal in terminals:
-        if not any(identity.live() for identity in terminal.members):
+        capture = terminal.capture
+        if not capture.active:
             continue
         result = session_tree.kill_session_tree(
-            terminal.shell, also=terminal.members, wait_s=_TERMINAL_KILL_WAIT_S
+            capture.leader,
+            also=capture.members,
+            wait_s=_TERMINAL_KILL_WAIT_S,
+            proven_at=capture.proven_at,
         )
         survivors += [(terminal, identity) for identity in result.survivors]
     return survivors
@@ -152,7 +172,7 @@ def _terminals_incomplete(survivors: list[tuple[_Terminal, OwnedProcess]]) -> St
     return StopIncompleteError(
         f"terminal stop incomplete — processes outlived their SIGKILL: "
         f"{[identity.pid for identity in live]} from sessions: {surviving}\n"
-        f"{SurvivorInventory(survivors=report, groups=[]).render(stage='terminals')}",
+        f"{SurvivorInventory(survivors=report, groups=[]).render(stage='terminals', killed=True)}",
         stage="terminals",
         survivors=[survivor.payload() for survivor in report],
     )
@@ -164,15 +184,18 @@ def _await_no_terminals(until: float) -> None:
     A host ends on its own once its shell is gone. Its protocol deliberately
     ignores SIGTERM, so signalling host processes is not a stop API.
     """
-    from cli.commands._maintenance_stop import require_no_terminals
+    from cli.commands._maintenance_stop import live_terminals
 
     while True:
-        try:
-            require_no_terminals()
+        left = live_terminals()
+        if not left:
             return
-        except RuntimeError:
-            if time.monotonic() >= until:
-                raise
+        if time.monotonic() >= until:
+            raise StopIncompleteError(
+                f"terminal stop incomplete — terminals still present after this stop "
+                f"closed every session it captured: {left}",
+                stage="terminals",
+            )
         time.sleep(0.05)
 
 
@@ -183,10 +206,12 @@ def _stop_terminals(deadline: float, operation: str, acquired_at: datetime) -> N
     (`_hang_up`); whatever is still alive after `_TERMINAL_STOP_GRACE_S` is
     SIGKILLed with its session (`session_tree`).
 
-    Busy sessions verified closed — a job the SIGKILL cut short included —
-    leave a durable closure notice for their owner agent (issue #2044): the
-    gateway and ops server are already down by now, so the notice is
-    delivered at the next ops-daemon startup.
+    Busy sessions whose shell is verified gone — a job the SIGKILL cut short
+    included — leave a durable closure notice for their owner agent (issue
+    #2044): the gateway and ops server are already down by now, so the notice
+    is delivered at the next ops-daemon startup. That holds when a process
+    outlived the SIGKILL too (the notice names it) and when another session
+    keeps the stop incomplete (`_close_out`).
     """
     backend = get_shell_backend()
     names = backend.list_sessions()
@@ -199,29 +224,70 @@ def _stop_terminals(deadline: float, operation: str, acquired_at: datetime) -> N
     terminals = _capture_terminals(names)
     _hang_up(terminals)
     grace_end = min(deadline, time.monotonic() + _TERMINAL_STOP_GRACE_S)
-    if not _await_members(terminals, grace_end):
-        survivors = _kill_leftovers(terminals)
-        if live_identities(identity for _terminal, identity in survivors):
-            raise _terminals_incomplete(survivors)
+    survivors = [] if _await_members(terminals, grace_end) else _kill_leftovers(terminals)
+    _close_out(terminals, survivors, operation, acquired_at)
     _await_no_terminals(max(deadline, time.monotonic() + _TERMINAL_KILL_WAIT_S))
-    _record_close_notices(
-        {terminal.name: terminal.shell for terminal in terminals if terminal.busy},
-        operation,
-        acquired_at,
-    )
+
+
+def _close_out(
+    terminals: list[_Terminal],
+    survivors: list[tuple[_Terminal, OwnedProcess]],
+    operation: str,
+    acquired_at: datetime,
+) -> None:
+    """Record every busy session whose shell is verified gone, then fail on what outlived its SIGKILL.
+
+    The shell is the session as its owner uses it: once it is gone the session
+    cannot be used again, so its notice is recorded, naming whatever of it
+    outlived the SIGKILL (issue #2044's "notify only what actually closed",
+    judged by the shell). A session whose shell still lives records nothing; a
+    retry sees it again. The notices go first: a closed session's record is
+    gone by any retry.
+    """
+    stuck = set(live_identities(identity for _terminal, identity in survivors))
+    left: dict[str, list[OwnedProcess]] = {}
+    for terminal, identity in survivors:
+        if identity in stuck:
+            left.setdefault(terminal.name, []).append(identity)
+    closed = {
+        terminal.name: (terminal.shell, left.get(terminal.name, []))
+        for terminal in terminals
+        if terminal.busy and not live_identities([terminal.shell])
+    }
+    _record_close_notices(closed, operation, acquired_at)
+    if stuck:
+        raise _terminals_incomplete(survivors)
+
+
+def _named(identities: list[OwnedProcess]) -> list[tuple[int, str]]:
+    """(pid, command name) of each process still running as its captured identity."""
+    named: list[tuple[int, str]] = []
+    for identity in sorted(identities, key=lambda identity: identity.pid):
+        try:
+            name = psutil.Process(identity.pid).name()
+        except psutil.NoSuchProcess:
+            continue
+        except psutil.Error:
+            name = "<unreadable>"
+        if live_identities([identity]):  # the name was read from that process
+            named.append((identity.pid, name))
+    return named
 
 
 def _record_close_notices(
-    busy: dict[str, OwnedProcess], operation: str, acquired_at: datetime
+    closed: dict[str, tuple[OwnedProcess, list[OwnedProcess]]],
+    operation: str,
+    acquired_at: datetime,
 ) -> None:
     """Durably record one closure notice per busy session verified closed.
 
-    Only sessions whose exact process identity is gone reach this point; an
-    idle session, a timed-out stop, or a Windows unit records nothing. A write
-    failure is loud but never fails the stop — the resources are already
-    closed and retrying the whole stop would not restore them.
+    Each entry is a session whose shell identity is verified gone, with the
+    processes of it that outlived the SIGKILL; an idle session, a session
+    whose shell lives, or a Windows unit records nothing. A write failure is
+    loud but never fails the stop — the resources are already closed and
+    retrying the whole stop would not restore them.
     """
-    for name, shell in busy.items():
+    for name, (shell, left) in closed.items():
         if shell.starttime is not None:
             birth = f"starttime:{shell.starttime}"
         else:
@@ -234,6 +300,7 @@ def _record_close_notices(
                 shell_birth=birth,
                 operation=operation,
                 acquired_at=acquired_at,
+                survivors=_named(left),
             )
         except Exception as exc:
             # The side-channel notice must never fail a stop whose resources

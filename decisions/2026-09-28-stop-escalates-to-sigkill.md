@@ -104,3 +104,8 @@ new updater closes terminals at release (FC-6).
   extending the rule there needs its own membership rule.
 - A member this user may not signal (for example a root `sudo` on the pty)
   outlives the SIGKILL. The stop reports it and keeps the hold.
+
+Forward: [decisions/2026-09-28-session-id-proven-by-a-live-member.md](2026-09-28-session-id-proven-by-a-live-member.md)
+closes the escape in the third consequence above (a process forked and
+orphaned after the shell is gone), and a closed session's notice is now
+recorded even when another session leaves the stop incomplete.

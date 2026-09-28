@@ -26,6 +26,8 @@ import os
 import signal
 import time
 from pathlib import Path
+from types import SimpleNamespace
+from typing import Any
 
 import psutil
 import pytest
@@ -33,6 +35,7 @@ import pytest
 from cli.commands import _temporary_stop as command
 from cli.commands import stop as entry
 from cli.commands._maintenance_stop import OwnedProcess
+from cli.commands._maintenance_stop_report import StopIncompleteError
 from shared import maintenance
 from shared.session_backend import PtySessionBackend
 from shared.sessions.pty import session_tree
@@ -68,6 +71,52 @@ _DOUBLE_FORK_JOB = (
     "        while True: time.sleep(0.1)\n"
     "    os._exit(0)\n"
     "os.wait()\n"
+)
+
+# A foreground job whose TERM handler forks a helper and exits at once. The
+# helper is born after the stop's signals and its parent is gone before the next
+# poll; the shell has already died of its hangup. It keeps the shell's POSIX
+# session. `{disposition}` is the helper's own HUP/TERM disposition. It records
+# its pid first: with SIG_DFL, a shell slow to handle its own hangup (a loaded
+# box) forwards HUP to the job's group, which then includes the helper.
+_FORK_ON_TERM_JOB = (
+    "import os,signal,sys,time\n"
+    "def on_term(*_):\n"
+    "    if os.fork() == 0:\n"
+    "        open(sys.argv[1] + '.tmp', 'w').write(str(os.getpid()))\n"
+    "        os.rename(sys.argv[1] + '.tmp', sys.argv[1])\n"
+    "        signal.signal(signal.SIGTERM, signal.{disposition})\n"
+    "        signal.signal(signal.SIGHUP, signal.{disposition})\n"
+    "        while True: time.sleep(0.1)\n"
+    "    os._exit(0)\n"
+    "signal.signal(signal.SIGTERM, on_term)\n"
+    "signal.signal(signal.SIGHUP, signal.SIG_IGN)\n"
+    "open(sys.argv[1] + '.ready', 'w').close()\n"
+    "while True: time.sleep(0.1)\n"
+)
+
+
+# A job whose TERM handler starts a fork chain: each hop lives `{hop_ms}` ms,
+# forks the next and exits; the last of `{hops}` hops stays. Each hop is gone
+# long before a full process-table pass reaches it.
+_FORK_CHAIN_JOB = (
+    "import os,signal,sys,time\n"
+    "def on_term(*_):\n"
+    "    if os.fork() == 0:\n"
+    "        signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+    "        signal.signal(signal.SIGHUP, signal.SIG_IGN)\n"
+    "        for _ in range({hops}):\n"
+    "            time.sleep({hop_ms} / 1000.0)\n"
+    "            if os.fork() != 0:\n"
+    "                os._exit(0)\n"
+    "        open(sys.argv[1] + '.tmp', 'w').write(str(os.getpid()))\n"
+    "        os.rename(sys.argv[1] + '.tmp', sys.argv[1])\n"
+    "        while True: time.sleep(0.1)\n"
+    "    os._exit(0)\n"
+    "signal.signal(signal.SIGTERM, on_term)\n"
+    "signal.signal(signal.SIGHUP, signal.SIG_IGN)\n"
+    "open(sys.argv[1] + '.ready', 'w').close()\n"
+    "while True: time.sleep(0.1)\n"
 )
 
 
@@ -305,11 +354,197 @@ def test_stop_kills_a_double_forked_orphan_of_the_session(
     assert len(_notice_files(home)) == 1, "the orphan was running work: the session was busy"
 
 
+@pytest.mark.flaky
+@pytest.mark.parametrize("disposition", ["SIG_IGN", "SIG_DFL"])
+def test_stop_kills_a_helper_its_job_forks_on_term_and_orphans(
+    disposition: str, home: Path, monkeypatch: pytest.MonkeyPatch, pty_reaper: PtyReaper
+) -> None:
+    """The job's TERM handler forks a helper and exits at once: no captured
+    process is left alive to lead the stop to the helper (with SIG_DFL it never
+    even receives a signal), but it is still in the shell's POSIX session. The
+    stop takes it — it succeeds only with the helper dead."""
+    dependencies(monkeypatch)
+    terminal = PtySessionBackend()
+    _stop_env(monkeypatch, home, terminal)
+    monkeypatch.setattr(command, "_TERMINAL_STOP_GRACE_S", 1.0)
+    (home / "machine_name").write_text("test-host")
+    name = "ava-agent-987-shell-2047-helper"
+    pidfile = home / "helper.pid"
+    script = home / f"{name}.job.py"
+    script.write_text(_FORK_ON_TERM_JOB.format(disposition=disposition), encoding="utf-8")
+    assert terminal.new_session(
+        name, f"python3 -u {script} {pidfile}", home, env={"AVA_HOME": str(home)}
+    )
+    shell = pty_reaper.track_session(name)
+    assert _started_jobs(shell, pty_reaper), "the job never started"
+    ready = Path(f"{pidfile}.ready")
+    deadline = time.monotonic() + 15
+    while time.monotonic() < deadline and not ready.exists():
+        time.sleep(0.05)
+    assert ready.exists(), "the job never installed its TERM handler"
+
+    assert entry.cmd_stop(require_confirmation=False, keep_infra=True, timeout=12) == 0
+    assert pidfile.exists(), "the job's TERM handler never forked its helper"
+    helper = int(pidfile.read_text(encoding="utf-8"))
+    with contextlib.suppress(psutil.NoSuchProcess):
+        pty_reaper.track(psutil.Process(helper))
+    assert _wait_exit(helper, timeout=5), "the helper outlived a stop that succeeded"
+    assert len(_notice_files(home)) == 1
+
+
+@pytest.mark.flaky
+@pytest.mark.parametrize(
+    ("hop_ms", "hops", "grace_s"), [(3, 60, 2.0), (8, 40, 2.0), (10, 150, 2.0), (10, 150, 0.5)]
+)
+def test_stop_kills_the_last_hop_of_a_fork_chain_started_on_term(
+    hop_ms: int,
+    hops: int,
+    grace_s: float,
+    home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    pty_reaper: PtyReaper,
+) -> None:
+    """A TERM handler starts a chain of processes that each fork the next and
+    exit within a few ms — too short for a full process-table pass to read one
+    alive. While the session still holds a process the grace keeps polling, a
+    proven pass that reads a hop keeps the proof current, and no part of the
+    chain outlives the stop: it either reached its last hop, which dies with
+    the stop, or the stop cut it short. 10 ms x 150 runs past the proof's first
+    second; with a 0.5 s grace it is still forking when the kill starts, whose
+    freeze passes must stop a hop before it forks on."""
+    dependencies(monkeypatch)
+    terminal = PtySessionBackend()
+    _stop_env(monkeypatch, home, terminal)
+    monkeypatch.setattr(command, "_TERMINAL_STOP_GRACE_S", grace_s)
+    (home / "machine_name").write_text("test-host")
+    name = "ava-agent-987-shell-2048-chain"
+    pidfile = home / "last.pid"
+    script = home / f"{name}.job.py"
+    script.write_text(_FORK_CHAIN_JOB.format(hop_ms=hop_ms, hops=hops), encoding="utf-8")
+    assert terminal.new_session(
+        name, f"python3 -u {script} {pidfile}", home, env={"AVA_HOME": str(home)}
+    )
+    shell = pty_reaper.track_session(name)
+    assert _started_jobs(shell, pty_reaper), "the job never started"
+    ready = Path(f"{pidfile}.ready")
+    deadline = time.monotonic() + 15
+    while time.monotonic() < deadline and not ready.exists():
+        time.sleep(0.05)
+    assert ready.exists(), "the job never installed its TERM handler"
+
+    assert entry.cmd_stop(require_confirmation=False, keep_infra=True, timeout=12) == 0
+    # Wait out the chain's own run: a chain that escaped always has a live hop
+    # (each hop forks the next before it exits), or has reached its last one.
+    time.sleep(hops * hop_ms / 1000 + 1.0)
+    left = _running(script)
+    assert not left, f"part of the chain outlived a stop that succeeded: {left}"
+    if pidfile.exists():
+        assert _wait_exit(int(pidfile.read_text(encoding="utf-8")), timeout=5)
+    assert len(_notice_files(home)) == 1
+
+
+@pytest.mark.flaky
+def test_incomplete_stop_still_records_the_sessions_it_closed(
+    home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    pty_reaper: PtyReaper,
+) -> None:
+    """One session closes; in another the shell itself outlives the stop and
+    keeps its job through the SIGKILL. The stop is incomplete, yet the closed
+    session's notice is recorded before it reports — its record is gone, so a
+    retry could never record it. The session whose shell still lives records
+    nothing and is left to the retry, which records it: each notice once."""
+    dependencies(monkeypatch)
+    terminal = PtySessionBackend()
+    _stop_env(monkeypatch, home, terminal)
+    monkeypatch.setattr(command, "_TERMINAL_STOP_GRACE_S", 0.5)
+    (home / "machine_name").write_text("test-host")
+    closed = "ava-agent-987-shell-2051-closed"
+    stuck = "ava-agent-987-shell-2052-stuck"
+    closed_shell = _start_busy_session(terminal, home, closed, _STUBBORN_JOB, pty_reaper)
+    script = home / f"{stuck}.job.py"
+    script.write_text(_STUBBORN_JOB, encoding="utf-8")
+    # The shell ignores its hangup too, so the unclosed session outlives the stop.
+    assert terminal.new_session(
+        stuck, f"trap '' HUP; python3 -u {script}", home, env={"AVA_HOME": str(home)}
+    )
+    stuck_shell = pty_reaper.track_session(stuck)
+    assert _started_jobs(closed_shell, pty_reaper), "the closed session's job never started"
+    assert _started_jobs(stuck_shell, pty_reaper), "the stuck session's job never started"
+    real_kill = session_tree.kill_session_tree
+
+    def kill(leader: OwnedProcess, **kwargs: Any) -> session_tree.TreeKill:
+        if leader == stuck_shell:
+            also = tuple(kwargs["also"])
+            return session_tree.TreeKill((), also, also)
+        return real_kill(leader, **kwargs)
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(session_tree, "kill_session_tree", kill)
+        assert entry.cmd_stop(require_confirmation=False, keep_infra=True, timeout=12) == 1
+    assert maintenance.held(), "the hold must survive an incomplete stop"
+    assert stuck in capsys.readouterr().err
+    assert _notice_names(home) == [closed], "the closed session's notice was lost"
+    assert "survivors" not in _notices(home)[0], "nothing of the closed session survived"
+
+    def still_drained(_timeout: float, **_kw: object) -> None:
+        """The retry re-enters the held stop; the drain stand-in only opens a fresh hold."""
+
+    monkeypatch.setattr(command, "pause_agents", still_drained)
+    assert entry.cmd_stop(require_confirmation=False, keep_infra=True, timeout=12) == 0
+    assert _notice_names(home) == sorted([closed, stuck])
+
+
+def test_a_terminal_left_after_the_closure_fails_the_stop_in_its_own_words(
+    home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A terminal still present once the stop closed every captured session
+    fails the stop — naming it, and without maintenance's claim that nothing
+    will be killed: this stop has just killed its sessions."""
+    name = "ava-agent-987-shell-2053-lingering"
+    listing = SimpleNamespace(list_sessions=lambda: [name])
+    monkeypatch.setitem(os.environ, "AVA_HOME", str(home))
+    monkeypatch.setenv("AVA_HOME_OVERRIDE", "1")
+    from cli.commands import _maintenance_stop as strict
+
+    monkeypatch.setattr(strict, "get_shell_backend", lambda: listing)
+
+    with pytest.raises(StopIncompleteError) as excinfo:
+        command._await_no_terminals(time.monotonic())
+    message = str(excinfo.value)
+    assert name in message
+    assert "will not kill" not in message
+    assert excinfo.value.stage == "terminals"
+
+
+def _running(script: Path) -> list[int]:
+    """Live processes running `script` (a job and every fork of it carry it on argv)."""
+    return [
+        process.pid
+        for process in psutil.process_iter(["cmdline"])
+        if str(script) in (process.info["cmdline"] or ()) and not _has_exited(process)
+    ]
+
+
 def _notice_files(home: Path) -> list[Path]:
     from ops import pty_close_notices
 
     journal = pty_close_notices.journal_dir()
     return list(journal.iterdir()) if journal.is_dir() else []
+
+
+def _notices(home: Path) -> list[dict[str, Any]]:
+    import json as _json
+
+    return sorted(
+        (_json.loads(path.read_text()) for path in _notice_files(home)),
+        key=lambda notice: str(notice["name"]),
+    )
+
+
+def _notice_names(home: Path) -> list[str]:
+    return [notice["name"] for notice in _notices(home)]
 
 
 def test_stop_records_notice_for_verified_closed_busy_session(
@@ -368,34 +603,48 @@ def test_stop_keeps_hold_when_a_process_outlives_the_kill(
     capsys: pytest.CaptureFixture[str],
     pty_reaper: PtyReaper,
 ) -> None:
-    """A process that outlives its SIGKILL (another user's, which this stop may
-    not signal) leaves the stop incomplete: the hold stays, the failure names
-    the phase and the session, and no closure is claimed — only verified exits
-    are recorded (issue #2044 #2)."""
+    """The kill ends the shell, but a job outlives its SIGKILL (another user's,
+    which this stop may not signal). The stop is incomplete — the hold stays
+    and the failure names the phase and the session — yet the session is over
+    for its owner: the shell is verified gone, so its notice is recorded, naming
+    the process left running. A retry no longer sees the session and adds no
+    second notice."""
     dependencies(monkeypatch)
     terminal = PtySessionBackend()
     _stop_env(monkeypatch, home, terminal)
     monkeypatch.setattr(command, "_TERMINAL_STOP_GRACE_S", 0.5)
-
-    def unkillable(
-        leader: OwnedProcess, *, also: tuple[OwnedProcess, ...] = (), wait_s: float
-    ) -> session_tree.TreeKill:
-        del leader, wait_s
-        return session_tree.TreeKill((), tuple(also), tuple(also))
-
-    monkeypatch.setattr(session_tree, "kill_session_tree", unkillable)
+    (home / "machine_name").write_text("test-host")
     name = "ava-agent-987-shell-2044-stubborn"
     shell = _start_busy_session(terminal, home, name, _STUBBORN_JOB, pty_reaper)
     jobs = _started_jobs(shell, pty_reaper)
     assert jobs, "the stubborn job never started"
 
-    assert entry.cmd_stop(require_confirmation=False, keep_infra=True, timeout=12) == 1
+    def denied_but_the_shell(leader: OwnedProcess, **kwargs: Any) -> session_tree.TreeKill:
+        with contextlib.suppress(psutil.NoSuchProcess):
+            psutil.Process(leader.pid).kill()
+        assert _wait_exit(leader.pid), "the shell survived its SIGKILL"
+        left = tuple(identity for identity in kwargs["also"] if identity != leader)
+        return session_tree.TreeKill((leader,), left, left)
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(session_tree, "kill_session_tree", denied_but_the_shell)
+        assert entry.cmd_stop(require_confirmation=False, keep_infra=True, timeout=12) == 1
     assert maintenance.held(), "the hold must survive an incomplete stop"
     assert psutil.pid_exists(jobs[0].pid)
     err = capsys.readouterr().err
     assert "terminals" in err, "the failure must name the phase"
     assert name in err, "the failure must name the owning session"
-    assert _notice_files(home) == []
+    assert "nothing was force-killed" not in err, "the survivors outlived a SIGKILL"
+    notices = _notices(home)
+    assert [notice["name"] for notice in notices] == [name]
+    assert notices[0]["survivors"] == [{"pid": jobs[0].pid, "name": jobs[0].name()}]
+
+    def still_drained(_timeout: float, **_kw: object) -> None:
+        """The retry re-enters the held stop; the drain stand-in only opens a fresh hold."""
+
+    monkeypatch.setattr(command, "pause_agents", still_drained)
+    assert entry.cmd_stop(require_confirmation=False, keep_infra=True, timeout=12) == 0
+    assert len(_notice_files(home)) == 1, "the retry recorded the closed session again"
 
 
 @pytest.mark.flaky

@@ -13,6 +13,7 @@ script from there), so `pty_reaper` reaps whatever a failing kill leaves.
 
 from __future__ import annotations
 
+import functools
 import os
 import signal
 import subprocess
@@ -21,17 +22,18 @@ import threading
 import time
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from types import SimpleNamespace
+from typing import Any, cast
 
 import psutil
 import pytest
 
 from shared.platform import IS_WINDOWS
-from shared.proc_tree import OwnedProcess, stable_create_time
+from shared.proc_tree import OwnedProcess, shown_name, stable_create_time
 from shared.session_record import SessionRecord, pid_starttime_ticks
 from shared.sessions.pty import cli as pty_cli
 from shared.sessions.pty import host as pty_host
-from shared.sessions.pty import session_tree
+from shared.sessions.pty import orphan_reaper, session_tree
 from tests.cli.conftest import PtyReaper
 from tests.cli.conftest import pty_reaper as pty_reaper
 
@@ -371,7 +373,10 @@ def test_kill_with_only_unsignallable_survivors_answers_interrupted(
             raise psutil.AccessDenied(self.pid)
         real_kill(self)
 
-    monkeypatch.setattr(pty_host, "_KILL_FORCE_WAIT_S", 0.5)
+    # Nothing signalled the unsignallable member, so waiting for it cannot
+    # change its fate: the op answers without spending this wait on it (the
+    # TTL reaper's dispatch budget is 5 s end to end).
+    monkeypatch.setattr(pty_host, "_KILL_FORCE_WAIT_S", 5.0)
 
     def reader() -> None:
         os.waitpid(leader.pid, 0)
@@ -384,7 +389,9 @@ def test_kill_with_only_unsignallable_survivors_answers_interrupted(
         with pytest.MonkeyPatch.context() as patch:
             patch.setattr(psutil.Process, "suspend", suspend)
             patch.setattr(psutil.Process, "kill", kill)
+            started = time.monotonic()
             response = pty_host._op_kill(session, {})
+            elapsed = time.monotonic() - started
     finally:
         os.kill(member, signal.SIGKILL)
         os.close(write_end)
@@ -393,6 +400,7 @@ def test_kill_with_only_unsignallable_survivors_answers_interrupted(
     thread.join(10)
     assert response["ok"], response
     assert response["data"] == {"mode": "forced", "interrupted": True, "survivors": [member]}
+    assert elapsed < 2.5, f"the op waited {elapsed:.2f}s for a member it could not signal"
 
 
 def test_cli_kill_names_the_unsignallable_survivors(
@@ -421,3 +429,265 @@ def test_cli_kill_names_the_unsignallable_survivors(
     captured = capsys.readouterr()
     assert captured.out == "interrupted\n"
     assert "[4242]" in captured.err
+
+
+# A session leader with a member M (its child, still in its session) and U,
+# double-forked out of its tree but still in its session.
+_MEMBER_AND_ORPHAN = (
+    _WRITE_PID
+    + """\
+import time
+if os.fork() == 0:
+    write("m", os.getpid())
+    while True:
+        time.sleep(1)
+mid = os.fork()
+if mid == 0:
+    if os.fork() == 0:
+        write("u", os.getpid())
+        while True:
+            time.sleep(1)
+    os._exit(0)
+os.waitpid(mid, 0)
+while True:
+    time.sleep(1)
+"""
+)
+
+
+def _dead_leader(tmp_path: Path, reaper: PtyReaper) -> tuple[OwnedProcess, OwnedProcess, int]:
+    """A session whose shell is gone: its identity, a captured member M, and U.
+
+    U never was captured (born after the capture, or missed by it); M was.
+    Both are still in the dead shell's POSIX session.
+    """
+    leader = _launch(tmp_path, _MEMBER_AND_ORPHAN, reaper)
+    member, orphan = (_pid(tmp_path, name, reaper) for name in ("m", "u"))
+    shell = _identity(leader.pid)
+    captured = _identity(member)
+    leader.kill()
+    leader.wait(timeout=10)
+    assert os.getsid(orphan) == shell.pid and os.getsid(member) == shell.pid
+    return shell, captured, orphan
+
+
+def test_a_captured_member_proves_the_dead_shells_session(
+    tmp_path: Path, pty_reaper: PtyReaper
+) -> None:
+    """The shell is dead, so it cannot vouch for its session id. A captured
+    member still alive in that session can: the kernel gives no new session an
+    id another session still carries, so every process reading that id during
+    the pass is in the member's session. The orphan nobody captured dies too."""
+    shell, member, orphan = _dead_leader(tmp_path, pty_reaper)
+
+    result = session_tree.kill_session_tree(shell, also=(member,), wait_s=3.0)
+
+    assert result.survivors == ()
+    assert _wait(lambda: _exited(member.pid)), "the captured member survived"
+    assert _wait(lambda: _exited(orphan)), "the session's orphan survived its session's kill"
+
+
+def test_nothing_is_taken_by_a_session_id_nobody_proves(
+    tmp_path: Path, pty_reaper: PtyReaper, loguru_records: list[dict[str, Any]]
+) -> None:
+    """With the shell and every captured member gone, nothing proves the id
+    still names that session (the pid may have been handed on): a process
+    reading it is logged and left alone, never killed."""
+    shell, member, orphan = _dead_leader(tmp_path, pty_reaper)
+    os.kill(member.pid, signal.SIGKILL)
+    assert _wait(lambda: _exited(member.pid))
+
+    result = session_tree.kill_session_tree(shell, also=(member,), wait_s=3.0)
+
+    assert result == session_tree.TreeKill((), ())
+    assert not _exited(orphan), "a process was killed on an unproven session id"
+    assert any(
+        str(orphan) in record["message"] and "prove" in record["message"]
+        for record in loguru_records
+    ), "an unproven session id must be logged, never silent"
+
+
+def test_a_recycled_shell_pid_names_no_session(tmp_path: Path, pty_reaper: PtyReaper) -> None:
+    """The shell died and a process captured with the session now holds its
+    pid, leading a session of its own. It is killed as a captured process, but
+    its session is not the shell's: its orphan is left alone."""
+    holder = _launch(tmp_path, _MEMBER_AND_ORPHAN, pty_reaper)
+    held_member, held_orphan = (_pid(tmp_path, name, pty_reaper) for name in ("m", "u"))
+    # The shell's identity, with the pid the kernel handed to `holder`.
+    stale = _identity(holder.pid)
+    stale = OwnedProcess(
+        stale.pid,
+        stale.birth - 100.0,
+        None if stale.starttime is None else stale.starttime - 10_000,
+    )
+
+    session_tree.kill_session_tree(stale, also=(_identity(holder.pid),), wait_s=3.0)
+
+    assert _wait(lambda: _exited(holder.pid)), "the captured holder survived"
+    assert _wait(lambda: _exited(held_member)), "the holder's own tree survived"
+    assert not _exited(held_orphan), "the holder's own session was taken as the shell's"
+    _reap(holder)
+
+
+def test_a_dead_members_recycled_pid_vouches_for_nothing(
+    tmp_path: Path, pty_reaper: PtyReaper
+) -> None:
+    """The first round kills an orphaned member O, and its pid stays in the
+    membership. Were the kernel to hand O's pid to a stranger before the second
+    scan, the stranger's child must not be taken for O's: a pid vouches for a
+    child only while it still is the captured process. The recycle is simulated
+    — the scan and the child's parent read name O's pid once O is gone."""
+    leader = _launch(tmp_path, _ORPHANED_GROUP, pty_reaper)
+    orphan, _job, _child = (_pid(tmp_path, name, pty_reaper) for name in ("o", "p", "c"))
+    gone = psutil.Process(orphan)
+    other = tmp_path / "other"
+    other.mkdir()
+    stranger = _launch(other, _LEADER_WITH_CHILD, pty_reaper)
+    victim = _pid(other, "child", pty_reaper)
+    real_scan, real_ppid = session_tree._scan, psutil.Process.ppid
+
+    def recycled_scan() -> session_tree._Table:
+        table = real_scan()
+        if not gone.is_running():
+            table.parents[victim] = orphan
+        return table
+
+    @functools.wraps(real_ppid)  # keeps psutil's oneshot cache hooks
+    def ppid(self: psutil.Process) -> int:
+        return orphan if self.pid == victim and not gone.is_running() else real_ppid(self)
+
+    # A scoped patch: undone before teardown reaps with the real psutil.
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(session_tree, "_scan", recycled_scan)
+        patch.setattr(psutil.Process, "ppid", ppid)
+        session_tree.kill_session_tree(_identity(leader.pid), wait_s=3.0)
+
+    assert _wait(lambda: _exited(orphan))
+    assert not _exited(victim), "a stranger's child was killed through a dead member's pid"
+    assert psutil.Process(victim).status() != psutil.STATUS_STOPPED
+    _reap(leader)
+    stranger.kill()
+    stranger.wait(timeout=10)
+
+
+def test_orphan_reap_passes_when_only_unsignallable_processes_survive(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A force-reap whose only survivors are processes this user may not signal
+    killed everything it could — the host included — so it succeeds; a
+    survivor it could signal still fails it. The same `stuck` verdict as the
+    host's kill op and the record kill."""
+    denied = OwnedProcess(4242, 1.0, None)
+    stuck = OwnedProcess(4343, 1.0, None)
+    host = SimpleNamespace(pid=4141)
+    verdicts = iter(
+        [session_tree.TreeKill((), (denied,), (denied,)), session_tree.TreeKill((), (stuck,))]
+    )
+
+    def orphaned(*_args: object, **_kwargs: object) -> list[SimpleNamespace]:
+        return [host]
+
+    def kill_host_tree(*_args: object, **_kwargs: object) -> session_tree.TreeKill:
+        return next(verdicts)
+
+    monkeypatch.setattr(orphan_reaper, "_orphaned_host_processes", orphaned)
+    monkeypatch.setattr(orphan_reaper, "kill_host_tree", kill_host_tree)
+
+    assert orphan_reaper._reap_orphaned_hosts("ava-test-race-3") == 1
+    with pytest.raises(RuntimeError, match="survived force-reap: pids=\\[4343\\]"):
+        orphan_reaper._reap_orphaned_hosts("ava-test-race-3")
+
+
+def test_a_session_nothing_proves_is_still_looked_at_and_logged(
+    tmp_path: Path, pty_reaper: PtyReaper, loguru_records: list[dict[str, Any]]
+) -> None:
+    """A stop's capture with no captured process left and no fresh proof can
+    take nothing more, but its session may still hold a process (the stop
+    stalled past the proof). The shared scan still reads it: the capture stays
+    busy, and the process is logged once with its pid and command name — never
+    signalled."""
+    shell, member, orphan = _dead_leader(tmp_path, pty_reaper)
+    os.kill(member.pid, signal.SIGKILL)
+    assert _wait(lambda: _exited(member.pid))
+    capture = session_tree.SessionCapture(shell, [shell, member], None)
+
+    assert session_tree.refresh([capture]) is True, "the session still holds a process"
+    assert session_tree.refresh([capture]) is True
+
+    assert orphan not in {identity.pid for identity in capture.members}
+    assert not _exited(orphan), "an unproven process was signalled"
+    warnings = [
+        record["message"]
+        for record in loguru_records
+        if str(orphan) in record["message"] and "prove" in record["message"]
+    ]
+    assert len(warnings) == 1, f"logged once, with its command name: {warnings}"
+    assert repr(psutil.Process(orphan).name()) in warnings[0]
+
+
+# The caller alone in a session: its shell leaves, and it asks whether the
+# session still holds a process (a stop run from inside the session it closes).
+_CALLER_IN_SESSION = """
+import os, time, psutil
+from shared.proc_tree import OwnedProcess
+from shared.sessions.pty import session_tree
+shell = OwnedProcess.capture(psutil.Process())
+if os.fork() != 0:
+    os._exit(0)
+while shell.live():
+    time.sleep(0.01)
+capture = session_tree.SessionCapture(shell, [shell], time.monotonic())
+print(session_tree.refresh([capture]), flush=True)
+"""
+
+
+def test_the_caller_does_not_keep_its_own_session_busy() -> None:
+    """A stop run from inside a session it closes (`nohup ava stop` in an
+    agent's shell) reads its own process there. That is not a process the stop
+    could take or wait for, so it does not hold the grace open."""
+    result = subprocess.run(  # noqa: S603 — the test's own interpreter
+        [sys.executable, "-c", _CALLER_IN_SESSION],
+        start_new_session=True,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        cwd=Path(__file__).resolve().parents[3],
+        env={**os.environ, "AVA_CONFIG_FETCH": "skip"},
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "False", "the caller's own process kept its session busy"
+
+
+def test_a_session_row_gone_since_the_scan_still_counts(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A process the scan read in the session but that exited before its pin
+    may have forked on its way out: the poll is not quiet."""
+    reaped: list[int] = []
+    for _ in range(2):
+        process = subprocess.Popen([sys.executable, "-c", ""])
+        process.wait(timeout=30)
+        reaped.append(process.pid)
+    shell = OwnedProcess(reaped[0], 1.0, None)
+    real_scan = session_tree._scan
+
+    def scan() -> session_tree._Table:
+        table = real_scan()
+        table.sessions[reaped[1]] = shell.pid
+        return table
+
+    monkeypatch.setattr(session_tree, "_scan", scan)
+    capture = session_tree.SessionCapture(shell, [shell], None)
+
+    assert session_tree.refresh([capture]) is True, "a row that exited since the read was ignored"
+
+
+def test_a_logged_command_name_is_quoted_and_capped() -> None:
+    """The command name in an unproven-process log line is shown the way the
+    closure notice shows it: quoted, escaped and capped."""
+    name = "evil\nname " + "x" * 200
+    process = cast("psutil.Process", SimpleNamespace(name=lambda: name))
+
+    shown = session_tree._command(process)
+
+    assert shown == shown_name(name)
+    assert "\n" not in shown and "x" * 100 not in shown
