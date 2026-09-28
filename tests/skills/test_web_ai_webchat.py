@@ -1,5 +1,6 @@
 """Unit tests for the web-ai shared driver
-(ava_builtins.skill_support.web_ai.webchat).
+(ava_builtins.skill_support.web_ai.webchat), plus its `_utils` leaf helpers
+(split out of webchat.py, 2026-08-07, Task #1011).
 
 The live browser behavior (real chrome MCP against the logged-in sites) was
 verified by hand during the build; these lock the *pure* tab-ownership logic
@@ -7,16 +8,23 @@ that regresses silently: every navigation opens its OWN fresh tab (new_page,
 never navigate_page on a shared current page), the [selected] page-id parse, and
 the one-shot close (a finished ask closes its tab; keep_tab / wait=False keep
 it). The chrome MCP seam is mocked so nothing drives a browser.
+
+The `_utils._cluster` tests below (2026-09-28 fix, PR #3550 follow-up P2-2)
+lock its home-derived download label to `shared.dotenv_boot.resolve_ava_home`
+instead of a raw `os.environ.get("AVA_HOME", "~/.ava")` guess — the same
+anti-pattern flagged for `_source_root` / the `web-sources` feed adapters,
+just for a cosmetic label rather than a write or credential target.
 """
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
 
-from ava_builtins.skill_support.web_ai import webchat
+from ava_builtins.skill_support.web_ai import _utils, webchat
 
 _PAGE_LIST = (
     "## Pages\n"
@@ -520,3 +528,31 @@ def test_check_login_confirms_logged_in_when_composer_present(
     monkeypatch.setattr(webchat, "close_tab", MagicMock())
 
     assert webchat.check_login("chatgpt") is True
+
+
+# --------------------------------------------------------------------------- #
+# `_utils._cluster` — never guesses `~/.ava` (P2-2)
+# --------------------------------------------------------------------------- #
+
+
+def test_cluster_label_strips_leading_dots(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(_utils, "resolve_ava_home", lambda: (Path("/home/user/.ava-t1"), True))
+    assert _utils._cluster() == "ava-t1"
+
+
+def test_cluster_label_defaults_to_ava_when_home_name_is_all_dots(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(_utils, "resolve_ava_home", lambda: (Path("/home/user/.ava"), True))
+    assert _utils._cluster() == "ava"
+
+
+def test_cluster_label_never_guesses_the_default_home(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Locks the fix: an unanchored checkout's scratch home (never a hardcoded
+    `~/.ava` guess) is what `_cluster` labels from when `resolve_ava_home`
+    itself resolves there."""
+    scratch = tmp_path / "unanchored-scratch-home"
+    monkeypatch.setattr(_utils, "resolve_ava_home", lambda: (scratch, False))
+    assert _utils._cluster() == (scratch.name.lstrip(".") or "ava")
