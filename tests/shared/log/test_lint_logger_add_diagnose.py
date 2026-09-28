@@ -52,6 +52,24 @@ def test_add_with_non_literal_diagnose_is_flagged():
     assert "must pass the literal `False`" in violations[0][1]
 
 
+def test_add_with_kwargs_unpack_only_is_flagged():
+    # `**opts` carries no literal `diagnose=False` the lint can see statically
+    # (its AST keyword has `arg=None`, so the `diagnose` lookup never matches
+    # it) — fail-closed treats this the same as an omitted kwarg entirely,
+    # even if the dict happens to hold `diagnose=False` at runtime.
+    src = "logger.add(sink, **opts)\n"
+    violations = _violations(src)
+    assert len(violations) == 1
+    assert "passes no `diagnose=False`" in violations[0][1]
+
+
+def test_add_with_explicit_diagnose_false_and_kwargs_unpack_is_clean():
+    # The literal keyword still wins when it rides alongside a `**opts`
+    # unpack for the sink's other settings.
+    src = "logger.add(sink, diagnose=False, **opts)\n"
+    assert _violations(src) == []
+
+
 def test_underscore_logger_alias_is_covered():
     src = "_logger.add(sink, diagnose=True)\n"
     assert len(_violations(src)) == 1
