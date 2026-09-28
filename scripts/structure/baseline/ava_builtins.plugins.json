@@ -12,8 +12,5 @@
     "ava_builtins/plugins/ava_sdk_reminder/agent_runtime.py::_SdkReminderAfterExecHook.__call__": 23,
     "ava_builtins/plugins/lm_google/gemini_cache.py::get_or_create_cache": 16,
     "ava_builtins/plugins/lm_google/provider.py::build": 18
-  },
-  "owner_bypasses": {
-    "ava_builtins/plugins/ava_fleet/skills/ava-fleet/reference/watch_idle.py::postgres-dial": 1
   }
 }

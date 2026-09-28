@@ -12,20 +12,19 @@ import json
 
 from services.agent_host.daemon import _release_pools_route
 from services.agent_host.pools import build_control_pool, build_shared_pool
-from shared.config import settings
 
 
 def test_host_pools_start_lazy() -> None:
     """`min_size=0`: an idle host holds no client connection to strand."""
-    shared = build_shared_pool("postgresql://unused")
-    control = build_control_pool("postgresql://unused")
+    shared = build_shared_pool()
+    control = build_control_pool()
     assert shared.min_size == 0
     assert control.min_size == 0
 
 
 async def test_release_route_closes_both_pools_and_the_next_borrow_reconnects() -> None:
-    workload = build_shared_pool(settings.data_plane.db_url)
-    control = build_control_pool(settings.data_plane.db_url)
+    workload = build_shared_pool()
+    control = build_control_pool()
     try:
         await workload.open()
         await control.open()
@@ -54,8 +53,8 @@ async def test_release_route_closes_both_pools_and_the_next_borrow_reconnects() 
 
 
 async def test_release_route_on_idle_pools_reports_zero() -> None:
-    workload = build_shared_pool(settings.data_plane.db_url)
-    control = build_control_pool(settings.data_plane.db_url)
+    workload = build_shared_pool()
+    control = build_control_pool()
     try:
         await workload.open()
         await control.open()

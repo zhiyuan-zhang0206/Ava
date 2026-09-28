@@ -15,11 +15,11 @@ from langchain_core.messages import RemoveMessage, convert_to_messages
 from langgraph.checkpoint.postgres import PostgresSaver
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 from langgraph.graph.message import REMOVE_ALL_MESSAGES
-from psycopg import Connection, connect
+from psycopg import Connection
 from psycopg.rows import DictRow, dict_row
 
 from shared.agents.history.delta_read_compat import reconstruct_delta_messages
-from shared.config import settings
+from shared.db import connect
 
 
 def _state_module() -> Any:
@@ -81,12 +81,8 @@ def apply_plugin_delta(state: Any, delta: dict[str, Any]) -> None:
 
 def load_snapshot(agent_id: int) -> tuple[Any, dict[str, Any] | None, dict[str, Any] | None]:
     """Read native state and pinned config; never create or update a checkpoint."""
-    with connect(
-        settings.data_plane.db_url,
-        autocommit=True,
-        prepare_threshold=None,
-        row_factory=cast(Any, dict_row),
-    ) as conn:
+    with connect(autocommit=True) as conn:
+        conn.row_factory = cast(Any, dict_row)
         typed_conn = cast(Connection[DictRow], conn)
         row = typed_conn.execute(
             "SELECT config_overlay, birth_config FROM agents_meta WHERE id = %s", (agent_id,)

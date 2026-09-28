@@ -7,35 +7,31 @@ from psycopg_pool import AsyncConnectionPool
 
 from agent.db import LoggingConnectionPool
 from shared.config import settings
-from shared.db import PG_KEEPALIVE_KWARGS, _restore_pooled_session_async
+from shared.db import async_pool
 
 
-def build_shared_pool(dsn: str) -> AsyncConnectionPool[psycopg.AsyncConnection]:
+def build_shared_pool() -> AsyncConnectionPool[psycopg.AsyncConnection]:
     """The host's turn/checkpoint pool, independent of active agent count.
 
     Agents waiting on models or tools need no dedicated connection. The client
     budget covers short database borrows and is shared by all active agents.
-    `autocommit=True` +
-    `prepare_threshold=None` satisfy the saver and pooler: the saver expects
-    autocommit, and never preparing
-    is what keeps borrows safe across PgBouncer's transaction pooling.
-    `min_size=0` keeps no warm idle connection: the pool opens connections on
-    demand, so the pre-stop release (`/release-db-pools`) drains it to zero and
-    the first borrow after resume reconnects lazily.
+    The transport posture (autocommit for the saver, no prepared statements
+    across PgBouncer backends, the per-borrow session scrub) is
+    `shared.db.async_pool`'s. `min_size=0` keeps no warm idle connection: the
+    pool opens connections on demand, so the pre-stop release
+    (`/release-db-pools`) drains it to zero and the first borrow after resume
+    reconnects lazily.
     """
-    return LoggingConnectionPool[psycopg.AsyncConnection](
-        dsn,
+    return async_pool(
+        LoggingConnectionPool[psycopg.AsyncConnection],
         pool_name="agent-host",
         min_size=0,
         max_size=settings.daemon.host_db_pool_max_size,
-        kwargs={"autocommit": True, "prepare_threshold": None, **PG_KEEPALIVE_KWARGS},
-        check=_restore_pooled_session_async,
         timeout=settings.agent.db_pool_acquire_timeout_seconds,
-        open=False,
     )
 
 
-def build_control_pool(dsn: str) -> AsyncConnectionPool[psycopg.AsyncConnection]:
+def build_control_pool() -> AsyncConnectionPool[psycopg.AsyncConnection]:
     """Reserved capacity for host ownership, recovery, and durable scans.
 
     PgBouncer remains the downstream server-connection multiplexer. This
@@ -45,13 +41,10 @@ def build_control_pool(dsn: str) -> AsyncConnectionPool[psycopg.AsyncConnection]
     `min_size=0` mirrors the shared pool: an idle host holds no client
     connection.
     """
-    return LoggingConnectionPool[psycopg.AsyncConnection](
-        dsn,
+    return async_pool(
+        LoggingConnectionPool[psycopg.AsyncConnection],
         pool_name="agent-host-control",
         min_size=0,
         max_size=settings.daemon.host_control_pool_max_size,
-        kwargs={"autocommit": True, "prepare_threshold": None, **PG_KEEPALIVE_KWARGS},
-        check=_restore_pooled_session_async,
         timeout=settings.agent.db_pool_acquire_timeout_seconds,
-        open=False,
     )

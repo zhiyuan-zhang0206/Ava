@@ -226,7 +226,8 @@ def _data_plane_receivers(roles: MachineRoles | None) -> tuple[str, str]:
     if roles is None or "gateway" not in roles:
         return "", ""
     from shared.config import settings
-    from shared.db import UNANCHORED_DB_SENTINEL, direct_db_url
+    from shared.db import direct_db_url
+    from shared.dotenv_boot import UNANCHORED_DB_SENTINEL
 
     db_url = direct_db_url()
     if db_url == UNANCHORED_DB_SENTINEL:

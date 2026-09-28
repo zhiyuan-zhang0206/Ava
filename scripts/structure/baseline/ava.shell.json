@@ -1,5 +1,0 @@
-{
-  "owner_bypasses": {
-    "ava/shell/sessions.py::postgres-dial": 4
-  }
-}
