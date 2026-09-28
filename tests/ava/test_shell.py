@@ -430,6 +430,41 @@ def test_new_default_cwd_is_agent_workspace(_agent_row: int) -> None:
         shell.kill(sid)
 
 
+def test_new_session_bare_python_resolves_into_venv(
+    _agent_row: int, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A persistent session is a login+interactive shell (`bash -l -i`,
+    PtySessionBackend, `shared/sessions/pty/launch.py::_fork_shell`), so it
+    sources the user's shell profile — which could in principle put something
+    ahead of the venv bin dir `forward_env_dict` (`shared/session_env.py`)
+    forwards on PATH. QA for #3590 verified by hand that bare `python` still
+    resolves into this checkout's venv inside such a session; this pins that
+    down as a regression test.
+
+    HOME is pointed at a scratch dir with a minimal `.bash_profile` so the
+    assertion does not depend on the developer machine's own shell
+    customization (pyenv/conda/nvm rewriting PATH) — only on the mechanism
+    this repo actually ships.
+    """
+    from shared.runtime_interpreter import runtime_python
+
+    fake_home = tmp_path / "home"
+    fake_home.mkdir()
+    (fake_home / ".bash_profile").write_text("# minimal profile — no PATH edits\n")
+    monkeypatch.setenv("HOME", str(fake_home))
+
+    expected = str(runtime_python())
+    sid = shell.new("test-venv-python", ttl=120)
+    try:
+        _ready(sid)
+        shell.send(sid, "command -v python")
+        out = _capture_until(sid, expected)
+        lines = [ln.strip() for ln in out.split("\n")]
+        assert expected in lines, out
+    finally:
+        shell.kill(sid)
+
+
 def test_kill_reaps_session_and_foreground_child(_agent_row: int) -> None:
     """kill() removes the session, and a FOREGROUND child is reaped with it —
     the PTY kill signals the shell's group AND the tty's foreground group (a

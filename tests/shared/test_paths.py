@@ -36,6 +36,15 @@ def test_workspace_dir_idempotent_and_per_agent(unit_home: Path) -> None:
     assert other != first
 
 
+def test_workspace_dir_none_fails_fast(unit_home: Path) -> None:
+    """A None agent_id must explode, not silently create a `workspaces/None`
+    directory — callers that legitimately have no agent id (pre-bootstrap) are
+    expected to branch to Path.home() themselves before calling this."""
+    with pytest.raises(ValueError, match="workspace_dir"):
+        paths.workspace_dir(None)  # pyright: ignore[reportArgumentType]
+    assert not (unit_home / "workspaces" / "None").exists()
+
+
 # ── prod_service_checkout_error (Task #966: 01:13 worktree accident) ──
 
 
