@@ -6,6 +6,7 @@ changes across a status call (`_snapshot` before/after).
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
@@ -184,3 +185,37 @@ def test_a_fleet_operation_shows_every_unit_and_the_published_release(
     assert status_module.cmd_release_status(operation=None, as_json=False) == 0
     out = capsys.readouterr().out
     assert f"unit {unit}: included" in out and "fleet release: commit" in out
+
+
+@pytest.mark.parametrize("damage", ["member", "manifest"])
+def test_an_unverifiable_selection_is_reported_with_the_operation(
+    home: Path, capsys: pytest.CaptureFixture[str], damage: str
+) -> None:
+    """The moment the selected image stops verifying is when an operator most
+    needs the operation journal; status reports the failure beside it."""
+    reference = build_image(home, "candidate")
+    activate_release(
+        home / "releases",
+        reference.artifact_digest,
+        expected_current=None,
+        manifest_digest=reference.manifest_digest,
+        host_abi=current_abi(),
+        schema_digest=reference.schema_digest,
+    )
+    root = home / "releases" / reference.artifact_digest
+    if damage == "member":
+        (root / "venv/bin/python").write_bytes(b"tampered\n")
+    else:
+        (root / "manifest.json").write_bytes(b"{}\n")
+    request = _request(home)
+    request.path.parent.mkdir(parents=True)
+    request.path.write_text(at_phase("prepared", request=request).model_dump_json())
+    (home / "updates/active").write_text(str(request.path))
+
+    assert status_module.cmd_release_status(operation=None, as_json=True) == 0
+    body = json.loads(capsys.readouterr().out)
+    assert set(body["current"]) == {"unverifiable"} and body["current"]["unverifiable"]
+    assert body["operation"]["id"] == str(request.id)
+    assert status_module.cmd_release_status(operation=None, as_json=False) == 0
+    out = capsys.readouterr().out
+    assert "current release: unverifiable (" in out and f"operation {request.id}" in out

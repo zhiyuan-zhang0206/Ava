@@ -115,7 +115,9 @@ published release state, and it rejoins only through a converge operation.
 ava cluster release status [--operation OPERATION_ID] [--json]
 ```
 
-Read-only. Reports the currently selected release (if any), the published
+Read-only. Reports the currently selected release (if any; one that no
+longer verifies, a corrupted member or malformed manifest, is reported as
+unverifiable with the reason, and the rest still renders), the published
 cluster release state (`releases/fleet-state.json`: current release,
 last-known-good, stale units, rejections) and, by default, this home's active
 operation journal (`$AVA_HOME/updates/active`): the fleet journal's phase,
