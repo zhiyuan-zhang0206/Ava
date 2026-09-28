@@ -36,7 +36,7 @@ Create a task and return the full `Task`. `title` is a single line (unique among
 - `priority`: `"P0"` (highest)..`"P3"` (lowest), default `"P2"`; illegal value raises `ValueError` (#663; board sorts within a status column by this).
 - `remind_interval_seconds`: no-update duration after which the owner is reminded. Default scales with priority — P0 30m / P1 1h / P2 2h / P3 4h. **Cannot be disabled**—`None` falls back to the priority default; an explicit value wins; cap 24h; out-of-range raises `ValueError`.
 - `token_budget` / `usd_budget`: optional positive token and finite USD ceilings. Only LLM calls explicitly tagged with this task count; every ceiling sends one owner notification when crossed, without terminating the agent.
-- **Rejects duplicate titles** among `in_progress` tasks (`ValueError`).
+- **Rejects duplicate titles** among `in_progress` tasks (`ValueError`) — the check is `shared.tasks.task_rules.open_title_holder`, shared with `update()`'s rename check and the gateway PATCH.
 - Triggers a `task_create` event log + publishes `task_created` (SSE, board invalidates and refetches).
 
 ### `create_and_assign(title, description, *, preset="coder", label=None, config_overlay=None, parent, priority="P2", token_budget=None, usd_budget=None, remind_interval_seconds=None) -> (Task, int)`
@@ -64,7 +64,7 @@ Filter the task list, ordered by `created_at` ascending. All parameters are opti
 Modify task fields, **pass only what you want to change**—omitted fields remain unchanged. `results` is replaced wholesale; to append progress, use `note=` or `log()`.
 
 - `title`: rename; must be unique among `in_progress` tasks, conflict raises `ValueError` (same duplicate check as `create`, checked inside row lock).
-- `status`: changing to `done` or `cancelled` is rejected while any direct child remains `in_progress`; close or cancel those children first. Other status changes and non-status updates are unaffected.
+- `status`: changing to `done` or `cancelled` is rejected while any direct child remains `in_progress`; close or cancel those children first. Other status changes and non-status updates are unaffected. Both the closed check and the open-child check are `shared.tasks.task_rules` (`is_closed` / `first_open_child`), shared with the gateway PATCH path so the two write surfaces cannot drift apart.
 - `owner`: pass an agent id to transfer/claim; **not passing or passing `None` both mean "unchanged"**—a task always has an owner, `owner=None` no longer releases a task.
 - `remind_interval_seconds`: **not passing or passing `None` both mean "unchanged"**—reminders cannot be disabled; only passing a positive integer (≤24h) changes it, exceeding raises `ValueError`.
 - `priority`: `None` (default) means "unchanged"; passing `"P0"`..`"P3"` writes it, illegal value raises `ValueError` (#663).

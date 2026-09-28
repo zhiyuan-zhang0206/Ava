@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 
 from shared.tasks.priority import DEFAULT_REMIND_INTERVAL_SECONDS, Priority, validate_priority
 from shared.tasks.task_notes import task_note_line
+from shared.tasks.task_rules import first_open_child, is_closed, open_title_holder
 
 if TYPE_CHECKING:
     # Annotation-only here; the runtime import sits at the raise site so plugin
@@ -263,14 +264,8 @@ def _write_task_update(
             f"task {task_id} is the system root task and is immutable — "
             f"it cannot be reassigned, completed, cancelled, or otherwise edited"
         )
-    if status in ("done", "cancelled"):
-        cur.execute(
-            "SELECT id, count(*) OVER () FROM agent_tasks "
-            "WHERE parent_id = %s AND status = 'in_progress' "
-            "ORDER BY id LIMIT 1",
-            (task_id,),
-        )
-        active_child = cur.fetchone()
+    if is_closed(status):
+        active_child = first_open_child(cur, task_id)
         if active_child is not None:
             child_id, child_count = active_child
             raise ValueError(
@@ -280,11 +275,7 @@ def _write_task_update(
     # A rename must keep create()'s invariant: no two in_progress
     # tasks share a title.
     if title is not None:
-        cur.execute(
-            "SELECT id, status FROM agent_tasks WHERE title = %s AND status = 'in_progress' AND id != %s LIMIT 1",
-            (title, task_id),
-        )
-        dup = cur.fetchone()
+        dup = open_title_holder(cur, title, exclude_id=task_id)
         if dup is not None:
             raise ValueError(
                 f"task with title {title!r} already exists (task #{dup[0]} is {dup[1]}) — "
