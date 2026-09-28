@@ -664,6 +664,43 @@ def test_start_pg_waits_for_reachable_bind_before_starting(
     assert calls != []
 
 
+def test_the_postmaster_inherits_no_ava_authority(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The postmaster is the longest-lived daemon (retained across releases), and
+    the `ava start` that spawns it may hold the delivered gateway login, the
+    generation, the API token, the human secret and the Redis admin password.
+    It keeps only the operator's process mechanics."""
+    delivered = {
+        "AVA_DB_URL": "postgresql://ava_g0_gateway:gen-password@127.0.0.1:6433/ava",
+        "AVA_DB_GENERATION": "0",
+        "AVA_API_TOKEN": "gateway-api-token-" + "t" * 32,
+        "AVA_CLUSTER_SECRET": "human-" + "h" * 40,
+        "AVA_REDIS_ADMIN_PASSWORD": "redis-admin-" + "r" * 20,
+        "AVA_HOME": "/Users/operator/.ava",
+    }
+    for key, value in {**delivered, "PATH": "/usr/bin:/bin", "TZ": "Asia/Shanghai"}.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.setattr(_ci, "_bind_addrs", lambda _secret: ["127.0.0.1"])  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_ci, "_ensure_pg_data", lambda: tmp_path)
+    monkeypatch.setattr(_ci, "_pg_running", lambda _port, _host: False)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_ci, "_pg_socket_dir", lambda: tmp_path)
+    envs: list[dict[str, str]] = []
+
+    def start(
+        _data: Path, _port: int, _argv: list[str], env: dict[str, str], **_kw: object
+    ) -> None:
+        envs.append(env)
+
+    monkeypatch.setattr(_ci.owned_postgres, "start", start)
+
+    assert _ci._start_pg(5433, "") == 0
+    [env] = envs
+    assert env["PATH"] == "/usr/bin:/bin" and env["TZ"] == "Asia/Shanghai"
+    assert not [key for key in env if key.startswith("AVA_")]
+    assert not set(delivered.values()) & set(env.values())
+
+
 def test_start_pg_hands_the_built_start_env_to_owned_launch(
     monkeypatch: pytest.MonkeyPatch, tmp_path: object
 ) -> None:

@@ -27,7 +27,8 @@ _DAEMON_ENV_NAMES = frozenset({"PATH", "HOME", "USER", "LOGNAME", "TMPDIR", "TZ"
 
 
 def daemon_process_env() -> dict[str, str]:
-    """The environment of a long-lived data-plane daemon (PgBouncer, Redis).
+    """The environment of a long-lived data-plane daemon (PgBouncer, Redis, and
+    the Postgres postmaster through `shared.pg_tools.pg_start_env`).
 
     Only the operator's process mechanics cross, never configuration or a
     credential: the boot pass may have put the gateway login, the write

@@ -13,9 +13,10 @@ every timestamptz as a stable `+00:00`-offset datetime instead of one that
 drifts with the host OS timezone.
 
 `pg_start_env` (Task #3754) is the third startup-path fragment: the child
-environment for a server start, supplying the macOS locale fallback the
-postmaster needs when the caller's environment carries none (a launchd job or
-a non-interactive ssh session).
+environment for a server start, the operator's process mechanics only (no
+credential the caller holds), plus the macOS locale fallback the postmaster
+needs when the caller's environment carries none (a launchd job or a
+non-interactive ssh session).
 """
 
 import os
@@ -31,6 +32,7 @@ import pytest
 
 from shared import pg_throwaway_base, pg_tools
 from shared.config import settings
+from shared.process_env import daemon_process_env
 
 _MMAP_ARGS = "-c shared_memory_type=mmap -c dynamic_shared_memory_type=mmap"
 
@@ -118,7 +120,7 @@ def test_pg_start_env_macos_fills_lc_all_when_missing(
     env = pg_tools.pg_start_env()
 
     assert env["LC_ALL"] == "en_US.UTF-8"
-    assert env["PATH"] == os.environ["PATH"], "the caller's env is inherited otherwise"
+    assert env["PATH"] == os.environ["PATH"], "the operator's PATH crosses"
 
 
 def test_pg_start_env_macos_keeps_a_caller_locale(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -160,16 +162,39 @@ def test_pg_start_env_macos_empty_value_counts_as_missing(
     assert pg_tools.pg_start_env()["LC_ALL"] == "en_US.UTF-8"
 
 
-def test_pg_start_env_non_macos_returns_the_caller_environment(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_pg_start_env_non_macos_adds_no_locale(monkeypatch: pytest.MonkeyPatch) -> None:
     """Linux needs nothing: an absent locale resolves to C without threads, and
     a minimal image may not have en_US.UTF-8 generated."""
     monkeypatch.setattr(pg_tools, "is_macos", lambda: False)
     monkeypatch.delenv("LC_ALL", raising=False)
     monkeypatch.delenv("LANG", raising=False)
 
-    assert pg_tools.pg_start_env() == dict(os.environ)
+    assert pg_tools.pg_start_env() == daemon_process_env()
+
+
+def test_pg_start_env_carries_only_process_mechanics(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The postmaster keeps the operator's PATH, home, user, temp dir, timezone
+    and locale, never configuration or a credential the caller holds."""
+    monkeypatch.setattr(pg_tools, "is_macos", lambda: False)
+    # The raw process environment the spawning `ava start` may hold (Settings
+    # is not involved): delivered credentials, `.env` secrets, libpq leftovers.
+    held = {
+        "AVA_API_TOKEN": "gateway-api-token-" + "t" * 32,
+        "AVA_CLUSTER_SECRET": "human-" + "h" * 40,
+        "PGPASSWORD": "inherited",
+        "TZ": "Asia/Shanghai",
+        "LC_CTYPE": "UTF-8",
+    }
+    for key, value in held.items():
+        monkeypatch.setenv(key, value)
+
+    env = pg_tools.pg_start_env()
+
+    assert set(env) <= {"PATH", "HOME", "USER", "LOGNAME", "TMPDIR", "TZ", "LANG"} | {
+        name for name in env if name.startswith("LC_")
+    }
+    assert env["TZ"] == "Asia/Shanghai" and env["LC_CTYPE"] == "UTF-8"
+    assert env["PATH"] == os.environ["PATH"]
 
 
 def test_throwaway_pg_ctl_start_is_handed_the_built_start_env(
