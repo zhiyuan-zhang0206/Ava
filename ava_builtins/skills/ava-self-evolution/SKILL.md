@@ -38,14 +38,14 @@ collect dataset -> detect what changed -> mine bad runs + analyze -> (replay) ->
 ```
 
 Helper scripts live in `reference/` (hyphenated dir, not importable — run as
-scripts with `.venv/bin/python`). Output lands under
-`$AVA_HOME/self_evolution/` (private per deployment), not in the repo.
+scripts with bare `python`, PATH-resolved to this checkout's venv). Output
+lands under `$AVA_HOME/self_evolution/` (private per deployment), not in the repo.
 
 ### 1. Collect the dataset
 
 ```
-$AVA_HOME/source/.venv/bin/python $AVA_HOME/skills/ava-self-evolution/reference/collect.py --days 1  # Batch run (~100 accumulated runs)
-$AVA_HOME/source/.venv/bin/python $AVA_HOME/skills/ava-self-evolution/reference/collect.py --days 7  # Monday weekly summary
+python $AVA_HOME/skills/ava-self-evolution/reference/collect.py --days 1  # Batch run (~100 accumulated runs)
+python $AVA_HOME/skills/ava-self-evolution/reference/collect.py --days 7  # Monday weekly summary
 ```
 
 The batch command reads the past day; the Monday summary reads the past week.
@@ -84,14 +84,14 @@ developed in its own repo would otherwise be invisible to this loop exactly
 where user modification concentrates. Sweep them too:
 
 ```python
-import json, os, subprocess
+import json, subprocess
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
-home = Path(os.environ.get("AVA_HOME") or Path.home() / ".ava")
+from shared.paths import ava_home, plugins_dir
+home = ava_home()  # checkout-anchored $AVA_HOME — never a guessed ~/.ava
 cutoff = (datetime.now(UTC) - timedelta(days=1)).isoformat()
 reg = json.loads((home / "installed.json").read_text())  # install registry
 print([p["name"] for p in reg["packages"] if (p.get("updated_at") or "") >= cutoff])
-for d in (home / "plugins").iterdir():                    # hand-cloned plugin repos
+for d in plugins_dir().iterdir():                         # hand-cloned plugin repos
     if (d / ".git").is_dir():
         log = subprocess.run(["git", "-C", str(d), "log", "--since=7 days ago",
                               "--pretty=%h %cI %s"], capture_output=True, text=True).stdout
@@ -109,7 +109,7 @@ If nothing changed, write a short report noting the dataset grew and stop early.
 ### 3. Mine the bad runs and analyze
 
 ```
-$AVA_HOME/source/.venv/bin/python $AVA_HOME/skills/ava-self-evolution/reference/mine.py
+python $AVA_HOME/skills/ava-self-evolution/reference/mine.py
 ```
 
 Clusters the active window's `failed`/`fumbled` runs and prints a markdown digest —

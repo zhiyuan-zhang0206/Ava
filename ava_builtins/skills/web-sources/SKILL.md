@@ -43,14 +43,18 @@ Do not hardcode any specific source names into this skill repository.
 
 ## Calling conventions (agent launches bash)
 
-> **Environment**: scripts run from the load dir (`$AVA_HOME/skills/`) with the
-> checkout's venv (`$AVA_HOME/source/.venv/bin/python`; in a dev checkout use
-> `<checkout>/.venv/bin/python` instead). `$AVA_HOME` is set in agent processes.
+> **Environment**: scripts run from the load dir (`$AVA_HOME/skills/`), in a
+> persistent shell session (`ava.shell.sessions.new` / `run_background`, not
+> the one-shot `ava.shell.run`): its PATH already resolves bare `python` to
+> this checkout's own venv interpreter — prod home, a dev worktree cluster, or
+> Windows all work the same way, no `.venv/bin/` / `Scripts\` prefix needed
+> (`shared/session_env.py::forward_env_dict`). `$AVA_HOME` is set in agent
+> processes.
 ```bash
 # Most adapters' CLI is in reference/feed.py:
-$AVA_HOME/source/.venv/bin/python $AVA_HOME/skills/web-sources/<adapter>/reference/feed.py <enum|sync|fetch> --...
+python $AVA_HOME/skills/web-sources/<adapter>/reference/feed.py <enum|sync|fetch> --...
 # youtube's CLI is in reference/ too (all adapters share the layout):
-$AVA_HOME/source/.venv/bin/python $AVA_HOME/skills/web-sources/youtube/reference/feed.py <...> --...
+python $AVA_HOME/skills/web-sources/youtube/reference/feed.py <...> --...
 ```
 
 Each adapter's subcommands, parameters, cursor model, and output schema differ — **before you start, read its SKILL.md**.
