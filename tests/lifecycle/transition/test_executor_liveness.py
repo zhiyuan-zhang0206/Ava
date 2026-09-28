@@ -234,6 +234,59 @@ def test_a_live_executor_still_pauses_grading(
     assert _sent_alerts == []
 
 
+def test_an_executor_killed_during_a_recovery_is_reported_lost(
+    _all_checks_pass: None,
+    _home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    _sent_alerts: list[str],
+) -> None:
+    """A `recover` decision records its reason as the journal's error until
+    the recovery's next phase, and the executor keeps running. Killed in that
+    window (SIGKILL, OOM, reboot), it leaves its stamp behind, stale: only a
+    leaving executor removes it, so that error is no hold and the executor
+    is lost."""
+    path = _journal(_home, created_at=datetime.now(UTC) - timedelta(hours=1), phase="stopping")
+    payload = json.loads(path.read_bytes())
+    payload["direction"] = "previous"
+    payload["error"] = "candidate failed"
+    decided = datetime.now(UTC) - timedelta(minutes=31)
+    payload["fleet"]["decisions"] = [
+        {
+            "kind": "recover",
+            "phase": "starting",
+            "reason": "candidate failed",
+            "at": decided.isoformat(),
+        }
+    ]
+    path.write_text(json.dumps(payload) + "\n")
+    _beat(path, datetime.now(UTC) - timedelta(minutes=30))
+    monkeypatch.setattr(cluster_health, "_gateway_liveness_with_retry", lambda: False)
+    monkeypatch.setattr(cluster_health, "_data_plane_abnormal", lambda: False)
+    _write_aged_alert_state(_home, _LIVENESS_FAILURE, age=timedelta(minutes=30))
+
+    assert cluster_health.run_health_probe() == 1
+    [alert] = _sent_alerts
+    assert "operation executor lost" in alert
+    assert f"release operation {path.parent.name} at stopping" in alert
+
+
+def test_a_held_operation_whose_executor_left_is_not_lost(tmp_path: Path) -> None:
+    """A hold's executor records the error and exits on purpose, removing its
+    stamp; a completed operation is no longer in flight at all."""
+    home = tmp_path.resolve()
+    path = _journal(home, created_at=datetime.now(UTC) - 2 * _TTL, phase="stopping")
+    held = json.loads(path.read_bytes()) | {"error": "injected failure"}
+    path.write_text(json.dumps(held) + "\n")
+    with executor_heartbeat(path):
+        pass
+    left = operation_in_flight(home)
+    assert left is not None and not left.alive and left.failed and not left.lost
+
+    completed = held | {"phase": "complete", "error": None}
+    path.write_text(json.dumps(completed) + "\n")
+    assert operation_in_flight(home) is None
+
+
 def test_a_recovering_operation_explains_nothing_past_its_first_phase(
     _all_checks_pass: None,
     _home: Path,
