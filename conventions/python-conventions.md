@@ -81,10 +81,10 @@ section covers fixing a violation and maintaining its baseline.
   module may not edit `sys.path`, call `site.addsitedir`, or load a module
   by file path (`spec_from_file_location`, `SourceFileLoader`,
   `runpy.run_path`); `scripts/structure/path_imports.py` finds them. Shared
-  code moves into a governed package the script imports normally. The
-  existing sites are frozen in the `path_imports` section with the same exact
-  count semantics as Rules 4 and 5, but there is no pairing: a new key is
-  always refused.
+  code moves into a governed package the script imports normally, and a
+  script that needs it runs on the checkout's venv python. The
+  `path_imports` baseline section is empty; unlike Rules 4 and 5 it has no
+  pairing, so any new key is refused.
 - **Rule 5 — single decision owners.** `scripts/structure/locality.py:DECISIONS`
   names design decisions with exactly one owning module — today,
   `postgres-dial` (`shared/db_connections.py`). Any other module making that
