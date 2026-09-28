@@ -21,7 +21,7 @@ signal into a fix, which is sweeper territory under
 
 Run `.venv/bin/python scripts/structure/cochange.py [--days N | --commits N]
 [--repo PATH] [--min-support N] [--min-confidence F] [--json]`. Defaults: a
-90-day first-parent window on `main`, min-support 8, min-confidence 0.6; a
+90-day first-parent window on `origin/main`, min-support 8, min-confidence 0.6; a
 markdown report on stdout, always exit 0 on a successful scan (an index, not
 a wall).
 

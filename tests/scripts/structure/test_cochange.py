@@ -69,7 +69,9 @@ def _run_capture(root: pathlib.Path | None, *extra: str) -> tuple[int, str]:
     the later occurrence).
     """
     window = [] if any(flag in extra for flag in ("--days", "--commits")) else ["--commits", "1000"]
-    args = [*(["--repo", str(root)] if root is not None else []), *window, *extra]
+    # A synthetic repo has no remote: read its local `main` (the tool defaults to origin/main).
+    branch = [] if root is None or "--branch" in extra else ["--branch", "main"]
+    args = [*(["--repo", str(root)] if root is not None else []), *window, *branch, *extra]
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):
         code = cochange.main(args)
@@ -120,14 +122,14 @@ def test_package_of_file(rel_path: str, expected: str) -> None:
 @pytest.mark.parametrize(
     ("raw", "expected"),
     [
-        ("old.py => new.py", "new.py"),
-        ("dir/{old => new}/file.py", "dir/new/file.py"),
-        ("pkg_a/{mod.py => renamed.py}", "pkg_a/renamed.py"),
-        ("gateway/routers/foo.py", "gateway/routers/foo.py"),
+        ("old.py => new.py", ("old.py", "new.py")),
+        ("dir/{old => new}/file.py", ("dir/old/file.py", "dir/new/file.py")),
+        ("pkg_a/{mod.py => renamed.py}", ("pkg_a/mod.py", "pkg_a/renamed.py")),
+        ("gateway/routers/foo.py", (None, "gateway/routers/foo.py")),
     ],
 )
-def test_numstat_new_path_takes_the_new_side(raw: str, expected: str) -> None:
-    assert cochange._numstat_new_path(raw) == expected
+def test_numstat_paths_split_a_rename(raw: str, expected: tuple[str | None, str]) -> None:
+    assert cochange._numstat_paths(raw) == expected
 
 
 @pytest.mark.parametrize(
@@ -283,7 +285,9 @@ def test_bulk_commit_is_excluded_from_pairing(tmp_path: pathlib.Path) -> None:
     assert not any("bulk_" in a or "bulk_" in b for a, b in pairs)
 
 
-def test_rename_keeps_the_old_path_identity_in_the_pair(tmp_path: pathlib.Path) -> None:
+def test_rename_is_followed_to_the_current_name(tmp_path: pathlib.Path) -> None:
+    """History before a rename counts under the file's current name, so a moved
+    module keeps its co-change record instead of splitting it across two names."""
     _init_repo(tmp_path)
     _commit(tmp_path, "chore: seed", {"pkg_a/mod.py": "x = 0\n", "pkg_b/mod.py": "x = 0\n"})
     for i in range(2):
@@ -300,14 +304,12 @@ def test_rename_keeps_the_old_path_identity_in_the_pair(tmp_path: pathlib.Path) 
     report = _run(tmp_path, "--min-support", "2", "--min-confidence", "0.5")
 
     pairs = {(row["a"], row["b"]): row for row in report["strong_pairs"]}
-    assert ("pkg_a/mod.py", "pkg_b/mod.py") in pairs
-    row = pairs[("pkg_a/mod.py", "pkg_b/mod.py")]
-    # "seed" + the two "touch both" commits all predate the rename: 3 co-occurrences
-    # under the OLD name; the rename commit itself carries the new name instead.
-    assert row["c"] == 3
-    assert row["n_a"] == 3
-    assert row["n_b"] == 4  # pkg_b/mod.py was also touched in the rename commit
-    assert not any(a == "pkg_a/renamed.py" or b == "pkg_a/renamed.py" for a, b in pairs)
+    row = pairs[("pkg_a/renamed.py", "pkg_b/mod.py")]
+    # seed + two "touch both" commits (under the old name) + the rename commit.
+    assert row["c"] == 4
+    assert row["n_a"] == 4
+    assert row["n_b"] == 4
+    assert not any("pkg_a/mod.py" in (a, b) for a, b in pairs)
 
 
 # --- JSON shape + exit code ----------------------------------------------

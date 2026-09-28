@@ -241,8 +241,9 @@ graduation test puts this here, split from Rule 4 (package doors) the way
 reuses Rule 4's own package resolution (`scripts.structure.locality._package_of`),
 so "package" here means exactly what the pre-commit gate means by it.
 
-Run `.venv/bin/python scripts/structure/cochange.py` (defaults: 90-day
-rolling first-parent window on `main`, min-support 8, min-confidence 0.6;
+Run `git fetch origin` then `.venv/bin/python scripts/structure/cochange.py`
+(defaults: 90-day rolling first-parent window on `origin/main`, min-support 8,
+min-confidence 0.6;
 `--days N` / `--commits N` to change the window, `--json` for machine
 output). Read the two metrics:
 
