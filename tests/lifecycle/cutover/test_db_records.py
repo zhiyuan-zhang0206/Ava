@@ -439,7 +439,7 @@ def test_dry_run_plans_every_repair_with_its_before_image_and_writes_nothing(
     assert _state(db_conn) == unchanged
 
 
-def _run(cluster: Cluster, inputs: Inputs) -> dict[str, Any] | None:
+def _run(cluster: Cluster, inputs: Inputs) -> dict[str, Any]:
     with _connection(write=True) as conn:
         return records.execute(conn, cluster.home, inputs, (GATEWAY, str(cluster.home)))
 
@@ -448,7 +448,6 @@ def test_execute_repairs_every_record(
     cluster: Cluster, db_conn: psycopg.Connection, tmp_path: Path
 ) -> None:
     run = _run(cluster, _inputs(tmp_path, cluster))
-    assert run is not None
     repaired = _survey(Inputs())
     observed = {
         "results": run["results"],
@@ -496,8 +495,6 @@ def test_execute_records_the_run_and_the_same_inputs_change_nothing(
     assert (record / "journal.json").stat().st_mode & 0o777 == 0o600
 
     assert _run(cluster, inputs) == run
-    fresh = _inputs(tmp_path, cluster, pending=None, lease=None, retire_units=())
-    assert _run(cluster, fresh) is None
     assert len(json.loads((record / "journal.json").read_text())["runs"]) == 1
     after = _survey(inputs).checks
     verdicts = {name: after[name]["verdict"] for name in ("D-1", "D-2", "D-6", "D-8")}
@@ -680,11 +677,11 @@ def test_an_unattested_identity_stays_inadmissible_and_a_later_run_converts_it(
         "the attestation does not prove 1 recorded identity(ies) gone",
     )
     run = _run(cluster, inputs)
-    assert run is not None and len(run["results"]["incarnations"]) == 2
+    assert len(run["results"]["incarnations"]) == 2
 
     fresh = _inputs(tmp_path, cluster, pending=None, lease=None, retire_units=())
     second = _run(cluster, fresh)
-    assert second is not None and second["results"]["incarnations"] == ["applied"]
+    assert second["results"]["incarnations"] == ["applied"]
     journal = json.loads((cluster.home / records.JOURNAL).read_text())
     assert [run["state"] for run in journal["runs"]] == ["done", "done"]
 

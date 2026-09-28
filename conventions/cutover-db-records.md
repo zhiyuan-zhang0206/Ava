@@ -171,7 +171,8 @@ the script exists. What can change a fenced row:
 `attestations/<sha256>.json`, each attestation byte-for-byte. The journal is a
 list of runs. A run records its inputs, the fenced summary it printed (which
 agents stay fenced, per verdict and reason) and every planned effect with its
-before image before the first write, then each effect's result. A crashed run
+before image before the first write, then each effect's result. A run that
+plans no effect is recorded too, so its fenced summary is on record. A crashed run
 continues only with the same inputs; the same inputs as a completed run change
 nothing; new inputs (a late attestation) append a run. Refusals are all
 decided before the first write of a run.

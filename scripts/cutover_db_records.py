@@ -18,7 +18,7 @@ the repairs; `--execute` applies them. Every check reading `attention` is a
 refusal, named with why: the repairs run only once none remains. D-8 `fenced`
 is not a refusal; before its first write `--execute` prints which agents stay
 fenced (a count and example ids per reason) and records that summary in the
-journal run.
+journal run, also for a run that plans no effect.
 
 Repairs, in order; each effect compares its row with the before and after
 images recorded at planning:
@@ -414,8 +414,12 @@ def _store_attestations(home: Path, inputs: Inputs) -> None:
 
 def _begin(
     conn: psycopg.Connection[Any], home: Path, inputs: Inputs, own: tuple[str, str]
-) -> dict[str, Any] | None:
-    """Plan a new run and record it, every effect with its before image, before any write."""
+) -> dict[str, Any]:
+    """Plan a new run and record it, every effect with its before image, before any write.
+
+    A run with no effect is recorded too: its fenced summary is the cutover
+    record of what stays fenced.
+    """
     with conn.transaction():
         found = survey(conn, inputs)
     plan = plan_repairs(found, inputs, own)
@@ -423,8 +427,6 @@ def _begin(
         raise RefusedError("; ".join(plan.refusals))
     fenced = fenced_summary(found.legacy)
     _print_fenced(fenced)
-    if not any(plan.effects.values()):
-        return None
     _store_attestations(home, inputs)
     return _as_json(
         {
@@ -472,7 +474,7 @@ def _print_fenced(fenced: list[dict[str, Any]]) -> None:
 
 def execute(
     conn: psycopg.Connection[Any], home: Path, inputs: Inputs, own: tuple[str, str]
-) -> dict[str, Any] | None:
+) -> dict[str, Any]:
     """Continue an incomplete run with the same inputs, or begin a new one; apply its
     effects. The same inputs as a completed run change nothing and return that run."""
     journal = read_journal(home) or {"version": VERSION, "home": str(home), "runs": []}
@@ -487,10 +489,7 @@ def execute(
     elif same:
         return runs[-1]
     else:
-        run = _begin(conn, home, inputs, own)
-        if run is None:
-            return None
-        runs.append(run)
+        runs.append(_begin(conn, home, inputs, own))
         _write_journal(home, journal)
     run = runs[-1]
     for step in STEPS:
@@ -661,8 +660,8 @@ def _run(conn: psycopg.Connection[Any], home: Path, inputs: Inputs) -> int:
     ensure_private_dir(home / RECORD)
     with file_lock(home / RECORD / "journal.lock", timeout_s=30):
         run = execute(conn, home, inputs, own_unit(home))
-    if run is None:
-        print("✓ nothing to repair.")
+    if not any(run["effects"].values()):
+        print(f"✓ nothing to repair; the run is recorded in {home / JOURNAL}.")
         return 0
     for step in STEPS:
         outcome = [str(result).split(":", 1)[0] for result in run["results"][step]]
