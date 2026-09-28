@@ -141,6 +141,32 @@ journal's `record-retire` effect, delete `start-intent.json`, and restore `.env`
 from its pre-adoption snapshot in `backups/env/` (moved to
 `cutover-rollback/residue/backups/env/` on a remote unit).
 
+### An unreadable adoption journal
+
+The journal is written atomically, so only a hand edit or disk damage makes it
+unreadable. Nothing can then tell whether the standing hold is the cutover
+hold, so every path that asks fails closed with "unreadable adoption journal":
+a bare `ava start` (the autostart job included), `ava cluster recover`,
+`--start` and `--resume`. That also blocks the ordinary start of every later
+hold on the home, not only the cutover's.
+
+- **A later hold** (a stop after the cutover hold was released): read its
+  exact holder and time with `ava maintenance status`, then run
+  `ava maintenance start --operation <holder> --acquired-at <time>` and
+  `ava maintenance resume --operation <holder> --acquired-at <time>`. Neither
+  needs the journal; the resume notes that it could not read it.
+- **The cutover hold itself**: that recovery would release it without the
+  go/no-go step's checks. Repair the journal and use `--resume`, or, if it
+  cannot be repaired, verify those checks by hand first (the adoption steps
+  all `done` as far as the damaged file shows, phase `ready` in
+  `ava maintenance status`, on a gateway a `done` last run in
+  `cutover-rollback/db-records/journal.json`) and record that in the cutover
+  record.
+
+A *missing* journal instead reads as a home that was never adopted, and an
+ordinary start then releases the hold like any other. Never delete or move
+`cutover-rollback/` while the cutover hold stands.
+
 ## A legacy stop hold with failure receipts
 
 Adoption keeps only a completed legacy stop's hold: phase `stopped` with no
@@ -190,4 +216,5 @@ before the host's code switch; read the receipts with the old
 - Keep the hosts awake and on AC until the holds are released: after the first
   start the new converge registers the autostart job again. A reboot's ordinary
   start keeps the cutover hold, but the unit is down until it is ready again.
-- Delete `cutover-rollback/` after the agreed retention period.
+- Delete `cutover-rollback/` after the agreed retention period, and never
+  before `--resume` released the cutover hold.
