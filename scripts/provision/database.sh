@@ -15,6 +15,11 @@
 # later via `sudo apt-get install ...`.
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_lib.sh"
 
+# The operator-approved PgBouncer build (pgdg, Ubuntu 24.04). The CI install
+# action pins the same string; shared/brew_pin.py holds the canonical value and
+# tests/ci/test_pgbouncer_pin.py asserts the copies match.
+PGBOUNCER_APT_VERSION="1.26.0-1.pgdg24.04+1"
+
 OS="$(prov_os)"
 case "$OS" in
   linux)
@@ -42,17 +47,21 @@ case "$OS" in
       prov_apt_install redis
       prov_sudo locale-gen en_US.UTF-8
 
-      # PgBouncer transaction pooler (per-cluster data plane, on by default;
-      # AVA_PGBOUNCER_ENABLED=false is the kill-switch). apt's build (>= 1.14)
-      # supports scram-sha-256 client auth.
-      prov_apt_install pgbouncer
-
       # Postgres 17 server via the official PGDG repo (Ubuntu 24.04 ships 16).
       # initdb/pg_ctl land in /usr/lib/postgresql/17/bin (not on PATH; the test
       # fixture + ava start resolve them there). Client tools (psql/pg_dump)
       # ride along as a dependency.
       prov_apt_install postgresql-common
       prov_sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
+
+      # PgBouncer transaction pooler (per-cluster data plane, on by default;
+      # AVA_PGBOUNCER_ENABLED=false is the kill-switch), pinned to the pgdg build
+      # CI tests against (.github/actions/install-pg-redis) and held so an apt
+      # upgrade cannot move it: its releases change pooled-session semantics.
+      # Installed after the pgdg repo is added — Ubuntu's own archive ships an
+      # older build. Moving the pin needs the maintainer's approval.
+      prov_apt_install "pgbouncer=${PGBOUNCER_APT_VERSION}"
+      prov_sudo apt-mark hold pgbouncer
       # pgvector rides the same pgdg repo — the memory search pgvector backend
       # needs the extension binaries (CREATE EXTENSION vector at connect).
       prov_apt_install postgresql-17 postgresql-17-pgvector

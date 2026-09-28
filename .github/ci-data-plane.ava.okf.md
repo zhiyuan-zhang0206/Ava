@@ -19,9 +19,10 @@ Postgres/Redis/PgBouncer installation lives in the composite action
 versioned cache includes the pooler's dependency closure. An executable
 PgBouncer probe follows installation, including the archive-only fallback, so a
 missing pooler fails setup instead of silently skipping the wire/capacity tests.
-PgBouncer is pinned to an exact pgdg version and setup fails on any other: its
-releases change pooled-session semantics the wire fixtures assert, so moving the
-pin is a dependency upgrade that needs the maintainer's approval.
+PgBouncer is pinned to an exact pgdg version (the one `scripts/provision/database.sh`
+installs and holds on Linux hosts) and setup fails on any other: its releases
+change pooled-session semantics the wire fixtures assert, so moving the pin is a
+dependency upgrade that needs the maintainer's approval.
 
 Both `backend` and `e2e` point `AVA_DB_URL` / `AVA_REDIS_URL` at unreachable
 sentinel ports: the suite must provision its own throwaway cluster, and a
