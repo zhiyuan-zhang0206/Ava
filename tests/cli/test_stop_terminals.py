@@ -32,6 +32,7 @@ import os
 import signal
 import time
 from collections.abc import Iterable
+from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -576,6 +577,28 @@ def test_a_terminal_left_after_the_closure_fails_the_stop_in_its_own_words(
     assert name in message
     assert "will not kill" not in message
     assert excinfo.value.stage == "terminals"
+
+
+def test_a_terminal_that_clears_within_the_stop_deadline_does_not_fail_the_stop(
+    home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The closure evidence waits until the stop's deadline, and at least the
+    SIGKILL leg's bound: a PTY host still tearing down past that bound but
+    clearing its record before the deadline is a closed terminal, not a
+    failed stop."""
+    monkeypatch.setitem(os.environ, "AVA_HOME", str(home))
+    monkeypatch.setenv("AVA_HOME_OVERRIDE", "1")
+    monkeypatch.setattr(strict, "_TERMINAL_KILL_WAIT_S", 0.2)
+    monkeypatch.setattr(strict, "capture_terminals", lambda: strict.TerminalInventory(()))
+    cleared_at = time.monotonic() + 0.6
+    name = "ava-agent-987-shell-2053-tearing-down"
+
+    def tearing_down() -> list[str]:
+        return [] if time.monotonic() >= cleared_at else [name]
+
+    monkeypatch.setattr(strict, "live_terminals", tearing_down)
+    strict.close_terminals(time.monotonic() + 10, "stop-test", datetime.now(UTC))
+    assert time.monotonic() >= cleared_at
 
 
 def _running(script: Path) -> list[int]:

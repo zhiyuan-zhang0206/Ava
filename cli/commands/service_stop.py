@@ -56,7 +56,8 @@ _WORK_POLL_S = 0.5
 _TERMINAL_STOP_GRACE_S = 10.0
 
 # The SIGKILL leg's own bound at a normal stop: each wait inside a session kill,
-# the wait for the killed sessions' hosts to end, and the closure evidence.
+# the wait for the killed sessions' hosts to end, and the least the closure
+# evidence waits (it also gets the rest of the stop deadline).
 # Every wait ends as soon as its processes are gone. The leg runs even when the
 # grace spent the rest of the stop deadline — a stop that reached its terminal
 # phase closes its terminals — so a stop can overrun its deadline by this
@@ -350,7 +351,13 @@ _Closed = dict[str, tuple[OwnedProcess, list[OwnedProcess]]]
 
 
 def _close(
-    terminals: list[_Terminal], notice: _Notice, *, grace_until: float, kill_s: float, stage: str
+    terminals: list[_Terminal],
+    notice: _Notice,
+    *,
+    grace_until: float,
+    kill_s: float,
+    stage: str,
+    deadline: float | None = None,
 ) -> None:
     """The one terminal closure: hang up, a bounded grace, SIGKILL, then the evidence.
 
@@ -364,7 +371,8 @@ def _close(
     a closed session's record is gone by any retry. Then a captured process
     that outlived its SIGKILL fails the closure with its identity
     (`StopIncompleteError` at `stage`); so does a terminal still live after it
-    (`_await_no_terminals`).
+    (`_await_no_terminals`), waited for until the caller's `deadline` and at
+    least `kill_s`.
     """
     _hang_up(terminals)
     graceful = _await_members(terminals, grace_until)
@@ -373,7 +381,8 @@ def _close(
     survivors = killed + _end_hosts(terminals, kill_s)
     if live_identities(identity for _terminal, identity in survivors):
         raise _terminals_incomplete(survivors, stage)
-    _await_no_terminals(time.monotonic() + kill_s, stage)
+    settled = time.monotonic() + kill_s
+    _await_no_terminals(settled if deadline is None else max(deadline, settled), stage)
 
 
 def _closed(terminals: list[_Terminal], killed: list[tuple[_Terminal, OwnedProcess]]) -> _Closed:
@@ -477,7 +486,9 @@ def close_terminals(deadline: float, operation: str, acquired_at: datetime) -> N
     the grace spent the rest of the deadline — a stop that reached its
     terminal phase closes its terminals
     (decisions/2026-09-28-stop-escalates-to-sigkill.md). A process that
-    outlives its SIGKILL fails the stop, which keeps its maintenance hold.
+    outlives its SIGKILL fails the stop, which keeps its maintenance hold. A
+    PTY host still tearing down after that gets the rest of the deadline, and
+    at least `_TERMINAL_KILL_WAIT_S`, to clear its record.
 
     Busy sessions whose shell is verified gone — a job the SIGKILL cut short
     included — leave a durable closure notice for their owner agent (issue
@@ -499,6 +510,7 @@ def close_terminals(deadline: float, operation: str, acquired_at: datetime) -> N
         grace_until=min(deadline, time.monotonic() + _TERMINAL_STOP_GRACE_S),
         kill_s=_TERMINAL_KILL_WAIT_S,
         stage="terminals",
+        deadline=deadline,
     )
 
 
