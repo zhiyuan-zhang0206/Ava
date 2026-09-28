@@ -49,6 +49,13 @@ cap-domain exits use `exitType`, `expires`, and `approver`); readers ignore unkn
 - **first-seen**: 2026-09-28 (locality class first run)
 - **last-verified**: 2026-09-28
 
+### locality:gateway/schemas/__init__.py:shared/api_contracts/contracts.py
+- **class**: locality
+- **status**: open
+- **evidence**: `cochange.py`: c=15, confidence 65%. Every new gateway route edits two hubs: the `RouteContract` doorplate in `shared/api_contracts/contracts.py` (the deliberate single declaration point, lint-enforced — not the leak) and the hand-maintained root re-export of `gateway/schemas/__init__.py` (127 names, imported by 40 files): `04c4cadc0` (`ResolveBatchIn` + resolve-batch doorplate), `3e0d4c319` (`AgentCompact`), `e9253ee4e` (`ConfigAuditView` + config-audit doorplate). Leaked decision: which schema models are public is re-declared in the root facade on top of the family module that defines them. Fix: callers import the family module (`gateway.schemas.<family>`) and the root becomes a docstring-only package door, the `cli.commands` precedent. Waits for #3479, which rewrites the root and 8 of its importers.
+- **first-seen**: 2026-09-28 (locality class)
+- **last-verified**: 2026-09-28
+
 ### locality:cli/commands/agents/control.py:cli/parsers/agents.py
 - **class**: locality
 - **status**: open
