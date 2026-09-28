@@ -243,7 +243,7 @@ census; `authorizing` mints the next number for the selected image behind a
 fresh pooler; start and observation bind exactly that generation; the finite
 executor dials the owner-only socket as the administrator acting as the
 gateway group
-([release execution](../../cli/release_transition/execution.ava.okf.md#write-generations)).
+([release write generations](../../cli/release_transition/write-generations.ava.okf.md)).
 A recovery fences the failed candidate's generation before the predecessor
 gets a new one. The Linux preview's release A/B/A records the generation
 sequence and proves each fence with a stale writer outside root custody

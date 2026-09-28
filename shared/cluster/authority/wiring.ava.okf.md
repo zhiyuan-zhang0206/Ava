@@ -124,4 +124,4 @@ and the coordinator channel's authentication:
   `mint_generation` -> pooler serving the pending pair -> a pooled `SELECT 1`
   as each login -> `activate`; observation re-checks the invariant and that
   `stale_sessions` is empty. The journal records each step's intent and
-  receipt ([[cli/release_transition/execution.ava.okf.md|release execution]]).
+  receipt ([[cli/release_transition/write-generations.ava.okf.md|release write generations]]).

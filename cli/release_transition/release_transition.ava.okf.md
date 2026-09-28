@@ -49,6 +49,8 @@ cannot authorize disruption of a different release.
 
 `execute.py` runs the fleet coordinator (or a unit follower, or PITR) over
 `local.py`'s one-home effects: [[cli/release_transition/execution.ava.okf.md]].
+Each direction's database write generations:
+[[cli/release_transition/write-generations.ava.okf.md]].
 
 ## PITR operations
 

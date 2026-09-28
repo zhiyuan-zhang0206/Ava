@@ -66,7 +66,7 @@ on stdin.
   executor refuses by name before creating an operation. The finite executor
   the submission launches receives none of this: its launch environment is
   fixed, and it dials as the OS-user administrator
-  ([[cli/release_transition/execution.ava.okf.md]]).
+  ([[cli/release_transition/write-generations.ava.okf.md]]).
 - **Ops** (`release_image_exec`, `ops/ops_cluster.py`): `{entry, image,
   request}` with the request base64-encoded. The unit's ops server requires
   the envelope to name its own home and machine and `image` as executor,
