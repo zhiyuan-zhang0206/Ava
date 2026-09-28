@@ -23,7 +23,7 @@ kimi uses `ChatMoonshot` (`langchain-moonshot`) and captures reasoning in
 streaming fan-out (`RedisStreamHandler`) and timeline (`shared/agents/history/timeline.py`)
 handle that style. Its binding lives in `ava_builtins/plugins/lm_moonshot`.
 
-glm / mimo / qwen use `ReasoningContentChatModel` (`shared/lm/reasoning_compat.py`), a
+glm / mimo / qwen use `ReasoningContentChatModel` (`shared/lm/compat/openai_reasoning.py`), a
 ChatOpenAI subclass folding `reasoning_content` deltas into canonical
 `{"type":"thinking", ...}` blocks — none has a suitable community package
 (`langchain-zhipuai` unmaintained; `langchain_zhipu` needs `langchain<0.3.0`;
