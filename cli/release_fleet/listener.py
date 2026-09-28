@@ -22,21 +22,25 @@ idempotent: a report names the instruction it answers.
 Before any proof is checked, what an unauthenticated peer can cost is bounded:
 a body is read only when one plain decimal `Content-Length` declares it
 within `MAX_BODY_BYTES` (otherwise `400` or `413`, nothing read), a socket
-read that waits `READ_TIMEOUT_S` drops the connection, and at most
-`MAX_CONCURRENT_REQUESTS` are served at once (a connection beyond them is
-closed unanswered). Every request that does not authenticate (a wrong route,
-operation or unit, a missing enrollment, a failing proof) gets one uniform
-`401`; the reason is only logged on the coordinator.
+read that waits `READ_TIMEOUT_S` drops the connection, so does a request
+still unanswered `REQUEST_DEADLINE_S` after its accept (a peer trickling
+bytes inside every read timeout), and at most `MAX_CONCURRENT_REQUESTS` are
+served at once (a connection beyond them is closed unanswered). Every request
+that does not authenticate (a wrong route, operation or unit, a missing
+enrollment, a failing proof) gets one uniform `401`; the reason is only
+logged on the coordinator.
 """
 
 from __future__ import annotations
 
+import io
 import json
 import queue
 import re
 import socket
 import threading
-from collections.abc import Callable, Iterable, Mapping
+import time
+from collections.abc import Buffer, Callable, Iterable, Mapping
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -54,13 +58,16 @@ from shared.cluster.authority.channel import (
     verify_request,
 )
 from shared.cluster.authority.unit import Enrollment, UnitIdentity, load_enrollment
+from shared.deploy_timing import COORDINATOR_READ_TIMEOUT_S, COORDINATOR_REQUEST_DEADLINE_S
 from shared.log import logger
 
 MAX_BODY_BYTES = 64 * 1024
 _DECIMAL = re.compile(r"[0-9]+")
-# How long one socket read may wait: a unit sends each request whole, so only
-# a stalled or hostile peer waits this long, and its connection is dropped.
-READ_TIMEOUT_S = 10.0
+# How long one socket read may wait, and the whole request from accept (the
+# lattice's coordinator-channel clocks): a unit sends each request whole, so
+# only a stalled or trickling peer reaches either, and its connection is dropped.
+READ_TIMEOUT_S = COORDINATOR_READ_TIMEOUT_S
+REQUEST_DEADLINE_S = COORDINATOR_REQUEST_DEADLINE_S
 # Requests served at once. Each unit's follower holds at most one, so this is
 # far above a fleet's need; a peer opening more is closed unanswered, which a
 # unit reads as the coordinator being away and retries.
@@ -303,10 +310,37 @@ class _BoundedServer(ThreadingHTTPServer):
             self._slots.release()
 
 
+class _DeadlineReader(io.RawIOBase):
+    """A request's socket reads: each waits at most the read timeout and never
+    past the request's deadline, where it raises `TimeoutError`, which the
+    stdlib handler answers by dropping the connection."""
+
+    def __init__(self, connection: socket.socket, deadline: float) -> None:
+        self._connection = connection
+        self._deadline = deadline
+
+    def readable(self) -> bool:
+        return True
+
+    def readinto(self, buffer: Buffer, /) -> int:
+        remaining = self._deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError("the coordinator request deadline passed")
+        self._connection.settimeout(min(READ_TIMEOUT_S, remaining))
+        return self._connection.recv_into(buffer)
+
+
 def _handler(listener: CoordinatorListener) -> type[BaseHTTPRequestHandler]:
     class Handler(BaseHTTPRequestHandler):
         server_version = "ava-coordinator/1"
         timeout = READ_TIMEOUT_S
+
+        def setup(self) -> None:
+            """Start the request's deadline as the connection is taken from accept."""
+            super().setup()
+            self.rfile.close()
+            deadline = time.monotonic() + REQUEST_DEADLINE_S
+            self.rfile = io.BufferedReader(_DeadlineReader(self.connection, deadline))
 
         def version_string(self) -> str:
             """The protocol alone: the stdlib default appends the Python version."""

@@ -28,7 +28,8 @@ is read in its exact JSON type: a reader frozen into an image can never be
 tightened, so `true`, `1.0` or `"1"` for the version and any other UUID
 spelling are refused now. The reader ignores every other field and every unknown kind,
 so a newer candidate may add request kinds (a fleet request) and fields without
-a second release. The executor is verified with the reader's own image
+a second release; for the same reason a field meant to constrain what the
+previous image does must bump `version`, since v1 ignores it. The executor is verified with the reader's own image
 verification: full inventory hashes, packaged source identity, and the image's
 ABI tag against this host as observed now. The retained-image store layout and
 manifest format are consequently part of the same contract.

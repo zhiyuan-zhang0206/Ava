@@ -19,7 +19,7 @@ from typing import Literal, NamedTuple, Self, get_args
 
 from pydantic import AwareDatetime, Field, model_validator
 
-from cli.release_fleet.policy import Cohort, FleetPolicy, UnitKey
+from cli.release_fleet.policy import Cohort, FleetPolicy, UnitKey, _agent_ids
 from cli.release_transition.request import Record
 from shared.cluster.authority.model import Direction
 
@@ -37,6 +37,8 @@ CORE_SIGNALS: tuple[CoreSignal, ...] = get_args(CoreSignal)
 AffectedReason = Literal[
     "unit_failed", "unit_unknown", "runtime_error", "quarantined", "not_live", "unobserved"
 ]
+# The definitive facts of an agent sample: they can only grow within an interval.
+Fact = Literal["runtime_error", "quarantined"]
 _REASON_ORDER: tuple[AffectedReason, ...] = get_args(AffectedReason)
 Stage = Literal["start", "watch"]
 # A unit's judged state; "pending" is not judged until the interval closes.
@@ -74,6 +76,21 @@ class AgentReport(Record):
     observed_at: AwareDatetime
 
 
+class WindowFact(Record):
+    """One sample's first sightings of one definitive fact: the watch window's
+    memory (`first_sightings`), journaled as agent ids so a whole cohort's
+    sightings cost a few bytes per agent."""
+
+    fact: Fact
+    at: AwareDatetime
+    agents: tuple[int, ...] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def canonical(self) -> Self:
+        _agent_ids(self.agents, "sighted agents")
+        return self
+
+
 class CoreReport(Record):
     signal: CoreSignal
     ok: bool
@@ -86,17 +103,28 @@ class Evidence(Record):
 
     `since` is when the gateway started (start barrier) or when admission
     resumed (watch). Samples older than `since` are not evidence of the
-    interval and are ignored, except a unit's recorded `failed` mark.
+    interval and are ignored, except a unit's recorded `failed` mark. `facts`
+    are what the window already saw: they add reasons, never liveness.
     """
 
     since: AwareDatetime
     units: tuple[UnitReport, ...] = ()
     agents: tuple[AgentReport, ...] = ()
+    facts: tuple[WindowFact, ...] = ()
     core: tuple[CoreReport, ...] = ()
 
     def of_agent(self, agent: int) -> list[AgentReport]:
         """This agent's samples within the interval."""
         return [s for s in self.agents if s.agent == agent and s.observed_at >= self.since]
+
+    def seen(self) -> dict[int, set[AffectedReason]]:
+        """Each agent's facts the window saw within the interval."""
+        seen: dict[int, set[AffectedReason]] = {}
+        for sighting in self.facts:
+            if sighting.at >= self.since:
+                for agent in sighting.agents:
+                    seen.setdefault(agent, set()).add(sighting.fact)
+        return seen
 
     def of_signal(self, signal: CoreSignal) -> list[CoreReport]:
         """This core signal's samples within the interval."""
@@ -104,8 +132,9 @@ class Evidence(Record):
 
 
 class AffectedAgent(Record):
+    """An affected cohort agent; its unit is the frozen cohort's."""
+
     agent: int = Field(ge=1)
-    unit: UnitKey
     reasons: tuple[AffectedReason, ...] = Field(min_length=1)
 
 
@@ -168,9 +197,10 @@ class _Assessment(NamedTuple):
 
 
 def first_sightings(
-    known: tuple[AgentReport, ...], sampled: tuple[AgentReport, ...], *, since: datetime
-) -> tuple[AgentReport, ...]:
-    """The samples that show an agent's runtime error or quarantine not yet known.
+    known: tuple[WindowFact, ...], sampled: tuple[AgentReport, ...], *, since: datetime
+) -> tuple[WindowFact, ...]:
+    """The runtime errors and quarantines `sampled` shows that `known` has not
+    seen since `since`, one `WindowFact` per fact and sample time.
 
     Such a fact is definitive — it can only grow within the interval — but
     the signal it is read from is not: a completed turn clears the fatal-turn
@@ -178,22 +208,25 @@ def first_sightings(
     judges it with every later sample, so a window never forgets it.
     """
     seen = {
-        (report.agent, fact)
-        for report in known
-        if report.observed_at >= since
-        for fact in _facts(report)
+        (agent, sighting.fact)
+        for sighting in known
+        if sighting.at >= since
+        for agent in sighting.agents
     }
-    sightings: list[AgentReport] = []
+    fresh: dict[tuple[datetime, Fact], set[int]] = {}
     for sample in sampled:
-        facts = {(sample.agent, fact) for fact in _facts(sample)}
-        if facts - seen:
-            sightings.append(sample)
-            seen |= facts
-    return tuple(sightings)
+        for fact in _facts(sample):
+            if (sample.agent, fact) not in seen:
+                fresh.setdefault((sample.observed_at, fact), set()).add(sample.agent)
+                seen.add((sample.agent, fact))
+    return tuple(
+        WindowFact(fact=fact, at=at, agents=tuple(sorted(agents)))
+        for (at, fact), agents in sorted(fresh.items())
+    )
 
 
-def _facts(sample: AgentReport) -> set[AffectedReason]:
-    shown: set[AffectedReason] = set()
+def _facts(sample: AgentReport) -> set[Fact]:
+    shown: set[Fact] = set()
     if sample.runtime_error:
         shown.add("runtime_error")
     if sample.quarantined:
@@ -293,7 +326,7 @@ def _assess(
     final: bool,
 ) -> _Assessment:
     _require_coherent(cohort, evidence, now)
-    if stage == "start" and evidence.agents:
+    if stage == "start" and (evidence.agents or evidence.facts):
         raise ValueError("agents resume after the start barrier; their samples judge the watch")
     units = _unit_states(cohort, evidence, fresh_from=fresh_from, final=final)
     affected = _affected(cohort, units, evidence, stage=stage, fresh_from=fresh_from, final=final)
@@ -318,13 +351,17 @@ def _require_coherent(cohort: Cohort, evidence: Evidence, now: datetime) -> None
         *evidence.agents,
         *evidence.core,
     )
-    if any(sample.observed_at > now for sample in samples):
+    if any(sample.observed_at > now for sample in samples) or any(
+        sighting.at > now for sighting in evidence.facts
+    ):
         raise ValueError("evidence cannot be newer than the verdict")
     if outside := {report.unit.label for report in evidence.units} - {
         unit.label for unit in cohort.unit_keys
     }:
         raise ValueError(f"evidence names units outside the operation: {sorted(outside)}")
-    if strangers := {report.agent for report in evidence.agents} - cohort.members.keys():
+    named = {report.agent for report in evidence.agents}
+    named.update(agent for sighting in evidence.facts for agent in sighting.agents)
+    if strangers := named - cohort.members.keys():
         raise ValueError(f"evidence names agents outside the frozen cohort: {sorted(strangers)}")
 
 
@@ -355,12 +392,14 @@ def _affected(
     final: bool,
 ) -> tuple[AffectedAgent, ...]:
     affected: list[AffectedAgent] = []
+    seen = evidence.seen()
     for agent, unit in sorted(cohort.members.items()):
         reasons = _unit_reasons(units[unit])
         if stage == "watch":
             reasons |= _sample_reasons(evidence.of_agent(agent), fresh_from=fresh_from, final=final)
+            reasons |= seen.get(agent, set())
         if reasons:
-            affected.append(AffectedAgent(agent=agent, unit=unit, reasons=_ordered(reasons)))
+            affected.append(AffectedAgent(agent=agent, reasons=_ordered(reasons)))
     return tuple(affected)
 
 

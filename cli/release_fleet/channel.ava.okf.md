@@ -41,7 +41,9 @@ request carries an HMAC proof keyed by the unit's enrollment
 (`shared.cluster.authority.channel`), checked against the gateway's current
 record in a per-run replay window, so wrong operations, unknown units,
 forged, replayed or skewed requests, and rotated or revoked enrollments are
-refused. `client.py` is the unit side with typed failures: the coordinator
+refused. Before any proof, a request's body is bounded, each socket read and
+the whole request from accept have their own deadlines (the lattice's
+coordinator-channel clocks), and at most 32 are served at once. `client.py` is the unit side with typed failures: the coordinator
 away, a stale answer, a refusal, a deferred capability.
 
 ## Instructions and barriers
@@ -97,6 +99,11 @@ must be fixed before dbgen-8 relaxes that gate:
   re-stamps a journaled `watch` answer with a fresh `at` without observing
   the unit's root, so a dead unit keeps reporting ready through the window.
   Re-observe the root before re-stamping.
+- **A reconnecting peer still competes for the listener's slots.** Each
+  request is dropped `COORDINATOR_REQUEST_DEADLINE_S` after its accept, so
+  no connection holds one of the 32 slots for good, but a peer that
+  reconnects as fast as it is dropped keeps them busy against the units.
+  Give each source its own slot budget.
 - **The unit `close` bound is below a unit's worst-case stop.**
   `Coordinator._stopping` bounds the `close` barrier by `close_s +
   cancel_grace_s + drain_s` (130 s by default), but a unit's own stop is the

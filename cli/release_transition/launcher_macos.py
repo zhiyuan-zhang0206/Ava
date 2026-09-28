@@ -49,6 +49,7 @@ from services.permissions_helper.finite_artifact import HelperArtifact
 from shared.native_process import native_boot_id
 from shared.native_process.ownership import OwnedProcess, capture_tree
 from shared.proc import run_bounded
+from shared.release_operation import open_launch_grace
 from shared.runtime_release import VerifiedRelease
 from shared.verified_file import regular_bytes
 
@@ -653,6 +654,7 @@ def _dispatch(journal: Journal, planned: DarwinLaunch) -> None:
         raise RuntimeError("executor job already exists; recover by readback, never duplicate")
     _require_launchable(planned)
     _write_plist(planned)
+    open_launch_grace(journal.operation.request.path)
     journal.mark_launch_attempted()
     result = _command([LAUNCHCTL, "bootstrap", planned.domain, planned.plist])
     if result.returncode:

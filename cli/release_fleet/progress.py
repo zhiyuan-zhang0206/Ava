@@ -25,7 +25,7 @@ from pydantic import AwareDatetime, Field, JsonValue, model_validator
 from cli.release_fleet.alerting import FleetAlert, deliveries
 from cli.release_fleet.policy import AlertRoute, Cohort, UnitCohort, UnitKey
 from cli.release_fleet.request import FleetRequest, UnitRequest
-from cli.release_fleet.workload import AgentReport, Verdict
+from cli.release_fleet.workload import Verdict, WindowFact
 from cli.release_transition.authority_evidence import GenerationRef
 from cli.release_transition.request import Digest, Record
 from shared.cluster.authority.model import Direction
@@ -320,7 +320,7 @@ class FleetProgress(Record):
     # The watch window's first sighting of each agent's runtime error or
     # quarantine (`workload.first_sightings`): a later sample no longer shows
     # it, but the window never forgets it.
-    window_facts: tuple[AgentReport, ...] = ()
+    window_facts: tuple[WindowFact, ...] = ()
     verdicts: tuple[Verdict, ...] = ()
     alerts: tuple[AlertRecord, ...] = ()
     decisions: tuple[Decision, ...] = ()
