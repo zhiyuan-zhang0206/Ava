@@ -387,26 +387,33 @@ def remove_cron_lines(host: Host, lines: tuple[str, ...], archive: Path) -> int:
     return removed
 
 
+def _checked(host: Host, *argv: str) -> None:
+    result = host.run(*argv)
+    if result.returncode != 0:
+        raise RuntimeError(f"{' '.join(argv)} failed: {result.stderr.strip()}")
+
+
 def retire_unit(host: Host, unit: SystemdUnit, archive: Path) -> None:
-    """Disable and stop the unit, then move (or copy, for a system unit) its file."""
+    """Disable and stop the unit, then move (or copy, for a system unit) its file.
+
+    Every manager call must succeed (a user manager without a bus, as over SSH
+    without lingering, fails loudly before the file moves). Once the unit file
+    is gone a re-run only reloads the manager: the retirement already ran.
+    """
     from shared.private_storage import ensure_private_dir, write_private_bytes
 
     path = Path(unit.path)
     if unit.scope == "user":
-        host.run("systemctl", "--user", "disable", "--now", unit.unit)
-        _move(path, archive / unit.unit)
-        host.run("systemctl", "--user", "daemon-reload")
+        if path.exists():
+            _checked(host, "systemctl", "--user", "disable", "--now", unit.unit)
+            _move(path, archive / unit.unit)
+        _checked(host, "systemctl", "--user", "daemon-reload")
         return
     if path.exists():
         copy = archive / unit.unit
         if not copy.exists():
             ensure_private_dir(archive)
             write_private_bytes(copy, path.read_bytes())
-    for argv in (
-        ("systemctl", "disable", "--now", unit.unit),
-        ("rm", "-f", str(path)),
-        ("systemctl", "daemon-reload"),
-    ):
-        result = host.run("sudo", "-n", *argv)
-        if result.returncode != 0:
-            raise RuntimeError(f"sudo -n {' '.join(argv)} failed: {result.stderr.strip()}")
+        _checked(host, "sudo", "-n", "systemctl", "disable", "--now", unit.unit)
+        _checked(host, "sudo", "-n", "rm", "-f", str(path))
+    _checked(host, "sudo", "-n", "systemctl", "daemon-reload")
