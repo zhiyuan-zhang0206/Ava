@@ -122,10 +122,13 @@ def _restore_pooled_session(conn: psycopg.Connection) -> None:
     """Scrub a pooled connection back to its baseline session state.
 
     PgBouncer transaction pooling hands any backend to any client transaction
-    and never resets session state on the ordinary release path (measured on
-    1.25.2, 2026-09-02 P0), so a borrower can inherit another client's session
-    GUCs — `default_transaction_read_only=on` makes every write in the
-    transaction fail with ReadOnlySqlTransaction. Restoring the baseline is the
+    and never resets session state on the ordinary release path, so a borrower
+    can inherit another client's session GUCs. PgBouncer >= 1.26 isolates the
+    parameters PostgreSQL reports to clients (default_transaction_read_only,
+    the 2026-09-02 P0 vector), but unreported ones still leak — another
+    client's `search_path` fails every unqualified statement, its
+    `statement_timeout = 0` lifts the F7 ceiling — and a remote-managed data
+    plane's pooler may isolate nothing. Restoring the baseline is the
     client-side fix: RESET ALL + the statement ceiling, run as one transaction
     at every sanctioned pooled entry point — on a fresh dial (`connect()`), on
     a pool backend's creation (`configure`), and on every borrow (`check`).
