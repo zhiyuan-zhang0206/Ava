@@ -569,12 +569,12 @@ _tps(
     "Output TPS (avg / max agent / min agent)",
     "Output throughput = Σ(out_total) ÷ Σ(latency_sec), tok/s. out_total is "
     "the log_llm_usage total output tokens, incl. reasoning (Anthropic "
-    "thinking / OpenAI reasoning both count into output_tokens; observe.py "
-    "does not add them again) — i.e. pure decode generation speed (~79 tok/s "
-    "measured over the last 24h). latency is the llm_usage wall-clock "
-    "(latency_ms). avg = token-weighted over all calls; max/min = the "
-    "fastest/slowest agent per bucket (agent_id IS NOT NULL, only buckets "
-    "with valid calls count).",
+    "thinking / OpenAI reasoning both count into output_tokens; "
+    "shared/lm/usage.py does not add them again) — i.e. pure decode "
+    "generation speed (~79 tok/s measured over the last 24h). latency is the "
+    "llm_usage wall-clock (latency_ms). avg = token-weighted over all calls; "
+    "max/min = the fastest/slowest agent per bucket (agent_id IS NOT NULL, "
+    "only buckets with valid calls count).",
     "out_total",
     "latency_ms",
     "out tokens/s",

@@ -9,7 +9,7 @@
     "agent/runloop.py::_handle_fatal_llm_error": 26
   },
   "directories": {
-    "agent": 34
+    "agent": 27
   },
   "private_imports": {
     "agent/exec_child.py::shared.log._add_postgres_sink": 1,

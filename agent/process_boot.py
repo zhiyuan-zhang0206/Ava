@@ -218,9 +218,9 @@ async def boot_agent_scope(agent_id: int) -> Any:
     # When converge detected an unavailable desktop permission, notify once
     # (idempotent -- clears claimed status files after). Must run after the
     # SDK/plugin load so ava.ui.notify is available.
-    from .startup import _notify_desktop_permissions_at_startup
+    from .startup import notify_desktop_permissions_at_startup
 
-    await _notify_desktop_permissions_at_startup()
+    await notify_desktop_permissions_at_startup()
     from shared.lm.factory import build_chat_model
 
     return build_chat_model(turn_settings.lm.llm_model)

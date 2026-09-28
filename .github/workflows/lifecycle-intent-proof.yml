@@ -2,7 +2,7 @@ name: Durable lifecycle intent proof
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
-    paths: ['agent/lifecycle_intent.py', 'tests/agent/test_lifecycle_intent.py', 'migrations/**', 'db/schema.sql', '.github/workflows/lifecycle-intent-proof.yml']
+    paths: ['agent/ownership/lifecycle_intent.py', 'tests/agent/test_lifecycle_intent.py', 'migrations/**', 'db/schema.sql', '.github/workflows/lifecycle-intent-proof.yml']
 permissions:
   contents: read
 jobs:

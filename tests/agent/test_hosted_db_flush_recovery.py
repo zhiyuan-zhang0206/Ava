@@ -8,7 +8,7 @@ import pytest
 from psycopg_pool import AsyncConnectionPool
 
 from agent.hosted_ownership import apply_hosted_lifecycle
-from agent.inbound_ownership import RuntimeOwnershipLostError
+from agent.ownership.inbound import RuntimeOwnershipLostError
 from services.agent_host import host as host_module
 from shared.config import settings
 from shared.context import AvaContext

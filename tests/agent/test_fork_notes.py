@@ -188,7 +188,7 @@ def test_fork_rebuild_passes_the_messages_guard() -> None:
     as new messages. This pins that the reducer accepts the exact shape
     `_fork_rebuild_prefix` produces."""
     from agent.graph.claim._dispatch import _fork_rebuild_prefix
-    from agent.messages_guard import guarded_add_messages
+    from agent.messages.guard import guarded_add_messages
     from agent.state import AgentState
 
     sys_msg = SystemMessage(content="sys", id="m-sys")

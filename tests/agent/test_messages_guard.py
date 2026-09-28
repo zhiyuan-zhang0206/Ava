@@ -1,6 +1,6 @@
 """Message-list mutation hardening — the append-only invariant (task #1256).
 
-Covers the guarded messages reducer (`agent/messages_guard.py`): the three
+Covers the guarded messages reducer (`agent/messages/guard.py`): the three
 legal mutation classes (full wipe / tail append / modify-last) pass, every
 forbidden shape (edit an older message, reorder, middle insert, delete) is
 caught with a structured error, and delta-vs-delta merges (hook runner
@@ -22,7 +22,7 @@ from langchain_core.messages import (
 )
 from langgraph.graph.message import REMOVE_ALL_MESSAGES, add_messages
 
-from agent.messages_guard import (
+from agent.messages.guard import (
     MessagesMutationError,
     guarded_add_messages,
     validate_messages_mutation,

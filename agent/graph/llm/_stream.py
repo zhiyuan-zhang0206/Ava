@@ -33,7 +33,7 @@ from agent.graph.llm_errors import (
     _is_fatal_provider_error_type,
     _parse_provider_error_type,
 )
-from agent.lm_cache import prepare_invocation
+from agent.llm.cache import prepare_invocation
 from shared.config import settings
 from shared.config.turn_view import turn_settings
 from shared.log import logger

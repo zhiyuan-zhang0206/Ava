@@ -1,4 +1,4 @@
-"""agent/messages.py — pure unit tests for helpers.
+"""agent/messages/__init__.py — pure unit tests for helpers.
 
 No DB / LangGraph state needed — just construct messages and verify metadata shape.
 """

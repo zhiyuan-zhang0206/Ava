@@ -11,7 +11,7 @@ from weakref import WeakKeyDictionary
 import psycopg
 from psycopg_pool import AsyncConnectionPool, PoolTimeout
 
-from agent.inbound_ownership import lock_inbound_owner
+from agent.ownership.inbound import lock_inbound_owner
 from shared.agents.messages.inbound import InterruptReason
 from shared.config import settings
 from shared.db import ALIVE_STATUSES, InboundRow, publish_inbound_wake
@@ -267,7 +267,10 @@ async def claim_inbound_batch(
         runtime = await cur.fetchone()
         runtime_owned = runtime in (("process",), ("hosted",))
         if runtime_owned:
-            from agent.lifecycle_intent import accept_lifecycle_intent, settle_superseded_intent
+            from agent.ownership.lifecycle_intent import (
+                accept_lifecycle_intent,
+                settle_superseded_intent,
+            )
             from shared.runtime_incarnation import current_incarnation
 
             command = await accept_lifecycle_intent(conn, agent_id)

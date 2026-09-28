@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from psycopg_pool import AsyncConnectionPool
 
-from agent.inbound_ownership import lock_inbound_owner
+from agent.ownership.inbound import lock_inbound_owner
 from shared.db_transaction import async_write_transaction
 
 

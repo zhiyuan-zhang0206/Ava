@@ -1,4 +1,4 @@
-"""Tests for agent/lm_cache.py — invocation prep + stale-cache retry glue."""
+"""Tests for agent/llm/cache.py — invocation prep + stale-cache retry glue."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ import pytest
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
-from agent.lm_cache import ainvoke_with_cache_retry, prepare_invocation
+from agent.llm.cache import ainvoke_with_cache_retry, prepare_invocation
 from ava_builtins.plugins.lm_google import gemini_cache
 from ava_builtins.plugins.lm_google.gemini_cache import CacheRef
 

@@ -8,7 +8,7 @@ tags: []
 # Observability
 
 ## What it is
-`agent/observe.py` preserves the main-conversation `log_llm_usage()` entry point
+`agent/llm/usage.py` preserves the main-conversation `log_llm_usage()` entry point
 and delegates accounting to `shared/lm/usage.py`. The shared emitter records
 input tokens, cache hits, output tokens, reasoning tokens, usage-time price,
 and `usage_kind` for every metered LLM path.
@@ -24,7 +24,7 @@ and `usage_kind` for every metered LLM path.
 - [[gateway-cli.ava.okf.md]] — gateway stats dashboard consumes model info in logs for cost accounting
 
 ## Entry Points
-- `agent/observe.py:log_llm_usage(msg, model)` — called after each LLM invocation
+- `agent/llm/usage.py:log_llm_usage(msg, model)` — called after each LLM invocation
 
 ## Notes
 - Log format uses `[bracket]` prefix convention for easy grep

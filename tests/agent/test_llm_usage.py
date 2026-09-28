@@ -1,4 +1,4 @@
-"""`agent.observe.log_llm_usage` field format guard.
+"""`agent.llm.usage.log_llm_usage` field format guard.
 
 Blows up here when LangChain changes the usage_metadata shape — caught earlier than
 missing numbers on the dashboard. Consistent across providers: langchain-deepseek /
@@ -12,7 +12,7 @@ from typing import Any
 import pytest
 from langchain_core.messages import AIMessage
 
-from agent.observe import log_llm_usage
+from agent.llm.usage import log_llm_usage
 from shared.lm.plugin_providers import ensure_provider_plugins_loaded
 
 

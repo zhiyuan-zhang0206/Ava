@@ -62,7 +62,7 @@ def _earliest_message_ts(messages: list[AnyMessage]) -> datetime | None:
     """The earliest ``ava_created_at`` across the dumped messages, or None.
 
     Every message shape but the SystemMessage carries the stamp (the
-    ``agent/messages.py`` builders and the AIMessage stamp in
+    ``agent/messages/__init__.py`` builders and the AIMessage stamp in
     ``agent/graph/llm/node.py``), so this is the moment the round's context began.
     An unparseable value is skipped rather than sinking the whole dump; a
     stamp-less history falls back to the compaction moment at the caller.

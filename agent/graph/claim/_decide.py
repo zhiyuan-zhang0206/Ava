@@ -24,7 +24,6 @@ from agent.db import ClaimedInbound, finalize_claimed_inbounds
 from agent.graph.claim._batch import _defer_chats_to_pending
 from agent.graph.claim._dispatch import _BatchState
 from agent.graph.claim._routing import ClaimGoto, _Routing
-from agent.history_dump import dump_history, history_dump_note
 from agent.hooks.compact import (
     CompactionFailedError,
     build_compact_transition,
@@ -34,6 +33,7 @@ from agent.hooks.compact import (
     stamp_compact_boundary,
 )
 from agent.hooks.compact_events import emit_compact_finished, emit_compact_started
+from agent.hooks.history_dump import dump_history, history_dump_note
 from agent.nodes import BEFORE_LLM, CLAIM, END, INIT_CONTEXT
 from agent.state_channels import CIRCUIT_REASON_CONTEXT_OVERFLOW
 from shared.agents.messages.inbound import InboundKind

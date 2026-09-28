@@ -7,7 +7,7 @@
 // ephemeral markers (compact_done / cancelled / compact_request / error) and the
 // unrecognized-marker red alarm render bare (no card) through EphemeralSystemMarker.
 //
-// LifecycleTag mirrors the backend agent/messages.py NoteTag lifecycle_* members.
+// LifecycleTag mirrors the backend shared/message_kwargs.py NoteTag lifecycle_* members.
 // When the backend adds a new lifecycle tag without updating here, classifyMarker
 // routes it to the ephemeral path and it surfaces as the red UnknownMarkerChip —
 // fail-loud instead of a silent fallback.

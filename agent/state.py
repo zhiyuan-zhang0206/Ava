@@ -63,7 +63,7 @@ from langgraph.graph.message import add_messages
 from pydantic import BaseModel, Field
 from pydantic.fields import FieldInfo
 
-from agent.messages_guard import guarded_add_messages, guarded_delta_reducer
+from agent.messages.guard import guarded_add_messages, guarded_delta_reducer
 
 # The five nested sub-state channel models live in agent/state_channels
 # (issue #156 — this module sat at the 800-line ceiling). They are RE-EXPORTED
@@ -115,7 +115,7 @@ class BaseAgentState(BaseModel):
     # append-only guard — guarded_delta_reducer replays stored writes through
     # guarded_add_messages, so the invariant (user ruling 2026-08-13, task
     # #1256 — only a full wipe, a tail append, or modifying the last message
-    # is allowed; see agent/messages_guard.py) holds on every replay. The
+    # is allowed; see agent/messages/guard.py) holds on every replay. The
     # single-merge form (guarded_add_messages) stays the working-copy /
     # plugin-update merge.
     messages: Annotated[list[AnyMessage], _MESSAGES_DELTA_CHANNEL] = Field(default_factory=list)

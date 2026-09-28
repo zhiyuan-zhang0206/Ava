@@ -30,7 +30,7 @@ On failure, full tracebacks are in `tmp/e2e-logs/{gateway,frontend}.log` and
 
 1. In `fakes/scenarios/`, add a module, define `SCRIPT: tuple[AIMessage, ...]`
    and `def build(model: str) -> ScriptedFakeChatModel`. The `build` signature must
-   match the `agent/llm.py:_LLMFactory` Protocol (takes model name → returns
+   match the `shared/lm/factory.py:_LLMFactory` Protocol (takes model name → returns
    BaseChatModel); the `isinstance(BaseChatModel)` at the end of `_resolve_override`
    catches bad factories immediately at build time.
 2. The test function uses `@pytest.mark.scenario("tests.e2e.fakes.scenarios.<name>:build")`.

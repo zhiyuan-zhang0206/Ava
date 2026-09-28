@@ -1,4 +1,4 @@
-"""Pre-compact history dump tests (`agent/history_dump.py`).
+"""Pre-compact history dump tests (`agent/hooks/history_dump.py`).
 
 Covers the four contracts of the feature:
 - config gating: on (the declared default) → dump written + note injected; off
@@ -40,8 +40,8 @@ from langgraph.graph.message import REMOVE_ALL_MESSAGES
 from langgraph.runtime import Runtime
 from psycopg_pool import AsyncConnectionPool
 
-from agent import history_dump
 from agent.graph import claim_node
+from agent.hooks import history_dump
 from agent.hooks.compact import auto_compact_for_llm, compose_summary_message
 from agent.messages import NoteTag, system_note_message
 from agent.state import AgentState
@@ -70,12 +70,12 @@ def _patch_dump_enabled(
     def _fake_workspace_dir(_aid: int) -> Any:
         return ws
 
-    monkeypatch.setattr("agent.history_dump.workspace_dir", _fake_workspace_dir)
+    monkeypatch.setattr("agent.hooks.history_dump.workspace_dir", _fake_workspace_dir)
     return ws
 
 
 class _FakeClock(datetime):
-    """Controllable `datetime` subclass for `agent.history_dump` — lets a test
+    """Controllable `datetime` subclass for `agent.hooks.history_dump` — lets a test
     write several dumps with distinct, ordered timestamps without sleeping.
     Subclassing (not a bare stub) keeps the whole datetime API, so the module's
     parse path (`datetime.fromisoformat`) keeps working under the patch."""
@@ -89,7 +89,7 @@ class _FakeClock(datetime):
 
 
 def _patch_clock(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("agent.history_dump.datetime", _FakeClock)
+    monkeypatch.setattr("agent.hooks.history_dump.datetime", _FakeClock)
 
 
 # `<start>__<end>.jsonl`, both UTC: start with second precision, end with
@@ -353,7 +353,7 @@ def test_dump_failure_is_best_effort(monkeypatch: pytest.MonkeyPatch, tmp_path: 
     def _boom(aid: int) -> Any:
         raise OSError("disk full")
 
-    monkeypatch.setattr("agent.history_dump.workspace_dir", _boom)
+    monkeypatch.setattr("agent.hooks.history_dump.workspace_dir", _boom)
     assert history_dump.dump_history(_sample_messages(), 1) is None
 
 
@@ -415,7 +415,7 @@ async def test_auto_compact_proceeds_when_dump_fails(
     def _boom(aid: int) -> Any:
         raise OSError("disk full")
 
-    monkeypatch.setattr("agent.history_dump.workspace_dir", _boom)
+    monkeypatch.setattr("agent.hooks.history_dump.workspace_dir", _boom)
     state = _over_threshold_state()
 
     result = await auto_compact_for_llm(

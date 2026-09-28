@@ -23,7 +23,7 @@ from psycopg_pool import AsyncConnectionPool
 
 from agent.corpse_reap import reap_recrashed_corpse
 from agent.hosted_ownership import TurnSettlement, settle_and_stamp_turn
-from agent.inbound_ownership import RuntimeOwnershipLostError
+from agent.ownership.inbound import RuntimeOwnershipLostError
 from agent.startup import reconcile_claimed_inbounds_at_startup
 from services.agent_host.crash_recovery import recover_reaped_corpses
 from services.agent_host.db_recovery import database_phase
