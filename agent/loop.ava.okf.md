@@ -60,6 +60,12 @@ turn drops its runtime so the next admission re-runs reconciliation; an aborted
 turn (expected provider/compaction failure) keeps its runtime and reconciles its
 claimed inbounds at the settlement boundary itself
 (`host_abort_reconcile_enabled`), so no row waits for a boot that may not come.
+One admission shares a bounded reconstruction entry between startup tool repair
+and graph invocation. The key is the exact thread, namespace and checkpoint;
+only a copied message list is reused, while checkpoint metadata and pending
+writes are reread. Saver writes and flushes invalidate the entry before and
+after completion, including writes from another task. Nested database recovery
+shares the same entry, and admission exit discards it.
 A turn that dies again under its own crash mark has spent its grace: the
 settlement boundary terminates that corpse on the spot with the reaper's own
 termination and events (`hosted_recrash_prompt_reap_enabled`), instead of

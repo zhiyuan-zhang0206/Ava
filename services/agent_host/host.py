@@ -95,6 +95,7 @@ from services.agent_host.settlement import close_hosted_turn
 from services.agent_host.stall_guard import run_invocation_with_stall_guard
 from services.agent_host.truncation import reap_truncation_outcome, reap_truncation_stop
 from shared import maintenance
+from shared.agents.history.delta_read_compat import recovery_reconstruction_scope
 from shared.config import settings
 from shared.config.turn_view import bind_agent_config, resolve_agent_config_pins
 from shared.context import AvaContext
@@ -356,6 +357,7 @@ class AgentHost:
                     bind_turn_identity(agent_id, incarnation=incarnation),
                     bind_agent_config(pins),
                     bind_agent_plugin_config(plugin_pins),
+                    recovery_reconstruction_scope(self._checkpointer, str(agent_id)),
                 ):
                     await publish_agent_updated(agent_id)
                     runtime = await self._runtime_for(agent_id, stored.fingerprint)
