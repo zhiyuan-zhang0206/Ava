@@ -851,8 +851,8 @@ describe("plugin stat cards", () => {
       {
         plugin: "codex_usage",
         id: "codex-a",
-        value: "6%",
-        detail: "94% used - weekly",
+        value: "Weekly reset 10-04 17:14 UTC+08:00",
+        detail: "52% remaining · 0 resets available",
         status: "ok",
         updated_at: new Date().toISOString(),
         updated_by: "macmini",
@@ -861,11 +861,11 @@ describe("plugin stat cards", () => {
     wrap(<AgentSidebar {...handlers} />);
     openStats();
     expect(screen.getByText("Codex A")).toBeTruthy();
-    expect(screen.getByText("6%")).toBeTruthy();
-    expect(screen.getByText("94% used - weekly")).toBeTruthy();
+    expect(screen.getByText("Weekly reset 10-04 17:14 UTC+08:00")).toBeTruthy();
+    expect(screen.getByText("52% remaining · 0 resets available")).toBeTruthy();
   });
 
-  it("the truncated label and the detail row disclose their full text via title", () => {
+  it("keeps each reset window and supporting detail in visible text", () => {
     state.agents = [makeAgent({ agent_id: 1 })];
     state.pluginStatDeclarations = [
       { plugin: "codex_usage", id: "codex-a", label: "Codex · zhiyuan0206" },
@@ -874,8 +874,8 @@ describe("plugin stat cards", () => {
       {
         plugin: "codex_usage",
         id: "codex-a",
-        value: "6%",
-        detail: "94% used - weekly",
+        value: "5h reset 09-29 02:00 UTC+08:00\nWeekly reset 10-04 17:14 UTC+08:00",
+        detail: "5h 52% remaining · Weekly 68% remaining · 2 resets available",
         status: "ok",
         updated_at: new Date().toISOString(),
         updated_by: "macmini",
@@ -883,10 +883,11 @@ describe("plugin stat cards", () => {
     ]);
     wrap(<AgentSidebar {...handlers} />);
     openStats();
-    // the label truncates in the card; hover must disclose the full text
-    expect(screen.getByText("Codex · zhiyuan0206").getAttribute("title")).toBe("Codex · zhiyuan0206");
-    // same disclosure standard as the detail row
-    expect(screen.getByText("94% used - weekly").getAttribute("title")).toBe("94% used - weekly");
+    expect(screen.getByText("Codex · zhiyuan0206")).toBeTruthy();
+    expect(screen.getByText(/5h reset 09-29 02:00 UTC\+08:00/).textContent).toBe(
+      "5h reset 09-29 02:00 UTC+08:00\nWeekly reset 10-04 17:14 UTC+08:00",
+    );
+    expect(screen.getByText("5h 52% remaining · Weekly 68% remaining · 2 resets available")).toBeTruthy();
   });
 
   it("a declared card with no value row is the empty state; orphan values stay hidden", () => {

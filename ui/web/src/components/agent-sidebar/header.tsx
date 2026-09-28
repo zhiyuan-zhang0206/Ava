@@ -9,7 +9,7 @@ import { BAR_DIVIDER_CLASS, BAR_HEIGHT_CLASS, FLEX, FLEX_COL } from "@/lib/layou
 import { useStatsDashboard, useStatsWindow } from "@/lib/sidebar";
 import { cn } from "@/lib/utils";
 
-import { StatsCards } from "./footer";
+import { StatsCards, STATS_POPOVER_CLASS } from "./footer";
 import { fleetHref } from "./links";
 import type { DesktopProps } from "./types";
 
@@ -111,7 +111,7 @@ function CollapsedStatsButton() {
         <Popover.Content
           sideOffset={6}
           align="start"
-          className="z-50 w-64 rounded-md border border-border bg-popover text-popover-foreground shadow-md outline-none"
+          className={STATS_POPOVER_CLASS}
         >
           <StatsCards
             stats={stats}
