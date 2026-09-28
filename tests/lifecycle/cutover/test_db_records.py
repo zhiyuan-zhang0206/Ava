@@ -13,7 +13,7 @@ from collections.abc import Generator, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Any
+from typing import Any, LiteralString
 from uuid import UUID, uuid4
 
 import psycopg
@@ -277,7 +277,7 @@ def test_check_classifies_every_retired_row(cluster: Cluster) -> None:
         agents["drained"]: awaiting,
         agents["terminated"]: awaiting,
         agents["late"]: awaiting,
-        agents["live"]: ("inadmissible", "the row still names a live old incarnation"),
+        agents["live"]: ("inadmissible", "the row still names a live or different incarnation"),
         agents["paused"]: (
             "inadmissible",
             "the machine is paused; no closure evidence exists for it",
@@ -290,7 +290,54 @@ def test_check_classifies_every_retired_row(cluster: Cluster) -> None:
     assert found.counts == {
         "current_model": {GATEWAY: 1},
         "null_protocol_zero": {GATEWAY: 1},
-        "unconverted": {"convertible": 0, "awaiting": 3, "inadmissible": 3},
+        "unconverted": {"convertible": 0, "awaiting": 3, "inadmissible": 3, "unconvertible": 0},
+    }
+
+
+def _ended(
+    db: psycopg.Connection, runner: str, change: LiteralString, *, pointer: bool = False
+) -> int:
+    """A terminated row with its observed terminate receipt, then `change`d."""
+    aid, receipt = _agent(
+        db, runner, resources=_retired(uuid4(), uuid4(), 3131), receipt="terminate", terminated=True
+    )
+    db.execute(
+        f"UPDATE agents_meta SET {change}, lifecycle_command_id=%s WHERE id=%s",  # noqa: S608 -- fixed test fragments
+        (receipt if pointer else None, aid),
+    )
+    return aid
+
+
+def test_check_lists_rows_no_successor_would_take_as_unconvertible(
+    cluster: Cluster, db_conn: psycopg.Connection
+) -> None:
+    """Converting these would leave the agent fenced with no conversion left to
+    retry: resurrection needs the closed hosted incarnation and no pointer."""
+    runner = cluster.runner
+    shapes = {
+        _ended(db_conn, runner, "runtime_kind=NULL, runtime_generation=NULL, runtime_owner=NULL"): (
+            "the terminated row released its runtime identity; resurrection needs the closed "
+            "hosted incarnation"
+        ),
+        _ended(db_conn, runner, "runtime_kind=NULL"): (
+            "the terminated row records no hosted runtime kind; resurrection refuses it"
+        ),
+        _ended(db_conn, runner, "status='terminated'", pointer=True): (
+            "the terminated row still points at its receipt; resurrection defers while any "
+            "lifecycle pointer is set"
+        ),
+    }
+    db_conn.commit()
+    found = _survey(Inputs())
+    verdicts = _verdicts(found)
+    assert {aid: verdicts[aid] for aid in shapes} == {
+        aid: ("unconvertible", reason) for aid, reason in shapes.items()
+    }
+    assert found.counts["unconverted"] == {
+        "convertible": 0,
+        "awaiting": 3,
+        "inadmissible": 3,
+        "unconvertible": 3,
     }
 
 
@@ -413,7 +460,7 @@ def test_execute_repairs_every_record(
         "lease": FREE_LEASE,
         "postures": {GATEWAY: "idle", cluster.runner: "idle", PAUSED: "paused"},
         "units": sorted([GATEWAY, cluster.runner, PAUSED]),
-        "unconverted": {"convertible": 0, "awaiting": 0, "inadmissible": 3},
+        "unconverted": {"convertible": 0, "awaiting": 0, "inadmissible": 3, "unconvertible": 0},
     }
 
 

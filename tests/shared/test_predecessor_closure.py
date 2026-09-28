@@ -251,8 +251,8 @@ _Tamper = Callable[[psycopg.Connection, int, int, dict[str, Any]], object]
         (_null_row, "NULL"),
         (_current_row, "current resource evidence"),
         (_stale_before, "before image"),
-        (_unapplied, "settled lifecycle decision"),
-        (_other_target, "settled lifecycle decision"),
+        (_unapplied, "unsettled command"),
+        (_other_target, "unsettled command"),
         (_pointer_elsewhere, "unsettled command"),
         (_live_owner, "live or different incarnation"),
         (_replayed, "already carries a cutover closure"),
@@ -268,6 +268,85 @@ def test_conversion_refuses_unproven_or_contradicting_evidence(
     with pytest.raises(ResourceEvidenceError, match=refusal):
         _close(db_conn, aid, receipt, supplied)
     assert _snapshot(db_conn, aid, receipt) == unchanged
+
+
+def _ended(
+    db: psycopg.Connection,
+    *,
+    status: str = "terminated",
+    kind: str | None = "hosted",
+    runtime: bool = True,
+    pointer: bool = False,
+) -> tuple[int, int, dict[str, Any]]:
+    """An agent whose recorded incarnation ended through an applied and observed
+    terminate, shaped by the fields resurrection and admission read."""
+    aid, _, _, _ = create_agent_row(spawner="user", machine=machine_name())
+    before = _retired(uuid4(), uuid4())
+    receipt = db.execute(
+        "INSERT INTO inbound_messages(agent_id,kind,source,content,status,claimed_at,applied_at,"
+        "observed_at,target_generation,target_owner) VALUES(%s,'terminate','user','','done',"
+        "now(),now(),now(),%s,%s) RETURNING id",
+        (aid, before["generation"], before["owner"]),
+    ).fetchone()
+    assert receipt is not None
+    identity = (before["generation"], before["owner"]) if runtime else (None, None)
+    db.execute(
+        "UPDATE agents_meta SET status=%s,termination_source=CASE WHEN %s='terminated' "
+        "THEN 'user' END,runtime_kind=%s,runtime_generation=%s,runtime_owner=%s,"
+        "lease_expires_at=NULL,lifecycle_command_id=%s,incarnation_resources=%s WHERE id=%s",
+        (
+            status,
+            status,
+            kind,
+            *identity,
+            receipt[0] if pointer else None,
+            Jsonb(before),
+            aid,
+        ),
+    )
+    db.commit()
+    return aid, receipt[0], before
+
+
+@pytest.mark.parametrize(
+    ("shape", "refusal"),
+    [
+        ({"kind": None, "runtime": False}, "released its runtime identity"),
+        ({"kind": None}, "no hosted runtime kind"),
+        ({"pointer": True}, "still points at its receipt"),
+        (
+            {"status": "idling", "kind": None, "runtime": False, "pointer": True},
+            "admission clears only a restart pointer",
+        ),
+    ],
+    ids=["terminated-released", "terminated-kindless", "terminated-pointer", "idling-pointer"],
+)
+def test_conversion_refuses_a_row_no_successor_would_take(
+    db_conn: psycopg.Connection, shape: dict[str, Any], refusal: str
+) -> None:
+    """The guard is the successor's own rule: a terminated row resurrects only
+    with its closed hosted incarnation and no lifecycle pointer, and admission
+    observes only a restart pointer. Converting any other shape would leave the
+    agent fenced with no conversion left to retry."""
+    aid, receipt, before = _ended(db_conn, **shape)
+    unchanged = _snapshot(db_conn, aid, receipt)
+    with pytest.raises(ResourceEvidenceError, match=refusal):
+        _close(db_conn, aid, receipt, before)
+    assert _snapshot(db_conn, aid, receipt) == unchanged
+
+
+async def test_a_resurrected_row_never_readmitted_converts_through_its_terminate_receipt(
+    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+) -> None:
+    """Resurrection released the owner and left no pointer; the successor's
+    admission consumes the closed form through the observed terminate."""
+    aid, receipt, before = _ended(db_conn, status="idling", kind=None, runtime=False)
+    _close(db_conn, aid, receipt, before)
+    successor = await _admit(aops_pool, aid, uuid4())
+    assert successor is not None
+    admitted = decode_resources(_snapshot(db_conn, aid, receipt)[0]["incarnation_resources"])
+    assert isinstance(admitted, IncarnationResources)
+    assert (admitted.generation, admitted.owner) == (successor.generation, successor.owner)
 
 
 def test_conversion_requires_the_attested_machine_and_a_transaction(

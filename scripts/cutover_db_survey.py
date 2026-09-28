@@ -8,21 +8,22 @@ current model cannot decode. Nothing here writes. This one-time script reads
 the retired writer's shapes on purpose; the runtime keeps no parser for them.
 It is deleted after the cutover with the other `scripts/cutover_*` scripts.
 
-A retired-shape row is classified exactly as
-`shared.predecessor_closure.close_retired_predecessor` would judge it, read
-only: `convertible` (named incarnation, released or terminated row with no live
-runtime, settled lifecycle receipt, machine attestation proving every recorded
-identity gone), `awaiting` (everything but the attestation), or `inadmissible`
-with the reason (a live old incarnation, a paused machine, no receipt, an
-unattested identity, a malformed value). The conversion itself re-checks every
-guard under the row lock.
+A retired-shape row is classified with the conversion's own rule
+(`shared.predecessor_closure.successor_refusal`), read only: `convertible` (a
+named incarnation, a row its successor would take once converted, a settled
+lifecycle receipt, a machine attestation proving every recorded identity gone),
+`awaiting` (everything but the attestation), `inadmissible` with the reason (a
+live or different incarnation, an unsettled command, no receipt, a paused
+machine, an unattested identity, a malformed value), or `unconvertible` with
+the reason (a shape neither resurrection nor admission accepts even after
+conversion). The conversion itself re-checks every guard under the row lock.
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from typing import Any, LiteralString, cast
 from uuid import UUID
 
@@ -33,6 +34,12 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from scripts.cutover_inventory import Attestation, own_checkout
 from shared.incarnation_resources import ResourceShapeError, decode_resources
+from shared.predecessor_closure import (
+    SUCCESSOR_COLUMNS,
+    SettledReceipt,
+    SuccessorRow,
+    successor_refusal,
+)
 from shared.resource_admission import PREDECESSOR_RECEIPT
 
 LEASE_COLUMNS = (
@@ -49,16 +56,15 @@ LEASE_JSON = "jsonb_build_object(" + ",".join(f"'{c}',{c}" for c in LEASE_COLUMN
 FREE_LEASE: dict[str, Any] = dict.fromkeys(LEASE_COLUMNS) | {"phase": "stable"}
 EVIDENCE = "SELECT managed_writer_evidence FROM deployment_state WHERE id=1"
 _RECEIPT = (
-    "SELECT i.id, COALESCE(i.payload ? 'cutover_closure', false) FROM inbound_messages i "  # noqa: S608 -- constant SQL fragment
+    "SELECT i.id, i.kind, COALESCE(i.payload ? 'cutover_closure', false) FROM inbound_messages i "  # noqa: S608 -- constant SQL fragment
     f"JOIN agents_meta m ON m.id=i.agent_id WHERE {PREDECESSOR_RECEIPT} "
     "ORDER BY (i.id=m.lifecycle_command_id) DESC NULLS LAST, i.id LIMIT 1"
 )
 _ROWS = (
-    "SELECT id, machine, status, runtime_kind, runtime_generation, runtime_owner, pid, "
-    "lifecycle_command_id, lease_expires_at IS NULL OR lease_expires_at<=clock_timestamp() "
-    "AS lease_free, incarnation_resources FROM agents_meta "
+    f"SELECT id, machine, incarnation_resources, {SUCCESSOR_COLUMNS} FROM agents_meta "  # noqa: S608 -- constant columns
     "WHERE incarnation_resources IS NOT NULL ORDER BY id"
 )
+_SUCCESSOR_FIELDS = tuple(item.name for item in fields(SuccessorRow))
 _POSTURES = (
     "SELECT h.machine, h.posture, COALESCE(h.updater_lease_expires_at > now(), false) "
     "AS updater_live, to_jsonb(h) AS image FROM host_deploy_state h ORDER BY 1"
@@ -146,8 +152,8 @@ class Legacy:
     verdict: str = "convertible"
     reason: str | None = None
 
-    def refuse(self, reason: str) -> Legacy:
-        self.verdict, self.reason = "inadmissible", reason
+    def refuse(self, reason: str, verdict: str = "inadmissible") -> Legacy:
+        self.verdict, self.reason = verdict, reason
         return self
 
     def summary(self) -> dict[str, Any]:
@@ -271,7 +277,7 @@ def _checks(conn: psycopg.Connection[Any], found: Survey, inputs: Inputs) -> dic
     pending, problem = pending_of(found.evidence), publication_problem(found.evidence)
     owner = rows(conn, _OWNER)[0]
     prepared = value(conn, "SELECT count(*) FROM pg_prepared_xacts")
-    unreconciled = [item for item in found.legacy if item.verdict != "inadmissible"]
+    unreconciled = [item for item in found.legacy if item.verdict in ("convertible", "awaiting")]
     checks: dict[str, dict[str, Any]] = {
         "D-1": {
             "verdict": "repair" if pending is not None else ("attention" if problem else "ok"),
@@ -351,33 +357,17 @@ def _named_incarnation(resources: dict[str, object]) -> tuple[UUID, UUID] | None
         return None
 
 
-def _released(row: dict[str, Any], closed: tuple[UUID, UUID]) -> bool:
-    """No live, different or unsettled runtime: the owner was released (restart
-    apply) or the row terminated with exactly the recorded incarnation."""
-    runtime = (row["runtime_generation"], row["runtime_owner"])
-    released = runtime == (None, None) and row["status"] in ("idling", "terminated")
-    ended = runtime == closed and row["status"] == "terminated"
-    quiet = row["pid"] is None and row["runtime_kind"] in (None, "hosted") and row["lease_free"]
-    return (released or ended) and quiet
-
-
-def _settled(conn: psycopg.Connection[Any], legacy: Legacy, row: dict[str, Any]) -> Legacy:
+def _settled(
+    conn: psycopg.Connection[Any], agent_id: int, closed: tuple[UUID, UUID]
+) -> SettledReceipt | None:
     """The predecessor receipt: the drain's applied restart held as the lifecycle
     pointer (preferred), else an applied and observed terminate."""
-    assert legacy.closed is not None  # noqa: S101 -- the caller named the incarnation
-    receipt = conn.execute(_RECEIPT, (row["id"], *legacy.closed)).fetchone()
-    if receipt is None:
-        return legacy.refuse("no settled lifecycle receipt for the recorded incarnation")
-    legacy.receipt = receipt[0]
-    if row["lifecycle_command_id"] not in (None, receipt[0]):
-        return legacy.refuse("the lifecycle pointer names an unsettled command")
-    if receipt[1]:
-        return legacy.refuse("the receipt already carries a cutover closure")
-    return legacy
+    found = conn.execute(_RECEIPT, (agent_id, *closed)).fetchone()
+    return None if found is None else SettledReceipt(*found)
 
 
 def _classify(conn: psycopg.Connection[Any], row: dict[str, Any], paused: set[str]) -> Legacy:
-    """Static admissibility; mirrors `close_retired_predecessor`'s guards, read-only."""
+    """Static admissibility: `close_retired_predecessor`'s own guards, read-only."""
     legacy = Legacy(row["id"], row["machine"], row["status"], row["incarnation_resources"])
     resources = _mapping(legacy.before) or {}
     legacy.closed = _named_incarnation(resources)
@@ -387,10 +377,12 @@ def _classify(conn: psycopg.Connection[Any], row: dict[str, Any], paused: set[st
     if identities is None:
         return legacy.refuse("a recorded process identity is malformed")
     legacy.identities = identities
-    if not _released(row, legacy.closed):
-        return legacy.refuse("the row still names a live old incarnation")
-    if _settled(conn, legacy, row).verdict != "convertible":
-        return legacy
+    receipt = _settled(conn, legacy.agent_id, legacy.closed)
+    legacy.receipt = None if receipt is None else receipt.id
+    shape = SuccessorRow(**{name: row[name] for name in _SUCCESSOR_FIELDS})
+    refusal = successor_refusal(shape, legacy.closed, receipt)
+    if refusal is not None:
+        return legacy.refuse(refusal.reason, refusal.verdict)
     if row["machine"] in paused:
         return legacy.refuse("the machine is paused; no closure evidence exists for it")
     return legacy
@@ -436,7 +428,7 @@ def survey(conn: psycopg.Connection[Any], inputs: Inputs) -> Survey:
         current[row["machine"]] = current.get(row["machine"], 0) + 1
     for legacy in found.legacy:
         _weigh_evidence(legacy, inputs)
-    verdicts = ("convertible", "awaiting", "inadmissible")
+    verdicts = ("convertible", "awaiting", "inadmissible", "unconvertible")
     found.counts = {
         "current_model": current,
         "null_protocol_zero": dict(conn.execute(_NULLS).fetchall()),

@@ -31,8 +31,8 @@ images recorded at planning:
   closed-predecessor form (`shared.predecessor_closure`), backed by its settled
   lifecycle receipt and its machine's closure attestation (`--attestation`,
   one per machine). The attestation's bytes are stored in the record and its
-  sha256 on the receipt. Every other retired-shape row stays inadmissible and
-  is listed with its reason; NULL rows stay protocol zero.
+  sha256 on the receipt. Every other retired-shape row stays inadmissible or
+  unconvertible and is listed with its reason; NULL rows stay protocol zero.
 
 The pending, lease and posture repairs also require every included machine (a
 unit neither paused nor retired) to prove it stopped: an attestation with an

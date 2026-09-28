@@ -44,7 +44,8 @@ authority cutover brought the plane up under new custody. Run them with the
 5. **Repair (W7, after `scripts/cutover_db_authority.py`).** Dry-run with every
    input, resolve every refusal, then add `--execute`. Finally `--check` with
    the same attestations: D-1, D-2, D-6 and D-8 read `ok`, and every
-   remaining retired-shape row is listed `inadmissible` with its reason.
+   remaining retired-shape row is listed `inadmissible` or `unconvertible`
+   with its reason.
 
 ```bash
 P=scripts/cutover_db_records.py
@@ -92,16 +93,24 @@ conversion re-checks every closure guard under the row lock.
 The pending, lease and posture repairs also require an attestation proving
 closure from every included machine (a unit neither paused nor retired).
 
-A retired-shape row is `convertible` only with a named incarnation, a released
-or terminated row with no live runtime, a settled receipt (the drain's applied
+A retired-shape row is `convertible` only with a named incarnation, a row its
+successor would take once converted, a settled receipt (the drain's applied
 restart held as the lifecycle pointer, or an applied and observed terminate),
 and an attestation of its machine that proves every recorded identity gone.
-Otherwise it is `awaiting` (no attestation for its machine yet) or
-`inadmissible`: the row still names a live old incarnation, the machine is
-paused, no receipt exists, the pointer names an unsettled command, an identity
-is unattested or malformed. The runtime keeps refusing those rows
-(`resource_fence`, `runtime_cutover_required`). NULL rows are counted and left
-as protocol zero.
+The survey and the conversion judge the row with one rule
+(`shared.predecessor_closure.successor_refusal`), which is the successor's own
+admission: an idling row with its owner released (admission observes only a
+restart pointer), or a terminated row that still records exactly the closed
+hosted incarnation and holds no lifecycle pointer (what resurrection requires).
+Otherwise the row is `awaiting` (no attestation for its machine yet),
+`inadmissible` (it still names a live or different incarnation, the pointer
+names an unsettled command, no receipt exists, the machine is paused, an
+identity is unattested or malformed), or `unconvertible` (a shape no successor
+accepts even after conversion: a terminated row whose runtime identity was
+released or carries no hosted kind, a terminated row still pointing at its
+receipt, a terminate receipt left as an idling row's pointer, a process
+runtime). The runtime keeps refusing those rows (`resource_fence`,
+`runtime_cutover_required`). NULL rows are counted and left as protocol zero.
 
 ## Record and recovery
 
