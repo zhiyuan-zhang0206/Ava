@@ -93,13 +93,16 @@ def test_maintenance_resume_refuses_the_cutover_hold_and_names_the_gate(
     assert maintenance.business_paused()
 
 
+@pytest.mark.parametrize("later_holder", ["local-pause:legacy-box:77:later", "fleet:op-later"])
 def test_an_unreadable_journal_keeps_the_exact_holder_resume_as_the_way_out(
-    make_legacy: Make, monkeypatch: pytest.MonkeyPatch
+    make_legacy: Make, monkeypatch: pytest.MonkeyPatch, later_holder: str
 ) -> None:
     """A truncated adoption journal fails the ordinary start closed; the
-    exact-holder resume (after `ava maintenance start`) still releases a later hold."""
+    exact-holder resume (after `ava maintenance start`) still releases a later
+    hold. The journal belongs to the cutover alone, so a hold another subsystem
+    took (`fleet:`, `pitr:`, `recovery:`) resumes as it would without one."""
     legacy, _holder, _at = _adopted(make_legacy, monkeypatch)
-    later = ("local-pause:legacy-box:77:later", datetime.fromisoformat("2026-10-01T00:00:00+00:00"))
+    later = (later_holder, datetime.fromisoformat("2026-10-01T00:00:00+00:00"))
     owner = {
         "state": "paused",
         "holder": later[0],

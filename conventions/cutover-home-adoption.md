@@ -154,9 +154,9 @@ hold on the home, not only the cutover's.
   exact holder and time with `ava maintenance status`, then run
   `ava maintenance start --operation <holder> --acquired-at <time>` and
   `ava maintenance resume --operation <holder> --acquired-at <time>`. Neither
-  needs the journal; the resume notes that it could not read it. Only a
-  stop's hold (holder `local-pause:…`) resumes this way; the resume refuses
-  every other holder while the journal is unreadable.
+  needs the journal; the resume notes that it could not read it. Every
+  holder but `cutover:…` resumes this way: a later stop's (`local-pause:…`)
+  and a hold another subsystem took (`fleet:…`, `pitr:…`, `recovery:…`).
 - **The cutover hold itself**: that recovery would release it without the
   go/no-go step's checks. A created cutover hold (holder `cutover:<id>`) is
   refused outright; an adopted legacy stop's hold is a `local-pause:` holder

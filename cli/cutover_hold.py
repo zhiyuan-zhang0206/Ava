@@ -29,6 +29,8 @@ from datetime import datetime
 from pathlib import Path
 
 ADOPTION_JOURNAL = "cutover-rollback/adopt-home.json"
+# The holder of a hold the cutover creates (`cutover:<id>`); no other hold takes it.
+CUTOVER_HOLDER_PREFIX = "cutover:"
 
 
 @dataclass(frozen=True)
@@ -85,22 +87,22 @@ def resume_refusal(home: Path, holder: str, acquired_at: datetime) -> str | None
     """Why `ava maintenance resume` must not release `(holder, acquired_at)`; None
     when it is not the recorded cutover hold.
 
-    An unreadable journal cannot tell an adopted legacy stop's hold from a later
-    stop's: both are named `local-pause:`. For those alone, unlike an ordinary
-    start, the exact-holder resume then proceeds and says so: with
-    `ava maintenance start`, it is the way out of such a journal for a later hold
-    (conventions/cutover-home-adoption.md). Every other holder stays refused: a
-    created cutover hold is `cutover:<id>`, a name no later hold takes, so damage
-    to the journal opens no exit around the go/no-go step.
+    An unreadable journal cannot tell an adopted legacy stop's hold (named
+    `local-pause:`) from a later stop's, so unlike an ordinary start, the
+    exact-holder resume then proceeds and says so: with `ava maintenance start`,
+    it is the way out of such a journal for a later hold
+    (conventions/cutover-home-adoption.md). The journal is the cutover's alone,
+    so a hold another subsystem took (`fleet:`, `pitr:`, `recovery:`) resumes
+    the same way. Only a created cutover hold stays refused: it is
+    `cutover:<id>`, a name no later hold takes, so damage to the journal opens
+    no exit around the go/no-go step.
     """
-    from ops.agent_pause import STOP_HOLDER_PREFIX
-
     try:
         recorded = recorded_hold(home)
     except RuntimeError as exc:
-        if not holder.startswith(STOP_HOLDER_PREFIX):
+        if holder.startswith(CUTOVER_HOLDER_PREFIX):
             return (
-                f"{exc}; only a stop's `{STOP_HOLDER_PREFIX}` hold resumes without it. "
+                f"{exc}; a `{CUTOVER_HOLDER_PREFIX}` hold never resumes without it. "
                 f"Repair the journal; the go/no-go gate releases the cutover hold with "
                 f"{release_command(home)}"
             )

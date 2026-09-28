@@ -67,7 +67,12 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
 
-from cli.cutover_hold import ADOPTION_JOURNAL, held_start_command, release_command
+from cli.cutover_hold import (
+    ADOPTION_JOURNAL,
+    CUTOVER_HOLDER_PREFIX,
+    held_start_command,
+    release_command,
+)
 from scripts.cutover_adopt_plan import (
     SELECTION,
     STEPS,
@@ -153,7 +158,7 @@ def _new_journal(facts: Facts, inputs: Inputs, cutover_id: str) -> dict[str, Any
         {"holder": owner["holder"], "acquired_at": owner["acquired_at"], "origin": "legacy-stop"}
         if owner["adoptable"]
         else {
-            "holder": f"cutover:{cutover_id}",
+            "holder": f"{CUTOVER_HOLDER_PREFIX}{cutover_id}",
             "acquired_at": now.isoformat(),
             "origin": "cutover",
         }
