@@ -1930,7 +1930,7 @@
      "sort": "desc"
     }
    },
-   "title": "LLM cost (USD, per minute)",
+   "title": "LLM cost (per minute)",
    "type": "timeseries",
    "description": "LLM call cost per minute \u2014 unwrap of the cost_usd field every llm_usage payload carries (task #2626; the producer computes it from one versioned-catalog quote in shared/lm/pricing.py, unpriced models carry no cost_usd and are skipped); 30-minute buckets normalized to per-minute USD (bucket sum / 30). event_name='llm_usage', category='telemetry'.",
    "targets": [
@@ -2754,7 +2754,7 @@
      "sort": "desc"
     }
    },
-   "title": "Syntax fix triggers (per minute, by kind)",
+   "title": "Syntax fix triggers by kind (per minute)",
    "type": "timeseries",
    "description": "Syntax-fix trigger counts per minute (5-minute buckets / 5), bucketed by the fix kinds in attributes.fixes (substring regex matching; an event with several fix kinds counts once per kind, 'none'/null/unknown goes to other). event_name='syntax_fix', category='telemetry' (90d retention).",
    "targets": [

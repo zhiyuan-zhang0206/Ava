@@ -31,7 +31,8 @@ def _llm_cost(window: str) -> str:
 core_metrics.register_core_metric(
     MetricSpec(
         name="core_llm_cost_24h",
-        title="LLM cost (window)",
+        title="LLM cost",
+        time_basis="window",
         event_name="llm_usage",
         category="telemetry",
         unit="currencyUSD",

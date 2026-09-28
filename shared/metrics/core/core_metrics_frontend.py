@@ -19,7 +19,8 @@ _FRONTEND_ATTR = {k: f"attributes_{k}" for k in FRONTEND_INTERACTION_KEYS}
 core_metrics.register_core_metric(
     MetricSpec(
         name="ava_obs_frontend_interactions",
-        title="Frontend interactions (per minute)",
+        title="Frontend interactions",
+        time_basis="per_minute",
         description=(
             "Frontend interaction volume per minute (5-minute buckets / 5, "
             "total frontend_interaction events): the entry panel of "
@@ -37,8 +38,7 @@ core_metrics.register_core_metric(
             'category={category} | source="user"',
             "5m",
             matchers="event_name={event_name}",
-        )
-        + " / 5",
+        ),
         target_names=["interactions"],
         output=["grafana"],
         panel_id=34,

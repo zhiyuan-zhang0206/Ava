@@ -50,7 +50,8 @@ _PASSIVE_RECALL_ATTR = {k: f"attributes_{k}" for k in PASSIVE_RECALL_KEYS}
 register_metric(
     MetricSpec(
         name="ava_memory_recall_filter_runs",
-        title="Memory recall filter runs (per minute)",
+        title="Memory recall filter runs",
+        time_basis="per_minute",
         description=(
             "Recall_filter INFO events per minute (5-minute buckets / 5) — how "
             "often passive memory recall filters retrieval results for relevance "
@@ -63,8 +64,7 @@ register_metric(
         panel="timeseries",
         query=event_count(
             f'{CATEGORY_WITH_LEGACY_LOG} | level="info"', "5m", matchers="event_name={event_name}"
-        )
-        + " / 5",
+        ),
         query_type="logql",
         target_names=["runs"],
         output=["grafana"],
@@ -191,7 +191,8 @@ register_metric(
 register_metric(
     MetricSpec(
         name="ava_memory_recall_filter_failures",
-        title="Recall filter failures (window)",
+        title="Recall filter failures",
+        time_basis="window",
         description=(
             "Total recall_filter WARNINGs in the current window — filter unavailable, "
             "an unparseable reply, or an unknown model path all leave the round "
