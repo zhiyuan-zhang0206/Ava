@@ -1,6 +1,6 @@
 """Arbiter merge: squash-merge all open PRs targeting main, then refresh.
 
-Usage: $AVA_HOME/source/.venv/bin/python arbiter_merge.py
+Usage: python arbiter_merge.py
 
 Run by the Memory Arbiter after all per-machine stewards have reported their
 PRs ready. Merges PRs one at a time (each merge advances main, which may make
