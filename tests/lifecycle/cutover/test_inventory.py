@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -11,6 +12,7 @@ import psutil
 import pytest
 
 from scripts import cutover_inventory as inventory
+from shared.native_process.ownership import stable_create_time
 from tests.lifecycle.cutover.conftest import CANARY, SERVICE_PATH, LegacyHome
 
 Make = Callable[..., LegacyHome]
@@ -148,17 +150,32 @@ def test_service_path_candidate_comes_from_a_live_service_without_venvs(
     }
 
 
+def _gone_pid() -> int:
+    pid = 4_000_000
+    while psutil.pid_exists(pid):
+        pid += 1
+    return pid
+
+
 def test_attestation_proves_absence_per_recorded_birth(
     make_legacy: Make, capsys: pytest.CaptureFixture[str], tmp_path: Path
 ) -> None:
     legacy = make_legacy()
     live = legacy.spawn("services.agent_host.daemon")
-    birth = psutil.Process(live.pid).create_time()
+    birth = stable_create_time(psutil.Process(live.pid))
     rows = [
         {"machine": "legacy-box", "pid": live.pid, "birth": birth, "agent_id": 1},
+        # A reading one second off (a clock step, the public macOS correction)
+        # is still the recorded process: never proof that it is gone.
         {"machine": "legacy-box", "pid": live.pid, "birth": birth - 1, "agent_id": 2},
-        {"machine": "legacy-box", "pid": 12345, "birth": psutil.boot_time() - 60, "agent_id": 3},
-        {"machine": "other-box", "pid": live.pid, "birth": birth, "agent_id": 4},
+        {
+            "machine": "legacy-box",
+            "pid": live.pid,
+            "birth": psutil.boot_time() - 600,
+            "agent_id": 3,
+        },
+        {"machine": "legacy-box", "pid": _gone_pid(), "birth": birth, "agent_id": 4},
+        {"machine": "other-box", "pid": live.pid, "birth": birth, "agent_id": 5},
     ]
     path = tmp_path / "rows.json"
     path.write_text(json.dumps(rows))
@@ -166,14 +183,53 @@ def test_attestation_proves_absence_per_recorded_birth(
     assert code == 2 and not report["all_absent"]
     assert [(row["agent_id"], row["verdict"]) for row in report["rows"]] == [
         (1, "alive"),
-        (2, "absent"),
+        (2, "alive"),
         (3, "boot_changed"),
+        (4, "absent"),
     ]
     assert report["other_machines"] == 1
     live.kill()
     live.wait()
     code, report, _raw = _report(legacy, capsys, "--attest", str(path))
     assert code == 0 and report["all_absent"]
+
+
+def test_a_live_survivor_with_a_shifted_birth_never_proves_closure(
+    make_legacy: Make, capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    """The review's reproduction: user code the old stop left running (cwd under
+    the home, no Ava module in its argv) whose recorded birth reads one second
+    off must deny closure, through its row and through the census."""
+    legacy = make_legacy()
+    survivor = subprocess.Popen(["/bin/sleep", "120"], cwd=legacy.home)
+    legacy.children.append(survivor)
+    birth = stable_create_time(psutil.Process(survivor.pid)) + 1.0
+    rows = tmp_path / "rows.json"
+    rows.write_text(json.dumps([{"machine": "legacy-box", "pid": survivor.pid, "birth": birth}]))
+    code, report, raw = _report(legacy, capsys, "--attest", str(rows))
+    document = tmp_path / "attestation.json"
+    document.write_text(raw)
+    attestation, _data = inventory.load_attestation(document)
+    assert code == 2 and not attestation.proves_closure
+    assert [row.verdict for row in attestation.rows] == ["alive"]
+    assert [(p["pid"], p["kind"]) for p in report["processes"]] == [(survivor.pid, "other")]
+    assert not report["census_empty"]
+
+
+@pytest.mark.parametrize(("platform", "verdict"), [("darwin", "absent"), ("linux", "unknown")])
+def test_a_reused_pid_is_absent_only_where_the_birth_reading_is_stable(
+    make_legacy: Make, platform: str, verdict: str
+) -> None:
+    """A live pid whose birth reads far from the record, within this boot: the
+    macOS kernel start time never moves, so it is another process; a Linux
+    reading moves with wall-clock steps, so the record stays unproven."""
+    legacy = make_legacy()
+    live = legacy.spawn("services.agent_host.daemon")
+    birth = stable_create_time(psutil.Process(live.pid)) - 60
+    facts = inventory.Facts(legacy.home, legacy.slug, legacy.registry, legacy.checkout, {}, {})
+    row = {"machine": "legacy-box", "pid": live.pid, "birth": birth}
+    report = inventory.attest([row], "legacy-box", facts, platform=platform)
+    assert [row["verdict"] for row in report["rows"]] == [verdict]
 
 
 def test_attestation_is_one_closure_document_with_the_home_census(

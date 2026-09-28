@@ -578,27 +578,51 @@ def _journal_summary(journal: dict[str, Any] | None) -> dict[str, str] | None:
     return {name: step["state"] for name, step in journal["steps"].items()}
 
 
-def attest(rows: list[dict[str, Any]], machine: str, facts: Facts) -> dict[str, Any]:
+# Legacy rows hold `stable_create_time` at write time: the macOS kernel start
+# time, or on Linux start ticks plus the `/proc/stat` boot time of that moment,
+# which a wall-clock step moves. A live reading this close is the recorded
+# process; a wider window only widens the fail-closed `alive`.
+_BIRTH_WINDOW_S = 5.0
+# A clock step moves the reported boot time as well, so only a birth this far
+# before the current boot proves that the boot ended.
+_BOOT_MARGIN_S = 300.0
+
+
+def row_verdict(pid: int, birth: float, boot: float, platform: str = sys.platform) -> str:
+    """`absent` or `boot_changed` only when the recorded process is provably gone.
+
+    A live pid is compared through the same primitive the legacy code wrote the
+    birth with. Its identity is either confirmed (`alive`), disproved (a birth
+    before this boot, or a different macOS kernel start time: a reused pid), or
+    left `unknown`: a Linux reading moves with wall-clock steps.
+    """
+    from shared.native_process.ownership import stable_create_time
+
+    try:
+        live = stable_create_time(psutil.Process(pid))
+    except psutil.NoSuchProcess:
+        return "absent"
+    except psutil.Error:
+        return "unknown"
+    if abs(live - birth) <= _BIRTH_WINDOW_S:
+        return "alive"
+    if birth < boot - _BOOT_MARGIN_S:
+        return "boot_changed"
+    return "absent" if platform == "darwin" else "unknown"
+
+
+def attest(
+    rows: list[dict[str, Any]], machine: str, facts: Facts, *, platform: str = sys.platform
+) -> dict[str, Any]:
     """This machine's closure attestation: is every recorded `(pid, birth)` of its
-    rows provably gone, and does the home's live census show no Ava process and
-    no bound port? One document per machine covers all of its rows."""
+    rows provably gone, and does the home's live census show no related process
+    and no bound port? One document per machine covers all of its rows."""
     boot = psutil.boot_time()
-    attested: list[dict[str, Any]] = []
-    for row in rows:
-        if row["machine"] != machine:
-            continue
-        pid, birth = int(row["pid"]), float(row["birth"])
-        if birth < boot:
-            state = "boot_changed"
-        else:
-            try:
-                alive = abs(psutil.Process(pid).create_time() - birth) < 0.01
-                state = "alive" if alive else "absent"
-            except psutil.NoSuchProcess:
-                state = "absent"
-            except psutil.Error:
-                state = "unknown"
-        attested.append({**row, "verdict": state})
+    attested = [
+        {**row, "verdict": row_verdict(int(row["pid"]), float(row["birth"]), boot, platform)}
+        for row in rows
+        if row["machine"] == machine
+    ]
     return {
         "version": VERSION,
         "machine": machine,
@@ -618,7 +642,9 @@ ABSENT_VERDICTS = frozenset({"absent", "boot_changed"})
 
 
 def _census_empty(processes: Sequence[Mapping[str, Any]], listeners: Sequence[object]) -> bool:
-    return not listeners and all(proc["kind"] != "ava" for proc in processes)
+    """No bound port and no process related to the home, Ava service or not: a
+    survivor of the old stop (an execution root, a terminal child) is user code."""
+    return not listeners and not processes
 
 
 class AttestedRow(BaseModel):

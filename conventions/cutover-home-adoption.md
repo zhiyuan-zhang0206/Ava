@@ -33,9 +33,15 @@ the go/no-go gate's `ava maintenance resume` opens business.
    dry-run. Resolve every refusal before the window. `--attest ROWS.json`
    prints this machine's one closure attestation for the database-records
    repair: each of its recorded legacy `(pid, birth)` identities absent or
-   predating the current boot, plus the home census (no Ava process, no bound
-   port). Run it after the host's old stop, over the rows exported after the
-   W3 drain ([database records](cutover-db-records.md)).
+   predating the current boot, plus the home census (no process related to the
+   home, Ava service or not, and no bound port). A live pid proves nothing
+   unless its birth, read with the primitive the legacy code wrote it with,
+   rules it out: a reading within 5 s is the recorded process, a Linux reading
+   further off stays `unknown` (wall-clock steps move it), and only a birth
+   300 s before the current boot reads `boot_changed`. Close every shell or
+   tool whose working directory is inside the home first; the script's own
+   ancestry is exempt. Run it after the host's old stop, over the rows exported
+   after the W3 drain ([database records](cutover-db-records.md)).
 2. Disarm and stop with the old code (runbook W1 to W3). The adoption refuses
    while any Ava process of the home is alive or a data-plane port is bound.
 3. Gateway (W5): `--execute`, then the data-plane authority cutover

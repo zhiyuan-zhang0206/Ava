@@ -39,8 +39,9 @@ authority cutover brought the plane up under new custody. Run them with the
    attest-<machine>.json` on every host, the gateway included, before the new
    code starts there: one document per machine, covering that machine's rows
    (each recorded process absent or its boot ended) and the home census (no
-   Ava process, no bound port). Exit status 0 means it proves closure. Copy the
-   documents to the gateway unchanged; their bytes are the evidence.
+   related process at all, no bound port). Exit status 0 means it proves
+   closure. Copy the documents to the gateway unchanged; their bytes are the
+   evidence.
 5. **Repair (W7, after `scripts/cutover_db_authority.py`).** Dry-run with every
    input, resolve every refusal, then add `--execute`. Finally `--check` with
    the same attestations: D-1, D-2, D-6 and D-8 read `ok`, and every
