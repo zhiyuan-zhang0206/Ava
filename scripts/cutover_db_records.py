@@ -4,57 +4,27 @@
 The retired runtime left records the new code refuses or misreads: process
 receipts without boot scope in `agents_meta.incarnation_resources`, possibly a
 durable pending publication, a legacy deploy-lease holder, `paused` host
-postures and `machine_units` rows of homes that no longer exist. No runtime
-path repairs them (future/infra/unified-cluster-lifecycle.md). This script is
-the one explicit repair; it is deleted after the cutover with the other
-`scripts/cutover_*` scripts. Procedure: conventions/cutover-db-records.md.
+postures, `machine_units` rows of homes that no longer exist, and terminated
+rows without a runtime identity. No runtime path repairs them
+(future/infra/unified-cluster-lifecycle.md). This script is the one explicit
+repair; it is deleted after the cutover with the other `scripts/cutover_*`
+scripts.
 
 `--check` is read-only (`scripts/cutover_db_survey.py`): the plan's D-series
-inventory, with the pending publication and every incarnation resource value
-decoded by the current models, plus the refusals a repair would meet.
-`--rows-out` exports every recorded legacy `(pid, birth)` for
-`scripts/cutover_inventory.py --attest`. Without `--check` the script dry-runs
-the repairs; `--execute` applies them. Every check reading `attention` is a
-refusal, named with why: the repairs run only once none remains. D-8 `fenced`
-is not a refusal; before its first write `--execute` prints which agents stay
-fenced (a count and example ids per reason) and records that summary in the
-journal run, also for a run that plans no effect.
-
-Repairs, in order; each effect compares its row with the before and after
-images recorded at planning:
-
-- `pending`: clears a durable pending publication, only when the operator
-  supplies its exact JSON (`--pending-json`). The column returns to SQL NULL
-  when nothing was ever published, else keeps `current`.
-- `lease`: releases a legacy deploy lease, only when the operator supplies its
-  exact columns (`--lease-json`, as `--check` prints them under D-2).
-- `posture`: `paused` postures of included hosts become `idle`.
-- `units`: deletes the `machine_units` rows the operator retires with evidence
-  (`--retire-units`); units of paused machines are kept.
-- `incarnations`: each convertible retired-shape row becomes the
-  closed-predecessor form (`shared.predecessor_closure`), backed by its settled
-  lifecycle receipt and its machine's closure attestation (`--attestation`,
-  one per machine). The attestation's bytes are stored in the record and its
-  sha256 on the receipt. Every other retired-shape row stays fenced
-  (inadmissible or unconvertible) and is listed with its reason; D-8 then reads
-  `fenced`, not `ok`. What can still convert a fenced row, and which ones stay
-  fenced for good (known gaps): conventions/cutover-db-records.md, "Rows left
-  fenced". NULL rows stay protocol zero.
-- `identities`: each convertible identity-less terminated row (NULL
-  resources, no complete hosted runtime identity, terminated no later than its
-  machine's attestation was taken) takes a minted hosted
-  identity (a fresh generation and owner, no pid) so resurrection accepts it,
-  which clears it again. Resources stay NULL and no receipt is written. One
-  compare-and-swap per machine, backed by its attestation; the journal keeps
-  each before image and minted pair. Why:
-  decisions/2026-09-28-legacy-terminated-agents-resurrectable-at-cutover.md.
-
-The pending, lease and posture repairs also require every included machine (a
-unit neither paused nor retired) to prove it stopped: an attestation with an
-empty census. `--execute` records every planned effect with its before image
-in `$AVA_HOME/cutover-rollback/db-records/journal.json` (0600) before the first
-write, and each effect's result after it. A crashed run continues with the
-same inputs; a later run with new inputs (a late attestation) appends a run.
+inventory, plus the refusals a repair would meet; `--rows-out` exports every
+recorded legacy `(pid, birth)` for `scripts/cutover_inventory.py --attest`.
+Without `--check` the script dry-runs the repairs; `--execute` applies them.
+Every refusal is decided before a run's first write. The steps (`STEPS`), in
+order: `pending`, `lease`, `posture`, `units`, `incarnations` (retired-shape
+rows to the closed-predecessor form, `shared.predecessor_closure`) and
+`identities` (a minted hosted identity for identity-less terminated rows, why:
+decisions/2026-09-28-legacy-terminated-agents-resurrectable-at-cutover.md).
+Each effect compares its row with the before and after images recorded at
+planning. The journal, `$AVA_HOME/cutover-rollback/db-records/journal.json`
+(0600), records every planned effect with its before image before the first
+write, and each result after it. What each step changes, the evidence it
+requires, the rows left fenced and the journal's rules:
+conventions/cutover-db-records.md.
 
 Run on the gateway, from a checkout of the cutover commit:
 
