@@ -228,7 +228,8 @@ def test_category_projection_matches_telemetry_whitelist() -> None:
     # The inbound reconcile's settled-history fallback (task #4788) raises it to 222.
     assert "restart_cas_lost" not in _TELEMETRY_KINDS
     assert "agent_reopened" not in _TELEMETRY_KINDS
-    assert len(_TELEMETRY_KINDS) == 222
+    # The message suffix transfer diagnostic raises the current total to 223.
+    assert len(_TELEMETRY_KINDS) == 223
     assert payload_keys("debt_sweep_daily") == (
         "day",
         "scan_status",

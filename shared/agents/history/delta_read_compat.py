@@ -78,7 +78,9 @@ class _ReadSpan:
     stage1_rows: int = 0
     stage2_rows: int = 0
     stage2_blob_bytes: int = 0
+    fetched_rows_observed: bool = False
     decode_ms: float = 0.0
+    reset_decode_ms: float = 0.0
     history_build_ms: float = 0.0
     fold_ms: float = 0.0
     fold_path: str = "none"
@@ -91,7 +93,7 @@ _sync_span = local()
 
 @dataclass(eq=False)
 class RecoveryReconstructionScope:
-    """One recovery's sole message-list cache entry, never a graph state snapshot."""
+    """One turn/recovery's message-list cache entry, never a graph state snapshot."""
 
     saver: AsyncPostgresSaver
     thread_id: str
@@ -167,9 +169,19 @@ def recovery_reconstruction_scope(
     tasks that did not inherit this context. The one entry is cleared at exit.
     An unwrapped saver has no reconstruction to cache.
     """
-    if not getattr(saver, "_ava_delta_read_compat", False):
+    if getattr(saver, "_ava_delta_read_compat", False) is not True:
         # A saver without delta reads has no reconstruction to cache.
         yield None
+        return
+    current = _recovery_scope.get()
+    if (
+        current is not None
+        and current.active
+        and current.saver is saver
+        and current.thread_id == thread_id
+    ):
+        # Database recovery inside an admitted turn shares its existing scope.
+        yield current
         return
     _install_recovery_invalidation(saver)
     scope = RecoveryReconstructionScope(saver=saver, thread_id=thread_id)
@@ -493,6 +505,7 @@ def _log_reconstruction(
         stage2_rows=span.stage2_rows,
         stage2_blob_bytes=span.stage2_blob_bytes,
         decode_ms=span.decode_ms,
+        reset_decode_ms=span.reset_decode_ms,
         history_build_ms=span.history_build_ms,
         fold_ms=span.fold_ms,
         fold_path=span.fold_path,
@@ -506,10 +519,41 @@ def _log_reconstruction(
     )
 
 
+def _instrument_suffix_reads(saver: AsyncPostgresSaver) -> None:
+    """Count actual read batches and time reset probes before history assembly."""
+
+    def fetched_history_rows(rows: Sequence[Mapping[str, Any]]) -> None:
+        span = _current_span()
+        if span is not None:
+            span.fetched_rows_observed = True
+            span.stage2_rows += len(rows)
+            span.stage2_blob_bytes += sum(len(row["blob"]) for row in rows)
+
+    saver._ava_delta_history_rows = fetched_history_rows  # type: ignore[attr-defined]
+
+    def decode_reset(value: Any) -> Any:
+        span = _current_span()
+        if span is None:
+            return saver.serde.loads_typed(value)
+        previous_phase = span.phase
+        started = time.monotonic()
+        span.phase = "reset_decode"
+        try:
+            result = saver.serde.loads_typed(value)
+            span.phase = previous_phase
+            return result
+        finally:
+            span.reset_decode_ms += (time.monotonic() - started) * 1000
+
+    saver._ava_delta_reset_decode = decode_reset  # type: ignore[attr-defined]
+
+
 def _instrument_history_callbacks(saver: AsyncPostgresSaver) -> None:
     """Count the rows and bytes LangGraph has already fetched for a history walk."""
     orig_ingest = saver._ingest_stage1_page
     orig_build = saver._build_delta_channels_writes_history
+
+    _instrument_suffix_reads(saver)
     serde = saver.serde
     if not getattr(serde, "_ava_delta_decode_instrumented", False):
         orig_decode = serde.loads_typed
@@ -542,8 +586,11 @@ def _instrument_history_callbacks(saver: AsyncPostgresSaver) -> None:
         if span is None:
             return orig_build(*args, **kwargs)
         rows = kwargs["stage2_rows"]
-        span.stage2_rows = len(rows)
-        span.stage2_blob_bytes = sum(len(row["blob"]) for row in rows)
+        if not span.fetched_rows_observed:
+            # Unmodified upstream history readers report through the builder;
+            # the suffix reader reports each fetched batch before truncation.
+            span.stage2_rows = len(rows)
+            span.stage2_blob_bytes = sum(len(row["blob"]) for row in rows)
         started = time.monotonic()
         span.in_history_build = True
         span.phase = "history_build"

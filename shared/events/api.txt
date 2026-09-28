@@ -497,6 +497,16 @@ class ConvergeFilePreserved(TypedDict)
   key: str
   path: str
   surface: str
+class DeltaMessageSuffix(TypedDict)
+  body_batches: int
+  candidate_writes: int
+  checkpoint_id: str
+  checkpoint_ns: str
+  fetched_bytes: int
+  fetched_rows: int
+  reset_found: bool
+  retained_writes: int
+  thread_id: str
 class EventClassReopened(TypedDict)
   agent_id: int | None
   category: str

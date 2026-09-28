@@ -18,6 +18,7 @@ from shared.events.system import (
     Auth401Rejected,
     CheckpointTableSizes,
     ConvergeFilePreserved,
+    DeltaMessageSuffix,
     EventClassReopened,
     EventSpec,
     FleetGraphStale,
@@ -55,6 +56,13 @@ from shared.events.system import (
 )
 
 _EVENTS_OPS: dict[str, EventSpec] = {
+    "delta_message_suffix": _telemetry(
+        "delta_message_suffix",
+        "message history write-body transfer and retained suffix counts; excludes snapshot seed",
+        payload=DeltaMessageSuffix,
+        tier="noise",
+        retention_class="telemetry",
+    ),
     # pause / rollout lifecycle
     "pause_lifecycle_wait": _telemetry(
         "pause_lifecycle_wait",
