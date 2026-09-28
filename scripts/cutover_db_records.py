@@ -83,12 +83,13 @@ from scripts.cutover_inventory import (
     own_checkout,
     registry_path,
 )
+from scripts.cutover_inventory import read_journal as read_adoption
 from shared.incarnation_resources import IncarnationResources, ResourceEvidenceError
 from shared.pg_admin import OwnerAuthority
 from shared.predecessor_closure import ClosureEvidence, close_retired_predecessor
 from shared.private_storage import ensure_private_dir, write_private_bytes
 
-VERSION = 1
+VERSION = 2  # 2: each run names the adoption it belongs to
 RECORD = f"{ARCHIVE}/db-records"
 JOURNAL = f"{RECORD}/journal.json"
 STEPS = ("pending", "lease", "posture", "units", "incarnations", "identities")
@@ -431,7 +432,15 @@ def completed(journal: dict[str, Any] | None) -> bool:
     return journal is not None and any(run["state"] == "done" for run in journal["runs"])
 
 
+def adoption(home: Path) -> dict[str, str] | None:
+    """The adoption a run belongs to: its journal's id and creation time. A rollback
+    (R1, also run by R2) moves that journal aside, and a retry adopts anew."""
+    found = read_adoption(home)
+    return None if found is None else {k: found[k] for k in ("cutover_id", "created_at")}
+
+
 def read_journal(home: Path) -> dict[str, Any] | None:
+    """The journal; refuses one whose last run belongs to another adoption of the home."""
     from shared.verified_file import regular_bytes
 
     path = home / JOURNAL
@@ -444,6 +453,11 @@ def read_journal(home: Path) -> dict[str, Any] | None:
         raise RefusedError(f"unrecognized database-records journal: {path}")
     if journal["home"] != str(home):
         raise RefusedError(f"{path} belongs to {journal['home']}")
+    if journal["runs"] and (ran := journal["runs"][-1]["adoption"]) != (now := adoption(home)):
+        raise RefusedError(
+            f"{path} records a run of adoption {ran}, not this home's {now}: a rollback (R2) "
+            "restored the database it repaired. Move cutover-rollback/db-records aside"
+        )
     return journal
 
 
@@ -488,6 +502,7 @@ def _begin(
         {
             "started_at": datetime.now(UTC).isoformat(),
             "inputs": inputs.record(),
+            "adoption": adoption(home),
             # Survey-derived, so not part of the inputs a continuation must match.
             "fenced": fenced,
             "state": "started",

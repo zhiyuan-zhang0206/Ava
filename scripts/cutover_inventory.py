@@ -192,6 +192,10 @@ def registry_path(home: Path, explicit: str | None) -> Path:
 
 
 def read_journal(home: Path) -> dict[str, Any] | None:
+    """The adoption journal; None before the first `--execute`. Refuses one whose
+    completed `intent` step no longer has its start intent: a rollback (R0, R1)
+    undid that adoption, and a retry must not read the home as adopted."""
+    from cli.start_identity import INTENT_NAME
     from shared.verified_file import regular_bytes
 
     path = home / ADOPTION_JOURNAL
@@ -206,6 +210,12 @@ def read_journal(home: Path) -> dict[str, Any] | None:
         or journal["home"] != str(home)
     ):
         raise RefusedError(f"unrecognized adoption journal: {path}")
+    intent = journal["steps"].get("intent")
+    if intent is not None and intent["state"] == "done" and not (home / INTENT_NAME).exists():
+        raise RefusedError(
+            f"{path} records an adoption whose {INTENT_NAME} is gone: a rollback (R0, R1) "
+            "undid it. Move the journal aside before any attestation or adoption of this home"
+        )
     return journal
 
 

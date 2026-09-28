@@ -276,6 +276,12 @@ crashed run continues only with the same inputs; the same inputs as a
 completed run change nothing; new inputs (a late attestation) append a run.
 Refusals are all decided before the first write of a run.
 
-Rollback after the repair (R2) restores the cold data-directory copy taken at
-W3, which predates every W7 write, minted identities included; the before
-images in the journal document exactly what changed.
+Each run also names the adoption it belongs to: the `cutover_id` and
+`created_at` of the home's adoption journal. Rollback after the repair (R2)
+restores the cold data-directory copy taken at W3, which predates every W7
+write, minted identities included; the before images in the journal document
+exactly what changed. R2 moves `cutover-rollback/db-records/` aside with the
+adoption journal ([rollback](cutover-home-adoption.md#journal-and-recovery)).
+A journal whose last run names another adoption than the home's (or the home
+has none) is refused by every mode and by the W11 gate: it records repairs of
+a database the rollback replaced.

@@ -192,6 +192,47 @@ def test_a_run_after_a_completed_one_never_changes_a_posture(
     assert _refusals(cluster, w12, later=True) == []
 
 
+def _adoption_journal(home: Path, created_at: str) -> None:
+    """The adoption journal the gateway's W5 leaves (the fields a run binds to)."""
+    journal: dict[str, object] = {"cutover_id": "c1", "created_at": created_at, "hold": {}}
+    path = home / "cutover-rollback" / "adopt-home.json"
+    path.parent.mkdir(mode=0o700, exist_ok=True)
+    journal |= {"version": 1, "home": str(home), "inputs": {}, "steps": {}}
+    path.write_text(json.dumps(journal))
+
+
+def test_a_journal_of_a_rolled_back_cutover_refuses_until_moved_aside(
+    cluster: Cluster, tmp_path: Path
+) -> None:
+    """R2 restores the W3 database copy, and R1 moves the adoption journal aside;
+    the retry adopts anew. A db-records journal left in place would still read
+    W7 done: the retry's W7 would return that run with the same inputs or run
+    as a late one (no posture repair), and the W11 gate would pass. It refuses
+    until it is moved aside too."""
+    from scripts import cutover_adopt_home as adopt
+
+    _adoption_journal(cluster.home, "2026-09-28T01:00:00+00:00")
+    inputs = _inputs(tmp_path, cluster)
+    first = _run(cluster, inputs)
+    w12 = replace(inputs, reason="W12", pending=None, lease=None, retire_units=())
+    assert _run(cluster, w12)["adoption"] == first["adoption"]  # the same adoption appends
+
+    rolled_back = cluster.home / "cutover-rollback" / "adopt-home.json"
+    rolled_back.rename(rolled_back.with_name("adopt-home.rolled-back.json"))
+    _adoption_journal(cluster.home, "2026-09-29T01:00:00+00:00")
+    for attempt in (lambda: _run(cluster, inputs), lambda: _run(cluster, w12)):
+        with pytest.raises(records.RefusedError, match=r"a rollback \(R2\) restored"):
+            attempt()
+    with pytest.raises(records.RefusedError, match=r"a rollback \(R2\) restored"):
+        adopt._records_repair_missing(cluster.home)
+
+    record = cluster.home / records.RECORD
+    record.rename(record.with_name("db-records.rolled-back"))
+    retried = _run(cluster, w12)
+    assert retried["adoption"] == {"cutover_id": "c1", "created_at": "2026-09-29T01:00:00+00:00"}
+    assert adopt._records_repair_missing(cluster.home) is None
+
+
 def test_a_held_row_lock_fails_the_effect_and_the_same_inputs_continue(
     cluster: Cluster,
     db_conn: psycopg.Connection,

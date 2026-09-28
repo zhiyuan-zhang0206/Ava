@@ -150,7 +150,8 @@ def _release(legacy: LegacyHome) -> int:
 
 
 def _record_repair(home: Path, state: str) -> None:
-    journal = {"version": records.VERSION, "home": str(home.resolve()), "runs": [{"state": state}]}
+    run = {"state": state, "adoption": records.adoption(home.resolve())}
+    journal = {"version": records.VERSION, "home": str(home.resolve()), "runs": [run]}
     (home / records.JOURNAL).parent.mkdir(parents=True, exist_ok=True)
     (home / records.JOURNAL).write_text(json.dumps(journal))
 

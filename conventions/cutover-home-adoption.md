@@ -235,7 +235,14 @@ move the archived files, residue, plists and unit files back to their original
 paths, reinstall `crontab.before`, restore the registry record from the
 journal's `record-retire` effect, delete `start-intent.json`, and restore `.env`
 from its pre-adoption snapshot in `backups/env/` (moved to
-`cutover-rollback/residue/backups/env/` on a remote unit).
+`cutover-rollback/residue/backups/env/` on a remote unit). Last, move
+`cutover-rollback/adopt-home.json` aside (keep it, renamed, as the record of
+what was undone): while it records the adoption, a retry would take the home
+as adopted, and the attestation and adoption would skip their guard against a
+re-armed legacy health probe. The inventory, the attestation and the adoption
+refuse a journal whose `intent` step is `done` while the home has no start
+intent; a rollback of a partial adoption leaves no such mark, so move its
+journal aside all the same.
 
 Rollback after the data-plane cutover (R2, before any `--resume`): stop the
 new code fully on every unit (`ava stop --yes`, data plane included), then on
@@ -249,7 +256,12 @@ its password, replacing whatever the data-plane cutover wrote there, as long
 as no Redis or pooler of the new code still runs. Move `db-authority/` aside
 as well: its journal records the conversion done, so a later
 `scripts/cutover_db_authority.py` would take a plane that is legacy again as
-converted. Then R1 on every host.
+converted. For the same reason move `cutover-rollback/db-records/` aside: its
+journal records W7 done, so the W11 gate would pass and a retried W7 would
+return the old run or run as a late one, which repairs no posture. Each run
+names the adoption it belongs to, and the repair and the W11 gate refuse a
+journal whose last run names another adoption than the home's. Then R1 on
+every host.
 
 ### An unreadable adoption journal
 
@@ -277,11 +289,15 @@ hold on the home, not only the cutover's.
   last run in `cutover-rollback/db-records/journal.json`), record that in the
   cutover record, and only then move the damaged `adopt-home.json` aside:
   the exact-holder resume then releases the hold as on a never-adopted home.
+  The database-records repair then refuses its journal, which names that
+  adoption, so no W12 late conversion runs there: its `pointer` rows stay
+  fenced.
 
 A *missing* journal instead reads as a home that was never adopted, and an
 ordinary start then releases the hold like any other. Never delete or move
-`cutover-rollback/` while the cutover hold stands; the one exception is an
-unrepairable journal after the checks above.
+`cutover-rollback/` while the cutover hold stands; the exceptions are an
+unrepairable journal after the checks above, and a rollback (R0, R1, R2),
+which booted the new code out first and hands the hold back to the old code.
 
 ## A legacy stop hold with failure receipts
 

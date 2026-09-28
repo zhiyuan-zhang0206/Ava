@@ -578,6 +578,35 @@ def test_the_new_codes_probe_after_the_jobs_step_never_refuses(
     assert json.loads(capsys.readouterr().out)["census_empty"]
 
 
+def test_a_rolled_back_adoption_journal_refuses_until_moved_aside(
+    make_legacy: Make, capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    """R0/R1 undo a completed adoption and delete its start intent; the old code's
+    start registers the legacy health probe again. A journal still recording the
+    adoption would read the home as adopted: the retry would take it as done, and
+    the attestation would skip the probe guard. Both refuse until it is moved aside."""
+    from scripts import cutover_inventory as inventory
+
+    legacy = make_legacy(roles=("gateway", "agent-runner"), platform="linux")
+    assert _run(legacy, "--execute") == 0
+    (legacy.home / "start-intent.json").unlink()
+    arm_health_probe(legacy)
+    rows = tmp_path / "rows.json"
+    rows.write_text("[]")
+    attest = ["--home", str(legacy.home), "--registry", str(legacy.registry), "--attest", str(rows)]
+    capsys.readouterr()
+    for extra in ((), ("--execute",)):
+        assert _run(legacy, *extra) == 1
+        assert "a rollback (R0, R1) undid it" in capsys.readouterr().err
+    assert inventory.main(attest, host=legacy.scheduler.host()) == 1
+    assert "a rollback (R0, R1) undid it" in capsys.readouterr().err
+
+    journal = legacy.home / "cutover-rollback" / "adopt-home.json"
+    journal.rename(journal.with_name("adopt-home.rolled-back.json"))
+    assert inventory.main(attest, host=legacy.scheduler.host()) == 1
+    assert "health-probe" in capsys.readouterr().err  # the probe guard is armed again
+
+
 def test_missing_service_path_refuses_and_is_never_inferred(
     make_legacy: Make, capsys: pytest.CaptureFixture[str]
 ) -> None:
