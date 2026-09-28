@@ -21,7 +21,7 @@ Each open or wontfix item is one `###` block keyed by a stable fingerprint, so a
 reconcile pass can match it across runs:
 
     ### <fingerprint>
-    - **class**: deps | docs-aging | fail-fast | inline-marker | dead-code | boundary | skill-desc | docstring-budget
+    - **class**: deps | docs-aging | fail-fast | inline-marker | dead-code | boundary | skill-desc | docstring-budget | locality
     - **status**: open | wontfix
     - **evidence**: file:line refs / command output; for `boundary`, the named
       files+symbols and one line on why it is a smell
@@ -34,6 +34,41 @@ Mechanisms may add structured bullet fields beyond this base set (for example,
 cap-domain exits use `exitType`, `expires`, and `approver`); readers ignore unknown fields.
 
 ## Open
+
+### locality:ava_builtins/plugins/ava_fleet/task_registry.py:gateway/routers/tasks.py
+- **class**: locality
+- **status**: open
+- **evidence**: `scripts/structure/cochange.py` (90-day window on origin/main, 2026-09-28): c=10, confidence 67%. Leaked decision: the task status vocabulary and its close rules have two owners — the agent-facing plugin (`task_registry.py`, `_STATUSES` validation) and the gateway API (`routers/tasks.py` filtering/validation) each re-encode them, while `shared/tasks/task_status.py` exists as the shared definition. `09b80a407` (drop the `ongoing` status) edited the vocabulary in both; `39822f4f7` (reject closing a parent with open children) and `08d95882b` did the same for the close rule. Fix: `shared/tasks` owns the vocabulary and the transition check; both sides call it.
+- **first-seen**: 2026-09-28 (locality class first run)
+- **last-verified**: 2026-09-28
+
+### locality:ava_builtins/plugins/ava_code/metrics.py:ava_builtins/plugins/ava_memory/metrics.py
+- **class**: locality
+- **status**: open
+- **evidence**: `cochange.py`: c=8, confidence 89%. Leaked decision: presentation conventions of the metric registry (panel-title time basis, legend naming, stream selectors) are spelled by hand in every plugin's metric specs, so each registry-format change edits every plugin: `01f016136` appended "(per minute)" to each plugin's titles, `1ebe6b67b` and `44e8b60d7` reshaped them together. Fix: the registry derives the convention from the metric's kind; plugins declare only what differs.
+- **first-seen**: 2026-09-28 (locality class first run)
+- **last-verified**: 2026-09-28
+
+### locality:ava/watcher.py:shared/daemon/schedules/watcher_registry.py
+- **class**: locality
+- **status**: open
+- **evidence**: `cochange.py`: c=13, confidence 93%; also `ava/watcher.py` <-> `shared/daemon/schedules/watcher.py` c=12, 75%. Leaked decision: watcher lifecycle policy (standing-cron cap, renewal/supersede, dedupe re-check under the lock) is split between the SDK facade and the registry: `315cd27cf` (7-day cap + renewal) added the `renewable` policy to `ava/watcher.py` and `register_cron_renewal` to the registry together; `6b4e11b1a` and `440a9c1cd` also moved both. Fix: the registry owns the policy; the facade forwards. Watcher lifecycle work is in flight elsewhere (no auto-rebuild ruling, 2026-09-27) — sequence after it.
+- **first-seen**: 2026-09-28 (locality class first run)
+- **last-verified**: 2026-09-28
+
+### locality:gateway/routers/agent_inspect.py:gateway/schemas/inspect.py
+- **class**: locality
+- **status**: open
+- **evidence**: `cochange.py`: c=15, confidence 71%; also `gateway/neighbors.py` <-> `gateway/routers/agent_inspect.py` c=8, 73%. Leaked decision: the Inspector read surface (response shape and its bounded-observability read policy) is split by technical layer — model in `gateway/schemas/`, assembly in the router, lineage/degradation in `gateway/neighbors.py`: `242092c9b` (persist observed metrics), `40ddfc499` (liveness fields), `a14902121` / `e8e70a11b` (bounded reads) each moved them together. A same-process layer split (see `future/infra/locality.md` calibration); fix is a vertical slice, and needs a design pass because `gateway/schemas/` feeds codegen.
+- **first-seen**: 2026-09-28 (locality class first run)
+- **last-verified**: 2026-09-28
+
+### locality:cli/commands/agents/control.py:cli/parsers/agents.py
+- **class**: locality
+- **status**: open
+- **evidence**: `cochange.py`: c=11, confidence 79%; same shape for `cli/commands/agents/impersonation.py` (c=11, 79%) and `impersonation_relay.py` (c=10, 71%) against `cli/parsers/impersonation.py`. Leaked decision: each command's argument surface lives twice — argparse flags in `cli/parsers/`, the parameters they feed in the `cmd_*` implementation: `2095b997a` (`ava impersonate send`) and `5b9f770b9` (caller attestation) edited both. Fix direction: each command domain owns its settings-free parser next to its commands (the `cli.commands` package door is already empty); waits for #3479, which rewrites `cli/main.py` and `cli/parsers/__init__.py`.
+- **first-seen**: 2026-09-28 (locality class first run)
+- **last-verified**: 2026-09-28
 
 ### boundary:checkpoint-postgres-historical-walk-patch
 - **class**: boundary
