@@ -490,7 +490,11 @@ def test_root_launch_digest_ignores_service_manager_injections(
     from cli.commands import start_generation
 
     monkeypatch.setattr(driver.settings.general, "service_path", str(tmp_path / "tools"))
-    monkeypatch.setattr(start_generation, "source_digest", lambda _repo: "source")
+
+    def source(_repo: Path) -> str:
+        return "source"
+
+    monkeypatch.setattr(start_generation, "source_digest", source)
     injected = _SERVICE_MANAGER_INJECTIONS[manager]
     for key in injected:
         monkeypatch.delenv(key, raising=False)

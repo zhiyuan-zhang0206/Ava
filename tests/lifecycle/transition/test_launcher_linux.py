@@ -435,7 +435,11 @@ def test_executor_exit_between_manager_and_process_reads_settles(
         monkeypatch.setattr(linux.psutil, "Process", _constant(_Zombie()))
         monkeypatch.setattr(OwnedProcess, "capture", _constant(OwnedProcess(900, 1.5, 150)))
         lives = iter([True])
-        monkeypatch.setattr(OwnedProcess, "live", lambda _self: next(lives, False))
+
+        def live(_self: OwnedProcess) -> bool:
+            return next(lives, False)
+
+        monkeypatch.setattr(OwnedProcess, "live", live)
     job = linux.readback(planned)
     assert job.finished and job.owner is None
     assert (job.active, job.sub, job.exit_code, job.exit_status) == ("active", "exited", 1, 0)
