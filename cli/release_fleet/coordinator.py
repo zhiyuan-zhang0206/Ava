@@ -6,7 +6,8 @@
 through `RemoteUnits` (`units.py`). Every decision is journaled before it acts:
 a cohort before its alerts, a verdict before its recovery or commit, a
 completion before the operation completes. A continuation after executor death
-acts on the journaled decision instead of re-deciding.
+acts on the journaled decision instead of re-deciding; an operator continuing a
+held operation re-runs the held step, so a held start barrier is judged again.
 
 - A failure before the fence **aborts**: every unit restores its unchanged
   previous image on the unchanged generation (`restoring`), outcome `aborted`.
@@ -319,11 +320,21 @@ class Coordinator:
         return cohort
 
     def _journaled_verdict(self, stage: Literal["start", "watch"]) -> Verdict | None:
-        """A decisive verdict already journaled for this stage and direction."""
-        direction = self.operation.direction
+        """The verdict journaled for this stage and direction that is still to execute.
+
+        A continuation after executor death executes it instead of judging
+        again, a `hold` included. A hold already executed — the operation
+        recorded its error and the executor exited — is the operator's to
+        continue: `ava cluster update --prepared` on a held operation asks for
+        the held step again, so it is judged afresh (and may hold again, with a
+        new alert). That is an explicit operator action, never an automatic
+        retry (decisions/2026-09-27-fleet-core-release-choices.md item 2).
+        """
+        operation = self.operation
         for verdict in reversed(self.progress.verdicts):
-            if verdict.stage == stage and verdict.direction == direction:
-                return verdict
+            if verdict.stage == stage and verdict.direction == operation.direction:
+                executed = verdict.action == "hold" and operation.error is not None
+                return None if executed else verdict
         return None
 
     def _judge(

@@ -47,8 +47,8 @@ cohort), stopping (units close, then the gateway: `close_s`,
 `judge_start`), resuming, watching (`judge_watch` every 30 s until
 `watch_s` after resume), complete. Every decision is journaled before it
 acts: the cohort before its alerts, a verdict with its alerts and unit marks
-before its recovery or commit; a continuation executes a journaled verdict
-instead of judging again.
+before its recovery or commit; a continuation after executor death executes
+a journaled verdict instead of judging again.
 
 - **Abort** (before the fence): `restoring` restarts the unchanged previous
   image on generation n, recorded read-only at `prepared`; outcome
@@ -59,7 +59,10 @@ instead of judging again.
 - **Hold**: any other failure (fencing, selecting, authorizing, resuming,
   restoring, the previous direction) journals the error and a `held` alert
   and exits; the operator continues with the same `ava cluster update
-  --prepared`.
+  --prepared`, which re-runs the held step. A hold verdict whose hold was
+  carried out (its error recorded) is judged again rather than replayed;
+  one journaled just before executor death is still carried out first. A
+  step that holds again raises a new `held` alert.
 
 A failure is any `Exception` a phase raises, a database error or a bug
 alike: the route follows the phase, never the class
