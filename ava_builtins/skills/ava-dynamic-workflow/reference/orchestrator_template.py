@@ -14,6 +14,7 @@ import json
 from pathlib import Path
 
 import ava
+from shared.paths import workspace_dir
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # 1. EXPLORE — understand the task and define sub-tasks
@@ -46,7 +47,7 @@ CHECKPOINT_COUNT = 0
 # ═══════════════════════════════════════════════════════════════════════════════
 
 orchestrator_id = ava.self.AGENT_ID
-handoff = Path.home() / ".ava/workspaces" / str(orchestrator_id) / "task_handoff"
+handoff = workspace_dir(orchestrator_id) / "task_handoff"
 handoff.mkdir(parents=True, exist_ok=True)
 
 worker_ids: dict[str, int] = {}

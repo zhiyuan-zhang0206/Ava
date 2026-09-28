@@ -31,7 +31,6 @@ from __future__ import annotations
 import datetime as _dt
 import html
 import json
-import os
 import re
 import subprocess
 import tempfile
@@ -41,12 +40,20 @@ from functools import cache as _cache
 from pathlib import Path
 from typing import Any, Literal
 
+from shared.dotenv_boot import resolve_ava_home
+
 
 def _default_root() -> Path:
     """Default raw-mirror dir `$AVA_HOME/state/mirrors/youtube/` — shared derived
     state doubling as the sync watermark; the per-content subdir is the stable
-    content id, so a re-run reuses it (dedup)."""
-    home = Path(os.environ.get("AVA_HOME", "~/.ava")).expanduser()
+    content id, so a re-run reuses it (dedup).
+
+    Resolves `$AVA_HOME` via `shared.dotenv_boot.resolve_ava_home` — the same
+    checkout-anchored resolution every other Ava process uses — rather than
+    guessing `~/.ava` when the env var is unset: an unanchored checkout has no
+    business writing its raw mirror into another cluster's home (2026-09-28,
+    PR #3550's P2 follow-up)."""
+    home, _anchored = resolve_ava_home()
     return home / "state" / "mirrors" / "youtube"
 
 

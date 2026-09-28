@@ -32,13 +32,14 @@ from datetime import datetime
 from pathlib import Path
 
 import ava
+from shared.paths import workspace_dir
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Config
 # ═══════════════════════════════════════════════════════════════════════════════
 ORCHESTRATOR = ava.self.AGENT_ID
 TASK = "deep-research"
-HANDOFF = Path.home() / ".ava/workspaces" / str(ORCHESTRATOR) / TASK
+HANDOFF = workspace_dir(ORCHESTRATOR) / TASK
 HANDOFF.mkdir(parents=True, exist_ok=True)
 PROGRESS_FILE = HANDOFF / "progress.md"
 
