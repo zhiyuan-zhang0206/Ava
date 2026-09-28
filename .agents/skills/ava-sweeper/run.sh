@@ -95,7 +95,7 @@ echo "--- [5/6] docstring-budget: Raises sections + soft-zone lengths ---"
 import ast
 from pathlib import Path
 from scripts.lint_agent_docstrings import (
-    _discover_plugin_namespace_modules, _is_in_scope,
+    _discover_agent_surface_modules, _discover_plugin_namespace_modules, _is_in_scope,
     _agent_visible_names, _wrap_targets, _is_visible,
 )
 
@@ -108,9 +108,10 @@ def doc_of(node):
 
 root = Path(".")
 ns_files = _discover_plugin_namespace_modules(root)
+surface_files = _discover_agent_surface_modules(root)
 hits = 0
 for f in sorted(root.rglob("*.py")):
-    if ".venv" in f.parts or not _is_in_scope(f.relative_to(root), ns_files):
+    if ".venv" in f.parts or not _is_in_scope(f.relative_to(root), ns_files, surface_files):
         continue
     tree = ast.parse(f.read_text())
     rel = str(f)

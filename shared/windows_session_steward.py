@@ -200,7 +200,6 @@ def serve(record_path: Path, pid: int, birth: float, port: int, nonce: str, name
     finally:
         with contextlib.suppress(OSError):
             sock.close()
-    return 0
 
 
 if __name__ == "__main__":
