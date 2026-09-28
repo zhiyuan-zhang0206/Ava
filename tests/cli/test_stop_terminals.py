@@ -398,17 +398,26 @@ def test_stop_records_nothing_for_idle_shell(
     home: Path, monkeypatch: pytest.MonkeyPatch, pty_reaper: PtyReaper
 ) -> None:
     """An idle shell (no jobs) closed by stop is silent — the TTL reaper's
-    quiet-empty policy, never a blanket close notification (issue #2044 #3)."""
+    quiet-empty policy, never a blanket close notification (issue #2044 #3).
+
+    The session has no initial command: the host types one into the login
+    shell after its prompt, where it runs as a job. Idle is the login shell at
+    its first prompt — bash prints it only after its startup files ran. The
+    machine name lets a wrongly recorded notice land in the journal.
+    """
     dependencies(monkeypatch)
     terminal = PtySessionBackend()
     _stop_env(monkeypatch, home, terminal)
+    (home / "machine_name").write_text("test-host")
     name = "ava-agent-987-shell-2044-idle"
-    assert terminal.new_session(name, "bash --norc", home, env={"AVA_HOME": str(home)})
+    assert terminal.new_session(name, "", home, env={"AVA_HOME": str(home)})
     shell = pty_reaper.track_session(name)
     deadline = time.monotonic() + 15
-    while time.monotonic() < deadline and _shell_children(shell):
+    while not terminal.capture_pane(name).rstrip().endswith(("$", "#")):
+        assert time.monotonic() < deadline, "the login shell never printed its prompt"
         time.sleep(0.1)
-    assert not _shell_children(shell), "the idle shell spawned children"
+    members = [member.pid for member in session_tree.session_members(shell)]
+    assert members == [shell.pid], "precondition: the shell at its prompt runs no job"
 
     assert entry.cmd_stop(require_confirmation=False, keep_infra=True, timeout=15) == 0
     assert _notice_files(home) == []
