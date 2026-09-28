@@ -42,13 +42,6 @@ cap-domain exits use `exitType`, `expires`, and `approver`); readers ignore unkn
 - **first-seen**: 2026-09-28 (locality class first run)
 - **last-verified**: 2026-09-28
 
-### locality:ava/watcher.py:shared/daemon/schedules/watcher_registry.py
-- **class**: locality
-- **status**: open
-- **evidence**: `cochange.py`: c=13, confidence 93%; also `ava/watcher.py` <-> `shared/daemon/schedules/watcher.py` c=12, 75%. Leaked decision: watcher lifecycle policy (standing-cron cap, renewal/supersede, dedupe re-check under the lock) is split between the SDK facade and the registry: `315cd27cf` (7-day cap + renewal) added the `renewable` policy to `ava/watcher.py` and `register_cron_renewal` to the registry together; `6b4e11b1a` and `440a9c1cd` also moved both. Fix: the registry owns the policy; the facade forwards. Watcher lifecycle work is in flight elsewhere (no auto-rebuild ruling, 2026-09-27) — sequence after it.
-- **first-seen**: 2026-09-28 (locality class first run)
-- **last-verified**: 2026-09-28
-
 ### locality:gateway/routers/agent_inspect.py:gateway/schemas/inspect.py
 - **class**: locality
 - **status**: open
