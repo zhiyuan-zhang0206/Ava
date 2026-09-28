@@ -22,7 +22,7 @@ runs:
       uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: /tmp/apt-archives
-        key: apt-pg17-redis-pgbouncer-${{ runner.os }}-v4
+        key: apt-pg17-redis-pgbouncer-${{ runner.os }}-v5
 
     - name: Install (pgdg repo, cached archives, timeout+retry)
       shell: bash
@@ -65,7 +65,13 @@ runs:
           -o APT::Get::List-Cleanup=0
         )
         archives=(-o Dir::Cache::archives=/tmp/apt-archives)
-        pkgs=(postgresql-17 redis-server postgresql-17-pgvector pgbouncer)
+        # PgBouncer is pinned: an unreviewed pgdg release changes pooled-session
+        # semantics the wire fixtures assert (1.26.0 stopped keeping a poisoned
+        # `default_transaction_read_only` on the pooled backend). Moving the pin
+        # is a dependency upgrade and needs the maintainer's approval; the cache
+        # key above bumps with it so no archived .deb of another version survives.
+        pgbouncer_version="1.25.2-1.pgdg24.04+1"
+        pkgs=(postgresql-17 redis-server postgresql-17-pgvector "pgbouncer=${pgbouncer_version}")
 
         sudo sh -c 'echo "deb http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
         sudo gpg --yes --dearmor -o /etc/apt/trusted.gpg.d/pgdg.gpg "${{ github.action_path }}/ACCC4CF8.asc"
@@ -115,8 +121,14 @@ runs:
         fi
 
         # An archive-only fallback must not silently omit the pooler and turn
-        # the real transaction-pooling tests into successful skips.
+        # the real transaction-pooling tests into successful skips, nor install
+        # a version other than the pin.
         pgbouncer --version
+        installed="$(dpkg-query -W -f='${Version}' pgbouncer)"
+        if [ "$installed" != "$pgbouncer_version" ]; then
+          echo "::error::pgbouncer ${installed} installed, pinned ${pgbouncer_version}" >&2
+          exit 1
+        fi
 
         # The cache save step reads the dir as the runner user: `X` grants the
         # traverse bit on directories only, leaving file modes alone.
@@ -129,4 +141,4 @@ runs:
       uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: /tmp/apt-archives
-        key: apt-pg17-redis-pgbouncer-${{ runner.os }}-v4
+        key: apt-pg17-redis-pgbouncer-${{ runner.os }}-v5
