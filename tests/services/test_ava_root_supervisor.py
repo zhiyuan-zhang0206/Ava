@@ -159,6 +159,23 @@ async def test_stop_closes_captured_descendant_after_leader_exits(tmp_path: Path
     await owner.shutdown()
 
 
+def exits_on(trigger: Path, before: str = "pass") -> str:
+    """Unit code that runs `before`, then exits once the test creates `trigger`.
+
+    Root reads a unit's birth only after asyncio's spawn returns. Under load, a
+    unit that exits at once can already be reaped by asyncio's child watcher,
+    leaving no birth to record ("unacknowledged native birth"), so each test
+    creates `trigger` only after `start()` has returned.
+    """
+    return (
+        f"import pathlib,sys,time\n{before}\n"
+        "deadline=time.monotonic()+30\n"
+        f"while not pathlib.Path({str(trigger)!r}).exists():\n"
+        "    if time.monotonic()>deadline: sys.exit(1)\n"
+        "    time.sleep(0.01)\n"
+    )
+
+
 async def exited(owner: Supervisor) -> None:
     """Wait until root's watch task has processed the unit's own exit."""
     for _ in range(100):
@@ -169,8 +186,10 @@ async def exited(owner: Supervisor) -> None:
 
 
 async def test_unexpected_exit_cannot_authorize_cold_duplicate(tmp_path: Path) -> None:
-    owner = root(tmp_path, "import time; time.sleep(0.05)")
+    trigger = tmp_path / "go"
+    owner = root(tmp_path, exits_on(trigger))
     await owner.start()
+    trigger.touch()
     await exited(owner)
     status = await row(owner)
     assert "custody" in status["last_error"]
@@ -188,14 +207,14 @@ async def test_unexpected_exit_cannot_authorize_cold_duplicate(tmp_path: Path) -
 
 
 async def test_stop_after_unexpected_exit_closes_surviving_descendants(tmp_path: Path) -> None:
-    child_file = tmp_path / "child"
-    code = f"import subprocess,sys,pathlib; child=subprocess.Popen([sys.executable,'-c','import time; time.sleep(60)']); pathlib.Path({str(child_file)!r}).write_text(str(child.pid))"
-    owner = root(tmp_path, code)
+    child_file, trigger = tmp_path / "child", tmp_path / "go"
+    spawn = f"import subprocess; child=subprocess.Popen([sys.executable,'-c','import time; time.sleep(60)']); pathlib.Path({str(child_file)!r}).write_text(str(child.pid))"
+    owner = root(tmp_path, exits_on(trigger, spawn))
     await owner.start()
-    await wait_file(child_file)
-    await exited(owner)
-    child = psutil.Process(int(child_file.read_text()))
+    child = psutil.Process(await pid_in(child_file))
     try:
+        trigger.touch()
+        await exited(owner)
         assert child.is_running()
         await owner.down("worker")
         assert not child.is_running() or child.status() == psutil.STATUS_ZOMBIE
@@ -265,8 +284,10 @@ async def test_exited_birth_at_a_reused_pid_never_signals_the_stranger(tmp_path:
     The recorded birth is positively dead, so its custody is released; the
     stranger is never signalled, captured, or adopted.
     """
-    owner = root(tmp_path, "pass")
+    trigger = tmp_path / "go"
+    owner = root(tmp_path, exits_on(trigger))
     await owner.start()
+    trigger.touch()
     await exited(owner)
     signals, ready = tmp_path / "stranger-signals", tmp_path / "stranger-ready"
     code = signal_recorder(signals, ready)
@@ -304,15 +325,21 @@ async def reaped_with_survivor(tmp_path: Path, reaped: str) -> tuple[Supervisor,
         "import os,pathlib,signal,time; signal.signal(signal.SIGTERM, signal.SIG_IGN); "
         f"pathlib.Path({str(survivor_file)!r}).write_text(str(os.getpid())); time.sleep(60)"
     )
-    leader_stays = "" if reaped == "unexpected-exit" else "; time.sleep(60)"
-    code = f"import subprocess,sys,time; subprocess.Popen([sys.executable,'-c',{survivor!r}]){leader_stays}"
-    owner = root(tmp_path, code)
+    trigger = tmp_path / "leader-go"
+    spawn = f"import subprocess; subprocess.Popen([sys.executable,'-c',{survivor!r}])"
+    stays = f"import sys,time; {spawn}; time.sleep(60)"
+    owner = root(tmp_path, exits_on(trigger, spawn) if reaped == "unexpected-exit" else stays)
     await owner.start()
     survivor_process = psutil.Process(await pid_in(survivor_file))
-    if reaped == "refused-stop":
-        with pytest.raises(RuntimeError, match="ownership retained"):
-            await owner.down("worker")
-    await exited(owner)
+    try:
+        trigger.touch()
+        if reaped == "refused-stop":
+            with pytest.raises(RuntimeError, match="ownership retained"):
+                await owner.down("worker")
+        await exited(owner)
+    except BaseException:
+        kill_all([survivor_process])
+        raise
     return owner, survivor_process
 
 
@@ -347,14 +374,16 @@ async def test_exited_leader_never_signals_a_stranger_group_at_its_number(
     and custody stays with a refusal that names the group and the record.
     """
     owner, survivor = await reaped_with_survivor(tmp_path, reaped)
-    generation = owner._units["worker"].generation
-    assert generation is not None and generation.identity is not None
-    assert generation.scope_closed_at_exit is False
-    survivor.kill()
-    await gone(survivor)
-    pgid, member, signals = await stranger_group(tmp_path)
+    spawned = [survivor]
     record = tmp_path / "custody/worker.json"
     try:
+        generation = owner._units["worker"].generation
+        assert generation is not None and generation.identity is not None
+        assert generation.scope_closed_at_exit is False
+        survivor.kill()
+        await gone(survivor)
+        pgid, member, signals = await stranger_group(tmp_path)
+        spawned.append(member)
         # The number the stop would read now names the stranger's group.
         dead = generation.identity
         generation.identity = OwnedProcess(pgid, dead.birth, dead.starttime)
@@ -368,8 +397,8 @@ async def test_exited_leader_never_signals_a_stranger_group_at_its_number(
         assert not ended(member)
         assert record.exists()
     finally:
-        member.kill()
-        await gone(member)
+        kill_all(spawned)
+    await gone(member)
     # Once that group has ended, the stop proves the unit's group over.
     await owner.down("worker")
     assert not list((tmp_path / "custody").iterdir())
@@ -438,8 +467,10 @@ async def test_a_moved_aside_record_never_drops_a_live_recorded_birth(tmp_path: 
 
 
 async def test_unobserved_reap_refuses_until_the_record_is_moved_aside(tmp_path: Path) -> None:
-    owner = root(tmp_path, "import time; time.sleep(0.05)")
+    trigger = tmp_path / "go"
+    owner = root(tmp_path, exits_on(trigger))
     await owner.start()
+    trigger.touch()
     await exited(owner)
     generation = owner._units["worker"].generation
     assert generation is not None
@@ -464,7 +495,9 @@ async def test_exited_leader_stop_closes_recorded_survivors_and_their_later_chil
     the group number, so it still closes them after the survivor moved to a
     group of its own; then custody is released and no error remains.
     """
-    survivor_file, trigger, late_file = (tmp_path / name for name in ("survivor", "go", "late"))
+    survivor_file, trigger, late_file, leader_go = (
+        tmp_path / name for name in ("survivor", "go", "late", "leader-go")
+    )
     survivor = (
         "import os,pathlib,subprocess,sys,time\n"
         f"pathlib.Path({str(survivor_file)!r}).write_text(str(os.getpid()))\n"
@@ -477,14 +510,14 @@ async def test_exited_leader_stop_closes_recorded_survivors_and_their_later_chil
         f"pathlib.Path({str(late_file)!r}).write_text(str(late.pid))\n"
         "time.sleep(60)\n"
     )
-    owner = root(
-        tmp_path, f"import subprocess,sys; subprocess.Popen([sys.executable,'-c',{survivor!r}])"
-    )
+    spawn = f"import subprocess; subprocess.Popen([sys.executable,'-c',{survivor!r}])"
+    owner = root(tmp_path, exits_on(leader_go, spawn))
     await owner.start()
     spawned: list[psutil.Process] = []
     try:
         survivor_process = psutil.Process(await pid_in(survivor_file))
         spawned.append(survivor_process)
+        leader_go.touch()
         await exited(owner)
         generation = owner._units["worker"].generation
         assert generation is not None and generation.scope_closed_at_exit is False
@@ -562,8 +595,10 @@ async def test_an_unreadable_survivor_leaves_its_siblings_recorded_and_closed(
 async def test_unconfirmable_exited_birth_retains_custody(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    owner = root(tmp_path, "pass")
+    trigger = tmp_path / "go"
+    owner = root(tmp_path, exits_on(trigger))
     await owner.start()
+    trigger.touch()
     await exited(owner)
 
     def unverifiable(self: OwnedProcess) -> bool:
