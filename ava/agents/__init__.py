@@ -377,28 +377,15 @@ def spawn(
 ) -> int:
     """Start a new agent; does not block.
 
-    `prompt` is the first message (make it self-contained — the new agent has
-    no context about why you spawned it); omit to leave it idling. `fork_from`
-    copies another agent's conversation state. `machine` defaults to your own.
-    `config_overlay` names a saved config template through its `preset` key
-    (`config_overlay={"preset": "name"}`); the preset's stored config is the
-    base and the explicit fields win per key.
-
-    A fork keeps the source agent's effective config so its inherited context
-    stays cache-valid: at fork, `config_overlay` may only ADD entries to
-    `skills_to_inject_into_system_prompt` / `skills_to_expand_at_start`
-    (supersets — loaded at the context tail); any other change raises
-    ForkConfigChangeNotAllowed.
-
-    Identity-class config you do not name — model, reasoning effort, the inject
-    and expand lists, prompt shaping — is taken from the shared default at spawn
-    time and frozen onto the new agent for its whole life, so a later change to
-    that default never re-brains it. Operational knobs (compaction thresholds,
-    timeouts) stay live and follow the shared default.
-    `config_overlay={"eval_isolation": True,
-    "eval_network_allowlist": ["web"]}` starts an eval-isolated agent and
-    explicitly permits only the listed `web` or `understand` capability; `mcps`
-    and `ui` are always disabled for isolated agents.
+    `prompt` is the first message — make it self-contained; omit it to leave the agent idling.
+    `machine` defaults to yours. `config_overlay={"preset": "name"}` starts from a saved config
+    template; explicit keys win. Identity config you do not name (model, reasoning effort, the
+    inject/expand lists, prompt shaping) is frozen at spawn; operational knobs follow the shared
+    default. `fork_from` copies another agent's conversation and keeps its config: the overlay
+    may then only add entries to `skills_to_inject_into_system_prompt` /
+    `skills_to_expand_at_start` (anything else raises ForkConfigChangeNotAllowed).
+    `{"eval_isolation": True, "eval_network_allowlist": ["web"]}` isolates the agent, allowing
+    only the listed `web` / `understand`; `mcps` and `ui` are off.
     """
     return spawn_impl(
         prompt=prompt,
@@ -471,21 +458,18 @@ def terminate(
     force: bool = False,
     kill_all_shell_sessions: bool = False,
 ) -> TerminateOutcome:
-    """End an agent after its current step. `message` is saved without another
-    response and is available if the agent is later revived. `force=True`
-    interrupts work; an `enqueued` result confirms acceptance, not exit. A
-    terminated agent wakes again on any new message, including one from its
-    own shell sessions or watchers; `kill_all_shell_sessions=True` also kills
-    every shell session it owns, watchers included, silently — right away
-    for `force=True` (and once more after it stops) or an already-terminated
-    agent, otherwise right before it stops. Pages opened with `ava.ui.serve`
-    keep running.
+    """End an agent after its current step.
 
-    The result compares as the status string (`== "enqueued"` works as before)
-    and carries `open_tasks`: the tasks the agent still owns as it goes down
-    (at most five, most recently updated first), or None when it leaves none,
-    and `shell_sessions`: what the shell-session kill did (a
-    `ShellSessionsKill`), or None when no kill was requested or honored."""
+    `message` is stored, without a reply, for when the agent is revived.
+    `force=True` interrupts work; an `enqueued` result confirms acceptance, not
+    exit. A terminated agent wakes on any new message, including from its own
+    shell sessions or watchers; `kill_all_shell_sessions=True` also kills every
+    shell session it owns, watchers included, silently. Pages opened with
+    `ava.ui.serve` keep running.
+
+    The result equals its status string and carries `open_tasks` (up to five
+    tasks it still owns, most recently updated first, or None) and
+    `shell_sessions` (a `ShellSessionsKill`, or None when no kill ran)."""
     agent_id = coerce_typed(agent_id, "agent_id", int)
     message = coerce_str(message, "message", allow_none=True)
     force = coerce_typed(force, "force", bool)
