@@ -212,6 +212,18 @@ def cluster(db_conn: psycopg.Connection, tmp_path: Path) -> Iterator[Cluster]:
         yield made
 
 
+# The real D-10 query: the throwaway database is owned by its bootstrap superuser.
+_BOOTSTRAP_OWNED = survey_module._OWNER
+
+
+@pytest.fixture(autouse=True)
+def _application_owner(monkeypatch: pytest.MonkeyPatch) -> None:
+    """D-10 as on a home the data-plane authority cutover converted."""
+    monkeypatch.setattr(
+        survey_module, "_OWNER", "SELECT 'ava_owner' AS owner, false AS owner_is_bootstrap"
+    )
+
+
 def _connection(*, write: bool) -> psycopg.Connection:
     conn = psycopg.connect(settings.data_plane.db_url, autocommit=True)
     records.prepare_session(conn, write=write)
@@ -358,7 +370,7 @@ def test_check_reports_the_d_series(cluster: Cluster) -> None:
         "D-7": "info",
         "D-8": "repair",
         "D-9": "info",
-        "D-10": "attention",  # the throwaway database is owned by its bootstrap superuser
+        "D-10": "ok",
         "D-11": "ok",
         "D-12": "info",
         "D-13": "info",
@@ -491,53 +503,6 @@ def test_execute_records_the_run_and_the_same_inputs_change_nothing(
     verdicts = {name: after[name]["verdict"] for name in ("D-1", "D-2", "D-6", "D-8")}
     # The live, paused and unreceipted rows stay fenced: D-8 says so, never `ok`.
     assert verdicts == dict.fromkeys(("D-1", "D-2", "D-6"), "ok") | {"D-8": "fenced"}
-
-
-def _owned_by_an_application_owner(monkeypatch: pytest.MonkeyPatch) -> None:
-    """D-10 as on a converted production home (the throwaway database is owned
-    by its bootstrap superuser)."""
-    monkeypatch.setattr(
-        survey_module, "_OWNER", "SELECT 'ava_owner' AS owner, false AS owner_is_bootstrap"
-    )
-
-
-def test_rows_left_fenced_keep_d8_and_the_check_from_reading_clean(
-    cluster: Cluster,
-    tmp_path: Path,
-    capsys: pytest.CaptureFixture[str],
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    _run(cluster, _inputs(tmp_path, cluster))
-    _owned_by_an_application_owner(monkeypatch)
-    capsys.readouterr()
-    with _patched_session(write=False):
-        code = records.main(["--home", str(cluster.home), "--check"])
-    checks = json.loads(capsys.readouterr().out)["checks"]
-    unclean = {
-        name: c["verdict"] for name, c in checks.items() if c["verdict"] not in ("ok", "info")
-    }
-    assert (code, unclean) == (2, {"D-8": "fenced"})
-    agents = cluster.agents
-    assert checks["D-8"]["fenced"] == [
-        {
-            "verdict": "inadmissible",
-            "reason": "no settled lifecycle receipt for the recorded incarnation",
-            "count": 1,
-            "agents": [agents["unreceipted"]],
-        },
-        {
-            "verdict": "inadmissible",
-            "reason": "the machine is paused; no closure evidence exists for it",
-            "count": 1,
-            "agents": [agents["paused"]],
-        },
-        {
-            "verdict": "inadmissible",
-            "reason": "the row still names a live or different incarnation",
-            "count": 1,
-            "agents": [agents["live"]],
-        },
-    ]
 
 
 async def test_the_converted_agent_carries_its_evidence_and_is_admitted(

@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Callable
 from dataclasses import dataclass, field, fields
 from typing import Any, LiteralString, cast
 from uuid import UUID
@@ -288,6 +289,41 @@ def fenced_summary(legacy: list[Legacy]) -> list[dict[str, Any]]:
     return [
         {"verdict": verdict, "reason": reason, "count": len(agents), "agents": agents[:_EXAMPLES]}
         for (verdict, reason), agents in sorted(groups.items())
+    ]
+
+
+def _pinned(pin: list[dict[str, Any]]) -> str:
+    return pin[0]["target_sha"] if pin and pin[0]["target_sha"] else "no commit"
+
+
+# Why each check can read `attention`: a premise to resolve before any repair.
+_WHY: dict[str, Callable[[dict[str, Any]], str]] = {
+    "D-1": lambda check: f"admission cannot read the managed-writer evidence: {check['problem']}",
+    "D-3": lambda check: (
+        f"the cluster pin names {_pinned(check['pin'])}, not --legacy-commit "
+        f"{check['legacy_commit']}"
+    ),
+    "D-4": lambda _check: (
+        "the applied migration set equals neither --legacy-commit's nor this checkout's"
+    ),
+    "D-6": lambda _check: (
+        "an included host carries a legacy updater (converging posture or live updater lease)"
+    ),
+    "D-10": lambda check: (
+        f"the database is owned by the bootstrap superuser {check['database_owner']}"
+    ),
+    "D-11": lambda check: (
+        f"{check['prepared']} prepared transaction(s) can hold the row locks the repairs take"
+    ),
+}
+
+
+def attention(checks: dict[str, dict[str, Any]]) -> list[str]:
+    """Every check reading `attention`, named with why; the repair refuses while any remains."""
+    return [
+        f"{name} reads attention: {_WHY[name](check)}"
+        for name, check in checks.items()
+        if check["verdict"] == "attention"
     ]
 
 

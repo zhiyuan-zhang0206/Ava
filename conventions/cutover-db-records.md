@@ -27,8 +27,10 @@ authority cutover brought the plane up under new custody. Run them with the
 1. **Before the window (T-2).** `--check --legacy-commit <commit every host
    runs>` and store the output. Resolve every `attention` verdict (a pin or
    applied-migration set that would fire a legacy controller, a bootstrap-owned
-   database, prepared transactions). Note D-1 (pending publication) and D-2
-   (deploy lease): their exact JSON is the input of the repair.
+   database, prepared transactions, a legacy updater): the dry run and
+   `--execute` refuse while any remains, naming each check and why. Note D-1
+   (pending publication) and D-2 (deploy lease): their exact JSON is the input
+   of the repair.
 2. **Baseline (W0).** `--check` again; store it with the cutover record.
 3. **Row export (W3, after the gateway's old `ava pause`, before its `ava
    stop`).** Every runner stopped at W2 and the gateway just drained, so the
@@ -119,7 +121,8 @@ runtime). The runtime keeps refusing those rows (`resource_fence`,
 stays fenced: the runtime keeps refusing its agent (`resource_fence` at
 admission, `runtime_cutover_required` at resurrection). D-8 reads `fenced`
 with a count and example agent ids per verdict and reason, so `--check` keeps
-exiting 2 after the repair.
+exiting 2 after the repair. `fenced` is not a refusal: `--execute` prints the
+same summary before its first write and records it in its journal run.
 
 Each run re-reads every row. A row whose state changes is reclassified by the
 next `--check`, and a later run with new inputs converts it, for as long as
@@ -155,8 +158,9 @@ the script exists. What can change a fenced row:
 
 `$AVA_HOME/cutover-rollback/db-records/` (0700) holds `journal.json` (0600) and
 `attestations/<sha256>.json`, each attestation byte-for-byte. The journal is a
-list of runs. A run records its inputs and every planned effect with its before
-image before the first write, then each effect's result. A crashed run
+list of runs. A run records its inputs, the fenced summary it printed (which
+agents stay fenced, per verdict and reason) and every planned effect with its
+before image before the first write, then each effect's result. A crashed run
 continues only with the same inputs; the same inputs as a completed run change
 nothing; new inputs (a late attestation) append a run. Refusals are all
 decided before the first write of a run.

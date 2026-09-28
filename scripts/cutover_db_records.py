@@ -14,7 +14,11 @@ inventory, with the pending publication and every incarnation resource value
 decoded by the current models, plus the refusals a repair would meet.
 `--rows-out` exports every recorded legacy `(pid, birth)` for
 `scripts/cutover_inventory.py --attest`. Without `--check` the script dry-runs
-the repairs; `--execute` applies them.
+the repairs; `--execute` applies them. Every check reading `attention` is a
+refusal, named with why: the repairs run only once none remains. D-8 `fenced`
+is not a refusal; before its first write `--execute` prints which agents stay
+fenced (a count and example ids per reason) and records that summary in the
+journal run.
 
 Repairs, in order; each effect compares its row with the before and after
 images recorded at planning:
@@ -78,8 +82,10 @@ from scripts.cutover_db_survey import (
     Inputs,
     RetiredUnit,
     Survey,
+    attention,
     cleared_publication,
     export_rows,
+    fenced_summary,
     pending_of,
     publication_problem,
     survey,
@@ -232,8 +238,16 @@ def _plan_incarnations(found: Survey, inputs: Inputs, plan: Plan) -> None:
 
 
 def plan_repairs(found: Survey, inputs: Inputs, own: tuple[str, str]) -> Plan:
-    """Every effect with its before image, and every refusal, before any write."""
+    """Every effect with its before image, and every refusal, before any write.
+
+    A check reading `attention` is a premise to resolve first (a legacy pin or
+    migration set, a bootstrap-owned database, prepared transactions, a legacy
+    updater): each refuses, named with why. D-8 `fenced` does not refuse; the
+    run states and records which agents stay fenced instead.
+    """
     plan = Plan({step: [] for step in STEPS}, [])
+    for reason in attention(found.checks):
+        plan.refuse(reason)
     _plan_pending(found, inputs, plan)
     _plan_lease(found, inputs, plan)
     _plan_postures(found, inputs, plan)
@@ -393,6 +407,8 @@ def _begin(
     plan = plan_repairs(found, inputs, own)
     if plan.refusals:
         raise RefusedError("; ".join(plan.refusals))
+    fenced = fenced_summary(found.legacy)
+    _print_fenced(fenced)
     if not any(plan.effects.values()):
         return None
     _store_attestations(home, inputs)
@@ -400,11 +416,29 @@ def _begin(
         {
             "started_at": datetime.now(UTC).isoformat(),
             "inputs": inputs.record(),
+            # Survey-derived, so not part of the inputs a continuation must match.
+            "fenced": fenced,
             "state": "started",
             "effects": plan.effects,
             "results": {step: [] for step in STEPS},
         }
     )
+
+
+def _print_fenced(fenced: list[dict[str, Any]]) -> None:
+    """What this run leaves fenced, stated before its first write."""
+    total = sum(group["count"] for group in fenced)
+    if not total:
+        print("  no retired-shape row stays fenced.")
+        return
+    print(
+        f"  {total} agent(s) stay fenced after this run; the runtime keeps refusing them "
+        '(conventions/cutover-db-records.md, "Rows left fenced"):'
+    )
+    for group in fenced:
+        more = " ..." if group["count"] > len(group["agents"]) else ""
+        agents = ", ".join(map(str, group["agents"])) + more
+        print(f"  - {group['count']} {group['verdict']}: {group['reason']} (agents {agents})")
 
 
 def execute(
@@ -420,6 +454,7 @@ def execute(
             raise RefusedError(
                 "an incomplete run recorded other inputs; re-run with the same inputs"
             )
+        _print_fenced(runs[-1]["fenced"])
     elif same:
         return runs[-1]
     else:
