@@ -18,12 +18,17 @@ proof keyed by the unit's enrollment secret, checked against the gateway's
 current record (a rotated or revoked enrollment stops at once) inside one
 replay window per run. A continuation starts a new window, so every route is
 idempotent: a report names the instruction it answers.
+
+Before any proof is checked, what an unauthenticated peer can cost is bounded:
+a body is read only when one plain decimal `Content-Length` declares it
+within `MAX_BODY_BYTES` (otherwise `400` or `413`, nothing read).
 """
 
 from __future__ import annotations
 
 import json
 import queue
+import re
 import threading
 from collections.abc import Callable, Iterable, Mapping
 from http import HTTPStatus
@@ -45,6 +50,7 @@ from shared.cluster.authority.unit import Enrollment, UnitIdentity, load_enrollm
 from shared.log import logger
 
 MAX_BODY_BYTES = 64 * 1024
+_DECIMAL = re.compile(r"[0-9]+")
 CAPABILITY_REFUSAL = (
     "the per-operation capability exchange over the coordinator channel is slice dbgen-8"
 )
@@ -77,6 +83,22 @@ class _Refused(Exception):  # noqa: N818 — an HTTP refusal carrying its status
     def __init__(self, status: HTTPStatus, message: str) -> None:
         super().__init__(message)
         self.status = status
+
+
+def _body_length(declared: list[str]) -> int:
+    """The body length one plain decimal `Content-Length` declares (none: 0).
+
+    Checked before any body byte is read or any proof verified: a negative,
+    signed, non-decimal or repeated length is a 400, one past the cap a 413.
+    """
+    if not declared:
+        return 0
+    if len(declared) > 1 or _DECIMAL.fullmatch(declared[0]) is None:
+        raise _Refused(HTTPStatus.BAD_REQUEST, "the request declares no valid Content-Length")
+    value = declared[0]
+    if len(value) > len(str(MAX_BODY_BYTES)) or int(value) > MAX_BODY_BYTES:
+        raise _Refused(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, "body too large")
+    return int(value)
 
 
 def _proof(headers: Mapping[str, str]) -> RequestProof:
@@ -228,9 +250,10 @@ def _handler(listener: CoordinatorListener) -> type[BaseHTTPRequestHandler]:
             logger.debug("[release-fleet] listener {}", format % args)
 
         def _serve(self, method: str) -> None:
-            length = int(self.headers.get("Content-Length") or 0)
-            if length > MAX_BODY_BYTES:
-                self._answer(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, {"error": "body too large"})
+            try:
+                length = _body_length(self.headers.get_all("Content-Length") or [])
+            except _Refused as refused:
+                self._answer(refused.status, {"error": str(refused)})
                 return
             body = self.rfile.read(length) if length else b""
             headers = {name.lower(): value for name, value in self.headers.items()}

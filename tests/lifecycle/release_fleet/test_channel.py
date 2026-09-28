@@ -7,6 +7,7 @@ or revoked through the real operator functions.
 
 from __future__ import annotations
 
+import socket
 import time
 import urllib.error
 import urllib.request
@@ -208,3 +209,47 @@ def _status(channel: Channel, path: str, headers: dict[str, str], body: bytes | 
             return answer.status
     except urllib.error.HTTPError as refused:
         return refused.code
+
+
+def _raw(channel: Channel, head: str, body: bytes = b"", *, finish: bool = False) -> bytes:
+    """Send `head` (and `body`) on a raw connection; the first answer bytes.
+
+    Without `finish` the connection stays open for writing, so a listener that
+    waits for more body instead of answering fails the 5 s read below.
+    """
+    with socket.create_connection((channel.endpoint.host, channel.endpoint.port)) as raw:
+        raw.settimeout(5)
+        raw.sendall(head.encode() + b"\r\n\r\n" + body)
+        if finish:
+            raw.shutdown(socket.SHUT_WR)
+        return raw.recv(4096)
+
+
+@pytest.mark.parametrize(
+    "length",
+    [
+        "Content-Length: -1",
+        "Content-Length: abc",
+        "Content-Length: 1.5",
+        "Content-Length: +1",
+        "Content-Length: 0x10",
+        "Content-Length: 2\r\nContent-Length: 2",
+    ],
+)
+def test_a_malformed_content_length_answers_400_without_reading(
+    channel: Channel, length: str
+) -> None:
+    path = route(channel.operation, _RUNNER, "/report")
+    answer = _raw(channel, f"POST {path} HTTP/1.1\r\nHost: x\r\n{length}", b"x" * 4096)
+    assert answer.startswith(b"HTTP/1.0 400 "), answer
+
+
+@pytest.mark.parametrize(
+    "length", [str(64 * 1024 + 1), "9" * 5000], ids=["one-over-the-cap", "5000-digits"]
+)
+def test_an_oversized_content_length_answers_413_without_reading(
+    channel: Channel, length: str
+) -> None:
+    path = route(channel.operation, _RUNNER, "/report")
+    answer = _raw(channel, f"POST {path} HTTP/1.1\r\nHost: x\r\nContent-Length: {length}", b"x")
+    assert answer.startswith(b"HTTP/1.0 413 "), answer
