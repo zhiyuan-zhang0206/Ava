@@ -48,8 +48,9 @@ NO_PROGRESS_TIMEOUT_S = 900.0
 
 # How often the process running an orchestration re-arms its own lease. Small
 # relative to `LOCK_TTL_S` so a missed round (a slow DB, one dropped connection) is
-# never fatal, and large enough that a multi-minute rollout costs a handful of
-# single-row UPDATEs rather than a poll-rate write stream.
+# never fatal — renewers retry until the lease could lapse before the next round
+# (`shared.cluster_lock.lease_may_lapse`) — and large enough that a multi-minute
+# rollout costs a handful of single-row UPDATEs rather than a poll-rate write stream.
 LEASE_RENEW_INTERVAL_S = 60.0
 
 # How stale a finite release or PITR executor's heartbeat may grow before its

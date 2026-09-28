@@ -73,8 +73,10 @@ continuation resumes from the journaled phase, as after process death.
 
 The lease (`deployment_state`, holder `fleet:<id>`) is taken at
 `dispatching`, re-armed by a continuation before any effect, renewed by a
-thread and released at completion; a lost lease fails the next step. An
-abort decided at `prepared` or `dispatching` needs no lease.
+thread and released at completion; a lost lease fails the next step. A
+renewal that raises is a missed round, retried until the lease could lapse
+before the next one; one answered "not yours" loses it at once. An abort
+decided at `prepared` or `dispatching` needs no lease.
 
 ## Gateway evidence, publication and alerts
 
