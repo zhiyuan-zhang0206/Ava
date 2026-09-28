@@ -28,6 +28,8 @@ timestamp and nonce under an HKDF-derived key; the listener verifies it against
 the gateway's current record (rotation and revocation take effect at once), a
 per-operation `ReplayWindow` refuses a repeated nonce and a timestamp outside
 300 s (a window does not survive a coordinator restart, so channel requests
-are idempotent), and a forged proof never burns a nonce. `seal` / `open_sealed`
+are idempotent; the listener's handler threads share it, and it prunes,
+checks and records a nonce under one lock, so concurrent copies of one
+request admit once), and a forged proof never burns a nonce. `seal` / `open_sealed`
 (AES-256-GCM under a key derived from the secret, operation and unit) carry a
 payload for exactly one unit in one operation.

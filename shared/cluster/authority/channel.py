@@ -26,6 +26,7 @@ import hashlib
 import hmac
 import re
 import secrets
+import threading
 import time
 from dataclasses import dataclass, field
 
@@ -131,7 +132,9 @@ class ReplayWindow:
     its operation. A continuation starts a new window, so a request captured
     less than the skew before a coordinator restart can arrive once more:
     every channel request must be idempotent (a report names the instruction
-    it answers).
+    it answers). The listener's handler threads share one window, so `admit`
+    prunes, checks and records under one lock: a nonce is admitted at most
+    once, and concurrent prunes never trip over each other.
     """
 
     operation: str
@@ -139,17 +142,21 @@ class ReplayWindow:
     _seen: dict[tuple[str, str], int] = field(
         default_factory=dict[tuple[str, str], int], init=False, repr=False
     )
+    _lock: threading.Lock = field(
+        default_factory=threading.Lock, init=False, repr=False, compare=False
+    )
 
     def admit(self, unit_key: str, proof: RequestProof, now: float) -> None:
         if abs(now - proof.timestamp) > self.skew_s:
             raise ChannelRefusedError("the coordinator request is outside the allowed clock skew")
-        for key, stamp in list(self._seen.items()):
-            if abs(now - stamp) > self.skew_s:
-                del self._seen[key]
         entry = (unit_key, proof.nonce)
-        if entry in self._seen:
-            raise ChannelRefusedError("the coordinator request replays an admitted nonce")
-        self._seen[entry] = proof.timestamp
+        with self._lock:
+            for key, stamp in list(self._seen.items()):
+                if abs(now - stamp) > self.skew_s:
+                    del self._seen[key]
+            if entry in self._seen:
+                raise ChannelRefusedError("the coordinator request replays an admitted nonce")
+            self._seen[entry] = proof.timestamp
 
 
 def verify_request(
