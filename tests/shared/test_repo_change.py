@@ -15,14 +15,13 @@ from shared.deploy.git.repo_change import classify_change, is_doc_path
         "schedules/x.json",
         "README.md",
         "AGENTS.md",
-        "CLAUDE.md",
     ],
 )
 def test_is_doc_path(path: str) -> None:
     assert is_doc_path(path)
 
 
-@pytest.mark.parametrize("path", ["ui/web/CLAUDE.md", "gateway/README.md"])
+@pytest.mark.parametrize("path", ["ui/web/AGENTS.md", "gateway/README.md"])
 def test_is_doc_path_leaves_nested_code_docs_to_their_directory(path: str) -> None:
     assert not is_doc_path(path)
 
@@ -44,8 +43,8 @@ def test_is_doc_path_leaves_nested_code_docs_to_their_directory(path: str) -> No
             ],
             (False, False),
         ),
-        (["README.md", "AGENTS.md", "CLAUDE.md"], (False, False)),
-        (["ui/web/CLAUDE.md"], (True, False)),
+        (["README.md", "AGENTS.md"], (False, False)),
+        (["ui/web/AGENTS.md"], (True, False)),
         (["gateway/README.md"], (False, True)),
         ([], (False, False)),
         (["ui/web/app/page.tsx", "agent/graph/_exec.py"], (True, True)),

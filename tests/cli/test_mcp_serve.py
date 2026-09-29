@@ -40,7 +40,7 @@ _EXPECTED_TOOLS = {
 }
 
 # Matches any CJK character. Tool descriptions are read by a third party's model,
-# not by this repo's maintainers, so they stay in English (CLAUDE.md principle 6).
+# not by this repo's maintainers, so they stay in English (AGENTS.md principle 6).
 _CJK = re.compile("[\u4e00-\u9fff\u3040-\u30ff]")
 
 

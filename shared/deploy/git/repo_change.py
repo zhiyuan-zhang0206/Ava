@@ -24,8 +24,8 @@ _DOC_ROOTS = (
 
 def is_doc_path(path: str) -> bool:
     """Docs need no service restart: under a doc axis/artifact root, or a
-    top-level Markdown file (CLAUDE.md / README.md / AGENTS.md). A nested *.md
-    (e.g. ui/web/CLAUDE.md) is classified by its directory, not here.
+    top-level Markdown file (README.md / AGENTS.md). A nested *.md
+    (e.g. ui/web/AGENTS.md) is classified by its directory, not here.
     """
     return path.startswith(_DOC_ROOTS) or (path.endswith(".md") and "/" not in path)
 
