@@ -37,4 +37,4 @@ startup.
 [[cli/commands/commands.ava.okf.md]].
 
 
-Parent: [[shared/session-backend/session-backend.ava.okf.md|session backend]].
+Parent: [[shared/sessions/session-backend.ava.okf.md|session backend]].

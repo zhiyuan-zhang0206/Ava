@@ -45,7 +45,7 @@ to the root service runtime; the backend remains for its surviving session users
 ### macOS firewall manifest
 The Application Firewall allow-list manifest, reconciliation, status rendering,
 and off-box reachability attribution (issue #949):
-[[shared/session-backend/firewall-audit.ava.okf.md]].
+[[shared/sessions/firewall-audit.ava.okf.md]].
 
 ## Entry points
 

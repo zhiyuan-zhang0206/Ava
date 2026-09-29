@@ -21,6 +21,6 @@ per-loop progress snapshots make concurrent-loop failures attributable. OS
 schedulers own health/watchdog probes, boot autostart, and daily
 rotate-then-retain log maintenance through `shared/os_*.py`. Launch shape, the
 kill contract and the SIGTERM unwind:
-[[shared/session-backend/session-backend.ava.okf.md|session backend]].
+[[shared/sessions/session-backend.ava.okf.md|session backend]].
 External coding tools add
 [[coding-session-owner.ava.okf.md|canonical generation ownership]].
