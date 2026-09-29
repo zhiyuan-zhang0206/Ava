@@ -17,13 +17,13 @@ import { NAV_LOCATIONS } from "@/lib/plugin-nav";
 
 function validatorTuple(name: string): string[] {
   const source = readFileSync(
-    resolve(__dirname, "../../../../shared/plugin_ui_contributions.py"),
+    resolve(__dirname, "../../../../shared/packages/plugins/ui_contributions.py"),
     "utf-8",
   );
   // Non-greedy to the first `)`, so a one-line tuple (NAV_LOCATIONS) and a
   // multi-line one (NAV_ICONS) both read correctly.
   const block = new RegExp(`^${name} = \\(([\\s\\S]*?)\\)`, "m").exec(source);
-  expect(block, `${name} tuple not found in plugin_ui_contributions.py`).not.toBeNull();
+  expect(block, `${name} tuple not found in packages/plugins/ui_contributions.py`).not.toBeNull();
   return [...block![1].matchAll(/"([a-z0-9-]+)"/g)].map((m) => m[1]);
 }
 

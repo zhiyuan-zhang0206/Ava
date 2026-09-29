@@ -19,6 +19,7 @@ from uuid import UUID
 import pytest
 
 from cli.commands.agents import impersonation_relay as relay
+from shared.events.live import redis_listener
 
 
 def _public_relay_session(*_args: object, **_kwargs: object) -> dict[str, int]:
@@ -754,7 +755,7 @@ def test_command_passes_remote_to_steer(monkeypatch: pytest.MonkeyPatch) -> None
         return frozenset(ids)
 
     monkeypatch.setattr(relay, "reserve_delivery", reserve)
-    monkeypatch.setattr(relay.shared.redis_listener, "RedisInboundListener", make_listener)
+    monkeypatch.setattr(redis_listener, "RedisInboundListener", make_listener)
 
     def heartbeat_ok(_lease_id: UUID, _token: str) -> bool:
         return True
@@ -829,7 +830,7 @@ def test_codex_relay_caps_content_and_preserves_inbox_on_steer_failure(
         return frozenset(ids)
 
     monkeypatch.setattr(relay, "reserve_delivery", reserve)
-    monkeypatch.setattr(relay.shared.redis_listener, "RedisInboundListener", make_listener)
+    monkeypatch.setattr(redis_listener, "RedisInboundListener", make_listener)
 
     def heartbeat_ok(_lease_id: UUID, _token: str) -> bool:
         return True
