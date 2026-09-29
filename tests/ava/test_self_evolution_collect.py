@@ -22,14 +22,11 @@ from langchain_core.messages import HumanMessage
 
 from tests.skills import load_skill_script
 
-collect_module = load_skill_script("ava-self-evolution", "scripts", "collect.py")
-
 
 @pytest.fixture(scope="module")
 def collect_mod() -> Any:
-    """The collection logic module, loaded by path (ava_builtins/skills/ dir
-    names are kebab-case, so this is never an importable Python package)."""
-    return collect_module
+    """The collection logic module, loaded by path (kebab-case skill dirs never import)."""
+    return load_skill_script("ava-self-evolution", "scripts", "collect.py")
 
 
 def _insert_agent(cur: psycopg.Cursor, agent_id: int) -> None:
