@@ -33,7 +33,7 @@ def _spawn_agent() -> int:
     """Setup helper — a row for the SDK's self identity (Task #1236 split: the
     row is created by create_agent_row; nothing launches, these tests only need
     the row to exist)."""
-    from ops.agent_spawn import create_agent_row
+    from ops.agents.spawn import create_agent_row
     from shared.machine import machine_name
 
     agent_id, _, _prompt_id, _attempt_id = create_agent_row(machine=machine_name())
@@ -51,7 +51,7 @@ def _sdk_via_inprocess_gateway(monkeypatch: pytest.MonkeyPatch):
     from gateway.app import app
     from gateway.routers import agents as _agents_router
     from gateway.routers import agents_forward as _agents_forward_router
-    from ops.ops_lifecycle import launch_agent_op, lifecycle_op
+    from ops.lifecycle import launch_agent_op, lifecycle_op
     from ops.rpc_schemas import LaunchAgentRequest, SpawnedAgent
     from shared import machines as _machines
     from shared.machine import machine_name

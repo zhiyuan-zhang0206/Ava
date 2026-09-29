@@ -73,7 +73,7 @@ from gateway.lifecycle_fences import (
     settle_absent_machine_fences,
 )
 from gateway.routers import work_failed as work_failed_router
-from ops import cluster_rpc, ops_lifecycle
+from ops import cluster_rpc, lifecycle
 from shared import telemetry
 from shared.agents.impersonation.impersonation_maintenance import (
     reap_impersonations,
@@ -594,7 +594,7 @@ async def _reaper_loop(pool: ConnectionPool, stop: asyncio.Event) -> None:
             notices = await asyncio.to_thread(_reap_expired_notices_blocking, pool)
             for agent_id, nid in notices:
                 with suppress(Exception):
-                    await ops_lifecycle.publish_notice_resolved(agent_id, nid)
+                    await lifecycle.publish_notice_resolved(agent_id, nid)
             failures = await work_failed_router.reconcile_stale_work_failures(pool)
             pruned_fire_log = 0
             if _schedule_fire_log_prune_due():

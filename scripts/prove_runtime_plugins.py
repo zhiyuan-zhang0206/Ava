@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 
 from agent.extensions import load_extensions
-from ops.spec import _plugin_services
+from ops.spec import plugin_services
 from services.agent_host.daemon import _plugins_fingerprint
 from shared import paths, plugins_config
 from shared.runtime_interpreter import runtime_plugins_dir
@@ -53,7 +53,7 @@ def main() -> None:
         config["plugins"]["runtime_fixture"]["enabled"] = False
         plugins_config.local_config_path().write_text(json.dumps(config))
         require(
-            any(spec.session == "runtime-fixture" for spec in _plugin_services()),
+            any(spec.session == "runtime-fixture" for spec in plugin_services()),
             "disabled agent plugin lost its installed machine service",
         )
         require(paths.plugins_dir().is_relative_to(home), "installer destination moved into image")

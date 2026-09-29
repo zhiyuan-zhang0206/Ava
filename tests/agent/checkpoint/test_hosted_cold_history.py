@@ -13,7 +13,7 @@ from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
 
 from agent import state as states
-from ops.agent_spawn import create_agent_row
+from ops.agents.spawn import create_agent_row
 from services.agent_host import host as host_module
 from services.agent_host.host import AgentHost
 from services.agent_host.runtime import TurnOutcome

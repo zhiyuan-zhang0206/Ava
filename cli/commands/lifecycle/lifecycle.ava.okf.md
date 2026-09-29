@@ -29,7 +29,7 @@ reach them. The `_`-prefixed modules are steps only this package calls.
 `stop.py` exposes `pause` and `stop` through `_temporary_stop`; restart reuses
 its native drain, after `_start_readiness_preflight` has refused any restart
 whose start would fail ([[start-readiness-preflight.ava.okf.md]]).
-`ops.agent_pause` and `ops.agent_pause_probe` own prepare/drain and runtime
+`ops.agent_pause` and `ops.agent_pause.probe` own prepare/drain and runtime
 capability checks; `service_stop` and `data_plane/maintenance_stop` verify
 resource exits (`_maintenance_stop_report` names survivors), and
 `data_plane/write_generation` performs a release's write-generation fence and
@@ -61,7 +61,7 @@ one exit, `scripts/cutover_adopt_home.py --resume`.
 `cli/parsers/maintenance.py` retains explicit intermediate steps through
 `maintenance.py`, which reads its generation's hold through the maintenance
 journal's own door (`shared.maintenance.require_operation`) and the agent-host
-probes from `ops.agent_pause_probe`. They reuse the
+probes from `ops.agent_pause.probe`. They reuse the
 [durable maintenance journal](../../../shared/maintenance/maintenance.ava.okf.md).
 See [the coordinated operator procedure](../../../conventions/graceful-maintenance.md).
 

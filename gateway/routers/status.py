@@ -43,7 +43,7 @@ from gateway.schemas import (
 from ops import cluster_rpc as _cluster_rpc
 from ops.cluster_pause import is_paused as cluster_is_paused
 from ops.cluster_status import ClusterStatus, _check_pidfile
-from ops.schema_mismatch import status as schema_mismatch_status
+from ops.cluster_status.schema_mismatch import status as schema_mismatch_status
 from shared.cluster_drift import prod_source_head_sha
 from shared.cluster_lock import DeployLease
 from shared.config import settings
@@ -311,7 +311,7 @@ async def _probe_agent_runner(
     """Probe an agent-runner by POSTing a `status_probe` op to its ops server.
 
     The machine is reached at its ava-ops server (services/agent_ops), which
-    dispatches `status_probe` via `gateway.ops_cluster.cluster_status_op`
+    dispatches `status_probe` via `ops.cluster.cluster_status_op`
     in-process and returns the snapshot. Same path the CLI `ava cluster status`
     uses. The local machine is no special case — its ops server is dialed at
     its registered localhost URL, keeping one uniform probe path.

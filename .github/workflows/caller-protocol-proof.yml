@@ -11,7 +11,7 @@ on:
       - 'gateway/routers/delivery.py'
       - 'gateway/routers/agents*.py'
       - 'cli/commands/agents/control.py'
-      - 'ops/rpc_schemas.py'
+      - 'ops/rpc_schemas/__init__.py'
       - 'shared/audit_events.py'
       - 'shared/caller*.py'
       - 'shared/agents/messages/chat_delivery.py'

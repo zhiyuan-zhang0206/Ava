@@ -43,7 +43,7 @@ from typing import cast
 
 from psycopg_pool import ConnectionPool
 
-from ops.cluster_status import _AGENT_SHELL_RE
+from ops.cluster_status import AGENT_SHELL_RE
 from shared.agents.messages.inbound_provenance import InboundProvenance
 from shared.atomic_io import write_text_atomic
 from shared.db import insert_inbound_message, publish_inbound_wake
@@ -133,7 +133,7 @@ def record_close(
     path, or None when the session name is not an agent-owned shell (the
     canonical ``-agent-<id>-shell-<sid>`` shape).
     """
-    match = _AGENT_SHELL_RE.search(name)
+    match = AGENT_SHELL_RE.search(name)
     if match is None:
         return None
     notice = ClosureNotice(

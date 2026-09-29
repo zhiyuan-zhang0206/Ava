@@ -24,7 +24,7 @@ import psycopg
 import pytest
 
 from ops import agent_pause, cluster_pause
-from ops.agent_pause_probe import HostIdentity, host_identity_or_none
+from ops.agent_pause.probe import HostIdentity, host_identity_or_none
 from shared import maintenance, maintenance_cohort, pause_owner
 from shared.db import create_agent, insert_inbound_message
 from shared.machine import machine_name
@@ -307,12 +307,12 @@ def test_host_identity_or_none_requires_independent_absence(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     identity = MagicMock(side_effect=URLError(ConnectionRefusedError(111, "Connection refused")))
-    monkeypatch.setattr("ops.agent_pause_probe.host_identity", identity)
-    monkeypatch.setattr("ops.agent_pause_probe.host_running", lambda: False)
+    monkeypatch.setattr("ops.agent_pause.probe.host_identity", identity)
+    monkeypatch.setattr("ops.agent_pause.probe.host_running", lambda: False)
     assert host_identity_or_none() is None
     identity.assert_not_called()
 
-    monkeypatch.setattr("ops.agent_pause_probe.host_running", lambda: True)
+    monkeypatch.setattr("ops.agent_pause.probe.host_running", lambda: True)
     with pytest.raises(URLError):
         host_identity_or_none()
 
@@ -330,8 +330,8 @@ def test_unknown_host_process_evidence_still_refuses(monkeypatch: pytest.MonkeyP
         raise RuntimeError("cannot identify an unrecorded agent-host home")
 
     identity = MagicMock()
-    monkeypatch.setattr("ops.agent_pause_probe.host_running", unknown)
-    monkeypatch.setattr("ops.agent_pause_probe.host_identity", identity)
+    monkeypatch.setattr("ops.agent_pause.probe.host_running", unknown)
+    monkeypatch.setattr("ops.agent_pause.probe.host_identity", identity)
     with pytest.raises(RuntimeError, match="cannot identify"):
         host_identity_or_none()
     identity.assert_not_called()

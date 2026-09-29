@@ -1,9 +1,7 @@
 """Billing batch-recovery wire models — the `POST /api/agents/resurrect-billing`
 request/response and its per-agent `resurrect-billing-v1` home action (task #3919).
 
-Split out of `ops/rpc_schemas.py` when that file crossed the per-file line
-ceiling. `ops.rpc_schemas` re-exports these names, so every existing import
-path stays valid.
+The `ops.rpc_schemas` door re-exports these names.
 """
 
 from typing import Literal

@@ -2261,7 +2261,7 @@ async def test_claim_auto_resurrect_chat_batch_wakes_and_keeps_chat(
     from uuid import uuid4
 
     from agent.ownership.hosted import admit_hosted_runtime, apply_hosted_lifecycle
-    from ops.agent_wake import resurrect_agent
+    from ops.agents.wake import resurrect_agent
     from shared.machine import machine_name
     from shared.runtime_incarnation import current_incarnation
     from shared.turn_identity import bind_turn_identity

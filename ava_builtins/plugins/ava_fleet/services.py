@@ -1,9 +1,9 @@
 """ava_fleet — ops service declarations (the plugin's `build_services()` hook).
 
 A plugin that runs its own long-lived gateway/agent-runner daemon declares it
-here instead of hardcoding a ServiceSpec into the core `ops/roster.py`: a
+here instead of hardcoding a ServiceSpec into the core `ops/roster/__init__.py`: a
 plugin ships a `services.py` exposing ``services() -> tuple[ServiceSpec, ...]``,
-and `ops.spec._plugin_services()` discovers + folds it into the single
+and `ops.spec.plugin_services()` discovers + folds it into the single
 `build_services()` roster (so watchdog keepalive / `ava start` / `ava status`
 all still derive from one place). Discovery keys on this plugin's code being
 PRESENT on the machine, not the agent-facing enable-state — the cluster-level
@@ -21,7 +21,7 @@ matching `build_services()`'s use-time contract.
 from __future__ import annotations
 
 from ops.roster import daemon_identity
-from ops.service_spec import ServiceSpec
+from ops.roster.service_spec import ServiceSpec
 from shared.config import settings
 from shared.daemon_health import health_port
 from shared.machine import MachineRole

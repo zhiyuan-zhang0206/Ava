@@ -22,9 +22,9 @@ from psycopg_pool import AsyncConnectionPool, ConnectionPool
 from agent.db import has_pending_interrupt
 from agent.graph.exec._stream import StreamingTextIO
 from agent.ownership.hosted import admit_hosted_runtime
-from ops.agent_wake import resurrect_agent
-from ops.ops_exit import _force_terminate_transaction
-from ops.resurrection_retry import ResurrectSettlementDeferredError
+from ops.agents.resurrection_retry import ResurrectSettlementDeferredError
+from ops.agents.wake import resurrect_agent
+from ops.lifecycle.termination import _force_terminate_transaction
 from services.agent_host.daemon import _cancel_turn_route
 from services.agent_host.dispatcher import TurnScheduler
 from services.agent_host.host import AgentHost

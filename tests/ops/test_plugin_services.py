@@ -1,7 +1,7 @@
 """Plugin-registered ops services — the discovery + folding machinery in ops.spec.
 
 A plugin ships a `services.py` exposing `services() -> tuple[ServiceSpec, ...]`;
-`ops.spec._plugin_services()` discovers the INSTALLED plugins (by code presence,
+`ops.spec.plugin_services()` discovers the INSTALLED plugins (by code presence,
 via `shared.plugins_config`) and folds their specs onto `build_services()` so the
 roster stays single-source. These lock the load-bearing invariants:
 - the real ava_fleet plugin registers task-maintenance (venv-direct cmd +
@@ -21,7 +21,8 @@ from pathlib import Path
 import pytest
 
 import shared.plugins_config as pc
-from ops import roster, service_spec, spec
+from ops import roster, spec
+from ops.roster import service_spec
 
 
 def test_fleet_plugin_registers_task_maintenance() -> None:
@@ -47,7 +48,7 @@ def test_ops_spec_has_no_task_maintenance_hardcoded() -> None:
 
 
 def test_no_installed_plugins_contributes_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
-    """When no plugin is present, `_plugin_services()` contributes nothing and
+    """When no plugin is present, `plugin_services()` contributes nothing and
     task-maintenance is absent from the roster."""
     monkeypatch.setattr(pc, "installed_plugin_dirs", dict)
     names = {s.session for s in roster.build_services()}
@@ -94,7 +95,7 @@ def test_session_collision_fails_fast(monkeypatch: pytest.MonkeyPatch) -> None:
         capabilities=frozenset({"gateway"}),
         requires_db=True,
     )
-    monkeypatch.setattr(spec, "_plugin_services", lambda: (collider,))
+    monkeypatch.setattr(spec, "plugin_services", lambda: (collider,))
     with pytest.raises(spec.PluginServiceError, match="collides"):
         roster.build_services()
 
@@ -111,7 +112,7 @@ def test_services_py_without_declare_is_skipped_loudly(
     (plugin_dir / "services.py").write_text("X = 1  # no services() function\n")
     monkeypatch.setattr(pc, "installed_plugin_dirs", lambda: {"brokenplugin": plugin_dir})
 
-    spec._plugin_services()  # must not raise
+    spec.plugin_services()  # must not raise
 
     assert any(
         "brokenplugin" in r["message"] and "failed to load" in r["message"] for r in loguru_records
@@ -126,7 +127,7 @@ def test_broken_services_py_is_skipped_and_others_still_load(
     good_dir = tmp_path / "goodplugin"
     good_dir.mkdir()
     (good_dir / "services.py").write_text(
-        "from ops.service_spec import ServiceSpec\n"
+        "from ops.roster.service_spec import ServiceSpec\n"
         "def services():\n"
         "    return (ServiceSpec(session='probe-good', cmd='noop',\n"
         "            capabilities=frozenset({'gateway'}), requires_db=False),)\n"
@@ -140,7 +141,7 @@ def test_broken_services_py_is_skipped_and_others_still_load(
         lambda: {"brokenplugin": bad_dir, "goodplugin": good_dir},
     )
 
-    sessions = {s.session for s in spec._plugin_services()}
+    sessions = {s.session for s in spec.plugin_services()}
 
     assert sessions == {"probe-good"}
     assert any(
@@ -168,7 +169,7 @@ def test_external_service_healthcheck_loads_without_agent_bootstrap(
     (plugin_dir / "services.py").write_text(
         "from __future__ import annotations\n"
         "from dataclasses import dataclass\n"
-        "from ops.service_spec import ServiceSpec\n"
+        "from ops.roster.service_spec import ServiceSpec\n"
         "@dataclass\n"
         "class Sample:\n"
         "    value: int = 1\n"
@@ -180,7 +181,7 @@ def test_external_service_healthcheck_loads_without_agent_bootstrap(
         "            healthcheck_module=__name__),)\n"
     )
     monkeypatch.setattr(pc, "installed_plugin_dirs", lambda: {name: plugin_dir})
-    declared = spec._plugin_services()
+    declared = spec.plugin_services()
     assert len(declared) == 1
     assert declared[0].healthcheck_module == dotted
     assert importlib.import_module(dotted).main() == 1

@@ -31,12 +31,12 @@ async def recover_reaped_corpses(reaped: Sequence[ReapedCorpse]) -> None:
         wake_id = corpse.recovery_wake_id
         if wake_id is None:
             continue
-        # Deferred, and reached through ops_lifecycle's own module: ops is a
+        # Deferred, and reached through ops.lifecycle's own module: ops is a
         # higher layer resolved at call time, and this is the stubbable name.
-        from ops import ops_lifecycle
+        from ops import lifecycle
 
         try:
-            status = await ops_lifecycle.resurrect_if_terminated(
+            status = await lifecycle.resurrect_if_terminated(
                 corpse.agent_id,
                 trigger_inbound_id=wake_id,
                 trigger_inbound_kind="chat",

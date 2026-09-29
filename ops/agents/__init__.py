@@ -4,12 +4,13 @@ Gateway-internal — agent processes no longer import this module. The agent SDK
 (`ava.agents.*`) calls the gateway over HTTP. `resurrect` remains reachable here
 as an internal op used by `resurrect_if_terminated` (no dedicated endpoint).
 
-The entry points are re-exported from their owning modules:
+This package door re-exports the entry points from their owning submodules:
 
-- `ops/agent_spawn.py` creates a new metadata row (`create_agent_row`),
-  optionally forked from another agent's checkpoint (`latest_checkpoint_id`).
-- `ops/agent_wake.py` resurrects a terminated hosted incarnation
-  (`resurrect_agent`) after its original lifecycle command settles.
+- `spawn` creates a new metadata row (`create_agent_row`), optionally forked
+  from another agent's checkpoint (`latest_checkpoint_id`).
+- `wake` resurrects a terminated hosted incarnation (`resurrect_agent`) after
+  its original lifecycle command settles; `resurrection_retry` holds the
+  placement and termination boundaries a queued resurrection crosses.
 
 One durable agent identity is served by its home agent-host. Spawn and
 resurrection commit native intent and messages before publishing a wake;
@@ -19,22 +20,22 @@ admission binds the next turn to the host owner and a new generation.
 from __future__ import annotations
 
 import shared.db
-from ops.agent_spawn import (
+from ops.agents.spawn import (
     _SPAWNER_AGENT_RE as _SPAWNER_AGENT_RE,
 )
-from ops.agent_spawn import (
+from ops.agents.spawn import (
     _copy_checkpoint_chain as _copy_checkpoint_chain,
 )
-from ops.agent_spawn import (
+from ops.agents.spawn import (
     _spawner_agent_id_malformed as _spawner_agent_id_malformed,
 )
-from ops.agent_spawn import (
+from ops.agents.spawn import (
     create_agent_row as create_agent_row,
 )
-from ops.agent_spawn import (
+from ops.agents.spawn import (
     latest_checkpoint_id as latest_checkpoint_id,
 )
-from ops.agent_wake import (
+from ops.agents.wake import (
     resurrect_agent as resurrect_agent,
 )
 from shared.agents import AgentNotFound, AgentStatus

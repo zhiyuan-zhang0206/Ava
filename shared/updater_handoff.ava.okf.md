@@ -12,7 +12,7 @@ status: current
 (schemas in `shared/updater_recovery.py`). No current code writes either file:
 the old CLI/ops producer graph, its writers, bootstrap-hop and continuation
 commands are absent. A host upgraded from the retired updater may still carry
-them, so cluster resume and recovery (`ops/ops_cluster.py`) read them and refuse
+them, so cluster resume and recovery (`ops/cluster.py`) read them and refuse
 unresolved evidence.
 
 The only mutation left is `clear(generation)`: an exact-generation CAS under the

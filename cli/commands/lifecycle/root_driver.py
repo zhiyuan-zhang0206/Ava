@@ -13,7 +13,7 @@ from typing import Any, NamedTuple, cast
 from cli.commands._probe import ReadinessWait
 from cli.commands._repo import ServiceSpec, session_name
 from cli.start_runtime import StartRuntime
-from ops.service_spec import api_access, db_access, profile_marker
+from ops.roster.service_spec import api_access, db_access, profile_marker
 from shared.cluster.derive import runner_db_url_projection
 from shared.config import settings
 from shared.machine import MachineRoles

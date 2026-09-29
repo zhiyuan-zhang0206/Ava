@@ -27,11 +27,11 @@ from gateway.schemas import (
     MachineDeleteResponse,
     MachineStatus,
 )
+from ops import cluster as _ops
 from ops import cluster_rpc as _cluster_rpc
-from ops import ops_cluster as _ops
 from ops.cluster_pause import is_paused as cluster_is_paused
 from ops.cluster_status import ClusterStatus
-from ops.schema_mismatch import status as schema_mismatch_status
+from ops.cluster_status.schema_mismatch import status as schema_mismatch_status
 from shared import machines
 from shared.cluster_drift import prod_source_head_sha
 from shared.cluster_lock import DeployLease

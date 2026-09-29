@@ -9,10 +9,12 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import cast
 from uuid import uuid4
 
 import psycopg
 import pytest
+from psycopg_pool import ConnectionPool
 
 from ops import agent_pause, cluster_pause
 from ops.cluster_pause import unpause_local_cluster as _real_unpause_local_cluster
@@ -175,7 +177,7 @@ def test_drain_timeout_retains_hold_and_action_dependencies(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     agent = create_agent(db_conn)
-    from ops.agent_pause_probe import HostIdentity
+    from ops.agent_pause.probe import HostIdentity
 
     owner, generation = uuid4(), uuid4()
     monkeypatch.setattr(agent_pause, "host_running", lambda: True)
@@ -224,7 +226,7 @@ def test_stall_report_names_the_predecessor_owner_fence(
     owner mismatch, which is the fence that requires explicit resolution.
     """
     from ops.agent_pause import _stall_report
-    from ops.agent_pause_probe import HostIdentity
+    from ops.agent_pause.probe import HostIdentity
     from shared.maintenance_state import MaintenanceHold
 
     agent = create_agent(db_conn)
@@ -280,7 +282,6 @@ def test_release_local_db_pools_dials_the_host_and_releases_the_ops_pool(
     """The stop's last step: host pools over loopback, then this daemon's own."""
     from types import SimpleNamespace
 
-    from services.agent_ops import daemon as ops_daemon
     from shared import pool_release
 
     posted: list[str] = []
@@ -298,13 +299,12 @@ def test_release_local_db_pools_dials_the_host_and_releases_the_ops_pool(
         released_pools.append(pool)
         return 3
 
-    fake_pool = object()
+    fake_pool = cast(ConnectionPool, object())
     monkeypatch.setattr(cluster_pause, "http_dial", SimpleNamespace(post=_post))
     monkeypatch.setattr(cluster_pause, "health_port", lambda _name: 1234)
-    monkeypatch.setattr(ops_daemon, "_db_pool", fake_pool)
     monkeypatch.setattr(pool_release, "release_idle_sync", _release_idle_sync)
 
-    released = cluster_pause.release_local_db_pools()
+    released = cluster_pause.release_local_db_pools(fake_pool)
 
     assert posted == ["http://127.0.0.1:1234/release-db-pools"]
     assert released == {"host": {"workload": 2, "control": 1}, "ops": 3}
@@ -317,7 +317,6 @@ def test_release_local_db_pools_reports_failures_without_raising(
     """Both arms are best-effort: the stop must complete on either failure."""
     from types import SimpleNamespace
 
-    from services.agent_ops import daemon as ops_daemon
     from shared import pool_release
 
     def _refused(_url: str, **_kwargs: object) -> object:
@@ -328,10 +327,9 @@ def test_release_local_db_pools_reports_failures_without_raising(
 
     monkeypatch.setattr(cluster_pause, "http_dial", SimpleNamespace(post=_refused))
     monkeypatch.setattr(cluster_pause, "health_port", lambda _name: 1234)
-    monkeypatch.setattr(ops_daemon, "_db_pool", object())
     monkeypatch.setattr(pool_release, "release_idle_sync", _boom)
 
-    released = cluster_pause.release_local_db_pools()
+    released = cluster_pause.release_local_db_pools(cast(ConnectionPool, object()))
 
     assert released["host_error"] == "connection refused"
     assert released["ops_error"] == "pool release exploded"

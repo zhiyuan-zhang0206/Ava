@@ -58,7 +58,7 @@ def test_get_config_serializes_required_fields():
 def test_redis_url_masked_does_not_leak_cluster_secret(monkeypatch: pytest.MonkeyPatch) -> None:
     """redis_url carries the runtime ACL password as userinfo, so GET /api/config
     must mask it like db_url — the credential must never appear in the response."""
-    from ops.ops_config import SENSITIVE_MASK
+    from ops.host_config import SENSITIVE_MASK
 
     monkeypatch.setattr(settings.data_plane, "redis_url", "redis://:supersecret@10.0.0.1:6379/0")
     with TestClient(app) as client:

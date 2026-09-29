@@ -16,7 +16,7 @@ import cli.commands.lifecycle.start as _start_commands
 from cli.commands._repo import ServiceSpec
 from cli.commands.lifecycle import start
 from cli.commands.lifecycle.root_driver import LaunchOutcome
-from ops.service_spec import _GATEWAY
+from ops.roster.service_spec import _GATEWAY
 from shared import start_serving
 from shared.exit_codes import SERVICES_NOT_READY_EXIT_CODE
 from shared.start_serving import RootBirth

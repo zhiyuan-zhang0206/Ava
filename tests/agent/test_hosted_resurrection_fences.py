@@ -10,8 +10,8 @@ from psycopg_pool import AsyncConnectionPool
 
 from agent.db import claim_inbound_batch
 from agent.ownership.hosted import admit_hosted_runtime, apply_hosted_lifecycle
-from ops.agent_spawn import create_agent_row
-from ops.agent_wake import resurrect_agent
+from ops.agents.spawn import create_agent_row
+from ops.agents.wake import resurrect_agent
 from shared.db import insert_inbound_message
 from shared.incarnation_resources import (
     ExecAllocation,

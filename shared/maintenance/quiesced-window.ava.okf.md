@@ -22,7 +22,8 @@ not wait for the hold to release.
 `ops.cluster_pause.release_local_db_pools` releases every idle client-pool
 connection: the host daemon's shared and control pools (via `POST
 /release-db-pools` on its loopback health port) and the ops daemon's own
-dispatch pool. `shared.pool_release` performs the release against the pool's
+dispatch pool, which the calling daemon passes in (ops never reaches into the
+daemon's module state). `shared.pool_release` performs the release against the pool's
 private face because psycopg-pool has no public "close idle, keep usable"
 operation (`drain()` re-opens replacements, `close()` is terminal). Its only
 caller was the legacy `cluster_stop` op, which the fleet release transition

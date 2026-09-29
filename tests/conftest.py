@@ -1399,7 +1399,7 @@ def spawn_agent(
     **kw: Any,
 ) -> int:
     """Allocate a real agent row and publish its normal host-dispatch wake."""
-    from ops.agent_spawn import create_agent_row
+    from ops.agents.spawn import create_agent_row
     from shared.db import publish_inbound_wake
     from shared.machine import machine_name
 

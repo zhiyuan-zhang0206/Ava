@@ -20,7 +20,7 @@ from pydantic import (
 from shared.resource_sample import ResourceSample
 
 # Why a host's status snapshot reads `paused` — the first true clause of the
-# paused verdict, in the verdict's own order (ops/cluster_status.py::_paused_reason):
+# paused verdict, in the verdict's own order (ops/cluster_status/__init__.py::_paused_reason):
 #   no_state       — the deploy state read failed or its row is absent
 #   business_pause — host_deploy_state.posture reads "paused"
 #   maintenance    — a native admission hold (stop window / maintenance owner)
@@ -83,7 +83,7 @@ class MachineStatus(BaseModel):
     paused: bool | None  # None = unknown (probe failed)
     # Which clause of the host's paused verdict fired, when known (no_state /
     # business_pause / maintenance / startup — see
-    # ops/cluster_status.py::_paused_reason). None = not paused, or the row
+    # ops/cluster_status/__init__.py::_paused_reason). None = not paused, or the row
     # carries no verdict to decompose (probe failed / abnormal-state row).
     paused_reason: PausedReason | None = None
     description: str | None = None  # free-text machine metadata; NULL when unset

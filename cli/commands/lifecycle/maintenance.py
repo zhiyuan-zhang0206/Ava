@@ -23,7 +23,7 @@ from cli.commands.lifecycle.service_stop import (
 )
 from cli.cutover_hold import resume_refusal, start_refusal
 from ops.agent_pause import drain, prepare
-from ops.agent_pause_probe import host_identity_or_none, ops_quiescent
+from ops.agent_pause.probe import host_identity_or_none, ops_quiescent
 from shared import hold_driver, maintenance, maintenance_cohort, pause_owner, start_serving
 from shared.db import connect
 from shared.exit_codes import SERVICES_NOT_READY_EXIT_CODE

@@ -1,7 +1,6 @@
 """Event-publish RPC ops — the InboundArrived / PageClosed / Notice event fan-out.
 
-Split out of `ops/ops_lifecycle.py` (Task #1999) when the lifecycle cluster
-crossed the 800-line ceiling. Each helper is best-effort: the publish goes to
+The `ops.lifecycle` door re-exports these publishes. Each helper is best-effort: the publish goes to
 the shared events channel (`publish_best_effort`) so a Redis blip costs a live
 UI update, never the durable op that triggered it.
 """

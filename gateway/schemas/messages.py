@@ -16,7 +16,7 @@ from pydantic import (
     model_validator,
 )
 
-from ops.rpc_content import UserContent
+from ops.rpc_schemas.content import UserContent
 from shared.agents import AgentStatus
 from shared.agents.messages.envelope import validate_writable_source
 from shared.message_kwargs import NoteTag

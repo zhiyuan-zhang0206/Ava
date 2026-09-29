@@ -313,7 +313,7 @@ Full enumeration across 16 scenarios x 3 requests: parent exit / launchd adoptio
 - Landing details (draft-3 / the implementation phase): (1) designing the "zero permission content in root" lint rule (B2a) (2) refining the helper→root keepalive chain and the single-instance flow (E1/B5) (3) aligning the B7 metrics with the F list (4) decomposing the migration steps (D) (5) per-machine audit of the actual helper authorization state on all four Macs — using the zero-prompt preflight query probe (no side effects); never trigger a TCC prompt on a user or company device — added 2026-09-12, after the F1 event (task #3202).
 
 ## Open / to verify (tracked)
-- [ ] Stale docstrings such as `ops/agents.py:16-17` (already listed as a candidate small task)
+- [ ] Stale docstrings such as `ops/agents/__init__.py:16-17` (already listed as a candidate small task)
 - [ ] A line-by-line read of the `machine=` spawn-routing entry (C to verify)
 - [ ] The otel-collector supervisor shape (A to verify 3)
 - [ ] Refining the G6 counter-case (LGTM staying independent)

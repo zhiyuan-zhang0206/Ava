@@ -375,7 +375,7 @@ def test_launched_services_receive_their_class_login_only(
     born: Born, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from cli.commands.lifecycle.root_driver import _service_extra_env, root_child_env
-    from ops.service_spec import ServiceSpec
+    from ops.roster.service_spec import ServiceSpec
 
     # The launcher's settings-free serve-gateway read (a born single box).
     monkeypatch.setitem(os.environ, "AVA_MACHINE_SERVE_GATEWAY", "true")

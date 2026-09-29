@@ -20,7 +20,7 @@ from psycopg_pool import AsyncConnectionPool
 
 from agent.ownership.hosted import admit_hosted_runtime, settle_hosted_runtime
 from ops import agent_pause
-from ops.agent_pause_probe import HostIdentity
+from ops.agent_pause.probe import HostIdentity
 from shared import maintenance, maintenance_cohort, pause_owner, telemetry
 from shared.config import settings
 from shared.db import insert_inbound_message

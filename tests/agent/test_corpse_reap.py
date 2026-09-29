@@ -29,7 +29,7 @@ from agent.ownership.corpse_reap import (
     reap_recrashed_corpse,
 )
 from agent.ownership.hosted import admit_hosted_runtime, settle_hosted_runtime
-from ops import agent_wake
+from ops.agents import wake
 from shared.config import settings
 from shared.db import create_agent
 from shared.lifecycle_acceptance import HOSTED_TURN_RECOVERY_MARKER
@@ -272,7 +272,7 @@ async def test_prompt_reap_then_resurrect_composes_without_tearing(
         del payload
         wakes.append(agent_id)
 
-    monkeypatch.setattr(agent_wake, "publish_inbound_wake", _wake)
+    monkeypatch.setattr(wake, "publish_inbound_wake", _wake)
 
     agent_id, incarnation = await _recrashed_row(db_conn, aops_pool)
     reaped = await reap_recrashed_corpse(aops_pool, incarnation)
@@ -280,7 +280,7 @@ async def test_prompt_reap_then_resurrect_composes_without_tearing(
 
     second_reap, resurrected = await asyncio.gather(
         reap_recrashed_corpse(aops_pool, incarnation),
-        asyncio.to_thread(agent_wake.resurrect_agent, agent_id, resurrected_by="user"),
+        asyncio.to_thread(wake.resurrect_agent, agent_id, resurrected_by="user"),
     )
 
     assert second_reap == []
@@ -306,7 +306,7 @@ async def test_grace_reap_commits_a_marked_wake_that_passes_the_notice_gate(
     """The grace path queues the same wake as the prompt reap; the marker
     keeps it out of the system-notice class, so the resurrection channels
     see real work (not a notification that never resurrects)."""
-    from ops.resurrect_gates import system_notice_source_of_trigger
+    from ops.lifecycle.resurrect_gates import system_notice_source_of_trigger
 
     agent_id, owner = _agent(db_conn), uuid4()
     incarnation = await admit_hosted_runtime(

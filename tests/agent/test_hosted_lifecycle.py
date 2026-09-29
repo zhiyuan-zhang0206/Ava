@@ -19,7 +19,7 @@ from agent.ownership.hosted import (
     apply_hosted_lifecycle,
     settle_hosted_runtime,
 )
-from ops.ops_exit import _force_terminate_transaction
+from ops.lifecycle.termination import _force_terminate_transaction
 from services.agent_host.host import AgentHost, kill_terminating_agent_shells
 from shared.config import settings
 from shared.context import AvaContext

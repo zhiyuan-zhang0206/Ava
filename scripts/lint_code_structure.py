@@ -169,7 +169,7 @@ _MACHINE_ROLE_ALLOWED: dict[str, str] = {
     "cli/release_fleet/inventory.py": "Refuse a fleet of one whose home does not serve the gateway before effects; never dispatch by role.",
     "cli/release_fleet/entries.py": "Report which capabilities this unit serves in its release receipt; never dispatch by role.",
     "cli/commands/lifecycle/_temporary_stop.py": "Which selected local services and data plane does this unit own during explicit pause/stop? No execution is routed elsewhere.",
-    "ops/agent_pause.py": "Does this unit serve an agent host whose admitted cohort and actual continuation completion must be verified before local shutdown?",
+    "ops/agent_pause/__init__.py": "Does this unit serve an agent host whose admitted cohort and actual continuation completion must be verified before local shutdown?",
     "cli/commands/lifecycle/maintenance.py": "Which services/data plane does this explicitly local, DB-offline-capable stop/start own? Fleet transport is operator-coordinated.",
     "shared/machine.py": "defines machine_role() and its capability wrappers is_gateway()/is_agent_runner() — the implementation itself",
     "shared/observability.py": "does this process serve the gateway capability whose LGTM marker governs telemetry (what do I serve)",
@@ -178,7 +178,7 @@ _MACHINE_ROLE_ALLOWED: dict[str, str] = {
     "cli/commands/_repo.py": "resolve this host's capability set, None when unset, for stop/status/converge (what do I serve)",
     "cli/commands/observability/trace.py": "which recovery ingress does this host serve: gateway-local Tempo or a pure-runner relay target (what do I serve)",
     "services/agent_ops/_boot.py": "what do I advertise in register_self (what do I serve)",
-    "ops/ops_inventory.py": "capability guard: inventory ops are agent-runner-only (what do I serve)",
+    "ops/inventory.py": "capability guard: inventory ops are agent-runner-only (what do I serve)",
     "gateway/routers/config.py": "for the gateway itself, local role is authoritative (what do I serve)",
     "cli/commands/release_inventory.py": "verified installed image reads the real annotated service roster for the unit receipt (read-only, WHEEL_RUNTIME-guarded; no serve decision)",
 }

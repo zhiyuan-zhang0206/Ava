@@ -678,7 +678,7 @@ def test_supersede_and_withdraw_publish_notice_resolved_for_both_kinds(
     never surface in the resolved history."""
     # Events now publish from the gateway (R3 door ④ unified write API), not
     # the SDK — patch the gateway-side publisher.
-    import ops.ops_lifecycle as ops_mod
+    import ops.lifecycle as ops_mod
 
     resolved: list[int] = []
 

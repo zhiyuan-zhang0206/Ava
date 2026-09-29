@@ -46,7 +46,7 @@ from gateway.schemas import (
     NoticesFeed,
     ResolveNoticeIn,
 )
-from ops import ops_lifecycle as _ops
+from ops import lifecycle as _ops
 from shared.config import settings
 from shared.db import NOTICE_FYI_TTL_DAYS
 from shared.db_transaction import write_transaction

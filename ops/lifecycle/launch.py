@@ -23,10 +23,9 @@ async def launch_agent_op(body: LaunchAgentRequest, db_pool: ConnectionPool) -> 
     No failure here terminates the row: the gateway records launch failure and
     the pending scan can still deliver the committed first prompt.
     """
-    # Lazy imports: both homes (ops_lifecycle, moving to ops_events with the
-    # Task #1999 split) re-export THIS cluster, so a module-level import would
-    # be circular in either merge order.
-    from ops.ops_lifecycle import publish_inbound_arrived
+    # Lazy import: the package door re-exports this module, so a module-level
+    # import of the door would be circular.
+    from ops.lifecycle import publish_inbound_arrived
     from shared.lm.factory import validate_model_config
 
     await asyncio.to_thread(validate_model_config, model=settings.lm.llm_model, config=body.config)

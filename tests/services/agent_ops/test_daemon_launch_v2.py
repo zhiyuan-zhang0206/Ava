@@ -18,7 +18,7 @@ async def test_versioned_launch_dispatch(monkeypatch: pytest.MonkeyPatch) -> Non
         seen.append((body.agent_id, received_pool))
         return SpawnedAgent(id=body.agent_id)
 
-    monkeypatch.setattr(daemon.ops_lifecycle, "launch_agent_op", _launch)
+    monkeypatch.setattr(daemon.lifecycle, "launch_agent_op", _launch)
     status, result = await daemon._dispatch("spawn-launch-v2", {"agent_id": 777})
     assert (status, result) == ("completed", {"id": 777})
     assert seen == [(777, pool)]

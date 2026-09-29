@@ -46,7 +46,7 @@ def private_journal(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
 
 def _fake_host(monkeypatch: pytest.MonkeyPatch, owner: UUID, active: set[int]) -> None:
     """A live host bound to `owner`; its active set is what the drain waits on."""
-    from ops.agent_pause_probe import HostIdentity
+    from ops.agent_pause.probe import HostIdentity
 
     monkeypatch.setattr(agent_pause, "host_running", lambda: True)
     monkeypatch.setattr(
@@ -424,9 +424,9 @@ def test_only_the_reap_stamps_the_restarting_mark() -> None:
     was never meant to touch."""
     sources = _production_sources()
     stamped = {rel for rel, text in sources.items() if _REAP_STAMP.search(text)}
-    assert stamped == {"ops/agent_pause.py"}
+    assert stamped == {"ops/agent_pause/__init__.py"}
 
-    text = sources["ops/agent_pause.py"]
+    text = sources["ops/agent_pause/__init__.py"]
     match = _REAP_STAMP.search(text)
     assert match is not None
     start = text.rfind("def _reap_agent", 0, match.start())

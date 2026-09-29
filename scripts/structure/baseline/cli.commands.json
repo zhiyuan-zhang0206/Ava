@@ -32,8 +32,5 @@
   },
   "nesting": {
     "cli/commands/observability/trace.py::_post_line": 6
-  },
-  "private_imports": {
-    "cli/commands/_release_plugin_probe.py::ops.spec._plugin_services": 1
   }
 }

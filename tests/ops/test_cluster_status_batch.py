@@ -12,7 +12,8 @@ from pathlib import Path
 import psycopg
 import pytest
 
-from ops import cluster_status, schema_mismatch
+from ops import cluster_status
+from ops.cluster_status import schema_mismatch
 from ops.rpc_schemas import SessionInfo
 from shared.cluster_lock import DeployLease
 from shared.host_deploy_state import HostDeployState

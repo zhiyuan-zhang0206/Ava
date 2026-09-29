@@ -400,7 +400,7 @@ async def _resurrect_one(pool: ConnectionPool, agent_id: int, trigger_inbound_id
     """Run `resurrect_if_terminated` for one agent, bounded by the concurrency
     semaphore; classify the returned status and escalate consecutive failures
     into a durable wake-suppression window."""
-    from ops.ops_lifecycle import resurrect_if_terminated
+    from ops.lifecycle import resurrect_if_terminated
 
     async with _resurrect_semaphore:
         try:

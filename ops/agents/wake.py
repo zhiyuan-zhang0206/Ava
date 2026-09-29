@@ -7,9 +7,12 @@ import psycopg
 from psycopg import sql
 from psycopg.types.json import Jsonb
 
-from ops.resurrection_retry import ResurrectSettlementDeferredError, hosted_resurrection_target
-from ops.resurrection_retry import ResurrectTriggerStaleError as ResurrectTriggerStaleError
-from ops.resurrection_retry import lock_active_home_machine as _lock_active_home_machine
+from ops.agents.resurrection_retry import (
+    ResurrectSettlementDeferredError,
+    hosted_resurrection_target,
+)
+from ops.agents.resurrection_retry import ResurrectTriggerStaleError as ResurrectTriggerStaleError
+from ops.agents.resurrection_retry import lock_active_home_machine as _lock_active_home_machine
 from shared import telemetry
 from shared.agents import (
     AgentNotFound,

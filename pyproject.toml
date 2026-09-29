@@ -283,7 +283,7 @@ forbidden_modules = ["services"]
 # <-> cli HTTP API contracts that BOTH speak (MachineStatus / Config*) are
 # downshifted to `shared.api_contracts` — below both ops and gateway — so cli
 # decodes a gateway response without importing up; ops keeps only the
-# gateway<->runner RPC-shared closure (ops/rpc_schemas.py). See
+# gateway<->runner RPC-shared closure (ops/rpc_schemas/__init__.py). See
 # ops/ops-module.md.
 [[tool.importlinter.contracts]]
 name = "Ops layer (shared < ops < {gateway, cli})"
@@ -502,9 +502,12 @@ filterwarnings = [
 # copies), so measuring them would drag the ava_builtins floor toward dead
 # lines instead of executable ones.
 source = ["agent", "ava", "cli", "gateway", "shared", "ui", "ops", "services", "ava_builtins"]
+# Package `__init__.py` files are measured: a module that becomes a package
+# keeps its code in the package door (`x.py` -> `x/__init__.py`), and omitting
+# doors would drop that code from its domain's floor. An empty or re-export-only
+# door costs nothing — its lines run on import.
 omit = [
     "*/__main__.py",
-    "*/__init__.py",
     "*/tests/*",
     # ava_builtins/skill_support/** is a pure relocation of code that lived at
     # ava_builtins/skills/*/reference/* (path_imports fix, Rule 6) — same

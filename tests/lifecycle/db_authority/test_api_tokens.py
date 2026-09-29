@@ -30,7 +30,7 @@ from cli.commands.data_plane import bringup
 from gateway import request_principal
 from gateway.request_principal import cluster_credential
 from gateway.routers._webhook_auth import authenticate_webhook
-from ops.service_spec import ServiceSpec, api_access
+from ops.roster.service_spec import ServiceSpec, api_access
 from services.agent_ops import _boot as ops_boot
 from shared.cluster import authority
 from shared.cluster.authority import api, ledger, unit

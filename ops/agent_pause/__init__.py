@@ -11,6 +11,9 @@ released with the honest `reaped` outcome, never a fabricated flush receipt.
 Its mark is settled at the successor boot or local resume
 (`shared/straggler_reap.py`), which restores the row to runnable and lets the
 ordinary reconcile re-deliver its claimed work on the new code.
+
+The `probe` submodule reads the running local host's maintenance capability
+without trusting the code on disk.
 """
 
 import logging
@@ -21,7 +24,7 @@ from datetime import UTC, datetime
 from typing import NamedTuple
 from uuid import UUID, uuid4
 
-from ops.agent_pause_probe import HostIdentity, host_identity, host_running
+from ops.agent_pause.probe import HostIdentity, host_identity, host_running
 from shared import maintenance, maintenance_cohort, pause_owner
 from shared.db import connect, publish_inbound_wake
 from shared.hold_driver import HoldDriver

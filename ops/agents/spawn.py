@@ -1,15 +1,14 @@
 """Agent birth: a NEW agents_meta row, optionally forked from another agent.
 
-One of the two lifecycle halves reached through `ops/agents.py`; the other is
-`ops/agent_wake.py`, which revives rows that already exist. This side owns the
+One of the two lifecycle halves reached through the `ops.agents` door; the other
+is `ops.agents.wake`, which revives rows that already exist. This side owns the
 *GATEWAY-side creation* of a birth — the row insert, the fork checkpoint copy,
 and the pre-launch inbound delivery. Task #1236 follow-up: the row must be
 created as the MAIN data-plane identity, so creation happens on the gateway,
 never on the target runner — its ops server dials as the least-privilege
 `ava_runner` role, which by design cannot INSERT agents / agents_meta. The
-*mechanics* of launching a detached native child process live in
-`ops/agent_launch.py` (module-qualified access), reached from the runner's
-`launch` op.
+runner's `launch` op (`ops.lifecycle.launch`) validates the created row and
+wakes its host.
 
 - **create_agent_row(*, spawner="user", fork_from=None, fork_checkpoint=None,
   machine=<target>)** — new agent + new agents_meta row, NO launch; returns

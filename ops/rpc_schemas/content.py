@@ -1,8 +1,7 @@
 """Wire-content field constraints for the ops RPC schemas.
 
-Split out of `ops/rpc_schemas.py` when that file crossed the per-file line
-ceiling; the lifecycle request bodies in `ops/rpc_schemas.py` and
-`ops/rpc_terminate.py` share the same content guardrail.
+The lifecycle request bodies in the `ops.rpc_schemas` door and its `terminate`
+submodule share the same content guardrail.
 """
 
 from typing import Annotated

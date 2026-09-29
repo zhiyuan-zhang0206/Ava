@@ -67,7 +67,7 @@ on stdin.
   the submission launches receives none of this: its launch environment is
   fixed, and it dials as the OS-user administrator
   ([[cli/release_transition/write-generations.ava.okf.md]]).
-- **Ops** (`release_image_exec`, `ops/ops_cluster.py`): `{entry, image,
+- **Ops** (`release_image_exec`, `ops/cluster.py`): `{entry, image,
   request}` with the request base64-encoded. The unit's ops server requires
   the envelope to name its own home and machine and `image` as executor,
   verifies it in its own store, runs the entry on stdin with a 120 s bound (the

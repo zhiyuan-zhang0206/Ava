@@ -3,12 +3,14 @@ contract. These types are produced/consumed on BOTH sides of the ops RPC
 (the gateway HTTP surface AND the agent-runner ops handlers in ops/ +
 services/), so by the import layering (shared < ops < gateway) they live in
 the ops layer: gateway imports them downward, and ops/services never have to
-reach up into gateway. Split out of the former monolithic ops/schemas.py.
+reach up into gateway.
 
-The terminate exchange (request / response / open-task hint) lives in
-`ops/rpc_terminate.py`, the shared content guardrail in `ops/rpc_content.py`,
-and the billing batch-recovery exchange in `ops/rpc_billing_recovery.py`; all
-are re-exported here so every import path stays stable.
+This package door holds the op envelope and per-kind payload/result models.
+Focused exchanges live in its submodules — the terminate exchange (request /
+response / open-task hint) in `terminate`, the shared content guardrail in
+`content`, the chat request models in `messages`, platform completion metadata
+in `completion`, and the billing batch-recovery exchange in `billing_recovery`;
+the door re-exports the models its importers use.
 """
 
 from datetime import datetime
@@ -24,25 +26,29 @@ from pydantic import (
 )
 
 # Re-exported so existing `ops.rpc_schemas` importers keep their import paths.
-from ops.rpc_billing_recovery import BillingBalanceReport as BillingBalanceReport
-from ops.rpc_billing_recovery import BillingHaltedAliveRow as BillingHaltedAliveRow
-from ops.rpc_billing_recovery import BillingResurrectAgentOutcome as BillingResurrectAgentOutcome
-from ops.rpc_billing_recovery import BillingResurrectAgentResponse as BillingResurrectAgentResponse
-from ops.rpc_billing_recovery import BillingResurrectRequest as BillingResurrectRequest
-from ops.rpc_billing_recovery import BillingResurrectResponse as BillingResurrectResponse
-from ops.rpc_completion import CompletionNoticeIn as CompletionNoticeIn
-from ops.rpc_content import UserContent
-from ops.rpc_messages import AgentMessageIn as AgentMessageIn
-from ops.rpc_messages import ContentBlock as ContentBlock
-from ops.rpc_messages import ImageUrlContentBlock as ImageUrlContentBlock
-from ops.rpc_messages import ImageUrlRef as ImageUrlRef
-from ops.rpc_messages import TextContentBlock as TextContentBlock
+from ops.rpc_schemas.billing_recovery import BillingBalanceReport as BillingBalanceReport
+from ops.rpc_schemas.billing_recovery import BillingHaltedAliveRow as BillingHaltedAliveRow
+from ops.rpc_schemas.billing_recovery import (
+    BillingResurrectAgentOutcome as BillingResurrectAgentOutcome,
+)
+from ops.rpc_schemas.billing_recovery import (
+    BillingResurrectAgentResponse as BillingResurrectAgentResponse,
+)
+from ops.rpc_schemas.billing_recovery import BillingResurrectRequest as BillingResurrectRequest
+from ops.rpc_schemas.billing_recovery import BillingResurrectResponse as BillingResurrectResponse
+from ops.rpc_schemas.completion import CompletionNoticeIn as CompletionNoticeIn
+from ops.rpc_schemas.content import UserContent
+from ops.rpc_schemas.messages import AgentMessageIn as AgentMessageIn
+from ops.rpc_schemas.messages import ContentBlock as ContentBlock
+from ops.rpc_schemas.messages import ImageUrlContentBlock as ImageUrlContentBlock
+from ops.rpc_schemas.messages import ImageUrlRef as ImageUrlRef
+from ops.rpc_schemas.messages import TextContentBlock as TextContentBlock
 
 # Re-exported so existing `ops.rpc_schemas` importers keep their import paths.
-from ops.rpc_terminate import OpenTaskRow as OpenTaskRow
-from ops.rpc_terminate import OpenTasksHint as OpenTasksHint
-from ops.rpc_terminate import TerminateAgentRequest as TerminateAgentRequest
-from ops.rpc_terminate import TerminateAgentResponse as TerminateAgentResponse
+from ops.rpc_schemas.terminate import OpenTaskRow as OpenTaskRow
+from ops.rpc_schemas.terminate import OpenTasksHint as OpenTasksHint
+from ops.rpc_schemas.terminate import TerminateAgentRequest as TerminateAgentRequest
+from ops.rpc_schemas.terminate import TerminateAgentResponse as TerminateAgentResponse
 from shared.agent_observation import AvailabilityReason
 from shared.agents.messages.envelope import reject_unnegotiated_caller, validate_writable_source
 from shared.api_contracts.op_envelope import OpEnvelope as OpEnvelope

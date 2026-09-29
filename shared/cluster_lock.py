@@ -212,10 +212,10 @@ def holder_pid_if_local(holder: str) -> int | None:
     point: a holder naming another machine must answer None (its pid is
     meaningless in this host's namespace, and signalling it would hit an
     unrelated local process), as must an unparseable string and a pid that is not
-    alive. Used by the stalled-rollout controller's interrupt and by the formal
-    cancel op (`ops.ops_cluster.cluster_cancel_op`), which ask "may I signal this
-    pid" — the opposite question from `ops.ops_cluster._lock_holder_is_live`,
-    which answers "no" on every doubt.
+    alive. It answers "may I signal this pid" — the opposite question from
+    `ops.cluster._lock_holder_is_live`, which answers "no" on every doubt. Its
+    callers (the stalled-rollout interrupt and the cancel op) are retired; it
+    has no production caller now.
     """
     from shared.machine import machine_name
     from shared.proc import process_alive
@@ -256,7 +256,7 @@ def holder_process_gone(holder: str, *, held_for_s: float | None = None) -> bool
     holder on another machine (its pid is meaningless in this namespace), an
     unparseable string, an unreadable process identity — answers False, so a
     caller that destroys state on this reading can only ever destroy a claim
-    whose owner is definitively gone. `ops.ops_cluster._lock_holder_is_live` is
+    whose owner is definitively gone. `ops.cluster._lock_holder_is_live` is
     its negation, and the stranded-lease controller its automatic consumer.
     """
     from shared.machine import machine_name
@@ -295,7 +295,7 @@ def self_holder() -> str:
     """This process's holder string, `<machine>:pid<N>`.
 
     One builder, because the format is *parsed* elsewhere:
-    `ops.ops_cluster._lock_holder_is_live` splits it to probe whether the owner
+    `ops.cluster._lock_holder_is_live` splits it to probe whether the owner
     process is still alive, which is what lets `ava cluster recover` break a hold
     whose owner is provably gone. It is also how a renewal re-finds its own lease
     without the holder having to be threaded through four call frames — the

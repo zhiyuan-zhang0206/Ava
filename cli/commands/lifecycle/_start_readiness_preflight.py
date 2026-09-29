@@ -261,7 +261,7 @@ def _venv_findings(repo: Path, *, check_launcher: bool) -> list[str]:
     """The venv entry points the coming start needs, keyed to who runs it.
 
     - `.venv/bin/python` — the interpreter every service session launches
-      through (`ops/roster.py` builds `<venv>/bin/python -m ...`). Checked for
+      through (`ops/roster/__init__.py` builds `<venv>/bin/python -m ...`). Checked for
       every caller: `ava restart` has no `uv sync` verification behind it, so a
       damaged venv is exactly the "stopped and cannot come back" class this
       gate exists for.

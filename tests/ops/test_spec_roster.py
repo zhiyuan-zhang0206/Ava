@@ -17,7 +17,8 @@ from typing import cast
 import pytest
 
 from cli.commands import _repo
-from ops import roster, service_spec, spec
+from ops import roster, spec
+from ops.roster import service_spec
 from shared.machine import MachineRole
 
 _GATEWAY_SESSIONS = {

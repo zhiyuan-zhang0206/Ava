@@ -76,7 +76,7 @@ def test_marker_clear_sites_are_enumerated() -> None:
     }
     assert clearers == {
         "agent/graph/llm/node.py",  # a completed LLM turn — the single reset
-        "ops/agent_wake.py",  # the resurrect transition (per-death)
+        "ops/agents/wake.py",  # the resurrect transition (per-death)
     }
 
 
@@ -97,7 +97,7 @@ def test_relaxed_guard_consumers_embed_the_shared_predicates() -> None:
             "SYSTEM_REAPED_CRASH_ROW",
             "RECOVERY_BREAKER_CLEAR",
         ],
-        "ops/agent_wake.py": ["SYSTEM_REAPED_CRASH_ROW", "RECOVERY_BREAKER_CLEAR"],
+        "ops/agents/wake.py": ["SYSTEM_REAPED_CRASH_ROW", "RECOVERY_BREAKER_CLEAR"],
         "services/delivery_watchdog/dispatch_guard.py": ["RECOVERY_BREAKER_CLEAR"],
     }
     for rel, names in expectations.items():

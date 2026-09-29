@@ -1,15 +1,13 @@
 """Terminate-exchange wire models — request, response, and the open-task hint.
 
-Split out of `ops/rpc_schemas.py` when that file crossed the per-file line
-ceiling. `ops.rpc_schemas` re-exports these names, so every existing import
-path stays valid.
+The `ops.rpc_schemas` door re-exports these names.
 """
 
 from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from ops.rpc_content import UserContent
+from ops.rpc_schemas.content import UserContent
 from shared.agents.messages.envelope import reject_unnegotiated_caller, validate_writable_source
 
 

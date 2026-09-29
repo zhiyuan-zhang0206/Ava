@@ -7,7 +7,7 @@ endpoint-private routing logic, shared by routers/agents.py (spawn),
 routers/agents_lifecycle.py (lifecycle ops) and the op-forwarding routers
 (guide / packages / schedules), so they live in their own module — the ops
 server never sees them (forwarding never recurses inside an op, see
-ops/ops_lifecycle.py), and tests get one stable patch point
+ops/lifecycle/__init__.py), and tests get one stable patch point
 (monkeypatch `_enqueue_lifecycle` / `_forward_spawn_to_remote` here). Same
 intent, just relocated from the old app.py to here.
 """
@@ -90,7 +90,7 @@ async def _forward_to_home_machine(agent_id: int, path: str, json_body: dict) ->
     127.0.0.1.
 
     The target machine's ava-ops server executes the op in-process via
-    `ops.ops_lifecycle.lifecycle_op` — no cross-machine forwarding inside the
+    `ops.lifecycle.lifecycle_op` — no cross-machine forwarding inside the
     op, no risk of a forwarding loop.
 
     Raises:
@@ -143,7 +143,7 @@ async def _forward_spawn_to_remote(target: str, body: LaunchAgentRequest) -> Spa
     """POST a versioned launch op to the target machine's ops server.
 
     The target machine's ava-ops server dispatches in-process to
-    `ops.ops_lifecycle.launch_agent_op`. The gateway already committed the
+    `ops.lifecycle.launch_agent_op`. The gateway already committed the
     agent row and first prompt; the runner validates the attempt, wakes the
     hosted agent, and returns the SpawnedAgent dict.
 

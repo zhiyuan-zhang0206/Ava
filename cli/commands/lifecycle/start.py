@@ -16,7 +16,7 @@ from cli.commands.lifecycle._start_bookmarks import record_running_sha as _recor
 from cli.commands.lifecycle.migrations import cmd_migrations_apply
 from cli.commands.lifecycle.status import cmd_status
 from cli.start_runtime import StartRuntime
-from ops.service_spec import ServiceSpec
+from ops.roster.service_spec import ServiceSpec
 from shared import start_serving
 from shared.cluster import session_name
 from shared.deploy_timing import SERVICE_READY_TIMEOUT_S

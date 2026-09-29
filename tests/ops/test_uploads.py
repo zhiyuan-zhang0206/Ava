@@ -1,4 +1,4 @@
-"""Unit tests for ops/ops_uploads.py — the runner-side half of cross-machine
+"""Unit tests for ops/uploads.py — the runner-side half of cross-machine
 file uploads (the `upload_receive` op).
 
 The gateway stores every upload on its own disk; this op pulls one file from
@@ -12,14 +12,14 @@ from pathlib import Path
 
 import pytest
 
-from ops.ops_uploads import upload_receive_op
 from ops.rpc_schemas import UploadReceivePayload
+from ops.uploads import upload_receive_op
 
 
 def _stub_gateway(monkeypatch: pytest.MonkeyPatch, raw: bytes) -> dict[str, list[str]]:
     """Stand in for the gateway's GET /uploads endpoint: the op module's
     http_get returns `raw`. Returns the seen URLs."""
-    import ops.ops_uploads as mod
+    import ops.uploads as mod
 
     seen: dict[str, list[str]] = {"urls": []}
 
@@ -79,7 +79,7 @@ class TestUploadReceiveOp:
         """A failed fetch raises OSError — the daemon surfaces it as a 'failed'
         op result and the gateway degrades to the URL-only message."""
         monkeypatch.setattr(Path, "home", lambda: tmp_path)
-        import ops.ops_uploads as mod
+        import ops.uploads as mod
 
         def _fake_get(url: str, **kwargs: object) -> object:
             import httpx
@@ -98,7 +98,7 @@ class TestUploadReceiveOp:
         """A 404 (file gone on the gateway) raises OSError, not a silent
         partial write."""
         monkeypatch.setattr(Path, "home", lambda: tmp_path)
-        import ops.ops_uploads as mod
+        import ops.uploads as mod
 
         class _Resp404:
             content = b""

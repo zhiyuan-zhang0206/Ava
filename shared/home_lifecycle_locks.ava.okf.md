@@ -20,7 +20,7 @@ tags:
   action.
 
 Recovery (`ava cluster recover`) takes the resource lock before the owner lock,
-the same order as the stop and resume operations in `ops/ops_cluster.py`.
+the same order as the stop and resume operations in `ops/cluster.py`.
 
 ## Diagnostics
 

@@ -45,7 +45,7 @@ _SQL_OR_DYNAMIC_KINDS = frozenset(
         "loki_write_path_probe_failed",  # services/healthchecks/lgtm.py write-path probe
         "delivery_poisoned",  # services/delivery_watchdog/dispatch_guard.py:_alert_poisoned
         "delivery_wake_suppressed",  # services/delivery_watchdog/resurrect_guard.py:_alert_wake_suppressed
-        "billing_resurrect_run",  # ops/billing_recovery.py:_record_run_event telemetry.emit("telemetry", ...)
+        "billing_resurrect_run",  # ops/lifecycle/billing_recovery.py:_record_run_event telemetry.emit("telemetry", ...)
         "delivery_recovery_decision",  # services/delivery_watchdog/stall_recovery.py:_request_harvest
         # Outbox emissions go through the module helper (shared/agents/messages/delivery_outbox.py:_emit),
         # which passes the name positionally — no `event=` literal to scan.
@@ -108,9 +108,9 @@ _SQL_OR_DYNAMIC_KINDS = frozenset(
         "error_reopened",
         "resolution_status",
         "checkpoint_table_sizes",  # services/events_maintenance/blob_vacuum.py telemetry.emit (positional)
-        "pause_lifecycle_wait",  # ops/agent_pause.py:_emit_lifecycle_wait (positional emit)
+        "pause_lifecycle_wait",  # ops/agent_pause/__init__.py:_emit_lifecycle_wait (positional emit)
         "pause_orphan_claim_settled",  # shared/maintenance_cohort.py:_emit_orphan_settlements
-        "update_straggler_reaped",  # ops/agent_pause.py:_reap_agents (positional emit)
+        "update_straggler_reaped",  # ops/agent_pause/__init__.py:_reap_agents (positional emit)
         # Positional emit from the frozen-archive reader (task #2004).
         "archive_fetch_degraded",  # gateway/inspect/neighbors.py:_emit_archive_degraded
         # The fleet-graph stale-serving fallback (task #3925): one positional
@@ -134,7 +134,7 @@ _SQL_OR_DYNAMIC_KINDS = frozenset(
         "exec(thread-stuck)",
         "exec(timeout)",
         # audit dynamic event_type: not an `event_type="x"` literal, invisible to the scanner.
-        "spawn",  # ops/agent_spawn.py:349 event_type = "fork" if ... else "spawn"
+        "spawn",  # ops/agents/spawn.py:349 event_type = "fork" if ... else "spawn"
         "send_message",  # shared/db.py:497 inbound kind->event_type mapping value
         "terminate",  # shared/db.py:498 same as above
         "cancel",  # shared/db.py:500 same as above

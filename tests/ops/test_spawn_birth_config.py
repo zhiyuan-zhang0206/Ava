@@ -1,4 +1,4 @@
-"""Spawn stamping — `ops/agent_spawn.spawn_agent` freezes the frozen set on the row.
+"""Spawn stamping — `ops.agents.spawn.create_agent_row` freezes the frozen set on the row.
 
 The agents_meta INSERT is THE spawn boundary (every spawn in the system funnels
 through it), so these tests go through the create+launch split (`create_agent_row`
@@ -17,7 +17,7 @@ from typing import Any
 import psycopg
 import pytest
 
-from ops.agent_spawn import create_agent_row
+from ops.agents.spawn import create_agent_row
 from shared.birth_config import set_cluster_default_model
 from shared.config import frozen_field_names
 
@@ -104,7 +104,7 @@ class TestReplayOnWake:
     """Resurrection preserves the birth configuration for hosted successor admission."""
 
     def test_resurrect_replays_the_stamp(self, db_conn: psycopg.Connection) -> None:
-        from ops.agent_wake import resurrect_agent
+        from ops.agents.wake import resurrect_agent
 
         agent_id = _spawn_agent(spawner="test")
         stamp = _birth_config(db_conn, agent_id)

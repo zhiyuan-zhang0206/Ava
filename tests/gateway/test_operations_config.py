@@ -14,8 +14,8 @@ from typing import Any
 
 import pytest
 
-from ops import ops_config as ops
-from ops.ops_config import config_audit_read_op, config_read_op, config_write_op
+from ops import host_config as ops
+from ops.host_config import config_audit_read_op, config_read_op, config_write_op
 from ops.rpc_schemas import ConfigReadResult, ConfigWriteOpResult
 from shared import host_config_validators, runtime_config
 from shared.config import get_config_metadata
@@ -516,7 +516,7 @@ async def test_dispatch_config_read_calls_config_read_op(
         captured.append(True)
         return ConfigReadResult(machine="x", host_fields={}, raw_overrides={})
 
-    monkeypatch.setattr(daemon.ops_config, "config_read_op", _fake_config_read)
+    monkeypatch.setattr(daemon.host_config, "config_read_op", _fake_config_read)
     status, result = await daemon._dispatch("config_read", {})
     assert status == "completed"
     # _dispatch serializes the result model to a JSON dict for the wire.
@@ -548,7 +548,7 @@ async def test_dispatch_config_write_passes_overrides(
         captured["trace_id"] = trace_id
         return ConfigWriteOpResult(machine="x", results={}, applied=True, restart_required=[])
 
-    monkeypatch.setattr(daemon.ops_config, "config_write_op", _fake_config_write)
+    monkeypatch.setattr(daemon.host_config, "config_write_op", _fake_config_write)
     status, _result = await daemon._dispatch("config_write", {"overrides": {"ops_concurrency": 2}})
     assert status == "completed"
     assert captured["overrides"] == {"ops_concurrency": 2}

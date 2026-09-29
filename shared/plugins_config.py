@@ -320,7 +320,7 @@ def installed_plugin_dirs() -> dict[str, Path]:
     external), regardless of enable-state.
 
     A thin public alias for `discover_plugins()`. The service roster
-    (`ops.spec._plugin_services`) uses this — presence, NOT the agent-facing
+    (`ops.spec.plugin_services`) uses this — presence, NOT the agent-facing
     enable-state (`ava plugins enable/disable`) — to fold plugin-declared
     ServiceSpecs into `build_services()`. The roster is a machine/cluster concern
     and must not depend on the agent-plugin-registration plane; a plugin gates its
