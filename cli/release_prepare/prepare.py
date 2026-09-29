@@ -13,7 +13,11 @@ from pathlib import Path
 
 from pydantic import Field
 
-from base.deploy.release.identity import ApplicationIdentity, read_application_identity
+from base.deploy.release.identity import (
+    IDENTITY_MEMBER,
+    ApplicationIdentity,
+    read_application_identity,
+)
 from base.deploy.release.runtime_prepare import (
     CollectorInput,
     FrontendInput,
@@ -101,9 +105,9 @@ def _built_source(request: Preparation, build: ApplicationBuild) -> tuple[Applic
         receipt.model_dump(exclude={"wheel", "wheel_digest", "build_constraints_digest"})
     )
     with zipfile.ZipFile(build.wheel) as wheel:
-        if wheel.namelist().count("shared/release-build.json") != 1 or wheel.read(
-            "shared/release-build.json"
-        ) != encode(identity):
+        if wheel.namelist().count(IDENTITY_MEMBER) != 1 or wheel.read(IDENTITY_MEMBER) != encode(
+            identity
+        ):
             raise ReleaseRejectedError(
                 "build receipt differs from the application's embedded source identity"
             )

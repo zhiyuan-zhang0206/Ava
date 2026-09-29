@@ -120,7 +120,7 @@ def serve_kwargs(*, host: str, app: str = "gateway.app:app") -> dict[str, Any]:
         "host": host,
         "port": settings.gateway.gateway_port,
         "reload": reload,
-        "reload_dirs": ["gateway", "shared", "ava", "agent"] if reload else None,
+        "reload_dirs": ["gateway", "base", "ava", "agent"] if reload else None,
         # log_config=None: uvicorn's default LOGGING_CONFIG dictConfig would
         # clobber the root-handler install (`_StdlibInterceptHandler`) that
         # init_gateway_process set up above, sending uvicorn's own records

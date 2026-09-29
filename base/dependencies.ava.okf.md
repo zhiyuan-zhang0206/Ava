@@ -1,15 +1,15 @@
 ---
 type: doc
-title: Shared library dependencies
+title: Base library dependencies
 description: Dependency map for shared contracts, state, infrastructure, and agent identity.
 tags:
 - shared
 - library
 ---
 
-# Shared library dependencies
+# Base library dependencies
 
-The shared-layer domain map below complements the public
+The base-layer domain map below complements the public
 [[entry-points.ava.okf.md|entry points]].
 
 - [[base/lm/lm.ava.okf.md]] — LLM provider abstraction layer, used by agent/graph/llm/node.py via factory to build chat models

@@ -264,7 +264,7 @@ def browser_mcp_incapability() -> str | None:
 
 # csc.exe ships with the .NET Framework present on every Windows 10/11 install;
 # the M1 prototype verified this exact path on the fleet Windows box. Shared
-# between the capability probe (shared layer) and the Windows helper build
+# between the capability probe (base layer) and the Windows helper build
 # (services layer) so the two can never disagree about what "capable" means.
 WINDOWS_CSC_CANDIDATES = (
     r"C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe",

@@ -27,9 +27,11 @@ _MACOS = AbiTag("macos", "arm64", None, None, "26", "11.0", "cpython-312", "")
 def committed_repo(tmp_path: Path) -> tuple[Path, str]:
     repo = tmp_path.resolve() / "repo"
     repo.mkdir()
-    for name in ("shared", "db", "migrations"):
+    for name in ("base", "shared", "db", "migrations"):
         (repo / name).mkdir()
     (repo / "base/__init__.py").write_text('VALUE = "committed"\n')
+    # The release identity member's directory (the time-boxed `shared/` shell).
+    (repo / "shared/__init__.py").write_text("")
     (repo / "db/schema.sql").write_text("SELECT 1;\n")
     (repo / "migrations/.gitkeep").write_text("")
     subprocess.run(["git", "init", "-q", str(repo)], check=True)

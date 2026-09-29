@@ -21,7 +21,7 @@ falls through to the process slot / env — behavior unchanged.
 
 This lives in `base/` (not `ava/`) because identity consumers exist below
 the `ava` layer (`base/lm/_providers.py` cache affinity, `base/host/net/resilience.py`
-retry de-phasing) and the import layering is `shared < ava`. `ava.agent_identity`
+retry de-phasing) and the import layering is `base < ava`. `ava.agent_identity`
 layers its process slot on top of this module's read.
 
 `TurnScopedAgentId` at the bottom is the same resolution deferred to *render*

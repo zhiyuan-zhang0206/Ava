@@ -45,7 +45,7 @@ def _files(classes: dict[str, tuple[int, int]]) -> dict[str, dict]:
     }
 
 
-_CORE = ("agent", "ava", "cli", "gateway", "shared", "ui")
+_CORE = ("agent", "ava", "cli", "gateway", "base", "ui")
 
 
 def _core_classes(covered: int = 9, valid: int = 10) -> dict[str, tuple[int, int]]:
@@ -61,7 +61,7 @@ def test_core_gate_passes_and_prints_table(
     )
     assert gates.check(files, threshold=85.0) == 0
     out = capsys.readouterr().out
-    assert "core domains agent+ava+cli+gateway+shared+ui: 90.0%" in out
+    assert "core domains agent+ava+cli+gateway+base+ui: 90.0%" in out
     assert "ops" in out and "services" in out and "ava_builtins" in out
 
 

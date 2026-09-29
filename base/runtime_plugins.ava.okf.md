@@ -29,8 +29,10 @@ setup resources are included in the same inventory. Manifest-required names
 also contribute to candidate identity.
 
 The CLI-owned `_release_plugin_probe` performs actual extension/service/provider imports;
-the shared package only validates manifest/dependency facts, preserving import
-direction. The preparation subprocess invokes that same CLI probe.
+the base package only validates manifest/dependency facts, preserving import
+direction. The preparation subprocess invokes that same CLI probe
+(`runtime_prepare.PLUGIN_PROBE`, importing this module through the
+`shared.runtime_plugins` release-probe shell; see `shared/__init__.py`).
 Actual extension/service/provider import verification uses a separate private scratch
 unit home outside the generation and blocks socket connections. Its disk config
 is discarded afterward. This executes trusted candidate code, not production

@@ -143,5 +143,5 @@ retransmission timeout.
 
 ## Key Dependencies
 
-- [[base/base.ava.okf.md]] — the shared-layer overview
+- [[base/base.ava.okf.md]] — the base-layer overview
 - [[cli/cli.ava.okf.md]] — `ava start` / `ava cluster update`, which apply and roll back

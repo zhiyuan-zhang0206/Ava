@@ -55,7 +55,7 @@ from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from psycopg.rows import DictRow
 from psycopg_pool import AsyncConnectionPool
 
-import shared.events.live.redis_client
+import base.events.live.redis_client
 from agent.ownership.hosted import settle_stale_running_rows
 from agent.turn.progress import turn_progress_age_s, turn_progress_snapshot
 from base import paths
@@ -146,11 +146,11 @@ async def _watch_plugins_for_restart() -> None:
     turns into the KeyboardInterrupt every daemon already unwinds through —
     the drains run, then the supervisor restarts the host fresh.
     """
-    base = _plugins_fingerprint()
+    baseline = _plugins_fingerprint()
     while True:
         await asyncio.sleep(_PLUGINS_POLL_INTERVAL_S)
         now = _plugins_fingerprint()
-        if now == base:
+        if now == baseline:
             continue
         _log.info(
             "[agent-host] external plugins changed under $AVA_HOME/plugins — "
@@ -178,7 +178,7 @@ async def _publish_turn_progress_heartbeat(
             }
     try:
         async with asyncio.timeout(_TURN_PROGRESS_PUBLISH_TIMEOUT_S):
-            await shared.events.live.redis_client.get_async_redis().set(
+            await base.events.live.redis_client.get_async_redis().set(
                 f"host_turn_progress:{machine}",
                 json.dumps(snapshots, separators=(",", ":")),
                 ex=_TURN_PROGRESS_HEARTBEAT_TTL_S,

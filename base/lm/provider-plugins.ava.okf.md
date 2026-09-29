@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Provider Plugin Mechanics
-description: 'The shared-layer contract and lazy loader for LLM provider plugins.'
+description: 'The base-layer contract and lazy loader for LLM provider plugins.'
 tags:
 - shared
 - library

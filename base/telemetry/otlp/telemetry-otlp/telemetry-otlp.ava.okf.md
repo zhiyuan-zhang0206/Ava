@@ -138,4 +138,4 @@ single-box hosts collapse to the local receiver even when their secret is set.
   semantics: [[exit-flush.ava.okf.md|OTLP exit flush]].
 - The stack's operational story (collector, Grafana) is in
   `conventions/runbook.md` (Observability / Tracing).
-- Parent node: [[base.ava.okf.md|Shared Libraries]].
+- Parent node: [[base.ava.okf.md|Base Library]].

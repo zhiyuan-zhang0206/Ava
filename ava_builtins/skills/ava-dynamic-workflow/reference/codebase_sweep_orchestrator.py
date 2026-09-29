@@ -120,7 +120,7 @@ def show_progress(wave: int, done: int, total: int, stage: str) -> None:
 W1_TARGETS = [
     ("scout-agent", REPO_ROOT / "agent", "agent/"),
     ("scout-ava", REPO_ROOT / "ava", "ava/"),
-    ("scout-shared", REPO_ROOT / "shared", "base/"),
+    ("scout-base", REPO_ROOT / "base", "base/"),
     ("scout-plugins", REPO_ROOT / "plugins", "plugins/"),
 ]
 

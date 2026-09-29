@@ -55,7 +55,7 @@ _SCAN_DIRS = (
     "ava",
     "gateway",
     "services",
-    "shared",
+    "base",
     "plugins",
     "scripts",
     "mcps",

@@ -40,9 +40,10 @@ def request_fixture(tmp_path: Path) -> Preparation:
     root = tmp_path.resolve()
     repo = root / "repo"
     repo.mkdir()
-    for name in ("shared", "db", "migrations"):
+    for name in ("base", "shared", "db", "migrations"):
         (repo / name).mkdir()
     (repo / "base/__init__.py").write_text('VALUE = "committed"\n')
+    (repo / "shared/__init__.py").write_text("")
     (repo / "db/schema.sql").write_text("SELECT 1;\n")
     (repo / "uv.lock").write_text("version = 1\n")
     (repo / "migrations/.gitkeep").write_text("")
@@ -187,7 +188,7 @@ def test_committed_build_receipt_binds_real_installed_image_without_external_eff
     assert stored.build.wheel_digest == file_sha256(
         request.work / "application/wheels" / stored.build.wheel
     )
-    member = stored.image.root / "venv/lib/python3.12/site-packages/shared/__init__.py"
+    member = stored.image.root / "venv/lib/python3.12/site-packages/base/__init__.py"
     assert member.read_text() == 'VALUE = "committed"\n'
     assert _protected(request) == before
     assert not (request.work / "failed.json").exists()

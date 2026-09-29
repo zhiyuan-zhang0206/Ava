@@ -413,7 +413,7 @@ repos:
       # lint-config-scope hook retired.)
 
       # Import-direction contract (config in pyproject [tool.importlinter]):
-      # locks shared < ava < agent < gateway < {services,cli} so no new
+      # locks base < ava < agent < gateway < {services,cli} so no new
       # reverse edge into a lower layer can creep back in. Analyzes the whole
       # import graph, so pass_filenames: false + trigger on any .py change.
       - id: lint-imports

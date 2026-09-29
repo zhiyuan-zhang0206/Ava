@@ -85,12 +85,12 @@ _SCAN_DIRS = (
     "agent",
     "ava",
     "ava_builtins",
+    "base",
     "cli",
     "gateway",
     "ops",
     "scripts",
     "services",
-    "shared",
 )
 
 # A parameter carrying any of these names is treated as the caller-visible

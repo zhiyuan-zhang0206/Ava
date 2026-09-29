@@ -442,7 +442,7 @@ def test_connect_query_bounds_pooled_backends_at_birth() -> None:
         assert _statement_timeout(conn) == "1min"
 
 
-def test_shared_connect_applies_statement_timeout_on_pooled_dial(
+def test_base_connect_applies_statement_timeout_on_pooled_dial(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """base.db.connect() delivers the statement ceiling through the pooler: the
@@ -466,7 +466,7 @@ def test_shared_connect_applies_statement_timeout_on_pooled_dial(
             assert _statement_timeout(conn) == "1min"
 
 
-def test_shared_pool_applies_statement_timeout_on_pooled_dial(
+def test_base_pool_applies_statement_timeout_on_pooled_dial(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """base.db.pool() applies the SET on every new backend via the pool's

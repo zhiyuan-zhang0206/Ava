@@ -1,6 +1,6 @@
 # Runtime wheel packaging gate
 
-The application wheel includes the SDK, CLI, agent kernel, shared modules,
+The application wheel includes the SDK, CLI, agent kernel, the `base` library,
 service daemons, gateway, operations code and built-in plugins. Development
 still supports editable installations. Production activation is unchanged by
 this packaging gate: a successful wheel build is not a deployed release.

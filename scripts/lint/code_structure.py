@@ -95,6 +95,16 @@ the `path_imports` section as `path::target -> site count`, matched exactly like
 Rules 4 and 5. There is no allowlist and no pairing: once the section exists at
 the base revision, any new key is a violation.
 
+### Rule 7: the `shared/` release-probe shell stays a shell
+
+`scripts/structure/shared_shell.py`: the `shared` package was renamed `base`;
+`shared/` keeps only the three files of a time-boxed release-probe shell
+(shared/__init__.py says why and when it retires). The directory must hold
+exactly those files, no Python file may import `shared`, and outside tests a
+string literal may name it only at the enumerated `ALLOWED_MENTIONS` sites (the
+two release probes and the identity member), each with its exact count. Checked
+repo-wide on every run, whatever the targets.
+
 ### Structure budgets: 800 lines per file, 20 direct entries per directory
 
 Budgets cover the governed packages in `_SCAN_DIRS`, plus tests/ and scripts/.
@@ -139,6 +149,7 @@ from scripts.structure import (  # noqa: E402 — standalone script
     baseline_shards,
     locality,
     path_imports,
+    shared_shell,
 )
 from scripts.structure import quality_budget as quality  # noqa: E402 — standalone script
 
@@ -472,8 +483,10 @@ def _rename_map(base: str) -> dict[str, str]:
     value — and the guard accepts the edit. The frozen values still cap the new
     path: a raise stays a violation and a new key without a paired removal stays
     an addition. A rewrite git no longer detects as a rename is evaluated fresh.
+    With -B, a module whose old path now holds a total rewrite still counts as
+    moved (git reports that pair as a copy, `C`, of the rewritten source).
     """
-    result = _git("diff", "-M", "--name-status", "--diff-filter=R", "--no-color", base)
+    result = _git("diff", "-M", "-B", "--name-status", "--diff-filter=RC", "--no-color", base)
     if result.returncode:
         print(f"note: rename map unavailable ({base} diff failed)", file=sys.stderr)
         return {}
@@ -481,7 +494,7 @@ def _rename_map(base: str) -> dict[str, str]:
     for line in result.stdout.splitlines():
         status, _, rest = line.partition("\t")
         old, separator, new = rest.partition("\t")
-        if status.startswith("R") and separator and old and new:
+        if status.startswith(("R", "C")) and separator and old and new:
             renames[old] = new
     return renames
 
@@ -756,6 +769,7 @@ def main(argv: list[str] | None = None) -> int:
     errors = _baseline_guard(baseline, renames=renames)
     errors.extend(_check_budgets(targets, baseline))
     errors.extend(_check_ast_and_quality(argv, targets, baseline, full=full, renames=renames))
+    errors.extend(shared_shell.repository_errors(_REPO_ROOT))
     for error in errors:
         print(error)
     if errors:

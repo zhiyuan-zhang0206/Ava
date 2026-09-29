@@ -136,34 +136,34 @@ def test_multiple_private_names_from_one_module_count_as_one_site(
 # --- private_imports: attribute reach-ins on an imported module alias -------
 
 
-def _shared_lm_and_db(tmp_path: pathlib.Path) -> None:
+def _base_lm_and_db(tmp_path: pathlib.Path) -> None:
     _write(tmp_path, "base/lm/_scratch.py", "x = 1\n")
     _write(tmp_path, "base/db.py", "class Foo:\n    _x = 1\n\n\ndef _restore(): ...\n")
 
 
 def test_attribute_reach_in_via_import_module(tmp_path: pathlib.Path) -> None:
-    _shared_lm_and_db(tmp_path)
+    _base_lm_and_db(tmp_path)
     tree = _parse("import base.lm\nbase.lm._scratch.x\n")
 
-    sites = locality.private_imports(tree, "gateway/x.py", ("shared",), tmp_path)
+    sites = locality.private_imports(tree, "gateway/x.py", ("base",), tmp_path)
 
     assert sites == {"gateway/x.py::base.lm._scratch": [2]}
 
 
 def test_attribute_reach_in_via_from_import_package(tmp_path: pathlib.Path) -> None:
-    _shared_lm_and_db(tmp_path)
+    _base_lm_and_db(tmp_path)
     tree = _parse("from base import lm\nlm._scratch\n")
 
-    sites = locality.private_imports(tree, "gateway/x.py", ("shared",), tmp_path)
+    sites = locality.private_imports(tree, "gateway/x.py", ("base",), tmp_path)
 
     assert sites == {"gateway/x.py::base.lm._scratch": [2]}
 
 
 def test_attribute_reach_in_via_from_import_module(tmp_path: pathlib.Path) -> None:
-    _shared_lm_and_db(tmp_path)
+    _base_lm_and_db(tmp_path)
     tree = _parse("from base import db\ndb._restore()\n")
 
-    sites = locality.private_imports(tree, "gateway/x.py", ("shared",), tmp_path)
+    sites = locality.private_imports(tree, "gateway/x.py", ("base",), tmp_path)
 
     assert sites == {"gateway/x.py::base.db._restore": [2]}
 
@@ -171,39 +171,39 @@ def test_attribute_reach_in_via_from_import_module(tmp_path: pathlib.Path) -> No
 def test_attribute_on_an_imported_class_is_not_a_module_reach_in(tmp_path: pathlib.Path) -> None:
     """`Foo` is bound to a class, not a module or package on disk, so its
     private attribute is out of Rule 4's reach."""
-    _shared_lm_and_db(tmp_path)
+    _base_lm_and_db(tmp_path)
     tree = _parse("from base.db import Foo\nFoo._x\n")
 
-    assert locality.private_imports(tree, "gateway/x.py", ("shared",), tmp_path) == {}
+    assert locality.private_imports(tree, "gateway/x.py", ("base",), tmp_path) == {}
 
 
 def test_attribute_chain_past_a_class_stops_at_the_module_boundary(
     tmp_path: pathlib.Path,
 ) -> None:
-    _shared_lm_and_db(tmp_path)
+    _base_lm_and_db(tmp_path)
     tree = _parse("from base import db\ndb.Foo._x\n")
 
-    assert locality.private_imports(tree, "gateway/x.py", ("shared",), tmp_path) == {}
+    assert locality.private_imports(tree, "gateway/x.py", ("base",), tmp_path) == {}
 
 
 def test_an_unbound_local_attribute_is_never_a_reach_in(tmp_path: pathlib.Path) -> None:
     tree = _parse("obj._x\n")
 
-    assert locality.private_imports(tree, "gateway/x.py", ("shared",), tmp_path) == {}
+    assert locality.private_imports(tree, "gateway/x.py", ("base",), tmp_path) == {}
 
 
 def test_attribute_reach_in_from_inside_the_owner_is_not_flagged(tmp_path: pathlib.Path) -> None:
-    _shared_lm_and_db(tmp_path)
+    _base_lm_and_db(tmp_path)
     tree = _parse("import base.lm\nbase.lm._scratch.x\n")
 
-    assert locality.private_imports(tree, "base/lm/other.py", ("shared",), tmp_path) == {}
+    assert locality.private_imports(tree, "base/lm/other.py", ("base",), tmp_path) == {}
 
 
 def test_a_long_attribute_chain_counts_the_site_once(tmp_path: pathlib.Path) -> None:
-    _shared_lm_and_db(tmp_path)
+    _base_lm_and_db(tmp_path)
     tree = _parse("import base.lm\nbase.lm._scratch.a.b\n")
 
-    sites = locality.private_imports(tree, "gateway/x.py", ("shared",), tmp_path)
+    sites = locality.private_imports(tree, "gateway/x.py", ("base",), tmp_path)
 
     assert sites == {"gateway/x.py::base.lm._scratch": [2]}
 
@@ -257,14 +257,14 @@ def test_an_alias_shadowed_by_a_function_parameter_is_not_followed(
     _write(tmp_path, "base/telemetry/__init__.py", "x = 1\n")
     tree = _parse("from base import telemetry\ndef f(telemetry): return telemetry._state\n")
 
-    assert locality.private_imports(tree, "gateway/x.py", ("shared", "gateway"), tmp_path) == {}
+    assert locality.private_imports(tree, "gateway/x.py", ("base", "gateway"), tmp_path) == {}
 
 
 def test_an_alias_shadowed_by_reassignment_is_not_followed(tmp_path: pathlib.Path) -> None:
     _write(tmp_path, "base/telemetry/__init__.py", "x = 1\n")
     tree = _parse("from base import telemetry\ntelemetry = object()\ntelemetry._state\n")
 
-    assert locality.private_imports(tree, "gateway/x.py", ("shared", "gateway"), tmp_path) == {}
+    assert locality.private_imports(tree, "gateway/x.py", ("base", "gateway"), tmp_path) == {}
 
 
 def test_an_alias_literally_named_self_is_not_followed_inside_a_method(
@@ -276,7 +276,7 @@ def test_an_alias_literally_named_self_is_not_followed_inside_a_method(
     _write(tmp_path, "base/self.py", "x = 1\n")
     tree = _parse("from base import self\nclass C:\n    def m(self): return self._x\n")
 
-    assert locality.private_imports(tree, "gateway/x.py", ("shared", "gateway"), tmp_path) == {}
+    assert locality.private_imports(tree, "gateway/x.py", ("base", "gateway"), tmp_path) == {}
 
 
 def test_an_unshadowed_alias_is_still_flagged(tmp_path: pathlib.Path) -> None:
@@ -285,7 +285,7 @@ def test_an_unshadowed_alias_is_still_flagged(tmp_path: pathlib.Path) -> None:
     _write(tmp_path, "base/telemetry/__init__.py", "x = 1\n")
     tree = _parse("from base import telemetry\ntelemetry._state\n")
 
-    sites = locality.private_imports(tree, "gateway/x.py", ("shared", "gateway"), tmp_path)
+    sites = locality.private_imports(tree, "gateway/x.py", ("base", "gateway"), tmp_path)
 
     assert sites == {"gateway/x.py::base.telemetry._state": [2]}
 
@@ -304,7 +304,7 @@ def test_an_attribute_of_a_module_level_class_is_not_matched_by_case_folding(
     _write(tmp_path, "base/pkg/registry.py", "class Registry: pass\n")
     tree = _parse("from base import pkg\npkg.Registry._cache.clear()\n")
 
-    assert locality.private_imports(tree, "gateway/x.py", ("shared", "gateway"), tmp_path) == {}
+    assert locality.private_imports(tree, "gateway/x.py", ("base", "gateway"), tmp_path) == {}
 
 
 def test_a_wrong_case_module_path_does_not_resolve_to_the_real_module(
@@ -317,7 +317,7 @@ def test_a_wrong_case_module_path_does_not_resolve_to_the_real_module(
     _write(tmp_path, "base/mod.py", "x = 1\n")
     tree = _parse("from base.Mod import _x\n")
 
-    sites = locality.private_imports(tree, "base/other.py", ("shared",), tmp_path)
+    sites = locality.private_imports(tree, "base/other.py", ("base",), tmp_path)
 
     assert sites == {"base/other.py::base.Mod._x": [1]}
 
@@ -327,7 +327,7 @@ def test_exists_exact_listing_is_refreshed_when_the_directory_changes(
 ) -> None:
     """The cached listing is keyed on the directory's mtime; a new entry in a later
     tick must be seen, and `reset_caches()` covers two writes in one coarse tick."""
-    directory = tmp_path / "shared"
+    directory = tmp_path / "base"
     directory.mkdir()
     (directory / "old.py").write_text("x = 1\n", encoding="utf-8")
     assert locality._exists_exact(directory / "old.py", directory=False)  # fills the cache

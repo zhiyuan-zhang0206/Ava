@@ -120,7 +120,9 @@ build-backend = "hatchling.build"
 # Include the application kernel, not only its SDK and CLI. A non-editable
 # installation must resolve exec children and service modules without a checkout.
 # This packaging step does not activate wheel-based production deployments.
-packages = ["ava", "cli", "agent", "shared", "ops", "gateway", "services", "ava_builtins"]
+# `shared` is the time-boxed release-probe shell (shared/__init__.py): a new image must still
+# answer `import shared.runtime_abi` and carry the shared/release-build.json identity member.
+packages = ["ava", "cli", "agent", "base", "shared", "ops", "gateway", "services", "ava_builtins"]
 
 [tool.hatch.build.targets.wheel.force-include]
 # Existing consumers resolve these siblings of base/. Keep their relative
@@ -162,7 +164,7 @@ dev = [
 # Import-direction contract: lock the layering the sink refactors established
 # so no new reverse edge can creep back in. A lower layer importing a higher
 # one fails CI; higher importing lower is allowed (agent imports ava; everyone
-# imports shared).
+# imports base).
 #
 # `services` is deliberately NOT a layer: the package straddles levels —
 # `services.memory_indexer` is imported by gateway (so it sits below gateway),
@@ -173,7 +175,7 @@ dev = [
 # `plugins` is left ungoverned (the built-in ava_compact is intentionally
 # coupled to the agent kernel, so agent <-> plugins is cyclic by design).
 [tool.importlinter]
-root_packages = ["base", "ava", "agent", "gateway", "cli", "ops", "services", "ava_builtins"]
+root_packages = ["base", "shared", "ava", "agent", "gateway", "cli", "ops", "services", "ava_builtins"]
 
 [[tool.importlinter.contracts]]
 name = "Layered architecture (base < ava < agent < gateway < cli)"
@@ -264,19 +266,36 @@ ignore_imports = [
     "services.hierarchy_worker.execute -> agent.llm",
 ]
 
-# The one reverse edge shared must never grow: `base` is the bottom layer,
+# The one reverse edge base must never grow: `base` is the bottom layer,
 # and `services` sits above it (daemons that import gateway). The alerts
 # module used to import services.im_bridge.copy for its IM templates — moved
 # down to base/telemetry/alerts_copy.py (tech audit 2026-08-24 P1); this contract
-# locks the direction so no new shared -> services edge can creep back in.
+# locks the direction so no new base -> services edge can creep back in.
 [[tool.importlinter.contracts]]
 name = "base must not import services"
 type = "forbidden"
 source_modules = ["base"]
 forbidden_modules = ["services"]
 
-# Ops layer: shared < ops < {gateway, cli}. The ops module (Spec / Status /
-# controllers) sits above shared and is consumed by gateway + cli (and by the
+# `shared` is the time-boxed release-probe shell (see shared/__init__.py): it
+# re-exports two names from `base` and nothing else, and no repository package
+# may import it — only the release-probe strings in
+# base/deploy/release/runtime_prepare.py name it (scripts/structure/shared_shell.py
+# enforces the file whitelist and the no-import rule on every tracked file).
+[[tool.importlinter.contracts]]
+name = "shared (release-probe shell) imports only base"
+type = "forbidden"
+source_modules = ["shared"]
+forbidden_modules = ["ava", "agent", "gateway", "cli", "ops", "services", "ava_builtins"]
+
+[[tool.importlinter.contracts]]
+name = "No package imports the shared release-probe shell"
+type = "forbidden"
+source_modules = ["base", "ava", "agent", "gateway", "cli", "ops", "services", "ava_builtins"]
+forbidden_modules = ["shared"]
+
+# Ops layer: base < ops < {gateway, cli}. The ops module (Spec / Status /
+# controllers) sits above base and is consumed by gateway + cli (and by the
 # services daemons, which become thin mains over the controllers) — but must never
 # reach up into them. A standalone layers contract (not folded into the main stack)
 # because ops's relationship to ava/agent is still being untangled. The gateway
@@ -437,7 +456,7 @@ ignore = [
 "tests/agent/test_turn_scoped_retry.py" = ["TID251"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["ava", "cli", "shared", "runtime"]
+known-first-party = ["ava", "cli", "base", "runtime"]
 
 [tool.ruff.format]
 quote-style = "double"
@@ -487,7 +506,7 @@ filterwarnings = [
 
 [tool.coverage.run]
 # Must match the CI shards' --cov= flags (ci.yml backend-shard / backend-serial).
-# agent/ava/gateway/shared/ui is the historical set; cli joined 2026-08-25
+# agent/ava/gateway/base/ui is the historical set; cli joined 2026-08-25
 # (tech audit P1 — measured 82% standalone with tests/cli).
 # ops/services/ava_builtins joined 2026-08-29 (tech audit 2026-08-24 finding
 # #10 follow-up, Task #1570): measured into the same coverage data, but gated
@@ -501,7 +520,7 @@ filterwarnings = [
 # standalone scripts the test suite mostly never imports (installed skill
 # copies), so measuring them would drag the ava_builtins floor toward dead
 # lines instead of executable ones.
-source = ["agent", "ava", "cli", "gateway", "shared", "ui", "ops", "services", "ava_builtins"]
+source = ["agent", "ava", "cli", "gateway", "base", "ui", "ops", "services", "ava_builtins"]
 # Package `__init__.py` files are measured: a module that becomes a package
 # keeps its code in the package door (`x.py` -> `x/__init__.py`), and omitting
 # doors would drop that code from its domain's floor. An empty or re-export-only
@@ -569,6 +588,7 @@ include = [
     "ops",
     "ava_builtins",
     "services",
+    "base",
     "shared",
     "scripts",
     "tests",
@@ -740,7 +760,7 @@ tests_dir = [
     "tests/agent/test_loop_main.py",
 ]
 also_copy = [
-    "shared",
+    "base",
     "agent",
     "gateway",
     "ava",

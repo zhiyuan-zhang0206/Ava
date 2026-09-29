@@ -92,7 +92,7 @@ def _assert_pool_posture(pool: ConnectionPool, site: str) -> None:
 # ─── the single definition ─────────────────────────────────────────────────────
 
 
-def test_shared_db_pool_is_the_single_definition() -> None:
+def test_base_db_pool_is_the_single_definition() -> None:
     """`base.db.pool()` merges both halves, so a caller cannot take one without
     the other. Every site below inherits the posture by calling it."""
     pool = db.pool()
@@ -184,7 +184,7 @@ def test_log_sink_pipeline_drain_thread_stays_alive() -> None:
         base.log.logger.remove(sink_id)
 
 
-def test_log_sink_import_of_shared_db_stays_deferred() -> None:
+def test_log_sink_import_of_base_db_stays_deferred() -> None:
     """`base/log/__init__.py` must import `base.db` inside the function, not at module
     scope — `base/db/__init__.py` imports `base.log` for `logger`, so a top-level
     import is a hard circular-import failure for any process that reaches

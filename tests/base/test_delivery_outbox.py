@@ -51,9 +51,9 @@ def journal(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
 
 @pytest.fixture()
 def pool() -> Iterator[ConnectionPool]:
-    import shared.db
+    from base import db
 
-    p = shared.db.pool(max_size=2)
+    p = db.pool(max_size=2)
     yield p
     p.close()
 

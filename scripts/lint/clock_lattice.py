@@ -66,12 +66,12 @@ _SCAN_DIRS = (
     "agent",
     "ava",
     "ava_builtins",
+    "base",
     "cli",
     "gateway",
     "ops",
     "scripts",
     "services",
-    "shared",
 )
 
 _TEST_PATTERNS = (

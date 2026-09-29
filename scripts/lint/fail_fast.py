@@ -60,7 +60,7 @@ from pathlib import Path
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
 # The 7 framework dirs (same scope as the sweeper's fail-fast class).
-_FRAMEWORK_DIRS = ("ava", "plugins", "agent", "gateway", "cli", "services", "shared")
+_FRAMEWORK_DIRS = ("ava", "plugins", "agent", "gateway", "cli", "services", "base")
 
 _EXEMPT_MARKER = "# fail-fast-ok:"
 

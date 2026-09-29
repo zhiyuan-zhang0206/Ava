@@ -21,7 +21,7 @@ import psycopg
 from base.cluster.machine import machine_name
 from base.config import settings
 from base.deploy.lifecycle import home_lifecycle_locks
-from base.deploy.release.identity import ApplicationIdentity
+from base.deploy.release.identity import IDENTITY_MEMBER, ApplicationIdentity
 from base.deploy.release.runtime_release import (
     ReleaseRejectedError,
     current_pointer,
@@ -144,7 +144,7 @@ def main() -> None:
         schema_digest=schema_digest,
     )
     identity = ApplicationIdentity.model_validate_json(
-        regular_bytes(MIGRATIONS_DIR.parent / "shared/release-build.json")
+        regular_bytes(MIGRATIONS_DIR.parent / IDENTITY_MEMBER)
     )
     runtime = StartRuntime.from_image(
         home, release, schema_digest=schema_digest, source_commit=identity.source_commit

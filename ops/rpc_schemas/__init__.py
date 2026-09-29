@@ -1,7 +1,7 @@
 """Gateway <-> agent-runner RPC-shared schemas — the cross-process wire
 contract. These types are produced/consumed on BOTH sides of the ops RPC
 (the gateway HTTP surface AND the agent-runner ops handlers in ops/ +
-services/), so by the import layering (shared < ops < gateway) they live in
+services/), so by the import layering (base < ops < gateway) they live in
 the ops layer: gateway imports them downward, and ops/services never have to
 reach up into gateway.
 

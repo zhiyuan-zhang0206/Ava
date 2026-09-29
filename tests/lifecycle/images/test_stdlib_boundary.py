@@ -20,7 +20,7 @@ import importlib.abc, sys
 class StdlibOnly(importlib.abc.MetaPathFinder):
     def find_spec(self, name, path=None, target=None):
         top = name.partition(".")[0]
-        if top in sys.stdlib_module_names or top == "shared":
+        if top in sys.stdlib_module_names or top == "base":
             return None
         raise ModuleNotFoundError(f"non-stdlib import {name!r}", name=name)
 

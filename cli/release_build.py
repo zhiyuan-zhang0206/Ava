@@ -16,13 +16,11 @@ import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 
-from base.deploy.release.identity import ApplicationIdentity
+from base.deploy.release.identity import IDENTITY_MEMBER, ApplicationIdentity
 from base.deploy.release.runtime_release import ReleaseRejectedError, file_sha256
 from base.deploy.release.verified_file import regular_bytes
 from base.deploy.schema.migration_layout import required_migration_set_from_names
 from base.native_process.posix_command import run_owned_command
-
-_IDENTITY_MEMBER = "shared/release-build.json"
 
 
 @dataclass(frozen=True)
@@ -134,7 +132,7 @@ def capture_source(repo: Path, commit: str, destination: Path) -> CapturedSource
     }
     # The build owns this new member. Refuse a committed lookalike instead of
     # overwriting provenance selected by the target being built.
-    with (source / _IDENTITY_MEMBER).open("xb") as stream:
+    with (source / IDENTITY_MEMBER).open("xb") as stream:
         stream.write(_canonical(identity))
     return CapturedSource(
         ApplicationIdentity.model_validate_json(_canonical(identity)), archive, source
@@ -167,9 +165,9 @@ def _verify_migrations(archive: zipfile.ZipFile, expected: dict[str, bytes]) -> 
 
 def _verify_wheel(wheel: Path, identity: dict[str, object], migrations: dict[str, bytes]) -> None:
     with zipfile.ZipFile(wheel) as archive:
-        if archive.namelist().count(_IDENTITY_MEMBER) != 1:
+        if archive.namelist().count(IDENTITY_MEMBER) != 1:
             raise ReleaseRejectedError("built wheel must contain exactly one source receipt")
-        if archive.read(_IDENTITY_MEMBER) != _canonical(identity):
+        if archive.read(IDENTITY_MEMBER) != _canonical(identity):
             raise ReleaseRejectedError("built wheel source receipt changed")
         if hashlib.sha256(archive.read("db/schema.sql")).hexdigest() != identity["schema_digest"]:
             raise ReleaseRejectedError("built wheel schema differs from committed source")

@@ -99,7 +99,7 @@ def _isolated_repo(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> N
 
 
 @pytest.mark.parametrize("lines", [600, 601, 700, 800, 801])
-@pytest.mark.parametrize("scope", ["shared", "tests", "scripts"])
+@pytest.mark.parametrize("scope", ["base", "tests", "scripts"])
 def test_line_budget_boundary(
     tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str], scope: str, lines: int
 ) -> None:
@@ -292,14 +292,14 @@ def test_non_git_checkout_skips_guard(
 def test_directory_with_unreadable_member_is_skipped(
     tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    shared = _entries(tmp_path, "shared", 1)
-    (shared / "bad_utf8.py").write_bytes(b"\xff\xfe\x00bad")
-    (shared / "dangling.py").symlink_to(shared / "missing.py")
-    assert lcs.main([str(shared / "bad_utf8.py")]) == 0
-    assert lcs.main([str(shared)]) == 0
+    package = _entries(tmp_path, "base", 1)
+    (package / "bad_utf8.py").write_bytes(b"\xff\xfe\x00bad")
+    (package / "dangling.py").symlink_to(package / "missing.py")
+    assert lcs.main([str(package / "bad_utf8.py")]) == 0
+    assert lcs.main([str(package)]) == 0
     assert lcs.main([]) == 0
-    _write(shared, "big.py", 901)
-    assert lcs.main([str(shared)]) == 1
+    _write(package, "big.py", 901)
+    assert lcs.main([str(package)]) == 1
     assert "hard ceiling" in capsys.readouterr().out
 
 
@@ -379,7 +379,7 @@ def test_explicit_repository_root_reaches_budget_scope(
         "ava",
         "ava_builtins",
         "gateway",
-        "shared",
+        "base",
         "services",
         "ops",
         "cli",
@@ -422,22 +422,22 @@ def test_ast_allowlists_and_stale_role_entry_are_preserved(
     assert "base/example.py:1: stale machine_role() allowlist entry" in capsys.readouterr().out
 
 
-@pytest.mark.parametrize("destination_scope", ["shared", "docs"])
+@pytest.mark.parametrize("destination_scope", ["base", "docs"])
 def test_explicit_alias_preserves_resolved_ast_scope(
     tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str], destination_scope: str
 ) -> None:
     destination = _write(tmp_path, f"{destination_scope}/original.py", 801)
     with destination.open("a", encoding="utf-8") as stream:
         stream.write("if TYPE_CHECKING:\n    import example\n")
-    alias_scope = "docs" if destination_scope == "shared" else "shared"
+    alias_scope = "docs" if destination_scope == "base" else "base"
     alias = tmp_path / alias_scope / "alias.py"
     alias.parent.mkdir(parents=True, exist_ok=True)
     alias.symlink_to(destination)
 
-    assert lcs.main([str(alias)]) == (1 if destination_scope == "shared" else 0)
+    assert lcs.main([str(alias)]) == (1 if destination_scope == "base" else 0)
     output = capsys.readouterr().out
     assert "hard ceiling" not in output
-    if destination_scope == "shared":
+    if destination_scope == "base":
         assert "base/original.py:802:" in output
         assert "TYPE_CHECKING" in output
     else:

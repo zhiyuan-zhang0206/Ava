@@ -94,7 +94,7 @@ class _AuditRootVisitor(ast.NodeVisitor):
 
     def visit_Import(self, node: ast.Import) -> None:
         for alias in node.names:
-            if alias.name == "shared":
+            if alias.name == "base":
                 root = alias.asname or alias.name
                 self._audit_modules.add(f"{root}.telemetry.audit_events")
                 self._telemetry_modules.add(f"{root}.telemetry")
@@ -105,7 +105,7 @@ class _AuditRootVisitor(ast.NodeVisitor):
         self.generic_visit(node)
 
     def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
-        self._register_shared_module_aliases(node)
+        self._register_base_module_aliases(node)
         self._register_function_aliases(
             node,
             "base.telemetry.audit_events",
@@ -120,8 +120,8 @@ class _AuditRootVisitor(ast.NodeVisitor):
         )
         self.generic_visit(node)
 
-    def _register_shared_module_aliases(self, node: ast.ImportFrom) -> None:
-        if node.module == "shared":
+    def _register_base_module_aliases(self, node: ast.ImportFrom) -> None:
+        if node.module == "base":
             for alias in node.names:
                 if alias.name == "telemetry":
                     self._telemetry_modules.add(alias.asname or alias.name)
@@ -281,7 +281,7 @@ def test_an_unclassified_aliased_audit_helper_fails(tmp_path: Path) -> None:
         _assert_classified(_audit_roots(root), {})
 
 
-def test_an_unclassified_import_shared_audit_emitter_fails(tmp_path: Path) -> None:
+def test_an_unclassified_import_base_audit_emitter_fails(tmp_path: Path) -> None:
     root = tmp_path / "root"
     root.mkdir()
     (root / "new_producer.py").write_text(
@@ -292,7 +292,7 @@ def test_an_unclassified_import_shared_audit_emitter_fails(tmp_path: Path) -> No
         _assert_classified(_audit_roots(root), {})
 
 
-def test_an_unclassified_import_shared_audit_helper_fails(tmp_path: Path) -> None:
+def test_an_unclassified_import_base_audit_helper_fails(tmp_path: Path) -> None:
     root = tmp_path / "root"
     root.mkdir()
     (root / "new_producer.py").write_text(

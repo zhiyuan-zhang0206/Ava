@@ -182,14 +182,14 @@ def _is_logger_root(node: ast.expr, names: set[str], modules: set[str]) -> bool:
     if isinstance(node, ast.Name):
         return node.id in names
     if isinstance(node, ast.Attribute) and node.attr == "logger":
-        base = node.value
-        if isinstance(base, ast.Name) and base.id in modules:
+        receiver = node.value
+        if isinstance(receiver, ast.Name) and receiver.id in modules:
             return True
         return (
-            isinstance(base, ast.Attribute)
-            and base.attr == "log"
-            and isinstance(base.value, ast.Name)
-            and base.value.id == "shared"
+            isinstance(receiver, ast.Attribute)
+            and receiver.attr == "log"
+            and isinstance(receiver.value, ast.Name)
+            and receiver.value.id == "base"
         )
     return False
 

@@ -48,7 +48,7 @@ The native OS unit supervises the application root, which owns its service
 subprocesses. Agent shells use independent PTY hosts. Stop verifies captured
 process identity before signalling.
 
-The import boundary is `shared < ops < {gateway, cli}`. The supported RPC
+The import boundary is `base < ops < {gateway, cli}`. The supported RPC
 vocabulary lives in the `ops/rpc_schemas/` door; focused agent contracts live in
 its `terminate`, `content`, and `billing_recovery` submodules. Gateway-only
 schemas stay in `gateway/schemas/`.

@@ -78,7 +78,7 @@ def launch_checkpoint(
 # ══════════════════════════════════════════════════════════════════
 
 W1_TARGETS = [
-    ("scout-shared", "base/", "shared utilities, config, db layer"),
+    ("scout-base", "base/", "base library: utilities, config, db layer"),
     ("scout-ava", "ava/", "SDK namespace, agent runtime"),
     ("scout-agent", "agent/", "agent loop, graph, execution"),
 ]

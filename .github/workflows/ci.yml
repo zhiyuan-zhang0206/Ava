@@ -719,7 +719,7 @@ jobs:
           uv run pytest tests/ -q --ignore=tests/e2e -m "not flaky" -n 4 \
             --splits 16 --group ${{ matrix.group }} \
             --splitting-algorithm least_duration \
-            --cov=agent --cov=ava --cov=cli --cov=gateway --cov=shared --cov=ui \
+            --cov=agent --cov=ava --cov=cli --cov=gateway --cov=base --cov=ui \
             --cov=ops --cov=services --cov=ava_builtins \
             --junit-xml=tmp/junit-backend-shard-${{ matrix.group }}-a1.xml -o junit_family=xunit1 \
             -o faulthandler_timeout=300 \
@@ -739,7 +739,7 @@ jobs:
             uv run pytest tests/ -q --ignore=tests/e2e -m "not flaky" -n 4 \
               --splits 16 --group ${{ matrix.group }} \
               --splitting-algorithm least_duration \
-              --cov=agent --cov=ava --cov=cli --cov=gateway --cov=shared --cov=ui \
+              --cov=agent --cov=ava --cov=cli --cov=gateway --cov=base --cov=ui \
               --cov=ops --cov=services --cov=ava_builtins \
               --junit-xml=tmp/junit-backend-shard-${{ matrix.group }}-a2.xml -o junit_family=xunit1 \
               -o faulthandler_timeout=300
@@ -1032,7 +1032,7 @@ jobs:
         run: >
           mkdir -p tmp &&
           uv run pytest tests/ -m flaky --ignore=tests/e2e -q
-          --cov=agent --cov=ava --cov=cli --cov=gateway --cov=shared --cov=ui
+          --cov=agent --cov=ava --cov=cli --cov=gateway --cov=base --cov=ui
           --cov=ops --cov=services --cov=ava_builtins
           --junit-xml=tmp/junit-backend-serial.xml -o junit_family=xunit1
 
@@ -1439,7 +1439,7 @@ jobs:
           #
           # Two tiers, enforced by scripts/ci/coverage_gates.py:
           # - the combined 85% gate over the core domains
-          #   agent/ava/cli/gateway/shared/ui (cli joined 2026-08-25, tech
+          #   agent/ava/cli/gateway/base/ui (cli joined 2026-08-25, tech
           #   audit P1 — measured 82% standalone);
           # - per-risk-domain minimum line floors for ops/services/ava_builtins
           #   (tech audit 2026-08-24 finding #10, Task #1570): the

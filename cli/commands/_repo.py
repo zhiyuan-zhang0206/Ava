@@ -31,7 +31,7 @@ from base.host.system.backend import get_backend
 from base.sessions.env_forwarding import frontend_toolchain_env
 
 # The service roster + capability filtering live in the `ops` module family — the
-# single desired-state source (`shared < ops < {gateway, cli}`). Bound here under their
+# single desired-state source (`base < ops < {gateway, cli}`). Bound here under their
 # historical names (module-level assignments, so both ruff and pyright see them as
 # intentional exports) so existing `from cli.commands._repo import ...` call sites
 # (start / status / stop / update / converge / __init__) keep working; `_repo` stays

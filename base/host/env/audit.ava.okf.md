@@ -43,4 +43,4 @@ tags: []
   emits `env_unauthorized_write` (audit/anomaly), and logs an error. The guard runs at the gateway
   config read boundary (`GET /api/config`).
 
-Parent: [[base/base.ava.okf.md|shared libraries]].
+Parent: [[base/base.ava.okf.md|base library]].

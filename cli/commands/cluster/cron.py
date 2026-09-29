@@ -2,7 +2,7 @@
 and `ava cluster health-probe-unregister`.
 
 Thin CLI wrappers that delegate to `base.host.system.cron`. The core logic lives in the
-shared layer so both the gateway lifespan (primary registration path) and the
+base layer so both the gateway lifespan (primary registration path) and the
 CLI converge step (belt-and-suspenders fallback) can call the same functions
 without violating the import layering.
 

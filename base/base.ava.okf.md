@@ -1,14 +1,14 @@
 ---
 type: doc
-title: "Shared Libraries"
+title: "Base Library"
 description: "Foundational cross-process libraries: contracts, LLM providers, cluster primitives, logging, and metrics."
 tags:
-- shared
+- base
 - library
 - cross-cutting
 ---
 
-# Shared Libraries
+# Base Library
 
 ## What it is
 
@@ -44,7 +44,7 @@ tags:
 The domain dependency map lives in [[dependencies.ava.okf.md]].
 
 ## Entry points
-The shared-layer public entry points: [[base/entry-points.ava.okf.md]].
+The base-layer public entry points: [[base/entry-points.ava.okf.md]].
 
 ## Notes
 
@@ -52,6 +52,6 @@ The shared-layer public entry points: [[base/entry-points.ava.okf.md]].
   audit, status renderer, and rootless-first reconciliation with bounded
   `sudo -n` / manual-command fallback; see
   [[base/sessions/session-backend.ava.okf.md|session backend]].
-- Layer constraints are enforced by `import-linter`: shared < ava < agent < gateway < cli
-- There is no internal layer restriction within shared; services must not import agent kernel
+- Layer constraints are enforced by `import-linter`: base < ava < agent < gateway < cli
+- There is no internal layer restriction within base; services must not import agent kernel
 - File line budget: soft limit 600 / hard limit 800 (enforced by lint)

@@ -31,9 +31,10 @@ def test_cold_acquisition_builds_locked_sdist_with_pinned_tools(tmp_path: Path) 
     uv = Path(uv_path).resolve(strict=True)
     repo = root / "repo"
     repo.mkdir()
-    for name in ("shared", "db", "migrations"):
+    for name in ("base", "shared", "db", "migrations"):
         (repo / name).mkdir()
     (repo / "base/__init__.py").write_text("")
+    (repo / "shared/__init__.py").write_text("")
     (repo / "db/schema.sql").write_text("SELECT 1;\n")
     (repo / "migrations/.gitkeep").write_text("")
     (repo / ".python-version").write_text("3.12.12\n")
@@ -41,7 +42,7 @@ def test_cold_acquisition_builds_locked_sdist_with_pinned_tools(tmp_path: Path) 
         '[project]\nname="ava"\nversion="0.1.5"\nrequires-python=">=3.12"\n'
         'dependencies=["crcmod==1.7", "packaging==26.3"]\n'
         '[build-system]\nrequires=["hatchling"]\nbuild-backend="hatchling.build"\n'
-        '[tool.hatch.build.targets.wheel]\npackages=["shared"]\n'
+        '[tool.hatch.build.targets.wheel]\npackages=["base", "shared"]\n'
         '[tool.hatch.build.targets.wheel.force-include]\n"db/schema.sql"="db/schema.sql"\n"migrations"="migrations"\n'
     )
     environment = {"PATH": os.defpath, "HOME": str(root), "UV_CACHE_DIR": str(root / "lock-cache")}

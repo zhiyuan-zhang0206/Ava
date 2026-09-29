@@ -30,6 +30,21 @@ from base.deploy.release.runtime_release import (
 from base.native_process.group_closure import close_unadmitted, wait_group_finished
 from base.runtime_abi import AbiTag, AbiTagError, current_abi, parse_abi_tag
 
+# Release-probe ABI: these run inside the TARGET image's own interpreter, and an
+# upgrade prepares a newer image while a rollback prepares an older one, so they
+# name the pre-rename `shared` package, which every image answers (the time-boxed
+# shell in shared/__init__.py re-exports both names from `base`). Retire together
+# with the shell: once every cluster has run a post-rename release and no rollback
+# crosses the rename, switch these to `base.*` and delete shared/.
+ABI_PROBE = "import json, shared.runtime_abi as a; print(json.dumps(a.current_abi().to_json()))"
+PLUGIN_PROBE = (
+    "import sys,json;from pathlib import Path;"
+    "from shared.runtime_plugins import verify_plugin_dependencies;"
+    "from cli.commands._release_plugin_probe import prove_plugin_registration;"
+    "root=Path(sys.argv[1]);names=tuple(json.loads(sys.argv[2]));"
+    "verify_plugin_dependencies(root,names);prove_plugin_registration(root,names)"
+)
+
 
 def tree_inventory(root: Path) -> dict[str, str]:
     """Hash private regular files; reject links and special files, including FIFOs."""
@@ -321,9 +336,10 @@ else:
 
 def _retained_abi(root: Path, interpreter: Path) -> AbiTag:
     """The image interpreter's own ABI tag on this host, from its installed module."""
-    probe = "import json, shared.runtime_abi as a; print(json.dumps(a.current_abi().to_json()))"
     try:
-        return parse_abi_tag(json.loads(_run([str(interpreter), "-I", "-B", "-c", probe], root)))
+        return parse_abi_tag(
+            json.loads(_run([str(interpreter), "-I", "-B", "-c", ABI_PROBE], root))
+        )
     except AbiTagError as exc:
         raise ReleaseRejectedError(f"retained interpreter has no release ABI tag: {exc}") from exc
 
@@ -412,11 +428,7 @@ def _verify_plugins(plugins: PluginInput | None, root: Path) -> None:
                 "-I",
                 "-B",
                 "-c",
-                "import sys,json;from pathlib import Path;"
-                "from shared.runtime_plugins import verify_plugin_dependencies;"
-                "from cli.commands._release_plugin_probe import prove_plugin_registration;"
-                "root=Path(sys.argv[1]);names=tuple(json.loads(sys.argv[2]));"
-                "verify_plugin_dependencies(root,names);prove_plugin_registration(root,names)",
+                PLUGIN_PROBE,
                 str(root / "plugins"),
                 json.dumps(plugins.required),
             ],

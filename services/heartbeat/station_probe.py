@@ -37,7 +37,7 @@ import urllib.request
 from datetime import UTC, datetime
 from typing import Any
 
-import shared.db
+from base import db
 from base.config import settings
 from base.deploy.transition import transition_severity
 from base.log import init_gateway_process, logger
@@ -185,7 +185,7 @@ def _alert_edges(target: _StationTarget, *, ok: bool, now: datetime) -> None:
             return
         identity = {"alertname": _ALERTNAME, "station": target.url}
         try:
-            with shared.db.connect() as conn:
+            with db.connect() as conn:
                 severity = transition_severity(
                     state["transition_since"],
                     now,
@@ -238,7 +238,7 @@ def _alert_edges(target: _StationTarget, *, ok: bool, now: datetime) -> None:
     if not recovered:
         return
     try:
-        with shared.db.connect() as conn:
+        with db.connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     "SELECT starts_at, fingerprint, severity FROM alerts "

@@ -16,7 +16,11 @@ from typing import Literal, Self
 
 from pydantic import model_validator
 
-from base.deploy.release.identity import ApplicationIdentity, read_application_identity
+from base.deploy.release.identity import (
+    IDENTITY_MEMBER,
+    ApplicationIdentity,
+    read_application_identity,
+)
 from base.deploy.release.runtime_release import (
     ReleaseRejectedError,
     VerifiedRelease,
@@ -165,7 +169,7 @@ def loaded_runtime() -> tuple[Path, Path, Path, bool]:
     """Read actual imports without importing Settings or a higher application layer."""
     # base/deploy/release/runtime_interpreter.py -> the import root (checkout or site-packages).
     package = Path(__file__).resolve().parents[3]
-    for name in ("shared", "cli", "ava", "agent", "gateway", "services"):
+    for name in ("base", "cli", "ava", "agent", "gateway", "services"):
         module = sys.modules.get(name)
         if (
             module is not None
@@ -246,9 +250,7 @@ def capture_loaded_runtime(home: Path) -> LoadedRuntimeIdentity:
     prefix, _executable, package, _isolated = loaded_runtime()
     if not package.is_relative_to(prefix):
         return verify_loaded_source(package)
-    identity = ApplicationIdentity.model_validate_json(
-        regular_bytes(package / "shared" / "release-build.json")
-    )
+    identity = ApplicationIdentity.model_validate_json(regular_bytes(package / IDENTITY_MEMBER))
     root = prefix.parent
     image = verify_release(
         home / "releases",

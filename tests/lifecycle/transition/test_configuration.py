@@ -60,7 +60,7 @@ def _forbid_runtime_imports(monkeypatch: pytest.MonkeyPatch) -> None:
             "base.config",
             "cli.start_runtime",
             "base.host.system.boot_unit",
-            "shared",
+            "base",
             "cli.commands.lifecycle.maintenance",
             "cli.commands.lifecycle.service_stop",
             "cli.release_transition.root_service",

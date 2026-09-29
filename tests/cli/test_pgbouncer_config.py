@@ -119,7 +119,7 @@ def test_backup_defaults_to_a_direct_dump_source() -> None:
     assert ".pooled_db_url" not in src
 
 
-def test_shared_db_connect_and_pool_dial_one_url_with_direct_escape() -> None:
+def test_base_db_connect_and_pool_dial_one_url_with_direct_escape() -> None:
     """base.db.connect/pool dial AVA_DB_URL (the one access URL) by default and
     expose direct=True (the admin plane derives the direct URL from the registry
     record); every connection disables server-side prepared statements

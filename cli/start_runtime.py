@@ -124,7 +124,7 @@ def admit_loaded_release(home: Path) -> StartRuntime:
     the selected manifest digest authenticates those bytes. This cannot switch
     an installed caller to a different selected image or authorize migration.
     """
-    from base.deploy.release.identity import ApplicationIdentity
+    from base.deploy.release.identity import IDENTITY_MEMBER, ApplicationIdentity
     from base.deploy.release.verified_file import regular_bytes
 
     selected = current_pointer(home / "releases")
@@ -134,9 +134,7 @@ def admit_loaded_release(home: Path) -> StartRuntime:
     prefix, _executable, package, _isolated = runtime_interpreter.loaded_runtime()
     if prefix != home / "releases" / digest / "venv" or not package.is_relative_to(prefix):
         raise ReleaseRejectedError("installed restart differs from the selected loaded image")
-    identity = ApplicationIdentity.model_validate_json(
-        regular_bytes(package / "shared" / "release-build.json")
-    )
+    identity = ApplicationIdentity.model_validate_json(regular_bytes(package / IDENTITY_MEMBER))
     image = verify_release(
         home / "releases",
         digest,

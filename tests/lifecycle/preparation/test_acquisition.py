@@ -40,9 +40,10 @@ def acquisition(tmp_path: Path) -> Acquisition:
     root = tmp_path.resolve()
     repo = root / "repo"
     repo.mkdir()
-    for name in ("shared", "migrations", "db"):
+    for name in ("base", "shared", "migrations", "db"):
         (repo / name).mkdir()
     (repo / "base/__init__.py").write_text("")
+    (repo / "shared/__init__.py").write_text("")
     (repo / "migrations/.gitkeep").write_text("")
     (repo / "db/schema.sql").write_text("SELECT 1;\n")
     (repo / "pyproject.toml").write_text('[project]\nname="ava"\nversion="0.1.5"\n')

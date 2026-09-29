@@ -26,7 +26,7 @@ A line that genuinely needs a sync call in an async handler (a tiny, bounded
 read; a third-party callback contract) opts out with an inline
 `# async-blocking-ok: <reason>` comment.
 
-Scope: `gateway/` and `ops/` — the event-loop surfaces. Tests, cli, shared,
+Scope: `gateway/` and `ops/` — the event-loop surfaces. Tests, cli, base,
 agent and services are not scanned (they do not run the gateway loop).
 
 The repo-helper names must stay current: each one in `_REPO_BLOCKING_HELPERS`

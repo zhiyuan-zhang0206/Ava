@@ -24,7 +24,7 @@ only correct read.
 
 **Framework fields.** Scan the turn-scoped packages (code that runs inside an agent's turn):
 `agent/`, `ava/`, `ava_builtins/`, `base/lm/`, plus the turn-adjacent
-shared modules listed in _EXTRA_FILES. Any `settings.<domain>.<field>`
+`base` modules listed in _EXTRA_FILES. Any `settings.<domain>.<field>`
 attribute read where `<field>` is a `per_agent=True` field in the config
 registry is an error — the site must read `turn_settings.<domain>.<field>`.
 
@@ -70,7 +70,7 @@ _SCAN_DIRS = (
     "base/lm",
 )
 
-# Turn-adjacent shared modules that execute inside agent turns.
+# Turn-adjacent `base` modules that execute inside agent turns.
 _EXTRA_FILES = ("base/packages/plugins/activation.py",)
 
 _ALLOWED_FILES = frozenset(

@@ -238,7 +238,7 @@ uses inline `# emoji-ok: <reason>`.
 
 ## Import layering
 
-`shared < ava < agent < gateway < cli` — a lower layer importing a
+`base < ava < agent < gateway < cli` — a lower layer importing a
 higher one fails; higher→lower is fine. `services` must not import the `agent`
 kernel but is otherwise unlayered (it straddles). `plugins` is ungoverned
 (agent ↔ plugins is cyclic by design).

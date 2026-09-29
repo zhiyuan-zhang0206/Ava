@@ -97,11 +97,11 @@ def _gateway_liveness_with_retry() -> bool:
 
 def _data_plane_abnormal() -> bool:
     """True when either dependency behind the gateway is currently unreachable."""
-    import shared.db
+    from base import db
     from base.events.live.redis_client import sync_redis
 
     try:
-        with shared.db.connect(autocommit=True):
+        with db.connect(autocommit=True):
             pass
     except Exception:
         return True
@@ -121,10 +121,10 @@ def _agent_population(min_agents: int) -> bool:
 
     Queries the central DB directly — the probe runs on the gateway machine
     and has DB access. A cluster with zero live agents is effectively dead."""
-    import shared.db
+    from base import db
 
     try:
-        with shared.db.connect(autocommit=True) as conn, conn.cursor() as cur:
+        with db.connect(autocommit=True) as conn, conn.cursor() as cur:
             cur.execute(
                 "SELECT COUNT(*) FROM agents_meta WHERE status IN ('running', 'idling') "
                 "AND lease_expires_at > now()"
@@ -143,12 +143,12 @@ def _agent_population(min_agents: int) -> bool:
 
 def _agent_population_failure_class(min_agents: int) -> str | None:
     """Classify observed low population against DB availability and local intent."""
-    import shared.db
+    from base import db
     from base.deploy.lifecycle import service_selection
     from base.deploy.maintenance import pause_owner
 
     try:
-        with shared.db.connect(autocommit=True) as conn, conn.cursor() as cur:
+        with db.connect(autocommit=True) as conn, conn.cursor() as cur:
             cur.execute(
                 "SELECT COUNT(*) FROM agents_meta WHERE status IN ('running', 'idling') "
                 "AND lease_expires_at > now()"
@@ -263,9 +263,9 @@ def _schema_health() -> bool:
 
     try:
         # check_schema_version expects a connection; connect+check inline
-        import shared.db
+        from base import db
 
-        with shared.db.connect(autocommit=True) as conn:
+        with db.connect(autocommit=True) as conn:
             check_schema_version(conn)
         return True
     except (CodeBehindSchema, SchemaVersionMismatch):
@@ -396,9 +396,9 @@ def _editable_install_failure() -> str | None:
     source plus the stable ~/Ava clone), never an arbitrary descendant.
     """
     import base.deploy.release.editable_install as ei
-    import shared.deploy.git.cluster_drift
+    from base.deploy.git import cluster_drift
 
-    source_root = shared.deploy.git.cluster_drift.prod_source_dir()
+    source_root = cluster_drift.prod_source_dir()
     if source_root is None:
         return None
     violations = list(
@@ -423,7 +423,7 @@ def _source_tree_failure(home: Path) -> str | None:
     selecting a release does not repair arbitrary edits.
     """
     import base.deploy.git.source_tree_guard as stg
-    import shared.deploy.git.cluster_drift
+    from base.deploy.git import cluster_drift
     from base.deploy.release.runtime_release import current_pointer
 
     try:
@@ -431,7 +431,7 @@ def _source_tree_failure(home: Path) -> str | None:
             return None
     except (OSError, ValueError) as exc:
         return f"prod source tree guard skipped: release selector unreadable ({exc})"
-    source_root = shared.deploy.git.cluster_drift.prod_source_dir()
+    source_root = cluster_drift.prod_source_dir()
     if source_root is None:
         return None
     violations = stg.source_tree_violations(source_root)

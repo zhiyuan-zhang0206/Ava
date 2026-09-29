@@ -1,7 +1,7 @@
 ---
 type: doc
 title: "Test Suite"
-description: "`tests/` is Ava's traditional pytest test suite, covering all modules agent / gateway / cli / shared."
+description: "`tests/` is Ava's traditional pytest test suite, covering all modules agent / gateway / cli / base."
 tags:
 - evaluation
 - tool
@@ -12,7 +12,7 @@ tags:
 
 ## What it is
 
-`tests/` is Ava's traditional pytest test suite, covering all modules agent / gateway / cli / shared.
+`tests/` is Ava's traditional pytest test suite, covering all modules agent / gateway / cli / base.
 
 ## Core responsibilities
 
@@ -38,7 +38,7 @@ suite and the post-deploy visual gate consume it so their definitions cannot dri
 - `tests/ava/` — SDK surface (ava.* namespace)
 - `tests/gateway/` — API gateway
 - `tests/cli/` — command-line tools
-- `tests/base/` — shared library
+- `tests/base/` — base library
 - `tests/services/` — backend services
 - `tests/ops/` — agent drain, pause/recovery, deployment holds, health inventory,
   service roster and resource admission

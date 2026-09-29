@@ -1,12 +1,12 @@
 ---
 type: doc
-title: Shared Libraries Entry Points
-description: The shared-layer public entry points — model factory, pricing, agent-status enum, message kwargs reader, metrics report, bootstrap.
+title: Base Library Entry Points
+description: The base-layer public entry points — model factory, pricing, agent-status enum, message kwargs reader, metrics report, bootstrap.
 tags:
 - shared
 ---
 
-# Shared Libraries Entry Points
+# Base Library Entry Points
 
 ## Entry points
 
@@ -19,4 +19,4 @@ tags:
 - `base/host/env/bootstrap.py` — system boot entry point
 
 
-Parent: [[base/base.ava.okf.md|Shared Libraries]].
+Parent: [[base/base.ava.okf.md|Base Library]].

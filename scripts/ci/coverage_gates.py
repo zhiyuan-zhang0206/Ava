@@ -5,7 +5,7 @@ Reads coverage.json (written by `uv run coverage json -o coverage.json` from
 the combined shard data in the backend CI job) and enforces two tiers:
 
 - the combined line-rate gate over the six core domains
-  (agent/ava/cli/gateway/shared/ui) — the legacy 85% gate, unchanged;
+  (agent/ava/cli/gateway/base/ui) — the legacy 85% gate, unchanged;
 - per-risk-domain minimum line floors for ops/services/ava_builtins — the
   high-incident operational domains (deploy/backup/watchdog/ops) the
   combined gate never scored (tech audit 2026-08-24 finding #10).
@@ -32,7 +32,7 @@ from pathlib import Path
 # The 85% gate denominator — must match [tool.coverage.run].source's core
 # set and the comment in ci.yml's gate step. ops/services/ava_builtins are
 # measured into the same data but gated by FLOORS, not by this number.
-CORE_DOMAINS = ("agent", "ava", "cli", "gateway", "shared", "ui")
+CORE_DOMAINS = ("agent", "ava", "cli", "gateway", "base", "ui")
 CORE_THRESHOLD_DEFAULT = 85.0
 
 # Per-risk-domain minimum line floors (percent). Each key is a domain

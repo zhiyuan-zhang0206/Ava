@@ -62,7 +62,7 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 # Scan directories — only OUR code, do not scan .venv / vendor / node_modules.
 _SCAN_DIRS = (
     "agent",
-    "shared",
+    "base",
     "gateway",
     "services",
     "ava",

@@ -16,7 +16,7 @@ import zipfile
 from pathlib import Path
 from unittest.mock import patch
 
-PACKAGES = ("ava", "cli", "agent", "shared", "ops", "gateway", "services", "ava_builtins")
+PACKAGES = ("ava", "cli", "agent", "base", "shared", "ops", "gateway", "services", "ava_builtins")
 REQUIRED = (
     "agent/exec_child.py",
     "agent/graph/exec/_subprocess.py",

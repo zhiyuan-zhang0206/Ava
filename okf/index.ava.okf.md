@@ -22,7 +22,7 @@ Root node of the Ava project's OKF (Open Knowledge Format) knowledge graph. Each
 | [[../evals/evals.ava.okf.md]] | Eval-case contract — schema-v1 JSONL format, reference loader, versioning discipline |
 | [[../ui/web/web.ava.okf.md]] | Frontend Web UI — fleet monitoring, agent management, task tracking |
 | [[../ui/app/app.ava.okf.md]] | Tauri app shell — remote console window plus desktop and Android native behavior |
-| [[../base/base.ava.okf.md]] | Shared library — lm provider abstraction, agents-contract wire protocol, migrations, logging, configuration |
+| [[../base/base.ava.okf.md]] | Base library — lm provider abstraction, agents-contract wire protocol, migrations, logging, configuration |
 | [[../services/services.ava.okf.md]] | Background services — long-running subsystems such as browser MCP wrapper |
 | [[../.github/.github.ava.okf.md]] | GitHub Actions surface — backend/frontend/e2e and shell CI, cluster/app releases, issue + PR templates |
 | [[okf/plugins/plugins.ava.okf.md]] | Plugin system — extension mechanism that can carry skills / MCP servers |

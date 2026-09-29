@@ -167,7 +167,7 @@ directory) when the domain's shape changed:
 | Gateway routes / SSE / auth | `gateway/gateway.ava.okf.md` |
 | CLI commands / cluster lifecycle | `cli/cli.ava.okf.md` |
 | Frontend | `ui/web/web.ava.okf.md` |
-| Shared library / LM providers / config / migrations | `base/base.ava.okf.md` |
+| Base library / LM providers / config / migrations | `base/base.ava.okf.md` |
 | Background services | `services/services.ava.okf.md` |
 | GitHub Actions / CI workflows | `.github/.github.ava.okf.md` |
 | Plugins / extension points | `okf/plugins/plugins.ava.okf.md` |

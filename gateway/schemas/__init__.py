@@ -16,6 +16,6 @@ A feature package owns its own wire models beside its routes
 
 The gateway<->runner RPC-shared types live one layer down in `ops.rpc_schemas`,
 and the response models the `cli` thin clients also decode (`MachineStatus`, the
-`Config*` family) in `base.api_contracts` (import layering: shared < ops <
+`Config*` family) in `base.api_contracts` (import layering: base < ops <
 gateway).
 """

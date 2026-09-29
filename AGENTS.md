@@ -233,7 +233,7 @@ and the `ava.skills.ava-code:testing` discipline; rule 4's ask-first loop is [wo
 - Structure budgets: ≤800 lines per `.py`; ≤20 direct Python files/subdirectories per directory; function cc <15 (10–14 warn), nesting ≤5; packages + tests/scripts, frozen shrink-only baseline. Locality: no `_`-private import from outside its owning package; single-owner decisions (Postgres dial → `base/db/connections.py`); no path imports (`sys.path` edits, file loaders) under `ava_builtins/` — skill scripts stay thin over a package — all frozen in the same baseline.
 - No `print()` in framework code (use `base.log.logger`).
 - No decorative emoji in core Python.
-- Import layering: `shared < ava < agent < gateway < cli`.
+- Import layering: `base < ava < agent < gateway < cli`.
 [Full conventions →](conventions/python-conventions.md)
 
 ## Communicating with the user

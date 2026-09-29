@@ -404,7 +404,7 @@ def test_reaped_receipts_roundtrip_and_reject_invalid_shapes() -> None:
 
 _REPO = Path(__file__).resolve().parents[2]
 # Production trees only, mirroring the crash-row writer guard's scope.
-_SCAN_DIRS = ("agent", "ava", "ava_builtins", "cli", "gateway", "ops", "services", "shared")
+_SCAN_DIRS = ("agent", "ava", "ava_builtins", "cli", "gateway", "ops", "services", "base")
 
 _REAP_STAMP = re.compile(r"SET\s+status\s*=\s*['\"]restarting['\"]")
 _REAP_CLEAR = re.compile(r"SET\s+status\s*=\s*['\"]idling['\"][\s\S]{0,600}?restarting")

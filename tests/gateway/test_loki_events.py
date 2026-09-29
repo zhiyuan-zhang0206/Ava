@@ -342,12 +342,12 @@ def _wait_for_budget_waiters(expected: int) -> None:
 
 
 class TestGlobalQueryBudget:
-    def test_budget_contract_is_reexported_from_shared(self) -> None:
+    def test_budget_contract_is_reexported_from_base(self) -> None:
         spec = importlib.util.find_spec("base.telemetry.loki_query_budget")
         assert spec is not None, (
             "base.telemetry.loki_query_budget must own the reusable budget contract"
         )
-        shared_budget = importlib.import_module("base.telemetry.loki_query_budget")
+        base_budget = importlib.import_module("base.telemetry.loki_query_budget")
         for name in (
             "BudgetErrorFactory",
             "BudgetMetrics",
@@ -358,7 +358,7 @@ class TestGlobalQueryBudget:
             "FairQueryBudget",
             "LokiQueryBudgetError",
         ):
-            assert getattr(loki_query_budget, name) is getattr(shared_budget, name)
+            assert getattr(loki_query_budget, name) is getattr(base_budget, name)
 
     def test_matches_loki_real_max_concurrent(self) -> None:
         repo = Path(__file__).parents[2]

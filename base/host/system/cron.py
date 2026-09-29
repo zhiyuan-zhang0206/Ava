@@ -8,9 +8,9 @@ the retained release operation.
 - Linux: user crontab entry
 - Windows: a Task Scheduler job (see base/host/system/schtasks.py)
 
-This module is in the shared layer so both the gateway lifespan (primary
+This module is in the base layer so both the gateway lifespan (primary
 registration path) and the CLI converge step (belt-and-suspenders fallback) can
-call the same functions without violating the import layering (shared < ava <
+call the same functions without violating the import layering (base < ava <
 agent < gateway < cli).
 
 It also carries the shared launchd / crontab mechanics used by the OS jobs:

@@ -8,6 +8,11 @@ and the matching GitHub Releases, cut by `scripts/ci/release_cut.py`.
 ## [Unreleased]
 
 ### Changed
+- The bottom-layer package `shared` is now `base` (`base < ava < agent <
+  gateway < cli`), with no compatibility aliases: external plugins, schedules
+  and skills that import `shared.*` must import `base.*`. A three-file
+  `shared/` release-probe shell remains only so release preparation can cross
+  the rename (see `shared/__init__.py` for its retirement condition).
 - The internal database plane always authenticates, whatever
   `AVA_CLUSTER_SECRET` says: `pg_hba` admits only the OS-user administrator by
   peer on the owner-only socket and SCRAM application logins; PgBouncer always

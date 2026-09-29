@@ -43,7 +43,7 @@ until the explicit schema cutover.
 
 ## Key Dependencies
 
-- [[base.ava.okf.md|Shared Libraries]] — layering: `base` must not import `cli`/`gateway`; identity from `base.cluster.machine`, DB from `base.db`
+- [[base.ava.okf.md|Base Library]] — layering: `base` must not import `cli`/`gateway`; identity from `base.cluster.machine`, DB from `base.db`
 - [[okf/design/r1-state-liveness/r1-state-liveness.ava.okf.md|R1 state & liveness design]] — the two-table deployment-state model
 
 ## Entry Points

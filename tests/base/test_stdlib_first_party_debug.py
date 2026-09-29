@@ -60,7 +60,7 @@ def test_first_party_controller_debug_reaches_loguru(loguru_records: list[dict])
 @pytest.mark.parametrize("prefix", _FIRST_PARTY_LOGGER_NAMES)
 def test_every_first_party_prefix_passes_debug(prefix: str, loguru_records: list[dict]) -> None:
     """Every listed first-party namespace gets the same DEBUG passthrough —
-    not just ops.controllers.*, but services / shared / gateway / agent /
+    not just ops.controllers.*, but services / base / gateway / agent /
     ava_builtins daemons and controllers."""
     _install_stdlib_intercept()
     logging.getLogger(f"{prefix}.some_module").debug("marker-%s", prefix)

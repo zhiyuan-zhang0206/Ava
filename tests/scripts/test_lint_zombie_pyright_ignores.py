@@ -27,7 +27,7 @@ reportMissingTypeStubs = false
 reportPrivateUsage = "none"
 
 [[tool.pyright.executionEnvironments]]
-root = "shared"
+root = "base"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 reportPrivateUsage = "error"

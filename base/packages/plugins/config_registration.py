@@ -600,7 +600,7 @@ def apply_config_overlay(
     (late). `scope="all"` keeps the single-call behavior for callers that
     don't care about phase (tests, off-process diagnostics).
 
-    Framework overlay: `shared_config.set_field(field, value)` for each key —
+    Framework overlay: `base_config.set_field(field, value)` for each key —
     in-place mutation on the owning sub-model of the singleton instance. Every
     module that has captured `from base.config import settings` sees the change
     (same sub-model object). Matches the pattern used by tests/conftest.py to point

@@ -470,7 +470,7 @@ def _assert_env_precedes_project_imports() -> None:
     leaked = sorted(
         name
         for name in sys.modules
-        if name.split(".")[0] in {"shared", "ava", "agent", "gateway", "cli", "ops", "services"}
+        if name.split(".")[0] in {"base", "ava", "agent", "gateway", "cli", "ops", "services"}
     )
     if leaked:
         raise RuntimeError(

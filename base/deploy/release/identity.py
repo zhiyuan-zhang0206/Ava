@@ -18,9 +18,15 @@ from pydantic import Field, model_validator
 from base.deploy.release.runtime_release import ReleaseRejectedError, VerifiedRelease
 from base.native_process.evidence import Digest, EvidenceModel
 
-_IDENTITY_MEMBER = "shared/release-build.json"
+# The builder-embedded identity, as a wheel member. It keeps the pre-rename `shared/`
+# path: the CURRENT release's builder writes it into the TARGET commit's source tree
+# (`cli.release_build.capture_source`) and every release reads it from images another
+# version built, so it is part of the time-boxed release shell (shared/__init__.py).
+# Moving it is its own expand-contract: readers accept both paths first, then the
+# builder switches.
+IDENTITY_MEMBER = "shared/release-build.json"
 _APPLICATION_MEMBER_PATTERN = re.compile(
-    r"venv/(?:lib/python[0-9]+\.[0-9]+|Lib)/site-packages/shared/release-build\.json"
+    r"venv/(?:lib/python[0-9]+\.[0-9]+|Lib)/site-packages/" + re.escape(IDENTITY_MEMBER)
 )
 
 
@@ -47,7 +53,7 @@ def application_identity_members(files: dict[str, str], abi_os: str) -> list[str
     `abi_os` is the verified manifest's `abi_tag["os"]`, not the provenance
     platform string.
     """
-    members = sorted(name for name in files if name.endswith("/" + _IDENTITY_MEMBER))
+    members = sorted(name for name in files if name.endswith("/" + IDENTITY_MEMBER))
     primary = [name for name in members if _APPLICATION_MEMBER_PATTERN.fullmatch(name)]
     if len(primary) != 1:
         raise ReleaseRejectedError("verified image requires one installed application identity")

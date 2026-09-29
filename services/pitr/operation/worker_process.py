@@ -78,7 +78,7 @@ _BOOTSTRAP = """\
 import importlib.util, pathlib, runpy, sys
 root, module = pathlib.Path(sys.argv[1]), sys.argv[2]
 sys.path.insert(0, str(root))
-for name in ("shared", "services.pitr", module):
+for name in ("base", "services.pitr", module):
     spec = importlib.util.find_spec(name)
     origin = None if spec is None else spec.origin
     if origin is None or not pathlib.Path(origin).resolve().is_relative_to(root):

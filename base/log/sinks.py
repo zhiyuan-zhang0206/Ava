@@ -79,7 +79,7 @@ class _StdlibInterceptHandler(logging.Handler):
 _FIRST_PARTY_LOGGER_NAMES = (
     "ops",
     "services",
-    "shared",
+    "base",
     "gateway",
     "agent",
     "ava_builtins",

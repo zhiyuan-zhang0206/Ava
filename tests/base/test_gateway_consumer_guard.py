@@ -305,7 +305,7 @@ def _repo_internal_import_closure(roots: tuple[str, ...]) -> set[Path]:
                 and node.module
                 and node.module.split(".")[0]
                 in (
-                    "shared",
+                    "base",
                     "gateway",
                     "services",
                     "agent",
@@ -316,7 +316,7 @@ def _repo_internal_import_closure(roots: tuple[str, ...]) -> set[Path]:
             elif isinstance(node, ast.Import):
                 for alias in node.names:
                     if alias.name.split(".")[0] in (
-                        "shared",
+                        "base",
                         "gateway",
                         "services",
                         "agent",
@@ -426,7 +426,7 @@ _KIND_ROOTS: dict[str, tuple[str, ...]] = {
 # Repo-internal package prefixes the closure walk follows (everything that can
 # be imported by a process of any kind).
 _CLOSURE_PACKAGES = (
-    "shared",
+    "base",
     "gateway",
     "services",
     "agent",

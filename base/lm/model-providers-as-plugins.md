@@ -60,7 +60,7 @@ Xiaomi, and Zhipu. A binding that reuses one of those clients omits
 ## Loading and startup
 
 Discovery is keyed on a plugin directory's `plugin.py`; `provider.py` is the
-separately loaded shared-layer module. It may import `base` and installed
+separately loaded base-layer module. It may import `base` and installed
 LangChain packages, never `ava` or `agent`, because gateway, labeler, and eval
 processes load it without an agent runtime.
 

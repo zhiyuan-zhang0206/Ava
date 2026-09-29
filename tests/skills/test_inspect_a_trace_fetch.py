@@ -532,7 +532,7 @@ def _isolated_scripts_dir(tmp_path: Path) -> Path:
     return isolated
 
 
-def test_source_root_refuses_when_shared_is_not_found_and_ava_home_is_unset(
+def test_source_root_refuses_when_base_is_not_found_and_ava_home_is_unset(
     tmp_path: Path,
 ) -> None:
     isolated = _isolated_scripts_dir(tmp_path)
@@ -545,12 +545,12 @@ def test_source_root_refuses_when_shared_is_not_found_and_ava_home_is_unset(
 
 
 def test_source_root_never_falls_back_to_a_look_alike_default_home(tmp_path: Path) -> None:
-    """A planted look-alike `~/.ava/source/shared` under a fake HOME must never
+    """A planted look-alike `~/.ava/source/base` under a fake HOME must never
     be picked up when AVA_HOME itself is unset — mirrors
     `test_ava_home_never_falls_back_to_the_default_home` for `_common.py`."""
     isolated = _isolated_scripts_dir(tmp_path)
     fake_home = tmp_path / "home"
-    planted = fake_home / ".ava" / "source" / "shared"
+    planted = fake_home / ".ava" / "source" / "base"
     planted.mkdir(parents=True)
     (planted / "__init__.py").write_text("")
 
@@ -565,7 +565,7 @@ def test_source_root_uses_the_explicit_ava_home(tmp_path: Path) -> None:
     isolated = _isolated_scripts_dir(tmp_path)
     home = tmp_path / "dev-cluster-home"
     source = home / "source"
-    (source / "shared").mkdir(parents=True)
+    (source / "base").mkdir(parents=True)
     (source / "base" / "__init__.py").write_text("")
 
     res = _run_source_root(isolated, {"AVA_HOME": str(home)})

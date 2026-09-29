@@ -233,7 +233,7 @@ async def _sweep_requested_shell_kill(
 
     Runs under the settlement's row lock, before the observation is recorded,
     so a crash retries the sweep; the kill is idempotent. The killer belongs
-    to the host (the shared layer does not reach the ops session primitives)
+    to the host (the base layer does not reach the ops session primitives)
     and must not raise; a caller that binds none may not settle such a force.
     """
     if requested is not True:

@@ -16,7 +16,7 @@ _lint = importlib.import_module("scripts.lint.async_no_sync_blocking")
 def tree(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """A scratch source tree with one repo helper defined in `base/`."""
     monkeypatch.setattr(_lint, "_ROOT", tmp_path)
-    monkeypatch.setattr(_lint, "_DEFINITION_DIRS", ("shared",))
+    monkeypatch.setattr(_lint, "_DEFINITION_DIRS", ("base",))
     monkeypatch.setattr(_lint, "_SCAN_DIRS", ("gateway",))
     monkeypatch.setattr(_lint, "_REPO_BLOCKING_HELPERS", {"sync_op"})
     monkeypatch.setattr(_lint, "_BLOCKING_NAMES", _lint._LIBRARY_BLOCKING_NAMES | {"sync_op"})

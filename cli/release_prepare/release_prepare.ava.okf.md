@@ -82,7 +82,9 @@ The receipt binds the request, source, build input digests, the image's ABI tag
 (its compatibility contract, read back from the verified manifest), the current
 platform string (provenance only), artifact digest, manifest digest, schema
 digest and retained executable/cwd. The image interpreter reports its own tag
-during assembly; the preparing process then verifies the image against its own
+during assembly (`runtime_prepare.ABI_PROBE`, which names the pre-rename
+`shared` package so images on both sides of the `shared` -> `base` rename answer
+it; see `shared/__init__.py`); the preparing process then verifies the image against its own
 host ABI, so an image whose Python ABI differs from the host runtime refuses
 here rather than at boot. See [[base/deploy/release/runtime_release.ava.okf.md]].
 It is local preparation evidence, not a publication signature or activation

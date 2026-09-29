@@ -480,7 +480,7 @@ _PRODUCTION = (
     "ops",
     "scripts",
     "services",
-    "shared",
+    "base",
 )
 
 

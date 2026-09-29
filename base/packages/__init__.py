@@ -1,1 +1,1 @@
-"""Shared package machinery — installable package families (``skills/``)."""
+"""Base-layer package machinery — installable package families (``skills/``)."""

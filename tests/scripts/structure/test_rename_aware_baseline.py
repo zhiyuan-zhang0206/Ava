@@ -216,8 +216,88 @@ def test_rename_map_follows_detected_moves(tmp_path: pathlib.Path) -> None:
     assert lcs._rename_map("HEAD") == {}
 
 
-def test_directory_keys_are_not_remapped() -> None:
+def test_a_move_whose_old_path_is_rewritten_still_carries(tmp_path: pathlib.Path) -> None:
+    """A module that moves while a small new file takes its old path (a shell left
+    behind) is a rewrite of the old path plus a move of its content."""
+    _freeze(tmp_path, "tests/q.py")
+    # Git only breaks a rewritten file above a minimum size; pad the frozen module.
+    padding = "".join(f"VALUE_{index} = {index}\n" for index in range(60))
+    (tmp_path / "tests/q.py").write_text(_branches(16) + padding, encoding="utf-8")
+    _git(tmp_path, "commit", "--quiet", "-am", "Grow the frozen module")
+    _git(tmp_path, "mv", "tests/q.py", "tests/q_moved.py")
+    (tmp_path / "tests/q.py").write_text('"""A shell."""\n', encoding="utf-8")
+    _git(tmp_path, "add", "tests/q.py")
+    _migrate(tmp_path, "tests/q.py", "tests/q_moved.py")
+
+    assert lcs._rename_map("HEAD") == {"tests/q.py": "tests/q_moved.py"}
+    assert lcs.main([]) == 0
+
+
+def test_directory_keys_stay_when_files_move_within_them() -> None:
     remapped = lcs._remap_renamed_keys(
         "directories", {"tests/scripts": 60}, {"tests/scripts/a.py": "tests/scripts/b.py"}
     )
     assert remapped == {"tests/scripts": 60}
+
+
+def test_directory_keys_follow_a_wholesale_directory_move(tmp_path: pathlib.Path) -> None:
+    renames = {
+        "tests/old/a.py": "tests/new/a.py",
+        "tests/old/sub/b.py": "tests/new/sub/b.py",
+        "tests/split/c.py": "tests/elsewhere/c.py",
+        "tests/split/d.py": "tests/other/d.py",
+    }
+    remapped = lcs._remap_renamed_keys(
+        "directories", {"tests/old": 25, "tests/old/sub": 22, "tests/split": 21}, renames
+    )
+    # A directory whose files disagree on the target is not carried.
+    assert remapped == {"tests/new": 25, "tests/new/sub": 22, "tests/split": 21}
+
+    (tmp_path / "tests/old").mkdir(parents=True)
+    # A directory that still exists was split, not moved.
+    assert lcs._remap_renamed_keys("directories", {"tests/old": 25}, renames) == {"tests/old": 25}
+
+
+def _freeze_package(tmp_path: pathlib.Path) -> None:
+    """A governed top-level package with a frozen complexity key and directory key."""
+    for index in range(21):
+        path = tmp_path / f"oldpkg/sub/m{index}.py"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(f"VALUE_{index} = {index}\n" * 20, encoding="utf-8")
+    (tmp_path / "oldpkg/q.py").write_text(_branches(16), encoding="utf-8")
+    data: dict[str, dict[str, int]] = {kind: {} for kind in _SECTIONS}
+    data["complexity"] = {"oldpkg/q.py::f": 16}
+    data["directories"] = {"oldpkg/sub": 21}
+    _write_baseline(tmp_path, data)
+    _git(tmp_path, "init", "--quiet")
+    _git(tmp_path, "add", "-A")
+    _git(tmp_path, "commit", "--quiet", "-m", "Freeze a governed package")
+
+
+@pytest.mark.parametrize("directory_value,rc", [(21, 0), (22, 1)])
+def test_a_renamed_top_level_package_carries_its_frozen_keys(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    directory_value: int,
+    rc: int,
+) -> None:
+    """The base revision's baseline still names the old package, which the current
+    scope no longer governs: it validates through the rename, and the moved
+    directory's key carries (a raise stays a violation)."""
+    _freeze_package(tmp_path)
+    _git(tmp_path, "mv", "oldpkg", "newpkg")
+    data = _read_baseline(tmp_path)
+    data["complexity"] = {"newpkg/q.py::f": 16}
+    data["directories"] = {"newpkg/sub": directory_value}
+    _write_baseline(tmp_path, data)
+    monkeypatch.setattr(lcs, "_SCAN_DIRS", ("newpkg",))
+    monkeypatch.setattr(lcs, "_STRUCTURE_DIRS", ("newpkg", "tests", "scripts"))
+
+    assert lcs.main([]) == rc
+    captured = capsys.readouterr()
+    assert "invalid base baseline" not in captured.out
+    if rc:
+        assert "raised directories entry newpkg/sub from 21 to 22" in captured.out
+    else:
+        assert captured.out == ""

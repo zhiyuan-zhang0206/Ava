@@ -32,7 +32,7 @@ def test_mask_history_reads_blanks_quoted_and_bare_operands() -> None:
 
 def test_old_references_ignores_git_show_history_reads_but_reports_old_destination() -> None:
     old_path = "base/" + "pty_sessions/cli.py"
-    old_module = "shared." + "pty_sessions.cli"
+    old_module = "base." + "pty_sessions.cli"
     quoted = f'git show "abc:{old_path}" > base/sessions/pty/cli.py'
     bare = f"git show bd6b15ed0:{old_path} > base/sessions/pty/cli.py"
     old_destination = f'git show "abc:{old_path}" > {old_path}'

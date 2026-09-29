@@ -42,9 +42,9 @@ def resolve_station_target(base: str) -> StationTarget:
     Database discovery errors propagate: rendering an invented target during
     an outage would persist it beyond recovery. Probe callers may skip a round.
     """
-    import shared.db
+    from base import db
 
-    with shared.db.connect() as conn:
+    with db.connect() as conn:
         advertised = advertised_station_unit(conn, base)
     if advertised is not None:
         name, url = advertised
