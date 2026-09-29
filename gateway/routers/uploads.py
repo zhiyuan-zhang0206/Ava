@@ -34,9 +34,9 @@ from fastapi import APIRouter, File, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse
 from psycopg_pool import ConnectionPool
 
-from gateway.inbound_provenance import request_inbound_provenance
-from gateway.routers.delivery import deliver_chat_inbound
-from gateway.schemas import UploadedBatch, UploadedFile
+from gateway.agents.delivery import deliver_chat_inbound
+from gateway.agents.inbound_provenance import request_inbound_provenance
+from gateway.schemas.uploads import UploadedBatch, UploadedFile
 from shared.agents import AgentNotFound
 from shared.db import agent_exists
 from shared.machine import machine_name

@@ -12,7 +12,7 @@ The class arithmetic is window-agnostic: :func:`level_splits` turns any
 window's per-class counts plus the active dismissals into per-level
 total / dismissed / net triples. The daemon's :func:`run_resolution_slice`
 applies it to its fixed six-hour window and publishes the unresolved and
-dismissed gauges; the gateway stats dashboard (``gateway/routers/status.py``)
+dismissed gauges; the gateway stats dashboard (``gateway/cluster/status.py``)
 applies the same arithmetic to the frontend-selected window, so the two
 surfaces agree class for class.
 

@@ -33,7 +33,7 @@ The three are loosely coupled via HTTP + SSE: frontend directly calls Gateway AP
 ## Entry Points
 
 - `gateway/app.py` — FastAPI app definition + lifespan + middleware
-- `gateway/alert_reconciliation.py` — periodic repair of lost Grafana resolution webhooks
+- `gateway/alerts/reconciliation.py` — periodic repair of lost Grafana resolution webhooks
 - `cli/main.py:main()` — CLI argparse entry
 - `ui/web/src/app/layout.tsx` — Next.js root layout
 - `ui/web/src/app/page.tsx` — home page (Fleet view)

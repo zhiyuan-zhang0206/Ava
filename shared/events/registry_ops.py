@@ -280,7 +280,7 @@ _EVENTS_OPS: dict[str, EventSpec] = {
     ),
     "last_msg": _telemetry("last_msg", "last-message check", tier="noise"),
     # gateway endpoint latency metering (Task #1091): 60s aggregates emitted
-    # by gateway/_latency.py — one event per (route, bucket), never per request
+    # by gateway/middleware/latency.py — one event per (route, bucket), never per request
     "gateway_latency": _telemetry(
         "gateway_latency",
         "gateway endpoint latency — 60s aggregate per route (p50/p95/p99/max/count)",

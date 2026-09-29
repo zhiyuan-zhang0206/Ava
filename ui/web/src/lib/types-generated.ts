@@ -889,7 +889,7 @@ export interface paths {
          *     Buckets the checkpoint messages by kind + splits the system prompt into its
          *     top-level sections, each a chars/4 estimate proportionally normalized to the
          *     last LLM call's real `input_tokens` (so the categories sum to the truth). Pure
-         *     gateway-side view logic (`gateway/context_breakdown.py`) — one checkpoint read,
+         *     gateway-side view logic (`gateway/agents/context_breakdown.py`) — one checkpoint read,
          *     no kernel/agent involvement. A checkpoint read failure / no checkpoint yields
          *     an empty breakdown with zeroed totals (same tolerance as token-usage: the
          *     panel re-opens fine later).

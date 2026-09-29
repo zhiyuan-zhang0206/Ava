@@ -43,7 +43,7 @@ tests/
 | Source | Test |
 |------|------|
 | `agent/graph/_exec.py` | `tests/agent/test_exec_output.py` |
-| `gateway/timeline.py` | `tests/gateway/test_timeline.py` |
+| `gateway/agents/timeline.py` | `tests/gateway/test_timeline.py` |
 | `ava/shell.py` | `tests/ava/test_shell.py` |
 
 If adding a new sub-module (e.g., `ava/new_module.py`), create `test_new_module.py` under `tests/ava/`.

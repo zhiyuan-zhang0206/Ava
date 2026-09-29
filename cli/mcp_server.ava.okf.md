@@ -87,4 +87,4 @@ instruction ending. Tool schemas still come from the local function signatures.
 
 - [[okf/mcps/mcps.ava.okf.md|MCP integrations]] — the domain node; the outbound half
 - [[commands/extensions/packages.ava.okf.md]] — the rest of the `ava mcp` verb surface
-- [[gateway/routers/ops-surfaces.ava.okf.md|gateway routes]] — the control plane being proxied
+- [[gateway/cluster/ops-surfaces.ava.okf.md|gateway routes]] — the control plane being proxied

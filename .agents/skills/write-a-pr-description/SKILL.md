@@ -32,7 +32,7 @@ services/
 ├── healthchecks/
 │   └── delivery_watchdog.py   (M)  probe covers both jobs' liveness stamps
 gateway/
-└── routers/agents.py          (M)  spawn path stamps last_active_at on wake
+└── agents/router.py           (M)  spawn path stamps last_active_at on wake
 shared/
 └── live_events.py             (D)  ★ retired the legacy wake broadcast channel
                                     (every consumer now rides the keyed wake)

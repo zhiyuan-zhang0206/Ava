@@ -1,4 +1,4 @@
-"""Tests for gateway/schedule_manager.py — the reconcile loop's decisions.
+"""Tests for gateway/schedules/manager.py — the reconcile loop's decisions.
 
 The DB is real (a small ConnectionPool on the test DB); the session backend is
 faked (a class-level `new_session` stub + `get_shell_backend` monkeypatch), so
@@ -17,7 +17,7 @@ import psycopg
 import pytest
 from psycopg_pool import ConnectionPool
 
-import gateway.schedule_manager as sm
+import gateway.schedules.manager as sm
 from shared import start_serving
 from shared.cluster import session_name
 from shared.config import settings

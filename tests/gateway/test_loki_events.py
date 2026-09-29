@@ -1,4 +1,4 @@
-"""Unit tests for `gateway/loki_events.py` — the Loki read side of the
+"""Unit tests for `gateway/lgtm/loki_events.py` — the Loki read side of the
 unified event stream (task #1197, LGTM cutover).
 
 The module's only I/O is httpx GETs through the shared client accessor
@@ -28,7 +28,7 @@ import httpx
 import pytest
 import yaml
 
-from gateway import _loki_logql, loki_events, loki_events_cache, loki_query_budget
+from gateway.lgtm import _loki_logql, loki_events, loki_events_cache, loki_query_budget
 from services.events_maintenance.resolution import EventClass
 from shared.config import settings
 from shared.events.contract import lineage_event_names

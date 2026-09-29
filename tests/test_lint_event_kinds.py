@@ -51,8 +51,8 @@ _SQL_OR_DYNAMIC_KINDS = frozenset(
         # which passes the name positionally — no `event=` literal to scan.
         "delivery_outbox_flushed",  # shared/agents/messages/delivery_outbox.py:flush
         "delivery_outbox_abandoned",  # shared/agents/messages/delivery_outbox.py:_abandon
-        "lifecycle_pointer_done_torn",  # gateway/lifecycle_fences.py:_scan_torn_lifecycle_pointers_blocking (positional emit)
-        "lifecycle_fences_settled_absent_machine",  # gateway/lifecycle_fences.py:settle_absent_machine_fences (positional emit)
+        "lifecycle_pointer_done_torn",  # gateway/ttl_reaper/lifecycle_fences.py:_scan_torn_lifecycle_pointers_blocking (positional emit)
+        "lifecycle_fences_settled_absent_machine",  # gateway/ttl_reaper/lifecycle_fences.py:settle_absent_machine_fences (positional emit)
         "heartbeat_nudged",  # services/heartbeat/daemon.py:_alert_idle
         "heartbeat_backoff_raised",  # services/heartbeat/daemon.py:_raise_backoff_level (positional emit)
         "heartbeat_backoff_reset",  # services/heartbeat/daemon.py:_sweep_backoff_resets (positional emit)
@@ -80,25 +80,25 @@ _SQL_OR_DYNAMIC_KINDS = frozenset(
         # shared/plugin_activation.py:emit binds event=PLUGIN_ACTIVATION_EVENT (a
         # module constant, like sdk_call), so the literal scan cannot see it.
         "plugin_activation",
-        "gateway_latency",  # gateway/_latency.py:emit_bucket telemetry.emit("telemetry", ...)
-        "sse",  # gateway/_runtime_metrics.py:sse_opened/sse_closed positional emit
-        "gateway_process",  # gateway/_runtime_metrics.py:_emit_snapshot positional emit
-        "gateway_event_loop",  # gateway/_runtime_metrics.py:_emit_snapshot positional emit
-        "auth401_rejected",  # gateway/_auth401_log.py:emit_auth401_count telemetry.emit("telemetry", ...)
-        "agent_registry",  # gateway/_agent_max_id.py:emit_max_agent_id telemetry.emit("telemetry", ...)
-        "schedule_stalled",  # gateway/schedule_manager.py:_report_stalled_schedules telemetry.emit
+        "gateway_latency",  # gateway/middleware/latency.py:emit_bucket telemetry.emit("telemetry", ...)
+        "sse",  # gateway/middleware/runtime_metrics.py:sse_opened/sse_closed positional emit
+        "gateway_process",  # gateway/middleware/runtime_metrics.py:_emit_snapshot positional emit
+        "gateway_event_loop",  # gateway/middleware/runtime_metrics.py:_emit_snapshot positional emit
+        "auth401_rejected",  # gateway/auth/rejection_log.py:emit_auth401_count telemetry.emit("telemetry", ...)
+        "agent_registry",  # gateway/agents/max_id_gauge.py:emit_max_agent_id telemetry.emit("telemetry", ...)
+        "schedule_stalled",  # gateway/schedules/manager.py:_report_stalled_schedules telemetry.emit
         "memory_search_stats",  # services/memory_search/app.py:emit_memory_search_stats (positional emit)
         "pitr_remote_inventory",  # services/pitr/retention_scheduler.py:refresh (positional emit)
         "backup_operation_custody",  # services/pitr/operation_custody.py:report (positional emit)
         "recovery_drill_failed",  # services/backup_scheduler/daemon.py:_run_due_local_dump_restore + services/pitr/base_scheduler_daemon.py:run (positional emit)
         "plugin_load_failed",  # shared/plugin_load_report.py:report_plugin_load_failure telemetry.emit("telemetry", ...)
         "converge_file_preserved",  # shared/host/converge/converge_preserve_report.py:report_converge_preserve telemetry.emit("telemetry", ...)
-        "loki_query_budget",  # gateway/loki_query_budget.py:_emit_observation
-        "telemetry_read_stale",  # gateway/telemetry_staleness.py:_emit
-        "telemetry_read_recovered",  # gateway/telemetry_staleness.py:_emit
+        "loki_query_budget",  # gateway/lgtm/loki_query_budget.py:_emit_observation
+        "telemetry_read_stale",  # gateway/lgtm/telemetry_staleness.py:_emit
+        "telemetry_read_recovered",  # gateway/lgtm/telemetry_staleness.py:_emit
         "otlp_backend_disabled",  # shared/telemetry/otlp/telemetry_otlp.py:_emit_backend_event
         "otlp_backend_recovered",  # shared/telemetry/otlp/telemetry_otlp.py:_emit_backend_event
-        "prom_query_budget",  # gateway/prom_metrics.py:_emit_budget_observation
+        "prom_query_budget",  # gateway/lgtm/prom_metrics.py:_emit_budget_observation
         # Class-resolution markers select their name from the event level at
         # runtime; services/events_maintenance/resolution.py emits the reopen
         # markers and resolution_status, while the gateway emits resolved ones.
@@ -117,8 +117,8 @@ _SQL_OR_DYNAMIC_KINDS = frozenset(
         # emit per degradation episode behind the route's emitter.
         "fleet_graph_stale",  # gateway/routers/fleet_graph.py:_emit_stale (positional emit)
         # The stats-dashboard stale-serving fallback (task #3973): same shape,
-        # behind gateway/routers/_stats_dashboard.py's emitter.
-        "stats_dashboard_stale",  # gateway/routers/_stats_dashboard.py:_emit_stale (positional emit)
+        # behind gateway/cluster/_stats_dashboard.py's emitter.
+        "stats_dashboard_stale",  # gateway/cluster/_stats_dashboard.py:_emit_stale (positional emit)
         # The hierarchy worker's trigger + guardrails (task #4674): positional
         # emits behind helpers, invisible to the literal scanner.
         "hierarchy_enqueue_failed",  # shared/agents/history/checkpoint_cleanup.py:_enqueue_failed

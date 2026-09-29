@@ -5,7 +5,7 @@
 RSS fix (the per-row reference implementation was retired with the SQL
 aggregation — single-day materialization outgrew 430K+ rows). These tests lock
 the aggregate path's output over deterministic scenarios against the in-memory
-`FakeLoki` backend (same filter/window semantics as `gateway.loki_events`):
+`FakeLoki` backend (same filter/window semantics as `gateway.lgtm.loki_events`):
 the text digest, the JSON `data` dict, and the per-agent rollups must stay
 exactly as pinned, so a regression in the Loki aggregation (counts, pctiles,
 position thirds, tie order, cost sums, since-compact cutoffs) fails here.

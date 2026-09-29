@@ -8,7 +8,7 @@ from the doorplate instead of guessing.
 
 This module is the ONLY place a route contract is declared — the doorplate
 wall. Route authors add one entry per route they own; the pause middleware
-reads exemptions from here (via `gateway._pause_policy`), the SDK reads
+reads exemptions from here (via `gateway.middleware.pause_policy`), the SDK reads
 idempotency from here, and lint forces every gateway route to declare a
 doorplate (`tests/gateway/test_route_contracts.py`).
 
@@ -92,7 +92,7 @@ class RouteContract:
 # start needs. Everything else is data-plane.
 # ─────────────────────────────────────────────────────────────────────
 ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
-    # ── gateway/routers/agents.py ───────────────────────────────────
+    # ── gateway/agents/router.py ───────────────────────────────────
     ("PATCH", "/api/agents/{agent_id}"): RouteContract(note="label patch — CAS update"),
     ("GET", "/api/models"): RouteContract(),
     ("GET", "/api/agents"): RouteContract(note="bounded agent directory page"),
@@ -108,7 +108,7 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ),
     ("GET", "/api/agents/{agent_id}"): RouteContract(),
     ("GET", "/api/agents/{agent_id}/born-chain"): RouteContract(),
-    # ── gateway/routers/alerts.py ───────────────────────────────────
+    # ── gateway/alerts/router.py ───────────────────────────────────
     ("GET", "/api/alerts"): RouteContract(),
     ("GET", "/api/alerts/impersonation-event-retention"): RouteContract(
         note="machine-scoped retention-loss operator panel"
@@ -120,7 +120,7 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
         pause=PauseSemantics.CONTROL_PLANE,
         note="Grafana Alertmanager webhook — upsert per (fingerprint, starts_at); a 503 exhausts Grafana retries and the alert is lost",
     ),
-    # ── gateway/routers/auth.py ───────────────────────────────────
+    # ── gateway/auth/router.py ───────────────────────────────────
     ("POST", "/api/auth/login"): RouteContract(note="login — repeats just mint a fresh cookie"),
     ("POST", "/api/auth/logout"): RouteContract(note="clear session cookie — idempotent"),
     ("GET", "/api/auth/check"): RouteContract(),
@@ -128,13 +128,13 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ("POST", "/api/auth/sessions/{session_id}/revoke"): RouteContract(
         note="session revocation — guarded update; repeats cannot revoke twice"
     ),
-    # ── gateway/routers/bootstrap.py ───────────────────────────────────
+    # ── gateway/cluster/bootstrap.py ───────────────────────────────────
     ("GET", "/api/bootstrap"): RouteContract(
         pause=PauseSemantics.CONTROL_PLANE,
         note="read-only config projection, still authenticated — a held unit's first start "
         "and every runner process's config resolution read it before the hold is released",
     ),
-    # ── gateway/routers/cluster.py ───────────────────────────────────
+    # ── gateway/cluster/router.py ───────────────────────────────────
     ("POST", "/api/cluster/stopping"): RouteContract(
         Idempotency.NON_IDEMPOTENT,
         PauseSemantics.CONTROL_PLANE,
@@ -184,18 +184,18 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ("PUT", "/api/config/default-model"): RouteContract(
         note="set default model — PUT is idempotent"
     ),
-    # ── gateway/routers/conversation.py ─────────────────────────────
+    # ── gateway/agents/conversation.py ─────────────────────────────
     ("GET", "/api/agents/{agent_id}/conversation-snapshot"): RouteContract(
         note="composed switch refresh — timeline head window + token usage + pending in one read"
     ),
-    # ── gateway/routers/events.py ───────────────────────────────────
+    # ── gateway/events/router.py ───────────────────────────────────
     ("GET", "/api/agents/{agent_id}/events/stream"): RouteContract(note="SSE live stream"),
     ("GET", "/api/agents/{agent_id}/events"): RouteContract(),
     ("GET", "/api/computer/traces"): RouteContract(
         note="computer-use task replay (Phase 3, task #1101): one task's desktop trail"
     ),
     ("GET", "/api/events"): RouteContract(),
-    # ── gateway/routers/event_resolutions.py ────────────────────────
+    # ── gateway/events/resolutions.py ────────────────────────
     ("GET", "/api/event-resolutions"): RouteContract(),
     ("POST", "/api/event-resolutions"): RouteContract(
         Idempotency.NON_IDEMPOTENT,
@@ -204,7 +204,7 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ("POST", "/api/event-resolutions/{dismissal_id}/reopen"): RouteContract(
         note="guarded active-state transition — repeats cannot reopen twice"
     ),
-    # ── gateway/routers/fleet.py ───────────────────────────────────
+    # ── gateway/routers/fleet_graph.py ───────────────────────────────────
     ("GET", "/api/fleet/graph"): RouteContract(),
     # ── gateway/routers/frontend_telemetry.py ─────────────────────────
     ("POST", "/api/frontend-telemetry"): RouteContract(
@@ -232,7 +232,7 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ("POST", "/api/guide/draft"): RouteContract(
         note="LLM draft generation — repeats waste tokens but are harmless"
     ),
-    # ── gateway/routers/health.py ───────────────────────────────────
+    # ── gateway/cluster/status.py (health) ───────────────────────────────────
     ("GET", "/api/health"): RouteContract(
         pause=PauseSemantics.CONTROL_PLANE,
         note="gateway identity and database liveness — start must prove readiness before releasing its hold",
@@ -245,10 +245,10 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ("GET", "/api/agents/{agent_id}/inspect/metrics"): RouteContract(),
     ("GET", "/api/agents/{agent_id}/inspect/widgets"): RouteContract(),
     ("GET", "/api/agents/{agent_id}/neighbors"): RouteContract(),
-    # ── gateway/routers/inventory.py ───────────────────────────────────
+    # ── gateway/extensions/inventory.py ───────────────────────────────────
     ("GET", "/api/inventory"): RouteContract(),
     ("PUT", "/api/inventory"): RouteContract(note="full inventory replace — PUT is idempotent"),
-    # ── gateway/routers/agents_lifecycle.py ───────────────────────────
+    # ── gateway/agents/lifecycle.py ───────────────────────────
     ("POST", "/api/agents/{agent_id}/impersonation/force-expire"): RouteContract(
         note="observed-session CAS close — repeated or stale requests leave the lease unchanged"
     ),
@@ -268,7 +268,7 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ("POST", "/api/agents/{agent_id}/restart"): RouteContract(
         note="enqueue restart — repeats are harmless"
     ),
-    # ── gateway/routers/mcp_clients.py ─────────────────────────────
+    # ── gateway/mcp_server/router.py ─────────────────────────────
     ("GET", "/api/mcp/clients"): RouteContract(),
     ("POST", "/api/mcp/clients"): RouteContract(
         Idempotency.NON_IDEMPOTENT,
@@ -285,12 +285,12 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ),
     ("POST", "/api/memory/refresh"): RouteContract(note="re-scan — repeats are harmless"),
     ("POST", "/api/memory/search"): RouteContract(note="pure read"),
-    # ── gateway/routers/metrics.py ───────────────────────────────────
+    # ── gateway/events/metrics.py ───────────────────────────────────
     ("GET", "/api/metrics"): RouteContract(),
     ("GET", "/api/metrics/agents"): RouteContract(),
-    # ── gateway/routers/monitor.py ───────────────────────────────────
+    # ── gateway/cluster/ops_monitor.py ───────────────────────────────────
     ("GET", "/api/ops/monitor"): RouteContract(),
-    # ── gateway/routers/notices.py ───────────────────────────────────
+    # ── gateway/agents/notices.py ───────────────────────────────────
     ("GET", "/api/notices"): RouteContract(
         note="unified inbox feed — open + awaiting + resolved page (R4 layer 2)"
     ),
@@ -313,9 +313,9 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ("POST", "/api/agents/{agent_id}/notices/current/dismiss"): RouteContract(
         note="withdraw current open notice — CAS, repeats are harmless"
     ),
-    # ── gateway/routers/okf.py ───────────────────────────────────
+    # ── gateway/routers/okf_graph.py ───────────────────────────────────
     ("GET", "/api/okf/graph"): RouteContract(),
-    # ── gateway/routers/packages.py ───────────────────────────────────
+    # ── gateway/extensions/packages.py ───────────────────────────────────
     ("POST", "/api/packages/draft"): RouteContract(
         note="LLM draft generation — repeats are harmless"
     ),
@@ -330,7 +330,7 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
         note="close page — CAS, repeats are harmless"
     ),
     ("GET", "/api/agents/{agent_id}/pages"): RouteContract(note="list open pages"),
-    # ── gateway/routers/plugin_ui.py ───────────────────────────────────
+    # ── gateway/extensions/plugin_ui.py ───────────────────────────────────
     ("GET", "/api/plugin-ui/{plugin}"): RouteContract(
         note="plugin page mount — trailing-slash redirect"
     ),
@@ -345,7 +345,7 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ),
     ("PATCH", "/api/presets/{preset_id}"): RouteContract(note="update — repeats are harmless"),
     ("DELETE", "/api/presets/{preset_id}"): RouteContract(note="delete — repeats are harmless"),
-    # ── gateway/routers/schedules.py ───────────────────────────────────
+    # ── gateway/schedules/router.py ───────────────────────────────────
     ("GET", "/api/schedules"): RouteContract(),
     ("GET", "/api/schedules/{schedule_id}"): RouteContract(),
     ("GET", "/api/schedules/{schedule_id}/logs"): RouteContract(),
@@ -372,10 +372,10 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ("PUT", "/api/settings/{key}"): RouteContract(note="set one key — PUT is idempotent"),
     # ── gateway/routers/shell.py ───────────────────────────────────
     ("GET", "/api/agents/{agent_id}/shell/{session_id}"): RouteContract(),
-    # ── gateway/routers/skills.py ───────────────────────────────────
+    # ── gateway/extensions/skills.py ───────────────────────────────────
     ("GET", "/api/skills"): RouteContract(),
     ("PUT", "/api/skills"): RouteContract(note="full replace — PUT is idempotent"),
-    # ── gateway/routers/state.py ───────────────────────────────────
+    # ── gateway/agents/state.py ───────────────────────────────────
     ("GET", "/api/agents/{agent_id}/messages"): RouteContract(
         note="raw checkpoint history — implicit requests return newest 100; start_index pages backward"
     ),
@@ -399,7 +399,7 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
         Idempotency.NON_IDEMPOTENT,
         note="deliver a framework system note (task assign/update/reminder) — renders as a system marker, not peer chat; resurrect is a body choice",
     ),
-    # ── gateway/routers/status.py ───────────────────────────────────
+    # ── gateway/cluster/status.py ───────────────────────────────────
     ("GET", "/api/stats/dashboard"): RouteContract(),
     ("GET", "/api/status"): RouteContract(),
     ("GET", "/api/system"): RouteContract(),
@@ -407,17 +407,17 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     # ── gateway/routers/tasks.py ───────────────────────────────────
     ("GET", "/api/tasks"): RouteContract(),
     ("PATCH", "/api/tasks/{task_id}"): RouteContract(note="task update — repeats are harmless"),
-    # ── gateway/routers/timeline.py ───────────────────────────────────
+    # ── gateway/agents/timeline.py ───────────────────────────────────
     ("GET", "/api/agents/{agent_id}/timeline"): RouteContract(),
-    # ── gateway/routers/run_timeline.py ───────────────────────────────
+    # ── gateway/run_timeline/router.py ───────────────────────────────
     ("GET", "/api/agents/{agent_id}/run-timeline"): RouteContract(
         note="read-only event-driven run waterfall (Loki-backed)",
     ),
-    # ── gateway/routers/run_timeline_strip.py ─────────────────────────
+    # ── gateway/run_timeline/strip.py ─────────────────────────
     ("GET", "/api/agents/{agent_id}/run-timeline/message"): RouteContract(
         note="one raw-context message's part texts — long parts clip with content_truncated; full=true returns the whole body",
     ),
-    # ── gateway/routers/ui_contributions.py ───────────────────────────────────
+    # ── gateway/extensions/ui_contributions.py ───────────────────────────────────
     ("GET", "/api/ui/contributions"): RouteContract(),
     # ── gateway/routers/uploads.py ───────────────────────────────────
     ("GET", "/api/agents/{agent_id}/uploads/{filename}"): RouteContract(),
@@ -558,7 +558,7 @@ def exempt_from_pause(method: str, path: str) -> bool:
     """Whether ``(method, path)`` is declared control-plane (survives a
     migration).
 
-    The single predicate behind `gateway._pause_policy.should_bypass_pause`
+    The single predicate behind `gateway.middleware.pause_policy.should_bypass_pause`
     — kept here so every consumer shares one matching implementation. The
     method matters: two methods can share one path template with different
     pause semantics (POST /api/alerts is the control-plane webhook while

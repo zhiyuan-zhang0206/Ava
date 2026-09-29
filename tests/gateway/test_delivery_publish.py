@@ -14,7 +14,7 @@ from psycopg.rows import TupleRow
 from psycopg_pool import ConnectionPool
 from redis.exceptions import ConnectionError as RedisConnectionError
 
-from gateway.routers.delivery import deliver_chat_inbound
+from gateway.agents.delivery import deliver_chat_inbound
 from shared import redis_client
 from shared.agents import AgentStatus
 from shared.config import settings
@@ -99,7 +99,7 @@ async def test_deliver_degrades_when_badge_step_raises(
     def _boom_badge(_agent_id: int) -> None:
         raise RuntimeError("lifecycle hint failed")
 
-    monkeypatch.setattr("gateway.routers.delivery.publish_agent_updated_sync", _boom_badge)
+    monkeypatch.setattr("gateway.agents.delivery.publish_agent_updated_sync", _boom_badge)
 
     with _sync_pool() as pool:
         delivery = await deliver_chat_inbound(
@@ -120,7 +120,7 @@ async def test_deliver_passes_inserted_chat_as_auto_resurrect_guard(
 ) -> None:
     """The durable chat id is the evidence the home runner re-checks before
     reviving; delivery must not fall back to an unguarded resurrect."""
-    from gateway.routers import delivery
+    from gateway.agents import delivery
 
     tid = _seed_idling_agent(db_conn)
     calls: list[tuple[int, int | None, str | None]] = []
@@ -155,7 +155,7 @@ async def test_retried_client_message_resurrects_terminated_agent_once(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A same-key retry reuses one chat and cannot create two resurrection effects."""
-    from gateway.routers import delivery
+    from gateway.agents import delivery
 
     tid = create_agent(db_conn)
     with db_conn.cursor() as cur:
@@ -281,7 +281,7 @@ async def test_concurrent_same_key_terminated_delivery_has_one_resurrect_effect(
     The exact-trigger/fence SQL itself has real-DB coverage in
     test_agents_internals; this test concentrates on the delivery fan-in.
     """
-    from gateway.routers import delivery
+    from gateway.agents import delivery
 
     tid = create_agent(db_conn)
     with db_conn.cursor() as cur:
@@ -378,7 +378,7 @@ async def test_badge_publish_happens_after_commit(
         finally:
             probe.close()
 
-    monkeypatch.setattr("gateway.routers.delivery.publish_agent_updated_sync", _spy_publish)
+    monkeypatch.setattr("gateway.agents.delivery.publish_agent_updated_sync", _spy_publish)
 
     def _prepare(conn: psycopg.Connection) -> None:
         # A write inside the delivery txn, no inbound content (so the txn commits

@@ -34,4 +34,4 @@ Gateway-owned background daemon (`services/events_maintenance/daemon.py`). Since
 - Watchdog keeps alive via `services/healthchecks/events_maintenance.py`
 
 ## Notes
-- Sidebar `total_events` is a historical parity constant (see `gateway/routers/status.py` `ARCHIVE_TOTAL_ROWS`) — the PG archive it once counted was dropped with the task #1281/#1823 cleanup
+- Sidebar `total_events` is a historical parity constant (see `gateway/cluster/status.py` `ARCHIVE_TOTAL_ROWS`) — the PG archive it once counted was dropped with the task #1281/#1823 cleanup

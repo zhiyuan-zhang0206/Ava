@@ -11,8 +11,8 @@ import psycopg
 import pytest
 from psycopg_pool import ConnectionPool
 
-from gateway import session_store
-from gateway.session_store import (
+from gateway.auth import session_store
+from gateway.auth.session_store import (
     create_session,
     list_sessions,
     minted_session_id,

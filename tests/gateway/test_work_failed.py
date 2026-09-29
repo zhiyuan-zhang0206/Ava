@@ -14,10 +14,10 @@ from fastapi.testclient import TestClient
 from psycopg_pool import ConnectionPool
 from pydantic import SecretStr
 
+from gateway.agents import delivery as delivery_router
+from gateway.agents.delivery import ChatDelivery
 from gateway.app import app
-from gateway.routers import delivery as delivery_router
 from gateway.routers import work_failed as work_failed_router
-from gateway.routers.delivery import ChatDelivery
 from gateway.schemas.work_failed import WorkFailedIn, WorkFailedResult
 from shared.agents import AgentStatus
 from shared.config import settings
@@ -136,7 +136,7 @@ def failure_pool() -> Iterator[ConnectionPool]:
 
 
 @pytest.fixture(autouse=True)
-def _webhook_auth(monkeypatch: pytest.MonkeyPatch) -> None:
+def _webhook_token(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings.alerts, "webhook_token", SecretStr(_WEBHOOK_TOKEN))
 
 

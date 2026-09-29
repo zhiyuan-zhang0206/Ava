@@ -8,7 +8,7 @@ from typing import Any, Literal, NamedTuple, cast
 from fastapi import HTTPException
 from psycopg_pool import ConnectionPool
 
-from gateway.schemas import HeartbeatInfo, HeartbeatLastPause
+from gateway.inspect.schemas import HeartbeatInfo, HeartbeatLastPause
 from services.heartbeat import JITTER_SPAN_S, STALE_PENDING_S
 from shared.agent_observation import AgentObservation, observation
 from shared.agent_snapshot import OpenNotice

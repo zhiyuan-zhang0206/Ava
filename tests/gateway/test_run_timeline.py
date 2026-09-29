@@ -6,7 +6,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from gateway.routers.run_timeline import (
+from gateway.run_timeline.router import (
     _ANOMALY_EVENTS,
     _TURN_EVENTS,
     _inbounds_for_window,
@@ -431,7 +431,7 @@ def test_narrative_for_window_keeps_layers_and_adds_the_fallback_on_partial(
 
     monkeypatch.setattr("shared.agents.history.hierarchy.store.load_window_nodes", _nodes)
     monkeypatch.setattr("shared.agents.history.hierarchy.store.load_coverage_extent", _extent)
-    monkeypatch.setattr("gateway.routers.run_timeline._latest_compact_summary", _fallback)
+    monkeypatch.setattr("gateway.run_timeline.router._latest_compact_summary", _fallback)
     layers, summary, pending = _narrative_for_window(405, start, end, activity=[(start, end)])
     assert layers is not None
     (layer,) = layers
@@ -474,7 +474,7 @@ def test_narrative_for_window_clamps_activity_to_the_window(
 
     monkeypatch.setattr("shared.agents.history.hierarchy.store.load_window_nodes", _nodes)
     monkeypatch.setattr("shared.agents.history.hierarchy.store.load_coverage_extent", _extent)
-    monkeypatch.setattr("gateway.routers.run_timeline._latest_compact_summary", _empty_summary)
+    monkeypatch.setattr("gateway.run_timeline.router._latest_compact_summary", _empty_summary)
     _, _, pending = _narrative_for_window(
         405,
         start,

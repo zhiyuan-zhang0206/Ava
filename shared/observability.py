@@ -148,7 +148,7 @@ def collector_allowed_for_home(home: Path | None) -> bool:
 OBSERVABILITY_READ_UNAVAILABLE_CODE = "observability_read_unavailable"
 
 
-class ObservabilityReadUnavailable(RuntimeError):  # noqa: N818 — mirrors gateway/_loki_transport
+class ObservabilityReadUnavailable(RuntimeError):  # noqa: N818 — mirrors gateway/lgtm/_loki_transport
     """A reader's view of the no-observability refusal above.
 
     Raised by readers (e.g. the self-evolution collect path) so callers can

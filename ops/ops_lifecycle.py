@@ -6,7 +6,7 @@ four op clusters split out of the former single `ops/operations.py` (the
 others are ops_cluster / ops_config / ops_inventory); each cluster is
 self-contained — no op here calls an op in another cluster.
 
-Both the gateway FastAPI handlers (`gateway/routers/agents_lifecycle.py`, `uploads.py`)
+Both the gateway FastAPI handlers (`gateway/agents/lifecycle.py`, `gateway/routers/uploads.py`)
 and the agent-runner ops server (`services/agent_ops/daemon.py:_dispatch`) call
 these directly; the ops server runs them in-process. Cross-machine routing stays
 in the FastAPI handler wrappers — forwarding never recurses inside an op. The

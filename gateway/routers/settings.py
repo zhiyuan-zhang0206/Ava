@@ -9,7 +9,11 @@ from __future__ import annotations
 from fastapi import APIRouter, Request
 from psycopg.types.json import Jsonb
 
-from gateway.schemas import UserSettingListResponse, UserSettingRow, UserSettingUpdateRequest
+from gateway.schemas.user_settings import (
+    UserSettingListResponse,
+    UserSettingRow,
+    UserSettingUpdateRequest,
+)
 from shared.db_transaction import write_transaction
 
 router = APIRouter()

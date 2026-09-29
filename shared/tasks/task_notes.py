@@ -4,7 +4,7 @@ implementation for the two writers.
 An agent's task notes are appended by the SDK task registry
 (`ava_builtins/plugins/ava_fleet/task_registry.py`) and by the gateway when a
 machine pause reassigns a task to the drain owner
-(`gateway/routers/_machine_pause.py`). Both build the same line, and both used
+(`gateway/cluster/machine_pause.py`). Both build the same line, and both used
 to build it by hand from `datetime.now(UTC).astimezone()` — the *writing
 machine's* local timezone. A fleet spans machines, so one task's notes arrived
 stamped in several different timezones, none of them marked, sitting in one

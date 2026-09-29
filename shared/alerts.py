@@ -4,7 +4,7 @@ One implementation serves every writer of the ``alerts`` table (Task #1224,
 user design 2026-08-12: Alert fully separate from Notice — own table, own UI,
 own IM channel):
 
-- the gateway router (gateway/routers/alerts.py) ingests the Grafana
+- the gateway router (gateway/alerts/router.py) ingests the Grafana
   embedded-Alertmanager webhook on ``POST /api/alerts``;
 - the cluster health probe (cli/commands/cluster/health_alerts.py) posts its
   time-graded health alerts through that endpoint too

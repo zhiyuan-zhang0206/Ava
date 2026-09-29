@@ -22,7 +22,7 @@ import psycopg
 import pytest
 from psycopg_pool import ConnectionPool
 
-from gateway import lifecycle_fences, ttl_reaper
+from gateway import ttl_reaper
 from gateway.ttl_reaper import (
     _claim_shell_row_still_expired,
     _reap_expired_notices_blocking,
@@ -30,6 +30,7 @@ from gateway.ttl_reaper import (
     _reap_expired_shells,
     _reap_expired_web_sessions_blocking,
     _reaper_loop,
+    lifecycle_fences,
 )
 from ops.rpc_schemas import ShellKillResult
 from shared.config import settings
@@ -852,8 +853,7 @@ def test_wall_clock_renders_cluster_timezone(monkeypatch: pytest.MonkeyPatch) ->
     at = now.replace(hour=23, minute=59, second=0, microsecond=0)
     assert ttl_reaper._wall_clock(at.astimezone(UTC)) == "23:59"
 
-    # A moment on the cluster's tomorrow (TTL crossing midnight) carries the
-    # MM-DD prefix.
+    # A moment on the cluster's tomorrow (TTL crossing midnight) carries the MM-DD prefix.
     cross = (now + timedelta(days=1)).replace(hour=0, minute=5, second=0, microsecond=0)
     assert ttl_reaper._wall_clock(cross) == cross.strftime("%m-%d %H:%M")
 

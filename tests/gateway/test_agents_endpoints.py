@@ -19,8 +19,8 @@ import pytest
 from fastapi.testclient import TestClient
 from psycopg_pool import ConnectionPool
 
-from gateway._cors import cors_allowed_origins
 from gateway.app import app
+from gateway.auth.cors import cors_allowed_origins
 from shared.lm.plugin_providers import ensure_provider_plugins_loaded
 from shared.lm.registry import MODELS
 
@@ -388,7 +388,7 @@ def test_post_commit_unknown_launch_failure_carries_id_and_cors_headers(
     """An unexpected post-commit error retains the identity and CORS headers."""
     # The autouse conftest fixture stubs _forward_spawn_to_remote in-process;
     # this test's monkeypatch runs later and wins, making the route itself blow up.
-    import gateway.routers.agents as _agents_router
+    import gateway.agents.router as _agents_router
     from ops.rpc_schemas import LaunchAgentRequest, SpawnedAgent
 
     async def _explode(target: str, body: LaunchAgentRequest) -> SpawnedAgent:
@@ -695,7 +695,7 @@ class TestSystemNote:
         self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """A reassignment cannot land after validation but before task-note enqueueing."""
-        from gateway.routers import agents_state
+        from gateway.agents import state
         from shared.db import connect, pool
 
         enqueue_entered, release_enqueue, reassign_started, reassign_finished = (
@@ -731,11 +731,11 @@ class TestSystemNote:
             )
             task_id = _returned_id(cur)
         db_conn.commit()
-        monkeypatch.setattr(agents_state, "insert_inbound_message", pause_enqueue)
+        monkeypatch.setattr(state, "insert_inbound_message", pause_enqueue)
 
         def enqueue(note_pool: ConnectionPool) -> None:
             try:
-                agents_state._system_note_blocking(
+                state._system_note_blocking(
                     note_pool,
                     owner_id,
                     "x",
@@ -1300,9 +1300,9 @@ def _result_read(client: TestClient, method: str, path: str, *, caller: str | No
 
 def _stub_result_read_backends(monkeypatch: pytest.MonkeyPatch) -> None:
     """Make non-blocked artifact reads deterministic without external services."""
-    import gateway.routers.agent_events as agent_events_router
+    import gateway.events.agent_events as agent_events_router
     import gateway.routers.memory as memory_router
-    from gateway import loki_events
+    from gateway.lgtm import loki_events
     from services.memory_indexer.embeddings import factory as _embedding_factory
 
     def _query(**_kwargs: object) -> tuple[list[dict[str, object]], bool]:

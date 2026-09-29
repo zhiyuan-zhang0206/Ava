@@ -47,7 +47,7 @@ import time
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from gateway import loki_events
+from gateway.lgtm import loki_events
 from shared.db import connect
 from shared.loki_index_labels import ledger_gap_plan, retention_floor
 

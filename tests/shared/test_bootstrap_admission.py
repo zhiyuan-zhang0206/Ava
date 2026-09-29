@@ -14,7 +14,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from gateway.routers.bootstrap import router
+from gateway.cluster.bootstrap import router
 from shared import bootstrap, config, runtime_config
 from shared.cluster_auth import bearer_header
 

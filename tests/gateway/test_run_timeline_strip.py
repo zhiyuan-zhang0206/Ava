@@ -9,7 +9,7 @@ from typing import Literal
 import pytest
 from fastapi import HTTPException
 
-from gateway.routers import run_timeline_strip as strip
+from gateway.run_timeline import strip
 from shared.agents.history import checkpoint
 from shared.agents.history.timeline import TimelineItem
 

@@ -147,7 +147,7 @@ class CheckpointTableSizes(TypedDict):
 
 
 class GatewayLatency(TypedDict):
-    """`gateway_latency` payload — gateway/_latency.py 60s aggregator.
+    """`gateway_latency` payload — gateway/middleware/latency.py 60s aggregator.
 
     One event per (route, 60s bucket) carrying p50/p95/p99/max/count — never
     per request (Task #1091).
@@ -186,7 +186,7 @@ class GatewayEventLoop(TypedDict):
 
 
 class Auth401Rejected(TypedDict):
-    """`auth401_rejected` payload — gateway/_auth401_log.py flusher.
+    """`auth401_rejected` payload — gateway/auth/rejection_log.py flusher.
 
     One event per 60s window carrying the number of gateway auth-middleware
     401 rejections in that window (task #1712). The per-request log line was
@@ -201,7 +201,7 @@ class Auth401Rejected(TypedDict):
 
 
 class AgentRegistry(TypedDict):
-    """`agent_registry` payload — gateway/_agent_max_id.py 60s flusher.
+    """`agent_registry` payload — gateway/agents/max_id_gauge.py 60s flusher.
 
     One event per 60s window carrying the ``agents`` table high-water mark
     (max id) — the fleet's growth curve (task #2010). Absolute state, never
@@ -244,7 +244,7 @@ class RootHealthExpected(TypedDict):
 
 
 class ScheduleStalled(TypedDict):
-    """`schedule_stalled` payload — gateway/schedule_manager.py.
+    """`schedule_stalled` payload — gateway/schedules/manager.py.
 
     Emitted once after an enabled, non-completed schedule has had no live
     session for more than two hours. A live observation rearms a later outage.
@@ -296,7 +296,7 @@ class RecoveryDrillFailed(TypedDict):
 
 
 class TelemetryReadStale(TypedDict):
-    """`telemetry_read_stale` payload — gateway/telemetry_staleness.py."""
+    """`telemetry_read_stale` payload — gateway/lgtm/telemetry_staleness.py."""
 
     source: str
     signal: str
@@ -307,7 +307,7 @@ class TelemetryReadStale(TypedDict):
 
 
 class TelemetryReadRecovered(TypedDict):
-    """`telemetry_read_recovered` payload — gateway/telemetry_staleness.py."""
+    """`telemetry_read_recovered` payload — gateway/lgtm/telemetry_staleness.py."""
 
     source: str
     signal: str
@@ -329,7 +329,7 @@ class OtlpBackendRecovered(TypedDict):
 
 
 class LokiQueryFailed(TypedDict):
-    """`loki_query_failed` payload — gateway/loki_events.py transport failure.
+    """`loki_query_failed` payload — gateway/lgtm/loki_events.py transport failure.
 
     One row per failed Loki HTTP call (timeout / disconnect / non-2xx) with
     the request shape, so a stalled query is attributable after Loki's own
@@ -415,7 +415,7 @@ class StatsDashboardStale(TypedDict):
 
 
 class PromQueryFailed(TypedDict):
-    """`prom_query_failed` payload — gateway/prom_metrics.py transport failure."""
+    """`prom_query_failed` payload — gateway/lgtm/prom_metrics.py transport failure."""
 
     endpoint: str
     duration_s: float

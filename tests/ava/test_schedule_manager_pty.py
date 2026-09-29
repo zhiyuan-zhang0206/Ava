@@ -19,7 +19,7 @@ import psycopg
 import pytest
 from psycopg_pool import ConnectionPool
 
-from gateway import schedule_manager as sm
+from gateway.schedules import manager as sm
 from shared.cluster import session_name
 from shared.platform import IS_WINDOWS
 from shared.session_backend import get_shell_backend
@@ -152,6 +152,12 @@ def _wait_session_gone(name: str, timeout_s: float = 20.0) -> None:
     assert not backend.has_session(name), f"session {name} still live"
 
 
+def test_launch_cwd_is_the_checkout_root() -> None:
+    """Schedule sessions start in the checkout root, where `python -m
+    gateway.schedule_runner` and the relative `.venv/bin/python` resolve."""
+    assert sm._REPO_ROOT == REPO
+
+
 def test_pty_launch_live_capture(
     db_conn: psycopg.Connection,
     pool: ConnectionPool,
@@ -239,7 +245,7 @@ def test_pty_breaker_trips_after_repeated_crashes(
     alone."""
     sid = _insert_schedule(db_conn, "pty-breaker", "exit 1", "bash run.sh")
     clock = {"t": 0.0}
-    import gateway.schedule_manager as _sm
+    import gateway.schedules.manager as _sm
 
     orig_monotonic = _sm.time.monotonic
     _sm.time.monotonic = lambda: clock["t"]  # type: ignore[method-assign]

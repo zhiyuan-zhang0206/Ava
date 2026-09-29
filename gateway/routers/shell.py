@@ -16,7 +16,7 @@ from typing import Annotated
 from fastapi import APIRouter, HTTPException, Query, Request
 from psycopg_pool import ConnectionPool
 
-from gateway.schemas import ShellCaptureResponse
+from gateway.schemas.shell import ShellCaptureResponse
 from ops import cluster_rpc as _cluster_rpc
 from shared.config import settings
 

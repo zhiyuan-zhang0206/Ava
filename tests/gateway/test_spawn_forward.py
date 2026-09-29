@@ -1,4 +1,4 @@
-"""Cross-machine spawn forward (`gateway/routers/agents.py:post_agents`) unit tests —
+"""Cross-machine spawn forward (`gateway/agents/router.py:post_agents`) unit tests —
 
 Verify "body.machine != local → _forward_spawn_to_remote is called" routing decision + error propagation.
 Actual httpx network calls are not made (mock `_forward_spawn_to_remote` intercepts); only validate router
@@ -13,9 +13,9 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
+from gateway.agents import forward
+from gateway.agents import router as app_module
 from gateway.app import app
-from gateway.routers import agents as app_module
-from gateway.routers import agents_forward
 from ops.rpc_schemas import LaunchAgentRequest, SpawnedAgent
 from shared.agent_observation import AvailabilityReason
 
@@ -241,7 +241,7 @@ class TestRouting:
         """A post-commit forward error returns 502 with the committed identity."""
 
         async def _forward_raises(*args: Any, **kw: Any) -> None:
-            raise agents_forward.LaunchForwardError(
+            raise forward.LaunchForwardError(
                 AvailabilityReason.LAUNCH_UNREACHABLE, "target unreachable after 3 retries"
             )
 
@@ -287,9 +287,9 @@ async def test_spawn_forward_classifies_rpc_unreachable_and_uses_versioned_kind(
         seen.append((kind, payload))
         raise ClusterOpUnreachable("offline")
 
-    monkeypatch.setattr(agents_forward._cluster_rpc, "dispatch_to_machine", _fail)
-    with pytest.raises(agents_forward.LaunchForwardError) as raised:
-        await agents_forward._forward_spawn_to_remote(
+    monkeypatch.setattr(forward._cluster_rpc, "dispatch_to_machine", _fail)
+    with pytest.raises(forward.LaunchForwardError) as raised:
+        await forward._forward_spawn_to_remote(
             "runner", LaunchAgentRequest(agent_id=4, launch_attempt_id=attempt_id)
         )
     assert seen == [("spawn-launch-v2", {"agent_id": 4, "launch_attempt_id": str(attempt_id)})]
@@ -311,8 +311,8 @@ async def test_spawn_forward_preserves_runner_rejection_detail(
             }
         )
 
-    monkeypatch.setattr(agents_forward._cluster_rpc, "dispatch_to_machine", _fail)
-    with pytest.raises(agents_forward.LaunchForwardError) as raised:
-        await agents_forward._forward_spawn_to_remote("runner", LaunchAgentRequest(agent_id=4))
+    monkeypatch.setattr(forward._cluster_rpc, "dispatch_to_machine", _fail)
+    with pytest.raises(forward.LaunchForwardError) as raised:
+        await forward._forward_spawn_to_remote("runner", LaunchAgentRequest(agent_id=4))
     assert raised.value.reason == AvailabilityReason.LAUNCH_REJECTED
     assert "invalid_model_config: key missing" in str(raised.value)

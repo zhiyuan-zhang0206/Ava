@@ -71,7 +71,7 @@ def test_machine_pause_resolves_old_and_new_fingerprint_alerts(
 
     from psycopg.types.json import Jsonb
 
-    from gateway.routers._machine_pause import _resolve_machine_alerts_blocking
+    from gateway.cluster.machine_pause import _resolve_machine_alerts_blocking
     from shared.alerts import fingerprint
 
     identity_labels = {"alertname": "machine offline", "machine": "away"}

@@ -7,8 +7,8 @@ import httpx
 import pytest
 from fastapi import HTTPException
 
-from gateway.routers import _run_timeline_events as reads
-from gateway.routers import run_timeline as timeline
+from gateway.run_timeline import _events as reads
+from gateway.run_timeline import router as timeline
 from shared.turn_identity import bind_turn_identity, current_turn_agent_id
 
 

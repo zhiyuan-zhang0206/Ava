@@ -4,7 +4,7 @@ FastAPI TestClient + real ava_test DB. The SQL is the one place a column-name /
 cast / filter typo passes the frontend tests (which feed mock data) but breaks
 live, so it is exercised against a real DB here. Covers:
 - `total_tokens` — per-agent retained-window in+out llm_usage counter increase,
-  read from Prometheus via gateway/prom_metrics (mocked here; its own unit
+  read from Prometheus via gateway/lgtm/prom_metrics (mocked here; its own unit
   tests lock the PromQL text).
 - `node_score` — windowed SUM(in)*0.1 + SUM(out)*1.0 (drives node size).
 - edge weight — lineage (spawn/fork/resurrect) permanent count*2.0 (no decay,
@@ -24,8 +24,8 @@ import pytest
 from fastapi.testclient import TestClient
 from psycopg import errors as pg_errors
 
-from gateway import loki_events, prom_metrics, telemetry_staleness
 from gateway.app import app
+from gateway.lgtm import loki_events, prom_metrics, telemetry_staleness
 from gateway.routers import fleet_graph
 from shared.cluster import home_label
 from shared.loki_index_labels import ARCHIVE_FREEZE_AT, INDEX_LABEL_CUTOVER_AT

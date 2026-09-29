@@ -1,12 +1,12 @@
 """Machine-status API contract — the roster row the gateway serves and the CLI
 renders.
 
-Downshifted from `gateway/schemas/status.py` so both sides of the wire can name
+Downshifted from `gateway/cluster/schemas.py` so both sides of the wire can name
 one type: the gateway registers it on `/api/cluster/roster` + the status panel
 (so it keeps its OpenAPI schema name `MachineStatus`), and `cli` thin clients
 (`ava cluster status`) validate the response against it without importing up
 into `gateway`. Gateway-only status models (ClusterPanel, SystemStatus,
-ServiceItem, ...) stay in `gateway.schemas.status`.
+ServiceItem, ...) stay in `gateway.cluster.schemas`.
 """
 
 from datetime import datetime

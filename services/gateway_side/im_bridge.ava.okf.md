@@ -18,11 +18,11 @@ The IM Bridge daemon runs every configured IM channel adapter (Telegram / WeChat
 - **Command set**: `/list` / `/switch` / `/status` / `/spawn` / `/commands` / `/help`, plus `/notice` (notice queue) — see `core.py`; per-chat switch state persists through `state.py` across daemon restarts.
 - **Spawn menu** (`spawn_menu.py`): interactive agent-spawn flow from the chat (`SpawnDraft` lives in `types.py`; `SpawnMenuMixin` owns the flow).
 - **Push watchdog** (`push_watchdog.py`): WeChat context-token expiry watchdog (Task #829) — alerts the user via other channels and gives recovery hints when the WeChat push link dies; **dormant in production** since weixin is disabled (2026-08-06). Not an SSE re-pusher. It owns the outbound retry primitive both outbound paths share: a failed send is retried **exactly once** after a bounded jitter backoff (`AVA_IM_PUSH_RETRY_BACKOFF_SECONDS` + uniform `AVA_IM_PUSH_RETRY_JITTER_SECONDS`, default 1.0s + U(0, 2.0s)), read from config at retry time — an immediate retry re-enters the measured ~0.65s connection-failure window (task #4252).
-- **Ops-alert fan-out**: `IMBridgeCore.notify_user` sends ops alerts (P0/P1 by default) to the owner chat — see [[gateway/routers/alerts.ava.okf.md]]. Each channel's leg gets the same single retry as the push path; a failed channel still reports `error: <TypeName>` (all-failed → `/send` 502 → the caller's `notified_at` re-send gate, unchanged).
+- **Ops-alert fan-out**: `IMBridgeCore.notify_user` sends ops alerts (P0/P1 by default) to the owner chat — see [[gateway/alerts/alerts.ava.okf.md]]. Each channel's leg gets the same single retry as the push path; a failed channel still reports `error: <TypeName>` (all-failed → `/send` 502 → the caller's `notified_at` re-send gate, unchanged).
 
 ## Key Dependencies
 - [[gateway/routers/routers.ava.okf.md]] — the gateway REST client + SSE subscription the bridge consumes
-- [[gateway/routers/alerts.ava.okf.md]] — IM notification fan-out for ops alerts
+- [[gateway/alerts/alerts.ava.okf.md]] — IM notification fan-out for ops alerts
 
 ## Entry Points
 - `services/im_bridge/daemon.py` — `.venv/bin/python -m services.im_bridge.daemon`

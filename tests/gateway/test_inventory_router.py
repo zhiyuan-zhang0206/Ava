@@ -21,8 +21,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 from gateway.app import app
-from gateway.routers import _roster_probe
-from gateway.routers import inventory as inventory_router
+from gateway.cluster import roster_probe
+from gateway.extensions import inventory as inventory_router
 from ops import cluster_rpc as _cluster_rpc
 from ops.rpc_schemas import FieldWriteResult, InventoryReadResult, InventoryWriteOpResult
 from shared.config import settings
@@ -166,7 +166,7 @@ def test_aggregate_buckets_unreachable_machine(monkeypatch: pytest.MonkeyPatch) 
             return _read({"X": _plugin(enabled=True)}, {}, "A")
         raise _cluster_rpc.ClusterOpUnreachable("no ack")
 
-    monkeypatch.setattr(_roster_probe, "_probe_failures", {})
+    monkeypatch.setattr(roster_probe, "_probe_failures", {})
     monkeypatch.setattr(inventory_router, "_dispatch_inventory_read", fake_read)
 
     with TestClient(app) as client:
@@ -188,8 +188,8 @@ def test_aggregate_skips_stopped_and_backoff_hosts(monkeypatch: pytest.MonkeyPat
         "_agent_runner_rows",
         lambda: [("A", False), ("B", True), ("C", False)],
     )
-    monkeypatch.setattr(_roster_probe, "_probe_failures", {})
-    _roster_probe._note_probe_unreachable("C")  # C now sits inside its backoff window
+    monkeypatch.setattr(roster_probe, "_probe_failures", {})
+    roster_probe.note_probe_unreachable("C")  # C now sits inside its backoff window
 
     dialed: list[str] = []
 
@@ -217,10 +217,10 @@ def test_aggregate_dial_outcome_feeds_shared_backoff(monkeypatch: pytest.MonkeyP
     monkeypatch.setattr(
         inventory_router, "_agent_runner_rows", lambda: [("A", False), ("B", False)]
     )
-    monkeypatch.setattr(_roster_probe, "_probe_failures", {})
+    monkeypatch.setattr(roster_probe, "_probe_failures", {})
     # A is known-failed but its backoff window has long elapsed: still dialed,
     # under the fast-fail budget.
-    _roster_probe._probe_failures["A"] = (1, time.monotonic() - 3600.0)
+    roster_probe._probe_failures["A"] = (1, time.monotonic() - 3600.0)
 
     seen: dict[str, tuple[float, int | None]] = {}
 
@@ -240,8 +240,8 @@ def test_aggregate_dial_outcome_feeds_shared_backoff(monkeypatch: pytest.MonkeyP
     assert resp.json()["unreachable"] == ["B"]
     fast = settings.gateway.status_probe_fastfail_timeout_seconds
     assert seen["A"] == (fast, 1)
-    assert "A" not in _roster_probe._probe_failures  # a success cleared it
-    assert "B" in _roster_probe._probe_failures  # an unreachable widened it
+    assert "A" not in roster_probe._probe_failures  # a success cleared it
+    assert "B" in roster_probe._probe_failures  # an unreachable widened it
 
 
 # ── GET single machine ──

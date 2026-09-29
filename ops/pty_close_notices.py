@@ -20,7 +20,7 @@ released its maintenance hold (`services/agent_ops/close_notices.py`): a
 notice for a live owner becomes a system inbound message, one for a
 terminated/restarting owner is dropped without delivery (a closure notice
 must never resurrect a dead agent — the TTL reaper's boundary,
-gateway/ttl_reaper.py:83).
+gateway/ttl_reaper/__init__.py:83).
 
 One file per (machine, agent_id, session_id, shell-birth) dedup key: a stop
 retry or a CLI re-entry overwrites the same record instead of stacking a

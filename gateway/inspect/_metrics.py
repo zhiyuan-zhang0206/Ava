@@ -19,9 +19,15 @@ from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
 
 from gateway.inspect._metrics_health import note_inspect_metrics_coverage
-from gateway.inspect.schemas import InspectMetricsMetadata, MetricEvidence
-from gateway.schemas import AgentActivity, AgentCost, AgentStats, AgentTps, StatsWindowHours
-from gateway.schemas.stats import window_delta
+from gateway.inspect.schemas import (
+    AgentActivity,
+    AgentCost,
+    AgentStats,
+    AgentTps,
+    InspectMetricsMetadata,
+    MetricEvidence,
+)
+from gateway.schemas.stats import StatsWindowHours, window_delta
 
 _SUM_FIELDS = (
     "usage_calls",

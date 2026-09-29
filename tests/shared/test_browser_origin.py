@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from gateway._cors import cors_allowed_origins, session_cookie_secure
+from gateway.auth.cors import cors_allowed_origins, session_cookie_secure
 from shared.cluster.derive import fe_build_env, frontend_service_cmd
 from shared.config import settings
 from shared.config.gateway import GatewaySettings

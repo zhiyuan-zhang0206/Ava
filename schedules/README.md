@@ -2,7 +2,7 @@
 
 Gateway-hosted schedules for cluster agents: a schedule is a persistent,
 supervised session (a `script` + the `command` that runs it) owned by the
-gateway's ScheduleManager — see `gateway/schedule_manager.py`. Manage them via
+gateway's ScheduleManager — see `gateway/schedules/manager.py`. Manage them via
 `ava schedules ...` (thin client over `/api/schedules`) or the
 `/control/schedules` page.
 

@@ -39,7 +39,7 @@ from fastapi import HTTPException
 from psycopg import Cursor
 from psycopg_pool import ConnectionPool
 
-from gateway.schemas import InspectWidgetResult, InspectWidgetTask
+from gateway.inspect.schemas import InspectWidgetResult, InspectWidgetTask
 from shared import plugin_load_report, plugins_config
 from shared.plugin_context import PluginContext
 from shared.plugin_inspector import (

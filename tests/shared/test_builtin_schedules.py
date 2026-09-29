@@ -118,7 +118,7 @@ class TestProvision:
     async def test_gateway_boot_respects_seeding_without_disabling_explicit_provision(
         self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, automatic: bool
     ) -> None:
-        from gateway.schedule_manager import ScheduleManager
+        from gateway.schedules.manager import ScheduleManager
         from shared.config import settings
 
         monkeypatch.setattr(settings.gateway, "provision_builtin_schedules", automatic)

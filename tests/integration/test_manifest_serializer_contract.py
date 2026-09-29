@@ -38,7 +38,7 @@ def test_jsonl_otlp_and_loki_use_one_byte_identity_with_drift_rejected(
     otlp_backend: tuple[Any, Any],
 ) -> None:
     """The producer census and Loki reader must share the exact event bytes."""
-    from gateway._loki_event_rows import _parse_line
+    from gateway.lgtm._loki_event_rows import _parse_line
 
     backend, log_exporter = otlp_backend
     event = Event(

@@ -30,7 +30,12 @@ from typing import Any, Literal, cast
 
 from fastapi import APIRouter, HTTPException, Query, Request
 
-from gateway.schemas import (
+from ops import cluster_rpc as _cluster_rpc
+from ops import ops_config
+from ops.ops_config import SENSITIVE_MASK
+from ops.rpc_schemas import ConfigAuditReadResult, ConfigReadResult, ConfigWriteOpResult
+from shared import runtime_config
+from shared.api_contracts.config import (
     ConfigAuditView,
     ConfigFieldView,
     ConfigFieldWriteResult,
@@ -39,11 +44,6 @@ from gateway.schemas import (
     ResolvedConfigView,
     ResolvedFieldView,
 )
-from ops import cluster_rpc as _cluster_rpc
-from ops import ops_config
-from ops.ops_config import SENSITIVE_MASK
-from ops.rpc_schemas import ConfigAuditReadResult, ConfigReadResult, ConfigWriteOpResult
-from shared import runtime_config
 from shared.config import env_override_values, field_domain, get_config_metadata, settings
 from shared.config.candidate import validate_env_patch_for_write
 from shared.config.editing import ConfigPatchPlan, split_reducer_patch
@@ -58,7 +58,7 @@ def _request_actor(request: Request) -> tuple[str | None, str | None]:
 
     `source_verified_by` (`cluster_bearer` / `user_session`) is bound by the auth
     middleware after credential validation, with `auth_principal` beside it —
-    never read from caller JSON (`gateway/request_principal.ava.okf.md`). A
+    never read from caller JSON (`gateway/auth/request_principal.ava.okf.md`). A
     no-auth mode has no verified principal and records no actor.
     """
     verified_by = getattr(request.state, "source_verified_by", None)

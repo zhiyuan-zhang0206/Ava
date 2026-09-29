@@ -201,7 +201,7 @@ def fingerprint(
 def split_content(content: Content) -> tuple[str, dict[str, object] | None]:
     """Map wire content to its durable `(content, payload)` form.
 
-    The semantic twin of `gateway/routers/agents_state.py::_normalize_message_content`
+    The semantic twin of `gateway/agents/state.py::_normalize_message_content`
     (kept here because `services` may not import `gateway`): a string is
     stripped; a block list stores the joined text part (or `"[image]"`) plus the
     `{"content_blocks": [...]}` payload the claim node inlines natively.

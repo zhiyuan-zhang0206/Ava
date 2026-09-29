@@ -104,7 +104,7 @@ def test_503_on_checkpoint_read_failure(
     db_conn: psycopg.Connection, test_client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A store read failure is not disguised as pruned — 503, caller retries."""
-    from gateway.routers import agents_state as agents_mod
+    from gateway.agents import state as agents_mod
     from shared.agents.history import checkpoint as checkpoint_mod
 
     tid = create_agent(db_conn)

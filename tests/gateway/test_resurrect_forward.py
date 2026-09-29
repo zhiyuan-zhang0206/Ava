@@ -1,4 +1,4 @@
-"""Cross-machine resurrect forward (`gateway/routers/agents_lifecycle.py:post_agent_resurrect`)
+"""Cross-machine resurrect forward (`gateway/agents/lifecycle.py:post_agent_resurrect`)
 unit tests —
 
 resurrect must forward to the home machine (a session spawn starting a new process
@@ -18,9 +18,9 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
+from gateway.agents import forward as forward_module
+from gateway.agents import lifecycle as lifecycle_module
 from gateway.app import app
-from gateway.routers import agents_forward as forward_module
-from gateway.routers import agents_lifecycle as lifecycle_module
 from shared.agents import CrossMachineGatewayUnavailable, MachineNotRegistered
 
 
@@ -161,7 +161,7 @@ def test_local_home_machine_is_forwarded(
     with TestClient(app) as client:
         agent_id = client.post("/api/agents", json={}).json()["id"]
         _set_agent_machine(db_conn, agent_id, "local-test")
-        monkeypatch.setattr(forward_module, "_enqueue_lifecycle", _capture_enqueue)  # pyright: ignore[reportUnknownArgumentType]
+        monkeypatch.setattr(forward_module, "enqueue_lifecycle", _capture_enqueue)  # pyright: ignore[reportUnknownArgumentType]
         resp = client.post(f"/api/agents/{agent_id}/resurrect")
     assert resp.status_code == 200
     assert resp.json() == {"status": "spawned"}
@@ -184,7 +184,7 @@ async def test_lifecycle_forward_uses_a_short_idempotent_retry_budget(
 
     monkeypatch.setattr(forward._cluster_rpc, "dispatch_to_machine", _dispatch)
 
-    result = await forward._enqueue_lifecycle("offline-runner", "/restart", {})
+    result = await forward.enqueue_lifecycle("offline-runner", "/restart", {})
 
     assert result == {"status": "enqueued"}
     assert isinstance(captured["timeout_s"], float)
@@ -210,5 +210,5 @@ async def test_lifecycle_forward_deadline_becomes_a_clear_gateway_error(
 
     with pytest.raises(CrossMachineGatewayUnavailable, match="did not answer"):
         await asyncio.wait_for(
-            forward._enqueue_lifecycle("offline-runner", "/restart", {}), timeout=0.2
+            forward.enqueue_lifecycle("offline-runner", "/restart", {}), timeout=0.2
         )

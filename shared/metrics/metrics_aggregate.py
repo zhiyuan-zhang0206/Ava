@@ -7,7 +7,7 @@ ava/bugs/gateway-mem-profile-2026-08-03.md; audit finding F-s1-4). The metric
 units reduced that stream to a handful of aggregates (counts, sums, pctiles,
 per-key counters, position buckets); the SQL path fetched those aggregates
 in Postgres. With the telemetry stack cutover (task #1197) `fetch_aggregate`
-now runs the same reductions over Loki via `gateway.loki_events` — injected
+now runs the same reductions over Loki via `gateway.lgtm.loki_events` — injected
 as the `loki` argument (shared code never imports gateway; tests pass a
 fake). `fetch_aggregate` runs ~20 compact Loki queries (exact counts,
 per-key grouped counts, projected payload rows for the distributions) and
@@ -153,7 +153,7 @@ def fetch_aggregate(
     category telemetry|log over [now-days, now], optional single-agent scope,
     optional since_compact (each agent's rows narrowed to at-or-after its
     latest compact halt; service rows always kept). `loki` is the
-    `gateway.loki_events` module (injected: shared never imports gateway).
+    `gateway.lgtm.loki_events` module (injected: shared never imports gateway).
     """
     to = datetime.now(UTC)
     from_ = to - timedelta(days=days)

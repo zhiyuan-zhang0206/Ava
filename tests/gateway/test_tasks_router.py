@@ -27,8 +27,8 @@ import pytest
 from fastapi.testclient import TestClient
 from starlette.requests import Request
 
+from gateway.agents import state as _agents_state
 from gateway.app import app
-from gateway.routers import agents_state as _agents_state
 from gateway.routers.tasks import get_tasks
 from shared.agents import AgentStatus
 

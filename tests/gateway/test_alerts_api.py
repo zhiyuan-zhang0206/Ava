@@ -25,8 +25,8 @@ from fastapi.testclient import TestClient
 from psycopg.types.json import Jsonb
 from pydantic import SecretStr
 
+from gateway.alerts import router as alerts_router
 from gateway.app import app
-from gateway.routers import alerts as alerts_router
 from shared.config import settings
 
 

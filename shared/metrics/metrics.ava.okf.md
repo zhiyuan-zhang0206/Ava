@@ -29,7 +29,7 @@ Currently 6: `syntax_fix`, `exec`, `llm_turns`, `agent_activity`, `sdk_usage`, `
 
 ### Two consumers share the same core
 - `scripts/metrics.py` CLI — renders text + dumps JSON.
-- gateway `/api/metrics` (`gateway/routers/metrics.py`) — returns `data` to the frontend Metrics page. Inspector statistics read persisted observations with cumulative or time-based windows.
+- gateway `/api/metrics` (`gateway/events/metrics.py`) — returns `data` to the frontend Metrics page. Inspector statistics read persisted observations with cumulative or time-based windows.
 
 ## Notes
 

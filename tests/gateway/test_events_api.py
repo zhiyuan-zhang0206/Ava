@@ -19,8 +19,8 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from gateway import loki_events
 from gateway.app import app
+from gateway.lgtm import loki_events
 
 _EVENT_KEYS = {
     "id",
