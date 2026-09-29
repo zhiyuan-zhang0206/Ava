@@ -34,7 +34,7 @@ import sys
 from collections.abc import Callable
 from pathlib import Path
 
-from cli.commands._manifest_gate import gate_refuses
+from cli.commands.extensions._manifest_gate import gate_refuses
 
 from ._pkg_source import cleanup_temp, clone_git
 

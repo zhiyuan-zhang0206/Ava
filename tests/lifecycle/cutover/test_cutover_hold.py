@@ -16,7 +16,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from cli.commands._pause_resume import resume_after_start
+from cli.commands.lifecycle._pause_resume import resume_after_start
 from scripts import cutover_adopt_home as adopt
 from shared import maintenance, start_serving
 from shared.config import settings
@@ -164,7 +164,7 @@ def test_maintenance_start_is_no_side_door_around_the_held_first_start(
     the records repair (W7), which the held first start waits for. A damaged
     journal keeps a `cutover:` hold refused; a later hold still starts, the
     documented way out of such a journal. From `starting` on it starts held."""
-    from cli.commands import maintenance as maintenance_command
+    from cli.commands.lifecycle import maintenance as maintenance_command
 
     legacy, holder, at = _adopted(make_legacy, monkeypatch)
     if case == "cutover-starting":
@@ -187,7 +187,7 @@ def test_maintenance_start_is_no_side_door_around_the_held_first_start(
         starts.append(maintenance.start_authorized())
         return 0
 
-    monkeypatch.setattr("cli.commands.start.cmd_start", cmd_start)
+    monkeypatch.setattr("cli.commands.lifecycle.start.cmd_start", cmd_start)
     monkeypatch.setattr(start_serving, "is_serving", lambda: True)
 
     if refused:

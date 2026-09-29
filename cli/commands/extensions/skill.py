@@ -87,7 +87,7 @@ def cmd_skill_install(
         if not root.is_dir():
             print(f"[ava skill install] path '{path}' not found in source.", file=sys.stderr)
             return 1
-        from cli.commands._manifest_gate import gate_refuses
+        from cli.commands.extensions._manifest_gate import gate_refuses
 
         if gate_refuses(root, command="skill install"):
             return 1

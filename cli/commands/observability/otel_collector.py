@@ -34,7 +34,7 @@ from pathlib import Path
 from string import Template
 from urllib.parse import unquote, urlsplit
 
-from cli.commands._rendered_file import write_rendered_guarded
+from cli.commands.converge.rendered_file import write_rendered_guarded
 from cli.commands.converge.spec import ConvergeCtx
 from cli.commands.observability._otel_collector_exporters import BACKEND_EXPORTERS, RELAY_EXPORTERS
 from shared import collector_artifact

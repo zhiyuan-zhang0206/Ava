@@ -204,7 +204,7 @@ def test_termination_acceptance_never_substitutes_for_native_closure(
 ) -> None:
     import httpx
 
-    from cli.commands import service_stop
+    from cli.commands.lifecycle import service_stop
 
     (tmp_path / "smoke-release-a.json").write_text('{"agent": 5}')
     (tmp_path / "config.json").write_text(

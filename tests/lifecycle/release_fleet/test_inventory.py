@@ -57,7 +57,7 @@ def lone_gateway(prepared: FleetRequest, monkeypatch: pytest.MonkeyPatch) -> dic
     import shared.cluster
     import shared.machine
     import shared.paths
-    from cli.commands import service_stop
+    from cli.commands.lifecycle import service_stop
     from shared.config import settings
 
     rows: dict[str, Any] = {

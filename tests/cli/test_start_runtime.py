@@ -18,7 +18,7 @@ from uuid import uuid4
 import pytest
 
 from cli import start_runtime
-from cli.commands import root_driver, start_generation
+from cli.commands.lifecycle import root_driver, start_generation
 from ops.service_spec import ServiceSpec
 from services.ava_root_glue import manifests
 from shared import runtime_interpreter
@@ -314,7 +314,7 @@ def test_release_cold_start_uses_same_storage_readiness_without_source_or_schema
     from cli.commands.data_plane import bringup
     from cli.commands.extensions import materialize
 
-    start = importlib.import_module("cli.commands.start")
+    start = importlib.import_module("cli.commands.lifecycle.start")
     runtime = _admit(image)
     calls: list[str] = []
 

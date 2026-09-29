@@ -899,14 +899,14 @@ def test_prune_old_mirror_removes_stale_keeps_recent(
 
 
 def test_mirror_day_parses_all_collector_name_shapes(tmp_path: Path) -> None:
-    """`_mirror_day` parses every mirror filename shape in the wild: legacy
+    """`mirror_day` parses every mirror filename shape in the wild: legacy
     pid-dated files, collector-rotated backups WITH the timberjack trigger
     suffix (`-size` / `-time`), older unsuffixed rotated backups, manual
     `spans.cut-*` orphans, and the `.gz` variants of each — while the
     unstamped ACTIVE `spans.jsonl` stays None (never a prune target)."""
     from datetime import date
 
-    from shared.trace import _mirror_day
+    from shared.trace_mirror import mirror_day
 
     cases = {
         "spans-20200101-1.jsonl": date(2020, 1, 1),
@@ -924,7 +924,7 @@ def test_mirror_day_parses_all_collector_name_shapes(tmp_path: Path) -> None:
     for name, expected in cases.items():
         p = tmp_path / name
         p.touch()
-        assert _mirror_day(p) == expected, name
+        assert mirror_day(p) == expected, name
 
 
 def test_mirror_sort_key_orders_suffixed_rotated_and_cut_files(
@@ -933,7 +933,7 @@ def test_mirror_sort_key_orders_suffixed_rotated_and_cut_files(
     """The cap-prune order key handles timberjack-suffixed backups and manual
     cuts (day from the name, sub-day epoch from the timestamp), so a cap prune
     deletes them oldest-first instead of treating them like the active file."""
-    from shared.trace import _mirror_sort_key
+    from shared.trace_mirror import mirror_sort_key
 
     names = [
         "spans-2026-08-01T00-00-00.000-size.jsonl",
@@ -941,7 +941,7 @@ def test_mirror_sort_key_orders_suffixed_rotated_and_cut_files(
         "spans.cut-20260802.jsonl",
         "spans.jsonl",
     ]
-    keys = [_mirror_sort_key(tmp_path / n) for n in names]
+    keys = [mirror_sort_key(tmp_path / n) for n in names]
     # Both 08-01 segments before the 08-02 cut, all before the active file.
     assert keys == sorted(keys)
 

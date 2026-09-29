@@ -9,7 +9,7 @@ tags:
 
 # Converge Ownership Preflight
 
-`cli/commands/_ownership_preflight.py` is the first converge step
+`cli/commands/converge/_ownership_preflight.py` is the first converge step
 (`CONVERGE_STEPS[0]`), running before the `$AVA_HOME` directory skeleton and
 every write-capable step so the repair command always prints before any step can
 fail on a foreign-owned path. On POSIX it compares `Path.stat().st_uid` to the

@@ -97,7 +97,7 @@ def test_migrations_apply_uses_direct_unbounded_connection() -> None:
     remote plane dials its provider URL that way; a local plane dials the owner
     authority over the postmaster's own socket, which carries no ceiling (proved
     on real Postgres in tests/shared/test_pg_owner_authority.py)."""
-    from cli.commands import migrations
+    from cli.commands.lifecycle import migrations
 
     src = inspect.getsource(migrations.cmd_migrations_apply)
     assert "connect(direct=True, unbounded=True)" in src

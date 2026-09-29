@@ -14,7 +14,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from cli.commands._rendered_file import write_rendered_guarded
+from cli.commands.converge.rendered_file import write_rendered_guarded
 from cli.commands.extensions.materialize import materialize_cluster_extensions
 from shared import db, extension_materialize, paths
 

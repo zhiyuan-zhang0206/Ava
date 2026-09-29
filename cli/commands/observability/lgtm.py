@@ -18,7 +18,7 @@ def is_station_ctx(ctx: ConvergeCtx) -> bool:
 
 def _reconcile(*, enabled: bool) -> int:
     """Change only backend intent; use the same lifecycle as every service."""
-    from cli.commands.start import cmd_start
+    from cli.commands.lifecycle.start import cmd_start
     from shared.service_selection import read_selection
 
     selection = read_selection()

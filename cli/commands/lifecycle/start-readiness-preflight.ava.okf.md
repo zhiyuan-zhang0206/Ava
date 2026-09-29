@@ -9,8 +9,8 @@ tags:
 
 # Pre-Stop Start-Readiness Preflight
 
-`cli/commands/_start_readiness_preflight.py` is the local-state half of
-"validate before kill" for `ava restart` (`cli/commands/stop.py`).
+`cli/commands/lifecycle/_start_readiness_preflight.py` is the local-state half of
+"validate before kill" for `ava restart` (`cli/commands/lifecycle/stop.py`).
 `ava start` is the only step that brings a stopped host back, so a start check
 that fails AFTER the stop fails on a host whose services are already down
 (macmini 2026-09-12: a stray workspace socket aborted converge after the stop

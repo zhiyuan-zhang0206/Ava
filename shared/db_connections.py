@@ -78,7 +78,7 @@ PG_KEEPALIVE_KWARGS: dict[str, Any] = {
 # gateway/daemon request for minutes.
 #
 # Deliberately NOT folded into PG_KEEPALIVE_KWARGS: the migration applier
-# (cli/commands/migrations.py) dials `connect(direct=True, unbounded=True)` and
+# (cli/commands/lifecycle/migrations.py) dials `connect(direct=True, unbounded=True)` and
 # its DDL runs may legitimately exceed 60s — the migration applier must stay
 # unbounded. The sanctioned entry points deliver this one ceiling — as `options`
 # on a direct dial, as PG_STATEMENT_TIMEOUT_SET_SQL on a pooled one — so it is

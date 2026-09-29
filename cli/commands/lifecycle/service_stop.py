@@ -31,7 +31,7 @@ from datetime import datetime
 
 import psutil
 
-from cli.commands._maintenance_stop_report import (
+from cli.commands.lifecycle._maintenance_stop_report import (
     StopIncompleteError,
     SurvivorInventory,
     capture_survivor,
@@ -570,7 +570,7 @@ def stop_services(
     timeout: float, *, keep_terminals: bool = False, selected: frozenset[str] | None = None
 ) -> list[str]:
     """Ask the sole root owner to stop drained services without force escalation."""
-    from cli.commands.root_driver import _root_tree_selection, _stop_root_service_tree
+    from cli.commands.lifecycle.root_driver import _root_tree_selection, _stop_root_service_tree
 
     deadline = deadline_after(timeout)
     if not keep_terminals:

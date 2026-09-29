@@ -14,11 +14,6 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from cli.commands._health_preflight import ensure_health_preflight as _ensure_health_preflight
-from cli.commands._ownership_preflight import (
-    ensure_ownership_preflight as _ensure_ownership_preflight,
-)
-from cli.commands._port_preflight import ensure_port_preflight as _ensure_port_preflight
 from cli.commands.converge._brew_pin import ensure_brew_pin
 from cli.commands.converge._frontend_env import ensure_no_frontend_env_overrides
 from cli.commands.converge._os_jobs import (
@@ -27,6 +22,9 @@ from cli.commands.converge._os_jobs import (
     ensure_logs_maintenance,
     ensure_packages_refresh_job,
     ensure_pr_flow_job,
+)
+from cli.commands.converge._ownership_preflight import (
+    ensure_ownership_preflight as _ensure_ownership_preflight,
 )
 from cli.commands.converge._steps import (
     _PATH_BEGIN as _PATH_BEGIN,
@@ -46,6 +44,10 @@ from cli.commands.converge._steps import (
     _shell_rc_path as _shell_rc_path,
 )
 from cli.commands.converge.firewall import ensure_firewall_allowlist
+from cli.commands.converge.health_preflight import (
+    ensure_health_preflight as _ensure_health_preflight,
+)
+from cli.commands.converge.port_preflight import ensure_port_preflight as _ensure_port_preflight
 from cli.commands.converge.redis_bridge import ensure_redis_bridge
 
 # The step contract lives in spec.py so step implementations can span

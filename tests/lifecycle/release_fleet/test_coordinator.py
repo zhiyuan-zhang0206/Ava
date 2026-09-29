@@ -665,7 +665,7 @@ def test_resuming_reobserves_selected_root_before_admission_or_completion(
     pause_status: str,
     healthy: bool,
 ) -> None:
-    from cli.commands import maintenance as maintenance_commands
+    from cli.commands.lifecycle import maintenance as maintenance_commands
     from cli.release_transition import root_service
     from shared import maintenance, pause_owner, start_serving
     from shared.runtime_release import VerifiedRelease
@@ -734,7 +734,7 @@ def test_selection_requires_terminal_closure_evidence_before_the_selector_moves(
     request_record: FleetRequest, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A terminal alive after the stop phase's closure holds selection."""
-    from cli.commands import root_driver, service_stop
+    from cli.commands.lifecycle import root_driver, service_stop
 
     create(request_record)
     transition = object.__new__(LocalTransition)

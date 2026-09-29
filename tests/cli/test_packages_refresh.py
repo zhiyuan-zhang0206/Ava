@@ -32,13 +32,13 @@ from shared.config import settings
 @pytest.fixture(autouse=True)
 def _hermetic(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Isolated home, no cluster-update probe, OS-job gate off (suite default)."""
-    import cli.commands.status as status_mod
+    import cli.commands.extensions.packages_refresh as refresh_mod
 
     home = tmp_path / ".ava"
     (home / "skills").mkdir(parents=True)
     (home / "logs").mkdir()
     monkeypatch.setattr(settings.general, "ava_home", home)
-    monkeypatch.setattr(status_mod, "_update_in_flight", lambda: False)
+    monkeypatch.setattr(refresh_mod, "_update_in_flight", lambda: False)
 
 
 def _home() -> Path:
@@ -420,9 +420,9 @@ def test_flock_skips_a_concurrent_pass(core_repo: Path) -> None:
 
 
 def test_update_in_flight_skips(core_repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    import cli.commands.status as status_mod
+    import cli.commands.extensions.packages_refresh as refresh_mod
 
-    monkeypatch.setattr(status_mod, "_update_in_flight", lambda: True)
+    monkeypatch.setattr(refresh_mod, "_update_in_flight", lambda: True)
     report = run_refresh(repo=core_repo)
     assert not report.ran and "update is in flight" in (report.skip_reason or "")
 

@@ -202,8 +202,8 @@ def test_start_observe_and_steady_state_dispatch_by_recorded_kind(
 def test_stop_authenticates_the_helper_before_and_proves_its_stop_intent_after(
     harness: Harness, monkeypatch: pytest.MonkeyPatch, kind: str
 ) -> None:
-    from cli.commands import maintenance as maintenance_commands
-    from cli.commands import root_driver, service_stop
+    from cli.commands.lifecycle import maintenance as maintenance_commands
+    from cli.commands.lifecycle import root_driver, service_stop
     from shared import maintenance
 
     transition = _transition(harness, monkeypatch)

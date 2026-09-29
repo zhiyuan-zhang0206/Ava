@@ -1,7 +1,7 @@
 """Gateway data-plane bring-up and remote reachability probes.
 
 The gateway's `ava start` data-plane step lives here rather than in
-`cli/commands/start.py`: bring-up chooses between a LOCAL instance
+`cli/commands/lifecycle/start.py`: bring-up chooses between a LOCAL instance
 (`ensure_cluster_storage` — initdb / pg / redis / ACL under
 `$AVA_HOME`) and a REMOTE-managed plane (Task #1752) whose URLs name another
 host, where startup degrades to a reachability probe of the URLs themselves
@@ -384,7 +384,7 @@ def _ensure_pooler(rec: ClusterRecord, database: str, home: Path, generation: Ge
 def prove_generation_logins(home: Path, generation: Generation, endpoint: str) -> None:
     """Both logins of `generation` answer `SELECT 1` through the consumer endpoint
     (the pooler when enabled: SCRAM client auth plus the pass-through hop)."""
-    from cli.commands._health_preflight import probe_postgres
+    from cli.commands.converge.health_preflight import probe_postgres
     from shared.cluster.authority import read_secret
     from shared.url_secret import url_with_userinfo
 
@@ -474,7 +474,7 @@ def complete_gateway_data_plane(*, refresh_schema: bool = True) -> None:
     pair (restarted only when its bytes change). A home without a ledger is a
     legacy home and refuses with the cutover instruction — never converted here.
     """
-    from cli.commands._health_preflight import probe_postgres, probe_redis
+    from cli.commands.converge.health_preflight import probe_postgres, probe_redis
     from cli.start_identity import mark_phase, needs_provision
     from shared import cluster
     from shared.paths import ava_home

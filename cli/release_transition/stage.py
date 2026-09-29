@@ -116,8 +116,8 @@ def preflight_operation(path: Path, *, previous: bool = False) -> int:
         schema_digest=reference.schema_digest,
         source_commit=reference.source_commit,
     )
-    from cli.commands.root_driver import root_child_env, start_roster, tree_manifest
-    from cli.commands.start_generation import launch_digest
+    from cli.commands.lifecycle.root_driver import root_child_env, start_roster, tree_manifest
+    from cli.commands.lifecycle.start_generation import launch_digest
     from ops import spec as ops_spec
     from shared.machine import machine_role
     from shared.service_selection import resolve_selection
@@ -174,7 +174,11 @@ def observe_operation(path: Path) -> int:
         schema_digest=reference.schema_digest,
         source_commit=reference.source_commit,
     )
-    from cli.commands.root_driver import admit_live_start, start_roster, wait_for_service_tree
+    from cli.commands.lifecycle.root_driver import (
+        admit_live_start,
+        start_roster,
+        wait_for_service_tree,
+    )
     from ops import spec as ops_spec
     from shared.machine import machine_role
     from shared.service_selection import resolve_selection

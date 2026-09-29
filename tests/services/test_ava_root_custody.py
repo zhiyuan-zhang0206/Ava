@@ -224,7 +224,7 @@ def test_exact_home_helper_retirement_keeps_neighbor_and_waits_for_native_exit(
 
     monkeypatch.setattr(jobs, "_retirement_command", command)
     # Ordinary stop, then the shared destroy boundary, then a cleanup retry.
-    from cli.commands._stop_extras import stop_permissions_helper
+    from cli.commands.lifecycle._stop_extras import stop_permissions_helper
     from shared.config import settings
 
     monkeypatch.setattr("shared.platform.IS_MACOS", True)

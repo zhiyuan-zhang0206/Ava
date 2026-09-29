@@ -31,11 +31,11 @@ __all__ = [
     "_disk_watermark_exceeded",
     "_enforce_dir_cap",
     "_gzip_old_mirror",
-    "_mirror_day",
     "_mirror_epoch",
     "_mirror_size",
-    "_mirror_sort_key",
     "_prune_old_mirror",
+    "mirror_day",
+    "mirror_sort_key",
 ]
 
 # Mirror filenames (sidecar file exporter layout since task #1266):
@@ -68,7 +68,7 @@ _MIRROR_ROTATED_RE = re.compile(
 _MIRROR_CUT_RE = re.compile(r"^spans\.cut-(\d{8})\.jsonl(?:\.gz)?$")
 
 
-def _mirror_day(path: Path) -> date | None:
+def mirror_day(path: Path) -> date | None:
     """Day stamp of a mirror file from its name; None when it carries none.
 
     Old agent-side files stamp `spans-YYYYMMDD-<pid>.jsonl`; the collector's
@@ -92,7 +92,7 @@ def _mirror_day(path: Path) -> date | None:
 
 def _mirror_epoch(path: Path) -> int:
     """Sub-day order key: pid for legacy files, epoch seconds for rotated
-    backups (both share the day key in `_mirror_sort_key`); 0 for the active
+    backups (both share the day key in `mirror_sort_key`); 0 for the active
     file. A name that parses as neither sorts last with day +inf — an
     unrecognized file is never the deletion target."""
     m = _MIRROR_DAY_RE.match(path.name)
@@ -122,7 +122,7 @@ def _prune_old_mirror(retention_days: int) -> None:
     # `.jsonl.gz` included: the gzip pass renames old segments, and retention
     # must still reach them (their day stamp parses from the name).
     for path in traces_dir().glob("spans*.jsonl*"):
-        day = _mirror_day(path)
+        day = mirror_day(path)
         if day is not None and day < cutoff:
             path.unlink(missing_ok=True)
             removed += 1
@@ -194,10 +194,10 @@ def _gzip_old_mirror(grace_seconds: int = 60) -> int:
     return compressed
 
 
-def _mirror_sort_key(p: Path) -> tuple[int, int]:
+def mirror_sort_key(p: Path) -> tuple[int, int]:
     """Oldest-first key for a mirror file (day, sub-day order).
 
-    Day comes from the name (`_mirror_day`); sub-day is the numeric pid for
+    Day comes from the name (`mirror_day`); sub-day is the numeric pid for
     legacy files (string order would prune `...-1000` before `...-999`,
     deleting a newer file) or the epoch seconds of a rotated backup. The
     ACTIVE `spans.jsonl` (no day stamp) sorts last — the cap prune never
@@ -205,7 +205,7 @@ def _mirror_sort_key(p: Path) -> tuple[int, int]:
     contract as retention: bounded disk, documented loss, never silent). No
     stat — the file may vanish mid-parse.
     """
-    day = _mirror_day(p)
+    day = mirror_day(p)
     if day is not None:
         return (day.toordinal(), _mirror_epoch(p))
     return (2**31, 0)
@@ -229,7 +229,7 @@ def _mirror_size(p: Path) -> int:
 def _enforce_dir_cap(max_mb: int) -> int:
     """Delete oldest mirror files until the traces directory fits under `max_mb`.
 
-    Iterates oldest-first by day stamp + numeric pid (`_mirror_sort_key`).
+    Iterates oldest-first by day stamp + numeric pid (`mirror_sort_key`).
     Never deletes the file currently being written (the newest, by key) unless
     the cap is absurdly small — same contract as retention: bounded disk,
     documented loss, never silent. Returns the number of files deleted. No-op
@@ -238,7 +238,7 @@ def _enforce_dir_cap(max_mb: int) -> int:
     if max_mb <= 0:
         return 0
     cap_bytes = max_mb * 1024 * 1024
-    files = sorted(traces_dir().glob("spans*.jsonl*"), key=_mirror_sort_key)
+    files = sorted(traces_dir().glob("spans*.jsonl*"), key=mirror_sort_key)
     total = sum(_mirror_size(p) for p in files)
     removed = 0
     for p in files:

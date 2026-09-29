@@ -44,7 +44,7 @@ single source of truth for their bundled skills.
 
 | Point | Check | On violation |
 |---|---|---|
-| install / upgrade (skill / plugin / mcp) | `engines` range + `requires_commit` vs this checkout | refuse, report (`cli/commands/_manifest_gate.py`) |
+| install / upgrade (skill / plugin / mcp) | `engines` range + `requires_commit` vs this checkout | refuse, report (`cli/commands/extensions/_manifest_gate.py`) |
 | content-channel refresh landing | same, against the staged tree | keep the current content, record `blocked_version`, retry after the host moves |
 | runtime plugin load | `engines` vs the derived version | skip that plugin, loud report, process continues |
 | runtime skill scan | `engines` vs the derived version | excluded from the catalog with a visible reason |

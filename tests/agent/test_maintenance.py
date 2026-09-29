@@ -303,7 +303,7 @@ async def test_admitted_model_finishes_real_exec_and_after_exec_before_drain_rec
         # Drop the old host's in-memory graph/cache: recovery consumes the
         # durable restart pointer and real cold checkpoint after explicit release.
         assert current.maintenance is not None
-        from cli.commands._pause_resume import resume_after_start
+        from cli.commands.lifecycle._pause_resume import resume_after_start
         from shared import start_serving
 
         monkeypatch.setattr("ops.cluster_pause._unpause_local_cluster", MagicMock())

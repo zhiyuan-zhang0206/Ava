@@ -6,7 +6,7 @@
     "tests/cli/test_pgbouncer_config.py::test_render_ini_is_transaction_scram_and_socket_server": 17
   },
   "directories": {
-    "tests/cli": 130
+    "tests/cli": 129
   },
   "files": {
     "tests/cli/test_cluster_health.py": 2117,

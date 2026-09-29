@@ -14,7 +14,7 @@ tags:
 ## What it is
 
 The primitives for ending a process Ava started. Normal `pause` and `stop`
-use `cli/commands/service_stop.py`: deliver a verified graceful signal and
+use `cli/commands/lifecycle/service_stop.py`: deliver a verified graceful signal and
 wait for actual process exit without implicit escalation. Their shared deadline
 reports an incomplete stop if resources remain. Persistent terminals are the
 exception: a stop, a release or a PITR activation HUPs/TERMs each shell's
@@ -46,7 +46,7 @@ without joining stuck executor threads. See [[session-backend.ava.okf.md|session
 
 ### Stop convergence when a service leader is gone
 
-`cli/commands/service_stop.py` treats a confirmed-dead leader as one step,
+`cli/commands/lifecycle/service_stop.py` treats a confirmed-dead leader as one step,
 not the end of the stop. A live leader still runs its own graceful cleanup
 first; once the leader is confirmed dead, its captured, birth-validated
 descendants are signalled — at most once each, SIGTERM on POSIX — so a
@@ -65,7 +65,7 @@ the unit stopped. Legacy records without a `pgid` reap as before.
 
 A held stop that runs its deadline out must not leave the operator with a bare
 pid list — that is a diagnosis no one can act on, and the only remaining move
-is a blind rerun (issue #2162). `cli/commands/_maintenance_stop_report.py`
+is a blind rerun (issue #2162). `cli/commands/lifecycle/_maintenance_stop_report.py`
 builds the failure report instead: for every process still alive (and every
 member of a recorded process group that is still occupied, even one that
 appeared after the capture) it records the owning recorded session, whether the
@@ -95,7 +95,7 @@ Not every process Ava stops is a named session: the pooler, an orphan holding a 
 
 ## Entry points
 
-- `cli/commands/_maintenance_stop_report.py` — the deadline survivor report (raise, render, journal payload)
+- `cli/commands/lifecycle/_maintenance_stop_report.py` — the deadline survivor report (raise, render, journal payload)
 - `shared/session_backend.py:SessionBackend.kill_session` — the session stop, per backend
 - `shared/proc.py:process_alive` / `request_stop` / `force_kill` — the non-session trio
 - `shared/proc.py:kill_process_tree` / `run_bounded` — tree teardown and a bounded run

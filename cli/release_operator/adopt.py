@@ -74,7 +74,7 @@ def _adopt(receipt: Path) -> tuple[ReleaseRef, VerifiedRelease]:
 
 
 def _select_and_install(home: Path, reference: ReleaseRef, receipt: Path) -> VerifiedRelease:
-    from cli.commands.root_driver import require_root_absent
+    from cli.commands.lifecycle.root_driver import require_root_absent
     from cli.release_transition.root_service import install_steady
     from shared.cluster import registry_path
     from shared.private_storage import ensure_private_dir

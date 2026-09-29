@@ -125,7 +125,7 @@ def test_start_phase_verifies_checkpoint_schema_after_ava_migrations(
 ) -> None:
     """A locally owned plane migrates as the admin acting as the owner, then
     every capability shares the read-only post-migration checkpoint gate."""
-    from cli.commands.migrations import cmd_migrations_apply
+    from cli.commands.lifecycle.migrations import cmd_migrations_apply
     from shared import pg_admin
 
     authority = pg_admin.local_owner_authority()
@@ -144,7 +144,7 @@ def test_start_phase_verifies_checkpoint_schema_after_ava_migrations(
 def test_foreign_connected_postgres_refuses_before_migration_ddl(
     migration_phase: list[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from cli.commands.migrations import cmd_migrations_apply
+    from cli.commands.lifecycle.migrations import cmd_migrations_apply
     from shared.cluster import ownership
 
     def refuse(_conn: object, _data: Path) -> None:
@@ -161,7 +161,7 @@ def test_admin_session_without_owner_role_refuses_before_migration_ddl(
 ) -> None:
     """A dial that dropped the startup role (a pooler) would create
     superuser-owned objects; the owner check refuses before any DDL."""
-    from cli.commands.migrations import cmd_migrations_apply
+    from cli.commands.lifecycle.migrations import cmd_migrations_apply
     from shared import pg_admin
 
     def superuser_dial(_url: str, **_kwargs: object) -> _FakeAdminConnection:
@@ -176,7 +176,7 @@ def test_admin_session_without_owner_role_refuses_before_migration_ddl(
 def test_remote_managed_migration_preserves_explicit_provider_authority(
     migration_phase: list[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from cli.commands.migrations import cmd_migrations_apply
+    from cli.commands.lifecycle.migrations import cmd_migrations_apply
     from shared import pg_admin
     from shared.config import settings
 
@@ -227,7 +227,7 @@ def test_real_start_phase_converges_ava_then_is_idempotent(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Real PG proves both migration domains are exact on repeated starts."""
-    from cli.commands.migrations import cmd_migrations_apply
+    from cli.commands.lifecycle.migrations import cmd_migrations_apply
     from shared.migrations import required_migration_set
 
     _bind_private_database(db_conn, monkeypatch)
@@ -257,7 +257,7 @@ def test_dependency_drift_fails_before_any_database_change(
     """
     from langgraph.checkpoint.postgres import PostgresSaver
 
-    from cli.commands.migrations import cmd_migrations_apply
+    from cli.commands.lifecycle.migrations import cmd_migrations_apply
     from shared.cluster.provision import CheckpointDependencyDriftError
 
     _bind_private_database(db_conn, monkeypatch)

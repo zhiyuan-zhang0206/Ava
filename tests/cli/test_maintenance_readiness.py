@@ -4,7 +4,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import cli.commands._probe as _probe_commands
-import cli.commands.start as _start_commands
+import cli.commands.lifecycle.start as _start_commands
 from gateway.app import app
 from shared import host_deploy_state, maintenance, start_serving
 from tests.agent.test_maintenance import isolate as isolate

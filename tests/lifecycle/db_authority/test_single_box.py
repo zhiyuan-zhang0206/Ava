@@ -30,7 +30,7 @@ from psycopg import sql
 from cli.commands.data_plane import bringup
 from cli.commands.data_plane import cluster_instance as ci
 from cli.commands.data_plane import pgbouncer as pooler
-from cli.commands.migrations import cmd_migrations_apply
+from cli.commands.lifecycle.migrations import cmd_migrations_apply
 from services.gateway_side.backup import passphrase
 from shared import cluster
 from shared.cluster import authority, ownership
@@ -374,7 +374,7 @@ def test_interrupted_birth_retries_to_the_same_generation(
 def test_launched_services_receive_their_class_login_only(
     born: Born, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from cli.commands.root_driver import _service_extra_env, root_child_env
+    from cli.commands.lifecycle.root_driver import _service_extra_env, root_child_env
     from ops.service_spec import ServiceSpec
 
     # The launcher's settings-free serve-gateway read (a born single box).

@@ -476,7 +476,7 @@ def admit_live_start(
     runtime: StartRuntime | None = None,
 ) -> bool:
     """Observe before any converge/schema write; reuse only identical inputs."""
-    from cli.commands.start_generation import launch_digest
+    from cli.commands.lifecycle.start_generation import launch_digest
 
     status = _root_status(_root_client())
     if status is None:
@@ -510,7 +510,7 @@ def _ensure_root_service_tree(
         runtime.validate(ava_home())
     env = root_child_env()
     manifest = tree_manifest(roster, repo, roles=roles, runtime=runtime)
-    from cli.commands.start_generation import launch_digest
+    from cli.commands.lifecycle.start_generation import launch_digest
 
     manifest["launch_digest"] = launch_digest(repo, env, home=ava_home(), runtime=runtime)
     manifests = root_manifests_path()

@@ -12,10 +12,10 @@ import psutil
 import pytest
 
 import cli.commands._repo as _repo_commands
-import cli.commands.root_driver as _root_driver_commands
-from cli.commands import _temporary_stop as command
-from cli.commands import stop as entry
-from cli.commands._pause_resume import StartDelegation, resume_after_start
+import cli.commands.lifecycle.root_driver as _root_driver_commands
+from cli.commands.lifecycle import _temporary_stop as command
+from cli.commands.lifecycle import stop as entry
+from cli.commands.lifecycle._pause_resume import StartDelegation, resume_after_start
 from cli.parsers import build_parser
 from ops import agent_pause
 from shared import maintenance, pause_owner, start_serving
@@ -113,12 +113,12 @@ def test_full_stop_closes_real_idle_terminal_after_drain(
     monkeypatch.setitem(os.environ, "AVA_HOME", str(home))
     monkeypatch.setenv("AVA_HOME_OVERRIDE", "1")
     monkeypatch.setenv("HOME", str(home))
-    from cli.commands import service_stop as strict
+    from cli.commands.lifecycle import service_stop as strict
 
     terminal = PtySessionBackend()
     monkeypatch.setattr(strict, "get_shell_backend", lambda: terminal)
     for name in ("stop_permissions_helper",):
-        monkeypatch.setattr(f"cli.commands._stop_extras.{name}", lambda **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
+        monkeypatch.setattr(f"cli.commands.lifecycle._stop_extras.{name}", lambda **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(entry, "_announce_stopping", lambda: None)
     name = "ava-agent-987-shell-2"
     assert terminal.new_session(name, "", home, env={"AVA_HOME": str(home)})
@@ -266,7 +266,7 @@ def test_resource_stop_excludes_concurrent_start(
 ) -> None:
     from threading import Event, Thread
 
-    from cli.commands._pause_resume import exclusive_resources
+    from cli.commands.lifecycle._pause_resume import exclusive_resources
 
     entered, finish, start_finished = Event(), Event(), Event()
 
@@ -313,7 +313,7 @@ def test_explicit_force_stops_host_and_preserves_only_pause_terminals(
     monkeypatch.setattr(_repo_commands, "_roles_or_none", lambda: frozenset({"agent-runner"}))
     monkeypatch.setattr(entry, "_announce_stopping", lambda: None)
     for name in ("stop_permissions_helper",):
-        monkeypatch.setattr(f"cli.commands._stop_extras.{name}", lambda **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
+        monkeypatch.setattr(f"cli.commands.lifecycle._stop_extras.{name}", lambda **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(
         command, "pause_agents", MagicMock(side_effect=AssertionError("force fabricated a drain"))
     )

@@ -10,7 +10,7 @@ tags:
 
 # Start readiness verdict
 
-`cli/commands/root_driver.py:wait_for_service_tree` checks the selected root
+`cli/commands/lifecycle/root_driver.py:wait_for_service_tree` checks the selected root
 roster after launch. A running process is insufficient: every service needs a
 fresh identity-bound protocol verdict. Root generations are observed before and
 after probing, so a replacement or stopped generation invalidates the response.
@@ -32,4 +32,4 @@ missing identity probes. It does not substitute a bare HTTP response, TCP connec
 or PID-file liveness. Startup failure alerts retain their durable episode identity
 and resolve after a later positive readiness observation.
 
-Parent: [[cli/commands/start-readiness/start-readiness.ava.okf.md|start readiness]].
+Parent: [[cli/commands/lifecycle/start-readiness.ava.okf.md|start readiness]].

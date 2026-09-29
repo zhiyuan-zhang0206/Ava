@@ -32,7 +32,7 @@ from cli import start_intent
 from cli.commands.data_plane import bringup
 from cli.commands.data_plane import cluster_instance as ci
 from cli.commands.data_plane import pgbouncer as pooler
-from cli.commands.start_generation import _write_generation
+from cli.commands.lifecycle.start_generation import _write_generation
 from scripts import cutover_db_authority as cutover
 from shared import bootstrap, config, dotenv_boot
 from shared.cluster import authority

@@ -11,12 +11,12 @@ tags:
 # Start readiness
 
 `ava start` first validates the persisted home and service selection. The
-pre-bind gate in `cli/commands/start.py:_refuse_occupied_health_ports` refuses
+pre-bind gate in `cli/commands/lifecycle/start.py:_refuse_occupied_health_ports` refuses
 ports held by another unit before launching application processes. It reads the
 same selected roster that the root will own. A matching HTTP response from an
 unrelated process is insufficient evidence of ownership.
 
-`cli/commands/root_driver.py` owns admission, launch and observation of the
+`cli/commands/lifecycle/root_driver.py` owns admission, launch and observation of the
 single application root. An idempotent start observes the live root generation;
 a cold start launches one through the platform's native custody boundary.
 macOS places the permission helper above the root. Linux starts the root under
@@ -42,7 +42,7 @@ readiness before resuming work.
 
 ## Related contracts
 
-- [[cli/commands/start-readiness/readiness-verdict.ava.okf.md]] — exit codes,
+- [[cli/commands/lifecycle/readiness-verdict.ava.okf.md]] — exit codes,
   generation evidence, deadlines and alerts.
 - [[cli/start_identity.ava.okf.md]] — first-start identity and operation admission.
 - [[cli/release_transition/release_transition.ava.okf.md]] — retained execution,

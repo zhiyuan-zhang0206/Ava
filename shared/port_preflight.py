@@ -1,7 +1,7 @@
 """Port-preflight helpers — the expected-port set, the bind probe, and drift.
 
-The `ava start` preflight (cli/commands/_port_preflight.py) and the `ava stop`
-orphan sweep (cli/commands/stop.py) need the same three facts about a
+The `ava start` preflight (cli/commands/converge/port_preflight.py) and the `ava stop`
+orphan sweep (cli/commands/lifecycle/stop.py) need the same three facts about a
 cluster's ports, stated here beside the record code they read:
 
 - `expected_cluster_ports` / `unit_port_map` — the service->port map the

@@ -13,7 +13,7 @@ import pytest
 
 import cli.commands._probe as _probe_commands
 import cli.commands._repo as _repo_commands
-import cli.commands.status as _status_commands
+import cli.commands.lifecycle.status as _status_commands
 import ops.roster as _roster
 import shared.cluster_drift as _cluster_drift
 from shared.config import settings
@@ -189,7 +189,7 @@ def test_status_shows_the_gate_entry_row(
 ) -> None:
     """The entry service shares the root/identity readiness table with the app."""
     import cli.commands._probe as probe_module
-    import cli.commands.status as status_module
+    import cli.commands.lifecycle.status as status_module
     from cli.commands._probe import ServiceProbe
 
     monkeypatch.setattr(_repo_commands, "_roles_or_none", lambda: frozenset({"gateway"}))
@@ -211,7 +211,7 @@ def test_status_shows_the_end_to_end_redis_bridge_row(
     monkeypatch: pytest.MonkeyPatch, capsys, tmp_path: Path
 ) -> None:
     """The host-level relay must not disappear behind healthy service rows."""
-    import cli.commands.status as status_mod
+    import cli.commands.lifecycle.status as status_mod
 
     monkeypatch.setattr(_repo_commands, "_roles_or_none", lambda: frozenset({"gateway"}))
     monkeypatch.setattr(_probe_commands, "_curl_ok", lambda _u: False)  # pyright: ignore[reportUnknownArgumentType]
@@ -377,7 +377,9 @@ def test_cmd_status_warns_on_prod_source_drift(monkeypatch: pytest.MonkeyPatch, 
     (runs on any installed host, here agent-runner)."""
     monkeypatch.setattr(_repo_commands, "_roles_or_none", lambda: frozenset({"agent-runner"}))
     monkeypatch.setattr(_probe_commands, "_curl_ok", lambda _u: False)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr("cli.commands.status._detect_prod_source_drift", lambda: "ava-7/fix")
+    monkeypatch.setattr(
+        "cli.commands.lifecycle.status._detect_prod_source_drift", lambda: "ava-7/fix"
+    )
     rc = _status_commands.cmd_status()
     assert rc == 0
     out = capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
@@ -392,7 +394,7 @@ def _quiet_status(monkeypatch: pytest.MonkeyPatch, home: Path) -> None:
     """Isolate `ava status` to its release section: a runner-only role, no probes."""
     monkeypatch.setattr(_repo_commands, "_roles_or_none", lambda: frozenset({"agent-runner"}))
     monkeypatch.setattr(_probe_commands, "_curl_ok", lambda _u: False)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr("cli.commands.status._detect_prod_source_drift", lambda: None)
+    monkeypatch.setattr("cli.commands.lifecycle.status._detect_prod_source_drift", lambda: None)
     monkeypatch.setattr("shared.paths.ava_home", lambda: home)
 
 
@@ -535,7 +537,7 @@ def test_status_prints_a_live_host_reading(monkeypatch: pytest.MonkeyPatch, caps
     that must survive a deployment whose LGTM backend is down or was never
     deployed, so it must not go through the observability stack at all.
     """
-    from cli.commands import status as status_mod
+    from cli.commands.lifecycle import status as status_mod
 
     monkeypatch.setattr(status_mod, "_repo_root", lambda: "/repo")
     monkeypatch.setattr(status_mod, "_release_identity_lines", lambda _repo: [])  # pyright: ignore[reportUnknownArgumentType]
@@ -555,7 +557,7 @@ def test_status_host_reading_failure_does_not_hide_the_rest(
 ) -> None:
     """A host without psutil still gets the service table and the release section —
     the reading degrades to its own reason line, it does not abort the verb."""
-    from cli.commands import status as status_mod
+    from cli.commands.lifecycle import status as status_mod
 
     monkeypatch.setattr(status_mod, "_repo_root", lambda: "/repo")
     monkeypatch.setattr(status_mod, "_release_identity_lines", lambda _repo: [])  # pyright: ignore[reportUnknownArgumentType]

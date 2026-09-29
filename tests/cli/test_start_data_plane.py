@@ -13,9 +13,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from cli.commands import start as _start
 from cli.commands.converge.spec import ConvergeCtx
 from cli.commands.data_plane import cluster_instance as _ci
+from cli.commands.lifecycle import start as _start
 from shared import cluster
 from shared.config import settings
 
@@ -120,7 +120,7 @@ def test_port_preflight_warns_and_logs_conflicts(
 ):
     """A foreign occupant on the cluster block → the start CONTINUES (rc-free
     step) but prints the warning and appends it to $AVA_HOME/logs/port_conflicts.log."""
-    from cli.commands import _port_preflight as _pp
+    from cli.commands.converge import port_preflight as _pp
     from shared import cluster as _cluster
 
     ctx = _preflight_ctx(tmp_path)
@@ -143,7 +143,7 @@ def test_port_preflight_warns_and_logs_conflicts(
 
 def test_port_preflight_silent_when_clean(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys):
     """No conflicts and no drift → no output, no log file."""
-    from cli.commands import _port_preflight as _pp
+    from cli.commands.converge import port_preflight as _pp
     from shared import cluster as _cluster
 
     ctx = _preflight_ctx(tmp_path)
@@ -161,7 +161,7 @@ def test_port_preflight_never_fails_start_on_scan_error(
 ):
     """A scan exception prints a notice and returns — the step must not turn a
     warning pass into a failed start."""
-    from cli.commands import _port_preflight as _pp
+    from cli.commands.converge import port_preflight as _pp
 
     ctx = _preflight_ctx(tmp_path)
     monkeypatch.setattr(
@@ -189,7 +189,7 @@ def test_collect_port_conflicts_detects_foreign_listener(
     ownership rule, not the map, so the map is stubbed to one port."""
     import socket
 
-    from cli.commands import _port_preflight as _pp
+    from cli.commands.converge import port_preflight as _pp
 
     sock = socket.socket()
     sock.bind(("127.0.0.1", 0))
@@ -216,7 +216,7 @@ def test_collect_port_conflicts_env_layer_overrides_block_for_enrolled_unit(
     the legacy segment the block layer would otherwise claim. Before the S4
     fix the `.env` layer only filled gaps, so an enrolled unit's health ports
     were never checked (the exact gap im_bridge/delivery_watchdog fell into)."""
-    from cli.commands import _port_preflight as _pp
+    from cli.commands.converge import port_preflight as _pp
 
     ctx = _preflight_ctx(tmp_path)
     # no registry record -> block layer is the legacy segment
@@ -265,7 +265,7 @@ class _Plane:
 @pytest.fixture
 def plane(monkeypatch: pytest.MonkeyPatch) -> _Plane:
     """Every effect of `complete_gateway_data_plane`, recorded in order."""
-    from cli.commands import _health_preflight
+    from cli.commands.converge import health_preflight
     from cli.commands.data_plane import bringup
     from shared.cluster import authority
 
@@ -314,7 +314,7 @@ def plane(monkeypatch: pytest.MonkeyPatch) -> _Plane:
         state["active"] = True
 
     monkeypatch.setattr(authority, "activate", activate)
-    monkeypatch.setattr(_health_preflight, "probe_redis", record("redis-probe"))
+    monkeypatch.setattr(health_preflight, "probe_redis", record("redis-probe"))
     monkeypatch.setattr("cli.start_identity.mark_phase", record("provisioned"))
 
     def needs_provision(_home: object) -> bool:

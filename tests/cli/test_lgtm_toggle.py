@@ -20,7 +20,7 @@ def _wire(
         calls.append(kwargs)
         return 0
 
-    monkeypatch.setattr("cli.commands.start.cmd_start", start)
+    monkeypatch.setattr("cli.commands.lifecycle.start.cmd_start", start)
     return marker, calls
 
 
@@ -74,5 +74,5 @@ def test_normal_start_refusal_is_not_reported_as_toggle_success(
     def refuse(**_kwargs: object) -> int:
         return 1
 
-    monkeypatch.setattr("cli.commands.start.cmd_start", refuse)
+    monkeypatch.setattr("cli.commands.lifecycle.start.cmd_start", refuse)
     assert lgtm.cmd_lgtm_on() == 1

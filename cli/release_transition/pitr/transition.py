@@ -200,7 +200,7 @@ class PitrTransition:
 
     def _offline_rollback(self, journal: Journal, record: ActivationRecord) -> ActivationRecord:
         from cli.commands.data_plane.maintenance_stop import stop_captured
-        from cli.commands.root_driver import require_root_absent
+        from cli.commands.lifecycle.root_driver import require_root_absent
         from services.pitr.activation.runtime import restore_exact_file, settings_digest
         from shared import maintenance
 
@@ -318,10 +318,10 @@ class PitrTransition:
         agent_pause.drain(str(self.request.id), self.at, 90, reap=True)
 
     def stop_apps(self, journal: Journal) -> None:
-        from cli.commands import maintenance as maintenance_commands
         from cli.commands.data_plane.maintenance_stop import capture_custody
-        from cli.commands.root_driver import require_root_absent
-        from cli.commands.service_stop import (
+        from cli.commands.lifecycle import maintenance as maintenance_commands
+        from cli.commands.lifecycle.root_driver import require_root_absent
+        from cli.commands.lifecycle.service_stop import (
             await_terminal_work,
             close_release_terminals,
             require_no_terminals,
@@ -377,7 +377,7 @@ class PitrTransition:
 
     def stop_data(self, operation: Operation) -> None:
         from cli.commands.data_plane.maintenance_stop import stop_captured
-        from cli.commands.root_driver import require_root_absent
+        from cli.commands.lifecycle.root_driver import require_root_absent
         from shared import maintenance
 
         require_inputs(operation)
@@ -412,7 +412,7 @@ class PitrTransition:
         restore_boot(operation, self.image)
 
     def resume(self, operation: Operation) -> None:
-        from cli.commands import maintenance as maintenance_commands
+        from cli.commands.lifecycle import maintenance as maintenance_commands
         from cli.release_transition.root_service import observe
         from shared import pause_owner, start_serving
 

@@ -250,7 +250,7 @@ async def _shutdown_unauthenticated(port: int, data_dir: Path, deadline: float) 
     from redis.asyncio.retry import Retry as AsyncRetry
 
     from cli.commands.data_plane.maintenance_stop import _request_stop
-    from cli.commands.service_stop import remaining, wait_for_exit
+    from cli.commands.lifecycle.service_stop import remaining, wait_for_exit
     from shared.cluster import ownership
     from shared.native_process.ownership import capture_tree
 
@@ -332,7 +332,7 @@ def _verify(port: int, env: RedisEnv, data_dir: Path) -> None:
 def convert_redis(home: Path, port: int, *, execute: bool) -> str:
     """Convert (or verify) this home's Redis; return a one-line outcome."""
     from cli.commands.data_plane import cluster_instance as instance
-    from cli.commands.service_stop import deadline_after
+    from cli.commands.lifecycle.service_stop import deadline_after
 
     state = read_journal(home).get("redis")
     env = RedisEnv.read(home)
@@ -469,7 +469,7 @@ def _convert_db(home: Path, record: ClusterRecord, env: DbEnv) -> int:
         prove_generation_logins,
     )
     from cli.commands.data_plane.pgbouncer import stop_pgbouncer
-    from cli.commands.migrations import cmd_migrations_apply
+    from cli.commands.lifecycle.migrations import cmd_migrations_apply
     from shared.cluster import authority, record_postgres_port
     from shared.envfile import remove_env
 
@@ -724,8 +724,8 @@ def convert_remote_units(
 def admitted_record(home: Path) -> ClusterRecord:
     """`home`'s registry record, only when it is this checkout's quiescent local
     gateway home: no application root, terminals or active release operation."""
-    from cli.commands.root_driver import require_root_absent
-    from cli.commands.service_stop import require_no_terminals
+    from cli.commands.lifecycle.root_driver import require_root_absent
+    from cli.commands.lifecycle.service_stop import require_no_terminals
     from shared.release_operation import require_configuration_write_authorized
 
     if home != ava_home().resolve():

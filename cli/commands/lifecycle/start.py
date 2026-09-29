@@ -9,12 +9,12 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from cli.commands._pause_resume import StartDelegation, resume_after_start
 from cli.commands._repo import _repo_root
 from cli.commands._setup import _print_missing_setup_error
-from cli.commands._start_bookmarks import record_running_sha as _record_running_sha
-from cli.commands.migrations import cmd_migrations_apply
-from cli.commands.status import cmd_status
+from cli.commands.lifecycle._pause_resume import StartDelegation, resume_after_start
+from cli.commands.lifecycle._start_bookmarks import record_running_sha as _record_running_sha
+from cli.commands.lifecycle.migrations import cmd_migrations_apply
+from cli.commands.lifecycle.status import cmd_status
 from cli.start_runtime import StartRuntime
 from ops.service_spec import ServiceSpec
 from shared import start_serving
@@ -204,7 +204,7 @@ def _cmd_start_body(  # noqa: PLR0915 — cohesive linear start sequence (conver
     import cli.commands._probe as _probe_commands
     import cli.commands._repo as _repo_commands
     import cli.commands._setup as _setup_commands
-    import cli.commands.root_driver as _root_driver_commands
+    import cli.commands.lifecycle.root_driver as _root_driver_commands
     from shared import maintenance
 
     maintenance.require_start_allowed()

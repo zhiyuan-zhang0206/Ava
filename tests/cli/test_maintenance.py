@@ -11,8 +11,8 @@ from uuid import uuid4
 
 import pytest
 
-from cli.commands import maintenance as command
-from cli.commands._maintenance_probe import HostIdentity
+from cli.commands.lifecycle import maintenance as command
+from ops.agent_pause_probe import HostIdentity
 from ops.agent_pause_probe import host_identity_or_none as real_host_identity_or_none
 from shared import hold_driver, maintenance, pause_owner, start_serving
 from shared.maintenance_state import MaintenanceHold
@@ -93,7 +93,7 @@ def test_start_keeps_hold_until_explicit_resume(
         assert maintenance.held()
         resume_agents()
 
-    monkeypatch.setattr("cli.commands.start.cmd_start", start)
+    monkeypatch.setattr("cli.commands.lifecycle.start.cmd_start", start)
     monkeypatch.setattr("ops.cluster_pause.unpause_local_cluster", unpause)
     assert command._start("local", WHEN) == 0
     assert command._hold("local", WHEN).phase == "ready"
@@ -154,7 +154,7 @@ def test_resume_still_refuses_an_unreadable_host_probe(
 
 def test_failed_start_remains_retryable_under_hold(monkeypatch: pytest.MonkeyPatch) -> None:
     phase("stopped")
-    monkeypatch.setattr("cli.commands.start.cmd_start", MagicMock(return_value=7))
+    monkeypatch.setattr("cli.commands.lifecycle.start.cmd_start", MagicMock(return_value=7))
     assert command._start("local", WHEN) == 7
     assert command._hold("local", WHEN).phase == "starting"
 

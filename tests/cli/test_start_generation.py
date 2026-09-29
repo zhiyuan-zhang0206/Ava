@@ -9,7 +9,7 @@ from typing import Any
 
 import pytest
 
-from cli.commands.start_generation import launch_digest
+from cli.commands.lifecycle.start_generation import launch_digest
 from shared.runtime_interpreter import source_digest
 from shared.start_inputs import configuration_digest
 
@@ -106,7 +106,7 @@ def test_generation_binds_declared_service_selection_and_refuses_dangling_pointe
 
 
 def test_live_admission_requires_positive_absence(monkeypatch: pytest.MonkeyPatch) -> None:
-    from cli.commands import root_driver as driver
+    from cli.commands.lifecycle import root_driver as driver
 
     def no_status(_client: object) -> None:
         return None

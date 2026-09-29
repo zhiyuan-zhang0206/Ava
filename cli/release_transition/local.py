@@ -74,9 +74,9 @@ class LocalTransition:
         return current
 
     def stop(self, operation: Operation) -> None:
-        from cli.commands import maintenance as maintenance_commands
-        from cli.commands import service_stop
-        from cli.commands.root_driver import require_root_absent
+        from cli.commands.lifecycle import maintenance as maintenance_commands
+        from cli.commands.lifecycle import service_stop
+        from cli.commands.lifecycle.root_driver import require_root_absent
         from cli.release_transition import root_macos
         from ops import pty_close_notices
         from shared import maintenance, pause_owner
@@ -127,7 +127,7 @@ class LocalTransition:
 
     def fence(self, journal: Journal) -> None:
         """Revoke the direction's write generation once its root is gone."""
-        from cli.commands.root_driver import require_root_absent
+        from cli.commands.lifecycle.root_driver import require_root_absent
         from cli.release_transition import authority
 
         self.request.require_configuration()
@@ -136,7 +136,7 @@ class LocalTransition:
 
     def authorize(self, journal: Journal) -> None:
         """Admit a new write generation for the selected image before it starts."""
-        from cli.commands.root_driver import require_root_absent
+        from cli.commands.lifecycle.root_driver import require_root_absent
         from cli.release_transition import authority
 
         self.request.require_configuration()
@@ -151,8 +151,8 @@ class LocalTransition:
         return self.candidate if operation.reference == self.request.candidate else self.previous
 
     def select(self, operation: Operation) -> None:
-        from cli.commands.root_driver import require_root_absent
-        from cli.commands.service_stop import live_terminals
+        from cli.commands.lifecycle.root_driver import require_root_absent
+        from cli.commands.lifecycle.service_stop import live_terminals
 
         self.preflight()
         require_root_absent()
@@ -226,7 +226,7 @@ class LocalTransition:
 
     def resume(self, operation: Operation) -> None:
         self.request.require_configuration()
-        from cli.commands import maintenance as maintenance_commands
+        from cli.commands.lifecycle import maintenance as maintenance_commands
         from shared import maintenance, pause_owner, start_serving
 
         # An executor may have died after recording this phase. A durable
@@ -252,7 +252,7 @@ class LocalTransition:
         cancelled; otherwise the stop completes, the previous root starts,
         is observed and resumes, all under the same hold.
         """
-        from cli.commands import maintenance as maintenance_commands
+        from cli.commands.lifecycle import maintenance as maintenance_commands
         from shared import pause_owner
 
         operation = journal.operation

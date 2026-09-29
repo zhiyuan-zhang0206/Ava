@@ -14,7 +14,7 @@ import json
 import sys
 from pathlib import Path
 
-from cli.commands._rendered_file import write_rendered_guarded
+from cli.commands.converge.rendered_file import write_rendered_guarded
 from shared import telemetry
 
 from .observatory_urls import _atomic_write

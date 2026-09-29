@@ -76,10 +76,10 @@ Package acquisition is separate and has no cluster effects:
 The inactive committed application build input is described in
 [[cli/release-build.ava.okf.md]].
 
-## Internal Commands (`_` prefix, run by start/update)
+## Internal Commands (`_` prefix)
 
-Per-cluster pg/redis bring-up, host convergence, the staged upgrade legs, and
-the rest of the `_`-prefixed steps are enumerated in
+Per-cluster pg/redis bring-up, host convergence, the host lifecycle and the
+`_`-prefixed helpers they share are enumerated in
 [[cli/commands/commands.ava.okf.md]].
 
 ## Design Principles
@@ -89,7 +89,7 @@ the rest of the `_`-prefixed steps are enumerated in
 - **Ops-layer only**: not exposed to agents (they use the `ava.*` SDK).
 - **Settings-independent**: `ava start` identity admission is specially routed in `main()` before settings-gated imports — no `shared.config` (stdlib + `shared.dotenv_boot`). `ava config` uses only registry metadata and direct local files until a full Settings consumer actually needs the singleton, so a broken `.env` remains repairable. `ava pty` is settings-lite and data-plane-independent.
 - **Cold stop**: normal pause/stop loads the cluster configuration for native drain. Explicit force stop, or repeating a completed stop with no recorded failures, can skip gateway configuration fetch; the latter reads the existing pause journal before Settings bootstrap.
-- **Migrations are not a command**: `cli/commands/migrations.py:cmd_migrations_apply` runs internally from `ava start` / `ava cluster update`.
+- **Migrations are not a command**: `cli/commands/lifecycle/migrations.py:cmd_migrations_apply` runs internally from `ava start` / `ava cluster update`.
 
 ## Entry Points
 

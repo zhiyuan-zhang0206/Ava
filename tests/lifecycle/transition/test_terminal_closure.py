@@ -17,8 +17,8 @@ from uuid import uuid4
 
 import pytest
 
-from cli.commands import service_stop as strict
-from cli.commands._maintenance_stop_report import StopIncompleteError
+from cli.commands.lifecycle import service_stop as strict
+from cli.commands.lifecycle._maintenance_stop_report import StopIncompleteError
 from ops import pty_close_notices
 from shared import maintenance
 from shared.platform import IS_WINDOWS
@@ -265,8 +265,8 @@ def test_release_stop_closes_terminals_after_root_and_before_evidence(
 ) -> None:
     """The release stop phase closes a live terminal instead of refusing it:
     work bound, root stop keeping terminals, closure, then root evidence."""
-    from cli.commands import maintenance as maintenance_commands
-    from cli.commands import root_driver
+    from cli.commands.lifecycle import maintenance as maintenance_commands
+    from cli.commands.lifecycle import root_driver
     from cli.release_transition import local
 
     terminal = PtySessionBackend()
@@ -349,8 +349,8 @@ def test_pitr_stop_apps_closes_terminals_after_root_and_before_evidence(
     same order as a release's stop phase: work bound, root stop keeping
     terminals, closure (with a PITR-named notice for the busy owner), root
     evidence, then the post-closure terminal evidence check."""
-    from cli.commands import maintenance as maintenance_commands
-    from cli.commands import root_driver
+    from cli.commands.lifecycle import maintenance as maintenance_commands
+    from cli.commands.lifecycle import root_driver
     from cli.release_transition.pitr import transition as pitr_transition
     from ops import pty_close_notices
     from shared import maintenance
@@ -402,8 +402,8 @@ def test_pitr_stop_apps_evidence_check_refuses_a_terminal_live_after_closure(
     """`require_no_terminals` is the post-closure evidence check: a terminal
     that is somehow still alive right after `close_release_terminals` returns
     must refuse before PITR touches the data plane."""
-    from cli.commands import maintenance as maintenance_commands
-    from cli.commands import root_driver
+    from cli.commands.lifecycle import maintenance as maintenance_commands
+    from cli.commands.lifecycle import root_driver
     from cli.release_transition.pitr import transition as pitr_transition
     from shared import maintenance
 

@@ -13,7 +13,7 @@ from datetime import datetime
 import psutil
 
 from cli.commands._repo import _repo_root, build_services, session_name
-from cli.commands.service_stop import (
+from cli.commands.lifecycle.service_stop import (
     OwnedProcess,
     capture_tree,
     close_terminals,
@@ -49,7 +49,7 @@ def _stop_browser(deadline: float) -> None:
 
 
 def _stop_extras(deadline: float) -> None:
-    from cli.commands._stop_extras import stop_permissions_helper
+    from cli.commands.lifecycle._stop_extras import stop_permissions_helper
 
     stop_permissions_helper(timeout_s=remaining(deadline))
 
@@ -273,7 +273,7 @@ def _stop_plan(
 
 def _services_phase_action(*, preserved: frozenset[str], deadline: float) -> Callable[[], object]:
     """Stop services through their root owner, preserving explicitly retained units."""
-    import cli.commands.root_driver as _root_driver_commands
+    import cli.commands.lifecycle.root_driver as _root_driver_commands
 
     return lambda: _root_driver_commands._stop_root_service_tree(
         preserve=preserved, timeout_s=remaining(deadline)
@@ -282,8 +282,8 @@ def _services_phase_action(*, preserved: frozenset[str], deadline: float) -> Cal
 
 def _require_unstarted_initialization() -> bool:
     """Positive first-start evidence that no application could have admitted work."""
-    from cli.commands.root_driver import require_root_absent
-    from cli.commands.service_stop import require_no_terminals
+    from cli.commands.lifecycle.root_driver import require_root_absent
+    from cli.commands.lifecycle.service_stop import require_no_terminals
     from cli.start_identity import read_intent
     from shared.paths import ava_home, root_manifests_path
 
@@ -336,7 +336,7 @@ def stop(
     pause) SIGKILLs what outlives its bounded grace
     (`service_stop.close_terminals`).
     """
-    from cli.commands.stop import _announce_stopping, _confirm_stop
+    from cli.commands.lifecycle.stop import _announce_stopping, _confirm_stop
 
     os.environ.pop("AVA_HOME_OVERRIDE", None)
     from shared.proc import hosting_exec_domain, hosting_supervised_session

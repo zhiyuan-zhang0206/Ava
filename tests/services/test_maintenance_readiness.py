@@ -145,9 +145,9 @@ async def test_real_ops_status_reports_the_hold_without_releasing_it(
 
 @pytest.mark.usefixtures("held")
 def test_maintenance_start_waiver_does_not_publish_ready(monkeypatch: pytest.MonkeyPatch) -> None:
-    from cli.commands import maintenance as cli_maintenance
+    from cli.commands.lifecycle import maintenance as cli_maintenance
 
-    monkeypatch.setattr("cli.commands.start.cmd_start", MagicMock(return_value=0))
+    monkeypatch.setattr("cli.commands.lifecycle.start.cmd_start", MagicMock(return_value=0))
     assert cli_maintenance._start("update", WHEN) != 0
     current = maintenance.snapshot()
     assert current is not None and current.maintenance is not None

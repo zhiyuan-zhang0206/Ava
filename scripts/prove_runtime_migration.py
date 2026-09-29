@@ -18,7 +18,7 @@ from unittest.mock import patch
 
 import psycopg
 
-from cli.commands.start import cmd_start
+from cli.commands.lifecycle.start import cmd_start
 from cli.start_runtime import StartRuntime
 from shared import home_lifecycle_locks
 from shared.config import settings
