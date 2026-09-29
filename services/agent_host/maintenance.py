@@ -10,6 +10,7 @@ from psycopg_pool import AsyncConnectionPool, PoolTimeout
 
 from services.agent_host.dispatcher import PendingInboundWake
 from shared import maintenance
+from shared.log import logger
 from shared.resource_admission import DRAINED_RESOURCES
 
 FailureFences = dict[int, tuple[str | None, datetime | None]]
@@ -47,6 +48,22 @@ async def record_failure(agent_id: int, exc: BaseException, fences: FailureFence
         fences.pop(agent_id, None)
         return
     category = type(exc).__name__
+    assert current.maintenance is not None  # noqa: S101 — snapshot() returns only holds
+    if current.maintenance.outside_cohort(agent_id):
+        # Every runner sees every wake (the dispatcher's subscription is
+        # cluster-wide). One cancelled before its row read could say "not
+        # ours" is no receipt of this unit: the captured cohort, readable
+        # without the database, proves the agent has no continuation here
+        # (FC-10 F20: a stopping host latched other machines' woken agents).
+        # An uncaptured cohort proves nothing, so preparation still records.
+        fences.pop(agent_id, None)
+        logger.debug(
+            "wake failure for agent {agent_id} outside this unit's maintenance cohort "
+            "not recorded ({category})",
+            agent_id=agent_id,
+            category=category,
+        )
+        return
     if isinstance(exc, CRASH_EQUIVALENT_FAILURES):
         # The receipt channel broke, not the continuation: the left-behind
         # state is crash-equivalent and durable. Record it for audit WITHOUT

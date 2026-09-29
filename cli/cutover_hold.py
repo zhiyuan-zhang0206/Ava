@@ -17,8 +17,10 @@ own records first.
   failed or unready held first start) to `ready`, as the held first start does.
 
 Any other hold, including a later stop's on an adopted home, keeps the
-ordinary release. Deleted with the `scripts/cutover_*` scripts after the
-cutover.
+ordinary release. The adoption also reads a legacy stop's hold here
+(`legacy_hold_facts`) and settles its failure receipts of other machines'
+agents (`settle_foreign_receipts`). Deleted with the `scripts/cutover_*`
+scripts after the cutover.
 """
 
 from __future__ import annotations
@@ -28,6 +30,9 @@ import sys
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from typing import Any
+
+from shared.maintenance_state import MaintenanceHold
 
 ADOPTION_JOURNAL = "cutover-rollback/adopt-home.json"
 # The holder of a hold the cutover creates (`cutover:<id>`); no other hold takes it.
@@ -40,6 +45,89 @@ class CutoverHold:
 
     holder: str
     acquired_at: datetime
+
+
+def legacy_hold_facts(home: Path) -> dict[str, Any]:
+    """`home`'s pause-owner journal as the inventory reports it, and whether the
+    adoption may keep its hold as the cutover hold.
+
+    A completed legacy `ava stop` leaves its hold in phase `stopped`. A failure
+    receipt refuses the adoption unless it is `foreign`: its agent is outside
+    the cohort the legacy preparation captured, so it has no continuation in
+    the hold. The legacy host latched such receipts when its stop cancelled
+    wakes it had received for other machines' agents (FC-10 F20); the adoption
+    records them in its journal and settles them. A receipt of an agent in the
+    cohort (`local`) still refuses.
+    """
+    from shared import pause_owner
+
+    snapshot = pause_owner.read_for_home(home)
+    facts: dict[str, Any] = {
+        "status": snapshot.status,
+        "holder": snapshot.holder,
+        "acquired_at": snapshot.acquired_at.isoformat() if snapshot.acquired_at else None,
+        **_maintenance_facts(snapshot.maintenance),
+    }
+    facts["adoptable"] = (
+        snapshot.status == "paused"
+        and facts["maintenance_phase"] == "stopped"
+        and not facts["local_receipts"]
+    )
+    return facts
+
+
+def _maintenance_facts(hold: MaintenanceHold | None) -> dict[str, Any]:
+    if hold is None:
+        return {
+            "maintenance_phase": None,
+            "cohort": [],
+            "parked": [],
+            "drained": [],
+            "foreign_receipts": {},
+            "local_receipts": [],
+        }
+    foreign = hold.receipts_outside_cohort()
+    return {
+        "maintenance_phase": hold.phase,
+        "cohort": sorted(hold.commands),
+        "parked": list(hold.parked),
+        "drained": list(hold.drained),
+        "foreign_receipts": {str(agent): cause for agent, cause in sorted(foreign.items())},
+        "local_receipts": sorted(set(hold.unsettled_failures()) - set(foreign)),
+    }
+
+
+def settle_foreign_receipts(
+    hold: MaintenanceHold, receipts: dict[int, str], record: dict[str, str]
+) -> MaintenanceHold | None:
+    """`hold` with exactly `receipts` moved into `repaired` under `record`;
+    None when an earlier run already did.
+
+    Refuses unless the hold's unsettled failures are exactly `receipts`, every
+    one outside its cohort, and no repair record stands: an operator's is
+    never replaced.
+    """
+    from dataclasses import replace
+
+    from shared.maintenance_state import validate_repair_record
+
+    unsettled = hold.unsettled_failures()
+    if not unsettled and receipts.items() <= hold.repaired.items():
+        return None
+    if unsettled != receipts or hold.receipts_outside_cohort() != receipts:
+        raise RuntimeError(
+            f"the hold's failure receipts changed under the adoption ({unsettled}, planned "
+            f"{receipts}); run the inventory again"
+        )
+    if hold.repair_record is not None:
+        raise RuntimeError("the hold already carries an operator's repair record")
+    failures = {agent: cause for agent, cause in hold.failures.items() if agent not in receipts}
+    return replace(
+        hold,
+        failures=failures,
+        repaired={**hold.repaired, **receipts},
+        repair_record=validate_repair_record(record),
+    )
 
 
 def recorded_hold(home: Path) -> CutoverHold | None:

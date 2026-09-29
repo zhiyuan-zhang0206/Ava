@@ -56,6 +56,27 @@ class MaintenanceHold:
             agent: reason for agent, reason in self.failures.items() if agent not in self.reaped
         }
 
+    def outside_cohort(self, agent_id: int) -> bool:
+        """Whether `agent_id` provably has no continuation in this hold.
+
+        Preparation captures every non-terminated agent of this machine under
+        row locks, each as a restart command or parked. An agent outside that
+        set is another machine's (every runner sees every wake), or one this
+        hold never drains; no receipt of it gates the hold. A hold the cutover
+        created has an empty cohort, so no agent has a continuation there.
+        Before the capture (phase `preparing`, empty cohort) nothing is proven.
+        """
+        captured = self.phase != "preparing" or bool(self.commands or self.parked)
+        return captured and agent_id not in self.commands and agent_id not in self.parked
+
+    def receipts_outside_cohort(self) -> dict[int, str]:
+        """The unsettled failures of agents with no continuation in this hold."""
+        return {
+            agent: reason
+            for agent, reason in self.unsettled_failures().items()
+            if self.outside_cohort(agent)
+        }
+
     def encode(self) -> dict[str, object]:
         return {
             "phase": self.phase,

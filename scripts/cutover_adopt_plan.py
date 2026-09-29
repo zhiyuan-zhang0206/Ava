@@ -9,8 +9,9 @@ Steps run in this order; each one's effects are idempotent:
 
 1. `jobs` retires the legacy OS jobs (disarm first).
 2. `hold` adopts the maintenance hold a completed legacy `ava stop` left
-   (phase `stopped`) as the cutover hold; without one, it archives an inert
-   legacy pause-owner journal and creates the cutover hold in phase `stopped`.
+   (phase `stopped`) as the cutover hold, settling its foreign failure
+   receipts; without one, it archives an inert legacy pause-owner journal
+   and creates the cutover hold in phase `stopped`.
 3. `files` moves inert legacy files aside.
 4. `selection` translates `disabled_services` into `service-selection.json`.
 5. `env` records `AVA_SERVICE_PATH`, removes dead keys and, on a remote unit,
@@ -122,15 +123,37 @@ def _jobs(facts: Facts) -> tuple[dict[str, Any], ...]:
     )
 
 
+def _foreign_receipts(owner: dict[str, Any]) -> tuple[dict[str, Any], ...]:
+    """Record, with their evidence, and settle the kept hold's foreign receipts.
+
+    Every one names an agent outside the cohort the legacy stop captured (all
+    non-terminated agents of this machine), so none is this unit's
+    continuation: its host latched other machines' wakes it cancelled (FC-10
+    F20). Settling moves exactly these into the hold's `repaired`.
+    """
+    if not owner["foreign_receipts"]:
+        return ()
+    keys = ("holder", "acquired_at", "cohort", "parked", "drained")
+    evidence = {key: owner[key] for key in keys}
+    return (
+        {
+            "op": "hold-disregard-foreign-receipts",
+            **evidence,
+            "receipts": owner["foreign_receipts"],
+        },
+    )
+
+
 def _hold(facts: Facts) -> tuple[dict[str, Any], ...]:
     owner = facts.pause_owner
     if _ours(facts):
-        return ()
+        return _foreign_receipts(owner)
     if owner["adoptable"] and facts.journal is None:
         # The legacy stop's own hold becomes the cutover hold: its cohort is
         # exactly the agents that stop drained, which the final resume wakes.
         return (
             {"op": "hold-adopt", "holder": owner["holder"], "acquired_at": owner["acquired_at"]},
+            *_foreign_receipts(owner),
         )
     effects: list[dict[str, Any]] = []
     if facts.pause_owner["status"] == "resumed":
@@ -263,9 +286,11 @@ def _state_refusals(facts: Facts) -> list[str]:
         reasons.append(f"{PAUSE_OWNER} is unreadable")
     adoptable = owner["adoptable"] and facts.journal is None
     if owner["status"] == "paused" and not _ours(facts) and not adoptable:
+        local = f", failure receipts of its own agents {owner['local_receipts']}"
         reasons.append(
             f"{PAUSE_OWNER} holds a pause that is not a completed stop's maintenance hold "
-            f"({owner['holder']}, phase {owner['maintenance_phase']})"
+            f"({owner['holder']}, phase {owner['maintenance_phase']}"
+            f"{local if owner['local_receipts'] else ''})"
         )
     selection = facts.home / SELECTION
     if (

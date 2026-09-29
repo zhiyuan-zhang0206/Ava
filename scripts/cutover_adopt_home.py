@@ -73,6 +73,7 @@ from cli.cutover_hold import (
     CUTOVER_HOLDER_PREFIX,
     held_start_command,
     release_command,
+    settle_foreign_receipts,
 )
 from scripts.cutover_adopt_plan import (
     SELECTION,
@@ -250,6 +251,52 @@ def _require_hold(home: Path, journal: dict[str, Any], phase: str) -> None:
         raise RuntimeError(f"the adopted hold {holder} moved to {current.maintenance.phase}")
 
 
+def _settle_foreign_receipts(home: Path, journal: dict[str, Any], effect: dict[str, Any]) -> None:
+    """Move exactly the effect's receipts into the kept hold's `repaired`.
+
+    Only while the hold is still the journal's, in phase `stopped`, and its
+    unsettled failures are exactly those receipts, all outside its cohort
+    (`cli.cutover_hold.settle_foreign_receipts`); the audit record names this
+    adoption. A re-run after the write finds them repaired.
+    """
+    import getpass
+    import os
+
+    from shared import pause_owner
+    from shared.platform import file_lock
+
+    holder, at = journal["hold"]["holder"], datetime.fromisoformat(journal["hold"]["acquired_at"])
+    receipts = {int(agent): cause for agent, cause in effect["receipts"].items()}
+    record = {
+        "at": datetime.now(UTC).isoformat(),
+        "by": f"cutover adoption {journal['cutover_id']}: foreign receipts disregarded",
+        "user": getpass.getuser(),
+        "uid": str(getattr(os, "getuid", lambda: 0)()),
+        "pid": str(os.getpid()),
+    }
+    path = home / PAUSE_OWNER
+    with file_lock(path.parent / "deploy-pause-owner.lock", timeout_s=pause_owner._LOCK_TIMEOUT_S):
+        current = pause_owner.read_for_home(home)
+        hold = current.maintenance
+        if not (current.status == "paused" and current.matches(holder, at) and hold):
+            raise RuntimeError(f"the adopted hold {holder} is no longer standing")
+        if hold.phase != "stopped":
+            raise RuntimeError(f"the adopted hold {holder} moved to {hold.phase}")
+        settled = settle_foreign_receipts(hold, receipts, record)
+        if settled is None:
+            return
+        pause_owner._write_atomic(
+            path,
+            {
+                "state": "paused",
+                "holder": holder,
+                "acquired_at": at.isoformat(),
+                "maintenance": settled.encode(),
+                "driver": current.driver.encode() if current.driver else None,
+            },
+        )
+
+
 def _record_complete(registry: Path, home: Path, ports: dict[str, int]) -> None:
     with cluster.registry_lock(path=registry):
         records = cluster.load_registry(path=registry)
@@ -340,6 +387,9 @@ def _handlers(
         "archive": lambda effect: _archive(home, effect),
         "hold-create": lambda _effect: _create_hold(home, journal),
         "hold-adopt": lambda _effect: _require_hold(home, journal, "stopped"),
+        "hold-disregard-foreign-receipts": lambda effect: _settle_foreign_receipts(
+            home, journal, effect
+        ),
         "selection-write": lambda effect: write_private_bytes(
             home / SELECTION, selection_payload(effect["names"])
         ),
