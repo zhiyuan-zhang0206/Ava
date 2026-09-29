@@ -34,6 +34,7 @@ from services.pitr.checksums import CRC32C, KNOWN_CHECKSUM_ALGOS
 from services.pitr.operation_custody import NativeProcess, OperationWorker, owned_receipts
 from services.pitr.space_budget import CandidateSpaceBudget, require_candidate_space
 from services.pitr.worker_process import StopSignal
+from shared.db import connect_url
 from shared.pg_admin import OwnerAuthority, local_owner_authority
 from shared.pg_tools import pg_tool
 
@@ -128,7 +129,7 @@ def _validate_replication_contract(db_url: str, replication_db_url: str) -> None
     replication = conninfo_to_dict(replication_db_url)
     if str(primary.get("port", "")) != str(replication.get("port", "")):
         raise BaseCandidateError("replication URL does not target this cluster's Postgres port")
-    with psycopg.connect(replication_db_url) as conn, conn.cursor() as cur:
+    with connect_url(replication_db_url) as conn, conn.cursor() as cur:
         cur.execute("SELECT rolreplication, rolsuper FROM pg_roles WHERE rolname = current_user")
         row = cur.fetchone()
     if row != (True, False):

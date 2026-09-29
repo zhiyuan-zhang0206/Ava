@@ -10,7 +10,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import cast
 
-import psycopg
 from psycopg import sql
 
 from services import backup
@@ -278,7 +277,7 @@ def restore_rollback_snapshot_table(table: str, dump: Path) -> None:
         )
         if result.returncode != 0:
             raise SnapshotArchiveError(f"pg_restore exited {result.returncode}")
-        with psycopg.connect(scratch_db_url, autocommit=True) as connection:
+        with db.connect_url(scratch_db_url, autocommit=True, unbounded=True) as connection:
             exists = connection.execute("SELECT to_regclass(%s)", (f"public.{table}",)).fetchone()
             if exists is None or exists[0] is None:
                 raise SnapshotArchiveError("restore drill did not recreate the rollback snapshot")

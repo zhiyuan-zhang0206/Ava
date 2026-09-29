@@ -23,11 +23,5 @@
   },
   "directories": {
     "services/pitr": 66
-  },
-  "owner_bypasses": {
-    "services/pitr/base_candidate.py::postgres-dial": 1,
-    "services/pitr/restore_drill.py::postgres-dial": 3,
-    "services/pitr/restore_postgres.py::postgres-dial": 3,
-    "services/pitr/rollback_snapshot_archive.py::postgres-dial": 1
   }
 }

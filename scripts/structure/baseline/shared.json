@@ -46,11 +46,5 @@
   },
   "nesting": {
     "shared/daemon_http.py::start_daemon_http.<locals>.handle": 6
-  },
-  "owner_bypasses": {
-    "shared/migrations.py::postgres-dial": 1,
-    "shared/pg_foreground.py::postgres-dial": 1,
-    "shared/pg_stall_watchdog.py::postgres-dial": 2,
-    "shared/pg_tools.py::postgres-dial": 2
   }
 }

@@ -84,9 +84,9 @@ def probe_postgres(url: str, timeout: float = _PROBE_TIMEOUT_S) -> str | None:
     if url == UNANCHORED_DB_SENTINEL:
         return "no cluster connection facts (unanchored checkout)"
     try:
-        import psycopg
+        from shared.db_connections import connect_url
 
-        with psycopg.connect(url, connect_timeout=int(timeout), autocommit=True) as conn:
+        with connect_url(url, autocommit=True, connect_timeout=int(timeout)) as conn:
             conn.execute("SELECT 1")
     except Exception as exc:  # a probe reports any failure
         return _short_reason(exc)

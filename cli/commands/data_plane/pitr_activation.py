@@ -186,8 +186,8 @@ def _validate_secrets() -> dict[str, str]:
 
 
 def read_pg_state() -> dict[str, str]:
+    from shared import pg_admin
     from shared.cluster import db_identity, get_record, ownership, record_postgres_port
-    from shared.pg_admin import OwnerAuthority
 
     from .cluster_instance import pg_admin_url
 
@@ -204,8 +204,11 @@ def read_pg_state() -> dict[str, str]:
             raise RuntimeError(f"PostgreSQL returned no row for {query!r}")
         return row[0]
 
-    with psycopg.connect(pg_admin_url(record_postgres_port(record)), autocommit=True) as conn:
-        ownership.require_postgres_connection(conn, ava_home() / "pg")
+    with pg_admin.connect(
+        pg_admin_url(record_postgres_port(record)),
+        expected_data_dir=ava_home() / "pg",
+        autocommit=True,
+    ) as conn:
         system_id = str(scalar(conn, "SELECT system_identifier FROM pg_control_system()"))
         server_version = int(str(scalar(conn, "SHOW server_version_num")))
         current = {
@@ -222,7 +225,7 @@ def read_pg_state() -> dict[str, str]:
     # The pre-activation dump reads as the schema owner (the administrator
     # acting as the owner over the same socket), never as the superuser itself
     # or a write-generation login; the session proves custody and the role.
-    dump_target = OwnerAuthority(
+    dump_target = pg_admin.OwnerAuthority(
         admin_url=pg_admin_url(record_postgres_port(record)),
         database=expected_db,
         owner=expected_db,

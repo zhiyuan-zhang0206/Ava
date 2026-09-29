@@ -55,7 +55,6 @@ from typing import cast
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
-import psycopg
 from psycopg.conninfo import conninfo_to_dict, make_conninfo
 
 from services.gateway_side.backup import passphrase as backup_passphrase
@@ -69,7 +68,7 @@ from services.pitr.logical_dump_names import (
     stamp_utc,
 )
 from shared.config import settings
-from shared.db import connect, direct_db_url
+from shared.db import connect, connect_url, direct_db_url
 from shared.pg_admin import local_owner_authority
 from shared.pg_tools import pg_tool
 from shared.platform import LockTimeoutError, file_lock
@@ -615,7 +614,7 @@ def _db_size_breakdown(db_url: str | None = None) -> str:
     """
     try:
         with (
-            psycopg.connect(db_url, autocommit=True, connect_timeout=_BREAKDOWN_CONNECT_TIMEOUT_S)
+            connect_url(db_url, autocommit=True, connect_timeout=_BREAKDOWN_CONNECT_TIMEOUT_S)
             if db_url is not None
             else connect(direct=True, autocommit=True)
         ) as conn:

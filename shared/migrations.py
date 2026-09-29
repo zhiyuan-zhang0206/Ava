@@ -75,7 +75,7 @@ from pathlib import Path
 
 import psycopg
 
-from shared.db import PG_KEEPALIVE_KWARGS
+from shared.db import connect_url
 from shared.dotenv_boot import checkout_anchored_home
 from shared.log import logger
 from shared.machine import MachineNameMissing, machine_name
@@ -212,25 +212,24 @@ def assert_schema_current(db_url: str) -> None:
     MigrationLayoutError pass through; the process entry receives the traceback
     and exits directly; the human/Claude reads the stack and takes over.
 
-    Connects with `shared.db.PG_KEEPALIVE_KWARGS` rather than through
-    `shared.db.connect()`: no function in this module reads settings — every
-    other entry point takes a `conn` and this one takes `db_url` — whereas
-    `connect()` reads `settings.data_plane` and would ignore the argument.
-    Every caller passes `settings.data_plane.db_url` — the one URL — which
-    points at the PgBouncer pooler when pooling is on; this boot assertion is
-    a read-only SELECT, so pooled is fine (only the migration applier needs
-    the direct URL).
-    The kwargs come from that one constant so there is a single definition of the
-    cluster's connect-timeout / keepalive posture. `connect_timeout` is the
-    load-bearing one here: this is the FIRST thing a daemon does at boot, so
-    against a database that black-holes packets (dropped traffic, not
-    ECONNREFUSED — a runner that changed networks, a stale route) a bare connect
-    parks the whole boot on the OS TCP-retransmit timeout. The daemon then reads
+    Dials through `shared.db.connect_url()` rather than `shared.db.connect()`:
+    no function in this module reads settings — every other entry point takes
+    a `conn` and this one takes `db_url` — whereas `connect()` reads
+    `settings.data_plane` and would ignore the argument. Every caller passes
+    `settings.data_plane.db_url` — the one URL — which points at the PgBouncer
+    pooler when pooling is on; this boot assertion is a read-only SELECT, so
+    pooled is fine (only the migration applier needs the direct URL).
+    The door carries the cluster's one connect-timeout / keepalive posture.
+    `connect_timeout` is the load-bearing part here: this is the FIRST thing a
+    daemon does at boot, so against a database that black-holes packets
+    (dropped traffic, not ECONNREFUSED — a runner that changed networks, a
+    stale route) a bare connect parks the whole boot on the OS TCP-retransmit
+    timeout. The daemon then reads
     as "failed to start" while it is really blocked on a socket, and
     `respawn_and_verify` reports it down and respawns another one that wedges
     identically. Bounded at 5s, boot raises the socket error instead.
     """
-    with psycopg.connect(db_url, autocommit=True, **PG_KEEPALIVE_KWARGS) as conn:
+    with connect_url(db_url, autocommit=True) as conn:
         check_schema_version(conn)
 
 
