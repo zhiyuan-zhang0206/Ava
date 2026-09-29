@@ -13,7 +13,7 @@ from shared.agents import AgentNotFound, AgentStatus
 from shared.agents.incarnation.lifecycle_acceptance import KILL_ALL_SHELL_SESSIONS
 from shared.agents.messages.envelope import validate_writable_source
 from shared.db import publish_inbound_wake
-from shared.db_transaction import write_transaction
+from shared.db.transaction import write_transaction
 from shared.log import logger
 from shared.telemetry.audit_events import prepare_event_log
 

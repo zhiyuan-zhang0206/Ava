@@ -86,8 +86,8 @@ from scripts.cutover_inventory import (
 from scripts.cutover_inventory import read_journal as read_adoption
 from shared.agents.incarnation.predecessor_closure import ClosureEvidence, close_retired_predecessor
 from shared.agents.incarnation.resources import IncarnationResources, ResourceEvidenceError
+from shared.db.pg_admin import OwnerAuthority
 from shared.host.private_storage import ensure_private_dir, write_private_bytes
-from shared.pg_admin import OwnerAuthority
 
 VERSION = 2  # 2: each run names the adoption it belongs to
 RECORD = f"{ARCHIVE}/db-records"
@@ -583,7 +583,7 @@ def owner_authority(home: Path, registry: Path) -> OwnerAuthority:
     from psycopg.conninfo import conninfo_to_dict
 
     from shared.cluster import load_registry, record_postgres_port
-    from shared.pg_admin import pg_socket_path
+    from shared.db.pg_admin import pg_socket_path
 
     record = load_registry(path=registry).get(str(home))
     if record is None:
@@ -602,7 +602,7 @@ def owner_authority(home: Path, registry: Path) -> OwnerAuthority:
 def session(home: Path, registry: Path, *, write: bool) -> Generator[psycopg.Connection[Any]]:
     """The owner session. Read modes also run against the legacy postmaster, which
     has no custody record; `--execute` binds the session to the home's postmaster."""
-    from shared.pg_admin import owner_session
+    from shared.db.pg_admin import owner_session
 
     authority = owner_authority(home, registry)
     with owner_session(

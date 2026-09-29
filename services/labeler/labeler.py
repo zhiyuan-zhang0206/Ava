@@ -12,7 +12,7 @@ from loguru import logger
 from shared.agents.labels import publish_label_updated
 from shared.agents.messages.kwargs import message_content
 from shared.config import settings
-from shared.db_transaction import write_transaction
+from shared.db.transaction import write_transaction
 from shared.lm.content import content_blocks
 from shared.lm.factory import build_chat_model
 

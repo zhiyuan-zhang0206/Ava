@@ -135,9 +135,9 @@ _SQL_OR_DYNAMIC_KINDS = frozenset(
         "exec(timeout)",
         # audit dynamic event_type: not an `event_type="x"` literal, invisible to the scanner.
         "spawn",  # ops/agents/spawn.py:349 event_type = "fork" if ... else "spawn"
-        "send_message",  # shared/db.py:497 inbound kind->event_type mapping value
-        "terminate",  # shared/db.py:498 same as above
-        "cancel",  # shared/db.py:500 same as above
+        "send_message",  # shared/db/__init__.py:497 inbound kind->event_type mapping value
+        "terminate",  # shared/db/__init__.py:498 same as above
+        "cancel",  # shared/db/__init__.py:500 same as above
         # Historic producer-less events (registry §7.4): existing DB rows and schema
         # comments still reference them; registration stays until the unified model
         # lands and retirement is confirmed.

@@ -9,7 +9,7 @@ from ava.impersonation.replay import consume_recorded_events, post_completion_in
 from shared.agents.impersonation_manifest import monitor_manifest_health
 from shared.cluster.machine import machine_name
 from shared.config import settings
-from shared.db_transaction import write_transaction
+from shared.db.transaction import write_transaction
 from shared.deploy.maintenance import admission
 from shared.log import logger
 from shared.telemetry.alerts import upsert_alert

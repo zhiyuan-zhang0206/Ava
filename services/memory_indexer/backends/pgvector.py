@@ -46,7 +46,7 @@ from psycopg_pool import ConnectionPool
 
 import shared.db
 from services.memory_indexer.backends.base import KIND_BODY, pk_of
-from shared.db_transaction import write_transaction
+from shared.db.transaction import write_transaction
 
 _log = logging.getLogger("services.memory_indexer.backends.pgvector")
 

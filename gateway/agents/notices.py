@@ -49,7 +49,7 @@ from gateway.agents.schemas import (
 from ops import lifecycle as _ops
 from shared.config import settings
 from shared.db import NOTICE_FYI_TTL_DAYS
-from shared.db_transaction import write_transaction
+from shared.db.transaction import write_transaction
 from shared.events.live.announce import publish_agent_updated_sync
 
 router = APIRouter()

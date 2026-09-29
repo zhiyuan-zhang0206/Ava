@@ -155,7 +155,7 @@ def require_postgres_connection(conn: psycopg.Connection[Any], data: Path) -> No
     postmaster in its actual data directory. A Unix endpoint must be canonical;
     TCP must be loopback and all listeners must belong to the same postmaster.
     """
-    from shared.pg_admin import pg_socket_dir
+    from shared.db.pg_admin import pg_socket_dir
 
     data = data.resolve()
     owner = postgres(data)

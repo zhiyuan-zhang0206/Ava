@@ -186,7 +186,7 @@ def test_log_sink_pipeline_drain_thread_stays_alive() -> None:
 
 def test_log_sink_import_of_shared_db_stays_deferred() -> None:
     """`shared/log/__init__.py` must import `shared.db` inside the function, not at module
-    scope — `shared/db.py` imports `shared.log` for `logger`, so a top-level
+    scope — `shared/db/__init__.py` imports `shared.log` for `logger`, so a top-level
     import is a hard circular-import failure for any process that reaches
     `shared.db` first, which is the common case.
 

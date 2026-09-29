@@ -78,7 +78,7 @@ from shared.agents.context import AvaContext, agent_id_from_config
 from shared.agents.messages.kwargs import read_ava_kwargs
 from shared.config import settings
 from shared.config.turn_view import turn_settings
-from shared.db_transaction import async_write_transaction
+from shared.db.transaction import async_write_transaction
 from shared.events.live.projection import TokenUsage
 from shared.events.live.publisher import AgentEventPublisher
 from shared.lm.content import content_blocks

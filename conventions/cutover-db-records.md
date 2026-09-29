@@ -16,7 +16,7 @@ scripts, handle them:
 
 Both run on the gateway, against the home's own PostgreSQL, as the OS-user
 administrator acting as the schema owner over the owner-only socket
-(`shared.pg_admin.owner_session`). The read modes also work against the legacy
+(`shared.db.pg_admin.owner_session`). The read modes also work against the legacy
 postmaster, which has no custody record; `--execute` additionally binds the
 session to the home's postmaster, so it runs only after the data-plane
 authority cutover brought the plane up under new custody. Run them with the

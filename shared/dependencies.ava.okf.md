@@ -18,7 +18,7 @@ The shared-layer domain map below complements the public
 - [[shared/agents/messages/inbound-provenance.ava.okf.md]] — non-enforcing credential, transport, content-hash, and source-assertion facts on gateway inbounds
 - [[log.ava.okf.md]] — structured logging, feeds the unified event emitter (`shared/telemetry/emitter.py`)
 - [[metrics.ava.okf.md]] — system-level metrics computation core
-- [[db.ava.okf.md]] — shared/db.py provides database connection pool, depended on by services and gateway
+- [[db.ava.okf.md]] — shared/db/__init__.py provides database connection pool, depended on by services and gateway
 - [[gateway-cli.ava.okf.md]] — gateway communicates with agent processes via the contracts in shared/agents/contract.py
 - [[shared/events/live/live.ava.okf.md]] — `ava:events` live pub/sub payload union
 - [[shared/cluster/machine.ava.okf.md]] — machine name + capability set, `machines` table, spawn-target invariant

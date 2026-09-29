@@ -34,7 +34,7 @@ from scripts import cutover_db_authority as cutover
 from shared import cluster
 from shared.cluster import authority, ownership
 from shared.config import settings
-from shared.pg_admin import owner_session
+from shared.db.pg_admin import owner_session
 from tests._containers import _free_port
 
 pytestmark = pytest.mark.skipif(

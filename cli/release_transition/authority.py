@@ -56,8 +56,8 @@ def adopt_executor_authority(home: Path) -> None:
     the session user stays the administrator, whom no fence census includes.
     """
     from shared.cluster import db_identity, get_record, record_postgres_port
-    from shared.db_connections import adopt_administrator
-    from shared.pg_admin import pg_socket_dir
+    from shared.db.connections import adopt_administrator
+    from shared.db.pg_admin import pg_socket_dir
 
     ledger = require_ledger(home)
     record = get_record(home)

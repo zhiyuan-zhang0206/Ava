@@ -44,7 +44,7 @@ from shared.cluster.machine import (
     machine_description,
     machine_name,
 )
-from shared.db_transaction import write_transaction
+from shared.db.transaction import write_transaction
 from shared.host.net.predicates import is_loopback_host
 from shared.paths import ava_home
 

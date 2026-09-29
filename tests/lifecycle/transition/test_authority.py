@@ -576,8 +576,9 @@ def test_executor_dials_the_owner_socket_as_the_gateway_group(
 ) -> None:
     from urllib.parse import parse_qs, unquote, urlsplit
 
-    from shared import cluster, db_connections
+    from shared import cluster
     from shared.cluster.registry import ClusterRecord
+    from shared.db import connections
 
     home = Path(request_record.home)
     record = ClusterRecord(
@@ -592,7 +593,7 @@ def test_executor_dials_the_owner_socket_as_the_gateway_group(
 
     monkeypatch.setattr(cluster, "get_record", registered)
     monkeypatch.setattr(cluster, "db_identity", lambda: "ava")
-    monkeypatch.setattr(db_connections, "adopt_administrator", adopted.append)
+    monkeypatch.setattr(connections, "adopt_administrator", adopted.append)
     authority.adopt_executor_authority(home)
     (url,) = adopted
     parts = urlsplit(url)

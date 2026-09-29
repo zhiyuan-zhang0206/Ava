@@ -42,8 +42,8 @@ from shared.cluster import (
 )
 from shared.cluster.authority import GATEWAY_GROUP, RUNNER_GROUP, Groups, ensure_groups
 from shared.config import settings
+from shared.db.pg_admin import OwnerAuthority, local_owner_authority, owner_conninfo
 from shared.migrations import apply_pending_migrations, required_migration_set
-from shared.pg_admin import OwnerAuthority, local_owner_authority, owner_conninfo
 from shared.pg_tools import pg_tool
 
 _OWNER_PASSWORD = "owner-login-fixture"  # noqa: S105 — test fixture, not a real credential

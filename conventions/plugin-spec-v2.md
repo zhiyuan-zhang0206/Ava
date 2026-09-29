@@ -295,7 +295,7 @@ machine satisfying it.
   and consumed by two different mechanisms at two different moments — install /
   placement versus injection.
 - **Test context rules** (specifying existing discipline): env block before
-  project imports; derived keys to a tmp-home `.env`; `shared/test_db_guard.py`
+  project imports; derived keys to a tmp-home `.env`; `shared/db/test_db_guard.py`
   fail-closed validation remains the single rule source.
 - **Multi-tenant**: today one user, context rooted at `AVA_HOME`; the tenant
   dimension extends with #1212 Step 5. This spec only requires context to be

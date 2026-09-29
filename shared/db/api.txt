@@ -17,18 +17,18 @@ class InboundRow(NamedTuple)
   source: str | None
   status: str
 NOTICE_FYI_TTL_DAYS = 30
-NoDatabaseAuthorityError  (re-export of shared.db_connections.NoDatabaseAuthorityError)
-PG_KEEPALIVE_KWARGS  (re-export of shared.db_connections.PG_KEEPALIVE_KWARGS)
-PG_STATEMENT_TIMEOUT_SET_SQL  (re-export of shared.db_connections.PG_STATEMENT_TIMEOUT_SET_SQL)
-UnanchoredHomeError  (re-export of shared.db_connections.UnanchoredHomeError)
+NoDatabaseAuthorityError  (re-export of shared.db.connections.NoDatabaseAuthorityError)
+PG_KEEPALIVE_KWARGS  (re-export of shared.db.connections.PG_KEEPALIVE_KWARGS)
+PG_STATEMENT_TIMEOUT_SET_SQL  (re-export of shared.db.connections.PG_STATEMENT_TIMEOUT_SET_SQL)
+UnanchoredHomeError  (re-export of shared.db.connections.UnanchoredHomeError)
 def agent_exists(db: psycopg.Connection, agent_id: int) -> bool
 def agent_is_alive(status: str | None, lease_expires_at: datetime | None) -> bool
 def announce_spawn_prompt(agent_id: int, inbound_id: int, content: str, source: str) -> None
-async_pool  (re-export of shared.db_connections.async_pool)
-connect  (re-export of shared.db_connections.connect)
-connect_url  (re-export of shared.db_connections.connect_url)
+async_pool  (re-export of shared.db.connections.async_pool)
+connect  (re-export of shared.db.connections.connect)
+connect_url  (re-export of shared.db.connections.connect_url)
 def create_agent(db: psycopg.Connection) -> int
-direct_db_url  (re-export of shared.db_connections.direct_db_url)
+direct_db_url  (re-export of shared.db.connections.direct_db_url)
 def fetch_one(cur: psycopg.Cursor, context: str) -> tuple[Any, ...]
 def insert_compact_request_inbound(db: psycopg.Connection, agent_id: int) -> int
 def insert_inbound_message(db: psycopg.Connection, agent_id: int, content: str, source: str, kind: str='chat', payload: dict[str, object] | None=None, provenance: InboundProvenance | None=None) -> int
@@ -39,6 +39,6 @@ def list_chat_inbound_facts(agent_id: int, from_: datetime, to: datetime) -> lis
 def list_inbound_messages(db: psycopg.Connection, agent_id: int, limit: int) -> list[InboundRow]
 def list_live_agent_ids(machine: str | None=None) -> list[int]
 def list_pending_inbounds(db: psycopg.Connection, agent_id: int) -> list[InboundRow]
-pool  (re-export of shared.db_connections.pool)
+pool  (re-export of shared.db.connections.pool)
 def publish_inbound_wake(agent_id: int, payload: str) -> bool
 def signal_live_agents_restart(source: str, *, exclude_agent_ids: Collection[int]=(), machine: str | None=None) -> list[int]

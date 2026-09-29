@@ -69,9 +69,9 @@ from services.pitr.stores.logical_dump_names import (
 )
 from shared.config import settings
 from shared.db import connect, connect_url, direct_db_url
+from shared.db.pg_admin import local_owner_authority
 from shared.host.private_storage import ensure_private_dir, ensure_private_file
 from shared.native_process.os_platform import LockTimeoutError, file_lock
-from shared.pg_admin import local_owner_authority
 from shared.pg_tools import pg_tool
 
 _log = logging.getLogger(__name__)
@@ -257,7 +257,7 @@ def dump_source() -> str:
     """The dial `pg_dump` reads this cluster's whole database through.
 
     A locally owned plane dumps as the administrator acting as the schema owner
-    over the home's owner-only socket (`shared.pg_admin`): password-free,
+    over the home's owner-only socket (`shared.db.pg_admin`): password-free,
     custody-checked against this home's postmaster, and independent of the
     write generations a rollout revokes, so a dump never needs, and never dies
     with, a delivered login. A remote-managed plane's provider URL

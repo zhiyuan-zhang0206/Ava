@@ -451,7 +451,7 @@ def _restart_blocking(
     from psycopg import sql
 
     from shared.agents.incarnation.lifecycle_acceptance import FAILED_RESTART_FOR_CURRENT_TARGET
-    from shared.db_transaction import write_transaction
+    from shared.db.transaction import write_transaction
 
     with write_transaction(db_pool) as conn:
         row = conn.execute(
@@ -533,7 +533,7 @@ def _recover_crash_marked_blocking(agent_id: int) -> RecoverCrashMarkedResponse:
         HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS,
         SUPPRESS_REASON_PERMANENT_REJECT,
     )
-    from shared.db_transaction import write_transaction
+    from shared.db.transaction import write_transaction
 
     with write_transaction() as conn:
         row = conn.execute(

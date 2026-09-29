@@ -60,13 +60,13 @@ from shared.cluster.authority.monitor import MONITOR_MAP, MONITOR_ROLE
 from shared.cluster.machine import reachable_host
 from shared.config import settings
 from shared.config.physical_backup import pitr_replication_hba_lines
+from shared.db.pg_admin import pg_admin_url as _shared_pg_admin_url
+from shared.db.pg_admin import pg_socket_dir
 from shared.host.net.url_secret import url_host
 from shared.host.private_storage import write_private_bytes
 from shared.host.system.backend import get_backend
 from shared.native_process.child_env import daemon_process_env, inherited_process_env
 from shared.paths import ava_home
-from shared.pg_admin import pg_admin_url as _shared_pg_admin_url
-from shared.pg_admin import pg_socket_dir
 from shared.pg_tools import (
     PG_BIN_LINUX,
     brew_prefix,
@@ -340,17 +340,17 @@ def _ensure_pg_data() -> Path:
     return data
 
 
-# Thin shells over the shared admin-plane dial (moved to shared.pg_admin,
+# Thin shells over the shared admin-plane dial (moved to shared.db.pg_admin,
 # 2026-08-31 — services layer reaches it without importing up into cli). The
 # underscore names stay for existing cli callers and their monkeypatches.
 def _pg_socket_dir(socket_root: Path | None = None) -> Path:
-    """Thin shell over shared.pg_admin.pg_socket_dir — the home resolution stays
+    """Thin shell over shared.db.pg_admin.pg_socket_dir — the home resolution stays
     in the cli namespace so tests steering `ava_home` keep steering this probe."""
     return pg_socket_dir(socket_root, home=ava_home())
 
 
 def pg_admin_url(pg_port: int) -> str:
-    """Thin shell — the admin URL lives in shared.pg_admin (services import it
+    """Thin shell — the admin URL lives in shared.db.pg_admin (services import it
     from there); this keeps the cli-side monkeypatch surface stable."""
     return _shared_pg_admin_url(pg_port)
 

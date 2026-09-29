@@ -1,4 +1,4 @@
-"""shared.test_db_guard — the fail-fast non-test-DB rule.
+"""shared.db.test_db_guard — the fail-fast non-test-DB rule.
 
 Covers the rule added after the 2026-08-12 incident (a test run rooted
 outside this repo resolved the operator's real ~/.ava/.env and seeded
@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import pytest
 
-from shared.test_db_guard import assert_test_db_url
+from shared.db.test_db_guard import assert_test_db_url
 
 
 def test_main_cluster_db_always_refused(monkeypatch: pytest.MonkeyPatch) -> None:

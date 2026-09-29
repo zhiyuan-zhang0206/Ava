@@ -30,7 +30,7 @@ from shared.agents.impersonation_manifest_alerts import (
     _retention_lost,
 )
 from shared.config import settings
-from shared.db_transaction import write_transaction
+from shared.db.transaction import write_transaction
 from shared.log import logger
 from shared.telemetry import Event, event_id, event_line, event_line_digest
 

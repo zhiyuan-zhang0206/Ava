@@ -21,9 +21,9 @@ from services.pitr.activation.runtime import (
     pitr_env_is_desired,
 )
 from services.pitr.activation.state import ActivationRecord, load_record, write_record_cas
-from shared import pg_admin
 from shared.cluster import get_record, record_postgres_port
 from shared.config import settings
+from shared.db import pg_admin
 from shared.paths import ava_home
 
 from .cluster_instance import pg_admin_url
@@ -33,7 +33,7 @@ from .cluster_instance import pg_admin_url
 def _pg_connection() -> Generator[psycopg.Connection[Any]]:
     """The admin session the archive settings are read and altered on.
 
-    `shared.pg_admin.connect` binds the backend to this home's recorded
+    `shared.db.pg_admin.connect` binds the backend to this home's recorded
     postmaster before any `ALTER SYSTEM` or settings read.
     """
     cluster = get_record(ava_home())

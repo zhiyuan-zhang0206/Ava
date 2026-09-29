@@ -5,7 +5,7 @@ owner, write generation 0, a credential-free `AVA_DB_URL`. The maintenance
 process here holds NO write-generation login: its `AVA_DB_URL` is the
 credential-free endpoint and no `AVA_DB_ADMIN_PASSWORD` exists anywhere. Dumps,
 DDL and PITR probes must still work, because they dial the home's own authority
-(`shared.pg_admin`): the OS-user administrator over the owner-only socket,
+(`shared.db.pg_admin`): the OS-user administrator over the owner-only socket,
 acting as the schema owner for dumps/DDL/reads and as itself for server admin,
 custody-checked against the home's postmaster.
 """
@@ -37,9 +37,9 @@ from services.pitr.stores import factory
 from shared import cluster
 from shared.cluster import authority
 from shared.config import settings
+from shared.db.pg_admin import local_owner_authority
 from shared.host.net.url_secret import url_with_port
 from shared.native_process.child_env import restricted_process_env
-from shared.pg_admin import local_owner_authority
 from shared.pg_tools import pg_tool
 from tests.lifecycle.db_authority.test_single_box import Born
 from tests.lifecycle.db_authority.test_single_box import born as born

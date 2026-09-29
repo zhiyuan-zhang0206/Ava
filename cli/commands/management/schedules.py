@@ -344,7 +344,7 @@ def cmd_schedules_provision() -> int:
     the same provision at every boot). Idempotent — existing schedules (by
     name) are never modified, so an operator's edits survive a provision."""
     from shared.daemon.schedules.builtin_schedules import provision_builtin_schedules
-    from shared.db_transaction import write_transaction
+    from shared.db.transaction import write_transaction
 
     with write_transaction() as conn:
         created = provision_builtin_schedules(conn)

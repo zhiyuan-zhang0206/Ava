@@ -45,7 +45,7 @@ from gateway.auth.request_principal import PrincipalScopeError, request_key
 from gateway.middleware.error_envelope import error_response
 from shared.api_contracts import contracts
 from shared.api_contracts.contracts import Idempotency
-from shared.db_transaction import write_transaction
+from shared.db.transaction import write_transaction
 
 _MAX_WAIT_SECONDS = 15.0
 _POLL_INITIAL_S = 0.1

@@ -49,7 +49,7 @@ from loguru import logger
 import shared.db
 import shared.host.proc
 from shared.config import settings
-from shared.db_transaction import write_transaction
+from shared.db.transaction import write_transaction
 from shared.paths import ava_home, prod_service_checkout_error
 
 # A .py schedule script is run in-process, so a single call that hangs (a

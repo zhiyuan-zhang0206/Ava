@@ -40,10 +40,10 @@ _INVENTORY: dict[str, str] = {
     "services/computer/mcp_daemon.py::ComputerMcpDaemon._emit_action": "central",
     "services/computer/mcp_daemon.py::ComputerMcpDaemon._emit_session_event": "central",
     "shared/agents/messages/chat_delivery.py::_insert_chat_inbound_once": "central",
-    "shared/db.py::insert_inbound_message": "central",
-    "shared/db.py::announce_spawn_prompt": "central",
-    "shared/db.py::insert_restart_completed_inbound": "central",
-    "shared/db.py::insert_compact_request_inbound": "ineligible",
+    "shared/db/__init__.py::insert_inbound_message": "central",
+    "shared/db/__init__.py::announce_spawn_prompt": "central",
+    "shared/db/__init__.py::insert_restart_completed_inbound": "central",
+    "shared/db/__init__.py::insert_compact_request_inbound": "ineligible",
     "shared/host/env/audit.py::_emit_audit_event": "ineligible",
 }
 

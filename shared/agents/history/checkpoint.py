@@ -50,7 +50,7 @@ from psycopg.rows import DictRow, dict_row
 from shared.agents.history.checkpoint_serde import STATIC_CHECKPOINT_MSGPACK_TYPES
 from shared.agents.history.delta_read_compat import reconstruct_delta_messages
 from shared.db import pool
-from shared.db_transaction import async_write_transaction
+from shared.db.transaction import async_write_transaction
 
 _log = logging.getLogger(__name__)
 

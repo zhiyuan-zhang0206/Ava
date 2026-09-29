@@ -10,7 +10,7 @@ from agent.messages import system_note_message
 from shared.agents.impersonation.history import export_handoff, metadata
 from shared.agents.messages.kwargs import NoteTag
 from shared.db import publish_inbound_wake
-from shared.db_transaction import write_transaction
+from shared.db.transaction import write_transaction
 from shared.native_process.runtime_incarnation import RuntimeIncarnation
 
 

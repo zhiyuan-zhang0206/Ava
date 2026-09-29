@@ -48,7 +48,7 @@ from psycopg.rows import dict_row
 from gateway.inspect.schemas import InspectMetricsMetadata
 from shared.cluster import home_label
 from shared.config import settings
-from shared.db_transaction import write_transaction
+from shared.db.transaction import write_transaction
 from shared.log import logger
 from shared.paths import ava_home
 from shared.telemetry.alerts import (

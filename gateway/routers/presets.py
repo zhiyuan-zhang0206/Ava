@@ -33,7 +33,7 @@ from fastapi import APIRouter, HTTPException, Request
 from psycopg_pool import ConnectionPool
 from pydantic import BaseModel, Field
 
-from shared.db_transaction import write_transaction
+from shared.db.transaction import write_transaction
 
 router = APIRouter()
 

@@ -423,7 +423,7 @@ def test_memory_vectors_prepared_as_owner_only_for_pgvector(
     from cli.commands.data_plane.bringup import prepare_memory_vectors
     from services.memory_indexer.backends import pgvector
     from services.memory_indexer.embeddings import factory
-    from shared import pg_admin
+    from shared.db import pg_admin
 
     calls: list[str] = []
     monkeypatch.setattr(pg_admin, "local_owner_authority", lambda: _Authority(calls))
@@ -452,7 +452,7 @@ def test_remote_plane_prepares_memory_vectors_through_its_provider_url(
     from cli.commands.data_plane.bringup import prepare_memory_vectors
     from services.memory_indexer.backends import pgvector
     from services.memory_indexer.embeddings import factory
-    from shared import pg_admin
+    from shared.db import pg_admin
 
     calls: list[str] = []
 

@@ -10,7 +10,7 @@ import psycopg
 from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
 
-from shared.db_transaction import write_transaction
+from shared.db.transaction import write_transaction
 
 
 def _token_hash(token: str) -> str:

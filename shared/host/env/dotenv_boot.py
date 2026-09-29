@@ -90,7 +90,7 @@ _GENERATION_ENV = "AVA_DB_GENERATION"
 _API_TOKEN_ENV = "AVA_API_TOKEN"  # noqa: S105 — env key name, not a credential
 
 # Why this process holds no database authority, when a home with a write-
-# generation ledger delivered none to it: `shared.db_connections._guard_db_url`
+# generation ledger delivered none to it: `shared.db.connections._guard_db_url`
 # turns a dial of the credential-free endpoint into a named refusal.
 _db_authority_refusal: str | None = None
 # Name prefix of a case-4 scratch home (`_unanchored_home`).

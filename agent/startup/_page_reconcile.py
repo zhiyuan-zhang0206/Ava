@@ -8,7 +8,7 @@ from typing import Any
 
 from psycopg_pool import AsyncConnectionPool
 
-from shared.db_transaction import async_write_transaction
+from shared.db.transaction import async_write_transaction
 from shared.log import logger
 
 # The re-serve notice prefix — also the dedupe key for the min-interval check.

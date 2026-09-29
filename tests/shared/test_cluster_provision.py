@@ -20,7 +20,7 @@ from psycopg import sql
 
 from shared.cluster import _swap_db, drop_database, provision_database
 from shared.config import settings
-from shared.pg_admin import owner_conninfo
+from shared.db.pg_admin import owner_conninfo
 
 # provision_database creates a NOLOGIN owning role sharing the db identifier and
 # applies the schema acting as that role. The identifier is passed in full

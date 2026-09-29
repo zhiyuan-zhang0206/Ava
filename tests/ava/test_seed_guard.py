@@ -3,7 +3,7 @@ before opening any connection.
 
 2026-08-12 incident class: synthetic agent rows (spawner="test", high-range
 ids) written into the production agents/agents_meta tables. The helper's guard
-lives in shared/test_db_guard.py (single source of truth); these tests prove
+lives in shared/db/test_db_guard.py (single source of truth); these tests prove
 the wiring — that the helper actually calls it — without touching a database.
 """
 

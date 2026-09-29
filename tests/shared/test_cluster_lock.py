@@ -20,8 +20,8 @@ import psycopg
 import pytest
 from psycopg.types.json import Jsonb
 
-from shared import db_transaction
 from shared.config import settings
+from shared.db import transaction
 from shared.deploy.state.cluster_lock import (
     SETTLE_TTL_S,
     DeployLease,
@@ -627,7 +627,7 @@ def test_release_lands_when_the_pooler_is_down(
     """The rollout tail must not depend on the pooler a data-plane stop has just
     taken down (issue #2307): with the pooled URL dead — the half-shut-pooler
     shape — release still lands through the direct dial."""
-    import shared.db_connections
+    import shared.db.connections
     from tests._containers import _free_port
 
     direct_url = settings.data_plane.db_url
@@ -636,9 +636,9 @@ def test_release_lands_when_the_pooler_is_down(
     monkeypatch.setattr(
         settings.data_plane, "db_url", f"postgresql://ava@127.0.0.1:{_free_port()}/ava"
     )
-    monkeypatch.setattr(shared.db_connections, "direct_db_url", lambda: direct_url)
+    monkeypatch.setattr(shared.db.connections, "direct_db_url", lambda: direct_url)
 
-    with pytest.raises(psycopg.OperationalError), db_transaction.write_transaction():
+    with pytest.raises(psycopg.OperationalError), transaction.write_transaction():
         pass
 
     release_update_lock("A")

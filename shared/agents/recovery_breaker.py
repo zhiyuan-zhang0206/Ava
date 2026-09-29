@@ -32,7 +32,7 @@ from typing import Final, LiteralString, cast
 
 from psycopg_pool import AsyncConnectionPool
 
-from shared.db_transaction import async_write_transaction
+from shared.db.transaction import async_write_transaction
 
 HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS = 2
 

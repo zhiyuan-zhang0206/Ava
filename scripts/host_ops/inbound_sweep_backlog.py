@@ -35,7 +35,7 @@ from psycopg.rows import class_row
 
 import shared.db
 from shared.config import settings
-from shared.db_transaction import write_transaction
+from shared.db.transaction import write_transaction
 
 _CONFIRMATION_TEXT = "inbound-sweep-backlog"
 _BACKUP_PREFIX = "inbound_sweep_backlog_backup_"

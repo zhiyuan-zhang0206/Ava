@@ -8,7 +8,7 @@ exit 1) rather than a silent no-op). Also run automatically via pre-commit hook.
 ## Why
 
 Pool connections are **long-lived**, which is what makes a missing keepalive
-invisible until it costs minutes. `shared/db_connections.py:PG_KEEPALIVE_KWARGS` documents the
+invisible until it costs minutes. `shared/db/connections.py:PG_KEEPALIVE_KWARGS` documents the
 mechanism: a laptop-grade runner that sleeps or changes networks wakes holding
 dead TCP flows, and a query already in flight on a borrowed half-dead socket has
 no application-level bound — it waits out the OS TCP-retransmit timeout.
@@ -17,7 +17,7 @@ no application-level bound — it waits out the OS TCP-retransmit timeout.
 `shared.db.async_pool()` for every async one (the agent host passes its
 `LoggingConnectionPool` in as the pool class). In the governed packages the
 structure gate's Rule 5 (`postgres-dial`, `scripts/structure/locality.py`)
-already rejects any pool built outside `shared/db_connections.py`, with no
+already rejects any pool built outside `shared/db/connections.py`, with no
 frozen exceptions left. This lint covers only what that rule does not see:
 `scripts/` (not a governed package) and the modules the decision allows to dial
 Postgres directly. A construction there must at least spell out
@@ -40,7 +40,7 @@ dict containing `**PG_KEEPALIVE_KWARGS`. AST-based, so it sees through
 `AsyncConnectionPool[psycopg.AsyncConnection](...)` subscripts and subclasses
 (`LoggingConnectionPool`) without regex guesswork.
 
-Exempt: the decision's owner, `shared/db_connections.py` (the definition of the
+Exempt: the decision's owner, `shared/db/connections.py` (the definition of the
 posture — it builds the merged dict literal every other site inherits), and
 test/eval-fixture code under `tests/`, where a throwaway pool against a local
 test Postgres has nothing to survive. `ConnectionPool.check_connection(...)` and
@@ -217,7 +217,7 @@ def main(argv: list[str] | None = None) -> int:
     if total:
         print(
             f"\n{total} pool(s) built without TCP keepalives. See the docstring at the "
-            "top of scripts/lint_pool_keepalives.py and shared/db.py:pool().",
+            "top of scripts/lint_pool_keepalives.py and shared/db/__init__.py:pool().",
             file=sys.stderr,
         )
         return 1

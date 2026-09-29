@@ -247,7 +247,7 @@ def prepare_memory_vectors() -> None:
     import shared.db
     from services.memory_indexer.backends.pgvector import prepare_table
     from services.memory_indexer.embeddings.factory import get_provider
-    from shared.pg_admin import local_owner_authority
+    from shared.db.pg_admin import local_owner_authority
 
     dim = get_provider().dim
     if settings.data_plane.is_remote:
@@ -288,8 +288,8 @@ def admin_session(rec: ClusterRecord, database: str) -> Generator[psycopg.Connec
     from psycopg.conninfo import make_conninfo
 
     from cli.commands.data_plane.cluster_instance import pg_admin_url
-    from shared import pg_admin
     from shared.cluster import record_postgres_port
+    from shared.db import pg_admin
     from shared.paths import ava_home
 
     url = make_conninfo(pg_admin_url(record_postgres_port(rec)), dbname=database)

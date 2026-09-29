@@ -20,7 +20,7 @@ import pytest
 
 from shared.cluster import authority
 from shared.cluster.authority import delivery
-from shared.db_connections import NoDatabaseAuthorityError, _guard_db_url
+from shared.db.connections import NoDatabaseAuthorityError, _guard_db_url
 from shared.host.env import dotenv_boot
 
 _ENDPOINT = "postgresql://ava@127.0.0.1:6433/ava"
@@ -250,18 +250,18 @@ _ADMIN = "postgresql://osuser@/ava?host=/tmp/ava-pg-x&port=5433&options=-c%20rol
 def test_only_the_adopted_administrator_url_passes_a_recorded_refusal(
     boot: Path, seeded: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from shared import db_connections
     from shared.config import settings
+    from shared.db import connections
 
     del seeded
     _intent(boot, tmp_path / "candidate-image")
     dotenv_boot._enforce_cluster_env_authority()
     assert dotenv_boot.db_authority_refusal() is not None
-    monkeypatch.setattr(db_connections, "_administrator_url", None)
+    monkeypatch.setattr(connections, "_administrator_url", None)
     monkeypatch.setattr(settings.data_plane, "db_url", settings.data_plane.db_url)
     with pytest.raises(NoDatabaseAuthorityError):
         _guard_db_url(_ADMIN)
-    db_connections.adopt_administrator(_ADMIN)
+    connections.adopt_administrator(_ADMIN)
     assert settings.data_plane.db_url == _ADMIN
     assert _guard_db_url(_ADMIN) == _ADMIN
     with pytest.raises(NoDatabaseAuthorityError, match="credential-free"):
@@ -271,11 +271,11 @@ def test_only_the_adopted_administrator_url_passes_a_recorded_refusal(
         "postgresql://osuser@127.0.0.1:5433/ava",
     ):
         with pytest.raises(ValueError, match="password-free owner-only socket"):
-            db_connections.adopt_administrator(refused)
+            connections.adopt_administrator(refused)
 
 
 def test_a_urls_own_startup_options_survive_the_statement_ceiling() -> None:
-    from shared.db_connections import PG_STATEMENT_TIMEOUT_KWARGS, _statement_kwargs
+    from shared.db.connections import PG_STATEMENT_TIMEOUT_KWARGS, _statement_kwargs
 
     assert _statement_kwargs(_ENDPOINT) is PG_STATEMENT_TIMEOUT_KWARGS
     assert _statement_kwargs(_ADMIN)["options"] == (

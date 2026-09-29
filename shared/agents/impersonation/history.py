@@ -20,7 +20,7 @@ from pydantic import BaseModel
 
 from shared.cluster.machine import machine_name
 from shared.db import connect
-from shared.db_transaction import write_transaction
+from shared.db.transaction import write_transaction
 from shared.host.private_storage import write_private_bytes
 from shared.paths import workspace_dir
 

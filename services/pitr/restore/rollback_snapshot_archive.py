@@ -21,9 +21,9 @@ from services.pitr.wal.crypto import decrypt_archive, encrypt_archive, source_id
 from shared import db
 from shared.api_contracts import strict_decode
 from shared.config import settings
+from shared.db.pg_admin import local_owner_authority
 from shared.host.private_storage import write_private_bytes
 from shared.host.proc import run_bounded
-from shared.pg_admin import local_owner_authority
 from shared.pg_tools import pg_tool, throwaway_postgres
 from shared.rollback_snapshot import is_rollback_snapshot_table
 
@@ -295,7 +295,7 @@ def drop_rollback_snapshot_table(table: str) -> None:
 
     A migration created the table, so only the schema owner may drop it: a
     locally owned plane drops it as the administrator acting as the owner over
-    the home's own socket (`shared.pg_admin`); a remote-managed plane's
+    the home's own socket (`shared.db.pg_admin`); a remote-managed plane's
     provider URL is its only authority.
     """
     _require_snapshot_table(table)

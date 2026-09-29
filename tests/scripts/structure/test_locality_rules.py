@@ -138,7 +138,7 @@ def test_multiple_private_names_from_one_module_count_as_one_site(
 
 def _shared_lm_and_db(tmp_path: pathlib.Path) -> None:
     _write(tmp_path, "shared/lm/_scratch.py", "x = 1\n")
-    _write(tmp_path, "shared/db.py", "class Foo:\n    _x = 1\n\n\ndef _restore(): ...\n")
+    _write(tmp_path, "shared/db/__init__.py", "class Foo:\n    _x = 1\n\n\ndef _restore(): ...\n")
 
 
 def test_attribute_reach_in_via_import_module(tmp_path: pathlib.Path) -> None:
@@ -428,7 +428,7 @@ def test_non_dial_calls_are_not_flagged(source: str) -> None:
 def test_the_owner_module_itself_is_exempt() -> None:
     tree = _parse("import psycopg\npsycopg.connect('dsn')\n")
 
-    assert locality.owner_bypasses(tree, "shared/db_connections.py", ()) == {}
+    assert locality.owner_bypasses(tree, "shared/db/connections.py", ()) == {}
 
 
 # --- measure: test *directories* are exempt, test-prefixed files are not ----

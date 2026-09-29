@@ -60,7 +60,7 @@ from shared.daemon.health import (
     stop_health_server,
 )
 from shared.daemon.shutdown import install_graceful_shutdown
-from shared.db_transaction import write_transaction
+from shared.db.transaction import write_transaction
 from shared.events.live.announce import publish_agent_updated_sync
 from shared.log import init_gateway_process
 

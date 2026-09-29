@@ -65,7 +65,7 @@ from services.agent_host.pooled_checkpoint import PooledPostgresSaver
 from services.agent_host.pools import build_control_pool, build_shared_pool
 from services.agent_host.stdout_log import _rotate_stdout_log_forever
 from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
-from shared import paths, pool_release
+from shared import paths
 from shared.agents.incarnation.exec_request_evidence import disposition_hint
 from shared.agents.incarnation.hosted_force import recover_orphaned_hosted_forces
 from shared.cluster.machine import machine_name
@@ -79,6 +79,7 @@ from shared.daemon.health import (
 )
 from shared.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
 from shared.daemon.shutdown import hard_exit as _hard_exit
+from shared.db import pool_release
 from shared.deploy.maintenance import admission
 from shared.deploy.maintenance.straggler_reap import settle_stranded_reaps_async
 from shared.deploy.progress_timeout import AGENT_LEASE_RENEW_INTERVAL_S

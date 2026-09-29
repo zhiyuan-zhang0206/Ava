@@ -3,7 +3,7 @@
 Covers agent CRUD + wait_for_inbound Redis pub/sub wake-up + table existence.
 No LLM involved.
 
-`shared/db.py` is the UI/kernel shared synchronous helper (`create_agent` / ...), still using
+`shared/db/__init__.py` is the UI/kernel shared synchronous helper (`create_agent` / ...), still using
 the synchronous `db_conn` fixture. `agent/db/__init__.py` is the kernel async path (`wait_for_inbound`
 / `claim_inbound_batch`), using `aops_pool` (AsyncConnectionPool) +
 real PostgreSQL connections, matching the host's transactional queue.

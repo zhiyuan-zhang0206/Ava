@@ -8,7 +8,7 @@ from psycopg_pool import ConnectionPool
 
 from shared.agents.impersonation._store import expire, lock_lease
 from shared.db import publish_inbound_wake
-from shared.db_transaction import write_transaction
+from shared.db.transaction import write_transaction
 from shared.events.live.announce import (
     publish_agent_updated_sync,
     publish_impersonation_changed_sync,

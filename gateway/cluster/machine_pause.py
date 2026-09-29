@@ -24,7 +24,7 @@ from ops.lifecycle import _force_mark_terminated
 from shared.agents.tasks.notes import task_note_line
 from shared.cluster import machines
 from shared.cluster.machine import machine_name
-from shared.db_transaction import write_transaction
+from shared.db.transaction import write_transaction
 
 router = APIRouter()
 

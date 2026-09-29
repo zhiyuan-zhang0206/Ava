@@ -140,7 +140,7 @@ def test_a_docs_only_twin_directory_does_not_change_a_clean_module_owner(
 ) -> None:
     """Adding a same-named OKF docs folder beside a module must not flip the
     owner resolution for an importer that was already clean."""
-    _write(_repo, "shared/db.py", "def _restore(): ...\n")
+    _write(_repo, "shared/db/__init__.py", "def _restore(): ...\n")
     _write(_repo, "shared/user.py", "from shared.db import _restore\n")
     assert lcs.main([]) == 0
     assert capsys.readouterr().out == ""

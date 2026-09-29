@@ -17,7 +17,7 @@ from datetime import UTC, datetime
 from typing import Generic, TypeVar
 
 import shared.db
-from shared.db_transaction import write_transaction
+from shared.db.transaction import write_transaction
 from shared.daemon.schedules.watcher import previous_fire
 
 _log = logging.getLogger(__name__)
