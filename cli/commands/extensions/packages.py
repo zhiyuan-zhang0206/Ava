@@ -68,14 +68,14 @@ def _read_declared_range(pkg: InstalledPackage) -> tuple[dict[str, object] | Non
     fails validation is reported as an error value instead of raising — status
     must never fail on the state it reports.
     """
-    from shared.packages.plugins import manifest as plugin_manifest
+    from shared.packages.plugins import manifest as manifest_module
 
     root = _package_root(pkg)
     if root is None:
         return None, None
     try:
-        manifest = plugin_manifest.load_manifest(root)
-    except plugin_manifest.ManifestError as e:
+        manifest = manifest_module.load_manifest(root)
+    except manifest_module.ManifestError as e:
         return None, str(e)
     if manifest is None:
         return None, None

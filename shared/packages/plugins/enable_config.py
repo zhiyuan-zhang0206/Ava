@@ -27,7 +27,7 @@ from typing import Any, Literal, cast
 from pydantic import BaseModel, ValidationError
 
 from shared import paths
-from shared.packages.skills import names as skill_names
+from shared.packages.skills import names as skill_naming
 from shared.plugin_config_registry import merge_disk_image_schema
 
 
@@ -240,7 +240,7 @@ def load(known_plugins: set[str], *, allow_dangling: bool = False) -> PluginsCon
     # name everywhere a human writes it — a hand-edited `plugins_config.json`
     # saying `ava-code` addresses the `ava_code` plugin.
     cfg.plugins = {
-        (skill_names.find(name, known_plugins) or name): entry
+        (skill_naming.find(name, known_plugins) or name): entry
         for name, entry in cfg.plugins.items()
     }
 
@@ -341,7 +341,7 @@ def set_local_enabled(name: str, *, enabled: bool) -> PluginsConfig:
         DanglingPlugin: `name` is not a plugin installed on this machine.
     """
     known = set(discover_plugins())
-    resolved = skill_names.find(name, known)
+    resolved = skill_naming.find(name, known)
     if resolved is None:
         raise DanglingPlugin(
             f"plugin {name!r} is not present on this machine (known: {sorted(known) or '<none>'})"

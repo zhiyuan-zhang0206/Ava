@@ -328,7 +328,7 @@ def _run_code(code: str, payload: Any) -> None:
         register_agent_source,
     )
     from ava.sdk_surface.help import HelpRouter
-    from shared.agents.sdk import telemetry as sdk_telemetry
+    from shared.agents.sdk import telemetry as sdk_usage_telemetry
 
     # Register the source so `<agent_code>` frames resolve their offending
     # line in tracebacks (exec'd code is invisible to linecache).
@@ -357,7 +357,7 @@ def _run_code(code: str, payload: Any) -> None:
         # contract as the old in-process worker had). It yields the block's full
         # runtime tally — the block's real SDK-call counts, not a scan of its
         # text. Read in the finally so a crash keeps what already ran.
-        with sdk_telemetry.recording() as tally:
+        with sdk_usage_telemetry.recording() as tally:
             exec(compile(code, "<agent_code>", "exec"), fresh_globals)
     except BaseException as exc:
         from shared.agents.lifecycle import LifecycleExit
@@ -382,7 +382,7 @@ def _run_code(code: str, payload: Any) -> None:
         sys.stdout.write(format_agent_traceback(exc))
         sys.stdout.flush()
     finally:
-        payload.sdk_calls = sdk_telemetry.tally_entries(tally)
+        payload.sdk_calls = sdk_usage_telemetry.tally_entries(tally)
 
 
 def _finalize_telemetry() -> None:

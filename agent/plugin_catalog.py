@@ -36,7 +36,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
-from shared.packages.plugins import contributions as plugin_contributions
+from shared.packages.plugins import contributions as contribution_ledger
 from shared.packages.plugins import enable_config
 from shared.packages.plugins.contributions import Contribution
 from shared.packages.plugins.manifest import CONTRIBUTION_KEYS, PluginManifest, load_manifest
@@ -334,7 +334,7 @@ def build_catalog() -> Catalog:
                 builtin=directory.is_relative_to(repo_plugins),
                 directory=directory,
                 description=enable_config.parse_description(directory / "plugin.py"),
-                contributions=plugin_contributions.contributions_of(name),
+                contributions=contribution_ledger.contributions_of(name),
                 manifest=load_manifest(directory),
             )
         )

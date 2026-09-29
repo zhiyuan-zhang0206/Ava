@@ -56,7 +56,7 @@ from shared.agents.messages.caller_identity import CallerIdentity
 from shared.agents.messages.chat_delivery import ClientMessageConflictError
 from shared.agents.messages.inbound_provenance import InboundProvenance
 from shared.agents.observation import roster
-from shared.agents.observation import snapshot as agent_snapshot
+from shared.agents.observation import snapshot as snapshot_module
 from shared.api_contracts.mcp_tool_contract import (
     project_message,
     server_instructions,
@@ -209,7 +209,7 @@ def _select_directory_blocking(
 
 def _select_one_blocking(pool: Any, agent_id: int) -> Any:
     with pool.connection() as conn:
-        return agent_snapshot.select_one(conn, agent_id)
+        return snapshot_module.select_one(conn, agent_id)
 
 
 def _require_write_scope(tool: str) -> None:

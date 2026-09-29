@@ -60,7 +60,7 @@ _WRAPPED: list[tuple[Any, str]] = []
 def _caller() -> Generator[None, None, None]:
     """Snapshot provenance before the call; metering never changes SDK behavior."""
     from shared.agents.messages.external_caller import external_caller
-    from shared.agents.sdk import telemetry as sdk_telemetry
+    from shared.agents.sdk import telemetry as sdk_usage_telemetry
 
     identity = {}
     with contextlib.suppress(Exception):
@@ -78,11 +78,11 @@ def _caller() -> Generator[None, None, None]:
             "agent_id": agent_id,
             "source": source,
         }
-    token = sdk_telemetry.set_identity(identity)
+    token = sdk_usage_telemetry.set_identity(identity)
     try:
         yield
     finally:
-        sdk_telemetry.reset_identity(token)
+        sdk_usage_telemetry.reset_identity(token)
 
 
 def _make_recorder(original: Callable[..., Any], fq: str) -> Callable[..., Any]:
@@ -100,10 +100,10 @@ def _make_recorder(original: Callable[..., Any], fq: str) -> Callable[..., Any]:
 
         @functools.wraps(original)
         async def async_recorder(*args: Any, **kwargs: Any) -> Any:
-            from shared.agents.sdk import telemetry as sdk_telemetry
+            from shared.agents.sdk import telemetry as sdk_usage_telemetry
 
             with _caller():
-                return await sdk_telemetry.run_metered_async(fq, original, args, kwargs)
+                return await sdk_usage_telemetry.run_metered_async(fq, original, args, kwargs)
 
         _RECORDERS.add(async_recorder)
         return async_recorder

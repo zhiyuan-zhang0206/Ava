@@ -24,7 +24,7 @@ from services.agent_host import runtime as runtime_module
 from services.agent_host.dispatcher import InboundWakeDispatcher, TurnScheduler
 from services.agent_host.host import AgentHost
 from shared.agents.incarnation import hosted_force
-from shared.agents.incarnation import resources as incarnation_resources
+from shared.agents.incarnation import resources as resource_codec
 from shared.db import insert_inbound_message
 from shared.machine import machine_name
 from tests.agent.test_hosted_db_recovery import _admit, _graph
@@ -149,15 +149,15 @@ async def test_expired_predecessor_is_rediscovered_after_boot_without_pending_me
         [sys.executable, "-c", "import sys; sys.stdin.read()"], stdin=subprocess.PIPE
     ) as predecessor:
         assert predecessor.stdin is not None
-        dead = incarnation_resources.ResourceProcess.capture(psutil.Process(predecessor.pid))
+        dead = resource_codec.ResourceProcess.capture(psutil.Process(predecessor.pid))
         predecessor.stdin.close()
         predecessor.wait(timeout=3)
     row = db_conn.execute(
         "SELECT incarnation_resources FROM agents_meta WHERE id=%s", (agent,)
     ).fetchone()
     assert row is not None
-    resources = incarnation_resources.decode_resources(row[0])
-    assert isinstance(resources, incarnation_resources.IncarnationResources)
+    resources = resource_codec.decode_resources(row[0])
+    assert isinstance(resources, resource_codec.IncarnationResources)
     db_conn.execute(
         "UPDATE agents_meta SET incarnation_resources=%s WHERE id=%s",
         (Jsonb(resources.model_copy(update={"host_process": dead}).model_dump(mode="json")), agent),
@@ -270,9 +270,9 @@ async def test_expired_scan_wake_cannot_steal_a_live_predecessor(
                 "SELECT incarnation_resources FROM agents_meta WHERE id=%s", (agent,)
             ).fetchone()
             assert row is not None
-            resources = incarnation_resources.decode_resources(row[0])
-            assert isinstance(resources, incarnation_resources.IncarnationResources)
-            native = incarnation_resources.ResourceProcess.capture(psutil.Process(predecessor.pid))
+            resources = resource_codec.decode_resources(row[0])
+            assert isinstance(resources, resource_codec.IncarnationResources)
+            native = resource_codec.ResourceProcess.capture(psutil.Process(predecessor.pid))
             db_conn.execute(
                 "UPDATE agents_meta SET status=%s,incarnation_resources=%s,"
                 "lease_expires_at=now()-interval '1s' WHERE id=%s",

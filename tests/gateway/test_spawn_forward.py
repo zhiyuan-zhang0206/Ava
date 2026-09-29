@@ -45,7 +45,7 @@ class TestRouting:
                 raise RuntimeError("receipt read unavailable")
 
         monkeypatch.setattr(app_module, "_forward_spawn_to_remote", _capture_forward)
-        monkeypatch.setattr(app_module.agent_snapshot, "select_one", _unreadable)
+        monkeypatch.setattr(app_module.snapshot_module, "select_one", _unreadable)
         with TestClient(app) as client:
             resp = client.post("/api/agents", json={"machine": "local-test"})
         assert resp.status_code == 201

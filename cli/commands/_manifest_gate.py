@@ -18,14 +18,14 @@ import sys
 from pathlib import Path
 
 from shared import paths
-from shared.packages.plugins import manifest as plugin_manifest
+from shared.packages.plugins import manifest as manifest_module
 
 
 def manifest_install_errors(pkg_dir: Path, *, mirror_pyproject: bool = False) -> list[str]:
     """Manifest checks for a package about to be landed; [] = proceed."""
     try:
-        manifest = plugin_manifest.load_manifest(pkg_dir)
-    except plugin_manifest.ManifestError as e:
+        manifest = manifest_module.load_manifest(pkg_dir)
+    except manifest_module.ManifestError as e:
         return [str(e)]
     if manifest is None:
         return []
@@ -37,8 +37,8 @@ def manifest_install_errors(pkg_dir: Path, *, mirror_pyproject: bool = False) ->
         host = host_version_mod.host_version(paths.repo_root())
     except host_version_mod.HostVersionError as e:
         return [str(e)]
-    errors += plugin_manifest.check_host_engine(manifest, host)
-    errors += plugin_manifest.check_host_commit(manifest, paths.repo_root())
+    errors += manifest_module.check_host_engine(manifest, host)
+    errors += manifest_module.check_host_commit(manifest, paths.repo_root())
 
     if mirror_pyproject:
         from shared.packages.plugins import pyproject_mirror
@@ -47,7 +47,7 @@ def manifest_install_errors(pkg_dir: Path, *, mirror_pyproject: bool = False) ->
         if pyproject.is_file():
             try:
                 specs = pyproject_mirror.pyproject_dependency_specs(pkg_dir)
-            except plugin_manifest.ManifestError as e:
+            except manifest_module.ManifestError as e:
                 errors.append(str(e))
             else:
                 errors += pyproject_mirror.check_python_packages(manifest, specs)

@@ -44,7 +44,7 @@ from shared.config import settings
 from shared.deploy.git.gitenv import git_env
 from shared.os_cron import os_jobs_enabled
 from shared.packages.extensions import install_registry
-from shared.packages.plugins import manifest as plugin_manifest
+from shared.packages.plugins import manifest as manifest_module
 from shared.packages.skills import scan
 from shared.packages.skills.names import match_key
 from shared.platform import LockTimeoutError, file_lock
@@ -563,8 +563,8 @@ class _Pass:
         if critical:
             return f"refused_scan: {', '.join(scan.rule_ids(critical))}", None
         try:
-            manifest = plugin_manifest.load_manifest(staged)
-        except plugin_manifest.ManifestError as exc:
+            manifest = manifest_module.load_manifest(staged)
+        except manifest_module.ManifestError as exc:
             return f"error: manifest invalid: {exc}", None
         if manifest is not None:
             host_errors: list[str] = []
@@ -573,8 +573,8 @@ class _Pass:
             except host_version.HostVersionError as exc:
                 host_errors.append(str(exc))
             else:
-                host_errors += plugin_manifest.check_host_engine(manifest, host)
-            host_errors += plugin_manifest.check_host_commit(manifest, self.repo)
+                host_errors += manifest_module.check_host_engine(manifest, host)
+            host_errors += manifest_module.check_host_commit(manifest, self.repo)
             if host_errors:
                 return f"blocked_version: {'; '.join(host_errors)}", None
         recorded = pkg.installed_hash or pkg.content_hash

@@ -49,7 +49,7 @@ from shared.agents import (
 )
 from shared.agents.labels import publish_label_updated, spawn_prompt_with_label
 from shared.agents.observation import roster
-from shared.agents.observation import snapshot as agent_snapshot
+from shared.agents.observation import snapshot as snapshot_module
 from shared.agents.observation.evidence import AgentAvailability, AvailabilityReason
 from shared.config import settings
 from shared.db_transaction import write_transaction
@@ -509,7 +509,7 @@ def _read_launch_state(pool: ConnectionPool, agent_id: int) -> tuple[dict[str, o
             (agent_id,),
         )
         row = cur.fetchone()
-        snapshot = agent_snapshot.select_one(conn, agent_id)
+        snapshot = snapshot_module.select_one(conn, agent_id)
     if row is None or snapshot is None:
         return {"status": "unknown", "availability": None}, False, False
     status, admission_at, attempt_id = row
@@ -595,7 +595,7 @@ def _require_matching_launch_receipt(spawned: SpawnedAgent, agent_id: int, targe
 def _creation_availability(pool: ConnectionPool, agent_id: int) -> AgentAvailability:
     try:
         with pool.connection() as conn:
-            snap = agent_snapshot.select_one(conn, agent_id)
+            snap = snapshot_module.select_one(conn, agent_id)
     except Exception as exc:
         logger.warning(
             "created agent {} receipt read failed ({}): {}",
@@ -692,7 +692,7 @@ def get_agent(agent_id: int, request: Request) -> AgentRow:
     A nonexistent ID returns 404 rather than falling back to another agent.
     """
     with request.app.state.db_pool.connection() as conn:
-        snap = agent_snapshot.select_one(conn, agent_id)
+        snap = snapshot_module.select_one(conn, agent_id)
     if snap is None:
         raise AgentNotFound(f"agent {agent_id} does not exist")
     return AgentRow.model_validate(snap.model_dump())
