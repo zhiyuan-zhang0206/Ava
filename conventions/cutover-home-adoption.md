@@ -418,7 +418,7 @@ with the old code, before the host's code switch:
   `--exclude-unit` at W6 keeps it fenced), or treat it as a no-go on the
   gateway (R1). The new code latches none of these receipts once its drain is
   certified ([receipts need a live
-  continuation](../shared/maintenance/cohort-receipts.ava.okf.md)).
+  continuation](../shared/deploy/maintenance/cohort-receipts.ava.okf.md)).
 
 ## Operator follow-up
 
