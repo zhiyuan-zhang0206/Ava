@@ -14,7 +14,7 @@ platform.
   supervisor on Windows. Never addresses service sessions.
 
 **Every import of a platform supervisor in this module is method-local** —
-`from shared import winproc` / `from shared import posixproc` /
+`from shared.sessions.windows import winproc` / `from shared.sessions import posixproc` /
 `from shared.sessions.helperproc import HelperProcSessionBackend` inside method bodies,
 never at module scope — so selecting one backend does not import every
 platform implementation.
