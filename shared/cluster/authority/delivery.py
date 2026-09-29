@@ -72,16 +72,14 @@ def read_pooler_admin(home: Path) -> PoolerAdmin:
     try:
         return _parse_pooler_admin(_read_private(pooler_admin_path(home)))
     except FileNotFoundError:
-        raise LedgerRefusedError(
-            "no pooler admin credential: birth or the cutover creates it"
-        ) from None
+        raise LedgerRefusedError("no pooler admin credential: birth creates it") from None
 
 
 def ensure_pooler_admin(home: Path, *, encrypt: Encrypt) -> PoolerAdmin:
     """Create the admin-console credential once, published exclusively.
 
-    Birth and the cutover call this; an existing credential is kept, never
-    rotated, so a retry reuses the value the running pooler already holds.
+    Birth calls this; an existing credential is kept, never rotated, so a
+    retry reuses the value the running pooler already holds.
     """
     import secrets
 

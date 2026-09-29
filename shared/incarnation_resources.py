@@ -37,7 +37,7 @@ class ResourceEvidenceError(RuntimeError):
 class ResourceShapeError(ResourceEvidenceError, ValueError):
     """A stored value the current model cannot decode: malformed, or written by
     a retired runtime (process receipts without native boot scope). No runtime
-    path parses it; only the one-time cutover reconciliation replaces it."""
+    path parses or replaces it."""
 
 
 class _StrictEvidence(BaseModel):

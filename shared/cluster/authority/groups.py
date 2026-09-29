@@ -38,7 +38,6 @@ from shared.cluster.authority.model import (
     AuthorityRefusedError,
     BirthAuthority,
     CatalogRefusedError,
-    CutoverAuthority,
     Groups,
 )
 
@@ -103,9 +102,7 @@ def group_violations(conn: Conn, groups: Groups) -> list[str]:
     violations: list[str] = []
     for name, fact in facts.items():
         if fact.login or fact.password is not None:
-            violations.append(
-                f"group {name} can log in; an existing home converts through the cutover"
-            )
+            violations.append(f"group {name} can log in")
         if fact.elevated or fact.owns or fact.configured:
             violations.append(f"group {name} holds attributes, ownership or settings")
         if not fact.inherit:
@@ -202,7 +199,7 @@ def ensure_groups(conn: Conn, *, owner: str, database: str, groups: Groups) -> N
     Never changes LOGIN: a group that can log in, holds elevated attributes,
     owns objects, carries role settings or is a member of another role is an
     unknown state and refuses. A legacy LOGIN ``ava_runner`` is demoted only by
-    ``retire_legacy_logins`` under birth or cutover authority.
+    ``retire_legacy_logins`` under birth authority.
     """
     require_admin(conn)
     with conn.transaction():
@@ -214,7 +211,7 @@ def ensure_groups(conn: Conn, *, owner: str, database: str, groups: Groups) -> N
 
 
 def retire_legacy_logins(
-    conn: Conn, *, owner: str, groups: Groups, authority: BirthAuthority | CutoverAuthority
+    conn: Conn, *, owner: str, groups: Groups, authority: BirthAuthority
 ) -> tuple[str, ...]:
     """Demote the schema owner and existing groups to NOLOGIN without a password.
 

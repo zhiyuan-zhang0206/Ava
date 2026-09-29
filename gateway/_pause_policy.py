@@ -20,9 +20,8 @@ middleware comments):
   alert is lost exactly when the user needs alerting most.
 - `GET /api/bootstrap` — the read-only config projection a remote unit's
   start fetches (its join, and every process's config resolution). A held
-  runner starts before the hold is released (the cutover's held first
-  start), so a 503 here would stop it. It stays authenticated and serves
-  no database login.
+  runner starts before the hold is released, so a 503 here would stop it.
+  It stays authenticated and serves no database login.
 """
 
 from __future__ import annotations

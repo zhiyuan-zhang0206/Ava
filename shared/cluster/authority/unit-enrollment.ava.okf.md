@@ -10,8 +10,8 @@ tags: [authority, lifecycle]
 The enrollment (`db-authority/units/<key>.json` on the gateway, the unit's copy
 in `enrollment.json`) is the unit's durable identity toward a release
 coordinator; the human bearer and write generations never authenticate that
-channel. It is minted when the unit first receives a bundle — its join or the
-one-time cutover (`remote-units` step) — and reused by later bundles. Only an
+channel. It is minted when the unit first receives a bundle and reused by
+later bundles. Only an
 operator command on the gateway changes it, refused while a release operation
 is incomplete; the commands print the enrollment id, never the secret:
 

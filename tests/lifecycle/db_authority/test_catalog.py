@@ -1,6 +1,6 @@
-"""Group grants and the fail-closed invariant on real PostgreSQL 17,
-MAINTAIN/VACUUM, and cutover. The runner matrix itself is exercised through a
-group login in tests/shared/test_runner_role.py."""
+"""Group grants and the fail-closed invariant on real PostgreSQL 17, and
+MAINTAIN/VACUUM. The runner matrix itself is exercised through a group login in
+tests/shared/test_runner_role.py."""
 
 from __future__ import annotations
 
@@ -9,16 +9,12 @@ import pytest
 from psycopg import sql
 
 from shared.cluster.authority import (
+    BirthAuthority,
     CatalogRefusedError,
-    CutoverAuthority,
     VacuumSkippedError,
-    activate,
     check_invariant,
-    create_ledger,
     ensure_groups,
     ensure_monitor,
-    mint_generation,
-    prove_closure,
     retire_legacy_logins,
     vacuum_or_fail,
 )
@@ -160,7 +156,7 @@ def test_ensure_groups_is_idempotent_and_never_changes_login(
             )
         check_invariant(conn, cluster.home, database=cluster.database)
         conn.execute("ALTER ROLE ava_runner LOGIN")
-        with pytest.raises(CatalogRefusedError, match="converts through the cutover"):
+        with pytest.raises(CatalogRefusedError, match="group ava_runner can log in"):
             ensure_groups(
                 conn, owner=cluster.owner, database=cluster.database, groups=cluster.groups
             )
@@ -187,61 +183,7 @@ def test_gateway_vacuum_requires_maintain_and_a_skip_is_a_failure(
             vacuum_or_fail(gateway, "checkpoints")
 
 
-def test_cutover_retires_legacy_logins_closes_their_sessions_and_mints(
-    authority_unborn: AuthorityCluster,
-) -> None:
-    cluster = authority_unborn
-    authority = CutoverAuthority()
-    with cluster.admin() as conn:
-        conn.execute(
-            sql.SQL("ALTER ROLE {} LOGIN PASSWORD 'legacy-owner-password'").format(
-                sql.Identifier(OWNER)
-            )
-        )
-        conn.execute("CREATE ROLE ava_runner LOGIN PASSWORD 'legacy-runner-password'")
-        conn.execute("GRANT SELECT ON agents TO ava_runner")
-    legacy_owner = cluster.login(OWNER, "legacy-owner-password")
-    legacy_runner = cluster.login("ava_runner", "legacy-runner-password", via="socket")
-    legacy_runner.execute("SELECT count(*) FROM agents")
-    try:
-        with cluster.admin() as conn:
-            with pytest.raises(CatalogRefusedError, match="converts through the cutover"):
-                ensure_groups(
-                    conn, owner=cluster.owner, database=cluster.database, groups=cluster.groups
-                )
-            with conn.transaction():
-                demoted = retire_legacy_logins(
-                    conn, owner=cluster.owner, groups=cluster.groups, authority=authority
-                )
-                ensure_groups(
-                    conn, owner=cluster.owner, database=cluster.database, groups=cluster.groups
-                )
-            assert demoted == ("ava_runner", OWNER)
-            evidence = prove_closure(conn, (cluster.owner, "ava_gateway", "ava_runner"))
-            assert evidence.terminated == 2
-            create_ledger(
-                cluster.home, owner=cluster.owner, groups=cluster.groups, authority=authority
-            )
-            verified = mint_generation(conn, cluster.home, authority)
-            activate(cluster.home, authority, verified)
-            assert check_invariant(conn, cluster.home, database=cluster.database) == verified
-        for session in (legacy_owner, legacy_runner):
-            with pytest.raises(psycopg.OperationalError):
-                session.execute("SELECT 1")
-        for role, password in (
-            (OWNER, "legacy-owner-password"),
-            ("ava_runner", "legacy-runner-password"),
-        ):
-            with pytest.raises(psycopg.OperationalError):
-                cluster.login(role, password)
-        with cluster.connect_class("runner") as runner:
-            assert runner.execute("SELECT count(*) FROM agents").fetchone() == (0,)
-    finally:
-        legacy_owner.close()
-        legacy_runner.close()
-
-
 def test_retire_refuses_a_superuser_owner(authority_unborn: AuthorityCluster) -> None:
     cluster = authority_unborn
     with cluster.admin() as conn, pytest.raises(CatalogRefusedError, match="superuser"):
-        retire_legacy_logins(conn, owner="ava", groups=cluster.groups, authority=CutoverAuthority())
+        retire_legacy_logins(conn, owner="ava", groups=cluster.groups, authority=BirthAuthority())

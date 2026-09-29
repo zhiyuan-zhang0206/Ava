@@ -61,23 +61,15 @@ are not implementation requirements for this revision.
    directories as `AVA_SERVICE_PATH` in its home configuration before first start
    with the new code; omit virtualenv directories. Do not derive this declaration
    from a later recovery caller's PATH. Deployment is separate from PR merge.
-   Existing homes are adopted (start intent, `AVA_SERVICE_PATH`, legacy OS jobs,
-   legacy files and runner residue) by the one-time
-   `scripts/cutover_adopt_home.py`, after the read-only
-   `scripts/cutover_inventory.py`
-   ([procedure](../../conventions/cutover-home-adoption.md)).
-   The gateway's database records (pending publication, legacy deploy lease,
-   host postures, stale units, retired-shape incarnation rows, identity-less
-   terminated rows) are inventoried
-   and repaired by the one-time `scripts/cutover_db_records.py`
-   ([procedure](../../conventions/cutover-db-records.md)).
+   The one-time home adoption and database-records repair tooling is removed:
+   no code adopts or converts an existing home or its database records.
    Cutover preconditions and one-time repairs:
    - Every cluster reads `deployment_state.managed_writer_evidence->'pending'
      IS NULL` before this release is admitted. The retired updater's checked
      publication recovery is gone, and no runtime command clears a recorded
      pending publication. It keeps fencing every deploy-lease acquire, including
-     PITR provisioning, until the operator resolves it with the database-records
-     repair, which clears only the exact recorded value. The fence itself stays.
+     PITR provisioning, until an operator's manual database repair clears
+     exactly the recorded value. The fence itself stays.
    - `$AVA_HOME/installed_sha` has no reader or writer; the source-tree check
      alerts only on checkout edits of a source-run home. Delete the file in the
      cutover record.
@@ -86,8 +78,7 @@ are not implementation requirements for this revision.
      current code spawns such a session, so recovery no longer probes for one:
      a legacy session is invisible to it until it takes its database lease. The
      remaining guards (updater handoff, deploy-lease holder PID probe, host
-     updater lease, maintenance admission, the fleet cutover's hold) cover
-     every current owner.
+     updater lease, maintenance admission) cover every current owner.
    - `$AVA_HOME/deploy-state.json`, the retired updater's Gate marker, has no
      reader or writer; Gate never renders an update page. Delete it in the
      cutover record.
@@ -194,18 +185,13 @@ be deleted together. No permanent row-adoption compatibility path belongs in the
 new runtime.
 
 Implemented for existing agents (FC-4a; why: `decisions/2026-09-27-existing-agent-closed-predecessor-admission.md`):
-a retired-shape row is admissible only after the cutover rewrites it to the
-closed-predecessor form, `IncarnationResources(G, O, host_process=null,
-requests={})` for the incarnation the retired value names, backed by that
-incarnation's existing predecessor receipt (the old drain's applied restart,
-or an observed terminate) and the machine's closure attestation recorded on
-the receipt. `shared.predecessor_closure.close_retired_predecessor` is the
-one-time library `scripts/cutover_db_records.py` calls, with one closure
-attestation per machine (`scripts/cutover_inventory.py --attest`: recorded
-identities gone and the home census empty); admission keeps
-`PREDECESSOR_RECEIPT` as its only rule. Unconverted rows refuse with
-`resource_fence` / `runtime_cutover_required`; NULL resources are never
-converted and stay protocol zero. Drain certification accepts
+a retired-shape row is admissible only in the closed-predecessor form,
+`IncarnationResources(G, O, host_process=null, requests={})` for the
+incarnation the retired value names, backed by that incarnation's existing
+predecessor receipt (the old drain's applied restart, or an observed
+terminate); admission keeps `PREDECESSOR_RECEIPT` as its only rule. No code
+converts a row to that form. Retired-shape rows refuse with `resource_fence` /
+`runtime_cutover_required`; NULL resources stay protocol zero. Drain certification accepts
 the complete empty recorded set of the released incarnation. A never-admitted
 row resurrects as a fresh birth only with its birth marker intact, or when the
 runtime's own force recorded that it ended the row unowned after the
@@ -214,20 +200,11 @@ runtime's own lifecycle had left it so
 
 Implemented for agents terminated before the runtime incarnation (why:
 `decisions/2026-09-28-legacy-terminated-agents-resurrectable-at-cutover.md`):
-a terminated row with NULL resources and an incomplete runtime identity gets,
-at W7 and on a machine whose closure attestation the run holds, a minted
-hosted identity (fresh generation and owner, no pid), which only passes the
-resurrection gate and which the resurrection CAS clears. Resources stay NULL;
-no marker or receipt is written. The evidence is the attested home's empty
-census plus the row's termination no later than the attestation, a strict
-subset of FC-4a's (the row records no pid to prove gone), so a machine with a
-second unit left gets no mint, and W7 refuses while any row reads as
-terminated after its attestation (clock skew or a late writer). A row whose
-lifecycle pointer names a forced terminate the new agent host settles at its
-first boot converts at the W12 late conversion, with the W7 attestations.
-Rows of unattested, paused or unit-less machines, rows with any other
-pointer resurrection does not supersede, and rows terminated after their
-machine's attestation (the new code writes that shape too) keep refusing.
+a terminated row with NULL resources and an incomplete runtime identity
+resurrects only when it carries a minted hosted identity (fresh generation and
+owner, no pid), which only passes the resurrection gate and which the
+resurrection CAS clears. Resources stay NULL. No code mints such an identity;
+every other such row keeps refusing.
 
 ### Proposed database authority boundary
 
@@ -281,13 +258,11 @@ launcher delivers each service its class token (`AVA_API_TOKEN`) only while the
 API is authenticated. Remote units never hold the human secret (bootstrap does
 not serve it); their OTLP relay uses a telemetry token derived from it
 ([API tokens](../../shared/cluster/authority/api-tokens.ava.okf.md)).
-Existing homes convert through the one-time `scripts/cutover_db_authority.py`
-(steps `redis`, `db`, `api` — pinning the logical-backup passphrase, plus the
-one bearer rotation on a networked home — and `remote-units`;
-[credential split](../../conventions/data-plane-secret-split.md#convert-an-existing-home)).
+A home born before this model is refused; no conversion exists
+([credential split](../../conventions/data-plane-secret-split.md#homes-born-before-this-model)).
 
-The unit enrollment secret (minted at a unit's first bundle: its join or the
-cutover) has operator rotation and revocation and keys the coordinator
+The unit enrollment secret (minted at a unit's first bundle) has operator
+rotation and revocation and keys the coordinator
 channel's request authentication and sealing
 ([enrollment](../../shared/cluster/authority/unit-enrollment.ava.okf.md)).
 The only cross-release contract, the frozen v1 image-exec handoff (CLI and the

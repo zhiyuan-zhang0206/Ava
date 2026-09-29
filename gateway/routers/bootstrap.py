@@ -19,7 +19,7 @@ shared by every runner unit, and the bundle's telemetry token is the
 cluster's; only the bundle's enrollment secret is the unit's own.
 
 The route is control-plane (`shared.api_contracts.contracts`): a held gateway
-still serves it, since a runner's held first start joins through it and every
+still serves it, since a runner started under a hold joins through it and every
 runner process resolves its config from it before the hold is released. The
 pause exemption changes neither the authentication nor the payload.
 """

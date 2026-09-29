@@ -151,8 +151,7 @@ def _join(values: dict[str, str], home: Path, capability: str | None) -> None:
         raise ValueError(
             f"this remote unit's home ({home}) records the human cluster secret; a remote "
             "unit authenticates with its capability's machine API token and never holds "
-            "it. Remove AVA_CLUSTER_SECRET from its .env (the one-time home adoption does "
-            "this: scripts/cutover_adopt_home.py)"
+            "it. Remove AVA_CLUSTER_SECRET from its .env"
         )
     gateway = values["AVA_GATEWAY_URL"]
     host = values.get("AVA_MACHINE_HOST", "")

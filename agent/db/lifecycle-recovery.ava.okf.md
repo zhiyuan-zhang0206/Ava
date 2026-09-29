@@ -36,17 +36,12 @@ above the epoch fence
 (`decisions/2026-09-29-unowned-termination-resurrects.md`).
 Historical process runtimes, unknown runtime kinds, incomplete hosted
 identities and resources the current model cannot decode refuse resurrection
-(`runtime_cutover_required`) pending explicit one-time cutover reconciliation.
-For a terminated row with NULL resources and an incomplete identity, that
-reconciliation is the cutover's identity mint: on an attested machine it
-writes a hosted kind and a fresh generation and owner, which this gate then
-accepts and the resurrection CAS clears
+(`runtime_cutover_required`); no code reconciles them. A terminated row with
+NULL resources passes this gate only with a minted hosted identity (a hosted
+kind and a fresh generation and owner), which the resurrection CAS clears
 (`decisions/2026-09-28-legacy-terminated-agents-resurrectable-at-cutover.md`).
-It reaches only rows terminated before their machine's attestation; a row
-whose pointer names a forced terminate is minted at the cutover's W12 late
-conversion once boot recovery settled that force. Rows the mint does not
-reach keep refusing, and so does a legacy unowned row this runtime
-force-terminated without having released it first.
+Every other such row keeps refusing, and so does a legacy unowned row this
+runtime force-terminated without having released it first.
 An automatic resurrection that meets such a refusal leaves its inbound queued
 and logs a WARNING naming the reason.
 No process-exit observer adopts those rows or settles a hosted logical lifecycle.

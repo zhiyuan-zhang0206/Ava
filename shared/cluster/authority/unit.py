@@ -2,9 +2,9 @@
 
 The bootstrap endpoint serves no database credential. A remote agent-runner
 unit receives the cluster's runner login only through an explicit operator
-step (the plan's manual delivery, "F1"), used for the one-time production
-cutover, a new runner's join and emergencies; routine networked rollouts keep
-refusing until the automated exchange exists.
+step (the plan's manual delivery, "F1"), used for a new runner's join and
+emergencies; routine networked rollouts keep refusing until the automated
+exchange exists.
 
 - The gateway operator issues a **bundle** (`issue_bundle`): the ACTIVE write
   generation's runner login, the endpoint bootstrap serves, the unit's
@@ -38,8 +38,7 @@ what a lost bundle exposes and how to contain it:
 The enrollment secret is the unit's durable identity toward the gateway: it
 keys the release coordinator channel (`shared.cluster.authority.channel`). The
 gateway keeps its copy in `$AVA_HOME/db-authority/units/<key>.json`, minted
-when the unit first receives a bundle (its join, or the one-time cutover) and
-reused by later bundles. Only an explicit operator command changes it:
+when the unit first receives a bundle and reused by later bundles. Only an explicit operator command changes it:
 `rotate_enrollment` replaces the secret (the next bundle delivers it) and
 `revoke_enrollment` deletes the record; neither touches the generation's login
 or API token.

@@ -552,12 +552,10 @@ def test_only_an_ordinary_start_births_the_pooler() -> None:
     transient unit's cgroup (`KillMode=control-group`), which systemd empties
     when the executor exits. Admission proves the minted logins directly; the
     stage's ordinary start, run by the root boot owner, births the pooler
-    (`complete_gateway_data_plane`); the operator's one-time cutover runs
-    with the application stopped. A new caller must not run inside the
+    (`complete_gateway_data_plane`). A new caller must not run inside the
     executor process."""
     assert _callers("_ensure_pooler") == [
         "cli/commands/data_plane/bringup.py::complete_gateway_data_plane",
-        "scripts/cutover_db_authority.py::_convert_db",
     ]
     assert _callers("ensure_pgbouncer") == ["cli/commands/data_plane/bringup.py::_ensure_pooler"]
     assert _callers("_launch_pooler") == ["cli/commands/data_plane/pgbouncer.py::ensure_pgbouncer"]

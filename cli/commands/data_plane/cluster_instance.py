@@ -19,9 +19,8 @@ Model (mirrors `shared.pg_tools.throwaway_postgres`, but persistent + authed):
 - Redis runs `redis-server` on the cluster's redis port and ALWAYS authenticates,
   whatever the bearer: `requirepass` = the gateway-only Redis admin password, and
   the cluster's ACL user has its own runtime password. Both are minted at first
-  start; a home without them is refused and converted once by
-  `scripts/cutover_db_authority.py`. A no-secret cluster keeps the loopback-only
-  bind. Data dir under `$AVA_HOME/redis`. The
+  start; a home without them is refused, never converted. A no-secret cluster
+  keeps the loopback-only bind. Data dir under `$AVA_HOME/redis`. The
   Redis admin password reaches redis through a 0600 `redis.conf` and reaches `redis-cli`
   through `$REDISCLI_AUTH` — never argv, which `ps` shows to any local user
   (issue #974).
@@ -614,10 +613,8 @@ def ensure_cluster_storage(
     if not (redis_admin_password and redis_password):
         raise ValueError(
             "Redis always authenticates, but this home has no generated Redis credentials "
-            "(AVA_REDIS_ADMIN_PASSWORD / AVA_REDIS_PASSWORD). Convert the existing home "
-            "once, with its application stopped (`ava stop --keep-infra`): "
-            f"`.venv/bin/python scripts/cutover_db_authority.py --home {ava_home()} "
-            "--execute` (see conventions/data-plane-secret-split.md)."
+            "(AVA_REDIS_ADMIN_PASSWORD / AVA_REDIS_PASSWORD): it was born before Redis "
+            "always authenticated and no conversion exists; re-birth it as a new home."
         )
     print(f"\n→ per-cluster data plane (pg :{pg_port}, redis :{redis_port})")
     if (rc := _start_pg(pg_port, cluster_secret)) != 0:

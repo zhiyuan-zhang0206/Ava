@@ -2,9 +2,8 @@
 
 A gateway birth mints and pins the passphrase, so rotating the cluster secret
 never changes the key. A home born earlier encrypted under `sha256(secret)`;
-its cutover pins exactly that (a networked home inside the rotation, a single
-box without rotating), so its earlier artifacts keep decrypting. An empty
-secret's derivation is a public constant, so such a home pins a minted
+with exactly that pinned, its earlier artifacts keep decrypting. An empty
+secret's derivation is a public constant, so such a home carries a minted
 passphrase and its earlier artifacts decrypt only through the explicit legacy
 restore option. Every rotation step is journaled before its effect, with
 fingerprints only, and a resumed rotation never re-derives the passphrase from
@@ -156,7 +155,7 @@ def _decrypts_with(artifact: Path, key: str) -> bool:
     return proc.returncode == 0 and out.read_bytes() == b"PGDMP fake dump"
 
 
-def _written_before_the_cutover(
+def _written_before_the_pin(
     backups: Callable[[], Path], monkeypatch: pytest.MonkeyPatch, secret: str
 ) -> Path:
     """An artifact as a home born earlier wrote it: under `sha256(secret)`."""
@@ -181,7 +180,7 @@ def test_a_home_without_a_pin_has_no_backup_key(home: Path, backups: Callable[[]
     """No derivation fallback: without a pin nothing is written or read."""
     with pytest.raises(passphrase.PassphrasePinError, match="no logical-backup passphrase"):
         backups()
-    with pytest.raises(passphrase.PassphrasePinError, match="cutover"):
+    with pytest.raises(passphrase.PassphrasePinError, match="mints one at birth"):
         passphrase.logical_backup_passphrase()
     directory = backup.backup_dir()
     assert not list(directory.rglob("*.dump.enc")) and not list(directory.rglob(".backup-key-*"))
@@ -197,33 +196,14 @@ def test_an_empty_secret_home_encrypts_for_real(
     assert _decrypts_with(artifact, passphrase.resolve(open_home))
 
 
-def test_the_cutover_pins_what_an_existing_home_encrypted_under(
-    home: Path, backups: Callable[[], Path], monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """A single box keeps its bearer; its `api` step pins `sha256(secret)`, so the
-    artifacts it wrote before the cutover restore, and a later rotation keeps it."""
-    old = _written_before_the_cutover(backups, monkeypatch, _OLD)
-    assert rotate.pin_single_box(home, execute=False).startswith("api: would pin")
-    assert passphrase.pinned(home) is None
-    outcome = rotate.pin_single_box(home, execute=True)
-    assert outcome.startswith("api: single box keeps its bearer") and "legacy" not in outcome
-    assert passphrase.pinned(home) == passphrase.derive(_OLD) and _secret(home) == _OLD
-    assert _restored(old) == _restored(backups()) == b"PGDMP fake dump"
-    assert rotate.pin_single_box(home, execute=True) == outcome  # a re-run keeps the pin
-    rotate.advance(home, None, lambda _rotation: None)
-    monkeypatch.setattr(settings.data_plane, "cluster_secret", _secret(home))
-    assert _restored(old) == b"PGDMP fake dump"
-
-
-def test_an_empty_secret_home_pins_a_minted_passphrase_at_the_cutover(
+def test_an_empty_secret_homes_earlier_artifacts_need_the_legacy_option(
     open_home: Path, backups: Callable[[], Path], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """sha256("") is public, so the cutover pins a minted passphrase; the
+    """sha256("") is public, so such a home carries a minted passphrase; the
     artifacts written before decrypt only through the explicit legacy option,
     which is never tried on its own, and never opens a current artifact."""
-    old = _written_before_the_cutover(backups, monkeypatch, "")
-    outcome = rotate.pin_single_box(open_home, execute=True)
-    assert "--legacy-empty-secret-passphrase" in outcome
+    old = _written_before_the_pin(backups, monkeypatch, "")
+    passphrase.ensure_minted(open_home)
     pinned = passphrase.pinned(open_home)
     assert pinned is not None and pinned != passphrase.LEGACY_EMPTY_SECRET_PASSPHRASE
     with pytest.raises(RuntimeError, match="--legacy-empty-secret-passphrase"):

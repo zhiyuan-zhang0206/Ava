@@ -135,7 +135,7 @@ revoked generation); it then writes `$AVA_HOME/db-authority/unit.json` and
 refuses to start and names the issue command. Issue is refused while a release
 operation is incomplete and on a remote-managed plane. Networked release
 operations keep refusing; a new generation reaches remote units only by a new
-bundle (cutover, join, emergency).
+bundle (join, emergency).
 
 The bundle also carries the unit's enrollment secret, its identity toward a
 release coordinator (minted at its first bundle, then reused). Change it only
@@ -380,17 +380,9 @@ unauthenticated and binds every data-plane listener to loopback. `.env` holds on
 credential-free database endpoint; the root launcher delivers each DB-using service its
 class login (gateway or runner) from `$AVA_HOME/db-authority/`, and an admitted operator
 CLI receives the gateway login (see the secret-split page). A home born before this is
-refused by `ava start` before any native effect until it is converted once: stop its
-application (`ava stop --keep-infra`), then run
-`.venv/bin/python scripts/cutover_db_authority.py --home <home>` (dry-run) and again with
-`--execute` from the checkout that owns the home, then `ava start`
-([details](data-plane-secret-split.md#convert-an-existing-home)). A home in the fleet
-cutover is the exception: while its cutover hold stands, an ordinary start never releases
-that hold (it refuses before the held first start and keeps the hold after it), so start it
-with `scripts/cutover_adopt_home.py --home <home> --start` (the held first start) after the
-[database records repair](cutover-db-records.md), never bare `ava start`
-([cutover home adoption](cutover-home-adoption.md)). Settings never rewrites a
-database credential. On the same load, a data-plane URL whose host is this machine's own
+refused by `ava start` before any native effect; no conversion exists
+([details](data-plane-secret-split.md#homes-born-before-this-model)). Settings never
+rewrites a database credential. On the same load, a data-plane URL whose host is this machine's own
 reachable address (`AVA_MACHINE_HOST`) dials `127.0.0.1` instead
 (`shared/config/data_plane.py`): self-dial never leaves the box. The `.env` value,
 bootstrap payload, and registered address stay untouched, so remote runners keep dialing
@@ -419,7 +411,7 @@ TTL rows, and full CRUD on the LangGraph checkpoint tables.
 `agents` INSERT, `agents_meta` INSERT, notices writes, the cluster deploy-state tables and
 any DDL fail under it by construction. Each write generation is one `ava_g<n>_gateway` and
 one `ava_g<n>_runner` login inheriting its group (`INHERIT TRUE, SET FALSE, ADMIN
-FALSE`); generation 0 is minted at birth (or by the cutover). The point-in-time `ALL`
+FALSE`); generation 0 is minted at birth. The point-in-time `ALL`
 grants are re-run by every gateway `ava start` after migrations (`ensure_groups`), and
 standing `ALTER DEFAULT PRIVILEGES FOR ROLE <owner>` covers objects later migrations
 create; start then sweeps every non-active application login to `NOLOGIN` and holds on
@@ -1590,16 +1582,14 @@ loopback.
 
 `AVA_CLUSTER_SECRET` is the gateway's human bearer (API, frontend login); no
 remote unit holds it, and machine API tokens rotate with every write
-generation. The fleet cutover rotates it once (`scripts/cutover_db_authority.py`,
-step `api`); otherwise run
+generation. Run
 [`scripts/rotate_cluster_secret.py`](../scripts/rotate_cluster_secret.py)
 (`--execute`) only after a bearer leak. Rotating the secret never touches the
 logical-backup passphrase `$AVA_HOME/backups/logical-backup.passphrase`: a gateway
-home's birth mints and pins it, independent of the secret; a home born earlier pins
-`sha256(secret)` once, in the cutover's `api` step before that step rotates, so every
-earlier logical backup keeps decrypting (an empty-secret home pins a minted one instead).
-Both scripts verify the pin before they write
-the new secret, and journal each step with fingerprints, never secrets.
+home's birth mints and pins it, independent of the secret; a home born earlier carries
+`sha256(secret)`, pinned once, so every earlier logical backup keeps decrypting (an
+empty-secret home carries a minted one instead). The script verifies the pin before it
+writes the new secret, and journals each step with fingerprints, never secrets.
 **The pinned file is backup-critical material**: nothing re-derives it, and losing it
 makes every logical backup of the home unreadable; escrow a copy with the gateway's
 backup keys ([decision](../decisions/2026-09-28-backup-passphrase-minted-at-birth.md),

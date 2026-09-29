@@ -13,9 +13,7 @@ in, and every session whose role was dropped underneath it (PostgreSQL lets
 ``DROP ROLE`` succeed while its sessions live on). A backend that passed
 authentication just before its role lost LOGIN may appear after an empty
 census. For a generation login that is harmless: its only capability is group
-membership, which the sweep revokes in the same transaction. A legacy owner
-session racing the cutover's demotion is excluded by the cutover's own
-precondition (no application root running), not by this census.
+membership, which the sweep revokes in the same transaction.
 """
 
 from __future__ import annotations

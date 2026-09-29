@@ -83,8 +83,8 @@ chmod 600 "$scratch_dir/backup.dump"
 The key file holds the logical-backup passphrase from its one resolution
 (`services/gateway_side/backup/passphrase.py`, the same one every backup and
 restore uses): the pinned `$AVA_HOME/backups/logical-backup.passphrase`. A
-gateway birth mints it; a home born earlier pinned `sha256(secret)` in the
-cutover's `api` step. It never changes with the cluster secret and is never
+gateway birth mints it; a home born earlier carries `sha256(secret)`, pinned
+once. It never changes with the cluster secret and is never
 derived: a home without it refuses. It is private, never passed on argv, and
 must be deleted with the scratch directory after the drill. Only the gateway
 holds it, so disaster recovery needs that file: keep an escrowed copy with the

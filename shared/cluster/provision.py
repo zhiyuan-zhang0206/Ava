@@ -61,7 +61,7 @@ def ensure_cluster_role(
     The owner never logs in: every DDL path is the administrator acting as it
     (`owner_session`), and application processes hold write-generation logins.
     An existing role is never given LOGIN or a password here; demoting a legacy
-    login owner belongs to birth/cutover authority
+    login owner belongs to birth authority
     (`shared.cluster.authority.retire_legacy_logins`). The initdb bootstrap
     superuser (the installing OS user) cannot be an owner that must lose LOGIN,
     so an identity equal to it refuses. When the database already exists,

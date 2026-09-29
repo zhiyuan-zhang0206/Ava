@@ -79,7 +79,7 @@ def test_build_state_refuses_a_home_without_redis_credentials(
 ) -> None:
     _patch_gateway_home(monkeypatch, tmp_path)
     (tmp_path / ".env").write_text(f"AVA_REDIS_ADMIN_PASSWORD={_OLD_REDIS_ADMIN}\n")
-    with pytest.raises(RuntimeError, match="cutover_db_authority"):
+    with pytest.raises(RuntimeError, match="no conversion exists"):
         rotate.build_state()
 
 

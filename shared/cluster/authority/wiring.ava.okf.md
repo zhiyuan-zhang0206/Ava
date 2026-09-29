@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Write-generation delivery and wiring
-description: How the active write generation reaches the pooler userlist, launched services, admitted operator processes and remote agent-runner units (login and API token), and the birth, ordinary-start and cutover call sequences.
+description: How the active write generation reaches the pooler userlist, launched services, admitted operator processes and remote agent-runner units (login and API token), and the birth and ordinary-start call sequences.
 tags: [postgres, authority, lifecycle]
 ---
 
@@ -14,7 +14,7 @@ the ledger's credential digest:
 
 - `render_userlist`: the pooler's `auth_file` — the generation's two SCRAM
   verifiers plus the admin-console entry `ava_pooler_admin`
-  (`pooler-admin.json`, created once by birth or cutover, never a PostgreSQL
+  (`pooler-admin.json`, created once by birth, never a PostgreSQL
   role). Deterministic bytes, so an unchanged userlist is never restarted.
 - `write_grant`: one class login and API token of the ACTIVE generation (a
   pending or revoked one is never delivered) for a launch environment;
@@ -73,8 +73,8 @@ carries a login to another home:
   runtime; anything else records a refusal naming the issue command, raised at
   the first dial.
 
-A new generation reaches a remote unit only through a new bundle (the one-time
-cutover, a join, an emergency). Networked release operations keep refusing
+A new generation reaches a remote unit only through a new bundle (a join, an
+emergency). Networked release operations keep refusing
 until the fleet transition exchanges capabilities automatically.
 
 ## Unit enrollment
@@ -102,17 +102,6 @@ and the coordinator channel's authentication:
   same operator login itself and hands it, in the exec environment only, to
   the executor image's submission, which is not admitted until selected
   ([[cli/release_handoff/release_handoff.ava.okf.md]]).
-- **Cutover** (`scripts/cutover_db_authority.py`, step `db`):
-  `retire_legacy_logins(Cutover)` -> `ensure_groups` -> `ensure_monitor` ->
-  `prove_closure` over the
-  legacy roles -> ledger -> generation 0 -> pooler -> proof -> `activate` ->
-  invariant -> credential-free `.env`. Step `api`: pin the logical-backup
-  passphrase (`sha256(secret)`, or a minted one for an empty secret); on a
-  networked home inside the one human-bearer rotation
-  (`scripts/rotate_cluster_secret.advance`, journaled as fingerprints). Step
-  `remote-units` (networked homes): explicit classification of every other
-  `machine_units` row -> Redis admin and runtime rotation -> one `issue_bundle` per
-  included unit (after `api`, so bundles carry the rotated telemetry token).
 - **Monitoring** is not delivered: the collector's PostgreSQL receiver
   (`cli/commands/observability/otel_collector.py`) dials the owner-only socket as
   `ava_monitor` by `peer`, so its rendered config names no credential and a

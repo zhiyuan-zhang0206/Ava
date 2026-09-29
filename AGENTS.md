@@ -77,8 +77,8 @@ callers present their API token: the gateway admits the active generation's toke
 one), an ops server its generation's two. Bootstrap serves configuration only: a remote agent-runner
 gets its runner login, API and telemetry tokens in a sealed bundle its start installs (`ava cluster
 db-authority issue-unit`), all shared across runner units (only the bundle's enrollment secret is per
-unit), and never holds the human secret. Older homes convert once: `scripts/cutover_db_authority.py`
-(a networked home also rotates the human secret there).
+unit), and never holds the human secret. A home born before this model (no ledger) is refused; no
+conversion exists.
 
 | Path | Role |
 |---|---|

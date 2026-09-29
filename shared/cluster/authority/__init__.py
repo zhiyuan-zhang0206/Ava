@@ -119,9 +119,6 @@ from shared.cluster.authority.model import (
     ClosureRefusedError as ClosureRefusedError,
 )
 from shared.cluster.authority.model import (
-    CutoverAuthority as CutoverAuthority,
-)
-from shared.cluster.authority.model import (
     Generation as Generation,
 )
 from shared.cluster.authority.model import (

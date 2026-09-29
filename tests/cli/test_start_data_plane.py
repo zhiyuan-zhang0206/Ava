@@ -78,8 +78,8 @@ def test_gateway_data_plane_refuses_a_home_without_a_ledger_before_any_effect(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """A home born before the always-authenticated data plane (no ledger, not a
-    first start in progress) is refused with the cutover instruction before any
-    native effect — never converted by an ordinary start."""
+    first start in progress) is refused before any native effect — never
+    converted by an ordinary start."""
     monkeypatch.setattr(cluster, "get_record", lambda _home: _rec())  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr("shared.cluster.authority.load_ledger", lambda _home: None)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr("cli.start_identity.needs_provision", lambda _home: False)  # pyright: ignore[reportUnknownArgumentType]
@@ -89,7 +89,7 @@ def test_gateway_data_plane_refuses_a_home_without_a_ledger_before_any_effect(
         lambda **_kw: pytest.fail("native effect on a legacy home"),  # pyright: ignore[reportUnknownArgumentType]
     )
     assert _start._ensure_gateway_data_plane() == 1
-    assert "scripts/cutover_db_authority.py" in capsys.readouterr().err
+    assert "no conversion exists" in capsys.readouterr().err
 
 
 def test_gateway_data_plane_no_record_is_error(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -479,18 +479,18 @@ def test_remote_plane_prepares_memory_vectors_through_its_provider_url(
 @pytest.mark.parametrize(
     ("secret", "missing", "reason"),
     [
-        ("bearer-only", "redis_admin_password", "cutover_db_authority"),
-        ("bearer-only", "redis_password", "cutover_db_authority"),
-        ("", "redis_admin_password", "cutover_db_authority"),
-        ("", "redis_password", "cutover_db_authority"),
+        ("bearer-only", "redis_admin_password", "no conversion exists"),
+        ("bearer-only", "redis_password", "no conversion exists"),
+        ("", "redis_admin_password", "no conversion exists"),
+        ("", "redis_password", "no conversion exists"),
     ],
 )
 def test_storage_refuses_missing_credentials_before_effects(
     monkeypatch: pytest.MonkeyPatch, secret: str, missing: str, reason: str
 ) -> None:
     """Redis always authenticates, so an empty bearer does not excuse missing
-    Redis credentials: an unconverted home is refused (naming the one-time
-    cutover) before any native effect. Postgres needs no credential here: its
+    Redis credentials: a home born without them is refused before any native
+    effect. Postgres needs no credential here: its
     administrator is the OS user over the owner-only socket."""
     credentials = {"redis_admin_password": "admin-value", "redis_password": "runtime-value"}
     credentials[missing] = ""

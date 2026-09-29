@@ -7,11 +7,11 @@ cluster secret (decisions/2026-09-28-backup-passphrase-minted-at-birth.md):
 
 - a gateway home's birth mints a random one (`ensure_minted`), whatever its
   secret, so an empty-secret single box encrypts for real;
-- a home born before that pins, once, in the cutover's `api` step
-  (`pin_existing_home`), the passphrase it has encrypted under so far:
-  `sha256(secret)`; an empty-secret home gets a minted one instead, since
-  `sha256("")` is a public constant (`LEGACY_EMPTY_SECRET_PASSPHRASE`, which
-  only an explicit restore option ever uses);
+- a home born before that carries the passphrase it had encrypted under,
+  `sha256(secret)`, pinned once at its conversion; an empty-secret home
+  carries a minted one instead, since `sha256("")` is a public constant
+  (`LEGACY_EMPTY_SECRET_PASSPHRASE`, which only an explicit restore option
+  ever uses);
 - rotating the secret never touches it.
 
 Writers and readers never derive a passphrase: a home without a pin has no
@@ -88,8 +88,7 @@ def resolve(home: Path) -> str:
     if value is None:
         raise PassphrasePinError(
             f"no logical-backup passphrase is pinned at {pin_path(home)}: a gateway home "
-            "mints one at birth, and a home born earlier pins one in the cutover's `api` "
-            "step (scripts/cutover_db_authority.py)"
+            "mints one at birth"
         )
     return value
 
@@ -97,8 +96,8 @@ def resolve(home: Path) -> str:
 def pin(home: Path, passphrase: str) -> None:
     """Pin `passphrase` once; an existing pin must be exactly it (never replaced).
 
-    The caller serializes pinning for `home` (birth under the start lock, the
-    cutover or a rotation under its journal).
+    The caller serializes pinning for `home` (birth under the start lock, or a
+    rotation under its journal).
     """
     if _PASSPHRASE.fullmatch(passphrase) is None:
         raise PassphrasePinError("a logical-backup passphrase is 64 lowercase hex characters")
@@ -117,22 +116,6 @@ def ensure_minted(home: Path) -> None:
     """
     if pinned(home) is None:
         pin(home, mint())
-
-
-def pin_existing_home(home: Path, cluster_secret: str) -> str:
-    """Pin the passphrase of a home born before births minted one; return it.
-
-    An existing pin is kept. Otherwise the home has encrypted under
-    `sha256(secret)`, which is pinned so every earlier artifact keeps
-    decrypting; an empty secret's derivation is the public
-    `LEGACY_EMPTY_SECRET_PASSPHRASE`, so that home pins a minted one and its
-    earlier artifacts decrypt only through the explicit legacy restore option.
-    """
-    value = pinned(home)
-    if value is None:
-        value = derive(cluster_secret) if cluster_secret else mint()
-        pin(home, value)
-    return value
 
 
 def logical_backup_passphrase() -> str:

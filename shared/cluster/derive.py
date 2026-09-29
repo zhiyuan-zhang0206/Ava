@@ -263,7 +263,7 @@ def redis_password_from_env() -> str:
     """This gateway home's file-only Redis ACL runtime password.
 
     Empty only on a home born before Redis always authenticated; storage
-    bring-up refuses it and names the one-time cutover script."""
+    bring-up refuses it."""
     from dotenv import dotenv_values
 
     from shared.paths import ava_home

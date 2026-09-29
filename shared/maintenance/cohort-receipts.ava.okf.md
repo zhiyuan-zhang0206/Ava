@@ -14,8 +14,7 @@ receipt for a failed wake in two cases, only logging it at debug and setting
 no fence:
 
 - the agent is outside the captured cohort (`MaintenanceHold.outside_cohort`):
-  another machine's agent, or one this hold never drains. A hold the cutover
-  created has an empty cohort, so this covers every agent under it;
+  another machine's agent, or one this hold never drains;
 - the drain is certified and the agent drained or is parked
   (`MaintenanceHold.settled_after_drain`): the hold reached `drained`, which
   required every member drained or reaped with no unsettled failure, or any
@@ -35,10 +34,7 @@ Receipts latched after the stop started had no exit.
 Everything else records as before: any failure before the capture (phase
 `preparing`) and a member's failure before the drain is certified (phase
 `draining`, drained and parked members included); `ava maintenance repair`
-covers both. On a `stopped` legacy hold the cutover adoption settles the
-receipts the old code latched in the same cases, proving from the old code's
-rules that they postdate the certified drain (`cli/cutover_hold.py`,
-[cutover runbook](../../conventions/cutover-home-adoption.md#a-legacy-stop-hold-with-failure-receipts)).
+covers both.
 
 ## Dependencies
 
