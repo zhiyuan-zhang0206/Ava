@@ -1,7 +1,7 @@
 """`ava cluster recover` — clear a deploy lease and pause that no live owner holds.
 
 A deploy lease or a paused host posture can outlive the process that took it.
-This verb runs `ops.ops_cluster.cluster_recover_op` in-process, so it needs only
+This verb runs `ops.cluster.cluster_recover_op` in-process, so it needs only
 the data plane, not the gateway HTTP API that is often down in the same incident.
 
 The op clears nothing while any owner may still act: it refuses on an unresolved
@@ -32,7 +32,7 @@ def cmd_cluster_recover() -> int:
     deploy still owns it — that refusal is the command working, not failing.
     """
     from cli.cutover_hold import release_command, standing_hold
-    from ops.ops_cluster import ClusterUpdateInProgress, cluster_recover_op
+    from ops.cluster import ClusterUpdateInProgress, cluster_recover_op
     from shared.cluster_lock import update_lock_holder
     from shared.paths import ava_home
 

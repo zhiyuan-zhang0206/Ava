@@ -6,7 +6,7 @@ import psycopg
 from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 
-from ops.ops_lifecycle.events import publish_page_closed as publish_page_closed
+from ops.lifecycle.events import publish_page_closed as publish_page_closed
 from ops.pages import list_open_page_names
 from shared import telemetry
 from shared.agents import AgentNotFound, AgentStatus

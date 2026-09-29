@@ -24,7 +24,7 @@ from gateway.schemas import (
     MachinePauseResponse,
     MachineResumeResponse,
 )
-from ops.ops_lifecycle import _force_mark_terminated
+from ops.lifecycle import _force_mark_terminated
 from shared import machines
 from shared.db_transaction import write_transaction
 from shared.machine import machine_name

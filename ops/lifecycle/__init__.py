@@ -2,8 +2,8 @@
 
 spawn / terminate / resurrect / restart / self-exit finalize, plus the
 InboundArrived / PageClosed event publishes the agent-runner emits. One of the
-op clusters beside `ops.ops_cluster` / `ops.ops_config` / `ops.ops_inventory`;
-each cluster is self-contained — no op here calls an op in another cluster.
+op clusters beside `ops.cluster` / `ops.host_config` / `ops.inventory` /
+`ops.uploads`; each cluster is self-contained — no op here calls an op in another cluster.
 
 This package door holds the lifecycle ops; its submodules hold the pieces the
 ops compose: `launch` (runner-side spawn validation and wake), `termination`
@@ -40,55 +40,55 @@ from ops.agents import (
 from ops.agents.resurrection_retry import report_auto_resurrect_failure
 from ops.agents.wake import ResurrectTriggerStaleError
 from ops.cluster_status import kill_agent_shells
-from ops.ops_lifecycle import termination
+from ops.lifecycle import termination
 
 # Re-exported from `events`; callers keep module-qualified sites.
-from ops.ops_lifecycle.events import (
+from ops.lifecycle.events import (
     publish_inbound_arrived as publish_inbound_arrived,
 )
-from ops.ops_lifecycle.events import (
+from ops.lifecycle.events import (
     publish_notice_posted as publish_notice_posted,
 )
-from ops.ops_lifecycle.events import (
+from ops.lifecycle.events import (
     publish_notice_resolved as publish_notice_resolved,
 )
-from ops.ops_lifecycle.events import (
+from ops.lifecycle.events import (
     publish_page_closed as publish_page_closed,
 )
 
 # Re-exported (explicit-alias form) from `launch` so the gateway routers and
 # tests keep their module-qualified call sites.
-from ops.ops_lifecycle.launch import (
+from ops.lifecycle.launch import (
     _insert_prompt_blocking as _insert_prompt_blocking,
 )
-from ops.ops_lifecycle.launch import (
+from ops.lifecycle.launch import (
     launch_agent_op as launch_agent_op,
 )
 
 # Re-exported (explicit-alias form) from `resurrect_gates` so the
 # module-qualified callers — tests — keep their call sites.
-from ops.ops_lifecycle.resurrect_gates import (
+from ops.lifecycle.resurrect_gates import (
     clear_wake_suppression as _clear_wake_suppression,
 )
-from ops.ops_lifecycle.resurrect_gates import (
+from ops.lifecycle.resurrect_gates import (
     recovery_halt_reason as _recovery_halt_reason,
 )
-from ops.ops_lifecycle.resurrect_gates import (
+from ops.lifecycle.resurrect_gates import (
     recovery_halted as _recovery_halted,
 )
-from ops.ops_lifecycle.resurrect_gates import (
+from ops.lifecycle.resurrect_gates import (
     system_notice_source_of_trigger as _system_notice_source_of_trigger,
 )
-from ops.ops_lifecycle.resurrect_gates import (
+from ops.lifecycle.resurrect_gates import (
     wake_suppression_active as _wake_suppression_active,
 )
-from ops.ops_lifecycle.termination import (
+from ops.lifecycle.termination import (
     _force_mark_terminated as _force_mark_terminated,
 )
-from ops.ops_lifecycle.termination import (
+from ops.lifecycle.termination import (
     _force_terminate_transaction as _force_terminate_transaction,
 )
-from ops.ops_lifecycle.termination import (
+from ops.lifecycle.termination import (
     _publish_force_terminate_inbound as _publish_force_terminate_inbound,
 )
 from ops.rpc_schemas import (
@@ -753,7 +753,7 @@ async def lifecycle_op(
             trigger_inbound_kind=trigger_inbound_kind,
         )
     if action == "resurrect-billing-v1":
-        from ops.ops_lifecycle.billing_recovery import resurrect_billing_agent_op
+        from ops.lifecycle.billing_recovery import resurrect_billing_agent_op
 
         return await resurrect_billing_agent_op(agent_id)
     if action == "recover-crash-marked-v2":

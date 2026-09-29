@@ -7,7 +7,7 @@ and the pre-launch inbound delivery. Task #1236 follow-up: the row must be
 created as the MAIN data-plane identity, so creation happens on the gateway,
 never on the target runner — its ops server dials as the least-privilege
 `ava_runner` role, which by design cannot INSERT agents / agents_meta. The
-runner's `launch` op (`ops.ops_lifecycle.launch`) validates the created row and
+runner's `launch` op (`ops.lifecycle.launch`) validates the created row and
 wakes its host.
 
 - **create_agent_row(*, spawner="user", fork_from=None, fork_checkpoint=None,

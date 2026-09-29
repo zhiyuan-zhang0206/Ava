@@ -199,7 +199,7 @@ async def _recover_hosted_turn(pool: ConnectionPool, wedge: _HostedTurnWedge) ->
         )
 
     try:
-        from ops.ops_lifecycle import resurrect_if_terminated, terminate_agent_op
+        from ops.lifecycle import resurrect_if_terminated, terminate_agent_op
         from ops.rpc_schemas import TerminateAgentRequest
 
         await terminate_agent_op(

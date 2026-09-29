@@ -33,7 +33,7 @@ def _stub_run(captured: dict[str, Any]) -> Any:
 
 class TestBillingResurrectRoute:
     def test_defaults_to_a_read_only_preview(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        from ops.ops_lifecycle import billing_recovery
+        from ops.lifecycle import billing_recovery
 
         captured: dict[str, Any] = {}
         monkeypatch.setattr(billing_recovery, "run_billing_recovery", _stub_run(captured))
@@ -47,7 +47,7 @@ class TestBillingResurrectRoute:
         assert resp.json()["halted_alive"] == [{"agent_id": 7, "machine": "m", "streak": 2}]
 
     def test_execute_flag_round_trips(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        from ops.ops_lifecycle import billing_recovery
+        from ops.lifecycle import billing_recovery
 
         captured: dict[str, Any] = {}
         monkeypatch.setattr(billing_recovery, "run_billing_recovery", _stub_run(captured))

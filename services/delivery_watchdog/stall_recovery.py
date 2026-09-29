@@ -73,7 +73,7 @@ def select_stalled_crash_marked(
 async def _request_harvest(agent_id: int, inbound_id: int) -> None:
     """Ask the owner's home runner for one harvest decision; emit it (the
     recovery-decision-rate metric). Never raises."""
-    from ops.ops_lifecycle import recover_crash_marked_if_stalled
+    from ops.lifecycle import recover_crash_marked_if_stalled
 
     async with _harvest_semaphore:
         try:

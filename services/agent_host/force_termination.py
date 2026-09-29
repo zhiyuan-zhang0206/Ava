@@ -1,6 +1,6 @@
 """Separate an externally commanded force termination from a real ownership loss.
 
-`ops.ops_lifecycle.terminate_agent_op(force=True)` installs an applied-but-
+`ops.lifecycle.terminate_agent_op(force=True)` installs an applied-but-
 unobserved terminate command bound to the current hosted incarnation
 (`shared.hosted_force.install_hosted_force`; the live pointer
 `agents_meta.lifecycle_command_id`). The delivery watchdog's hosted-turn wedge

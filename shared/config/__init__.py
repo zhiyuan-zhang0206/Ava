@@ -197,7 +197,7 @@ if TYPE_CHECKING:
     # Names the lite latch installs into this module's globals at upgrade
     # (`_full._facade_exports`) or serves settings-free in `__getattr__`:
     # declared so `from shared.config import X` / `from . import X` consumers
-    # (`shared/config/editing.py`, the gateway config router, ops_config, tests)
+    # (`shared/config/editing.py`, the gateway config router, ops.host_config, tests)
     # keep resolving statically after the split.
     from shared.config.metadata import (
         CONFIG_UNCHANGED_SENTINEL as CONFIG_UNCHANGED_SENTINEL,

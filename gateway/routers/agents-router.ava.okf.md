@@ -17,7 +17,7 @@ actions live in `agents_lifecycle.py`; message and state reads live in
 `agents_state.py`; `agents_forward.py` provides the cross-machine forwarding
 helpers. The billing batch-recovery entry is `POST /api/agents/resurrect-billing`
 (a read-only preview unless the body sets `execute`; orchestration in
-`ops/ops_lifecycle/billing_recovery.py`, per-agent dispatch via the versioned
+`ops/lifecycle/billing_recovery.py`, per-agent dispatch via the versioned
 `resurrect-billing-v1` home action).
 
 `/api/cancel` cancels a running turn. `/api/models` exposes available models,

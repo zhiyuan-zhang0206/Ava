@@ -306,7 +306,7 @@ async def test_grace_reap_commits_a_marked_wake_that_passes_the_notice_gate(
     """The grace path queues the same wake as the prompt reap; the marker
     keeps it out of the system-notice class, so the resurrection channels
     see real work (not a notification that never resurrects)."""
-    from ops.ops_lifecycle.resurrect_gates import system_notice_source_of_trigger
+    from ops.lifecycle.resurrect_gates import system_notice_source_of_trigger
 
     agent_id, owner = _agent(db_conn), uuid4()
     incarnation = await admit_hosted_runtime(

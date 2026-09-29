@@ -32,7 +32,7 @@ from gateway.schemas import (
     TokenUsageResponse,
     TraceCheckpointMessagesResponse,
 )
-from ops import ops_lifecycle as _ops
+from ops import lifecycle as _ops
 from ops.agents import get_agent_status
 from ops.rpc_schemas import AgentMessageIn, ContentBlock, ImageUrlContentBlock, TextContentBlock
 from shared import agent_snapshot

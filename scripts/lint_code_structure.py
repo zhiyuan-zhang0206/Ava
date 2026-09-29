@@ -178,7 +178,7 @@ _MACHINE_ROLE_ALLOWED: dict[str, str] = {
     "cli/commands/_repo.py": "resolve this host's capability set, None when unset, for stop/status/converge (what do I serve)",
     "cli/commands/observability/trace.py": "which recovery ingress does this host serve: gateway-local Tempo or a pure-runner relay target (what do I serve)",
     "services/agent_ops/_boot.py": "what do I advertise in register_self (what do I serve)",
-    "ops/ops_inventory.py": "capability guard: inventory ops are agent-runner-only (what do I serve)",
+    "ops/inventory.py": "capability guard: inventory ops are agent-runner-only (what do I serve)",
     "gateway/routers/config.py": "for the gateway itself, local role is authoritative (what do I serve)",
     "cli/commands/release_inventory.py": "verified installed image reads the real annotated service roster for the unit receipt (read-only, WHEEL_RUNTIME-guarded; no serve decision)",
 }

@@ -14,12 +14,12 @@ from psycopg_pool import AsyncConnectionPool, ConnectionPool
 
 from agent.db import claim_inbound_batch
 from agent.hosted_ownership import admit_hosted_runtime, apply_hosted_lifecycle
-from ops import ops_lifecycle
+from ops import lifecycle
 from ops.agents import wake
 from ops.agents.resurrection_retry import ResurrectSettlementDeferredError
 from ops.agents.spawn import create_agent_row
 from ops.cluster_rpc import ClusterOpFailed, ClusterOpUnreachable
-from ops.ops_lifecycle import termination
+from ops.lifecycle import termination
 from shared import maintenance_cohort, pause_owner
 from shared.agents import AgentStatus, ResurrectError, ResurrectRefused
 from shared.config import settings
@@ -200,7 +200,7 @@ def _refused_locally(monkeypatch: pytest.MonkeyPatch, db: psycopg.Connection) ->
     async def _unreachable(*_a: object, **_kw: object) -> dict[str, Any]:
         raise ClusterOpUnreachable("local ops server not reachable")
 
-    monkeypatch.setattr(ops_lifecycle._cluster_rpc, "dispatch_to_machine", _unreachable)
+    monkeypatch.setattr(lifecycle._cluster_rpc, "dispatch_to_machine", _unreachable)
     return aid, trigger
 
 
@@ -212,7 +212,7 @@ def _refused_remotely(monkeypatch: pytest.MonkeyPatch, db: psycopg.Connection) -
     async def _failed(*_a: object, **_kw: object) -> dict[str, Any]:
         raise ClusterOpFailed({"error": "ResurrectRefused: runtime_cutover_required"})
 
-    monkeypatch.setattr(ops_lifecycle._cluster_rpc, "dispatch_to_machine", _failed)
+    monkeypatch.setattr(lifecycle._cluster_rpc, "dispatch_to_machine", _failed)
     return aid, trigger
 
 
@@ -224,7 +224,7 @@ async def test_auto_resurrect_refusal_is_a_warning_naming_the_reason(
     arrange: Any,
 ) -> None:
     aid, trigger = arrange(monkeypatch, db_conn)
-    status = await ops_lifecycle.resurrect_if_terminated(
+    status = await lifecycle.resurrect_if_terminated(
         aid, trigger_inbound_id=trigger, trigger_inbound_kind="chat"
     )
     assert status is AgentStatus.TERMINATED
@@ -251,8 +251,8 @@ async def test_other_auto_resurrect_failures_stay_informational(
     async def _failed(*_a: object, **_kw: object) -> dict[str, Any]:
         raise ClusterOpFailed({"error": "launch failed on the home machine"})
 
-    monkeypatch.setattr(ops_lifecycle._cluster_rpc, "dispatch_to_machine", _failed)
-    await ops_lifecycle.resurrect_if_terminated(
+    monkeypatch.setattr(lifecycle._cluster_rpc, "dispatch_to_machine", _failed)
+    await lifecycle.resurrect_if_terminated(
         aid, trigger_inbound_id=trigger, trigger_inbound_kind="chat"
     )
     events = [r["extra"].get("event") for r in loguru_records if r["level"].name == "WARNING"]

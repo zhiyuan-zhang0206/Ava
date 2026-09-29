@@ -19,8 +19,8 @@ from pathlib import Path
 import pytest
 
 import ava.mcp_config as mcp_cfg_mod
-from ops import ops_inventory as ops
-from ops.ops_inventory import inventory_read_op, inventory_write_op
+from ops import inventory as ops
+from ops.inventory import inventory_read_op, inventory_write_op
 from ops.rpc_schemas import FieldWriteResult
 from shared import mcp_enabled, plugins_config
 

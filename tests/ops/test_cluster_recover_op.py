@@ -16,8 +16,8 @@ from typing import Literal
 
 import pytest
 
-import ops.ops_cluster as _ops
-from ops.ops_cluster import ClusterUpdateInProgress
+import ops.cluster as _ops
+from ops.cluster import ClusterUpdateInProgress
 from shared.cluster_lock import DeployLease, RecoveryClaim
 
 _Kind = Literal["rollout", "restart", "update"]

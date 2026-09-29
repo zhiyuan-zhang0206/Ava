@@ -2,7 +2,7 @@
 
 These are the single never-raise wrapper for every fire-and-forget live-UI /
 lifecycle event publish (shared/live_announce, shared/labels,
-gateway/routers/pages, ops/ops_lifecycle all route through them). The invariant
+gateway/routers/pages, ops/lifecycle all route through them). The invariant
 they enforce: pub/sub is only a latency optimization, so a publish failure must
 never propagate into (crash / roll back) the caller — it returns None and logs,
 classified like the `shared/db.py:publish_inbound_wake` template (NOPERM /

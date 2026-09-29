@@ -311,7 +311,7 @@ async def _probe_agent_runner(
     """Probe an agent-runner by POSTing a `status_probe` op to its ops server.
 
     The machine is reached at its ava-ops server (services/agent_ops), which
-    dispatches `status_probe` via `gateway.ops_cluster.cluster_status_op`
+    dispatches `status_probe` via `ops.cluster.cluster_status_op`
     in-process and returns the snapshot. Same path the CLI `ava cluster status`
     uses. The local machine is no special case — its ops server is dialed at
     its registered localhost URL, keeping one uniform probe path.

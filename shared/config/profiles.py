@@ -102,7 +102,7 @@ PROCESS_PROFILES: dict[ProcessProfile, frozenset[str]] = {
             "general",
             "data_plane",
             "gateway",
-            "lm",  # ops_lifecycle reads llm_model
+            "lm",  # ops.lifecycle reads llm_model
             "sandbox",
             "observability",
             # Runner-owned central producers and lifecycle paths share the

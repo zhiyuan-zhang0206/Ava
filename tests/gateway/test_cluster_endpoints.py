@@ -333,28 +333,28 @@ class TestLockHolderLiveness:
     """
 
     def test_this_machine_dead_pid_is_not_live(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        from ops import ops_cluster as ops_mod
+        from ops import cluster as ops_mod
 
         monkeypatch.setattr("shared.machine.machine_name", lambda: "mc")
         monkeypatch.setattr("shared.proc.process_alive", lambda _pid: False)  # pyright: ignore[reportUnknownArgumentType]
         assert ops_mod._lock_holder_is_live("mc:pid123") is False
 
     def test_this_machine_alive_pid_is_live(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        from ops import ops_cluster as ops_mod
+        from ops import cluster as ops_mod
 
         monkeypatch.setattr("shared.machine.machine_name", lambda: "mc")
         monkeypatch.setattr("shared.proc.process_alive", lambda _pid: True)  # pyright: ignore[reportUnknownArgumentType]
         assert ops_mod._lock_holder_is_live("mc:pid123") is True
 
     def test_foreign_machine_holder_is_treated_live(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        from ops import ops_cluster as ops_mod
+        from ops import cluster as ops_mod
 
         # Can't probe a remote pid — must not clobber another gateway's lock.
         monkeypatch.setattr("shared.machine.machine_name", lambda: "mc")
         assert ops_mod._lock_holder_is_live("other:pid5") is True
 
     def test_unparseable_holder_is_treated_live(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        from ops import ops_cluster as ops_mod
+        from ops import cluster as ops_mod
 
         monkeypatch.setattr("shared.machine.machine_name", lambda: "mc")
         assert ops_mod._lock_holder_is_live("garbage") is True
@@ -375,7 +375,7 @@ class TestRetiredDeploymentEndpoints:
         self, monkeypatch: pytest.MonkeyPatch, method: str, path: str
     ) -> None:
         """Stranded-host recovery is the host-local `ava cluster recover` verb only."""
-        from ops import ops_cluster as ops_mod
+        from ops import cluster as ops_mod
 
         def forbidden(*_args: object, **_kwargs: object) -> None:
             pytest.fail("retired HTTP ingress reached the old updater")
@@ -495,7 +495,7 @@ class TestClusterEndpoints:
     def test_post_stopping_marks_machine(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """POST /api/cluster/stopping?machine=<name>&home=<home> retracts that unit."""
         marked: list[tuple[str, str]] = []
-        from ops import ops_cluster as ops_mod
+        from ops import cluster as ops_mod
 
         monkeypatch.setattr(
             ops_mod,

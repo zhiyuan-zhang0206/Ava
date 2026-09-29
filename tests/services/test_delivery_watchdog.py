@@ -1600,7 +1600,7 @@ class TestResurrectRetry:
     ) -> None:
         import asyncio
 
-        import ops.ops_lifecycle as ol
+        import ops.lifecycle as ol
         import services.delivery_watchdog.daemon as dw
         from shared.agents import AgentStatus
 
@@ -1670,7 +1670,7 @@ class TestResurrectRetry:
     async def test_success_resets_failure_and_suppression_escalation_counts(
         self, db_conn: psycopg.Connection, pool: ConnectionPool, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        import ops.ops_lifecycle as ol
+        import ops.lifecycle as ol
         import services.delivery_watchdog.daemon as dw
         from shared.agents import AgentStatus
 
@@ -1695,7 +1695,7 @@ class TestResurrectRetry:
         pool: ConnectionPool,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        import ops.ops_lifecycle as ol
+        import ops.lifecycle as ol
         import services.delivery_watchdog.daemon as dw
         from services.delivery_watchdog.daemon import select_terminated_owners_with_pending
         from shared.agents import AgentStatus
@@ -1746,7 +1746,7 @@ class TestResurrectRetry:
         finally timestamp prevents the next tick from retrying immediately."""
         import asyncio
 
-        import ops.ops_lifecycle as ol
+        import ops.lifecycle as ol
         import services.delivery_watchdog.daemon as dw
 
         aid = _make_terminated_agent(db_conn)
@@ -1783,7 +1783,7 @@ class TestResurrectRetry:
         retry cooldown once the RPC body has started."""
         import asyncio
 
-        import ops.ops_lifecycle as ol
+        import ops.lifecycle as ol
         import services.delivery_watchdog.daemon as dw
 
         aid = _make_terminated_agent(db_conn)
@@ -1823,7 +1823,7 @@ class TestResurrectRetry:
         accounting, so the following tick can fairly admit owner B."""
         import asyncio
 
-        import ops.ops_lifecycle as ol
+        import ops.lifecycle as ol
         import services.delivery_watchdog.daemon as dw
 
         dead_a = _make_terminated_agent(db_conn)
@@ -1871,7 +1871,7 @@ class TestResurrectRetry:
         must reuse its in-flight attempt instead of building a task herd."""
         import asyncio
 
-        import ops.ops_lifecycle as ol
+        import ops.lifecycle as ol
         import services.delivery_watchdog.daemon as dw
 
         aid = _make_terminated_agent(db_conn)
@@ -1916,7 +1916,7 @@ class TestResurrectRetry:
         unreachable home machine drains over ticks, never as a burst."""
         import asyncio
 
-        import ops.ops_lifecycle as ol
+        import ops.lifecycle as ol
         import services.delivery_watchdog.daemon as dw
 
         dead_a = _make_terminated_agent(db_conn)
@@ -1975,7 +1975,7 @@ class TestResurrectRetry:
         stamps the per-agent attempt clock (drives the 60s cooldown)."""
         import time
 
-        import ops.ops_lifecycle as ol
+        import ops.lifecycle as ol
         import services.delivery_watchdog.daemon as dw
 
         aid = _make_terminated_agent(db_conn)
@@ -2162,7 +2162,7 @@ class TestStalledCrashMarkedRecovery:
     ) -> None:
         import asyncio
 
-        import ops.ops_lifecycle as ol
+        import ops.lifecycle as ol
         from services.delivery_watchdog import stall_recovery as sr
 
         zombie = _make_crash_marked_agent(db_conn)
@@ -2209,7 +2209,7 @@ class TestStalledCrashMarkedRecovery:
     ) -> None:
         import asyncio
 
-        import ops.ops_lifecycle as ol
+        import ops.lifecycle as ol
         from services.delivery_watchdog import stall_recovery as sr
 
         zombie = _make_crash_marked_agent(db_conn)
@@ -2243,7 +2243,7 @@ class TestStalledCrashMarkedRecovery:
     ) -> None:
         import asyncio
 
-        import ops.ops_lifecycle as ol
+        import ops.lifecycle as ol
         from services.delivery_watchdog import stall_recovery as sr
 
         zombie = _make_crash_marked_agent(db_conn)

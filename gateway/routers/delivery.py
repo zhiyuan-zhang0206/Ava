@@ -17,7 +17,7 @@ import psycopg
 from fastapi import HTTPException
 from psycopg_pool import ConnectionPool
 
-from ops import ops_lifecycle as _ops
+from ops import lifecycle as _ops
 from ops.agents import get_agent_status
 from shared.agents import AgentStatus
 from shared.agents.messages.chat_delivery import (

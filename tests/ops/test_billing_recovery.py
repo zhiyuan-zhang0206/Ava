@@ -23,8 +23,8 @@ from psycopg_pool import ConnectionPool
 
 from ops.agents import wake
 from ops.agents.wake import resurrect_agent
-from ops.ops_lifecycle import billing_recovery
-from ops.ops_lifecycle.billing_recovery import (
+from ops.lifecycle import billing_recovery
+from ops.lifecycle.billing_recovery import (
     enumerate_candidates,
     enumerate_halted_alive,
     run_billing_recovery,

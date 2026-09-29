@@ -30,7 +30,7 @@ from pydantic import SecretStr
 from gateway.app import app
 from gateway.routers import agents as _agents_router
 from gateway.routers import agents_forward as _agents_forward_router
-from ops.ops_lifecycle import launch_agent_op, lifecycle_op
+from ops.lifecycle import launch_agent_op, lifecycle_op
 from ops.rpc_schemas import LaunchAgentRequest, OpKind, SpawnedAgent
 from shared import machines as _machines
 from shared.config import settings as _settings
@@ -117,7 +117,7 @@ def _local_config_in_process(monkeypatch: pytest.MonkeyPatch) -> None:
     NO in-process fallback — an unreachable ops server is a 503, uniform with
     every other machine."""
     from gateway.routers import config as _config_router
-    from ops import ops_config
+    from ops import host_config
 
     real_dispatch = _config_router._cluster_rpc.dispatch_to_machine
 
@@ -140,8 +140,8 @@ def _local_config_in_process(monkeypatch: pytest.MonkeyPatch) -> None:
                 "only the local machine is simulated in-process"
             )
             if kind == "config_read":
-                return ops_config.config_read_op().model_dump(mode="json")
-            return ops_config.config_write_op(
+                return host_config.config_read_op().model_dump(mode="json")
+            return host_config.config_write_op(
                 cast("dict[str, Any]", payload["overrides"]),
                 local=bool(payload.get("local", False)),
             ).model_dump(mode="json")

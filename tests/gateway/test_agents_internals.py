@@ -21,7 +21,7 @@ from ops.agents import (
     wake,
 )
 from ops.agents.wake import ResurrectTriggerStaleError
-from ops.ops_lifecycle import _force_mark_terminated
+from ops.lifecycle import _force_mark_terminated
 from shared.agent_snapshot import select_one
 from shared.agents import (
     AgentNotFound,
@@ -283,7 +283,7 @@ class TestResurrectAgent:
         """A repeated force creates a newer intent fence without changing the
         real status-transition epoch used to reopen pages on manual resurrect."""
         agent_id = _hosted_agent(db_conn)
-        monkeypatch.setattr("ops.ops_lifecycle.termination.publish_inbound_wake", _noop)
+        monkeypatch.setattr("ops.lifecycle.termination.publish_inbound_wake", _noop)
         with db_conn.cursor() as cur:
             cur.execute(
                 "INSERT INTO agent_pages (agent_id, name, port) VALUES (%s, 'work', 8765)",
@@ -348,7 +348,7 @@ class TestResurrectAgent:
         """Even without a real status transition, a repeated explicit force
         fences every chat inbound that existed before that latest intent."""
         agent_id = _hosted_agent(db_conn)
-        monkeypatch.setattr("ops.ops_lifecycle.termination.publish_inbound_wake", _noop)
+        monkeypatch.setattr("ops.lifecycle.termination.publish_inbound_wake", _noop)
         with db_conn.cursor() as cur:
             cur.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (agent_id,))
         db_conn.commit()
@@ -584,7 +584,7 @@ class TestResurrectAgent:
         """A force after compact enqueue fences that older work exactly like
         chat, even though no second status transition occurs."""
         agent_id = _hosted_agent(db_conn)
-        monkeypatch.setattr("ops.ops_lifecycle.termination.publish_inbound_wake", _noop)
+        monkeypatch.setattr("ops.lifecycle.termination.publish_inbound_wake", _noop)
         with db_conn.cursor() as cur:
             cur.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (agent_id,))
         db_conn.commit()

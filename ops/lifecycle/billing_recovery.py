@@ -98,7 +98,7 @@ def enumerate_candidates(conn: Connection) -> list[BillingCandidate]:
 
     A read failure propagates: the caller treats it as an aborted run, never
     as an empty candidate set (the same fail-closed shape as
-    ``ops.ops_lifecycle.resurrect_gates``).
+    ``ops.lifecycle.resurrect_gates``).
     """
     from shared.agents import TerminationSource
     from shared.recovery_breaker import (

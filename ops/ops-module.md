@@ -9,15 +9,17 @@ coordination. Its design rationale is recorded in
 | Service specification | `ops/spec.py` (capability selection and gates); `ops/roster/` (canonical roster, its `service_spec` contract) |
 | Observation and status | `ops/roster/observe.py`; `ops/cluster_status/` (host snapshot, `schema_mismatch` diagnosis) |
 | Native agent drain | `ops/agent_pause/` (drain, `probe` of the running host) |
-| Agent lifecycle | `ops/agents/` (birth and wake); `ops/ops_lifecycle/` (lifecycle RPC ops) |
+| Agent lifecycle | `ops/agents/` (birth and wake); `ops/lifecycle/` (lifecycle RPC ops) |
 | RPC | `ops/rpc_schemas/` (wire vocabulary); `ops/cluster_rpc.py` (gateway client) |
+| Op clusters the ops server dispatches | `ops/lifecycle/`, `ops/cluster.py`, `ops/host_config.py`, `ops/inventory.py`, `ops/uploads.py` |
 | Pause, stop and restart | CLI maintenance orchestration over the shared drain |
 | Release transition | `cli/release_transition/`, prepared image and native executor |
 
-Each package keeps the import path of the module its door grew from, so
-`ops.agents`, `ops.ops_lifecycle`, `ops.rpc_schemas`, `ops.cluster_status`,
-`ops.agent_pause` and `ops.roster` read the same to their importers. Two
-modules stay top-level by contract: the runtime-prepare probe imports
+Each package door is the module it grew from; `ops.agents`,
+`ops.rpc_schemas`, `ops.cluster_status`, `ops.agent_pause` and `ops.roster`
+kept their import paths. Module names never repeat the package name, so the
+op clusters read `ops.lifecycle`, `ops.cluster`, `ops.host_config`,
+`ops.inventory` and `ops.uploads`. Two modules stay top-level by contract: the runtime-prepare probe imports
 `ops.spec` by name inside a candidate image, and `python -m ops.private_files`
 is an operator entry point beside its `private-files/` manifest.
 
@@ -52,7 +54,7 @@ its `terminate`, `content`, and `billing_recovery` submodules. Gateway-only
 schemas stay in `gateway/schemas/`.
 The client and daemon reject unknown kinds before machine lookup, maintenance
 admission, dedupe, or dispatch. `release_image_exec` is the frozen v1
-image-exec handoff (`ops_cluster.release_image_exec_op`): the unit verifies a
+image-exec handoff (`ops.cluster.release_image_exec_op`): the unit verifies a
 prepared image in its own store and runs one fixed entry of that image with
 bounded time (contract in `shared/api_contracts/release_handoff.py`, described
 in `cli/release_handoff/release_handoff.ava.okf.md`). Retired updater fetch, prepare, bootstrap, and

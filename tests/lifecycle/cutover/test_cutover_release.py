@@ -66,7 +66,7 @@ def test_recover_refuses_while_the_cutover_hold_stands(
     legacy, holder, at = _adopted(make_legacy, monkeypatch)
     _ready(holder, at)
     op = MagicMock(return_value={"unlocked_holder": None})
-    monkeypatch.setattr("ops.ops_cluster.cluster_recover_op", op)
+    monkeypatch.setattr("ops.cluster.cluster_recover_op", op)
     monkeypatch.setattr("shared.cluster_lock.update_lock_holder", lambda: None)
 
     assert recover.cmd_cluster_recover() == 1

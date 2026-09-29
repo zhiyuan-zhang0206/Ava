@@ -19,7 +19,7 @@ from agent.hosted_ownership import admit_hosted_runtime, apply_hosted_lifecycle
 from agent.state import BaseAgentState
 from cli.commands.agents import impersonation_relay as relay
 from ops.agents.wake import resurrect_agent
-from ops.ops_lifecycle.termination import (
+from ops.lifecycle.termination import (
     _enqueue_termination_inbounds,
     _force_terminate_transaction,
 )

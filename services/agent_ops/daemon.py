@@ -3,7 +3,7 @@
 The ONLY long-running ava process on an agent-runner the gateway dials
 DIRECTLY (the runner's other services — agent-host, browser,
 mcp-daemon — are local or health-checked). Serves POST /ops; each request
-executes in-process against `ops/ops_*.py` and returns {status, result}.
+executes in-process against the `ops` op clusters and returns {status, result}.
 
 Usage: .venv/bin/python -m services.agent_ops.daemon — a per-machine
 singleton via pidfile, supervised by the application root. Registers
@@ -50,22 +50,12 @@ from pydantic import ValidationError
 # `services.agent_ops.dispatch_sync` (split at the file-size ceiling, task
 # #4129 I4). The op modules below are re-exported through the daemon because
 # the routing tests patch them through this module's name
-# (`daemon.ops_cluster`); the arms reference the same module objects.
-from ops import (
-    ops_cluster as ops_cluster,
-)
-from ops import (
-    ops_config as ops_config,
-)
-from ops import (
-    ops_inventory as ops_inventory,
-)
-from ops import (
-    ops_lifecycle,
-)
-from ops import (
-    ops_uploads as ops_uploads,
-)
+# (`daemon.cluster`); the arms reference the same module objects.
+from ops import cluster as cluster
+from ops import host_config as host_config
+from ops import inventory as inventory
+from ops import lifecycle
+from ops import uploads as uploads
 from ops.cluster_status import ShellNotFoundError
 from ops.rpc_schemas import (
     LaunchAgentRequest,
@@ -217,7 +207,7 @@ def _dispatch_sync(kind: str, payload: dict[str, Any]) -> tuple[str, dict[str, o
 
 
 async def _dispatch(kind: str, payload: dict[str, Any]) -> tuple[str, dict[str, object]]:
-    """Execute one op in-process by calling `ops/ops_*.py`.
+    """Execute one op in-process by calling the `ops` op clusters.
 
     `kind` ranges over `ops.rpc_schemas.OpKind` (the canonical op vocabulary);
     this `match` must stay exhaustive over it, and an unrecognized kind falls
@@ -250,7 +240,7 @@ async def _dispatch(kind: str, payload: dict[str, Any]) -> tuple[str, dict[str, 
     try:
         match kind:
             case "spawn-launch" | "spawn-launch-v2":
-                spawned = await ops_lifecycle.launch_agent_op(
+                spawned = await lifecycle.launch_agent_op(
                     LaunchAgentRequest.model_validate(payload), pool
                 )
                 # `exclude_none`: the settlement receipt is present only when a
@@ -259,7 +249,7 @@ async def _dispatch(kind: str, payload: dict[str, Any]) -> tuple[str, dict[str, 
                 return "completed", spawned.model_dump(mode="json", exclude_none=True)
             case "lifecycle":
                 lc = LifecyclePayload.model_validate(payload)
-                resp = await ops_lifecycle.lifecycle_op(
+                resp = await lifecycle.lifecycle_op(
                     lc.path,
                     lc.body,
                     pool,
@@ -280,7 +270,7 @@ async def _dispatch(kind: str, payload: dict[str, Any]) -> tuple[str, dict[str, 
         }
     except (ValidationError, ValueError) as exc:
         # ValidationError: a payload that failed its per-kind model_validate.
-        # ValueError: ops_lifecycle.lifecycle_op raises it for an unparseable path.
+        # ValueError: lifecycle.lifecycle_op raises it for an unparseable path.
         return "failed", {"error": f"{type(exc).__name__}: {exc}"}
     except (ShellNotFoundError, ResurrectRefused) as exc:
         # A capture for a shell session that no longer exists (capture_shell's

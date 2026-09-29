@@ -16,7 +16,7 @@ from langgraph.checkpoint.postgres import PostgresSaver
 from psycopg.types.json import Jsonb
 
 from ava import composer_commands, mcp_config, skills
-from ops import ops_cluster
+from ops import cluster
 from shared import mcp_enabled
 from shared.db import create_agent
 
@@ -117,7 +117,7 @@ def test_agent_skill_view_inputs_read_checkpointed_cwd_and_pinned_narrowing(
         new_versions={"ava_code__cwd": "1"},
     )
 
-    cwd, wanted = ops_cluster._agent_skill_view_inputs(_OneConnectionPool(db_conn), agent_id)
+    cwd, wanted = cluster._agent_skill_view_inputs(_OneConnectionPool(db_conn), agent_id)
 
     assert cwd == tmp_path
     assert wanted == ["overlay-skill"]
@@ -127,7 +127,7 @@ def test_agent_skill_view_missing_row_is_load_dir_only(
     db_conn: psycopg.Connection, load_dir: Path
 ) -> None:
     """A removed row has no cwd or narrowing, rather than failing the op."""
-    view = ops_cluster.agent_skill_view_op(999_999_999, _OneConnectionPool(db_conn))
+    view = cluster.agent_skill_view_op(999_999_999, _OneConnectionPool(db_conn))
 
     assert [command.name for command in view.commands] == ["load-skill"]
 
@@ -137,9 +137,9 @@ def test_agent_skill_view_includes_project_skills_for_persisted_cwd(
 ) -> None:
     """A cwd inside a git repository contributes its project-local skill command."""
     repo, _ = _project_with_skill(tmp_path)
-    monkeypatch.setattr(ops_cluster, "_agent_skill_view_inputs", _view_inputs(repo, ["*"]))
+    monkeypatch.setattr(cluster, "_agent_skill_view_inputs", _view_inputs(repo, ["*"]))
 
-    view = ops_cluster.agent_skill_view_op(42, object())
+    view = cluster.agent_skill_view_op(42, object())
 
     assert {command.name for command in view.commands} >= {"load-skill", "project-skill"}
 
@@ -148,15 +148,15 @@ def test_agent_skill_view_without_cwd_or_repo_is_load_dir_only(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, load_dir: Path
 ) -> None:
     """Missing cwd and non-repository cwd never add a project-local root."""
-    monkeypatch.setattr(ops_cluster, "_agent_skill_view_inputs", _view_inputs(None, ["*"]))
-    missing_cwd_view = ops_cluster.agent_skill_view_op(42, object())
+    monkeypatch.setattr(cluster, "_agent_skill_view_inputs", _view_inputs(None, ["*"]))
+    missing_cwd_view = cluster.agent_skill_view_op(42, object())
 
     monkeypatch.setattr(
-        ops_cluster,
+        cluster,
         "_agent_skill_view_inputs",
         _view_inputs(tmp_path / "not-a-repo", ["*"]),
     )
-    non_repo_view = ops_cluster.agent_skill_view_op(42, object())
+    non_repo_view = cluster.agent_skill_view_op(42, object())
 
     assert {command.name for command in missing_cwd_view.commands} == {"load-skill"}
     assert {command.name for command in non_repo_view.commands} == {"load-skill"}
@@ -167,14 +167,14 @@ def test_agent_skill_view_clears_project_provider_after_each_op(
 ) -> None:
     """One agent's project root cannot leak into the next op's command view."""
     repo, _ = _project_with_skill(tmp_path)
-    monkeypatch.setattr(ops_cluster, "_agent_skill_view_inputs", _view_inputs(repo, ["*"]))
+    monkeypatch.setattr(cluster, "_agent_skill_view_inputs", _view_inputs(repo, ["*"]))
     assert "project-skill" in {
-        command.name for command in ops_cluster.agent_skill_view_op(42, object()).commands
+        command.name for command in cluster.agent_skill_view_op(42, object()).commands
     }
 
-    monkeypatch.setattr(ops_cluster, "_agent_skill_view_inputs", _view_inputs(None, ["*"]))
+    monkeypatch.setattr(cluster, "_agent_skill_view_inputs", _view_inputs(None, ["*"]))
     assert "project-skill" not in {
-        command.name for command in ops_cluster.agent_skill_view_op(43, object()).commands
+        command.name for command in cluster.agent_skill_view_op(43, object()).commands
     }
 
 
@@ -183,10 +183,10 @@ def test_agent_skill_view_tolerates_ava_code_plugin_import_failure(
 ) -> None:
     """An unavailable ava-code plugin degrades to the converged load-dir list."""
     repo, _ = _project_with_skill(tmp_path)
-    monkeypatch.setattr(ops_cluster, "_agent_skill_view_inputs", _view_inputs(repo, ["*"]))
+    monkeypatch.setattr(cluster, "_agent_skill_view_inputs", _view_inputs(repo, ["*"]))
     monkeypatch.setitem(sys.modules, "ava_builtins.plugins.ava_code", None)
 
-    view = ops_cluster.agent_skill_view_op(42, object())
+    view = cluster.agent_skill_view_op(42, object())
 
     assert {command.name for command in view.commands} == {"load-skill"}
 
@@ -200,12 +200,12 @@ def test_agent_skill_view_honors_per_agent_skill_narrowing(
         "shared.install_registry.loadable_skill_names", lambda: {"load-skill", "other-skill"}
     )
     monkeypatch.setattr(
-        ops_cluster,
+        cluster,
         "_agent_skill_view_inputs",
         _view_inputs(None, ["load_skill"]),
     )
 
-    view = ops_cluster.agent_skill_view_op(42, object())
+    view = cluster.agent_skill_view_op(42, object())
 
     assert [command.name for command in view.commands] == ["load-skill"]
 
@@ -220,9 +220,9 @@ def test_agent_skill_view_includes_sorted_enabled_mcp_names(
         _mcp_source({"zeta": {"command": "z"}, "alpha": {"command": "a"}}),
     )
     monkeypatch.setattr(mcp_enabled, "read_enabled", lambda: {"zeta": True})
-    monkeypatch.setattr(ops_cluster, "_agent_skill_view_inputs", _view_inputs(None, ["*"]))
+    monkeypatch.setattr(cluster, "_agent_skill_view_inputs", _view_inputs(None, ["*"]))
 
-    view = ops_cluster.agent_skill_view_op(42, object())
+    view = cluster.agent_skill_view_op(42, object())
 
     assert view.mcp_names == ["alpha", "zeta"]
 
@@ -237,9 +237,9 @@ def test_agent_skill_view_excludes_disabled_mcp_names(
         _mcp_source({"disabled": {"command": "off"}, "enabled": {"command": "on"}}),
     )
     monkeypatch.setattr(mcp_enabled, "read_enabled", lambda: {"disabled": False})
-    monkeypatch.setattr(ops_cluster, "_agent_skill_view_inputs", _view_inputs(None, ["*"]))
+    monkeypatch.setattr(cluster, "_agent_skill_view_inputs", _view_inputs(None, ["*"]))
 
-    view = ops_cluster.agent_skill_view_op(42, object())
+    view = cluster.agent_skill_view_op(42, object())
 
     assert view.mcp_names == ["enabled"]
 
@@ -248,8 +248,8 @@ def test_agent_skill_view_without_mcp_config_returns_empty_names(
     monkeypatch: pytest.MonkeyPatch, load_dir: Path
 ) -> None:
     """An empty merged MCP map leaves the command op successful."""
-    monkeypatch.setattr(ops_cluster, "_agent_skill_view_inputs", _view_inputs(None, ["*"]))
+    monkeypatch.setattr(cluster, "_agent_skill_view_inputs", _view_inputs(None, ["*"]))
 
-    view = ops_cluster.agent_skill_view_op(42, object())
+    view = cluster.agent_skill_view_op(42, object())
 
     assert view.mcp_names == []

@@ -1,5 +1,5 @@
 # pyright: reportUnknownArgumentType=warning, reportUnknownLambdaType=warning
-"""`ops.ops_*` op clusters — ops-server-callable RPC implementations.
+"""The `ops` op clusters — ops-server-callable RPC implementations.
 
 Free functions backing both the gateway FastAPI handlers and the in-process dispatch in
 services/agent_ops/daemon.py. These tests pin the contract independently of either entry point:
@@ -16,8 +16,8 @@ import psycopg
 import pytest
 from pydantic import ValidationError
 
-from ops import ops_cluster, ops_lifecycle
-from ops.ops_lifecycle import launch
+from ops import cluster, lifecycle
+from ops.lifecycle import launch
 from ops.rpc_schemas import (
     LaunchAgentRequest,
     RestartAgentRequest,
@@ -147,10 +147,10 @@ async def test_legacy_launch_agent_op_delivers_plain_spawn_prompt(
     async def _fake_publish(aid: int, iid: int, kind: str, source: str, prompt: str) -> None:
         published.append((aid, iid, kind, source, prompt))
 
-    monkeypatch.setattr(ops_lifecycle, "publish_inbound_arrived", _fake_publish)
+    monkeypatch.setattr(lifecycle, "publish_inbound_arrived", _fake_publish)
 
     body = LaunchAgentRequest(agent_id=9, prompt="go do X", prompt_source="user", label="runner")
-    result = await ops_lifecycle.launch_agent_op(body, stub_pool)  # type: ignore[arg-type]
+    result = await lifecycle.launch_agent_op(body, stub_pool)  # type: ignore[arg-type]
     assert result.id == 9
     assert seen["aid"] == 9
     assert seen["source"] == "user"
@@ -172,10 +172,10 @@ async def test_launch_agent_op_skips_prompt_for_fork(
         return 0
 
     monkeypatch.setattr(launch, "_insert_prompt_blocking", _fake_insert)
-    monkeypatch.setattr(ops_lifecycle, "publish_inbound_arrived", lambda *_a, **_k: None)
+    monkeypatch.setattr(lifecycle, "publish_inbound_arrived", lambda *_a, **_k: None)
 
     body = LaunchAgentRequest(agent_id=10)  # no prompt — a fork
-    result = await ops_lifecycle.launch_agent_op(body, stub_pool)  # type: ignore[arg-type]
+    result = await lifecycle.launch_agent_op(body, stub_pool)  # type: ignore[arg-type]
     assert result.id == 10
     assert inserted == []
 
@@ -253,11 +253,9 @@ async def test_restart_agent_op_terminated_short_circuits(
     db_conn.execute("UPDATE agents_meta SET status='terminated' WHERE id=%s", (agent_id,))
     db_conn.commit()
     wake = AsyncMock()
-    monkeypatch.setattr(ops_lifecycle, "publish_inbound_arrived", wake)
+    monkeypatch.setattr(lifecycle, "publish_inbound_arrived", wake)
     with _test_pool() as pool:
-        resp = await ops_lifecycle.restart_agent_op(
-            agent_id, RestartAgentRequest(source="user"), pool
-        )
+        resp = await lifecycle.restart_agent_op(agent_id, RestartAgentRequest(source="user"), pool)
     assert resp.status == "already_terminated"
     wake.assert_not_awaited()
     assert db_conn.execute(
@@ -271,7 +269,7 @@ async def test_restart_lifecycle_op_validates_overlay_on_the_runner(
 ) -> None:
     """The runner reparses forwarded restart bodies before any DB write."""
     with pytest.raises(ValidationError):
-        await ops_lifecycle.lifecycle_op(
+        await lifecycle.lifecycle_op(
             "/api/agents/9/restart",
             {"config_overlay": {"definitely_not_a_config_field": "x"}},
             stub_pool,  # type: ignore[arg-type]
@@ -284,8 +282,8 @@ async def test_resurrect_agent_op_alive_returns_already_alive(
 ) -> None:
     from shared.agents import AgentStatus
 
-    monkeypatch.setattr(ops_lifecycle, "get_agent_status", lambda _aid: AgentStatus.RUNNING)
-    resp = await ops_lifecycle.resurrect_agent_op(9, ResurrectAgentRequest(prompt="test"))
+    monkeypatch.setattr(lifecycle, "get_agent_status", lambda _aid: AgentStatus.RUNNING)
+    resp = await lifecycle.resurrect_agent_op(9, ResurrectAgentRequest(prompt="test"))
     assert resp.status == "already_alive"
 
 
@@ -301,13 +299,13 @@ async def test_resurrect_agent_op_stale_trigger_returns_idempotent_noop(
     def _terminated(_agent_id: int) -> AgentStatus:
         return AgentStatus.TERMINATED
 
-    monkeypatch.setattr(ops_lifecycle, "get_agent_status", _terminated)
+    monkeypatch.setattr(lifecycle, "get_agent_status", _terminated)
 
     def _stale(*_args: object, **_kwargs: object) -> None:
         raise ResurrectTriggerStaleError("trigger chat no longer qualifies")
 
-    monkeypatch.setattr(ops_lifecycle, "resurrect_agent", _stale)
-    resp = await ops_lifecycle.resurrect_agent_op(
+    monkeypatch.setattr(lifecycle, "resurrect_agent", _stale)
+    resp = await lifecycle.resurrect_agent_op(
         9,
         ResurrectAgentRequest(resurrected_by="system"),
         trigger_inbound_id=123,
@@ -322,13 +320,13 @@ async def test_terminate_agent_op_terminated_short_circuits(
 ) -> None:
     from shared.agents import AgentStatus
 
-    monkeypatch.setattr(ops_lifecycle, "get_agent_status", lambda _aid: AgentStatus.TERMINATED)
+    monkeypatch.setattr(lifecycle, "get_agent_status", lambda _aid: AgentStatus.TERMINATED)
 
     def _no_kill(_aid: int) -> list[int]:
         raise AssertionError("a terminate without the option never kills shell sessions")
 
-    monkeypatch.setattr(ops_lifecycle, "kill_agent_shells", _no_kill)
-    resp = await ops_lifecycle.terminate_agent_op(
+    monkeypatch.setattr(lifecycle, "kill_agent_shells", _no_kill)
+    resp = await lifecycle.terminate_agent_op(
         9,
         TerminateAgentRequest(),
         stub_pool,  # type: ignore[arg-type]
@@ -351,8 +349,8 @@ async def test_lifecycle_op_parses_path_to_terminate(
 
         return TerminateAgentResponse(status="enqueued")
 
-    monkeypatch.setattr(ops_lifecycle, "terminate_agent_op", _fake_terminate)
-    result = await ops_lifecycle.lifecycle_op(
+    monkeypatch.setattr(lifecycle, "terminate_agent_op", _fake_terminate)
+    result = await lifecycle.lifecycle_op(
         "/api/agents/42/terminate",
         {"source": "user"},
         stub_pool,  # type: ignore[arg-type]
@@ -366,7 +364,7 @@ async def test_lifecycle_op_parses_path_to_terminate(
 @pytest.mark.asyncio
 async def test_lifecycle_op_unparseable_path_raises(stub_pool: object) -> None:
     with pytest.raises(ValueError, match="lifecycle path not recognized"):
-        await ops_lifecycle.lifecycle_op(
+        await lifecycle.lifecycle_op(
             "/api/agents/bogus",
             {},
             stub_pool,  # type: ignore[arg-type]
@@ -377,7 +375,7 @@ async def test_lifecycle_op_unparseable_path_raises(stub_pool: object) -> None:
 async def test_guarded_resurrect_path_requires_trigger(stub_pool: object) -> None:
     """The new internal path fails closed when its CAS evidence is missing."""
     with pytest.raises(ValueError, match="requires trigger inbound"):
-        await ops_lifecycle.lifecycle_op(
+        await lifecycle.lifecycle_op(
             "/api/agents/42/resurrect-if-pending-work-v2",
             {"resurrected_by": "system"},
             stub_pool,  # type: ignore[arg-type]
@@ -407,7 +405,7 @@ async def test_manual_lifecycle_path_rejects_auto_resurrect_trigger(stub_pool: o
     """A mismatched path/guard pair cannot silently fall back to an
     unconditional manual resurrect."""
     with pytest.raises(ValueError, match="only valid for resurrect-if-pending-work-v2"):
-        await ops_lifecycle.lifecycle_op(
+        await lifecycle.lifecycle_op(
             "/api/agents/42/resurrect",
             {"resurrected_by": "system"},
             stub_pool,  # type: ignore[arg-type]
@@ -421,7 +419,7 @@ async def test_legacy_resurrect_path_fails_closed_without_trigger(stub_pool: obj
     """A new runner rejects an old gateway's ambiguous resurrection even when
     no new trigger field is present; mixed-version rollback cannot revive."""
     with pytest.raises(ValueError, match="legacy /resurrect is refused"):
-        await ops_lifecycle.lifecycle_op(
+        await lifecycle.lifecycle_op(
             "/api/agents/42/resurrect",
             {"resurrected_by": "user"},
             stub_pool,  # type: ignore[arg-type]
@@ -452,9 +450,9 @@ async def test_explicit_v2_resurrect_dispatches_manual_op(
         )
         return ResurrectAgentResponse(status="spawned")
 
-    monkeypatch.setattr(ops_lifecycle, "resurrect_agent_op", _fake_resurrect)
+    monkeypatch.setattr(lifecycle, "resurrect_agent_op", _fake_resurrect)
 
-    result = await ops_lifecycle.lifecycle_op(
+    result = await lifecycle.lifecycle_op(
         "/api/agents/42/resurrect-explicit-v2",
         {"resurrected_by": "user"},
         stub_pool,  # type: ignore[arg-type]
@@ -483,9 +481,9 @@ def test_cluster_status_op_returns_snapshot(monkeypatch: pytest.MonkeyPatch) -> 
         seen.append(pool)
         return snap
 
-    monkeypatch.setattr(ops_cluster, "status_snapshot", _snapshot)
+    monkeypatch.setattr(cluster, "status_snapshot", _snapshot)
 
-    assert ops_cluster.cluster_status_op(expected_pool) is snap
+    assert cluster.cluster_status_op(expected_pool) is snap
     assert seen == [expected_pool]
 
 
@@ -499,14 +497,12 @@ class TestResurrectIfTerminatedPlacement:
 
     @pytest.fixture(autouse=True)
     def _default_unsuppressed(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(ops_lifecycle, "_wake_suppression_active", lambda _aid: False)
-        monkeypatch.setattr(ops_lifecycle, "_recovery_halted", lambda _aid: False)
-        monkeypatch.setattr(ops_lifecycle, "_clear_wake_suppression", lambda _aid: None)
+        monkeypatch.setattr(lifecycle, "_wake_suppression_active", lambda _aid: False)
+        monkeypatch.setattr(lifecycle, "_recovery_halted", lambda _aid: False)
+        monkeypatch.setattr(lifecycle, "_clear_wake_suppression", lambda _aid: None)
         # The notice guard reads the trigger row from the DB; these tests pin
         # dispatch placement, not the guard — default it to "not a notice".
-        monkeypatch.setattr(
-            ops_lifecycle, "_system_notice_source_of_trigger", lambda _aid, _iid: None
-        )
+        monkeypatch.setattr(lifecycle, "_system_notice_source_of_trigger", lambda _aid, _iid: None)
 
     @pytest.mark.asyncio
     async def test_active_suppression_skips_forward_and_launch(
@@ -514,14 +510,14 @@ class TestResurrectIfTerminatedPlacement:
     ) -> None:
         from shared.agents import AgentStatus
 
-        monkeypatch.setattr(ops_lifecycle, "get_agent_status", lambda _aid: AgentStatus.TERMINATED)
-        monkeypatch.setattr(ops_lifecycle, "_wake_suppression_active", lambda _aid: True)
+        monkeypatch.setattr(lifecycle, "get_agent_status", lambda _aid: AgentStatus.TERMINATED)
+        monkeypatch.setattr(lifecycle, "_wake_suppression_active", lambda _aid: True)
 
         def _no_machine_read(_aid: int) -> str:
             raise AssertionError("suppressed auto-resurrect must not read or contact the home")
 
-        monkeypatch.setattr(ops_lifecycle, "get_agent_machine", _no_machine_read)
-        status = await ops_lifecycle.resurrect_if_terminated(
+        monkeypatch.setattr(lifecycle, "get_agent_machine", _no_machine_read)
+        status = await lifecycle.resurrect_if_terminated(
             5, trigger_inbound_id=88, trigger_inbound_kind="chat"
         )
         assert status is AgentStatus.TERMINATED
@@ -535,14 +531,14 @@ class TestResurrectIfTerminatedPlacement:
         exactly like an active wake suppression (task #3617)."""
         from shared.agents import AgentStatus
 
-        monkeypatch.setattr(ops_lifecycle, "get_agent_status", lambda _aid: AgentStatus.TERMINATED)
-        monkeypatch.setattr(ops_lifecycle, "_recovery_halted", lambda _aid: True)
+        monkeypatch.setattr(lifecycle, "get_agent_status", lambda _aid: AgentStatus.TERMINATED)
+        monkeypatch.setattr(lifecycle, "_recovery_halted", lambda _aid: True)
 
         def _no_machine_read(_aid: int) -> str:
             raise AssertionError("halted auto-resurrect must not read or contact the home")
 
-        monkeypatch.setattr(ops_lifecycle, "get_agent_machine", _no_machine_read)
-        status = await ops_lifecycle.resurrect_if_terminated(
+        monkeypatch.setattr(lifecycle, "get_agent_machine", _no_machine_read)
+        status = await lifecycle.resurrect_if_terminated(
             5, trigger_inbound_id=88, trigger_inbound_kind="chat"
         )
         assert status is AgentStatus.TERMINATED
@@ -554,9 +550,9 @@ class TestResurrectIfTerminatedPlacement:
         from shared.agents import AgentStatus
 
         statuses = iter([AgentStatus.TERMINATED, AgentStatus.IDLING])
-        monkeypatch.setattr(ops_lifecycle, "get_agent_status", lambda _aid: next(statuses))
-        monkeypatch.setattr(ops_lifecycle, "get_agent_machine", lambda _aid: "home-a")
-        monkeypatch.setattr(ops_lifecycle, "machine_name", lambda: "home-a")
+        monkeypatch.setattr(lifecycle, "get_agent_status", lambda _aid: next(statuses))
+        monkeypatch.setattr(lifecycle, "get_agent_machine", lambda _aid: "home-a")
+        monkeypatch.setattr(lifecycle, "machine_name", lambda: "home-a")
         called: dict[str, object] = {}
         dispatch_called: list[dict[str, object]] = []
 
@@ -573,25 +569,25 @@ class TestResurrectIfTerminatedPlacement:
             called["trigger_inbound_kind"] = trigger_inbound_kind
             return ResurrectAgentResponse(status="spawned")
 
-        monkeypatch.setattr(ops_lifecycle, "resurrect_agent_op", _fake_resurrect_op)
+        monkeypatch.setattr(lifecycle, "resurrect_agent_op", _fake_resurrect_op)
         cleared: list[int] = []
 
         def _record_clear(agent_id: int) -> None:
             cleared.append(agent_id)
 
         monkeypatch.setattr(
-            ops_lifecycle,
+            lifecycle,
             "_clear_wake_suppression",
             _record_clear,
         )
 
         async def _fake_dispatch(*args: object, **kwargs: object) -> dict:
             dispatch_called.append(kwargs)
-            raise ops_lifecycle._cluster_rpc.ClusterOpUnreachable("ops server not reachable")
+            raise lifecycle._cluster_rpc.ClusterOpUnreachable("ops server not reachable")
 
-        monkeypatch.setattr(ops_lifecycle._cluster_rpc, "dispatch_to_machine", _fake_dispatch)
+        monkeypatch.setattr(lifecycle._cluster_rpc, "dispatch_to_machine", _fake_dispatch)
 
-        status = await ops_lifecycle.resurrect_if_terminated(
+        status = await lifecycle.resurrect_if_terminated(
             5,
             trigger_inbound_id=88,
             trigger_inbound_kind="chat",
@@ -621,14 +617,14 @@ class TestResurrectIfTerminatedPlacement:
         from shared.agents import AgentStatus
 
         statuses = iter([AgentStatus.TERMINATED, AgentStatus.IDLING])
-        monkeypatch.setattr(ops_lifecycle, "get_agent_status", lambda _aid: next(statuses))
-        monkeypatch.setattr(ops_lifecycle, "get_agent_machine", lambda _aid: "wsl")
-        monkeypatch.setattr(ops_lifecycle, "machine_name", lambda: "gateway-host")
+        monkeypatch.setattr(lifecycle, "get_agent_status", lambda _aid: next(statuses))
+        monkeypatch.setattr(lifecycle, "get_agent_machine", lambda _aid: "wsl")
+        monkeypatch.setattr(lifecycle, "machine_name", lambda: "gateway-host")
 
         async def _no_local(*_a: object, **_kw: object) -> ResurrectAgentResponse:
             raise AssertionError("remote-homed resurrect must not launch locally")
 
-        monkeypatch.setattr(ops_lifecycle, "resurrect_agent_op", _no_local)
+        monkeypatch.setattr(lifecycle, "resurrect_agent_op", _no_local)
 
         async def _fake_dispatch(
             target_machine: str,
@@ -639,9 +635,9 @@ class TestResurrectIfTerminatedPlacement:
             captured.update(target=target_machine, kind=kind, payload=payload)
             return {"status": "spawned"}
 
-        monkeypatch.setattr(ops_lifecycle._cluster_rpc, "dispatch_to_machine", _fake_dispatch)
+        monkeypatch.setattr(lifecycle._cluster_rpc, "dispatch_to_machine", _fake_dispatch)
 
-        status = await ops_lifecycle.resurrect_if_terminated(
+        status = await lifecycle.resurrect_if_terminated(
             7,
             trigger_inbound_id=99,
             trigger_inbound_kind="chat",
@@ -663,17 +659,17 @@ class TestResurrectIfTerminatedPlacement:
         from ops.cluster_rpc import ClusterOpUnreachable
         from shared.agents import AgentStatus
 
-        monkeypatch.setattr(ops_lifecycle, "get_agent_status", lambda _aid: AgentStatus.TERMINATED)
-        monkeypatch.setattr(ops_lifecycle, "get_agent_machine", lambda _aid: "wsl")
-        monkeypatch.setattr(ops_lifecycle, "machine_name", lambda: "gateway-host")
+        monkeypatch.setattr(lifecycle, "get_agent_status", lambda _aid: AgentStatus.TERMINATED)
+        monkeypatch.setattr(lifecycle, "get_agent_machine", lambda _aid: "wsl")
+        monkeypatch.setattr(lifecycle, "machine_name", lambda: "gateway-host")
 
         async def _unreachable(*_a: object, **_kw: object) -> dict:
             raise ClusterOpUnreachable("ops server for machine='wsl' unreachable")
 
-        monkeypatch.setattr(ops_lifecycle._cluster_rpc, "dispatch_to_machine", _unreachable)
+        monkeypatch.setattr(lifecycle._cluster_rpc, "dispatch_to_machine", _unreachable)
 
         with caplog.at_level("INFO"):
-            status = await ops_lifecycle.resurrect_if_terminated(
+            status = await lifecycle.resurrect_if_terminated(
                 7, trigger_inbound_id=99, trigger_inbound_kind="chat"
             )
         assert status is AgentStatus.TERMINATED
@@ -684,16 +680,16 @@ class TestResurrectIfTerminatedPlacement:
         from ops.cluster_rpc import ClusterOpFailed
         from shared.agents import AgentStatus
 
-        monkeypatch.setattr(ops_lifecycle, "get_agent_status", lambda _aid: AgentStatus.TERMINATED)
-        monkeypatch.setattr(ops_lifecycle, "get_agent_machine", lambda _aid: "wsl")
-        monkeypatch.setattr(ops_lifecycle, "machine_name", lambda: "gateway-host")
+        monkeypatch.setattr(lifecycle, "get_agent_status", lambda _aid: AgentStatus.TERMINATED)
+        monkeypatch.setattr(lifecycle, "get_agent_machine", lambda _aid: "wsl")
+        monkeypatch.setattr(lifecycle, "machine_name", lambda: "gateway-host")
 
         async def _failed(*_a: object, **_kw: object) -> dict:
             raise ClusterOpFailed({"error": "launch failed on the home machine"})
 
-        monkeypatch.setattr(ops_lifecycle._cluster_rpc, "dispatch_to_machine", _failed)
+        monkeypatch.setattr(lifecycle._cluster_rpc, "dispatch_to_machine", _failed)
 
-        status = await ops_lifecycle.resurrect_if_terminated(
+        status = await lifecycle.resurrect_if_terminated(
             7, trigger_inbound_id=99, trigger_inbound_kind="chat"
         )
         assert status is AgentStatus.TERMINATED
@@ -702,14 +698,14 @@ class TestResurrectIfTerminatedPlacement:
     async def test_not_terminated_short_circuits(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from shared.agents import AgentStatus
 
-        monkeypatch.setattr(ops_lifecycle, "get_agent_status", lambda _aid: AgentStatus.RUNNING)
+        monkeypatch.setattr(lifecycle, "get_agent_status", lambda _aid: AgentStatus.RUNNING)
 
         def _no_machine_read(_aid: int) -> str:
             raise AssertionError("a live agent must not trigger a machine lookup")
 
-        monkeypatch.setattr(ops_lifecycle, "get_agent_machine", _no_machine_read)
+        monkeypatch.setattr(lifecycle, "get_agent_machine", _no_machine_read)
 
-        status = await ops_lifecycle.resurrect_if_terminated(
+        status = await lifecycle.resurrect_if_terminated(
             5, trigger_inbound_id=99, trigger_inbound_kind="chat"
         )
         assert status is AgentStatus.RUNNING
@@ -725,9 +721,9 @@ class TestResurrectIfTerminatedNotificationGuard:
 
     @pytest.fixture(autouse=True)
     def _default_state(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(ops_lifecycle, "_wake_suppression_active", lambda _aid: False)
-        monkeypatch.setattr(ops_lifecycle, "_recovery_halted", lambda _aid: False)
-        monkeypatch.setattr(ops_lifecycle, "_clear_wake_suppression", lambda _aid: None)
+        monkeypatch.setattr(lifecycle, "_wake_suppression_active", lambda _aid: False)
+        monkeypatch.setattr(lifecycle, "_recovery_halted", lambda _aid: False)
+        monkeypatch.setattr(lifecycle, "_clear_wake_suppression", lambda _aid: None)
 
     @pytest.mark.asyncio
     async def test_system_notice_trigger_skips_forward_and_launch(
@@ -735,16 +731,16 @@ class TestResurrectIfTerminatedNotificationGuard:
     ) -> None:
         from shared.agents import AgentStatus
 
-        monkeypatch.setattr(ops_lifecycle, "get_agent_status", lambda _aid: AgentStatus.TERMINATED)
+        monkeypatch.setattr(lifecycle, "get_agent_status", lambda _aid: AgentStatus.TERMINATED)
         monkeypatch.setattr(
-            ops_lifecycle, "_system_notice_source_of_trigger", lambda _aid, _iid: "system"
+            lifecycle, "_system_notice_source_of_trigger", lambda _aid, _iid: "system"
         )
 
         def _no_machine_read(_aid: int) -> str:
             raise AssertionError("a system notice must not read or contact the home")
 
-        monkeypatch.setattr(ops_lifecycle, "get_agent_machine", _no_machine_read)
-        status = await ops_lifecycle.resurrect_if_terminated(
+        monkeypatch.setattr(lifecycle, "get_agent_machine", _no_machine_read)
+        status = await lifecycle.resurrect_if_terminated(
             5, trigger_inbound_id=207124, trigger_inbound_kind="chat"
         )
         assert status is AgentStatus.TERMINATED
@@ -757,9 +753,9 @@ class TestResurrectIfTerminatedNotificationGuard:
         from shared.agents import AgentStatus
 
         statuses = iter([AgentStatus.TERMINATED, AgentStatus.IDLING])
-        monkeypatch.setattr(ops_lifecycle, "get_agent_status", lambda _aid: next(statuses))
-        monkeypatch.setattr(ops_lifecycle, "get_agent_machine", lambda _aid: "home-a")
-        monkeypatch.setattr(ops_lifecycle, "machine_name", lambda: "home-a")
+        monkeypatch.setattr(lifecycle, "get_agent_status", lambda _aid: next(statuses))
+        monkeypatch.setattr(lifecycle, "get_agent_machine", lambda _aid: "home-a")
+        monkeypatch.setattr(lifecycle, "machine_name", lambda: "home-a")
         calls: list[int] = []
 
         async def _fake_op(
@@ -772,14 +768,14 @@ class TestResurrectIfTerminatedNotificationGuard:
             calls.append(agent_id)
             return ResurrectAgentResponse(status="spawned")
 
-        monkeypatch.setattr(ops_lifecycle, "resurrect_agent_op", _fake_op)
+        monkeypatch.setattr(lifecycle, "resurrect_agent_op", _fake_op)
 
         async def _unreachable(*_a: object, **_kw: object) -> dict:
-            raise ops_lifecycle._cluster_rpc.ClusterOpUnreachable("no ops server")
+            raise lifecycle._cluster_rpc.ClusterOpUnreachable("no ops server")
 
-        monkeypatch.setattr(ops_lifecycle._cluster_rpc, "dispatch_to_machine", _unreachable)
+        monkeypatch.setattr(lifecycle._cluster_rpc, "dispatch_to_machine", _unreachable)
 
-        status = await ops_lifecycle.resurrect_if_terminated(
+        status = await lifecycle.resurrect_if_terminated(
             5, trigger_inbound_id=10**12, trigger_inbound_kind="chat"
         )
         assert status is AgentStatus.IDLING
@@ -792,14 +788,14 @@ class TestResurrectIfTerminatedNotificationGuard:
         suppression / breaker read above fails loudly."""
         from shared.agents import AgentStatus
 
-        monkeypatch.setattr(ops_lifecycle, "get_agent_status", lambda _aid: AgentStatus.TERMINATED)
+        monkeypatch.setattr(lifecycle, "get_agent_status", lambda _aid: AgentStatus.TERMINATED)
 
         def _boom(_aid: int, _iid: int) -> str | None:
             raise RuntimeError("trigger read failed")
 
-        monkeypatch.setattr(ops_lifecycle, "_system_notice_source_of_trigger", _boom)
+        monkeypatch.setattr(lifecycle, "_system_notice_source_of_trigger", _boom)
         with pytest.raises(RuntimeError, match="trigger read failed"):
-            await ops_lifecycle.resurrect_if_terminated(
+            await lifecycle.resurrect_if_terminated(
                 5, trigger_inbound_id=207124, trigger_inbound_kind="chat"
             )
 
@@ -826,22 +822,22 @@ class TestResurrectIfTerminatedNotificationGuard:
         # chat (decisions/2026-09-27-watchers-are-never-restarted.md).
         watcher_iid = insert_inbound_message(db_conn, aid, "wake", source="watcher:7")
 
-        assert ops_lifecycle._system_notice_source_of_trigger(aid, sys_iid) == "system"
-        assert ops_lifecycle._system_notice_source_of_trigger(aid, var_iid) == "system:notice-reply"
-        assert ops_lifecycle._system_notice_source_of_trigger(aid, user_iid) is None
-        assert ops_lifecycle._system_notice_source_of_trigger(aid, note_iid) is None
-        assert ops_lifecycle._system_notice_source_of_trigger(aid, watcher_iid) is None
-        assert ops_lifecycle._system_notice_source_of_trigger(aid, 10**12) is None
-        assert ops_lifecycle._system_notice_source_of_trigger(aid + 999, sys_iid) is None
+        assert lifecycle._system_notice_source_of_trigger(aid, sys_iid) == "system"
+        assert lifecycle._system_notice_source_of_trigger(aid, var_iid) == "system:notice-reply"
+        assert lifecycle._system_notice_source_of_trigger(aid, user_iid) is None
+        assert lifecycle._system_notice_source_of_trigger(aid, note_iid) is None
+        assert lifecycle._system_notice_source_of_trigger(aid, watcher_iid) is None
+        assert lifecycle._system_notice_source_of_trigger(aid, 10**12) is None
+        assert lifecycle._system_notice_source_of_trigger(aid + 999, sys_iid) is None
 
         recovery_iid = insert_inbound_message(
             db_conn, aid, "continue", source="system", payload={"hosted_turn_recovery": True}
         )
-        assert ops_lifecycle._system_notice_source_of_trigger(aid, recovery_iid) is None
+        assert lifecycle._system_notice_source_of_trigger(aid, recovery_iid) is None
         user_marker_iid = insert_inbound_message(
             db_conn, aid, "hi", source="user", payload={"hosted_turn_recovery": True}
         )
-        assert ops_lifecycle._system_notice_source_of_trigger(aid, user_marker_iid) is None
+        assert lifecycle._system_notice_source_of_trigger(aid, user_marker_iid) is None
 
         fail_closed: tuple[tuple[str, dict[str, object] | None], ...] = (
             ("payload-absent", None),
@@ -853,7 +849,7 @@ class TestResurrectIfTerminatedNotificationGuard:
         )
         for label, payload in fail_closed:
             iid = insert_inbound_message(db_conn, aid, "noticed", source="system", payload=payload)
-            assert ops_lifecycle._system_notice_source_of_trigger(aid, iid) == "system", label
+            assert lifecycle._system_notice_source_of_trigger(aid, iid) == "system", label
 
     @pytest.mark.asyncio
     async def test_hosted_turn_recovery_marker_reaches_dispatch(
@@ -879,9 +875,9 @@ class TestResurrectIfTerminatedNotificationGuard:
             payload={"hosted_turn_recovery": True},
         )
         statuses = iter([AgentStatus.TERMINATED, AgentStatus.IDLING])
-        monkeypatch.setattr(ops_lifecycle, "get_agent_status", lambda _aid: next(statuses))
-        monkeypatch.setattr(ops_lifecycle, "get_agent_machine", lambda _aid: "home-a")
-        monkeypatch.setattr(ops_lifecycle, "machine_name", lambda: "home-a")
+        monkeypatch.setattr(lifecycle, "get_agent_status", lambda _aid: next(statuses))
+        monkeypatch.setattr(lifecycle, "get_agent_machine", lambda _aid: "home-a")
+        monkeypatch.setattr(lifecycle, "machine_name", lambda: "home-a")
         calls: list[tuple[int, int | None]] = []
 
         async def _fake_op(
@@ -894,14 +890,14 @@ class TestResurrectIfTerminatedNotificationGuard:
             calls.append((agent_id, trigger_inbound_id))
             return ResurrectAgentResponse(status="spawned")
 
-        monkeypatch.setattr(ops_lifecycle, "resurrect_agent_op", _fake_op)
+        monkeypatch.setattr(lifecycle, "resurrect_agent_op", _fake_op)
 
         async def _unreachable(*_a: object, **_kw: object) -> dict:
-            raise ops_lifecycle._cluster_rpc.ClusterOpUnreachable("no ops server")
+            raise lifecycle._cluster_rpc.ClusterOpUnreachable("no ops server")
 
-        monkeypatch.setattr(ops_lifecycle._cluster_rpc, "dispatch_to_machine", _unreachable)
+        monkeypatch.setattr(lifecycle._cluster_rpc, "dispatch_to_machine", _unreachable)
 
-        status = await ops_lifecycle.resurrect_if_terminated(
+        status = await lifecycle.resurrect_if_terminated(
             aid, trigger_inbound_id=rec_iid, trigger_inbound_kind="chat"
         )
         assert status is AgentStatus.IDLING
@@ -932,9 +928,9 @@ async def test_spawned_auto_resurrect_clears_suppression_in_database(
         db_conn.commit()
         return {"status": "spawned"}
 
-    monkeypatch.setattr(ops_lifecycle._cluster_rpc, "dispatch_to_machine", _spawn_on_home)
+    monkeypatch.setattr(lifecycle._cluster_rpc, "dispatch_to_machine", _spawn_on_home)
 
-    status = await ops_lifecycle.resurrect_if_terminated(
+    status = await lifecycle.resurrect_if_terminated(
         agent_id,
         trigger_inbound_id=trigger_id,
         trigger_inbound_kind="chat",
@@ -965,14 +961,14 @@ async def test_launch_agent_op_hosted_skips_process_and_wakes(
     async def _fake_publish(*_a: object, **_k: object) -> None:
         return None
 
-    monkeypatch.setattr(ops_lifecycle, "publish_inbound_arrived", _fake_publish)
+    monkeypatch.setattr(lifecycle, "publish_inbound_arrived", _fake_publish)
     wakes: list[tuple[int, str]] = []
     monkeypatch.setattr(
         launch, "publish_inbound_wake", lambda aid, payload: wakes.append((aid, payload))
     )
 
     body = LaunchAgentRequest(agent_id=7, prompt="go do X", prompt_source="user")
-    result = await ops_lifecycle.launch_agent_op(body, stub_pool)  # type: ignore[arg-type]
+    result = await lifecycle.launch_agent_op(body, stub_pool)  # type: ignore[arg-type]
     assert result.id == 7
     assert inserted == [(7, "go do X", "user")]
     assert wakes == [(7, "0")]
@@ -996,14 +992,14 @@ async def test_launch_agent_op_hosted_fork_still_wakes(
     async def _fake_publish(*_a: object, **_k: object) -> None:
         return None
 
-    monkeypatch.setattr(ops_lifecycle, "publish_inbound_arrived", _fake_publish)
+    monkeypatch.setattr(lifecycle, "publish_inbound_arrived", _fake_publish)
     wakes: list[tuple[int, str]] = []
     monkeypatch.setattr(
         launch, "publish_inbound_wake", lambda aid, payload: wakes.append((aid, payload))
     )
 
     body = LaunchAgentRequest(agent_id=8)
-    result = await ops_lifecycle.launch_agent_op(body, stub_pool)  # type: ignore[arg-type]
+    result = await lifecycle.launch_agent_op(body, stub_pool)  # type: ignore[arg-type]
     assert result.id == 8
     assert inserted == []  # fork prompt is delivered pre-launch, never here
     assert wakes == [(8, "0")]
@@ -1027,20 +1023,20 @@ async def test_force_terminate_hosted_skips_process_kill_and_cancels_turn(
         captured["agent_id"] = aid
         return AgentStatus.RUNNING, None, [], 91
 
-    monkeypatch.setattr(ops_lifecycle, "_terminate_force_blocking", _fake_force_blocking)
+    monkeypatch.setattr(lifecycle, "_terminate_force_blocking", _fake_force_blocking)
     cancelled: list[tuple[int, int]] = []
 
     async def _fake_cancel(aid: int, command_id: int) -> None:
         cancelled.append((aid, command_id))
 
-    monkeypatch.setattr(ops_lifecycle, "_cancel_hosted_turn_best_effort", _fake_cancel)
+    monkeypatch.setattr(lifecycle, "_cancel_hosted_turn_best_effort", _fake_cancel)
 
     async def _fake_page_closed(*_a: object, **_k: object) -> None:
         return None
 
-    monkeypatch.setattr(ops_lifecycle, "publish_page_closed", _fake_page_closed)
+    monkeypatch.setattr(lifecycle, "publish_page_closed", _fake_page_closed)
 
-    resp = await ops_lifecycle.terminate_agent_op(
+    resp = await lifecycle.terminate_agent_op(
         9,
         TerminateAgentRequest(force=True),
         stub_pool,  # type: ignore[arg-type]
@@ -1067,11 +1063,11 @@ async def test_launch_agent_op_hosted_failure_preserves_its_row(
         reclaimed.append((agent_id, source))
         return []
 
-    monkeypatch.setattr(ops_lifecycle, "_force_mark_terminated", _fake_reclaim)
+    monkeypatch.setattr(lifecycle, "_force_mark_terminated", _fake_reclaim)
 
     body = LaunchAgentRequest(agent_id=7, prompt="go", prompt_source="user")
     with pytest.raises(RuntimeError, match="prompt insert failed"):
-        await ops_lifecycle.launch_agent_op(body, stub_pool)  # type: ignore[arg-type]
+        await lifecycle.launch_agent_op(body, stub_pool)  # type: ignore[arg-type]
     assert reclaimed == []
 
 
@@ -1091,9 +1087,9 @@ async def test_launch_agent_op_hosted_validation_failure_preserves_its_row(
         reclaimed.append((agent_id, source))
         return []
 
-    monkeypatch.setattr(ops_lifecycle, "_force_mark_terminated", _fake_reclaim)
+    monkeypatch.setattr(lifecycle, "_force_mark_terminated", _fake_reclaim)
 
     body = LaunchAgentRequest(agent_id=7, prompt="go", prompt_source="user")
     with pytest.raises(RuntimeError, match="bad model config"):
-        await ops_lifecycle.launch_agent_op(body, stub_pool)  # type: ignore[arg-type]
+        await lifecycle.launch_agent_op(body, stub_pool)  # type: ignore[arg-type]
     assert reclaimed == []

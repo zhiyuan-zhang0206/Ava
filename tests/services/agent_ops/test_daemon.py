@@ -87,7 +87,7 @@ async def test_dispatch_spawn_launch_calls_launch_agent_op(
         captured["pool"] = pool
         return SpawnedAgent(id=777)
 
-    monkeypatch.setattr(daemon.ops_lifecycle, "launch_agent_op", _fake_launch)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(daemon.lifecycle, "launch_agent_op", _fake_launch)  # pyright: ignore[reportUnknownArgumentType]
     status, result = await daemon._dispatch("spawn-launch", {"agent_id": 777})
     assert status == "completed"
     assert result == {"id": 777}
@@ -98,7 +98,7 @@ async def test_dispatch_spawn_launch_calls_launch_agent_op(
 async def test_dispatch_shell_probe_calls_shell_probe_op(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """shell_probe kind -> ops_cluster.shell_probe_op(agent_id), serialized."""
+    """shell_probe kind -> cluster.shell_probe_op(agent_id), serialized."""
     from ops.rpc_schemas import ShellInfo, ShellProbeResult
 
     monkeypatch.setattr(daemon, "_db_pool", _stub_pool())
@@ -108,7 +108,7 @@ async def test_dispatch_shell_probe_calls_shell_probe_op(
         seen["agent_id"] = agent_id
         return ShellProbeResult(shells=[ShellInfo(id=5, name="build", uptime_seconds=42)])
 
-    monkeypatch.setattr(daemon.ops_cluster, "shell_probe_op", _fake_probe)
+    monkeypatch.setattr(daemon.cluster, "shell_probe_op", _fake_probe)
     status, result = await daemon._dispatch("shell_probe", {"agent_id": 42})
     assert status == "completed"
     assert seen == {"agent_id": 42}
@@ -132,7 +132,7 @@ async def test_dispatch_shell_probe_bad_payload_fails(
     """shell_probe without agent_id fails without invoking the op."""
     monkeypatch.setattr(daemon, "_db_pool", _stub_pool())
     monkeypatch.setattr(
-        daemon.ops_cluster,
+        daemon.cluster,
         "shell_probe_op",
         lambda *_a, **_kw: pytest.fail("must not dispatch on bad payload"),  # pyright: ignore[reportUnknownArgumentType]
     )
@@ -155,7 +155,7 @@ async def test_dispatch_shell_kill_calls_shell_kill_op(
         seen.update(agent_id=agent_id, session_id=session_id)
         return ShellKillResult(mode="killed")
 
-    monkeypatch.setattr(daemon.ops_cluster, "shell_kill_op", _fake_kill)
+    monkeypatch.setattr(daemon.cluster, "shell_kill_op", _fake_kill)
     status, result = await daemon._dispatch("shell_kill", {"agent_id": 42, "session_id": 5})
     assert status == "completed"
     assert seen == {"agent_id": 42, "session_id": 5}
@@ -171,7 +171,7 @@ async def test_dispatch_shell_kill_reports_absent(
 
     monkeypatch.setattr(daemon, "_db_pool", _stub_pool())
     monkeypatch.setattr(
-        daemon.ops_cluster,
+        daemon.cluster,
         "shell_kill_op",
         lambda _agent_id, _session_id: ShellKillResult(mode="absent"),  # pyright: ignore[reportUnknownArgumentType]
     )
@@ -184,7 +184,7 @@ async def test_dispatch_shell_kill_reports_absent(
 async def test_dispatch_agent_skill_view_calls_machine_op(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """agent_skill_view kind -> ops_cluster.agent_skill_view_op(agent_id, pool)."""
+    """agent_skill_view kind -> cluster.agent_skill_view_op(agent_id, pool)."""
     from ops.rpc_schemas import AgentSkillViewResult, OpsCommandItem
 
     pool = _stub_pool()
@@ -198,7 +198,7 @@ async def test_dispatch_agent_skill_view_calls_machine_op(
             commands=[OpsCommandItem(name="project", description="d", instruction_hint="h")]
         )
 
-    monkeypatch.setattr(daemon.ops_cluster, "agent_skill_view_op", _fake_view)
+    monkeypatch.setattr(daemon.cluster, "agent_skill_view_op", _fake_view)
     status, result = await daemon._dispatch("agent_skill_view", {"agent_id": 42})
     assert status == "completed"
     assert seen == {"agent_id": 42, "pool": pool}
@@ -215,7 +215,7 @@ async def test_dispatch_agent_skill_view_bad_payload_fails(
     """agent_skill_view without an id is rejected before it reaches the op."""
     monkeypatch.setattr(daemon, "_db_pool", _stub_pool())
     monkeypatch.setattr(
-        daemon.ops_cluster,
+        daemon.cluster,
         "agent_skill_view_op",
         lambda *_a, **_kw: pytest.fail("must not dispatch on bad payload"),  # pyright: ignore[reportUnknownArgumentType]
     )
@@ -228,7 +228,7 @@ async def test_dispatch_agent_skill_view_bad_payload_fails(
 async def test_dispatch_shell_capture_calls_shell_capture_op(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """shell_capture kind -> ops_cluster.shell_capture_op(agent_id, session_id, lines)."""
+    """shell_capture kind -> cluster.shell_capture_op(agent_id, session_id, lines)."""
     from ops.rpc_schemas import ShellCaptureResult
 
     monkeypatch.setattr(daemon, "_db_pool", _stub_pool())
@@ -240,7 +240,7 @@ async def test_dispatch_shell_capture_calls_shell_capture_op(
         seen["lines"] = lines
         return ShellCaptureResult(session_name="ava-agent-42-shell-3-build", lines=["a", "b"])
 
-    monkeypatch.setattr(daemon.ops_cluster, "shell_capture_op", _fake_capture)
+    monkeypatch.setattr(daemon.cluster, "shell_capture_op", _fake_capture)
     status, result = await daemon._dispatch(
         "shell_capture", {"agent_id": 42, "session_id": 3, "lines": 500}
     )
@@ -268,7 +268,7 @@ async def test_dispatch_shell_capture_defaults_lines(
         seen["lines"] = lines
         return ShellCaptureResult(session_name="n", lines=[])
 
-    monkeypatch.setattr(daemon.ops_cluster, "shell_capture_op", _fake_capture)
+    monkeypatch.setattr(daemon.cluster, "shell_capture_op", _fake_capture)
     status, _ = await daemon._dispatch("shell_capture", {"agent_id": 1, "session_id": 2})
     assert status == "completed"
     assert seen == {"lines": 200}
@@ -278,7 +278,7 @@ async def test_dispatch_shell_capture_defaults_lines(
 async def test_dispatch_upload_receive_calls_upload_receive_op(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """upload_receive kind -> ops_uploads.upload_receive_op(payload)."""
+    """upload_receive kind -> uploads.upload_receive_op(payload)."""
     from ops.rpc_schemas import UploadReceiveResult
 
     monkeypatch.setattr(daemon, "_db_pool", _stub_pool())
@@ -291,7 +291,7 @@ async def test_dispatch_upload_receive_calls_upload_receive_op(
             path=f"/home/runner/Downloads/AvaAgent-{payload.agent_id}/{payload.name}"  # pyright: ignore[reportUnknownMemberType]
         )
 
-    monkeypatch.setattr(daemon.ops_uploads, "upload_receive_op", _fake_receive)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(daemon.uploads, "upload_receive_op", _fake_receive)  # pyright: ignore[reportUnknownArgumentType]
     status, result = await daemon._dispatch(
         "upload_receive", {"agent_id": 42, "name": "report.pdf"}
     )
@@ -328,7 +328,7 @@ async def test_dispatch_lifecycle_calls_lifecycle_op(monkeypatch: pytest.MonkeyP
         captured["trigger_inbound_kind"] = trigger_inbound_kind
         return TerminateAgentResponse(status="enqueued")
 
-    monkeypatch.setattr(daemon.ops_lifecycle, "lifecycle_op", _fake_lifecycle)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(daemon.lifecycle, "lifecycle_op", _fake_lifecycle)  # pyright: ignore[reportUnknownArgumentType]
     status, result = await daemon._dispatch(
         "lifecycle",
         {
@@ -355,7 +355,7 @@ async def test_dispatch_lifecycle_missing_path_fails(monkeypatch: pytest.MonkeyP
     async def _should_not_be_called(*_a, **_kw):  # type: ignore[no-untyped-def]
         raise AssertionError("lifecycle_op should not be invoked on missing path")
 
-    monkeypatch.setattr(daemon.ops_lifecycle, "lifecycle_op", _should_not_be_called)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(daemon.lifecycle, "lifecycle_op", _should_not_be_called)  # pyright: ignore[reportUnknownArgumentType]
     status, result = await daemon._dispatch("lifecycle", {})
     assert status == "failed"
     # LifecyclePayload validation rejects a missing 'path' before lifecycle_op runs.
@@ -381,7 +381,7 @@ async def test_dispatch_unparseable_lifecycle_path(monkeypatch: pytest.MonkeyPat
     ):
         raise ValueError(f"lifecycle path not recognized: {path!r}")
 
-    monkeypatch.setattr(daemon.ops_lifecycle, "lifecycle_op", _raises)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(daemon.lifecycle, "lifecycle_op", _raises)  # pyright: ignore[reportUnknownArgumentType]
     status, result = await daemon._dispatch("lifecycle", {"path": "/garbage", "body": {}})
     assert status == "failed"
     assert "not recognized" in str(result["error"])
@@ -400,7 +400,7 @@ async def test_dispatch_shell_capture_shell_not_found_fails(
     def _raises(agent_id: int, session_id: int, lines: int = 200) -> object:
         raise ShellNotFoundError(f"agent {agent_id} has no live shell {session_id} on this host")
 
-    monkeypatch.setattr(daemon.ops_cluster, "shell_capture_op", _raises)
+    monkeypatch.setattr(daemon.cluster, "shell_capture_op", _raises)
     status, result = await daemon._dispatch("shell_capture", {"agent_id": 42, "session_id": 9})
     assert status == "failed"
     assert "ShellNotFoundError" in str(result["error"])
@@ -422,7 +422,7 @@ async def test_dispatch_resurrect_refusal_fails_with_its_reason(
     ):
         raise ResurrectRefused("runtime_cutover_required")
 
-    monkeypatch.setattr(daemon.ops_lifecycle, "lifecycle_op", _raises)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(daemon.lifecycle, "lifecycle_op", _raises)  # pyright: ignore[reportUnknownArgumentType]
     status, result = await daemon._dispatch(
         "lifecycle", {"path": "/api/agents/7/resurrect-explicit-v2", "body": {}}
     )
@@ -442,7 +442,7 @@ async def test_dispatch_wire_error_carries_reason(monkeypatch: pytest.MonkeyPatc
     ):
         raise AgentNotFound("agent 999 does not exist")
 
-    monkeypatch.setattr(daemon.ops_lifecycle, "lifecycle_op", _raises)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(daemon.lifecycle, "lifecycle_op", _raises)  # pyright: ignore[reportUnknownArgumentType]
     status, result = await daemon._dispatch(
         "lifecycle", {"path": "/api/agents/999/terminate", "body": {}}
     )
@@ -480,7 +480,7 @@ async def test_dispatch_status_probe_passes_the_daemon_pool(
             paused=False,
         )
 
-    monkeypatch.setattr(daemon.ops_cluster, "cluster_status_op", _status)
+    monkeypatch.setattr(daemon.cluster, "cluster_status_op", _status)
 
     status, result = await daemon._dispatch("status_probe", {})
 
@@ -551,7 +551,7 @@ async def test_ops_route_status_probe_serializes_datetime_fields(
             ],
         )
 
-    monkeypatch.setattr(daemon.ops_cluster, "cluster_status_op", _status)
+    monkeypatch.setattr(daemon.cluster, "cluster_status_op", _status)
     status, body, ctype = await daemon._ops_route(json.dumps({"kind": "status_probe"}).encode())
     assert status == 200
     assert ctype == "application/json"
@@ -584,7 +584,7 @@ async def test_ops_route_completes_with_a_db_down_degraded_status(
             resource=None,
         )
 
-    monkeypatch.setattr(daemon.ops_cluster, "cluster_status_op", _degraded_status)
+    monkeypatch.setattr(daemon.cluster, "cluster_status_op", _degraded_status)
 
     status, body, ctype = await daemon._ops_route(json.dumps({"kind": "status_probe"}).encode())
 
@@ -897,7 +897,7 @@ async def test_idempotent_dispatch_first_run_executes_and_stores(
     op_status + result)."""
     monkeypatch.setattr(daemon, "_db_pool", ops_pool)
     calls: dict[str, int] = {}
-    monkeypatch.setattr(daemon.ops_lifecycle, "launch_agent_op", _fake_spawn_factory(calls))
+    monkeypatch.setattr(daemon.lifecycle, "launch_agent_op", _fake_spawn_factory(calls))
 
     status, result = await daemon._dispatch_idempotent(
         "spawn-launch",
@@ -928,7 +928,7 @@ async def test_idempotent_dispatch_replays_without_reexecuting(
     idempotent op (spawn) safe: a lost response cannot create a twin agent."""
     monkeypatch.setattr(daemon, "_db_pool", ops_pool)
     calls: dict[str, int] = {}
-    monkeypatch.setattr(daemon.ops_lifecycle, "launch_agent_op", _fake_spawn_factory(calls))
+    monkeypatch.setattr(daemon.lifecycle, "launch_agent_op", _fake_spawn_factory(calls))
 
     first = await daemon._dispatch_idempotent(
         "spawn-launch",
@@ -1029,7 +1029,7 @@ async def test_idempotent_dispatch_distinct_keys_execute_twice(
     """Different keys are different logical ops — each executes."""
     monkeypatch.setattr(daemon, "_db_pool", ops_pool)
     calls: dict[str, int] = {}
-    monkeypatch.setattr(daemon.ops_lifecycle, "launch_agent_op", _fake_spawn_factory(calls))
+    monkeypatch.setattr(daemon.lifecycle, "launch_agent_op", _fake_spawn_factory(calls))
 
     await daemon._dispatch_idempotent(
         "spawn-launch",
@@ -1060,7 +1060,7 @@ async def test_idempotent_dispatch_failed_outcome_is_stored_and_replayed(
     ):
         raise ValueError("unparseable lifecycle path")
 
-    monkeypatch.setattr(daemon.ops_lifecycle, "lifecycle_op", _fake_lifecycle)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(daemon.lifecycle, "lifecycle_op", _fake_lifecycle)  # pyright: ignore[reportUnknownArgumentType]
 
     first = await daemon._dispatch_idempotent(
         "lifecycle",
@@ -1088,7 +1088,7 @@ async def test_ops_route_dedupes_by_envelope_key(
     monkeypatch.setattr(daemon, "_db_pool", ops_pool)
     monkeypatch.setattr(daemon, "_dispatch_sem", asyncio.Semaphore(4))
     calls: dict[str, int] = {}
-    monkeypatch.setattr(daemon.ops_lifecycle, "launch_agent_op", _fake_spawn_factory(calls))
+    monkeypatch.setattr(daemon.lifecycle, "launch_agent_op", _fake_spawn_factory(calls))
 
     body = json.dumps(
         {"kind": "spawn-launch", "payload": {"agent_id": 1}, "idempotency_key": "route-key"}
@@ -1113,7 +1113,7 @@ async def test_ops_route_without_key_does_not_dedupe(
     monkeypatch.setattr(daemon, "_db_pool", ops_pool)
     monkeypatch.setattr(daemon, "_dispatch_sem", asyncio.Semaphore(4))
     calls: dict[str, int] = {}
-    monkeypatch.setattr(daemon.ops_lifecycle, "launch_agent_op", _fake_spawn_factory(calls))
+    monkeypatch.setattr(daemon.lifecycle, "launch_agent_op", _fake_spawn_factory(calls))
 
     body = json.dumps({"kind": "spawn-launch", "payload": {"agent_id": 1}}).encode()
     await daemon._ops_route(body)
@@ -1265,7 +1265,7 @@ async def test_an_unrelated_op_still_dispatches_while_a_read_is_stuck(
 
         return InventoryReadResult(machine="runner", plugins={}, mcp_servers={})
 
-    monkeypatch.setattr(daemon.ops_inventory, "inventory_read_op", _wedged)
+    monkeypatch.setattr(daemon.inventory, "inventory_read_op", _wedged)
 
     class _Status:
         def model_dump(self, *, mode: str) -> dict[str, bool]:
@@ -1275,7 +1275,7 @@ async def test_an_unrelated_op_still_dispatches_while_a_read_is_stuck(
     def _status(_pool: object) -> _Status:
         return _Status()
 
-    monkeypatch.setattr(daemon.ops_cluster, "cluster_status_op", _status)
+    monkeypatch.setattr(daemon.cluster, "cluster_status_op", _status)
 
     stuck = asyncio.ensure_future(daemon._dispatch("inventory_read", {}))
     await asyncio.to_thread(started.wait, 10)
@@ -1315,8 +1315,8 @@ async def test_two_config_writes_cannot_interleave(monkeypatch: pytest.MonkeyPat
         inside -= 1
         return _Result()
 
-    monkeypatch.setattr(daemon.ops_config, "config_write_op", _slow_write)
-    monkeypatch.setattr(daemon.ops_inventory, "inventory_write_op", _slow_write)
+    monkeypatch.setattr(daemon.host_config, "config_write_op", _slow_write)
+    monkeypatch.setattr(daemon.inventory, "inventory_write_op", _slow_write)
 
     await asyncio.gather(
         daemon._dispatch("config_write", {"overrides": {}}),
@@ -1341,7 +1341,7 @@ async def test_config_write_op_receives_actor_and_trace(monkeypatch: pytest.Monk
         return _Result()
 
     monkeypatch.setattr(daemon, "_db_pool", _stub_pool())
-    monkeypatch.setattr(daemon.ops_config, "config_write_op", _capture)
+    monkeypatch.setattr(daemon.host_config, "config_write_op", _capture)
     status, _ = await daemon._dispatch(
         "config_write",
         {"overrides": {}, "actor": "user_session:administrator", "trace_id": "trace-9"},
@@ -1367,7 +1367,7 @@ async def test_config_audit_read_op_receives_last(monkeypatch: pytest.MonkeyPatc
         return _Result()
 
     monkeypatch.setattr(daemon, "_db_pool", _stub_pool())
-    monkeypatch.setattr(daemon.ops_config, "config_audit_read_op", _capture)
+    monkeypatch.setattr(daemon.host_config, "config_audit_read_op", _capture)
     status, _ = await daemon._dispatch("config_audit_read", {"last": 7})
     assert status == "completed"
     assert captured == {"last": 7}
@@ -1408,7 +1408,7 @@ async def test_op_arms_do_not_run_on_the_default_executor(
 
         return _R()
 
-    monkeypatch.setattr(daemon.ops_config, "config_read_op", _note_thread)
+    monkeypatch.setattr(daemon.host_config, "config_read_op", _note_thread)
 
     await daemon._dispatch("config_read", {})
 

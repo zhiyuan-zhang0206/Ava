@@ -94,7 +94,7 @@ async def test_recorded_reason_is_the_billing_whitelist_value(
 ) -> None:
     """End-to-end anti-drift (task #3919): the reason the breaker WRITES is the
     value the billing batch-recovery whitelist PICKS UP."""
-    from ops.ops_lifecycle.billing_recovery import enumerate_candidates
+    from ops.lifecycle.billing_recovery import enumerate_candidates
 
     aid = spawn_agent(spawner="user")
     assert await record_permanent_reject_turn(aops_pool, aid, PERMANENT_REJECT_REASON_BILLING) == 1

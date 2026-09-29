@@ -24,7 +24,7 @@ from pydantic import BaseModel, Field
 
 from gateway.routers.agents_forward import _forward_to_home_machine
 from gateway.schemas import CancelRequest, CompactEnqueued
-from ops import ops_lifecycle as _ops
+from ops import lifecycle as _ops
 from ops.rpc_schemas import (
     BillingResurrectRequest,
     BillingResurrectResponse,
@@ -313,7 +313,7 @@ async def post_agents_resurrect_billing(
     audited no-op, and a concurrent second run is refused by the run-level
     advisory lock.
     """
-    from ops.ops_lifecycle.billing_recovery import run_billing_recovery
+    from ops.lifecycle.billing_recovery import run_billing_recovery
 
     return await run_billing_recovery(execute=body.execute, pool=request.app.state.db_pool)
 

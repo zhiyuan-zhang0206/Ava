@@ -25,7 +25,7 @@ async def launch_agent_op(body: LaunchAgentRequest, db_pool: ConnectionPool) -> 
     """
     # Lazy import: the package door re-exports this module, so a module-level
     # import of the door would be circular.
-    from ops.ops_lifecycle import publish_inbound_arrived
+    from ops.lifecycle import publish_inbound_arrived
     from shared.lm.factory import validate_model_config
 
     await asyncio.to_thread(validate_model_config, model=settings.lm.llm_model, config=body.config)

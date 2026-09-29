@@ -51,7 +51,7 @@ def _sdk_via_inprocess_gateway(monkeypatch: pytest.MonkeyPatch):
     from gateway.app import app
     from gateway.routers import agents as _agents_router
     from gateway.routers import agents_forward as _agents_forward_router
-    from ops.ops_lifecycle import launch_agent_op, lifecycle_op
+    from ops.lifecycle import launch_agent_op, lifecycle_op
     from ops.rpc_schemas import LaunchAgentRequest, SpawnedAgent
     from shared import machines as _machines
     from shared.machine import machine_name

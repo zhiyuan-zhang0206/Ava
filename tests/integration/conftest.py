@@ -73,7 +73,7 @@ def _local_spawn_in_process(monkeypatch: pytest.MonkeyPatch) -> None:
     the forwarded op (the agent row was already created by the gateway). Routing
     tests that patch `_forward_spawn_to_remote` themselves run after this and win."""
     from gateway.routers import agents as _agents_router
-    from ops.ops_lifecycle import launch_agent_op
+    from ops.lifecycle import launch_agent_op
     from ops.rpc_schemas import LaunchAgentRequest, SpawnedAgent
     from shared import machines as _machines
     from shared.machine import machine_name

@@ -68,8 +68,8 @@ class OpsTransport:
         import asyncio
         import base64
 
+        from ops.cluster import RELEASE_ENTRY_TIMEOUT_S
         from ops.cluster_rpc import dispatch_to_machine
-        from ops.ops_cluster import RELEASE_ENTRY_TIMEOUT_S
         from shared.api_contracts.release_handoff import (
             ReleaseImageExecPayload,
             ReleaseImageExecResult,

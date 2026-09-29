@@ -40,8 +40,8 @@ from gateway.schemas import (
     ResolvedFieldView,
 )
 from ops import cluster_rpc as _cluster_rpc
-from ops import ops_config
-from ops.ops_config import SENSITIVE_MASK
+from ops import host_config
+from ops.host_config import SENSITIVE_MASK
 from ops.rpc_schemas import ConfigAuditReadResult, ConfigReadResult, ConfigWriteOpResult
 from shared import runtime_config
 from shared.config import env_override_values, field_domain, get_config_metadata, settings
@@ -158,7 +158,7 @@ async def _dispatch_config_read(target: str) -> ConfigReadResult:
             status_code=503,
             detail=f"machine {target!r} has no agent-runner ops server — its config cannot be read",
         )
-    return ConfigReadResult.model_validate(await asyncio.to_thread(ops_config.config_read_op))
+    return ConfigReadResult.model_validate(await asyncio.to_thread(host_config.config_read_op))
 
 
 async def _dispatch_config_audit_read(target: str, last: int) -> ConfigAuditReadResult:
@@ -203,7 +203,7 @@ async def _dispatch_config_audit_read(target: str, last: int) -> ConfigAuditRead
             ),
         )
     return ConfigAuditReadResult.model_validate(
-        await asyncio.to_thread(ops_config.config_audit_read_op, last)
+        await asyncio.to_thread(host_config.config_audit_read_op, last)
     )
 
 
@@ -267,7 +267,7 @@ async def _dispatch_config_write(
         )
     return ConfigWriteOpResult.model_validate(
         await asyncio.to_thread(
-            ops_config.config_write_op, overrides, local=local, actor=actor, trace_id=trace_id
+            host_config.config_write_op, overrides, local=local, actor=actor, trace_id=trace_id
         )
     )
 

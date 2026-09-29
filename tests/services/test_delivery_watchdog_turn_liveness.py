@@ -183,7 +183,7 @@ async def test_recovery_emits_evidence_then_terminates_queues_and_resurrects(
     pool: ConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import ops.ops_lifecycle as lifecycle
+    from ops import lifecycle
 
     calls: list[str] = []
 
@@ -242,7 +242,7 @@ async def test_recovery_chain_reaches_dispatch_through_the_real_notice_guard(
     would reach no dispatch and fail the assert. A `closed_at` stamp left by
     the retired closed-agent concept gates nothing
     (decisions/2026-09-27-terminate-has-no-closed-state.md)."""
-    import ops.ops_lifecycle as lifecycle
+    from ops import lifecycle
 
     agent_id = _make_hosted_running_agent(db_conn)
     db_conn.execute(

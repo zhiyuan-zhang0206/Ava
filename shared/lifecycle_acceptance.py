@@ -133,7 +133,7 @@ async def terminate_kills_shell_sessions(conn: psycopg.AsyncConnection, agent_id
 
     The graceful apply reads this after locking the agent row. A
     kill-requesting graceful terminate locks the same row before queueing
-    (`ops.ops_lifecycle.termination._enqueue_termination_inbounds`), so it either committed
+    (`ops.lifecycle.termination._enqueue_termination_inbounds`), so it either committed
     before this read and is honored, or it sees the committed termination and
     kills the sessions itself — the request cannot fall between the two.
     """

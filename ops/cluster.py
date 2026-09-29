@@ -1,13 +1,13 @@
 """Cluster-ops RPC implementations.
 
 Stranded-lease recovery, stopping announcements, live status snapshots and the
-release image-exec handoff. One of the four
-op clusters split out of the former single `ops/operations.py` (the others
-are ops_lifecycle / ops_config / ops_inventory); each cluster is self-contained.
+release image-exec handoff. One of the op clusters beside `ops.lifecycle`,
+`ops.host_config`, `ops.inventory` and `ops.uploads`; each cluster is
+self-contained.
 
-Most of these are thin wrappers — the real work lives in `gateway/cluster.py`;
-this layer is the agent-runner-callable RPC surface the ops server dispatches
-(`services/agent_ops/daemon.py:_dispatch`) and the gateway cluster router calls.
+Most of these are thin wrappers; this layer is the agent-runner-callable RPC
+surface the ops server dispatches (`services/agent_ops/daemon.py:_dispatch`) and
+the gateway cluster router calls.
 """
 
 from __future__ import annotations

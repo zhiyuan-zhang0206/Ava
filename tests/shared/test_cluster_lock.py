@@ -505,7 +505,7 @@ def test_renewal_re_arms_a_lease_that_had_already_lapsed() -> None:
 
 
 def test_self_holder_is_the_format_the_liveness_probe_parses() -> None:
-    """One builder, because `ops.ops_cluster._lock_holder_is_live` parses it to decide
+    """One builder, because `ops.cluster._lock_holder_is_live` parses it to decide
     whether `ava cluster recover` may break a hold. It is also how the Phase-B poll
     re-finds its own lease without the holder being threaded down four frames."""
     from shared.machine import machine_name
@@ -534,7 +534,7 @@ def test_holder_process_gone_only_on_positive_local_death() -> None:
 def test_holder_process_gone_reads_a_recycled_pid_as_gone() -> None:
     """An alive pid is not enough: with the lease's age, a process that started
     after the acquire cannot be the holder (the recycled-pid bound is shared with
-    `ops.ops_cluster._lock_holder_is_live`, so manual and automatic recovery can
+    `ops.cluster._lock_holder_is_live`, so manual and automatic recovery can
     never disagree)."""
     from shared.machine import machine_name
 

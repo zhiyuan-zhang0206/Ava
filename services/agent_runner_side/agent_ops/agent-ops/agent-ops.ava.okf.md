@@ -1,14 +1,14 @@
 ---
 type: doc
 title: Agent-Ops — Agent-Runner Inbound HTTP Ops Service
-description: The sole resident Ava HTTP process on agent-runner — binds 0.0.0.0, receives POST /ops ops requests from Gateway after authentication with a write-generation machine API token, calls ops/ops_*.py in-process, executes and returns synchronously. Compact request/response, non-streaming.
+description: The sole resident Ava HTTP process on agent-runner — binds 0.0.0.0, receives POST /ops ops requests from Gateway after authentication with a write-generation machine API token, calls the ops op clusters in-process, executes and returns synchronously. Compact request/response, non-streaming.
 tags: []
 ---
 
 # Agent-Ops — Agent-Runner Inbound HTTP Ops Service
 
 ## What is it
-The sole resident Ava HTTP process on agent-runner (session `ops`) — Gateway resolves the local address from the `machines` table and directly connects to `POST /ops`; the daemon calls `ops/ops_*.py` (cluster/config/inventory/lifecycle) in-process to execute cluster ops operations, returning results synchronously in the HTTP response. Compact request/response, non-streaming, no queue / no SSE / no reconnection.
+The sole resident Ava HTTP process on agent-runner (session `ops`) — Gateway resolves the local address from the `machines` table and directly connects to `POST /ops`; the daemon calls the ops op clusters (`ops.cluster` / `ops.host_config` / `ops.inventory` / `ops.lifecycle` / `ops.uploads`) in-process to execute cluster ops operations, returning results synchronously in the HTTP response. Compact request/response, non-streaming, no queue / no SSE / no reconnection.
 
 **Role affiliation**: agent-runner side (gateway does not run; instead it runs `gateway.ops_*` in-process) — `ServiceSpec.capabilities=_AGENT_RUNNER` in `ops/spec.py`.
 
