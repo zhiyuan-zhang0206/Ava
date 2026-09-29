@@ -310,6 +310,12 @@ def pending_of(evidence: Any) -> Any:
     return None if fields is None else fields.get("pending")
 
 
+def current_of(evidence: Any) -> Any:
+    """The committed current publication, None when absent (JSON null counts as absent)."""
+    fields = _mapping(evidence)
+    return None if fields is None else fields.get("current")
+
+
 def publication_problem(evidence: Any) -> str | None:
     """Why admission cannot read `evidence`; None when it can (SQL NULL is protocol zero)."""
     from shared.managed_writer_publication import WriterPublication
@@ -388,9 +394,34 @@ def _pinned(pin: list[dict[str, Any]]) -> str:
     return pin[0]["target_sha"] if pin and pin[0]["target_sha"] else "no commit"
 
 
+# Only the retired updater's managed-writer mode (AVA_UPDATE_MANAGED_WRITER)
+# committed a `current` publication. The new runtime resolves no loaded
+# publication input to match it, so admission refuses every agent while it
+# stands, and no repair here clears it (the `pending` step keeps it).
+_CURRENT_PUBLICATION = (
+    "the managed-writer evidence records a committed current publication, left by "
+    "the retired updater's managed-writer mode (AVA_UPDATE_MANAGED_WRITER); the new "
+    "runtime admits no agent while it stands. No repair clears it: contact the "
+    "maintainers before the cutover"
+)
+
+
+def _publication_verdict(pending: Any, current: Any, problem: str | None) -> str:
+    """D-1: a committed current publication blocks, even beside a pending one."""
+    if current is not None:
+        return "attention"
+    if pending is not None:
+        return "repair"
+    return "attention" if problem else "ok"
+
+
 # Why each check can read `attention`: a premise to resolve before any repair.
 _WHY: dict[str, Callable[[dict[str, Any]], str]] = {
-    "D-1": lambda check: f"admission cannot read the managed-writer evidence: {check['problem']}",
+    "D-1": lambda check: (
+        _CURRENT_PUBLICATION
+        if check["current"] is not None
+        else f"admission cannot read the managed-writer evidence: {check['problem']}"
+    ),
     "D-3": lambda check: (
         f"the cluster pin names {_pinned(check['pin'])}, not --legacy-commit "
         f"{check['legacy_commit']}"
@@ -421,6 +452,7 @@ def attention(checks: dict[str, dict[str, Any]]) -> list[str]:
 
 def _checks(conn: psycopg.Connection[Any], found: Survey, inputs: Inputs) -> dict[str, Any]:
     pending, problem = pending_of(found.evidence), publication_problem(found.evidence)
+    current = current_of(found.evidence)
     owner = rows(conn, _OWNER)[0]
     prepared = value(conn, "SELECT count(*) FROM pg_prepared_xacts")
     judged = found.classified
@@ -428,10 +460,11 @@ def _checks(conn: psycopg.Connection[Any], found: Survey, inputs: Inputs) -> dic
     fenced = fenced_summary(judged)
     checks: dict[str, dict[str, Any]] = {
         "D-1": {
-            "verdict": "repair" if pending is not None else ("attention" if problem else "ok"),
+            "verdict": _publication_verdict(pending, current, problem),
             "pending_clear": pending is None,
             "problem": problem,
             "pending": pending,
+            "current": current,
         },
         "D-2": {"verdict": "ok" if found.lease == FREE_LEASE else "repair", "lease": found.lease},
         "D-3": _pin(conn, inputs.legacy_commit),

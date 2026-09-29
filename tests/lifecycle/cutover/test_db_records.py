@@ -708,7 +708,8 @@ def test_cleared_publication_keeps_current_and_refuses_what_admission_cannot_rea
     )
     db_conn.commit()
     refusals = _refusals(cluster, _inputs(tmp_path, cluster))
-    assert refusals[0].startswith("clearing pending leaves evidence the runtime cannot read")
+    assert refusals[0] == "D-1 reads attention: " + survey_module._CURRENT_PUBLICATION
+    assert refusals[1].startswith("clearing pending leaves evidence the runtime cannot read")
 
 
 def test_owner_authority_names_the_home_socket_port_owner_and_database(tmp_path: Path) -> None:

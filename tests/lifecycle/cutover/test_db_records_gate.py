@@ -15,12 +15,15 @@ from uuid import uuid4
 
 import psycopg
 import pytest
+from psycopg.types.json import Jsonb
 
 from scripts import cutover_db_records as records
 from scripts import cutover_db_survey as survey_module
 from shared.config import settings
 from tests.lifecycle.cutover.test_db_records import (  # noqa: F401 -- fixtures
     _BOOTSTRAP_OWNED,
+    _PENDING,
+    GATEWAY,
     GONE,
     Cluster,
     _agent,
@@ -96,6 +99,85 @@ def test_execute_refuses_while_any_check_reads_attention(
     assert str(refused.value) == "; ".join(blocked)
     assert _state(db_conn) == unchanged
     assert not (cluster.home / records.JOURNAL).exists()
+
+
+def _committed_publication() -> dict[str, object]:
+    """A `current` the retired updater's managed-writer mode committed; it decodes."""
+    from datetime import UTC, datetime
+
+    from shared.managed_writer_barrier import RolloutIdentity
+    from shared.managed_writer_publication import CommittedPublication, PublishedUnit
+
+    at = datetime(2026, 9, 20, tzinfo=UTC)
+    unit = PublishedUnit(
+        machine=GATEWAY,
+        home="/home/ava/.ava",
+        inventory_digest="a" * 64,
+        prepared_receipt_digest="b" * 64,
+        artifact_digest="c" * 64,
+        manifest_digest="d" * 64,
+    )
+    return CommittedPublication(
+        publication_id=uuid4(),
+        operation=RolloutIdentity(holder="ubuntu:pid1", acquired_at=at, target_sha="e" * 40),
+        committed_at=at,
+        units=(unit,),
+        activation_digest="f" * 64,
+        activation_challenge=uuid4(),
+    ).model_dump(mode="json")
+
+
+@pytest.mark.parametrize("beside_pending", [False, True])
+def test_a_committed_publication_reads_attention_and_execute_refuses(
+    cluster: Cluster,
+    db_conn: psycopg.Connection,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    beside_pending: bool,
+) -> None:
+    """The new runtime admits no agent beside a committed `current`, and no step
+    clears one (`pending` keeps it): D-1 reads `attention`, even beside a
+    pending publication, so `--check` is unclean and `--execute` writes nothing."""
+    pending = _PENDING if beside_pending else None
+    evidence = {"version": 2, "current": _committed_publication(), "pending": pending}
+    db_conn.execute("UPDATE deployment_state SET managed_writer_evidence=%s", (Jsonb(evidence),))
+    db_conn.commit()
+    unchanged = _state(db_conn)
+    blocked = "D-1 reads attention: " + survey_module._CURRENT_PUBLICATION
+    assert "contact the maintainers" in blocked
+
+    capsys.readouterr()
+    with _patched_session(write=False):
+        code = records.main(["--home", str(cluster.home), "--check"])
+    report = json.loads(capsys.readouterr().out)
+    d1 = report["checks"]["D-1"]
+    assert (code, d1["verdict"], d1["current"]) == (2, "attention", evidence["current"])
+    assert report["refusals"][0] == blocked  # the bare --check supplies no repair inputs
+
+    inputs = _inputs(tmp_path, cluster, pending=pending)
+    assert _refusals(cluster, inputs) == [blocked]
+    with pytest.raises(records.RefusedError) as refused:
+        _run(cluster, inputs)
+    assert str(refused.value) == blocked
+    assert _state(db_conn) == unchanged
+    assert not (cluster.home / records.JOURNAL).exists()
+
+
+def test_null_or_pending_only_evidence_is_not_blocked(
+    cluster: Cluster, db_conn: psycopg.Connection, tmp_path: Path
+) -> None:
+    """Only a committed publication blocks: pending-only evidence reads `repair`
+    with no refusal, the run clears it to SQL NULL, and SQL NULL reads `ok`."""
+    inputs = _inputs(tmp_path, cluster)
+    pending_only = _survey(inputs).checks["D-1"]
+    assert (pending_only["verdict"], pending_only["current"]) == ("repair", None)
+    assert _refusals(cluster, inputs) == []
+    assert _run(cluster, inputs)["state"] == "done"
+    row = db_conn.execute("SELECT managed_writer_evidence FROM deployment_state").fetchone()
+    db_conn.commit()
+    assert row == (None,)
+    cleared = _survey(inputs).checks["D-1"]
+    assert (cleared["verdict"], cleared["current"]) == ("ok", None)
 
 
 def test_execute_prints_and_records_what_stays_fenced(

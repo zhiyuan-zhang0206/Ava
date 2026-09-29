@@ -27,10 +27,10 @@ authority cutover brought the plane up under new custody. Run them with the
 1. **Before the window (T-2).** `--check --legacy-commit <commit every host
    runs>` and store the output. Resolve every `attention` verdict (a pin or
    applied-migration set that would fire a legacy controller, a bootstrap-owned
-   database, prepared transactions, a legacy updater): the dry run and
-   `--execute` refuse while any remains, naming each check and why. Note D-1
-   (pending publication) and D-2 (deploy lease): their exact JSON is the input
-   of the repair.
+   database, prepared transactions, a legacy updater, a committed publication):
+   the dry run and `--execute` refuse while any remains, naming each check and
+   why. Note D-1 (pending publication) and D-2 (deploy lease): their exact JSON
+   is the input of the repair.
 2. **Baseline (W0).** `--check` again; store it with the cutover record.
 3. **Row export (W3, after the gateway's old `ava pause`, before its `ava
    stop`).** Every runner stopped at W2 and the gateway just drained, so the
@@ -98,12 +98,23 @@ cause, and the same inputs continue it.
 
 | Step | Effect |
 |---|---|
-| `pending` | Removes the durable pending publication. The column returns to SQL NULL when nothing was ever published, else keeps `current`; either result must decode for admission. |
+| `pending` | Removes the durable pending publication; the column returns to SQL NULL. It never runs beside a committed `current` publication: D-1 reads `attention` for one (below), so the run refuses first. |
 | `lease` | Releases the legacy deploy lease (phase `stable`, holder, times and settle hold cleared), only once no pending publication remains. |
 | `posture` | `paused` postures of included hosts become `idle`, in the journal's first run only: once a run completed, a `paused` posture is a held unit's own (every start inside a hold writes it, W8 and W9 included), and no later run plans a posture effect. No held start precedes that first run: the gateway's `--start` refuses until a run completed, and a runner's joins through the gateway. Paused machines keep theirs; stranded-hold columns stay for the retired-storage cleanup. A `converging` posture or a live updater lease refuses. |
 | `units` | Deletes the retired `machine_units` rows. Units of paused machines, this gateway's own unit and attested homes refuse. The stale `machines` row itself stays (the cluster machine-delete endpoint removes it). |
 | `incarnations` | `shared.predecessor_closure.close_retired_predecessor` per convertible row: the closed-predecessor form, with the before image, attestation digest, operator and reason recorded on the receipt ([why](../decisions/2026-09-27-existing-agent-closed-predecessor-admission.md)). The journal keeps both before images, the resources and the receipt's payload (NULL included), and both are compared. A row the guards refuse is recorded `refused: <why>` and the run continues. |
 | `identities` | One effect per attested machine: each convertible identity-less terminated row takes `runtime_kind='hosted'`, a minted UUID generation and owner, and `pid=NULL`, so resurrection accepts it; the resurrection clears it again. Resources stay NULL; no receipt or other row is written ([why](../decisions/2026-09-28-legacy-terminated-agents-resurrectable-at-cutover.md)). One compare-and-swap restates every identity-less condition and each row's before image. The result is `applied`, `already` (a continued run finds its minted pair), or names the rows that changed since planning, which it leaves unchanged; the run continues. |
+
+D-1 reads `attention` whenever `deployment_state.managed_writer_evidence`
+records a committed `current` publication, with or without a pending one. Only
+the retired updater's managed-writer mode (`AVA_UPDATE_MANAGED_WRITER`) wrote
+one. The new runtime resolves no loaded publication input to match it, so
+admission refuses every agent while it stands. The `pending` step would keep
+it, but that step is unreachable: the dry run and `--execute` refuse while any
+check reads `attention`, before the run's first write. Nothing in this
+repository clears a committed publication: contact the maintainers before the
+window. SQL NULL evidence reads `ok`, and evidence holding only a pending
+publication reads `repair`, which the `pending` step clears to SQL NULL.
 
 `--execute` prints a count per step and outcome, then every result that
 carries a note in full (a conversion the guards refused, the rows a mint left
