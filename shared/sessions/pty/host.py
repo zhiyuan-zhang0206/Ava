@@ -109,8 +109,8 @@ def _set_winsz(fd: int, cols: int, rows: int) -> None:
 def _load_env_file(path: str) -> dict[str, str]:
     """Parse a 0600 session-env file (KEY=quoted-value lines) into a dict.
 
-    The writer lives in cli.py (``write_env_file``) and mirrors
-    ``shared.sessions.env_forwarding.env_load_prefix``'s on-disk format. Parsed with
+    The writer lives in cli.py (``write_env_file``) and shares its on-disk format with
+    ``shared.sessions.backend._write_session_env_file``. Parsed with
     shlex so quoted values — spaces, newlines — survive; a comment or a
     non-assignment token is skipped.
     """

@@ -215,8 +215,8 @@ def write_env_file(env: dict[str, str]) -> Path:
     """Write `env` to a fresh 0600 file under $AVA_HOME/run/session-env/ and
     return its path — the ``new`` op's envfile argument.
 
-    Same on-disk format as ``shared.sessions.env_forwarding.env_load_prefix`` (KEY=shlex-
-    quoted values), so files from either writer load in the host; only
+    Same on-disk format as ``shared.sessions.backend._write_session_env_file`` (sorted
+    KEY=shlex-quoted lines), so files from either writer load in the host; only
     shell-identifier keys ride (a child env can hold names a shell cannot
     assign). The host consumes the file at startup.
     """

@@ -668,8 +668,8 @@ def kill_session(name: str, *, graceful: bool = False, timeout: float = 15.0) ->
     the caller's own ancestry (`_spared_pids`), because on Windows a session
     spawned by a daemon never stops being that daemon's descendant.
 
-    Returns (ok, mode) with mode in {graceful, forced, noop} to match
-    `_graceful_kill_session`. Idempotent: an absent/dead session is a noop.
+    Returns (ok, mode) with mode in {graceful, forced, noop} to match the
+    `SessionBackend.kill_session` contract. Idempotent: an absent/dead session is a noop.
 
     `ok` is the SessionBackend contract's "confirmed gone", so the record is
     dropped only once the session's process actually stopped. Unlinking it

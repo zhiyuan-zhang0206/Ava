@@ -120,7 +120,7 @@ def test_new_session_cli_shape_and_envfile(
     envfile = Path(argv[3])
     assert envfile.parent == tmp_path / "session-env"
     assert envfile.stat().st_mode & 0o777 == 0o600
-    # shell-identifier keys only, sorted, shlex-quoted (env_load_prefix format)
+    # shell-identifier keys only, sorted, shlex-quoted (the session-env file format)
     body = envfile.read_text()
     assert body == (f"AVA_HOME={shlex.quote('/home')}\nSECRET={shlex.quote('hunter2 value')}\n")
     # no secret value ever reaches the CLI argv

@@ -31,9 +31,8 @@ leak that made a prod gateway carry AVA_AGENT_ID and load the whole
 agent stack, +11MB resident). The builders here stay thin mechanisms over that
 projection — iterate + build the dict, plus the venv activation (VIRTUAL_ENV +
 PATH) a login shell's profile would otherwise drop; the allow/drop decision is
-the data in the registry. The agent-child builder lives with its sole consumer
-in `ops.agent_launch.agent_spawn_env_dict`; the daemon-session builders stay
-here because five callers across four layers (ava SDK shell sessions, shared
+the data in the registry. The session builders live here because five callers
+across four layers (ava SDK shell sessions, shared
 service respawn, cli start, ops operator shells, gateway schedule runner) need
 identical semantics and layering forbids a lower layer importing a process
 package. The child re-sources cluster-scope values at its own boot (gateway

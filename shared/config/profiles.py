@@ -5,8 +5,8 @@ and process-side code can import the profile sets without triggering a
 Settings construction. `shared/config/__init__.py` consumes this.
 
 AVA_PROCESS_PROFILE names the process kind — gateway / agent / runner — and is
-set explicitly by each launcher (Phase 1/2: the service launcher, the
-watchdog respawn paths, agent_spawn_env_dict). The Settings singleton
+set explicitly by each launcher (the root driver for services, the exec-child
+and watcher spawners for agent-side processes). The Settings singleton
 constructs ONLY its profile's domains; a domain outside the profile raises an
 actionable AttributeError on access (fail-fast, Task #856 D2) and
 `settings.has_domain()` is the escape hatch for dynamic code (plugins). A

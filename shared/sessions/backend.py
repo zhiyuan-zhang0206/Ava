@@ -71,8 +71,8 @@ class SessionBackend(abc.ABC):
         """Launch ``cmd`` as a detached, named background session.
 
         ``env`` is the **complete** child environment dict — the caller is
-        responsible for building it (``shared.sessions.env_forwarding.forward_env_dict`` for
-        daemons, ``shared.sessions.env_forwarding.agent_spawn_env_dict`` for agents).
+        responsible for building it (``shared.sessions.env_forwarding.forward_env_dict`` is the
+        shared builder every current caller uses).
 
         ``login_shell`` (POSIX only) wraps the command in ``bash -lc`` so
         user-local PATH additions are visible.  Windows ignores this flag —
