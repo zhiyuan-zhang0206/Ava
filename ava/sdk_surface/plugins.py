@@ -28,7 +28,7 @@ from .sdk_disable import _DisabledSDKModule
 # them down, avoiding reload-induced NamespaceConflictError.
 
 
-# ── Exception hierarchy (CLAUDE.md SDK docstring rule: parent + subclass) ─
+# ── Exception hierarchy (AGENTS.md SDK docstring rule: parent + subclass) ─
 # Plugin authors use RegisterNamespaceError for coarse catch, specific
 # subclass for fine catch.
 # `__all_for_ava__` and `_REGISTERED_NAMESPACES` are two-faced representations

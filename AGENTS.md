@@ -172,8 +172,8 @@ enforces format + pairing). **Adding a migration:** `.agents/skills/add-a-migrat
 
 ## Agent instruction files
 
-This `AGENTS.md` is this repo's entry point for all AI coding agents.
-`CLAUDE.md` is a symlink → `AGENTS.md`. `ui/web/CLAUDE.md` → `ui/web/AGENTS.md`. Repo skills live in `.agents/skills/` (open Agent Skills standard); `.ava/skills/` + `.claude/skills/` link back to it, built-ins (Ava Guide, …) link in from `ava_builtins/skills/`.
+This `AGENTS.md` is this repo's entry point for all AI coding agents; Claude Code reads it (and `ui/web/AGENTS.md`) directly, so there is no `CLAUDE.md`.
+Repo skills live in `.agents/skills/` (open Agent Skills standard); `.ava/skills/` + `.claude/skills/` link back to it, built-ins (Ava Guide, …) link in from `ava_builtins/skills/`.
 
 ## Key docs — read on demand
 

@@ -347,8 +347,7 @@ full design.
 
 ## Agent instruction files
 
-`AGENTS.md` is this repo's entry point for all AI coding agents.
-`CLAUDE.md` is a symlink → `AGENTS.md`. `ui/web/CLAUDE.md` → `ui/web/AGENTS.md`.
+`AGENTS.md` is this repo's entry point for all AI coding agents; Claude Code reads it (and `ui/web/AGENTS.md`) directly, so there is no `CLAUDE.md`.
 
 ## Contributing
 

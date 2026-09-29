@@ -89,7 +89,7 @@ class SpawnAgentRequest(BaseModel):
     The schema does not give prompt_source a default — to avoid the
     "caller forgot to pass it and got silently tagged user,
     contaminating envelope source" anti-pattern (one of the
-    `or default` forms CLAUDE.md prohibits); both kinds of callers must
+    `or default` forms AGENTS.md prohibits); both kinds of callers must
     explicitly identify themselves.
     """
 

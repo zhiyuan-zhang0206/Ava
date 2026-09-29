@@ -5578,7 +5578,7 @@ export interface components {
          * InventoryWriteRequest
          * @description PUT /api/inventory body. Each half is genuinely optional (the frontend may
          *     toggle only a plugin or only an MCP server), so a missing half defaults to
-         *     empty — not the contract-required-field fallback CLAUDE.md forbids. FastAPI
+         *     empty — not the contract-required-field fallback AGENTS.md forbids. FastAPI
          *     422s a present-but-non-object half before the handler runs.
          */
         InventoryWriteRequest: {
@@ -7651,7 +7651,7 @@ export interface components {
          *     The schema does not give prompt_source a default — to avoid the
          *     "caller forgot to pass it and got silently tagged user,
          *     contaminating envelope source" anti-pattern (one of the
-         *     `or default` forms CLAUDE.md prohibits); both kinds of callers must
+         *     `or default` forms AGENTS.md prohibits); both kinds of callers must
          *     explicitly identify themselves.
          */
         SpawnAgentRequest: {
