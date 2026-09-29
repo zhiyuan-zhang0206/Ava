@@ -42,7 +42,7 @@ their sources (design §5.3; plugin/MCP applies land in P2):
 - **git channel** (a user install with a recorded `source`): the existing
   `acquire_source` path; a ref pinned to a tag/commit never auto-advances.
 - **Gates** (any failure keeps the disk as-is and records the outcome): the
-  tree must carry a `SKILL.md`; `shared/packages/skills/scan.py` critical findings refuse
+  tree must carry a `SKILL.md`; `base/packages/skills/scan.py` critical findings refuse
   with no `--accept-risk` on any automatic path; the manifest host contract
   (`engines.ava` vs the derived version, `requires_commit` ancestry) records
   `blocked_version`; and the local-edit guard never overwrites a hand-edited
@@ -56,7 +56,7 @@ their sources (design §5.3; plugin/MCP applies land in P2):
   check on demand; job runs honor each package's due cadence and backoff.
 - The pass **never restarts anything** and **never writes the checkout**; a
   landed skill activates at the next skill scan. One OS job per machine runs
-  `ava packages refresh --from-job` (`shared/host/system/packages_job.py`, 15-minute base
+  `ava packages refresh --from-job` (`base/host/system/packages_job.py`, 15-minute base
   tick; per-package cadence is registry data).
 
 ## `ava packages rollback <name> [--force]`

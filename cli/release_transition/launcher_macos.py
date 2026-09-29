@@ -25,6 +25,12 @@ from pathlib import Path
 import psutil
 from pydantic import JsonValue
 
+from base.deploy.release.operation import open_launch_grace
+from base.deploy.release.runtime_release import VerifiedRelease
+from base.deploy.release.verified_file import regular_bytes
+from base.host.proc import run_bounded
+from base.native_process import native_boot_id
+from base.native_process.ownership import OwnedProcess, capture_tree
 from cli.release_transition.journal import Journal, exclusive, read_operation
 from cli.release_transition.launchd_custody import (
     Birth,
@@ -46,12 +52,6 @@ from cli.release_transition.native import require_private_operation
 from cli.release_transition.request import PitrRequest, Request
 from services.permissions_helper import finite_artifact
 from services.permissions_helper.finite_artifact import HelperArtifact
-from shared.deploy.release.operation import open_launch_grace
-from shared.deploy.release.runtime_release import VerifiedRelease
-from shared.deploy.release.verified_file import regular_bytes
-from shared.host.proc import run_bounded
-from shared.native_process import native_boot_id
-from shared.native_process.ownership import OwnedProcess, capture_tree
 
 LAUNCHCTL = "/bin/launchctl"
 EXIT_TIMEOUT_S = 20
@@ -605,7 +605,7 @@ def executor_receipt(record: dict[str, JsonValue]) -> dict[str, JsonValue]:
 
 
 def _write_plist(launch: DarwinLaunch) -> None:
-    from shared.host.private_storage import ensure_private_dir
+    from base.host.private_storage import ensure_private_dir
 
     path = Path(launch.plist)
     ensure_private_dir(path.parent.parent)

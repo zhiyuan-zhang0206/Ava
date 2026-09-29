@@ -25,7 +25,7 @@ from services.im_bridge.adapters.feishu import (
     _segment,
 )
 from services.im_bridge.types import InboundMessage
-from tests.shared.poll_until import poll_until_async
+from tests.base.poll_until import poll_until_async
 
 
 class FakeCore:
@@ -216,7 +216,7 @@ async def test_ws_callback_drops_when_no_main_loop(adapter: FeishuAdapter) -> No
 
 
 def test_credentials_read_from_settings(monkeypatch: pytest.MonkeyPatch) -> None:
-    from shared.config import settings
+    from base.config import settings
 
     monkeypatch.setattr(settings.feishu, "feishu_app_id", "cli_env")
     monkeypatch.setattr(settings.feishu, "feishu_app_secret", "sec_ava")
@@ -229,7 +229,7 @@ def test_credentials_read_from_settings(monkeypatch: pytest.MonkeyPatch) -> None
 
 
 def test_credentials_missing_returns_empty(monkeypatch: pytest.MonkeyPatch) -> None:
-    from shared.config import settings
+    from base.config import settings
 
     monkeypatch.setattr(settings.feishu, "feishu_app_id", "")
     monkeypatch.setattr(settings.feishu, "feishu_app_secret", "")
@@ -244,7 +244,7 @@ def test_credentials_missing_returns_empty(monkeypatch: pytest.MonkeyPatch) -> N
 async def test_start_skips_without_credentials(
     adapter: FeishuAdapter, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from shared.config import settings
+    from base.config import settings
 
     monkeypatch.setattr(settings.feishu, "feishu_app_id", "")
     monkeypatch.setattr(settings.feishu, "feishu_app_secret", "")
@@ -259,7 +259,7 @@ async def test_start_skips_without_credentials(
 async def test_start_connects_with_credentials(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from shared.config import settings
+    from base.config import settings
 
     monkeypatch.setattr(settings.feishu, "feishu_app_id", "cli_x")
     monkeypatch.setattr(settings.feishu, "feishu_app_secret", "secret_x")
@@ -308,8 +308,8 @@ def test_ws_connect_kwargs_defer_to_the_machine_proxy(
 
     import websockets
 
+    from base.host.env.registry import NETWORK_PROXY_KEYS
     from services.im_bridge.adapters import feishu_ws_proxy
-    from shared.host.env.registry import NETWORK_PROXY_KEYS
 
     for key in NETWORK_PROXY_KEYS:
         monkeypatch.delenv(key, raising=False)
@@ -557,7 +557,7 @@ def test_rest_client_applies_configured_timeout(
     contract — the adapter must pass AVA_FEISHU_REST_TIMEOUT_SECONDS through
     so a hung Feishu line cannot park an IM outbound at an unknown default.
     """
-    from shared.config import settings
+    from base.config import settings
 
     monkeypatch.setattr(settings.feishu, "feishu_rest_timeout_seconds", 7.5)
     seen: list[float] = []
@@ -882,7 +882,7 @@ async def test_send_does_not_override_existing_owner_open_id(adapter: FeishuAdap
 
 def test_start_poller_honors_zero_interval(monkeypatch: pytest.MonkeyPatch) -> None:
     """AVA_FEISHU_POLL_INTERVAL_SECONDS=0 disables the poller (WS-only)."""
-    from shared.config import settings
+    from base.config import settings
 
     monkeypatch.setattr(settings.feishu, "feishu_poll_interval_seconds", 0)
     adapter = FeishuAdapter(FakeCore())

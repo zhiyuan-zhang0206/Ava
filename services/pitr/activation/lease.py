@@ -6,9 +6,9 @@ import threading
 import time
 from collections.abc import Callable
 
-from shared.deploy.progress_timeout import LEASE_RENEW_INTERVAL_S
-from shared.deploy.state.cluster_lock import lease_may_lapse, renew_update_lock
-from shared.log import logger
+from base.deploy.progress_timeout import LEASE_RENEW_INTERVAL_S
+from base.deploy.state.cluster_lock import lease_may_lapse, renew_update_lock
+from base.log import logger
 
 
 def run_while_renewing[T](holder: str, action: Callable[[threading.Event], T]) -> T:

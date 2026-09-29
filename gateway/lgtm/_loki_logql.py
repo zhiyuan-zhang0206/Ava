@@ -10,8 +10,8 @@ import re
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from shared.events.contract import TIER_BY_EVENT, EventTier
-from shared.telemetry.loki_index_labels import (
+from base.events.contract import TIER_BY_EVENT, EventTier
+from base.telemetry.loki_index_labels import (
     LokiReadEra,
     LokiReadSlice,
     archive_stream_selector,
@@ -47,7 +47,7 @@ def _tier_predicate(tiers: list[EventTier]) -> str:
     """One LogQL label-filter expression for a union of event tiers.
 
     Tier is derived from row fields rather than stored in Loki. The predicate
-    mirrors ``shared.events.contract.tier_for`` exactly, including severity
+    mirrors ``base.events.contract.tier_for`` exactly, including severity
     and audit precedence, so filtering happens before pagination and count
     aggregation rather than after a page has been fetched.
     """

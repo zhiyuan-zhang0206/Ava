@@ -14,8 +14,8 @@ import threading
 import time
 from typing import Any
 
+from base.config import settings
 from ops import cluster_rpc
-from shared.config import settings
 
 _log = logging.getLogger(__name__)
 

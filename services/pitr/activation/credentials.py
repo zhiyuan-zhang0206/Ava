@@ -16,8 +16,8 @@ from typing import cast
 from google.cloud import storage
 from google.oauth2 import service_account
 
-from shared.config import settings
-from shared.config.physical_backup import PhysicalBackupSettings
+from base.config import settings
+from base.config.physical_backup import PhysicalBackupSettings
 
 
 def credential_identity(path: Path) -> tuple[str, str, str]:

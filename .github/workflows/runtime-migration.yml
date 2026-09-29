@@ -2,18 +2,18 @@ name: Verified release migration authority
 on:
   pull_request:
     paths:
-      - 'shared/deploy/schema/runtime_migration.py'
-      - 'shared/deploy/schema/migrations.py'
-      - 'shared/deploy/schema/migration_layout.py'
-      - 'shared/deploy/release/runtime_release.py'
+      - 'base/deploy/schema/runtime_migration.py'
+      - 'base/deploy/schema/migrations.py'
+      - 'base/deploy/schema/migration_layout.py'
+      - 'base/deploy/release/runtime_release.py'
       - 'cli/start_runtime.py'
       - 'cli/start_identity.py'
       - 'cli/start_intent.py'
       - 'cli/commands/lifecycle/start.py'
       - 'cli/commands/lifecycle/migrations.py'
       - 'scripts/release_proofs/prove_runtime_migration.py'
-      - 'tests/shared/test_runtime_migration.py'
-      - 'tests/shared/test_migration_authority.py'
+      - 'tests/base/test_runtime_migration.py'
+      - 'tests/base/test_migration_authority.py'
       - 'tests/cli/test_start_runtime.py'
       - '.github/workflows/runtime-migration.yml'
 permissions:
@@ -33,9 +33,9 @@ jobs:
       - uses: ./.github/actions/install-pg-redis
       - run: uv sync --locked
       - name: Type-check migration authority and separate start admission
-        run: uv run pyright shared/deploy/schema/runtime_migration.py cli/start_runtime.py cli/commands/lifecycle/migrations.py scripts/release_proofs/prove_runtime_migration.py tests/shared/test_runtime_migration.py tests/cli/test_start_runtime.py
+        run: uv run pyright base/deploy/schema/runtime_migration.py cli/start_runtime.py cli/commands/lifecycle/migrations.py scripts/release_proofs/prove_runtime_migration.py tests/base/test_runtime_migration.py tests/cli/test_start_runtime.py
       - name: Real native PG authority and checkout regression cases
-        run: uv run pytest -q tests/shared/test_runtime_migration.py tests/shared/test_migration_authority.py tests/cli/test_start_runtime.py --junitxml=runtime-migration.xml
+        run: uv run pytest -q tests/base/test_runtime_migration.py tests/base/test_migration_authority.py tests/cli/test_start_runtime.py --junitxml=runtime-migration.xml
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: always()
         with:

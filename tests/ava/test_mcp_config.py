@@ -194,7 +194,7 @@ def test_machine_config_overrides_builtin(unit_home: Path, monkeypatch: pytest.M
 
 def _install_mcp(home: Path, name: str, spec: dict[str, Any]) -> Path:
     """Register a `type="mcp"` package and write its `$AVA_HOME/mcps/<name>/.mcp.json`."""
-    from shared.packages.extensions import install_registry as reg
+    from base.packages.extensions import install_registry as reg
 
     dest = home / "mcps" / name
     dest.mkdir(parents=True, exist_ok=True)
@@ -270,7 +270,7 @@ def test_installed_mcp_dir_none_when_machine_shadows(unit_home: Path) -> None:
 def test_server_cwd_builtin_is_repo_root(unit_home: Path) -> None:
     """Built-ins are pinned to the repo root so their relative `.venv/bin/python`
     resolves to the repo venv and `-m <pkg>` finds repo top-level packages."""
-    from shared.paths import repo_root
+    from base.paths import repo_root
 
     assert cfg_mod.server_cwd("chrome") == repo_root()
 
@@ -312,7 +312,7 @@ def test_assert_requirements_noop_without_requires() -> None:
 
 
 def test_assert_requirements_display_ok_with_display(monkeypatch: pytest.MonkeyPatch) -> None:
-    # display_available is imported into cfg_mod from shared.host.system.probes;
+    # display_available is imported into cfg_mod from base.host.system.probes;
     # patch the bound name (where assert_requirements calls it).
     monkeypatch.setattr(cfg_mod, "display_available", lambda: True)
     cfg_mod.assert_requirements({"requires": {"display": True}})  # no raise
@@ -393,7 +393,7 @@ def test_resolve_command_passthrough_on_posix(monkeypatch: pytest.MonkeyPatch) -
 def test_resolve_command_maps_venv_python_on_windows(monkeypatch: pytest.MonkeyPatch) -> None:
     """`.mcp.json` is committed once and read on every platform, so the reader
     maps the repo's POSIX interpreter convention onto the local venv layout —
-    the same substitution `shared.sessions.backend` does for session commands."""
+    the same substitution `base.sessions.backend` does for session commands."""
     monkeypatch.setattr(cfg_mod, "IS_WINDOWS", True)
     assert cfg_mod.resolve_command(".venv/bin/python") == ".venv\\Scripts\\python.exe"
 

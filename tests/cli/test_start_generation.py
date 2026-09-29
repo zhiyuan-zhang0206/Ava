@@ -9,9 +9,9 @@ from typing import Any
 
 import pytest
 
+from base.deploy.release.runtime_interpreter import source_digest
+from base.deploy.release.start_inputs import configuration_digest
 from cli.commands.lifecycle.start_generation import launch_digest
-from shared.deploy.release.runtime_interpreter import source_digest
-from shared.deploy.release.start_inputs import configuration_digest
 
 
 def test_development_generation_includes_dirty_and_untracked_source(tmp_path: Path) -> None:
@@ -125,7 +125,7 @@ def test_live_admission_requires_positive_absence(monkeypatch: pytest.MonkeyPatc
 def test_loaded_source_identity_is_explicit_and_changes_with_source(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from shared.deploy.release import runtime_interpreter
+    from base.deploy.release import runtime_interpreter
 
     subprocess.run(  # noqa: S603 — fixed argv in private test repository/interpreter
         ["git", "init", "-q", str(tmp_path)], check=True
@@ -174,11 +174,11 @@ import importlib.abc
 import sys
 class Poison(importlib.abc.MetaPathFinder):
     def find_spec(self, fullname, path=None, target=None):
-        if fullname in {'shared.config', 'shared.paths', 'shared.host.env.dotenv_boot'}:
+        if fullname in {'base.config', 'base.paths', 'base.host.env.dotenv_boot'}:
             raise AssertionError('Settings preload: ' + fullname)
 sys.meta_path.insert(0, Poison())
-import shared.deploy.release.runtime_interpreter
-assert 'shared.config' not in sys.modules
+import base.deploy.release.runtime_interpreter
+assert 'base.config' not in sys.modules
 """
     subprocess.run(  # noqa: S603 — fixed argv in private test repository/interpreter
         [sys.executable, "-c", program], check=True, timeout=20
@@ -190,8 +190,8 @@ def test_generation_binds_the_delivered_write_generation(
 ) -> None:
     """A changed write generation alone changes the launch digest; only its
     number and credential digest are bound, never a password."""
-    from shared.cluster.authority import load_ledger
-    from shared.cluster.authority.ledger import ledger_path
+    from base.cluster.authority import load_ledger
+    from base.cluster.authority.ledger import ledger_path
 
     repo = tmp_path / "repo"
     subprocess.run(["git", "init", "-q", str(repo)], check=True)  # noqa: S603 — test-owned repository

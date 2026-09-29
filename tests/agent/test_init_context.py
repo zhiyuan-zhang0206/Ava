@@ -19,9 +19,9 @@ from psycopg_pool import AsyncConnectionPool
 
 from agent.graph._init_context import init_context_node
 from agent.state import AgentState, ContextReset
-from shared.agents.context import AvaContext
-from shared.config import settings
-from shared.db import create_agent
+from base.agents.context import AvaContext
+from base.config import settings
+from base.db import create_agent
 
 
 def _config(tid: int) -> RunnableConfig:
@@ -204,7 +204,7 @@ async def test_established_head_records_what_the_capability_index_lists(
     )
     monkeypatch.setattr(skills_mod, "_skills_dir", lambda: d)
     monkeypatch.setattr(
-        "shared.packages.extensions.install_registry.loadable_skill_names", lambda: {"alpha"}
+        "base.packages.extensions.install_registry.loadable_skill_names", lambda: {"alpha"}
     )
     monkeypatch.setattr(settings.agent, "skills_to_inject_into_system_prompt", ["*"])
     tid = create_agent(db_conn)
@@ -241,7 +241,7 @@ async def test_a_skill_installed_after_establishment_reaches_the_next_turn(
     )
     monkeypatch.setattr(skills_mod, "_skills_dir", lambda: d)
     monkeypatch.setattr(
-        "shared.packages.extensions.install_registry.loadable_skill_names",
+        "base.packages.extensions.install_registry.loadable_skill_names",
         lambda: {p.name for p in d.iterdir() if p.is_dir()},
     )
     monkeypatch.setattr(settings.agent, "skills_to_inject_into_system_prompt", ["*"])
@@ -287,7 +287,7 @@ async def test_a_compaction_in_the_same_pass_keeps_its_summary_and_its_head(
     from agent.hooks import compact as compact_mod
     from agent.hooks.capabilities import _newly_installed_skills
     from agent.hooks.compact import _compact_reminder
-    from shared.lm.context_budget import ContextBudget
+    from base.lm.context_budget import ContextBudget
 
     d = tmp_path / "skills"
     (d / "alpha").mkdir(parents=True)
@@ -296,7 +296,7 @@ async def test_a_compaction_in_the_same_pass_keeps_its_summary_and_its_head(
     )
     monkeypatch.setattr(skills_mod, "_skills_dir", lambda: d)
     monkeypatch.setattr(
-        "shared.packages.extensions.install_registry.loadable_skill_names",
+        "base.packages.extensions.install_registry.loadable_skill_names",
         lambda: {p.name for p in d.iterdir() if p.is_dir()},
     )
     monkeypatch.setattr(settings.agent, "skills_to_inject_into_system_prompt", ["*"])

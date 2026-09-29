@@ -10,10 +10,10 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from base.agents import AgentLaunchFailed, AvaAgentError
 from gateway.auth.cors import cors_allowed_origins
 from gateway.lgtm import loki_events, loki_query_budget, prom_metrics
 from gateway.middleware.error_envelope import error_response
-from shared.agents import AgentLaunchFailed, AvaAgentError
 
 _log = logging.getLogger(__name__)
 

@@ -44,7 +44,7 @@ Windows loopback forwarding and mirrored networking can make otherwise separate
 units share a port collision domain. A pure WSL2 runner applies its reserved
 health-port base when no explicit value exists. Two WSL2 distros may still need
 different `--health-port-base` values. Select an unused block on the grid in
-`shared/host/env/port_block.py`; check actual host listeners and local reservations.
+`base/host/env/port_block.py`; check actual host listeners and local reservations.
 Root readiness refuses a listener belonging to another home.
 
 The first start binds the selected ports and identity durably. Bare repeated

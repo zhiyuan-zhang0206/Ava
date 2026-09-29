@@ -12,12 +12,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from base.deploy.release.identity import read_application_identity
+from base.deploy.release.runtime_release import VerifiedRelease, release_abi, verify_release
+from base.deploy.release.verified_file import regular_bytes
+from base.runtime_abi import current_abi
+from base.sessions.env_forwarding import frontend_toolchain_path, normalize_service_path
 from cli.release_prepare import PreparationReceipt
-from shared.deploy.release.identity import read_application_identity
-from shared.deploy.release.runtime_release import VerifiedRelease, release_abi, verify_release
-from shared.deploy.release.verified_file import regular_bytes
-from shared.runtime_abi import current_abi
-from shared.sessions.env_forwarding import frontend_toolchain_path, normalize_service_path
 
 
 @dataclass(frozen=True)

@@ -32,7 +32,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from shared.deploy.maintenance.state import MaintenanceHold
+from base.deploy.maintenance.state import MaintenanceHold
 
 ADOPTION_JOURNAL = "cutover-rollback/adopt-home.json"
 # The holder of a hold the cutover creates (`cutover:<id>`); no other hold takes it.
@@ -52,9 +52,9 @@ class CutoverHold:
 # introduction) on, unchanged at every later commit writing a maintenance phase.
 LEGACY_RECEIPT_RULES_SINCE = "cc5c5e2098385fa0e28e42b882e273f0bdecdfed"
 LEGACY_RECEIPT_RULES = (
-    "shared/maintenance.py::set_phase: entering `drained` requires no unsettled "
+    "base/maintenance.py::set_phase: entering `drained` requires no unsettled "
     "failure, and no other code moves a hold past `draining`",
-    "shared/maintenance.py::record_drained: a drained receipt is refused once the "
+    "base/maintenance.py::record_drained: a drained receipt is refused once the "
     "agent has a failure",
 )
 # Classes the adoption settles: other machines' agents, then members that have
@@ -76,7 +76,7 @@ def legacy_hold_facts(home: Path, checkout: Path) -> dict[str, Any]:
     receipts then postdate the certified drain, and such a wake claims nothing.
     Any other receipt refuses the adoption.
     """
-    from shared.deploy.maintenance import pause_owner
+    from base.deploy.maintenance import pause_owner
 
     snapshot = pause_owner.read_for_home(home)
     facts: dict[str, Any] = {
@@ -156,8 +156,8 @@ def legacy_rules(home: Path, checkout: Path) -> dict[str, Any]:
     import re
     import subprocess
 
-    from shared.deploy.git.gitenv import git_env
-    from shared.host.proc import run_bounded
+    from base.deploy.git.gitenv import git_env
+    from base.host.proc import run_bounded
 
     since = LEGACY_RECEIPT_RULES_SINCE
     evidence: dict[str, Any] = {
@@ -199,7 +199,7 @@ def settle_receipts(
     """
     from dataclasses import replace
 
-    from shared.deploy.maintenance.state import validate_repair_record
+    from base.deploy.maintenance.state import validate_repair_record
 
     unsettled = hold.unsettled_failures()
     if not unsettled and receipts.items() <= hold.repaired.items():
@@ -223,7 +223,7 @@ def settle_receipts(
 
 def recorded_hold(home: Path) -> CutoverHold | None:
     """The hold `home`'s adoption journal recorded; None when it was never adopted."""
-    from shared.deploy.release.verified_file import regular_bytes
+    from base.deploy.release.verified_file import regular_bytes
 
     path = home / ADOPTION_JOURNAL
     try:
@@ -243,7 +243,7 @@ def recorded_hold(home: Path) -> CutoverHold | None:
 
 def standing_hold(home: Path) -> CutoverHold | None:
     """The recorded cutover hold, only while it is the hold standing on `home`."""
-    from shared.deploy.maintenance import pause_owner
+    from base.deploy.maintenance import pause_owner
 
     recorded = recorded_hold(home)
     if recorded is None:

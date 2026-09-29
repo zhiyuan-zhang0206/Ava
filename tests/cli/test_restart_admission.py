@@ -10,11 +10,11 @@ import cli.commands._repo as _repo_commands
 import cli.commands.lifecycle._start_readiness_preflight as _start_readiness_preflight_commands
 import cli.commands.lifecycle.start as _start_commands
 import cli.commands.lifecycle.stop as _stop_commands
+from base.deploy.lifecycle import status_journal
+from base.deploy.release import operation, runtime_interpreter
+from base.deploy.release.runtime_release import ReleaseRejectedError, VerifiedRelease
 from cli.commands.lifecycle import _start_readiness_preflight, stop
 from cli.start_runtime import StartRuntime, admit_loaded_release
-from shared.deploy.lifecycle import status_journal
-from shared.deploy.release import operation, runtime_interpreter
-from shared.deploy.release.runtime_release import ReleaseRejectedError, VerifiedRelease
 from tests.cli.test_start_runtime import image as image
 
 
@@ -30,7 +30,7 @@ def test_restart_refuses_before_journal_preflight_or_stop(
 ) -> None:
 
     home = image.root.parent.parent
-    monkeypatch.setattr("shared.paths.ava_home", lambda: home)
+    monkeypatch.setattr("base.paths.ava_home", lambda: home)
     monkeypatch.setattr(runtime_interpreter, "WHEEL_RUNTIME", True)
     expected = "selected"
     if problem in {"source", "source-owner"}:
@@ -42,7 +42,7 @@ def test_restart_refuses_before_journal_preflight_or_stop(
         def foreign_source(_repo: Path) -> str:
             return "foreign source"
 
-        monkeypatch.setattr("shared.paths.prod_service_checkout_error", foreign_source)
+        monkeypatch.setattr("base.paths.prod_service_checkout_error", foreign_source)
         expected = "foreign source"
     if problem == "unisolated":
         prefix, executable, package, _ = runtime_interpreter.loaded_runtime()
@@ -79,10 +79,10 @@ def test_installed_restart_carries_identical_admitted_runtime(
     image: VerifiedRelease, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     home = image.root.parent.parent
-    monkeypatch.setattr("shared.paths.ava_home", lambda: home)
+    monkeypatch.setattr("base.paths.ava_home", lambda: home)
     monkeypatch.setattr(runtime_interpreter, "WHEEL_RUNTIME", True)
-    monkeypatch.setattr("shared.host.proc.hosting_exec_domain", lambda: None)
-    monkeypatch.setattr("shared.host.proc.hosting_supervised_session", lambda: None)
+    monkeypatch.setattr("base.host.proc.hosting_exec_domain", lambda: None)
+    monkeypatch.setattr("base.host.proc.hosting_supervised_session", lambda: None)
     monkeypatch.setattr(_repo_commands, "_preflight_probes", lambda: 0)
     calls: list[str] = []
     captured: list[StartRuntime] = []
@@ -115,7 +115,7 @@ def test_retained_preflight_uses_verified_interpreter_without_source_checks(
     image: VerifiedRelease, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     home = image.root.parent.parent
-    monkeypatch.setattr("shared.paths.ava_home", lambda: home)
+    monkeypatch.setattr("base.paths.ava_home", lambda: home)
     runtime = admit_loaded_release(home)
     image.interpreter.chmod(0o500)
     monkeypatch.setattr(_start_readiness_preflight, "_machine_roles", lambda: None)

@@ -46,10 +46,10 @@ from typing import Literal, cast
 
 from dotenv import dotenv_values
 
+from base.deploy.release.verified_file import regular_bytes
+from base.host.env.dotenv_file import upsert_env
+from base.host.private_storage import write_private_bytes
 from services.gateway_side.backup import passphrase
-from shared.deploy.release.verified_file import regular_bytes
-from shared.host.env.dotenv_file import upsert_env
-from shared.host.private_storage import write_private_bytes
 
 _TOKEN_BYTES = 32
 _SECRET_ENV = "AVA_CLUSTER_SECRET"  # noqa: S105 — env key name, not a credential
@@ -223,7 +223,7 @@ def _save(home: Path) -> Callable[[Rotation], None]:
 
 
 def main(argv: list[str] | None = None) -> int:
-    from shared.paths import ava_home
+    from base.paths import ava_home
 
     parser = argparse.ArgumentParser(description="Rotate the gateway's AVA_CLUSTER_SECRET.")
     parser.add_argument("--execute", action="store_true", help="perform the rotation")

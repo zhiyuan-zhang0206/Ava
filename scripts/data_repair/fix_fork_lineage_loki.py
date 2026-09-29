@@ -36,9 +36,9 @@ from typing import Any
 
 import httpx
 
+from base.config import settings
+from base.telemetry.loki_index_labels import ARCHIVE_FREEZE_AT
 from gateway.lgtm import loki_events
-from shared.config import settings
-from shared.telemetry.loki_index_labels import ARCHIVE_FREEZE_AT
 
 
 def _misrecorded_rows() -> list[dict[str, Any]]:
@@ -135,7 +135,7 @@ def _reemit_corrected(row: dict[str, Any]) -> None:
     becomes the payload's fork_from. The process label on the re-ingested row
     is this script's own (honest provenance); no reader filters on it.
     """
-    from shared import telemetry
+    from base import telemetry
 
     attrs = dict(row.get("attributes") or {})
     telemetry.emit(
@@ -160,7 +160,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    from shared import telemetry
+    from base import telemetry
 
     telemetry.init_telemetry(process="fork-lineage-fix")
     bad = _misrecorded_rows()

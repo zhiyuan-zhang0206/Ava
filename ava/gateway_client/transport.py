@@ -7,14 +7,14 @@ import time as _time
 import uuid as _uuid
 
 import ava
-from shared.agents import EXCEPTION_BY_REASON, ErrorReason, GatewayUnavailable
-from shared.agents.messages.delivery_outbox import (
+from base.agents import EXCEPTION_BY_REASON, ErrorReason, GatewayUnavailable
+from base.agents.messages.delivery_outbox import (
     TRANSIENT_HTTP_STATUSES as _TRANSIENT_HTTP_STATUSES,
 )
-from shared.api_contracts import contracts
-from shared.api_contracts.contracts import Idempotency
-from shared.cluster.auth import bearer_header, client_bearer
-from shared.config import settings
+from base.api_contracts import contracts
+from base.api_contracts.contracts import Idempotency
+from base.cluster.auth import bearer_header, client_bearer
+from base.config import settings
 
 # Singleton: process-wide shared connection pool. Connect/read timeout is a
 # guard against a stuck gateway line. Most gateway ops are near-instant,
@@ -22,7 +22,7 @@ from shared.config import settings
 # claims its row), so the budget must comfortably exceed the server's confirm
 # window — otherwise a read timeout on a spawn that DID succeed triggers a retry
 # that re-POSTs the non-idempotent create and yields a phantom-twin agent.
-# Default value see `shared.config.Settings.gateway_client_http_timeout_seconds`;
+# Default value see `base.config.Settings.gateway_client_http_timeout_seconds`;
 # env override: `AVA_GATEWAY_HTTP_TIMEOUT_SECONDS`.
 _client: httpx.Client | None = None  # noqa: F821  # pyright: ignore[reportUndefinedVariable]
 
@@ -34,7 +34,7 @@ def _client_singleton() -> httpx.Client:  # noqa: F821  # pyright: ignore[report
     `_client` directly (e.g. a FastAPI TestClient)."""
     import httpx
 
-    from shared.host.net.http_dial import transport_for_url
+    from base.host.net.http_dial import transport_for_url
 
     global _client  # noqa: PLW0603 — lazy module singleton
     if _client is None:
@@ -52,7 +52,7 @@ def _client_singleton() -> httpx.Client:  # noqa: F821  # pyright: ignore[report
             timeout=httpx.Timeout(settings.gateway.gateway_client_http_timeout_seconds),
             headers=headers,
             # Pins the dial when GATEWAY_URL's host is an IPv4 literal (e.g. a
-            # private-network address) — see shared/host/net/http_dial.py. None (a hostname
+            # private-network address) — see base/host/net/http_dial.py. None (a hostname
             # target) is httpx's own default transport, unchanged.
             transport=transport_for_url(ava.GATEWAY_URL),
         )
@@ -68,7 +68,7 @@ _RETRY_DELAY_S = settings.gateway.gateway_client_retry_delay_seconds
 
 # ── Transient-failure retry policy ──
 # The status set (429/500/502/503/504) lives with the deferred-delivery outbox
-# — `shared.agents.messages.delivery_outbox.TRANSIENT_HTTP_STATUSES` — so this transport's
+# — `base.agents.messages.delivery_outbox.TRANSIENT_HTTP_STATUSES` — so this transport's
 # retry policy and the outbox interception on both send paths (SDK
 # `send_message` + the `ava agents send` CLI) classify failures identically.
 
@@ -122,7 +122,7 @@ def _agent_jitter_seconds() -> float:
     contextvar in the host, or AVA_AGENT_ID carried by a launched child) so an agent keeps its own offset across restarts; no identity
     (tests, non-agent callers) → 0 (no offset).
     """
-    from shared.native_process.turn_identity import effective_agent_id
+    from base.native_process.turn_identity import effective_agent_id
 
     ident = effective_agent_id()
     if ident is None:
@@ -170,7 +170,7 @@ def raise_from_response(resp: httpx.Response) -> None:  # noqa: F821  # pyright:
         return  # unreachable; raise_for_status has raised
     reason, body = wire
     if reason == ErrorReason.AGENT_LAUNCH_FAILED:
-        from shared.agents import AgentLaunchFailed
+        from base.agents import AgentLaunchFailed
 
         raise AgentLaunchFailed(
             body["detail"],
@@ -241,7 +241,7 @@ def post(
     loud failure carries the full status + body).
 
     `idempotent=None` (default) inherits the route's semantics from its
-    doorplate (`shared.api_contracts.contracts`): IDEMPOTENT retries the transient family,
+    doorplate (`base.api_contracts.contracts`): IDEMPOTENT retries the transient family,
     NON_IDEMPOTENT surfaces immediately (a ReadTimeout means the request
     left this process and the server may well have acted on it — re-sending
     can duplicate the effect, e.g. spawn's phantom-twin agent), and
@@ -276,7 +276,7 @@ def post(
     per_call = httpx.USE_CLIENT_DEFAULT if timeout is None else timeout
 
     # Inherit retry semantics from the route's doorplate unless the caller
-    # overrides: server promises (shared/api_contracts/contracts.py), clients inherit.
+    # overrides: server promises (base/api_contracts/contracts.py), clients inherit.
     semantics = (
         Idempotency.IDEMPOTENT
         if idempotent

@@ -17,10 +17,10 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
+from base.agents import CrossMachineGatewayUnavailable, MachineNotRegistered
 from gateway.agents import forward as forward_module
 from gateway.agents import lifecycle as lifecycle_module
 from gateway.app import app
-from shared.agents import CrossMachineGatewayUnavailable, MachineNotRegistered
 
 
 @pytest.fixture
@@ -201,8 +201,8 @@ def test_restart_overlay_is_validated_without_gateway_agent_domain(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Restart validates its forwarded overlay without constructing agent settings."""
-    import shared.config as shared_config
-    from shared.config import Settings
+    import base.config as base_config
+    from base.config import Settings
 
     captured: dict[str, Any] = {}
 
@@ -219,7 +219,7 @@ def test_restart_overlay_is_validated_without_gateway_agent_domain(
         agent_id = client.post("/api/agents", json={}).json()["id"]
         _set_agent_machine(db_conn, agent_id, "remote-runner")
         with monkeypatch.context() as profile_patch:
-            profile_patch.setattr(shared_config, "settings", Settings(profile="gateway"))
+            profile_patch.setattr(base_config, "settings", Settings(profile="gateway"))
             valid = client.post(
                 f"/api/agents/{agent_id}/restart",
                 json={"config_overlay": {"completion_notice_policy": "hourly"}},

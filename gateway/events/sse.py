@@ -34,10 +34,10 @@ from fastapi import Request
 from pydantic import ValidationError
 from redis.exceptions import AuthenticationError, NoPermissionError
 
+from base.config import settings
+from base.events.live.projection import EVENT_ADAPTER, Error
+from base.events.live.redis_client import open_async_redis, retry_auth_failures_async
 from gateway.middleware import runtime_metrics
-from shared.config import settings
-from shared.events.live.projection import EVENT_ADAPTER, Error
-from shared.events.live.redis_client import open_async_redis, retry_auth_failures_async
 
 _log = logging.getLogger(__name__)
 
@@ -51,7 +51,7 @@ _DISCONNECT_POLL_SECONDS = settings.gateway.sse_disconnect_poll_seconds
 # OSError as a fallback for the socket layer (BrokenPipe etc.).
 # TypeError: redis-py writes a connection whose asyncio transport already fired
 # connection_lost (`TypeError: 'NoneType' object is not callable`, agent-2613
-# crash 2026-08-04 — see shared/redis_client._TransportAwareAsyncConnection).
+# crash 2026-08-04 — see base/redis_client._TransportAwareAsyncConnection).
 # The SSE stream is a per-request short-lived connection, so treat it as any
 # other IO failure: emit an error frame and let the frontend reconnect.
 _REDIS_IO_ERRORS = (redis.ConnectionError, redis.TimeoutError, OSError, TypeError)

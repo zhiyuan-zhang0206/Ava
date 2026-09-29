@@ -18,10 +18,10 @@ from typing import Any
 import pytest
 
 from agent.llm import execute_code
+from base.agents.history.hierarchy.generate import GenResult
+from base.agents.history.hierarchy.pipeline import MaterializedNode, MaterializedTree
+from base.config import settings
 from scripts.codegen import build_hierarchy_once as build
-from shared.agents.history.hierarchy.generate import GenResult
-from shared.agents.history.hierarchy.pipeline import MaterializedNode, MaterializedTree
-from shared.config import settings
 
 
 def _node(nid: str, level: int, trigger: str = "compact@i1") -> MaterializedNode:

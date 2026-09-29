@@ -14,7 +14,7 @@ provide its stack, or accept that this cluster has no observability".
 
 ## The fallback: the local event mirror
 
-`logs/events-<UTC day>.jsonl` (`shared/telemetry`'s local copy of every event
+`logs/events-<UTC day>.jsonl` (`base/telemetry`'s local copy of every event
 this box emitted, 7-day retention) is a complete source on a single-box
 cluster. Both self-evolution flows use it when the read is refused:
 

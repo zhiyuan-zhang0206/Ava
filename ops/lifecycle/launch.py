@@ -6,13 +6,13 @@ import asyncio
 
 from psycopg_pool import ConnectionPool
 
+from base.agents import ForkSourceEmpty
+from base.agents.labels import spawn_prompt_with_label
+from base.cluster.machine import machine_name
+from base.config import settings
+from base.db import insert_inbound_message, publish_inbound_wake
 from ops.agents import latest_checkpoint_id
 from ops.rpc_schemas import LaunchAgentRequest, SpawnAgentRequest, SpawnedAgent
-from shared.agents import ForkSourceEmpty
-from shared.agents.labels import spawn_prompt_with_label
-from shared.cluster.machine import machine_name
-from shared.config import settings
-from shared.db import insert_inbound_message, publish_inbound_wake
 
 
 async def launch_agent_op(body: LaunchAgentRequest, db_pool: ConnectionPool) -> SpawnedAgent:
@@ -25,8 +25,8 @@ async def launch_agent_op(body: LaunchAgentRequest, db_pool: ConnectionPool) -> 
     """
     # Lazy import: the package door re-exports this module, so a module-level
     # import of the door would be circular.
+    from base.lm.factory import validate_model_config
     from ops.lifecycle import publish_inbound_arrived
-    from shared.lm.factory import validate_model_config
 
     await asyncio.to_thread(validate_model_config, model=settings.lm.llm_model, config=body.config)
     if body.launch_attempt_id is not None:
@@ -62,7 +62,7 @@ def spawn_prechecks_blocking(body: SpawnAgentRequest, db_pool: ConnectionPool) -
     # Validate model config before any DB work — defense-in-depth on top of the
     # gateway-side check in post_agents. The gateway may be on a different machine
     # without API keys; the runner always has its own settings and is authoritative.
-    from shared.lm.factory import validate_model_config
+    from base.lm.factory import validate_model_config
 
     validate_model_config(model=settings.lm.llm_model, config=body.config)
     fork_checkpoint: str | None = None

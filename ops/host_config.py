@@ -14,6 +14,12 @@ from __future__ import annotations
 
 from typing import Any
 
+from base.cluster.machine import machine_name
+from base.config import env_override_values, field_domain, get_config_metadata
+from base.config.candidate import validate_env_patch_for_write
+from base.config.editing import field_editable, split_reducer_patch
+from base.host import config_validators
+from base.host.env import runtime_config
 from ops.rpc_schemas import (
     ConfigAuditReadResult,
     ConfigReadResult,
@@ -21,12 +27,6 @@ from ops.rpc_schemas import (
     FieldWriteResult,
     HostConfigField,
 )
-from shared.cluster.machine import machine_name
-from shared.config import env_override_values, field_domain, get_config_metadata
-from shared.config.candidate import validate_env_patch_for_write
-from shared.config.editing import field_editable, split_reducer_patch
-from shared.host import config_validators
-from shared.host.env import runtime_config
 
 SENSITIVE_MASK = "••••••••"
 
@@ -78,7 +78,7 @@ def config_read_op() -> ConfigReadResult:
 
 def config_audit_read_op(last: int) -> ConfigAuditReadResult:
     """Read this machine's most recent `.env`-write audit records (newest first)."""
-    from shared.host.env.audit import read_env_write_records
+    from base.host.env.audit import read_env_write_records
 
     return ConfigAuditReadResult(machine=machine_name(), records=read_env_write_records(last))
 
@@ -107,7 +107,7 @@ def config_write_op(
     fields) from a remote one. A host field is editable iff `writable` when local,
     else `remote_writable` — `writable` means "a human may edit it on its own host",
     `remote_writable` is the narrower allowlist for editing a *remote* host's field.
-    The gate is `shared.config.editing.field_editable` — the same definition the
+    The gate is `base.config.editing.field_editable` — the same definition the
     gateway's PUT /api/config gate uses, so the two write paths cannot drift.
     """
     metas = {m.name: m for m in get_config_metadata()}

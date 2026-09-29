@@ -18,8 +18,8 @@ from agent.graph.llm_errors import (
     LLMStreamStallPairExhaustedError,
     LLMStreamStallTimeoutError,
 )
-from shared.config import settings
-from shared.native_process.turn_identity import bind_turn_identity
+from base.config import settings
+from base.native_process.turn_identity import bind_turn_identity
 
 
 def test_retry_policy_excludes_fatal_llm_stream_error() -> None:
@@ -72,7 +72,7 @@ def test_retry_policy_default_on_is_callable() -> None:
 def test_retry_policy_stops_when_its_total_time_budget_is_exhausted() -> None:
     """A retry failure after the wall-clock budget must end the retry loop."""
     from agent.graph._build import _RETRY_REMAINING_ATTR
-    from shared.config.lm import LmSettings
+    from base.config.lm import LmSettings
 
     assert LmSettings().llm_retry_max_total_seconds == 420.0
     exc = ConnectionError("budget exhausted")
@@ -109,7 +109,7 @@ def test_retry_policy_phase_jitter_zero_without_agent_id(monkeypatch: pytest.Mon
     """No AVA_AGENT_ID (tests / non-agent entry points) → no offset: the
     schedule stays exactly the configured 30→60→120→240→480."""
     from agent.graph._build import _retry_phase_jitter
-    from shared.config import settings
+    from base.config import settings
 
     monkeypatch.delenv("AVA_AGENT_ID", raising=False)
     assert _retry_phase_jitter() == 0.0
@@ -122,7 +122,7 @@ def test_retry_policy_phase_jitter_deterministic_per_agent(monkeypatch: pytest.M
     cannot re-sync the fleet's retry waves into lockstep (heartbeat-daemon
     de-phasing pattern)."""
     from agent.graph._build import _RETRY_JITTER_SPAN_S, _build_llm_retry, _retry_phase_jitter
-    from shared.config import settings
+    from base.config import settings
 
     monkeypatch.setenv("AVA_AGENT_ID", "1234")
     j1 = _retry_phase_jitter()
@@ -179,8 +179,8 @@ def test_stall_pair_grants_the_delayed_schedule(bound_thread: str) -> None:
     """A pair error is retried under the delayed schedule: minutes-scale
     jittered wait, no compounding backoff, its own attempts headroom."""
     from agent.graph.llm_errors import _stall_pair_streak
-    from shared.config.turn_view import turn_settings
-    from shared.lm.registry import resolve_setting
+    from base.config.turn_view import turn_settings
+    from base.lm.registry import resolve_setting
 
     policy = _build_llm_retry()
     exc = LLMStreamStallPairError("pair", stage="ttft")

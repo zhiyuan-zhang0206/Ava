@@ -33,7 +33,7 @@ instances, so a hook that needs a threshold, a counter, or a handle keeps it on
 `self` rather than in a module global.
 
 `config` is used to get agent_id via
-`shared.agents.context.agent_id_from_config(config)` — hooks that need agent
+`base.agents.context.agent_id_from_config(config)` — hooks that need agent
 identity for things like INSERT inbound / marking agent-scoped events use
 this. Hooks that don't need agent_id (such as pure state-watching
 auto_compact) also take config but don't read; signature unified to keep
@@ -65,10 +65,10 @@ from langgraph.types import Command
 
 from agent import state as _state
 from agent.nodes import NodeName
-from shared.agents.context import AvaContext, agent_id_from_config
-from shared.log import logger
-from shared.packages.plugins import activation, contributions
-from shared.packages.plugins.context import current_plugin_name
+from base.agents.context import AvaContext, agent_id_from_config
+from base.log import logger
+from base.packages.plugins import activation, contributions
+from base.packages.plugins.context import current_plugin_name
 
 HookName = Literal["before_llm", "before_exec", "after_exec", "after_init"]
 
@@ -207,7 +207,7 @@ def make_hook_runner(
     - Each hook returning None → skip
     - A **plugin** hook returning a non-empty dict also emits one
       `plugin_activation` event naming the keys it wrote
-      (`shared.packages.plugins.activation`) — a pure side channel, and silent for
+      (`base.packages.plugins.activation`) — a pure side channel, and silent for
       framework hooks and for `None` returns.
     - Final return Command(update=update_minus_goto, goto=next_node)
     """

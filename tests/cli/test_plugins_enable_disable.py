@@ -14,8 +14,8 @@ def _isolate(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     session home (tests ambient-state audit H-1): a discoverable plugin or a
     plugins_config.json left in `$AVA_HOME` changes what later tests in the same
     worker see. Same redirection `test_plugin_scaffold.py` uses."""
-    from shared import paths
-    from shared.config import settings
+    from base import paths
+    from base.config import settings
 
     home = tmp_path / "ava_home"
     monkeypatch.setattr(paths, "plugins_dir", lambda: home / "plugins")
@@ -25,8 +25,8 @@ def _isolate(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_cmd_enable_then_disable(tmp_path: Path, capsys):
     # Everything below lands in the per-test tmp home (see `_isolate`).
-    from shared import paths
-    from shared.packages.plugins.enable_config import local_config_path, write_local
+    from base import paths
+    from base.packages.plugins.enable_config import local_config_path, write_local
 
     pdir = paths.plugins_dir() / "compact"
     pdir.mkdir(parents=True, exist_ok=True)
@@ -49,8 +49,8 @@ def test_cmd_enable_accepts_the_dash_spelling_of_an_underscore_plugin(tmp_path: 
     """A plugin directory has to stay a Python package, so `my_plugin` is the
     on-disk identity while `my-plugin` is the name a human writes. The typed name
     folds onto the directory, and the config stays keyed by the directory."""
-    from shared import paths
-    from shared.packages.plugins.enable_config import local_config_path
+    from base import paths
+    from base.packages.plugins.enable_config import local_config_path
 
     pdir = paths.plugins_dir() / "my_plugin"
     pdir.mkdir(parents=True, exist_ok=True)
@@ -66,8 +66,8 @@ def test_cmd_enable_accepts_the_dash_spelling_of_an_underscore_plugin(tmp_path: 
 def test_load_folds_a_dash_config_key_onto_the_plugin_dir(tmp_path: Path):
     """A hand-edited plugins_config.json spelling a plugin with dashes resolves
     to the real package instead of raising DanglingPlugin."""
-    from shared import paths
-    from shared.packages.plugins.enable_config import load, write_local
+    from base import paths
+    from base.packages.plugins.enable_config import load, write_local
 
     pdir = paths.plugins_dir() / "my_plugin"
     pdir.mkdir(parents=True, exist_ok=True)

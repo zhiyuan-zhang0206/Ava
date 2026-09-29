@@ -14,8 +14,8 @@ from __future__ import annotations
 import pytest
 
 from agent.graph.context_notes import RANK_CLUSTER_MEMORY, RANK_TIMEZONE, timezone_note
-from shared.agents.messages.kwargs import NoteTag
-from shared.config import settings
+from base.agents.messages.kwargs import NoteTag
+from base.config import settings
 
 
 @pytest.fixture(autouse=True)
@@ -81,7 +81,7 @@ def test_renders_under_a_hosted_turn_identity(monkeypatch: pytest.MonkeyPatch) -
     no process-wide id — the turn contextvar is the identity. The note must
     resolve through it, not the process slot (task #3939: reading the slot
     directly silently dropped this note from every hosted head)."""
-    from shared.native_process.turn_identity import bind_turn_identity
+    from base.native_process.turn_identity import bind_turn_identity
 
     monkeypatch.setattr("ava.agent_identity._agent_id", None)
     monkeypatch.delenv("AVA_AGENT_ID", raising=False)

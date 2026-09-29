@@ -12,11 +12,11 @@ from uuid import UUID
 
 from psycopg_pool import ConnectionPool
 
-import shared.db
-import shared.events.live.redis_client
-from shared import telemetry
-from shared.agents.incarnation.lifecycle_acceptance import HOSTED_TURN_RECOVERY_MARKER
-from shared.agents.observation.db_wait import database_wait_matches
+import base.db
+import base.events.live.redis_client
+from base import telemetry
+from base.agents.incarnation.lifecycle_acceptance import HOSTED_TURN_RECOVERY_MARKER
+from base.agents.observation.db_wait import database_wait_matches
 
 _log = logging.getLogger("services.delivery_watchdog.turn_liveness")
 
@@ -157,7 +157,7 @@ def _queue_hosted_turn_recovery(pool: ConnectionPool, agent_id: int) -> int:
     plain system notification, which never resurrects (task #3687 review,
     Ava #3242)."""
     with pool.connection() as conn:
-        return shared.db.insert_inbound_message(
+        return base.db.insert_inbound_message(
             conn,
             agent_id,
             "Your previous hosted turn stopped making progress and was restarted "
@@ -257,6 +257,6 @@ def _maybe_spawn_hosted_turn_recoveries(
 
 async def scan_hosted_turn_liveness(pool: ConnectionPool, threshold_s: float) -> None:
     """Run one Redis-confirmed scan on the delivery watchdog's existing tick."""
-    redis_client = cast(_RedisReader, shared.events.live.redis_client.get_async_redis())
+    redis_client = cast(_RedisReader, base.events.live.redis_client.get_async_redis())
     wedges = await _detect_hosted_turn_wedges(pool, threshold_s, redis_client)
     _maybe_spawn_hosted_turn_recoveries(pool, wedges)

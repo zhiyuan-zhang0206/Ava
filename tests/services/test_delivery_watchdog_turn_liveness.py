@@ -9,9 +9,9 @@ import psycopg
 import pytest
 from psycopg_pool import ConnectionPool
 
+from base.config import settings
 from services.delivery_watchdog import daemon as delivery_daemon
 from services.delivery_watchdog import turn_liveness as watchdog
-from shared.config import settings
 
 _THRESHOLD_S = 2400.0
 

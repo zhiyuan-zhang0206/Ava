@@ -43,18 +43,18 @@ from agent.graph.exec.protocol import (
     read_result,
     write_request,
 )
-from shared.deploy.release import editable_install
-from shared.host.env.registry import (
+from base.deploy.release import editable_install
+from base.host.env.registry import (
     AGENT_BIRTH_CONFIG_ENV,
     AGENT_CONFIG_OVERLAY_ENV,
     MANIFEST_CERTIFICATION_FINALIZER_ENV,
     MANIFEST_CERTIFICATION_SECRET_ENV,
 )
-from shared.log import logger
-from shared.native_process.os_platform import CREATE_NO_WINDOW, IS_WINDOWS
-from shared.native_process.turn_identity import current_hosted_resources
-from shared.native_process.winjob import EXEC_JOB_GATE_ENV, WindowsJob, publish_parent_job_gate
-from shared.paths import exec_run_dir
+from base.log import logger
+from base.native_process.os_platform import CREATE_NO_WINDOW, IS_WINDOWS
+from base.native_process.turn_identity import current_hosted_resources
+from base.native_process.winjob import EXEC_JOB_GATE_ENV, WindowsJob, publish_parent_job_gate
+from base.paths import exec_run_dir
 
 from . import _process
 

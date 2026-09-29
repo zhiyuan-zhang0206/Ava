@@ -36,12 +36,10 @@ from fastapi import HTTPException
 from psycopg import Connection, Cursor
 from psycopg_pool import ConnectionPool
 
-from gateway.inspect.schemas import MetricPoint, PluginMetricResult
-from gateway.lgtm import loki_events, loki_query_budget
-from shared.packages.plugins.context import PluginContext
-from shared.telemetry.metrics.core import catalog
-from shared.telemetry.metrics.logql import validate_logql
-from shared.telemetry.metrics.plugin_metrics import (
+from base.packages.plugins.context import PluginContext
+from base.telemetry.metrics.core import catalog
+from base.telemetry.metrics.logql import validate_logql
+from base.telemetry.metrics.plugin_metrics import (
     MetricSpec,
     PluginMetricError,
     drop_plugin_metrics,
@@ -50,6 +48,8 @@ from shared.telemetry.metrics.plugin_metrics import (
     render_title,
     validate_metric_sql,
 )
+from gateway.inspect.schemas import MetricPoint, PluginMetricResult
+from gateway.lgtm import loki_events, loki_query_budget
 
 # The shipped-plugin metrics directory — every plugin dir with a metrics.py is
 # part of the in-process registry (the generator's import set, task #180 PR D).
@@ -117,7 +117,7 @@ def _load_plugin_metrics() -> list[MetricSpec]:
     partial registrations are dropped too (``drop_plugin_metrics`` — a module
     can raise mid-registration), so a fixed file is picked up cleanly on the
     next call."""
-    from shared.packages.plugins import load_report
+    from base.packages.plugins import load_report
 
     for path in _plugin_metric_modules():
         name = path.parent.name

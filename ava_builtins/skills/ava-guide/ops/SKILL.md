@@ -228,7 +228,7 @@ When disk pressure comes from dead agents' workspaces, the disposal playbook is 
 
 Ava's long-running processes (gateway, agent-runners, services, agent shells)
 run as named sessions on the platform session backend — the native process
-supervisor on POSIX (`shared.sessions.posixproc`), `shared.sessions.windows.winproc` on Windows, and
+supervisor on POSIX (`base.sessions.posixproc`), `base.sessions.windows.winproc` on Windows, and
 per-session detached pty hosts for agents' interactive shells. Key facts:
 
 ### Session naming
@@ -259,7 +259,7 @@ symlinks, and skips open handles. Register it daily; see `deploy/lgtm/README.md`
 
 ### Environment forwarding
 
-The session backend hands the child a built env dict (`shared.sessions.env_forwarding.
+The session backend hands the child a built env dict (`base.sessions.env_forwarding.
 forward_env_dict`) — host-scope env only (machine identity, paths, health
 ports, the gateway URL) for daemon/service sessions; the cluster-scope values
 are NOT forwarded — the child re-sources them at its own boot (fetch on a
@@ -277,4 +277,4 @@ or watchdog respawn can kill it; only its own `kill`, its shell exiting, or a
 machine reboot ends it. Orphan sessions are reclaimed as a periodic
 management task.
 
-Full detail: `shared/sessions/env_forwarding.py`, `shared/sessions/backend.py`, `cli/commands/observability/logs.py`.
+Full detail: `base/sessions/env_forwarding.py`, `base/sessions/backend.py`, `cli/commands/observability/logs.py`.

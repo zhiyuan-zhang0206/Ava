@@ -14,6 +14,14 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
+from base.cluster.auth import (
+    clear_cookie_header,
+    cookie_name,
+    is_managed_browser_user_agent,
+    session_cookie_header,
+)
+from base.cluster.rate_limit import login_limiter
+from base.config import settings
 from gateway.auth.cors import session_cookie_secure
 from gateway.auth.request_principal import current_session_fact, login_mint, session_mints
 from gateway.auth.session_store import (
@@ -25,14 +33,6 @@ from gateway.auth.session_store import (
     session_mint,
 )
 from gateway.middleware.error_envelope import error_response
-from shared.cluster.auth import (
-    clear_cookie_header,
-    cookie_name,
-    is_managed_browser_user_agent,
-    session_cookie_header,
-)
-from shared.cluster.rate_limit import login_limiter
-from shared.config import settings
 
 router = APIRouter()
 
@@ -70,7 +70,7 @@ async def login(body: LoginRequest, request: Request) -> JSONResponse:
 
     Brute-force guard: an IP that fails ``gateway.login_max_failures`` times in
     a row is locked for ``gateway.login_lockout_seconds`` (policy + rationale on
-    those config fields; enforcement in shared/cluster/rate_limit.py).
+    those config fields; enforcement in base/cluster/rate_limit.py).
     While locked, the endpoint returns 429 + ``Retry-After`` instead of 401 —
     401 would read as "wrong password" and invite exactly the retry loop the
     lockout exists to stop. A successful login resets the IP's counter.

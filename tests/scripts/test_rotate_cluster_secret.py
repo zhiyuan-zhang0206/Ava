@@ -25,10 +25,10 @@ from typing import Any
 import pytest
 from dotenv import dotenv_values
 
+from base.config import settings
 from scripts.data_plane_ops import rotate_cluster_secret as rotate
 from services import backup
 from services.gateway_side.backup import passphrase
-from shared.config import settings
 
 _OLD = "old-bearer-" + "o" * 32
 _RESTORES = itertools.count()
@@ -39,7 +39,7 @@ def _home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, secret: str) -> Path:
     path.mkdir(mode=0o700)
     (path / ".env").write_text(f"AVA_CLUSTER_SECRET={secret}\n")
     (path / ".env").chmod(0o600)
-    monkeypatch.setattr("shared.paths.ava_home", lambda: path)
+    monkeypatch.setattr("base.paths.ava_home", lambda: path)
     monkeypatch.setattr(settings.data_plane, "cluster_secret", secret)
     return path
 

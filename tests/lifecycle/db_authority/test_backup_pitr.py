@@ -5,7 +5,7 @@ owner, write generation 0, a credential-free `AVA_DB_URL`. The maintenance
 process here holds NO write-generation login: its `AVA_DB_URL` is the
 credential-free endpoint and no `AVA_DB_ADMIN_PASSWORD` exists anywhere. Dumps,
 DDL and PITR probes must still work, because they dial the home's own authority
-(`shared.db.pg_admin`): the OS-user administrator over the owner-only socket,
+(`base.db.pg_admin`): the OS-user administrator over the owner-only socket,
 acting as the schema owner for dumps/DDL/reads and as itself for server admin,
 custody-checked against the home's postmaster.
 """
@@ -30,17 +30,17 @@ from langgraph.checkpoint.base import empty_checkpoint
 from langgraph.checkpoint.postgres import PostgresSaver
 from psycopg.conninfo import conninfo_to_dict
 
+from base import cluster
+from base.cluster import authority
+from base.cluster.dataplane.pg_tools import pg_tool
+from base.config import settings
+from base.db.pg_admin import local_owner_authority
+from base.host.net.url_secret import url_with_port
+from base.native_process.child_env import restricted_process_env
 from cli.commands.data_plane import cluster_instance as ci
 from cli.commands.data_plane import pgbouncer as pooler
 from services import backup
 from services.pitr.stores import factory
-from shared import cluster
-from shared.cluster import authority
-from shared.cluster.dataplane.pg_tools import pg_tool
-from shared.config import settings
-from shared.db.pg_admin import local_owner_authority
-from shared.host.net.url_secret import url_with_port
-from shared.native_process.child_env import restricted_process_env
 from tests.lifecycle.db_authority.test_single_box import Born
 from tests.lifecycle.db_authority.test_single_box import born as born
 from tests.lifecycle.db_authority.test_single_box import configured as configured

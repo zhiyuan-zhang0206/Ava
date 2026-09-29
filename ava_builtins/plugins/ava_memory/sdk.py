@@ -21,8 +21,8 @@ import shared.cluster.machine
 import shared.paths
 from ava import gateway_client as _client
 from ava.sdk_surface.validation import coerce_str, coerce_typed
-from shared.agents import IndexerUnavailable as IndexerUnavailable
-from shared.paths import ava_home as _ava_home
+from base.agents import IndexerUnavailable as IndexerUnavailable
+from base.paths import ava_home as _ava_home
 
 __all_for_ava__ = ["PATH", "search", "write"]
 

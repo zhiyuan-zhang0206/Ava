@@ -37,12 +37,12 @@ from typing import Annotated
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
 
+from base.config import settings
+from base.events.contract import EventTier, tier_for
 from gateway.agents.eval_guard import deny_isolated_result_read
 from gateway.events.schemas import EventRow, EventsMeta, EventsResponse
 from gateway.lgtm import loki_events, loki_query_budget
 from gateway.lgtm.backend_failure import raise_backend_unavailable
-from shared.config import settings
-from shared.events.contract import EventTier, tier_for
 
 router = APIRouter()
 

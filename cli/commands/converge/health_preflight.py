@@ -38,13 +38,13 @@ from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
+from base.cluster import port_free
+from base.cluster.port_preflight import expected_cluster_ports
+from base.config import settings
+from base.deploy.git.gitenv import git_env
+from base.host.env.dotenv_boot import UNANCHORED_DB_SENTINEL
+from base.host.proc import run_bounded
 from cli.commands.converge.spec import ConvergeCtx
-from shared.cluster import port_free
-from shared.cluster.port_preflight import expected_cluster_ports
-from shared.config import settings
-from shared.deploy.git.gitenv import git_env
-from shared.host.env.dotenv_boot import UNANCHORED_DB_SENTINEL
-from shared.host.proc import run_bounded
 
 # Bounded git + network probes: a preflight must never hang a start, and the
 # data plane's own keepalive posture (30s idle) is far too slow for a gate that
@@ -84,7 +84,7 @@ def probe_postgres(url: str, timeout: float = _PROBE_TIMEOUT_S) -> str | None:
     if url == UNANCHORED_DB_SENTINEL:
         return "no cluster connection facts (unanchored checkout)"
     try:
-        from shared.db.connections import connect_url
+        from base.db.connections import connect_url
 
         with connect_url(url, autocommit=True, connect_timeout=int(timeout)) as conn:
             conn.execute("SELECT 1")

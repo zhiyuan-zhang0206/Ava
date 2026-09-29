@@ -17,6 +17,8 @@ from fastapi.testclient import TestClient
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import Response
 
+from base import config
+from base.agents import AgentNotFound, AvaAgentError, ErrorReason
 from gateway.app import (
     _cluster_auth_middleware,
     _cluster_pause_middleware,
@@ -36,8 +38,6 @@ from gateway.middleware.error_handlers import (
     unhandled_exception_handler,
 )
 from gateway.schemas.errors import ErrorEnvelope
-from shared import config
-from shared.agents import AgentNotFound, AvaAgentError, ErrorReason
 
 
 def _assert_envelope(

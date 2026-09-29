@@ -8,14 +8,14 @@ from datetime import UTC, datetime, timedelta
 
 from psycopg_pool import ConnectionPool
 
-from gateway.agents.delivery import deliver_chat_inbound
-from shared.daemon.schedules.completion_notices import (
+from base.daemon.schedules.completion_notices import (
     CompletionDigest,
     format_digest,
     mark_digest_delivered,
     pending_digests,
     prune_delivered_notices,
 )
+from gateway.agents.delivery import deliver_chat_inbound
 
 _log = logging.getLogger(__name__)
 

@@ -7,9 +7,9 @@ from typing import cast
 from urllib.request import ProxyHandler, build_opener
 from uuid import UUID
 
-from shared.config import settings
-from shared.daemon.health import health_port
-from shared.paths import ava_home
+from base.config import settings
+from base.daemon.health import health_port
+from base.paths import ava_home
 
 _ROOT_SOCKET_NAME = "ava-root.sock"  # the K1 control socket under root_run_dir()
 
@@ -30,8 +30,8 @@ def host_running() -> bool:
     """
     import psutil
 
-    from shared.cluster import session_name
-    from shared.sessions.backend import get_backend
+    from base.cluster import session_name
+    from base.sessions.backend import get_backend
 
     if get_backend().has_session(session_name("agent-host")):
         return True
@@ -92,8 +92,8 @@ def _root_unit(unit_id: str) -> dict[str, object] | None:
     unreachable root reads as "no unit", the conservative rule `host_running`
     applies too: a claim the root cannot make is not made.
     """
-    from shared.native_process.root_control.client import RootClient, RootClientError
-    from shared.paths import root_run_dir
+    from base.native_process.root_control.client import RootClient, RootClientError
+    from base.paths import root_run_dir
 
     try:
         response = RootClient(root_run_dir() / _ROOT_SOCKET_NAME, timeout=2.0).status()
@@ -175,8 +175,8 @@ def ops_quiescent(timeout: float) -> None:
     """
     import time
 
-    from shared.cluster import session_name
-    from shared.sessions.backend import get_backend
+    from base.cluster import session_name
+    from base.sessions.backend import get_backend
 
     if not get_backend().has_session(session_name("ops")) and not _root_unit_running("ops"):
         return

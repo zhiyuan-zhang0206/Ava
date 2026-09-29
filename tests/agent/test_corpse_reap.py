@@ -29,11 +29,11 @@ from agent.ownership.corpse_reap import (
     reap_recrashed_corpse,
 )
 from agent.ownership.hosted import admit_hosted_runtime, settle_hosted_runtime
+from base.agents.incarnation.lifecycle_acceptance import HOSTED_TURN_RECOVERY_MARKER
+from base.config import settings
+from base.db import create_agent
+from base.native_process.runtime_incarnation import RuntimeIncarnation
 from ops.agents import wake
-from shared.agents.incarnation.lifecycle_acceptance import HOSTED_TURN_RECOVERY_MARKER
-from shared.config import settings
-from shared.db import create_agent
-from shared.native_process.runtime_incarnation import RuntimeIncarnation
 
 
 def _agent(conn: psycopg.Connection[Any], machine: str = "host-test") -> int:

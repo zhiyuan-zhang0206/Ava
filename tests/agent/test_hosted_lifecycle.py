@@ -19,14 +19,14 @@ from agent.ownership.hosted import (
     apply_hosted_lifecycle,
     settle_hosted_runtime,
 )
+from base.agents.context import AvaContext
+from base.agents.incarnation.hosted_force import recover_orphaned_hosted_forces
+from base.config import settings
+from base.db import PG_KEEPALIVE_KWARGS
+from base.native_process.runtime_incarnation import RuntimeIncarnation
+from base.native_process.turn_identity import bind_turn_identity
 from ops.lifecycle.termination import _force_terminate_transaction
 from services.agent_host.host import AgentHost, kill_terminating_agent_shells
-from shared.agents.context import AvaContext
-from shared.agents.incarnation.hosted_force import recover_orphaned_hosted_forces
-from shared.config import settings
-from shared.db import PG_KEEPALIVE_KWARGS
-from shared.native_process.runtime_incarnation import RuntimeIncarnation
-from shared.native_process.turn_identity import bind_turn_identity
 from tests.agent.test_inbound_ownership import _admit, _agent
 from tests.agent.test_lifecycle_intent import _command
 
@@ -481,7 +481,7 @@ async def test_boot_recovery_sweeps_a_requested_force_shell_kill(
             kill_all_shell_sessions=True,
         )
     monkeypatch.setattr(
-        "shared.agents.incarnation.exec_request_evidence.exec_run_dir", lambda: tmp_path
+        "base.agents.incarnation.exec_request_evidence.exec_run_dir", lambda: tmp_path
     )
     sweeps = _record_force_sweeps(monkeypatch, command)
     recovered, _ = await recover_orphaned_hosted_forces(

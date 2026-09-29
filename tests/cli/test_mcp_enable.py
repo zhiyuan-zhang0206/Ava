@@ -11,7 +11,7 @@ from cli.commands.extensions.mcp import cmd_mcp_add, cmd_mcp_disable, cmd_mcp_en
 
 
 def test_enable_then_disable_writes_overlay(unit_home: Path) -> None:
-    from shared.packages.plugins.mcp_enabled import read_enabled
+    from base.packages.plugins.mcp_enabled import read_enabled
 
     assert cmd_mcp_enable("foo") == 0
     assert read_enabled() == {"foo": True}
@@ -50,7 +50,7 @@ def test_disable_hints_when_undefined(unit_home: Path, capsys: pytest.CaptureFix
 
 
 def test_overlay_file_shape(unit_home: Path) -> None:
-    from shared.packages.plugins.mcp_enabled import local_config_path
+    from base.packages.plugins.mcp_enabled import local_config_path
 
     cmd_mcp_disable("foo")
     data = json.loads(local_config_path().read_text())

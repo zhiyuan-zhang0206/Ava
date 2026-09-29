@@ -45,7 +45,7 @@ from ava.mcp_config import (
 )
 from ava.sdk_surface.validation import coerce_str
 from ava.security import scan_content
-from shared.config import settings
+from base.config import settings
 
 from ._oauth import _OAUTH_FLOW_TIMEOUT_S
 from ._remote import (
@@ -74,7 +74,7 @@ _CACHE_TTL_S = 86400.0  # 24h
 
 def _cache_dir() -> Path:
     """Disk cache directory for tool metadata. Same `_config_path` route through ava_home()."""
-    from shared.paths import ava_home
+    from base.paths import ava_home
 
     return ava_home() / "mcp_cache"
 

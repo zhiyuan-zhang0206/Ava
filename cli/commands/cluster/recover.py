@@ -31,10 +31,10 @@ def cmd_cluster_recover() -> int:
     Returns 0 when the cluster is (or has been made) deployable, 1 when a live
     deploy still owns it — that refusal is the command working, not failing.
     """
+    from base.deploy.state.cluster_lock import update_lock_holder
+    from base.paths import ava_home
     from cli.cutover_hold import release_command, standing_hold
     from ops.cluster import ClusterUpdateInProgress, cluster_recover_op
-    from shared.deploy.state.cluster_lock import update_lock_holder
-    from shared.paths import ava_home
 
     if (cutover := standing_hold(ava_home())) is not None:
         print(

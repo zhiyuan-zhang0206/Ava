@@ -43,13 +43,13 @@ def cluster_credential(authorization: str | None, secret: str) -> str | None:
 
     `cluster_bearer` for the human cluster secret; `machine_token:<class>` for
     the ACTIVE write generation's machine API token of that class (a revoked
-    generation's token never matches: `shared.cluster.authority.api`). Both
+    generation's token never matches: `base.cluster.authority.api`). Both
     authenticate the one cluster administrator; the fact only records which
     credential did. A blank `secret` never verifies as the human bearer.
     """
-    from shared.cluster.auth import verify_bearer
-    from shared.cluster.authority.api import acceptance, bearer_class
-    from shared.paths import ava_home
+    from base.cluster.auth import verify_bearer
+    from base.cluster.authority.api import acceptance, bearer_class
+    from base.paths import ava_home
 
     if verify_bearer(authorization, secret):
         return "cluster_bearer"
@@ -85,8 +85,8 @@ def _session_key(home: Path, *, create: bool) -> bytes | None:
     None when absent and `create` is false (then no session authenticates).
     Losing the file ends every session; the next login mints a new key.
     """
-    from shared.deploy.release.verified_file import regular_bytes
-    from shared.host.private_storage import create_private_bytes, private_file_problem
+    from base.deploy.release.verified_file import regular_bytes
+    from base.host.private_storage import create_private_bytes, private_file_problem
 
     path = session_key_path(home)
     if create and not path.exists():
@@ -125,8 +125,8 @@ def login_mint(password: str, secret: str) -> str | None:
     managed browser holds no human secret). The gateway-class token never logs
     a browser in. Mints this gateway's session key on first use.
     """
-    from shared.cluster.authority.api import acceptance, bearer_class, token_digest
-    from shared.paths import ava_home
+    from base.cluster.authority.api import acceptance, bearer_class, token_digest
+    from base.paths import ava_home
 
     home = ava_home().resolve()
     if secret and hmac.compare_digest(password, secret):
@@ -149,8 +149,8 @@ def session_mints(secret: str) -> dict[str, str]:
     for the active generation's runner token. Empty while no session key
     exists; the runner mint is absent while no generation is active (a fence).
     """
-    from shared.cluster.authority.api import acceptance, token_digest
-    from shared.paths import ava_home
+    from base.cluster.authority.api import acceptance, token_digest
+    from base.paths import ava_home
 
     home = ava_home().resolve()
     key = _session_key(home, create=False)
@@ -181,7 +181,7 @@ def require_human_credential(request: Request) -> None:
     """
     from fastapi import HTTPException
 
-    from shared.config import settings
+    from base.config import settings
 
     if not settings.gateway.auth_middleware_enabled or not settings.data_plane.cluster_secret:
         return

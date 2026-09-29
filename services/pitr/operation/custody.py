@@ -42,17 +42,17 @@ from typing import cast
 
 import psutil
 
-from shared.cluster.dataplane.pg_foreground import (
+from base.cluster.dataplane.pg_foreground import (
     POSTMASTER_SHUTDOWN_S,
     FamilyCustody,
     family_refusal,
 )
-from shared.host.atomic_io import write_text_atomic
-from shared.native_process import native_boot_id
-from shared.native_process.exec_domain import ExecProcessDomain
-from shared.native_process.group_closure import confirm_closure
-from shared.native_process.os_platform import LockTimeoutError, file_lock
-from shared.native_process.ownership import OwnedProcess
+from base.host.atomic_io import write_text_atomic
+from base.native_process import native_boot_id
+from base.native_process.exec_domain import ExecProcessDomain
+from base.native_process.group_closure import confirm_closure
+from base.native_process.os_platform import LockTimeoutError, file_lock
+from base.native_process.ownership import OwnedProcess
 
 _log = logging.getLogger(__name__)
 
@@ -481,7 +481,7 @@ def _prune_quarantine(root: Path, newest: Path) -> None:
 
 def report(kind: OperationKind, custody: str, detail: str) -> None:
     """Log and alert one custody transition; a retirement is informational."""
-    from shared import telemetry
+    from base import telemetry
 
     bounded = detail[:2000]
     retired = custody == "retired"

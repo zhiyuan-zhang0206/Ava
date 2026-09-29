@@ -1,6 +1,6 @@
 """`ava trace ship` — replay the local trace mirror (collector JSONL) to Tempo.
 
-Recording (shared/telemetry/tracing.py) exports spans over OTLP/HTTP to the local OTel
+Recording (base/telemetry/tracing.py) exports spans over OTLP/HTTP to the local OTel
 Collector sidecar, whose file exporter mirrors them to `$AVA_HOME/traces/`:
 the active `spans.jsonl` plus rotated `spans-<ISO-timestamp>.jsonl` backups,
 each line a standard OTLP/JSON `ExportTraceServiceRequest`. This command is
@@ -44,9 +44,9 @@ from typing import Any
 
 import httpx
 
-from shared.cluster.machine import machine_role
-from shared.config import settings
-from shared.paths import traces_dir
+from base.cluster.machine import machine_role
+from base.config import settings
+from base.paths import traces_dir
 
 _WATERMARK_NAME = ".ship-watermark.json"
 # The standard OTLP/HTTP trace path — what Tempo's OTLP receiver listens on.
@@ -78,11 +78,11 @@ def _require_ship_config() -> _ShipTarget:
             "mirror to Tempo."
         )
     if machine_role() == frozenset({"agent-runner"}):
+        from base.cluster.auth import bearer_header
         from cli.commands.observability.otel_collector import (
             gateway_otel_ingress_endpoint,
             telemetry_bearer,
         )
-        from shared.cluster.auth import bearer_header
 
         token = telemetry_bearer()
         if not token:
@@ -112,7 +112,7 @@ def _file_day(path: Path) -> date:
     the collector's rotated `spans-<ISO-timestamp>(-size|-time)?.jsonl` names
     (`.gz` suffix tolerated), else the file's mtime (the active `spans.jsonl`
     carries no stamp — its content is today's)."""
-    from shared.telemetry.trace_mirror import mirror_day
+    from base.telemetry.trace_mirror import mirror_day
 
     day = mirror_day(path)
     if day is not None:
@@ -281,7 +281,7 @@ def cmd_trace_ship(*, since: str | None, until: str | None, dry_run: bool) -> in
     lo = datetime.strptime(since, "%Y-%m-%d").date() if since else date.min  # noqa: DTZ007 — date-only
     hi = datetime.strptime(until, "%Y-%m-%d").date() if until else date.max  # noqa: DTZ007 — date-only
 
-    from shared.telemetry.trace_mirror import mirror_sort_key
+    from base.telemetry.trace_mirror import mirror_sort_key
 
     # Active `spans.jsonl` + rotated `spans-<ts>(-size|-time)?.jsonl` + legacy
     # `spans-YYYYMMDD-<pid>.jsonl` + gzipped old segments (`*.jsonl.gz` — the

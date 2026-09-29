@@ -4,11 +4,11 @@
 consolidation scripts under `skills/scripts/` (`consolidate.py`, `steward.py`,
 `arbiter_merge.py`, `gen_indexes.py`, `rebuild_memory_index.py`) as
 `ava_builtins.plugins.ava_memory.pool_ops`, so a run needs the checkout's venv
-(`ava_builtins` importable). It still avoids `shared.host.env.dotenv_boot`'s
+(`ava_builtins` importable). It still avoids `base.host.env.dotenv_boot`'s
 checkout-anchored home resolution: `ava_home()` takes the opposite, simpler
 stance, requiring an explicit `AVA_HOME` and failing fast instead of
 defaulting to `Path.home() / ".ava"` — the same "unanchored checkout reaches
-production" bug class as `shared/host/env/dotenv_boot.py`, but for a script with no
+production" bug class as `base/host/env/dotenv_boot.py`, but for a script with no
 per-invocation identity to anchor to. `pool_dir()` / `refresh_index()` are
 write paths (git commit + push to the pool, `ava memory refresh`), so a wrong
 guess would not just misread a stray file, it would mutate whatever machine
@@ -17,7 +17,7 @@ happens to run this.
 Runs `pool_ops.py` in a subprocess with a from-scratch environment (like
 `test_ava_memory_steward_guard.py`'s `env = os.environ.copy()` pattern)
 rather than `monkeypatch.setenv`/`delenv` on `AVA_HOME` — `AVA_HOME` is also
-a `shared.config.Settings` field alias, and `no_os_environ.py` (Rule 2)
+a `base.config.Settings` field alias, and `no_os_environ.py` (Rule 2)
 correctly flags `monkeypatch.setenv` on it as a Settings-singleton no-op
 footgun everywhere else in the suite; `pool_ops.py` reads raw `os.environ` by
 design, so a real subprocess environment is the actual seam here, not a

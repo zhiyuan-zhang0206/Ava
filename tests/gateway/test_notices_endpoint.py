@@ -2,7 +2,7 @@
 
 FastAPI TestClient + real ava_test DB. One table, discriminated by
 require_response, carries the whole agent->user queue. Covers:
-  - shared.agents.observation.snapshot.select_one exposes the open require_response notices as
+  - base.agents.observation.snapshot.select_one exposes the open require_response notices as
     notices_awaiting_response (the "waiting on you" worklist) and counts the open
     FYI notices as unread_notice_count (the badge); FYI content stays off the
     snapshot.
@@ -27,9 +27,9 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
+from base.agents.observation.snapshot import select_one
+from base.config import settings
 from gateway.app import app
-from shared.agents.observation.snapshot import select_one
-from shared.config import settings
 
 
 def _seed_agent(db_conn: psycopg.Connection, status: str = "idling") -> int:
@@ -681,7 +681,7 @@ def test_dismiss_require_response_delivers_system_note(db_conn: psycopg.Connecti
     assert row is not None and row[0] == "dismissed"
 
     # one self-describing inbound, system-sourced — the claim node envelope-wraps
-    # it as "[system] ..." (see shared/agents/messages/envelope.py), never as the user "[ts]" header
+    # it as "[system] ..." (see base/agents/messages/envelope.py), never as the user "[ts]" header
     rows = _pending_rows(db_conn, a)
     assert len(rows) == 1
     kind, _status, inbound_text, source = rows[0]
@@ -1009,7 +1009,7 @@ def test_open_default_limit_comes_from_display_config(
     """The implicit open-feed cap is ``settings.display.notices_open_default_limit``
     (``AVA_NOTICES_OPEN_DEFAULT_LIMIT``); the literal 200 is only that field's
     default, not a hard-coded page size."""
-    from shared.config import settings
+    from base.config import settings
 
     monkeypatch.setattr(settings.display, "notices_open_default_limit", 2)
     a = _seed_agent(db_conn)
@@ -1028,7 +1028,7 @@ def test_resolved_default_page_comes_from_display_config(
     """The implicit resolved-history page is
     ``settings.display.notices_resolved_default_page``
     (``AVA_NOTICES_RESOLVED_DEFAULT_PAGE``); 30 is only that field's default."""
-    from shared.config import settings
+    from base.config import settings
 
     monkeypatch.setattr(settings.display, "notices_resolved_default_page", 2)
     a = _seed_agent(db_conn)
@@ -1053,7 +1053,7 @@ def test_feed_defaults_come_from_display_config(
 ) -> None:
     """The unified feed's implicit open cap and resolved page follow the same
     display fields as the standalone endpoints."""
-    from shared.config import settings
+    from base.config import settings
 
     monkeypatch.setattr(settings.display, "notices_open_default_limit", 1)
     monkeypatch.setattr(settings.display, "notices_resolved_default_page", 1)

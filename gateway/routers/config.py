@@ -17,7 +17,7 @@ Cluster + agent fields are always the gateway's own (machine-independent),
 so a remote PUT may carry host-scope fields only.
 
 `GET /api/config/resolved?model=` is the read-only per-model companion: it
-resolves the per-model-defaultable subset (`shared/lm/registry.py:ModelTuning`)
+resolves the per-model-defaultable subset (`base/lm/registry.py:ModelTuning`)
 for one model and names the layer each effective value came from. It adds no
 write path — an explicit value is still edited as the ordinary config field of
 the same name, through the PUT above.
@@ -30,11 +30,7 @@ from typing import Any, Literal, cast
 
 from fastapi import APIRouter, HTTPException, Query, Request
 
-from ops import cluster_rpc as _cluster_rpc
-from ops import host_config
-from ops.host_config import SENSITIVE_MASK
-from ops.rpc_schemas import ConfigAuditReadResult, ConfigReadResult, ConfigWriteOpResult
-from shared.api_contracts.config import (
+from base.api_contracts.config import (
     ConfigAuditView,
     ConfigFieldView,
     ConfigFieldWriteResult,
@@ -43,12 +39,16 @@ from shared.api_contracts.config import (
     ResolvedConfigView,
     ResolvedFieldView,
 )
-from shared.cluster.machine import MachineRole, machine_name
-from shared.config import env_override_values, field_domain, get_config_metadata, settings
-from shared.config.candidate import validate_env_patch_for_write
-from shared.config.editing import ConfigPatchPlan, split_reducer_patch
-from shared.host.env import runtime_config
-from shared.host.env.audit import check_env_integrity
+from base.cluster.machine import MachineRole, machine_name
+from base.config import env_override_values, field_domain, get_config_metadata, settings
+from base.config.candidate import validate_env_patch_for_write
+from base.config.editing import ConfigPatchPlan, split_reducer_patch
+from base.host.env import runtime_config
+from base.host.env.audit import check_env_integrity
+from ops import cluster_rpc as _cluster_rpc
+from ops import host_config
+from ops.host_config import SENSITIVE_MASK
+from ops.rpc_schemas import ConfigAuditReadResult, ConfigReadResult, ConfigWriteOpResult
 
 router = APIRouter()
 
@@ -100,10 +100,10 @@ def _target_capabilities(target: str) -> list[MachineRole]:
     shows the common section).
     """
     if target == machine_name():
-        from shared.cluster.machine import machine_role
+        from base.cluster.machine import machine_role
 
         return cast("list[MachineRole]", sorted(machine_role()))
-    from shared.cluster.machines import MachineNotRegistered, lookup_role
+    from base.cluster.machines import MachineNotRegistered, lookup_role
 
     try:
         # machines.role is written from the capability tokens, so it is a
@@ -124,7 +124,7 @@ async def _dispatch_config_read(target: str) -> ConfigReadResult:
     structural exception as the roster's lightweight local row). Caller has
     already verified the machine is known.
     """
-    from shared.cluster.machines import MachineNotRegistered, lookup_role
+    from base.cluster.machines import MachineNotRegistered, lookup_role
 
     try:
         role = await asyncio.to_thread(lookup_role, target)
@@ -170,7 +170,7 @@ async def _dispatch_config_audit_read(target: str, last: int) -> ConfigAuditRead
     when it has no agent-runner role, and a REMOTE machine without one is
     unreachable by construction. Caller has already verified the machine is known.
     """
-    from shared.cluster.machines import MachineNotRegistered, lookup_role
+    from base.cluster.machines import MachineNotRegistered, lookup_role
 
     try:
         role = await asyncio.to_thread(lookup_role, target)
@@ -227,7 +227,7 @@ async def _dispatch_config_write(
     target-side op applies the correct writability gate (writable vs
     remote_writable). Caller has already verified the machine is known.
     """
-    from shared.cluster.machines import MachineNotRegistered, lookup_role
+    from base.cluster.machines import MachineNotRegistered, lookup_role
 
     try:
         role = await asyncio.to_thread(lookup_role, target)
@@ -396,13 +396,13 @@ async def get_config_audit(
     Omitted `last` returns the configured default count
     (``display.config_audit_default_last`` - 20 out of the box); an explicit
     `last` stays capped at 200. Records are the raw
-    audit-JSONL entries (`shared/host/env/audit.py`), each tagged with its `machine`;
+    audit-JSONL entries (`base/host/env/audit.py`), each tagged with its `machine`;
     values were redacted at write time (non-sensitive fields only), and records
     from before record v2 lack `actor` / `trace_id` / `changed`.
     """
     effective_last = last if last is not None else settings.display.config_audit_default_last
     if machine == "all":
-        from shared.cluster.machines import list_agent_runners
+        from base.cluster.machines import list_agent_runners
 
         runners = await asyncio.to_thread(list_agent_runners)
         names = [name for name, _url in runners]
@@ -429,7 +429,7 @@ def get_resolved_config(model: str | None = None) -> ResolvedConfigView:
 
     Answers "what will an agent on this model actually run with, and which layer
     decided that": shared default < per-model default (both code, in
-    `shared/lm/registry.py`) < explicit `.env` value. `explain_setting` does the
+    `base/lm/registry.py`) < explicit `.env` value. `explain_setting` does the
     layering — the same function the runtime resolves through, so this view
     cannot drift from the value an agent gets.
 
@@ -443,9 +443,9 @@ def get_resolved_config(model: str | None = None) -> ResolvedConfigView:
     explicit — is per process and invisible from the cluster; `per_agent` marks
     which fields a spawn/restart overlay may still override.
     """
-    from shared.config import per_agent_field_names
-    from shared.lm.factory import ensure_provider_plugins_loaded
-    from shared.lm.registry import MODELS, explain_setting, tuning_field_names
+    from base.config import per_agent_field_names
+    from base.lm.factory import ensure_provider_plugins_loaded
+    from base.lm.registry import MODELS, explain_setting, tuning_field_names
 
     # Plugin models must be registered before the registry lookup below.
     ensure_provider_plugins_loaded()
@@ -457,7 +457,7 @@ def get_resolved_config(model: str | None = None) -> ResolvedConfigView:
     fields: list[ResolvedFieldView] = []
     for name in tuning_field_names():
         # A ModelTuning field name is a config field name by invariant
-        # (tests/shared/test_model_registry.py) — hard index, so a rename that
+        # (tests/base/test_model_registry.py) — hard index, so a rename that
         # orphans one side 500s here instead of silently dropping the row.
         meta = metas[name]
         resolved = explain_setting(name, model=target, explicit=meta.current_value)

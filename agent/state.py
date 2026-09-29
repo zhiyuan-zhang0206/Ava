@@ -72,7 +72,7 @@ from agent.messages.guard import guarded_add_messages, guarded_delta_reducer
 # module attribute lookup — so old checkpoints keep deserializing only while
 # these names stay importable from agent.state. New checkpoints carry
 # ("agent.state_channels", "<Name>") and are allowlisted in
-# shared/agents/history/checkpoint_serde.py alongside the legacy pairs.
+# base/agents/history/checkpoint_serde.py alongside the legacy pairs.
 from agent.state_channels import AttachEntry as _AttachEntry
 from agent.state_channels import (
     AttachState,
@@ -83,9 +83,9 @@ from agent.state_channels import (
     MemoryState,
     _memory_state_merge,
 )
-from shared.agents.history.checkpoint_serde import STATIC_CHECKPOINT_MSGPACK_TYPES
-from shared.packages.plugins import contributions
-from shared.packages.plugins.context import current_plugin_name
+from base.agents.history.checkpoint_serde import STATIC_CHECKPOINT_MSGPACK_TYPES
+from base.packages.plugins import contributions
+from base.packages.plugins.context import current_plugin_name
 
 AttachEntry = _AttachEntry
 
@@ -111,7 +111,7 @@ class BaseAgentState(BaseModel):
     # to `checkpoint_writes` (periodic `_DeltaSnapshot` blobs at
     # _MESSAGES_DELTA_SNAPSHOT_FREQUENCY); readers fold at read time, and the
     # read-compat layer keeps pre-switch threads readable through rollback
-    # (shared/agents/history/delta_read_compat.py). The reducer is the delta form of the
+    # (base/agents/history/delta_read_compat.py). The reducer is the delta form of the
     # append-only guard — guarded_delta_reducer replays stored writes through
     # guarded_add_messages, so the invariant (user ruling 2026-08-13, task
     # #1256 — only a full wipe, a tail append, or modifying the last message
@@ -657,8 +657,8 @@ def clear_plugin_registrations() -> None:
     from agent.graph.context_notes import clear_plugin_context_notes
     from agent.graph.system_prompt import clear_plugin_system_prompt_sections
     from agent.hooks import clear_hooks
-    from shared.packages.plugins.config_registration import clear_plugin_configs
-    from shared.packages.plugins.flags import clear_plugin_flags
+    from base.packages.plugins.config_registration import clear_plugin_configs
+    from base.packages.plugins.flags import clear_plugin_flags
 
     # Keep the framework-owned sections / context notes (registered once at
     # module import); drop only the plugin-contributed tails.

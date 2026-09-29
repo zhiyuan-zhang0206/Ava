@@ -11,9 +11,9 @@ from typing import Any, cast
 
 import pytest
 
+from base.daemon.health import DaemonProbe
 from cli.commands._repo import ServiceSpec
 from cli.commands.lifecycle import root_driver as driver
-from shared.daemon.health import DaemonProbe
 
 # The repo-wide readiness guard replaces `_wait_for_root_services_ready` itself;
 # without this opt-out every readiness test here would assert on that stub.
@@ -188,7 +188,7 @@ def test_unresponsive_root_with_custody_is_not_an_absent_tree(
     directory = tmp_path / "custody"
     directory.mkdir()
     (directory / "gateway.json").write_text("unknown")
-    monkeypatch.setattr("shared.paths.root_run_dir", lambda: tmp_path)
+    monkeypatch.setattr("base.paths.root_run_dir", lambda: tmp_path)
 
     def make_client(**_kwargs: object) -> object:
         return object()
@@ -375,8 +375,8 @@ def test_generation_change_refuses_without_signal_or_seed_publication(
         snapshot["units"].append({"id": "agent-host", "state": "running"})
     published = tmp_path / "manifests.json"
     published.write_text("old generation")
-    monkeypatch.setattr("shared.paths.root_run_dir", lambda: tmp_path)
-    monkeypatch.setattr("shared.paths.root_manifests_path", lambda: published)
+    monkeypatch.setattr("base.paths.root_run_dir", lambda: tmp_path)
+    monkeypatch.setattr("base.paths.root_manifests_path", lambda: published)
 
     def tree(*_args: object, **_kwargs: object) -> dict[str, object]:
         return manifest
@@ -519,7 +519,7 @@ def test_root_child_env_beyond_the_launch_inputs_is_only_ambient(
     alias) and the finalizer projection are set, including keys forwarded only
     when present, so what this catches does not depend on this host's environment.
     """
-    from shared.host.env import registry
+    from base.host.env import registry
 
     ambient = (
         registry.HOST_PASSTHROUGH_KEYS
@@ -573,7 +573,7 @@ def test_unusable_helper_socket_requires_positive_native_absence(
 
 
 def _mock_pidfd_delivery(monkeypatch: pytest.MonkeyPatch, signals: list[str]) -> None:
-    from shared.native_process import ownership as proc_tree
+    from base.native_process import ownership as proc_tree
 
     def open_pidfd(_pid: int) -> int:
         return os.open(os.devnull, os.O_RDONLY)
@@ -593,8 +593,8 @@ def test_signals_reject_reuse_inside_legacy_birth_tolerance(
 ) -> None:
     import psutil
 
+    from base.native_process.ownership import OwnedProcess
     from services.ava_root.supervisor import Supervisor
-    from shared.native_process.ownership import OwnedProcess
 
     old = OwnedProcess(12345, 10.0, 100)
     replacement = OwnedProcess(12345, 10.01, 101)
@@ -651,8 +651,8 @@ def test_signals_keep_linux_custody_when_wall_birth_moves(
 ) -> None:
     import psutil
 
+    from base.native_process.ownership import OwnedProcess
     from services.ava_root.supervisor import Supervisor
-    from shared.native_process.ownership import OwnedProcess
 
     captured = OwnedProcess(12345, 10.0, 100)
     observed = OwnedProcess(12345, 3610.0, 100)

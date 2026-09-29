@@ -72,12 +72,12 @@ from pathlib import Path
 from typing import NamedTuple, TypedDict
 
 from ava import skills
-from shared.config import settings
-from shared.deploy.release.runtime_interpreter import external_plugin_read_root
-from shared.log import logger
-from shared.packages.docs.frontmatter import FrontmatterError, parse_frontmatter
-from shared.packages.skills.names import display_name, match_key
-from shared.paths import ava_home, repo_plugins_dir, repo_root
+from base.config import settings
+from base.deploy.release.runtime_interpreter import external_plugin_read_root
+from base.log import logger
+from base.packages.docs.frontmatter import FrontmatterError, parse_frontmatter
+from base.packages.skills.names import display_name, match_key
+from base.paths import ava_home, repo_plugins_dir, repo_root
 
 
 def _commands_enabled() -> bool:
@@ -89,17 +89,17 @@ def _commands_enabled() -> bool:
     (`gateway/routers/commands.py` -> `discover_commands`) and needs the
     value. On a profile without the agent domain, read the cluster value from
     the .env FILE (the authoritative source; same fallback pattern as
-    `shared/lm/factory.py` after the gateway pop) and default to True. On an
+    `base/lm/factory.py` after the gateway pop) and default to True. On an
     agent process the ordinary `settings.agent.commands_enabled` read is used,
     unchanged.
 
     The `settings.has_domain` guard is the sanctioned cross-profile pattern:
     the consumption-matrix guard test treats a read under such a guard as
-    legitimate (see tests/shared/test_gateway_consumer_guard.py).
+    legitimate (see tests/base/test_gateway_consumer_guard.py).
     """
     if settings.has_domain("agent"):
         return settings.agent.commands_enabled
-    from shared.host.env.runtime_config import read_env_aliases
+    from base.host.env.runtime_config import read_env_aliases
 
     value = read_env_aliases().get("AVA_COMMANDS_ENABLED")
     if value is None:
@@ -275,7 +275,7 @@ def split_commands(content: str) -> list[Invocation] | None:
 def _expand_one(inv: Invocation) -> str:
     """Expand a single invocation into its prompt text.
 
-    Source-neutral: the envelope (shared.agents.messages.envelope.wrap_inbound) already frames
+    Source-neutral: the envelope (base.agents.messages.envelope.wrap_inbound) already frames
     the message ("Agent 5:" for peers; the bare "[ts]" header for the user), so
     the expansion must not re-name an actor — a `/command` sent by a peer agent
     reads correctly without the old "User invoked …" phrasing.

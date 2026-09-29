@@ -16,7 +16,7 @@ retired ([decision](../decisions/2026-09-28-retire-windows-docker-compose.md)).
 
 Not a rough port — an absent one.
 
-- `shared/cluster/dataplane/runtime_binaries.py` vendors Postgres for `darwin` and
+- `base/cluster/dataplane/runtime_binaries.py` vendors Postgres for `darwin` and
   `linux-x86_64`; `_platform_key()` raises for Windows. Redis is not vendored on
   any platform yet ("a prebuilt we publish — not here yet").
 - `_redis_server_bin()` / `_redis_cli_bin()` (`cli/commands/data_plane/cluster_instance.py`)
@@ -51,8 +51,8 @@ unconditionally in the Windows start roster and fails every time.
 
 `cli/commands/data_plane/pgbouncer.py` signals with `os.kill(pid, SIGHUP)` /
 `os.kill(pid, 0)`. On Windows `os.kill(pid, 0)` **terminates** the target — the
-hazard `shared/host/proc.py` documents and routes around. PgBouncer is enabled by
-default (`shared/config/data_plane.py`) and is part of `ensure_cluster_instance`.
+hazard `base/host/proc.py` documents and routes around. PgBouncer is enabled by
+default (`base/config/data_plane.py`) and is part of `ensure_cluster_instance`.
 
 ## Also missing
 
@@ -62,8 +62,8 @@ default (`shared/config/data_plane.py`) and is part of `ensure_cluster_instance`
   `-c unix_socket_directories=…`, and `_pg_hba_body()` writes a `local` line.
   Windows Postgres supports none of it.
 - **`_pg_bin()`** has no Windows branch and yields the Linux path;
-  `PG_BIN_WINDOWS` exists in `shared/cluster/dataplane/pg_tools.py` but is only reachable through
-  `shared.host.system.backend`'s `pg_binary_path`, which `cluster_instance` never calls.
+  `PG_BIN_WINDOWS` exists in `base/cluster/dataplane/pg_tools.py` but is only reachable through
+  `base.host.system.backend`'s `pg_binary_path`, which `cluster_instance` never calls.
 - **`memory-indexer`** registers a `SIGTERM` handler for graceful shutdown that
   never fires on Windows, and cold-starts against milvus.
 - **Teardown symmetry.** `stop_cluster_instance()` calls `pg_ctl` / `redis-cli`
@@ -83,7 +83,7 @@ names and ignored the registry-allocated ports, so two co-located clusters would
 adopt each other's containers.
 
 `ava-windows-scheduling` contributed the `schtasks` work, which is on main in a
-**better** form: main's `shared.host.system.schtasks.task_name`/`delete_task` take an explicit
+**better** form: main's `base.host.system.schtasks.task_name`/`delete_task` take an explicit
 slug, where the branch fell back to the calling process's own slug — the bug
 that made a `cluster destroy` deregister prod's jobs.
 

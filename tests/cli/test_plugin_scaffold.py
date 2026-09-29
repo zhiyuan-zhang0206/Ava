@@ -9,15 +9,15 @@ from pathlib import Path
 
 import pytest
 
+from base import paths
+from base.cluster.machine import set_identity
+from base.config import settings
+from base.deploy.git import memory_repo
+from base.host import proc
+from base.packages.plugins.enable_config import write_local
 from cli.commands.converge import host as converge_host
 from cli.commands.extensions import memory
 from cli.commands.extensions._plugin_scaffold import ScaffoldResult, run_plugin_scaffolds
-from shared import paths
-from shared.cluster.machine import set_identity
-from shared.config import settings
-from shared.deploy.git import memory_repo
-from shared.host import proc
-from shared.packages.plugins.enable_config import write_local
 
 
 @pytest.fixture(autouse=True)

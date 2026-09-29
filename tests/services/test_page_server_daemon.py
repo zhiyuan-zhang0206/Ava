@@ -17,7 +17,7 @@ from psycopg_pool import ConnectionPool
 
 import services.page_server.daemon as psd
 import services.page_server.degradation as page_degradation
-from shared.cluster.machine import reset_identity, set_identity
+from base.cluster.machine import reset_identity, set_identity
 from tests.conftest import spawn_agent
 
 _HOST = "127.0.0.1"
@@ -83,7 +83,7 @@ def backend(monkeypatch: pytest.MonkeyPatch) -> _FakeShellBackend:
 
 @pytest.fixture
 def sync_pool(db_conn: psycopg.Connection) -> Iterator[ConnectionPool]:
-    from shared.config import settings
+    from base.config import settings
 
     pool: ConnectionPool = ConnectionPool(
         settings.data_plane.db_url, min_size=1, max_size=2, open=True

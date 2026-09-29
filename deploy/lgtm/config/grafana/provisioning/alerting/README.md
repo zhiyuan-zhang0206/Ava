@@ -20,7 +20,7 @@ dashboards).
 
 ### LogQL migration (task #1467, complete)
 
-- Since the 2026-08-23 index-label cutover (shared/telemetry/loki_index_labels.py) the
+- Since the 2026-08-23 index-label cutover (base/telemetry/loki_index_labels.py) the
   collector promotes `event_name` / `agent_id` to stream labels; event-scoped
   rules match them INSIDE the stream selector
   (`{service_name="unknown_service", event_name=...}`) and keep `| json` only
@@ -201,7 +201,7 @@ R13 (llm-billing-quota) is the one rule with no threshold and no `for`
 window: an out-of-credit API key fails every turn in the fleet and only a
 human spending money clears it, so the first rejection is already the whole
 incident. Its discriminator is the `billing` field the emitter writes from
-`shared/lm/errors.py`'s cross-provider predicate (HTTP 402 plus a per-vendor
+`base/lm/errors.py`'s cross-provider predicate (HTTP 402 plus a per-vendor
 vocabulary matched against the response body's `error.type` AND `error.code`) —
 a new provider is covered by adding its string there, with no edit to
 `rules.yml`.

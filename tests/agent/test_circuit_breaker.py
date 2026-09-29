@@ -36,9 +36,9 @@ from agent.hooks.compact import (
 )
 from agent.state import AgentState, CircuitState
 from agent.turn.runloop import _handle_fatal_llm_error
-from shared.agents.context import AvaContext
-from shared.config import settings
-from shared.events.live.publisher import AgentEventPublisher
+from base.agents.context import AvaContext
+from base.config import settings
+from base.events.live.publisher import AgentEventPublisher
 from tests.agent.test_claim import (
     _compact_tail,
     _config,
@@ -675,8 +675,8 @@ async def test_host_persists_provider_failure_before_releasing_turn(
     from langgraph.graph import END, START, StateGraph
 
     from agent.startup import wrap_saver_writes_with_nstep_interval
+    from base.config import settings
     from services.agent_host.host import AgentHost
-    from shared.config import settings
 
     agent_id = spawn_agent()
     calls = 0

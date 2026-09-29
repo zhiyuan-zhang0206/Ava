@@ -5,7 +5,7 @@ from collections.abc import Generator
 from contextlib import contextmanager
 from typing import Any
 
-from shared.deploy.maintenance import admission as maintenance_admission
+from base.deploy.maintenance import admission as maintenance_admission
 
 _requests: set[object] = set()
 _workers: set[asyncio.Future[Any]] = set()

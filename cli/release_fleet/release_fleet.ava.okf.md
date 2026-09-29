@@ -96,7 +96,7 @@ runtime error and a quarantine, seven-digit ids) writes about 238 KB
 Events: `unit_failed`, `unit_unknown` (per unit, with its agents),
 `drain_cancelled`, `threshold_exceeded`, `recovering`, `held` (critical),
 `recovered`, `degraded_commit`. Each alert is delivered as an `alerts` row
-(source `release-fleet`, the shape `shared.telemetry.alerts.upsert_alert` ingests),
+(source `release-fleet`, the shape `base.telemetry.alerts.upsert_alert` ingests),
 plus the out-of-band webhook and an observer-agent notice when the route
 names them. The webhook URL stays in `$AVA_HOME/secrets/<webhook_file>`, never
 in the request; that file must be this user's and mode 0600, or delivery

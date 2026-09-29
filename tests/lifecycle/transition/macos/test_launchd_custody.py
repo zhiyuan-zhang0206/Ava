@@ -20,9 +20,9 @@ from pathlib import Path
 import psutil
 import pytest
 
+from base.native_process.ownership import OwnedProcess
 from cli.release_transition import launchd_custody as custody
 from cli.release_transition.launchd_custody import Birth, GroupReceipt
-from shared.native_process.ownership import OwnedProcess
 from tests.lifecycle.transition.macos.launchd_fake import (
     HELPER_BIRTH,
     Harness,

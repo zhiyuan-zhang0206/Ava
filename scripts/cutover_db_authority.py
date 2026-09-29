@@ -89,17 +89,17 @@ from redis.backoff import NoBackoff
 from redis.exceptions import AuthenticationError
 from redis.retry import Retry
 
+from base.cluster import get_record, identity_from_url, record_redis_port
+from base.cluster.derive import REDIS_PASSWORD_ENV
+from base.cluster.registry import ClusterRecord
+from base.config import settings
+from base.deploy.progress_timeout import UNIT_BUNDLE_TTL_S
+from base.deploy.release.verified_file import regular_bytes
+from base.host.env.dotenv_file import upsert_env
+from base.host.net.url_secret import url_with_userinfo
+from base.host.private_storage import ensure_private_dir, write_private_bytes
+from base.paths import ava_home
 from cli.cutover_hold import start_instruction
-from shared.cluster import get_record, identity_from_url, record_redis_port
-from shared.cluster.derive import REDIS_PASSWORD_ENV
-from shared.cluster.registry import ClusterRecord
-from shared.config import settings
-from shared.deploy.progress_timeout import UNIT_BUNDLE_TTL_S
-from shared.deploy.release.verified_file import regular_bytes
-from shared.host.env.dotenv_file import upsert_env
-from shared.host.net.url_secret import url_with_userinfo
-from shared.host.private_storage import ensure_private_dir, write_private_bytes
-from shared.paths import ava_home
 
 _ADMIN_ENV = "AVA_REDIS_ADMIN_PASSWORD"
 _URL_ENV = "AVA_REDIS_URL"
@@ -249,10 +249,10 @@ async def _shutdown_unauthenticated(port: int, data_dir: Path, deadline: float) 
     from redis.asyncio import Redis as AsyncRedis
     from redis.asyncio.retry import Retry as AsyncRetry
 
+    from base.cluster import ownership
+    from base.native_process.ownership import capture_tree
     from cli.commands.data_plane.maintenance_stop import _request_stop
     from cli.commands.lifecycle.service_stop import remaining, wait_for_exit
-    from shared.cluster import ownership
-    from shared.native_process.ownership import capture_tree
 
     client = AsyncRedis(
         host="127.0.0.1",
@@ -397,7 +397,7 @@ class DbEnv:
 
 def _decide_db(state: str | None, env: DbEnv, home: Path) -> str:
     """The db step's action, or CutoverRefusedError; decided before any effect."""
-    from shared.cluster.authority import AuthorityRefusedError, load_ledger
+    from base.cluster.authority import AuthorityRefusedError, load_ledger
 
     try:
         ledger = load_ledger(home)
@@ -430,8 +430,8 @@ def _refuse_superuser_owner(record: ClusterRecord, env: DbEnv) -> None:
     postmaster defers the same refusal to `retire_legacy_logins`."""
     import psycopg
 
+    from base.cluster import record_postgres_port
     from cli.commands.data_plane import cluster_instance as instance
-    from shared.cluster import record_postgres_port
 
     port = record_postgres_port(record)
     if not instance._pg_running(port):
@@ -448,7 +448,7 @@ def _refuse_superuser_owner(record: ClusterRecord, env: DbEnv) -> None:
 
 
 def _legacy_roles(conn: Any, env: DbEnv) -> tuple[str, ...]:
-    from shared.cluster.authority import GATEWAY_GROUP, RUNNER_GROUP
+    from base.cluster.authority import GATEWAY_GROUP, RUNNER_GROUP
 
     rows = conn.execute(
         "SELECT rolname FROM pg_roles WHERE rolname = ANY(%s) ORDER BY 1",
@@ -461,6 +461,8 @@ def _convert_db(home: Path, record: ClusterRecord, env: DbEnv) -> int:
     """Every effect of the db step, each idempotent; returns the active number."""
     from functools import partial
 
+    from base.cluster import authority, record_postgres_port
+    from base.host.env.dotenv_file import remove_env
     from cli.commands.data_plane import cluster_instance as instance
     from cli.commands.data_plane.bringup import (
         READONLY_GRANTEES,
@@ -470,8 +472,6 @@ def _convert_db(home: Path, record: ClusterRecord, env: DbEnv) -> int:
     )
     from cli.commands.data_plane.pgbouncer import stop_pgbouncer
     from cli.commands.lifecycle.migrations import cmd_migrations_apply
-    from shared.cluster import authority, record_postgres_port
-    from shared.host.env.dotenv_file import remove_env
 
     groups = authority.Groups(gateway=authority.GATEWAY_GROUP, runner=authority.RUNNER_GROUP)
     cutover = authority.CutoverAuthority()
@@ -504,7 +504,7 @@ def _convert_db(home: Path, record: ClusterRecord, env: DbEnv) -> int:
 
 def convert_db(home: Path, record: ClusterRecord, *, execute: bool) -> str:
     """Convert (or verify) this home's database authority; return a one-line outcome."""
-    from shared.cluster.authority import AuthorityRefusedError, active_generation
+    from base.cluster.authority import AuthorityRefusedError, active_generation
 
     state = read_journal(home).get("db")
     env = DbEnv.read(home)
@@ -532,9 +532,9 @@ def convert_db(home: Path, record: ClusterRecord, *, execute: bool) -> str:
 
 def convert_api(home: Path, record: ClusterRecord, *, execute: bool) -> str:
     """Rotate the human bearer once on a networked home (step `api`)."""
+    from base.cluster import record_postgres_port
     from cli.commands.data_plane import cluster_instance as instance
     from scripts.data_plane_ops import rotate_cluster_secret as bearer
-    from shared.cluster import record_postgres_port
 
     state, raw = read_journal(home).get("api"), _journal(home).get("api")
     rotation = None if raw is None else bearer.Rotation.parse(raw)
@@ -582,8 +582,8 @@ class UnitPlan:
 
 def _remote_inventory(record: ClusterRecord, database: str, home: Path) -> tuple[Units, Units]:
     """(remote units, units of paused machines) from the gateway's own tables."""
+    from base.cluster.machine import machine_name
     from cli.commands.data_plane.bringup import admin_session
-    from shared.cluster.machine import machine_name
 
     with admin_session(record, database) as conn:
         units = {(m, h) for m, h in conn.execute("SELECT machine_name, home FROM machine_units")}
@@ -627,8 +627,8 @@ def _pending(home: Path, name: str) -> str:
 def _rotate_redis(home: Path, port: int) -> None:
     """Replace both Redis passwords: runner homes, their residue and the W3 copies
     hold the admin one and the runtime one (bootstrap served it to every runner)."""
+    from base.cluster import ensure_cluster_redis_acl
     from cli.commands.data_plane import cluster_instance as instance
-    from shared.cluster import ensure_cluster_redis_acl
 
     env = RedisEnv.read(home)
     admin, runtime = _pending(home, "admin"), _pending(home, "runtime")
@@ -662,8 +662,8 @@ def _rotate_redis(home: Path, port: int) -> None:
 
 
 def _issue_bundles(home: Path, plan: UnitPlan, bundle_dir: Path) -> list[str]:
-    from shared.cluster.authority.unit import UnitIdentity, issue_bundle, write_bundle
-    from shared.config.service_read import served_db_endpoint
+    from base.cluster.authority.unit import UnitIdentity, issue_bundle, write_bundle
+    from base.config.service_read import served_db_endpoint
 
     bundle_dir.mkdir(mode=0o700, exist_ok=True)
     info = bundle_dir.lstat()
@@ -692,8 +692,8 @@ def convert_remote_units(
     home: Path, record: ClusterRecord, plan: UnitPlan, *, execute: bool
 ) -> str:
     """Classify the remote units, rotate both Redis passwords and issue bundles."""
+    from base.cluster import record_postgres_port
     from cli.commands.data_plane import cluster_instance as instance
-    from shared.cluster import record_postgres_port
 
     state = read_journal(home).get("remote-units")
     env = DbEnv.read(home)
@@ -724,9 +724,9 @@ def convert_remote_units(
 def admitted_record(home: Path) -> ClusterRecord:
     """`home`'s registry record, only when it is this checkout's quiescent local
     gateway home: no application root, terminals or active release operation."""
+    from base.deploy.release.operation import require_configuration_write_authorized
     from cli.commands.lifecycle.root_driver import require_root_absent
     from cli.commands.lifecycle.service_stop import require_no_terminals
-    from shared.deploy.release.operation import require_configuration_write_authorized
 
     if home != ava_home().resolve():
         raise CutoverRefusedError(
@@ -777,8 +777,8 @@ def main(argv: list[str] | None = None) -> int:
             _run(home, execute=False, plan=plan)
             print("[dry-run] no changes made.")
             return 0
-        from shared.deploy.lifecycle.home_lifecycle_locks import resource_lock
-        from shared.native_process.os_platform import file_lock
+        from base.deploy.lifecycle.home_lifecycle_locks import resource_lock
+        from base.native_process.os_platform import file_lock
 
         # The same home lock order as `ava start`: start intent, then resources.
         with (

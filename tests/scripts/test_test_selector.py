@@ -52,7 +52,7 @@ def _selector_repo(tmp_path: Path) -> Path:
         "cli/commands.py": "",
         "ops/worker.py": "",
         "scripts/only_helper.py": "",
-        "shared/lm/__init__.py": "",
+        "base/lm/__init__.py": "",
         "tests/unit/conftest.py": "import cli.commands\n",
         "tests/unit/helper.py": "from scripts import only_helper\n",
         "tests/unit/test_changed.py": "def test_changed(): pass\n",
@@ -64,7 +64,7 @@ def _selector_repo(tmp_path: Path) -> Path:
             "\n"
             "def lazy_imports():\n"
             "    from agent import exec_child\n"
-            "    from shared import lm\n"
+            "    from base import lm\n"
         ),
         "tests/unit/test_other.py": "def test_other(): pass\n",
         "tests/e2e/test_browser.py": "import cli.commands\n",
@@ -96,7 +96,7 @@ def test_builds_a_direct_import_reverse_map_from_every_test_scope(tmp_path: Path
     assert reverse_map["agent/exec_child.py"] == expected_importer
     assert reverse_map["cli/commands.py"] == expected_importer
     assert reverse_map["ops/worker.py"] == expected_importer
-    assert reverse_map["shared/lm/__init__.py"] == expected_importer
+    assert reverse_map["base/lm/__init__.py"] == expected_importer
     assert "scripts/only_helper.py" not in reverse_map
 
 
@@ -159,7 +159,7 @@ def test_tree_scan_pins_cover_the_real_repo_lint_family_and_are_never_stale() ->
 @pytest.mark.parametrize(
     ("changed_path", "reason"),
     [
-        ("shared/deploy/git/repo_change.py", "forced-root:shared/"),
+        ("base/deploy/git/repo_change.py", "forced-root:base/"),
         ("pyproject.toml", "test-configuration"),
         (".test_durations", "test-configuration"),
         ("tests/e2e/test_browser.py", "e2e"),

@@ -12,10 +12,10 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+from base import paths
+from base.config import settings
+from base.packages.plugins.enable_config import write_local
 from gateway.app import app
-from shared import paths
-from shared.config import settings
-from shared.packages.plugins.enable_config import write_local
 
 
 @pytest.fixture(autouse=True)

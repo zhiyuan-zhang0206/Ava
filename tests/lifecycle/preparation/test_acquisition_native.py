@@ -10,12 +10,12 @@ from pathlib import Path
 
 import pytest
 
+from base.deploy.release.runtime_release import ReleaseRejectedError
 from cli.release_build import build_application
 from cli.release_prepare.acquire import acquire_inputs, verify_acquisition
 from cli.release_prepare.acquisition_dependencies import file_input, tree_input
 from cli.release_prepare.acquisition_models import Acquisition, AcquisitionReceipt
 from cli.release_prepare.source_distributions import export_distributions
-from shared.deploy.release.runtime_release import ReleaseRejectedError
 
 # ruff: noqa: S603 -- explicitly opted-in cold tools operate only within tmp_path.
 
@@ -33,7 +33,7 @@ def test_cold_acquisition_builds_locked_sdist_with_pinned_tools(tmp_path: Path) 
     repo.mkdir()
     for name in ("shared", "db", "migrations"):
         (repo / name).mkdir()
-    (repo / "shared/__init__.py").write_text("")
+    (repo / "base/__init__.py").write_text("")
     (repo / "db/schema.sql").write_text("SELECT 1;\n")
     (repo / "migrations/.gitkeep").write_text("")
     (repo / ".python-version").write_text("3.12.12\n")

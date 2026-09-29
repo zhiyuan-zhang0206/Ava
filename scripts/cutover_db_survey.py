@@ -9,7 +9,7 @@ the retired writer's shapes on purpose; the runtime keeps no parser for them.
 It is deleted after the cutover with the other `scripts/cutover_*` scripts.
 
 A retired-shape row is classified with the conversion's own rule
-(`shared.agents.incarnation.predecessor_closure.successor_refusal`), read only: `convertible` (a
+(`base.agents.incarnation.predecessor_closure.successor_refusal`), read only: `convertible` (a
 named incarnation, a row its successor would take once converted, a settled
 lifecycle receipt, a machine attestation proving every recorded identity gone),
 `awaiting` (everything but the attestation), `inadmissible` with the reason (a
@@ -48,15 +48,15 @@ from psycopg.pq import TransactionStatus
 from psycopg.rows import dict_row
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from scripts.cutover_inventory import Attestation, own_checkout
-from shared.agents.incarnation.predecessor_closure import (
+from base.agents.incarnation.predecessor_closure import (
     SUCCESSOR_COLUMNS,
     SettledReceipt,
     SuccessorRow,
     successor_refusal,
 )
-from shared.agents.incarnation.resource_admission import PREDECESSOR_RECEIPT
-from shared.agents.incarnation.resources import ResourceShapeError, decode_resources
+from base.agents.incarnation.resource_admission import PREDECESSOR_RECEIPT
+from base.agents.incarnation.resources import ResourceShapeError, decode_resources
+from scripts.cutover_inventory import Attestation, own_checkout
 
 LEASE_COLUMNS = (
     "phase",
@@ -318,7 +318,7 @@ def current_of(evidence: Any) -> Any:
 
 def publication_problem(evidence: Any) -> str | None:
     """Why admission cannot read `evidence`; None when it can (SQL NULL is protocol zero)."""
-    from shared.deploy.writers.publication import WriterPublication
+    from base.deploy.writers.publication import WriterPublication
 
     if evidence is None:
         return None
@@ -337,7 +337,7 @@ def cleared_publication(evidence: dict[str, Any]) -> dict[str, Any] | None:
 
 
 def _migrations(conn: psycopg.Connection[Any], legacy_commit: str | None) -> dict[str, Any]:
-    from shared.deploy.schema.migration_layout import (
+    from base.deploy.schema.migration_layout import (
         required_migration_set,
         required_migration_set_at_ref,
     )

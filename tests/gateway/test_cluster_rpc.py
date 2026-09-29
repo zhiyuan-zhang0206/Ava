@@ -15,8 +15,8 @@ from typing import Any
 import httpx
 import pytest
 
+from base.cluster.machines import MachineGatewayUrlMissing, MachineNotRegistered
 from ops import cluster_rpc
-from shared.cluster.machines import MachineGatewayUrlMissing, MachineNotRegistered
 
 
 def _patch(
@@ -214,7 +214,7 @@ async def test_default_timeout_comes_from_settings(
 ) -> None:
     """Omitting timeout_s uses AVA_CLUSTER_RPC_TIMEOUT_SECONDS (task #698 G8)
     — the default is config, not a module literal."""
-    from shared.config import settings
+    from base.config import settings
 
     monkeypatch.setattr(settings.gateway, "cluster_rpc_timeout_seconds", 12.5)
     monkeypatch.setattr(cluster_rpc, "lookup_machine_url", lambda _n: "http://host:8106")  # pyright: ignore[reportUnknownArgumentType]
@@ -571,7 +571,7 @@ async def test_malformed_response_is_not_retried(monkeypatch: pytest.MonkeyPatch
 async def test_retries_default_from_settings(monkeypatch: pytest.MonkeyPatch) -> None:
     """Omitting `retries` uses AVA_CLUSTER_RPC_MAX_RETRIES — the retry budget is
     config, not a module literal."""
-    from shared.config import settings
+    from base.config import settings
 
     calls = {"n": 0}
 

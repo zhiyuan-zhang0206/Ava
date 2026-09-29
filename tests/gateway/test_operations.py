@@ -26,14 +26,14 @@ from ops.rpc_schemas import (
     SpawnAgentRequest,
     TerminateAgentRequest,
 )
-from tests.shared.test_admission import isolate as isolate
+from tests.base.test_admission import isolate as isolate
 
 
 class TestSpawnAgentRequestSourceValidation:
     """F1: an illegal prompt_source must be rejected at the schema boundary,
     not silently accepted and deferred to the agent claim node — where an
     unrecognized envelope source raises ValueError and kills the just-spawned
-    process. The schema reuses shared.agents.messages.envelope.validate_source so the legal set
+    process. The schema reuses base.agents.messages.envelope.validate_source so the legal set
     stays single-sourced with the claim-side wrap."""
 
     def test_rejects_unrecognized_source(self) -> None:
@@ -64,10 +64,10 @@ class TestRestartAgentRequestConfigOverlay:
         self, monkeypatch: pytest.MonkeyPatch, profile: str
     ) -> None:
         """Schema validation must not depend on the boundary process's domains."""
-        import shared.config as shared_config
-        from shared.config import Settings
+        import base.config as base_config
+        from base.config import Settings
 
-        monkeypatch.setattr(shared_config, "settings", Settings(profile=profile))
+        monkeypatch.setattr(base_config, "settings", Settings(profile=profile))
 
         body = RestartAgentRequest(config_overlay={"completion_notice_policy": "hourly"})
 
@@ -78,10 +78,10 @@ class TestRestartAgentRequestConfigOverlay:
         self, monkeypatch: pytest.MonkeyPatch, profile: str
     ) -> None:
         """Profile-limited schema validation still rejects invalid agent settings."""
-        import shared.config as shared_config
-        from shared.config import Settings
+        import base.config as base_config
+        from base.config import Settings
 
-        monkeypatch.setattr(shared_config, "settings", Settings(profile=profile))
+        monkeypatch.setattr(base_config, "settings", Settings(profile=profile))
 
         with pytest.raises(ValidationError):
             RestartAgentRequest(config_overlay={"completion_notice_policy": "bogus"})
@@ -90,10 +90,10 @@ class TestRestartAgentRequestConfigOverlay:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """The gateway does not construct sandbox, but must validate its fields."""
-        import shared.config as shared_config
-        from shared.config import Settings
+        import base.config as base_config
+        from base.config import Settings
 
-        monkeypatch.setattr(shared_config, "settings", Settings(profile="gateway"))
+        monkeypatch.setattr(base_config, "settings", Settings(profile="gateway"))
 
         body = RestartAgentRequest(config_overlay={"syntax_fix_ruff_format": True})
 
@@ -217,7 +217,7 @@ class TestSpawnPrechecksBlocking:
 
     def test_fork_empty_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """fork_from with no checkpoint raises ForkSourceEmpty (wire-mapped to 409)."""
-        from shared.agents import ForkSourceEmpty
+        from base.agents import ForkSourceEmpty
 
         monkeypatch.setattr(launch, "latest_checkpoint_id", lambda _cur, _aid: None)
         with pytest.raises(ForkSourceEmpty):
@@ -280,7 +280,7 @@ async def test_restart_lifecycle_op_validates_overlay_on_the_runner(
 async def test_resurrect_agent_op_alive_returns_already_alive(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from shared.agents import AgentStatus
+    from base.agents import AgentStatus
 
     monkeypatch.setattr(lifecycle, "get_agent_status", lambda _aid: AgentStatus.RUNNING)
     resp = await lifecycle.resurrect_agent_op(9, ResurrectAgentRequest(prompt="test"))
@@ -293,8 +293,8 @@ async def test_resurrect_agent_op_stale_trigger_returns_idempotent_noop(
 ) -> None:
     """The internal guarded path treats a stale chat as an expected no-launch
     race, while leaving the still-terminated status for its caller to return."""
+    from base.agents import AgentStatus
     from ops.agents.wake import ResurrectTriggerStaleError
-    from shared.agents import AgentStatus
 
     def _terminated(_agent_id: int) -> AgentStatus:
         return AgentStatus.TERMINATED
@@ -318,7 +318,7 @@ async def test_resurrect_agent_op_stale_trigger_returns_idempotent_noop(
 async def test_terminate_agent_op_terminated_short_circuits(
     monkeypatch: pytest.MonkeyPatch, stub_pool: object
 ) -> None:
-    from shared.agents import AgentStatus
+    from base.agents import AgentStatus
 
     monkeypatch.setattr(lifecycle, "get_agent_status", lambda _aid: AgentStatus.TERMINATED)
 
@@ -508,7 +508,7 @@ class TestResurrectIfTerminatedPlacement:
     async def test_active_suppression_skips_forward_and_launch(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from shared.agents import AgentStatus
+        from base.agents import AgentStatus
 
         monkeypatch.setattr(lifecycle, "get_agent_status", lambda _aid: AgentStatus.TERMINATED)
         monkeypatch.setattr(lifecycle, "_wake_suppression_active", lambda _aid: True)
@@ -529,7 +529,7 @@ class TestResurrectIfTerminatedPlacement:
         """A tripped recovery breaker (consecutive permanent provider
         rejections) refuses the automatic resurrect before any home contact,
         exactly like an active wake suppression (task #3617)."""
-        from shared.agents import AgentStatus
+        from base.agents import AgentStatus
 
         monkeypatch.setattr(lifecycle, "get_agent_status", lambda _aid: AgentStatus.TERMINATED)
         monkeypatch.setattr(lifecycle, "_recovery_halted", lambda _aid: True)
@@ -547,7 +547,7 @@ class TestResurrectIfTerminatedPlacement:
     async def test_local_home_resurrects_in_process(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Local-homed resurrect dispatches to ops server first; falls back
         to in-process when the ops server is unreachable."""
-        from shared.agents import AgentStatus
+        from base.agents import AgentStatus
 
         statuses = iter([AgentStatus.TERMINATED, AgentStatus.IDLING])
         monkeypatch.setattr(lifecycle, "get_agent_status", lambda _aid: next(statuses))
@@ -614,7 +614,7 @@ class TestResurrectIfTerminatedPlacement:
     @pytest.mark.asyncio
     async def test_remote_home_forwards_lifecycle_op(self, monkeypatch: pytest.MonkeyPatch) -> None:
         captured: dict[str, object] = {}
-        from shared.agents import AgentStatus
+        from base.agents import AgentStatus
 
         statuses = iter([AgentStatus.TERMINATED, AgentStatus.IDLING])
         monkeypatch.setattr(lifecycle, "get_agent_status", lambda _aid: next(statuses))
@@ -656,8 +656,8 @@ class TestResurrectIfTerminatedPlacement:
     async def test_remote_home_unreachable_skips(
         self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
     ) -> None:
+        from base.agents import AgentStatus
         from ops.cluster_rpc import ClusterOpUnreachable
-        from shared.agents import AgentStatus
 
         monkeypatch.setattr(lifecycle, "get_agent_status", lambda _aid: AgentStatus.TERMINATED)
         monkeypatch.setattr(lifecycle, "get_agent_machine", lambda _aid: "wsl")
@@ -677,8 +677,8 @@ class TestResurrectIfTerminatedPlacement:
 
     @pytest.mark.asyncio
     async def test_remote_op_failure_swallowed(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from base.agents import AgentStatus
         from ops.cluster_rpc import ClusterOpFailed
-        from shared.agents import AgentStatus
 
         monkeypatch.setattr(lifecycle, "get_agent_status", lambda _aid: AgentStatus.TERMINATED)
         monkeypatch.setattr(lifecycle, "get_agent_machine", lambda _aid: "wsl")
@@ -696,7 +696,7 @@ class TestResurrectIfTerminatedPlacement:
 
     @pytest.mark.asyncio
     async def test_not_terminated_short_circuits(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        from shared.agents import AgentStatus
+        from base.agents import AgentStatus
 
         monkeypatch.setattr(lifecycle, "get_agent_status", lambda _aid: AgentStatus.RUNNING)
 
@@ -729,7 +729,7 @@ class TestResurrectIfTerminatedNotificationGuard:
     async def test_system_notice_trigger_skips_forward_and_launch(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from shared.agents import AgentStatus
+        from base.agents import AgentStatus
 
         monkeypatch.setattr(lifecycle, "get_agent_status", lambda _aid: AgentStatus.TERMINATED)
         monkeypatch.setattr(
@@ -750,7 +750,7 @@ class TestResurrectIfTerminatedNotificationGuard:
         """No row -> None -> the normal path runs; stale-work adjudication stays
         with the home runner's final CAS. This drives the real read (the id
         does not exist), not a stubbed one."""
-        from shared.agents import AgentStatus
+        from base.agents import AgentStatus
 
         statuses = iter([AgentStatus.TERMINATED, AgentStatus.IDLING])
         monkeypatch.setattr(lifecycle, "get_agent_status", lambda _aid: next(statuses))
@@ -786,7 +786,7 @@ class TestResurrectIfTerminatedNotificationGuard:
         """A failed trigger read must not be swallowed into a skip (review
         note A): the error surfaces to the caller, mirroring how a failed
         suppression / breaker read above fails loudly."""
-        from shared.agents import AgentStatus
+        from base.agents import AgentStatus
 
         monkeypatch.setattr(lifecycle, "get_agent_status", lambda _aid: AgentStatus.TERMINATED)
 
@@ -808,7 +808,7 @@ class TestResurrectIfTerminatedNotificationGuard:
         is a fail-closed carve-out: only the exact JSON boolean `true` lets a
         system-family chat through — a missing key, null, or any other value
         (even the string "true") stays a notice (task #3687 review, Ava #3242)."""
-        from shared.db import create_agent, insert_inbound_message
+        from base.db import create_agent, insert_inbound_message
 
         aid = create_agent(db_conn)
         db_conn.commit()
@@ -862,8 +862,8 @@ class TestResurrectIfTerminatedNotificationGuard:
         asserts the chain reaches the resurrect dispatch, with only the
         below-dispatch machinery stubbed; a guard that wrongly matched would
         reach no dispatch and fail the assert."""
-        from shared.agents import AgentStatus
-        from shared.db import create_agent, insert_inbound_message
+        from base.agents import AgentStatus
+        from base.db import create_agent, insert_inbound_message
 
         aid = create_agent(db_conn)
         db_conn.commit()
@@ -910,8 +910,8 @@ async def test_spawned_auto_resurrect_clears_suppression_in_database(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A successful spawn is a durable recovery, not only an in-memory result."""
-    from shared.agents import AgentStatus
-    from shared.db import create_agent, insert_inbound_message
+    from base.agents import AgentStatus
+    from base.db import create_agent, insert_inbound_message
 
     agent_id = create_agent(db_conn)
     db_conn.execute(
@@ -1013,7 +1013,7 @@ async def test_force_terminate_hosted_skips_process_kill_and_cancels_turn(
     transaction. The durable terminate inbound inserted by the fence is the
     captured: dict[str, object] = {}
     correctness mechanism; the cancel only accelerates a wedged turn."""
-    from shared.agents import AgentStatus
+    from base.agents import AgentStatus
 
     captured: dict[str, object] = {}
 
@@ -1080,7 +1080,7 @@ async def test_launch_agent_op_hosted_validation_failure_preserves_its_row(
     def _boom_validate(*_a: object, **_k: object) -> None:
         raise RuntimeError("bad model config")
 
-    monkeypatch.setattr("shared.lm.factory.validate_model_config", _boom_validate)
+    monkeypatch.setattr("base.lm.factory.validate_model_config", _boom_validate)
     reclaimed: list[tuple[int, str]] = []
 
     def _fake_reclaim(agent_id: int, _pool: object, *, source: str) -> list[str]:

@@ -99,7 +99,7 @@ matters + suggested fix**. Match the diff against
 - Swallowed exceptions: top-level `except Exception` that logs and
   continues — what does the caller believe happened? A caught exception
   that still advances state is data loss.
-- Retry loops converge on `shared/host/net/resilience.py`; new hand-rolled loops
+- Retry loops converge on `base/host/net/resilience.py`; new hand-rolled loops
   with divergent backoff/jitter/classifier are violations.
 - Async called as sync: a never-awaited coroutine silently never runs (the
   redis `disconnect()` class).

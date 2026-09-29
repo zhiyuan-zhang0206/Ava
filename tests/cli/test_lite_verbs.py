@@ -21,8 +21,8 @@ from pathlib import Path
 
 import pytest
 
+from base.deploy.maintenance.state import MaintenanceHold
 from cli import main as cli_main
-from shared.deploy.maintenance.state import MaintenanceHold
 
 
 def _dispatched_fetch_env(monkeypatch: pytest.MonkeyPatch, argv: list[str]) -> str | None:

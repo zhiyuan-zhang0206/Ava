@@ -20,8 +20,8 @@ import pytest
 import ava.skills as skills_mod
 from agent.graph.capabilities import resolve_prompt_skills
 from agent.graph.context_notes import preloaded_skills_note
-from shared.agents.messages.kwargs import NoteTag
-from shared.config import FIELD_INFOS, AgentSettings, per_agent_field_names, settings
+from base.agents.messages.kwargs import NoteTag
+from base.config import FIELD_INFOS, AgentSettings, per_agent_field_names, settings
 
 
 @pytest.fixture(autouse=True)
@@ -35,7 +35,7 @@ def _isolate_load_dir(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         return {p.name for p in d.iterdir() if p.is_dir()} if d.is_dir() else set()
 
     monkeypatch.setattr(
-        "shared.packages.extensions.install_registry.loadable_skill_names", _all_enabled
+        "base.packages.extensions.install_registry.loadable_skill_names", _all_enabled
     )
 
 

@@ -13,10 +13,10 @@ from typing import NoReturn
 
 import pytest
 
-import shared.cluster.dataplane.pg_tools
+import base.cluster.dataplane.pg_tools
+from base.native_process.os_platform import LockTimeoutError
 from services import backup
 from services.gateway_side.backup import snapshot as _snapshot
-from shared.native_process.os_platform import LockTimeoutError
 
 
 def _activation_progress(line: str) -> None:
@@ -43,7 +43,7 @@ def _patch_decrypt_and_listing(
         return listing
 
     monkeypatch.setattr(backup, "decrypt_artifact", _decrypt)
-    monkeypatch.setattr(shared.cluster.dataplane.pg_tools, "pg_tool", _pg_restore_path)
+    monkeypatch.setattr(base.cluster.dataplane.pg_tools, "pg_tool", _pg_restore_path)
     monkeypatch.setattr(_snapshot, "run_bounded", _run_bounded)
 
 

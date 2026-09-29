@@ -14,11 +14,11 @@ from uuid import uuid4
 import pytest
 from pydantic import JsonValue
 
+from base import paths
+from base.host.system import boot_unit
 from cli.release_fleet.request import FleetRequest
 from cli.release_transition import journal, submit
 from cli.release_transition import launcher_linux as linux
-from shared import paths
-from shared.host.system import boot_unit
 from tests.lifecycle.transition.phases import advance_to
 from tests.lifecycle.transition.test_launcher_linux import (
     _closed_attempt,

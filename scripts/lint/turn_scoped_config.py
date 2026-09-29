@@ -13,7 +13,7 @@ through the process-global `settings` singleton returns the CLUSTER default —
 silently ignoring the agent's `config_overlay` / `birth_config`. The correct
 read path for turn-scoped code is the per-turn view:
 
-    from shared.config.turn_view import turn_settings
+    from base.config.turn_view import turn_settings
     turn_settings.lm.llm_model        # pin-aware: overlay > birth > live default
 
 In process mode the view is byte-for-byte the singleton (boot applied the
@@ -23,20 +23,20 @@ only correct read.
 ## Rules
 
 **Framework fields.** Scan the turn-scoped packages (code that runs inside an agent's turn):
-`agent/`, `ava/`, `ava_builtins/`, `shared/lm/`, plus the turn-adjacent
+`agent/`, `ava/`, `ava_builtins/`, `base/lm/`, plus the turn-adjacent
 shared modules listed in _EXTRA_FILES. Any `settings.<domain>.<field>`
 attribute read where `<field>` is a `per_agent=True` field in the config
 registry is an error — the site must read `turn_settings.<domain>.<field>`.
 
 The per-agent field set is read from the live config registry
-(`shared.config.per_agent_field_names`), so declaring a new per-agent field
+(`base.config.per_agent_field_names`), so declaring a new per-agent field
 auto-extends the ban with no manual list to maintain.
 
 **Plugin config.** Same problem one layer over: `_PLUGIN_CONFIGS`
-(`shared/packages/plugins/config_registration.py`) is a process-global `plugin -> instance`
+(`base/packages/plugins/config_registration.py`) is a process-global `plugin -> instance`
 map that boot rebuilds from the agent's overlay, so subscripting it in turn
 code returns whichever agent booted the process. Reads go through
-`shared/packages/plugins/config_view.py:turn_plugin_config` (which
+`base/packages/plugins/config_view.py:turn_plugin_config` (which
 `get_plugin_config` / `ava._settings.plugins` already do). Membership tests
 (`name in _PLUGIN_CONFIGS`) are untouched — they ask whether a plugin is
 registered, which is not per-agent.
@@ -67,16 +67,16 @@ _SCAN_DIRS = (
     "agent",
     "ava",
     "ava_builtins",
-    "shared/lm",
+    "base/lm",
 )
 
 # Turn-adjacent shared modules that execute inside agent turns.
-_EXTRA_FILES = ("shared/packages/plugins/activation.py",)
+_EXTRA_FILES = ("base/packages/plugins/activation.py",)
 
 _ALLOWED_FILES = frozenset(
     {
         # The view itself falls through to the singleton by design.
-        "shared/config/turn_view.py",
+        "base/config/turn_view.py",
     }
 )
 
@@ -84,8 +84,8 @@ _ALLOWED_FILES = frozenset(
 # process-global map, the view is what turn code reads it through.
 _PLUGIN_MECHANISM_FILES = frozenset(
     {
-        "shared/packages/plugins/config_registration.py",
-        "shared/packages/plugins/config_view.py",
+        "base/packages/plugins/config_registration.py",
+        "base/packages/plugins/config_view.py",
     }
 )
 
@@ -105,7 +105,7 @@ def _iter_files(paths: list[str]) -> list[Path]:
 
 
 def main(argv: list[str]) -> int:
-    from shared.config import per_agent_field_names
+    from base.config import per_agent_field_names
 
     missing = [a for a in argv if not Path(a).exists()]
     if missing:
@@ -140,7 +140,7 @@ def main(argv: list[str]) -> int:
         print(
             "plugin config read straight out of the process-global "
             "_PLUGIN_CONFIGS in turn-scoped code — use "
-            "`shared.packages.plugins.config_view.turn_plugin_config(<plugin>)` (or "
+            "`base.packages.plugins.config_view.turn_plugin_config(<plugin>)` (or "
             "`get_plugin_config`, which routes through it); in hosted mode the "
             "map holds whichever agent booted the process:\n",
             file=sys.stderr,
@@ -151,7 +151,7 @@ def main(argv: list[str]) -> int:
         print(
             "per-agent config read through the bare settings singleton in "
             "turn-scoped code — use `turn_settings.<domain>.<field>` "
-            "(shared/config/turn_view.py); in hosted mode the singleton holds "
+            "(base/config/turn_view.py); in hosted mode the singleton holds "
             "the CLUSTER default, not this agent's overlay:\n",
             file=sys.stderr,
         )

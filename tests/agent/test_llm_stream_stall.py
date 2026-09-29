@@ -34,10 +34,10 @@ from agent.graph.llm_errors import (
     _reset_stall_pair_streak,
 )
 from agent.state import AgentState
-from shared.agents.context import AvaContext
-from shared.config import settings
-from shared.lm.registry import MODELS, ModelSpec
-from shared.native_process.turn_identity import bind_turn_identity
+from base.agents.context import AvaContext
+from base.config import settings
+from base.lm.registry import MODELS, ModelSpec
+from base.native_process.turn_identity import bind_turn_identity
 from tests.agent._fakes import make_fake_ops_pool
 
 _CONFIG: RunnableConfig = {"configurable": {"thread_id": "7"}}
@@ -64,10 +64,8 @@ async def test_stall_at_ttft_raises_with_ttft_marker(
         await asyncio.Future()  # never returns — simulates server hang
         yield  # type: ignore[unreachable]
 
-    monkeypatch.setattr("shared.config.settings.lm.llm_stream_ttft_timeout_seconds", 0.05)
-    monkeypatch.setattr(
-        "shared.config.settings.lm.llm_non_streaming_fallback_timeout_seconds", 0.05
-    )
+    monkeypatch.setattr("base.config.settings.lm.llm_stream_ttft_timeout_seconds", 0.05)
+    monkeypatch.setattr("base.config.settings.lm.llm_non_streaming_fallback_timeout_seconds", 0.05)
     fake_llm = MagicMock()
     fake_llm.astream.return_value = _hang_immediately()
 
@@ -99,11 +97,9 @@ async def test_stall_mid_stream_raises_with_chunk_count(
         yield AIMessageChunk(content="!")
         await asyncio.Future()  # hangs after 3 chunks
 
-    monkeypatch.setattr("shared.config.settings.lm.llm_stream_ttft_timeout_seconds", 10.0)
-    monkeypatch.setattr("shared.config.settings.lm.llm_stream_inter_chunk_timeout_seconds", 0.05)
-    monkeypatch.setattr(
-        "shared.config.settings.lm.llm_non_streaming_fallback_timeout_seconds", 0.05
-    )
+    monkeypatch.setattr("base.config.settings.lm.llm_stream_ttft_timeout_seconds", 10.0)
+    monkeypatch.setattr("base.config.settings.lm.llm_stream_inter_chunk_timeout_seconds", 0.05)
+    monkeypatch.setattr("base.config.settings.lm.llm_non_streaming_fallback_timeout_seconds", 0.05)
     fake_llm = MagicMock()
     fake_llm.astream.return_value = _stream_then_hang()
 
@@ -137,8 +133,8 @@ async def test_normal_stream_completes_no_stall_timeout(
         )
 
     # 1.0s timeout is generous for a normal stream (zero latency), but it is a test value, not the production default
-    monkeypatch.setattr("shared.config.settings.lm.llm_stream_ttft_timeout_seconds", 1.0)
-    monkeypatch.setattr("shared.config.settings.lm.llm_stream_inter_chunk_timeout_seconds", 1.0)
+    monkeypatch.setattr("base.config.settings.lm.llm_stream_ttft_timeout_seconds", 1.0)
+    monkeypatch.setattr("base.config.settings.lm.llm_stream_inter_chunk_timeout_seconds", 1.0)
     fake_llm = MagicMock()
     fake_llm.astream.return_value = _normal_stream()
     state = AgentState(messages=[HumanMessage(content="hi")], halted=False)
@@ -265,7 +261,7 @@ async def test_stall_pair_fallback_runs_under_the_stream_segment_bound(
     """The post-stall fallback is bounded by the SAME key/value as its stream
     segment — a hanging fallback with a tiny segment bound must be cut at that
     bound, not at the 600s fallback ceiling."""
-    monkeypatch.setattr("shared.config.settings.lm.llm_stream_ttft_timeout_seconds", 0.1)
+    monkeypatch.setattr("base.config.settings.lm.llm_stream_ttft_timeout_seconds", 0.1)
     monkeypatch.setattr(settings.lm, "llm_non_streaming_fallback_timeout_seconds", 600.0)
 
     async def _hang_immediately() -> AsyncIterator[AIMessageChunk]:
@@ -332,7 +328,7 @@ async def test_stall_events_carry_provider_health_fields(
     """The stall + pair events carry vendor/model/stage (the 09-14/15 wave was
     100% api.deepseek.com yet nothing in the telemetry said so) plus the
     segment's elapsed time — the fields LogQL and the OTLP histogram key on."""
-    monkeypatch.setattr("shared.config.settings.lm.llm_stream_ttft_timeout_seconds", 0.05)
+    monkeypatch.setattr("base.config.settings.lm.llm_stream_ttft_timeout_seconds", 0.05)
     monkeypatch.setattr(settings.lm, "llm_non_streaming_fallback_timeout_seconds", 0.05)
 
     async def _hang_immediately() -> AsyncIterator[AIMessageChunk]:

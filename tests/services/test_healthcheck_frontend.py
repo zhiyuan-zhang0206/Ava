@@ -21,7 +21,7 @@ def _owner_of_this_process():
     """A real OwnedProcess for the pytest process — the lineage check runs for real."""
     import psutil
 
-    from shared.native_process.ownership import OwnedProcess
+    from base.native_process.ownership import OwnedProcess
 
     return OwnedProcess.capture(psutil.Process(os.getpid()))
 
@@ -105,7 +105,7 @@ def _root_response(*, state: str, pid: int) -> dict[str, object]:
 def _stub_root_client(
     monkeypatch: pytest.MonkeyPatch, *, response: object = None, unreachable: bool = False
 ) -> None:
-    from shared.native_process.root_control.client import RootClientError
+    from base.native_process.root_control.client import RootClientError
 
     class _Client:
         def __init__(self, _socket_path: Path, *, timeout: float = 1.0) -> None:
@@ -116,7 +116,7 @@ def _stub_root_client(
                 raise RootClientError("no root answers")
             return response
 
-    monkeypatch.setattr("shared.native_process.root_control.client.RootClient", _Client)
+    monkeypatch.setattr("base.native_process.root_control.client.RootClient", _Client)
 
 
 def test_expected_owner_reads_the_tree_when_root_driven(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -130,7 +130,7 @@ def test_expected_owner_ignores_the_session_record_when_root_driven(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The unit's own management mode is authoritative — no cross-reading."""
-    from shared.sessions.record import SessionRecord
+    from base.sessions.record import SessionRecord
 
     _stub_root_client(monkeypatch, response=_root_response(state="running", pid=os.getpid()))
 

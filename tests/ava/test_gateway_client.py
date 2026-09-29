@@ -12,7 +12,7 @@ from unittest.mock import MagicMock, patch
 import httpx
 import pytest
 
-from shared.agents import GatewayUnavailable
+from base.agents import GatewayUnavailable
 
 # --- raise_from_response ---
 
@@ -34,7 +34,7 @@ class TestRaiseFromResponse:
         resp.status_code = 404
         resp.json.return_value = {"reason": "agent_not_found", "detail": "agent 99 not found"}
 
-        from shared.agents import AgentNotFound
+        from base.agents import AgentNotFound
 
         with pytest.raises(AgentNotFound, match="agent 99 not found"):
             raise_from_response(resp)
@@ -293,7 +293,7 @@ class TestPostTimeoutContract:
         5s default rather than `AVA_GATEWAY_HTTP_TIMEOUT_SECONDS`.
         """
         import ava.gateway_client.transport as gc
-        from shared.config import settings
+        from base.config import settings
 
         monkeypatch.setattr(gc, "_client", None)  # pyright: ignore[reportUnknownMemberType]
         monkeypatch.setattr(settings.gateway, "gateway_client_http_timeout_seconds", 20.0)  # pyright: ignore[reportUnknownMemberType]
@@ -549,8 +549,8 @@ class TestTransientHttpRetry:
         gateway's own deadline has already spent that time, so re-sending only
         re-queues behind the same congestion."""
         from ava import gateway_client as gc
-        from shared.agents import IndexerUnavailable
-        from shared.config import settings
+        from base.agents import IndexerUnavailable
+        from base.config import settings
 
         fail = _transient_resp(503, {"reason": "indexer_unavailable", "detail": "busy"})
         mock_client.post.return_value = fail
@@ -595,7 +595,7 @@ class TestTransientHttpRetry:
         with reason indexer_unavailable raises IndexerUnavailable (the error
         callers catch to degrade), not a generic transport error."""
         from ava.gateway_client.transport import post, raise_from_response
-        from shared.agents import IndexerUnavailable
+        from base.agents import IndexerUnavailable
 
         fail = _transient_resp(503, {"reason": "indexer_unavailable", "detail": "embed failed"})
         mock_client.post.return_value = fail

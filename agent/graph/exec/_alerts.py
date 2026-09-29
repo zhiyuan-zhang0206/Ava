@@ -22,7 +22,7 @@ import threading
 import time
 from typing import Any
 
-from shared.log import logger
+from base.log import logger
 
 # One bootstrap-failure alert per process per window: an outage fails every
 # exec, and the point is one visible signal (plus a slow reminder), not a row
@@ -40,7 +40,7 @@ _rate_lock = threading.Lock()
 
 def _payload(agent_id: int, exc_type: str, exc_msg: str) -> dict[str, Any]:
     """Alertmanager-webhook-shaped payload (one alert instance, firing)."""
-    from shared.cluster.machine import machine_name
+    from base.cluster.machine import machine_name
 
     labels = {
         "alertname": _ALERT_NAME,
@@ -73,7 +73,7 @@ def _post(agent_id: int, exc_type: str, exc_msg: str) -> None:
     try:
         import httpx
 
-        from shared.cluster.machine import gateway_api_base, gateway_auth_headers
+        from base.cluster.machine import gateway_api_base, gateway_auth_headers
 
         resp = httpx.post(
             f"{gateway_api_base()}/api/alerts",

@@ -17,8 +17,8 @@ from pydantic import ValidationError
 
 from ava_builtins.skill_support.self_evolution.audit import LeakPaths, invalidated, scan
 from ava_builtins.skill_support.self_evolution.label import label
-from shared.agents.history.checkpoint import CheckpointReadError, load_checkpoint_messages_full
-from shared.telemetry.audit_events import SkillInvokedPayload
+from base.agents.history.checkpoint import CheckpointReadError, load_checkpoint_messages_full
+from base.telemetry.audit_events import SkillInvokedPayload
 
 # Chinese correction keywords — user is redirecting or correcting the agent.
 CN_CORRECTION_KEYWORDS = [

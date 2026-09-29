@@ -76,9 +76,9 @@ Anything derivable from the code — modules, endpoints, schemas, wiring, data
 flow — lives in the OKF graph, never in `conventions/`. The graph is
 **co-located**: most `.ava.okf.md` files sit inside the source trees they
 describe (`agent/`, `ava/`, `ava_builtins/`, `cli/`, `ui/web/`, `gateway/`,
-`services/`, `shared/`); the rest are index-layer nodes in `okf/`.
+`services/`, `base/`); the rest are index-layer nodes in `okf/`.
 
-Hierarchy is filesystem-derived (`shared/packages/docs/okf_graph.py:compute_parent`):
+Hierarchy is filesystem-derived (`base/packages/docs/okf_graph.py:compute_parent`):
 `<dir>/<dir>.ava.okf.md` is the overview node for `<dir>/`, and the other files
 inside `<dir>/` are its children (user ruling 2026-08-12: a directory's
 overview lives *inside* the directory, not beside it at the parent level).
@@ -167,7 +167,7 @@ directory) when the domain's shape changed:
 | Gateway routes / SSE / auth | `gateway/gateway.ava.okf.md` |
 | CLI commands / cluster lifecycle | `cli/cli.ava.okf.md` |
 | Frontend | `ui/web/web.ava.okf.md` |
-| Shared library / LM providers / config / migrations | `shared/shared.ava.okf.md` |
+| Shared library / LM providers / config / migrations | `base/base.ava.okf.md` |
 | Background services | `services/services.ava.okf.md` |
 | GitHub Actions / CI workflows | `.github/.github.ava.okf.md` |
 | Plugins / extension points | `okf/plugins/plugins.ava.okf.md` |

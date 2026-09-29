@@ -23,8 +23,8 @@ from pathlib import Path
 import psycopg
 import pytest
 
+from base.deploy.progress_timeout import NO_PROGRESS_TIMEOUT_S
 from services.agent_ops import daemon, health
-from shared.deploy.progress_timeout import NO_PROGRESS_TIMEOUT_S
 
 _REPO = Path(__file__).resolve().parents[3]
 
@@ -413,7 +413,7 @@ async def test_dispatch_resurrect_refusal_fails_with_its_reason(
 ) -> None:
     """A resurrection refusal is a durable verdict, returned in the wire form
     the caller classifies (`ResurrectRefused: <reason>`), not a dispatch crash."""
-    from shared.agents import ResurrectRefused
+    from base.agents import ResurrectRefused
 
     monkeypatch.setattr(daemon, "_db_pool", _stub_pool())
 
@@ -435,7 +435,7 @@ async def test_dispatch_wire_error_carries_reason(monkeypatch: pytest.MonkeyPatc
     so the gateway's _raise_proxied_wire_error_from_payload can re-emit."""
     monkeypatch.setattr(daemon, "_db_pool", _stub_pool())
 
-    from shared.agents import AgentNotFound
+    from base.agents import AgentNotFound
 
     async def _raises(  # type: ignore[no-untyped-def]
         path, body, pool, *, trigger_inbound_id=None, trigger_inbound_kind=None
@@ -723,7 +723,7 @@ def test_main_logs_and_exits_nonzero_on_an_uncaught_crash(tmp_path: Path) -> Non
 
     Driven in a subprocess because `main` ends in shared `hard_exit` and never
     returns — the price of skipping the interpreter teardown that a wedged arm
-    hangs in (see `shared.daemon.shutdown`). The contract it used to keep by re-raising is the
+    hangs in (see `base.daemon.shutdown`). The contract it used to keep by re-raising is the
     same one asserted here, just observed from outside: logged, and rc != 0."""
     script = textwrap.dedent(f"""
         import sys
@@ -768,13 +768,13 @@ def test_register_boot_announces_this_unit_up(monkeypatch: pytest.MonkeyPatch) -
     The URL comes from the shared `unit_dial_url()` with this unit's capability
     set, so the daemon cannot advertise a different address than `ava start` did.
     """
-    from shared.cluster.machine import reset_identity, set_identity
+    from base.cluster.machine import reset_identity, set_identity
 
     calls: list[str | None] = []
-    monkeypatch.setattr("shared.cluster.machines.register_self", lambda *, url: calls.append(url))  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr("shared.cluster.machine.reachable_host", lambda: "10.0.0.2")
+    monkeypatch.setattr("base.cluster.machines.register_self", lambda *, url: calls.append(url))  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("base.cluster.machine.reachable_host", lambda: "10.0.0.2")
     monkeypatch.setattr(
-        "shared.daemon.health.health_port",
+        "base.daemon.health.health_port",
         lambda name: 8600 if name == "ops" else 0,  # pyright: ignore[reportUnknownArgumentType]
     )
     set_identity(name="wsl", role="agent-runner")
@@ -793,15 +793,15 @@ def test_register_boot_failure_does_not_stop_the_daemon(
     logged and swallowed. Exiting here would hand the watchdog a respawn loop and
     take the host dark for the gateway — the outage this call exists to prevent.
     """
-    from shared.cluster.machine import reset_identity, set_identity
+    from base.cluster.machine import reset_identity, set_identity
 
     def _boom(*, url: str | None = None) -> None:
         raise RuntimeError("central postgres unreachable")
 
-    monkeypatch.setattr("shared.cluster.machines.register_self", _boom)
-    monkeypatch.setattr("shared.cluster.machine.reachable_host", lambda: "10.0.0.2")
+    monkeypatch.setattr("base.cluster.machines.register_self", _boom)
+    monkeypatch.setattr("base.cluster.machine.reachable_host", lambda: "10.0.0.2")
     monkeypatch.setattr(
-        "shared.daemon.health.health_port",
+        "base.daemon.health.health_port",
         lambda name: 8600 if name == "ops" else 0,  # pyright: ignore[reportUnknownArgumentType]
     )
     logged: list[str] = []
@@ -828,14 +828,14 @@ def test_register_boot_unstops_a_host_that_came_back(monkeypatch: pytest.MonkeyP
     """
     import psycopg
 
-    from shared.cluster import machines
-    from shared.cluster.machine import reset_identity, set_identity
-    from shared.config import settings
+    from base.cluster import machines
+    from base.cluster.machine import reset_identity, set_identity
+    from base.config import settings
 
-    monkeypatch.setattr("shared.cluster.machines.ava_home", lambda: "~/.ava")
-    monkeypatch.setattr("shared.cluster.machine.reachable_host", lambda: "10.0.0.9")
+    monkeypatch.setattr("base.cluster.machines.ava_home", lambda: "~/.ava")
+    monkeypatch.setattr("base.cluster.machine.reachable_host", lambda: "10.0.0.9")
     monkeypatch.setattr(
-        "shared.daemon.health.health_port",
+        "base.daemon.health.health_port",
         lambda name: 8600 if name == "ops" else 0,  # pyright: ignore[reportUnknownArgumentType]
     )
     with psycopg.connect(settings.data_plane.db_url) as conn, conn.cursor() as cur:
@@ -868,7 +868,7 @@ def ops_pool() -> object:
     non-DB stand-in and cannot serve it)."""
     from psycopg_pool import ConnectionPool
 
-    from shared.config import settings
+    from base.config import settings
 
     pool = ConnectionPool(settings.data_plane.db_url, min_size=1, max_size=2, open=True)
     try:

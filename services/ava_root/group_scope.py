@@ -11,9 +11,9 @@ import os
 
 import psutil
 
+from base.native_process.group_closure import group_empty, group_members
+from base.native_process.ownership import OwnedProcess, capture_tree, retain_processes
 from services.ava_root.custody import ServiceCustody
-from shared.native_process.group_closure import group_empty, group_members
-from shared.native_process.ownership import OwnedProcess, capture_tree, retain_processes
 
 _log = logging.getLogger(__name__)
 

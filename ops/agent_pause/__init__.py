@@ -9,7 +9,7 @@ Update-family drains additionally reap their stragglers (`reap=True`, task
 was issued is CAS-marked 'restarting' — the durable truncation signal — and
 released with the honest `reaped` outcome, never a fabricated flush receipt.
 Its mark is settled at the successor boot or local resume
-(`shared/deploy/maintenance/straggler_reap.py`), which restores the row to runnable and lets the
+(`base/deploy/maintenance/straggler_reap.py`), which restores the row to runnable and lets the
 ordinary reconcile re-deliver its claimed work on the new code.
 
 The `probe` submodule reads the running local host's maintenance capability
@@ -24,13 +24,13 @@ from datetime import UTC, datetime
 from typing import NamedTuple
 from uuid import UUID, uuid4
 
+from base.agents.incarnation.resource_admission import DRAINED_RESOURCES
+from base.cluster.machine import machine_name, machine_role
+from base.db import connect, publish_inbound_wake
+from base.deploy.maintenance import admission, cohort, pause_owner
+from base.deploy.maintenance.hold_driver import HoldDriver
+from base.deploy.maintenance.state import MaintenanceHold
 from ops.agent_pause.probe import HostIdentity, host_identity, host_running
-from shared.agents.incarnation.resource_admission import DRAINED_RESOURCES
-from shared.cluster.machine import machine_name, machine_role
-from shared.db import connect, publish_inbound_wake
-from shared.deploy.maintenance import admission, cohort, pause_owner
-from shared.deploy.maintenance.hold_driver import HoldDriver
-from shared.deploy.maintenance.state import MaintenanceHold
 
 _log = logging.getLogger(__name__)
 
@@ -63,14 +63,14 @@ def _lifecycle_wait_seconds() -> float:
     Task #3591: 0 disables the wait (the pre-#3591 refuse-immediately
     behavior); maintenance-authored commands never wait regardless.
     """
-    from shared.config import settings
+    from base.config import settings
 
     return settings.gateway.pause_lifecycle_wait_seconds
 
 
 def _emit_lifecycle_wait(waited: float, outcome: str, agents: tuple[int, ...]) -> None:
     """One row per wait episode (task #3591): duration, outcome, agents waited on."""
-    from shared import telemetry
+    from base import telemetry
 
     telemetry.emit(
         "telemetry",
@@ -172,7 +172,7 @@ def _prepare_cohort(
 
 def _straggler_reap_seconds() -> float:
     """The straggler window W in seconds; 0 disables the reap (task #4016)."""
-    from shared.config import settings
+    from base.config import settings
 
     return settings.gateway.update_straggler_reap_seconds
 
@@ -308,7 +308,7 @@ def _reap_agents(
     for agent in marked:
         admission.record_reaped(agent, "update_straggler_reap")
     if marked:
-        from shared import telemetry
+        from base import telemetry
 
         telemetry.emit(
             "telemetry",

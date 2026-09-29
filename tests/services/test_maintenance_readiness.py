@@ -15,16 +15,16 @@ import pytest
 from fastapi.testclient import TestClient
 from psycopg_pool import ConnectionPool, PoolTimeout
 
+from base import config
+from base.cluster.auth import bearer_header
+from base.config import settings
+from base.deploy.lifecycle import start_serving
+from base.deploy.maintenance import admission, pause_owner
+from base.deploy.maintenance.state import MaintenanceHold
+from base.deploy.state import host_deploy_state
+from base.host.env import runtime_config as rt
 from gateway.app import app
 from services.agent_ops import daemon
-from shared import config
-from shared.cluster.auth import bearer_header
-from shared.config import settings
-from shared.deploy.lifecycle import start_serving
-from shared.deploy.maintenance import admission, pause_owner
-from shared.deploy.maintenance.state import MaintenanceHold
-from shared.deploy.state import host_deploy_state
-from shared.host.env import runtime_config as rt
 from tests.agent.test_maintenance import WHEN
 from tests.agent.test_maintenance import isolate as isolate
 
@@ -162,7 +162,7 @@ def _authenticated(monkeypatch: pytest.MonkeyPatch) -> str:
     secret = uuid4().hex
     monkeypatch.setattr(settings.data_plane, "cluster_secret", secret)
     monkeypatch.setattr(settings.gateway, "auth_middleware_enabled", True)
-    monkeypatch.setattr("shared.paths.ava_home", rt._ava_home)
+    monkeypatch.setattr("base.paths.ava_home", rt._ava_home)
     return secret
 
 
@@ -197,9 +197,9 @@ def test_a_runners_held_first_start_joins_a_held_gateway(
     """The cutover's W9: the runner's first start joins (`_join`) with the bundle
     the gateway's data-plane cutover issued, while the gateway's own hold still
     stands, over the gateway's real middleware stack."""
+    from base.cluster.authority import unit
+    from base.host.env import bootstrap
     from cli import start_intent
-    from shared.cluster.authority import unit
-    from shared.host.env import bootstrap
 
     secret = _authenticated(monkeypatch)
     runner = (tmp_path / "runner").resolve()

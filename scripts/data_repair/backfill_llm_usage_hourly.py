@@ -16,7 +16,7 @@ second run over the same file rewrites identical values.
     .venv/bin/python scripts/data_repair/backfill_llm_usage_hourly.py \
         --input ~/.ava/workspaces/5804/llm-usage-extract-full.jsonl
 
-Row shape is the `llm_usage` event payload (`shared/events/contract.py:LlmUsage`):
+Row shape is the `llm_usage` event payload (`base/events/contract.py:LlmUsage`):
 `ts` plus an `attributes` object carrying the four token counters and, when the
 call was priced, the usage-time `cost_usd` snapshot.
 """
@@ -33,8 +33,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from shared.config import settings
-from shared.db.transaction import write_transaction
+from base.config import settings
+from base.db.transaction import write_transaction
 
 # The 2x peak-price window opened at this instant. It starts AFTER the extract's
 # last row (2026-08-13), so on today's archive every hour prices as off-peak and
@@ -138,7 +138,7 @@ def read_rows(path: Path) -> Iterator[dict[str, Any]]:
 
 @contextmanager
 def _dialing(db_url: str) -> Generator[None]:
-    """Point `shared.db` at `db_url` for the duration.
+    """Point `base.db` at `db_url` for the duration.
 
     The connection helpers read `settings.data_plane.db_url` rather than take a
     URL, and going through them is what keeps the guard, the keepalives, and the

@@ -44,7 +44,7 @@ _DEEPSEEK_TABLE = """
 </main></html>
 """
 
-_PLUGIN_SOURCE = """from shared.lm.provider_api import PricePeriod, PriceRates, PriceTier, PriceWindow, register
+_PLUGIN_SOURCE = """from base.lm.provider_api import PricePeriod, PriceRates, PriceTier, PriceWindow, register
 
 register(
     None,
@@ -130,7 +130,7 @@ def _sync_fixture(
                 ],
             }
         )
-    archive_path = repo_root / "shared/lm/pricing_catalog_archive.json"
+    archive_path = repo_root / "base/lm/pricing_catalog_archive.json"
     archive_path.parent.mkdir(parents=True)
     archive_path.write_text(
         json.dumps(
@@ -264,7 +264,7 @@ def test_deepseek_parser_rejects_an_unknown_pricing_meter(band: str) -> None:
 
 
 def _reviewed_catalog() -> dict[str, Any]:
-    return json.loads((_REPO_ROOT / "shared/lm/pricing_catalog_archive.json").read_text())
+    return json.loads((_REPO_ROOT / "base/lm/pricing_catalog_archive.json").read_text())
 
 
 def _without_recorded_succession(catalog: dict[str, Any]) -> dict[str, Any]:

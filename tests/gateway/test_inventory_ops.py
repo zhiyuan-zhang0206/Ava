@@ -19,10 +19,10 @@ from pathlib import Path
 import pytest
 
 import ava.mcp_config as mcp_cfg_mod
+from base.packages.plugins import enable_config, mcp_enabled
 from ops import inventory as ops
 from ops.inventory import inventory_read_op, inventory_write_op
 from ops.rpc_schemas import FieldWriteResult
-from shared.packages.plugins import enable_config, mcp_enabled
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -41,9 +41,9 @@ def _machine_only_mcp(unit_home: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     there, and the test env has no AVA_MACHINE_SERVE_* set."""
     monkeypatch.setattr(mcp_cfg_mod, "builtin_mcp_paths", list)
     monkeypatch.setattr(mcp_cfg_mod, "_plugin_config_paths", list)
-    # is_agent_runner() (the ops precondition) reads shared.cluster.machine.machine_role;
+    # is_agent_runner() (the ops precondition) reads base.cluster.machine.machine_role;
     # ops.machine_role is only used to format the rejection message. Pin both.
-    monkeypatch.setattr("shared.cluster.machine.machine_role", lambda: frozenset({"agent-runner"}))
+    monkeypatch.setattr("base.cluster.machine.machine_role", lambda: frozenset({"agent-runner"}))
     monkeypatch.setattr(ops, "machine_role", lambda: frozenset({"agent-runner"}))
     return unit_home
 
@@ -201,7 +201,7 @@ def test_inventory_ops_reject_gateway(monkeypatch: pytest.MonkeyPatch) -> None:
     """On a gateway both ops raise before touching any local file — the
     invariant that inventory is agent-runner-only, made loud rather than silently
     surfacing the gateway checkout's built-in plugins/MCP."""
-    monkeypatch.setattr("shared.cluster.machine.machine_role", lambda: frozenset({"gateway"}))
+    monkeypatch.setattr("base.cluster.machine.machine_role", lambda: frozenset({"gateway"}))
     monkeypatch.setattr(ops, "machine_role", lambda: frozenset({"gateway"}))
     with pytest.raises(RuntimeError, match="only on an agent-runner"):
         inventory_read_op()

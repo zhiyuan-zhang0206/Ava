@@ -25,13 +25,13 @@ from agent.ownership.corpse_reap import reap_recrashed_corpse
 from agent.ownership.hosted import TurnSettlement, settle_and_stamp_turn
 from agent.ownership.inbound import RuntimeOwnershipLostError
 from agent.startup import reconcile_claimed_inbounds_at_startup
+from base.config import settings
+from base.log import logger
+from base.native_process.runtime_incarnation import RuntimeIncarnation
+from base.native_process.turn_identity import bind_turn_identity, hosted_resources_settled
 from services.agent_host.crash_recovery import recover_reaped_corpses
 from services.agent_host.db_recovery import database_phase
 from services.agent_host.runtime import TurnOutcome
-from shared.config import settings
-from shared.log import logger
-from shared.native_process.runtime_incarnation import RuntimeIncarnation
-from shared.native_process.turn_identity import bind_turn_identity, hosted_resources_settled
 
 __all__ = [
     "close_hosted_turn",

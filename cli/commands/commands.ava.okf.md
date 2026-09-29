@@ -48,7 +48,7 @@ The package root keeps only what several domains share or what must not move:
 (first-start field resolution), `_probe` (identity-bound service diagnostics,
 read by `lifecycle/` and the cluster health probe), `release_inventory.py`
 ([[release-inventory.ava.okf.md]]) and `_release_plugin_probe.py`. The last is a
-cross-version contract: `shared/deploy/release/runtime_prepare.py` names it in a `-c` program
+cross-version contract: `base/deploy/release/runtime_prepare.py` names it in a `-c` program
 that the candidate image's own interpreter runs, so a preparer of one version
 imports it from an image of another; it stays at this path.
 

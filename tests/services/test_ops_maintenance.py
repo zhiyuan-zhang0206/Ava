@@ -9,12 +9,12 @@ from typing import Any
 
 import pytest
 
+from base.daemon.health import stop_health_server
+from base.daemon.http_transport import start_daemon_http
+from base.deploy.maintenance import pause_owner
+from base.deploy.maintenance.state import MaintenanceHold
 from services.agent_ops import daemon
 from services.agent_ops import maintenance as activity
-from shared.daemon.health import stop_health_server
-from shared.daemon.http_transport import start_daemon_http
-from shared.deploy.maintenance import pause_owner
-from shared.deploy.maintenance.state import MaintenanceHold
 from tests.agent.test_maintenance import WHEN
 from tests.agent.test_maintenance import isolate as isolate
 

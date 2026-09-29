@@ -7,7 +7,7 @@ import sys
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
-from shared.host.system.job_observation import (
+from base.host.system.job_observation import (
     NativeReadUnavailableError,
     launchd_loaded,
     native_read,

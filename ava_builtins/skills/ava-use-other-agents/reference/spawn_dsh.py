@@ -41,8 +41,8 @@ import time
 from pathlib import Path
 
 import ava
-from shared.agents import AgentNotFound, AgentStatus
-from shared.sessions import coding_session_owner
+from base.agents import AgentNotFound, AgentStatus
+from base.sessions import coding_session_owner
 
 _HERE = Path(__file__).resolve().parent
 _PLUGIN = _HERE / "ava-relay-dsh" / "ava-relay.mjs"

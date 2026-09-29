@@ -16,7 +16,7 @@ def test_missing_approved_pin_is_reported(monkeypatch: pytest.MonkeyPatch) -> No
             subprocess.CompletedProcess([], 0, stdout="postgresql@17\nredis\n"),
         ]
     )
-    monkeypatch.setattr("shared.host.proc.run_bounded", query)
+    monkeypatch.setattr("base.host.proc.run_bounded", query)
     assert brew_pins().verdict.value == "down"
     assert query.call_args_list[0].args[0] == ["brew", "list", "--pinned"]
     assert all(call.kwargs["timeout"] == 5 for call in query.call_args_list)
@@ -24,7 +24,7 @@ def test_missing_approved_pin_is_reported(monkeypatch: pytest.MonkeyPatch) -> No
 
 def test_command_failure_is_not_an_empty_pin_set(monkeypatch: pytest.MonkeyPatch) -> None:
     query = Mock(side_effect=subprocess.CalledProcessError(1, "brew"))
-    monkeypatch.setattr("shared.host.proc.run_bounded", query)
+    monkeypatch.setattr("base.host.proc.run_bounded", query)
     with pytest.raises(subprocess.CalledProcessError):
         brew_pins()
 

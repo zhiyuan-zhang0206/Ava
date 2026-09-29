@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 import ava.skills as skills_mod
-from shared.packages.extensions import install_registry
+from base.packages.extensions import install_registry
 
 
 @pytest.fixture(autouse=True)
@@ -874,7 +874,7 @@ def test_auto_promote_help_renders_root_skill(
 #
 # Dash is canonical on disk and in `identifier`; underscore is the Python
 # projection rendered by `target` and used for attribute access. Everything in
-# between folds through `shared.packages.skills.names.match_key`.
+# between folds through `base.packages.skills.names.match_key`.
 
 
 def test_dash_dir_renders_dash_identifier_and_underscore_target(fake_skills_dir: Path) -> None:
@@ -960,7 +960,7 @@ def test_two_skills_claiming_one_frontmatter_name_are_refused(fake_skills_dir: P
     identity check fires first."""
     _write_skill(fake_skills_dir, "first", "name: first\ndescription: a")
     _write_skill(fake_skills_dir, "second", "name: first\ndescription: b")
-    from shared.packages.skills.names import SkillIdentityMismatch
+    from base.packages.skills.names import SkillIdentityMismatch
 
     with pytest.raises(SkillIdentityMismatch):
         skills_mod.names()
@@ -1397,7 +1397,7 @@ def test_a_swallowed_db_error_reports_failure(
     def _boom(*_a: object, **_k: object) -> None:
         raise RuntimeError("emitter broken")
 
-    monkeypatch.setattr("shared.telemetry.audit_events.insert_event_log_many", _boom)
+    monkeypatch.setattr("base.telemetry.audit_events.insert_event_log_many", _boom)
     (skill,) = skills_mod.names()
     assert skills_mod._insert_skill_events(1, [skill]) is False
 
@@ -1416,7 +1416,7 @@ def test_insert_skill_events_writes_only_the_loaded_depth(
     def _capture(*, payloads: list[dict[str, str]], **_: object) -> None:
         captured.extend(payloads)
 
-    monkeypatch.setattr("shared.telemetry.audit_events.insert_event_log_many", _capture)
+    monkeypatch.setattr("base.telemetry.audit_events.insert_event_log_many", _capture)
     (skill,) = skills_mod.names()
     assert skills_mod._insert_skill_events(1, [skill]) is True
     assert captured == [{"skill": "alpha", "identifier": "alpha", "invocation_depth": "loaded"}]
@@ -1484,7 +1484,7 @@ def test_frontmatter_name_not_folding_to_dir_is_refused(
     family as SkillNameCollision)."""
     _write_skill(fake_skills_dir, "wechat-ocr", "name: wechat\ndescription: read wechat")
     monkeypatch.setattr(install_registry, "loadable_skill_names", lambda: {"wechat-ocr"})
-    from shared.packages.skills.names import SkillIdentityMismatch
+    from base.packages.skills.names import SkillIdentityMismatch
 
     with pytest.raises(SkillIdentityMismatch):
         skills_mod.names()

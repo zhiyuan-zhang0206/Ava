@@ -32,7 +32,7 @@ dependencies = [
     "langchain-google-genai>=4.2.4",
     "langchain-openai>=0.3",
     "langchain-moonshot>=0.1.0",
-    # Imported by name in shared/agents/history/hierarchy/tokens.py (hierarchy budget
+    # Imported by name in base/agents/history/hierarchy/tokens.py (hierarchy budget
     # accounting in o200k tokens); already resolved transitively through
     # langchain-openai — declared here because the repo imports it directly.
     "tiktoken>=0.14",
@@ -51,14 +51,14 @@ dependencies = [
     "milvus-lite==3.1.1; sys_platform != 'win32'",  # mirrors pymilvus's extra marker
     # The runtime startup-hook gate retains the original locked setuptools
     # wheel — its distutils-precedence .pth is the one non-editable helper the
-    # release admits (shared/deploy/release/runtime_release.py). It rode in transitively via
+    # release admits (base/deploy/release/runtime_release.py). It rode in transitively via
     # pymilvus until pymilvus 3.0.1 dropped the requirement; declared
     # explicitly so the lock always carries exactly one wheel.
     "setuptools>=82",
     "pyte>=0.8.0",  # terminal emulation screen model for PTY sessions (S6 step 2)
     "traceloop-sdk>=0.61",
-    # Imported directly: shared/telemetry/tracing.py (span exporter, OTLP protobuf encode)
-    # and shared/telemetry/otlp/telemetry_otlp.py (OTLP/HTTP logs + metrics exporters).
+    # Imported directly: base/telemetry/tracing.py (span exporter, OTLP protobuf encode)
+    # and base/telemetry/otlp/telemetry_otlp.py (OTLP/HTTP logs + metrics exporters).
     # Transitively pulled by traceloop-sdk already; declared here because we
     # import them by name.
     "opentelemetry-sdk>=1.30",
@@ -123,7 +123,7 @@ build-backend = "hatchling.build"
 packages = ["ava", "cli", "agent", "shared", "ops", "gateway", "services", "ava_builtins"]
 
 [tool.hatch.build.targets.wheel.force-include]
-# Existing consumers resolve these siblings of shared/. Keep their relative
+# Existing consumers resolve these siblings of base/. Keep their relative
 # layout in the installed application; no Git checkout is needed to read them.
 "db/schema.sql" = "db/schema.sql"
 "migrations" = "migrations"
@@ -173,30 +173,30 @@ dev = [
 # `plugins` is left ungoverned (the built-in ava_compact is intentionally
 # coupled to the agent kernel, so agent <-> plugins is cyclic by design).
 [tool.importlinter]
-root_packages = ["shared", "ava", "agent", "gateway", "cli", "ops", "services", "ava_builtins"]
+root_packages = ["base", "ava", "agent", "gateway", "cli", "ops", "services", "ava_builtins"]
 
 [[tool.importlinter.contracts]]
-name = "Layered architecture (shared < ava < agent < gateway < cli)"
+name = "Layered architecture (base < ava < agent < gateway < cli)"
 type = "layers"
 layers = [
     "cli",
     "gateway",
     "agent",
     "ava",
-    "shared",
+    "base",
 ]
 
 # The hosted runner is a supervised service that intentionally runs agent turns
 # in-process. State that exceptional direction explicitly, rather than letting
 # its narrow whitelist below make the broader services package look unlayered.
 [[tool.importlinter.contracts]]
-name = "Hosted agent runner (shared < ava < agent < services.agent_host)"
+name = "Hosted agent runner (base < ava < agent < services.agent_host)"
 type = "layers"
 layers = [
     "services.agent_host",
     "agent",
     "ava",
-    "shared",
+    "base",
 ]
 
 # Every supervision daemon reaches agents by SPAWNING them (ops/agent_launch.py
@@ -264,15 +264,15 @@ ignore_imports = [
     "services.hierarchy_worker.execute -> agent.llm",
 ]
 
-# The one reverse edge shared must never grow: `shared` is the bottom layer,
+# The one reverse edge shared must never grow: `base` is the bottom layer,
 # and `services` sits above it (daemons that import gateway). The alerts
 # module used to import services.im_bridge.copy for its IM templates — moved
-# down to shared/telemetry/alerts_copy.py (tech audit 2026-08-24 P1); this contract
+# down to base/telemetry/alerts_copy.py (tech audit 2026-08-24 P1); this contract
 # locks the direction so no new shared -> services edge can creep back in.
 [[tool.importlinter.contracts]]
-name = "shared must not import services"
+name = "base must not import services"
 type = "forbidden"
-source_modules = ["shared"]
+source_modules = ["base"]
 forbidden_modules = ["services"]
 
 # Ops layer: shared < ops < {gateway, cli}. The ops module (Spec / Status /
@@ -281,17 +281,17 @@ forbidden_modules = ["services"]
 # reach up into them. A standalone layers contract (not folded into the main stack)
 # because ops's relationship to ava/agent is still being untangled. The gateway
 # <-> cli HTTP API contracts that BOTH speak (MachineStatus / Config*) are
-# downshifted to `shared.api_contracts` — below both ops and gateway — so cli
+# downshifted to `base.api_contracts` — below both ops and gateway — so cli
 # decodes a gateway response without importing up; ops keeps only the
 # gateway<->runner RPC-shared closure (ops/rpc_schemas/__init__.py). See
 # ops/ops-module.md.
 [[tool.importlinter.contracts]]
-name = "Ops layer (shared < ops < {gateway, cli})"
+name = "Ops layer (base < ops < {gateway, cli})"
 type = "layers"
 layers = [
     "gateway | cli",
     "ops",
-    "shared",
+    "base",
 ]
 
 [tool.ruff]
@@ -329,7 +329,7 @@ select = [
     "TRY",          # tryceratops (try/except best practices)
     "FBT",          # boolean trap
     "ANN",          # type annotations
-    "T20",          # flake8-print: framework code logs via shared.log.logger, not print()
+    "T20",          # flake8-print: framework code logs via base.log.logger, not print()
 ]
 ignore = [
     "E501",         # line too long — formatter handles
@@ -358,7 +358,7 @@ ignore = [
 # telemetry / retry-policy readers sit outside node signatures, so a blanket
 # ban is not possible. New uses need a written justification in the PR
 # description before joining the per-file-ignores allowlist below.
-"contextvars" = { msg = "contextvars is allowlisted only — owners: shared/native_process/turn_identity.py, shared/config/turn_view.py, shared/packages/plugins/config_view.py, shared/packages/plugins/context.py, shared/events/live/redis_client.py, gateway/mcp_server/endpoint.py, ava/sdk_surface/help.py, ava/sdk_surface/discovery.py, services/agent_host/runtime.py (audit 2026-08-27). New use needs a written justification in the PR description." }
+"contextvars" = { msg = "contextvars is allowlisted only — owners: base/native_process/turn_identity.py, base/config/turn_view.py, base/packages/plugins/config_view.py, base/packages/plugins/context.py, base/events/live/redis_client.py, gateway/mcp_server/endpoint.py, ava/sdk_surface/help.py, ava/sdk_surface/discovery.py, services/agent_host/runtime.py (audit 2026-08-27). New use needs a written justification in the PR description." }
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["S101", "PLR2004", "SLF001", "ARG001", "ARG002", "ANN", "FBT", "RUF001", "RUF002", "RUF003"]
@@ -421,19 +421,19 @@ ignore = [
 # contextvar mechanism owners — the only files allowed to import contextvars
 # (allowlist lock, user ruling 2026-08-27, audit #3607). New use points must be
 # justified in the PR description before joining this list.
-"shared/native_process/turn_identity.py" = ["TID251"]
+"base/native_process/turn_identity.py" = ["TID251"]
 # SDK async tasks must not share active call frames or borrowed identity.
-"shared/agents/sdk/telemetry.py" = ["TID251"]
-"shared/config/turn_view.py" = ["TID251"]
-"shared/packages/plugins/config_view.py" = ["TID251"]
-"shared/packages/plugins/context.py" = ["TID251"]
-"shared/events/live/redis_client.py" = ["TID251"]
+"base/agents/sdk/telemetry.py" = ["TID251"]
+"base/config/turn_view.py" = ["TID251"]
+"base/packages/plugins/config_view.py" = ["TID251"]
+"base/packages/plugins/context.py" = ["TID251"]
+"base/events/live/redis_client.py" = ["TID251"]
 "gateway/mcp_server/endpoint.py" = ["TID251"]
 "ava/sdk_surface/help.py" = ["TID251"]
 "ava/sdk_surface/discovery.py" = ["TID251"]
 "services/agent_host/runtime.py" = ["TID251"]
 # tests may import contextvars to exercise the propagation contracts
-"tests/shared/test_turn_identity.py" = ["TID251"]
+"tests/base/test_turn_identity.py" = ["TID251"]
 "tests/agent/test_turn_scoped_retry.py" = ["TID251"]
 
 [tool.ruff.lint.isort]
@@ -542,7 +542,7 @@ directory = "htmlcov"
 # attribute, wrong call signature) + enforces type annotation completeness in this repo.
 # Every strict rule that produces actionable signal here stays at error level and blocks merge.
 # The reportUnknown*/reportMissing* family is run on a LADDER (see reportUnknown* block below):
-# "warning" globally + "error" on the shared/ops/services core via executionEnvironments.
+# "warning" globally + "error" on the base/ops/services core via executionEnvironments.
 # Measured cost (origin/main, pyright 1.1.402): 11319 total findings, of which 85% (9644) land in
 # tests/ — monkeypatch lambdas, fake-helper signatures, and untyped-assignment scaffolding that is
 # idiomatic test-stub style, not a bug signal. The historical "third-party stacks lack stubs"
@@ -596,7 +596,7 @@ reportMissingTypeStubs = false
 reportPrivateUsage = "none"
 reportUnusedFunction = "none"
 # Ladder (see the [tool.pyright] header for cost data): global "warning" makes all 11319 Unknown/
-# Missing findings visible in the IDE and CI logs without gating merge; the shared/ops/services
+# Missing findings visible in the IDE and CI logs without gating merge; the base/ops/services
 # executionEnvironments below raise these same seven rules to "error" on the core layers, where the
 # 234 real findings have been annotated away. tests/ stays at warning — its 9644 findings are
 # monkeypatch/fake-helper stub idiom, not bugs, and gating them would be pure churn.
@@ -620,7 +620,7 @@ reportUnnecessaryIsInstance = "none"
 # roots carried 234 findings on origin/main, all fixed. Expand outward (gateway / agent / ava …) by
 # adding roots here once each layer is annotated.
 [[tool.pyright.executionEnvironments]]
-root = "shared"
+root = "base"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 reportUnknownVariableType = "error"
@@ -705,7 +705,7 @@ reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
-root = "tests/shared"
+root = "tests/base"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 

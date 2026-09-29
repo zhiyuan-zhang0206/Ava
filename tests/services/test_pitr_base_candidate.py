@@ -285,7 +285,7 @@ def test_validate_replication_hba_wraps_probe_failure(
 
 
 def _scratch_pg(tmp_path: Path) -> tuple[Path, Path, int]:
-    from shared.cluster.dataplane.pg_tools import pg_tool
+    from base.cluster.dataplane.pg_tools import pg_tool
 
     sock = Path(tempfile.mkdtemp(prefix="ava-pg-sock-", dir="/tmp"))
     data = tmp_path / "pg"
@@ -342,7 +342,7 @@ def test_validate_replication_contract_fails_closed_without_replication_row(
     """Real PG 17: a `host all all` loopback row passes every normal-connection
     probe yet still refuses pg_basebackup — the preflight must catch exactly
     that state BEFORE the backup runs."""
-    from shared.cluster.dataplane.pg_tools import pg_tool
+    from base.cluster.dataplane.pg_tools import pg_tool
 
     data, sock, port = _scratch_pg(tmp_path)
     admin = f"postgresql://ava@/postgres?host={sock}&port={port}"
@@ -593,11 +593,11 @@ def test_a_capture_that_fails_its_own_verification_is_rejected_not_resumed(
 # ─── the worker's own records ───────────────────────────────────────────────
 
 # The worker's real `main`, with its request replaced by a loguru warning:
-# a record written only through loguru, like the ones `shared.db` and
-# `shared.cluster.dataplane.pg_tools` write while a candidate is prepared.
+# a record written only through loguru, like the ones `base.db` and
+# `base.cluster.dataplane.pg_tools` write while a candidate is prepared.
 _WORKER = """
 from services.pitr import base_worker
-from shared.log import logger
+from base.log import logger
 
 
 def request(_argv):
@@ -632,17 +632,17 @@ def test_the_base_workers_loguru_records_reach_its_stderr_and_log(tmp_path: Path
 
 
 # The restore worker's real `main`, with its request replaced by a loguru
-# warning: a record written only through loguru, like the ones `shared.cluster.dataplane.pg_tools`
+# warning: a record written only through loguru, like the ones `base.cluster.dataplane.pg_tools`
 # writes while a candidate is restored.
 _RESTORE_WORKER = """
 import sys
 from services.pitr import restore_worker
-from shared.log import logger
+from base.log import logger
 
 
 def request(_argv):
     logger.warning("restore worker probe warning")
-    raise SystemExit(1 if "shared.config" in sys.modules else 0)
+    raise SystemExit(1 if "base.config" in sys.modules else 0)
 
 
 restore_worker.worker_request = request
@@ -654,7 +654,7 @@ def test_the_restore_workers_loguru_records_reach_its_stderr_without_settings() 
     """Its stderr is the operation's `stderr.log`, whose tail a failure carries.
     The worker runs with no authority (no HOME, no AVA_HOME), so its sink opens
     without building Settings."""
-    from shared.native_process.child_env import restricted_process_env
+    from base.native_process.child_env import restricted_process_env
 
     environment = restricted_process_env()
     assert "HOME" not in environment and not any(name.startswith("AVA_") for name in environment)

@@ -12,9 +12,9 @@ from typing import Any
 import psycopg
 import pytest
 
+from base.config import settings
 from services.im_bridge.core import IMBridgeCore
 from services.im_bridge.notice_bridge import NoticeBridge, _state_dir
-from shared.config import settings
 
 
 class FakeGateway:
@@ -358,7 +358,7 @@ def test_cmd_notice_filter_updates_and_persists(
 def _direct_bridge(db_conn: psycopg.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     from psycopg_pool import ConnectionPool
 
-    from shared.config import settings
+    from base.config import settings
 
     pool = ConnectionPool(settings.data_plane.db_url, min_size=1, max_size=2, open=True)
     monkeypatch.setattr(settings.general, "ava_home", tmp_path)

@@ -3,7 +3,7 @@
 Run: `.venv/bin/python scripts/audit/split_reexports.py <module> [<module> ...]`
 from the repo root, e.g. the W3 split surface:
 
-    .venv/bin/python scripts/audit/split_reexports.py shared.events.contract shared.deploy.schema.migrations
+    .venv/bin/python scripts/audit/split_reexports.py base.events.contract base.deploy.schema.migrations
 
 ## Why
 
@@ -12,7 +12,7 @@ the origin module as a re-export facade. The AST byte-identity check that
 proves moved definitions unchanged covers def/class bodies only — module-level
 constants (and other names) are not in that diff. A missed re-export is an
 ImportError that only surfaces at runtime, in a burst (PR #1729 QA BLOCK:
-`UNANCHORED_DB_SENTINEL` missed by `shared.db`'s re-export list failed 11
+`UNANCHORED_DB_SENTINEL` missed by `base.db`'s re-export list failed 11
 shards). This script is the split's reference-completeness gate.
 
 ## What it checks
@@ -91,7 +91,7 @@ def main(argv: list[str]) -> int:
         "modules",
         nargs="+",
         metavar="MODULE",
-        help="origin (facade) module to audit, e.g. shared.deploy.schema.migrations",
+        help="origin (facade) module to audit, e.g. base.deploy.schema.migrations",
     )
     args = parser.parse_args(argv)
     failed = False

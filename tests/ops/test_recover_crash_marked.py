@@ -14,12 +14,12 @@ from typing import Any, NamedTuple
 import psycopg
 import pytest
 
+from base.agents import AgentNotFound
+from base.cluster.machine import machine_name
+from base.telemetry import Event
 from ops import lifecycle
 from ops.agents.spawn import create_agent_row
 from ops.rpc_schemas import RecoverCrashMarkedResponse
-from shared.agents import AgentNotFound
-from shared.cluster.machine import machine_name
-from shared.telemetry import Event
 
 
 class _Stubs(NamedTuple):

@@ -16,10 +16,10 @@ from typing import cast
 
 import psutil
 
-from shared.cluster import ownership
-from shared.host.private_storage import write_private_bytes
-from shared.native_process.os_platform import LockTimeoutError, file_lock
-from shared.native_process.ownership import OwnedProcess
+from base.cluster import ownership
+from base.host.private_storage import write_private_bytes
+from base.native_process.os_platform import LockTimeoutError, file_lock
+from base.native_process.ownership import OwnedProcess
 
 
 def _native_birth(identity: OwnedProcess) -> dict[str, int | float | None]:

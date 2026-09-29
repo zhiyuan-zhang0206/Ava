@@ -26,7 +26,7 @@ The four hook container nodes (after_init / before_llm / before_exec / after_exe
 ### 4. SDK Namespace Registration
 `ava.register_namespace(name, module)` — registers a new namespace under `ava.*` (e.g., `ava.cwd` from the ava_code plugin). The registered object is also placed in `sys.modules` as `ava.<name>`, so `import ava.<name>` resolves to the same object as attribute access; SimpleNamespace namespaces are materialized as real modules. `ava.register_sdk_expand(name)` promotes that namespace into the system prompt's expanded SDK reference. `ava.register_namespace_member(namespace, name, fn)` — attaches a callable member to an already-registered namespace (used by ava_fleet to inject task helpers); all three are exported from `ava/__init__.py`.
 
-### 5. Plugin Config (`shared/packages/plugins/config_registration.py`)
+### 5. Plugin Config (`base/packages/plugins/config_registration.py`)
 Two-phase design:
 - `register_plugin_config(Cls)` — registers a Pydantic BaseModel class
 - `bind_from_disk()` — the framework reads from `~/.ava/configs/<plugin>/config.json` and instantiates
@@ -35,7 +35,7 @@ Config instances are frozen (`ConfigDict(frozen=True)`) and cannot be modified b
 
 ## The surface catalog + registration attribution
 Every `register_*` entry point above also writes one record to the attribution
-ledger (`shared/packages/plugins/contributions.py`): which surface, what identifier
+ledger (`base/packages/plugins/contributions.py`): which surface, what identifier
 (the hook point, the `ava` namespace, the wrap target, the state channel key —
 spelled as `ava-plugin.json` declares it), and which plugin, read off the
 `PluginContext` the loader opens. Only registrations made inside that context are
@@ -61,7 +61,7 @@ keyed by the same triple: [[activation-telemetry.ava.okf.md]].
 - [[agents-contract.ava.okf.md]] — `PluginContext` ContextVar ensures registration isolation
 
 ## Entry Points
-- `shared/packages/plugins/enable_config.py:discover_plugins()` — filesystem scan for `ava_builtins/plugins/<name>/plugin.py` (built-in) and `~/.ava/plugins/<name>/plugin.py` (external)
+- `base/packages/plugins/enable_config.py:discover_plugins()` — filesystem scan for `ava_builtins/plugins/<name>/plugin.py` (built-in) and `~/.ava/plugins/<name>/plugin.py` (external)
 - `agent/extensions/__init__.py:load_extensions()` — imports plugins according to the enabled set (each `plugin.py` import wrapped with `with PluginContext(name):`), after which `bind_from_disk()` uniformly instantiates configs. A plugin's optional `agent_runtime.py` face loads on the full form only ([[okf/plugins/module-loading/two-faces.ava.okf.md]]); `agent/graph/_build.py` calls it directly at graph-build time. Import mechanics, load order and reload semantics: [[okf/plugins/module-loading/module-loading.ava.okf.md]].
 - `agent/graph/_build.py:build_graph()` — at build time calls `make_hook_runner` to snapshot hook lists
 - `agent/state.py:build_agent_state()` — at build time merges all plugins' state fields

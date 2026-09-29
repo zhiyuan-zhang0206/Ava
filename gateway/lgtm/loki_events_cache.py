@@ -18,7 +18,7 @@ from collections import OrderedDict
 from dataclasses import dataclass, field
 from datetime import datetime
 
-from shared.config import settings
+from base.config import settings
 
 # 60s matches the dashboard poll rhythm (a second 30s poll reuses the first
 # result) and the panel is a non-alerting read path, so up-to-60s staleness is

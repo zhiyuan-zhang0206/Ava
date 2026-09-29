@@ -5,7 +5,7 @@ Regression lock for Task #1408 (2026-08-26): the mirror-backfill consumer
 ``collect()``, so byte-identical duplicate rows the emitter writes twice
 (~7% of mirror rows on 08-24/25, same surrogate id) inflated backfilled
 datasets. It now dedupes on the surrogate event id mirror rows carry since
-PR #356 (``shared/telemetry.event_id``), matching
+PR #356 (``base/telemetry.event_id``), matching
 ``collect._fetch_events_window``'s None-id handling.
 """
 

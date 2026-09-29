@@ -32,8 +32,8 @@ from typing import cast
 
 import psutil
 
-from shared.host.proc import run_bounded
-from shared.native_process.ownership import OwnedProcess, capture_tree, leader_owns_pids
+from base.host.proc import run_bounded
+from base.native_process.ownership import OwnedProcess, capture_tree, leader_owns_pids
 
 HELPER_BUNDLE_ID = "com.ava.permissions-helper"
 """Fixed across clusters so one TCC grant covers all (the grant keys on this)."""
@@ -52,8 +52,8 @@ def helper_job_label(home: Path | None = None) -> str:
     Per-cluster, keyed on the home-path slug (path-only identity); the bundle id
     (the TCC grant) stays shared across clusters.
     """
-    from shared.cluster import home_slug
-    from shared.paths import ava_home
+    from base.cluster import home_slug
+    from base.paths import ava_home
 
     return f"{HELPER_BUNDLE_ID}.{home_slug(ava_home() if home is None else home)}"
 

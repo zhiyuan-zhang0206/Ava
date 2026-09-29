@@ -16,9 +16,9 @@ from pathlib import Path
 
 import pytest
 
+from base.api_contracts.config import ConfigFieldView
+from base.host.env import runtime_config
 from cli.commands.management import config as cfg
-from shared.api_contracts.config import ConfigFieldView
-from shared.host.env import runtime_config
 
 _KEY = "AVA_IMPERSONATION_EVENT_MANIFEST_CERTIFICATION_SECRET"
 
@@ -34,7 +34,7 @@ def test_manifest_certification_secret_provisioning_surface(
 ) -> None:
     """All three proofs for the field: local write allowed, remote write
     rejected, masking preserved (task #4719)."""
-    from shared.config import get_config_metadata
+    from base.config import get_config_metadata
 
     secret = "ab" * 32  # 64 chars; the field requires >= 32
     (local_env_home / ".env").write_text("OTHER=kept\n")

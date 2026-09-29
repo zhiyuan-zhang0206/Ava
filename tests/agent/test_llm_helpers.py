@@ -31,8 +31,8 @@ from langgraph.types import Command
 from agent.graph import llm_node
 from agent.graph._base_prompt import _capture_ava_overview, _get_ava_overview
 from agent.state import AgentState
-from shared.agents.context import AvaContext
-from shared.events.live.projection import EVENT_ADAPTER, Cancelled
+from base.agents.context import AvaContext
+from base.events.live.projection import EVENT_ADAPTER, Cancelled
 from tests.agent._fakes import make_fake_ops_pool
 
 _CONFIG: RunnableConfig = {"configurable": {"thread_id": "7"}}
@@ -585,7 +585,7 @@ async def test_silent_idle_zero_output_reasoning_content_consumes_minimum_budget
 ) -> None:
     """Reasoning-content-only turns cannot bypass the silent-idle cost guard."""
     from agent.graph.llm.node import _silent_idle_output_tokens
-    from shared.config import settings
+    from base.config import settings
 
     _silent_idle_output_tokens.pop("7", None)
     monkeypatch.setattr(settings.lm, "llm_silent_idle_max_output_tokens", 3)
@@ -646,7 +646,7 @@ async def test_llm_node_permanent_provider_error_fails_fast_with_structured_fiel
     The RetryPolicy excludes FatalProviderError, so the agent idles instead of
     burning the ~16-min backoff budget and dying."""
     from agent.graph.llm_errors import FatalProviderError, _consecutive_errors
-    from shared.config import settings
+    from base.config import settings
 
     _consecutive_errors.pop("7", None)
     fake_llm = MagicMock()
@@ -673,8 +673,8 @@ async def test_llm_node_billing_error_logs_billing_vendor_and_model(
 ) -> None:
     """Provider 402 logs the billing flag, vendor, and model for alert routing."""
     from agent.graph.llm_errors import FatalProviderError, _consecutive_errors
-    from shared.config import settings
-    from shared.lm.context_budget import ContextBudget
+    from base.config import settings
+    from base.lm.context_budget import ContextBudget
 
     def fixture_budget(_model: str) -> ContextBudget:
         return ContextBudget(10_000, 3_000, 4_000)
@@ -726,7 +726,7 @@ async def test_llm_node_configured_fatal_error_type_fails_fast() -> None:
     in-turn is futile, so it becomes a FatalProviderError (error_class records the
     transient nature; fatal=True records the fail-fast action)."""
     from agent.graph.llm_errors import FatalProviderError, _consecutive_errors
-    from shared.config import settings
+    from base.config import settings
 
     _consecutive_errors.pop("7", None)
     original = settings.lm.llm_fatal_provider_error_types
@@ -754,7 +754,7 @@ async def test_llm_node_configured_fatal_error_type_fails_fast() -> None:
 async def test_silent_idle_guard_halts_at_cumulative_output_token_cap(loguru_records) -> None:
     """Silent-idle output consumes one token budget and reports its cost."""
     from agent.graph.llm.node import _silent_idle_output_tokens
-    from shared.config import settings
+    from base.config import settings
 
     _silent_idle_output_tokens.pop("7", None)
     cap = settings.lm.llm_silent_idle_max_output_tokens
@@ -992,7 +992,7 @@ def test_parse_provider_error_type_empty_string() -> None:
 def test_is_fatal_provider_error_type_matches_configured() -> None:
     """When the error type is in the configured fatal set, returns True."""
     from agent.graph.llm_errors import _is_fatal_provider_error_type
-    from shared.config import settings
+    from base.config import settings
 
     original = settings.lm.llm_fatal_provider_error_types
     try:
@@ -1008,7 +1008,7 @@ def test_is_fatal_provider_error_type_matches_configured() -> None:
 def test_is_fatal_provider_error_type_not_in_set() -> None:
     """Error type not in the configured set returns False."""
     from agent.graph.llm_errors import _is_fatal_provider_error_type
-    from shared.config import settings
+    from base.config import settings
 
     original = settings.lm.llm_fatal_provider_error_types
     try:
@@ -1022,7 +1022,7 @@ def test_is_fatal_provider_error_type_not_in_set() -> None:
 def test_is_fatal_provider_error_type_empty_config() -> None:
     """Empty configured set is a fast no-op (always returns False)."""
     from agent.graph.llm_errors import _is_fatal_provider_error_type
-    from shared.config import settings
+    from base.config import settings
 
     original = settings.lm.llm_fatal_provider_error_types
     try:

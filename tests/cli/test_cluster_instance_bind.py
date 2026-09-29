@@ -13,8 +13,8 @@ from typing import cast
 
 import pytest
 
+from base.config import settings
 from cli.commands.data_plane import cluster_instance as _ci
-from shared.config import settings
 
 
 def _no_native_effect(*_args: object, **_kwargs: object) -> None:
@@ -46,7 +46,7 @@ _ALWAYS_AUTH_LOOPBACK = [
 
 
 def _pg_socket_path(root: Path, home: Path) -> Path:
-    from shared.cluster import home_slug
+    from base.cluster import home_slug
 
     return root / f"ava-pg-{home_slug(home)}"
 
@@ -428,7 +428,7 @@ def test_running_redis_persists_the_authenticated_password_to_its_config(
 def test_redis_config_keeps_previous_complete_value_when_replace_fails(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    from shared.host import private_storage
+    from base.host import private_storage
 
     conf = tmp_path / "redis.conf"
     conf.write_text('requirepass "old-complete"\n')

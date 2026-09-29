@@ -13,8 +13,8 @@ import cli.commands.lifecycle._start_readiness_preflight as _start_readiness_pre
 import cli.commands.lifecycle.root_driver as _root_driver_commands
 import cli.commands.lifecycle.start as _start_commands
 import cli.commands.lifecycle.stop as _stop_commands
+from base.deploy.lifecycle.start_serving import RootBirth
 from cli.commands.lifecycle.stop import _force_stop
-from shared.deploy.lifecycle.start_serving import RootBirth
 from tests.cli._commands_helpers import (
     _FakeResponse,
     _FakeResult,
@@ -101,7 +101,7 @@ def test_cmd_restart_finishes_the_journal_only_when_it_owns_it(
 ) -> None:
     """An outer operation's still-running journal is never closed by the nested
     restart — the owns_journal guard _temporary_stop keeps (task #2898)."""
-    from shared.deploy.lifecycle import status_journal
+    from base.deploy.lifecycle import status_journal
 
     monkeypatch.setattr(_repo_commands, "_preflight_probes", lambda: 0)
     monkeypatch.setattr(
@@ -155,7 +155,7 @@ def test_cmd_restart_aborts_when_preflight_fails(monkeypatch: pytest.MonkeyPatch
     """When preflight probes fail, cmd_restart aborts without stopping — and says so
     with its OWN exit code, since "nothing was stopped, host still serving" is what
     the detached updater must not run `ava start` over."""
-    from shared.agents.exit_codes import RESTART_DECLINED_EXIT_CODE
+    from base.agents.exit_codes import RESTART_DECLINED_EXIT_CODE
 
     stopped: list[bool] = []
     start_called: list[bool] = []
@@ -181,7 +181,7 @@ def test_cmd_restart_aborts_when_start_readiness_fails(monkeypatch: pytest.Monke
     probes gate, with stop and start neither run. The gate is called with
     `check_launcher=False`: this start is in-process and never execs
     `.venv/bin/ava`."""
-    from shared.agents.exit_codes import RESTART_DECLINED_EXIT_CODE
+    from base.agents.exit_codes import RESTART_DECLINED_EXIT_CODE
 
     stopped: list[bool] = []
     start_called: list[bool] = []
@@ -248,7 +248,7 @@ def test_stop_proceeds_on_yes(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_stop_revokes_serving_before_stopping_root(
     serving_root: RootBirth, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    from shared.deploy.lifecycle import start_serving
+    from base.deploy.lifecycle import start_serving
 
     monkeypatch.setattr(start_serving, "state_path", lambda: tmp_path / "start-serving.json")
     generation = start_serving.begin_start()
@@ -376,10 +376,10 @@ def test_cmd_stop_announces_stopping_after_confirm_before_teardown(
     /api/cluster/stopping?machine=<self>&home=<self-home> before the local
     teardown (so the cluster view shows 'stopped', not 'offline'). `home`
     identifies THIS unit so a co-located peer keeps its caps."""
-    from shared.paths import ava_home
+    from base.paths import ava_home
 
     _patch_gateway_http(monkeypatch)
-    monkeypatch.setattr("shared.cluster.machine.machine_name", lambda: "test-host")
+    monkeypatch.setattr("base.cluster.machine.machine_name", lambda: "test-host")
     events: list[str] = []
     calls: list[tuple[str, dict]] = []
 
@@ -405,7 +405,7 @@ def test_cmd_stop_aborted_confirm_does_not_announce(
     announce stamps `machines.stopped_at`, and only the next `ava start` clears
     it — an announce fired before the gate would mark a running host 'stopped'."""
     _patch_gateway_http(monkeypatch)
-    monkeypatch.setattr("shared.cluster.machine.machine_name", lambda: "test-host")
+    monkeypatch.setattr("base.cluster.machine.machine_name", lambda: "test-host")
     monkeypatch.setattr("builtins.input", lambda _prompt: "n")  # pyright: ignore[reportUnknownArgumentType]
     events: list[str] = []
     monkeypatch.setattr("httpx.post", lambda *_a, **_kw: events.append("announce"))  # pyright: ignore[reportUnknownArgumentType]
@@ -423,7 +423,7 @@ def test_cmd_stop_proceeds_when_announce_fails(
     """If the stopping announce can't reach the gateway, `ava stop` logs and still
     tears down — the announce is best-effort, never a blocker."""
     _patch_gateway_http(monkeypatch)
-    monkeypatch.setattr("shared.cluster.machine.machine_name", lambda: "wsl")
+    monkeypatch.setattr("base.cluster.machine.machine_name", lambda: "wsl")
 
     def _boom(*_a, **_kw):
         raise RuntimeError("connection refused")

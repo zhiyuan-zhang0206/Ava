@@ -4,11 +4,11 @@
 'restarting' while its maintenance restart is still un-applied — the durable
 truncation signal `agent.db.has_pending_interrupt` turns into an abort for the
 member's in-flight turn. The turn's next fail-closed guard read
-(`agent.impersonation.protect_native_hooks` -> `shared.agents.impersonation.native_status`)
+(`agent.impersonation.protect_native_hooks` -> `base.agents.impersonation.native_status`)
 then refuses it: the row's status has left (running, idling). That refusal is a
 *deliberate* truncation, not an ownership loss — the drain already released the
 member with the honest `reaped` receipt and a successor boundary settles the
-mark (`shared.deploy.maintenance.straggler_reap`). Classifying it here lets the host end the turn
+mark (`base.deploy.maintenance.straggler_reap`). Classifying it here lets the host end the turn
 as truncated instead of recording an unclassified crash; every other ownership
 loss still raises (fail-closed, unchanged).
 
@@ -25,10 +25,10 @@ from contextlib import asynccontextmanager
 
 from psycopg_pool import AsyncConnectionPool
 
+from base.agents.impersonation import ImpersonationError
+from base.log import logger
+from base.native_process.runtime_incarnation import RuntimeIncarnation, current_incarnation
 from services.agent_host.runtime import TurnOutcome
-from shared.agents.impersonation import ImpersonationError
-from shared.log import logger
-from shared.native_process.runtime_incarnation import RuntimeIncarnation, current_incarnation
 
 __all__ = ["reap_truncation_outcome", "reap_truncation_stop"]
 

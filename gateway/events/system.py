@@ -17,9 +17,9 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
+from base.config import settings
+from base.events.live.projection import GLOBAL_ROLES, SYSTEM_ROLES
 from gateway.events.sse import event_stream, throttled_event_stream
-from shared.config import settings
-from shared.events.live.projection import GLOBAL_ROLES, SYSTEM_ROLES
 
 router = APIRouter()
 

@@ -25,11 +25,11 @@ from agent.ownership.hosted import (
     TurnSettlement,
     admit_hosted_runtime,
 )
+from base.config import settings
+from base.db import create_agent
+from base.native_process.runtime_incarnation import RuntimeIncarnation
 from services.agent_host import settlement as settlement_mod
 from services.agent_host.runtime import TurnOutcome
-from shared.config import settings
-from shared.db import create_agent
-from shared.native_process.runtime_incarnation import RuntimeIncarnation
 
 
 def _settlement(*, crashed: bool, recrash: bool, settled: bool) -> TurnSettlement:

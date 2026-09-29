@@ -4,9 +4,9 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from functools import wraps
 
+from base.deploy.lifecycle import start_serving
+from base.deploy.maintenance import admission, pause_owner
 from cli.cutover_hold import CutoverHold, held_start_command, release_command, standing_hold
-from shared.deploy.lifecycle import start_serving
-from shared.deploy.maintenance import admission, pause_owner
 
 
 @dataclass(frozen=True)
@@ -21,7 +21,7 @@ def exclusive_resources[**P, R](operation: Callable[P, R]) -> Callable[P, R]:
 
     @wraps(operation)
     def wrapped(*args: P.args, **kwargs: P.kwargs) -> R:
-        from shared.deploy.lifecycle.home_lifecycle_locks import resource_lock
+        from base.deploy.lifecycle.home_lifecycle_locks import resource_lock
 
         with resource_lock(purpose=f"cli.{operation.__name__}"):
             return operation(*args, **kwargs)
@@ -42,7 +42,7 @@ def _start_held_for_cutover(
     start's own last step, so a failed first start is finished by the next one
     that serves (the autostart after a reboot included).
     """
-    from shared.paths import ava_home
+    from base.paths import ava_home
 
     assert current.maintenance is not None  # noqa: S101 — snapshot() only returns maintenance holds
     phase = current.maintenance.phase
@@ -76,8 +76,8 @@ def resume_after_start[**P](start: Callable[P, int | StartDelegation]) -> Callab
 
     @exclusive_resources
     def start_locked(*args: P.args, **kwargs: P.kwargs) -> int | StartDelegation:
-        from shared.deploy.release.operation import require_start_authorized
-        from shared.paths import ava_home
+        from base.deploy.release.operation import require_start_authorized
+        from base.paths import ava_home
 
         operation_hold = require_start_authorized(ava_home())
         current = admission.snapshot()

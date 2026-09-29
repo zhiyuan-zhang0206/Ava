@@ -29,8 +29,8 @@ import pytest
 from langgraph.types import RetryPolicy
 
 from agent.graph._build import _RETRY_JITTER_SPAN_S, _build_llm_retry, _TurnScopedRetryPolicy
-from shared.config import settings
-from shared.native_process.turn_identity import bind_turn_identity
+from base.config import settings
+from base.native_process.turn_identity import bind_turn_identity
 
 
 class TestPerAgentResolution:
@@ -73,7 +73,7 @@ class TestPerAgentResolution:
 
     def test_max_attempts_follows_the_turn_model(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """A per-model cap must be read per turn, not frozen at build."""
-        from shared.config.turn_view import bind_agent_config
+        from base.config.turn_view import bind_agent_config
 
         policy = _build_llm_retry()
         seen: list[str] = []
@@ -82,7 +82,7 @@ class TestPerAgentResolution:
             seen.append(model)
             return 42
 
-        monkeypatch.setattr("shared.lm.registry.resolve_setting", _fake_resolve)
+        monkeypatch.setattr("base.lm.registry.resolve_setting", _fake_resolve)
         with bind_agent_config({"llm_model": "model-for-this-agent"}):
             assert policy.max_attempts == 42
         assert seen == ["model-for-this-agent"], "the cap must resolve against the TURN's model"

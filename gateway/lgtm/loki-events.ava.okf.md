@@ -15,7 +15,7 @@ tags:
 `gateway/lgtm/loki_events.py` is the historical read path that replaced the PG
 `events` table reads (task #1197 — the LGTM cutover, user decision 2026-08-12:
 all event history reads serve from Loki). The write side
-(`shared/telemetry/otlp/telemetry_otlp.py`, [[shared/telemetry/otlp/telemetry-otlp/telemetry-otlp.ava.okf.md|OTLP exporter]])
+(`base/telemetry/otlp/telemetry_otlp.py`, [[base/telemetry/otlp/telemetry-otlp/telemetry-otlp.ava.okf.md|OTLP exporter]])
 ships every event as an OTLP log whose line body is the full event JSON and
 whose top-level fields, including the home-derived `cluster`, ride as
 structured metadata.
@@ -75,7 +75,7 @@ structured metadata.
   level / category / machine / trace_id filters. `agent_id` and `event_name`
   are the exceptions since the 2026-08-23 index-label cutover (Task #1407
   B2): the collector promotes them to stream labels, so indexed-era slices
-  match them inside `{...}` (see `shared/telemetry/loki_index_labels.py`); pre-cutover
+  match them inside `{...}` (see `base/telemetry/loki_index_labels.py`); pre-cutover
   rows keep the pipeline-filter form until legacy retention expires
   2026-08-30.
 - A plain `| json` flattens the nested `attributes` object into per-line
@@ -109,7 +109,7 @@ structured metadata.
   across the gateway's fan-out reads instead of a TCP connection per query.
 - Every HTTP query also crosses the gateway process's FIFO singleton in
   `gateway/lgtm/loki_query_budget.py`: its reusable state machine lives in
-  `shared/telemetry/loki_query_budget.py`; the gateway adapter supplies six active slots, matching Loki's deployed
+  `base/telemetry/loki_query_budget.py`; the gateway adapter supplies six active slots, matching Loki's deployed
   `querier.max_concurrent`, plus a bounded waiter queue and 10s acquisition
   deadline. Inspect, stats, events, and ops therefore share one backpressure
   boundary; timeout/cancellation always releases the slot. `queue_full` and
@@ -125,4 +125,4 @@ structured metadata.
   three functions), `tests/gateway/test_agent_inspect.py` (route tests with
   an in-memory `_FakeLoki`).
 - Parent node: [[gateway.ava.okf.md|Gateway]]; write side:
-  [[shared/telemetry/otlp/telemetry-otlp/telemetry-otlp.ava.okf.md|OTLP exporter]].
+  [[base/telemetry/otlp/telemetry-otlp/telemetry-otlp.ava.okf.md|OTLP exporter]].

@@ -27,13 +27,13 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 import ava
-import shared
+import base
 from ava.agents import AgentStatus as S
 from schedules.agent_status_guard import ensure_agent_status_members
 from schedules.catchup import claimed_slot
 from schedules.daily_host import report_agent, run_daily_loop
-from shared.config import settings
-from shared.log import init_gateway_process
+from base.config import settings
+from base.log import init_gateway_process
 
 ensure_agent_status_members(
     S,
@@ -50,9 +50,9 @@ _REPORT_LABEL = "Ava \u8d1f\u8d23\u4eba"
 # The gateway materializes this script to ~/.ava/schedules/<id>/ before
 # executing it, so a __file__-relative root resolves to ~/.ava/schedules at
 # runtime (the repo layout only matches inside the checkout). Derive the
-# source root from shared.__file__ instead: shared/ lives at the deployed
+# source root from base.__file__ instead: base/ lives at the deployed
 # source root in both places, so scripts/ci/accounting.py is always found.
-_REPO_ROOT = Path(shared.__file__).resolve().parents[1]
+_REPO_ROOT = Path(base.__file__).resolve().parents[1]
 _PROCESS_NAME = "schedule-c9-daily"
 
 # GitHub-hosted overage rates (private-repo equivalent; scripts/ci/accounting.py).
@@ -148,7 +148,7 @@ def _fire(_payload: None) -> None:
         entries = accounting.collect(accounting.DEFAULT_REPO, since, until)
         appended = accounting.append_ledger(accounting.DEFAULT_LEDGER, entries)
         init_gateway_process(name=_PROCESS_NAME)
-        from shared import telemetry
+        from base import telemetry
 
         telemetry.emit(
             "telemetry",

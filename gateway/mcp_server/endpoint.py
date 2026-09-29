@@ -41,6 +41,20 @@ from fastapi import FastAPI, HTTPException, Request
 from pydantic import Field
 from starlette.responses import JSONResponse
 
+from base.agents import AvaAgentError
+from base.agents.history.checkpoint import CheckpointReadError, load_checkpoint_messages
+from base.agents.messages.caller_identity import CallerIdentity
+from base.agents.messages.chat_delivery import ClientMessageConflictError
+from base.agents.messages.inbound_provenance import InboundProvenance
+from base.agents.observation import roster
+from base.agents.observation import snapshot as snapshot_module
+from base.api_contracts.mcp_tool_contract import (
+    project_message,
+    server_instructions,
+    tool_description,
+)
+from base.cluster.machine import machine_name
+from base.telemetry.audit_events import insert_event_log
 from gateway.agents import router as _agents_router
 from gateway.agents.delivery import deliver_chat_inbound
 from gateway.agents.lifecycle import terminate_agent_with_open_tasks
@@ -50,20 +64,6 @@ from gateway.mcp_server import clients
 from gateway.middleware.error_envelope import error_response
 from ops.agents import get_agent_status
 from ops.rpc_schemas import SpawnAgentRequest, TerminateAgentRequest
-from shared.agents import AvaAgentError
-from shared.agents.history.checkpoint import CheckpointReadError, load_checkpoint_messages
-from shared.agents.messages.caller_identity import CallerIdentity
-from shared.agents.messages.chat_delivery import ClientMessageConflictError
-from shared.agents.messages.inbound_provenance import InboundProvenance
-from shared.agents.observation import roster
-from shared.agents.observation import snapshot as snapshot_module
-from shared.api_contracts.mcp_tool_contract import (
-    project_message,
-    server_instructions,
-    tool_description,
-)
-from shared.cluster.machine import machine_name
-from shared.telemetry.audit_events import insert_event_log
 
 # Provenance of everything this surface creates. `spawner` groups the agents
 # an external tool created under their own root in the fleet views; `source`
@@ -366,7 +366,7 @@ def _register_fleet_tools(
             # The old stdio serve forwarded the gateway's `detail` verbatim;
             # in-process the same business errors are AvaAgentError instances —
             # surface their message as a tool error, not a protocol error.
-            from shared.agents import AgentLaunchFailed
+            from base.agents import AgentLaunchFailed
 
             if isinstance(exc, AgentLaunchFailed):
                 raise ToolError(
@@ -394,7 +394,7 @@ def _register_fleet_tools(
 
     @typed_server.tool(description=tool_description("get_messages", "gateway"))
     async def get_messages(agent_id: int, limit: int = _DEFAULT_MESSAGE_LIMIT) -> dict[str, Any]:
-        from shared.db import agent_exists
+        from base.db import agent_exists
 
         def _exists() -> bool:
             with pool.connection() as conn:

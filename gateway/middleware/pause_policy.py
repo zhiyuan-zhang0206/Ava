@@ -3,7 +3,7 @@
 The single consumer of the pause side of the doorplate wall: the gateway
 middleware asks `should_bypass_pause(path)` and nothing else decides.
 Exemption is a route-declared attribute (`PauseSemantics.CONTROL_PLANE`
-in `shared/api_contracts/contracts.py`), never a string special-case in middleware — so
+in `base/api_contracts/contracts.py`), never a string special-case in middleware — so
 the exempt surface is enumerable and auditable. `control_plane_surface()`
 exposes it; `tests/gateway/test_route_contracts.py` asserts the exact set,
 so a new exemption is a deliberate, reviewed change, not an incident
@@ -27,8 +27,8 @@ middleware comments):
 
 from __future__ import annotations
 
-from shared.api_contracts import contracts
-from shared.api_contracts.contracts import PauseSemantics
+from base.api_contracts import contracts
+from base.api_contracts.contracts import PauseSemantics
 
 
 def should_bypass_pause(method: str, path: str) -> bool:

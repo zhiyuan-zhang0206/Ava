@@ -12,9 +12,9 @@ from typing import Any
 
 import pytest
 
+from base.native_process.exec_domain import ExecProcessDomain
 from services.pitr.operation import worker_process
 from services.pitr.operation.custody import OperationKind
-from shared.native_process.exec_domain import ExecProcessDomain
 
 
 async def test_native_restore_result_is_atomic_before_receiver_validation(

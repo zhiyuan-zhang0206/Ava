@@ -22,6 +22,8 @@ import psycopg
 import pytest
 from psycopg_pool import ConnectionPool
 
+from base.config import settings
+from base.db import create_agent
 from gateway import ttl_reaper
 from gateway.ttl_reaper import (
     _claim_shell_row_still_expired,
@@ -33,16 +35,14 @@ from gateway.ttl_reaper import (
     lifecycle_fences,
 )
 from ops.rpc_schemas import ShellKillResult
-from shared.config import settings
-from shared.db import create_agent
 
 
 @pytest.fixture()
 def reaper_pool() -> Iterator[ConnectionPool]:
     """The reaper's own small pool (the functions take a ConnectionPool)."""
-    import shared.db
+    import base.db
 
-    pool = shared.db.pool(max_size=2)
+    pool = base.db.pool(max_size=2)
     yield pool
     pool.close()
 
@@ -121,7 +121,7 @@ def _capture_telemetry(
     emitted: list[tuple[tuple[object, ...], dict[str, object]]] = []
 
     def _capture_emit(*args: object, **kwargs: object) -> None:
-        from shared.events.contract import EVENTS
+        from base.events.contract import EVENTS
 
         assert len(args) > 1 and args[1] in EVENTS, f"unregistered emit name: {args!r}"
         emitted.append((args, kwargs))
@@ -375,7 +375,7 @@ def test_torn_pointer_scan_reports_torn_commands(
         # Mirror the production emit() contract: an unregistered name raises
         # there, so a stub that accepts one would hide exactly that class of
         # drift (PR #2667 review).
-        from shared.events.contract import EVENTS
+        from base.events.contract import EVENTS
 
         assert len(args) > 1 and args[1] in EVENTS, f"unregistered emit name: {args!r}"
         emitted.append((args, kwargs))

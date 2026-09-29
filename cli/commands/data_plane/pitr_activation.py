@@ -14,6 +14,9 @@ from typing import LiteralString
 
 import psycopg
 
+from base.cluster.dataplane.pg_tools import pg_tool
+from base.config import settings
+from base.paths import ava_home
 from cli.commands.data_plane._pitr_activation_config import (
     apply_wal_config,
     require_inactive_gate_posture,
@@ -66,9 +69,6 @@ from services.pitr.activation.state import (
     write_record_cas,
 )
 from services.pitr.stores.cos.client import credential_evidence as _cos_credential_evidence
-from shared.cluster.dataplane.pg_tools import pg_tool
-from shared.config import settings
-from shared.paths import ava_home
 
 _EMERGENCY_FLOOR_BYTES = 4 * 1024**3
 
@@ -186,8 +186,8 @@ def _validate_secrets() -> dict[str, str]:
 
 
 def read_pg_state() -> dict[str, str]:
-    from shared.cluster import db_identity, get_record, ownership, record_postgres_port
-    from shared.db import pg_admin
+    from base.cluster import db_identity, get_record, ownership, record_postgres_port
+    from base.db import pg_admin
 
     from .cluster_instance import pg_admin_url
 
@@ -352,7 +352,7 @@ def cmd_pitr_status() -> int:
 def _require_same_pg_state(expected: dict[str, str] | None, boundary: str) -> None:
     current = read_pg_state()
     if expected is not None and expected.get("postmaster_starttime"):
-        from shared.native_process.ownership import OwnedProcess
+        from base.native_process.ownership import OwnedProcess
 
         def native(state: dict[str, str]) -> OwnedProcess:
             return OwnedProcess(
@@ -578,7 +578,7 @@ def _prove_activation(home: Path, record: ActivationRecord, holder: str) -> Acti
 
 
 def rollback_record(home: Path, record: ActivationRecord) -> ActivationRecord:
-    from shared.deploy.release.operation import require_pitr_authorized
+    from base.deploy.release.operation import require_pitr_authorized
 
     require_pitr_authorized(home)
     if record.phase == "rollback_restart_pending":

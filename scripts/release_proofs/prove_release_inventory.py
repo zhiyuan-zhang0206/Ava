@@ -21,22 +21,22 @@ from uuid import uuid4
 import psutil
 import psycopg
 
-from cli.commands import release_inventory as inventory
-from shared.deploy.release.runtime_prepare import tree_inventory
-from shared.deploy.release.runtime_release import (
+from base.deploy.release.runtime_prepare import tree_inventory
+from base.deploy.release.runtime_release import (
     ReleaseRejectedError,
     VerifiedRelease,
     verify_release,
 )
-from shared.deploy.writers.observation import (
+from base.deploy.writers.observation import (
     ExpectedUnitWriters,
     ObservationChallenge,
     UnitObserver,
 )
-from shared.host.system.job_observation import NativeReadUnavailableError
-from shared.native_process import pid_starttime_ticks
-from shared.runtime_abi import current_abi
-from shared.sessions.record import SessionRecord
+from base.host.system.job_observation import NativeReadUnavailableError
+from base.native_process import pid_starttime_ticks
+from base.runtime_abi import current_abi
+from base.sessions.record import SessionRecord
+from cli.commands import release_inventory as inventory
 
 
 def require(value: bool, message: str) -> None:  # noqa: FBT001 — CI predicate.
@@ -109,7 +109,7 @@ def check_bounded_read(home: Path) -> None:
         replacement.replace(target)
         return original_open(target, flags)
 
-    with patch("shared.deploy.release.verified_file.os.open", side_effect=replace_before_open):
+    with patch("base.deploy.release.verified_file.os.open", side_effect=replace_before_open):
         try:
             inventory._regular_bytes(path)
         except ReleaseRejectedError:

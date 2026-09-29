@@ -103,7 +103,7 @@ def test_a_data_plane_birth_inside_a_release_executor_cgroup_is_rejected(
 ) -> None:
     """The r6 pooler lived in the executor's KillMode=control-group unit and
     died 90 s after the executor exited; the observer names that custody."""
-    from shared.host.system import boot_unit
+    from base.host.system import boot_unit
 
     cgroups = {
         40: "/system.slice/ava-boot.home-58520e1a.service",
@@ -172,7 +172,7 @@ def test_storage_observer_refuses_outside_the_reserved_endpoint(url: str) -> Non
 def test_every_listener_must_belong_to_the_captured_application(
     monkeypatch: pytest.MonkeyPatch, foreign: bool, clock_shift: int
 ) -> None:
-    from shared.cluster import port_preflight
+    from base.cluster import port_preflight
 
     owner = observer.OwnedProcess(40, 100.0, 400)
     child = observer.OwnedProcess(41, 100.0, 401)

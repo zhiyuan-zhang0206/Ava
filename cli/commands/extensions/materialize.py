@@ -42,9 +42,9 @@ def materialize_cluster_extensions() -> None:
     local-only result is drift; materialization is the moment a machine catches
     up.
     """
-    from shared import db, paths
-    from shared.host.converge.preserve_report import report_converge_preserve
-    from shared.packages.extensions import materialize
+    from base import db, paths
+    from base.host.converge.preserve_report import report_converge_preserve
+    from base.packages.extensions import materialize
 
     try:
         # The pool opens eagerly and owns worker threads; close it here rather
@@ -81,11 +81,11 @@ def adopt_local_extensions() -> None:
     Same failure stance as its sibling and for the same reason: a machine that
     cannot reach the cluster is behind, not broken, and the next converge
     retries. The one thing worth being loud about is a name two machines
-    disagree on, which `shared.packages.extensions.adopt` logs and this reports again on
+    disagree on, which `base.packages.extensions.adopt` logs and this reports again on
     the operator's terminal — it is the only outcome here that needs a person.
     """
-    from shared import db, paths
-    from shared.packages.extensions import adopt
+    from base import db, paths
+    from base.packages.extensions import adopt
 
     try:
         with db.pool() as pool:

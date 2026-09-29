@@ -19,11 +19,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import Literal
 
+from base.native_process.child_env import inherited_process_env
+from base.paths import ava_home
 from services.pitr.operation.custody import OperationKind, OperationWorker, publish_result
 from services.pitr.operation.worker_process import CompletedOperation, run_operation, worker_request
 from services.pitr.stores.logical_dump_names import DUMP_NAME_RE
-from shared.native_process.child_env import inherited_process_env
-from shared.paths import ava_home
 
 Job = Literal["dump", "restore"]
 
@@ -58,7 +58,7 @@ def _sanitize_restore_drill(work: Path, _worker: OperationWorker | None) -> None
     cluster; after proven closure its owner lock is released, so the
     throwaway sweep reaps it now instead of at the next throwaway start.
     """
-    from shared.cluster.dataplane.pg_tools import sweep_orphaned_throwaway_clusters
+    from base.cluster.dataplane.pg_tools import sweep_orphaned_throwaway_clusters
 
     scratch = work / "scratch"
     if scratch.is_dir() and not scratch.is_symlink():
@@ -130,8 +130,8 @@ def commit_scheduled_backup(staged: Path, digest: str) -> Path:
     published the same exclusive way. Any refusal leaves the staged artifact in
     the operation's controls for quarantine.
     """
+    from base.host.private_storage import ensure_private_dir, ensure_private_file
     from services.backup import backup_dir, prune_after_publish
-    from shared.host.private_storage import ensure_private_dir, ensure_private_file
 
     if staged.is_symlink() or not staged.is_file() or not DUMP_NAME_RE.fullmatch(staged.name):
         raise RuntimeError("scheduled backup result is not a managed regular artifact")
@@ -205,7 +205,7 @@ def _execute(request: dict[str, object], work: Path) -> dict[str, object]:
 
 def main() -> None:
     request, output = worker_request(sys.argv)
-    from shared.log import init_gateway_process
+    from base.log import init_gateway_process
 
     # The store-verified publish ACK is an INFO record: route it to the log sinks.
     init_gateway_process(name="pg-backup-worker")

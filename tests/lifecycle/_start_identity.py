@@ -12,10 +12,10 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+from base.host.private_storage import ensure_private_dir
+from base.native_process.os_platform import file_lock
 from cli import start_intent
 from cli.start_runtime import StartRuntime
-from shared.host.private_storage import ensure_private_dir
-from shared.native_process.os_platform import file_lock
 
 
 def prepare_start_identity(args: argparse.Namespace) -> Path:

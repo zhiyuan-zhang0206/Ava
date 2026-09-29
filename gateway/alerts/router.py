@@ -41,6 +41,18 @@ from fastapi.responses import StreamingResponse
 from psycopg.rows import dict_row
 from pydantic import TypeAdapter
 
+from base.agents.impersonation_manifest import retention_loss_panel
+from base.config import settings
+from base.db.transaction import write_transaction
+from base.events.live.redis_client import sync_redis
+from base.telemetry.alerts import (
+    AlertKey,
+    display_language,
+    notify_im,
+    notify_text,
+    stamp_notified,
+    upsert_alert,
+)
 from gateway.alerts.schemas import (
     AlertIngestResult,
     AlertRow,
@@ -53,18 +65,6 @@ from gateway.alerts.schemas import (
 )
 from gateway.auth.webhook import authenticate_webhook
 from gateway.events.sse import event_stream
-from shared.agents.impersonation_manifest import retention_loss_panel
-from shared.config import settings
-from shared.db.transaction import write_transaction
-from shared.events.live.redis_client import sync_redis
-from shared.telemetry.alerts import (
-    AlertKey,
-    display_language,
-    notify_im,
-    notify_text,
-    stamp_notified,
-    upsert_alert,
-)
 
 router = APIRouter()
 _log = logging.getLogger(__name__)
@@ -172,7 +172,7 @@ def publish_alert_rows(rows: list[dict[str, Any]]) -> None:
         with sync_redis() as client:
             for row in rows:
                 frame = AlertRow(**row).model_dump_json()
-                client.publish(ALERTS_CHANNEL, frame)  # pyright: ignore[reportUnknownMemberType] — redis-py from_url kwargs typed Unknown (same pattern as shared/events/live/redis_client.py)
+                client.publish(ALERTS_CHANNEL, frame)  # pyright: ignore[reportUnknownMemberType] — redis-py from_url kwargs typed Unknown (same pattern as base/events/live/redis_client.py)
     except Exception:
         _log.warning("alerts: SSE publish failed (Redis unreachable?)", exc_info=True)
 

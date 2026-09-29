@@ -21,10 +21,10 @@ from pathlib import Path
 
 import pytest
 
-from shared.cluster.dataplane import pg_tools
-from shared.cluster.dataplane import runtime_binaries as rb
-from shared.config import settings
-from shared.host.net import resilience
+from base.cluster.dataplane import pg_tools
+from base.cluster.dataplane import runtime_binaries as rb
+from base.config import settings
+from base.host.net import resilience
 
 
 @pytest.fixture()

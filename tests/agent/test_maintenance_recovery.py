@@ -10,11 +10,11 @@ from psycopg_pool import AsyncConnectionPool
 
 from agent.db import claim_inbound_batch
 from agent.ownership.hosted import admit_hosted_runtime, apply_hosted_lifecycle
+from base.cluster.machine import machine_name
+from base.deploy.maintenance import admission, cohort, pause_owner
+from base.native_process.turn_identity import bind_turn_identity
 from services.agent_host.host import AgentHost
 from services.agent_host.runtime import TurnOutcome
-from shared.cluster.machine import machine_name
-from shared.deploy.maintenance import admission, cohort, pause_owner
-from shared.native_process.turn_identity import bind_turn_identity
 from tests.agent.test_maintenance import WHEN, _agent
 from tests.agent.test_maintenance import isolate as isolate
 
@@ -131,7 +131,7 @@ async def test_cold_idle_resume_uses_pointer_without_an_extra_model_call(
 
     from agent import state as states
     from agent.graph.claim.node import claim_node
-    from shared.agents.context import AvaContext
+    from base.agents.context import AvaContext
 
     agent = _agent(db_conn)
     saver = AsyncPostgresSaver(aops_pool)

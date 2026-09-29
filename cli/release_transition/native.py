@@ -82,7 +82,7 @@ def _host_platform() -> str:
 
 def for_host(request: Request | PitrRequest) -> ModuleType:
     """The adapter admitted for a new launch on this host, checked before effects."""
-    from shared.host.system.boot_unit import systemd_running
+    from base.host.system.boot_unit import systemd_running
 
     if systemd_running():
         from cli.release_transition import launcher_linux

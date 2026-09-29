@@ -19,10 +19,10 @@ import pytest
 from fastapi.testclient import TestClient
 from psycopg_pool import ConnectionPool
 
+from base.lm.plugin_providers import ensure_provider_plugins_loaded
+from base.lm.registry import MODELS
 from gateway.app import app
 from gateway.auth.cors import cors_allowed_origins
-from shared.lm.plugin_providers import ensure_provider_plugins_loaded
-from shared.lm.registry import MODELS
 
 
 @pytest.fixture
@@ -102,7 +102,7 @@ def test_get_models_returns_grouped_supported_models() -> None:
         "cache_read": 0.4,
         "output": 20.0,
     }
-    from shared.config import settings
+    from base.config import settings
 
     assert body["default"] == settings.lm.llm_model
 
@@ -113,7 +113,7 @@ def test_get_models_surfaces_superseded_by(monkeypatch: pytest.MonkeyPatch) -> N
     and an un-superseded model carries null."""
     from dataclasses import replace
 
-    from shared.lm.registry import MODELS
+    from base.lm.registry import MODELS
 
     monkeypatch.setitem(MODELS, "glm-5.2", replace(MODELS["glm-5.2"], superseded_by="kimi-k3"))
     with TestClient(app) as client:
@@ -145,8 +145,8 @@ def test_get_models_reasoning_effort_options_match_factory_tables() -> None:
     providers must mirror their plugin binding's clamp vocabularies — a drift
     would silently offer the spawn UI a value build_chat_model then clamps
     away, or hide a value the provider actually accepts."""
-    from shared.lm import provider_api
-    from shared.lm.registry import MODELS
+    from base.lm import provider_api
+    from base.lm.registry import MODELS
 
     with TestClient(app) as client:
         resp = client.get("/api/models")
@@ -215,8 +215,8 @@ def test_get_models_reasoning_effort_default_is_the_per_model_tuning_value(
     NOT leak into the published default: the picker shows the model's own
     default, while the pin is operator policy (visible in the config panel's
     per-model view)."""
-    from shared.config import settings
-    from shared.lm.registry import MODELS
+    from base.config import settings
+    from base.lm.registry import MODELS
 
     with TestClient(app) as client:
         resp = client.get("/api/models")
@@ -695,8 +695,8 @@ class TestSystemNote:
         self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """A reassignment cannot land after validation but before task-note enqueueing."""
+        from base.db import connect, pool
         from gateway.agents import state
-        from shared.db import connect, pool
 
         enqueue_entered, release_enqueue, reassign_started, reassign_finished = (
             threading.Event(),
@@ -1113,7 +1113,7 @@ class TestList:
 class TestGetLastMessage:
     def test_any_agent_can_query_unrelated_agent(self, db_conn: psycopg.Connection) -> None:
         """Any agent in the cluster can query — not just spawn-chain ancestors."""
-        from shared.db import create_agent
+        from base.db import create_agent
 
         # Create two unrelated agents (no spawn chain).
         # create_agent inserts into agents (LangGraph thread); agents_meta
@@ -1146,7 +1146,7 @@ class TestGetLastMessage:
         self, db_conn: psycopg.Connection, isolation_column: str
     ) -> None:
         """The gateway denies the result read even if an eval agent bypasses its SDK."""
-        from shared.db import create_agent
+        from base.db import create_agent
 
         target_id = create_agent(db_conn)
         caller_id = create_agent(db_conn)
@@ -1181,7 +1181,7 @@ class TestGetLastMessage:
 
     def test_none_for_agent_without_ai_message(self, db_conn: psycopg.Connection) -> None:
         """Returns text=None when the agent has no AI message yet."""
-        from shared.db import create_agent
+        from base.db import create_agent
 
         agent_id = create_agent(db_conn)
         with db_conn.cursor() as cur:
@@ -1201,7 +1201,7 @@ class TestGetLastMessage:
 
     def test_returns_last_message_text_from_column(self, db_conn: psycopg.Connection) -> None:
         """When last_message_text is set, return it — no checkpoint needed."""
-        from shared.db import create_agent
+        from base.db import create_agent
 
         agent_id = create_agent(db_conn)
         with db_conn.cursor() as cur:
@@ -1224,7 +1224,7 @@ class TestGetLastMessage:
         self, db_conn: psycopg.Connection
     ) -> None:
         """After compact wipes the checkpoint, last_message_text still returns the last AI text."""
-        from shared.db import create_agent
+        from base.db import create_agent
 
         agent_id = create_agent(db_conn)
         with db_conn.cursor() as cur:
@@ -1247,7 +1247,7 @@ class TestGetLastMessage:
 
     def test_empty_text_reads_as_none(self, db_conn: psycopg.Connection) -> None:
         """An empty-string column value reads as None — no empty message."""
-        from shared.db import create_agent
+        from base.db import create_agent
 
         agent_id = create_agent(db_conn)
         with db_conn.cursor() as cur:
@@ -1336,7 +1336,7 @@ def test_eval_isolated_callers_cannot_read_result_surfaces(
     db_conn: psycopg.Connection, method: str, path_template: str
 ) -> None:
     """Every artifact-read endpoint blocks the SDK-bypassing eval caller."""
-    from shared.db import create_agent
+    from base.db import create_agent
 
     target_id = create_agent(db_conn)
     caller_id = create_agent(db_conn)
@@ -1376,7 +1376,7 @@ def test_result_surfaces_allow_non_isolated_and_unmarked_callers(
     path_template: str,
 ) -> None:
     """The guard leaves ordinary reads intact and preserves last-message validation."""
-    from shared.db import create_agent
+    from base.db import create_agent
 
     _stub_result_read_backends(monkeypatch)
     target_id = create_agent(db_conn)

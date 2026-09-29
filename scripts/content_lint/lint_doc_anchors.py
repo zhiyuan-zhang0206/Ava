@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Lint: every `path/to/file.py:symbol` anchor in the procedural docs must resolve.
 
-The procedural docs cite code by anchor — `` `shared/telemetry/tracing.py:turn_span` `` — so a
+The procedural docs cite code by anchor — `` `base/telemetry/tracing.py:turn_span` `` — so a
 reader can jump straight at the thing being described. Nothing validated them.
 `lint_doc_symbols.py` looks like the guard but is not: its pattern is
 `ava.<name>`, which validates the **SDK namespace** surface; a `file:symbol`

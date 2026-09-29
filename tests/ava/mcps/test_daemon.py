@@ -26,7 +26,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 import ava.mcps._daemon as daemon_mod
-from shared.config import settings
+from base.config import settings
 
 # Most tests here are deterministic (mocked I/O / pure DB side-effects) and run in
 # the parallel pool. Only the real AF_UNIX socket lifecycle smoke tests depend on
@@ -1063,7 +1063,7 @@ async def test_connect_server_enforces_requires_before_connecting(
     _write_config(fake_home, {"chrome": {"command": "npx", "requires": {"display": True}}})
     import ava.mcp_config as _cfg
 
-    # display_available is imported into mcp_config from shared.host.system.probes;
+    # display_available is imported into mcp_config from base.host.system.probes;
     # patch the bound name (where assert_requirements calls it).
     monkeypatch.setattr(_cfg, "display_available", lambda: False)
     called = False

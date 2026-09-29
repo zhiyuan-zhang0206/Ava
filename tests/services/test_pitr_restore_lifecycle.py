@@ -14,6 +14,9 @@ import psutil
 import pytest
 from pytest import MonkeyPatch
 
+from base.cluster.dataplane import pg_tools
+from base.native_process import native_boot_id
+from base.native_process.ownership import OwnedProcess
 from services.pitr.base_backup.manifest import (
     SCHEMA_VERSION,
     BaseObject,
@@ -44,9 +47,6 @@ from services.pitr.restore.proof import (
 )
 from services.pitr.stores.checksums import CRC32C, ObjectChecksum
 from services.pitr.stores.object_store import RemoteObjectAck
-from shared.cluster.dataplane import pg_tools
-from shared.native_process import native_boot_id
-from shared.native_process.ownership import OwnedProcess
 
 
 def _native(pid: int, birth: float = 1.0) -> NativeProcess:
@@ -343,7 +343,7 @@ def test_live_identity_probe_needs_no_settings_privilege() -> None:
     with no settings-read grant (the 2026-08-30 activation's InsufficientPrivilege)."""
     import psycopg
 
-    from shared.cluster.dataplane.pg_tools import throwaway_postgres
+    from base.cluster.dataplane.pg_tools import throwaway_postgres
 
     with throwaway_postgres() as url:
         admin = url.rsplit("/", 1)[0] + "/postgres"
@@ -728,7 +728,7 @@ def test_smoke_probe_accepts_a_bigint_identifier_and_a_dropped_anchor_table() ->
     import psycopg
     from psycopg import sql
 
-    from shared.cluster.dataplane.pg_tools import throwaway_postgres
+    from base.cluster.dataplane.pg_tools import throwaway_postgres
 
     with throwaway_postgres() as url:
         with psycopg.connect(url, autocommit=True) as conn, conn.cursor() as cur:

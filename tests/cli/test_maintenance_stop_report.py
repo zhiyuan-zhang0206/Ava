@@ -19,13 +19,13 @@ from types import SimpleNamespace
 import psutil
 import pytest
 
+from base.deploy.lifecycle import status_journal
+from base.native_process import ownership
+from base.native_process.ownership import OwnedProcess
+from base.sessions.record import SessionRecord
 from cli.commands.lifecycle import _maintenance_stop_report as report
 from cli.commands.lifecycle import _temporary_stop as command
 from cli.commands.lifecycle import service_stop as stop
-from shared.deploy.lifecycle import status_journal
-from shared.native_process import ownership
-from shared.native_process.ownership import OwnedProcess
-from shared.sessions.record import SessionRecord
 from tests.agent.test_maintenance import WHEN
 from tests.cli.test_maintenance_stop import Launcher
 from tests.cli.test_maintenance_stop import home as home

@@ -21,18 +21,18 @@ from typing import Any
 import psycopg
 from dotenv import dotenv_values
 
+from base.config import settings
+from base.config.physical_backup import PhysicalBackupSettings
+from base.paths import ava_home
 from services.pitr.activation.evidence import stored_digest_matches
 from services.pitr.activation.state import ActivationRecord
 from services.pitr.base_backup.manifest import CandidateManifest
 from services.pitr.restore.manifest import ProtectedManifest, candidate_sha256
 from services.pitr.wal.uploader import AckManifest
-from shared.config import settings
-from shared.config.physical_backup import PhysicalBackupSettings
-from shared.paths import ava_home
 
 
 def activation_health_component() -> dict[str, object]:
-    from shared.daemon.health_schema import DEGRADED, OK, component
+    from base.daemon.health_schema import DEGRADED, OK, component
 
     try:
         activation = ActivationRecord.from_json(
@@ -85,7 +85,7 @@ def restore_exact_file(
 ) -> None:
     payload = base64.b64decode(payload_b64, validate=True)
     if path.name == ".env":
-        from shared.host.env.dotenv_file import replace_env_bytes_cas
+        from base.host.env.dotenv_file import replace_env_bytes_cas
 
         replace_env_bytes_cas(
             path,
@@ -163,7 +163,7 @@ PITR_ENV_FIELDS = {
 
 
 def _pitr_env_baseline(payload: bytes | None = None) -> dict[str, str]:
-    from shared.host.env.dotenv_file import capture_env_bytes, env_line_key
+    from base.host.env.dotenv_file import capture_env_bytes, env_line_key
 
     path = ava_home() / ".env"
     if payload is None:
@@ -179,7 +179,7 @@ def _pitr_env_baseline(payload: bytes | None = None) -> dict[str, str]:
 
 
 def capture_pitr_env_baseline(path: Path) -> tuple[str, str, dict[str, str]]:
-    from shared.host.env.dotenv_file import capture_env_bytes
+    from base.host.env.dotenv_file import capture_env_bytes
 
     payload = capture_env_bytes(path)
     return (
@@ -237,7 +237,7 @@ def pitr_admin_url() -> str:
     the initdb superuser over the live unix socket (same face `read_pg_state`
     reads through).
 
-    Deliberately NOT `shared.db.direct_db_url()` — that derives from
+    Deliberately NOT `base.db.direct_db_url()` — that derives from
     `AVA_DB_URL`, whose identity is a write-generation login, which lacks
     `pg_switch_wal` (2026-08-30 activation failure: the WAL-switch step
     crashed with InsufficientPrivilege while every read-only preflight check
@@ -245,8 +245,8 @@ def pitr_admin_url() -> str:
     the mutation means the probe can never certify a different connection
     than the switch runs on.
     """
-    from shared.cluster import get_record, record_postgres_port
-    from shared.db.pg_admin import pg_admin_url
+    from base.cluster import get_record, record_postgres_port
+    from base.db.pg_admin import pg_admin_url
 
     record = get_record(ava_home())
     if record is None:
@@ -258,12 +258,12 @@ def pitr_admin_url() -> str:
 def pitr_admin_session() -> Generator[psycopg.Connection[Any]]:
     """`pitr_admin_url()` as an autocommit session bound to this home's postmaster.
 
-    `shared.db.pg_admin.connect` proves the backend is a native child of the
+    `base.db.pg_admin.connect` proves the backend is a native child of the
     home's recorded postmaster before any probe or mutation runs, so a server
     that is not this home's can neither certify the activation nor receive its
     WAL switch or configuration.
     """
-    from shared.db import pg_admin
+    from base.db import pg_admin
 
     with pg_admin.connect(
         pitr_admin_url(), expected_data_dir=ava_home() / "pg", autocommit=True

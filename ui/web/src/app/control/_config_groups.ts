@@ -334,7 +334,7 @@ export function isDeprecated(field: ConfigFieldView): boolean {
  * Render a config value for display — shared by the editable field rows and the
  * per-model resolution view so one value never reads two ways.
  *
- * Values arrive typed `object` on the wire (`shared/api_contracts/config.py`),
+ * Values arrive typed `object` on the wire (`base/api_contracts/config.py`),
  * so a field the backend ever grows a structured (list/dict) value for lands
  * here as-is. `String()` on a plain object is always the content-free
  * "[object Object]"; stringify it instead so such a field still shows something

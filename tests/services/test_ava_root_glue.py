@@ -12,6 +12,7 @@ from typing import cast
 
 import pytest
 
+from base.daemon.health import DaemonProbe
 from services.ava_root.health import HealthMonitor
 from services.ava_root.manifest import ROOT_ID, RestartPolicy, UnitManifest, UnitRegistry
 from services.ava_root.probes import Probe, ProbeError
@@ -19,7 +20,6 @@ from services.ava_root.supervisor import Supervisor
 from services.ava_root.wiring import WiringContext
 from services.ava_root_glue import drill, glue
 from services.ava_root_glue.diagnostics import Diagnostic, RootHealthRounds
-from shared.daemon.health import DaemonProbe
 
 _SLEEPER = [sys.executable, "-u", "-c", "import time; time.sleep(60)"]
 
@@ -234,7 +234,7 @@ def test_reference_wiring_refuses_unobserved_manifest_unit(
 async def test_glue_uses_shared_readiness_tiers_for_native_startup(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from shared.deploy.progress_timeout import (
+    from base.deploy.progress_timeout import (
         NON_CRITICAL_SERVICE_READY_TIMEOUT_S,
         SERVICE_READY_TIMEOUT_S,
     )

@@ -25,11 +25,11 @@ from fastapi.responses import StreamingResponse
 from fastapi.testclient import TestClient
 from starlette.requests import Request
 
+from base.agents import AgentStatus
+from base.api_contracts.contracts import Idempotency
 from gateway.app import app
 from gateway.middleware import idempotency
 from ops.rpc_schemas import ContentBlock
-from shared.agents import AgentStatus
-from shared.api_contracts.contracts import Idempotency
 
 
 @pytest.fixture
@@ -71,7 +71,7 @@ def test_authenticated_admin_legacy_retry_and_scoped_reconcile(
     agent_id: int,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from shared.config import settings
+    from base.config import settings
 
     secret = "principal-scope-test-secret"  # noqa: S105 — isolated test credential
     monkeypatch.setattr(settings.data_plane, "cluster_secret", secret)
@@ -103,8 +103,8 @@ def test_browser_rotation_and_bearer_share_admin_retry_namespace(
     agent_id: int,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from shared.cluster.auth import cookie_name
-    from shared.config import settings
+    from base.cluster.auth import cookie_name
+    from base.config import settings
 
     secret = "principal-rotation-test-secret"  # noqa: S105 — isolated test credential
     monkeypatch.setattr(settings.data_plane, "cluster_secret", secret)
@@ -144,7 +144,7 @@ def test_no_auth_mode_cannot_claim_verified_principal_namespace(
     agent_id: int,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from shared.config import settings
+    from base.config import settings
 
     monkeypatch.setattr(settings.gateway, "auth_middleware_enabled", False)
     response = client.post(

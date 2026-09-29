@@ -8,7 +8,7 @@ tags:
 
 # Gateway Router Design Principles
 
-- Each router is an independent file, depending on pure functions from `shared.*`/`ops.*` plus gateway internals (`gateway.events.sse`, `gateway.agents.delivery`, lazy `gateway.app` `db_pool`, spawn forwarding in `gateway.agents.forward`); **never** imports `agent.*`
+- Each router is an independent file, depending on pure functions from `base.*`/`ops.*` plus gateway internals (`gateway.events.sse`, `gateway.agents.delivery`, lazy `gateway.app` `db_pool`, spawn forwarding in `gateway.agents.forward`); **never** imports `agent.*`
 - **Feature packages**: a surface whose routes, helpers and wire models change together lives in one package (`gateway/<feature>/`) behind a docstring-only door; callers outside it import its public modules, never its `_`-prefixed ones
 - Gateway itself does not build the turn-loop prompts, run LLMs, or construct LangGraph (the spawn/draft endpoints — schedules/guide/packages — inline a fixed system prompt for the agent they spawn; that is the deliberate, enumerated exception)
 - Endpoint implementation and mounting are separated: router defines handlers, app.py is responsible for `include_router`

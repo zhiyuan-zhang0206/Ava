@@ -19,7 +19,7 @@ Genuine exceptions (circular imports, `import torch`-class heavy deps) go in
 
 A `.py` file may contain at most 800 lines (`len(text.splitlines())`). Split
 larger files into focused modules. The budget covers the eight governed
-packages (`agent`, `ava`, `ava_builtins`, `gateway`, `shared`, `services`, `ops`,
+packages (`agent`, `ava`, `ava_builtins`, `gateway`, `base`, `services`, `ops`,
 `cli`) plus `tests/` and `scripts/`. The TYPE_CHECKING ban and machine_role()
 allowlist still apply only to the eight packages.
 
@@ -91,7 +91,7 @@ section covers fixing a violation and maintaining its baseline.
   pairing, so any new key is refused.
 - **Rule 5 — single decision owners.** `scripts/structure/locality.py:DECISIONS`
   names design decisions with exactly one owning module — today,
-  `postgres-dial` (`shared/db/connections.py`). Any other module making that
+  `postgres-dial` (`base/db/connections.py`). Any other module making that
   decision is a bypass; fix it by routing through the owner. A site that
   genuinely cannot goes in that decision's `allowed` map with a one-line
   reason — an allowed module that stops bypassing (or disappears) fails as
@@ -127,8 +127,8 @@ What this means for common edits:
 Rule 4 says nothing outside a package may import its `_`-private modules or
 names — so a door's contract IS its public surface. `scripts/structure/contracts.py`
 renders that surface (module-by-module, function/class/variable/re-export, sorted
-and deterministic) into a snapshot file next to the code: `shared/db/api.txt`,
-`shared/agents/api.txt`, `shared/events/api.txt`. Regenerate with
+and deterministic) into a snapshot file next to the code: `base/db/api.txt`,
+`base/agents/api.txt`, `base/events/api.txt`. Regenerate with
 `.venv/bin/python scripts/structure/contracts.py --write`; the
 `lint-contract-snapshots` pre-commit hook runs `--check` and fails on drift.
 
@@ -223,7 +223,7 @@ no warning output. Warnings alone never fail the gate.
 
 ## No `print()` in framework code
 
-Framework code logs via `shared.log.logger`. `print()` is banned in framework
+Framework code logs via `base.log.logger`. `print()` is banned in framework
 code by ruff `T20`. Exempt: `cli/` (terminal output), `ava/` + `plugins/`
 (agent-facing dump), `scripts/` (tooling).
 One-off legitimate cases use inline `# noqa: T201` with a reason.
@@ -262,16 +262,16 @@ allowlist.
 A payload crossing a process boundary (gateway↔agent-runner RPC, SSE events,
 `additional_kwargs` metadata bags) gets a `BaseModel` / `TypedDict` / `StrEnum`
 at the boundary, not a `dict[str, Any]` unpacked by hand at each call site.
-`shared/events/live/projection.py`'s discriminated union (`role: Literal[...]` discriminator +
+`base/events/live/projection.py`'s discriminated union (`role: Literal[...]` discriminator +
 a `TypeAdapter`) is the template. Not lint-enforced — see
 the git log (typed-boundaries design record)
 for why pyright's `reportUnknown*` family can't substitute for this.
 
-## A subprocess timeout means `shared.host.proc.run_bounded`
+## A subprocess timeout means `base.host.proc.run_bounded`
 
 `subprocess.run(..., timeout=T)` bounds the process Python spawned, not the work
 it started: on expiry Python kills that one process and every descendant keeps
-running. Use `shared.host.proc.run_bounded(argv, timeout=...)` instead — same shape,
+running. Use `base.host.proc.run_bounded(argv, timeout=...)` instead — same shape,
 but it kills the whole tree (descendants enumerated *before* the parent dies)
 and still raises `TimeoutExpired`, so caller control flow is unchanged.
 
@@ -281,18 +281,18 @@ git: the fleet's Windows agent-runner accumulated 66 orphaned `git.exe` + 66
 `ssh.exe` + 63 `sh.exe`, all below a killed stub. Anything with a shell in the
 middle (`shell=True`, a `-lc` wrapper) has the same shape on every platform.
 
-Git specifically: pass `env=shared.deploy.git.gitenv.git_env()` so a credential prompt
+Git specifically: pass `env=base.deploy.git.gitenv.git_env()` so a credential prompt
 errors instead of blocking on a terminal that does not exist, and ssh neither
 asks nor dials unbounded. Note that `ConnectTimeout` is not the bound — an
 `ssh.exe` on that box reached a state where its own timeout never fired, so the
 caller's bound is the only real one.
 
 Not lint-enforced repo-wide yet; the modules that drive git are guarded by
-`tests/shared/test_proc.py::test_git_driving_modules_do_not_bound_with_subprocess_run`.
+`tests/base/test_proc.py::test_git_driving_modules_do_not_bound_with_subprocess_run`.
 
 ## Reach a stubbable name through its owning module
 
-`from shared.cluster import session_name` binds the function object into the
+`from base.cluster import session_name` binds the function object into the
 *reader's* module dict at import time, and that binding is what the reader
 resolves. So the reader — not the owner — becomes the patch surface, and moving a
 function to another module silently takes it out of reach of a patch aimed at its
@@ -303,10 +303,10 @@ because it fixes importers, not global resolution inside moved code.
 So a name that a test would stub is **reached through the module that owns it**:
 
 ```python
-import shared.cluster
+import base.cluster
 from ops import cluster_pause
 
-shared.cluster.session_name(service)      # not: session_name(...)
+base.cluster.session_name(service)      # not: session_name(...)
 cluster_pause.unpause_local_cluster()     # not: unpause_local_cluster()
 ```
 
@@ -319,24 +319,24 @@ function-local `from x import y` is already fine — it re-resolves per call, so
 reads the owner's current binding and survives its enclosing function moving.
 
 **Before converting anything in a function, check that function for a
-`import shared.X` statement.** It binds `shared` as a *local* for the entire function
-body — the binding is decided statically, so a module-level `import shared.paths`
-does **not** rescue you — and every `shared.…` above that line then raises
+`import base.X` statement.** It binds `base` as a *local* for the entire function
+body — the binding is decided statically, so a module-level `import base.paths`
+does **not** rescue you — and every `base.…` above that line then raises
 `UnboundLocalError`:
 
 ```python
-import shared.paths          # module scope — irrelevant to the function below
+import base.paths          # module scope — irrelevant to the function below
 
 def pause_local_cluster():
-    state = shared.deploy.state.host_deploy_state.read()     # UnboundLocalError
-    import shared.db                            # <- makes `shared` local for the whole body
+    state = base.deploy.state.host_deploy_state.read()     # UnboundLocalError
+    import base.db                            # <- makes `base` local for the whole body
 ```
 
 Runtime only, on that branch only, and neither ruff nor pyright reports it.
 `ops/cluster_pause.py` was exactly this shape, so its conversion had to hoist
-`import shared.db` to module level first. Hit blind, it reads as the whole approach
+`import base.db` to module level first. Hit blind, it reads as the whole approach
 being unworkable rather than as one import in the wrong place. A function-local
-`from shared.x import y` is safe — it binds `y`, not `shared`.
+`from base.x import y` is safe — it binds `y`, not `base`.
 
 The trade is deliberate: source-patching has a **wider blast radius** than
 patch-where-used. Measure it before arguing about it — a source patch only reaches

@@ -18,7 +18,7 @@ from typing import Literal, Protocol
 
 import psutil
 
-from shared import telemetry
+from base import telemetry
 
 _log = logging.getLogger(__name__)
 

@@ -34,11 +34,8 @@ from fastapi import APIRouter, File, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse
 from psycopg_pool import ConnectionPool
 
-from gateway.agents.delivery import deliver_chat_inbound
-from gateway.agents.inbound_provenance import request_inbound_provenance
-from gateway.schemas.uploads import UploadedBatch, UploadedFile
-from shared.agents import AgentNotFound
-from shared.agents.uploads import (
+from base.agents import AgentNotFound
+from base.agents.uploads import (
     MAX_AGENT_UPLOAD_BYTES,
     MAX_AGENT_UPLOAD_FILES,
     MAX_UPLOAD_BYTES,
@@ -49,9 +46,12 @@ from shared.agents.uploads import (
     upload_quota_used,
     upload_url,
 )
-from shared.cluster.machine import machine_name
-from shared.db import agent_exists
-from shared.host.private_storage import ensure_private_dir, write_private_bytes
+from base.cluster.machine import machine_name
+from base.db import agent_exists
+from base.host.private_storage import ensure_private_dir, write_private_bytes
+from gateway.agents.delivery import deliver_chat_inbound
+from gateway.agents.inbound_provenance import request_inbound_provenance
+from gateway.schemas.uploads import UploadedBatch, UploadedFile
 
 _log = logging.getLogger(__name__)
 

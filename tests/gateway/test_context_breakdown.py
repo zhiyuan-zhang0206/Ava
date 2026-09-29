@@ -21,6 +21,7 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, Tool
 import agent.graph  # noqa: F401  # pyright: ignore[reportUnusedImport]
 from agent.hooks.compact import compose_summary_message
 from agent.messages import NoteTag, inbound_message, system_note_message
+from base.db import create_agent
 from gateway.agents.context_breakdown import (
     SECTION_SPLIT_THRESHOLD_TOKENS,
     SectionNode,
@@ -30,7 +31,6 @@ from gateway.agents.context_breakdown import (
     section_breakdown,
 )
 from gateway.app import app
-from shared.db import create_agent
 
 
 def _assert_conserved(node: SectionNode) -> None:
@@ -310,7 +310,7 @@ def _put_checkpoint(agent_id: int, messages: list) -> None:
     from langgraph.checkpoint.base import empty_checkpoint
     from langgraph.checkpoint.postgres import PostgresSaver
 
-    from shared.config import settings
+    from base.config import settings
 
     ckpt = empty_checkpoint()
     ckpt["channel_values"] = {"messages": messages}

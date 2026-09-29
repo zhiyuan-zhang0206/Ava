@@ -32,6 +32,10 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from zoneinfo import ZoneInfo
 
+from base import telemetry
+from base.config.physical_backup import PhysicalBackupSettings
+from base.daemon.health_schema import DEGRADED, OK, component
+from base.paths import ava_home
 from services.pitr.retention.executor import RetentionExecutionSummary, execute_retention_plan
 from services.pitr.retention.journal import RetentionJournal
 from services.pitr.retention.planner import (
@@ -41,10 +45,6 @@ from services.pitr.retention.planner import (
 )
 from services.pitr.retention.policy import LogicalRetention
 from services.pitr.stores.factory import get_store_group
-from shared import telemetry
-from shared.config.physical_backup import PhysicalBackupSettings
-from shared.daemon.health_schema import DEGRADED, OK, component
-from shared.paths import ava_home
 
 _log = logging.getLogger("services.pitr.retention.scheduler")
 
@@ -107,8 +107,8 @@ def _logical_retention() -> LogicalRetention:
     ``services.backup`` itself, so the off-site mirror cannot drift from the
     local prune.
     """
+    from base.config import settings
     from services.backup import ACTIVATION_KEEP, active_activation_snapshot_name
-    from shared.config import settings
 
     return LogicalRetention(
         keep_dailies=settings.services.backup_keep,
@@ -121,7 +121,7 @@ def _logical_retention() -> LogicalRetention:
 
 def _read_carrier(alias: str) -> str | None:
     """Fresh raw value of one carrier key from the unit `.env`, or None."""
-    from shared.host.env import runtime_config
+    from base.host.env import runtime_config
 
     return runtime_config.read_env_aliases().get(alias)
 

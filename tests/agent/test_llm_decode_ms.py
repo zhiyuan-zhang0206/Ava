@@ -165,7 +165,7 @@ async def test_non_streaming_fallback_decode_ms_none(monkeypatch: pytest.MonkeyP
     """Stream stalls → non-streaming ainvoke fallback: the whole message
     arrives in one chunk with no first→last window → decode_ms must stay
     None (never a fake wall-clock number)."""
-    monkeypatch.setattr("shared.config.settings.lm.llm_stream_ttft_timeout_seconds", 0.05)
+    monkeypatch.setattr("base.config.settings.lm.llm_stream_ttft_timeout_seconds", 0.05)
 
     async def _hang() -> AsyncIterator[AIMessageChunk]:
         import asyncio

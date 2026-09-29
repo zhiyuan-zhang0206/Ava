@@ -39,8 +39,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from shared import paths
-from shared.packages.plugins import enable_config as plugins_cfg
+from base import paths
+from base.packages.plugins import enable_config as plugins_cfg
 
 FACE_MODULE = "agent_runtime"
 
@@ -124,7 +124,7 @@ def load_extensions(*, surface: bool = False) -> plugins_cfg.PluginsConfig:
     discovered, config = _discovered_and_config()
 
     from ava.sdk_surface.plugin_loader import safe_load_plugin_module
-    from shared.packages.plugins.context import PluginContext
+    from base.packages.plugins.context import PluginContext
 
     for name in sorted(config.plugins):
         if not config.plugins[name].enabled:
@@ -145,7 +145,7 @@ def load_extensions(*, surface: bool = False) -> plugins_cfg.PluginsConfig:
     # complete, so that when hook callbacks actually fire,
     # `ava._settings.plugins.<n>` is ready. Missing disk image auto-writes
     # default; schema drift raises (guides `ava plugins update`).
-    from shared.packages.plugins.config_registration import bind_from_disk
+    from base.packages.plugins.config_registration import bind_from_disk
 
     bind_from_disk()
 
@@ -170,7 +170,7 @@ def load_agent_faces() -> None:
     surface has not loaded are skipped too: the surface owns the module
     identity the face imports against.
     """
-    from shared.packages.plugins.context import PluginContext
+    from base.packages.plugins.context import PluginContext
 
     for name, plugin_dir in _enabled_plugin_dirs():
         pkg = _pkg_of(plugin_dir)

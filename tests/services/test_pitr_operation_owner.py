@@ -22,11 +22,11 @@ from typing import Any, cast
 import psutil
 import pytest
 
+from base.native_process.exec_domain import ExecProcessDomain
+from base.native_process.ownership import OwnedProcess
 from services.pitr.operation import custody
 from services.pitr.operation import worker_process as workers
 from services.pitr.operation.custody import OperationKind
-from shared.native_process.exec_domain import ExecProcessDomain
-from shared.native_process.ownership import OwnedProcess
 
 pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="PITR is POSIX-only")
 
@@ -227,7 +227,7 @@ async def test_birth_capture_failure_closes_the_unowned_launch(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The worker never runs its job unowned: its pinned group is closed at once."""
-    from shared.native_process.exec_domain import ExecDomainBirthError
+    from base.native_process.exec_domain import ExecDomainBirthError
 
     marker = tmp_path / "descendant"
     _worker(
@@ -613,8 +613,8 @@ def _operation_dirs(root: Path) -> list[Path]:
 async def test_deferred_base_candidate_retires_clean_controls(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    from base.native_process.os_platform import LockTimeoutError
     from services.pitr import base_worker
-    from shared.native_process.os_platform import LockTimeoutError
 
     monkeypatch.setattr(base_worker, "ava_home", lambda: tmp_path)
     _result_worker(tmp_path, monkeypatch, {"deferred": "backup_lock", "detail": "busy"})

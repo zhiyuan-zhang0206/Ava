@@ -18,8 +18,8 @@ from langgraph.graph.message import REMOVE_ALL_MESSAGES
 from psycopg import Connection
 from psycopg.rows import DictRow, dict_row
 
-from shared.agents.history.delta_read_compat import reconstruct_delta_messages
-from shared.db import connect
+from base.agents.history.delta_read_compat import reconstruct_delta_messages
+from base.db import connect
 
 
 def _state_module() -> Any:

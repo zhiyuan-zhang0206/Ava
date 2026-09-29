@@ -13,6 +13,12 @@ import os
 import sys
 from datetime import UTC, datetime
 
+from base.agents.exit_codes import SERVICES_NOT_READY_EXIT_CODE
+from base.cluster.machine import machine_name, machine_role
+from base.db import connect
+from base.deploy.lifecycle import start_serving
+from base.deploy.maintenance import admission, cohort, hold_driver, pause_owner
+from base.deploy.maintenance.state import MaintenanceHold
 from cli.commands.lifecycle._pause_resume import exclusive_resources
 from cli.commands.lifecycle.service_stop import (
     deadline_after,
@@ -24,12 +30,6 @@ from cli.commands.lifecycle.service_stop import (
 from cli.cutover_hold import resume_refusal, start_refusal
 from ops.agent_pause import drain, prepare
 from ops.agent_pause.probe import host_identity_or_none, ops_quiescent
-from shared.agents.exit_codes import SERVICES_NOT_READY_EXIT_CODE
-from shared.cluster.machine import machine_name, machine_role
-from shared.db import connect
-from shared.deploy.lifecycle import start_serving
-from shared.deploy.maintenance import admission, cohort, hold_driver, pause_owner
-from shared.deploy.maintenance.state import MaintenanceHold
 
 
 def _hold(holder: str, at: datetime) -> MaintenanceHold:
@@ -64,7 +64,7 @@ def stop(
             raise RuntimeError("agent-host still has active continuations")
     # Only now close ordinary API admission. In-flight native actions retained
     # their dependency APIs throughout prepare/drain.
-    from shared.deploy.state.host_deploy_state import set_posture
+    from base.deploy.state.host_deploy_state import set_posture
 
     if hold.phase == "drained":
         admission.set_phase(holder, at, "stopping")
@@ -78,8 +78,8 @@ def stop(
 
 
 def _start(holder: str, at: datetime) -> int:
+    from base.paths import ava_home
     from cli.commands.lifecycle.start import cmd_start
-    from shared.paths import ava_home
 
     hold = _hold(holder, at)
     if hold.phase not in ("stopped", "starting"):
@@ -246,7 +246,7 @@ def _stop_data(
 
 def _generation(args: argparse.Namespace) -> datetime:
     """The exact hold generation the verb names; `resume` refuses the cutover hold."""
-    from shared.paths import ava_home
+    from base.paths import ava_home
 
     at = datetime.fromisoformat(args.acquired_at)
     if at.tzinfo is None or not args.operation.strip():
@@ -276,8 +276,8 @@ def run(args: argparse.Namespace) -> int:
             )
         )
         return 0
-    from shared.deploy.release.operation import require_start_authorized
-    from shared.paths import ava_home
+    from base.deploy.release.operation import require_start_authorized
+    from base.paths import ava_home
 
     require_start_authorized(ava_home())
     at = _generation(args)

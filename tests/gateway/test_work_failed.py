@@ -14,13 +14,13 @@ from fastapi.testclient import TestClient
 from psycopg_pool import ConnectionPool
 from pydantic import SecretStr
 
+from base.agents import AgentStatus
+from base.config import settings
 from gateway.agents import delivery as delivery_router
 from gateway.agents.delivery import ChatDelivery
 from gateway.app import app
 from gateway.routers import work_failed as work_failed_router
 from gateway.schemas.work_failed import WorkFailedIn, WorkFailedResult
-from shared.agents import AgentStatus
-from shared.config import settings
 
 _WEBHOOK_TOKEN = "work-failed-webhook-token"  # noqa: S105 -- isolated test credential
 _CLUSTER_SECRET = "work-failed-cluster-secret"  # noqa: S105 -- isolated test credential
@@ -128,9 +128,9 @@ def _seed_unfinished_failure(
 
 @pytest.fixture()
 def failure_pool() -> Iterator[ConnectionPool]:
-    import shared.db
+    import base.db
 
-    pool = shared.db.pool(max_size=4)
+    pool = base.db.pool(max_size=4)
     yield pool
     pool.close()
 

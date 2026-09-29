@@ -25,8 +25,8 @@ from typing import Protocol
 if not __package__:
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from base.deploy.release.python_lock import violations
 from cli._python_index import PYPI_INDEX, python_index
-from shared.deploy.release.python_lock import violations
 
 # These settings would redirect the target or change the lock's selected pins.
 # Transport/cache/TLS environment settings remain inherited; machine files are not replayed.

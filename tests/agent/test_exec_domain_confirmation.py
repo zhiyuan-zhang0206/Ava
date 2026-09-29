@@ -13,10 +13,10 @@ import psutil
 import pytest
 
 from agent.graph.exec import _process
-from shared.native_process import group_closure
-from shared.native_process.os_platform import IS_WINDOWS
-from shared.native_process.winjob import WindowsJob, _kernel32
-from shared.native_process.winjob_pipes import PipedJobChild, start_piped_job_process
+from base.native_process import group_closure
+from base.native_process.os_platform import IS_WINDOWS
+from base.native_process.winjob import WindowsJob, _kernel32
+from base.native_process.winjob_pipes import PipedJobChild, start_piped_job_process
 
 
 def _belongs_to_job(job: WindowsJob, pid: int) -> bool:
@@ -255,7 +255,7 @@ def test_signal_failure_retains_unreaped_owner(
 ) -> None:
     import errno
 
-    from shared.native_process.ownership import OwnedProcess
+    from base.native_process.ownership import OwnedProcess
 
     receipt = tmp_path / "child"
     code = (
@@ -296,8 +296,8 @@ def test_signal_failure_retains_unreaped_owner(
 
 @pytest.mark.skipif(IS_WINDOWS, reason="POSIX retained child authority")
 def test_native_capture_failure_retains_launched_handle(monkeypatch: pytest.MonkeyPatch) -> None:
-    from shared.native_process.exec_domain import ExecDomainBirthError
-    from shared.native_process.ownership import OwnedProcess
+    from base.native_process.exec_domain import ExecDomainBirthError
+    from base.native_process.ownership import OwnedProcess
 
     def denied(_process: psutil.Process) -> OwnedProcess:
         raise psutil.AccessDenied(_process.pid)
@@ -370,7 +370,7 @@ def test_confirmed_domain_does_not_reobserve_reused_numeric_group(
     def unknown(_pid: int) -> bool:
         raise AssertionError("terminal domain cannot inspect a new numeric group")
 
-    monkeypatch.setattr("shared.native_process.exec_domain._process_group_has_live_member", unknown)
+    monkeypatch.setattr("base.native_process.exec_domain._process_group_has_live_member", unknown)
     monkeypatch.setattr(group_closure, "group_members", unknown)
     domain.close_confirmed(time.monotonic() + 5)
 
@@ -431,7 +431,7 @@ def _late_listing_domain(
         return [root.pid, 0x7FFFFFFF] if late else [root.pid]
 
     monkeypatch.setattr(os, "killpg", signal_group)
-    monkeypatch.setattr("shared.native_process.exec_domain._process_group_has_live_member", empty)
+    monkeypatch.setattr("base.native_process.exec_domain._process_group_has_live_member", empty)
     monkeypatch.setattr(group_closure, "group_members", listing)
     return root, domain, events
 

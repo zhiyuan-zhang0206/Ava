@@ -13,10 +13,10 @@ from pathlib import Path
 
 import pytest
 
+from base.config import settings
 from services.pitr.activation.evidence import validate_wal_remote_evidence
 from services.pitr.activation.runtime import wal_evidence_common, wal_metadata
 from services.pitr.wal.uploader import AckManifest
-from shared.config import settings
 from tests._pitr_fixtures import baidu_credential_evidence, oss_credential_evidence
 
 _SEGMENT = "00000001000000A20000008B"

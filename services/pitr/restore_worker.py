@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 from typing import Any, cast
 
+from base.log import init_restricted_process
 from services.pitr.base_backup.manifest import CandidateManifest
 from services.pitr.operation.custody import publish_result
 from services.pitr.operation.worker_process import worker_request, worker_secrets
@@ -18,7 +19,6 @@ from services.pitr.restore.proof import (
 )
 from services.pitr.stores.factory import construct_store_group
 from services.pitr.stores.restore_object_store import GenerationPinnedObjectReader
-from shared.log import init_restricted_process
 
 
 def _object(value: object) -> dict[str, Any]:
@@ -129,8 +129,8 @@ def _run_drill(
 
 
 def main() -> None:
-    # Importing `shared.log` drops loguru's default handler: without a sink,
-    # every record `shared.cluster.dataplane.pg_tools` and the restore code write is discarded.
+    # Importing `base.log` drops loguru's default handler: without a sink,
+    # every record `base.cluster.dataplane.pg_tools` and the restore code write is discarded.
     # Stderr is the operation's `stderr.log`; this worker holds no home, so it
     # opens no file sink.
     init_restricted_process()

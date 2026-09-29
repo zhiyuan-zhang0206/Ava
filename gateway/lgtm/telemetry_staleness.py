@@ -26,8 +26,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from base.log import logger
 from gateway.lgtm import loki_events, prom_metrics
-from shared.log import logger
 
 HEARTBEAT_EVENT = "gateway_latency"
 HEARTBEAT_METRIC = "ava_gateway_latency_count_total"
@@ -88,7 +88,7 @@ def loki_heartbeat_age(timeout_s: float | None = None) -> float | None:
 def _emit(event_name: str, attributes: dict[str, Any]) -> None:
     """Best-effort status event; the JSONL mirror survives an OTLP outage."""
     with contextlib.suppress(Exception):
-        from shared import telemetry
+        from base import telemetry
 
         telemetry.emit("telemetry", event_name, attributes=attributes)
 

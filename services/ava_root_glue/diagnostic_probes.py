@@ -14,16 +14,16 @@ from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from base.config import settings
+from base.daemon.health import DaemonProbe
+from base.native_process.os_platform import IS_MACOS, IS_WINDOWS
+from base.native_process.ownership import OwnedProcess
+from base.telemetry.station_endpoint import StationTarget
 from services.ava_root_glue.diagnostics import Diagnostic
-from shared.config import settings
-from shared.daemon.health import DaemonProbe
-from shared.native_process.os_platform import IS_MACOS, IS_WINDOWS
-from shared.native_process.ownership import OwnedProcess
-from shared.telemetry.station_endpoint import StationTarget
 
 
 def brew_pins() -> DaemonProbe:
-    from shared.host import brew_pin, proc
+    from base.host import brew_pin, proc
 
     observed: list[set[str]] = []
     for option in ("--pinned", "--formula"):
@@ -53,10 +53,10 @@ def venv() -> DaemonProbe:
 
 
 def redis_acl() -> DaemonProbe:
+    from base.cluster import ownership
     from cli.commands.data_plane import cluster_instance as instance
     from services.healthchecks import owned_service
     from services.healthchecks import redis_acl as check
-    from shared.cluster import ownership
 
     port = instance.configured_redis_port()
     if port is None:
@@ -105,11 +105,11 @@ def redis_acl() -> DaemonProbe:
 
 
 def pgbouncer() -> DaemonProbe:
+    from base.cluster import get_record, ownership, record_pgbouncer_port
+    from base.cluster.authority import AuthorityRefusedError, read_pooler_admin
+    from base.paths import ava_home
     from cli.commands.data_plane import pgbouncer as pooler
     from services.healthchecks import owned_service
-    from shared.cluster import get_record, ownership, record_pgbouncer_port
-    from shared.cluster.authority import AuthorityRefusedError, read_pooler_admin
-    from shared.paths import ava_home
 
     record = get_record(ava_home())
     if record is None:
@@ -190,8 +190,8 @@ class StationProbe:
 
 
 def lgtm_write_path() -> DaemonProbe:
+    from base.telemetry.lgtm_local import backend_urls
     from services.healthchecks import lgtm, owned_service
-    from shared.telemetry.lgtm_local import backend_urls
 
     port = urlsplit(backend_urls()["loki"]).port
     if port is None:
@@ -216,7 +216,7 @@ class LokiReport:
             self._failures = 0
             self._throttles = 0
             return
-        from shared.log import logger
+        from base.log import logger
 
         if result.detail == "push_http_429":
             self._failures = 0
@@ -248,7 +248,7 @@ def helper_report(result: DaemonProbe) -> None:
 
 def build_diagnostics(requested: set[str]) -> list[Diagnostic]:
     """Host policy is explicit; absent capabilities do not create fake samples."""
-    from shared.cluster.machine import is_gateway
+    from base.cluster.machine import is_gateway
 
     checks: list[Diagnostic] = []
     if IS_MACOS:

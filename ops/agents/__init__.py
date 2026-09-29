@@ -19,7 +19,8 @@ admission binds the next turn to the host owner and a new generation.
 
 from __future__ import annotations
 
-import shared.db
+import base.db
+from base.agents import AgentNotFound, AgentStatus
 from ops.agents.spawn import (
     _SPAWNER_AGENT_RE as _SPAWNER_AGENT_RE,
 )
@@ -38,7 +39,6 @@ from ops.agents.spawn import (
 from ops.agents.wake import (
     resurrect_agent as resurrect_agent,
 )
-from shared.agents import AgentNotFound, AgentStatus
 
 
 def get_agent_status(agent_id: int) -> AgentStatus:
@@ -47,7 +47,7 @@ def get_agent_status(agent_id: int) -> AgentStatus:
     Raises:
         AgentNotFound: agent_id does not exist in agents_meta.
     """
-    with shared.db.connect() as conn, conn.cursor() as cur:
+    with base.db.connect() as conn, conn.cursor() as cur:
         cur.execute("SELECT status FROM agents_meta WHERE id = %s", (agent_id,))
         row = cur.fetchone()
     if row is None:
@@ -62,7 +62,7 @@ def get_agent_machine(agent_id: int) -> str:
     Raises:
         AgentNotFound: agent_id does not exist in agents_meta.
     """
-    with shared.db.connect() as conn, conn.cursor() as cur:
+    with base.db.connect() as conn, conn.cursor() as cur:
         cur.execute("SELECT machine FROM agents_meta WHERE id = %s", (agent_id,))
         row = cur.fetchone()
     if row is None:

@@ -19,7 +19,7 @@ pointer is legal when every non-empty line names an allowed source root; a
 disposable worktree is never a legal target. uv writes one line per wheel
 package, so its native multi-line form (including repeated roots and no trailing
 newline) is healthy.
-`shared/deploy/release/editable_install.py` owns the platform-independent discovery, exact-root
+`base/deploy/release/editable_install.py` owns the platform-independent discovery, exact-root
 validation, atomic repair, and temporary permission window for explicit
 installation tooling.
 
@@ -31,7 +31,7 @@ or source convergence. Development starts keep host wiring and plugin scaffold
 preparation, but do not discover or rewrite a separate production virtualenv.
 Converge has no editable pointer repair, protection, or reinstall step.
 
-`shared/deploy/release/editable_install.py` provides explicit inspection and repair tools for
+`base/deploy/release/editable_install.py` provides explicit inspection and repair tools for
 editable installations. Its write window opens the exact records and structural
 site-packages, dist-info and launcher directories, then restores their original
 modes. A caller must identify the intended checkout and its virtualenv; automatic
@@ -73,5 +73,5 @@ editable-install recovery procedure for an explicitly selected installation.
 ## Key dependencies
 
 - [[commands.ava.okf.md]] — command-module and lifecycle overview
-- [[shared/shared.ava.okf.md]] — shared path and installation primitives
+- [[base/base.ava.okf.md]] — shared path and installation primitives
 - [[cli/cli.ava.okf.md]] — public converge, start, and update surfaces

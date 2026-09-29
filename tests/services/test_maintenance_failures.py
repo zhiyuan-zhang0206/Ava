@@ -7,8 +7,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from shared.deploy.maintenance import admission, pause_owner
-from shared.deploy.maintenance.state import MaintenanceHold
+from base.deploy.maintenance import admission, pause_owner
+from base.deploy.maintenance.state import MaintenanceHold
 from tests.agent.test_maintenance import WHEN
 from tests.agent.test_maintenance import isolate as isolate
 from tests.agent.test_maintenance_receipt_grading import (

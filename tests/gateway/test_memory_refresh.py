@@ -13,11 +13,11 @@ from gateway.app import app
 
 
 class TestRefreshPath:
-    """refresh calls shared.deploy.git.memory_repo.pull_main(), passing the returned sha through to the caller."""
+    """refresh calls base.deploy.git.memory_repo.pull_main(), passing the returned sha through to the caller."""
 
     def test_refresh_returns_head_sha(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """stub pull_main → verify 200 + head returned, and pull_main called once."""
-        import shared.deploy.git.memory_repo as _memory_repo
+        import base.deploy.git.memory_repo as _memory_repo
 
         calls = {"n": 0}
 
@@ -43,7 +43,7 @@ class TestRefreshOffEventLoop:
         import asyncio as _asyncio
         import threading
 
-        import shared.deploy.git.memory_repo as _memory_repo
+        import base.deploy.git.memory_repo as _memory_repo
 
         real_to_thread = cast("Callable[..., object]", _asyncio.to_thread)
         handoffs: list[tuple[object, int]] = []  # (fn, event-loop thread ident)

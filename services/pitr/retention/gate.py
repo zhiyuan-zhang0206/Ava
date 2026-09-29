@@ -9,7 +9,7 @@ a flip takes effect on the next tick without a restart.
 
 This module holds the state logic and the display formatters; the CLI wrappers
 print and choose exit codes. The status command reads the daemon's in-memory
-machine state through `shared.daemon.health.read_health_payload` (the same
+machine state through `base.daemon.health.read_health_payload` (the same
 home-identity contract as the probes) and degrades to file state when the
 daemon does not answer.
 """
@@ -24,13 +24,13 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import cast
 
+from base.config import field_alias_map
+from base.host.env import runtime_config
+from base.native_process.turn_identity import effective_agent_id
+from base.paths import ava_home
 from services.pitr.retention.journal import RetentionJournal
 from services.pitr.retention.manifest import RetentionPlan
 from services.pitr.retention.planner import inspect_dry_run_plan
-from shared.config import field_alias_map
-from shared.host.env import runtime_config
-from shared.native_process.turn_identity import effective_agent_id
-from shared.paths import ava_home
 
 ARMED_FIELD = "pitr_retention_delete_armed"
 DIGEST_FIELD = "pitr_retention_delete_approved_digest"
@@ -186,7 +186,7 @@ def iso_timestamp(value: object) -> str:
 
 def read_daemon_record() -> dict[str, object] | None:
     """The scheduler's retention health record, or None when it does not answer."""
-    from shared.daemon.health import read_health_payload
+    from base.daemon.health import read_health_payload
 
     payload = read_health_payload(DAEMON_NAME, timeout_s=2.0)
     if payload is None:

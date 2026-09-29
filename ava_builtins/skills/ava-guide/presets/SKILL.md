@@ -41,7 +41,7 @@ is ADDING skills to `skills_to_inject_into_system_prompt` /
 
 **What does Config store?** The preset's `config` is a JSON object whose
 fields are per-agent config field name → value. Available per-agent fields are
-returned by `shared/config`'s `per_agent_field_names()`, and common ones
+returned by `base/config`'s `per_agent_field_names()`, and common ones
 include:
 
 | Field | Description | Type |
@@ -58,7 +58,7 @@ include:
 
 > **Model ids come from the registry, not from memory.** `llm_model` values must
 > be ids on the current roster — list them with `GET /api/models` or read
-> `shared/lm/registry.py` (`MODELS` / `SUPPORTED_MODELS`); a name copied from an
+> `base/lm/registry.py` (`MODELS` / `SUPPORTED_MODELS`); a name copied from an
 > old doc or spawn may be stale or unregistered (see the
 > [models sub-skill](../models/SKILL.md)).
 

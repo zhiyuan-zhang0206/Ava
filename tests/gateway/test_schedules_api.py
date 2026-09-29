@@ -12,8 +12,8 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
+from base.daemon.schedules.builtin_schedules import load_manifest
 from gateway.app import app
-from shared.daemon.schedules.builtin_schedules import load_manifest
 
 BUILTIN_MANIFEST_NAMES = [s.name for s in load_manifest()]
 
@@ -249,8 +249,8 @@ class TestLogsRunsDraft:
         """No live session -> the schedule session's PTY transcript file
         supplies the output: a finished/crashed runner's output survives the
         session being reaped, where scrollback was lost."""
-        from shared.cluster import session_name
-        from shared.sessions.backend import get_shell_backend
+        from base.cluster import session_name
+        from base.sessions.backend import get_shell_backend
 
         with TestClient(app) as client:
             sid = _create(client, name="l").json()["id"]
@@ -273,7 +273,7 @@ class TestLogsRunsDraft:
         """The implicit page is ``settings.display.schedules_runs_default_limit``
         (``AVA_SCHEDULES_RUNS_DEFAULT_LIMIT``); the literal 50 is only that
         field's default, not a hard-coded page size."""
-        from shared.config import settings
+        from base.config import settings
 
         monkeypatch.setattr(settings.display, "schedules_runs_default_limit", 1)
         with TestClient(app) as client:

@@ -12,6 +12,8 @@ from types import SimpleNamespace
 import pytest
 from psycopg.conninfo import conninfo_to_dict
 
+from base.config import FIELD_INFOS, field_alias, field_domain, settings
+from base.deploy.release import operation
 from cli.commands.data_plane import _pitr_activation_config as activation_config
 from cli.commands.data_plane import pitr_activation as activation
 from services.gateway_side.backup import snapshot as _snapshot
@@ -29,8 +31,6 @@ from services.pitr.base_backup.candidate import BaseCandidateError
 from services.pitr.stores.checksums import ObjectChecksum
 from services.pitr.stores.object_store import RemoteObjectAck
 from services.pitr.wal.uploader import ack_manifest_from_raw
-from shared.config import FIELD_INFOS, field_alias, field_domain, settings
-from shared.deploy.release import operation
 from tests._pitr_fixtures import baidu_credential_evidence, stub_update_lock
 
 
@@ -55,7 +55,7 @@ def _credentials() -> dict[str, str]:
 def test_validate_secrets_produces_baidu_evidence_for_the_baidu_backend(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from shared.config import settings
+    from base.config import settings
 
     credentials = tmp_path / "baidu.json"
     credentials.write_text(
@@ -91,7 +91,7 @@ def test_validate_secrets_produces_baidu_evidence_for_the_baidu_backend(
 def test_validate_secrets_produces_cos_evidence_for_the_cos_backend(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from shared.config import settings
+    from base.config import settings
 
     credentials = tmp_path / "cos.json"
     credentials.write_text(json.dumps({"secret_id": "AKIDcos", "secret_key": "secret-key"}))
@@ -120,7 +120,7 @@ def test_validate_secrets_produces_cos_evidence_for_the_cos_backend(
 def test_validate_secrets_fails_closed_for_unknown_backend(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from shared.config import settings
+    from base.config import settings
 
     monkeypatch.setattr(settings.physical_backup, "pitr_store_backend", "nope")
     monkeypatch.setattr(settings.physical_backup, "pitr_backup_key_file", tmp_path / "backup.key")
@@ -770,10 +770,10 @@ def _env_apply_fixture(
         activation_config, "_auto_conf_entries", lambda _home: [("archive_mode", "on")]
     )
     monkeypatch.setattr(activation_config, "_alter", lambda _name, _value: None)
-    monkeypatch.setattr("shared.host.env.runtime_config.env_file_path", lambda: tmp_path / ".env")
+    monkeypatch.setattr("base.host.env.runtime_config.env_file_path", lambda: tmp_path / ".env")
     if not valid_pitr_baseline:
         monkeypatch.setattr(
-            "shared.config.candidate.validate_env_patch_for_write",
+            "base.config.candidate.validate_env_patch_for_write",
             lambda *_args: SimpleNamespace(
                 errors=(),
                 expected_digest=hashlib.sha256((tmp_path / ".env").read_bytes()).hexdigest(),
@@ -826,7 +826,7 @@ def test_env_apply_provisions_only_when_all_four_absent(
 def test_env_apply_resumes_after_provisioning_crash(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, after_write: bool
 ) -> None:
-    from shared.host.env import dotenv_file
+    from base.host.env import dotenv_file
 
     record = _env_apply_fixture(monkeypatch, tmp_path, "OTHER=kept\n")
     original = dotenv_file.replace_env_bytes_cas
@@ -891,7 +891,7 @@ def test_env_apply_provisioning_round_trips_real_env_bytes(
         "OTHER=kept\n",
         valid_pitr_baseline=True,
     )
-    monkeypatch.setattr("shared.host.env.runtime_config.env_file_path", lambda: tmp_path / ".env")
+    monkeypatch.setattr("base.host.env.runtime_config.env_file_path", lambda: tmp_path / ".env")
     replacement = activation_config.apply_wal_config(tmp_path, record, {"archive_mode": "on"})
     assert replacement.phase == "wal_restart_pending"
     payload = (tmp_path / ".env").read_text()
@@ -1049,7 +1049,7 @@ def test_alter_system_accepts_only_literal_values_on_real_pg17(
     import subprocess
     import tempfile
 
-    from shared.cluster.dataplane.pg_tools import pg_tool
+    from base.cluster.dataplane.pg_tools import pg_tool
 
     port = 39617
     # Short socket root: the default pytest tmp_path on macOS exceeds
@@ -1145,8 +1145,8 @@ def test_frozen_pg_state_contract_with_real_reader(
     import tempfile
     from types import SimpleNamespace
 
-    from shared.cluster import db_identity, postgres
-    from shared.cluster.dataplane.pg_tools import pg_tool
+    from base.cluster import db_identity, postgres
+    from base.cluster.dataplane.pg_tools import pg_tool
 
     with socket.socket() as listener:
         listener.bind(("127.0.0.1", 0))
@@ -1212,7 +1212,7 @@ def test_frozen_pg_state_contract_with_real_reader(
         # Environment plumbing is faked; the reader itself runs for real.
         monkeypatch.setattr(activation, "ava_home", lambda: tmp_path)
         monkeypatch.setattr(
-            "shared.cluster.get_record",
+            "base.cluster.get_record",
             lambda _home: SimpleNamespace(ports={"postgres": port}, gateway_home=str(tmp_path)),
         )
         monkeypatch.setattr(
@@ -1267,7 +1267,7 @@ def _wal_ack_pending_record(
 def test_switch_wal_runs_on_pitr_admin_connection(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The 2026-08-30 failure: the switch ran on shared.db.direct_db_url (the
+    """The 2026-08-30 failure: the switch ran on base.db.direct_db_url (the
     runtime identity, no pg_switch_wal) while every read-only preflight check
     passed on the superuser connection. The mutation must dial the SAME admin
     URL the privilege probe certifies, bound to this home's postmaster before
@@ -1304,7 +1304,7 @@ def test_switch_wal_runs_on_pitr_admin_connection(
     def custody(_conn: object, data: Path) -> None:
         events.append(("custody", data))
 
-    monkeypatch.setattr("shared.cluster.ownership.require_postgres_connection", custody)
+    monkeypatch.setattr("base.cluster.ownership.require_postgres_connection", custody)
     assert activation._switch_wal() == "00000001000000A20000008D"
     assert [kind for kind, _ in events] == ["dial", "custody", "execute"]
     assert events[0][1] == "postgresql://super@/postgres?host=/sock&port=5433"
@@ -1345,7 +1345,7 @@ def test_probe_switch_privilege_fails_closed(monkeypatch: pytest.MonkeyPatch) ->
     def custody(_conn: object, _data: Path) -> None:
         return None
 
-    monkeypatch.setattr("shared.cluster.ownership.require_postgres_connection", custody)
+    monkeypatch.setattr("base.cluster.ownership.require_postgres_connection", custody)
     with pytest.raises(RuntimeError, match="pg_switch_wal"):
         runtime.probe_switch_privilege()
     assert "has_function_privilege" in called[0]
@@ -1414,7 +1414,7 @@ def test_probe_switch_privilege_against_real_pg(
     import subprocess
     import tempfile
 
-    from shared.cluster.dataplane.pg_tools import pg_tool
+    from base.cluster.dataplane.pg_tools import pg_tool
 
     port = 39614
     # The socket directory must live under a SHORT root: the default pytest

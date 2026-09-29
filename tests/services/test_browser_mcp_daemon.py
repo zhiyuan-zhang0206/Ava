@@ -23,6 +23,7 @@ from mcp import types
 from mcp.shared.exceptions import MCPError
 from mcp.types import CONNECTION_CLOSED, REQUEST_TIMEOUT
 
+from base.config import settings
 from services.browser import page_lifecycle
 from services.browser.mcp_daemon import (
     ChromeMcpDaemon,
@@ -40,7 +41,6 @@ from services.browser.page_lifecycle import (
     reap_dead_agent_pages,
     set_agent_page,
 )
-from shared.config import settings
 
 
 class FakeUpstream:

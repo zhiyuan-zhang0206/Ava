@@ -17,7 +17,7 @@ from typing import Any
 import pytest
 
 import ava
-from shared.events.live.projection import EVENT_ADAPTER
+from base.events.live.projection import EVENT_ADAPTER
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _SNIPPET_PATHS = (

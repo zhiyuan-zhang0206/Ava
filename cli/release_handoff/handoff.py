@@ -4,13 +4,13 @@ It reads only the request's envelope, requires the request's home to be the
 home this CLI resolves (settings-free), verifies the executor image in that
 home's store against this host, takes this CLI's database authority, and
 replaces this process with the executor's `submit` entry. Everything after the
-exec is candidate code. The contract is `shared.api_contracts.release_handoff`.
+exec is candidate code. The contract is `base.api_contracts.release_handoff`.
 
 The executor image is not the home's selected image until its own operation
 selects it, so no boot pass admits it to a write generation; its submission
 reads the registered units with the login this admitted CLI hands over. This
 CLI never builds Settings, so it takes that login here, exactly as its boot
-pass would have (`shared.host.env.dotenv_boot.operator_db_delivery`): the active
+pass would have (`base.host.env.dotenv_boot.operator_db_delivery`): the active
 gateway login and its generation marker, in the exec environment only (never
 argv, a file or a log), without the gateway API token. The executor's boot
 pass keeps a delivery naming its home's endpoint. On a home without a ledger
@@ -24,7 +24,7 @@ import sys
 from pathlib import Path
 from typing import NoReturn
 
-from shared.api_contracts.release_handoff import (
+from base.api_contracts.release_handoff import (
     RELEASE_REQUEST_MAX_BYTES,
     Envelope,
     HandoffRefusedError,
@@ -32,13 +32,13 @@ from shared.api_contracts.release_handoff import (
     entry_environment,
     read_envelope,
 )
-from shared.deploy.release.runtime_release import VerifiedRelease
-from shared.deploy.release.verified_file import regular_bytes
-from shared.runtime_abi import current_abi
+from base.deploy.release.runtime_release import VerifiedRelease
+from base.deploy.release.verified_file import regular_bytes
+from base.runtime_abi import current_abi
 
 
 def _require_own_home(envelope: Envelope) -> None:
-    from shared.host.env import dotenv_boot
+    from base.host.env import dotenv_boot
 
     home, anchored = dotenv_boot.resolve_ava_home()
     if not anchored:
@@ -55,7 +55,7 @@ def _db_authority() -> dict[str, str]:
     """The database authority this CLI holds on its (already required) home."""
     from dotenv import dotenv_values
 
-    from shared.host.env import dotenv_boot
+    from base.host.env import dotenv_boot
 
     files = {
         **dotenv_values(dotenv_boot.AVA_ENV_PATH),

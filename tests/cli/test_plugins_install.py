@@ -8,13 +8,13 @@ from pathlib import Path
 import pytest
 
 import ava.skills as skills_mod
+from base.packages.extensions import install_registry as reg
 from cli.commands.extensions.plugins import (
     cmd_plugins_install,
     cmd_plugins_installed,
     cmd_plugins_uninstall,
     cmd_plugins_upgrade,
 )
-from shared.packages.extensions import install_registry as reg
 
 
 def _git(cwd: Path, *args: str) -> None:

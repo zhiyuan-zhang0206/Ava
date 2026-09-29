@@ -16,9 +16,9 @@ from langgraph.checkpoint.postgres import PostgresSaver
 from psycopg.types.json import Jsonb
 
 from ava import composer_commands, mcp_config, skills
+from base.db import create_agent
+from base.packages.plugins import mcp_enabled
 from ops import cluster
-from shared.db import create_agent
-from shared.packages.plugins import mcp_enabled
 
 
 def _write_skill(root: Path, name: str, description: str = "project skill") -> None:
@@ -44,7 +44,7 @@ def load_dir(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     _write_skill(root, "load-skill", "converged skill")
     monkeypatch.setattr(skills, "_skills_dir", lambda: root)
     monkeypatch.setattr(
-        "shared.packages.extensions.install_registry.loadable_skill_names", lambda: {"load-skill"}
+        "base.packages.extensions.install_registry.loadable_skill_names", lambda: {"load-skill"}
     )
     monkeypatch.setattr(composer_commands, "_command_dirs", list)
     return root
@@ -199,7 +199,7 @@ def test_agent_skill_view_honors_per_agent_skill_narrowing(
     """A named prompt capability keeps only its corresponding skill command."""
     _write_skill(load_dir, "other-skill", "other converged skill")
     monkeypatch.setattr(
-        "shared.packages.extensions.install_registry.loadable_skill_names",
+        "base.packages.extensions.install_registry.loadable_skill_names",
         lambda: {"load-skill", "other-skill"},
     )
     monkeypatch.setattr(

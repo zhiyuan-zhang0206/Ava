@@ -26,12 +26,12 @@ from mcp import types
 from mcp.server.lowlevel import Server
 from mcp.server.stdio import stdio_server
 
+from base.paths import computer_mcp_socket
 from services.browser.mcp_socket_bridge import (
     ReconnectingLink,
     SocketLink,
     dial_unix_socket,
 )
-from shared.paths import computer_mcp_socket
 
 
 def _agent_id() -> int | None:

@@ -55,8 +55,8 @@ period like `*/5 * * * *`.
 
 ```python
 from datetime import UTC, datetime
-from shared.config import settings
-from shared.daemon.schedules.watcher import next_fire
+from base.config import settings
+from base.daemon.schedules.watcher import next_fire
 nxt = next_fire("0 3 * * *", after=datetime.now(UTC), timezone=settings.general.timezone)
 ```
 
@@ -118,8 +118,8 @@ import time
 from datetime import UTC, datetime
 import ava
 from ava.agents import AgentStatus as S
-from shared.config import settings
-from shared.daemon.schedules.watcher import next_fire
+from base.config import settings
+from base.daemon.schedules.watcher import next_fire
 
 def ensure_agent(label: str, prompt: str) -> int:
     before_id = None

@@ -34,10 +34,10 @@ from agent.graph.exec._result import (
 )
 from agent.graph.exec._stream import ExecOutputChunkPublisher
 from agent.graph.exec._subprocess import _run_in_subprocess
-from shared.agents.lifecycle import AgentRestart, AgentTermination, SystemHalt
-from shared.config import settings
-from shared.host.proc import kill_process_tree
-from shared.paths import logs_dir
+from base.agents.lifecycle import AgentRestart, AgentTermination, SystemHalt
+from base.config import settings
+from base.host.proc import kill_process_tree
+from base.paths import logs_dir
 from tests._test_env_file import rewrite_line
 
 _AGENT_ID = 424242
@@ -159,7 +159,7 @@ async def test_exec_child_disables_otlp_after_cluster_env_authority(tmp_path: Pa
         result = await _run(
             tmp_path,
             (
-                "from shared.telemetry.otlp.telemetry_otlp import backend\n"
+                "from base.telemetry.otlp.telemetry_otlp import backend\n"
                 'print("OTLP_ENABLED_IN_CHILD:", backend._enabled())\n'
             ),
         )
@@ -487,7 +487,7 @@ async def test_subprocess_state_snapshot_reaches_child(tmp_path: Path) -> None:
 def _self_lifecycle_code(action: str) -> str:
     return (
         "import ava, os, psycopg\n"
-        "from shared.host.env.registry import ADMIN_DATA_PLANE_ALIASES\n"
+        "from base.host.env.registry import ADMIN_DATA_PLANE_ALIASES\n"
         "assert not ADMIN_DATA_PLANE_ALIASES.intersection(os.environ)\n"
         "with psycopg.connect(ava.DB_URL) as conn:\n"
         "    assert conn.execute('SELECT current_user').fetchone() == ('ava_g0_runner',)\n"
@@ -538,7 +538,7 @@ async def test_subprocess_unknown_lifecycle_class_crashes(tmp_path: Path) -> Non
     result = await _run(
         tmp_path,
         (
-            "from shared.agents.lifecycle import LifecycleExit\n"
+            "from base.agents.lifecycle import LifecycleExit\n"
             "class _MysteryLifecycle(LifecycleExit):\n"
             "    def __init__(self):\n"
             "        super().__init__(0)\n"

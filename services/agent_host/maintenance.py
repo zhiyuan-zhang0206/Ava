@@ -8,10 +8,10 @@ from uuid import UUID
 import psycopg
 from psycopg_pool import AsyncConnectionPool, PoolTimeout
 
+from base.agents.incarnation.resource_admission import DRAINED_RESOURCES
+from base.deploy.maintenance import admission
+from base.log import logger
 from services.agent_host.dispatcher import PendingInboundWake
-from shared.agents.incarnation.resource_admission import DRAINED_RESOURCES
-from shared.deploy.maintenance import admission
-from shared.log import logger
 
 FailureFences = dict[int, tuple[str | None, datetime | None]]
 

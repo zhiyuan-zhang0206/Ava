@@ -50,6 +50,8 @@ from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import cast, get_args
 
+from base.cluster.machine import MachineRole
+from base.deploy.release.runtime_release import ReleaseRejectedError, VerifiedRelease
 from ops.roster import build_services
 from ops.roster.service_spec import ServiceSpec
 from services.ava_root.inputs import InputSeal
@@ -59,8 +61,6 @@ from services.ava_root.manifest import (
     UnitRegistry,
     load_manifests,
 )
-from shared.cluster.machine import MachineRole
-from shared.deploy.release.runtime_release import ReleaseRejectedError, VerifiedRelease
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -249,7 +249,7 @@ def build_manifest(
 def write_manifest(path: Path, manifest: Mapping[str, object]) -> Path:
     """Write the manifest JSON (validate with `build_manifest` first)."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    from shared.host.atomic_io import write_text_atomic
+    from base.host.atomic_io import write_text_atomic
 
     write_text_atomic(path, json.dumps(manifest, indent=2) + "\n", mode=0o600, sync_parent=True)
     return path

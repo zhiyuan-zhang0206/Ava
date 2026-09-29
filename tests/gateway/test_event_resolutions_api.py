@@ -8,9 +8,9 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
+from base.config import settings
 from gateway.app import app
 from gateway.events import resolutions
-from shared.config import settings
 
 
 @pytest.fixture

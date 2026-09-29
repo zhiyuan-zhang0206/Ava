@@ -7,12 +7,12 @@ from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
 
-from shared.deploy.release.runtime_publication_input import (
+from base.deploy.release.runtime_publication_input import (
     resolve_runtime_publication_input,
     revalidate_runtime_publication_input,
 )
-from shared.deploy.release.runtime_release import ReleaseRejectedError
-from shared.deploy.writers.observation import ExpectedUnitWriters
+from base.deploy.release.runtime_release import ReleaseRejectedError
+from base.deploy.writers.observation import ExpectedUnitWriters
 
 
 def prove_publication_input(home: Path, receipt: Path) -> None:  # noqa: PLR0915 — isolated selector/receipt lifetime, always restored.
@@ -39,7 +39,7 @@ def prove_publication_input(home: Path, receipt: Path) -> None:  # noqa: PLR0915
         ):
             raise AssertionError("installed resolver did not return actual complete receipt")
         with patch(
-            "shared.deploy.release.runtime_publication_input.verify_release",
+            "base.deploy.release.runtime_publication_input.verify_release",
             side_effect=AssertionError("rehash"),
         ):
             revalidate_runtime_publication_input(actual)

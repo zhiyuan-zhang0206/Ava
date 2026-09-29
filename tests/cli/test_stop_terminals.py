@@ -40,15 +40,15 @@ from typing import Any
 import psutil
 import pytest
 
+from base.deploy.maintenance import admission
+from base.sessions.backend import PtySessionBackend
+from base.sessions.pty import session_tree
 from cli.commands.lifecycle import _temporary_stop as command
 from cli.commands.lifecycle import service_stop as strict
 from cli.commands.lifecycle import stop as entry
 from cli.commands.lifecycle._maintenance_stop_report import StopIncompleteError
 from cli.commands.lifecycle.service_stop import OwnedProcess
 from ops import pty_close_notices
-from shared.deploy.maintenance import admission
-from shared.sessions.backend import PtySessionBackend
-from shared.sessions.pty import session_tree
 from tests.cli.conftest import PtyReaper
 from tests.cli.test_pause_stop import dependencies
 from tests.cli.test_pause_stop import home as home
@@ -266,8 +266,8 @@ def test_fork_shell_child_resets_term_and_hup_dispositions(
     field state). The suite guards os.execvp in-process, so the probe is a
     fake exec that snapshots the dispositions the real exec would carry.
     """
-    import shared.sessions.pty.host as host_mod
-    from shared.sessions.pty.launch import _fork_shell
+    import base.sessions.pty.host as host_mod
+    from base.sessions.pty.launch import _fork_shell
 
     probe_file = tmp_path / "dispositions.txt"
 

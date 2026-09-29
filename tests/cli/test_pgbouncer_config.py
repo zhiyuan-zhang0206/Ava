@@ -1,7 +1,7 @@
 """PgBouncer config generation + the direct-connection exemption contract.
 
 Unit-level: the rendered pgbouncer.ini content (the userlist is rendered by
-`shared.cluster.authority.render_userlist`), and the code paths
+`base.cluster.authority.render_userlist`), and the code paths
 that MUST bypass the pooler. The end-to-end wire behaviour (a real pgbouncer in
 transaction pooling in front of Postgres) lives in test_pgbouncer_wire.py.
 """
@@ -33,7 +33,7 @@ def test_render_ini_is_transaction_scram_and_socket_server() -> None:
     assert "ava_main = host=/" in ini and "port=5433 dbname=ava_main" in ini
     # Every pooled backend is born with the statement ceiling (the pooler drops
     # the client's `options` startup parameter — the connect_query SET is the
-    # one pooler-side delivery path; see shared.db.PG_STATEMENT_TIMEOUT_SET_SQL).
+    # one pooler-side delivery path; see base.db.PG_STATEMENT_TIMEOUT_SET_SQL).
     assert "connect_query='SET statement_timeout = 60000'" in ini
     # A backend whose client vanished mid-transaction is scrubbed back to its
     # connect_query-fresh state by the release reset: a session-level GUC (e.g.
@@ -42,7 +42,7 @@ def test_render_ini_is_transaction_scram_and_socket_server() -> None:
     # that SV_ACTIVE window — always=1 fires after every transaction and its
     # DISCARD ALL wiped the client's own dial/borrow-time SETs (the statement
     # ceiling; measured 2026-09-03, 405 ruling option B). Between-transaction
-    # pollution is defended client-side by shared/db/__init__.py's baseline restore
+    # pollution is defended client-side by base/db/__init__.py's baseline restore
     # (2026-09-02 P0 incident).
     assert "server_reset_query = DISCARD ALL" in ini
     # The reset is one statement and unquoted: pgbouncer 1.25.2 runs
@@ -55,7 +55,7 @@ def test_render_ini_is_transaction_scram_and_socket_server() -> None:
     # The reset does NOT re-apply the statement ceiling: DISCARD ALL clears the
     # birth-time connect_query SET, and the reset would need a second statement
     # to re-apply it — a shape transaction pooling rejects. The ceiling is
-    # delivered by connect_query (every backend at birth) and by shared/db/__init__.py's
+    # delivered by connect_query (every backend at birth) and by base/db/__init__.py's
     # client-side SET on every pooled use.
     reset_line = next(ln for ln in ini.splitlines() if ln.startswith("server_reset_query ="))
     assert reset_line == "server_reset_query = DISCARD ALL"
@@ -96,7 +96,7 @@ def test_migrations_apply_uses_direct_unbounded_connection() -> None:
     DDL may exceed the 60s statement ceiling — the dial must be unbounded too. A
     remote plane dials its provider URL that way; a local plane dials the owner
     authority over the postmaster's own socket, which carries no ceiling (proved
-    on real Postgres in tests/shared/test_pg_owner_authority.py)."""
+    on real Postgres in tests/base/test_pg_owner_authority.py)."""
     from cli.commands.lifecycle import migrations
 
     src = inspect.getsource(migrations.cmd_migrations_apply)
@@ -120,25 +120,25 @@ def test_backup_defaults_to_a_direct_dump_source() -> None:
 
 
 def test_shared_db_connect_and_pool_dial_one_url_with_direct_escape() -> None:
-    """shared.db.connect/pool dial AVA_DB_URL (the one access URL) by default and
+    """base.db.connect/pool dial AVA_DB_URL (the one access URL) by default and
     expose direct=True (the admin plane derives the direct URL from the registry
     record); every connection disables server-side prepared statements
     (transaction-pooling safe). connect() also exposes unbounded=True — the
     migration applier's no-statement-ceiling escape — and pooled dials deliver
     the ceiling as an explicit SET (the pooler drops the `options` parameter)."""
-    import shared.db
+    import base.db
 
-    for fn in (shared.db.connect, shared.db.pool):
+    for fn in (base.db.connect, base.db.pool):
         assert "direct" in inspect.signature(fn).parameters
         src = inspect.getsource(fn)
         assert "dp.db_url if not direct else direct_db_url()" in src
         assert "prepare_threshold" in src
-    assert "unbounded" in inspect.signature(shared.db.connect).parameters
+    assert "unbounded" in inspect.signature(base.db.connect).parameters
     # Pooled dials restore the baseline session (RESET ALL + statement ceiling)
     # — pgbouncer never resets backend session state between clients, so a
     # borrowed backend may carry another client's session GUCs (2026-09-02 P0).
-    assert "_restore_pooled_session" in inspect.getsource(shared.db.connect)
-    pool_src = inspect.getsource(shared.db.pool)
+    assert "_restore_pooled_session" in inspect.getsource(base.db.connect)
+    pool_src = inspect.getsource(base.db.pool)
     assert "configure=_restore_pooled_session" in pool_src
     # The check hook spans a formatted multi-line conditional; assert the wiring
     # shape rather than a contiguous literal.

@@ -2,7 +2,7 @@
 agent_id sentinel / payload shape on the JSONL mirror (the durable local copy
 of the unified event stream).
 
-The loguru handler enqueues into the unified emitter (`shared.telemetry`),
+The loguru handler enqueues into the unified emitter (`base.telemetry`),
 whose drain thread batch-writes; `_last_event` flushes the queue first so
 assertions see the written lines without sleeps. The Postgres `events` copy
 was retired with the LGTM cutover (task #1197 close-C) and dropped with the
@@ -23,8 +23,8 @@ import psycopg
 import pytest
 from loguru import logger as _global_logger
 
-from shared import telemetry
-from shared.log import _postgres_sink, add_postgres_sink
+from base import telemetry
+from base.log import _postgres_sink, add_postgres_sink
 
 
 @pytest.fixture
@@ -55,7 +55,7 @@ def _isolate_events_mirror(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> N
     function itself would make the drain write to the session home while
     `_last_event` read the tmp dir. Both sides resolve `ava_home()` at call
     time, so one patch redirects the whole pipeline consistently."""
-    from shared import paths
+    from base import paths
 
     monkeypatch.setattr(paths, "ava_home", lambda: tmp_path / "ava_home")
 
@@ -63,7 +63,7 @@ def _isolate_events_mirror(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> N
 def _last_event() -> tuple[str, int | None, str, dict]:
     """Flush the emitter, then return the last mirror line (event_name,
     agent_id, level, attributes). Fail loud on an empty mirror."""
-    from shared.paths import logs_dir
+    from base.paths import logs_dir
 
     telemetry.sync()
     day = datetime.now(UTC).strftime("%Y%m%d")
@@ -141,7 +141,7 @@ def test_stdlib_intercept_routes_through_sink(sink_logger) -> None:
     the event stream after the upgrade, without needing to rewrite callsites line by line."""
     import logging
 
-    from shared.log import _install_stdlib_intercept
+    from base.log import _install_stdlib_intercept
 
     _install_stdlib_intercept()
     stdlib_log = logging.getLogger("test.stdlib.intercept")
@@ -154,7 +154,7 @@ def test_stdlib_intercept_routes_through_sink(sink_logger) -> None:
 
 
 def test_sink_agent_id_int_kwarg_overrides_bind(sink_logger, db_conn: psycopg.Connection) -> None:
-    """log call passing agent_id=N overrides the bind default — used by shared/agents/contract.py for cross-process
+    """log call passing agent_id=N overrides the bind default — used by base/agents/contract.py for cross-process
     lifecycle events (the caller process bind may not be the target)."""
     tid = _insert_agent(db_conn)
     db_conn.commit()
@@ -277,7 +277,7 @@ def test_sink_opt_exception_without_active_exc_skips_garbage_payload(
 def _reset_deploy_cache():
     """Each test starts with a cold deploy cache — the module-level cache is a
     process singleton and would otherwise leak a True/False across tests."""
-    import shared.log as slog
+    import base.log as slog
 
     slog._deploy_cached = cast(
         bool | None, None
@@ -292,7 +292,7 @@ def test_rollout_quiet_db_pool_acquire_slow(
 ) -> None:
     """db_pool_acquire_slow during a deploy → INFO in the events row (file sink
     keeps the original level; only the PG row is quieted)."""
-    import shared.log as slog
+    import base.log as slog
 
     monkeypatch.setattr(slog, "_deploy_in_progress", lambda: True)
     sink_logger.warning(  # pyright: ignore[reportUnknownMemberType]
@@ -310,7 +310,7 @@ def test_rollout_quiet_db_outage_events(
     sink_logger,
 ) -> None:
     """Every db_outage_* category is quieted while a deploy holds the lease."""
-    import shared.log as slog
+    import base.log as slog
 
     monkeypatch.setattr(slog, "_deploy_in_progress", lambda: True)
     for event in ("db_outage_wait", "db_outage_pause", "db_outage_reconcile_retry"):
@@ -325,7 +325,7 @@ def test_rollout_quiet_query_cancellation(
 ) -> None:
     """The 'query cancellation failed' line (bare warning, event='log') is
     quieted by message prefix while a deploy holds the lease."""
-    import shared.log as slog
+    import base.log as slog
 
     monkeypatch.setattr(slog, "_deploy_in_progress", lambda: True)
     sink_logger.warning("query cancellation failed: cancellation timeout expired")  # pyright: ignore[reportUnknownMemberType]
@@ -339,7 +339,7 @@ def test_rollout_quiet_no_deploy_keeps_warning(
 ) -> None:
     """No deploy in flight → the same categories keep their original WARNING:
     outside a rollout window these are real signals."""
-    import shared.log as slog
+    import base.log as slog
 
     monkeypatch.setattr(slog, "_deploy_in_progress", lambda: False)
     sink_logger.warning("slow acquire", event="db_pool_acquire_slow", elapsed=2.0)  # pyright: ignore[reportUnknownMemberType]
@@ -354,7 +354,7 @@ def test_rollout_quiet_unrelated_warning_stays(
     """A WARNING outside the quiet categories is untouched even mid-deploy —
     the suppression list is deliberately narrow (no blanket WARNING
     suppression)."""
-    import shared.log as slog
+    import base.log as slog
 
     monkeypatch.setattr(slog, "_deploy_in_progress", lambda: True)
     sink_logger.warning("real trouble", event="db_pool_acquire_timeout")  # pyright: ignore[reportUnknownMemberType]
@@ -375,7 +375,7 @@ def test_deploy_quieting_read_never_blocks_producer(
     import threading
     import time
 
-    import shared.log as slog
+    import base.log as slog
 
     entered = threading.Event()
     release = threading.Event()
@@ -418,7 +418,7 @@ def test_stdlib_intercept_emit_never_raises(monkeypatch: pytest.MonkeyPatch) -> 
     ValueError) would otherwise kill the logger's caller."""
     import logging
 
-    from shared.log import _StdlibInterceptHandler
+    from base.log import _StdlibInterceptHandler
 
     handler = _StdlibInterceptHandler()
     seen: list[logging.LogRecord] = []
@@ -445,7 +445,7 @@ def test_deploy_quieting_cache_holds_answer_through_read_failure(
     not cancel the quieting a rollout relies on."""
     import time
 
-    import shared.log as slog
+    import base.log as slog
 
     monkeypatch.setattr(slog, "_read_deploy_lease", lambda: True)
     slog._deploy_cached = True
@@ -463,7 +463,7 @@ def test_deploy_quieting_cache_holds_answer_through_read_failure(
 # event_name from the label fallback, `telemetry.emit` raised inside the sink
 # (the row was lost) and loguru logged the internal error on every such read.
 # The call now passes an explicit `event=` — registered as `delta_read_compat`
-# in shared/events/registry.py (naming rules §6.2: label is display-only).
+# in base/events/registry.py (naming rules §6.2: label is display-only).
 
 
 def test_sink_delta_read_compat_reconstruction_is_a_registered_event(sink_logger) -> None:
@@ -477,7 +477,7 @@ def test_sink_delta_read_compat_reconstruction_is_a_registered_event(sink_logger
 
     from langgraph.checkpoint.base import CheckpointTuple
 
-    from shared.agents.history.delta_read_compat import _log_reconstruction
+    from base.agents.history.delta_read_compat import _log_reconstruction
 
     tuple_ = cast(
         CheckpointTuple,
@@ -493,7 +493,7 @@ def test_sink_delta_read_compat_reconstruction_is_a_registered_event(sink_logger
     # own row. (The historical source was the conftest cluster-spawn guard's
     # `ava.mcps` probe, fixed in task #3950; the find-by-name defense stays for
     # any other ambient emitter.)
-    from shared.paths import logs_dir
+    from base.paths import logs_dir
 
     telemetry.sync()
     day = datetime.now(UTC).strftime("%Y%m%d")

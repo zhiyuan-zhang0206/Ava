@@ -30,6 +30,10 @@ from typing import Any
 import numpy as np
 import pytest
 
+from base.config import settings
+from base.daemon import health
+from base.daemon.health import Liveness
+from base.host.net.resilience import MAX_RETRY_AFTER_RESPECT_S, ExponentialBackoff
 from services.memory_indexer import daemon
 from services.memory_indexer.backends.base import MemorySearchBackend, content_hash
 from services.memory_indexer.backends.milvus import (
@@ -40,10 +44,6 @@ from services.memory_indexer.backends.milvus import (
 )
 from services.memory_indexer.embeddings import factory, gemini
 from services.memory_indexer.embeddings.base import EmbeddingAPIError
-from shared.config import settings
-from shared.daemon import health
-from shared.daemon.health import Liveness
-from shared.host.net.resilience import MAX_RETRY_AFTER_RESPECT_S, ExponentialBackoff
 
 _DIM = 8
 _FP = "test:gemini:dim=8"
@@ -860,7 +860,7 @@ def test_refresh_gateway_checkout_fast_forwards(
         ["git", "-C", str(tmp_path), "rev-parse", "HEAD"], text=True
     ).strip()
 
-    from shared.deploy.git import memory_repo
+    from base.deploy.git import memory_repo
 
     monkeypatch.setattr(memory_repo, "gateway_memory_dir", lambda: tmp_path)
     monkeypatch.setattr(memory_repo, "pull_main", lambda: "abc1234")
@@ -878,7 +878,7 @@ def test_refresh_gateway_checkout_failure_logs_and_does_not_raise(
     retries next cycle instead of letting the daemon die."""
     import logging
 
-    from shared.deploy.git import memory_repo
+    from base.deploy.git import memory_repo
 
     monkeypatch.setattr(memory_repo, "gateway_memory_dir", lambda: tmp_path)
 

@@ -244,7 +244,7 @@ async def test_runaway_print_loop_is_truncated_and_the_run_completes(
     # The accumulation budget lives in the PARENT's StreamingTextIO — the
     # child ships raw chunks and the parent accumulates/truncates. So the
     # in-process monkeypatch still reaches it.
-    monkeypatch.setattr("shared.config.settings.sandbox.exec_output_accumulation_max_chars", budget)
+    monkeypatch.setattr("base.config.settings.sandbox.exec_output_accumulation_max_chars", budget)
 
     result, _payload = await _run_in_subprocess(
         code="for i in range(20000): print('spam', i)\nprint('DONE_MARKER')",
@@ -275,7 +275,7 @@ def test_budget_below_the_inline_cap_is_refused_at_startup() -> None:
     envelope."""
     from pydantic import ValidationError
 
-    from shared.config.sandbox import SandboxSettings
+    from base.config.sandbox import SandboxSettings
 
     with pytest.raises(ValidationError, match="must be >= exec_output_max_chars"):
         SandboxSettings.model_validate(

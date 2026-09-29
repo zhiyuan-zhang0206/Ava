@@ -288,22 +288,22 @@ class Decision:
 
 DECISIONS: dict[str, Decision] = {
     "postgres-dial": Decision(
-        owners=frozenset({"shared/db/connections.py"}),
+        owners=frozenset({"base/db/connections.py"}),
         find=_postgres_dials,
         fix=(
-            "dial through shared.db.connect() / shared.db.pool() (the cluster's own URL) "
-            "or shared.db.connect_url() (an explicit target the caller names), which own "
+            "dial through base.db.connect() / base.db.pool() (the cluster's own URL) "
+            "or base.db.connect_url() (an explicit target the caller names), which own "
             "the transport posture (prepare_threshold=None, keepalives, statement ceiling "
             "or unbounded, sslmode, pooled-session scrub)"
         ),
         allowed={
-            "shared/db/pg_admin.py": (
+            "base/db/pg_admin.py": (
                 "the OS-user administrator's peer-socket authority (roles, grants, schema "
                 "DDL, owner sessions) behind its own postmaster custody check; the FC-10 "
                 "cutover scripts dial through it, so its transport stays as rehearsed until "
                 "the cutover lands"
             ),
-            "shared/cluster/authority/unit.py": (
+            "base/cluster/authority/unit.py": (
                 "probes an installed unit capability's own runner login at the served "
                 "endpoint, the credential under test"
             ),
@@ -311,7 +311,7 @@ DECISIONS: dict[str, Decision] = {
                 "proves the running postmaster demands a password by dialing a role "
                 "that cannot exist, with no credential"
             ),
-            # shared.db.connections resolves a home (shared.host.env.dotenv_boot) and imports
+            # base.db.connections resolves a home (base.host.env.dotenv_boot) and imports
             # settings at load; the modules below run where neither may happen.
             "services/pitr/restore/drill.py": (
                 "restore-drill dials inside the restricted restore worker, which runs "
@@ -321,16 +321,16 @@ DECISIONS: dict[str, Decision] = {
                 "restore-sandbox and live-identity dials inside the restricted restore "
                 "worker, which runs without a home or settings"
             ),
-            "shared/cluster/dataplane/pg_tools.py": (
+            "base/cluster/dataplane/pg_tools.py": (
                 "provisions the throwaway Postgres it just started; imported by the "
                 "restricted restore worker and run config-free by scripts/ci/migration_smoke.py"
             ),
-            "shared/cluster/dataplane/pg_stall_watchdog.py": (
-                "probes the throwaway Postgres shared/cluster/dataplane/pg_tools.py started, under the same "
+            "base/cluster/dataplane/pg_stall_watchdog.py": (
+                "probes the throwaway Postgres base/cluster/dataplane/pg_tools.py started, under the same "
                 "home-free constraint"
             ),
-            "shared/cluster/dataplane/pg_foreground.py": (
-                "readiness probe of the foreground throwaway postmaster shared/cluster/dataplane/pg_tools.py "
+            "base/cluster/dataplane/pg_foreground.py": (
+                "readiness probe of the foreground throwaway postmaster base/cluster/dataplane/pg_tools.py "
                 "started, under the same home-free constraint"
             ),
         },

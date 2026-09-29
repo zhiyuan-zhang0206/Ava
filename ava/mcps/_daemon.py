@@ -38,8 +38,8 @@ from typing import Any
 from loguru import logger
 
 from ava.mcp_config import assert_requirements, is_transport_error, load_mcp_config, server_url
-from shared.config import settings
-from shared.log.sinks import add_sink
+from base.config import settings
+from base.log.sinks import add_sink
 
 from ._oauth import _OAUTH_FLOW_TIMEOUT_S
 
@@ -700,7 +700,7 @@ def main() -> None:
     if len(sys.argv) == 2:
         socket_path = sys.argv[1]
     else:
-        from shared.paths import mcp_daemon_shared_socket
+        from base.paths import mcp_daemon_shared_socket
 
         socket_path = mcp_daemon_shared_socket()
     add_sink(sys.stderr, format="{message}")

@@ -23,10 +23,10 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
+from base import config, telemetry
+from base.api_contracts.mcp_tool_contract import project_message
+from base.cluster.auth import bearer_header
 from gateway.app import app
-from shared import config, telemetry
-from shared.api_contracts.mcp_tool_contract import project_message
-from shared.cluster.auth import bearer_header
 
 _SECRET = "test-cluster-secret"  # noqa: S105 — test fixture
 _ACCEPT = "application/json, text/event-stream"
@@ -128,7 +128,7 @@ def _tool_result(message: dict[str, Any]) -> Any:
 
 def _audit_hits(tool: str, client_name: str) -> list[dict[str, Any]]:
     telemetry.sync()
-    from shared.paths import logs_dir
+    from base.paths import logs_dir
 
     day = datetime.now(UTC).strftime("%Y%m%d")
     mirror = logs_dir() / f"events-{day}.jsonl"
@@ -210,8 +210,8 @@ async def test_gateway_contract_matches_pre_extraction_golden() -> None:
 
 
 def test_list_agents_reads_one_directory_page(monkeypatch: pytest.MonkeyPatch) -> None:
+    from base.agents.observation.roster import AgentCard, AgentDirectoryPage
     from gateway.mcp_server import endpoint
-    from shared.agents.observation.roster import AgentCard, AgentDirectoryPage
 
     seen: dict[str, Any] = {}
     card = AgentCard.model_validate(
@@ -314,10 +314,10 @@ def test_spawn_get_terminate_round_trip(db_conn: psycopg.Connection) -> None:
 def test_spawn_launch_failure_tool_error_names_committed_agent(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    from base.agents.observation.evidence import AvailabilityReason
     from gateway.agents import router as route
     from gateway.agents.forward import LaunchForwardError
     from ops.rpc_schemas import LaunchAgentRequest, SpawnedAgent
-    from shared.agents.observation.evidence import AvailabilityReason
 
     async def _fail(_target: str, _body: LaunchAgentRequest) -> SpawnedAgent:
         raise LaunchForwardError(AvailabilityReason.LAUNCH_UNREACHABLE, "runner offline")

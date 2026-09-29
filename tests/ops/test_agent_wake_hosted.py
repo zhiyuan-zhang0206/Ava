@@ -8,9 +8,9 @@ import psycopg
 import pytest
 from psycopg_pool import AsyncConnectionPool
 
+from base.cluster.machine import machine_name
 from ops.agents import wake
 from ops.agents.spawn import create_agent_row
-from shared.cluster.machine import machine_name
 
 
 @pytest.fixture
@@ -138,9 +138,9 @@ async def test_resurrection_admits_a_new_incarnation_on_the_same_host(
     from agent.db import claim_inbound_batch
     from agent.ownership.hosted import admit_hosted_runtime, apply_hosted_lifecycle
     from agent.ownership.inbound import RuntimeOwnershipLostError
-    from shared.agents.incarnation.resources import ResourceBirth
-    from shared.db import insert_inbound_message
-    from shared.native_process.turn_identity import bind_turn_identity
+    from base.agents.incarnation.resources import ResourceBirth
+    from base.db import insert_inbound_message
+    from base.native_process.turn_identity import bind_turn_identity
 
     aid = _park(db_conn, status="idling")
     if managed:
@@ -193,7 +193,7 @@ def _backdate_before_status(db: psycopg.Connection, aid: int, iid: int) -> None:
 def _reaped_crash_park(db: psycopg.Connection) -> tuple[int, int]:
     """terminated + reaper source + retained crash marker + a leftover chat
     that predates the termination (the relaxed-trigger shape)."""
-    from shared.db import insert_inbound_message
+    from base.db import insert_inbound_message
 
     aid = _park(db, status="terminated")
     trigger = insert_inbound_message(db, aid, "leftover work", "user")
@@ -237,7 +237,7 @@ def test_reaped_crash_row_resumes_leftover_work(
 def test_operator_death_still_refuses_leftover_work(db_conn: psycopg.Connection) -> None:
     """The crash marker alone never relaxes the fence: a user kill keeps its
     contract — the leftover chat cannot undo it."""
-    from shared.db import insert_inbound_message
+    from base.db import insert_inbound_message
 
     aid = _park(db_conn, status="terminated")
     trigger = insert_inbound_message(db_conn, aid, "leftover work", "user")
@@ -318,8 +318,8 @@ def test_reaped_crash_row_keeps_the_auto_resurrect_budget(
 ) -> None:
     """The relaxed fence is not a budget bypass: an exhausted auto-resurrect
     budget refuses even a reaper-marked leftover."""
-    from shared.agents import ResurrectBudgetExhausted
-    from shared.db import insert_inbound_message
+    from base.agents import ResurrectBudgetExhausted
+    from base.db import insert_inbound_message
 
     aid, trigger = _reaped_crash_park(db_conn)
     for _ in range(wake._auto_resurrect_max_attempts()):
@@ -366,8 +366,8 @@ def test_historical_runtime_cannot_be_resurrected(
     guarded: bool,
 ) -> None:
     """An absent command pointer cannot adopt a historical or unknown runtime."""
-    from shared.agents import ResurrectRefused
-    from shared.db import insert_inbound_message
+    from base.agents import ResurrectRefused
+    from base.db import insert_inbound_message
 
     aid = _park(db_conn, status="terminated")
     db_conn.execute(
@@ -402,7 +402,7 @@ def test_incomplete_hosted_target_requires_cutover(
     """A hosted label alone cannot replace the retained incarnation authority."""
     from psycopg import sql
 
-    from shared.agents import ResurrectRefused
+    from base.agents import ResurrectRefused
 
     aid = _park(db_conn, status="terminated")
     db_conn.execute(

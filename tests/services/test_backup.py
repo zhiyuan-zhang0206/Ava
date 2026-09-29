@@ -25,13 +25,13 @@ import pytest
 from psycopg import sql
 from psycopg.conninfo import conninfo_to_dict
 
+from base.config import settings
+from base.native_process.os_platform import LockTimeoutError
 from services import backup
 from services.gateway_side.backup.passphrase import logical_backup_passphrase
 from services.pitr.stores import factory, logical_dump_names
 from services.pitr.stores.checksums import MD5, ObjectChecksum
 from services.pitr.stores.object_store import RemoteObjectAck
-from shared.config import settings
-from shared.native_process.os_platform import LockTimeoutError
 
 _CLUSTER_TZ = "America/Los_Angeles"
 _REPO = Path(__file__).resolve().parents[2]
@@ -77,7 +77,7 @@ def _spawn_backup_lock_holder(
 
         sys.path.insert(0, {str(_REPO)!r})
         from services.backup import backup_lock
-        from shared.config import settings
+        from base.config import settings
 
         settings.general.ava_home = Path({str(ava_home)!r})
         with backup_lock(timeout_s=60):

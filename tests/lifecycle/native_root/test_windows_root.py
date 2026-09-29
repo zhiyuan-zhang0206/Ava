@@ -12,8 +12,8 @@ from typing import cast
 import psutil
 import pytest
 
-from shared.native_process.os_platform import CREATE_NO_WINDOW
-from shared.native_process.root_control.ipc import ResponsePayload
+from base.native_process.os_platform import CREATE_NO_WINDOW
+from base.native_process.root_control.ipc import ResponsePayload
 
 pytestmark = pytest.mark.skipif(
     sys.platform != "win32", reason="native Windows Job/pipe/console proof"
@@ -61,7 +61,7 @@ def root_fixture(
     ignore_break: bool = False,
     terminal_broker: bool = False,
 ):
-    from shared.native_process.root_control.client import RootClient, native_identity
+    from base.native_process.root_control.client import RootClient, native_identity
 
     run = Path(env["AVA_HOME"]) / "run" / "ava-root"
     manifest = tmp_path / "manifest.json"
@@ -220,8 +220,8 @@ def test_force_job_closure_keeps_unrelated_process_alive(tmp_path, native_env):
 
 
 def test_native_pipe_rejects_bad_frames_and_recovers(tmp_path, native_env):
-    from shared.native_process.root_control.ipc import MAX_MESSAGE_BYTES
-    from shared.native_process.root_control.windows.transport import roundtrip
+    from base.native_process.root_control.ipc import MAX_MESSAGE_BYTES
+    from base.native_process.root_control.windows.transport import roundtrip
 
     with root_fixture(tmp_path, native_env, "import time; time.sleep(120)", ignore_break=True) as (
         _,

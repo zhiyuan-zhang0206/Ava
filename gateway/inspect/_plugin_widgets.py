@@ -5,7 +5,7 @@ Not a router: ``gateway/inspect/router.py`` mounts the single endpoint
 (kept as its own module so agent_inspect stays under the per-file line budget).
 The extension surface of the inspector panel: a plugin embeds widgets for
 every agent from its own Python half (``register_inspect_widget`` at
-``inspector.py`` import — see ``shared/packages/plugins/inspector.py``).
+``inspector.py`` import — see ``base/packages/plugins/inspector.py``).
 
 The registry is built **in process** like the plugin-metric one (task #180
 PR D): the shipped builtin plugins' ``inspector.py`` modules are imported
@@ -39,15 +39,15 @@ from fastapi import HTTPException
 from psycopg import Cursor
 from psycopg_pool import ConnectionPool
 
-from gateway.inspect.schemas import InspectWidgetResult, InspectWidgetTask
-from shared.agents.tasks.priority import Priority
-from shared.packages.plugins import enable_config, load_report
-from shared.packages.plugins.context import PluginContext
-from shared.packages.plugins.inspector import (
+from base.agents.tasks.priority import Priority
+from base.packages.plugins import enable_config, load_report
+from base.packages.plugins.context import PluginContext
+from base.packages.plugins.inspector import (
     InspectWidgetSpec,
     drop_plugin_inspect_widgets,
     registered_inspect_widgets,
 )
+from gateway.inspect.schemas import InspectWidgetResult, InspectWidgetTask
 
 # The shipped-plugin inspector directory — every builtin plugin dir with an
 # inspector.py is part of the in-process registry (the metric loader's

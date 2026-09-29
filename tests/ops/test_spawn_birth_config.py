@@ -17,9 +17,9 @@ from typing import Any
 import psycopg
 import pytest
 
+from base.agents.birth_config import set_cluster_default_model
+from base.config import frozen_field_names
 from ops.agents.spawn import create_agent_row
-from shared.agents.birth_config import set_cluster_default_model
-from shared.config import frozen_field_names
 
 
 def _spawn_agent(
@@ -32,7 +32,7 @@ def _spawn_agent(
     (gateway-side, the main data-plane identity) + `_launch_agent_process`
     (runner-side; the autouse guard spy records the launch so tests can assert
     the stamp rides out to the child)."""
-    from shared.cluster.machine import machine_name
+    from base.cluster.machine import machine_name
 
     agent_id, _birth_config, _prompt_id, _attempt_id = create_agent_row(
         spawner=spawner, machine=machine_name(), config=config, **kw

@@ -53,7 +53,7 @@ def test_probe_gateway_takes_the_identity_path(monkeypatch: pytest.MonkeyPatch) 
         "_curl_ok",
         lambda _u: pytest.fail("gateway must not fall back to a bare 2xx"),  # pyright: ignore[reportUnknownArgumentType]
     )
-    from shared.daemon.health import DaemonProbe
+    from base.daemon.health import DaemonProbe
 
     spec = replace(spec, identity_probe=lambda: DaemonProbe.up("root-owned gateway"))
     probe = _probe_commands._probe_service(spec)
@@ -67,7 +67,7 @@ def test_probe_gateway_reports_which_fact_failed(monkeypatch: pytest.MonkeyPatch
     learns which one they have."""
 
     spec = _spec_by_service("gateway")
-    from shared.daemon.health import DaemonProbe
+    from base.daemon.health import DaemonProbe
 
     spec = replace(
         spec,
@@ -127,18 +127,18 @@ def test_register_gateway_advertises_without_gateway_url(
     The real `_register_machine_or_die` is used (autouse fixture replaces the
     module attribute with a noop; `_real_register_machine_or_die` captures the
     original at import time)."""
-    from shared.config import settings
+    from base.config import settings
 
     calls: list[str | None] = []
 
     def fake_register_self(*, url: str | None = None) -> None:
         calls.append(url)
 
-    monkeypatch.setattr("shared.cluster.machines.register_self", fake_register_self)
+    monkeypatch.setattr("base.cluster.machines.register_self", fake_register_self)
     monkeypatch.setattr(settings.gateway, "gateway_url", "")
     monkeypatch.setattr(settings.gateway, "gateway_port", 8000)
-    monkeypatch.setattr("shared.cluster.machine.reachable_host", lambda: "10.0.0.2")
-    monkeypatch.setattr("shared.cluster.machine.ava_home", lambda: tmp_path)
+    monkeypatch.setattr("base.cluster.machine.reachable_host", lambda: "10.0.0.2")
+    monkeypatch.setattr("base.cluster.machine.ava_home", lambda: tmp_path)
 
     rc = _real_register_machine_or_die(
         cast(SetupValues, {"machine_name": "control"}), frozenset({"gateway"})
@@ -153,17 +153,17 @@ def test_register_gateway_only_advertises_reachable_host(
     """A gateway-only unit advertises `reachable_host` + the gateway URL's port —
     NOT the bare gateway URL (WP4: the hostname is what the page proxy's SSRF
     allowlist consumes; a loopback advertisement breaks page serves)."""
-    from shared.config import settings
+    from base.config import settings
 
     calls: list[str | None] = []
 
     def fake_register_self(*, url: str | None = None) -> None:
         calls.append(url)
 
-    monkeypatch.setattr("shared.cluster.machines.register_self", fake_register_self)
+    monkeypatch.setattr("base.cluster.machines.register_self", fake_register_self)
     monkeypatch.setattr(settings.gateway, "gateway_url", "")
-    monkeypatch.setattr("shared.cluster.machine.reachable_host", lambda: "10.0.0.2")
-    monkeypatch.setattr("shared.cluster.machine.ava_home", lambda: tmp_path)
+    monkeypatch.setattr("base.cluster.machine.reachable_host", lambda: "10.0.0.2")
+    monkeypatch.setattr("base.cluster.machine.ava_home", lambda: tmp_path)
     (tmp_path / "gateway_url").write_text("https://ava.example:8000")
 
     rc = _real_register_machine_or_die(
@@ -181,10 +181,10 @@ def test_register_agent_runner_advertises_ops_url(monkeypatch: pytest.MonkeyPatc
     def fake_register_self(*, url: str | None = None) -> None:
         calls.append(url)
 
-    monkeypatch.setattr("shared.cluster.machines.register_self", fake_register_self)
-    monkeypatch.setattr("shared.cluster.machine.reachable_host", lambda: "10.0.0.2")
+    monkeypatch.setattr("base.cluster.machines.register_self", fake_register_self)
+    monkeypatch.setattr("base.cluster.machine.reachable_host", lambda: "10.0.0.2")
     monkeypatch.setattr(
-        "shared.daemon.health.health_port",
+        "base.daemon.health.health_port",
         lambda name: 8106 if name == "ops" else 0,  # pyright: ignore[reportUnknownArgumentType]
     )
 
@@ -199,7 +199,7 @@ def test_register_agent_runner_loopback_host_exits_nonzero(monkeypatch: pytest.M
     """A remote agent-runner whose reachable address resolves to loopback must fail
     loud (exit 1): register_self raises LoopbackDialUrlRefused rather than writing a
     self-dialing localhost ops URL that a remote gateway would dial itself."""
-    from shared.cluster.machines import LoopbackDialUrlRefused
+    from base.cluster.machines import LoopbackDialUrlRefused
 
     calls: list[str | None] = []
 
@@ -207,10 +207,10 @@ def test_register_agent_runner_loopback_host_exits_nonzero(monkeypatch: pytest.M
         calls.append(url)
         raise LoopbackDialUrlRefused(f"loopback dial url refused: {url}")
 
-    monkeypatch.setattr("shared.cluster.machines.register_self", _reject)
-    monkeypatch.setattr("shared.cluster.machine.reachable_host", lambda: "127.0.0.1")
+    monkeypatch.setattr("base.cluster.machines.register_self", _reject)
+    monkeypatch.setattr("base.cluster.machine.reachable_host", lambda: "127.0.0.1")
     monkeypatch.setattr(
-        "shared.daemon.health.health_port",
+        "base.daemon.health.health_port",
         lambda name: 8106 if name == "ops" else 0,  # pyright: ignore[reportUnknownArgumentType]
     )
 
@@ -248,8 +248,8 @@ def test_register_schema_behind_hint_names_working_commands(
         del url
         raise psycopg.errors.UndefinedTable('relation "machines" does not exist')
 
-    monkeypatch.setattr("shared.cluster.machines.register_self", _missing_table)
-    monkeypatch.setattr("shared.cluster.machine.reachable_host", lambda: "10.0.0.2")
+    monkeypatch.setattr("base.cluster.machines.register_self", _missing_table)
+    monkeypatch.setattr("base.cluster.machine.reachable_host", lambda: "10.0.0.2")
 
     rc = _real_register_machine_or_die(
         cast(SetupValues, {"machine_name": "gw"}), frozenset({"gateway"})
@@ -265,12 +265,12 @@ def test_code_behind_schema_hint_names_working_commands(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     import cli.commands._repo as _repo_commands
-    from shared.deploy.schema.migrations import CodeBehindSchema
+    from base.deploy.schema.migrations import CodeBehindSchema
 
     def _ahead(_url: str) -> None:
         raise CodeBehindSchema("DB has migrations this checkout lacks")
 
-    monkeypatch.setattr("shared.deploy.schema.migrations.assert_schema_current", _ahead)
+    monkeypatch.setattr("base.deploy.schema.migrations.assert_schema_current", _ahead)
 
     assert _repo_commands._assert_schema_current_or_die() == 1
     err = capsys.readouterr().err

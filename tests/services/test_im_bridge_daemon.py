@@ -15,8 +15,8 @@ from typing import Any
 
 import pytest
 
+from base.daemon.health import Liveness
 from services.im_bridge import daemon
-from shared.daemon.health import Liveness
 
 
 class _FakeServer:
@@ -111,7 +111,7 @@ def test_run_wires_the_liveness_task(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_load_adapters_skips_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
     """AVA_IM_DISABLED_ADAPTERS skips the named adapters at load; the code
     stays importable (user ruling 2026-08-06: only Telegram stays live)."""
-    from shared.config import settings
+    from base.config import settings
 
     monkeypatch.setattr(settings.services, "im_disabled_adapters", ["weixin", "feishu"])
     imported: list[str] = []

@@ -16,11 +16,11 @@ import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 
-from shared.deploy.release.identity import ApplicationIdentity
-from shared.deploy.release.runtime_release import ReleaseRejectedError, file_sha256
-from shared.deploy.release.verified_file import regular_bytes
-from shared.deploy.schema.migration_layout import required_migration_set_from_names
-from shared.native_process.posix_command import run_owned_command
+from base.deploy.release.identity import ApplicationIdentity
+from base.deploy.release.runtime_release import ReleaseRejectedError, file_sha256
+from base.deploy.release.verified_file import regular_bytes
+from base.deploy.schema.migration_layout import required_migration_set_from_names
+from base.native_process.posix_command import run_owned_command
 
 _IDENTITY_MEMBER = "shared/release-build.json"
 

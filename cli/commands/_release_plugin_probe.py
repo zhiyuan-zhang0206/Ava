@@ -9,12 +9,12 @@ from pathlib import Path
 from unittest.mock import patch
 
 from agent.extensions import load_extensions
+from base import paths
+from base.deploy.release.runtime_release import ReleaseRejectedError
+from base.lm.plugin_providers import ensure_provider_plugins_loaded
+from base.packages.plugins import enable_config
+from base.runtime_plugins import declared_plugins
 from ops.spec import plugin_services
-from shared import paths
-from shared.deploy.release.runtime_release import ReleaseRejectedError
-from shared.lm.plugin_providers import ensure_provider_plugins_loaded
-from shared.packages.plugins import enable_config
-from shared.runtime_plugins import declared_plugins
 
 
 def prove_plugin_registration(root: Path, required: tuple[str, ...]) -> None:
@@ -47,13 +47,13 @@ def prove_plugin_registration(root: Path, required: tuple[str, ...]) -> None:
         patch("socket.socket.connect", side_effect=RuntimeError("prepare network forbidden")),
         patch("socket.socket.connect_ex", side_effect=RuntimeError("prepare network forbidden")),
         patch("socket.create_connection", side_effect=RuntimeError("prepare network forbidden")),
-        # The canonical fail-soft reporter (shared/packages/plugins/load_report.py):
+        # The canonical fail-soft reporter (base/packages/plugins/load_report.py):
         # substituting it turns any contained plugin load failure — plugin.py,
         # services.py, provider registration, a dangling config entry — back
         # into a hard release rejection, so a candidate image with unloadable
         # plugin code never ships.
         patch(
-            "shared.packages.plugins.load_report.report_plugin_load_failure",
+            "base.packages.plugins.load_report.report_plugin_load_failure",
             side_effect=ReleaseRejectedError("candidate plugin import failed"),
         ),
     ):

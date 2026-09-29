@@ -13,13 +13,13 @@ from uuid import uuid4
 
 import pytest
 
+from base import paths as base_paths
+from base.cluster import machine as base_machine
+from base.deploy.release.runtime_release import activate_release
+from base.runtime_abi import current_abi
 from cli.release_fleet.request import FleetRequest
 from cli.release_operator import status as status_module
 from cli.release_transition.request import ReleaseRef
-from shared import paths as shared_paths
-from shared.cluster import machine as shared_machine
-from shared.deploy.release.runtime_release import activate_release
-from shared.runtime_abi import current_abi
 from tests.lifecycle.release_operator.conftest import build_image, digest
 from tests.lifecycle.transition.phases import at_phase
 
@@ -51,8 +51,8 @@ def _request(home: Path) -> FleetRequest:
 def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     path = tmp_path / "home"
     path.mkdir()
-    monkeypatch.setattr(shared_paths, "ava_home", lambda: path)
-    monkeypatch.setattr(shared_machine, "machine_name", lambda: "test-unit")
+    monkeypatch.setattr(base_paths, "ava_home", lambda: path)
+    monkeypatch.setattr(base_machine, "machine_name", lambda: "test-unit")
     return path
 
 
@@ -146,8 +146,8 @@ def test_a_fleet_operation_shows_every_unit_and_the_published_release(
 
     request = fleet_request(tmp_path.resolve())
     home = Path(request.home)
-    monkeypatch.setattr(shared_paths, "ava_home", lambda: home)
-    monkeypatch.setattr(shared_machine, "machine_name", lambda: request.machine)
+    monkeypatch.setattr(base_paths, "ava_home", lambda: home)
+    monkeypatch.setattr(base_machine, "machine_name", lambda: request.machine)
     # The selection names digests only; its image is not what this test reads.
     monkeypatch.setattr(status_module, "current_release", lambda _home: None)
     create(request)

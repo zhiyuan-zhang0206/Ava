@@ -28,8 +28,8 @@ import pytest
 import ava
 from ava.sdk_surface import wraps
 from ava.sdk_surface.wraps import wrap
-from shared.packages.plugins import activation
-from shared.packages.plugins.context import PluginContext
+from base.packages.plugins import activation
+from base.packages.plugins.context import PluginContext
 
 
 @pytest.fixture

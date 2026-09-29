@@ -23,12 +23,12 @@ import argparse
 import builtins
 import sys
 
+from base.packages.docs.notes import walk_notes
+from base.paths import gateway_memory_dir
 from services.memory_indexer.backends.base import MemorySearchBackend
 from services.memory_indexer.backends.factory import get_backend_named
 from services.memory_indexer.embeddings.base import EmbeddingAPIError
 from services.memory_indexer.embeddings.factory import get_provider
-from shared.packages.docs.notes import walk_notes
-from shared.paths import gateway_memory_dir
 
 
 def _sample_queries(limit: int) -> list[str]:

@@ -17,11 +17,11 @@ from unittest.mock import Mock
 
 import pytest
 
+from base.config import settings
+from base.host.net import resilience
 from services.computer.mcp_wrapper import _Link, _ReconnectingLink
 from services.permissions_helper import client
 from services.permissions_helper.client import PermissionsHelperError
-from shared.config import settings
-from shared.host.net import resilience
 
 
 class FakeWriter:

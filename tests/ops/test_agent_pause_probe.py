@@ -15,8 +15,8 @@ from pathlib import Path
 
 import pytest
 
+from base.config import settings
 from ops.agent_pause import probe
-from shared.config import settings
 
 
 def _pidfile(tmp_path: Path, pid: int) -> Path:
@@ -31,13 +31,13 @@ def _stub_backend(monkeypatch: pytest.MonkeyPatch, *, has_session: bool) -> None
             del name
             return has_session
 
-    monkeypatch.setattr("shared.sessions.backend.get_backend", _Backend)
+    monkeypatch.setattr("base.sessions.backend.get_backend", _Backend)
 
 
 def _stub_root_client(
     monkeypatch: pytest.MonkeyPatch, *, response: object = None, unreachable: bool = False
 ) -> None:
-    from shared.native_process.root_control.client import RootClientError
+    from base.native_process.root_control.client import RootClientError
 
     class _Client:
         def __init__(self, socket_path: Path, *, timeout: float = 1.0) -> None:
@@ -48,7 +48,7 @@ def _stub_root_client(
                 raise RootClientError("no root answers")
             return response
 
-    monkeypatch.setattr("shared.native_process.root_control.client.RootClient", _Client)
+    monkeypatch.setattr("base.native_process.root_control.client.RootClient", _Client)
 
 
 def _root_response(*, state: str, pid: int, unit_id: str = "agent-host") -> dict[str, object]:
@@ -264,7 +264,7 @@ def test_ops_quiescent_session_gate_does_not_consult_the_tree(
     def _explode(*_args: object, **_kwargs: object) -> object:
         raise AssertionError("root consulted although the session records ops")
 
-    monkeypatch.setattr("shared.native_process.root_control.client.RootClient", _explode)
+    monkeypatch.setattr("base.native_process.root_control.client.RootClient", _explode)
     calls: list[str] = []
     _stub_ops_wait(monkeypatch, tmp_path, calls=calls)
     probe.ops_quiescent(1.0)

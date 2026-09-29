@@ -10,13 +10,13 @@ import time
 from pathlib import Path
 from typing import Any, NamedTuple, cast
 
+from base.cluster.derive import runner_db_url_projection
+from base.cluster.machine import MachineRoles
+from base.config import settings
 from cli.commands._probe import ReadinessWait
 from cli.commands._repo import ServiceSpec, session_name
 from cli.start_runtime import StartRuntime
 from ops.roster.service_spec import api_access, db_access, profile_marker
-from shared.cluster.derive import runner_db_url_projection
-from shared.cluster.machine import MachineRoles
-from shared.config import settings
 
 _ROOT_SOCKET_NAME = "ava-root.sock"
 _ROOT_STDOUT_LOG = "root.stdout.log"
@@ -42,9 +42,9 @@ def complete_boot_start() -> None:
     """Hand Linux systemd the verified root after ordinary readiness succeeds."""
     if sys.platform != "linux":
         return
-    from shared.host.system.boot_unit import in_boot_unit, publish_root_ready
-    from shared.native_process.root_control.client import native_identity
-    from shared.paths import ava_home
+    from base.host.system.boot_unit import in_boot_unit, publish_root_ready
+    from base.native_process.root_control.client import native_identity
+    from base.paths import ava_home
 
     home = ava_home()
     if not in_boot_unit(home):
@@ -65,8 +65,8 @@ class LaunchOutcome(NamedTuple):
 
 def _service_extra_env(spec: ServiceSpec) -> dict[str, str]:
     """Bind profile, database login and API token to one service, never its parent."""
+    from base.telemetry.lgtm_local import BACKENDS, service_environment
     from cli.commands.data_plane.bringup import api_delivery, db_delivery
-    from shared.telemetry.lgtm_local import BACKENDS, service_environment
 
     extra = service_environment(spec.session) if spec.session in BACKENDS else {}
     marker = profile_marker(spec)
@@ -95,15 +95,15 @@ def _root_tree_roster(roles: MachineRoles, launch_skip: set[str]) -> tuple[Servi
 
 def _root_client(*, timeout: float = 5.0) -> Any:
     """A blocking client bound to this cluster's root control socket."""
-    from shared.native_process.root_control.client import RootClient
-    from shared.paths import root_run_dir
+    from base.native_process.root_control.client import RootClient
+    from base.paths import root_run_dir
 
     return RootClient(root_run_dir() / _ROOT_SOCKET_NAME, timeout=timeout)
 
 
 def _root_status(client: Any) -> dict[str, Any] | None:
     """The daemon's status result, or None when no root answers (yet)."""
-    from shared.native_process.root_control.client import RootClientError
+    from base.native_process.root_control.client import RootClientError
 
     try:
         response = client.status()
@@ -156,10 +156,10 @@ def _require_root_owner(status: dict[str, Any]) -> None:
     """Bind every reused or stopped root to its required live native parent."""
     import psutil
 
+    from base.native_process.ownership import OwnedProcess
+    from base.native_process.root_control.client import native_identity
+    from base.paths import root_run_dir
     from services.permissions_helper import client as helper_client
-    from shared.native_process.ownership import OwnedProcess
-    from shared.native_process.root_control.client import native_identity
-    from shared.paths import root_run_dir
 
     root = native_identity(status.get("root"))
     if not root.live():
@@ -201,8 +201,8 @@ def _root_argv(run_dir: Path, manifests: Path, runtime: StartRuntime | None = No
 
 def root_child_env() -> dict[str, str]:
     """The root env, including the proof it may pass only to agent-host."""
-    from shared.host.env.registry import manifest_certification_secret_env
-    from shared.sessions.env_forwarding import managed_service_env
+    from base.host.env.registry import manifest_certification_secret_env
+    from base.sessions.env_forwarding import managed_service_env
 
     return managed_service_env(settings.general.service_path) | manifest_certification_secret_env()
 
@@ -299,7 +299,7 @@ def _seed_via_helper(
     from services.permissions_helper import client as helper_client
 
     try:
-        from shared.host.atomic_io import write_text_atomic
+        from base.host.atomic_io import write_text_atomic
 
         seed: helper_client.RootSeedConfig = {
             "argv": _root_argv(run_dir, manifests, runtime),
@@ -385,7 +385,7 @@ def _stop_root_process(
     run_dir: Path, client: Any, status: dict[str, Any], *, timeout_s: float
 ) -> None:
     """Stop through the keeper on macOS, or SIGTERM; await native root exit."""
-    from shared.native_process.root_control.client import native_identity
+    from base.native_process.root_control.client import native_identity
 
     _require_root_owner(status)
     identity = native_identity(status["root"])
@@ -484,7 +484,7 @@ def admit_live_start(
         return False
     _require_root_owner(status)
     manifest = tree_manifest(roster, repo, roles=roles, runtime=runtime)
-    from shared.paths import ava_home
+    from base.paths import ava_home
 
     manifest["launch_digest"] = launch_digest(
         repo, root_child_env(), home=ava_home(), runtime=runtime
@@ -502,8 +502,8 @@ def _ensure_root_service_tree(
     runtime: StartRuntime | None = None,
 ) -> LaunchOutcome:
     """Reuse an identical generation; changing its inputs requires prior stop."""
+    from base.paths import ava_home, root_manifests_path, root_run_dir
     from services.ava_root_glue.manifests import write_manifest
-    from shared.paths import ava_home, root_manifests_path, root_run_dir
 
     run_dir = root_run_dir()
     if runtime is not None:
@@ -659,8 +659,8 @@ def _wait_for_root_services_ready(
     specs: tuple[ServiceSpec, ...], timeout_s: float
 ) -> ReadinessWait:
     """Every success uses one fresh whole-roster observation, never sticky ALIVE."""
+    from base.deploy.progress_timeout import NON_CRITICAL_SERVICE_READY_TIMEOUT_S
     from cli.commands._probe import CRITICAL_SERVICE_SESSIONS
-    from shared.deploy.progress_timeout import NON_CRITICAL_SERVICE_READY_TIMEOUT_S
 
     client = _root_client()
     started_at = time.monotonic()
@@ -692,9 +692,9 @@ def _wait_for_root_services_ready(
 
 
 def require_root_absent() -> None:
+    from base.paths import root_run_dir
     from services.ava_root.custody import require_clear
     from services.ava_root.singleton import acquire_instance_lock, release_instance_lock
-    from shared.paths import root_run_dir
 
     run_dir = root_run_dir()
     require_clear(run_dir)
@@ -759,7 +759,7 @@ def _stop_root_service_tree(
     leaves the root running to host it. Raises `_RootDriverError` when the
     tree cannot be brought down; the caller's phase accounting reports it.
     """
-    from shared.paths import root_run_dir
+    from base.paths import root_run_dir
 
     deadline = time.monotonic() + timeout_s
     client = _root_client(timeout=timeout_s)

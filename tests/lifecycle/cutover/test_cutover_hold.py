@@ -16,12 +16,12 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from base.config import settings
+from base.deploy.lifecycle import start_serving
+from base.deploy.maintenance import admission
+from base.deploy.maintenance.state import MaintenanceHold
 from cli.commands.lifecycle._pause_resume import resume_after_start
 from scripts import cutover_adopt_home as adopt
-from shared.config import settings
-from shared.deploy.lifecycle import start_serving
-from shared.deploy.maintenance import admission
-from shared.deploy.maintenance.state import MaintenanceHold
 from tests.lifecycle.cutover.conftest import SERVICE_PATH, LegacyHome
 
 Make = Callable[..., LegacyHome]

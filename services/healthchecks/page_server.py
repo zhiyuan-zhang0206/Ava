@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from shared.config import settings
-from shared.daemon.health import DaemonProbe, health_port, probe_daemon
+from base.config import settings
+from base.daemon.health import DaemonProbe, health_port, probe_daemon
 
 _HEALTH_URL = (
     settings.services.page_server_health_url

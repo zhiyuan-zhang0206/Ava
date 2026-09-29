@@ -1,6 +1,6 @@
 """GET /api/metrics HTTP integration tests.
 
-The per-unit aggregation math is unit-tested in tests/shared/test_metrics.py
+The per-unit aggregation math is unit-tested in tests/base/test_metrics.py
 (pure functions over hand-built EventRow). This file locks the *endpoint
 contract*: the windowed Loki fetch wires `attributes.X` keys to the real emit
 field names, the `{meta, metrics}` envelope shape holds, and the `days` / `agent`
@@ -182,7 +182,7 @@ def test_metrics_default_window_comes_from_display_config(
     """Omitted `days` is settings.display.metrics_default_window_days
     (``AVA_METRICS_DEFAULT_WINDOW_DAYS``); the literal 1 is only that field's
     default, not a hard-coded window. Both metrics endpoints resolve it."""
-    from shared.config import settings
+    from base.config import settings
 
     db_conn.commit()
     monkeypatch.setattr(settings.display, "metrics_default_window_days", 3)

@@ -23,12 +23,12 @@ import argparse
 from urllib.parse import urlsplit
 
 from agent.llm import execute_code
-from shared.agents.history.hierarchy.generate import build_generation_llm
-from shared.agents.history.hierarchy.pipeline import MaterializedTree, build_agent_tree
-from shared.agents.history.hierarchy.store import load_known_texts, write_tree
-from shared.agents.observation.snapshot import agent_effective_model
-from shared.config import settings
-from shared.lm.factory import close_chat_model
+from base.agents.history.hierarchy.generate import build_generation_llm
+from base.agents.history.hierarchy.pipeline import MaterializedTree, build_agent_tree
+from base.agents.history.hierarchy.store import load_known_texts, write_tree
+from base.agents.observation.snapshot import agent_effective_model
+from base.config import settings
+from base.lm.factory import close_chat_model
 
 # How many failed-node lines the report shows before folding the rest into a
 # count. The full set is one re-run away; the operator needs the flavor and

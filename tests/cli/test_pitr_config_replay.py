@@ -12,10 +12,10 @@ import psycopg
 import pytest
 from psycopg import sql
 
+from base.config import settings
 from cli.commands.data_plane import _pitr_activation_config as config
 from cli.commands.data_plane import pitr_activation as activation
 from services.pitr.activation.state import ActivationRecord, load_record, record_path, write_record
-from shared.config import settings
 from tests.cli.test_pitr_activation import _env_apply_fixture
 
 
@@ -52,7 +52,7 @@ def native_auto(
     def authorized(_home: Path) -> None:
         return None
 
-    monkeypatch.setattr("shared.deploy.release.operation.require_pitr_authorized", authorized)
+    monkeypatch.setattr("base.deploy.release.operation.require_pitr_authorized", authorized)
     try:
         yield tmp_path, record
     finally:
@@ -71,7 +71,7 @@ def _effective_mode() -> str:
 def test_real_pg_replays_own_sql_while_show_remains_off(
     native_auto: tuple[Path, ActivationRecord], monkeypatch: pytest.MonkeyPatch, window: str
 ) -> None:
-    from shared.host.env import dotenv_file
+    from base.host.env import dotenv_file
 
     home, record = native_auto
 

@@ -8,8 +8,8 @@ from pathlib import Path
 
 import pytest
 
+from base.cluster import home_slug
 from scripts import cutover_legacy_jobs as jobs
-from shared.cluster import home_slug
 from tests.lifecycle.cutover.conftest import LegacyHome, arm_health_probe
 
 Make = Callable[..., LegacyHome]

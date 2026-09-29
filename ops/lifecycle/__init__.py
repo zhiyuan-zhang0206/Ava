@@ -31,6 +31,17 @@ from typing import Any, Literal
 
 from psycopg_pool import ConnectionPool
 
+from base import telemetry
+from base.agents import (
+    AgentNotFound,
+    AgentStatus,
+    ResurrectAlreadyAlive,
+)
+from base.cluster.machine import machine_name
+from base.db import insert_inbound_message
+from base.events.live.announce import publish_agent_updated_sync
+from base.lm.registry import normalize_overlay_llm_model
+from base.telemetry.audit_events import prepare_event_log
 from ops import cluster_rpc as _cluster_rpc
 from ops.agents import (
     get_agent_machine,
@@ -103,17 +114,6 @@ from ops.rpc_schemas import (
     TerminateAgentResponse,
 )
 from ops.rpc_schemas.terminate import ShellSessionsKill
-from shared import telemetry
-from shared.agents import (
-    AgentNotFound,
-    AgentStatus,
-    ResurrectAlreadyAlive,
-)
-from shared.cluster.machine import machine_name
-from shared.db import insert_inbound_message
-from shared.events.live.announce import publish_agent_updated_sync
-from shared.lm.registry import normalize_overlay_llm_model
-from shared.telemetry.audit_events import prepare_event_log
 
 _log = logging.getLogger(__name__)
 
@@ -233,7 +233,7 @@ async def _cancel_hosted_turn_best_effort(agent_id: int, command_id: int) -> Non
     """
     import httpx
 
-    from shared.daemon.health import health_port
+    from base.daemon.health import health_port
 
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(2.0)) as client:
@@ -450,8 +450,8 @@ def _restart_blocking(
     when the agent is already terminated."""
     from psycopg import sql
 
-    from shared.agents.incarnation.lifecycle_acceptance import FAILED_RESTART_FOR_CURRENT_TARGET
-    from shared.db.transaction import write_transaction
+    from base.agents.incarnation.lifecycle_acceptance import FAILED_RESTART_FOR_CURRENT_TARGET
+    from base.db.transaction import write_transaction
 
     with write_transaction(db_pool) as conn:
         row = conn.execute(
@@ -529,11 +529,11 @@ def _recover_crash_marked_blocking(agent_id: int) -> RecoverCrashMarkedResponse:
       refused, naming the guard that failed;
     - already terminated -> `already_terminated` (an idempotent repeat).
     """
-    from shared.agents.recovery_breaker import (
+    from base.agents.recovery_breaker import (
         HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS,
         SUPPRESS_REASON_PERMANENT_REJECT,
     )
-    from shared.db.transaction import write_transaction
+    from base.db.transaction import write_transaction
 
     with write_transaction() as conn:
         row = conn.execute(
@@ -592,7 +592,7 @@ def _recover_crash_marked_blocking(agent_id: int) -> RecoverCrashMarkedResponse:
             source="system",
             payload={"from": "idling", "to": "terminated", "reason": "corpse_reaper"},
         )
-        from shared.agents.impersonation_manifest import stage_central_expected_event
+        from base.agents.impersonation_manifest import stage_central_expected_event
 
         prepared_event = stage_central_expected_event(
             conn, prepared_event, origin_kind="ops_lifecycle_reaper", origin_id=agent_id

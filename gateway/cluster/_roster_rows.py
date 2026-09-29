@@ -12,8 +12,8 @@ from __future__ import annotations
 import logging
 from datetime import datetime
 
-from shared.api_contracts.status import MachineStatus
-from shared.deploy.state.cluster_lock import DeployLease
+from base.api_contracts.status import MachineStatus
+from base.deploy.state.cluster_lock import DeployLease
 
 _log = logging.getLogger("gateway.cluster._roster_rows")
 

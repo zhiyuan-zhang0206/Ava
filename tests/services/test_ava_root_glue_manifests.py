@@ -8,13 +8,14 @@ from typing import cast
 
 import pytest
 
+from base.cluster.machine import MachineRole
+
 # The capability constants are typed frozenset[MachineRole]; capability values
 # are irrelevant to the roster-driven assertions here (same precedent as
 # tests/cli/test_cluster_health.py).
 from ops.roster.service_spec import _AGENT_RUNNER, _BOTH, _GATEWAY, ServiceSpec
 from services.ava_root.manifest import ManifestError, load_manifests
 from services.ava_root_glue import manifests as gen
-from shared.cluster.machine import MachineRole
 
 _REPO = Path("/checkout/repo")
 
@@ -22,8 +23,8 @@ _REPO = Path("/checkout/repo")
 @pytest.fixture(autouse=True)
 def _declared_configuration(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Give the real roster private configuration, without a native backend install."""
+    from base.telemetry.lgtm_local import BACKENDS, service_input_paths
     from ops import roster
-    from shared.telemetry.lgtm_local import BACKENDS, service_input_paths
 
     monkeypatch.setattr(roster, "ava_home", lambda: tmp_path)
     collector = tmp_path / "collector.yaml"

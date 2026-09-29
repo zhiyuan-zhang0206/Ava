@@ -80,7 +80,7 @@ repos:
         files: ^((gateway|ops)/.*|scripts/lint/async_no_sync_blocking)\.py$
         pass_filenames: false
 
-      # Ban raw os.environ / os.getenv — runtime config must go through shared.config.settings.
+      # Ban raw os.environ / os.getenv — runtime config must go through base.config.settings.
       # Legitimate exceptions (3rd-party secret / IPC handoff / container entrypoints)
       # use an inline `# env-ok: <reason>` exemption, see scripts/lint/no_os_environ.py header.
       - id: lint-no-os-environ
@@ -103,7 +103,7 @@ repos:
 
       # per_agent config fields read through the bare settings singleton in
       # turn-scoped code silently ignore the agent's overlay in hosted-runner
-      # mode — force the per-turn view (shared/config/turn_view.py).
+      # mode — force the per-turn view (base/config/turn_view.py).
       - id: lint-turn-scoped-config
         name: lint per-agent config reads (force turn_settings)
         entry: .venv/bin/python scripts/lint/turn_scoped_config.py
@@ -152,7 +152,7 @@ repos:
       # Ban raw CJK characters anywhere in the repo — English-only source
       # (user ruling 2026-08-27, tightening English-primary). Exemption: i18n /
       # locale copy only (<dir>/messages/*.json, */locales/*, *.po, and
-      # shared/telemetry/alerts_copy.py — the IM alert-copy locale module). Skill bodies,
+      # base/telemetry/alerts_copy.py — the IM alert-copy locale module). Skill bodies,
       # code comments, docs, tests, fixtures, demos all fail on raw CJK;
       # functional CJK data is written as \uXXXX escapes (runtime-identical).
       # Whole-repo scan via git ls-files; see scripts/content_lint/lint_no_cjk.py header.
@@ -226,7 +226,7 @@ repos:
       # with a frozen shrink-only baseline checked against the base revision.
       # Also locality: no `_`-private import from outside its owning package
       # (package doors), and single decision owners (scripts/structure/
-      # locality.py DECISIONS, e.g. postgres-dial -> shared/db/connections.py) —
+      # locality.py DECISIONS, e.g. postgres-dial -> base/db/connections.py) —
       # both frozen in the baseline shards as exact site counts. Rules + the
       # _TYPE_CHECKING_ALLOWED list live in scripts/lint/code_structure.py
       # header. (print() bans are enforced by ruff T20, not here.)
@@ -271,7 +271,7 @@ repos:
         name: lint core-content manifests (ranges + requires_commit vs derived host version)
         entry: .venv/bin/python scripts/content_lint/lint_core_content_manifests.py
         language: system
-        files: '(ava-plugin\.json$|^scripts/content_lint/lint_core_content_manifests\.py$|^shared/packages/plugins/manifest\.py$|^shared/deploy/git/host_version\.py$)'
+        files: '(ava-plugin\.json$|^scripts/content_lint/lint_core_content_manifests\.py$|^base/packages/plugins/manifest\.py$|^base/deploy/git/host_version\.py$)'
         pass_filenames: false
 
       # SKILL.md line-count ceiling to prevent progressive bloat.
@@ -408,7 +408,7 @@ repos:
         pass_filenames: false
 
       # (Config-scope ownership is now enforced at import by the config package's
-      # registry builder — shared/config/__init__.py:_build_registry fails fast on
+      # registry builder — base/config/__init__.py:_build_registry fails fast on
       # a field with a missing/invalid scope, so the former standalone
       # lint-config-scope hook retired.)
 
@@ -432,7 +432,7 @@ repos:
         name: lint NoteTag / system_marker bidirectional sync
         entry: .venv/bin/python scripts/lint/note_tags.py
         language: system
-        files: ^(shared/agents/messages/kwargs\.py|ui/web/src/components/timeline/markers\.tsx)$
+        files: ^(base/agents/messages/kwargs\.py|ui/web/src/components/timeline/markers\.tsx)$
         pass_filenames: false
 
       # Migration layout: timestamp-id filename format, unique names, up/down
@@ -517,49 +517,49 @@ repos:
         name: "types-generated.ts in sync with Pydantic schema (drift: run ./scripts/codegen-types.sh)"
         entry: ./scripts/check-types-fresh.sh
         language: system
-        # shared/agents/tasks/priority.py + shared/agents/tasks/status.py carry the shared enums the
+        # base/agents/tasks/priority.py + base/agents/tasks/status.py carry the shared enums the
         # wire schemas reference, and ops/rpc_schemas/terminate.py defines the terminate
         # hint models — all three feed the generated spec, so they trigger the
         # freshness check like the other schema sources.
         # Include defining modules behind schema re-exports. The CI closure
         # test follows route annotations/imports so moves cannot escape here.
-        files: ^(gateway/.*\.py$|shared/agents/contract\.py$|shared/api_contracts/.*\.py$|shared/agents/tasks/priority\.py$|shared/agents/tasks/status\.py$|shared/agents/history/timeline\.py$|shared/agents/observation/snapshot\.py$|shared/host/resource_sample\.py$|ops/rpc_schemas/.*\.py$|ui/web/src/lib/types-generated\.ts$|ui/web/openapi\.json$|shared/agents/observation/roster\.py$|shared/agents/observation/evidence\.py$|shared/agents/history/timeline_item\.py$|ops/cluster_status/__init__\.py$|shared/agents/impersonation/history\.py$|shared/agents/sdk/telemetry\.py$)
+        files: ^(gateway/.*\.py$|base/agents/contract\.py$|base/api_contracts/.*\.py$|base/agents/tasks/priority\.py$|base/agents/tasks/status\.py$|base/agents/history/timeline\.py$|base/agents/observation/snapshot\.py$|base/host/resource_sample\.py$|ops/rpc_schemas/.*\.py$|ui/web/src/lib/types-generated\.ts$|ui/web/openapi\.json$|base/agents/observation/roster\.py$|base/agents/observation/evidence\.py$|base/agents/history/timeline_item\.py$|ops/cluster_status/__init__\.py$|base/agents/impersonation/history\.py$|base/agents/sdk/telemetry\.py$)
         pass_filenames: false
       - id: constants-codegen-fresh
-        name: "constants-generated.ts in sync with shared/events/live/projection.py (drift: run ./scripts/codegen/dump_frontend_constants.py)"
+        name: "constants-generated.ts in sync with base/events/live/projection.py (drift: run ./scripts/codegen/dump_frontend_constants.py)"
         entry: ./scripts/check-constants-fresh.sh
         language: system
-        files: ^(shared/events/live/projection\.py$|scripts/codegen/dump_frontend_constants\.py$|ui/web/src/lib/constants-generated\.ts$)
+        files: ^(base/events/live/projection\.py$|scripts/codegen/dump_frontend_constants\.py$|ui/web/src/lib/constants-generated\.ts$)
         pass_filenames: false
 
-      # shared/events/registry.md must stay in sync with the event contract
-      # registry (shared/events/contract.py EVENTS + live_events SSE roles) —
+      # base/events/registry.md must stay in sync with the event contract
+      # registry (base/events/contract.py EVENTS + live_events SSE roles) —
       # the doc is a generated artifact (R2-C): a new/renamed event or role
       # without regenerating turns this hook red.
       - id: events-registry-fresh
-        name: "shared/events/registry.md in sync with EVENTS registry (drift: run .venv/bin/python scripts/codegen/gen_event_registry.py)"
+        name: "base/events/registry.md in sync with EVENTS registry (drift: run .venv/bin/python scripts/codegen/gen_event_registry.py)"
         entry: ./scripts/check-events-registry-fresh.sh
         language: system
         # The EVENTS shards feed the registry too: a spec added/edited in
-        # shared/events/registry*.py (e.g. registry_ops.py) must re-run the
+        # base/events/registry*.py (e.g. registry_ops.py) must re-run the
         # freshness check locally, not only in the CI --all-files pass.
         # contract.py re-exports payload and lifecycle shards; CI verifies
         # the recursive source-module closure against this pattern.
-        files: ^(shared/events/contract\.py$|shared/events/registry\.py$|shared/events/registry_ops\.py$|shared/events/system\.py$|shared/events/live/projection\.py$|scripts/codegen/gen_event_registry\.py$|shared/events/registry\.md$|shared/events/payloads\.py$|shared/events/registry_lifecycle\.py$)
+        files: ^(base/events/contract\.py$|base/events/registry\.py$|base/events/registry_ops\.py$|base/events/system\.py$|base/events/live/projection\.py$|scripts/codegen/gen_event_registry\.py$|base/events/registry\.md$|base/events/payloads\.py$|base/events/registry_lifecycle\.py$)
         pass_filenames: false
 
-      # shared/host/env/config_lite_table.json must stay in sync with the config
+      # base/host/env/config_lite_table.json must stay in sync with the config
       # registry — the boot-path field index is a generated artifact (#3621):
       # any config field change without regenerating turns this hook red.
       - id: config-lite-table-fresh
-        name: "shared/host/env/config_lite_table.json in sync with the config registry (drift: run .venv/bin/python scripts/codegen/gen_config_lite_table.py)"
+        name: "base/host/env/config_lite_table.json in sync with the config registry (drift: run .venv/bin/python scripts/codegen/gen_config_lite_table.py)"
         entry: .venv/bin/python scripts/codegen/gen_config_lite_table.py --check
         language: system
-        files: ^(shared/host/env/config_registry\.py$|shared/config/.*\.py$|scripts/codegen/gen_config_lite_table\.py$|shared/host/env/config_lite_table\.json$)
+        files: ^(base/host/env/config_registry\.py$|base/config/.*\.py$|scripts/codegen/gen_config_lite_table\.py$|base/host/env/config_lite_table\.json$)
         pass_filenames: false
 
-      # Package-door contract snapshots (shared/db/api.txt, shared/agents/api.txt,
-      # shared/events/api.txt) must match the door's current public surface — pure
+      # Package-door contract snapshots (base/db/api.txt, base/agents/api.txt,
+      # base/events/api.txt) must match the door's current public surface — pure
       # AST, so a body-only fix leaves the snapshot untouched; a signature change,
       # or a new/removed public name, must land its snapshot diff in the same PR.
       # See conventions/python-conventions.md and scripts/structure/contracts.py.
@@ -567,7 +567,7 @@ repos:
         name: "core package-door contract snapshots in sync (drift: run .venv/bin/python scripts/structure/contracts.py --write)"
         entry: .venv/bin/python scripts/structure/contracts.py --check
         language: system
-        files: ^(shared/db/__init__\.py$|shared/agents/.*\.py$|shared/events/.*\.py$|shared/db/api\.txt$|shared/agents/api\.txt$|shared/events/api\.txt$|scripts/structure/contracts\.py$)
+        files: ^(base/db/__init__\.py$|base/agents/.*\.py$|base/events/.*\.py$|base/db/api\.txt$|base/agents/api\.txt$|base/events/api\.txt$|scripts/structure/contracts\.py$)
         pass_filenames: false
 
   - repo: local

@@ -34,6 +34,10 @@ import psycopg
 from fastapi import APIRouter, HTTPException, Query, Request, Response
 from psycopg_pool import ConnectionPool
 
+from base.config import settings
+from base.db import NOTICE_FYI_TTL_DAYS
+from base.db.transaction import write_transaction
+from base.events.live.announce import publish_agent_updated_sync
 from gateway.agents.delivery import deliver_chat_inbound
 from gateway.agents.inbound_provenance import request_inbound_provenance
 from gateway.agents.schemas import (
@@ -47,10 +51,6 @@ from gateway.agents.schemas import (
     ResolveNoticeIn,
 )
 from ops import lifecycle as _ops
-from shared.config import settings
-from shared.db import NOTICE_FYI_TTL_DAYS
-from shared.db.transaction import write_transaction
-from shared.events.live.announce import publish_agent_updated_sync
 
 router = APIRouter()
 _log = logging.getLogger(__name__)
@@ -457,7 +457,7 @@ async def post_notice_resolve(
     # Delivery channel: every notice resolution rides the notice-system source —
     # a user reply as `system:notice-reply`, a bare dismiss as
     # `system:notice-dismiss`. The claim node envelope-wraps both as "[system] ..."
-    # (shared/agents/messages/envelope.py), so no User-role message is consumed and nothing is
+    # (base/agents/messages/envelope.py), so no User-role message is consumed and nothing is
     # shaped like a reply request; read-without-reply still delivers nothing.
     deliver_source = "system:notice-reply" if reply is not None else "system:notice-dismiss"
     delivery = await deliver_chat_inbound(

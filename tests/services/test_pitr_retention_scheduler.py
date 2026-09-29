@@ -138,7 +138,7 @@ def wired(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
 
 
 def _config() -> Any:
-    from shared.config import settings
+    from base.config import settings
 
     return settings.physical_backup
 
@@ -347,7 +347,7 @@ def test_build_verify_absent_uses_the_viewer_stat(monkeypatch: pytest.MonkeyPatc
         def viewer_object_store(self) -> _Viewer:
             return _Viewer()
 
-    from shared.config import settings
+    from base.config import settings
 
     monkeypatch.setattr(scheduler, "get_store_group", _Group)
     config = settings.physical_backup
@@ -377,7 +377,7 @@ def test_build_verify_absent_polls_for_baidu(monkeypatch: pytest.MonkeyPatch) ->
         def viewer_object_store(self) -> _Viewer:
             return self.viewer
 
-    from shared.config import settings
+    from base.config import settings
 
     monkeypatch.setattr(
         scheduler,

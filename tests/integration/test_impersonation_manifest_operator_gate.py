@@ -13,9 +13,9 @@ import psycopg
 import pytest
 
 from ava.impersonation import replay as reader
-from shared.agents import impersonation as leases
-from shared.agents.impersonation import history as history
-from shared.agents.impersonation_manifest import (
+from base.agents import impersonation as leases
+from base.agents.impersonation import history as history
+from base.agents.impersonation_manifest import (
     LocalParticipant,
     alert_if_participant_still_open,
     bind_local_participant,
@@ -28,17 +28,17 @@ from shared.agents.impersonation_manifest import (
     stage_central_expected_event,
     unbind_local_participant,
 )
-from shared.cluster.machine import machine_name
-from shared.config import settings
-from shared.db import create_agent
-from shared.host.env.registry import MANIFEST_CERTIFICATION_SECRET_ENV
-from shared.native_process.runtime_incarnation import RuntimeIncarnation
-from shared.telemetry import Event
-from shared.telemetry.alerts import upsert_alert
-from shared.telemetry.audit_events import prepare_event_log
-from shared.telemetry.loki_index_labels import EVENT_STREAM_RETENTION
+from base.cluster.machine import machine_name
+from base.config import settings
+from base.db import create_agent
+from base.host.env.registry import MANIFEST_CERTIFICATION_SECRET_ENV
+from base.native_process.runtime_incarnation import RuntimeIncarnation
+from base.telemetry import Event
+from base.telemetry.alerts import upsert_alert
+from base.telemetry.audit_events import prepare_event_log
+from base.telemetry.loki_index_labels import EVENT_STREAM_RETENTION
+from tests.base import test_history as history_cases
 from tests.impersonation_support import attested_caller
-from tests.shared import test_history as history_cases
 
 _CERTIFICATION_SECRET = "test-manifest-certification-secret-000001"  # noqa: S105 -- test proof
 
@@ -546,7 +546,7 @@ def test_transient_capture_failure_stays_sticky_until_the_failed_receipt_persist
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Neither a failed writer nor an alert failure can turn a lost event into a seal."""
-    import shared.agents.impersonation_manifest as manifest
+    import base.agents.impersonation_manifest as manifest
 
     participant = LocalParticipant(str(v1_lease["id"]), owner.agent_id, 0, "sticky-capture-failure")
     assert open_local_participant(
@@ -634,7 +634,7 @@ def test_certifier_rejects_a_durable_entry_with_the_right_key_but_wrong_digest(
     ).fetchone()
     assert expected is not None
     key, event_at = expected
-    from shared.agents.impersonation.events import consume_events
+    from base.agents.impersonation.events import consume_events
 
     assert (
         consume_events(

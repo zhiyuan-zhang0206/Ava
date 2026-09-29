@@ -18,13 +18,13 @@ from datetime import UTC, datetime
 from fastapi import APIRouter, HTTPException, Request
 from psycopg_pool import ConnectionPool
 
+from base.agents.tasks.notes import task_note_line
+from base.cluster import machines
+from base.cluster.machine import machine_name
+from base.db.transaction import write_transaction
 from gateway.agents import forward
 from gateway.cluster.schemas import MachinePauseRequest, MachinePauseResponse, MachineResumeResponse
 from ops.lifecycle import _force_mark_terminated
-from shared.agents.tasks.notes import task_note_line
-from shared.cluster import machines
-from shared.cluster.machine import machine_name
-from shared.db.transaction import write_transaction
 
 router = APIRouter()
 
@@ -53,7 +53,7 @@ def _drain_tasks_blocking(pool: ConnectionPool, name: str) -> int:
     to the drain owner (#405), appending a note on each so the new owner knows
     why it landed on their board.
 
-    The note goes through `shared.agents.tasks.notes.task_note_line`, the same builder
+    The note goes through `base.agents.tasks.notes.task_note_line`, the same builder
     the SDK task registry uses, so the two writers into one `results` column
     cannot drift apart on format or timezone; the write resets the reminder
     clock like a normal update would. Agents already terminated before the
@@ -122,7 +122,7 @@ def _resolve_machine_alerts_blocking(pool: ConnectionPool, name: str) -> None:
     the whole pause window. Mirrors the liveness pass's recovery edge
     (`services.heartbeat.liveness._machine_alert_edges`) so each persisted
     instance keeps its original fingerprint convention."""
-    from shared.telemetry.alerts import AlertKey, stamp_notified, upsert_alert
+    from base.telemetry.alerts import AlertKey, stamp_notified, upsert_alert
 
     identity_labels = {"alertname": "machine offline", "machine": name}
     with pool.connection() as conn:

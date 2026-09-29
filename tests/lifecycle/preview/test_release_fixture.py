@@ -11,16 +11,16 @@ from pathlib import Path
 
 import pytest
 
+from base.deploy.release.identity import ApplicationIdentity
+from base.deploy.release.runtime_release import ReleaseRejectedError, file_sha256
 from cli.release_prepare.models import FileInput
 from scripts.preview import release_fixture as fixture
-from shared.deploy.release.identity import ApplicationIdentity
-from shared.deploy.release.runtime_release import ReleaseRejectedError, file_sha256
 
 
 def _archive(tmp_path: Path, *, invalid: bool = False) -> tuple[Path, ApplicationIdentity]:
     archive = tmp_path / "source.tar"
     with tarfile.open(archive, "w") as stream:
-        for name in (*fixture._SOURCE_FILES, "tests/unrelated.py", "shared/production.py"):
+        for name in (*fixture._SOURCE_FILES, "tests/unrelated.py", "base/production.py"):
             contents = f"# Captured source: {name}\n".encode()
             member = tarfile.TarInfo(name)
             member.size = len(contents)
@@ -54,7 +54,7 @@ def _builder(tmp_path: Path, *, mutate: str) -> Path:
         "if mode=='source': pathlib.Path('tests/e2e/fakes/_chat_model.py').write_text('changed')\n"
         "with zipfile.ZipFile(out/'ava_preview_fixture-0.0.0-py3-none-any.whl','w') as z:\n"
         " for p in pathlib.Path('tests').rglob('*.py'): z.write(p,p.as_posix())\n"
-        " if mode=='extra': z.writestr('shared/production.py', 'must not ship')\n"
+        " if mode=='extra': z.writestr('base/production.py', 'must not ship')\n"
         " if mode=='duplicate': z.writestr('tests/__init__.py', '')\n"
         " z.writestr('ava_preview_fixture-0.0.0.dist-info/METADATA',"
         " 'Name: ava-preview-fixture\\nVersion: 0.0.0\\n')\n"

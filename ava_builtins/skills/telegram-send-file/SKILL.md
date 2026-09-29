@@ -36,7 +36,7 @@ $AVA_HOME/source/.venv/bin/python $AVA_HOME/skills/telegram-send-file/scripts/se
 
 The script resolves the source root itself (the checkout it runs from, or
 `$AVA_HOME/source`), so the invocation path does not matter — only the venv
-Python matters: it must be the checkout's `.venv` so `httpx` and `shared`
+Python matters: it must be the checkout's `.venv` so `httpx` and `base`
 are importable.
 
 Output on success (stdout, one line):

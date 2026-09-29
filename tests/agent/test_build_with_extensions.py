@@ -13,9 +13,9 @@ from pathlib import Path
 
 import pytest
 
-from shared import paths
-from shared.config import settings
-from shared.packages.plugins.enable_config import write_local
+from base import paths
+from base.config import settings
+from base.packages.plugins.enable_config import write_local
 
 # Every dotted name `load_extensions` can register a plugin module under.
 _PLUGIN_MODULE_PREFIXES = ("ava_builtins.plugins.", "plugins.")
@@ -226,7 +226,7 @@ def test_a_different_file_under_the_same_name_gets_a_fresh_module(
 
 def test_duplicate_plugin_name_raises(monkeypatch: pytest.MonkeyPatch):
     """Same-named plugin in two locations -> discover_plugins raises DuplicatePlugin."""
-    from shared.packages.plugins.enable_config import DuplicatePlugin, discover_plugins
+    from base.packages.plugins.enable_config import DuplicatePlugin, discover_plugins
 
     _make_plugin("dup")
     _make_external_plugin("dup")
@@ -280,8 +280,8 @@ def _make_external_plugin_with(name: str, body: str) -> None:
 def _capture_plugin_load_events(
     monkeypatch: pytest.MonkeyPatch,
 ) -> list[tuple[str, dict[str, object]]]:
-    """Route shared.telemetry.emit into a list of (event_name, attributes)."""
-    import shared.telemetry
+    """Route base.telemetry.emit into a list of (event_name, attributes)."""
+    import base.telemetry
 
     events: list[tuple[str, dict[str, object]]] = []
 
@@ -295,7 +295,7 @@ def _capture_plugin_load_events(
     ) -> None:
         events.append((event_name, attributes or {}))
 
-    monkeypatch.setattr(shared.telemetry, "emit", fake_emit)
+    monkeypatch.setattr(base.telemetry, "emit", fake_emit)
     return events
 
 
@@ -397,7 +397,7 @@ def test_dangling_config_entry_reported_and_skipped(
     disabled, the rest of the config intact. The reporter's once-per-process
     memo is reset so this test does not depend on interpreter run order.
     """
-    from shared.packages.plugins import enable_config
+    from base.packages.plugins import enable_config
 
     monkeypatch.setattr(enable_config, "_dangling_reported", set[str]())
     _make_external_plugin("audit")
@@ -419,7 +419,7 @@ def test_dot_prefixed_dirs_are_not_discovered(monkeypatch: pytest.MonkeyPatch) -
     """Atomic-install residue (.name.staging / .name.backup-<pid>) must never
     surface as ghost plugins — a hard kill between rename steps would
     otherwise have the loader import a half-installed tree as a plugin."""
-    from shared.packages.plugins.enable_config import discover_plugins
+    from base.packages.plugins.enable_config import discover_plugins
 
     _make_plugin("real")
     _make_external_plugin("ext")

@@ -39,17 +39,17 @@ from pydantic import BaseModel, ConfigDict, Field
 import ava.agent_identity
 from agent.ownership.corpse_reap import ReapedCorpse
 from agent.ownership.hosted import TurnFatalStamp, TurnSettlement
+from base.agents.context import AvaContext
+from base.config import settings
+from base.config.turn_view import turn_settings
+from base.lm.factory import validate_model_config
+from base.packages.plugins.config_registration import _PLUGIN_CONFIG_CLASSES, _PLUGIN_CONFIGS
+from base.packages.plugins.config_view import turn_plugin_config
 from services.agent_host import dispatcher, settlement
 from services.agent_host.dispatcher import TurnScheduler
 from services.agent_host.host import AgentHost
 from services.agent_host.runtime import TurnOutcome, _config_fingerprint
-from shared.agents.context import AvaContext
-from shared.config import settings
-from shared.config.turn_view import turn_settings
-from shared.lm.factory import validate_model_config
-from shared.packages.plugins.config_registration import _PLUGIN_CONFIG_CLASSES, _PLUGIN_CONFIGS
-from shared.packages.plugins.config_view import turn_plugin_config
-from tests.shared.poll_until import poll_until_async
+from tests.base.poll_until import poll_until_async
 
 
 class _HostPluginConfig(BaseModel):
@@ -298,7 +298,7 @@ def _stub_host_transitions(
     flip: Callable[..., Awaitable[bool]],
 ) -> list[int]:
     import services.agent_host.host as host_mod
-    from shared.native_process.runtime_incarnation import RuntimeIncarnation
+    from base.native_process.runtime_incarnation import RuntimeIncarnation
 
     stamps: list[int] = []
 
@@ -396,7 +396,7 @@ def wired(monkeypatch: pytest.MonkeyPatch, host_plugin: None) -> _Build:
         # settlement and refusal are covered by test_hosted_force_quiescence.
         return False
 
-    monkeypatch.setattr("shared.agents.incarnation.hosted_force.original_host_force", _no_force)
+    monkeypatch.setattr("base.agents.incarnation.hosted_force.original_host_force", _no_force)
 
     def _build(
         rows: dict[int, _Row], results: dict[int, list[dict[str, Any]]] | None = None
@@ -497,7 +497,7 @@ class TestPoolIsolation:
     ) -> None:
         """A busy turn may use the work pool without consuming control capacity."""
         import services.agent_host.host as host_mod
-        from shared.native_process.runtime_incarnation import RuntimeIncarnation
+        from base.native_process.runtime_incarnation import RuntimeIncarnation
 
         rows = {11: _Row(status="idling")}
         original, graph, turn_pool = wired(rows)
@@ -536,7 +536,7 @@ class TestPoolIsolation:
 
         monkeypatch.setattr(host_mod, "admit_hosted_runtime", admit)
         monkeypatch.setattr(settlement, "settle_and_stamp_turn", settle_and_stamp)
-        monkeypatch.setattr("shared.agents.incarnation.hosted_force.original_host_force", force)
+        monkeypatch.setattr("base.agents.incarnation.hosted_force.original_host_force", force)
         host = AgentHost(
             pool=cast(AsyncConnectionPool[Any], turn_pool),
             control_pool=cast(AsyncConnectionPool[Any], control_pool),
@@ -694,7 +694,7 @@ class TestConcurrentAgentIsolation:
         slot — which tests/conftest.py pins to 1 for the whole session, and which
         the real host never sets at all (it never calls `establish`).
         """
-        from shared.native_process.turn_identity import current_turn_agent_id
+        from base.native_process.turn_identity import current_turn_agent_id
 
         host, _, _ = wired({11: _Row(overlay={"llm_model": "model-for-11"})})
         assert current_turn_agent_id() is None
@@ -974,7 +974,7 @@ class TestTurnLoop:
         self, wired: _Build, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         import services.agent_host.host as host_mod
-        from shared.native_process.runtime_incarnation import RuntimeIncarnation
+        from base.native_process.runtime_incarnation import RuntimeIncarnation
 
         flips: list[tuple[int, str, str]] = []
 
@@ -1028,7 +1028,7 @@ class TestTurnLoop:
     ) -> None:
         """Hosted exit uses the admitted owner's durable apply, not process exit RPC."""
         import services.agent_host.host as host_mod
-        from shared.native_process.runtime_incarnation import RuntimeIncarnation
+        from base.native_process.runtime_incarnation import RuntimeIncarnation
 
         notified: list[int] = []
 
@@ -1059,7 +1059,7 @@ class TestTurnLoop:
     ) -> None:
         """A returned graph releases its cache before the owner-fenced application."""
         import services.agent_host.host as host_mod
-        from shared.native_process.runtime_incarnation import RuntimeIncarnation
+        from base.native_process.runtime_incarnation import RuntimeIncarnation
 
         notified: list[int] = []
 
@@ -1168,7 +1168,7 @@ class TestTurnStallGuard:
     """
 
     async def _stall_settings(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        from shared.config import settings
+        from base.config import settings
 
         monkeypatch.setattr(settings.daemon, "host_turn_progress_scan_interval_seconds", 0.01)
         monkeypatch.setattr(settings.daemon, "host_turn_no_progress_timeout_seconds", 0.05)
@@ -1428,7 +1428,7 @@ class TestNormalizedModelConfig:
 
     @pytest.fixture(autouse=True)
     def _load_provider_plugins(self) -> None:
-        from shared.lm.plugin_providers import ensure_provider_plugins_loaded
+        from base.lm.plugin_providers import ensure_provider_plugins_loaded
 
         ensure_provider_plugins_loaded()
 
@@ -1436,7 +1436,7 @@ class TestNormalizedModelConfig:
     def withdrawn_model(self, monkeypatch: pytest.MonkeyPatch, _load_provider_plugins: None) -> str:
         from dataclasses import replace
 
-        from shared.lm.registry import MODELS
+        from base.lm.registry import MODELS
 
         model = "deepseek-retired-fixture"
         monkeypatch.setitem(
@@ -1632,7 +1632,7 @@ class TestBounds:
         self, wired: _Build, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """An explicitly configured admission bound still queues excess agents."""
-        from shared.config import settings
+        from base.config import settings
 
         monkeypatch.setattr(settings.daemon, "host_max_concurrent_turns", 2)
         rows = {i: _Row() for i in (1, 2, 3)}
@@ -1661,7 +1661,7 @@ class TestBounds:
         """Admission precedes the runtime claim: an agent queued for a slot has
         touched no row, runtime or checkpoint — and the queue is visible while
         it waits (task #3584 review: lock the pre-claim property in)."""
-        from shared.config import settings
+        from base.config import settings
 
         monkeypatch.setattr(settings.daemon, "host_max_concurrent_turns", 1)
         host, graph, _ = wired({1: _Row(), 2: _Row()})
@@ -1691,7 +1691,7 @@ class TestBounds:
     async def test_the_lru_cap_evicts_the_least_recently_used(
         self, wired: _Build, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from shared.config import settings
+        from base.config import settings
 
         monkeypatch.setattr(settings.daemon, "host_agent_cache_size", 2)
         host, _, _ = wired({i: _Row() for i in (1, 2, 3)})
@@ -1706,7 +1706,7 @@ class TestBounds:
     ) -> None:
         """The size cap alone keeps a long-silent agent warm forever on a
         lightly loaded runner; the TTL is the other half."""
-        from shared.config import settings
+        from base.config import settings
 
         host, _, _ = wired({i: _Row() for i in (1, 2)})
         await asyncio.wait_for(host.run_turn(1), 2)

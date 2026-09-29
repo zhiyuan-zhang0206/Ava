@@ -12,6 +12,12 @@ from datetime import datetime
 
 import psutil
 
+from base.agents.exit_codes import SERVICES_NOT_READY_EXIT_CODE
+from base.cluster.machine import MachineRoles, machine_role
+from base.deploy.lifecycle import start_serving
+from base.deploy.lifecycle.status_journal import begin, finish, phase, status_path
+from base.deploy.maintenance import admission
+from base.native_process.ownership import retain_processes
 from cli.commands._repo import _repo_root, build_services, session_name
 from cli.commands.lifecycle.service_stop import (
     OwnedProcess,
@@ -24,12 +30,6 @@ from cli.commands.lifecycle.service_stop import (
 )
 from ops.agent_pause import PAUSE_TIMEOUT_SECONDS, pause_agents
 from ops.agent_pause.probe import ops_quiescent
-from shared.agents.exit_codes import SERVICES_NOT_READY_EXIT_CODE
-from shared.cluster.machine import MachineRoles, machine_role
-from shared.deploy.lifecycle import start_serving
-from shared.deploy.lifecycle.status_journal import begin, finish, phase, status_path
-from shared.deploy.maintenance import admission
-from shared.native_process.ownership import retain_processes
 
 
 def _stop_browser(deadline: float) -> None:
@@ -283,10 +283,10 @@ def _services_phase_action(*, preserved: frozenset[str], deadline: float) -> Cal
 
 def _require_unstarted_initialization() -> bool:
     """Positive first-start evidence that no application could have admitted work."""
+    from base.paths import ava_home, root_manifests_path
     from cli.commands.lifecycle.root_driver import require_root_absent
     from cli.commands.lifecycle.service_stop import require_no_terminals
     from cli.start_identity import read_intent
-    from shared.paths import ava_home, root_manifests_path
 
     intent = read_intent(ava_home())
     if intent is None or intent["phase"] != "configured":
@@ -340,7 +340,7 @@ def stop(
     from cli.commands.lifecycle.stop import _announce_stopping, _confirm_stop
 
     os.environ.pop("AVA_HOME_OVERRIDE", None)
-    from shared.host.proc import hosting_exec_domain, hosting_supervised_session
+    from base.host.proc import hosting_exec_domain, hosting_supervised_session
 
     # An exec-domain leg is SIGKILLed with the call's process group as the tool
     # call returns, mid-drain (the 2026-09-12 stranding shape). Name the one
@@ -396,7 +396,7 @@ def stop(
             return _finish_stop(owns_journal=owns_journal)
         # Task #3270: an operator's own stop/pause binds the hold to this
         # command's shepherding process; daemon-driven pauses stay unbound.
-        from shared.deploy.maintenance.hold_driver import mint_driver
+        from base.deploy.maintenance.hold_driver import mint_driver
 
         _timed_phase(
             phases, "drain", lambda: pause_agents(remaining(deadline), driver=mint_driver())
@@ -409,7 +409,7 @@ def stop(
         assert current.holder is not None and current.acquired_at is not None  # noqa: S101
         holder, acquired_at = current.holder, current.acquired_at
         if current.maintenance.phase == "drained":
-            from shared.deploy.state.host_deploy_state import set_posture
+            from base.deploy.state.host_deploy_state import set_posture
 
             # A failed posture write leaves the drained phase retryable. The
             # stopped phase never dials a data plane that is already offline.

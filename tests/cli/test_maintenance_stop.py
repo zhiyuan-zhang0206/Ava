@@ -19,14 +19,14 @@ import psutil
 import pytest
 
 import cli.commands.lifecycle.root_driver as _root_driver_commands
+from base.config import settings
+from base.native_process import pid_starttime_ticks
+from base.sessions.backend import PosixProcSessionBackend, PtySessionBackend
+from base.sessions.record import SessionRecord
 from cli.commands.data_plane import maintenance_stop as plane
 from cli.commands.data_plane import pgbouncer as pb
 from cli.commands.lifecycle import root_driver
 from cli.commands.lifecycle import service_stop as stop
-from shared.config import settings
-from shared.native_process import pid_starttime_ticks
-from shared.sessions.backend import PosixProcSessionBackend, PtySessionBackend
-from shared.sessions.record import SessionRecord
 from tests.e2e._proc import kill_group_if_alive
 
 Launcher = Callable[[str, str], subprocess.Popen[str]]
@@ -53,7 +53,7 @@ def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         # test CLI still needs its explicit private binding when the checkout
         # currently points at an isolated native-proof home.
         return subprocess.run(  # noqa: S603 — fixed module and fixture-owned home
-            [sys.executable, "-m", "shared.sessions.pty.cli", *tokens],
+            [sys.executable, "-m", "base.sessions.pty.cli", *tokens],
             capture_output=True,
             text=True,
             check=False,
@@ -129,15 +129,15 @@ def test_persistent_terminals_refuse_before_signalling(
 def test_explicit_keep_preserves_real_idle_terminal_during_service_stop(
     home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from shared.sessions.pty import cli as pty
-    from shared.sessions.pty._paths import host_identity
+    from base.sessions.pty import cli as pty
+    from base.sessions.pty._paths import host_identity
 
     name = "ava-agent-123-shell-1"
     monkeypatch.setattr(stop, "get_shell_backend", PtySessionBackend)
     envfile = pty.write_env_file({})
     try:
         created = subprocess.run(  # noqa: S603 — test-owned home and repository module
-            [sys.executable, "-m", "shared.sessions.pty.cli", name, "new", str(home), str(envfile)],
+            [sys.executable, "-m", "base.sessions.pty.cli", name, "new", str(home), str(envfile)],
             env={**os.environ, "AVA_HOME": str(home), "AVA_HOME_OVERRIDE": "1", "HOME": str(home)},
             capture_output=True,
             text=True,
@@ -196,11 +196,11 @@ def test_linux_ticks_win_over_changed_epoch_birth(
     def read_tick(_pid: int) -> int | None:
         return tick
 
-    # OwnedProcess lives in shared.native_process.ownership (the stop path and the frontend
+    # OwnedProcess lives in base.native_process.ownership (the stop path and the frontend
     # identity probe share it); patch the reference its live() consults.
-    import shared.native_process.ownership
+    import base.native_process.ownership
 
-    monkeypatch.setattr(shared.native_process.ownership, "pid_starttime_ticks", read_tick)
+    monkeypatch.setattr(base.native_process.ownership, "pid_starttime_ticks", read_tick)
     identity = stop.OwnedProcess(proc.pid, 0, 123)
     assert identity.live()
     tick = 124
@@ -217,7 +217,7 @@ def test_wait_for_exit_converges_when_a_tracked_entry_vanishes(
     """A tracked process exiting (reaped) mid-wait converges the wait instead
     of aborting the stop — the 2026-09-20 wave-2 failure: the identity read
     found no /proc entry after psutil had validated the pid."""
-    import shared.native_process.ownership
+    import base.native_process.ownership
 
     child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
     pid = child.pid
@@ -234,7 +234,7 @@ def test_wait_for_exit_converges_when_a_tracked_entry_vanishes(
             child.wait()
         return real_read(reading_pid)
 
-    monkeypatch.setattr(shared.native_process.ownership, "pid_starttime_ticks", reaping_read)
+    monkeypatch.setattr(base.native_process.ownership, "pid_starttime_ticks", reaping_read)
     try:
         stop.wait_for_exit({identity}, stop.deadline_after(5))
     finally:
@@ -351,7 +351,7 @@ def test_foreign_redis_directory_refuses_before_local_signals(
 
 
 def test_live_pty_host_with_dead_shell_blocks_stop(home: Path, launch: Launcher) -> None:
-    from shared.sessions.pty._paths import write_record
+    from base.sessions.pty._paths import write_record
 
     proc = launch("temporary-host", _IGNORE)
     (home / "run/sessions/temporary-host.json").unlink()

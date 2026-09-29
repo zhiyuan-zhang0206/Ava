@@ -37,21 +37,21 @@ import httpx
 from fastapi import APIRouter, Query, Request
 from psycopg import errors as pg_errors
 
-from gateway.lgtm import loki_events, loki_query_budget, prom_metrics, telemetry_staleness
-from gateway.lgtm.edge_stream import EDGE_EVENT_NAMES, LOKI_EDGE_LIMIT
-from gateway.schemas.fleet_graph import FleetGraphEdge, FleetGraphNode, FleetGraphResponse
-from gateway.schemas.stats import StatsWindowHours, window_delta
-from shared import telemetry
-from shared.config import settings
-from shared.events.contract import FleetGraphStaleReason
-from shared.events.live.redis_client import sync_redis
-from shared.log import logger
-from shared.telemetry.loki_index_labels import (
+from base import telemetry
+from base.config import settings
+from base.events.contract import FleetGraphStaleReason
+from base.events.live.redis_client import sync_redis
+from base.log import logger
+from base.telemetry.loki_index_labels import (
     ARCHIVE_FLOOR_AT,
     ARCHIVE_FREEZE_AT,
     INDEX_LABEL_CUTOVER_AT,
 )
-from shared.telemetry.observability import cluster_label
+from base.telemetry.observability import cluster_label
+from gateway.lgtm import loki_events, loki_query_budget, prom_metrics, telemetry_staleness
+from gateway.lgtm.edge_stream import EDGE_EVENT_NAMES, LOKI_EDGE_LIMIT
+from gateway.schemas.fleet_graph import FleetGraphEdge, FleetGraphNode, FleetGraphResponse
+from gateway.schemas.stats import StatsWindowHours, window_delta
 
 router = APIRouter()
 
@@ -87,7 +87,7 @@ _ROUTE_TIMEOUT_S = 10.0
 # closed constant, never a request-derived path; reasons live in the contract.
 _STALE_ROUTE = "fleet_graph"
 
-# The OTLP-mapped llm_usage counters (shared/telemetry/otlp/telemetry_otlp._record_metrics:
+# The OTLP-mapped llm_usage counters (base/telemetry/otlp/telemetry_otlp._record_metrics:
 # int payload field -> Counter named ava_<event>_<field>, Prometheus appends
 # `_total`). The token totals are the sum of the two counters.
 _IN_METRIC = "ava_llm_usage_in_total"

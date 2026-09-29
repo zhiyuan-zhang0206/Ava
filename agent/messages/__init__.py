@@ -4,7 +4,7 @@ ToolMessage with `additional_kwargs` metadata.
 The read side (timeline endpoint / hooks etc.) uniformly classifies via
 `read_ava_kwargs(msg).get("ava_msg_type")` — **not isinstance**, so no need to
 subclass. The metadata keys + the `ava_msg_type` / `ava_note_tag` value sets are
-the typed contract in `shared/agents/messages/kwargs.py` (`AvaMessageKwargs` TypedDict +
+the typed contract in `base/agents/messages/kwargs.py` (`AvaMessageKwargs` TypedDict +
 `AvaMsgType` / `NoteTag` StrEnums); these helpers centralize the writes.
 
 Convention for adding a new metadata type:
@@ -38,7 +38,7 @@ from langchain_core.messages import (
     ToolMessage,
 )
 
-from shared.agents.messages.kwargs import AvaMsgType, NoteTag, read_ava_kwargs
+from base.agents.messages.kwargs import AvaMsgType, NoteTag, read_ava_kwargs
 
 # The header prepended to every replacement compact summary (forced / command /
 # spontaneous) — written by `agent.hooks.compact.compose_summary_message`, and
@@ -80,7 +80,7 @@ def inbound_message(
     created_at: datetime | None = None,
     image_urls: list[str] | None = None,
 ) -> HumanMessage:
-    """Envelope-wrapped inbound message (product of `shared/agents/messages/envelope.py:wrap_inbound`).
+    """Envelope-wrapped inbound message (product of `base/agents/messages/envelope.py:wrap_inbound`).
 
     `content` is a plain string for a text inbound, or a list of content blocks
     for a multimodal one (a leading text block carrying the envelope-wrapped
@@ -157,7 +157,7 @@ def attach_message(
     interleaved per file — ``[text(notice), text(line1), media1, text(line2),
     media2, ...]`` — so every media block sits directly after its own caption
     line (the timeline reads that pairing structurally via
-    ``shared/agents/history/timeline._attach_image_captions``).
+    ``base/agents/history/timeline._attach_image_captions``).
     """
     content_blocks = blocks or [{"type": "text", "text": text}]
     return HumanMessage(

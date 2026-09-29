@@ -8,13 +8,13 @@ from types import SimpleNamespace
 
 import pytest
 
+from base import db, paths
+from base.packages.extensions import adopt, materialize
 from cli.commands.extensions.materialize import (
     adopt_local_extensions,
     materialize_cluster_extensions,
 )
 from cli.commands.extensions.skill_package import _register_in_cluster
-from shared import db, paths
-from shared.packages.extensions import adopt, materialize
 
 
 class _PoolSpy:

@@ -18,10 +18,10 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
+from base.agents import CrossMachineGatewayUnavailable, MachineNotRegistered
 from gateway.agents import forward as forward_module
 from gateway.agents import lifecycle as lifecycle_module
 from gateway.app import app
-from shared.agents import CrossMachineGatewayUnavailable, MachineNotRegistered
 
 
 @pytest.fixture

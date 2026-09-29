@@ -18,7 +18,7 @@ bundle the gateway operator issues for that unit
 shared by every runner unit, and the bundle's telemetry token is the
 cluster's; only the bundle's enrollment secret is the unit's own.
 
-The route is control-plane (`shared.api_contracts.contracts`): a held gateway
+The route is control-plane (`base.api_contracts.contracts`): a held gateway
 still serves it, since a runner's held first start joins through it and every
 runner process resolves its config from it before the hold is released. The
 pause exemption changes neither the authentication nor the payload.
@@ -28,8 +28,8 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Header, HTTPException
 
+from base import config
 from gateway.auth.request_principal import cluster_credential
-from shared import config
 
 router = APIRouter()
 
@@ -41,7 +41,7 @@ def get_bootstrap(authorization: str | None = Header(default=None)) -> dict[str,
 
     `AVA_DB_URL` is the credential-free endpoint; no database credential is
     served. The admin credentials remain gateway-local (see
-    shared.config.bootstrap_config_values).
+    base.config.bootstrap_config_values).
 
     Raises:
         HTTPException: 401 when the request carries neither the active write

@@ -8,8 +8,8 @@ import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
+from base.host.system.backend import get_backend
 from cli.commands.converge.spec import ConvergeCtx
-from shared.host.system.backend import get_backend
 
 
 def collect_ownership_warnings(ctx: ConvergeCtx) -> list[str]:

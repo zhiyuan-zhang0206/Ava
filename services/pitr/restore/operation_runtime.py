@@ -10,6 +10,11 @@ from functools import partial
 from pathlib import Path
 from typing import cast
 
+from base.cluster.dataplane.pg_tools import pg_tool
+from base.config import settings
+from base.config.physical_backup import PhysicalBackupSettings
+from base.native_process.child_env import forwarded_proxy_env, restricted_process_env
+from base.paths import ava_home
 from services.pitr.base_backup.manifest import CandidateManifest
 from services.pitr.operation.custody import OperationKind
 from services.pitr.operation.worker_process import run_operation
@@ -24,11 +29,6 @@ from services.pitr.restore.proof import (
     verify_candidate_proof,
 )
 from services.pitr.stores.factory import get_store_group
-from shared.cluster.dataplane.pg_tools import pg_tool
-from shared.config import settings
-from shared.config.physical_backup import PhysicalBackupSettings
-from shared.native_process.child_env import forwarded_proxy_env, restricted_process_env
-from shared.paths import ava_home
 
 _EMERGENCY_FLOOR_BYTES = 4 * 1024**3
 # A stopped drill stops its sandbox postmaster (bounded at 20 s), scans for
@@ -160,13 +160,13 @@ def live_probe_conninfo() -> str:
     """The dial the restricted worker's live probes (identity, live counts) use.
 
     This home's administrator acting as the schema owner over the owner-only
-    socket (`shared.db.pg_admin`): password-free, so the worker's stdin carries
+    socket (`base.db.pg_admin`): password-free, so the worker's stdin carries
     no credential, and independent of the write generations a rollout
     revokes. The worker cannot run the custody check itself, so it runs here
     before the conninfo is handed over. PITR is local-only: a remote-managed
     plane has no local owner authority and refuses.
     """
-    from shared.db.pg_admin import local_owner_authority
+    from base.db.pg_admin import local_owner_authority
 
     return local_owner_authority().verified_conninfo()
 

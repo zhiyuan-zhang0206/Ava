@@ -18,14 +18,14 @@ from typing import Literal
 import psutil
 from pydantic import Field, JsonValue, TypeAdapter
 
+from base.deploy.release.operation import open_launch_grace
+from base.deploy.release.runtime_release import VerifiedRelease
+from base.host.system.boot_unit import systemd_running
+from base.native_process.ownership import OwnedProcess
 from cli.release_transition.journal import Journal, exclusive, read_operation
 from cli.release_transition.native import LINUX
 from cli.release_transition.native import require_private_operation as _private_operation
 from cli.release_transition.request import Record
-from shared.deploy.release.operation import open_launch_grace
-from shared.deploy.release.runtime_release import VerifiedRelease
-from shared.host.system.boot_unit import systemd_running
-from shared.native_process.ownership import OwnedProcess
 
 _PROPERTIES = (
     "Id",

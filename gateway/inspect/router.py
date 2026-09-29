@@ -14,6 +14,8 @@ from opentelemetry import metrics
 from psycopg import Error as DatabaseError
 from psycopg_pool import ConnectionPool, PoolTimeout
 
+from base.agents import AgentNotFound
+from base.config import settings
 from gateway.inspect import _metrics, _plugin_metrics, _plugin_widgets, neighbors
 from gateway.inspect._cache import InspectCacheFullError, InspectQueryCache
 from gateway.inspect._live import db_rows_blocking, notice_blocking, project_heartbeat
@@ -31,8 +33,6 @@ from gateway.lgtm.backend_failure import raise_backend_unavailable
 from gateway.schemas.stats import StatsWindowHours
 from ops import cluster_rpc as _cluster_rpc
 from ops.rpc_schemas import ShellInfo
-from shared.agents import AgentNotFound
-from shared.config import settings
 
 router = APIRouter()
 _log = logging.getLogger(__name__)
@@ -356,7 +356,7 @@ def get_agent_neighbors(
 @router.get("/api/agents/{agent_id}/inspect/metrics")
 async def get_agent_plugin_metrics(agent_id: int, request: Request) -> list[PluginMetricResult]:
     """The agent's plugin metrics for the inspector panel — the W13b inspector
-    surface of the plugin metric system (see `shared/telemetry/metrics/plugin_metrics.py`).
+    surface of the plugin metric system (see `base/telemetry/metrics/plugin_metrics.py`).
 
     Builds the metric registry in process (task #180 PR D — shipped
     plugin `metrics.py` modules + core definitions), keeps the metrics whose
@@ -385,7 +385,7 @@ async def get_agent_plugin_metrics(agent_id: int, request: Request) -> list[Plug
 @router.get("/api/agents/{agent_id}/inspect/widgets")
 async def get_agent_inspect_widgets(agent_id: int, request: Request) -> list[InspectWidgetResult]:
     """The agent's plugin widgets for the inspector panel — the extension
-    surface where enabled plugins embed widgets (see `shared/packages/plugins/inspector.py`;
+    surface where enabled plugins embed widgets (see `base/packages/plugins/inspector.py`;
     registration mirrors the plugin-metric system).
 
     Builds the widget registry in process (shipped builtin plugins'

@@ -16,7 +16,7 @@ not degrade to "unfixed"; it hangs the bring-up, which is strictly worse than th
 defect it was trying to repair, and on a headless host it hangs it invisibly.
 `sudo -n` either runs the fallback mutation or fails immediately, and a failure
 degrades to the historical behavior — print the exact manual commands for the
-operator. See `shared.host.macos_firewall` for the platform compatibility contract.
+operator. See `base.host.macos_firewall` for the platform compatibility contract.
 
 Because it reports rather than enforces, it warns and returns instead of raising:
 a missing firewall rule does not stop this host serving loopback, `ava start`
@@ -29,9 +29,9 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+from base.host import macos_firewall as fw
+from base.host.macos_firewall import FirewallAudit, FirewallVerdict, audit_allowlist
 from cli.commands.converge.spec import ConvergeCtx
-from shared.host import macos_firewall as fw
-from shared.host.macos_firewall import FirewallAudit, FirewallVerdict, audit_allowlist
 
 
 def serving_binaries(roles: frozenset[str]) -> tuple[Path, ...]:
@@ -55,8 +55,8 @@ def serving_binaries(roles: frozenset[str]) -> tuple[Path, ...]:
     wrong-but-harmless default contributes a phantom "missing rule" instead of a
     real one.
     """
-    from shared.cluster.dataplane.pg_tools import pg_tool
-    from shared.paths import otel_collector_binary
+    from base.cluster.dataplane.pg_tools import pg_tool
+    from base.paths import otel_collector_binary
 
     candidates = [Path(sys.executable)]
     if "gateway" in roles:
@@ -77,7 +77,7 @@ def audit_this_host(roles: frozenset[str]) -> FirewallAudit:
     it on demand. Same detector, so they can never disagree about whether the
     firewall is the cause.
     """
-    from shared.cluster.machine import reachable_host
+    from base.cluster.machine import reachable_host
 
     required = serving_binaries(roles)
     if not required:
@@ -128,7 +128,7 @@ def ensure_firewall_allowlist(ctx: ConvergeCtx) -> None:
 
     # Prune before adding: a stale rule still holds its bundle identifier, and
     # macOS 15's ALF daemon silently ignores an --add whose identifier already
-    # has a rule (see shared.host.macos_firewall). Removing the stale rule first lets
+    # has a rule (see base.host.macos_firewall). Removing the stale rule first lets
     # the replacement version's rule persist in the same pass.
     pruned = fw.prune_stale_rules(rules)
     if pruned.removed:

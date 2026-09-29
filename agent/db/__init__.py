@@ -12,11 +12,11 @@ import psycopg
 from psycopg_pool import AsyncConnectionPool, PoolTimeout
 
 from agent.ownership.inbound import lock_inbound_owner
-from shared.agents.messages.inbound import InterruptReason
-from shared.config import settings
-from shared.db import ALIVE_STATUSES, InboundRow, publish_inbound_wake
-from shared.db.transaction import async_write_transaction
-from shared.log import logger
+from base.agents.messages.inbound import InterruptReason
+from base.config import settings
+from base.db import ALIVE_STATUSES, InboundRow, publish_inbound_wake
+from base.db.transaction import async_write_transaction
+from base.log import logger
 
 # A successful borrow that took at least this long still gets a WARNING — a
 # healthy pg hands a conn back in milliseconds, so seconds means it is under
@@ -142,7 +142,7 @@ class ClaimedInbound(NamedTuple):
     """One inbound row returned by `claim_inbound_batch`.
 
     `source` is the message channel ('system' / 'user' / 'agent:N' / 'ui:page:<name>' / 'watcher:N' / 'schedule:N' etc.); the
-    claim node uses it via `shared/agents/messages/envelope.py:wrap_inbound` to add an envelope
+    claim node uses it via `base/agents/messages/envelope.py:wrap_inbound` to add an envelope
     prefix for kind='chat'; lifecycle kinds directly assemble the marker text
     without going through wrap_inbound.
     """
@@ -271,7 +271,7 @@ async def claim_inbound_batch(
                 accept_lifecycle_intent,
                 settle_superseded_intent,
             )
-            from shared.native_process.runtime_incarnation import current_incarnation
+            from base.native_process.runtime_incarnation import current_incarnation
 
             command = await accept_lifecycle_intent(conn, agent_id)
             token = current_incarnation(agent_id)
@@ -379,7 +379,7 @@ async def reconcile_claimed_inbounds(
     The inbound reconcile — one helper shared by every settlement point that
     can leave claimed-but-uncommitted rows behind. The caller supplies the
     `committed_inbound_ids` set — read back from `state.messages`, or
-    side-loaded from the claim window's write rows (`shared/agents/history/inbound_sideload.py`),
+    side-loaded from the claim window's write rows (`base/agents/history/inbound_sideload.py`),
     which also proves a message committed and later removed. Each `'claimed'`
     row is then either:
 
@@ -547,7 +547,7 @@ async def pending_interrupt_reason(
 
     The branch reads the mark's full shape — the same predicate the stamp
     writes (`ops.agent_pause._reap_agent`) and the settle selector matches
-    (`shared.deploy.maintenance.straggler_reap._MARKED_ROWS`): `applied_at IS NULL AND
+    (`base.deploy.maintenance.straggler_reap._MARKED_ROWS`): `applied_at IS NULL AND
     observed_at IS NULL AND status IN ('pending','claimed') AND payload ?
     'maintenance'`. `observed_at IS NULL` is implied by `applied_at IS NULL`
     (schema `inbound_lifecycle_target_check`) and kept explicit so every face

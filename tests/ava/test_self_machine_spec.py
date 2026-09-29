@@ -6,7 +6,7 @@ import ava.self as self_mod
 
 
 def test_machine_spec_tuple_with_description() -> None:
-    from shared.cluster.machine import reset_identity, set_identity
+    from base.cluster.machine import reset_identity, set_identity
 
     set_identity(name="test-host", description="voice IO + browser")
     try:
@@ -16,7 +16,7 @@ def test_machine_spec_tuple_with_description() -> None:
 
 
 def test_machine_spec_tuple_empty_when_no_description() -> None:
-    from shared.cluster.machine import reset_identity, set_identity
+    from base.cluster.machine import reset_identity, set_identity
 
     set_identity(name="wsl", description=None)
     try:

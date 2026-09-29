@@ -8,9 +8,10 @@ import pytest
 from fastapi.testclient import TestClient
 from psycopg_pool import ConnectionPool
 
+from base.config import settings
+
 # ava.self.AGENT_ID is set by top-level tests/conftest.py (=1), no override here.
 from gateway.app import app
-from shared.config import settings
 
 # DB/Redis env (AVA_DB_URL / AVA_REDIS_URL) for spawned-subprocess inheritance is
 # synced by the `_provisioned_db` / `_provisioned_redis` session fixtures when a
@@ -49,7 +50,7 @@ def _mock_api_keys(monkeypatch: pytest.MonkeyPatch) -> None:
     """Set all API keys to dummy values so spawn validation passes."""
     from pydantic import SecretStr
 
-    from shared.config import settings as _settings
+    from base.config import settings as _settings
 
     for attr in (
         "anthropic_api_key",
@@ -72,11 +73,11 @@ def _local_spawn_in_process(monkeypatch: pytest.MonkeyPatch) -> None:
     in-process against the app's pool, exactly what the daemon does on receiving
     the forwarded op (the agent row was already created by the gateway). Routing
     tests that patch `_forward_spawn_to_remote` themselves run after this and win."""
+    from base.cluster import machines as _machines
+    from base.cluster.machine import machine_name
     from gateway.agents import router as _agents_router
     from ops.lifecycle import launch_agent_op
     from ops.rpc_schemas import LaunchAgentRequest, SpawnedAgent
-    from shared.cluster import machines as _machines
-    from shared.cluster.machine import machine_name
 
     async def _in_process_forward(_target: str, body: LaunchAgentRequest) -> SpawnedAgent:
         return await launch_agent_op(body, app.state.db_pool)

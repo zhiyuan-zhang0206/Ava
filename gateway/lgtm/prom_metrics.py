@@ -10,15 +10,15 @@ from typing import Any, cast
 
 import httpx
 
+from base import telemetry
+from base.config import settings
+from base.log import logger
 from gateway.lgtm.loki_query_budget import (
     BudgetObservation,
     BudgetObserver,
     BudgetRejectReason,
     FairQueryBudget,
 )
-from shared import telemetry
-from shared.config import settings
-from shared.log import logger
 
 # Instant queries over the llm_usage counters are fast; the timeout is the
 # same generous bound the Loki read path uses.

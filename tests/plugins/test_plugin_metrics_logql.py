@@ -15,9 +15,9 @@ import json
 import sys
 from pathlib import Path
 
-from shared.packages.plugins.context import PluginContext
-from shared.telemetry.metrics.core import catalog
-from shared.telemetry.metrics.plugin_metrics import (
+from base.packages.plugins.context import PluginContext
+from base.telemetry.metrics.core import catalog
+from base.telemetry.metrics.plugin_metrics import (
     MetricSpec,
     clear_registry,
     registered_metrics,
@@ -230,7 +230,7 @@ def test_unresolved_gauge_names_match_the_otlp_contract() -> None:
     net trio (task #1935): each gauge is registered, dispositioned, and
     wired into the dashboard JSON with the same name."""
 
-    from shared.telemetry.otlp.telemetry_otlp import _METRIC_DISPOSITION, _strip_unit_suffix
+    from base.telemetry.otlp.telemetry_otlp import _METRIC_DISPOSITION, _strip_unit_suffix
 
     specs = {spec.name: spec for spec in _load_core()}
     for field, name in (
@@ -253,7 +253,7 @@ def test_agent_max_id_gauge_names_match_the_otlp_contract() -> None:
     appends — the dashboard must query that exact name, and the growth-rate
     panel derives from it (``deriv(...[1h]) * 86400``, agents per day)."""
 
-    from shared.telemetry.otlp.telemetry_otlp import _METRIC_DISPOSITION, _strip_unit_suffix
+    from base.telemetry.otlp.telemetry_otlp import _METRIC_DISPOSITION, _strip_unit_suffix
 
     specs = {spec.name: spec for spec in _load_core()}
     assert _METRIC_DISPOSITION[("agent_registry", "max_id")] == "gauge"
@@ -282,7 +282,7 @@ def test_pr_flow_panels_match_the_otlp_contract() -> None:
     carries the joinByField transformation.
     """
 
-    from shared.telemetry.otlp.telemetry_otlp import _METRIC_DISPOSITION, _strip_unit_suffix
+    from base.telemetry.otlp.telemetry_otlp import _METRIC_DISPOSITION, _strip_unit_suffix
 
     specs = {spec.name: spec for spec in _load_core()}
     path = _REPO_ROOT / "deploy/lgtm/config/grafana/provisioning/dashboards/ava-ops-main.json"

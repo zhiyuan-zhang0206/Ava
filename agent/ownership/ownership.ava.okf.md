@@ -21,8 +21,8 @@ A stopping host's release is bounded (`services/agent_host/host.py`,
 `_RELEASE_OWNER_TIMEOUT_S`) so the whole stop fits ava-root's TERM window; with
 the database unreachable it fails and the leases expire by TTL.
 
-Lease TTL and renewal ordering live in `shared/deploy/progress_timeout.py` and
-`shared/deploy/timing.py`. A lease is runtime ownership evidence, not an agent identity
+Lease TTL and renewal ordering live in `base/deploy/progress_timeout.py` and
+`base/deploy/timing.py`. A lease is runtime ownership evidence, not an agent identity
 count: the status page counts non-terminated local identities, including idle
 and maintenance-paused agents. Heartbeat selects eligible idle identities
 without requiring an independently resident agent process.
@@ -35,6 +35,6 @@ without requiring an independently resident agent process.
 - `agent/ownership/inbound.py` — the owner lock every inbound queue mutation takes
 - `agent/ownership/lifecycle_intent.py` — the durable lifecycle command pointer
 - `services/agent_host/daemon.py` — owner health beat
-- `shared/native_process/runtime_incarnation.py` — context-bound execution identity
+- `base/native_process/runtime_incarnation.py` — context-bound execution identity
 
 Related: [[../startup/admission.ava.okf.md]] and [[../lifecycle.ava.okf.md]].

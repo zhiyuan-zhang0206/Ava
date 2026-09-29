@@ -13,15 +13,15 @@ from uuid import uuid4
 import pytest
 from pydantic import ValidationError
 
-from cli.release_fleet.request import FleetRequest
-from cli.release_transition import request as request_module
-from cli.release_transition.request import ReleaseRef, verify_pair
-from shared.deploy.release.runtime_release import (
+from base.deploy.release.runtime_release import (
     MANIFEST_VERSION,
     ReleaseRejectedError,
     VerifiedRelease,
 )
-from shared.runtime_abi import AbiTag, current_abi
+from base.runtime_abi import AbiTag, current_abi
+from cli.release_fleet.request import FleetRequest
+from cli.release_transition import request as request_module
+from cli.release_transition.request import ReleaseRef, verify_pair
 
 _SITE = "venv/lib/python3.12/site-packages"
 _UP = "20260926T000000_example.sql"

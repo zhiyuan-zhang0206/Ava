@@ -70,11 +70,11 @@ Everything else lives in `activation/`, `base_backup/`, `restore/`, `retention/`
 - Database dials never use a write-generation login. Capture facts, the
   restore worker's live probes and the operator drill's live counts read as
   the administrator acting as the schema owner over the home's owner-only
-  socket (`shared.db.pg_admin`); the worker receives that password-free conninfo
+  socket (`base.db.pg_admin`); the worker receives that password-free conninfo
   on stdin after the controller's custody-checked session. Server
   administration (WAL switch, archiver and `pg_hba` reads, `ALTER SYSTEM`,
   `data_directory`) runs on the administrator as itself over a
-  `shared.db.pg_admin.connect` session bound to the home's recorded postmaster
+  `base.db.pg_admin.connect` session bound to the home's recorded postmaster
   (`pitr_admin_session`).
 
 ## Operation custody

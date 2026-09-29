@@ -1,6 +1,6 @@
 """`ava notices` — operator CLI over the notice queue (Task #949).
 
-Monkeypatched shared.host.net.http_dial + gateway base; asserts arg plumbing, filters,
+Monkeypatched base.host.net.http_dial + gateway base; asserts arg plumbing, filters,
 resolve actions and the clear flow.
 """
 
@@ -39,7 +39,7 @@ def _notice(nid: int, agent: int, *, title: str = "T", require_response: bool = 
 
 @pytest.fixture
 def dial(monkeypatch: pytest.MonkeyPatch) -> dict[str, list[tuple]]:
-    """Stub shared.host.net.http_dial get/post + machine helpers; record calls."""
+    """Stub base.host.net.http_dial get/post + machine helpers; record calls."""
     calls: dict[str, list[tuple]] = {"get": [], "post": []}
 
     def fake_get(url: str, **kw: Any) -> _Resp:
@@ -50,10 +50,10 @@ def dial(monkeypatch: pytest.MonkeyPatch) -> dict[str, list[tuple]]:
         calls["post"].append((url, kw))  # pyright: ignore[reportUnknownMemberType]
         return _Resp(201)
 
-    monkeypatch.setattr("shared.host.net.http_dial.get", fake_get)
-    monkeypatch.setattr("shared.host.net.http_dial.post", fake_post)
-    monkeypatch.setattr("shared.cluster.machine.gateway_api_base", lambda: "http://gw")
-    monkeypatch.setattr("shared.cluster.machine.gateway_auth_headers", lambda: {"X": "1"})
+    monkeypatch.setattr("base.host.net.http_dial.get", fake_get)
+    monkeypatch.setattr("base.host.net.http_dial.post", fake_post)
+    monkeypatch.setattr("base.cluster.machine.gateway_api_base", lambda: "http://gw")
+    monkeypatch.setattr("base.cluster.machine.gateway_auth_headers", lambda: {"X": "1"})
     return calls
 
 
@@ -79,9 +79,9 @@ def test_list_filters_by_agent_and_type(monkeypatch: pytest.MonkeyPatch) -> None
             ],
         )
 
-    monkeypatch.setattr("shared.host.net.http_dial.get", fake_get)
-    monkeypatch.setattr("shared.cluster.machine.gateway_api_base", lambda: "http://gw")
-    monkeypatch.setattr("shared.cluster.machine.gateway_auth_headers", dict)
+    monkeypatch.setattr("base.host.net.http_dial.get", fake_get)
+    monkeypatch.setattr("base.cluster.machine.gateway_api_base", lambda: "http://gw")
+    monkeypatch.setattr("base.cluster.machine.gateway_auth_headers", dict)
     assert (
         cmd_notices_list(agent_id=7, priority=None, type_filter="fyi") == 0
     )  # prints filtered rows
@@ -123,10 +123,10 @@ def test_clear_resolves_each_open(monkeypatch: pytest.MonkeyPatch) -> None:
         posted.append(kw["json"])  # pyright: ignore[reportUnknownMemberType]
         return _Resp(201)
 
-    monkeypatch.setattr("shared.host.net.http_dial.get", fake_get)
-    monkeypatch.setattr("shared.host.net.http_dial.post", fake_post)
-    monkeypatch.setattr("shared.cluster.machine.gateway_api_base", lambda: "http://gw")
-    monkeypatch.setattr("shared.cluster.machine.gateway_auth_headers", dict)
+    monkeypatch.setattr("base.host.net.http_dial.get", fake_get)
+    monkeypatch.setattr("base.host.net.http_dial.post", fake_post)
+    monkeypatch.setattr("base.cluster.machine.gateway_api_base", lambda: "http://gw")
+    monkeypatch.setattr("base.cluster.machine.gateway_auth_headers", dict)
     # force skips the prompt
     assert cmd_notices_clear(agent_id=7, force=True) == 0
     assert posted == [
@@ -156,9 +156,9 @@ def test_list_stale_filters_terminated(monkeypatch: pytest.MonkeyPatch) -> None:
             ],
         )
 
-    monkeypatch.setattr("shared.host.net.http_dial.get", fake_get)
-    monkeypatch.setattr("shared.cluster.machine.gateway_api_base", lambda: "http://gw")
-    monkeypatch.setattr("shared.cluster.machine.gateway_auth_headers", dict)
+    monkeypatch.setattr("base.host.net.http_dial.get", fake_get)
+    monkeypatch.setattr("base.cluster.machine.gateway_api_base", lambda: "http://gw")
+    monkeypatch.setattr("base.cluster.machine.gateway_auth_headers", dict)
     assert cmd_notices_list(agent_id=None, priority=None, type_filter=None, stale=True) == 0
     assert calls == [
         "http://gw/api/notices/open",
@@ -191,10 +191,10 @@ def test_clear_stale_resolves_only_terminated(monkeypatch: pytest.MonkeyPatch) -
         posted.append((url, kw["json"]))
         return _Resp(201)
 
-    monkeypatch.setattr("shared.host.net.http_dial.get", fake_get)
-    monkeypatch.setattr("shared.host.net.http_dial.post", fake_post)
-    monkeypatch.setattr("shared.cluster.machine.gateway_api_base", lambda: "http://gw")
-    monkeypatch.setattr("shared.cluster.machine.gateway_auth_headers", dict)
+    monkeypatch.setattr("base.host.net.http_dial.get", fake_get)
+    monkeypatch.setattr("base.host.net.http_dial.post", fake_post)
+    monkeypatch.setattr("base.cluster.machine.gateway_api_base", lambda: "http://gw")
+    monkeypatch.setattr("base.cluster.machine.gateway_auth_headers", dict)
     assert cmd_notices_clear(agent_id=None, force=True, stale=True) == 0
     assert len(posted) == 1
     url, body = posted[0]
@@ -205,8 +205,8 @@ def test_clear_stale_resolves_only_terminated(monkeypatch: pytest.MonkeyPatch) -
 def test_clear_stale_rejects_agent(monkeypatch: pytest.MonkeyPatch) -> None:
     from cli.commands.agents.notices import cmd_notices_clear
 
-    monkeypatch.setattr("shared.cluster.machine.gateway_api_base", lambda: "http://gw")
-    monkeypatch.setattr("shared.cluster.machine.gateway_auth_headers", dict)
+    monkeypatch.setattr("base.cluster.machine.gateway_api_base", lambda: "http://gw")
+    monkeypatch.setattr("base.cluster.machine.gateway_auth_headers", dict)
     assert cmd_notices_clear(agent_id=7, force=True, stale=True) == 2
 
 
@@ -227,9 +227,9 @@ def test_stale_lookup_deduplicates_only_agents_in_filtered_notices(
             [_notice(1, 7), _notice(2, 7), _notice(3, 9, require_response=True)],
         )
 
-    monkeypatch.setattr("shared.host.net.http_dial.get", fake_get)
-    monkeypatch.setattr("shared.cluster.machine.gateway_api_base", lambda: "http://gw")
-    monkeypatch.setattr("shared.cluster.machine.gateway_auth_headers", dict)
+    monkeypatch.setattr("base.host.net.http_dial.get", fake_get)
+    monkeypatch.setattr("base.cluster.machine.gateway_api_base", lambda: "http://gw")
+    monkeypatch.setattr("base.cluster.machine.gateway_auth_headers", dict)
     assert cmd_notices_list(agent_id=None, priority=None, type_filter="fyi", stale=True) == 0
     assert calls == ["http://gw/api/notices/open", "http://gw/api/agents/7"]
 
@@ -253,6 +253,6 @@ def test_stale_clear_keeps_notices_of_missing_agents(
         assert url == "http://gw/api/notices/open"
         return _Resp(200, [_notice(1, 7)])
 
-    monkeypatch.setattr("shared.host.net.http_dial.get", fake_get)
+    monkeypatch.setattr("base.host.net.http_dial.get", fake_get)
     assert cmd_notices_clear(agent_id=None, force=True, stale=True) == 0
     assert dial["post"] == []

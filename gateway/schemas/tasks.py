@@ -9,8 +9,8 @@ from pydantic import (
     ConfigDict,
 )
 
-from shared.agents.tasks.priority import Priority
-from shared.agents.tasks.status import TaskStatus
+from base.agents.tasks.priority import Priority
+from base.agents.tasks.status import TaskStatus
 
 
 class TaskRow(BaseModel):

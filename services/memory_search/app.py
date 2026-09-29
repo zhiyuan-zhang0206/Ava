@@ -27,10 +27,10 @@ import numpy as np
 from fastapi import FastAPI
 from pydantic import BaseModel, Field
 
+from base import telemetry
+from base.config import settings
 from services.memory_indexer.embeddings.factory import get_provider
 from services.memory_search.store import MemoryStore
-from shared import telemetry
-from shared.config import settings
 
 _log = logging.getLogger("services.memory_search.app")
 

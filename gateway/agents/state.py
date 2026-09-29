@@ -16,6 +16,27 @@ from typing import Any
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from psycopg_pool import ConnectionPool
 
+from base.agents.history.checkpoint import (
+    CheckpointReadError,
+    load_checkpoint_messages,
+    load_checkpoint_messages_by_trace,
+)
+from base.agents.messages.chat_delivery import ClientMessageConflictError
+from base.agents.messages.inbound import InboundKind
+from base.agents.messages.inbound_images import inbound_image_urls
+from base.agents.messages.inbound_provenance import InboundProvenance
+from base.agents.observation import snapshot
+from base.agents.uploads import image_mime_for, parse_upload_url, resolve_upload_path
+from base.config import settings
+from base.daemon.schedules.completion_notices import (
+    CompletionNotice,
+    CompletionNoticePolicy,
+    current_default_completion_notice_policy,
+    delivery_required_for_agent,
+    policy_for_agent,
+)
+from base.db import agent_exists, insert_inbound_message, list_pending_inbounds
+from base.db.transaction import write_transaction
 from gateway.agents.delivery import deliver_chat_inbound, reconcile_chat_delivery
 from gateway.agents.eval_guard import caller_eval_isolation, deny_isolated_result_read
 from gateway.agents.inbound_provenance import request_inbound_provenance
@@ -35,27 +56,6 @@ from gateway.agents.schemas import (
 from ops import lifecycle as _ops
 from ops.agents import get_agent_status
 from ops.rpc_schemas import AgentMessageIn, ContentBlock, ImageUrlContentBlock, TextContentBlock
-from shared.agents.history.checkpoint import (
-    CheckpointReadError,
-    load_checkpoint_messages,
-    load_checkpoint_messages_by_trace,
-)
-from shared.agents.messages.chat_delivery import ClientMessageConflictError
-from shared.agents.messages.inbound import InboundKind
-from shared.agents.messages.inbound_images import inbound_image_urls
-from shared.agents.messages.inbound_provenance import InboundProvenance
-from shared.agents.observation import snapshot
-from shared.agents.uploads import image_mime_for, parse_upload_url, resolve_upload_path
-from shared.config import settings
-from shared.daemon.schedules.completion_notices import (
-    CompletionNotice,
-    CompletionNoticePolicy,
-    current_default_completion_notice_policy,
-    delivery_required_for_agent,
-    policy_for_agent,
-)
-from shared.db import agent_exists, insert_inbound_message, list_pending_inbounds
-from shared.db.transaction import write_transaction
 
 router = APIRouter()
 _log = logging.getLogger(__name__)
@@ -77,7 +77,7 @@ def _resolve_agent_model(request: Request, agent_id: int) -> str:
     so callers judge the model that will actually run. Same lookup as the
     token-usage endpoint; capability gates (image input) must use this resolved
     id, never the raw configured one."""
-    from shared.lm.registry import resolve_available_model
+    from base.lm.registry import resolve_available_model
 
     with request.app.state.db_pool.connection() as conn, conn.cursor() as cur:
         cur.execute("SELECT config_overlay FROM agents_meta WHERE id = %s", (agent_id,))
@@ -119,7 +119,7 @@ def _prepare_message_content(
     model here, up front, rather than letting the LLM call fail after the
     inbound is already queued.
     """
-    from shared.lm.factory import model_supports_vision, vision_capable_provider_names
+    from base.lm.factory import model_supports_vision, vision_capable_provider_names
 
     if isinstance(content, str):
         return content, None
@@ -658,8 +658,8 @@ def get_token_usage(agent_id: int, request: Request) -> TokenUsageResponse:
     """
     from langchain_core.messages import AIMessage
 
-    from shared.lm.context_budget import UnknownModelWindowError, resolve_context_budget
-    from shared.lm.factory import ensure_provider_plugins_loaded
+    from base.lm.context_budget import UnknownModelWindowError, resolve_context_budget
+    from base.lm.factory import ensure_provider_plugins_loaded
 
     # Plugin models must be registered before the registry lookup below.
     ensure_provider_plugins_loaded()
@@ -680,7 +680,7 @@ def get_token_usage(agent_id: int, request: Request) -> TokenUsageResponse:
         config_overlay: dict[str, Any] | None = row[0] if row and row[0] else None
         model: str | None = config_overlay.get("llm_model") if config_overlay else None
         if not model:
-            from shared.config import settings
+            from base.config import settings
 
             model = settings.lm.llm_model
         if model:
@@ -715,7 +715,7 @@ def get_token_usage(agent_id: int, request: Request) -> TokenUsageResponse:
         if isinstance(msg, AIMessage):
             usage = msg.usage_metadata
             if usage:
-                from shared.lm.reasoning import extract_reasoning_tokens
+                from base.lm.reasoning import extract_reasoning_tokens
 
                 return TokenUsageResponse(
                     input_tokens=usage["input_tokens"],
@@ -748,13 +748,13 @@ def get_context_breakdown(agent_id: int, request: Request) -> ContextBreakdownRe
     no kernel/agent involvement. A checkpoint read failure / no checkpoint yields
     an empty breakdown with zeroed totals (same tolerance as token-usage: the
     panel re-opens fine later)."""
-    from gateway.agents.context_breakdown import SectionNode, compute_breakdown
-    from shared.lm.context_budget import (
+    from base.lm.context_budget import (
         UnknownModelWindowError,
         latest_input_tokens,
         resolve_context_budget,
     )
-    from shared.lm.factory import ensure_provider_plugins_loaded
+    from base.lm.factory import ensure_provider_plugins_loaded
+    from gateway.agents.context_breakdown import SectionNode, compute_breakdown
 
     # Plugin models must be registered before the registry lookup below.
     ensure_provider_plugins_loaded()

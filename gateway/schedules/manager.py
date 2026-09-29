@@ -56,14 +56,14 @@ from typing import Any
 
 from psycopg_pool import ConnectionPool
 
-from shared import telemetry
-from shared.cluster import session_name
-from shared.config import settings
-from shared.daemon.schedules.timing import SCHEDULE_STALL_ALERT_AFTER_S
-from shared.db.transaction import write_transaction
-from shared.paths import ava_home, prod_service_checkout_error
-from shared.sessions.backend import get_shell_backend
-from shared.sessions.env_forwarding import forward_env_dict
+from base import telemetry
+from base.cluster import session_name
+from base.config import settings
+from base.daemon.schedules.timing import SCHEDULE_STALL_ALERT_AFTER_S
+from base.db.transaction import write_transaction
+from base.paths import ava_home, prod_service_checkout_error
+from base.sessions.backend import get_shell_backend
+from base.sessions.env_forwarding import forward_env_dict
 
 _log = logging.getLogger(__name__)
 
@@ -123,7 +123,7 @@ class ScheduleManager:
         """Seed missing schedules when requested; never edit existing workload rows."""
         if not settings.gateway.provision_builtin_schedules:
             return
-        from shared.daemon.schedules.builtin_schedules import provision_builtin_schedules
+        from base.daemon.schedules.builtin_schedules import provision_builtin_schedules
 
         def provision() -> list[str]:
             # Pool acquisition and provisioning both block; keep them off the event loop.
@@ -168,7 +168,7 @@ class ScheduleManager:
         await asyncio.to_thread(self._sync_blocking, schedule_id)
 
     def _sync_blocking(self, schedule_id: int) -> None:
-        from shared.deploy.maintenance import admission
+        from base.deploy.maintenance import admission
 
         if admission.held():
             return
@@ -212,7 +212,7 @@ class ScheduleManager:
             self._reconcile_locked()
 
     def _reconcile_locked(self) -> None:
-        from shared.deploy.maintenance import admission
+        from base.deploy.maintenance import admission
 
         if admission.held():
             return
@@ -232,7 +232,7 @@ class ScheduleManager:
         }
         now = time.monotonic()
         self._report_stalled_schedules(status, live, now)
-        from shared.deploy.lifecycle import start_serving
+        from base.deploy.lifecycle import start_serving
 
         # A launch can find a same-name session after liveness initially said it
         # was absent. If the official reap refused it, this set makes the next
@@ -331,7 +331,7 @@ class ScheduleManager:
             self._stall_alerted.add(schedule_id)
 
     def _live_ids(self) -> set[int]:
-        from shared.sessions.pty.allocation_freeze import current_generation
+        from base.sessions.pty.allocation_freeze import current_generation
 
         live: set[int] = set()
         backend = get_shell_backend()
@@ -407,7 +407,7 @@ class ScheduleManager:
                 self._close_null_runs(sid)
 
     def _launch(self, schedule_id: int) -> None:
-        from shared.deploy.maintenance import admission
+        from base.deploy.maintenance import admission
 
         if admission.held():
             return
@@ -449,7 +449,7 @@ class ScheduleManager:
         # instead of Shanghai midnight after the 08-12 timezone ruling. Pin the
         # gateway's own resolved timezone into the spawn env so the fire time is
         # deterministic; dotenv_boot's authority pass still lets a declared .env
-        # value override it (and never drops it — shared/dotenv_boot._force_also).
+        # value override it (and never drops it — base/dotenv_boot._force_also).
         env["AVA_TIMEZONE"] = settings.general.timezone
         # `cd` first: the login shell's own profile can move the cwd the
         # daemon forked with (macOS path_helper rebuilds PATH; a profile `cd`

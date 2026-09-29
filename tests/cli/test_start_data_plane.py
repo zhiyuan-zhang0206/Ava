@@ -13,11 +13,11 @@ from types import SimpleNamespace
 
 import pytest
 
+from base import cluster
+from base.config import settings
 from cli.commands.converge.spec import ConvergeCtx
 from cli.commands.data_plane import cluster_instance as _ci
 from cli.commands.lifecycle import start as _start
-from shared import cluster
-from shared.config import settings
 
 _PORTS: cluster.ClusterPorts = {
     "gateway": 8000,
@@ -47,7 +47,7 @@ def test_gateway_data_plane_brings_up_own_instance(monkeypatch: pytest.MonkeyPat
     ports, with each data-plane identity read from its own URL."""
     monkeypatch.setattr(cluster, "get_record", lambda _home: _rec())  # pyright: ignore[reportUnknownArgumentType]
     # An established home: its database authority ledger exists.
-    monkeypatch.setattr("shared.cluster.authority.load_ledger", lambda _home: object())  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("base.cluster.authority.load_ledger", lambda _home: object())  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(settings.data_plane, "cluster_secret", "bearer")
     monkeypatch.setattr(settings.data_plane, "redis_admin_password", "redis-admin")
     monkeypatch.setattr(cluster, "redis_password_from_env", lambda: "redis-runtime")
@@ -81,7 +81,7 @@ def test_gateway_data_plane_refuses_a_home_without_a_ledger_before_any_effect(
     first start in progress) is refused with the cutover instruction before any
     native effect — never converted by an ordinary start."""
     monkeypatch.setattr(cluster, "get_record", lambda _home: _rec())  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr("shared.cluster.authority.load_ledger", lambda _home: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("base.cluster.authority.load_ledger", lambda _home: None)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr("cli.start_identity.needs_provision", lambda _home: False)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(
         _ci,
@@ -120,8 +120,8 @@ def test_port_preflight_warns_and_logs_conflicts(
 ):
     """A foreign occupant on the cluster block → the start CONTINUES (rc-free
     step) but prints the warning and appends it to $AVA_HOME/logs/port_conflicts.log."""
+    from base import cluster as _cluster
     from cli.commands.converge import port_preflight as _pp
-    from shared import cluster as _cluster
 
     ctx = _preflight_ctx(tmp_path)
     monkeypatch.setattr(
@@ -143,8 +143,8 @@ def test_port_preflight_warns_and_logs_conflicts(
 
 def test_port_preflight_silent_when_clean(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys):
     """No conflicts and no drift → no output, no log file."""
+    from base import cluster as _cluster
     from cli.commands.converge import port_preflight as _pp
-    from shared import cluster as _cluster
 
     ctx = _preflight_ctx(tmp_path)
     monkeypatch.setattr(_pp, "collect_port_conflicts", lambda _ctx: [])  # pyright: ignore[reportUnknownArgumentType]
@@ -221,14 +221,14 @@ def test_collect_port_conflicts_env_layer_overrides_block_for_enrolled_unit(
     ctx = _preflight_ctx(tmp_path)
     # no registry record -> block layer is the legacy segment
     monkeypatch.setattr(
-        "shared.cluster.port_preflight.expected_cluster_ports",
+        "base.cluster.port_preflight.expected_cluster_ports",
         lambda _home: {"agent_host": 8121},  # pyright: ignore[reportUnknownArgumentType]
     )
     # the unit's own .env declares a per-unit block port (every health daemon
     # resolves; only agent_host's matters for the assertion)
     per_unit = {"agent_host": 20003}
     monkeypatch.setattr(
-        "shared.daemon.health.health_port",
+        "base.daemon.health.health_port",
         lambda svc: per_unit.get(svc, 20000 + len(svc)),  # pyright: ignore[reportUnknownArgumentType]
     )
 
@@ -265,9 +265,9 @@ class _Plane:
 @pytest.fixture
 def plane(monkeypatch: pytest.MonkeyPatch) -> _Plane:
     """Every effect of `complete_gateway_data_plane`, recorded in order."""
+    from base.cluster import authority
     from cli.commands.converge import health_preflight
     from cli.commands.data_plane import bringup
-    from shared.cluster import authority
 
     recorded = _Plane()
     calls, state = recorded.calls, recorded.state
@@ -391,8 +391,8 @@ def test_release_readiness_performs_no_schema_or_grant_writes(plane: _Plane) -> 
 def test_invariant_violation_never_starts_pooler_or_marks_provisioned(
     plane: _Plane, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    from base.cluster import authority
     from cli.commands.data_plane.bringup import complete_gateway_data_plane
-    from shared.cluster import authority
 
     def fail(*_a: object, **_kw: object) -> None:
         raise authority.CatalogRefusedError(("foreign grant",))
@@ -420,10 +420,10 @@ def test_memory_vectors_prepared_as_owner_only_for_pgvector(
 ) -> None:
     """The pgvector table is start-time DDL through the owner authority at the
     provider's dimension; any other backend dials nothing."""
+    from base.db import pg_admin
     from cli.commands.data_plane.bringup import prepare_memory_vectors
     from services.memory_indexer.backends import pgvector
     from services.memory_indexer.embeddings import factory
-    from shared.db import pg_admin
 
     calls: list[str] = []
     monkeypatch.setattr(pg_admin, "local_owner_authority", lambda: _Authority(calls))
@@ -448,11 +448,11 @@ def test_remote_plane_prepares_memory_vectors_through_its_provider_url(
 ) -> None:
     """A remote-managed plane has no local owner authority; its provider URL
     carries the table DDL, exactly as it carries the plane's migrations."""
-    import shared.db
+    import base.db
+    from base.db import pg_admin
     from cli.commands.data_plane.bringup import prepare_memory_vectors
     from services.memory_indexer.backends import pgvector
     from services.memory_indexer.embeddings import factory
-    from shared.db import pg_admin
 
     calls: list[str] = []
 
@@ -466,7 +466,7 @@ def test_remote_plane_prepares_memory_vectors_through_its_provider_url(
 
     monkeypatch.setattr(settings.data_plane, "db_url", "postgresql://owner@db.example/ava")
     monkeypatch.setattr(settings.services, "memory_search_backend", "pgvector")
-    monkeypatch.setattr(shared.db, "connect", provider)
+    monkeypatch.setattr(base.db, "connect", provider)
     monkeypatch.setattr(pg_admin, "local_owner_authority", lambda: pytest.fail("no local admin"))
     monkeypatch.setattr(pgvector, "prepare_table", prepare)
     monkeypatch.setattr(factory, "get_provider", lambda: SimpleNamespace(dim=768))

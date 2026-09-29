@@ -7,9 +7,9 @@ from uuid import uuid4
 import psycopg
 import pytest
 
-from shared.cluster.machine import machine_name
-from shared.db import insert_inbound_message
-from shared.deploy.maintenance import cohort, pause_owner
+from base.cluster.machine import machine_name
+from base.db import insert_inbound_message
+from base.deploy.maintenance import cohort, pause_owner
 from tests.agent.test_maintenance import WHEN, _agent
 from tests.agent.test_maintenance import isolate as isolate
 

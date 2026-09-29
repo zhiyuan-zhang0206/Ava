@@ -75,12 +75,12 @@ def _write(root: Path, rel: str, body: str) -> Path:
 
 def test_unthreaded_split_inside_clocked_function_is_rejected(scratch) -> None:
     root, build = scratch
-    _write(root, "shared/telemetry/loki_index_labels.py", FIXED_FAMILY)
+    _write(root, "base/telemetry/loki_index_labels.py", FIXED_FAMILY)
     _write(
         root,
         "services/events_maintenance.py",
         """
-        from shared.telemetry.loki_index_labels import split_index_label_window
+        from base.telemetry.loki_index_labels import split_index_label_window
 
 
         def compute_rollup(*, now_utc):
@@ -102,12 +102,12 @@ def test_unthreaded_split_inside_clocked_function_is_rejected(scratch) -> None:
 
 def test_threaded_split_is_allowed(scratch) -> None:
     root, build = scratch
-    _write(root, "shared/telemetry/loki_index_labels.py", FIXED_FAMILY)
+    _write(root, "base/telemetry/loki_index_labels.py", FIXED_FAMILY)
     _write(
         root,
         "services/events_maintenance.py",
         """
-        from shared.telemetry.loki_index_labels import split_index_label_window
+        from base.telemetry.loki_index_labels import split_index_label_window
 
 
         def compute_rollup(*, now_utc):
@@ -126,12 +126,12 @@ def test_threaded_split_is_allowed(scratch) -> None:
 def test_clocked_function_pinning_the_callee_is_allowed(scratch) -> None:
     """A `now` parameter threaded into the fixed-instant callee is fine."""
     root, build = scratch
-    _write(root, "shared/telemetry/loki_index_labels.py", FIXED_FAMILY)
+    _write(root, "base/telemetry/loki_index_labels.py", FIXED_FAMILY)
     _write(
         root,
         "services/noop.py",
         """
-        from shared.telemetry.loki_index_labels import retention_floor
+        from base.telemetry.loki_index_labels import retention_floor
 
 
         def plan(window_start, now):
@@ -150,12 +150,12 @@ def test_inspect_bomb_exact_equality_after_opaque_http_is_rejected(scratch) -> N
     """Regression: the 2026-08-30 agent-inspect bomb — `client.get(...)` then
     `assert ... == INDEX_LABEL_CUTOVER_AT`."""
     root, build = scratch
-    _write(root, "shared/telemetry/loki_index_labels.py", FIXED_FAMILY)
+    _write(root, "base/telemetry/loki_index_labels.py", FIXED_FAMILY)
     _write(
         root,
         "tests/test_inspect.py",
         """
-        from shared.telemetry.loki_index_labels import INDEX_LABEL_CUTOVER_AT, retention_floor
+        from base.telemetry.loki_index_labels import INDEX_LABEL_CUTOVER_AT, retention_floor
 
 
         class _Client:
@@ -181,12 +181,12 @@ def test_rollup_bomb_unpinned_callee_derivation_is_rejected(scratch) -> None:
     production clock is unthreaded, so the exact aggregate still rides the
     wall clock."""
     root, build = scratch
-    _write(root, "shared/telemetry/loki_index_labels.py", FIXED_FAMILY)
+    _write(root, "base/telemetry/loki_index_labels.py", FIXED_FAMILY)
     _write(
         root,
         "services/events_maintenance.py",
         """
-        from shared.telemetry.loki_index_labels import split_index_label_window
+        from base.telemetry.loki_index_labels import split_index_label_window
 
 
         def compute_rollup(*, now_utc):
@@ -201,7 +201,7 @@ def test_rollup_bomb_unpinned_callee_derivation_is_rejected(scratch) -> None:
         root,
         "tests/test_rollup.py",
         """
-        from shared.telemetry.loki_index_labels import INDEX_LABEL_CUTOVER_AT
+        from base.telemetry.loki_index_labels import INDEX_LABEL_CUTOVER_AT
 
         from services.events_maintenance import compute_rollup
 
@@ -221,12 +221,12 @@ def test_pinned_clock_exact_equality_is_allowed(scratch) -> None:
     """The fleet-graph shape: the call site passes a fixed-derived `now`, so
     `== INDEX_LABEL_CUTOVER_AT` is deterministic forever."""
     root, build = scratch
-    _write(root, "shared/telemetry/loki_index_labels.py", FIXED_FAMILY)
+    _write(root, "base/telemetry/loki_index_labels.py", FIXED_FAMILY)
     _write(
         root,
         "gateway/routers/fleet_graph.py",
         """
-        from shared.telemetry.loki_index_labels import INDEX_LABEL_CUTOVER_AT
+        from base.telemetry.loki_index_labels import INDEX_LABEL_CUTOVER_AT
 
 
         def fetch_edges(*, now):
@@ -240,7 +240,7 @@ def test_pinned_clock_exact_equality_is_allowed(scratch) -> None:
         from datetime import timedelta
 
         from gateway.routers.fleet_graph import fetch_edges
-        from shared.telemetry.loki_index_labels import INDEX_LABEL_CUTOVER_AT
+        from base.telemetry.loki_index_labels import INDEX_LABEL_CUTOVER_AT
 
 
         def test_edge_tail_is_scoped():
@@ -256,12 +256,12 @@ def test_pinned_clock_exact_equality_is_allowed(scratch) -> None:
 def test_tolerance_assertion_is_allowed(scratch) -> None:
     """The post-fix inspect shape: a drift-tolerant compare, never an exact."""
     root, build = scratch
-    _write(root, "shared/telemetry/loki_index_labels.py", FIXED_FAMILY)
+    _write(root, "base/telemetry/loki_index_labels.py", FIXED_FAMILY)
     _write(
         root,
         "tests/test_inspect.py",
         """
-        from shared.telemetry.loki_index_labels import retention_floor
+        from base.telemetry.loki_index_labels import retention_floor
 
 
         def test_window_floor():
@@ -276,14 +276,14 @@ def test_tolerance_assertion_is_allowed(scratch) -> None:
 def test_explicit_now_to_boundary_function_is_allowed(scratch) -> None:
     """The shared-slice test shape: every boundary call pins `now=`."""
     root, build = scratch
-    _write(root, "shared/telemetry/loki_index_labels.py", FIXED_FAMILY)
+    _write(root, "base/telemetry/loki_index_labels.py", FIXED_FAMILY)
     _write(
         root,
         "tests/test_labels.py",
         """
         from datetime import timedelta
 
-        from shared.telemetry import loki_index_labels as labels
+        from base.telemetry import loki_index_labels as labels
 
 
         def test_split_before_cutover():
@@ -302,12 +302,12 @@ def test_explicit_now_to_boundary_function_is_allowed(scratch) -> None:
 
 def test_opt_out_comment_suppresses(scratch) -> None:
     root, build = scratch
-    _write(root, "shared/telemetry/loki_index_labels.py", FIXED_FAMILY)
+    _write(root, "base/telemetry/loki_index_labels.py", FIXED_FAMILY)
     _write(
         root,
         "tests/test_inspect.py",
         """
-        from shared.telemetry.loki_index_labels import INDEX_LABEL_CUTOVER_AT, retention_floor
+        from base.telemetry.loki_index_labels import INDEX_LABEL_CUTOVER_AT, retention_floor
 
 
         class _Client:
@@ -329,7 +329,7 @@ def test_literal_datetime_assertions_are_allowed(scratch) -> None:
     """A test-local `datetime(...)` literal is deterministic by construction —
     no repo fixed instant participates, so no bomb."""
     root, build = scratch
-    _write(root, "shared/telemetry/loki_index_labels.py", FIXED_FAMILY)
+    _write(root, "base/telemetry/loki_index_labels.py", FIXED_FAMILY)
     _write(
         root,
         "tests/test_pricing.py",
@@ -569,15 +569,15 @@ def test_non_utf8_module_in_scan_dir_is_skipped(
     """A non-UTF-8 module inside the scanned tree must not crash the index
     build — and a violating sibling module is still reported."""
     root, _ = scratch
-    (root / "shared" / "bad_utf8.py").write_bytes(b"\xff\xfe\x00bad")
-    (root / "shared" / "clean.py").write_text("value = 1\n", encoding="utf-8")
+    (root / "base" / "bad_utf8.py").write_bytes(b"\xff\xfe\x00bad")
+    (root / "base" / "clean.py").write_text("value = 1\n", encoding="utf-8")
     assert _lint.main([]) == 0
-    _write(root, "shared/telemetry/loki_index_labels.py", FIXED_FAMILY)
+    _write(root, "base/telemetry/loki_index_labels.py", FIXED_FAMILY)
     _write(
         root,
         "services/events_maintenance.py",
         """
-        from shared.telemetry.loki_index_labels import split_index_label_window
+        from base.telemetry.loki_index_labels import split_index_label_window
 
 
         def compute_rollup(*, now_utc):

@@ -19,10 +19,10 @@ from langchain_core.messages import HumanMessage
 
 from ava import gateway_client
 from ava_builtins.plugins.ava_memory import inherit
-from shared.agents import GatewayUnavailable
-from shared.cluster.machine import machine_name
-from shared.config import settings
-from shared.paths import ava_home
+from base.agents import GatewayUnavailable
+from base.cluster.machine import machine_name
+from base.config import settings
+from base.paths import ava_home
 
 OPEN = inherit.INHERITABLE_OPEN
 CLOSE = inherit.INHERITABLE_CLOSE
@@ -104,8 +104,8 @@ def memory_plugin() -> Iterator[Any]:
     tests/agent/test_fork_notes.py) so `fork_notes` runs against the
     registered note set."""
     from agent.state import clear_plugin_registrations
-    from shared.packages.plugins.config_registration import bind_from_disk
-    from shared.packages.plugins.context import PluginContext
+    from base.packages.plugins.config_registration import bind_from_disk
+    from base.packages.plugins.context import PluginContext
 
     clear_plugin_registrations()
     for name in list(sys.modules):

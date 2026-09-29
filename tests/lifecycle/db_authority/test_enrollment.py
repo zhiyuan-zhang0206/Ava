@@ -22,8 +22,8 @@ from uuid import uuid4
 
 import pytest
 
+from base.cluster.authority import channel, unit
 from cli.commands.cluster import control as cluster_cmd
-from shared.cluster.authority import channel, unit
 
 _ENDPOINT = "postgresql://ava@10.0.0.7:6433/ava"
 _MACHINE = "mini"
@@ -162,10 +162,10 @@ def test_enrollment_commands_refuse_while_a_release_operation_is_incomplete(
         raise RuntimeError("a release operation is incomplete")
 
     enrolled = unit.ensure_enrollment(gateway, identity)
-    monkeypatch.setattr("shared.host.env.bootstrap.config_source_is_local", lambda: True)
-    monkeypatch.setattr("shared.paths.ava_home", lambda: gateway)
+    monkeypatch.setattr("base.host.env.bootstrap.config_source_is_local", lambda: True)
+    monkeypatch.setattr("base.paths.ava_home", lambda: gateway)
     monkeypatch.setattr(
-        "shared.deploy.release.operation.require_configuration_write_authorized", incomplete
+        "base.deploy.release.operation.require_configuration_write_authorized", incomplete
     )
     for command in (
         cluster_cmd.cmd_db_authority_rotate_enrollment,

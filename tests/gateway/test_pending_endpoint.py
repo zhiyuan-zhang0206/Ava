@@ -12,12 +12,12 @@ from uuid import uuid4
 import psycopg
 from fastapi.testclient import TestClient
 
-from gateway.app import app
-from shared.db import (
+from base.db import (
     insert_compact_request_inbound,
     insert_inbound_message,
     list_pending_inbounds,
 )
+from gateway.app import app
 
 
 def _seed_agent(db_conn: psycopg.Connection) -> int:

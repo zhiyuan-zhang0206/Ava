@@ -8,7 +8,7 @@ import time
 
 from fastapi import Request
 
-from shared import telemetry
+from base import telemetry
 
 _log = logging.getLogger(__name__)
 
@@ -44,7 +44,7 @@ def _prune_auth401_throttle(now: float) -> None:
 
 # Task #1635 / PR #610 stopped new bundles from blind-retrying 401'd SSE streams;
 # Task #1694 treats SSE 401s as stale old-bundle tabs: expected reconnect noise.
-# Uvicorn access logs are WARNING-gated (`shared/log/__init__.py` `_install_stdlib_intercept`),
+# Uvicorn access logs are WARNING-gated (`base/log/__init__.py` `_install_stdlib_intercept`),
 # so without this explicit log 401s are invisible. DEBUG keeps the forensic gateway.log
 # trail out of events/Loki (only INFO+ derives). Non-stream sources stay visible at
 # WARNING once per (client, path) per 300s while flood repeats are downgraded to DEBUG.

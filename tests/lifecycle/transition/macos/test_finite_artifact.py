@@ -13,9 +13,9 @@ from types import SimpleNamespace
 
 import pytest
 
+from base import paths
+from base.native_process.ownership import OwnedProcess
 from services.permissions_helper import client, finite_artifact, hardened_runtime, lifecycle
-from shared import paths
-from shared.native_process.ownership import OwnedProcess
 
 _STABLE = (
     'identifier "com.ava.permissions-helper" and certificate leaf = '

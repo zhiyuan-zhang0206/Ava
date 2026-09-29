@@ -10,12 +10,12 @@ from unittest.mock import Mock
 
 import pytest
 
+from base.daemon.health import DaemonProbe
+from base.native_process.ownership import OwnedProcess
 from services.ava_root.health import HealthMonitor, ProbeRunner
 from services.ava_root.probes import ProbeRegistry
 from services.ava_root_glue import diagnostic_probes as probes
 from services.ava_root_glue.diagnostics import Diagnostic, DiagnosticMonitor, RootHealthRounds
-from shared.daemon.health import DaemonProbe
-from shared.native_process.ownership import OwnedProcess
 
 
 class _EventLog:
@@ -38,9 +38,9 @@ def _no_op(**_kwargs: object) -> None:
 @pytest.fixture
 def events(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, object]]:
     records: list[dict[str, object]] = []
-    monkeypatch.setattr("shared.log.init_gateway_process", _no_op)
-    monkeypatch.setattr("shared.telemetry.sync", _no_op)
-    monkeypatch.setattr("shared.log.logger", _EventLog(records))
+    monkeypatch.setattr("base.log.init_gateway_process", _no_op)
+    monkeypatch.setattr("base.telemetry.sync", _no_op)
+    monkeypatch.setattr("base.log.logger", _EventLog(records))
     return records
 
 
@@ -220,7 +220,7 @@ async def test_expectation_precedes_first_sample_and_is_retired_on_stop(
 def test_helper_diagnostics_are_macos_only(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(probes, "IS_MACOS", False)
     monkeypatch.setattr(probes, "IS_WINDOWS", False)
-    monkeypatch.setattr("shared.cluster.machine.is_gateway", lambda: False)
+    monkeypatch.setattr("base.cluster.machine.is_gateway", lambda: False)
     names = {check.name for check in probes.build_diagnostics(set())}
     assert names == {"venv"}
     monkeypatch.setattr(probes, "IS_MACOS", True)
@@ -272,14 +272,14 @@ def test_browser_canary_runs_only_inside_owned_endpoint_probe(
 
 
 def test_pooler_requires_native_custody_before_protocol(monkeypatch: pytest.MonkeyPatch) -> None:
+    from base.cluster import ownership
     from cli.commands.data_plane import pgbouncer
-    from shared.cluster import ownership
 
     def registered(_home: object) -> object:
         return object()
 
     listener = Mock(side_effect=AssertionError("unknown pooler must not be accepted"))
-    monkeypatch.setattr("shared.cluster.get_record", registered)
+    monkeypatch.setattr("base.cluster.get_record", registered)
     monkeypatch.setattr(ownership, "pooler", Mock(return_value=None))
     monkeypatch.setattr(pgbouncer, "pgbouncer_listener_reachable", listener)
     assert probes.pgbouncer().verdict.value == "down"
@@ -292,6 +292,6 @@ def test_missing_brew_probe_is_unavailable_not_an_empty_healthy_set(
     def missing(*_args: object, **_kwargs: object) -> NoReturn:
         raise FileNotFoundError("brew")
 
-    monkeypatch.setattr("shared.host.proc.run_bounded", missing)
+    monkeypatch.setattr("base.host.proc.run_bounded", missing)
     with pytest.raises(FileNotFoundError):
         probes.brew_pins()  # ProbeRunner maps inspection failure to UNAVAILABLE.

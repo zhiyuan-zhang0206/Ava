@@ -48,7 +48,7 @@ def test_session_scoped_env_write_in_a_subdirectory_conftest_is_flagged() -> Non
 
 
 def test_session_scoped_settings_attribute_write_is_flagged() -> None:
-    # Not every process global is an env var — `shared.config.settings` is a
+    # Not every process global is an env var — `base.config.settings` is a
     # module-load singleton, and the real fixture reassigned a field on it too.
     src = (
         '@pytest.fixture(scope="session")\n'

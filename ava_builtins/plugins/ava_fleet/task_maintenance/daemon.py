@@ -49,20 +49,20 @@ from collections import defaultdict
 import psycopg
 from psycopg_pool import ConnectionPool
 
-import shared.db
-from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
-from shared import telemetry
-from shared.config import settings
-from shared.daemon.health import (
+import base.db
+from base import telemetry
+from base.config import settings
+from base.daemon.health import (
     Liveness,
     health_port,
     start_health_server,
     stop_health_server,
 )
-from shared.daemon.shutdown import install_graceful_shutdown
-from shared.db.transaction import write_transaction
-from shared.events.live.announce import publish_agent_updated_sync
-from shared.log import init_gateway_process
+from base.daemon.shutdown import install_graceful_shutdown
+from base.db.transaction import write_transaction
+from base.events.live.announce import publish_agent_updated_sync
+from base.log import init_gateway_process
+from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
 
 _log = logging.getLogger("ava_builtins.plugins.ava_fleet.task_maintenance.daemon")
 
@@ -108,7 +108,7 @@ def _deliver_message(
     publish_agent_updated_sync(agent_id)
     # The connection context commits before the best-effort wake. A missing
     # subscriber is expected for a terminated agent and does not resurrect it.
-    shared.db.publish_inbound_wake(agent_id, str(inbound_id))
+    base.db.publish_inbound_wake(agent_id, str(inbound_id))
 
 
 # ── Reminder pass ──────────────────────────────────────────────────────────────
@@ -529,7 +529,7 @@ async def run() -> None:
     health = await start_health_server("task_maintenance", liveness=liveness)
     _log.info("[task-maintenance] healthz listening on :%s", health_port("task_maintenance"))
 
-    pool = shared.db.pool()
+    pool = base.db.pool()
     try:
         await _dispatch_loop(pool, liveness)
     finally:
@@ -540,7 +540,7 @@ async def run() -> None:
 
 
 def main() -> None:
-    from shared.deploy.schema.migrations import assert_schema_current
+    from base.deploy.schema.migrations import assert_schema_current
 
     assert_schema_current(settings.data_plane.db_url)
     init_gateway_process(name="task_maintenance")

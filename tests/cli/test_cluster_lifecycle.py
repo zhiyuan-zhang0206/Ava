@@ -9,10 +9,10 @@ from unittest.mock import Mock
 
 import pytest
 
+from base import cluster
+from base.cluster.ports import ClusterPorts
+from base.host.env.port_block import PORT_OFFSETS
 from cli.commands.cluster import registry as lifecycle
-from shared import cluster
-from shared.cluster.ports import ClusterPorts
-from shared.host.env.port_block import PORT_OFFSETS
 
 
 @pytest.fixture

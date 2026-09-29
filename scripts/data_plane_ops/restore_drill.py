@@ -21,13 +21,13 @@ from pathlib import Path
 
 import psycopg
 
+from base.agents.history import checkpoint as checkpoint_reader
+from base.cluster.authority import GATEWAY_GROUP, RUNNER_GROUP
+from base.cluster.dataplane.pg_throwaway_base import format_bytes, select_throwaway_base
+from base.cluster.dataplane.pg_tools import pg_tool, throwaway_postgres
+from base.config import settings
+from base.log import logger
 from services import backup
-from shared.agents.history import checkpoint as checkpoint_reader
-from shared.cluster.authority import GATEWAY_GROUP, RUNNER_GROUP
-from shared.cluster.dataplane.pg_throwaway_base import format_bytes, select_throwaway_base
-from shared.cluster.dataplane.pg_tools import pg_tool, throwaway_postgres
-from shared.config import settings
-from shared.log import logger
 
 
 @dataclass(frozen=True)
@@ -56,7 +56,7 @@ creates the `ava` superuser; without these pg_restore fails on
 `role "..." does not exist` (2026-08-27 prod drill finding). They are created
 as plain LOGIN roles without a password (trust auth): a restore needs them
 only to exist. The two write-generation capability groups
-(`shared.cluster.authority`) hold every application grant and default
+(`base.cluster.authority`) hold every application grant and default
 privilege, so a dump of an always-authenticated home names both; the
 generation logins own nothing and hold no direct grant, so none is needed.
 `zzy` is the live admin role ad-hoc artifacts are created under (the

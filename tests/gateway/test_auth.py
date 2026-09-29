@@ -26,15 +26,15 @@ from fastapi.testclient import TestClient
 from starlette.middleware import Middleware
 
 import gateway.app as gateway_app
-from gateway.app import app
-from gateway.auth.cors import cors_allowed_origins
-from gateway.middleware.error_handlers import cors_headers
-from shared import config
-from shared.cluster.auth import (
+from base import config
+from base.cluster.auth import (
     bearer_header,
     cookie_name,
 )
-from shared.config.gateway import GatewaySettings
+from base.config.gateway import GatewaySettings
+from gateway.app import app
+from gateway.auth.cors import cors_allowed_origins
+from gateway.middleware.error_handlers import cors_headers
 
 _SECRET = "test-cluster-secret"  # noqa: S105 — test fixture
 
@@ -1144,7 +1144,7 @@ def test_login_succeeds_without_secret_and_bypasses_limiter(
     """A no-secret cluster accepts login as a no-op success. The rate limiter
     is bypassed entirely — there is no credential to guess, and no-secret
     requests must never count into its failure records."""
-    from shared.cluster.rate_limit import login_limiter
+    from base.cluster.rate_limit import login_limiter
 
     monkeypatch.setattr(config.settings.data_plane, "cluster_secret", "")
     monkeypatch.setattr(config.settings.gateway, "auth_middleware_enabled", True)

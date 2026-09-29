@@ -3,7 +3,7 @@
 Covers agent CRUD + wait_for_inbound Redis pub/sub wake-up + table existence.
 No LLM involved.
 
-`shared/db/__init__.py` is the UI/kernel shared synchronous helper (`create_agent` / ...), still using
+`base/db/__init__.py` is the UI/kernel shared synchronous helper (`create_agent` / ...), still using
 the synchronous `db_conn` fixture. `agent/db/__init__.py` is the kernel async path (`wait_for_inbound`
 / `claim_inbound_batch`), using `aops_pool` (AsyncConnectionPool) +
 real PostgreSQL connections, matching the host's transactional queue.
@@ -22,7 +22,7 @@ import pytest
 from psycopg_pool import AsyncConnectionPool
 
 from agent import db as agent_db
-from shared.db import agent_exists, create_agent, list_agents
+from base.db import agent_exists, create_agent, list_agents
 from tests.conftest import spawn_agent
 
 # Redis pub/sub wake-latency discrimination, used by the tests that prove a wake

@@ -27,11 +27,11 @@ def test_recover_clears_a_dead_holders_lock(
     after it, so a crashed orchestration still blocks every deploy until its TTL
     expires — up to 30 minutes on the strength of a dead process."""
     import ops.cluster as _ops
-    from cli.commands.cluster import recover
-    from shared.deploy.state.cluster_lock import (
+    from base.deploy.state.cluster_lock import (
         acquire_update_lock,
         update_lock_holder,
     )
+    from cli.commands.cluster import recover
 
     _clear_update_lock(db_conn)
     try:
@@ -59,11 +59,11 @@ def test_recover_refuses_while_the_holder_is_alive(
     """The override must not become a way to stomp a rollout that is running fine —
     that would reintroduce the collision the deploy window exists to prevent."""
     import ops.cluster as _ops
-    from cli.commands.cluster import recover
-    from shared.deploy.state.cluster_lock import (
+    from base.deploy.state.cluster_lock import (
         acquire_update_lock,
         update_lock_holder,
     )
+    from cli.commands.cluster import recover
 
     _clear_update_lock(db_conn)
     try:

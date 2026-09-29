@@ -37,9 +37,9 @@ def test_root_manifest_projects_runner_url_for_agent_profile(
     def _fake_projection() -> str:
         return projected
 
-    from shared.config import settings
+    from base.config import settings
 
-    monkeypatch.setattr("shared.host.env.bootstrap.config_source_is_local", lambda: True)
+    monkeypatch.setattr("base.host.env.bootstrap.config_source_is_local", lambda: True)
     monkeypatch.setattr(type(settings.data_plane), "is_remote", property(lambda _self: True))
     monkeypatch.setattr(root_driver, "runner_db_url_projection", _fake_projection)
     environments = {spec.session: root_driver._service_extra_env(spec) for spec in (agent, ops)}

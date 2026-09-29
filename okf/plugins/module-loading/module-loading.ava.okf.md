@@ -25,7 +25,7 @@ the `register_*` calls it triggers.
 The name given to `importlib.util.spec_from_file_location` is **dotted**
 (`ava_builtins.plugins.<name>.plugin` built-in, `plugins.<name>.plugin`
 external), so importlib sets `__package__` and a `from . import x` inside
-`plugin.py` resolves. A directory under `shared/paths/__init__.py:repo_plugins_dir()`
+`plugin.py` resolves. A directory under `base/paths/__init__.py:repo_plugins_dir()`
 is built-in; anything else is external.
 
 Load order is the `config.plugins` dict order (alphabetical), one by one —
@@ -43,7 +43,7 @@ Per-face containment, the face's dotted name, and the load forms in full:
 
 ## Disabled means never imported
 The enable set comes from the per-machine `plugins_config.json`, read by both
-loaders through `shared/plugins_config`: host boot via `load_for_runtime()`
+loaders through `base/plugins_config`: host boot via `load_for_runtime()`
 and the graph loader via `load()`, each falling back to
 `load(allow_dangling=True)` when a config entry's plugin directory is gone —
 every dangling name is reported once per process through the canonical
@@ -73,7 +73,7 @@ A plugin whose `plugin.py` raises at import (missing sibling, syntax error,
 top-level exception) degrades to a **skip with a loud report**, never a
 blocked `import ava` / host boot / graph build: `safe_load_plugin_module`
 drops the half-executed module from `sys.modules`, and
-`shared/packages/plugins/load_report.py:report_plugin_load_failure` emits a loguru ERROR
+`base/packages/plugins/load_report.py:report_plugin_load_failure` emits a loguru ERROR
 carrying the traceback plus one `plugin_load_failed` telemetry event (anomaly
 tier). The remaining enabled plugins keep loading; a config entry whose
 plugin directory is gone (`DanglingPlugin`) is reported and treated as
@@ -82,14 +82,14 @@ not a plugin failure.
 
 The same containment applies at the other plugin-code load sites, each
 reporting through the one reporter: a plugin's `provider.py`
-(`shared/lm/plugin_providers.py`), `services.py` (`ops/spec.py`), `setup.py`
+(`base/lm/plugin_providers.py`), `services.py` (`ops/spec.py`), `setup.py`
 (`cli/commands/extensions/_plugin_scaffold.py`), a built-in plugin's `metrics.py`
 (`gateway/inspect/_plugin_metrics.py`), the gateway plugin inspector's
 `inspector.py` (`gateway/inspect/_plugin_widgets.py`), and the launched
 child's `import ava` self-load (`ava.ensure_plugins_loaded`, plus a stderr
 line — a child usually has no log sink). One contained site stays off that
 reporter: `default_config.py` images surface as `error`-status entries on the
-plugin-update result (`shared/packages/plugins/enable_config.py:update_all_disk_images`).
+plugin-update result (`base/packages/plugins/enable_config.py:update_all_disk_images`).
 
 ## Semantics boundary: what stays fail-closed
 Containment covers *code* that fails to load; inventory and contract conflicts

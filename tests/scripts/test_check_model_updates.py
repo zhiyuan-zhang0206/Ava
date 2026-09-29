@@ -69,9 +69,9 @@ def _no_retry_sleep(_seconds: float) -> None:
 
 
 def _pin_retry_sleep(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Pin shared.host.net.resilience's sleep seam (its own tests' pattern) so the
+    """Pin base.host.net.resilience's sleep seam (its own tests' pattern) so the
     retry-path tests exercise the backoff loop without waiting it out."""
-    monkeypatch.setattr("shared.host.net.resilience._sleep", _no_retry_sleep)
+    monkeypatch.setattr("base.host.net.resilience._sleep", _no_retry_sleep)
 
 
 class _JSONResponse:

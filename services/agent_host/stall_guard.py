@@ -32,14 +32,14 @@ from langgraph.graph.state import CompiledStateGraph
 from agent.state import BaseAgentState
 from agent.turn.progress import reset_turn_progress, turn_progress_age_s
 from agent.turn.runloop import emit_error_event
+from base.agents.context import AvaContext
+from base.config import settings
+from base.deploy.stop_timing import CANCEL_UNWIND_TIMEOUT_S
+from base.log import logger
 from services.agent_host.dispatcher import (
     HostRestartRequiredError,
     TurnStallTimeoutError,
 )
-from shared.agents.context import AvaContext
-from shared.config import settings
-from shared.deploy.stop_timing import CANCEL_UNWIND_TIMEOUT_S
-from shared.log import logger
 
 _Graph = CompiledStateGraph[BaseAgentState, AvaContext, BaseAgentState, BaseAgentState]
 

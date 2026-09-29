@@ -25,15 +25,15 @@ from uuid import uuid4
 
 import pytest
 
-import shared.cluster as cluster_pkg
+import base.cluster as cluster_pkg
+from base import paths as base_paths
+from base.deploy.release.runtime_release import activate_release, current_pointer
+from base.host.system.boot_unit import BootStartAction, BootUnitContext
+from base.runtime_abi import current_abi
 from cli.release_fleet.request import FleetRequest
 from cli.release_operator import adopt as adopt_module
 from cli.release_transition import root_service
 from cli.release_transition.request import ReleaseRef
-from shared import paths as shared_paths
-from shared.deploy.release.runtime_release import activate_release, current_pointer
-from shared.host.system.boot_unit import BootStartAction, BootUnitContext
-from shared.runtime_abi import current_abi
 from tests.lifecycle.release_operator.conftest import build_image, digest
 from tests.lifecycle.transition.phases import at_phase
 
@@ -42,7 +42,7 @@ from tests.lifecycle.transition.phases import at_phase
 def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     path = tmp_path / "home"
     path.mkdir()
-    monkeypatch.setattr(shared_paths, "ava_home", lambda: path)
+    monkeypatch.setattr(base_paths, "ava_home", lambda: path)
     monkeypatch.setattr(cluster_pkg, "registry_path", lambda: tmp_path / "clusters.json")
     return path
 

@@ -15,7 +15,7 @@ from typing import Any
 import pytest
 
 import ava
-from shared.packages.plugins.context import PluginContext
+from base.packages.plugins.context import PluginContext
 
 # ── Plugin simulation: wrap search() with the real implementation ───────
 # In the agent process the ava_memory plugin wraps search() at startup.
@@ -193,7 +193,7 @@ def test_indexer_unavailable_is_wire_encoded() -> None:
     """After PR-1, IndexerUnavailable travels over the wire protocol (AvaAgentError
     subclass) — gateway side 503 + reason='indexer_unavailable', SDK reverse-looksup
     to reconstruct."""
-    from shared.agents import AvaAgentError
+    from base.agents import AvaAgentError
 
     assert issubclass(ava.memory.IndexerUnavailable, AvaAgentError)
 
@@ -202,7 +202,7 @@ def test_indexer_unavailable_importable_but_not_in_all() -> None:
     """exception class is not in __all_for_ava__ (the rendered SDK surface only exposes
     the call surface), but remains reachable — agent still catches with
     `ava.memory.IndexerUnavailable`."""
-    from shared.agents import IndexerUnavailable
+    from base.agents import IndexerUnavailable
 
     assert "IndexerUnavailable" not in ava.memory.__all_for_ava__
     assert ava.memory.IndexerUnavailable is IndexerUnavailable

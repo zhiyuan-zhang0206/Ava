@@ -33,7 +33,7 @@ reportUnknownArgumentType = "error"
 reportPrivateUsage = "error"
 
 [[tool.pyright.executionEnvironments]]
-root = "shared/lenient"
+root = "base/lenient"
 reportUnknownArgumentType = "error"
 """.lstrip(),
         encoding="utf-8",
@@ -57,9 +57,9 @@ def _no_pyright_errors(_path: Path) -> frozenset[tuple[int, str]]:
 
 
 def test_tier_config_uses_longest_environment_root(tier_config: gate.TierConfig) -> None:
-    assert tier_config.level_for("shared/model.py", "reportUnknownMemberType") == "error"
-    assert tier_config.level_for("shared/lenient/model.py", "reportUnknownMemberType") == "warning"
-    assert tier_config.level_for("shared/lenient/model.py", "reportUnknownArgumentType") == "error"
+    assert tier_config.level_for("base/model.py", "reportUnknownMemberType") == "error"
+    assert tier_config.level_for("base/lenient/model.py", "reportUnknownMemberType") == "warning"
+    assert tier_config.level_for("base/lenient/model.py", "reportUnknownArgumentType") == "error"
     assert tier_config.level_for("sharedness/model.py", "reportUnknownMemberType") == "warning"
     assert tier_config.level_for("agent/model.py", "reportUnknownMemberType") == "warning"
 
@@ -104,13 +104,13 @@ def test_classify_keeps_error_tier_and_non_family_rules(
     tier_config: gate.TierConfig,
 ) -> None:
     ignores = [
-        _ignore("shared/model.py", 1, "reportUnknownMemberType"),
+        _ignore("base/model.py", 1, "reportUnknownMemberType"),
         _ignore("agent/model.py", 2, "reportUnknownMemberType"),
         _ignore("agent/model.py", 3, "reportAssignmentType"),
         _ignore("agent/model.py", 4, "reportPrivateUsage"),
         _ignore("agent/model.py", 5, "reportMissingTypeStubs"),
         _ignore("agent/model.py", 6, "reportUnusedParameter"),
-        _ignore("shared/model.py", 7, "reportPrivateUsage"),
+        _ignore("base/model.py", 7, "reportPrivateUsage"),
         _ignore("agent/model.py", 8, "reportMadeUpRule"),
     ]
 

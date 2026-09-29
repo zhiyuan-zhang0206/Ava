@@ -33,8 +33,8 @@ def _spawn_agent() -> int:
     """Setup helper — a row for the SDK's self identity (Task #1236 split: the
     row is created by create_agent_row; nothing launches, these tests only need
     the row to exist)."""
+    from base.cluster.machine import machine_name
     from ops.agents.spawn import create_agent_row
-    from shared.cluster.machine import machine_name
 
     agent_id, _, _prompt_id, _attempt_id = create_agent_row(machine=machine_name())
     return agent_id
@@ -48,13 +48,13 @@ def _sdk_via_inprocess_gateway(monkeypatch: pytest.MonkeyPatch):
        httpx client — SDK calls go through ASGI directly into gateway endpoint, real DB real logic,
        not bound to TCP port
     """
+    from base.cluster import machines as _machines
+    from base.cluster.machine import machine_name
     from gateway.agents import forward as _agents_forward_router
     from gateway.agents import router as _agents_router
     from gateway.app import app
     from ops.lifecycle import launch_agent_op, lifecycle_op
     from ops.rpc_schemas import LaunchAgentRequest, SpawnedAgent
-    from shared.cluster import machines as _machines
-    from shared.cluster.machine import machine_name
 
     # POST /api/agents always forwards the launch to a runner's ops server over
     # HTTP, even for the co-located box. There is no live ops server in-process,
@@ -95,7 +95,7 @@ def _sdk_via_inprocess_gateway(monkeypatch: pytest.MonkeyPatch):
     # the full gateway spawn path, which validates model config before forwarding.
     from pydantic import SecretStr
 
-    from shared.config import settings as _settings
+    from base.config import settings as _settings
 
     for _attr in (
         "anthropic_api_key",
@@ -160,7 +160,7 @@ class TestSpawn:
 
     def test_spawn_defaults_machine_to_local(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """When machine omitted, SDK defaults to local machine (ava.self.MACHINE_SPEC), gateway receives explicit target, no longer falls back to gateway's own machine."""
-        from shared.cluster.machine import machine_name
+        from base.cluster.machine import machine_name
 
         captured: dict[str, Any] = {}
 
@@ -743,7 +743,7 @@ class TestGetNeighbors:
         (``AVA_NEIGHBORS_DEFAULT_DEPTH`` / ``AVA_NEIGHBORS_DEFAULT_LIMIT``); the
         literals 1/20 are only the fields' defaults, not hard-coded call
         parameters."""
-        from shared.config import settings
+        from base.config import settings
 
         seen: dict[str, int] = {}
 
@@ -1050,7 +1050,7 @@ class TestSpawnConfig:
         (which reject unknown keys) must not see it, while the other fields are
         still validated."""
         from ava import agents
-        from shared.packages.plugins.config_registration import InvalidConfigOverlay
+        from base.packages.plugins.config_registration import InvalidConfigOverlay
 
         seen: dict[str, Any] = {}
         monkeypatch.setattr(agents._client, "spawn", lambda **kw: seen.update(kw) or 3)  # pyright: ignore[reportUnknownArgumentType]
@@ -1063,7 +1063,7 @@ class TestSpawnConfig:
     def test_spawn_rejects_non_per_agent_config(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """spawn(config_overlay=...) rejects fields not marked per_agent — raises before spawning."""
         from ava import agents
-        from shared.packages.plugins.config_registration import InvalidConfigOverlay
+        from base.packages.plugins.config_registration import InvalidConfigOverlay
 
         monkeypatch.setattr(ava, "AGENT_ID", 1, raising=False)
         with pytest.raises(InvalidConfigOverlay):
@@ -1074,7 +1074,7 @@ class TestResurrect:
     def test_resurrect_returns_resurrect_result(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """resurrect(agent_id, prompt) calls gateway client and wraps status."""
         from ava import agents
-        from shared.agents import ResurrectResult
+        from base.agents import ResurrectResult
 
         seen: dict[str, Any] = {}
         monkeypatch.setattr(
@@ -1094,7 +1094,7 @@ class TestResurrect:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         from ava import agents
-        from shared.agents import ResurrectResult
+        from base.agents import ResurrectResult
 
         seen: dict[str, Any] = {}
         monkeypatch.setattr(
@@ -1110,7 +1110,7 @@ class TestResurrect:
     def test_resurrect_already_alive(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """When the agent is still alive, resurrect returns ALREADY_ALIVE."""
         from ava import agents
-        from shared.agents import ResurrectResult
+        from base.agents import ResurrectResult
 
         monkeypatch.setattr(agents._client, "resurrect", lambda _agent_id, **_kw: "already_alive")  # pyright: ignore[reportUnknownArgumentType]
         assert agents.resurrect(1, "ping") == ResurrectResult.ALREADY_ALIVE
@@ -1138,8 +1138,8 @@ class TestLifecycleResultEnums:
     def test_terminate_result_matches_gateway_literal(self) -> None:
         from typing import get_args, get_type_hints
 
+        from base.agents import TerminateResult
         from ops.rpc_schemas import TerminateAgentResponse
-        from shared.agents import TerminateResult
 
         literal = get_type_hints(TerminateAgentResponse)["status"]
         assert {m.value for m in TerminateResult} == set(get_args(literal))
@@ -1147,8 +1147,8 @@ class TestLifecycleResultEnums:
     def test_resurrect_result_matches_gateway_literal(self) -> None:
         from typing import get_args, get_type_hints
 
+        from base.agents import ResurrectResult
         from ops.rpc_schemas import ResurrectAgentResponse
-        from shared.agents import ResurrectResult
 
         literal = get_type_hints(ResurrectAgentResponse)["status"]
         assert {m.value for m in ResurrectResult} == set(get_args(literal))
@@ -1156,8 +1156,8 @@ class TestLifecycleResultEnums:
     def test_restart_result_matches_gateway_literal(self) -> None:
         from typing import get_args, get_type_hints
 
+        from base.agents import RestartResult
         from ops.rpc_schemas import RestartAgentResponse
-        from shared.agents import RestartResult
 
         literal = get_type_hints(RestartAgentResponse)["status"]
         assert {m.value for m in RestartResult} == set(get_args(literal))

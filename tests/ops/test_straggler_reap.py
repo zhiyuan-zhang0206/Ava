@@ -7,7 +7,7 @@ Task #4016: an update-family drain releases an un-landed cohort member as
 durable truncation signal read by `agent.db.has_pending_interrupt`), its
 in-flight turn interrupted, and it is released with the honest `reaped`
 outcome — never a flush/apply receipt. The mark is settled at the successor
-boundary (`shared.deploy.maintenance.straggler_reap`): the row returns to runnable and the
+boundary (`base.deploy.maintenance.straggler_reap`): the row returns to runnable and the
 never-applied command is closed with an honest `lifecycle_result`.
 """
 
@@ -21,16 +21,16 @@ from uuid import UUID, uuid4
 import psycopg
 import pytest
 
-from ops import agent_pause, cluster_pause
-from shared.cluster.machine import machine_name
-from shared.db import create_agent, insert_inbound_message
-from shared.deploy.maintenance import admission, cohort, pause_owner
-from shared.deploy.maintenance.state import MaintenanceHold
-from shared.deploy.maintenance.straggler_reap import (
+from base.cluster.machine import machine_name
+from base.db import create_agent, insert_inbound_message
+from base.deploy.maintenance import admission, cohort, pause_owner
+from base.deploy.maintenance.state import MaintenanceHold
+from base.deploy.maintenance.straggler_reap import (
     REAP_LIFECYCLE_OUTCOME,
     REAP_LIFECYCLE_REASON,
     settle_stranded_reaps,
 )
+from ops import agent_pause, cluster_pause
 
 _MAINTENANCE_PAYLOAD: dict[str, object] = {
     "maintenance": {"holder": "ops:test:1", "acquired_at": "2026-09-19T00:00:00+00:00"}
@@ -69,7 +69,7 @@ def _running_agent(db_conn: psycopg.Connection) -> tuple[int, UUID, UUID]:
 
 
 def _reap_window(monkeypatch: pytest.MonkeyPatch, seconds: float) -> None:
-    monkeypatch.setattr("shared.config.settings.gateway.update_straggler_reap_seconds", seconds)
+    monkeypatch.setattr("base.config.settings.gateway.update_straggler_reap_seconds", seconds)
 
 
 def test_drain_reaps_a_straggler_past_its_window(
@@ -79,7 +79,7 @@ def test_drain_reaps_a_straggler_past_its_window(
     agent, owner, generation = _running_agent(db_conn)
     _fake_host(monkeypatch, owner, {agent})
     _reap_window(monkeypatch, 0.001)
-    monkeypatch.setattr("shared.config.settings.gateway.update_quiesce_timeout_seconds", 10.0)
+    monkeypatch.setattr("base.config.settings.gateway.update_quiesce_timeout_seconds", 10.0)
 
     cluster_pause.pause_local_cluster()
 
@@ -104,15 +104,15 @@ def test_drain_accepts_the_reaped_turns_failure_with_a_fresh_lease(
     db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, failure_first: bool
 ) -> None:
     """The status fence alone raises; either receipt arrival order must drain."""
-    from shared.agents.impersonation import ImpersonationError, native_status
-    from shared.native_process.runtime_incarnation import RuntimeIncarnation
+    from base.agents.impersonation import ImpersonationError, native_status
+    from base.native_process.runtime_incarnation import RuntimeIncarnation
 
     agent, owner, generation = _running_agent(db_conn)
     incarnation = RuntimeIncarnation(agent, generation, owner)
     assert native_status(agent, incarnation) is None
     _fake_host(monkeypatch, owner, {agent})
     _reap_window(monkeypatch, 0.001)
-    monkeypatch.setattr("shared.config.settings.gateway.update_quiesce_timeout_seconds", 10.0)
+    monkeypatch.setattr("base.config.settings.gateway.update_quiesce_timeout_seconds", 10.0)
     record_reaped = admission.record_reaped
 
     def receipt(agent_id: int, reason: str) -> None:
@@ -146,7 +146,7 @@ def test_drain_with_a_zero_window_keeps_the_abort_behavior(
     agent, owner, generation = _running_agent(db_conn)
     _fake_host(monkeypatch, owner, {agent})
     _reap_window(monkeypatch, 0)
-    monkeypatch.setattr("shared.config.settings.gateway.update_quiesce_timeout_seconds", 0.01)
+    monkeypatch.setattr("base.config.settings.gateway.update_quiesce_timeout_seconds", 0.01)
 
     with pytest.raises(TimeoutError, match="without force") as raised:
         cluster_pause.pause_local_cluster()
@@ -174,7 +174,7 @@ def test_drain_excludes_takeover_rows_from_the_reap(
     db_conn.commit()
     _fake_host(monkeypatch, owner, {agent})
     _reap_window(monkeypatch, 0.001)
-    monkeypatch.setattr("shared.config.settings.gateway.update_quiesce_timeout_seconds", 0.01)
+    monkeypatch.setattr("base.config.settings.gateway.update_quiesce_timeout_seconds", 0.01)
 
     with pytest.raises(TimeoutError, match="without force"):
         cluster_pause.pause_local_cluster()
@@ -311,7 +311,7 @@ def test_unpause_settles_stranded_reaps_and_wakes_them(
     db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A resume on a host that stayed up is the other settle boundary."""
-    import shared.db as shared_db
+    import base.db as base_db
 
     agent = create_agent(db_conn)
     db_conn.execute(
@@ -324,8 +324,8 @@ def test_unpause_settles_stranded_reaps_and_wakes_them(
     )
     db_conn.commit()
     woke: list[int] = []
-    monkeypatch.setattr(shared_db, "publish_inbound_wake", lambda aid, _source: woke.append(aid))
-    monkeypatch.setattr("shared.deploy.state.host_deploy_state.set_posture", lambda _posture: None)
+    monkeypatch.setattr(base_db, "publish_inbound_wake", lambda aid, _source: woke.append(aid))
+    monkeypatch.setattr("base.deploy.state.host_deploy_state.set_posture", lambda _posture: None)
 
     cluster_pause.unpause_local_cluster()
 
@@ -337,7 +337,7 @@ def test_unpause_settles_stranded_reaps_and_wakes_them(
 
 async def test_settle_async_restores_the_same_shape(db_conn: psycopg.Connection, aops_pool) -> None:
     """The boot transport is the same settle on the async pool."""
-    from shared.deploy.maintenance.straggler_reap import settle_stranded_reaps_async
+    from base.deploy.maintenance.straggler_reap import settle_stranded_reaps_async
 
     agent = create_agent(db_conn)
     db_conn.execute(
@@ -400,7 +400,7 @@ def test_reaped_receipts_roundtrip_and_reject_invalid_shapes() -> None:
 # live — `agent.db.has_pending_interrupt` turns exactly that shape into an
 # abort signal for the agent's in-flight turn. A new writer or a widened
 # WHERE must update this list and the read predicate together. Mirrors
-# tests/shared/test_crash_row_writers.py (task #3617).
+# tests/base/test_crash_row_writers.py (task #3617).
 
 _REPO = Path(__file__).resolve().parents[2]
 # Production trees only, mirroring the crash-row writer guard's scope.
@@ -458,8 +458,8 @@ def test_restarting_mark_exits_are_enumerated() -> None:
     cold normalization — a new exit must be weighed against the interrupt."""
     cleared = {rel for rel, text in _production_sources().items() if _REAP_CLEAR.search(text)}
     assert cleared == {
-        "shared/deploy/maintenance/straggler_reap.py",
-        "shared/deploy/maintenance/cold.py",
+        "base/deploy/maintenance/straggler_reap.py",
+        "base/deploy/maintenance/cold.py",
     }
 
 

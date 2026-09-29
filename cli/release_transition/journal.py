@@ -16,6 +16,13 @@ from typing import Annotated, Literal, Self
 
 from pydantic import Field, JsonValue, TypeAdapter, model_validator
 
+from base.deploy.release.runtime_release import current_pointer
+from base.deploy.release.verified_file import regular_bytes
+from base.host.atomic_io import write_text_atomic
+from base.host.private_storage import ensure_private_dir, private_file_problem
+from base.native_process.evidence import ExpectedProcess
+from base.native_process.os_platform import file_lock
+from base.native_process.ownership import OwnedProcess
 from cli.release_fleet.progress import (
     FLEET_PHASES,
     UNIT_PHASES,
@@ -32,13 +39,6 @@ from cli.release_transition.authority_evidence import Fence, Issue, require_cohe
 from cli.release_transition.native import DARWIN, LINUX
 from cli.release_transition.pitr.evidence import PitrProgress, PitrSeal
 from cli.release_transition.request import PitrRequest, Record, ReleaseRef
-from shared.deploy.release.runtime_release import current_pointer
-from shared.deploy.release.verified_file import regular_bytes
-from shared.host.atomic_io import write_text_atomic
-from shared.host.private_storage import ensure_private_dir, private_file_problem
-from shared.native_process.evidence import ExpectedProcess
-from shared.native_process.os_platform import file_lock
-from shared.native_process.ownership import OwnedProcess
 
 Phase = Literal[
     "prepared",
@@ -224,7 +224,7 @@ class Operation(Record):
         if self.pitr is None or self.pitr.seal is None:
             self.request.require_configuration()
             return
-        from shared.deploy.release.start_inputs import require_configuration
+        from base.deploy.release.start_inputs import require_configuration
 
         require_configuration(Path(self.request.home), self.pitr.seal.configuration_digest)
 

@@ -107,7 +107,7 @@ _EXEMPT: set[str] = {
     "fleet",  # localStorage key prefix "ava.fleet.*" (conventions/frontend-stack.md), not an SDK member
     "active",  # localStorage key prefix "ava.active.*" (same doc), not an SDK member
     # The OTel root-span attribute keys "ava.checkpoint_id" / "ava.turn"
-    # (shared/telemetry/tracing.py) — span attribute names, not SDK members.
+    # (base/telemetry/tracing.py) — span attribute names, not SDK members.
     "checkpoint_id",
     "turn",
 }

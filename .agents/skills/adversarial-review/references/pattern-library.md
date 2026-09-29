@@ -72,7 +72,7 @@ otherwise. Each entry: symptom → how it reads in a diff → evidence anchor.
 
 - **D1 Hand-rolled retry loops.** A new retry loop with its own
   backoff/jitter/transient classification instead of converging on
-  `shared/host/net/resilience.py` (design invariant D1 — "the only retry loop").
+  `base/host/net/resilience.py` (design invariant D1 — "the only retry loop").
   The loops drift: one retries 429, another doesn't; one jitters, another
   sleeps negative.
 - **D2 Retry re-executes non-idempotent work.** A timeout-then-retry of a

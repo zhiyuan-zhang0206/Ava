@@ -11,8 +11,8 @@ from uuid import uuid4
 import pytest
 from pydantic import ValidationError
 
-from shared.cluster.authority import ledger as store
-from shared.cluster.authority.model import (
+from base.cluster.authority import ledger as store
+from base.cluster.authority.model import (
     BirthAuthority,
     ClosureEvidence,
     CutoverAuthority,

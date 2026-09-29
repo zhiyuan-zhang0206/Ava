@@ -83,7 +83,7 @@ mutations and separating them from the ordinary `shutil.rmtree(...)` /
 `subprocess.run(...)` calls a fixture body is full of would take a deny-list of
 method names, which is the polarity this file argues against. The surface covered is
 the one this repo has declared its runtime-config surface — env vars and
-`shared.config.settings` fields (see `scripts/lint/no_os_environ.py`) — plus every
+`base.config.settings` fields (see `scripts/lint/no_os_environ.py`) — plus every
 `Store` / `Del` target and `global` declaration, which is exhaustive over the
 syntactic forms.
 
@@ -131,7 +131,7 @@ _ENVIRON_READ_ONLY = frozenset(
 # Modules a local can be bound to as a live VIEW rather than a copy, so writing
 # through the local reaches the global: `env = os.environ`, `dp =
 # settings.data_plane`. Only these two need tracking — they are the repo's declared
-# runtime-config surface (`shared.config.settings` plus the environment). A write
+# runtime-config surface (`base.config.settings` plus the environment). A write
 # whose root is any other non-local name is already a finding on the general rule
 # below; this list exists only so the alias bypass is closed too.
 _ALIASABLE_GLOBAL_ROOTS = frozenset({"os", "settings"})

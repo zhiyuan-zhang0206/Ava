@@ -9,6 +9,12 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+from base.agents.exit_codes import SERVICES_NOT_READY_EXIT_CODE
+from base.cluster import session_name
+from base.cluster.machine import MachineRoles
+from base.deploy.lifecycle import start_serving
+from base.deploy.progress_timeout import SERVICE_READY_TIMEOUT_S
+from base.paths import prod_service_checkout_error
 from cli.commands._repo import _repo_root
 from cli.commands._setup import _print_missing_setup_error
 from cli.commands.lifecycle._pause_resume import StartDelegation, resume_after_start
@@ -17,12 +23,6 @@ from cli.commands.lifecycle.migrations import cmd_migrations_apply
 from cli.commands.lifecycle.status import cmd_status
 from cli.start_runtime import StartRuntime
 from ops.roster.service_spec import ServiceSpec
-from shared.agents.exit_codes import SERVICES_NOT_READY_EXIT_CODE
-from shared.cluster import session_name
-from shared.cluster.machine import MachineRoles
-from shared.deploy.lifecycle import start_serving
-from shared.deploy.progress_timeout import SERVICE_READY_TIMEOUT_S
-from shared.paths import prod_service_checkout_error
 
 
 def _ensure_gateway_data_plane() -> int:
@@ -62,7 +62,7 @@ def _refuse_occupied_health_ports(roster: tuple[ServiceSpec, ...]) -> int:
     """
     # Read through the probe owner so the safety fixture guards this lookup.
     import cli.commands._probe as _probe_commands
-    from shared.paths import ava_home
+    from base.paths import ava_home
 
     occupied = _probe_commands._occupied_health_ports(roster)
     if not occupied:
@@ -205,10 +205,10 @@ def _cmd_start_body(  # noqa: PLR0915 — cohesive linear start sequence (conver
     import cli.commands._repo as _repo_commands
     import cli.commands._setup as _setup_commands
     import cli.commands.lifecycle.root_driver as _root_driver_commands
-    from shared.deploy.maintenance import admission
+    from base.deploy.maintenance import admission
 
     admission.require_start_allowed()
-    from shared.paths import ava_home
+    from base.paths import ava_home
 
     if (ava_home() / "destroy-intent.json").exists():
         raise RuntimeError("home is being destroyed or detached; startup refused")
@@ -246,21 +246,21 @@ def _cmd_start_body(  # noqa: PLR0915 — cohesive linear start sequence (conver
         _print_missing_setup_error(missing, resolved.get("machine_role"))
         return 1
 
-    # reset identity holder so downstream shared.cluster.machine.machine_name() /
+    # reset identity holder so downstream base.cluster.machine.machine_name() /
     # machine_role() see the just-written machine_serve_* files.
-    from shared.cluster.machine import machine_role, reset_identity
+    from base.cluster.machine import machine_role, reset_identity
 
     reset_identity()
 
     roles = machine_role()
     print(f"\n→ roles = {','.join(sorted(roles))}, machine = {resolved['machine_name']}")
-    from shared.native_process.os_platform import raise_fd_limit
+    from base.native_process.os_platform import raise_fd_limit
 
     raise_fd_limit(65536)  # every service spawned here inherits the raised ceiling
 
     # Resolve desired services without publishing changes before admission.
+    from base.deploy.lifecycle.service_selection import resolve_selection
     from cli.commands._repo import _services_for_roles_annotated
-    from shared.deploy.lifecycle.service_selection import resolve_selection
 
     names = {spec.session for spec, _reason in _services_for_roles_annotated(roles)}
     launch_skip = resolve_selection(
@@ -294,7 +294,7 @@ def _cmd_start_body(  # noqa: PLR0915 — cohesive linear start sequence (conver
     if rc:
         return rc
     if live:
-        from shared import cluster, db
+        from base import cluster, db
 
         cluster.assert_checkpoint_schema_current(db.direct_db_url())
 
@@ -345,7 +345,7 @@ def _cmd_start_body(  # noqa: PLR0915 — cohesive linear start sequence (conver
     if runtime.release is None:
         _record_running_sha(repo)
     else:
-        from shared.deploy.git import running_sha
+        from base.deploy.git import running_sha
 
         assert runtime.source_commit is not None  # noqa: S101 — admitted release invariant
         running_sha.set(runtime.source_commit)
@@ -357,13 +357,13 @@ def _cmd_start_body(  # noqa: PLR0915 — cohesive linear start sequence (conver
     # Written unconditionally so a clean start clears a previous run's list; the
     # rollout's local leg is the consumer (`update._run_gateway_local_update`),
     # because its `ava start` is a child and an exit code cannot carry names.
-    from shared.deploy.lifecycle import launch_failures
+    from base.deploy.lifecycle import launch_failures
 
     launch_failures.record(list(launch.failed))
 
     # The exact maintenance generation stays held through readiness. Its
     # authorized owner, or resume_after_start, alone may release admission.
-    from shared.deploy.state.host_deploy_state import set_posture
+    from base.deploy.state.host_deploy_state import set_posture
 
     set_posture("paused" if admission.held() else "idle")
 
@@ -382,9 +382,9 @@ def _cmd_start_body(  # noqa: PLR0915 — cohesive linear start sequence (conver
     # — what a remote agent-runner dials — so whoever just brought the gateway up
     # can enroll runners against it without hunting for the host/port.
     if any(spec.session == "gateway" for spec in started) and not wait.unready:
-        from shared.cluster.machine import reachable_host
-        from shared.config import settings as _settings
-        from shared.host.net.predicates import is_loopback_host
+        from base.cluster.machine import reachable_host
+        from base.config import settings as _settings
+        from base.host.net.predicates import is_loopback_host
 
         port = _settings.gateway.gateway_port
         host = reachable_host()
@@ -405,8 +405,8 @@ def _cmd_start_body(  # noqa: PLR0915 — cohesive linear start sequence (conver
 
     # 8) Readiness verdict last: its exit code and printed snapshot describe the same run.
     #
-    # Launch failures share the verdict: rollout reads `shared.deploy.lifecycle.launch_failures`, while the
-    # boot loop retries without an unbounded wait on one service (`shared/host/system/boot_policy.py`).
+    # Launch failures share the verdict: rollout reads `base.deploy.lifecycle.launch_failures`, while the
+    # boot loop retries without an unbounded wait on one service (`base/host/system/boot_policy.py`).
     if launch.failed:
         print(
             f"\n✗ {len(launch.failed)} service(s) could not be launched "
@@ -433,8 +433,8 @@ def _cmd_start_body(  # noqa: PLR0915 — cohesive linear start sequence (conver
     if not start_serving.mark_serving(serving_generation, runtime=runtime.identity(ava_home())):
         print("  ✗ this start lost its serving generation", file=sys.stderr)
         return 1
+    from base.paths import ava_home
     from cli.start_identity import mark_phase
-    from shared.paths import ava_home
 
     mark_phase(ava_home(), "ready")
     return 0

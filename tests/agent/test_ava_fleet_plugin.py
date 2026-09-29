@@ -25,8 +25,8 @@ import ava
 import ava.agents
 from agent.graph.system_prompt import build_system_prompt
 from agent.state import clear_plugin_registrations
-from shared.agents.observation.snapshot import select_one
-from shared.packages.plugins.context import PluginContext
+from base.agents.observation.snapshot import select_one
+from base.packages.plugins.context import PluginContext
 
 
 def _seed_agent(db: psycopg.Connection) -> int:
@@ -187,7 +187,7 @@ def test_prompt_section_reduce_context_switch_gating(
     from ava_builtins.plugins.ava_fleet.agent_runtime import (
         _reduce_context_switch_section,
     )
-    from shared.config import settings
+    from base.config import settings
 
     monkeypatch.setattr(settings.agent, "reduce_context_switch", True)
     assert "Queue, never push" in _reduce_context_switch_section()
@@ -206,7 +206,7 @@ def test_prompt_section_reduce_context_switch_content(
     from ava_builtins.plugins.ava_fleet.agent_runtime import (
         _reduce_context_switch_section,
     )
-    from shared.config import settings
+    from base.config import settings
 
     monkeypatch.setattr(settings.agent, "reduce_context_switch", True)
     section = _reduce_context_switch_section()
@@ -228,7 +228,7 @@ def test_reduce_context_switch_reaches_the_prompt(
     """End to end: the toggle gates the section's presence in the assembled
     system prompt."""
     from agent.graph.system_prompt import build_system_prompt
-    from shared.config import settings
+    from base.config import settings
 
     monkeypatch.setattr(settings.agent, "reduce_context_switch", True)
     assert "## Reduce context switch for the human" in build_system_prompt()

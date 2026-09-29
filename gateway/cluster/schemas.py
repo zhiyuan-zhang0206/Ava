@@ -3,7 +3,7 @@ machine pause/resume/delete admin responses, the stats-dashboard aggregate, and
 the `GET /api/ops/monitor` series (the Insights Ops panel).
 
 `MachineStatus` (the roster row the CLI also decodes) lives in
-`shared.api_contracts.status` so `cli` can decode the roster without importing
+`base.api_contracts.status` so `cli` can decode the roster without importing
 up into `gateway`; the models below are the gateway-only status surface.
 
 The ops-monitor shapes mirror `gateway.cluster.ops_series_lgtm.fetch_ops_series`
@@ -28,8 +28,8 @@ from pydantic import (
     NonNegativeInt,
 )
 
+from base.api_contracts.status import MachineStatus
 from gateway.schemas.stats import StatsWindowHours
-from shared.api_contracts.status import MachineStatus
 
 
 class ServiceItem(BaseModel):
@@ -171,7 +171,7 @@ class StatsTokens(BaseModel):
     cache_hit_pct: float = Field(ge=0, le=100)
 
 
-# The plugin-stats status vocabulary, mirrored from `shared.packages.plugins.stats`
+# The plugin-stats status vocabulary, mirrored from `base.packages.plugins.stats`
 # (the DB-side writer + check constraint). There is deliberately no "empty":
 # a card with no row IS the frontend's empty state, and a second spelling of
 # that would be a second fact to keep in sync.

@@ -43,14 +43,14 @@ from typing import cast
 
 from psycopg_pool import ConnectionPool
 
+from base.agents.messages.inbound_provenance import InboundProvenance
+from base.db import insert_inbound_message, publish_inbound_wake
+from base.db.transaction import write_transaction
+from base.host.atomic_io import write_text_atomic
+from base.log import logger
+from base.native_process.ownership import shown_name
+from base.paths import ava_home
 from ops.cluster_status import AGENT_SHELL_RE
-from shared.agents.messages.inbound_provenance import InboundProvenance
-from shared.db import insert_inbound_message, publish_inbound_wake
-from shared.db.transaction import write_transaction
-from shared.host.atomic_io import write_text_atomic
-from shared.log import logger
-from shared.native_process.ownership import shown_name
-from shared.paths import ava_home
 
 # The reaper's notifiable boundary: only these statuses receive a closure
 # notice; anything else (terminated / restarting / missing) drops the record.

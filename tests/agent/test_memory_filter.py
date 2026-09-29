@@ -32,7 +32,7 @@ def _model(reply: str | Exception) -> MagicMock:
 
 @pytest.fixture(autouse=True)
 def _filter_on(monkeypatch: pytest.MonkeyPatch):
-    from shared.config import settings
+    from base.config import settings
 
     monkeypatch.setattr(settings.agent, "memory_recall_filter_enabled", True)
     monkeypatch.setattr(settings.agent, "memory_recall_inject_k", 3)
@@ -40,7 +40,7 @@ def _filter_on(monkeypatch: pytest.MonkeyPatch):
 
 def _patch_model(monkeypatch: pytest.MonkeyPatch, reply: str | Exception) -> None:
     monkeypatch.setattr(
-        "shared.lm.factory.build_chat_model",
+        "base.lm.factory.build_chat_model",
         lambda _model_name, **_kw: _model(reply),  # pyright: ignore[reportUnknownArgumentType]
     )
 
@@ -55,7 +55,7 @@ async def test_retries_when_reply_unparseable_then_succeeds(
     replies = iter(["not a list at all", '["b.md"]'])
     m = MagicMock()
     m.ainvoke = AsyncMock(side_effect=lambda *_a, **_k: AIMessage(content=next(replies)))
-    monkeypatch.setattr("shared.lm.factory.build_chat_model", lambda _model_name, **_kw: m)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("base.lm.factory.build_chat_model", lambda _model_name, **_kw: m)  # pyright: ignore[reportUnknownArgumentType]
 
     picked = await filter_candidates("q", _candidates("a.md", "b.md", "c.md"))
 
@@ -72,7 +72,7 @@ async def test_warns_only_when_all_retries_fail(monkeypatch: pytest.MonkeyPatch)
     monkeypatch.setattr(mf.logger, "warning", lambda *_a, **k: warned.append(str(k.get("body"))))  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
     m = MagicMock()
     m.ainvoke = AsyncMock(side_effect=lambda *_a, **_k: AIMessage(content="still not a list"))
-    monkeypatch.setattr("shared.lm.factory.build_chat_model", lambda _model_name, **_kw: m)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("base.lm.factory.build_chat_model", lambda _model_name, **_kw: m)  # pyright: ignore[reportUnknownArgumentType]
 
     picked = await filter_candidates("q", _candidates("a.md", "b.md"))
 
@@ -194,7 +194,7 @@ async def test_successful_filter_call_emits_chat_billing(
     The regression this catches is a successful background LLM call that is
     invisible to the billing trace because only foreground paths emit usage.
     """
-    from shared.config import settings
+    from base.config import settings
 
     response = AIMessage(
         content='["a.md"]',
@@ -203,7 +203,7 @@ async def test_successful_filter_call_emits_chat_billing(
     model = MagicMock()
     model.ainvoke = AsyncMock(return_value=response)
 
-    monkeypatch.setattr("shared.lm.factory.build_chat_model", lambda _name, **_kw: model)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("base.lm.factory.build_chat_model", lambda _name, **_kw: model)  # pyright: ignore[reportUnknownArgumentType]
 
     assert await filter_candidates("q", _candidates("a.md")) == ["a.md"]
     [record] = [record for record in loguru_records if record["extra"].get("event") == "llm_usage"]
@@ -215,11 +215,11 @@ async def test_filter_model_is_built_with_reasoning_pinned_off(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The registry defaults deepseek models to effort=max
-    (shared/lm/registry.py), which made a filter call take ~80s against the 20s
+    (base/lm/registry.py), which made a filter call take ~80s against the 20s
     bound — every call timed out and recall silently injected the unfiltered
     top-3. The filter must pin reasoning off at the call site so a registry
     default change can never resurface that mode (review F1)."""
-    from shared.lm.effort import ReasoningEffort
+    from base.lm.effort import ReasoningEffort
 
     seen: dict[str, object] = {}
 
@@ -229,7 +229,7 @@ async def test_filter_model_is_built_with_reasoning_pinned_off(
         m.ainvoke = AsyncMock(return_value=AIMessage(content="[]"))
         return m
 
-    monkeypatch.setattr("shared.lm.factory.build_chat_model", _capture)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("base.lm.factory.build_chat_model", _capture)  # pyright: ignore[reportUnknownArgumentType]
 
     assert await filter_candidates("q", _candidates("a.md", "b.md")) == []
     assert seen["reasoning_effort"] == ReasoningEffort.NONE
@@ -248,7 +248,7 @@ async def test_injects_nothing_when_the_model_rejects_everything(
 async def test_model_order_is_kept_and_capped_at_inject_k(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from shared.config import settings
+    from base.config import settings
 
     monkeypatch.setattr(settings.agent, "memory_recall_inject_k", 2)
     _patch_model(monkeypatch, '["c.md", "a.md", "b.md"]')
@@ -314,7 +314,7 @@ async def test_timeout_bound_comes_from_settings(
     bound is config not a module literal."""
     import asyncio
 
-    from shared.config import settings
+    from base.config import settings
 
     monkeypatch.setattr(settings.agent, "memory_recall_filter_timeout_seconds", 0.01)
     captured: dict[str, float] = {}
@@ -349,14 +349,14 @@ async def test_model_failure_injects_nothing(
 async def test_disabled_filter_passes_the_top_through_untouched(
     monkeypatch: pytest.MonkeyPatch, loguru_records: list[dict[str, Any]]
 ) -> None:
-    from shared.config import settings
+    from base.config import settings
 
     monkeypatch.setattr(settings.agent, "memory_recall_filter_enabled", False)
 
     def _boom(_name: str, **_kw):
         raise AssertionError("must not build a model when the filter is off")
 
-    monkeypatch.setattr("shared.lm.factory.build_chat_model", _boom)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("base.lm.factory.build_chat_model", _boom)  # pyright: ignore[reportUnknownArgumentType]
 
     assert await filter_candidates("q", _candidates("a.md", "b.md")) == ["a.md", "b.md"]
     assert not [
@@ -368,7 +368,7 @@ async def test_no_candidates_needs_no_model(monkeypatch: pytest.MonkeyPatch) -> 
     def _boom(_name: str, **_kw):
         raise AssertionError("must not build a model with nothing to judge")
 
-    monkeypatch.setattr("shared.lm.factory.build_chat_model", _boom)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("base.lm.factory.build_chat_model", _boom)  # pyright: ignore[reportUnknownArgumentType]
 
     assert await filter_candidates("q", []) == []
 
@@ -393,7 +393,7 @@ async def test_prompt_lists_when_unsure_instead_of_staying_strict(
         m.ainvoke = _ainvoke
         return m
 
-    monkeypatch.setattr("shared.lm.factory.build_chat_model", _capture)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("base.lm.factory.build_chat_model", _capture)  # pyright: ignore[reportUnknownArgumentType]
 
     await filter_candidates("q", _candidates("a.md", "b.md"))
 
@@ -420,7 +420,7 @@ async def test_prompt_shows_the_type_tag(monkeypatch: pytest.MonkeyPatch) -> Non
         m.ainvoke = _ainvoke
         return m
 
-    monkeypatch.setattr("shared.lm.factory.build_chat_model", _capture)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("base.lm.factory.build_chat_model", _capture)  # pyright: ignore[reportUnknownArgumentType]
 
     await filter_candidates(
         "q", [Candidate(path="p.md", description="a profile", tags=["type/user", "tech-ops"])]

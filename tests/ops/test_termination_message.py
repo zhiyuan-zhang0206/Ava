@@ -15,11 +15,11 @@ import pytest
 from psycopg_pool import ConnectionPool
 from pydantic import ValidationError
 
+from base.config import settings
+from base.db import create_agent
+from base.telemetry import Event
 from ops.lifecycle import termination
 from ops.rpc_schemas import TerminateAgentRequest
-from shared.config import settings
-from shared.db import create_agent
-from shared.telemetry import Event
 from tests.cli.conftest import PtyReaper
 from tests.cli.conftest import pty_reaper as pty_reaper
 
@@ -400,8 +400,8 @@ class TestKillAllShellSessions:
         """The agent dies between the status read and the locked enqueue: the
         request is not queued onto a dead row no apply will read — its sessions
         are killed at once instead."""
+        from base.agents import AgentStatus
         from ops import lifecycle
-        from shared.agents import AgentStatus
 
         def _stale_read(_aid: int) -> AgentStatus:
             return AgentStatus.RUNNING
@@ -525,11 +525,11 @@ async def test_kill_terminates_only_the_owners_real_shell_sessions(
     `ava.ui.serve` page session and another agent's session running."""
     import shlex
 
+    from base.cluster import session_name
+    from base.sessions.backend import PtySessionBackend
+    from base.sessions.page_session import page_session_name
     from ops import lifecycle
     from ops.rpc_schemas.terminate import ShellSessionsKill
-    from shared.cluster import session_name
-    from shared.sessions.backend import PtySessionBackend
-    from shared.sessions.page_session import page_session_name
 
     monkeypatch.setattr(settings.general, "ava_home", str(tmp_path))
     # The PTY CLI runs as a child process: it resolves its home from the

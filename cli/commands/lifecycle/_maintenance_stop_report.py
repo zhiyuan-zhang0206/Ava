@@ -13,8 +13,8 @@ from dataclasses import dataclass
 
 import psutil
 
-from shared.native_process import pid_starttime_ticks
-from shared.native_process.ownership import OwnedProcess
+from base.native_process import pid_starttime_ticks
+from base.native_process.ownership import OwnedProcess
 
 
 def occupied_groups(groups: tuple[int, ...]) -> list[int]:

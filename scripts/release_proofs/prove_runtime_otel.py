@@ -12,7 +12,7 @@ import urllib.request
 from pathlib import Path
 from unittest.mock import patch
 
-from shared.paths import otel_collector_binary, otel_collector_config
+from base.paths import otel_collector_binary, otel_collector_config
 
 
 def require(condition: bool, message: str) -> None:  # noqa: FBT001 — assertion predicate.
@@ -31,7 +31,7 @@ def main() -> None:
 
     rejected_home = home / "must-not-be-created"
     with patch(
-        "shared.deploy.release.runtime_interpreter.runtime_otel_binary",
+        "base.deploy.release.runtime_interpreter.runtime_otel_binary",
         return_value=home / "missing",
     ):
         try:

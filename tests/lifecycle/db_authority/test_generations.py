@@ -12,7 +12,7 @@ import psycopg
 import pytest
 from psycopg import sql
 
-from shared.cluster.authority import (
+from base.cluster.authority import (
     CatalogRefusedError,
     LedgerRefusedError,
     OperationAuthority,
@@ -23,8 +23,8 @@ from shared.cluster.authority import (
     require_ledger,
     revoke,
 )
-from shared.cluster.authority import ledger as ledger_module
-from shared.cluster.authority import roles as roles_module
+from base.cluster.authority import ledger as ledger_module
+from base.cluster.authority import roles as roles_module
 from tests.lifecycle.db_authority.conftest import OWNER, AuthorityCluster
 
 _LOGIN_ATTRIBUTES = (

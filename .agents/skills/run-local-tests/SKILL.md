@@ -8,7 +8,7 @@ description: Runs the Ava repo's Python, frontend, and end-to-end checks and dia
 ## Test layering
 
 - **Full test suites run in CI only** (user ruling 2026-09-22). Never launch
-  a local repository-wide or full-backend run, including after a `shared/`
+  a local repository-wide or full-backend run, including after a `base/`
   change. Run bounded tests selected from the changed behavior and its direct
   consumers locally; leave broad verification to CI.
 - **Commit hooks** run lints and codegen checks. For targeted local verification,
@@ -99,7 +99,7 @@ Both are guardrails from real escapes; the rules are condensed in
   easy to get wrong: it provisions a real throwaway Postgres, so a "dependency is
   down" fixture that patches only the seam today's code calls leaves every other
   route live and the test passes against the bug it was written to catch — patch
-  **every** route (`shared.db.connect` *and* `shared.db.pool`), and prove it red.
+  **every** route (`base.db.connect` *and* `base.db.pool`), and prove it red.
   ([postmortem](../../../postmortems/0002-db-down-tests-pass-for-the-wrong-reason.md))
 - **Verify the world, not the self-report.** An end-to-end assertion re-runs the
   command or re-reads the file **externally**, and asserts that untouched files
@@ -140,7 +140,7 @@ CI runs as an independent `e2e` job (`.github/workflows/ci.yml`); on failure upl
 | AVA_HOME          | `~/.ava`          | `tmp/ava_e2e_home/` |
 
 **LLM mock injection path**: `AVA_LLM_OVERRIDE=tests.e2e.fakes.scenarios.<name>:build`
-→ `shared/lm/factory.py:build_chat_model` detects env and goes through importlib + factory; unset env
+→ `base/lm/factory.py:build_chat_model` detects env and goes through importlib + factory; unset env
 takes the original path (no impact in prod).
 
 **Three-layer env inheritance**: pytest setenv → gateway subprocess → gateway launches the
@@ -163,7 +163,7 @@ This is self-limiting now: each throwaway instance holds an `flock` on an
 for its whole life, and the next `throwaway_postgres` reaps the instances whose
 lock the kernel has released. So a killed run's orphan lives until the next test
 run, not until reboot, and only instances that positively identify as throwaway
-are ever touched (`shared/cluster/dataplane/pg_tools.py` documents the safety argument). The lock
+are ever touched (`base/cluster/dataplane/pg_tools.py` documents the safety argument). The lock
 sits in the instance dir rather than a side registry so that it shares that
 cluster's exact lifetime — nothing can prune the lock while the cluster it
 describes keeps running — and so two UNIX users on one shared scratch base
@@ -171,12 +171,12 @@ describes keeps running — and so two UNIX users on one shared scratch base
 platform default (`/dev/shm` on Linux, else the OS temp dir); a restore that
 declares its footprint may land on the disk fallback (`/var/tmp`, or
 `AVA_PG_THROWAWAY_BASE` when set) — the sweep covers every base
-(`shared/pg_throwaway_base.throwaway_roots`).
+(`base/pg_throwaway_base.throwaway_roots`).
 
 To sweep without starting a test run — e.g. a box wedged right now:
 
 ```bash
-.venv/bin/python -c 'from shared.cluster.dataplane.pg_tools import sweep_orphaned_throwaway_clusters as s; print(s())'
+.venv/bin/python -c 'from base.cluster.dataplane.pg_tools import sweep_orphaned_throwaway_clusters as s; print(s())'
 ```
 
 Instances leaked *before* this mechanism existed carry no lock, so the sweep cannot

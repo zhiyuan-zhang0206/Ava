@@ -411,8 +411,8 @@ def test_read_sidecar_rejects_tampered_bytes() -> None:
 def test_restore_worker_input_builds_oss_store_args(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    from base.config import settings
     from services.pitr.restore import operation_runtime as restore_runtime
-    from shared.config import settings
 
     monkeypatch.setattr(settings.physical_backup, "pitr_store_backend", "oss")
     monkeypatch.setattr(settings.physical_backup, "pitr_restore_proof_enabled", True)

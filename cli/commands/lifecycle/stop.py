@@ -139,7 +139,7 @@ def _confirm_stop(*, require_confirmation: bool) -> bool:
 
 def _stop_terminals_force() -> None:
     """Close this unit's persistent shells on an explicit full force stop."""
-    from shared.sessions.backend import get_shell_backend
+    from base.sessions.backend import get_shell_backend
 
     backend = get_shell_backend()
     names = backend.list_sessions()
@@ -164,7 +164,7 @@ def _force_stop(
     Preserves agent identities/data and the selected service/infra/terminal
     scope, but may interrupt work. Never entered merely because drain timed out.
     """
-    # `_repo` imported shared.config above, so dotenv_boot has already consumed
+    # `_repo` imported base.config above, so dotenv_boot has already consumed
     # AVA_HOME_OVERRIDE. Strip it only when stop actually runs: cluster down/destroy
     # needs the exemption to enter this process, but pg_ctl and future Python children
     # must not inherit it — the "cannot become ambient" boundary (F-s4-7).
@@ -192,7 +192,7 @@ def _force_stop(
 
     # A deliberate stop must revoke the prior start's recovery authority before
     # any daemon has a chance to observe its own shutdown or a dead peer.
-    from shared.deploy.lifecycle import start_serving
+    from base.deploy.lifecycle import start_serving
 
     start_serving.clear_serving()
 
@@ -314,9 +314,9 @@ def _announce_stopping() -> None:
     caps). Best-effort by design: if the gateway is unreachable we are stopping
     anyway, so we log and proceed rather than block the teardown.
     """
-    from shared.cluster.machine import gateway_api_base, gateway_auth_headers, machine_name
-    from shared.host.net.http_dial import post as dial_post
-    from shared.paths import ava_home
+    from base.cluster.machine import gateway_api_base, gateway_auth_headers, machine_name
+    from base.host.net.http_dial import post as dial_post
+    from base.paths import ava_home
 
     try:
         name = machine_name()
@@ -348,9 +348,9 @@ def _release_self_heal_pause() -> None:
     later (the controller's finer discrimination is unsafe in the failing
     process, #1098).
     """
-    from shared.deploy.maintenance import admission
-    from shared.deploy.state.cluster_lock import update_lock_holder
-    from shared.deploy.state.host_deploy_state import read
+    from base.deploy.maintenance import admission
+    from base.deploy.state.cluster_lock import update_lock_holder
+    from base.deploy.state.host_deploy_state import read
 
     held = admission.snapshot()
     if (
@@ -391,8 +391,8 @@ def _release_self_heal_pause() -> None:
 
 def _require_restart_runtime(runtime: StartRuntime, home: Path) -> None:
     """Recheck the captured runtime and operation gate before disruptive work."""
-    from shared.deploy.release.operation import require_start_authorized
-    from shared.paths import prod_service_checkout_error
+    from base.deploy.release.operation import require_start_authorized
+    from base.paths import prod_service_checkout_error
 
     require_start_authorized(home)
     runtime.validate(home)
@@ -402,9 +402,9 @@ def _require_restart_runtime(runtime: StartRuntime, home: Path) -> None:
 
 def _restart_runtime(home: Path) -> StartRuntime:
     """Admit the currently executing source or image before restart effects."""
+    from base.deploy.release.operation import require_start_authorized
+    from base.deploy.release.runtime_interpreter import WHEEL_RUNTIME
     from cli.start_runtime import admit_loaded_release
-    from shared.deploy.release.operation import require_start_authorized
-    from shared.deploy.release.runtime_interpreter import WHEEL_RUNTIME
 
     require_start_authorized(home)
     runtime = (
@@ -420,11 +420,11 @@ def _cmd_restart_body(*, mode: str = "smooth", force_reap: bool = False) -> int:
     Hosted agents drain through the shared pause boundary before service stop.
     Explicit force authorizes interrupting resource shutdown.
     """
+    from base.agents.exit_codes import RESTART_DECLINED_EXIT_CODE
+    from base.host.proc import hosting_exec_domain, hosting_supervised_session
+    from base.paths import ava_home
     from cli.commands import _repo
     from cli.commands.lifecycle import _start_readiness_preflight, start
-    from shared.agents.exit_codes import RESTART_DECLINED_EXIT_CODE
-    from shared.host.proc import hosting_exec_domain, hosting_supervised_session
-    from shared.paths import ava_home
 
     # Admission precedes even the restart journal: an incompatible caller must
     # leave the running generation and its maintenance state untouched.
@@ -467,9 +467,9 @@ def _cmd_restart_body(*, mode: str = "smooth", force_reap: bool = False) -> int:
 
     repo = runtime.code_root
     print(f"[ava restart] cwd = {repo}")
+    from base.deploy.lifecycle import status_journal
+    from base.deploy.progress_timeout import SERVICE_READY_TIMEOUT_S
     from ops.agent_pause import PAUSE_TIMEOUT_SECONDS
-    from shared.deploy.lifecycle import status_journal
-    from shared.deploy.progress_timeout import SERVICE_READY_TIMEOUT_S
 
     # Only the journal's opener closes it — the same owns_journal contract
     # _temporary_stop keeps (task #2898). When an outer operation's journal is

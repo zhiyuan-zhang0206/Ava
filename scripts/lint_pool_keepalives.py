@@ -8,16 +8,16 @@ exit 1) rather than a silent no-op). Also run automatically via pre-commit hook.
 ## Why
 
 Pool connections are **long-lived**, which is what makes a missing keepalive
-invisible until it costs minutes. `shared/db/connections.py:PG_KEEPALIVE_KWARGS` documents the
+invisible until it costs minutes. `base/db/connections.py:PG_KEEPALIVE_KWARGS` documents the
 mechanism: a laptop-grade runner that sleeps or changes networks wakes holding
 dead TCP flows, and a query already in flight on a borrowed half-dead socket has
 no application-level bound — it waits out the OS TCP-retransmit timeout.
 
-`shared.db.pool()` merges those kwargs for every sync pool and
-`shared.db.async_pool()` for every async one (the agent host passes its
+`base.db.pool()` merges those kwargs for every sync pool and
+`base.db.async_pool()` for every async one (the agent host passes its
 `LoggingConnectionPool` in as the pool class). In the governed packages the
 structure gate's Rule 5 (`postgres-dial`, `scripts/structure/locality.py`)
-already rejects any pool built outside `shared/db/connections.py`, with no
+already rejects any pool built outside `base/db/connections.py`, with no
 frozen exceptions left. This lint covers only what that rule does not see:
 `scripts/` (not a governed package) and the modules the decision allows to dial
 Postgres directly. A construction there must at least spell out
@@ -26,7 +26,7 @@ definition of the *values* even where a site is not the single definition of
 the *call*.
 
 Without a check the invariant is "each call site remembered", which is exactly
-the state that produced the defect: the sync pools in `shared/log/__init__.py`,
+the state that produced the defect: the sync pools in `base/log/__init__.py`,
 `gateway/app.py` and `services/agent_ops/daemon.py` all wrote
 `kwargs={"prepare_threshold": None}` and stopped there, and PR #940's sweep of the
 bare `psycopg.connect` sites left them untouched because they are a different
@@ -40,7 +40,7 @@ dict containing `**PG_KEEPALIVE_KWARGS`. AST-based, so it sees through
 `AsyncConnectionPool[psycopg.AsyncConnection](...)` subscripts and subclasses
 (`LoggingConnectionPool`) without regex guesswork.
 
-Exempt: the decision's owner, `shared/db/connections.py` (the definition of the
+Exempt: the decision's owner, `base/db/connections.py` (the definition of the
 posture — it builds the merged dict literal every other site inherits), and
 test/eval-fixture code under `tests/`, where a throwaway pool against a local
 test Postgres has nothing to survive. `ConnectionPool.check_connection(...)` and
@@ -160,7 +160,7 @@ def violations_in_source(src: str, filename: str = "<source>") -> list[tuple[int
                 (
                     node.lineno,
                     f"{class_name}(kwargs=...) does not unpack `**{_KEEPALIVE_NAME}` "
-                    "— for a sync pool call `shared.db.pool()` instead of "
+                    "— for a sync pool call `base.db.pool()` instead of "
                     "constructing one; for an async pool add "
                     f"`**{_KEEPALIVE_NAME}` to the kwargs dict",
                 )
@@ -217,7 +217,7 @@ def main(argv: list[str] | None = None) -> int:
     if total:
         print(
             f"\n{total} pool(s) built without TCP keepalives. See the docstring at the "
-            "top of scripts/lint_pool_keepalives.py and shared/db/__init__.py:pool().",
+            "top of scripts/lint_pool_keepalives.py and base/db/__init__.py:pool().",
             file=sys.stderr,
         )
         return 1

@@ -8,7 +8,7 @@ gateway route (`ava.impersonation.replay`) use `transport` directly.
 The agent process's `ava.agents.*` no longer directly connects to the DB —
 three gateway ops (spawn / send_message / get_last_message)
 all go through this module calling gateway HTTP routes. See the
-"error-wire protocol" section at the top of `shared/agents/contract.py`.
+"error-wire protocol" section at the top of `base/agents/contract.py`.
 
 Design trade-offs:
 - **Synchronous httpx.Client**: agent code is sync; introducing async
@@ -80,8 +80,8 @@ from ava.gateway_client.transport import (
 from ava.gateway_client.transport import (
     patch as patch,
 )
-from shared.agents import GatewayUnavailable as GatewayUnavailable
-from shared.log import logger
+from base.agents import GatewayUnavailable as GatewayUnavailable
+from base.log import logger
 
 
 class MemorySearchResult(NamedTuple):
@@ -224,7 +224,7 @@ def send_message(
     `Idempotency-Key`, so it returns that row's stable id instead of duplicating
     the message even if the first HTTP response was lost.
 
-    Deferred delivery (`shared.agents.messages.delivery_outbox`, task #3757): all attempts of
+    Deferred delivery (`base.agents.messages.delivery_outbox`, task #3757): all attempts of
     one logical message — this call's own retries and a caller's later re-sends
     of the same (target, source, content) within the dedup window — share one
     key while the message is undelivered, and a final failure is recorded
@@ -236,7 +236,7 @@ def send_message(
     """
     import httpx
 
-    from shared.agents.messages import delivery_outbox
+    from base.agents.messages import delivery_outbox
 
     body = {
         "content": content,

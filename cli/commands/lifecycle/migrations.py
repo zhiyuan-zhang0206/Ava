@@ -12,7 +12,7 @@ from typing import Any
 
 import psycopg
 
-from shared.deploy.schema.runtime_migration import ReleaseMigrationContext
+from base.deploy.schema.runtime_migration import ReleaseMigrationContext
 
 
 def cmd_migrations_apply(*, release: ReleaseMigrationContext | None = None) -> list[str]:
@@ -33,10 +33,10 @@ def cmd_migrations_apply(*, release: ReleaseMigrationContext | None = None) -> l
     because a migration that created a table is the moment `ava_runner`'s
     point-in-time read grant went stale; failure is raised, not returned.
     """
-    import shared.db
-    from shared import cluster
-    from shared.config import settings
-    from shared.db import pg_admin
+    import base.db
+    from base import cluster
+    from base.config import settings
+    from base.db import pg_admin
 
     # Dependency drift is a pre-DB gate: a new upstream checkpoint migration
     # must first be mirrored in a paired Ava up/down migration. Failing before
@@ -45,8 +45,8 @@ def cmd_migrations_apply(*, release: ReleaseMigrationContext | None = None) -> l
 
     # Both dials bypass PgBouncer — the ONE sanctioned data-plane exemption
     # (user ruling 2026-08: every consumer goes through PgBouncer; see
-    # shared/db/__init__.py `connect`). apply_pending_migrations holds a SESSION
-    # advisory lock (pg_advisory_lock, shared/deploy/schema/migrations.py _MIGRATION_LOCK_KEY)
+    # base/db/__init__.py `connect`). apply_pending_migrations holds a SESSION
+    # advisory lock (pg_advisory_lock, base/deploy/schema/migrations.py _MIGRATION_LOCK_KEY)
     # across its whole apply loop, and transaction pooling hands the backend
     # back to the pool at the end of each transaction — the lock would silently
     # drop between statements, letting a concurrent applier interleave DDL.
@@ -54,9 +54,9 @@ def cmd_migrations_apply(*, release: ReleaseMigrationContext | None = None) -> l
     # statement ceiling (large-table rebuilds, partition backfills).
     if settings.data_plane.is_remote:
         # A remote-managed plane's provider URL is its only authority.
-        with shared.db.connect(direct=True, unbounded=True) as conn:
+        with base.db.connect(direct=True, unbounded=True) as conn:
             done = _apply(conn, release)
-        cluster.assert_checkpoint_schema_current(shared.db.direct_db_url())
+        cluster.assert_checkpoint_schema_current(base.db.direct_db_url())
     else:
         # A locally owned plane migrates as the administrator acting as the
         # schema owner over the home's own socket: objects stay owner-owned and
@@ -72,7 +72,7 @@ def cmd_migrations_apply(*, release: ReleaseMigrationContext | None = None) -> l
 
 
 def _apply(conn: psycopg.Connection[Any], release: ReleaseMigrationContext | None) -> list[str]:
-    from shared.deploy.schema.migrations import apply_pending_migrations
+    from base.deploy.schema.migrations import apply_pending_migrations
 
     if release is None:
         return apply_pending_migrations(conn)

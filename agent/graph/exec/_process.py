@@ -17,9 +17,9 @@ from typing import Any, Literal
 
 import psutil
 
-from shared.log import logger
-from shared.native_process.exec_domain import ExecProcessDomain as ExecProcessDomain
-from shared.native_process.os_platform import IS_WINDOWS
+from base.log import logger
+from base.native_process.exec_domain import ExecProcessDomain as ExecProcessDomain
+from base.native_process.os_platform import IS_WINDOWS
 
 _READER_JOIN_TIMEOUT_S = 5.0
 _EMERGENCY_SETTLE_TIMEOUT_S = 5.0

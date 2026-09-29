@@ -20,6 +20,33 @@ import subprocess
 from pathlib import Path
 from typing import Any, cast
 
+from base.agents.history.checkpoint_serde import STATIC_CHECKPOINT_MSGPACK_TYPES
+from base.api_contracts.release_handoff import (
+    HandoffRefusedError,
+    ReleaseImageEntry,
+    ReleaseImageExecPayload,
+    ReleaseImageExecResult,
+    ReleaseImageRef,
+    entry_argv,
+    entry_environment,
+    read_envelope,
+)
+from base.cluster.machine import machine_name
+from base.cluster.machines import mark_stopping
+from base.config.turn_view import resolve_agent_config_pins
+from base.deploy.lifecycle import home_lifecycle_locks
+from base.deploy.maintenance import pause_owner
+from base.deploy.state.cluster_lock import (
+    claim_recovery_lock,
+    read_update_lease,
+    release_update_lock,
+)
+from base.deploy.state.host_deploy_state import updater_lease_live
+from base.deploy.updater import handoff
+from base.host.proc import run_bounded
+from base.log import logger
+from base.paths import ava_home
+from base.runtime_abi import current_abi
 from ops.cluster_pause import unpause_local_cluster
 from ops.cluster_status import (
     ClusterStatus,
@@ -35,33 +62,6 @@ from ops.rpc_schemas import (
     ShellKillResult,
     ShellProbeResult,
 )
-from shared.agents.history.checkpoint_serde import STATIC_CHECKPOINT_MSGPACK_TYPES
-from shared.api_contracts.release_handoff import (
-    HandoffRefusedError,
-    ReleaseImageEntry,
-    ReleaseImageExecPayload,
-    ReleaseImageExecResult,
-    ReleaseImageRef,
-    entry_argv,
-    entry_environment,
-    read_envelope,
-)
-from shared.cluster.machine import machine_name
-from shared.cluster.machines import mark_stopping
-from shared.config.turn_view import resolve_agent_config_pins
-from shared.deploy.lifecycle import home_lifecycle_locks
-from shared.deploy.maintenance import pause_owner
-from shared.deploy.state.cluster_lock import (
-    claim_recovery_lock,
-    read_update_lease,
-    release_update_lock,
-)
-from shared.deploy.state.host_deploy_state import updater_lease_live
-from shared.deploy.updater import handoff
-from shared.host.proc import run_bounded
-from shared.log import logger
-from shared.paths import ava_home
-from shared.runtime_abi import current_abi
 
 
 class ClusterUpdateInProgress(RuntimeError):  # noqa: N818 — state description
@@ -73,7 +73,7 @@ def _lock_holder_is_live(holder: str, *, held_for_s: float | None = None) -> boo
     the deploy lease) names a process that is
     still running on THIS host.
 
-    The negation of `shared.deploy.state.cluster_lock.holder_process_gone` supplies local-owner
+    The negation of `base.deploy.state.cluster_lock.holder_process_gone` supplies local-owner
     proof, including the pid-recycling slack. A holder on a different machine, an
     unparseable holder, and an unreadable process identity are all treated as live
     (refuse rather than risk clobbering a real run). `held_for_s` (the lease's
@@ -83,7 +83,7 @@ def _lock_holder_is_live(holder: str, *, held_for_s: float | None = None) -> boo
     recover's timescale: a 30-minute TTL is exactly the window in which a busy
     host recycles the dead orchestration's pid.
     """
-    from shared.deploy.state.cluster_lock import holder_process_gone
+    from base.deploy.state.cluster_lock import holder_process_gone
 
     return not holder_process_gone(holder, held_for_s=held_for_s)
 
@@ -285,7 +285,7 @@ def _narrow_commands(commands: list[Any], wanted: list[str] | None) -> list[Any]
         return commands
 
     from ava import skills
-    from shared.packages.skills.names import match_key
+    from base.packages.skills.names import match_key
 
     loaded = skills.names()
     by_ident = {match_key(skills.identifier(skill)): skill for skill in loaded}
@@ -314,7 +314,7 @@ def agent_skill_view_op(agent_id: int, pool: Any) -> AgentSkillViewResult:
     from ava import skills
     from ava.composer_commands import discover_commands
     from ava.mcp_config import load_mcp_config
-    from shared.packages.plugins.mcp_enabled import read_enabled
+    from base.packages.plugins.mcp_enabled import read_enabled
 
     cwd, wanted = _agent_skill_view_inputs(pool, agent_id)
     skills.register_skill_source(lambda: _project_skill_roots(cwd))
@@ -403,7 +403,7 @@ def run_release_entry(
         # run_bounded, not subprocess.run(timeout=...): a plain timeout only
         # kills the direct child, which can leave the real entry process
         # (or a launcher-stub descendant on Windows) running past the bound
-        # (shared/host/proc.py).
+        # (base/host/proc.py).
         completed = run_bounded(
             entry_argv(verified, entry, "-"),
             input=request,

@@ -20,8 +20,8 @@ import pytest
 import pytest_asyncio
 from psycopg_pool import AsyncConnectionPool
 
+from base.config import settings
 from services.agent_host.dispatcher import InboundWakeDispatcher, PendingInboundWake
-from shared.config import settings
 
 
 class _IdleScheduler:

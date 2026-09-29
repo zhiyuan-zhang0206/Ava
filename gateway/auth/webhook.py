@@ -7,9 +7,9 @@ from typing import NamedTuple
 
 from starlette.requests import Request
 
+from base.cluster.auth import verify_bearer
+from base.config import settings
 from gateway.auth.request_principal import cluster_credential
-from shared.cluster.auth import verify_bearer
-from shared.config import settings
 
 
 class WebhookAuthentication(NamedTuple):

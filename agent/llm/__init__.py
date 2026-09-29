@@ -6,7 +6,7 @@ per-capability tool. See `future/single-tool-rearchitecture.md`.
 
 This module holds only the tool *schema* (name + docstring + arg types that
 `bind_tools` consumes); the actual run is dispatched by the exec node. The
-chat-model factory that the schema is bound onto lives in `shared/lm/factory.py`.
+chat-model factory that the schema is bound onto lives in `base/lm/factory.py`.
 
 The package holds the helpers around the agent's own model calls, outside
 the llm graph node (`agent/graph/llm/`) that drives them:
@@ -15,7 +15,7 @@ the llm graph node (`agent/graph/llm/`) that drives them:
     explicit Gemini cache binding with a plain-path fallback, and the
     stale-cache retry for single-shot callers
   - `usage.py` — usage accounting for a completed llm-node call, over the
-    canonical emitter in `shared/lm/usage.py`
+    canonical emitter in `base/lm/usage.py`
 
 This door imports neither: it stays a dependency-free schema leaf (langchain
 only), which is what lets the hierarchy worker bind the same schema without

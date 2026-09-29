@@ -35,9 +35,9 @@ import subprocess
 import sys
 from pathlib import Path
 
-from shared.deploy.git import host_version
-from shared.host.proc import run_bounded
-from shared.packages.plugins import manifest as pm
+from base.deploy.git import host_version
+from base.host.proc import run_bounded
+from base.packages.plugins import manifest as pm
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 

@@ -27,16 +27,16 @@ import psycopg
 import pytest
 from psycopg import sql
 
+from base import cluster
+from base.cluster import authority, ownership
+from base.cluster.authority.api import API_TOKEN_ENV
+from base.config import settings
+from base.host.net.url_secret import url_with_userinfo
 from cli.commands.data_plane import bringup
 from cli.commands.data_plane import cluster_instance as ci
 from cli.commands.data_plane import pgbouncer as pooler
 from cli.commands.lifecycle.migrations import cmd_migrations_apply
 from services.gateway_side.backup import passphrase
-from shared import cluster
-from shared.cluster import authority, ownership
-from shared.cluster.authority.api import API_TOKEN_ENV
-from shared.config import settings
-from shared.host.net.url_secret import url_with_userinfo
 from tests._containers import _free_port
 
 pytestmark = pytest.mark.skipif(
@@ -436,7 +436,7 @@ def _collector_postgres_receiver(born: Born, monkeypatch: pytest.MonkeyPatch) ->
     from cli.commands.observability import otel_collector as oc
 
     monkeypatch.setattr(settings.observability, "telemetry_otlp_enabled", True)
-    monkeypatch.setattr("shared.cluster.machine.machine_name", lambda: "test-machine")
+    monkeypatch.setattr("base.cluster.machine.machine_name", lambda: "test-machine")
     rendered = oc.generate_config(_REPO, born.home, _ROLES)
     secret = authority.read_secret(born.home, authority.active_generation(born.home))
     credentials = {
@@ -554,20 +554,20 @@ def test_direct_exemption_dials_postgres_as_the_delivered_login(
 ) -> None:
     """With pooling on, the admin-plane `direct=True` dial swaps only the port to
     the real Postgres (the registry record) and keeps the delivered login."""
-    import shared.db
+    import base.db
 
     def _registry() -> dict[str, cluster.ClusterRecord]:
         return {str(born.home): born.record}
 
     monkeypatch.setattr(cluster, "load_registry", _registry)
-    direct = shared.db.direct_db_url()
+    direct = base.db.direct_db_url()
     assert direct == url_with_userinfo(
         born.endpoint().replace(str(born.pooler_port), str(born.pg_port)), *born.login("gateway")
     )
-    with shared.db.connect(direct=True) as conn:
+    with base.db.connect(direct=True) as conn:
         assert conn.execute("SELECT inet_server_port(), session_user").fetchone() == (
             born.pg_port,
             born.login("gateway")[0],
         )
-    with shared.db.connect() as conn:  # pooled: the one access URL
+    with base.db.connect() as conn:  # pooled: the one access URL
         assert conn.execute("SELECT session_user").fetchone() == (born.login("gateway")[0],)

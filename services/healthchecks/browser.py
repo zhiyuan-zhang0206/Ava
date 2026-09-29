@@ -1,8 +1,8 @@
 """Identity probe for the browser owned by the root supervisor."""
 
+from base.config import settings
+from base.daemon.health import DaemonProbe
 from services.browser.probe import probe_browser
-from shared.config import settings
-from shared.daemon.health import DaemonProbe
 
 
 def _probe() -> DaemonProbe:

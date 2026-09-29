@@ -14,7 +14,7 @@ import pytest
 import agent.graph.memory_recall as recall
 from agent.messages import inbound_message
 from ava.gateway_client import MemorySearchResult
-from shared.agents import IndexerUnavailable
+from base.agents import IndexerUnavailable
 
 
 @pytest.fixture
@@ -27,8 +27,8 @@ def memory_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     of testing the thing named in the test. The filter has its own file
     (`test_memory_filter.py`), and the two-stage composition is covered below.
     """
-    monkeypatch.setattr("shared.config.settings.agent.passive_memory_recall_enabled", True)
-    monkeypatch.setattr("shared.config.settings.agent.memory_recall_filter_enabled", False)
+    monkeypatch.setattr("base.config.settings.agent.passive_memory_recall_enabled", True)
+    monkeypatch.setattr("base.config.settings.agent.memory_recall_filter_enabled", False)
     monkeypatch.setattr(recall, "memory_dir", lambda: tmp_path)
     return tmp_path
 
@@ -233,7 +233,7 @@ async def test_programming_error_in_search_still_propagates(
 
 
 async def test_returns_none_when_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("shared.config.settings.agent.passive_memory_recall_enabled", False)
+    monkeypatch.setattr("base.config.settings.agent.passive_memory_recall_enabled", False)
 
     result = await recall.passive_memory_recall(_conversation())  # pyright: ignore[reportUnknownArgumentType]
 
@@ -242,7 +242,7 @@ async def test_returns_none_when_disabled(monkeypatch: pytest.MonkeyPatch) -> No
 
 async def test_returns_none_when_eval_isolated(monkeypatch: pytest.MonkeyPatch) -> None:
     """Eval isolation must stop the direct index call that passive recall bypasses."""
-    monkeypatch.setattr("shared.config.settings.agent.eval_isolation", True)
+    monkeypatch.setattr("base.config.settings.agent.eval_isolation", True)
     called = False
 
     def _fake(_q: str, _k: int) -> list[MemorySearchResult]:
@@ -285,8 +285,8 @@ async def test_retrieval_default_is_top_100(
 ) -> None:
     """Retrieval goes wide by default — the relaxed filter lists rather than
     rejects, so it needs real candidates to judge; the default lives in
-    `shared/config/agent.py` (memory_recall_retrieve_k = 100)."""
-    from shared.config import settings
+    `base/config/agent.py` (memory_recall_retrieve_k = 100)."""
+    from base.config import settings
 
     assert settings.agent.memory_recall_retrieve_k == 100
     asked: dict[str, int] = {}
@@ -307,8 +307,8 @@ async def test_retrieval_is_wider_than_injection(
 ) -> None:
     """`retrieve_k` is what search is asked for — not `inject_k`. A filter with
     only as many candidates as it may inject can rank but never reject."""
-    monkeypatch.setattr("shared.config.settings.agent.memory_recall_retrieve_k", 10)
-    monkeypatch.setattr("shared.config.settings.agent.memory_recall_inject_k", 3)
+    monkeypatch.setattr("base.config.settings.agent.memory_recall_retrieve_k", 10)
+    monkeypatch.setattr("base.config.settings.agent.memory_recall_inject_k", 3)
     asked: dict[str, int] = {}
 
     def _search(_q: str, k: int) -> list[MemorySearchResult]:
@@ -325,7 +325,7 @@ async def test_retrieval_is_wider_than_injection(
 async def test_only_what_the_filter_kept_is_injected(
     memory_root: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr("shared.config.settings.agent.memory_recall_filter_enabled", True)
+    monkeypatch.setattr("base.config.settings.agent.memory_recall_filter_enabled", True)
     for rel in ("a.md", "b.md", "c.md"):
         _write_note(memory_root, rel, "body")
     _set_search(
@@ -354,7 +354,7 @@ async def test_nothing_is_injected_when_the_filter_keeps_nothing(
 ) -> None:
     """The point of having a filter: an unfiltered recall always had its top-k to
     show, however weakly they matched."""
-    monkeypatch.setattr("shared.config.settings.agent.memory_recall_filter_enabled", True)
+    monkeypatch.setattr("base.config.settings.agent.memory_recall_filter_enabled", True)
     _write_note(memory_root, "a.md", "body")
     _set_search(monkeypatch, [MemorySearchResult(path="a.md", description="one")])
 
@@ -371,7 +371,7 @@ async def test_the_filter_sees_the_type_tag_search_returned(
 ) -> None:
     """Tags travel from the search result into the candidate — without them the
     filter cannot be stricter with a profile note than with a procedure."""
-    monkeypatch.setattr("shared.config.settings.agent.memory_recall_filter_enabled", True)
+    monkeypatch.setattr("base.config.settings.agent.memory_recall_filter_enabled", True)
     _write_note(memory_root, "a.md", "body")
     _set_search(
         monkeypatch,
@@ -398,7 +398,7 @@ async def test_already_injected_notes_still_reach_the_filter_then_dedup(
     its best matches pre-removed, and the filter would inject unrelated notes
     that merely outranked the deduped ones. Dedup applies after the filter, to
     what it judged relevant."""
-    monkeypatch.setattr("shared.config.settings.agent.memory_recall_filter_enabled", True)
+    monkeypatch.setattr("base.config.settings.agent.memory_recall_filter_enabled", True)
     for rel in ("a.md", "b.md"):
         _write_note(memory_root, rel, "body")
     _set_search(
@@ -433,7 +433,7 @@ async def test_returns_none_when_everything_the_filter_kept_is_already_injected(
     """The filter picks the same relevant note again on a similar second
     message; it is already in front of the agent, so nothing new is injected —
     and critically, no unrelated note is injected in its place."""
-    monkeypatch.setattr("shared.config.settings.agent.memory_recall_filter_enabled", True)
+    monkeypatch.setattr("base.config.settings.agent.memory_recall_filter_enabled", True)
     for rel in ("a.md", "b.md", "c.md"):
         _write_note(memory_root, rel, "body")
     _set_search(

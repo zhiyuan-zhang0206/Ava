@@ -11,9 +11,9 @@ from __future__ import annotations
 from datetime import datetime
 from typing import cast
 
+from base.config import settings
 from gateway.lgtm import _loki_aggregates, _loki_transport, loki_events_cache
 from services.events_maintenance import resolution as _event_resolution
-from shared.config import settings
 
 
 def count_event_classes(

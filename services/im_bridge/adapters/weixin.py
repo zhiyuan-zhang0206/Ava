@@ -30,10 +30,10 @@ from typing import Any
 
 import httpx
 
+from base.config import settings
+from base.host.private_storage import write_private_bytes
+from base.log import logger
 from services.im_bridge.types import IMAdapter, InboundMessage
-from shared.config import settings
-from shared.host.private_storage import write_private_bytes
-from shared.log import logger
 
 ILINK_BASE_URL = "https://ilinkai.weixin.qq.com"
 EP_GET_UPDATES = "ilink/bot/getupdates"

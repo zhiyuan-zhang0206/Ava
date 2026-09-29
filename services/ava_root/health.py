@@ -19,10 +19,10 @@ from dataclasses import dataclass, replace
 from threading import Thread
 from typing import Protocol
 
+from base.daemon.health import DaemonProbe
+from base.native_process.ownership import OwnedProcess
 from services.ava_root.manifest import UnknownUnitError
 from services.ava_root.probes import Probe, ProbeError, ProbeRegistry
-from shared.daemon.health import DaemonProbe
-from shared.native_process.ownership import OwnedProcess
 
 _log = logging.getLogger(__name__)
 
@@ -273,7 +273,7 @@ class HealthMonitor:
     @staticmethod
     def _emit_breaker_open(unit_id: str, rounds: int, attempts: int, detail: str) -> None:
         """One registered alert per unresolved service failure episode."""
-        from shared.log import logger
+        from base.log import logger
 
         logger.warning(
             "[health] unit {unit}: restart breaker OPEN after {rounds} rounds without a "

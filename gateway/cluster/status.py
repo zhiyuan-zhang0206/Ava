@@ -24,6 +24,18 @@ from psycopg import Cursor
 from psycopg_pool import ConnectionPool
 from pydantic import ValidationError
 
+from base.api_contracts.status import MachineStatus
+from base.cluster.machine import (
+    is_agent_runner,
+    is_gateway,
+    is_observability_station,
+    machine_name,
+)
+from base.config import settings
+from base.deploy.git.cluster_drift import prod_source_head_sha
+from base.deploy.state.cluster_lock import DeployLease
+from base.host.resource_sample import ResourceSample
+from base.telemetry.observability import cluster_label
 from gateway.cluster import _loki_shards, _roster_rows, _stats_dashboard, roster_probe
 from gateway.cluster._health import get_health
 from gateway.cluster._roster_rows import stamp_cluster_globals
@@ -42,18 +54,6 @@ from ops import cluster_rpc as _cluster_rpc
 from ops.cluster_pause import is_paused as cluster_is_paused
 from ops.cluster_status import ClusterStatus, _check_pidfile
 from ops.cluster_status.schema_mismatch import status as schema_mismatch_status
-from shared.api_contracts.status import MachineStatus
-from shared.cluster.machine import (
-    is_agent_runner,
-    is_gateway,
-    is_observability_station,
-    machine_name,
-)
-from shared.config import settings
-from shared.deploy.git.cluster_drift import prod_source_head_sha
-from shared.deploy.state.cluster_lock import DeployLease
-from shared.host.resource_sample import ResourceSample
-from shared.telemetry.observability import cluster_label
 
 router = APIRouter()
 ARCHIVE_TOTAL_ROWS = 4_813_148  # frozen archive rows at the #1823 drop (pg_dump-verified)
@@ -438,7 +438,7 @@ async def _probe_agent_runner(
 
 
 def _read_deploy_lease() -> DeployLease | None:
-    """The live deploy lease (`shared.deploy.state.cluster_lock.read_update_lease`), or None when
+    """The live deploy lease (`base.deploy.state.cluster_lock.read_update_lease`), or None when
     the cluster is free / the row cannot be read.
 
     Read once per roster assembly and stamped onto every row: a hold is a
@@ -456,7 +456,7 @@ def _read_deploy_lease() -> DeployLease | None:
     """
     import psycopg
 
-    from shared.deploy.state.cluster_lock import read_update_lease
+    from base.deploy.state.cluster_lock import read_update_lease
 
     try:
         return read_update_lease()
@@ -470,7 +470,7 @@ def _read_deploy_lease() -> DeployLease | None:
 def _local_resource_sample() -> ResourceSample | None:
     """One live resource reading for the gateway's own machine (no status_snapshot call)."""
     try:
-        from shared.host.resource_sample import resource_sample
+        from base.host.resource_sample import resource_sample
 
         return resource_sample()
     except Exception:  # fail-fast-ok: psutil may not be installed; degrade gracefully
@@ -491,7 +491,7 @@ def _local_machine_status_blocking(
     capability (pure gateway) — via to_thread: the paused flag (file read),
     prod-source HEAD (git rev-parse subprocess), the frozen process commit and
     the psutil resource snapshot must not run on the event loop."""
-    from shared.native_process import loaded_commit as _process_sha
+    from base.native_process import loaded_commit as _process_sha
 
     paused = cluster_is_paused()
     return MachineStatus(

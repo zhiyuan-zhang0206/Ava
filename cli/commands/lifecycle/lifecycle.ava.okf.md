@@ -41,7 +41,7 @@ another shutdown signal as immediate termination. A birth that finishes its
 drain and exits while its listeners are being scanned is stopped, not a foreign
 listener. An explicit force request alone permits a kill, with a separate
 bounded settle wait when the graceful deadline is spent. The data-plane stop
-requests [owned PostgreSQL](../../../shared/cluster/postgres.ava.okf.md) fast
+requests [owned PostgreSQL](../../../base/cluster/postgres.ava.okf.md) fast
 shutdown (SIGINT), so neither waits on idle client connections a drained state
 cannot protect (issue #2307). When the data-plane phase still fails after the
 services phase stopped, `_temporary_stop` compensates with a bounded internal
@@ -60,9 +60,9 @@ one exit, `scripts/cutover_adopt_home.py --resume`.
 
 `cli/parsers/maintenance.py` retains explicit intermediate steps through
 `maintenance.py`, which reads its generation's hold through the maintenance
-journal's own door (`shared.deploy.maintenance.admission.require_operation`) and the agent-host
+journal's own door (`base.deploy.maintenance.admission.require_operation`) and the agent-host
 probes from `ops.agent_pause.probe`. They reuse the
-[durable maintenance journal](../../../shared/deploy/maintenance/maintenance.ava.okf.md).
+[durable maintenance journal](../../../base/deploy/maintenance/maintenance.ava.okf.md).
 See [the coordinated operator procedure](../../../conventions/graceful-maintenance.md).
 
 ## Start

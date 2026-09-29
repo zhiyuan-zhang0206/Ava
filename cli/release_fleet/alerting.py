@@ -70,7 +70,7 @@ class FleetAlert(Record):
 
 
 class AlertRow(Record):
-    """One `alerts` instance for `shared.telemetry.alerts.upsert_alert(conn, payload, source)`."""
+    """One `alerts` instance for `base.telemetry.alerts.upsert_alert(conn, payload, source)`."""
 
     kind: Literal["alert_row"] = "alert_row"
     source: Literal["release-fleet"] = "release-fleet"

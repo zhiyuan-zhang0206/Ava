@@ -42,8 +42,8 @@ def test_factory_and_probe_registries_stay_in_sync() -> None:
 
 def test_factory_default_is_numpy() -> None:
     """The unset switch yields the numpy backend (default since 2026-09-02)."""
+    from base.config import settings
     from services.memory_indexer.backends.numpy import NumPyBackend
-    from shared.config import settings
 
     assert settings.services.memory_search_backend == "numpy"
     assert isinstance(factory.get_backend(dim=_DIM, fingerprint=_FP), NumPyBackend)
@@ -51,8 +51,8 @@ def test_factory_default_is_numpy() -> None:
 
 def test_factory_numpy_dispatch(monkeypatch: pytest.MonkeyPatch) -> None:
     """AVA_MEMORY_SEARCH_BACKEND=numpy yields the NumPyBackend."""
+    from base.config import settings
     from services.memory_indexer.backends.numpy import NumPyBackend
-    from shared.config import settings
 
     monkeypatch.setattr(settings.services, "memory_search_backend", "numpy")
     assert isinstance(factory.get_backend(dim=_DIM, fingerprint=_FP), NumPyBackend)
@@ -60,8 +60,8 @@ def test_factory_numpy_dispatch(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_factory_pgvector_dispatch(monkeypatch: pytest.MonkeyPatch) -> None:
     """AVA_MEMORY_SEARCH_BACKEND=pgvector yields the PGVectorBackend."""
+    from base.config import settings
     from services.memory_indexer.backends.pgvector import PGVectorBackend
-    from shared.config import settings
 
     monkeypatch.setattr(settings.services, "memory_search_backend", "pgvector")
     assert isinstance(factory.get_backend(dim=_DIM, fingerprint=_FP), PGVectorBackend)
@@ -71,7 +71,7 @@ def test_factory_unknown_backend_fails_fast(monkeypatch: pytest.MonkeyPatch) -> 
     """An unrecognized AVA_MEMORY_SEARCH_BACKEND must not silently fall
     back to milvus — a typo would keep the old storage while the operator
     believes the switch happened."""
-    from shared.config import settings
+    from base.config import settings
 
     monkeypatch.setattr(settings.services, "memory_search_backend", "qdrant")
     with pytest.raises(ValueError, match="unknown memory search backend"):

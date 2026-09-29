@@ -11,7 +11,7 @@ conventions/reachability-and-credentials.md). When `AVA_OBSERVABILITY_URL`
 is empty the check is a no-op: the observatory is local and the `lgtm`
 healthcheck keeps the native stack alive. When it is set, the gateway dials
 the station through the reachability contract — the address the station
-unit advertises in `machine_units` (`shared.cluster.machines.unit_dial_url`), not a
+unit advertises in `machine_units` (`base.cluster.machines.unit_dial_url`), not a
 bare connect — and authenticates with the cluster's telemetry token, exactly
 like the collector relay that ships telemetry to it.
 
@@ -38,11 +38,11 @@ from datetime import UTC, datetime
 from typing import Any
 
 import shared.db
-from shared.config import settings
-from shared.deploy.transition import transition_severity
-from shared.log import init_gateway_process, logger
-from shared.telemetry.station_endpoint import StationTarget as _StationTarget
-from shared.telemetry.station_endpoint import resolve_station_target
+from base.config import settings
+from base.deploy.transition import transition_severity
+from base.log import init_gateway_process, logger
+from base.telemetry.station_endpoint import StationTarget as _StationTarget
+from base.telemetry.station_endpoint import resolve_station_target
 
 _log = logging.getLogger("services.heartbeat.station_probe")
 
@@ -126,7 +126,7 @@ def _station_answers(url: str) -> bool:
             url,
         )
         return True
-    from shared.cluster.authority.api import telemetry_token
+    from base.cluster.authority.api import telemetry_token
 
     headers = {
         "Authorization": f"Bearer {telemetry_token(secret)}",
@@ -167,7 +167,7 @@ def _alert_edges(target: _StationTarget, *, ok: bool, now: datetime) -> None:
     the shared transition clock, resolve on recovery, IM-notify on notify
     edges. Best-effort: alerting must never break the probe.
     """
-    from shared.telemetry.alerts import (
+    from base.telemetry.alerts import (
         display_language,
         fingerprint,
         notify_im,

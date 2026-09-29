@@ -12,8 +12,8 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
+from base.config import settings
 from cli.commands.data_plane import cluster_instance as instance
-from shared.config import settings
 
 
 def _tools(path: Path, version: str) -> Path:
@@ -50,7 +50,7 @@ def _probe(home: Path, system_bin: Path, *, inherited: str = "") -> dict[str, An
     code = """
 import json, subprocess
 from cli.commands.data_plane import cluster_instance as instance
-from shared.config import settings
+from base.config import settings
 instance.is_macos = lambda: False
 tools = [instance._redis_server_bin(), instance._redis_cli_bin()]
 print(json.dumps({
@@ -130,7 +130,7 @@ def test_explicit_nonexecutable_tool_never_falls_back(
 
 @pytest.mark.parametrize("value", ["relative/bin", "~/redis/bin", "/redis\n/bin"])
 def test_directory_setting_rejects_ambient_path_interpretation(value: str) -> None:
-    from shared.config.data_plane import DataPlaneSettings
+    from base.config.data_plane import DataPlaneSettings
 
     with pytest.raises(ValidationError, match="absolute directory"):
         DataPlaneSettings(
@@ -141,7 +141,7 @@ def test_directory_setting_rejects_ambient_path_interpretation(value: str) -> No
 
 
 def test_config_is_local_writable_and_not_a_runner_bootstrap_fact() -> None:
-    from shared.config import BOOTSTRAP_FIELDS, get_config_metadata
+    from base.config import BOOTSTRAP_FIELDS, get_config_metadata
 
     field = next(item for item in get_config_metadata() if item.name == "redis_bin_dir")
     assert field.scope == "host"
@@ -153,8 +153,8 @@ def test_config_is_local_writable_and_not_a_runner_bootstrap_fact() -> None:
 def test_local_config_write_only_changes_target_home(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
+    from base.host.env import runtime_config
     from cli.commands.management import config as config_cli
-    from shared.host.env import runtime_config
 
     selected = _tools(tmp_path / "bin", "selected-8")
     target = _home(tmp_path / "gateway", None)

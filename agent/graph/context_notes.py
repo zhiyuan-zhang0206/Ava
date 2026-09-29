@@ -38,11 +38,11 @@ from zoneinfo import ZoneInfo
 from langchain_core.messages import HumanMessage
 
 from agent.messages import NoteTag, system_note_message
-from shared.config import settings
-from shared.config.turn_view import turn_settings
-from shared.log import logger
-from shared.packages.plugins import contributions
-from shared.paths import workspace_dir
+from base.config import settings
+from base.config.turn_view import turn_settings
+from base.log import logger
+from base.packages.plugins import contributions
+from base.paths import workspace_dir
 
 NoteBuilder = Callable[[], HumanMessage | None]
 
@@ -272,7 +272,7 @@ def _machine_clause() -> str | None:
 
     Fail-soft like the label: a host whose machine name cannot be resolved
     still states the agent's identity line."""
-    from shared.cluster.machine import machine_name
+    from base.cluster.machine import machine_name
 
     try:
         name = machine_name()

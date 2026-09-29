@@ -13,14 +13,14 @@ from typing import Annotated, Any
 from fastapi import APIRouter, HTTPException, Query, Request, status
 from psycopg.rows import dict_row
 
+from base import telemetry
+from base.db.transaction import write_transaction
 from gateway.events.schemas import (
     EventResolutionCreate,
     EventResolutionListResponse,
     EventResolutionRow,
     EventResolutionStatus,
 )
-from shared import telemetry
-from shared.db.transaction import write_transaction
 
 router = APIRouter()
 

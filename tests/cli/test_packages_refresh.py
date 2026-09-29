@@ -19,14 +19,14 @@ from typing import cast
 
 import pytest
 
+from base.config import settings
+from base.packages.extensions import install_registry as reg
 from cli.commands.extensions.packages_refresh import (
     effective_interval_seconds,
     is_due,
     parse_duration,
     run_refresh,
 )
-from shared.config import settings
-from shared.packages.extensions import install_registry as reg
 
 
 @pytest.fixture(autouse=True)
@@ -412,7 +412,7 @@ def test_notify_mode_records_available_without_applying(core_repo: Path) -> None
 
 
 def test_flock_skips_a_concurrent_pass(core_repo: Path) -> None:
-    from shared.native_process.os_platform import file_lock
+    from base.native_process.os_platform import file_lock
 
     with file_lock(_home() / "packages-refresh.lock", timeout_s=1):
         report = run_refresh(repo=core_repo)
@@ -552,7 +552,7 @@ def _manifest_for(name: str, **extra: object) -> dict[str, object]:
 def test_loadable_names_respect_the_host_contract(
     core_repo: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from shared.packages.extensions.install_registry import (
+    from base.packages.extensions.install_registry import (
         host_contract_reason,
         loadable_skill_names,
     )
@@ -582,7 +582,7 @@ def test_loadable_names_respect_the_host_contract(
     skill("side", _manifest_for("side", requires_commit=side))
     skill("too_new", _manifest_for("too_new", engines={"ava": ">=2099"}))
 
-    import shared.paths as paths_mod
+    import base.paths as paths_mod
 
     monkeypatch.setattr(paths_mod, "repo_root", lambda: core_repo)
     loadable = loadable_skill_names()
@@ -594,7 +594,7 @@ def test_loadable_names_respect_the_host_contract(
 
 def test_scan_drops_host_blocked_packages(core_repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     import ava.skills as skills_mod
-    import shared.paths as paths_mod
+    import base.paths as paths_mod
 
     home = _home()
     for name in ("ok", "blocked"):
@@ -619,7 +619,7 @@ def test_scan_drops_host_blocked_packages(core_repo: Path, monkeypatch: pytest.M
 def test_refresh_cmd_json_shape(
     core_repo: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import shared.paths as paths_mod
+    import base.paths as paths_mod
     from cli.commands.extensions.packages import cmd_packages_refresh
 
     monkeypatch.setattr(paths_mod, "repo_root", lambda: core_repo)

@@ -20,12 +20,12 @@ import pytest
 from psycopg_pool import AsyncConnectionPool
 
 from agent.ownership.hosted import admit_hosted_runtime
+from base.agents import ResurrectRefused
+from base.db import insert_inbound_message
 from ops.agents import wake
 from ops.agents.spawn import create_agent_row
 from scripts import cutover_db_records as records
 from scripts.cutover_db_survey import Inputs, RetiredUnit
-from shared.agents import ResurrectRefused
-from shared.db import insert_inbound_message
 from tests.lifecycle.cutover.test_db_records import (  # noqa: F401 -- fixtures
     GATEWAY,
     GONE,

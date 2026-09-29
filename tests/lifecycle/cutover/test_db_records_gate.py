@@ -17,9 +17,9 @@ import psycopg
 import pytest
 from psycopg.types.json import Jsonb
 
+from base.config import settings
 from scripts import cutover_db_records as records
 from scripts import cutover_db_survey as survey_module
-from shared.config import settings
 from tests.lifecycle.cutover.test_db_records import (  # noqa: F401 -- fixtures
     _BOOTSTRAP_OWNED,
     _PENDING,
@@ -105,8 +105,8 @@ def _committed_publication() -> dict[str, object]:
     """A `current` the retired updater's managed-writer mode committed; it decodes."""
     from datetime import UTC, datetime
 
-    from shared.deploy.writers.barrier import RolloutIdentity
-    from shared.deploy.writers.publication import CommittedPublication, PublishedUnit
+    from base.deploy.writers.barrier import RolloutIdentity
+    from base.deploy.writers.publication import CommittedPublication, PublishedUnit
 
     at = datetime(2026, 9, 20, tzinfo=UTC)
     unit = PublishedUnit(

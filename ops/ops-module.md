@@ -56,7 +56,7 @@ The client and daemon reject unknown kinds before machine lookup, maintenance
 admission, dedupe, or dispatch. `release_image_exec` is the frozen v1
 image-exec handoff (`ops.cluster.release_image_exec_op`): the unit verifies a
 prepared image in its own store and runs one fixed entry of that image with
-bounded time (contract in `shared/api_contracts/release_handoff.py`, described
+bounded time (contract in `base/api_contracts/release_handoff.py`, described
 in `cli/release_handoff/release_handoff.ava.okf.md`). Retired updater fetch, prepare, bootstrap, and
 continuation requests have no wire registration or handler. Their handlers, schemas, command producers and session/log status projections
 are absent. Callers import live pause, status and recovery definitions directly.

@@ -24,9 +24,9 @@ from typing import Any, cast
 import pytest
 from psycopg_pool import ConnectionPool
 
+from base.config.daemon import DaemonSettings
+from base.daemon.health import LivenessGroup, LoopProgress
 from services.events_maintenance import daemon
-from shared.config.daemon import DaemonSettings
-from shared.daemon.health import LivenessGroup, LoopProgress
 
 # The pool is never touched — `_run_maintenance` / `_maintenance_with_liveness` are faked.
 _FAKE_POOL: Any = object()
@@ -425,7 +425,7 @@ def test_run_gives_each_loop_its_own_progress_tracker(monkeypatch: pytest.Monkey
     monkeypatch.setattr(daemon, "start_health_server", fake_start)
     monkeypatch.setattr(daemon, "stop_health_server", fake_stop)
     monkeypatch.setattr(daemon, "health_port", fake_health_port)
-    monkeypatch.setattr(daemon.shared.db, "pool", lambda: pool)
+    monkeypatch.setattr(daemon.base.db, "pool", lambda: pool)
     monkeypatch.setattr(daemon, "_dispatch_loop", dispatch)
     monkeypatch.setattr(daemon, "_checkpoint_trim_loop", trim)
     monkeypatch.setattr(daemon, "_resolution_loop", resolution)

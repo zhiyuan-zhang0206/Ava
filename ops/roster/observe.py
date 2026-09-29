@@ -10,11 +10,11 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 
+from base.cluster.machine import MachineRoles
+from base.host.net.resilience import ExponentialBackoff, Policy, http_classifier, retry
+from base.host.proc import process_alive
 from ops.roster.service_spec import ServiceSpec
 from ops.spec import services_for_capabilities_annotated
-from shared.cluster.machine import MachineRoles
-from shared.host.net.resilience import ExponentialBackoff, Policy, http_classifier, retry
-from shared.host.proc import process_alive
 
 _log = logging.getLogger(__name__)
 

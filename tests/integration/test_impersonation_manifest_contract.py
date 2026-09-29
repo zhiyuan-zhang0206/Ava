@@ -15,11 +15,10 @@ import pytest
 from fastapi.testclient import TestClient
 from psycopg import sql
 
-from gateway.alerts import router as alerts_router
-from shared.agents import impersonation as leases
-from shared.agents.impersonation import history as history
-from shared.agents.impersonation.events import _validate_event
-from shared.agents.impersonation_manifest import (
+from base.agents import impersonation as leases
+from base.agents.impersonation import history as history
+from base.agents.impersonation.events import _validate_event
+from base.agents.impersonation_manifest import (
     LocalParticipant,
     alert_if_participant_still_open,
     bind_local_participant,
@@ -33,15 +32,16 @@ from shared.agents.impersonation_manifest import (
     stage_central_expected_event,
     unbind_local_participant,
 )
-from shared.agents.messages.caller_identity import CallerIdentity
-from shared.cluster.machine import machine_name
-from shared.config import settings
-from shared.db import create_agent
-from shared.native_process.runtime_incarnation import RuntimeIncarnation
-from shared.telemetry import Event
-from shared.telemetry.audit_events import prepare_event_log
+from base.agents.messages.caller_identity import CallerIdentity
+from base.cluster.machine import machine_name
+from base.config import settings
+from base.db import create_agent
+from base.native_process.runtime_incarnation import RuntimeIncarnation
+from base.telemetry import Event
+from base.telemetry.audit_events import prepare_event_log
+from gateway.alerts import router as alerts_router
+from tests.base import test_history as history_cases
 from tests.impersonation_support import attested_caller, recorded_tree
-from tests.shared import test_history as history_cases
 
 _CERTIFICATION_SECRET = "test-manifest-certification-secret-000001"  # noqa: S105 -- test proof
 
@@ -238,7 +238,7 @@ def test_manual_is_pending_manual_while_nonempty_legacy_never_certifies(
         "source": f"agent:{owner.agent_id}",
         "attributes": {"fn": "ava.agents.send_message", "duration": 0.1},
     }
-    from shared.agents.impersonation.events import consume_events
+    from base.agents.impersonation.events import consume_events
 
     assert consume_events(owner.agent_id, 1, [event]) == 1
     leases.release(str(legacy["id"]), attested_caller(legacy), "Legacy work completed")
@@ -531,7 +531,7 @@ def test_runner_cannot_rewrite_ledgers_or_stamp_without_certification_procedure(
     owner: RuntimeIncarnation,
     v1_lease: dict[str, Any],
 ) -> None:
-    from shared.agents.impersonation_manifest_grants import grant_manifest_runner_access
+    from base.agents.impersonation_manifest_grants import grant_manifest_runner_access
 
     runner = "manifest_contract_runner"
     db_conn.execute(sql.SQL("CREATE ROLE {}").format(sql.Identifier(runner)))
@@ -616,9 +616,9 @@ def test_cli_impersonate_send_outbox_retry_certifies_exactly_once(
     import httpx
 
     from ava.impersonation import replay as reader
+    from base.agents.messages import delivery_outbox as outbox
     from cli.commands.agents.impersonation import _send
     from services.agent_host.impersonation_events import reconcile_one
-    from shared.agents.messages import delivery_outbox as outbox
 
     class SingleConnectionPool:
         def connection(self, *, timeout: float | None = None) -> Any:
@@ -644,13 +644,13 @@ def test_cli_impersonate_send_outbox_retry_certifies_exactly_once(
     monkeypatch.setattr(outbox, "limits", lambda: snapshot)
     outbox._reset_caches_for_tests()
     monkeypatch.setattr(
-        "shared.native_process.ownership.process_metadata", lambda: attested_caller(v1_lease)
+        "base.native_process.ownership.process_metadata", lambda: attested_caller(v1_lease)
     )
 
     def gateway_down(*_args: Any, **_kwargs: Any) -> Any:
         raise httpx.ConnectError("gateway unavailable")
 
-    monkeypatch.setattr("shared.host.net.http_dial.post", gateway_down)
+    monkeypatch.setattr("base.host.net.http_dial.post", gateway_down)
     args = argparse.Namespace(
         agent_id=owner.agent_id,
         session_id=0,

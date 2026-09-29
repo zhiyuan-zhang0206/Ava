@@ -24,9 +24,9 @@ Postgres port when off (5433). There is no separate pooler-port env key
 the data-plane bring-up alone. The admin plane — migrations, `pg_dump`,
 provisioning, PITR — is the ONLY direct-Postgres consumer. On a locally owned
 plane it dials the home's owner-only socket as the OS user, acting as the
-schema owner for schema work, dumps and PITR reads (`shared.db.pg_admin`), never
+schema owner for schema work, dumps and PITR reads (`base.db.pg_admin`), never
 the owner's own login or a write generation; a remote-managed plane uses its
-provider URL (`shared.db.direct_db_url`). Everything else dials `AVA_DB_URL`
+provider URL (`base.db.direct_db_url`). Everything else dials `AVA_DB_URL`
 as-is. Flipping `AVA_PGBOUNCER_ENABLED=false` is the kill-switch:
 converge rewrites the URL to the direct port on the next `ava start` and the
 pooler never starts.
@@ -66,7 +66,7 @@ retained image.
 **Identity is the home path** — there is no cluster name; the display label is
 the home's basename. A cluster's database and the Postgres role that owns it
 share one identifier, carried by its `.env` connection URLs **as data**
-(`shared.cluster.identity_from_url`): a fresh birth writes the fixed `ava`;
+(`base.cluster.identity_from_url`): a fresh birth writes the fixed `ava`;
 prod stays on its historical `ava_main` until an ops rename edits the URLs.
 The role is `NOLOGIN NOSUPERUSER` without a password, owning only its own
 database; that instance's own `initdb` superuser provisions it over the private
@@ -76,7 +76,7 @@ No application process ever logs in as it.
 A **unit** is one install of Ava under its own `$AVA_HOME`, and `AVA_HOME`
 locates the unit's `.env`, logs, memory pool, milvus data, pidfiles, etc., all of
 which derive from it. The home is resolved **checkout-anchored** by
-`shared/host/env/dotenv_boot.py:resolve_ava_home` — see "How a unit finds its home"
+`base/host/env/dotenv_boot.py:resolve_ava_home` — see "How a unit finds its home"
 below — so a bare invocation (ad-hoc script, subagent) inside a dev worktree never
 silently falls back to the prod home:
 
@@ -162,7 +162,7 @@ rotate the write generation, issue every unit a new bundle and revoke the lost
 unit's enrollment; rotate the human secret (telemetry token), the Redis runtime
 password and the provider keys as well. A networked home cannot rotate its
 write generation until networked release operations land (slices dbgen-8 and
-FC-9). Detail: [[shared/cluster/authority/unit-enrollment.ava.okf.md]].
+FC-9). Detail: [[base/cluster/authority/unit-enrollment.ava.okf.md]].
 
 Its DB/Redis connection facts are not cached locally: every runner process
 fetches them at Settings construction. Start the gateway first, then the
@@ -256,7 +256,7 @@ agent-runners stay single-home `~/.ava` and reach that gateway + DB/Redis over
 the private network. A larger deployment splits the gateway onto its own
 gateway-only host (the explicit `--role gateway` install).
 
-**How a unit finds its home** (`shared/host/env/dotenv_boot.py:resolve_ava_home`, run
+**How a unit finds its home** (`base/host/env/dotenv_boot.py:resolve_ava_home`, run
 before `Settings` is constructed). Which checkout the code lives in is the
 prod/dev discriminator, so resolution is anchored to `__file__`, not cwd —
 identical no matter where a bare script is launched. Precedence:
@@ -280,7 +280,7 @@ identical no matter where a bare script is launched. Precedence:
    client (`ava agents ls`, ...) under the deliberate "explicit env wins" rule.
    `load_ava_env` plants a sentinel `AVA_DB_URL`
    (`UNANCHORED_DB_SENTINEL`, an unreachable loopback URL) so a DB
-   connection fails loud — `shared/db.connect`/`pool` raise `UnanchoredHomeError`.
+   connection fails loud — `base/db.connect`/`pool` raise `UnanchoredHomeError`.
    Lint scripts, codegen hooks and ad-hoc `python -c` imports keep working from
    any checkout; every verb that acts on "this checkout's cluster" (`start`,
    `stop`, `restart`, `converge`, `config` writes, service launches)
@@ -316,7 +316,7 @@ themselves. `ava config get [KEY]` / `ava config unset KEY` round it out. Cluste
 values reach agent-runners + agents by bootstrap on their next restart; a rotated key
 needs only an agent restart, not a gateway restart. Which bucket a field falls
 in is declared on the field itself — every `Settings` field carries a `scope`
-(`cluster-pinned` / `cluster-default` / `host` / `agent`) in `shared/config/`,
+(`cluster-pinned` / `cluster-default` / `host` / `agent`) in `base/config/`,
 and `BOOTSTRAP_FIELDS` is derived from it.
 
 Every official `.env` write is audited in `$AVA_HOME/.env.audit.jsonl` (0600): site, actor
@@ -392,7 +392,7 @@ with `scripts/cutover_adopt_home.py --home <home> --start` (the held first start
 ([cutover home adoption](cutover-home-adoption.md)). Settings never rewrites a
 database credential. On the same load, a data-plane URL whose host is this machine's own
 reachable address (`AVA_MACHINE_HOST`) dials `127.0.0.1` instead
-(`shared/config/data_plane.py`): self-dial never leaves the box. The `.env` value,
+(`base/config/data_plane.py`): self-dial never leaves the box. The `.env` value,
 bootstrap payload, and registered address stay untouched, so remote runners keep dialing
 the gateway's real address.
 
@@ -402,7 +402,7 @@ as the schema owner). An application role reproduction uses the active generatio
 login from `$AVA_HOME/db-authority/generations/<n>.json` (0600; `<n>` is
 `ledger.json`'s `active.number`) — read it, never paste it into tickets or argv.
 
-**Capability groups and write generations** (Task #1236, `shared/cluster/authority/`):
+**Capability groups and write generations** (Task #1236, `base/cluster/authority/`):
 application privileges live on two `NOLOGIN` groups, never on a login. `ava_gateway`
 holds DML on every table, `USAGE, SELECT, UPDATE` on sequences, `EXECUTE` on every
 routine and PostgreSQL 17 `MAINTAIN` on the checkpoint tables (the blob vacuum fails
@@ -528,7 +528,7 @@ is enabled, see below), a **probe of the configured cross-machine transfer backe
 (`AVA_CROSS_MACHINE_TRANSFER_BACKEND`, `drive` by default), and **the ability to open
 and merge pull requests on the memory pool repo** (the nightly memory consolidation
 runs `gh` + `git push` on each machine; the gate `_ensure_github_pr` →
-`shared/deploy/git/github_pr.py:github_pr_blocker` fails loud unless `gh` is installed,
+`base/deploy/git/github_pr.py:github_pr_blocker` fails loud unless `gh` is installed,
 authenticated, and has write access to the pool repo). The transfer probe + GitHub-PR
 gate are **split-deployment-only**: both are auto-skipped when this unit also carries
 `gateway` (a single box has no peer to hand files to and consolidates memory locally);
@@ -539,7 +539,7 @@ that does not want the probe can set `AVA_CROSS_MACHINE_TRANSFER_BACKEND=none`
 host whose memory must stay on-box instead runs `AVA_MEMORY_KEEP_LOCAL=true`: the pool
 becomes a local-only git repo (no remote, no push / pull / PR), and the GitHub-PR gate
 is skipped regardless of role. The transfer probe
-(`_ensure_cross_machine_transfer` → `shared/host/converge/google_drive.py:find_writable_google_drive`)
+(`_ensure_cross_machine_transfer` → `base/host/converge/google_drive.py:find_writable_google_drive`)
 is how the fleet does cross-machine file transfer without a relay when Drive is present:
 every agent-runner mounts the same Google Drive account, so an agent hands a file to
 another machine by dropping it in its local Drive folder (the synced `My Drive` area —
@@ -592,11 +592,11 @@ nodes co-located with their code:
 
 | What | Node |
 |---|---|
-| `$AVA_HOME` layout, what derives from the home | `shared/paths/paths.ava.okf.md` |
-| plugin enable config (`plugins_config.json`) | `shared/packages/plugins/enable_config.ava.okf.md` |
-| `installed.json` schema, installable shapes, the scanner gate | `shared/packages/extensions/install_registry.ava.okf.md` |
+| `$AVA_HOME` layout, what derives from the home | `base/paths/paths.ava.okf.md` |
+| plugin enable config (`plugins_config.json`) | `base/packages/plugins/enable_config.ava.okf.md` |
+| `installed.json` schema, installable shapes, the scanner gate | `base/packages/extensions/install_registry.ava.okf.md` |
 | `ava plugins` / `skill` / `mcp` verbs, MCP merge layers, secret channel | `cli/commands/extensions/packages.ava.okf.md` |
-| machine name, capability set, `machines` table, spawn-target 400 invariant | `shared/cluster/machine.ava.okf.md` |
+| machine name, capability set, `machines` table, spawn-target 400 invariant | `base/cluster/machine.ava.okf.md` |
 | which services each capability contributes | `services/services.ava.okf.md` |
 
 Three operational consequences worth stating here:
@@ -613,9 +613,9 @@ Three operational consequences worth stating here:
 
 Ava's long-running **daemons** are each kept alive in their own named session — never crammed into one
 session with multiple windows. On POSIX they run as **detached native processes** (double-forked onto init by
-the process supervisor, `shared/sessions/posixproc.py`). Agent
+the process supervisor, `base/sessions/posixproc.py`). Agent
 interactive shells / watchers each run in their own detached pty host
-(`shared/sessions/pty/` — one `pty.fork()` `bash -l -i` + pyte screen capture +
+(`base/sessions/pty/` — one `pty.fork()` `bash -l -i` + pyte screen capture +
 byte transcript under `$AVA_HOME/logs/` per host, session ops over the
 session's own socket at `$AVA_HOME/run/pty/<name>.sock`; hosts reparent to
 init at creation, so they are outside the service roster. Pause and update
@@ -627,7 +627,7 @@ progress and turn events for execution state. Verify actual process/session
 inventory as well as the desired roster when stopping an older release.
 
 Session names follow the pattern `ava-<service>` (composed by
-`shared/cluster/derive.py:session_name()`; neither machine nor cluster is encoded —
+`base/cluster/derive.py:session_name()`; neither machine nor cluster is encoded —
 per-home hosting scopes them: the `$AVA_HOME/run/sessions/` records for native ones, the PTY
 supervisor socket for agent shells / watchers).
 
@@ -1102,7 +1102,7 @@ sides derive the CDP port + socket path from `settings.browser_cdp_port`
   the browser session and watchdog healthcheck engage automatically. Set
   `AVA_BROWSER_ENABLED=false` to explicitly opt out. The display verdict is
   computed consistently across processes: `$DISPLAY` / `$WAYLAND_DISPLAY` are
-  passed through both env builders (`shared/sessions/env_forwarding.py`) —
+  passed through both env builders (`base/sessions/env_forwarding.py`) —
   forwarded into every daemon service session, and carried in the detached agent's
   inherited env dict (`agent_spawn_env_dict`) — so the watchdog and the agent see
   the same display the operator's shell does. Without this a headed Linux / WSLg
@@ -1110,7 +1110,7 @@ sides derive the CDP port + socket path from `settings.browser_cdp_port`
   can actually run.
 - **Capability-gated at two layers, observably**: (1) `_services_for_roles`, the
   watchdog's `_checks_for_capability`, and `agent/warmup.py` all gate on
-  `browser_incapability()` (`shared/host/system/probes.py`) — the single source of
+  `browser_incapability()` (`base/host/system/probes.py`) — the single source of
   the display + Chrome-binary + npx check, returning the reason a prong is missing
   (or None when capable). A host missing any of the three never starts the browser
   session or its healthcheck, and warmup never polls a CDP port that will not
@@ -1428,11 +1428,11 @@ tree. Failed closure retains custody; systemd cannot prove orphan closure after
 abrupt root death. There is no convergence shell script or duplicate proxy probe.
 
 **OS-scheduled jobs.** The platform scheduler runs the health probe
-(`shared/host/system/cron.py`), boot autostart (`shared/host/system/autostart.py`),
-daily rotate-then-retain log maintenance (`shared/host/system/logs_job.py`), and the
-per-machine content-refresh pass (`shared/host/system/packages_job.py`)
+(`base/host/system/cron.py`), boot autostart (`base/host/system/autostart.py`),
+daily rotate-then-retain log maintenance (`base/host/system/logs_job.py`), and the
+per-machine content-refresh pass (`base/host/system/packages_job.py`)
 — as launchd LaunchAgents on macOS, systemd boot plus scheduled maintenance on
-Linux, and `\Ava\<home-slug>\` tasks on Windows (`shared/host/system/schtasks.py`). Linux
+Linux, and `\Ava\<home-slug>\` tasks on Windows (`base/host/system/schtasks.py`). Linux
 automatic startup requires systemd. Converge registers and enables the native
 home unit without starting a recursive caller; ordinary interactive start may
 launch root directly. The unit carries the exact home, checkout and registry.
@@ -1654,7 +1654,7 @@ programmatic rotation API at all.
 Kernel-side LLM calls go through `llm.astream()`; a LangChain callback publishes
 chat / code / reasoning start + delta to the Redis `ava:events` channel on each
 chunk. The full role table (payload fields, publisher, when each fires) is in
-`shared/events/live/live.ava.okf.md`; interrupt semantics for cancel / terminate are in
+`base/events/live/live.ava.okf.md`; interrupt semantics for cancel / terminate are in
 `agent/graph/graph.ava.okf.md`.
 
 **Lifecycle command residue:** never hand-clean a stuck lifecycle command (a row
@@ -1709,7 +1709,7 @@ resources. It fans out:
   Tempo) + local JSONL mirror
   (`$AVA_HOME/traces/spans.jsonl`, rotated `spans-<ISO>.jsonl`).
 - **logs** — every unified event (the emitter's write path) dual-writes to
-  OTLP logs (Loki) via `shared/telemetry/otlp/telemetry_otlp.py` → sidecar → Loki
+  OTLP logs (Loki) via `base/telemetry/otlp/telemetry_otlp.py` → sidecar → Loki
   (`AVA_TELEMETRY_LOKI_URL` base, `/otlp` appended). The emitter makes
   `event_name`, `cluster` and, when present, `agent_id` resource dimensions per
   record before the SDK serializes a batch: Loki indexes those resource
@@ -1782,9 +1782,9 @@ newly emitted rows, since indexed-era data from before the rollout is immutable.
 
 **One time-series store.** Prometheus holds the host history; nothing else
 retains one. `ava status` and the status page carry a single LIVE psutil
-reading per machine (`shared/host/resource_sample.py`) — the degraded answer for a
+reading per machine (`base/host/resource_sample.py`) — the degraded answer for a
 deployment whose LGTM backend is down or was never deployed — and link to the
-Grafana host dashboard for the trend. The retired `shared/resource_monitor.py`
+Grafana host dashboard for the trend. The retired `base/resource_monitor.py`
 kept a 300-sample ring buffer per process; two samplers meant two answers to
 "what was the CPU on machine X" that drift apart, and its history evaporated
 on every restart anyway.
@@ -1861,13 +1861,13 @@ and the collector's
 enqueue-failure counters make that loss visible. Every send attempt is bounded
 to five seconds and every exporter retries for at most 15 minutes before its
 counted failure path drops the batch. Cumulative metrics repair their totals on
-a later successful sample. `shared/telemetry/otlp/telemetry_otlp.py`
+a later successful sample. `base/telemetry/otlp/telemetry_otlp.py`
 also sheds (counted) instead of blocking, so an unreachable sidecar never
 touches the main write path. Exporter IDs stay `otlphttp/tempo`,
 `otlphttp/loki` and `otlphttp/prometheus`; in particular, renaming Tempo/Loki
 would orphan their file_storage backlog during an upgrade.
 
-**Record** — `shared/telemetry/tracing.py:initialize_tracing`, gated by `AVA_TRACE_ENABLED`
+**Record** — `base/telemetry/tracing.py:initialize_tracing`, gated by `AVA_TRACE_ENABLED`
 (default **on**). Instrumentation is OpenLLMetry (`traceloop-sdk`); the sole span
 exporter is `OtlpJsonHttpSpanExporter`, which POSTs each export batch as one
 standard protobuf `ExportTraceServiceRequest` to the configured collector's
@@ -2051,7 +2051,7 @@ Agent loguru JSONL (`agent-{N}.log`) is not scraped — it already reaches Loki
 structured via OTLP.
 
 The emitter wiring behind that stream, the unified `events` schema (and its
-legacy `agent_events` mirror), and the monthly partitioning are in `shared/log/log.ava.okf.md`.
+legacy `agent_events` mirror), and the monthly partitioning are in `base/log/log.ava.okf.md`.
 
 ## Git hooks: pre-commit / pre-push
 

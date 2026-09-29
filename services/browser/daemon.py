@@ -11,7 +11,7 @@ that stays alive, so the Windows supervisor treats CDP reachability — not its
 child's exit — as the browser-liveness fact. Agents reach the browser over
 localhost CDP through the chrome-devtools-mcp plugin (`--browserUrl`).
 
-env overrides (via shared.config.settings):
+env overrides (via base.config.settings):
 - `AVA_BROWSER_ENABLED` — gate (the ava-browser session only starts when true)
 - `AVA_CHROME_BINARY` — explicit Chrome path; else the platform default
 
@@ -37,10 +37,10 @@ from pathlib import Path
 
 from loguru import logger
 
-from shared.config import settings
-from shared.host.system.probes import browser_incapability, resolve_chrome_binary
-from shared.native_process.os_platform import IS_WINDOWS
-from shared.paths import logs_dir
+from base.config import settings
+from base.host.system.probes import browser_incapability, resolve_chrome_binary
+from base.native_process.os_platform import IS_WINDOWS
+from base.paths import logs_dir
 
 from . import macos_readiness
 from . import profile as browser_profile
@@ -64,7 +64,7 @@ _CDP_WATCH_INTERVAL_S = 5.0
 def assert_browser_capable() -> None:
     """Raise RuntimeError with a precise, actionable message if this machine
     cannot host the shared headed browser. Called by the converge preflight and
-    main(). The capability check itself lives in shared.host.system.probes
+    main(). The capability check itself lives in base.host.system.probes
     (browser_incapability); this raises its reason so a launch fails loudly with
     the same wording the operator sees in `ava status`."""
     reason = browser_incapability()

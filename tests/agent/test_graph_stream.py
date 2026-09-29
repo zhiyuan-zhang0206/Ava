@@ -25,8 +25,8 @@ from langgraph.types import Command
 
 from agent.graph import exec_node, llm_node
 from agent.state import AgentState
-from shared.agents.context import AvaContext
-from shared.events.live.projection import EVENT_ADAPTER, ExecOutput, ExecStart
+from base.agents.context import AvaContext
+from base.events.live.projection import EVENT_ADAPTER, ExecOutput, ExecStart
 from tests.agent._fakes import make_fake_ops_pool
 
 
@@ -382,7 +382,7 @@ async def test_exec_node_protects_archives_referenced_by_its_current_state(
 ) -> None:
     """A real child exec cannot evict the previous output still in native context."""
     from agent.graph.exec import output
-    from shared.config import settings
+    from base.config import settings
 
     directory = tmp_path / ".exec_output"
     monkeypatch.setattr(output, "_overflow_dir", lambda: directory)

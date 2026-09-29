@@ -16,7 +16,7 @@ to the PITR prefix and to the logical dump root respectively. The role
 contracts stay separate (an adapter may serve several roles internally,
 but no caller gets a merged surface). Daemons take the settings-bound group; the restricted
 restore worker builds the group explicitly from its input protocol,
-which keeps its exec boundary free of ``shared.config``.
+which keeps its exec boundary free of ``base.config``.
 """
 
 from __future__ import annotations
@@ -400,7 +400,7 @@ def construct_store_group(backend: str, store_args: Mapping[str, str]) -> PitrSt
     every required one must be present -- a protocol drift is an error, never
     a TypeError from deep inside a constructor. The restricted restore worker
     and the operator drill both build their group this way, staying free of
-    ``shared.config``.
+    ``base.config``.
     """
     constructor = get_group_constructor_named(backend)
     parameters = inspect.signature(constructor).parameters
@@ -423,7 +423,7 @@ def construct_store_group(backend: str, store_args: Mapping[str, str]) -> PitrSt
 def get_store_group() -> PitrStoreGroup:
     """The settings-bound group for the PITR daemons
     (``AVA_PITR_STORE_BACKEND``, default ``gcs``)."""
-    from shared.config import settings
+    from base.config import settings
 
     config = settings.physical_backup
     name = config.pitr_store_backend

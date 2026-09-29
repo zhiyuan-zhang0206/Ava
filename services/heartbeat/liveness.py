@@ -56,18 +56,18 @@ from typing import Any, cast
 
 from psycopg_pool import ConnectionPool
 
-from ops import cluster_rpc
-from ops.cluster_status import ClusterStatus
-from shared.agents.observation.evidence import (
+from base.agents.observation.evidence import (
     LIVENESS_PASS_INTERVAL_S,
     MACHINE_OFFLINE_AFTER_FAILURES,
 )
-from shared.cluster.machines import list_agent_runners
-from shared.config import settings
-from shared.db.transaction import write_transaction
-from shared.deploy.state import cluster_lock, host_deploy_state
-from shared.deploy.transition import transition_severity
-from shared.events.live.announce import publish_agent_updated_sync
+from base.cluster.machines import list_agent_runners
+from base.config import settings
+from base.db.transaction import write_transaction
+from base.deploy.state import cluster_lock, host_deploy_state
+from base.deploy.transition import transition_severity
+from base.events.live.announce import publish_agent_updated_sync
+from ops import cluster_rpc
+from ops.cluster_status import ClusterStatus
 
 _log = logging.getLogger("services.heartbeat.liveness")
 
@@ -142,7 +142,7 @@ def _machine_alert_edges(
     (DB errors propagate to the caller's per-pass catch, IM errors are
     swallowed by ``notify_im``).
     """
-    from shared.telemetry.alerts import (
+    from base.telemetry.alerts import (
         display_language,
         fingerprint,
         notify_im,

@@ -73,7 +73,7 @@ def _write(repo: Path, rel: str, payload: dict[str, object]) -> None:
 
 
 def test_derived_version_resolves_from_fixture_commit(repo: Path) -> None:
-    from shared.deploy.git import host_version
+    from base.deploy.git import host_version
 
     assert host_version.host_version(repo) == "2026.1.2"
 

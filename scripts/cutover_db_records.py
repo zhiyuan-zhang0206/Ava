@@ -16,7 +16,7 @@ recorded legacy `(pid, birth)` for `scripts/cutover_inventory.py --attest`.
 Without `--check` the script dry-runs the repairs; `--execute` applies them.
 Every refusal is decided before a run's first write. The steps (`STEPS`), in
 order: `pending`, `lease`, `posture`, `units`, `incarnations` (retired-shape
-rows to the closed-predecessor form, `shared.agents.incarnation.predecessor_closure`) and
+rows to the closed-predecessor form, `base.agents.incarnation.predecessor_closure`) and
 `identities` (a minted hosted identity for identity-less terminated rows, why:
 decisions/2026-09-28-legacy-terminated-agents-resurrectable-at-cutover.md).
 Each effect compares its row with the before and after images recorded at
@@ -53,6 +53,10 @@ import psycopg
 from psycopg.types.json import Jsonb
 from pydantic import TypeAdapter, ValidationError
 
+from base.agents.incarnation.predecessor_closure import ClosureEvidence, close_retired_predecessor
+from base.agents.incarnation.resources import IncarnationResources, ResourceEvidenceError
+from base.db.pg_admin import OwnerAuthority
+from base.host.private_storage import ensure_private_dir, write_private_bytes
 from scripts.cutover_db_survey import (
     EVIDENCE,
     FREE_LEASE,
@@ -84,10 +88,6 @@ from scripts.cutover_inventory import (
     registry_path,
 )
 from scripts.cutover_inventory import read_journal as read_adoption
-from shared.agents.incarnation.predecessor_closure import ClosureEvidence, close_retired_predecessor
-from shared.agents.incarnation.resources import IncarnationResources, ResourceEvidenceError
-from shared.db.pg_admin import OwnerAuthority
-from shared.host.private_storage import ensure_private_dir, write_private_bytes
 
 VERSION = 2  # 2: each run names the adoption it belongs to
 RECORD = f"{ARCHIVE}/db-records"
@@ -441,7 +441,7 @@ def adoption(home: Path) -> dict[str, str] | None:
 
 def read_journal(home: Path) -> dict[str, Any] | None:
     """The journal; refuses one whose last run belongs to another adoption of the home."""
-    from shared.deploy.release.verified_file import regular_bytes
+    from base.deploy.release.verified_file import regular_bytes
 
     path = home / JOURNAL
     try:
@@ -582,8 +582,8 @@ def owner_authority(home: Path, registry: Path) -> OwnerAuthority:
     from dotenv import dotenv_values
     from psycopg.conninfo import conninfo_to_dict
 
-    from shared.cluster import load_registry, record_postgres_port
-    from shared.db.pg_admin import pg_socket_path
+    from base.cluster import load_registry, record_postgres_port
+    from base.db.pg_admin import pg_socket_path
 
     record = load_registry(path=registry).get(str(home))
     if record is None:
@@ -602,7 +602,7 @@ def owner_authority(home: Path, registry: Path) -> OwnerAuthority:
 def session(home: Path, registry: Path, *, write: bool) -> Generator[psycopg.Connection[Any]]:
     """The owner session. Read modes also run against the legacy postmaster, which
     has no custody record; `--execute` binds the session to the home's postmaster."""
-    from shared.db.pg_admin import owner_session
+    from base.db.pg_admin import owner_session
 
     authority = owner_authority(home, registry)
     with owner_session(
@@ -725,7 +725,7 @@ def _check(conn: psycopg.Connection[Any], home: Path, inputs: Inputs, rows_out: 
 
 
 def _run(conn: psycopg.Connection[Any], home: Path, inputs: Inputs) -> int:
-    from shared.native_process.os_platform import file_lock
+    from base.native_process.os_platform import file_lock
 
     ensure_private_dir(home / ARCHIVE)
     ensure_private_dir(home / RECORD)

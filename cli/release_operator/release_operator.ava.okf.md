@@ -24,7 +24,7 @@ ava cluster release prepare --commit FULL_COMMIT_SHA --inputs LOCAL_INPUTS_JSON 
 Calls `cli.release_prepare.prepare_image` ([[cli/release_prepare/release_prepare.ava.okf.md]])
 with `work` at `$AVA_HOME/releases/work/<commit>` and `store` at
 `$AVA_HOME/releases`, creating both as owner-only directories if missing.
-`--repo` defaults to this checkout's own root (`shared.paths.repo_root`).
+`--repo` defaults to this checkout's own root (`base.paths.repo_root`).
 
 `--inputs` is the exact `LocalInputs` document the standalone entry point
 already required — a managed Python tree, a flat dependency wheelhouse, and
@@ -97,7 +97,7 @@ The selection commits before the boot action installs; if the install fails
 (`sudo -n` wanting a password) or the process dies in between, re-running
 adopt with the same receipt keeps the selection and finishes the install. A
 release operation that holds startup refuses adopt as it refuses `ava start`
-(`shared.deploy.release.operation.require_start_authorized`): one that activated its
+(`base.deploy.release.operation.require_start_authorized`): one that activated its
 candidate leaves the same pointer, and its boot action is not adopt's to
 replace. It holds the home's start-intent and lifecycle locks throughout.
 

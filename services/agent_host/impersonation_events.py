@@ -6,14 +6,14 @@ from datetime import UTC, datetime
 from psycopg.rows import dict_row
 
 from ava.impersonation.replay import consume_recorded_events, post_completion_integrity_breach
-from shared.agents.impersonation_manifest import monitor_manifest_health
-from shared.cluster.machine import machine_name
-from shared.config import settings
-from shared.db.transaction import write_transaction
-from shared.deploy.maintenance import admission
-from shared.log import logger
-from shared.telemetry.alerts import upsert_alert
-from shared.telemetry.loki_index_labels import retention_floor
+from base.agents.impersonation_manifest import monitor_manifest_health
+from base.cluster.machine import machine_name
+from base.config import settings
+from base.db.transaction import write_transaction
+from base.deploy.maintenance import admission
+from base.log import logger
+from base.telemetry.alerts import upsert_alert
+from base.telemetry.loki_index_labels import retention_floor
 
 
 def reconcile_one() -> None:

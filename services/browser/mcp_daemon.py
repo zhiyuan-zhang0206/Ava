@@ -61,6 +61,9 @@ from mcp import ClientSession, types
 from mcp.shared.exceptions import MCPError
 from mcp.types import CONNECTION_CLOSED, REQUEST_TIMEOUT
 
+from base.config import settings
+from base.log import logger
+from base.paths import chrome_mcp_socket
 from services.browser import page_lifecycle
 from services.browser.gateway_session import (
     _navigates_to_gateway,
@@ -87,9 +90,6 @@ from services.browser.page_lifecycle import (
     touch_agent_page,
 )
 from services.browser.protocol import Request, Response
-from shared.config import settings
-from shared.log import logger
-from shared.paths import chrome_mcp_socket
 
 # A single tool result (screenshot / DOM snapshot) can be multi-MB on one line;
 # lift the stream buffer cap well above StreamReader's 64KiB default.
@@ -648,7 +648,7 @@ def main() -> None:
     # per-daemon log file plus the event pipeline, so this daemon's expiry /
     # renewal events land attributed to `browser-mcp` and an uncaught
     # traceback is postmortem-able. Idempotent.
-    from shared.log import init_gateway_process
+    from base.log import init_gateway_process
 
     init_gateway_process(name="browser-mcp")
     asyncio.run(run())

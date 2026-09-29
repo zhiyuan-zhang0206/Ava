@@ -337,7 +337,7 @@ def test_run_record_failure_does_not_break_the_run(
     # schedules-row writes (status/last_error) keep working.
     import gateway.schedule_runner as sr
 
-    real_connect = sr.shared.db.connect
+    real_connect = sr.base.db.connect
 
     class _FlakyCursor:
         """Cursor proxy that fails every schedule_runs statement."""
@@ -392,7 +392,7 @@ def test_run_record_failure_does_not_break_the_run(
     def _flaky_connect(*args: object, **kwargs: object) -> _Flaky:
         return _Flaky(real_connect(*args, **kwargs))
 
-    monkeypatch.setattr(sr.shared.db, "connect", _flaky_connect)
+    monkeypatch.setattr(sr.base.db, "connect", _flaky_connect)
     sid = _insert_schedule(db_conn, script="x = 1\n")
 
     assert run(sid) == 0
@@ -410,7 +410,7 @@ def test_run_completed_marker_failure_keeps_run_row_honest(
     # same safe side as before, just without a false crash record.
     import gateway.schedule_runner as sr
 
-    real_connect = sr.shared.db.connect
+    real_connect = sr.base.db.connect
 
     class _FlakyCursor:
         """Cursor proxy that fails only the completed-marker statement."""
@@ -465,7 +465,7 @@ def test_run_completed_marker_failure_keeps_run_row_honest(
     def _flaky_connect(*args: object, **kwargs: object) -> _Flaky:
         return _Flaky(real_connect(*args, **kwargs))
 
-    monkeypatch.setattr(sr.shared.db, "connect", _flaky_connect)
+    monkeypatch.setattr(sr.base.db, "connect", _flaky_connect)
     sid = _insert_schedule(db_conn, script="x = 1\n")
 
     assert run(sid) == 0
@@ -777,7 +777,7 @@ def test_stall_verdict_closes_run_row(
     run_id = sr._record_run_start(sid)
     exited: list[int] = []
     monkeypatch.setattr(sr.os, "_exit", exited.append)
-    monkeypatch.setattr(sr.shared.host.proc, "kill_process_tree", Mock())
+    monkeypatch.setattr(sr.base.host.proc, "kill_process_tree", Mock())
 
     sr._stall_action(sid, "stalled in foo", run_id)
 

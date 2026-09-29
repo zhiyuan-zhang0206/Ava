@@ -16,7 +16,7 @@ import psycopg
 import pytest
 
 import ava
-from shared.config import set_field, settings
+from base.config import set_field, settings
 from tests.conftest import spawn_agent
 
 
@@ -220,8 +220,8 @@ class TestRestart:
         overlay column and the restart payload both carry the fallback."""
         from dataclasses import replace
 
-        from shared.lm.plugin_providers import ensure_provider_plugins_loaded
-        from shared.lm.registry import MODELS
+        from base.lm.plugin_providers import ensure_provider_plugins_loaded
+        from base.lm.registry import MODELS
 
         ensure_provider_plugins_loaded()
         model = "deepseek-retired-fixture"
@@ -262,7 +262,7 @@ class TestPauseHeartbeat:
         emits the heartbeat_paused event used by the inspector's Last Pause."""
         ava.agent_identity._agent_id = spawn_agent()  # self identity
         ava.self.pause_heartbeat(1800)
-        from shared import telemetry
+        from base import telemetry
 
         telemetry.sync()  # the event lands via the unified emitter's drain
         db_conn.rollback()  # fresh snapshot — the emitter wrote on its own connection
@@ -288,7 +288,7 @@ class TestPauseHeartbeat:
         from datetime import UTC as _UTC
         from datetime import datetime as _dt
 
-        from shared.paths import logs_dir
+        from base.paths import logs_dir
 
         day = _dt.now(_UTC).strftime("%Y%m%d")
         path = logs_dir() / f"events-{day}.jsonl"
@@ -314,7 +314,7 @@ class TestPauseHeartbeat:
     ) -> None:
         """Invalid duration must not write or emit a heartbeat pause event."""
         ava.agent_identity._agent_id = spawn_agent()
-        from shared import telemetry
+        from base import telemetry
 
         def _unexpected_emit(_category: str, event_name: str, **_kwargs: object) -> None:
             if event_name != "sdk_call":

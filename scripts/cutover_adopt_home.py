@@ -68,6 +68,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
 
+from base import cluster
+from base.host.private_storage import ensure_private_dir, write_private_bytes
 from cli.cutover_hold import (
     ADOPTION_JOURNAL,
     CUTOVER_HOLDER_PREFIX,
@@ -106,8 +108,6 @@ from scripts.cutover_legacy_jobs import (
     retire_launchd,
     retire_unit,
 )
-from shared import cluster
-from shared.host.private_storage import ensure_private_dir, write_private_bytes
 
 _AUDIT = "cutover_adopt_home"
 
@@ -211,9 +211,9 @@ def _archive(home: Path, effect: dict[str, Any]) -> None:
 
 def _create_hold(home: Path, journal: dict[str, Any]) -> None:
     """The cutover hold: the existing pause-owner journal, maintenance phase `stopped`."""
-    from shared.deploy.maintenance import pause_owner
-    from shared.deploy.maintenance.state import MaintenanceHold
-    from shared.native_process.os_platform import file_lock
+    from base.deploy.maintenance import pause_owner
+    from base.deploy.maintenance.state import MaintenanceHold
+    from base.native_process.os_platform import file_lock
 
     holder, at = journal["hold"]["holder"], journal["hold"]["acquired_at"]
     path = home / PAUSE_OWNER
@@ -241,7 +241,7 @@ def _create_hold(home: Path, journal: dict[str, Any]) -> None:
 
 def _require_hold(home: Path, journal: dict[str, Any], phase: str) -> None:
     """The adopted legacy hold is still exactly the one the journal recorded."""
-    from shared.deploy.maintenance import pause_owner
+    from base.deploy.maintenance import pause_owner
 
     holder, at = journal["hold"]["holder"], datetime.fromisoformat(journal["hold"]["acquired_at"])
     current = pause_owner.read_for_home(home)
@@ -262,8 +262,8 @@ def _settle_receipts(home: Path, journal: dict[str, Any], effect: dict[str, Any]
     import getpass
     import os
 
-    from shared.deploy.maintenance import pause_owner
-    from shared.native_process.os_platform import file_lock
+    from base.deploy.maintenance import pause_owner
+    from base.native_process.os_platform import file_lock
 
     holder, at = journal["hold"]["holder"], datetime.fromisoformat(journal["hold"]["acquired_at"])
     classes = effect["receipts"]
@@ -316,7 +316,7 @@ def _record_complete(registry: Path, home: Path, ports: dict[str, int]) -> None:
 
 
 def _record_retire(registry: Path, home: Path, before: dict[str, Any]) -> None:
-    from shared.cluster.registry import _dump_registry
+    from base.cluster.registry import _dump_registry
 
     with cluster.registry_lock(path=registry):
         records = cluster.load_registry(path=registry)
@@ -354,7 +354,7 @@ def _handlers(
     facts: Facts, inputs: Inputs, host: Host, journal: dict[str, Any]
 ) -> dict[str, Handler]:
     """One idempotent handler per effect kind the planner emits."""
-    from shared.host.env.dotenv_file import remove_env, upsert_env
+    from base.host.env.dotenv_file import remove_env, upsert_env
 
     home = facts.home
     jobs = home / ARCHIVE / "os-jobs"
@@ -517,7 +517,7 @@ def held_start(home: Path, db_capability: str | None = None) -> int:
     repair's first run would set `idle`. A runner's start joins through that
     gateway's bootstrap, so it cannot precede W7 either.
     """
-    from shared.deploy.maintenance import pause_owner
+    from base.deploy.maintenance import pause_owner
 
     journal = read_journal(home)
     if not _complete(journal):
@@ -558,10 +558,10 @@ def release(home: Path) -> int:
     the hold, so the smoke agent follows each release, gateway first, before the
     next unit is released (conventions/cutover-home-adoption.md).
     """
+    from base.deploy.maintenance import pause_owner
+    from base.deploy.release.operation import require_start_authorized
+    from base.paths import ava_home
     from cli.commands.lifecycle.maintenance import resume
-    from shared.deploy.maintenance import pause_owner
-    from shared.deploy.release.operation import require_start_authorized
-    from shared.paths import ava_home
 
     journal = read_journal(home)
     if not _complete(journal):
@@ -614,10 +614,10 @@ def _records_repair_missing(home: Path) -> str | None:
 def _start_inside_hold(
     home: Path, holder: str, at: datetime, phase: str, db_capability: str | None
 ) -> int:
-    from shared.agents.exit_codes import SERVICES_NOT_READY_EXIT_CODE
-    from shared.deploy.lifecycle import start_serving
-    from shared.deploy.maintenance import admission
-    from shared.paths import ava_home
+    from base.agents.exit_codes import SERVICES_NOT_READY_EXIT_CODE
+    from base.deploy.lifecycle import start_serving
+    from base.deploy.maintenance import admission
+    from base.paths import ava_home
 
     if ava_home().resolve() != home:
         raise RefusedError(f"this checkout's home is {ava_home()}, not {home}")
@@ -697,7 +697,7 @@ def main(
         registry = registry_path(home, args.registry)
         host = host or Host.current()
         if args.execute:
-            from shared.native_process.os_platform import file_lock
+            from base.native_process.os_platform import file_lock
 
             cutover_id = args.cutover_id or datetime.now(UTC).strftime("adopt-%Y%m%dT%H%M%SZ")
             with file_lock(home / "start-intent.lock", timeout_s=30):

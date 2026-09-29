@@ -14,11 +14,11 @@ from functools import partial
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from base.cluster import frontend_service_cmd
+from base.config import settings
+from base.daemon.health import DaemonProbe, health_port, probe_daemon, probe_home
+from base.paths import ava_home, otel_collector_binary, otel_collector_config
 from ops.roster.service_spec import _AGENT_RUNNER, _BOTH, _GATEWAY, ServiceSpec
-from shared.cluster import frontend_service_cmd
-from shared.config import settings
-from shared.daemon.health import DaemonProbe, health_port, probe_daemon, probe_home
-from shared.paths import ava_home, otel_collector_binary, otel_collector_config
 
 # The roster body moved verbatim and still resolves these policy helpers by
 # name. Lazy delegation keeps their definitions in ops.spec without introducing
@@ -81,7 +81,7 @@ def _browser_probe() -> DaemonProbe:
     nothing we control, so the browser is identified by the Chrome process
     running on this cluster's ``--user-data-dir`` — and both the profile path and
     the process-table identification already live in ``services/browser/``
-    (``profile.py`` / ``orphan.py``), which imports only ``shared``. Restating
+    (``profile.py`` / ``orphan.py``), which imports only ``base``. Restating
     either here would give the cluster's Chrome two definitions, which is the
     failure mode this whole batch is about. Lazy so importing the roster never
     pulls psutil in for a host that has no browser.
@@ -262,7 +262,7 @@ def build_services() -> tuple[ServiceSpec, ...]:
         ),
         ServiceSpec(
             session="frontend",
-            # Single source for the launch command: shared.cluster.frontend_service_cmd
+            # Single source for the launch command: base.cluster.frontend_service_cmd
             # — the watchdog respawn (services/healthchecks/frontend.py) builds the
             # SAME string, so the two launch paths cannot drift (they did once: the
             # respawn lost its `exec`, the session validator rejected the command,
@@ -451,14 +451,14 @@ def build_services() -> tuple[ServiceSpec, ...]:
         ),
     )
 
-    from services.healthchecks.lgtm import probe_backend
-    from shared.telemetry.lgtm_local import (
+    from base.telemetry.lgtm_local import (
         BACKENDS,
         HEALTH_PATHS,
         backend_urls,
         service_argv,
         service_input_paths,
     )
+    from services.healthchecks.lgtm import probe_backend
 
     urls = backend_urls()
     observability_services = tuple(

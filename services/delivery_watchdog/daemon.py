@@ -77,7 +77,16 @@ import psycopg
 from psycopg import sql
 from psycopg_pool import ConnectionPool
 
-import shared.db
+import base.db
+from base import telemetry
+from base.agents import AgentStatus
+from base.config import settings
+from base.config.service_read import current_field_values
+from base.daemon.health import Liveness, health_port, start_health_server, stop_health_server
+from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
+from base.daemon.shutdown import hard_exit as _hard_exit
+from base.db.transaction import write_transaction
+from base.log import init_gateway_process
 from services.delivery_watchdog import (
     dispatch_guard,
     resurrect_guard,
@@ -97,15 +106,6 @@ from services.delivery_watchdog.dead_letter import (
     dead_letter_stale_pending_terminated as dead_letter_stale_pending_terminated,
 )
 from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
-from shared import telemetry
-from shared.agents import AgentStatus
-from shared.config import settings
-from shared.config.service_read import current_field_values
-from shared.daemon.health import Liveness, health_port, start_health_server, stop_health_server
-from shared.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
-from shared.daemon.shutdown import hard_exit as _hard_exit
-from shared.db.transaction import write_transaction
-from shared.log import init_gateway_process
 
 _log = logging.getLogger("services.delivery_watchdog.daemon")
 
@@ -196,12 +196,12 @@ def select_terminated_owners_with_pending(
     `dead_letter_stale_pending_chats` closes — and with it the trigger, so no
     unbounded retry can resurrect-suicide the agent forever.
     """
-    from shared.agents.incarnation.lifecycle_acceptance import (
+    from base.agents.incarnation.lifecycle_acceptance import (
         FAILED_RESTART_FOR_CURRENT_TARGET,
         SYSTEM_NOTICE_SOURCE,
         SYSTEM_REAPED_CRASH_ROW,
     )
-    from shared.agents.recovery_breaker import RECOVERY_BREAKER_CLEAR
+    from base.agents.recovery_breaker import RECOVERY_BREAKER_CLEAR
 
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(
@@ -675,7 +675,7 @@ async def run() -> None:
     health = await start_health_server("delivery_watchdog", liveness=liveness)
     _log.info("[delivery] healthz listening on :%s", health_port("delivery_watchdog"))
 
-    pool = shared.db.pool()
+    pool = base.db.pool()
     try:
         await _scan_loop(pool, liveness)
     finally:
@@ -687,7 +687,7 @@ async def run() -> None:
 
 def main() -> None:
     """Entry point: init logger + run asyncio loop."""
-    from shared.deploy.schema.migrations import assert_schema_current
+    from base.deploy.schema.migrations import assert_schema_current
 
     # Pre-startup sanity: schema version must match code; raises SchemaVersionMismatch if not.
     assert_schema_current(settings.data_plane.db_url)

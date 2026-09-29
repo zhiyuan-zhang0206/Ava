@@ -66,6 +66,18 @@ import psycopg
 from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
 
+from base import telemetry
+from base.agents.impersonation.maintenance import (
+    reap_impersonations,
+    remind_expiring_impersonations,
+)
+from base.agents.messages.inbound_provenance import InboundProvenance
+from base.config import cluster_tz, settings
+from base.db import insert_inbound_message, publish_inbound_wake
+from base.db.transaction import write_transaction
+from base.events.live.announce import publish_agent_updated_sync
+from base.events.live.projection import PageClosed
+from base.events.live.redis_client import publish_best_effort_sync
 from gateway.routers import work_failed as work_failed_router
 from gateway.ttl_reaper.lifecycle_fences import (
     _fence_settle_due,
@@ -74,18 +86,6 @@ from gateway.ttl_reaper.lifecycle_fences import (
     settle_absent_machine_fences,
 )
 from ops import cluster_rpc, lifecycle
-from shared import telemetry
-from shared.agents.impersonation.maintenance import (
-    reap_impersonations,
-    remind_expiring_impersonations,
-)
-from shared.agents.messages.inbound_provenance import InboundProvenance
-from shared.config import cluster_tz, settings
-from shared.db import insert_inbound_message, publish_inbound_wake
-from shared.db.transaction import write_transaction
-from shared.events.live.announce import publish_agent_updated_sync
-from shared.events.live.projection import PageClosed
-from shared.events.live.redis_client import publish_best_effort_sync
 
 _log = logging.getLogger(__name__)
 
@@ -349,7 +349,7 @@ def _wall_clock(dt: datetime) -> str:
     is not on the cluster's today (a TTL can cross midnight).
 
     Renders in the cluster timezone; ``None`` falls back to the host zone
-    (``dt.astimezone(None)``) — the shared/config contract that ``None`` is
+    (``dt.astimezone(None)``) — the base/config contract that ``None`` is
     the host-zone fallback signal."""
     tz = cluster_tz()
     local = dt.astimezone(tz)

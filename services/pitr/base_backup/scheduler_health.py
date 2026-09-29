@@ -5,9 +5,9 @@ from __future__ import annotations
 import time
 from typing import Any
 
+from base.daemon.health_schema import DEGRADED, OK, component
 from services.pitr.activation.runtime import activation_health_component
 from services.pitr.retention.scheduler import health_component as retention_health_component
-from shared.daemon.health_schema import DEGRADED, OK, component
 
 BASE_BACKUP_STALE_AFTER_S = 8 * 24 * 60 * 60
 

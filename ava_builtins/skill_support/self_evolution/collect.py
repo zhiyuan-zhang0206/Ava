@@ -41,11 +41,11 @@ from ava_builtins.skill_support.self_evolution.record import (  # noqa: F401
     _transcript,
     build_record,
 )
-from shared.config import settings
-from shared.db import connect
-from shared.host.net.resilience import ExponentialBackoff, Policy, http_classifier, retry
-from shared.paths import ava_home
-from shared.telemetry.observability import (
+from base.config import settings
+from base.db import connect
+from base.host.net.resilience import ExponentialBackoff, Policy, http_classifier, retry
+from base.paths import ava_home
+from base.telemetry.observability import (
     ObservabilityReadUnavailable,
     observability_refusal_detail,
 )
@@ -66,7 +66,7 @@ _SUBPROCESS_CALL_RE = re.compile(r"subprocess\.(run|Popen|check_output|check_cal
 def _gateway_headers() -> dict[str, str]:
     """Bearer auth: the process's machine API token (an agent inherits its
     agent-host's), else the gateway home's secret from $AVA_HOME/.env."""
-    from shared.cluster.auth import delivered_token
+    from base.cluster.auth import delivered_token
 
     token = delivered_token()
     if token:

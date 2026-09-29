@@ -6,9 +6,9 @@ right gateway route with the right body and turns the answer into something a
 model can act on. Both are verified here against a fake HTTP transport — no
 gateway, no cluster.
 
-`cli.mcp_server` imports `httpx` at module scope and `shared.cluster.machine` inside
+`cli.mcp_server` imports `httpx` at module scope and `base.cluster.machine` inside
 `_request`, so patching `cli.mcp_server.httpx.AsyncClient` and
-`shared.cluster.machine.gateway_api_base` both land at call time.
+`base.cluster.machine.gateway_api_base` both land at call time.
 """
 
 from __future__ import annotations
@@ -23,8 +23,8 @@ import pytest
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import CallToolResult
 
+from base.api_contracts.mcp_tool_contract import message_text, project_message
 from cli import mcp_server
-from shared.api_contracts.mcp_tool_contract import message_text, project_message
 
 # The tools an external agent (Claude Code / Codex) sees. Pinned as a set: adding
 # one is a deliberate widening of what a third party can do to the fleet, and
@@ -80,9 +80,9 @@ def _summary_agent_row(agent_id: int = 7, status: str = "running") -> dict[str, 
 
 @pytest.fixture(autouse=True)
 def _gateway_base(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("shared.cluster.machine.gateway_api_base", lambda: "http://gw:8000")
+    monkeypatch.setattr("base.cluster.machine.gateway_api_base", lambda: "http://gw:8000")
     monkeypatch.setattr(
-        "shared.cluster.machine.gateway_auth_headers", lambda: {"Authorization": "Bearer s"}
+        "base.cluster.machine.gateway_auth_headers", lambda: {"Authorization": "Bearer s"}
     )
 
 
@@ -431,12 +431,12 @@ def test_serve_fails_before_starting_when_no_gateway_is_configured(
     """An unconfigured checkout is an install problem. Raising here puts the
     message on the operator's terminal; starting anyway would bury it in a tool
     error the client surfaces much later."""
-    from shared.cluster.machine import GatewayApiBaseMissing
+    from base.cluster.machine import GatewayApiBaseMissing
 
     def _missing() -> str:
         raise GatewayApiBaseMissing("gateway_url unset")
 
-    monkeypatch.setattr("shared.cluster.machine.gateway_api_base", _missing)
+    monkeypatch.setattr("base.cluster.machine.gateway_api_base", _missing)
     monkeypatch.setattr(mcp_server, "build_server", lambda: pytest.fail("must not build a server"))
     with pytest.raises(GatewayApiBaseMissing):
         mcp_server.cmd_mcp_serve()

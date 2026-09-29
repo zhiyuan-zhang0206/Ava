@@ -22,18 +22,18 @@ from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
 
 from agent.ownership.hosted import admit_hosted_runtime
+from base.agents.incarnation.resources import (
+    IncarnationResources,
+    ResourceBirth,
+    decode_resources,
+)
+from base.cluster.machine import machine_name
+from base.config import settings
 from ops.agents.spawn import create_agent_row
 from scripts import cutover_db_records as records
 from scripts import cutover_db_survey as survey_module
 from scripts import cutover_inventory as inventory
 from scripts.cutover_db_survey import FREE_LEASE, Inputs, RetiredUnit, export_rows, survey
-from shared.agents.incarnation.resources import (
-    IncarnationResources,
-    ResourceBirth,
-    decode_resources,
-)
-from shared.cluster.machine import machine_name
-from shared.config import settings
 
 GATEWAY, PAUSED, GONE = "gw-box", "win-box", "gone-box"
 _DRAIN = {"maintenance": {"holder": "legacy:pid41", "acquired_at": "2026-09-27T01:00:00+00:00"}}
@@ -717,7 +717,7 @@ def test_cleared_publication_keeps_current_and_refuses_what_admission_cannot_rea
 
 
 def test_owner_authority_names_the_home_socket_port_owner_and_database(tmp_path: Path) -> None:
-    from shared.db.pg_admin import pg_socket_path
+    from base.db.pg_admin import pg_socket_path
 
     home = tmp_path.resolve() / "home"
     home.mkdir()

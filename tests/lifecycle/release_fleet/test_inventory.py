@@ -54,21 +54,21 @@ def test_every_registered_unit_is_the_gateway_included_or_excluded() -> None:
 @pytest.fixture
 def lone_gateway(prepared: FleetRequest, monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     """The loaded identity of a single box, and the rows its database holds."""
-    import shared.cluster
-    import shared.cluster.machine
-    import shared.paths
+    import base.cluster
+    import base.cluster.machine
+    import base.paths
+    from base.config import settings
     from cli.commands.lifecycle import service_stop
-    from shared.config import settings
 
     rows: dict[str, Any] = {
         "units": {("unit", prepared.home)},
         "machines": {"unit"},
         "paused": set(),
     }
-    monkeypatch.setattr(shared.paths, "ava_home", lambda: Path(prepared.home))
-    monkeypatch.setattr(shared.cluster.machine, "machine_name", lambda: "unit")
-    monkeypatch.setattr(shared.cluster.machine, "machine_role", lambda: frozenset({"gateway"}))
-    monkeypatch.setattr(shared.cluster, "registry_path", lambda: Path(prepared.registry))
+    monkeypatch.setattr(base.paths, "ava_home", lambda: Path(prepared.home))
+    monkeypatch.setattr(base.cluster.machine, "machine_name", lambda: "unit")
+    monkeypatch.setattr(base.cluster.machine, "machine_role", lambda: frozenset({"gateway"}))
+    monkeypatch.setattr(base.cluster, "registry_path", lambda: Path(prepared.registry))
     monkeypatch.setattr(type(settings.data_plane), "is_remote", property(lambda _self: False))
     monkeypatch.setattr(settings.data_plane, "cluster_secret", "")
     monkeypatch.setattr(settings.data_plane, "data_plane_host", "")
@@ -92,7 +92,7 @@ def test_the_lone_gateway_home_is_a_fleet_of_one(
 def test_a_networked_cluster_refuses_naming_the_missing_slices(
     prepared: FleetRequest, lone_gateway: dict[str, Any], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from shared.config import settings
+    from base.config import settings
 
     monkeypatch.setattr(settings.data_plane, "cluster_secret", "bearer")
     with pytest.raises(ValueError, match="dbgen-8") as refused:
@@ -115,14 +115,14 @@ def test_any_other_registered_writer_refuses(
 def test_the_loaded_identity_must_be_the_operations(
     prepared: FleetRequest, lone_gateway: dict[str, Any], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import shared.cluster.machine
+    import base.cluster.machine
 
     with pytest.raises(ValueError, match="loaded home differs"):
         require_fleet_of_one(Path(prepared.home).with_name("other"))
-    monkeypatch.setattr(shared.cluster.machine, "machine_role", lambda: frozenset({"agent-runner"}))
+    monkeypatch.setattr(base.cluster.machine, "machine_role", lambda: frozenset({"agent-runner"}))
     with pytest.raises(ValueError, match="one local gateway data plane"):
         require_fleet_of_one(Path(prepared.home))
-    monkeypatch.setattr(shared.cluster.machine, "machine_name", lambda: "another")
+    monkeypatch.setattr(base.cluster.machine, "machine_name", lambda: "another")
     with pytest.raises(ValueError, match="loaded machine differs"):
         require_topology(prepared)
 
@@ -154,9 +154,9 @@ def test_pitr_admits_only_its_reserved_gateway_home_as_a_fleet_of_one(
     admits live terminals, which `stop_apps` closes like a release's stop phase
     (decisions/2026-09-27-unit-join-pitr-closure-fleet-policy.md item 2), and
     refuses any other registered writer or another machine's operation."""
-    import shared.cluster.machine
+    import base.cluster.machine
+    from base.deploy.release import runtime_release
     from cli.release_transition.pitr import transition
-    from shared.deploy.release import runtime_release
 
     def selected(_store: Path) -> str:
         return "selected"
@@ -176,6 +176,6 @@ def test_pitr_admits_only_its_reserved_gateway_home_as_a_fleet_of_one(
     with pytest.raises(ValueError, match="every registered unit must be this home"):
         driver.preflight()
     lone_gateway["units"].discard(_RUNNER.order)
-    monkeypatch.setattr(shared.cluster.machine, "machine_name", lambda: "another")
+    monkeypatch.setattr(base.cluster.machine, "machine_name", lambda: "another")
     with pytest.raises(ValueError, match="loaded machine differs"):
         driver.preflight()

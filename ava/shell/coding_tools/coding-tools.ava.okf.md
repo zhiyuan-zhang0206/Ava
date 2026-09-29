@@ -61,5 +61,5 @@ locates the impersonator guide.
 
 ## Key dependencies
 - [[ava/shell/shell.ava.okf.md|ava.shell]] — the session primitives every launch drives
-- [[shared/sessions/coding-session-owner.ava.okf.md]] — per-launch generations, the dead-sibling sweep, and exact cleanup
+- [[base/sessions/coding-session-owner.ava.okf.md]] — per-launch generations, the dead-sibling sweep, and exact cleanup
 - [[ava_builtins/skills/orchestration/ava-use-other-agents.ava.okf.md]] — the skill whose scripts are the command-line entries

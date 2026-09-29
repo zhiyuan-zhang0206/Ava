@@ -20,15 +20,15 @@ from agent.graph.claim.node import claim_node
 from agent.hooks.compact import COMPACT_MAX_ATTEMPTS
 from agent.impersonation import flush_checkpoint
 from agent.startup import wrap_saver_writes_with_nstep_interval
+from base.agents.context import AvaContext
+from base.agents.history.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
+from base.config import settings
+from base.db import insert_inbound_message
+from base.events.live.projection import Error
+from base.events.live.publisher import AgentEventPublisher
+from base.events.live.redis_client import open_async_redis
 from services.agent_host.host import AgentHost
 from services.agent_host.runtime import TurnOutcome
-from shared.agents.context import AvaContext
-from shared.agents.history.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
-from shared.config import settings
-from shared.db import insert_inbound_message
-from shared.events.live.projection import Error
-from shared.events.live.publisher import AgentEventPublisher
-from shared.events.live.redis_client import open_async_redis
 from tests.agent.test_inbound_ownership import _agent
 
 

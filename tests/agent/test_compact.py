@@ -46,8 +46,8 @@ from agent.hooks.compact import (
 from agent.llm import execute_code
 from agent.messages import inbound_message
 from agent.state import AgentState, CompactState
-from shared.agents.context import AvaContext
-from shared.lm.context_budget import ContextBudget
+from base.agents.context import AvaContext
+from base.lm.context_budget import ContextBudget
 from tests.conftest import spawn_agent
 
 
@@ -160,7 +160,7 @@ async def test_generate_summary_emits_agent_billing_span(
     """
     from opentelemetry import trace as otel_trace
 
-    from shared.telemetry import tracing as tracing_mod
+    from base.telemetry import tracing as tracing_mod
 
     class _Span:
         def __init__(self, name: str) -> None:
@@ -189,8 +189,8 @@ async def test_generate_summary_emits_agent_billing_span(
     def vendor_of_model(_model: str) -> str:
         return "deepseek"
 
-    monkeypatch.setattr("shared.lm.billing.vendor_of_model", vendor_of_model)
-    monkeypatch.setattr("shared.config.settings.observability.trace_enabled", True)
+    monkeypatch.setattr("base.lm.billing.vendor_of_model", vendor_of_model)
+    monkeypatch.setattr("base.config.settings.observability.trace_enabled", True)
     monkeypatch.setitem(tracing_mod._state, "initialized", True)
     monkeypatch.setattr(otel_trace, "get_tracer", lambda _name: tracer)  # pyright: ignore[reportUnknownArgumentType]
     response = AIMessage(
@@ -784,7 +784,7 @@ def test_compact_triggers_point_at_the_contract(_ava_compact_loaded):
     /compact command) is a short opener that defers to the `ava.self.compact`
     contract rather than carrying its own copy of the template."""
     from agent.hooks import compact as _p
-    from shared.paths import repo_root
+    from base.paths import repo_root
 
     compact_md = (repo_root() / "commands" / "compact.md").read_text(encoding="utf-8")
     assert "ava.self.compact" in COMPACTION_INSTRUCTION
@@ -971,7 +971,7 @@ async def test_terminate_preserves_pending_summary_without_wiping_history(
 ):
     """Lifecycle acceptance is serial; a summary cannot run in the exiting owner."""
     from agent.ownership.hosted import apply_hosted_lifecycle
-    from shared.native_process.turn_identity import bind_turn_identity
+    from base.native_process.turn_identity import bind_turn_identity
     from tests.agent.test_inbound_ownership import _admit, _agent
 
     tid = _agent(db_conn)
@@ -1014,7 +1014,7 @@ async def test_compact_in_same_batch_as_restart(
 ):
     """The admitted successor, not the exiting owner, consumes the same summary."""
     from agent.ownership.hosted import apply_hosted_lifecycle
-    from shared.native_process.turn_identity import bind_turn_identity
+    from base.native_process.turn_identity import bind_turn_identity
     from tests.agent.test_inbound_ownership import _admit, _agent
 
     tid = _agent(db_conn)

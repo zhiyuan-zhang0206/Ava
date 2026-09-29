@@ -23,13 +23,13 @@ from fastapi import APIRouter, HTTPException, Request
 from psycopg_pool import ConnectionPool
 from pydantic import BaseModel, Field
 
+from base.cluster import session_name
+from base.cluster.machine import machine_name
+from base.config import settings
+from base.db.transaction import write_transaction
+from base.paths import ava_home
 from gateway.agents.router import create_and_launch_agent
 from ops.rpc_schemas import SpawnAgentRequest
-from shared.cluster import session_name
-from shared.cluster.machine import machine_name
-from shared.config import settings
-from shared.db.transaction import write_transaction
-from shared.paths import ava_home
 
 router = APIRouter()
 
@@ -324,7 +324,7 @@ def _read_transcript_blocking(schedule_id: int, lines: int) -> list[str] | None:
     capture has nothing left to show (the backend keeps no such file, so this is the
     PTY-era replacement for the lost scrollback).
     """
-    from shared.sessions.backend import get_shell_backend
+    from base.sessions.backend import get_shell_backend
 
     log_path = get_shell_backend().session_log_path(session_name(f"schedule-{schedule_id}"))
     if log_path is None or not log_path.exists():

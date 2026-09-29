@@ -14,12 +14,12 @@ from typing import Any
 
 import pytest
 
+from base.config import get_config_metadata
+from base.host import config_validators
+from base.host.env import runtime_config
 from ops import host_config as ops
 from ops.host_config import config_audit_read_op, config_read_op, config_write_op
 from ops.rpc_schemas import ConfigReadResult, ConfigWriteOpResult
-from shared.config import get_config_metadata
-from shared.host import config_validators
-from shared.host.env import runtime_config
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -65,7 +65,7 @@ def _inject_sensitive_host_field(monkeypatch: pytest.MonkeyPatch) -> str:
     real metadata list, so every downstream lookup (metas_by_name,
     host_fields) sees it.
     """
-    from shared.config import ConfigFieldMeta
+    from base.config import ConfigFieldMeta
 
     metas = get_config_metadata()
     field = ConfigFieldMeta(
@@ -582,7 +582,7 @@ async def test_dispatch_config_write_missing_overrides_key_fails(
 def test_config_audit_read_op_returns_this_hosts_newest_records(
     isolated_host_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from shared.host.env.audit import record_env_write
+    from base.host.env.audit import record_env_write
 
     monkeypatch.setattr(ops, "machine_name", lambda: "test-machine")
     env_path = isolated_host_home / ".env"

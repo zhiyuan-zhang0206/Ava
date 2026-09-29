@@ -33,9 +33,9 @@ from pathlib import Path
 import psycopg
 from psycopg.rows import class_row
 
-import shared.db
-from shared.config import settings
-from shared.db.transaction import write_transaction
+import base.db
+from base.config import settings
+from base.db.transaction import write_transaction
 
 _CONFIRMATION_TEXT = "inbound-sweep-backlog"
 _BACKUP_PREFIX = "inbound_sweep_backlog_backup_"
@@ -213,7 +213,7 @@ def main(argv: list[str] | None = None) -> int:
     backup_path = args.backup or _default_backup_path()
 
     if not args.apply:
-        with shared.db.connect() as conn:
+        with base.db.connect() as conn:
             rows = _select_backlog(
                 conn,
                 idling_threshold_s=idling_threshold,

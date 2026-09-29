@@ -154,9 +154,9 @@ def test_operations_retire_previews_then_releases_a_proven_kind(
 
     import psutil
 
+    from base.native_process import native_boot_id
     from cli.commands.data_plane import pitr as commands
     from services.pitr.operation import custody
-    from shared.native_process import native_boot_id
 
     kind = custody.OperationKind("test", tmp_path / "controls", tmp_path / "quarantine")
     work = kind.control_root / ".operation-dead"

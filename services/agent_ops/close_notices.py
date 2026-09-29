@@ -13,8 +13,8 @@ import logging
 
 from psycopg_pool import ConnectionPool
 
+from base.deploy.maintenance import admission
 from ops import pty_close_notices
-from shared.deploy.maintenance import admission
 
 _log = logging.getLogger("services.agent_ops.close_notices")
 

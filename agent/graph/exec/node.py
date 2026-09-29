@@ -79,14 +79,14 @@ from agent.messages import exec_output_message
 from agent.nodes import AFTER_EXEC, EXEC
 from agent.state import AttachState, _validate_plugin_state_keys
 from ava.security import SecurityFindingEntry, take_findings
-from shared.agents.context import AvaContext, agent_id_from_config
-from shared.agents.exit_codes import IDLE_EXIT_CODE, SYSTEM_HALT_EXIT_CODE
-from shared.agents.lifecycle import AgentImpersonation, AgentRestart, AgentTermination, SystemHalt
-from shared.config import settings
-from shared.config.turn_view import current_agent_config_pins
-from shared.events.live.projection import Cancelled, ExecOutput, ExecStart
-from shared.log import logger
-from shared.packages.plugins.config_view import current_agent_plugin_pins
+from base.agents.context import AvaContext, agent_id_from_config
+from base.agents.exit_codes import IDLE_EXIT_CODE, SYSTEM_HALT_EXIT_CODE
+from base.agents.lifecycle import AgentImpersonation, AgentRestart, AgentTermination, SystemHalt
+from base.config import settings
+from base.config.turn_view import current_agent_config_pins
+from base.events.live.projection import Cancelled, ExecOutput, ExecStart
+from base.log import logger
+from base.packages.plugins.config_view import current_agent_plugin_pins
 
 from ._alerts import maybe_alert_exec_boot_failure
 from ._result import (
@@ -374,7 +374,7 @@ def _attach_model(ctx: AvaContext) -> str:
     LLM's model name, else the configured turn model. ``ctx.llm`` can be None
     (tests / container edge), hence the getattr fallback.
     """
-    from shared.config.turn_view import turn_settings
+    from base.config.turn_view import turn_settings
 
     return getattr(ctx.llm, "model_name", None) or turn_settings.lm.llm_model
 

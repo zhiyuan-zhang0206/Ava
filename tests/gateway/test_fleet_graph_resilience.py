@@ -11,12 +11,12 @@ import pytest
 from fastapi.testclient import TestClient
 from psycopg import errors as pg_errors
 
+from base import telemetry
+from base.agents import AgentStatus
+from base.telemetry.loki_index_labels import INDEX_LABEL_CUTOVER_AT
 from gateway.app import app
 from gateway.lgtm import loki_events, prom_metrics, telemetry_staleness
 from gateway.schemas.fleet_graph import FleetGraphNode, FleetGraphResponse
-from shared import telemetry
-from shared.agents import AgentStatus
-from shared.telemetry.loki_index_labels import INDEX_LABEL_CUTOVER_AT
 from tests.gateway.loki_fake import FakeLoki
 
 

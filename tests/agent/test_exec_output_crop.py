@@ -8,8 +8,8 @@ from langchain_core.messages import AIMessage, HumanMessage
 from pydantic import ValidationError
 
 from agent.graph.exec import output
-from shared.config import settings
-from shared.config.sandbox import SandboxSettings
+from base.config import settings
+from base.config.sandbox import SandboxSettings
 
 
 @pytest.fixture

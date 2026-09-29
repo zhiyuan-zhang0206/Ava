@@ -1,0 +1,505 @@
+"""Read an agent's stored message history from its checkpoint.
+
+The agent's full message history (the LLM conversation: inbound envelopes,
+AIMessages, tool outputs) lives in the stored checkpoint keyed by the agent
+id. Gateway cold-load read paths share this single deserialized view of
+`list[BaseMessage]`; this is the one place that opens the store and pulls
+them out.
+
+Compaction replaces the live messages channel. Each checkpoint marked
+`compact_boundary` is a full message snapshot that lets
+`load_checkpoint_messages_full` stitch the retained segments: it removes only
+the repeated SystemMessage at a join, retaining compaction summaries and
+framework session notes as part of the conversation. Boundaries are never
+deleted (never-delete ruling, 2026-09-12, task #3180).
+
+Cold-load tolerance: these reads run on page-mount / ops-query paths, not on
+the live-streaming path. A read can coincide with an in-flight commit; the
+store returns the last committed snapshot, so a slightly stale view is
+acceptable on cold-load paths.
+
+Schema is a precondition, not a read-side effect. Fresh install creates it;
+later upstream changes travel through paired Ava migrations, and ``ava start``
+verifies the complete applied set. These helpers only perform SELECTs so they
+also work under the least-privilege ``ava_runner`` role; a missing/outdated
+schema is a store failure, never an invitation for a request path to attempt
+DDL.
+
+Read contract:
+  - no checkpoint (agent never ran a turn) -> empty list.
+  - store readable, latest checkpoint committed but the messages channel not
+    yet written (just-spawned agent, first super-step uncommitted) -> empty
+    list (legitimate state, see `load_checkpoint_messages`).
+  - store unreadable (DB disconnect, deserialize error) -> raises
+    CheckpointReadError. Each caller decides its own tolerance: a UI cold-load
+    can swallow it to an empty view, a programmatic data endpoint surfaces it.
+"""
+
+from __future__ import annotations
+
+import logging
+from collections.abc import Generator
+from contextlib import contextmanager
+from typing import Any, cast
+
+from langchain_core.messages import BaseMessage, SystemMessage
+from langchain_core.runnables import RunnableConfig
+from psycopg import Connection
+from psycopg.rows import DictRow, dict_row
+
+from base.agents.history.checkpoint_serde import STATIC_CHECKPOINT_MSGPACK_TYPES
+from base.agents.history.delta_read_compat import reconstruct_delta_messages
+from base.db import pool
+from base.db.transaction import async_write_transaction
+
+_log = logging.getLogger(__name__)
+
+
+class CheckpointReadError(RuntimeError):
+    """The checkpoint store could not be read or its blob could not be
+    deserialized. Distinct from "no checkpoint yet" (which returns an empty
+    list) and from "checkpoint present but messages channel empty" (also an
+    empty list) — this is an IO / deserialize failure the caller must decide
+    how to tolerate."""
+
+
+@contextmanager
+def _checkpoint_read_connection(*, row_factory: Any | None = None) -> Generator[Connection[Any]]:
+    """Borrow one short-lived autocommit read connection through base.db.pool."""
+    db_pool = pool(autocommit=True, row_factory=row_factory)
+    try:
+        with db_pool.connection() as conn:
+            yield conn
+    finally:
+        db_pool.close()
+
+
+def load_checkpoint_messages(agent_id: int) -> list[BaseMessage]:
+    """Pull the stored message list for one agent.
+
+    Returns the deserialized message list in conversation order, or an empty
+    list when the agent has no checkpoint yet (never ran a turn) or has a
+    checkpoint whose messages channel is not yet written.
+
+    Raises:
+        CheckpointReadError: the store read or blob deserialize failed
+            (DB disconnect, msgpack error). The caller decides tolerance
+            (see module docstring).
+    """
+    from langgraph.checkpoint.postgres import PostgresSaver
+    from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
+
+    config: RunnableConfig = {"configurable": {"thread_id": str(agent_id)}}
+    # Explicit serde allowlist — same types as the agent runner registers
+    # (agent/state.py extends the static set with plugin classes). Without it
+    # the permissive default warns on every read: this path deserializes the
+    # whole checkpoint (all channels, incl. the nested agent.state sub-states),
+    # so every timeline/messages/token-usage cold load would warn once per
+    # type per gateway process start.
+    serde = JsonPlusSerializer(allowed_msgpack_modules=STATIC_CHECKPOINT_MSGPACK_TYPES)
+    try:
+        # Direct construction rather than `from_conn_string` — the classmethod
+        # does not forward a `serde` argument, and the default permissive serde
+        # is exactly what this module is avoiding.
+        with _checkpoint_read_connection(row_factory=dict_row) as conn:
+            saver = PostgresSaver(conn=cast(Connection[DictRow], conn), serde=serde)
+            tuple_ = saver.get_tuple(config)
+            if tuple_ is not None:
+                # Transition layer (tasks #3180/#3181): materialize a
+                # delta-written thread's messages before reading them.
+                reconstruct_delta_messages(saver, tuple_)
+    except Exception as exc:
+        raise CheckpointReadError(f"checkpoint read failed for agent {agent_id}") from exc
+    if tuple_ is None:
+        return []
+    ckpt = tuple_.checkpoint
+    # `channel_values` is a guaranteed Checkpoint key (always reconstructed by
+    # the store), so index it. The `messages` channel, however, can legitimately
+    # be absent: a just-spawned agent's latest committed checkpoint is the input
+    # snapshot, whose channel_values has not yet had the messages channel written
+    # (that happens when the first super-step commits). Absence there is a valid
+    # "no messages yet" state, not schema drift, so fall back to [].
+    return ckpt["channel_values"].get("messages", [])
+
+
+def list_compact_boundary_checkpoint_ids(agent_id: int, *, limit: int | None = None) -> list[str]:
+    """Return this agent's retained compact boundaries, newest first.
+
+    The descending position is the history segment's current display rank;
+    callers must still use the checkpoint id as the durable cursor identity.
+    ``limit`` bounds the ordered prefix read for finite history-depth views.
+
+    Raises:
+        CheckpointReadError: the boundary index could not be read.
+    """
+    if limit is not None and limit < 1:
+        raise ValueError(f"compact boundary limit must be positive, got {limit}")
+    query = (
+        "SELECT checkpoint_id FROM checkpoints"
+        " WHERE thread_id = %s AND metadata->>'compact_boundary' = 'true'"
+        " ORDER BY checkpoint_id DESC"
+    )
+    try:
+        with _checkpoint_read_connection() as conn:
+            rows = (
+                conn.execute(query, (str(agent_id),)).fetchall()
+                if limit is None
+                else conn.execute(f"{query} LIMIT %s", (str(agent_id), limit)).fetchall()
+            )
+    except Exception as exc:
+        raise CheckpointReadError(
+            f"compaction boundary index read failed for agent {agent_id}"
+        ) from exc
+    return [str(row[0]) for row in rows]
+
+
+def latest_checkpoint_id(agent_id: int) -> str | None:
+    """Return the agent's newest retained checkpoint id, or None.
+
+    The tail channel's delta source (task #3981 C): the tail gate compares it
+    against the last tail-sealed id. Same UUIDv6 ordering assumption as the
+    boundary listing.
+
+    Raises:
+        CheckpointReadError: the checkpoint table could not be read.
+    """
+    try:
+        with _checkpoint_read_connection() as conn:
+            row = conn.execute(
+                "SELECT max(checkpoint_id) FROM checkpoints WHERE thread_id = %s",
+                (str(agent_id),),
+            ).fetchone()
+    except Exception as exc:
+        raise CheckpointReadError(f"latest checkpoint read failed for agent {agent_id}") from exc
+    if row is None or row[0] is None:
+        return None
+    return str(row[0])
+
+
+def _msgpack_array_length(header: bytes) -> int:
+    """Read a MessagePack array length from its at-most-five-byte header.
+
+    Markers and widths are the MessagePack spec (task #3696 exception inventory).
+    """
+    if not header:
+        raise ValueError("empty MessagePack header")
+    marker = header[0]
+    if 0x90 <= marker <= 0x9F:
+        return marker & 0x0F
+    if marker == 0xDC and len(header) >= 3:
+        return int.from_bytes(header[1:3], byteorder="big")
+    if marker == 0xDD and len(header) >= 5:
+        return int.from_bytes(header[1:5], byteorder="big")
+    raise ValueError(f"messages blob does not start with a MessagePack array: 0x{marker:02x}")
+
+
+def _message_count_from_blob_header(blob_type: object, header: object) -> int:
+    if blob_type != "msgpack":
+        raise ValueError(f"unexpected messages blob type: {blob_type!r}")
+    return _msgpack_array_length(bytes(cast(bytes, header)))
+
+
+def _is_delta_snapshot_blob(blob_type: object, header: object) -> bool:
+    """True when the messages version is a delta snapshot instead of a plain
+    array.
+
+    A snapshot-step checkpoint of a delta-written thread materializes its value
+    as a MessagePack extension (`_DeltaSnapshot`, tasks #3180/#3181) — the same
+    "value not directly readable" family as the no-blob case — so the count
+    path must reconstruct rather than parse a header.
+    """
+    if blob_type != "msgpack":
+        return False
+    # ext8/16/32 (0xc7-0xc9) or the fixext family (0xd4-0xd8): payloads up to
+    # 16 bytes pack as fixext — an emptied messages snapshot does (QA probe:
+    # `_DeltaSnapshot([])` -> first byte 0xd4), so both families are delta
+    # evidence, not a parse failure.
+    return bytes(cast(bytes, header))[:1] in (
+        b"\xc7",
+        b"\xc8",
+        b"\xc9",
+        b"\xd4",
+        b"\xd5",
+        b"\xd6",
+        b"\xd7",
+        b"\xd8",
+    )
+
+
+def load_checkpoint_message_count(agent_id: int) -> int:
+    """Return the live checkpoint's messages length without loading the blob.
+
+    PostgresSaver stores each channel value in ``checkpoint_blobs``. Reading
+    only the first five bytes is enough to decode a MessagePack array header,
+    so a historical timeline page can preserve the authoritative current
+    ``msg_count`` without materializing a second checkpoint segment.
+
+    Raises:
+        CheckpointReadError: the latest messages header is unreadable or is
+            not the stable MessagePack array representation.
+    """
+    try:
+        with _checkpoint_read_connection() as conn:
+            row = conn.execute(
+                "SELECT b.type, substring(b.blob FROM 1 FOR 5)"
+                " FROM checkpoints c"
+                " LEFT JOIN checkpoint_blobs b"
+                " ON b.thread_id = c.thread_id"
+                " AND b.checkpoint_ns = c.checkpoint_ns"
+                " AND b.channel = 'messages'"
+                " AND b.version = c.checkpoint->'channel_versions'->>'messages'"
+                " WHERE c.thread_id = %s AND c.checkpoint_ns = ''"
+                " ORDER BY c.checkpoint_id DESC LIMIT 1",
+                (str(agent_id),),
+            ).fetchone()
+        if row is None:
+            return 0
+        if row[0] is None:
+            # A delta-written thread stores no messages blob for its newest
+            # version — the value lives in the write chain (tasks #3180/#3181).
+            # Reconstruct and count; a vanilla thread that merely has nothing
+            # written yet reconstructs to nothing and still counts 0.
+            return _reconstructed_message_count(agent_id)
+        blob_type, header = row
+        if _is_delta_snapshot_blob(blob_type, header):
+            return _reconstructed_message_count(agent_id)
+        return _message_count_from_blob_header(blob_type, header)
+    except Exception as exc:
+        raise CheckpointReadError(
+            f"checkpoint message count read failed for agent {agent_id}"
+        ) from exc
+
+
+def _reconstructed_message_count(agent_id: int) -> int:
+    """Count a delta-written thread's messages via reconstruction (0 when not delta)."""
+    from langgraph.checkpoint.postgres import PostgresSaver
+    from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
+
+    config: RunnableConfig = {"configurable": {"thread_id": str(agent_id)}}
+    serde = JsonPlusSerializer(allowed_msgpack_modules=STATIC_CHECKPOINT_MSGPACK_TYPES)
+    with _checkpoint_read_connection(row_factory=dict_row) as conn:
+        saver = PostgresSaver(conn=cast(Connection[DictRow], conn), serde=serde)
+        tuple_ = saver.get_tuple(config)
+        if tuple_ is None or not reconstruct_delta_messages(saver, tuple_):
+            return 0
+        messages = cast("list[Any]", tuple_.checkpoint["channel_values"].get("messages") or [])
+        return len(messages)
+
+
+def load_checkpoint_messages_segment(agent_id: int, checkpoint_id: str) -> list[BaseMessage]:
+    """Read one exact retained compaction segment without its system prompt.
+
+    A missing checkpoint or an id that is not currently a compact boundary
+    returns an empty segment. The checkpoint id, not its mutable newest-first
+    rank, is the authority: a stale rank can never redirect the cursor to
+    another segment's content.
+
+    Raises:
+        CheckpointReadError: the boundary blob exists but could not be read or
+            deserialized.
+    """
+    from langgraph.checkpoint.postgres import PostgresSaver
+    from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
+
+    config: RunnableConfig = {"configurable": {"thread_id": str(agent_id)}}
+    serde = JsonPlusSerializer(allowed_msgpack_modules=STATIC_CHECKPOINT_MSGPACK_TYPES)
+    try:
+        with _checkpoint_read_connection(row_factory=dict_row) as conn:
+            boundary = conn.execute(
+                "SELECT checkpoint_id FROM checkpoints"
+                " WHERE thread_id = %s AND checkpoint_id = %s"
+                " AND metadata->>'compact_boundary' = 'true'",
+                (str(agent_id), checkpoint_id),
+            ).fetchone()
+            if boundary is None:
+                return []
+            saver = PostgresSaver(conn=cast(Connection[DictRow], conn), serde=serde)
+            checkpoint_tuple = saver.get_tuple(
+                {
+                    **config,
+                    "configurable": {
+                        **config["configurable"],
+                        "checkpoint_id": checkpoint_id,
+                    },
+                }
+            )
+            if checkpoint_tuple is not None:
+                reconstruct_delta_messages(saver, checkpoint_tuple)
+    except Exception as exc:
+        raise CheckpointReadError(
+            f"compaction segment read failed for agent {agent_id} checkpoint {checkpoint_id}"
+        ) from exc
+    if checkpoint_tuple is None:
+        return []
+    messages = checkpoint_tuple.checkpoint["channel_values"].get("messages", [])
+    if not messages:
+        return []
+    if not isinstance(messages[0], SystemMessage):
+        return []
+    return messages[1:]
+
+
+def load_checkpoint_messages_full(agent_id: int) -> list[BaseMessage]:
+    """Reconstruct one agent's full history across compaction segments.
+
+    With no retained compaction boundary, returns the latest messages snapshot
+    unchanged. Otherwise, the oldest boundary is the initial segment; each
+    following boundary and the latest snapshot can repeat the system prompt,
+    which is dropped at the join. Every other message, including compaction
+    summaries and framework session notes, remains in the conversation.
+
+    Raises:
+        CheckpointReadError: the store read or blob deserialize failed.
+    """
+    from langgraph.checkpoint.postgres import PostgresSaver
+    from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
+
+    config: RunnableConfig = {"configurable": {"thread_id": str(agent_id)}}
+    serde = JsonPlusSerializer(allowed_msgpack_modules=STATIC_CHECKPOINT_MSGPACK_TYPES)
+    try:
+        with _checkpoint_read_connection(row_factory=dict_row) as conn:
+            saver = PostgresSaver(conn=cast(Connection[DictRow], conn), serde=serde)
+            latest_tuple = saver.get_tuple(config)
+            if latest_tuple is None:
+                return []
+            reconstruct_delta_messages(saver, latest_tuple)
+            latest = latest_tuple.checkpoint
+            boundaries = cast(
+                list[dict[str, str]],
+                conn.execute(
+                    "SELECT checkpoint_id FROM checkpoints"
+                    " WHERE thread_id = %s AND metadata->>'compact_boundary' = 'true'"
+                    " ORDER BY checkpoint_id ASC",
+                    (str(agent_id),),
+                ).fetchall(),
+            )
+            if not boundaries:
+                return latest["channel_values"].get("messages", [])
+
+            segments: list[list[BaseMessage]] = []
+            for boundary in boundaries:
+                checkpoint_id = boundary["checkpoint_id"]
+                checkpoint_tuple = saver.get_tuple(
+                    {
+                        **config,
+                        "configurable": {
+                            **config["configurable"],
+                            "checkpoint_id": checkpoint_id,
+                        },
+                    }
+                )
+                if checkpoint_tuple is not None:
+                    reconstruct_delta_messages(saver, checkpoint_tuple)
+                    segments.append(
+                        checkpoint_tuple.checkpoint["channel_values"].get("messages", [])
+                    )
+    except Exception as exc:
+        raise CheckpointReadError(f"full checkpoint read failed for agent {agent_id}") from exc
+
+    if len(segments) != len(boundaries):
+        raise CheckpointReadError(f"compaction boundary disappeared for agent {agent_id}")
+    full_history = list(segments[0])
+    latest_is_boundary = any(str(row["checkpoint_id"]) == str(latest["id"]) for row in boundaries)
+    following_segments = segments[1:]
+    if not latest_is_boundary:
+        following_segments = [*following_segments, latest["channel_values"].get("messages", [])]
+    for segment in following_segments:
+        remainder = segment
+        if remainder and isinstance(remainder[0], SystemMessage):
+            remainder = remainder[1:]
+        full_history.extend(remainder)
+    return full_history
+
+
+def load_checkpoint_messages_by_trace(
+    agent_id: int, trace_id: str
+) -> tuple[str | None, list[BaseMessage]]:
+    """(checkpoint_id, messages) for the newest checkpoint of this agent's
+    thread whose metadata carries `trace_id`.
+
+    The trace↔checkpoint link is written by
+    `attach_trace_to_checkpoint` after every turn (the turn's OTel trace_id
+    lands in the committed checkpoint's metadata), so a trace id resolves to
+    the exact checkpoint whose super-steps the trace spans. Messages include
+    the system prompt (the checkpoint's `messages` channel is the full
+    conversation, not a window).
+
+    Returns (None, []) when no checkpoint carries the trace id — the trace's
+    checkpoints were compact/trim pruned (checkpoint_cleanup keeps only the
+    latest K), or the trace predates the link. The caller renders this as
+    "pruned" rather than an error: the span metadata in the mirror/events
+    still exists, only the content is gone.
+
+    Raises:
+        CheckpointReadError: store read or blob deserialize failed — same
+            contract as load_checkpoint_messages.
+    """
+    from langgraph.checkpoint.postgres import PostgresSaver
+    from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
+
+    config: RunnableConfig = {"configurable": {"thread_id": str(agent_id)}}
+    # Explicit serde allowlist, same as load_checkpoint_messages — without it
+    # the permissive default warns on every read.
+    serde = JsonPlusSerializer(allowed_msgpack_modules=STATIC_CHECKPOINT_MSGPACK_TYPES)
+    try:
+        # The id lookup rides tuple rows; blob deserialization uses dict rows.
+        # Both paths borrow the data-plane pool URL, which already names
+        # PgBouncer when pooling is enabled.
+        with _checkpoint_read_connection() as conn:
+            row = conn.execute(
+                "SELECT checkpoint_id FROM checkpoints"
+                " WHERE thread_id = %s AND metadata->>'trace_id' = %s"
+                " ORDER BY checkpoint_id DESC LIMIT 1",
+                (str(agent_id), trace_id),
+            ).fetchone()
+        if row is None:
+            return None, []
+        checkpoint_id: str = row[0]
+        with _checkpoint_read_connection(row_factory=dict_row) as conn:
+            saver = PostgresSaver(conn=cast(Connection[DictRow], conn), serde=serde)
+            ckpt = saver.get_tuple(
+                {
+                    **config,
+                    "configurable": {**config["configurable"], "checkpoint_id": checkpoint_id},
+                }
+            )
+            if ckpt is not None:
+                reconstruct_delta_messages(saver, ckpt)
+    except Exception as exc:
+        raise CheckpointReadError(
+            f"checkpoint read by trace failed for agent {agent_id} trace {trace_id}"
+        ) from exc
+    if not ckpt:
+        return checkpoint_id, []
+    return checkpoint_id, ckpt.checkpoint["channel_values"].get("messages", [])
+
+
+async def attach_trace_to_checkpoint(
+    pool: Any,
+    thread_id: str,
+    checkpoint_id: str,
+    trace_id: str,
+) -> None:
+    """Stamp `trace_id` into one checkpoint row's metadata (idempotent).
+
+    The gateway trace endpoint resolves content on demand via
+    `load_checkpoint_messages_by_trace`; the row is the checkpoint committed
+    at the end of the turn whose OTel trace this trace_id belongs to.
+    Failure-tolerant: a missed stamp only loses one turn's content link.
+    """
+    try:
+        async with async_write_transaction(pool) as conn, conn.cursor() as cur:
+            await cur.execute(
+                "UPDATE checkpoints SET metadata = metadata || jsonb_build_object('trace_id', %s::text)"
+                " WHERE thread_id = %s AND checkpoint_id = %s",
+                (trace_id, thread_id, checkpoint_id),
+            )
+    except Exception:
+        from base.log import logger
+
+        logger.warning(
+            "failed to stamp trace_id on checkpoint",
+            event="trace",
+            thread_id=thread_id,
+            checkpoint_id=checkpoint_id,
+        )

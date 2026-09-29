@@ -39,18 +39,18 @@ from pathlib import Path
 
 from loguru import logger
 
+from base import paths
+from base.config import settings
+from base.deploy.git import host_version
+from base.deploy.git.gitenv import git_env
+from base.host.proc import run_bounded
+from base.host.system.cron import os_jobs_enabled
+from base.native_process.os_platform import LockTimeoutError, file_lock
+from base.packages.extensions import install_registry
+from base.packages.plugins import manifest as manifest_module
+from base.packages.skills import scan
+from base.packages.skills.names import match_key
 from cli.commands.extensions.skills_sync import _Source, iter_sources
-from shared import paths
-from shared.config import settings
-from shared.deploy.git import host_version
-from shared.deploy.git.gitenv import git_env
-from shared.host.proc import run_bounded
-from shared.host.system.cron import os_jobs_enabled
-from shared.native_process.os_platform import LockTimeoutError, file_lock
-from shared.packages.extensions import install_registry
-from shared.packages.plugins import manifest as manifest_module
-from shared.packages.skills import scan
-from shared.packages.skills.names import match_key
 
 # Backoff: failures double the effective interval, capped after this many
 # doublings (so a repeatedly failing package still re-checks about weekly).
@@ -756,7 +756,7 @@ def _skip(reason: str) -> RefreshReport:
 def _update_in_flight() -> bool:
     """Whether a live cluster deploy lease is held (a refresh skips then)."""
     with suppress(Exception):
-        from shared.deploy.state.cluster_lock import update_lock_holder
+        from base.deploy.state.cluster_lock import update_lock_holder
 
         return update_lock_holder() is not None
     return False

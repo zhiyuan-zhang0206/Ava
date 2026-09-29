@@ -12,6 +12,13 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+from base.config import settings
+from base.daemon import health_schema
+from base.daemon.health import Liveness, start_health_server, stop_health_server
+from base.daemon.shutdown import hard_exit as _hard_exit
+from base.daemon.shutdown import install_graceful_shutdown
+from base.log import init_gateway_process
+from base.paths import ava_home
 from services.pidfile import acquire_pidfile, remove_pidfile
 from services.pitr.stores.factory import get_store_group
 from services.pitr.stores.object_store import PermanentObjectStoreError, TransientObjectStoreError
@@ -22,13 +29,6 @@ from services.pitr.wal.uploader import (
     RemoteCollisionError,
     WalSourceTooLargeError,
 )
-from shared.config import settings
-from shared.daemon import health_schema
-from shared.daemon.health import Liveness, start_health_server, stop_health_server
-from shared.daemon.shutdown import hard_exit as _hard_exit
-from shared.daemon.shutdown import install_graceful_shutdown
-from shared.log import init_gateway_process
-from shared.paths import ava_home
 
 _log = logging.getLogger("services.pitr.uploader_daemon")
 

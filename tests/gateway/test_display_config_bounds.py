@@ -6,12 +6,12 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
+from base.config import settings
+from base.config.display import DisplaySettings
+from base.host.env import runtime_config
 from gateway.app import app
-from shared.config import settings
-from shared.config.display import DisplaySettings
-from shared.host.env import runtime_config
+from tests.base.test_display_config import DISPLAY_RANGES
 from tests.gateway.test_notices_endpoint import _seed_agent
-from tests.shared.test_display_config import DISPLAY_RANGES
 
 
 @pytest.mark.parametrize(("name", "minimum", "maximum"), DISPLAY_RANGES)

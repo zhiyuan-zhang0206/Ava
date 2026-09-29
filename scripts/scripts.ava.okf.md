@@ -57,7 +57,7 @@ cross-version contract, or another region's ownership pins the exact path:
 named by path in `AGENTS.md` / the runbook), `lint_pool_keepalives.py`
 (Postgres-dial locality is a separate region), `pr_flow_export.py` (its path
 is built into a registered launchd/cron job command by
-`shared/host/system/pr_flow_job.py`), `prepare_otel_release.py` (`runpy.run_path`'d from
+`base/host/system/pr_flow_job.py`), `prepare_otel_release.py` (`runpy.run_path`'d from
 `cli/release_prepare/acquisition_assets.py`'s isolated-subprocess release
 proof), the `cutover_*.py` family (runbook / FC-10 call them by path;
 retired at the FC-16 cutover), and `tcc-onboard-helper-grants.py` (compiled

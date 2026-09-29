@@ -11,6 +11,7 @@ import psycopg
 import pytest
 from psycopg_pool import ConnectionPool
 
+from base.config import settings
 from gateway.auth import session_store
 from gateway.auth.session_store import (
     create_session,
@@ -20,7 +21,6 @@ from gateway.auth.session_store import (
     session_is_valid,
     touch_session,
 )
-from shared.config import settings
 
 _MINT = "human-" + "0" * 32
 _ADMITTED = frozenset({_MINT})

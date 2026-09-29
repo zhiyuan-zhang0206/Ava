@@ -11,12 +11,12 @@ from unittest.mock import Mock
 import pytest
 import redis
 
+from base import cluster
+from base.config import settings
 from cli.commands.data_plane import cluster_instance as instance
 from cli.commands.data_plane._pooler_stop import OwnedPooler
 from services.ava_root.health import ProbeRunner
 from services.ava_root_glue import diagnostic_probes as probes
-from shared import cluster
-from shared.config import settings
 from tests._containers import _free_port, redis_server
 from tests.cli.test_pooler_stop import native_pooler as native_pooler
 
@@ -68,7 +68,7 @@ async def test_native_pooler_diagnostic_uses_shared_custody(
     # The fixture pooler trusts its userlist; the probe authenticates as the
     # admin-console operator entry with the home's recorded credential.
     monkeypatch.setattr(
-        "shared.cluster.authority.read_pooler_admin",
+        "base.cluster.authority.read_pooler_admin",
         Mock(return_value=SimpleNamespace(password="fixture-admin")),  # noqa: S106 — trusted fixture pooler
     )
     before = custodian.config.read_bytes()

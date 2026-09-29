@@ -19,7 +19,7 @@ import pytest
 import ava
 import ava.mcps as mcps_mod
 import ava.mcps._remote as remote_mod
-from shared.config import settings
+from base.config import settings
 
 # ─── _load_config / servers() ────────────────────────────────────────────
 

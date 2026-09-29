@@ -12,10 +12,10 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from base.config import settings
+from base.host.net import resilience
 from services.browser.mcp_socket_bridge import NotDeliveredError
 from services.browser.mcp_wrapper import _Link, _ReconnectingLink
-from shared.config import settings
-from shared.host.net import resilience
 
 # ---------------------------------------------------------------------------
 # Fake stream helpers

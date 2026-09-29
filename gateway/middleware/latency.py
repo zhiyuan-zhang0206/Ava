@@ -34,7 +34,7 @@ from collections.abc import Awaitable, Callable
 
 from fastapi import Request, Response
 
-from shared import telemetry
+from base import telemetry
 
 _log = logging.getLogger(__name__)
 

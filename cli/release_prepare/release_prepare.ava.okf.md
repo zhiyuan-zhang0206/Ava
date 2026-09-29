@@ -9,7 +9,7 @@ tags:
 # Local release preparation
 
 `prepare_image(Preparation)` binds `cli.release_build.build_application` to
-`shared.deploy.release.runtime_prepare.prepare_release`. It adds the source-to-image evidence
+`base.deploy.release.runtime_prepare.prepare_release`. It adds the source-to-image evidence
 contract; wheel construction and native image assembly remain in those existing
 builders. Linux and macOS are the supported preparation platforms.
 
@@ -46,7 +46,7 @@ store. The adapter does not create a home or infer one from environment settings
 File input objects use `path` and `digest`; tree input objects use `root` and
 `digest`. The Python inventory follows the managed interpreter copier's in-tree
 file-symlink rules. Other inventories use `tree_inventory` and
-`inventory_digest` from `shared.deploy.release.runtime_prepare`. Requirements and dependency
+`inventory_digest` from `base.deploy.release.runtime_prepare`. Requirements and dependency
 wheels are copied into the exclusive work directory and rechecked against the
 supplied hashes before assembly. Optional assets use the existing native
 builder's layout and dependency checks. Absence of an optional asset makes no
@@ -84,7 +84,7 @@ platform string (provenance only), artifact digest, manifest digest, schema
 digest and retained executable/cwd. The image interpreter reports its own tag
 during assembly; the preparing process then verifies the image against its own
 host ABI, so an image whose Python ABI differs from the host runtime refuses
-here rather than at boot. See [[shared/deploy/release/runtime_release.ava.okf.md]].
+here rather than at boot. See [[base/deploy/release/runtime_release.ava.okf.md]].
 It is local preparation evidence, not a publication signature or activation
 authorization. Consumers still verify the complete image at admission.
 

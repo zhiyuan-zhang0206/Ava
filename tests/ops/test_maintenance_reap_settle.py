@@ -23,12 +23,12 @@ from uuid import uuid4
 import psycopg
 import pytest
 
+from base.cluster.machine import machine_name
+from base.db import create_agent, insert_inbound_message
+from base.deploy.maintenance import admission, cohort, pause_owner
+from base.deploy.maintenance.state import MaintenanceHold, MaintenancePhase
 from ops import agent_pause, cluster_pause
 from ops.agent_pause.probe import HostIdentity, host_identity_or_none
-from shared.cluster.machine import machine_name
-from shared.db import create_agent, insert_inbound_message
-from shared.deploy.maintenance import admission, cohort, pause_owner
-from shared.deploy.maintenance.state import MaintenanceHold, MaintenancePhase
 
 WHEN = datetime(2026, 9, 20, 3, 0, tzinfo=UTC)
 HOLDER = "ops:test:4150"
@@ -191,7 +191,7 @@ def test_unpause_releases_a_hold_whose_failures_were_reaped(
     _publish(
         MaintenanceHold("draining", {1: 11}, reaped={1: REAP}, failures={1: "ImpersonationError"})
     )
-    monkeypatch.setattr("shared.deploy.state.host_deploy_state.set_posture", MagicMock())
+    monkeypatch.setattr("base.deploy.state.host_deploy_state.set_posture", MagicMock())
     monkeypatch.setattr(agent_pause, "publish_inbound_wake", MagicMock())
 
     cluster_pause.unpause_local_cluster()
@@ -262,7 +262,7 @@ def test_start_path_reaches_unpause_with_settled_failures(
         MaintenanceHold("draining", {1: 11}, reaped={1: REAP}, failures={1: "ImpersonationError"})
     )
     steps: list[str] = []
-    monkeypatch.setattr("shared.deploy.lifecycle.start_serving.is_serving", lambda: True)
+    monkeypatch.setattr("base.deploy.lifecycle.start_serving.is_serving", lambda: True)
     monkeypatch.setattr("ops.cluster_pause.unpause_local_cluster", lambda: steps.append("unpause"))
 
     @resume_after_start

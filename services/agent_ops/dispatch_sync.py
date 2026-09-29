@@ -15,6 +15,7 @@ from typing import Any
 
 from psycopg_pool import ConnectionPool
 
+from base.api_contracts.release_handoff import ReleaseImageExecPayload
 from ops import cluster, host_config, inventory, uploads
 from ops.rpc_schemas import (
     AgentSkillViewPayload,
@@ -26,7 +27,6 @@ from ops.rpc_schemas import (
     ShellProbePayload,
     UploadReceivePayload,
 )
-from shared.api_contracts.release_handoff import ReleaseImageExecPayload
 
 # The read-modify-write arms are serialized against each other: `config_write` and `inventory_write` both
 # READ their on-disk state, modify it and write it back, so an interleave lands the

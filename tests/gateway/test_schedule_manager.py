@@ -18,9 +18,9 @@ import pytest
 from psycopg_pool import ConnectionPool
 
 import gateway.schedules.manager as sm
-from shared.cluster import session_name
-from shared.config import settings
-from shared.deploy.lifecycle import start_serving
+from base.cluster import session_name
+from base.config import settings
+from base.deploy.lifecycle import start_serving
 
 
 class _FakeBackend:
@@ -69,7 +69,7 @@ def pool() -> Iterator[ConnectionPool[psycopg.Connection]]:
 def fake_session(
     serving_root: start_serving.RootBirth, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> tuple[_FakeBackend, list[int]]:
-    from shared.sessions.pty import allocation_freeze
+    from base.sessions.pty import allocation_freeze
 
     backend = _FakeBackend()
     launched: list[int] = []
@@ -214,7 +214,7 @@ def test_launches_enabled_missing_session(
     fake_session: tuple[_FakeBackend, list[int]],
 ) -> None:
     """An enabled schedule remains desired after a current-generation restart."""
-    from shared.sessions.pty import allocation_freeze
+    from base.sessions.pty import allocation_freeze
 
     _backend, launched = fake_session
     monkeypatch.setattr(allocation_freeze, "current_generation", lambda: "current-generation")
@@ -263,7 +263,7 @@ def test_live_superseded_generation_is_reaped_before_schedule_reconcile(
     fake_session: tuple[_FakeBackend, list[int]],
 ) -> None:
     """A same-name schedule session from a flip cannot be adopted as current."""
-    from shared.sessions.pty import allocation_freeze
+    from base.sessions.pty import allocation_freeze
 
     backend, _launched = fake_session
     name = session_name("schedule-77")
@@ -282,7 +282,7 @@ def test_superseded_generation_reap_retries_before_rebuilding_enabled_schedule(
     fake_session: tuple[_FakeBackend, list[int]],
 ) -> None:
     """A failed old-generation reap blocks replacement until the official retry wins."""
-    from shared.sessions.pty import allocation_freeze
+    from base.sessions.pty import allocation_freeze
 
     backend, launched = fake_session
     sid = _insert(db_conn, "generation-retry")
@@ -740,7 +740,7 @@ def test_schedule_manager_uses_shell_backend() -> None:
     loop on it would collide with the live PTY sessions on relaunch (the
     inverse of #1119).
     """
-    from shared.sessions.backend import get_backend, get_shell_backend
+    from base.sessions.backend import get_backend, get_shell_backend
 
     assert sm.get_shell_backend is get_shell_backend
     assert sm.get_shell_backend is not get_backend

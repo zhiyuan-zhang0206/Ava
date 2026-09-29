@@ -26,8 +26,8 @@ from uuid import UUID
 
 from psycopg_pool import ConnectionPool
 
-from shared import telemetry
-from shared.db.transaction import write_transaction
+from base import telemetry
+from base.db.transaction import write_transaction
 
 _log = logging.getLogger(__name__)
 
@@ -127,7 +127,7 @@ def _settle_one_fence_blocking(
     Re-verifies the exact command target and the machine's continued absence
     inside the locking transaction: a machine that re-registers in between is
     a live cluster member again, and its own boot recovery owns its fences
-    (``shared.agents.incarnation.hosted_force.recover_orphaned_hosted_forces``).
+    (``base.agents.incarnation.hosted_force.recover_orphaned_hosted_forces``).
     """
     with write_transaction(pool) as conn, conn.cursor() as cur:
         cur.execute(
@@ -164,7 +164,7 @@ def settle_absent_machine_fences(pool: ConnectionPool, *, batch: int) -> list[in
     """Settle force-terminate fences of terminated agents whose machine is gone.
 
     A hosted force-terminate command is installed claimed+applied in one write
-    (`shared.agents.incarnation.hosted_force.install_hosted_force`) and settled — observed, its
+    (`base.agents.incarnation.hosted_force.install_hosted_force`) and settled — observed, its
     ``agents_meta.lifecycle_command_id`` pointer cleared — by the machine's own
     recovery: the original host's serialized turn pump (`original_host_force`)
     or its next boot (`recover_orphaned_hosted_forces`). A decommissioned

@@ -57,6 +57,13 @@ import numpy as np
 from watchdog.events import FileSystemEvent, FileSystemEventHandler
 from watchdog.observers import Observer
 
+from base.config import settings
+from base.daemon.health import Liveness, health_port, start_health_server, stop_health_server
+from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
+from base.daemon.shutdown import hard_exit as _hard_exit
+from base.log import init_gateway_process
+from base.native_process.os_platform import CREATE_NO_WINDOW
+from base.paths import gateway_memory_dir
 from services.memory_indexer.backends.base import MemorySearchBackend, content_hash
 from services.memory_indexer.backends.factory import get_backend
 from services.memory_indexer.backends.probe import probe_backend
@@ -77,13 +84,6 @@ from services.memory_indexer.embeddings import factory
 from services.memory_indexer.embeddings.base import EmbeddingAPIError, EmbeddingProvider
 from services.memory_indexer.embeddings.factory import get_provider
 from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
-from shared.config import settings
-from shared.daemon.health import Liveness, health_port, start_health_server, stop_health_server
-from shared.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
-from shared.daemon.shutdown import hard_exit as _hard_exit
-from shared.log import init_gateway_process
-from shared.native_process.os_platform import CREATE_NO_WINDOW
-from shared.paths import gateway_memory_dir
 
 _log = logging.getLogger("services.memory_indexer.daemon")
 
@@ -472,7 +472,7 @@ def _refresh_gateway_checkout() -> None:
     logged at ERROR and retried next cycle — a stale index can no longer
     rot silently. Keep-local mode: `pull_main` is a no-op.
     """
-    from shared.deploy.git.memory_repo import gateway_memory_dir, pull_main
+    from base.deploy.git.memory_repo import gateway_memory_dir, pull_main
 
     cwd = gateway_memory_dir()
     try:

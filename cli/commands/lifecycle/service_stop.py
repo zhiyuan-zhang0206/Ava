@@ -5,7 +5,7 @@ prove only local recorded process identities; they do not prove remote drain or
 stop OS-managed extras. Service stops never escalate to force.
 
 Persistent terminals have one closure (`_close`): capture each shell's whole
-session as `shared.sessions.pty.session_tree` defines it — the recorded shell,
+session as `base.sessions.pty.session_tree` defines it — the recorded shell,
 its descendants and its POSIX session — then HUP the shells and TERM the rest,
 wait a bounded grace, and SIGKILL what is left, each session whole. Every busy
 session whose shell it verified gone gets its owner's notice, naming what of it
@@ -31,6 +31,12 @@ from datetime import datetime
 
 import psutil
 
+from base.cluster.machine import machine_name
+from base.native_process.ownership import OwnedProcess, capture_tree, retain_processes
+from base.paths import run_dir
+from base.sessions.backend import get_shell_backend
+from base.sessions.pty import host_identity, host_starttime, session_tree
+from base.sessions.record import SessionRecord
 from cli.commands.lifecycle._maintenance_stop_report import (
     StopIncompleteError,
     SurvivorInventory,
@@ -39,12 +45,6 @@ from cli.commands.lifecycle._maintenance_stop_report import (
     occupied_groups,
 )
 from ops import pty_close_notices
-from shared.cluster.machine import machine_name
-from shared.native_process.ownership import OwnedProcess, capture_tree, retain_processes
-from shared.paths import run_dir
-from shared.sessions.backend import get_shell_backend
-from shared.sessions.pty import host_identity, host_starttime, session_tree
-from shared.sessions.record import SessionRecord
 
 # How often the completed-work wait re-reads the terminal trees.
 _WORK_POLL_S = 0.5

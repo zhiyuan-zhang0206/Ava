@@ -37,9 +37,9 @@ from agent.graph import claim_node, exec_node
 from agent.hooks.compact import compose_summary_message
 from agent.messages import NoteTag, system_note_message
 from agent.state import AgentState, CompactState
-from shared.agents.context import AvaContext
-from shared.config import settings
-from shared.db import insert_inbound_message
+from base.agents.context import AvaContext
+from base.config import settings
+from base.db import insert_inbound_message
 from tests.conftest import spawn_agent
 
 # Almost all claim tests are short-path dispatch: the inbound is INSERTed before
@@ -128,7 +128,7 @@ def _make_runtime(
 def _insert_inbound_kind(
     db: psycopg.Connection, tid: int, content: str, kind: str, source: str = "system"
 ) -> int:
-    """Directly INSERT an inbound of any kind (bypasses the chat-only helper in shared/db/__init__.py)."""
+    """Directly INSERT an inbound of any kind (bypasses the chat-only helper in base/db/__init__.py)."""
     with db.cursor() as cur:
         cur.execute(
             "INSERT INTO inbound_messages (agent_id, content, kind, source) "
@@ -266,8 +266,8 @@ async def running_agent(aops_pool: AsyncConnectionPool):
     from uuid import uuid4
 
     from agent.ownership.hosted import admit_hosted_runtime
-    from shared.cluster.machine import machine_name
-    from shared.native_process.turn_identity import bind_turn_identity
+    from base.cluster.machine import machine_name
+    from base.native_process.turn_identity import bind_turn_identity
 
     agent_id = spawn_agent()
     incarnation = await admit_hosted_runtime(
@@ -394,7 +394,7 @@ async def test_claim_chat_kind_appends_humanmessage_with_envelope(
     # plus the context notes) is laid down by `init_context` before claim runs.
     assert len(msgs) == 1  # pyright: ignore[reportUnknownArgumentType]
     assert isinstance(msgs[0], HumanMessage)
-    # User envelope: a bare "[ts]" header (shared/agents/messages/envelope.py).
+    # User envelope: a bare "[ts]" header (base/agents/messages/envelope.py).
     assert msgs[0].content.startswith("[")  # pyright: ignore[reportUnknownMemberType]
     assert "hello" in msgs[0].content  # pyright: ignore[reportUnknownMemberType]
     assert cmd.update["halted"] is False  # type: ignore[index]
@@ -1597,7 +1597,7 @@ async def test_claim_restart_kind_hosted_ends_turn_and_stays_runnable(
     """Hosted restart: goto END with `restart_requested` (not `exit_requested`),
     leaves lifecycle application to the host after the acceptance checkpoint
     has been flushed."""
-    from shared.native_process.turn_identity import bind_turn_identity
+    from base.native_process.turn_identity import bind_turn_identity
     from tests.agent.test_inbound_ownership import _admit, _agent
 
     tid = _agent(db_conn)
@@ -2261,10 +2261,10 @@ async def test_claim_auto_resurrect_chat_batch_wakes_and_keeps_chat(
     from uuid import uuid4
 
     from agent.ownership.hosted import admit_hosted_runtime, apply_hosted_lifecycle
+    from base.cluster.machine import machine_name
+    from base.native_process.runtime_incarnation import current_incarnation
+    from base.native_process.turn_identity import bind_turn_identity
     from ops.agents.wake import resurrect_agent
-    from shared.cluster.machine import machine_name
-    from shared.native_process.runtime_incarnation import current_incarnation
-    from shared.native_process.turn_identity import bind_turn_identity
 
     tid = running_agent()
     stop = _insert_inbound_kind(db_conn, tid, "", "terminate", source="user")
@@ -3171,7 +3171,7 @@ def test_claim_will_idle_shares_the_impl_and_wrapper_contract() -> None:
     from agent.graph.claim.node import claim_will_idle
     from agent.messages import system_note_message
     from agent.state_channels import CIRCUIT_REASON_BILLING, CircuitState
-    from shared.agents.messages.kwargs import NoteTag
+    from base.agents.messages.kwargs import NoteTag
 
     fresh = AgentState()
     fresh.messages = [SystemMessage(content="prompt")]

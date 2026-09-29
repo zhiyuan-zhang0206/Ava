@@ -24,15 +24,15 @@ import subprocess
 import sys
 from pathlib import Path
 
+from base.deploy.release.verified_file import regular_bytes
+from base.host.private_storage import ensure_private_dir
 from cli.release_operator.layout import prepare_work_dir, prepare_work_root, releases_store
 from cli.release_prepare import LocalInputs, Preparation, prepare_image
 from cli.release_prepare.models import encode
-from shared.deploy.release.verified_file import regular_bytes
-from shared.host.private_storage import ensure_private_dir
 
 
 def cmd_release_prepare(*, commit: str, inputs: Path, repo: Path | None) -> int:
-    from shared.paths import ava_home, repo_root
+    from base.paths import ava_home, repo_root
 
     home = ava_home()
     try:

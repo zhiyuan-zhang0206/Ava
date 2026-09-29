@@ -456,7 +456,7 @@ cluster admin shouldn't need to configure it per agent.
 
 ### Phase A — Foundation (1 PR)
 
-- New inbound kind `heartbeat` in `shared/` schema + migration.
+- New inbound kind `heartbeat` in `base/` schema + migration.
 - Gateway watchdog async task (Tier 1): poll `agents_meta` every 5 min,
   log warnings on stale agents.
 - Agent system prompt section: heartbeat response convention

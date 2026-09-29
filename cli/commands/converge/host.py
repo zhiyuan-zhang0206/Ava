@@ -14,6 +14,19 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+from base.cluster import is_default_home
+from base.cluster.machine import MachineRoles
+from base.config import settings
+from base.host.converge.accessibility import (
+    clear_status as clear_accessibility_status,
+)
+from base.host.converge.accessibility import (
+    write_status as write_accessibility_status,
+)
+from base.host.converge.browser_deps import browser_deps_notice, browser_deps_warning
+from base.host.converge.screen_capture import clear_status, write_status
+from base.host.system.probes import browser_incapability
+from base.telemetry.lgtm_local import BACKENDS
 from cli.commands.converge._brew_pin import ensure_brew_pin
 from cli.commands.converge._frontend_env import ensure_no_frontend_env_overrides
 from cli.commands.converge._os_jobs import (
@@ -59,19 +72,6 @@ from cli.commands.data_plane.pitr_foundation import converge_pitr_foundation
 from cli.commands.extensions.external_skills import converge_external_agent_skill
 from cli.commands.observability.lgtm_native import ensure_lgtm_native_step
 from cli.commands.observability.otel_collector import ensure_otel_collector_step
-from shared.cluster import is_default_home
-from shared.cluster.machine import MachineRoles
-from shared.config import settings
-from shared.host.converge.accessibility import (
-    clear_status as clear_accessibility_status,
-)
-from shared.host.converge.accessibility import (
-    write_status as write_accessibility_status,
-)
-from shared.host.converge.browser_deps import browser_deps_notice, browser_deps_warning
-from shared.host.converge.screen_capture import clear_status, write_status
-from shared.host.system.probes import browser_incapability
-from shared.telemetry.lgtm_local import BACKENDS
 
 __all__ = [
     "ALL_ROLES",
@@ -87,7 +87,7 @@ __all__ = [
 
 
 def _ensure_plugin_config_images(ctx: ConvergeCtx) -> None:  # noqa: ARG001
-    from shared.packages.plugins.enable_config import update_all_disk_images
+    from base.packages.plugins.enable_config import update_all_disk_images
 
     update_all_disk_images()
 
@@ -146,7 +146,7 @@ def _ensure_permissions_helper(ctx: ConvergeCtx) -> None:  # noqa: ARG001
         return
     if not settings.services.permissions_helper_enabled:
         raise RuntimeError("macOS root supervision requires the permissions helper")
-    from shared.host.system.probes import permissions_helper_incapability
+    from base.host.system.probes import permissions_helper_incapability
 
     reason = permissions_helper_incapability()
     if reason is not None:
@@ -174,7 +174,7 @@ def _ensure_cross_machine_transfer(ctx: ConvergeCtx) -> None:
     backend = settings.general.cross_machine_transfer_backend
     if backend == "none":
         return
-    from shared.host.converge.google_drive import candidate_drive_dirs, find_writable_google_drive
+    from base.host.converge.google_drive import candidate_drive_dirs, find_writable_google_drive
 
     if find_writable_google_drive() is None:
         looked = ", ".join(str(p) for p in candidate_drive_dirs()) or "(no candidate paths)"
@@ -211,7 +211,7 @@ def _ensure_github_pr(ctx: ConvergeCtx) -> None:
         return
     if not settings.general.require_github_pr:
         return
-    from shared.deploy.git.github_pr import github_pr_blocker
+    from base.deploy.git.github_pr import github_pr_blocker
 
     reason = github_pr_blocker()
     if reason is not None:
@@ -233,7 +233,7 @@ def _ensure_screen_capture(ctx: ConvergeCtx) -> None:  # noqa: ARG001
     host that cannot run one, that step already said so, and a derived second
     complaint here would be noise rather than news.
     """
-    from shared.host.system.probes import permissions_helper_incapability
+    from base.host.system.probes import permissions_helper_incapability
 
     if (
         not settings.services.permissions_helper_enabled
@@ -262,7 +262,7 @@ def _ensure_accessibility(ctx: ConvergeCtx) -> None:  # noqa: ARG001
     helper's answer for the next agent startup to report, after the helper has
     been brought up and only where it can exist.
     """
-    from shared.host.system.probes import permissions_helper_incapability
+    from base.host.system.probes import permissions_helper_incapability
 
     if (
         not settings.services.permissions_helper_enabled
@@ -291,7 +291,7 @@ def _warn_untracked_migrations(ctx: ConvergeCtx) -> None:  # noqa: ARG001
     would otherwise read as "my migration ran". Gateway-only: the gateway is the
     single schema writer (e9d51acea).
     """
-    from shared.deploy.schema.migrations import untracked_migration_files
+    from base.deploy.schema.migrations import untracked_migration_files
 
     names = untracked_migration_files()
     if names:
@@ -556,8 +556,8 @@ def _skip_reason(ctx: ConvergeCtx, step: ConvergeStep, *, is_prod_install: bool)
 
 
 def _desired_service_names(roles: MachineRoles | None) -> frozenset[str]:
+    from base.deploy.lifecycle.service_selection import read_selection
     from cli.commands._repo import _services_for_roles_annotated
-    from shared.deploy.lifecycle.service_selection import read_selection
 
     if roles is None:
         return frozenset()
@@ -571,9 +571,9 @@ def _desired_service_names(roles: MachineRoles | None) -> frozenset[str]:
 
 def cmd_converge() -> int:
     """`ava converge` — bring this host to the state the current code expects (idempotent)."""
+    from base.deploy.maintenance import admission
+    from base.native_process.os_platform import raise_fd_limit
     from cli.commands import _repo
-    from shared.deploy.maintenance import admission
-    from shared.native_process.os_platform import raise_fd_limit
 
     admission.require_start_allowed()
     raise_fd_limit(65536)  # converge spawns services + frontend deps; children inherit

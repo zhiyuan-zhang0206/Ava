@@ -1,6 +1,6 @@
 """The release's write-generation records and their orchestration around the ledger.
 
-Real journal, real ledger (`shared.cluster.authority.ledger`) and the real
+Real journal, real ledger (`base.cluster.authority.ledger`) and the real
 `authority.fence` / `authority.authorize` driven by the fleet coordinator
 (a fleet of one, `tests/lifecycle/release_fleet/fakes.py`); only the
 catalog and pooler effects are replaced by the ledger transitions they perform
@@ -23,6 +23,16 @@ from uuid import uuid4
 import pytest
 from pydantic import ValidationError
 
+from base.cluster.authority import (
+    AuthorityRefusedError,
+    ClosureEvidence,
+    OperationAuthority,
+    VerifiedGeneration,
+    activate,
+    require_ledger,
+)
+from base.cluster.authority.ledger import begin_mint, begin_revoke, mark_closed, record_drops
+from base.deploy.release.runtime_release import current_pointer
 from cli.commands.data_plane import write_generation
 from cli.release_fleet.request import FleetRequest
 from cli.release_transition import authority
@@ -35,16 +45,6 @@ from cli.release_transition.authority_evidence import (
 )
 from cli.release_transition.journal import Journal, Operation, create, exclusive, read_operation
 from cli.release_transition.request import ReleaseRef
-from shared.cluster.authority import (
-    AuthorityRefusedError,
-    ClosureEvidence,
-    OperationAuthority,
-    VerifiedGeneration,
-    activate,
-    require_ledger,
-)
-from shared.cluster.authority.ledger import begin_mint, begin_revoke, mark_closed, record_drops
-from shared.deploy.release.runtime_release import current_pointer
 from tests.lifecycle.release_fleet.fakes import OffDutyGateway, drive
 from tests.lifecycle.transition.phases import (
     advance_to,
@@ -576,9 +576,9 @@ def test_executor_dials_the_owner_socket_as_the_gateway_group(
 ) -> None:
     from urllib.parse import parse_qs, unquote, urlsplit
 
-    from shared import cluster
-    from shared.cluster.registry import ClusterRecord
-    from shared.db import connections
+    from base import cluster
+    from base.cluster.registry import ClusterRecord
+    from base.db import connections
 
     home = Path(request_record.home)
     record = ClusterRecord(
@@ -622,7 +622,7 @@ def test_the_executor_adopts_its_administrator_authority_before_any_phase(
     # execute() exports the captured home to its own process environment.
     monkeypatch.setattr(execute, "os", SimpleNamespace(environ={}, getpid=lambda: 1))
     monkeypatch.setattr(
-        "shared.deploy.release.runtime_interpreter.verify_loaded_image", lambda *_a, **_k: None
+        "base.deploy.release.runtime_interpreter.verify_loaded_image", lambda *_a, **_k: None
     )
     monkeypatch.setattr(ReleaseRef, "verify", lambda _self, _home: None)
     monkeypatch.setattr(execute, "_executor_receipt", lambda _launch: {"pid": 1})

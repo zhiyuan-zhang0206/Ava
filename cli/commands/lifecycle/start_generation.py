@@ -11,18 +11,18 @@ import hashlib
 import json
 from pathlib import Path
 
+from base.deploy.release import start_inputs
+from base.deploy.release.runtime_interpreter import source_digest
+from base.host.env.registry import launch_input_keys
 from cli.start_runtime import StartRuntime
-from shared.deploy.release import start_inputs
-from shared.deploy.release.runtime_interpreter import source_digest
-from shared.host.env.registry import launch_input_keys
 
 
 def _write_generation(home: Path) -> dict[str, object] | None:
     """The delivered write generation's non-secret reference: the ledger's active
     generation on a gateway home, the installed unit capability's on a pure
     agent-runner, None on a remote-managed plane."""
-    from shared.cluster.authority import load_ledger
-    from shared.cluster.authority.unit import unit_reference
+    from base.cluster.authority import load_ledger
+    from base.cluster.authority.unit import unit_reference
 
     ledger = load_ledger(home.resolve())
     if ledger is None:

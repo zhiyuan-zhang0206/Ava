@@ -10,11 +10,11 @@ from pathlib import Path
 
 from psycopg_pool import ConnectionPool
 
-from shared import telemetry
-from shared.config import settings
-from shared.db.transaction import write_transaction
-from shared.events.live.projection import PageClosed
-from shared.events.live.redis_client import publish_best_effort
+from base import telemetry
+from base.config import settings
+from base.db.transaction import write_transaction
+from base.events.live.projection import PageClosed
+from base.events.live.redis_client import publish_best_effort
 
 _log = logging.getLogger("services.page_server.daemon")
 

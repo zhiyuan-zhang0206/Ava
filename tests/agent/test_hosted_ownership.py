@@ -23,20 +23,20 @@ from agent.ownership.hosted import (
     settle_hosted_runtime,
     stamp_turn_fatal,
 )
-from shared.agents.impersonation import ImpersonationError
-from shared.agents.incarnation.resources import (
+from base.agents.impersonation import ImpersonationError
+from base.agents.incarnation.resources import (
     IncarnationResources,
     ResourceProcess,
     decode_resources,
 )
-from shared.db import create_agent, insert_inbound_message
-from shared.deploy.writers.publication import AdmissionDecision, CurrentAdmission
-from shared.deploy.writers.runtime_admission import (
+from base.db import create_agent, insert_inbound_message
+from base.deploy.writers.publication import AdmissionDecision, CurrentAdmission
+from base.deploy.writers.runtime_admission import (
     PublicationAdmissionDeferredError,
     RuntimeAdmission,
 )
-from shared.native_process.runtime_incarnation import RuntimeIncarnation, current_incarnation
-from shared.native_process.turn_identity import bind_turn_identity
+from base.native_process.runtime_incarnation import RuntimeIncarnation, current_incarnation
+from base.native_process.turn_identity import bind_turn_identity
 
 
 class _CurrentRuntimeAdmission(RuntimeAdmission):
@@ -389,7 +389,7 @@ async def test_held_continuation_admits_at_protocol_zero(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A deferred publication continuing a held command advertises zero (issue #2159)."""
-    from shared.deploy.maintenance import admission
+    from base.deploy.maintenance import admission
 
     agent_id, owner = _agent(db_conn), uuid4()
     db_conn.execute(

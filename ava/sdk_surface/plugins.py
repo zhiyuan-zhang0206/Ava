@@ -119,7 +119,7 @@ def _current_plugin_name() -> str:
     has finished importing. Returns `<unknown>` when not called inside a
     PluginContext (e.g. test directly calling)."""
     try:
-        from shared.packages.plugins.context import current_plugin_name as _cp
+        from base.packages.plugins.context import current_plugin_name as _cp
     except ImportError:
         return "<unknown>"
     return _cp() or "<unknown>"
@@ -135,7 +135,7 @@ def _record(
     `ava plugins inspect`. Lazily imported for the same reason
     `_current_plugin_name` is, and a no-op outside a plugin import."""
     try:
-        from shared.packages.plugins import contributions
+        from base.packages.plugins import contributions
     except ImportError:
         return
     contributions.record(surface, identifier, detail=detail)

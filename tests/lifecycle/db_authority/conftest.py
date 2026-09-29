@@ -38,7 +38,7 @@ import pytest
 from langgraph.checkpoint.postgres import PostgresSaver
 from psycopg import sql
 
-from shared.cluster.authority import (
+from base.cluster.authority import (
     GATEWAY_GROUP,
     RUNNER_GROUP,
     BirthAuthority,
@@ -51,8 +51,8 @@ from shared.cluster.authority import (
     read_secret,
     require_ledger,
 )
-from shared.cluster.dataplane.pg_tools import pg_start_env, pg_tool, throwaway_postgres
-from shared.deploy.schema.migrations import apply_pending_migrations
+from base.cluster.dataplane.pg_tools import pg_start_env, pg_tool, throwaway_postgres
+from base.deploy.schema.migrations import apply_pending_migrations
 
 OWNER = "ava_test_owner"
 _TEMPLATE = "ava_test_tmpl"

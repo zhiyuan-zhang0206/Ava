@@ -43,8 +43,8 @@ def _cgnat_ip(second_octet: int, tail: str = "0.1") -> str:
 
 
 def test_clean_file_passes(repo: Path) -> None:
-    _write(repo, "shared/config.py", "# gateway URL from settings\nurl = settings.gateway_url\n")
-    assert gate._scan_file("shared/config.py") == []
+    _write(repo, "base/config.py", "# gateway URL from settings\nurl = settings.gateway_url\n")
+    assert gate._scan_file("base/config.py") == []
 
 
 def test_private_10x_literal_passes(repo: Path) -> None:
@@ -98,10 +98,10 @@ def test_cidr_range_notation_passes(repo: Path) -> None:
     policy and is not a host address."""
     _write(
         repo,
-        "shared/host/net/predicates.py",
+        "base/host/net/predicates.py",
         "# VPN-overlay 100.64.0.0/10 addresses get a pinned transport\n",
     )
-    assert gate._scan_file("shared/host/net/predicates.py") == []
+    assert gate._scan_file("base/host/net/predicates.py") == []
 
 
 def test_range_notation_with_numeric_mask_passes(repo: Path) -> None:

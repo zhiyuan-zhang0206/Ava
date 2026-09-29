@@ -14,14 +14,14 @@ from __future__ import annotations
 
 from typing import Any
 
+from base.cluster.machine import is_agent_runner, machine_name, machine_role
+from base.packages.plugins import enable_config, mcp_enabled
 from ops.rpc_schemas import (
     FieldWriteResult,
     InventoryReadItem,
     InventoryReadResult,
     InventoryWriteOpResult,
 )
-from shared.cluster.machine import is_agent_runner, machine_name, machine_role
-from shared.packages.plugins import enable_config, mcp_enabled
 
 
 def _mcp_summary(spec: dict[str, Any]) -> str:

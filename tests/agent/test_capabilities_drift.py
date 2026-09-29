@@ -29,9 +29,9 @@ from agent.graph.capabilities import (
 from agent.hooks._registry import HOOKS
 from agent.hooks.capabilities import _newly_installed_skills, register_capabilities_hooks
 from agent.state import AgentState, CapabilitiesState
-from shared.agents.context import AvaContext
-from shared.agents.messages.kwargs import NoteTag
-from shared.config import settings
+from base.agents.context import AvaContext
+from base.agents.messages.kwargs import NoteTag
+from base.config import settings
 
 _CONFIG = {"configurable": {"thread_id": "1042"}}
 
@@ -61,7 +61,7 @@ def skills_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     d.mkdir()
     monkeypatch.setattr(skills_mod, "_skills_dir", lambda: d)
     monkeypatch.setattr(
-        "shared.packages.extensions.install_registry.loadable_skill_names",
+        "base.packages.extensions.install_registry.loadable_skill_names",
         lambda: {p.name for p in d.iterdir() if p.is_dir()},
     )
     monkeypatch.setattr(settings.agent, "skills_to_inject_into_system_prompt", ["*"])
@@ -210,7 +210,7 @@ def _pin_compact_ceiling(monkeypatch: pytest.MonkeyPatch, *, hard_tokens: int) -
     """Pin the force-compact ceiling regardless of model. These messages carry no
     usage_metadata, so occupancy is the chars/4 fallback and `hard_tokens` is the
     absolute threshold `auto_compact_will_fire` compares against."""
-    from shared.lm.context_budget import ContextBudget
+    from base.lm.context_budget import ContextBudget
 
     monkeypatch.setattr(
         "agent.hooks.compact.resolve_context_budget",

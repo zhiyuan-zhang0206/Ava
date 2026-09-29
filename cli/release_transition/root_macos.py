@@ -25,14 +25,14 @@ from typing import Literal, cast
 
 import psutil
 
+from base.deploy.release.runtime_release import VerifiedRelease
+from base.deploy.release.verified_file import regular_bytes
+from base.native_process.ownership import OwnedProcess
 from cli.release_transition.journal import Journal, Operation
 from cli.release_transition.launchd_custody import Birth, DarwinLaunch, RootCustody
 from cli.release_transition.root_service import observe as observe_selected
 from cli.release_transition.root_service import stage_environment
 from services.permissions_helper import client, finite_artifact
-from shared.deploy.release.runtime_release import VerifiedRelease
-from shared.deploy.release.verified_file import regular_bytes
-from shared.native_process.ownership import OwnedProcess
 
 # The ordinary start's own readiness bound, as for the Linux unit start action.
 START_TIMEOUT_S = 660
@@ -62,7 +62,7 @@ def verified_helper(operation: Operation) -> OwnedProcess:
 
 def _keeper(helper: OwnedProcess) -> client.RootStatus:
     """The keeper's state, bracketed by the kernel peer of this exact helper birth."""
-    from shared import paths
+    from base import paths
 
     socket = paths.permissions_helper_socket()
     status = client.root_status(sock_path=socket)
@@ -74,8 +74,8 @@ def _keeper(helper: OwnedProcess) -> client.RootStatus:
 
 def _live_root(helper: OwnedProcess, keeper: client.RootStatus) -> OwnedProcess:
     """The root answering this home's control socket is the keeper's live direct child."""
-    from shared.native_process.root_control.client import root_process
-    from shared.paths import root_run_dir
+    from base.native_process.root_control.client import root_process
+    from base.paths import root_run_dir
 
     root = root_process()
     if root is None:
@@ -103,7 +103,7 @@ def _require_pinned(image: VerifiedRelease, keeper: client.RootStatus, root: Own
     restarted helper (or a new login) from ``seed.json``; the live root must be
     the exact argv and working directory both would launch.
     """
-    from shared.paths import root_run_dir
+    from base.paths import root_run_dir
 
     run_dir = root_run_dir()
     reported = keeper.get("seed")
@@ -154,7 +154,7 @@ def _run_start_action(operation: Operation, image: VerifiedRelease) -> None:
     """The selected image's ordinary start, as a finite tool of the executor job."""
     import pwd
 
-    from shared.host.proc import run_bounded
+    from base.host.proc import run_bounded
 
     request = operation.request
     account = pwd.getpwuid(os.getuid())

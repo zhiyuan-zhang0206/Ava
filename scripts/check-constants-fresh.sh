@@ -1,6 +1,6 @@
 #!/bin/bash
 # Check that ui/web/src/lib/constants-generated.ts is in sync with the
-# backend constant source of truth (shared/events/live/projection.py EVENT_COALESCE_MS).
+# backend constant source of truth (base/events/live/projection.py EVENT_COALESCE_MS).
 # Does not mutate actual files (writes to temp + diff), compatible with the
 # pre-commit hook's stash/restore (mutating actual files, even with identical
 # content, changes mtime and the hook still flags them as "modified").
@@ -17,7 +17,7 @@ cd "$(dirname "$0")/.."  # repo root
 .venv/bin/python scripts/codegen/dump_frontend_constants.py "$TMPDIR" >/dev/null
 
 if ! diff -q ui/web/src/lib/constants-generated.ts "$TMPDIR/constants-generated.ts" >/dev/null; then
-    echo "ERROR: ui/web/src/lib/constants-generated.ts is out of sync with shared/events/live/projection.py"
+    echo "ERROR: ui/web/src/lib/constants-generated.ts is out of sync with base/events/live/projection.py"
     echo "   run ./scripts/codegen/dump_frontend_constants.py to regenerate"
     diff ui/web/src/lib/constants-generated.ts "$TMPDIR/constants-generated.ts" | head -30
     exit 1

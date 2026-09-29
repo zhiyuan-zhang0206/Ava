@@ -25,7 +25,7 @@ import pytest
 from langchain_core.messages import AIMessageChunk
 
 from agent.graph._callbacks import RedisStreamHandler
-from shared.events.live.projection import (
+from base.events.live.projection import (
     EVENT_ADAPTER,
     ChatDelta,
     ChatStart,
@@ -498,7 +498,7 @@ def _openai_reasoning_chunk(frag: str, index: int = 0) -> AIMessageChunk:
 
 async def test_openai_responses_reasoning_summary_publishes_reasoning():
     """openai Responses reasoning block (text in summary[].text) folded to the
-    canonical thinking shape by shared.lm.reasoning before _process_content, so the
+    canonical thinking shape by base.lm.reasoning before _process_content, so the
     handler publishes ReasoningStart/Delta with no openai-specific branch. Real
     turn order: reasoning@0 → text@1 → tool@2, code offset past both content
     blocks (so the streamed item_id matches the committed snapshot)."""

@@ -12,9 +12,9 @@ from pathlib import Path
 import pytest
 
 from agent.extensions.catalog import SURFACES, Catalog, PluginView
+from base.packages.plugins.contributions import Contribution
+from base.packages.plugins.manifest import Dependencies, Lifecycle, PluginManifest
 from cli.commands.extensions import plugins_inspect
-from shared.packages.plugins.contributions import Contribution
-from shared.packages.plugins.manifest import Dependencies, Lifecycle, PluginManifest
 
 
 def _manifest(**contributions: object) -> PluginManifest:

@@ -10,19 +10,19 @@ from pathlib import Path
 from typing import Literal
 from uuid import UUID, uuid4
 
+from base.deploy.release.runtime_release import current_pointer, verify_release
+from base.deploy.release.start_inputs import configuration_files, files_digest
+from base.deploy.release.verified_file import regular_bytes
+from base.runtime_abi import current_abi
 from cli.release_transition.journal import Operation, exclusive, read_operation
 from cli.release_transition.request import PitrRequest, ReleaseRef
 from cli.release_transition.submit import submit_request
 from services.pitr.activation.state import ActivationRecord, load_record, record_path
-from shared.deploy.release.runtime_release import current_pointer, verify_release
-from shared.deploy.release.start_inputs import configuration_files, files_digest
-from shared.deploy.release.verified_file import regular_bytes
-from shared.runtime_abi import current_abi
 
 
 def selected_image(home: Path) -> ReleaseRef:
     """Capture source/schema facts only through the selected verified inventory."""
-    from shared.deploy.release.identity import (
+    from base.deploy.release.identity import (
         ApplicationIdentity,
         application_identity_members,
         read_application_identity,
@@ -82,7 +82,7 @@ def _rollback(operation: Operation) -> PitrRequest:
         digest = hashlib.sha256(
             regular_bytes(record_path(Path(operation.request.home)))
         ).hexdigest()
-        from shared.deploy.maintenance import pause_owner
+        from base.deploy.maintenance import pause_owner
 
         current = pause_owner.read()
         at = journal.operation.maintenance_at
@@ -114,7 +114,7 @@ def _join_active(active: Operation, action: Literal["activate", "rollback"]) -> 
 
 
 def prepare_request(action: Literal["activate", "rollback"], *, origin: str) -> PitrRequest:
-    from shared.paths import ava_home
+    from base.paths import ava_home
 
     home = ava_home()
     active = _active(home)
@@ -163,8 +163,8 @@ def _new_request(
     origin: str,
     record: ActivationRecord | None,
 ) -> PitrRequest:
-    from shared.cluster import registry_path
-    from shared.cluster.machine import machine_name
+    from base.cluster import registry_path
+    from base.cluster.machine import machine_name
 
     encoded = None if record is None else regular_bytes(record_path(home))
     files = configuration_files(home)

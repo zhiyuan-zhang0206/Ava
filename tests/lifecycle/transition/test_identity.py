@@ -7,11 +7,11 @@ from uuid import uuid4
 
 import pytest
 
+from base import cluster
 from cli.release_fleet.request import FleetRequest
 from cli.release_transition.identity import require_reservation
 from cli.release_transition.request import ReleaseRef
 from cli.start_identity import IdentityInput, mark_phase, prepare_identity
-from shared import cluster
 
 
 @pytest.fixture

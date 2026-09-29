@@ -17,14 +17,14 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from base.config import settings
+from base.deploy.lifecycle import start_serving
+from base.deploy.maintenance import admission, pause_owner
+from base.deploy.maintenance.state import MaintenanceHold
 from cli.commands.lifecycle import maintenance as maintenance_command
 from ops import cluster_pause
 from scripts import cutover_adopt_home as adopt
 from scripts import cutover_db_records as records
-from shared.config import settings
-from shared.deploy.lifecycle import start_serving
-from shared.deploy.maintenance import admission, pause_owner
-from shared.deploy.maintenance.state import MaintenanceHold
 from tests.lifecycle.cutover.conftest import SERVICE_PATH, LegacyHome, record_repair
 from tests.lifecycle.cutover.test_cutover_hold import _adopted, _bare_start
 
@@ -49,7 +49,7 @@ def _release_seams(monkeypatch: pytest.MonkeyPatch, roles: frozenset[str]) -> Ma
     monkeypatch.setattr(maintenance_command, "machine_role", lambda: roles)
     monkeypatch.setattr(maintenance_command, "host_identity_or_none", lambda: None)
     monkeypatch.setattr(maintenance_command, "connect", MagicMock())
-    monkeypatch.setattr("shared.deploy.state.host_deploy_state.set_posture", MagicMock())
+    monkeypatch.setattr("base.deploy.state.host_deploy_state.set_posture", MagicMock())
     monkeypatch.setattr("ops.cluster_pause._settle_stranded_reaps", MagicMock())
     monkeypatch.setattr(start_serving, "is_serving", lambda: True)
     wake = MagicMock()
@@ -68,7 +68,7 @@ def test_recover_refuses_while_the_cutover_hold_stands(
     _ready(holder, at)
     op = MagicMock(return_value={"unlocked_holder": None})
     monkeypatch.setattr("ops.cluster.cluster_recover_op", op)
-    monkeypatch.setattr("shared.deploy.state.cluster_lock.update_lock_holder", lambda: None)
+    monkeypatch.setattr("base.deploy.state.cluster_lock.update_lock_holder", lambda: None)
 
     assert recover.cmd_cluster_recover() == 1
 

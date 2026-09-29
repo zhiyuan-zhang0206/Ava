@@ -23,7 +23,7 @@ from langchain_core.messages import SystemMessage
 
 from agent.graph import node_log
 from agent.graph.node_log import node_lifecycle
-from shared.config import settings
+from base.config import settings
 
 
 def _enter_records(records):
@@ -467,7 +467,7 @@ async def test_node_lifecycle_full_window_skips_anchors_query_for_modern_message
     from langchain_core.messages import HumanMessage
 
     import agent.graph.node_log as nl
-    from shared.agents.messages.kwargs import AvaMsgType
+    from base.agents.messages.kwargs import AvaMsgType
 
     queried: list[int] = []
 

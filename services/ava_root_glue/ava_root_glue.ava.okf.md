@@ -74,7 +74,7 @@ replacement is UNAVAILABLE. This is observation of actual readiness, not a claim
 that starting means healthy.
 
 Deployment wiring supplies the same readiness tiers used by start:
-`shared.deploy.progress_timeout.CRITICAL_SERVICE_SESSIONS` (Gate, gateway, frontend,
+`base.deploy.progress_timeout.CRITICAL_SERVICE_SESSIONS` (Gate, gateway, frontend,
 agent-host, and im-bridge) uses 180 seconds; other services use 45 seconds.
 Generic root monitoring has no CLI import. A failed replacement still becomes
 eligible for bounded retry after its window; accumulated outage/backoff history

@@ -2,7 +2,7 @@
 
 Covers maintenance / status / roster / admin events query / machines
 DELETE. These paths are exempt from the paused-host 503 middleware through
-their CONTROL_PLANE route contracts (`shared/api_contracts/contracts.py`)
+their CONTROL_PLANE route contracts (`base/api_contracts/contracts.py`)
 because they are the tools the gateway uses during pause.
 """
 
@@ -18,6 +18,18 @@ from loguru import logger
 from psycopg_pool import ConnectionPool
 from pydantic import BaseModel
 
+from base.api_contracts.status import MachineStatus
+from base.cluster import machines
+from base.cluster.machine import (
+    is_agent_runner,
+    is_gateway,
+    is_observability_station,
+    machine_name,
+)
+from base.config import settings
+from base.db.transaction import write_transaction
+from base.deploy.git.cluster_drift import prod_source_head_sha
+from base.deploy.state.cluster_lock import DeployLease
 from gateway.cluster.schemas import AgentMachineRow, MachineDeleteResponse
 from gateway.cluster.status import gather_cluster_status
 from gateway.events.schemas import AgentEventRow, AgentEventsResponse
@@ -27,18 +39,6 @@ from ops import cluster_rpc as _cluster_rpc
 from ops.cluster_pause import is_paused as cluster_is_paused
 from ops.cluster_status import ClusterStatus
 from ops.cluster_status.schema_mismatch import status as schema_mismatch_status
-from shared.api_contracts.status import MachineStatus
-from shared.cluster import machines
-from shared.cluster.machine import (
-    is_agent_runner,
-    is_gateway,
-    is_observability_station,
-    machine_name,
-)
-from shared.config import settings
-from shared.db.transaction import write_transaction
-from shared.deploy.git.cluster_drift import prod_source_head_sha
-from shared.deploy.state.cluster_lock import DeployLease
 
 router = APIRouter()
 _log = logging.getLogger(__name__)
@@ -49,7 +49,7 @@ def _local_snapshot_blocking() -> ClusterStatus:
     paused flag (file), orchestration liveness (session probe) and the
     prod-source HEAD (git rev-parse) are all child-process / disk reads that
     must not run on the event loop."""
-    from shared.native_process import loaded_commit as _process_sha
+    from base.native_process import loaded_commit as _process_sha
 
     paused = cluster_is_paused()
     return ClusterStatus(
@@ -178,7 +178,7 @@ async def get_cluster_roster(request: Request) -> list[MachineStatus]:
 # --- Admin ops (token-only ops, ssh-free) -------------------------------------
 # Replaces what used to require SSH to the gateway host:
 #   - Reading service logs: query the `events` PG table directly. Daemons
-#     route stdlib logging through loguru's PG sink (see shared/log/__init__.py's
+#     route stdlib logging through loguru's PG sink (see base/log/__init__.py's
 #     `_StdlibInterceptHandler` + `_postgres_sink`), so every INFO+ line from
 #     gateway / scheduler / labeler / agent-host / watchdog / memory-
 #     indexer lands here. agent processes also write here.
@@ -354,8 +354,8 @@ def set_machine_staging(name: str, req: MachineStagingRequest) -> MachineDeleteR
 
     The staging latch is what keeps a registered staging host out of the
     agent-runner target set — `ava start` on it clears its `stopped_at` like any
-    host, and this flag is the exclusion (`shared.cluster.machines.list_agent_runners`
-    skips is_staging rows). Backed by `shared.cluster.machines.set_staging`; the CLI
+    host, and this flag is the exclusion (`base.cluster.machines.list_agent_runners`
+    skips is_staging rows). Backed by `base.cluster.machines.set_staging`; the CLI
     verbs `ava cluster mark-staging` / `unmark-staging` call this endpoint.
     """
     changed = machines.set_staging(name, is_staging=req.is_staging)

@@ -355,9 +355,9 @@ receipts it cannot settle and why). Read the receipts with the old
 wake, and the old host's stop cancelled wakes before their row read, latching
 each as a `CancelledError` receipt of its own hold (FC-10 F20). Two rules of
 the old code place every unsettled receipt of a `stopped` hold after its
-certified drain: `shared/maintenance.py::set_phase` enters `drained` only with
+certified drain: `base/maintenance.py::set_phase` enters `drained` only with
 no unsettled failure, and nothing else moves a hold past `draining`;
-`shared/maintenance.py::record_drained` refuses a drained receipt once the
+`base/maintenance.py::record_drained` refuses a drained receipt once the
 agent has a failure. From then on a wake of a drained or parked member claims
 nothing (its inbound messages stay pending for the resume), and an agent
 outside the cohort (`commands` and `parked`, every non-terminated agent of
@@ -418,7 +418,7 @@ with the old code, before the host's code switch:
   `--exclude-unit` at W6 keeps it fenced), or treat it as a no-go on the
   gateway (R1). The new code latches none of these receipts once its drain is
   certified ([receipts need a live
-  continuation](../shared/deploy/maintenance/cohort-receipts.ava.okf.md)).
+  continuation](../base/deploy/maintenance/cohort-receipts.ava.okf.md)).
 
 ## Operator follow-up
 

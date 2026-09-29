@@ -28,7 +28,7 @@ retired actions rather than silently dropping their guards. `OpFailure` carries
 `error`, `detail` and the optional `AvaAgentError` reason, allowing the gateway to
 reconstruct the same business failure.
 
-The shared envelope lives in `shared/api_contracts/op_envelope.py`; per-operation
+The shared envelope lives in `base/api_contracts/op_envelope.py`; per-operation
 models live below gateway in `ops`. Supported non-idempotent deliveries retain
 one bounded database dedupe outcome per key; removed updater operations have no
 special duration or concurrency policy.

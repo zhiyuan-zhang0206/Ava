@@ -13,16 +13,16 @@ from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
 
 from agent import state as states
+from base.agents.history.delta_read_compat import (
+    recovery_reconstruction_scope,
+    wrap_saver_reads_with_delta_reconstruction,
+)
+from base.agents.incarnation.resources import ResourceBirth
+from base.cluster.machine import machine_name
 from ops.agents.spawn import create_agent_row
 from services.agent_host import host as host_module
 from services.agent_host.host import AgentHost
 from services.agent_host.runtime import TurnOutcome
-from shared.agents.history.delta_read_compat import (
-    recovery_reconstruction_scope,
-    wrap_saver_reads_with_delta_reconstruction,
-)
-from shared.agents.incarnation.resources import ResourceBirth
-from shared.cluster.machine import machine_name
 
 
 def test_unwrapped_saver_does_not_opt_into_reconstruction_cache() -> None:

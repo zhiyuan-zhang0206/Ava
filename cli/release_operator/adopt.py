@@ -1,6 +1,6 @@
 """`ava cluster release adopt` — first image selection for a source-run home.
 
-Wires `shared.deploy.release.runtime_release.activate_release(expected_current=None)` plus
+Wires `base.deploy.release.runtime_release.activate_release(expected_current=None)` plus
 `cli.release_transition.root_service.install_steady` — exactly the sequence
 `scripts/preview/release_cycle_runtime.py::initial` already exercises for the
 preview's own captured bundle — to a real home/registry and a real
@@ -29,11 +29,11 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+from base.deploy.release.runtime_release import VerifiedRelease, activate_release, current_pointer
+from base.deploy.release.verified_file import regular_bytes
+from base.runtime_abi import current_abi
 from cli.release_prepare.models import PreparationReceipt
 from cli.release_transition.request import ReleaseRef
-from shared.deploy.release.runtime_release import VerifiedRelease, activate_release, current_pointer
-from shared.deploy.release.verified_file import regular_bytes
-from shared.runtime_abi import current_abi
 
 
 def _host_supports_adoption() -> bool:
@@ -44,10 +44,10 @@ def _host_supports_adoption() -> bool:
 
 
 def _adopt(receipt: Path) -> tuple[ReleaseRef, VerifiedRelease]:
-    from shared.deploy.lifecycle.home_lifecycle_locks import resource_lock
-    from shared.host.private_storage import ensure_private_dir
-    from shared.native_process.os_platform import file_lock
-    from shared.paths import ava_home
+    from base.deploy.lifecycle.home_lifecycle_locks import resource_lock
+    from base.host.private_storage import ensure_private_dir
+    from base.native_process.os_platform import file_lock
+    from base.paths import ava_home
 
     if not _host_supports_adoption():
         raise ValueError(
@@ -74,11 +74,11 @@ def _adopt(receipt: Path) -> tuple[ReleaseRef, VerifiedRelease]:
 
 
 def _select_and_install(home: Path, reference: ReleaseRef, receipt: Path) -> VerifiedRelease:
+    from base.cluster import registry_path
+    from base.deploy.release.operation import require_start_authorized
+    from base.host.private_storage import ensure_private_dir
     from cli.commands.lifecycle.root_driver import require_root_absent
     from cli.release_transition.root_service import install_steady
-    from shared.cluster import registry_path
-    from shared.deploy.release.operation import require_start_authorized
-    from shared.host.private_storage import ensure_private_dir
 
     # An operation that activated its candidate leaves the pointer on this
     # receipt's image, which the re-run below would otherwise accept; its boot

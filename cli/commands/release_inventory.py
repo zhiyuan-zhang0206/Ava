@@ -20,26 +20,26 @@ from typing import Literal, cast
 
 import psycopg
 
-from shared.deploy.release.runtime_release import (
+from base.deploy.release.runtime_release import (
     ReleaseRejectedError,
     VerifiedRelease,
     verify_release,
 )
-from shared.deploy.release.verified_file import regular_bytes as _regular_bytes
-from shared.deploy.writers.observation import (
+from base.deploy.release.verified_file import regular_bytes as _regular_bytes
+from base.deploy.writers.observation import (
     ExcludedRegistration,
     ExpectedLauncher,
     ExpectedSession,
     ExpectedUnitWriters,
 )
-from shared.host.private_storage import write_private_bytes
-from shared.host.system.job_observation import (
+from base.host.private_storage import write_private_bytes
+from base.host.system.job_observation import (
     read_crontab,
     read_launchd_definition,
     read_launchd_labels,
 )
-from shared.native_process.evidence import ExpectedProcess
-from shared.runtime_abi import current_abi
+from base.native_process.evidence import ExpectedProcess
+from base.runtime_abi import current_abi
 
 
 def _canonical(value: object) -> bytes:
@@ -228,9 +228,9 @@ def _launchers(
 
 
 def _service_roster() -> list[dict[str, object]]:
+    from base.cluster.machine import machine_role
+    from base.deploy.release.runtime_interpreter import WHEEL_RUNTIME
     from ops.spec import services_for_capabilities_annotated
-    from shared.cluster.machine import machine_role
-    from shared.deploy.release.runtime_interpreter import WHEEL_RUNTIME
 
     if not WHEEL_RUNTIME:
         raise ReleaseRejectedError("inventory must load the verified candidate service code")

@@ -139,7 +139,7 @@ def _run_watcher(
     def workspace_for_test(_agent_id: int) -> Path:
         return tmp_path
 
-    monkeypatch.setattr("shared.paths.workspace_dir", workspace_for_test)
+    monkeypatch.setattr("base.paths.workspace_dir", workspace_for_test)
 
     code = _TEMPLATE.read_text()
     substitutions = (
@@ -302,7 +302,7 @@ def test_persistent_owner_url_error_stops_early_with_absolute_fallback(
     """A guarded config error cannot heal through transport retries."""
     from pydantic import BaseModel, ValidationError, model_validator
 
-    from shared.config.data_plane import AgentProfileOwnerDbUrlRefusedError
+    from base.config.data_plane import AgentProfileOwnerDbUrlRefusedError
 
     class _Guarded(BaseModel):
         @model_validator(mode="after")
@@ -332,7 +332,7 @@ def test_exit_notice_tail_keeps_path_and_cause_after_boot_cleanup(
 
     from pydantic import BaseModel, ValidationError, model_validator
 
-    from shared.config.data_plane import AgentProfileOwnerDbUrlRefusedError
+    from base.config.data_plane import AgentProfileOwnerDbUrlRefusedError
 
     class _Guarded(BaseModel):
         @model_validator(mode="after")

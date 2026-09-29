@@ -58,7 +58,7 @@ The server set is determined by config (not enumerated in `ava/` source code). `
 2. bundled `.mcp.json` under each plugin root (`mcpServers` section);
 3. installed `$AVA_HOME/mcps/*/.mcp.json` (installed outside core via `ava mcp install`, gated by `install_registry` rows of `type="mcp"`);
 4. machine-level `$AVA_HOME/mcp.json` (applied last, overwrites defaults of same name).
-On top of this, per-host **disabled overlay** (`shared/packages/plugins/mcp_enabled.py:read_enabled`) — servers marked disabled are excluded from the returned map by default.
+On top of this, per-host **disabled overlay** (`base/packages/plugins/mcp_enabled.py:read_enabled`) — servers marked disabled are excluded from the returned map by default.
 
 Installed server spawn cwd is given by `installed_mcp_dir(name)` (its package directory), allowing its relative `.venv/bin/python` command to resolve to an isolated venv; builtin/plugin/machine returns None (keeping daemon cwd).
 

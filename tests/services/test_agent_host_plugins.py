@@ -16,8 +16,8 @@ from pathlib import Path
 
 import pytest
 
+from base.deploy.release import runtime_interpreter
 from services.agent_host import daemon
-from shared.deploy.release import runtime_interpreter
 
 
 def _make_plugin(root: Path, name: str, body: str = "x = 1\n") -> None:

@@ -9,9 +9,9 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
+from base.deploy.release.verified_file import regular_bytes
+from base.native_process.ownership import OwnedProcess, capture_tree
 from scripts.preview import local
-from shared.deploy.release.verified_file import regular_bytes
-from shared.native_process.ownership import OwnedProcess, capture_tree
 
 
 def capture(run: Path, label: str) -> None:

@@ -84,14 +84,14 @@ def _install_fake_accounting(monkeypatch: pytest.MonkeyPatch, accounting: Any) -
     def record_emit(category: str, event_name: str, **kwargs: Any) -> None:
         emitted.append({"category": category, "event_name": event_name, **kwargs})
 
-    monkeypatch.setattr("shared.telemetry.emit", record_emit)
+    monkeypatch.setattr("base.telemetry.emit", record_emit)
     return emitted
 
 
 def test_repo_root_survives_runtime_materialization(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The script finds the source root from shared.__file__, not its own path.
+    """The script finds the source root from base.__file__, not its own path.
 
     The gateway materializes the script to ~/.ava/schedules/<id>/ before
     executing it; there, ``Path(__file__).parents[1]`` is ~/.ava/schedules,

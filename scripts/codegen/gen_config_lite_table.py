@@ -1,17 +1,17 @@
 #!/usr/bin/env python
-"""Generate ``shared/host/env/config_lite_table.json`` — the boot-lite static config index.
+"""Generate ``base/host/env/config_lite_table.json`` — the boot-lite static config index.
 
-Single source of truth: the field declarations behind ``shared/config_registry``
+Single source of truth: the field declarations behind ``base/config_registry``
 (name / domain / env alias / per-agent flag / default) plus the explicit
 ``LITE_MANIFEST`` below. The generated index carries:
 
-- ``lite_fields`` — the boot-path fields ``shared/config/_lite.py`` resolves
+- ``lite_fields`` — the boot-path fields ``base/config/_lite.py`` resolves
   without pydantic, with the parse kind, the default kind, and any
   field-specific validity rule;
 - ``field_domains`` / ``field_aliases`` / ``field_scopes`` /
   ``field_capabilities`` / ``per_agent_fields`` — the all-field indexes the
   facade accessors (``field_alias`` / ``field_domain`` / ``field_names`` /
-  ``per_agent_field_names``) and ``shared/host/env/registry.py``'s authority
+  ``per_agent_field_names``) and ``base/host/env/registry.py``'s authority
   projections serve without building the registry.
 
 The manifest is the ONLY admission gate: a field not listed here still works —
@@ -24,14 +24,14 @@ several columns) blow past the repo's 800-line hard ceiling
 (``scripts/lint/code_structure.py``, no new baseline entries), and that rule's remedy —
 split into focused modules — does not fit one machine-generated table whose
 columns are never read as separate units. A data file carries no line budget
-(precedent: ``shared/lm/pricing_catalog_archive.json``);
-``shared/host/env/config_lite_table.py`` is the hand-written reader that materializes the
+(precedent: ``base/lm/pricing_catalog_archive.json``);
+``base/host/env/config_lite_table.py`` is the hand-written reader that materializes the
 named surfaces consumers import.
 
-Index and reader live OUTSIDE the ``shared.config`` package on purpose, like
-``shared/host/env/config_registry.py``: ``shared/host/env/registry.py`` (the env-authority
+Index and reader live OUTSIDE the ``base.config`` package on purpose, like
+``base/host/env/config_registry.py``: ``base/host/env/registry.py`` (the env-authority
 projections that ``load_ava_env`` runs before Settings exists) imports it, and a
-package submodule import would execute the ``shared.config`` facade first —
+package submodule import would execute the ``base.config`` facade first —
 re-entering the boot it is part of.
 
 Run after changing any config field, or let the pre-commit
@@ -58,11 +58,11 @@ from typing import Any, NamedTuple, cast
 from pydantic.fields import FieldInfo
 from pydantic_core import PydanticUndefined
 
-# Put project root on sys.path so `from shared... import ...` finds this
+# Put project root on sys.path so `from base... import ...` finds this
 # checkout's modules (same pattern as gen_event_registry.py).
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
-_OUT = Path("shared/host/env/config_lite_table.json")
+_OUT = Path("base/host/env/config_lite_table.json")
 _EMPTY_INDEX: dict[str, object] = {
     "_generated": (
         "BOOTSTRAP STUB — regenerate with `.venv/bin/python scripts/codegen/gen_config_lite_table.py`."
@@ -120,7 +120,7 @@ def _ensure_index_present() -> None:
 os.environ["AVA_CONFIG_FETCH"] = "skip"
 _ensure_index_present()
 
-from shared.host.env.config_registry import (  # noqa: E402 — must follow the bootstrap above
+from base.host.env.config_registry import (  # noqa: E402 — must follow the bootstrap above
     _build_registry,
     field_alias,
     schema_extra,
@@ -139,7 +139,7 @@ class LiteField(NamedTuple):
 
 
 # The boot-path fields. Order = the table's order (curated). Every row's
-# `check` names a validity rule that must exist in `shared/config/_lite.py`;
+# `check` names a validity rule that must exist in `base/config/_lite.py`;
 # a field whose declaration carries a validator lists the matching rule (the
 # parity test locks behavior against the eager path, the drift test locks this
 # table against the live registry).
@@ -157,7 +157,7 @@ LITE_MANIFEST: tuple[LiteField, ...] = (
         "cluster clock: cluster_tz_name/format_timestamp/apply_cluster_timezone",
     ),
     LiteField("message_timestamp_weekday", "literal", None, "format_timestamp weekday rendering"),
-    LiteField("machine_name", "literal", None, "shared/cluster/machine.py identity reads"),
+    LiteField("machine_name", "literal", None, "base/cluster/machine.py identity reads"),
     LiteField("machine_serve_gateway", "none", None, "machine_role() capability detection"),
     LiteField("machine_serve_agent_runner", "none", None, "machine_role() capability detection"),
     LiteField(
@@ -190,7 +190,7 @@ LITE_MANIFEST: tuple[LiteField, ...] = (
         "llm_model", "literal", None, "ava/attachment_transport.py model gate + lifecycle reads"
     ),
     LiteField(
-        "telemetry_otlp_enabled", "literal", None, "shared/telemetry/otlp/telemetry_otlp boot read"
+        "telemetry_otlp_enabled", "literal", None, "base/telemetry/otlp/telemetry_otlp boot read"
     ),
     LiteField(
         "telemetry_otlp_endpoint",
@@ -244,7 +244,7 @@ def _kind(annotation: object) -> str:
         return "csv_str_list"
     raise SystemExit(
         f"lite field annotation {annotation!r} has no parse kind — extend _kind() and the documented "
-        f"kinds in shared/config/_lite.py before adding this field to LITE_MANIFEST"
+        f"kinds in base/config/_lite.py before adding this field to LITE_MANIFEST"
     )
 
 
@@ -395,7 +395,7 @@ def main(*, check: bool = False, out: str | None = None) -> int:
         current = target.read_text(encoding="utf-8")
         if current != rendered:
             print(
-                "ERROR: shared/host/env/config_lite_table.json is out of sync with the config registry.\n"
+                "ERROR: base/host/env/config_lite_table.json is out of sync with the config registry.\n"
                 "   run .venv/bin/python scripts/codegen/gen_config_lite_table.py to regenerate"
             )
             return 1

@@ -52,7 +52,7 @@ def _probe_dead_otlp_window() -> None:
     incident's combination — dead OTLP window with an executor job in flight at
     SIGTERM — is not reproduced.
     """
-    from shared import telemetry
+    from base import telemetry
 
     telemetry.emit(
         "telemetry",

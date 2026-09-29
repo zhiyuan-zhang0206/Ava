@@ -1,9 +1,9 @@
 # ruff: noqa: RUF001 — generated doc keeps a few non-ASCII glyphs (✓/—); deliberate
-"""Generate shared/events/registry.md from the event contract registry (R2-C).
+"""Generate base/events/registry.md from the event contract registry (R2-C).
 
-Single source of truth: ``shared/events/contract.EVENTS`` (name x category x
+Single source of truth: ``base/events/contract.EVENTS`` (name x category x
 payload TypedDict x destination) plus the SSE roles in
-``shared/events/live/projection.py``. The generated doc carries the registry data as
+``base/events/live/projection.py``. The generated doc carries the registry data as
 tables and preserves the governance prose (§6-§8) verbatim; producer /
 consumer provenance now lives at the emit sites in code, not in this doc.
 
@@ -17,20 +17,20 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-# Put project root on sys.path so `from shared... import ...` finds this
+# Put project root on sys.path so `from base... import ...` finds this
 # checkout's modules (without it, an editable install of another checkout
 # shadows them — same pattern as dump_event_fixtures.py / dump_openapi.py).
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
-from shared.events.contract import EVENTS, payload_keys
-from shared.events.live.projection import GLOBAL_ROLES, SYSTEM_ROLES
+from base.events.contract import EVENTS, payload_keys
+from base.events.live.projection import GLOBAL_ROLES, SYSTEM_ROLES
 
-_OUT = Path("shared/events/registry.md")
+_OUT = Path("base/events/registry.md")
 
 _HEADER = """# Ava event name registry
 
 > This document is **generated**: produced by `scripts/codegen/gen_event_registry.py` from
-> the `EVENTS` registry in `shared/events/contract.py` (since 2026-08-08, R2-C).
+> the `EVENTS` registry in `base/events/contract.py` (since 2026-08-08, R2-C).
 > Hand edits are flagged as drift by the pre-commit `events-registry-fresh` hook.
 > Inventory method and history: see §8.
 
@@ -41,7 +41,7 @@ _HEADER = """# Ava event name registry
 > discriminator is called `role` (§5, live projection, not persisted).
 
 **The registry is the single source of truth for event_name** (the `EVENTS` in
-`shared/events/contract.py`). A new event = one row added to the registry
+`base/events/contract.py`). A new event = one row added to the registry
 (`telemetry.emit` fails fast on unregistered names); the tables in this document are
 generated from it and never hand-synced. event_names that violate the naming rules
 (§6) must not enter code.
@@ -92,7 +92,7 @@ _AUDIT_INTRO = """
 = one agent operation fact. `source` (who triggered: `agent:N` / `user` / `system` /
 `self`) and `target_agent_id` (against whom) are the two key audit dimensions, queried
 more often than payload. Payload keys other than those listed have no Pydantic model
-(display-surface use; see the payload tiering rules in `shared/telemetry/audit_events.py`).
+(display-surface use; see the payload tiering rules in `base/telemetry/audit_events.py`).
 Emit sites and consumers: see the comments at each emit point.
 
 | event_name | meaning | tier | key payload fields | destination |
@@ -102,7 +102,7 @@ Emit sites and consumers: see the comments at each emit point.
 _TELEMETRY_INTRO = """
 ## 3. Telemetry events (category=telemetry, {n})
 
-Telemetry-side event name resolution (`shared/log/__init__.py`): **explicit `event=` →
+Telemetry-side event name resolution (`base/log/__init__.py`): **explicit `event=` →
 `label=` fallback → default `"log"`**. Payload = logger extra fields + `msg`
 (formatted full text) + exception traceback. `(L)` marks names currently produced via
 **label fallback** (no explicit event=); `(SQL)` marks writes that bypass loguru and
@@ -123,7 +123,7 @@ _LOG_INTRO = """
 _SSE_INTRO = """
 ## 5. SSE roles (live channel, not persisted, {n})
 
-Typed Pydantic discriminators in `shared/events/live/projection.py` (role is a Literal);
+Typed Pydantic discriminators in `base/events/live/projection.py` (role is a Literal);
 `EVENT_ADAPTER` / `SYSTEM_ROLES` / `GLOBAL_ROLES` derive from the single
 `_ROLE_CLASSES` registry (R2-C). SSE is a **live projection** of the "latest drops"
 of the event river — not persisted, unlike persistent events; role naming shares the
@@ -158,12 +158,12 @@ Under the unified model `event_name` is a globally unique event name (OTel
 5. **One fact = one event_name, no cross-category near-duplicates**: when the same
    fact exists in both audit and telemetry, distinguish by category, do not mint a
    near-synonym name.
-6. **New event_names must be registered in `EVENTS` in `shared/events/contract.py`
+6. **New event_names must be registered in `EVENTS` in `base/events/contract.py`
    first** (this document is generated from it; registration = documented), and the
    PR description cites the registry entry.
 7. **Payload tiering**: only event_names whose payload fields are **branched on** by
    downstream programs get Pydantic models; display-surface payloads stay untyped
-   dicts (tiering rules in `shared/telemetry/audit_events.py`).
+   dicts (tiering rules in `base/telemetry/audit_events.py`).
 
 ---
 
@@ -223,9 +223,9 @@ loaded semantics = the body was actually read.
 
 ### 7.6 [Settled] Final event_name-category caliber (2026-08-05, tracker #762/#763)
 
-The `EVENTS` registry in `shared/events/contract.py` (R2-C) is the final caliber for
+The `EVENTS` registry in `base/events/contract.py` (R2-C) is the final caliber for
 event_name and category; `_TELEMETRY_KINDS` in
-`shared/telemetry/emitter.py` is a derived projection, no longer hand-maintained:
+`base/telemetry/emitter.py` is a derived projection, no longer hand-maintained:
 
 - **`text`, `syntax_fix` → telemetry**: the whitelist previously missed these two
   label-fallback event_names, so live data landed in log (30d). Now whitelisted +
@@ -246,10 +246,10 @@ event_name and category; `_TELEMETRY_KINDS` in
 
 ## 8. Inventory method and coverage (reproducible)
 
-1. **Registry**: the `EVENTS` in `shared/events/contract.py` is the single source of
+1. **Registry**: the `EVENTS` in `base/events/contract.py` is the single source of
    truth; this document is generated by `scripts/codegen/gen_event_registry.py` (the
    pre-commit `events-registry-fresh` hook verifies no drift).
-2. **Code-literal cross-check**: `python shared/events/scan_kinds.py` — scans
+2. **Code-literal cross-check**: `python base/events/scan_kinds.py` — scans
    production Python code (excluding tests/worktrees/node_modules) for `event=`,
    `label=`, `event_type=`, SSE roles, emits four inventories, and cross-checks them
    bidirectionally against the registry (`tests/test_lint_event_kinds.py`).
@@ -329,7 +329,7 @@ def main(*, check: bool = False, out: str | None = None) -> int:
         current = target.read_text(encoding="utf-8")
         if current != rendered:
             print(
-                "ERROR: shared/events/registry.md is out of sync with the registry.\n"
+                "ERROR: base/events/registry.md is out of sync with the registry.\n"
                 "   run .venv/bin/python scripts/codegen/gen_event_registry.py to regenerate"
             )
             return 1

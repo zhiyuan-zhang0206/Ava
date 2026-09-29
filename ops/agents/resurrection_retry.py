@@ -5,12 +5,12 @@ from uuid import UUID
 import psycopg
 from pydantic import ValidationError
 
+from base.agents import AgentNotFound, MachinePaused, ResurrectError, ResurrectRefused
+from base.agents.incarnation.resources import ResourceBirth, ResourceShapeError, decode_resources
+from base.log import logger
+from base.native_process.runtime_incarnation import RuntimeIncarnation
 from ops.cluster_rpc import ClusterOpFailed
 from ops.rpc_schemas import OpFailure
-from shared.agents import AgentNotFound, MachinePaused, ResurrectError, ResurrectRefused
-from shared.agents.incarnation.resources import ResourceBirth, ResourceShapeError, decode_resources
-from shared.log import logger
-from shared.native_process.runtime_incarnation import RuntimeIncarnation
 
 # The ops server's wire form of an exception it returns as a failed result.
 _REMOTE_REFUSAL = f"{ResurrectRefused.__name__}: "
@@ -44,7 +44,7 @@ def hosted_resurrection_target(
     - the runtime never admitted it: the fresh-INSERT birth marker is still
       unconsumed, so no predecessor allocation exists;
     - `unowned_termination` names this life's force receipt
-      (`shared.agents.incarnation.lifecycle_acceptance.record_unowned_termination`): this runtime
+      (`base.agents.incarnation.lifecycle_acceptance.record_unowned_termination`): this runtime
       ended the row while no incarnation owned it, and its own lifecycle had
       left it unowned. Resurrection restores the state that force ended;
       admission still decides the successor.

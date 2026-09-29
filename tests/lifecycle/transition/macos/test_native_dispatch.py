@@ -10,14 +10,14 @@ from uuid import uuid4
 import pytest
 from pydantic import JsonValue
 
+from base import paths
+from base.host.system import boot_unit
+from base.native_process.ownership import OwnedProcess
 from cli.release_fleet.request import FleetRequest
 from cli.release_transition import execute, journal, native, submit
 from cli.release_transition import launcher_linux as linux
 from cli.release_transition import launcher_macos as macos
 from cli.release_transition.request import PitrRequest
-from shared import paths
-from shared.host.system import boot_unit
-from shared.native_process.ownership import OwnedProcess
 from tests.lifecycle.transition.macos.launchd_fake import Harness
 from tests.lifecycle.transition.macos.launchd_fake import harness as harness
 

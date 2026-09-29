@@ -1,5 +1,0 @@
-{
-  "complexity": {
-    "shared/db/__init__.py::insert_inbound_message": 21
-  }
-}

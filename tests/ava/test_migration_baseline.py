@@ -10,8 +10,8 @@ import psycopg
 import pytest
 from psycopg import sql
 
-from shared.config import settings
-from shared.deploy.schema.migrations import (
+from base.config import settings
+from base.deploy.schema.migrations import (
     apply_pending_migrations,
     required_migration_set,
 )

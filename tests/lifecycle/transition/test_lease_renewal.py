@@ -1,6 +1,6 @@
 """A finite executor's deploy lease survives a missed renewal round.
 
-`shared.deploy.progress_timeout` promises that a missed round (a slow database, one
+`base.deploy.progress_timeout` promises that a missed round (a slow database, one
 dropped connection) is never fatal: a renewal that raises is retried until
 the lease could lapse before the next round. A renewal that answers "not
 yours" — another holder, or already expired — loses it at once. The fleet
@@ -16,10 +16,10 @@ from uuid import uuid4
 
 import pytest
 
+from base.deploy import progress_timeout
+from base.deploy.state import cluster_lock
 from cli.release_fleet.gateway import DeployLease
 from services.pitr.activation import lease as lease_module
-from shared.deploy import progress_timeout
-from shared.deploy.state import cluster_lock
 
 _INTERVAL_S = 0.01
 _TTL_S = 0.2

@@ -18,6 +18,13 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from datetime import time as clock_time
 
+from base import telemetry
+from base.config import settings
+from base.daemon.health import health_port, start_health_server, stop_health_server
+from base.daemon.health_schema import DEGRADED, OK, component
+from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
+from base.daemon.shutdown import hard_exit as _hard_exit
+from base.log import init_gateway_process
 from services.backup import _cluster_tz, is_due
 from services.backup_scheduler.recovery_drill import (
     load_local_dump_restore_success,
@@ -27,13 +34,6 @@ from services.backup_scheduler.recovery_drill import (
 from services.backup_scheduler.worker import run_job
 from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
 from services.pitr.operation.custody import OperationBusyError
-from shared import telemetry
-from shared.config import settings
-from shared.daemon.health import health_port, start_health_server, stop_health_server
-from shared.daemon.health_schema import DEGRADED, OK, component
-from shared.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
-from shared.daemon.shutdown import hard_exit as _hard_exit
-from shared.log import init_gateway_process
 
 _log = logging.getLogger("services.backup_scheduler.daemon")
 
@@ -213,7 +213,7 @@ async def run() -> None:
 
 def main() -> None:
     """Entry point for the gateway service session."""
-    from shared.deploy.schema.migrations import assert_schema_current
+    from base.deploy.schema.migrations import assert_schema_current
 
     assert_schema_current(settings.data_plane.db_url)
     init_gateway_process(name="pg-backup")

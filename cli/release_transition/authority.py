@@ -24,17 +24,17 @@ import getpass
 from pathlib import Path
 from urllib.parse import quote
 
-from cli.release_transition.authority_evidence import Fence, FenceEvidence, GenerationRef, Issue
-from cli.release_transition.journal import Journal, Operation
-from cli.release_transition.request import ReleaseRef
-from shared.cluster.authority import (
+from base.cluster.authority import (
     AuthorityRefusedError,
     Ledger,
     OperationAuthority,
     active_generation,
     require_ledger,
 )
-from shared.deploy.release.runtime_release import current_pointer
+from base.deploy.release.runtime_release import current_pointer
+from cli.release_transition.authority_evidence import Fence, FenceEvidence, GenerationRef, Issue
+from cli.release_transition.journal import Journal, Operation
+from cli.release_transition.request import ReleaseRef
 
 
 def _authority(operation: Operation) -> OperationAuthority:
@@ -55,9 +55,9 @@ def adopt_executor_authority(home: Path) -> None:
     role gives every statement exactly the gateway group's privileges while
     the session user stays the administrator, whom no fence census includes.
     """
-    from shared.cluster import db_identity, get_record, record_postgres_port
-    from shared.db.connections import adopt_administrator
-    from shared.db.pg_admin import pg_socket_dir
+    from base.cluster import db_identity, get_record, record_postgres_port
+    from base.db.connections import adopt_administrator
+    from base.db.pg_admin import pg_socket_dir
 
     ledger = require_ledger(home)
     record = get_record(home)
@@ -265,7 +265,7 @@ def _unit_generation(operation: Operation) -> None:
     A new generation reaches a unit through its capability exchange over the
     coordinator channel (slice dbgen-8); until then a unit start refuses.
     """
-    from shared.cluster.authority.unit import load_unit_capability
+    from base.cluster.authority.unit import load_unit_capability
 
     unit = operation.unit
     assert unit is not None  # noqa: S101 — called for unit operations only

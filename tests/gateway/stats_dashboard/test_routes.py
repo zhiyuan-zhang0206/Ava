@@ -24,17 +24,17 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
+from base import telemetry
+from base.cluster import home_label
+from base.config import settings
+from base.packages.plugins import stats
+from base.paths import ava_home
+from base.telemetry.loki_index_labels import EVENT_STREAM_RETENTION, retention_floor
 from gateway.app import app
 from gateway.cluster import _stats_dashboard, status
 from gateway.cluster.schemas import StatsDashboard
 from gateway.lgtm import loki_events, loki_query_budget
 from gateway.schemas.stats import StatsWindowHours, window_delta
-from shared import telemetry
-from shared.cluster import home_label
-from shared.config import settings
-from shared.packages.plugins import stats
-from shared.paths import ava_home
-from shared.telemetry.loki_index_labels import EVENT_STREAM_RETENTION, retention_floor
 from tests.gateway.loki_fake import FakeLoki
 
 

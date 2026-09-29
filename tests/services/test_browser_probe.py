@@ -25,7 +25,7 @@ from pathlib import Path
 import pytest
 
 import services.browser.probe as probe_mod
-from shared.daemon.health import ProbeVerdict
+from base.daemon.health import ProbeVerdict
 
 _PROFILE = Path("/home/u/.ava/chrome-profile")
 

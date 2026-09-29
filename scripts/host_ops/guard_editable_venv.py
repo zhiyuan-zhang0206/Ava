@@ -2,7 +2,7 @@
 
 This module depends only on the standard library so it can run before uv builds
 or imports a project environment. It validates the same POSIX, lib64, and
-Windows editable-install layouts as ``shared.deploy.release.editable_install`` without
+Windows editable-install layouts as ``base.deploy.release.editable_install`` without
 importing project dependencies.
 """
 

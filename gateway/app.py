@@ -35,9 +35,9 @@ Redis (`ava:events` channel); they do not share Python process state or
 semantic payload.
 
 Concurrency:
-- DB uses one `shared.db.pool()` per process; each request borrows a connection
+- DB uses one `base.db.pool()` per process; each request borrows a connection
 - Publish callsites reuse one process-wide `aredis.Redis` via
-  `shared.events.live.redis_client.get_async_redis()`; SSE / pubsub subscribers still
+  `base.events.live.redis_client.get_async_redis()`; SSE / pubsub subscribers still
   open their own connection per request (subscriber lifecycle ≠ publisher).
 
 Frontend: Next.js app under `ui/web/`, served on :3000; the browser calls
@@ -66,7 +66,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-import shared.db
+import base.db
+from base.agents import AvaAgentError
+from base.agents.context import AvaContext
+from base.cluster.auth import cookie_name
+from base.config import settings
+from base.host.system.cron import register_os_cron
+from base.lm.plugin_providers import ensure_provider_plugins_loaded
 from gateway import ttl_reaper
 from gateway._server import main as _run_gateway
 from gateway.agents import completion_notice_flusher, max_id_gauge
@@ -165,12 +171,6 @@ from gateway.routers import (
 from gateway.run_timeline import router as run_timeline_router
 from gateway.schedules import router as schedules_router
 from gateway.schedules.manager import ScheduleManager
-from shared.agents import AvaAgentError
-from shared.agents.context import AvaContext
-from shared.cluster.auth import cookie_name
-from shared.config import settings
-from shared.host.system.cron import register_os_cron
-from shared.lm.plugin_providers import ensure_provider_plugins_loaded
 
 _log = logging.getLogger(__name__)
 
@@ -200,7 +200,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     # app.state.ctx; raw db_pool / get_async_redis() keep working for
     # call sites that aren't migrated yet.
     app.state.ctx = AvaContext()
-    # Runtime consumer -> `shared.db.pool()` dials the pooled URL (PgBouncer when
+    # Runtime consumer -> `base.db.pool()` dials the pooled URL (PgBouncer when
     # enabled, else direct) and decides the connection kwargs in one place:
     # prepare_threshold=None keeps every borrowed connection transaction-pooling-safe,
     # and PG_KEEPALIVE_KWARGS bounds a borrow on a half-dead socket. The second
@@ -208,11 +208,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     # gateway process and serves every request, so a connection idle across a host
     # sleep or a network change comes back on a dead TCP flow and, unbounded, parks
     # the request handler on the OS TCP-retransmit timeout.
-    app.state.db_pool = shared.db.pool(max_size=8)
+    app.state.db_pool = base.db.pool(max_size=8)
     # The control plane must never queue behind the saturated data-plane pool.
     # Audit P0-2 follows the 2026-08-23 watchdog misjudgment chain: health and
     # recovery reads need their own short, small reservation.
-    app.state.control_db_pool = shared.db.pool(min_size=1, max_size=2, timeout=2.0)
+    app.state.control_db_pool = base.db.pool(min_size=1, max_size=2, timeout=2.0)
 
     # Shared upstream client for the Grafana reverse proxy — one connection
     # pool across proxied requests instead of an AsyncClient per request.
@@ -313,7 +313,7 @@ app = FastAPI(
 
 # Pause exemptions are a route-declared attribute: the middleware consumes
 # only the tested decision function `gateway.middleware.pause_policy.should_bypass_pause`,
-# which reads the CONTROL_PLANE doorplates from `shared/api_contracts/contracts.py`. The
+# which reads the CONTROL_PLANE doorplates from `base/api_contracts/contracts.py`. The
 # exempt surface (control plane + agent self-reports) is enumerable and
 # audited by tests/gateway/test_route_contracts.py — a new exemption is a
 # deliberate declaration, not an incident patch.
@@ -321,7 +321,7 @@ app = FastAPI(
 
 async def _cluster_is_paused(_request: Request) -> bool:
     """Read this home's durable admission state without a stale posture cache."""
-    from shared.deploy.maintenance.admission import business_paused
+    from base.deploy.maintenance.admission import business_paused
 
     return await asyncio.to_thread(business_paused)
 
@@ -650,7 +650,7 @@ app.mount("/mcp", mcp_server_endpoint.mcp_gateway(app))
 
 def main() -> None:
     """Run the gateway process through the stable `gateway.app` entry point."""
-    from shared.config import ensure_eager
+    from base.config import ensure_eager
 
     # Task #3621: the gateway is on the full-validation whitelist — build the
     # eager config chain at the entry, before serving.

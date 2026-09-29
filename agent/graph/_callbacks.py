@@ -20,7 +20,7 @@ openai). Providers differ on the chunk's `index`: anthropic sets the
 `tool_use` content_block_index, gemini leaves it `None`. The code item's
 block_idx is therefore computed locally (number of text/thinking content
 blocks + the tool call's first-appearance ordinal), matching the committed
-snapshot rule in `shared/agents/history/timeline.py` rather than trusting the raw index.
+snapshot rule in `base/agents/history/timeline.py` rather than trusting the raw index.
 
 `finish()` handles the rare case where partial JSON is only valid at the
 last fragment, and publishes LLMDone — LLMDone is the frontend's timeline
@@ -51,8 +51,8 @@ from langchain_core.messages.tool import ToolCallChunk
 from langchain_core.utils.json import parse_partial_json
 
 from agent.turn.progress import mark_turn_progress
-from shared.events.live.coalescer import DeltaCoalescer
-from shared.events.live.projection import (
+from base.events.live.coalescer import DeltaCoalescer
+from base.events.live.projection import (
     ChatDelta,
     ChatStart,
     CodeDelta,
@@ -61,8 +61,8 @@ from shared.events.live.projection import (
     ReasoningDelta,
     ReasoningStart,
 )
-from shared.events.live.publisher import AgentEventPublisher
-from shared.lm.reasoning import to_canonical_reasoning
+from base.events.live.publisher import AgentEventPublisher
+from base.lm.reasoning import to_canonical_reasoning
 
 
 class RedisStreamHandler:
@@ -120,7 +120,7 @@ class RedisStreamHandler:
         self._total_reasoning_chars = 0
         # Distinct content-block indices seen for text/thinking blocks. Its
         # size is the offset where tool-call code items begin, matching the
-        # committed snapshot rule in shared/agents/history/timeline.py: a tool call always
+        # committed snapshot rule in base/agents/history/timeline.py: a tool call always
         # follows all narration/reasoning (it terminates the turn), so by the
         # time a tool_call_chunk arrives this set is final.
         self._content_block_indices: set[int] = set()
@@ -313,7 +313,7 @@ class RedisStreamHandler:
         committed snapshot.
 
         Provider-native reasoning blocks are first folded to the canonical
-        `thinking` shape (`shared.lm.reasoning`), so this method only ever sees
+        `thinking` shape (`base.lm.reasoning`), so this method only ever sees
         text / thinking — it never branches on provider."""
         content = to_canonical_reasoning(content)
         if isinstance(content, str):

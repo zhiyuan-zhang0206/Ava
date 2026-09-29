@@ -12,12 +12,12 @@ from typing import Any
 
 import uvicorn
 
-from shared.cluster.machine import is_gateway
-from shared.cluster.transport_encryption import verify_transport_encryption
-from shared.config import settings
-from shared.deploy.schema.migrations import assert_schema_current
-from shared.log import init_gateway_process
-from shared.native_process.os_platform import raise_fd_limit
+from base.cluster.machine import is_gateway
+from base.cluster.transport_encryption import verify_transport_encryption
+from base.config import settings
+from base.deploy.schema.migrations import assert_schema_current
+from base.log import init_gateway_process
+from base.native_process.os_platform import raise_fd_limit
 
 _log = logging.getLogger(__name__)
 _GATEWAY_UVICORN_WORKERS = 1

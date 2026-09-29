@@ -14,7 +14,7 @@ down until every leaf is at or below the threshold or has no deeper heading to
 split (e.g. an "expanded SDK reference" section that dwarfs everything else).
 
 Every bucket is a chars/4 estimate, then **proportionally normalized** to the
-last LLM call's real `input_tokens` (`shared/lm/context_budget.latest_input_tokens`)
+last LLM call's real `input_tokens` (`base/lm/context_budget.latest_input_tokens`)
 so the parts sum exactly to the provider-truth total — the total is exact, the
 distribution is approximate, at zero extra API cost and zero KV-cache impact.
 The section tree is apportioned the same way (each parent's tokens split among
@@ -36,8 +36,8 @@ from langchain_core.messages import (
 )
 
 from agent.messages import COMPACT_SUMMARY_HEADER
-from shared.agents.messages.kwargs import AvaMsgType, NoteTag, read_ava_kwargs
-from shared.lm.content import content_blocks
+from base.agents.messages.kwargs import AvaMsgType, NoteTag, read_ava_kwargs
+from base.lm.content import content_blocks
 
 # Bucket kinds — the canonical enumeration, and the stable tie-break order when
 # two categories share the same token count (the frontend legend renders them
@@ -66,7 +66,7 @@ CATEGORY_ORDER: tuple[str, ...] = (
 
 def _inbound_bucket(source: str) -> str:
     """Bucket an inbound HumanMessage by its envelope `ava_source` (the taxonomy
-    in `shared/agents/messages/envelope.py`): a peer agent (`agent:N`) -> `agent_messages`; a
+    in `base/agents/messages/envelope.py`): a peer agent (`agent:N`) -> `agent_messages`; a
     machine- or framework-originated wakeup / notice (`watcher:N` / `shell:N` /
     `schedule:N` / `system` / `system:<subtype>`) -> `automation`; everything else
     — a human turn (`user`, `ui:page:<name>`) or a legacy inbound with no recorded

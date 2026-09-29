@@ -9,12 +9,12 @@ from uuid import uuid4
 import psycopg
 import pytest
 
-from shared.agents.impersonation import history as history
-from shared.agents.impersonation.events import consume_events
-from shared.cluster.machine import machine_name
-from shared.db import create_agent
-from shared.native_process.runtime_incarnation import RuntimeIncarnation
-from tests.shared import test_history as history_cases
+from base.agents.impersonation import history as history
+from base.agents.impersonation.events import consume_events
+from base.cluster.machine import machine_name
+from base.db import create_agent
+from base.native_process.runtime_incarnation import RuntimeIncarnation
+from tests.base import test_history as history_cases
 
 
 @pytest.fixture

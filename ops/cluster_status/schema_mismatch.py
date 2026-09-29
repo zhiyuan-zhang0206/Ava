@@ -7,12 +7,12 @@ from dataclasses import dataclass
 
 import psycopg
 
-import shared.db
-from shared.api_contracts.status import SchemaMismatchKind, SchemaMismatchStatus
-from shared.cluster.machine import machine_name
-from shared.deploy.schema.migration_errors import MigrationLayoutError
-from shared.deploy.schema.migration_layout import required_migration_set
-from shared.deploy.schema.migrations import applied_migration_names
+import base.db
+from base.api_contracts.status import SchemaMismatchKind, SchemaMismatchStatus
+from base.cluster.machine import machine_name
+from base.deploy.schema.migration_errors import MigrationLayoutError
+from base.deploy.schema.migration_layout import required_migration_set
+from base.deploy.schema.migrations import applied_migration_names
 
 _log = logging.getLogger(__name__)
 
@@ -48,7 +48,7 @@ def detect(*, conn: psycopg.Connection | None = None) -> Mismatch | None:
     """Read applied names once; required names come from the running image's SQL."""
     try:
         if conn is None:
-            with shared.db.connect(autocommit=True) as borrowed:
+            with base.db.connect(autocommit=True) as borrowed:
                 applied = applied_migration_names(borrowed)
         else:
             applied = applied_migration_names(conn)

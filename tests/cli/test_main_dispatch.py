@@ -91,8 +91,8 @@ def test_import_defers_cli_logging_until_dispatch(tmp_path: Path) -> None:
     code = """
 import sys
 import cli.main
-assert 'shared.log' not in sys.modules
-assert 'shared.config' not in sys.modules
+assert 'base.log' not in sys.modules
+assert 'base.config' not in sys.modules
 """
     result = subprocess.run(  # noqa: S603 - fixed interpreter and literal probe.
         [sys.executable, "-B", "-c", code],
@@ -128,9 +128,9 @@ from cli.release_transition import stage
 from cli.release_transition.journal import Operation
 from cli.release_fleet.request import FleetRequest
 from cli.release_transition.request import ReleaseRef
-from shared import cluster
-from shared.deploy.maintenance.state import MaintenanceHold
-from shared.deploy.release.start_inputs import configuration_digest
+from base import cluster
+from base.deploy.maintenance.state import MaintenanceHold
+from base.deploy.release.start_inputs import configuration_digest
 from tests.lifecycle._start_identity import prepare_start_identity
 
 home = Path(os.environ["AVA_HOME"])
@@ -163,14 +163,14 @@ pause.write_text(json.dumps({"state":"paused", "holder":str(request.id),
 
 # Only native-manager placement and installed-image bytes are fixtures.
 # Stage, boot, identity preparation, config boot, and pause authorization are real.
-from shared.host.system import boot_unit
+from base.host.system import boot_unit
 boot_unit.in_boot_unit = lambda value: value == home
 ReleaseRef.verify = lambda self, *args: self
 start_runtime.admit_release = lambda *args, **kwargs: start_runtime.StartRuntime.development(checkout)
 prepare = start_intent._prepare_start_locked
 def prepared(*args):
-    assert "shared.config" not in sys.modules, "configuration loaded before identity"
-    assert "shared.host.env.dotenv_boot" not in sys.modules, "home resolved before identity"
+    assert "base.config" not in sys.modules, "configuration loaded before identity"
+    assert "base.host.env.dotenv_boot" not in sys.modules, "home resolved before identity"
     prepare(*args)
 start_intent._prepare_start_locked = prepared
 main._init_cli_logging = lambda _args: None
@@ -179,9 +179,9 @@ sys.modules["cli.commands.lifecycle.start"] = commands
 calls = []
 def effects(**kwargs):
     from cli.commands.lifecycle._pause_resume import resume_after_start
-    from shared.deploy.lifecycle import start_serving
-    from shared.deploy.maintenance import admission
-    from shared.config import get_field
+    from base.deploy.lifecycle import start_serving
+    from base.deploy.maintenance import admission
+    from base.config import get_field
     from dotenv import dotenv_values
     expected = dotenv_values(home / ".env")
     @resume_after_start
@@ -382,7 +382,7 @@ def test_logs_retention_parser_rejects_unknown_family() -> None:
 
 
 def test_logs_retention_default_comes_from_observability_settings() -> None:
-    from shared.config.observability import ObservabilitySettings
+    from base.config.observability import ObservabilitySettings
 
     field = ObservabilitySettings.model_fields["log_retention_days"]
     configured = ObservabilitySettings(AVA_LOG_RETENTION_DAYS=23)
@@ -399,7 +399,7 @@ def test_logs_retention_parser_rejects_non_positive_days() -> None:
 def test_logs_retention_settings_reject_non_positive_environment_default() -> None:
     from pydantic import ValidationError
 
-    from shared.config.observability import ObservabilitySettings
+    from base.config.observability import ObservabilitySettings
 
     with pytest.raises(ValidationError):
         ObservabilitySettings(AVA_LOG_RETENTION_DAYS=0)
@@ -528,14 +528,14 @@ def _unanchored(monkeypatch: pytest.MonkeyPatch, home: str = "/scratch/ava-unanc
     """Make this process read as a checkout that claims no cluster — the shape
     `resolve_ava_home` resolves to a private scratch home with anchored=False."""
 
-    import shared.host.env.dotenv_boot as _boot
+    import base.host.env.dotenv_boot as _boot
 
     monkeypatch.setattr(_boot, "resolve_ava_home", lambda: (Path(home), False))
 
 
 def _anchored(monkeypatch: pytest.MonkeyPatch, home: str = "/Users/x/.ava-worktree") -> None:
 
-    import shared.host.env.dotenv_boot as _boot
+    import base.host.env.dotenv_boot as _boot
 
     monkeypatch.setattr(_boot, "resolve_ava_home", lambda: (Path(home), True))
 
@@ -645,7 +645,7 @@ from pathlib import Path
 sys.path.insert(0, sys.argv[1])
 class DenySettings(importlib.abc.MetaPathFinder):
     def find_spec(self, fullname, path=None, target=None):
-        if fullname == "shared.config" or fullname.startswith("shared.config."):
+        if fullname == "base.config" or fullname.startswith("base.config."):
             raise AssertionError("premature runtime Settings import")
 sys.meta_path.insert(0, DenySettings())
 def no_network(*args, **kwargs):
@@ -653,7 +653,7 @@ def no_network(*args, **kwargs):
 socket.socket.connect = no_network
 socket.create_connection = no_network
 from cli import main, start_intent
-from shared import cluster
+from base import cluster
 home = Path(os.environ["AVA_HOME"])
 checkout = home.parent / "checkout"
 checkout.mkdir()
@@ -677,12 +677,12 @@ sys.modules["cli.commands.lifecycle.start"] = types.SimpleNamespace(cmd_start=st
 sys.modules["cli.commands.lifecycle.root_driver"] = types.SimpleNamespace(
     complete_boot_start=lambda: calls.append("boot-complete")
 )
-sys.modules["shared.deploy.lifecycle.start_serving"] = types.SimpleNamespace(
+sys.modules["base.deploy.lifecycle.start_serving"] = types.SimpleNamespace(
     clear_serving=lambda: calls.append("clear-serving")
 )
 assert main.main(["start", "--worktree"]) == 0
 assert calls == ["logging", "runtime", "boot-complete"]
-assert "shared.config" not in sys.modules
+assert "base.config" not in sys.modules
 """
     env = {key: value for key, value in os.environ.items() if not key.startswith("AVA_")}
     env.update(
@@ -708,7 +708,7 @@ assert "shared.config" not in sys.modules
 def test_command_import_boundary_is_settings_free(entry: str, tmp_path: Path) -> None:
     """`cli.commands` is an empty package door: importing it does no import work
     of its own, so it must load no `cli.commands.*` submodule and pull in no
-    `shared.config` — Settings stays out of the boundary. The `parser` case
+    `base.config` — Settings stays out of the boundary. The `parser` case
     additionally builds the real argparse tree and parses a real subcommand's
     args (without dispatching to its handler), since `cli.parsers` must stay
     just as settings-free while doing that. The `config` case imports the
@@ -718,7 +718,7 @@ import importlib.abc
 import sys
 class Deny(importlib.abc.MetaPathFinder):
     def find_spec(self, fullname, path=None, target=None):
-        if fullname == 'shared.config':
+        if fullname == 'base.config':
             raise AssertionError('forbidden early import: ' + fullname)
 sys.meta_path.insert(0, Deny())
 import cli.commands
@@ -732,7 +732,7 @@ if sys.argv[1] == 'parser':
     assert args.prepared == '/unused/request'
 elif sys.argv[1] == 'config':
     import cli.commands.management.config
-assert 'shared.config' not in sys.modules
+assert 'base.config' not in sys.modules
 """
     result = subprocess.run(  # noqa: S603 — fixed interpreter, isolated import-only program.
         [sys.executable, "-B", "-c", code, entry],

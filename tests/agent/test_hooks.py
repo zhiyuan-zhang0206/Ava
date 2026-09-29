@@ -22,9 +22,9 @@ from agent.hooks import (
     register_before_llm,
 )
 from agent.state import AgentState
-from shared.agents.context import AvaContext
-from shared.packages.plugins import activation, contributions
-from shared.packages.plugins.context import PluginContext
+from base.agents.context import AvaContext
+from base.packages.plugins import activation, contributions
+from base.packages.plugins.context import PluginContext
 from tests.agent._fakes import make_fake_ops_pool
 
 
@@ -243,7 +243,7 @@ async def test_runner_sees_hooks_registered_after_build():
 
 async def test_hook_can_read_agent_id_from_config():
     """hook reads agent_id via config — verifies LangGraph automatically passes config into hook."""
-    from shared.agents.context import agent_id_from_config
+    from base.agents.context import agent_id_from_config
 
     seen: list[int] = []
 

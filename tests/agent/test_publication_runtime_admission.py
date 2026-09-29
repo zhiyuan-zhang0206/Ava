@@ -9,19 +9,19 @@ from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
 
 from agent.ownership.hosted import admit_hosted_runtime
-from shared.db import create_agent
-from shared.deploy.writers.publication import (
+from base.db import create_agent
+from base.deploy.writers.publication import (
     AdmissionDecision,
     CurrentAdmission,
     WriterPublication,
 )
-from shared.deploy.writers.runtime_admission import (
+from base.deploy.writers.runtime_admission import (
     PublicationAdmissionDeferredError,
     RuntimeAdmission,
     require_activation,
 )
-from tests.shared.test_publication import publication_db as publication_db
-from tests.shared.test_publication import seed_current
+from tests.base.test_publication import publication_db as publication_db
+from tests.base.test_publication import seed_current
 
 
 @pytest.mark.usefixtures("publication_db")

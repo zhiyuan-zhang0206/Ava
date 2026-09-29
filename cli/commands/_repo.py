@@ -20,6 +20,16 @@ import time
 from pathlib import Path
 from typing import NamedTuple
 
+# Re-exported (redundant alias marks intentional re-export) so existing call
+# sites `from cli.commands._repo import session_name` keep working after the
+# composer moved to base.cluster.
+from base.cluster import session_name as session_name
+from base.cluster.machine import MachineRoles
+from base.config import settings
+from base.deploy.progress_timeout import GATEWAY_PREFLIGHT_BUDGET_S
+from base.host.system.backend import get_backend
+from base.sessions.env_forwarding import frontend_toolchain_env
+
 # The service roster + capability filtering live in the `ops` module family — the
 # single desired-state source (`shared < ops < {gateway, cli}`). Bound here under their
 # historical names (module-level assignments, so both ruff and pyright see them as
@@ -32,16 +42,6 @@ from ops.roster import build_services as build_services
 from ops.roster.service_spec import ServiceSpec as ServiceSpec
 from ops.roster.service_spec import profile_marker as profile_marker
 
-# Re-exported (redundant alias marks intentional re-export) so existing call
-# sites `from cli.commands._repo import session_name` keep working after the
-# composer moved to shared.cluster.
-from shared.cluster import session_name as session_name
-from shared.cluster.machine import MachineRoles
-from shared.config import settings
-from shared.deploy.progress_timeout import GATEWAY_PREFLIGHT_BUDGET_S
-from shared.host.system.backend import get_backend
-from shared.sessions.env_forwarding import frontend_toolchain_env
-
 _services_for_roles = _spec.services_for_capabilities
 _services_for_roles_annotated = _spec.services_for_capabilities_annotated
 
@@ -51,7 +51,7 @@ def _roles_or_none() -> MachineRoles | None:
     explicit "this host's role is not resolvable yet" state, distinct from a
     (never-valid) empty capability set. stop/status/converge should not be
     blocked by unfinished setup, so they treat None conservatively."""
-    from shared.cluster.machine import MachineRoleInvalid, MachineRoleMissing, machine_role
+    from base.cluster.machine import MachineRoleInvalid, MachineRoleMissing, machine_role
 
     try:
         return machine_role()
@@ -152,7 +152,7 @@ def _ensure_frontend_deps(repo: Path) -> None:
 def _assert_schema_current_or_die() -> int:
     """Verify the DB's applied migration set == the code's required set. Targeted
     hints for the two failure shapes (DB behind code / code behind DB)."""
-    from shared.deploy.schema.migrations import (
+    from base.deploy.schema.migrations import (
         CodeBehindSchema,
         SchemaVersionMismatch,
         assert_schema_current,
@@ -216,8 +216,8 @@ def probe_gateway_once(gateway_url: str, *, timeout_s: float = 10.0) -> GatewayP
     """
     import httpx
 
-    from shared.cluster.machine import gateway_auth_headers
-    from shared.host.net.http_dial import get as dial_get
+    from base.cluster.machine import gateway_auth_headers
+    from base.host.net.http_dial import get as dial_get
 
     try:
         resp = dial_get(
@@ -253,7 +253,7 @@ def _probe_gateway_or_die(gateway_url: str, *, budget_s: float = GATEWAY_PREFLIG
     The budget buys nothing on the healthy path: a reachable gateway answers on the
     first dial and returns immediately. A gateway that is genuinely down still fails —
     `budget_s` is deliberately too short to outlast a real death, which needs the
-    watchdog's own round to fix (`shared.deploy.progress_timeout.GATEWAY_PREFLIGHT_BUDGET_S`).
+    watchdog's own round to fix (`base.deploy.progress_timeout.GATEWAY_PREFLIGHT_BUDGET_S`).
 
     A non-200 the gateway *chose* to send (401/403/404) is terminal on the first dial
     as before: a credential or route mismatch is not a timing problem.
@@ -303,7 +303,7 @@ def _probe_gateway_or_die(gateway_url: str, *, budget_s: float = GATEWAY_PREFLIG
 def _register_machine_or_die(resolved: SetupValues, roles: MachineRoles) -> int:
     """UPSERT this host into the machines table with typed error handling.
 
-    The dial URL comes from `shared.cluster.machines.unit_dial_url(roles)` — the one
+    The dial URL comes from `base.cluster.machines.unit_dial_url(roles)` — the one
     definition, shared with the ops daemon's boot registration so the two writers
     of this row cannot advertise different addresses for the same unit.
 
@@ -314,7 +314,7 @@ def _register_machine_or_die(resolved: SetupValues, roles: MachineRoles) -> int:
     """
     import psycopg
 
-    from shared.cluster.machines import LoopbackDialUrlRefused, register_self, unit_dial_url
+    from base.cluster.machines import LoopbackDialUrlRefused, register_self, unit_dial_url
 
     url = unit_dial_url(roles)
     try:

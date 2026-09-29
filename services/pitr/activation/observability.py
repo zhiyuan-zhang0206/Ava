@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from base.log import logger
 from services.pitr.activation.state import ActivationRecord, load_record, write_record
-from shared.log import logger
 
 # Message persistence is scoped to BaseCandidateError: its raise sites carry the
 # static, secret-free failure vocabulary of the candidate pipeline (exit codes +

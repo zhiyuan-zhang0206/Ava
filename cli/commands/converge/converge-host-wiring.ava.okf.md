@@ -34,7 +34,7 @@ Remote-managed data planes skip local server and extension preparation entirely.
   elevation on the macmini running macOS 15.3.1; other versions fall back to
   `sudo -n` and then an exact manual command without blocking `ava start`.
   See
-  [[shared/shared.ava.okf.md|Shared Libraries]].
+  [[base/base.ava.okf.md|Shared Libraries]].
 - `_steps.ensure_local_git_hooks` warns when any conventional local
   checkout's Git hook installation is missing or drifted (via
   `provision/check_git_hooks.py --scan-machine`); warn-only, it never blocks a

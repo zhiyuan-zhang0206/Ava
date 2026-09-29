@@ -15,9 +15,9 @@ from unittest.mock import MagicMock, patch
 import httpx
 import pytest
 
-from shared.agents import AgentNotFound, GatewayUnavailable
-from shared.agents.messages import delivery_outbox as outbox
-from shared.config import settings
+from base.agents import AgentNotFound, GatewayUnavailable
+from base.agents.messages import delivery_outbox as outbox
+from base.config import settings
 
 
 def _limits(**overrides: object) -> outbox.DeliveryOutboxLimits:

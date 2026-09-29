@@ -1,7 +1,7 @@
 """The finite executor's own records reach the logs its native adapter keeps.
 
 The executor runs as `python -m cli.release_transition.execute`. Importing
-`shared.log` drops loguru's default handler, so a process that never adds a
+`base.log` drops loguru's default handler, so a process that never adds a
 sink discards every record it writes: the traceback a routed phase failure
 keeps only in the log, the undelivered-alert error, missed heartbeat and
 lease rounds, the listener's refusal reasons. This runs a real child process,
@@ -102,12 +102,12 @@ _SENTINEL_PASSWORD = "SENTINEL-PASSWORD-do-not-log-me-1234567890"  # noqa: S105 
 # `role.password`'s raw string regardless of `RoleSecret.password`'s
 # `repr=False` field (confirmed empirically: field-level repr hiding does not
 # reach diagnose's per-line token dump). The one guard that stops this is
-# `shared.log.sinks.add_sink` forcing `diagnose=False` on every sink
+# `base.log.sinks.add_sink` forcing `diagnose=False` on every sink
 # `init_cli_process` registers (the executor's stderr and its log file).
 _CHILD_SECRET = f"""
 from cli.release_transition import execute
 from cli.release_transition.journal import exclusive
-from shared.cluster.authority.model import RoleSecret
+from base.cluster.authority.model import RoleSecret
 from tests.lifecycle.release_fleet.fakes import OffDutyGateway, drive
 
 
@@ -150,7 +150,7 @@ def test_a_role_secret_held_in_a_failing_frame_never_reaches_stderr_or_the_log_f
     loguru's diagnose reads each frame's source line through `linecache`, which
     resolves nothing for a `-c` string's synthetic `<string>` filename — the
     injected frame would go unannotated regardless of `diagnose`, silently
-    proving nothing. A real file needs its own `shared`/`cli` import root
+    proving nothing. A real file needs its own `base`/`cli` import root
     (`python file.py` does not inherit `cwd` onto `sys.path[0]` the way `-c`
     does), hence the explicit `PYTHONPATH`.
     """

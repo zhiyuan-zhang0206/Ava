@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from shared.deploy.state import cluster_lock
+from base.deploy.state import cluster_lock
 
 
 def stub_update_lock(monkeypatch: pytest.MonkeyPatch) -> None:

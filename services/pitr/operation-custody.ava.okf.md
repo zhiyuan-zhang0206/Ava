@@ -36,7 +36,7 @@ Each kind quarantines into `quarantine/<kind>/` beside its control root.
 - the leader is reaped.
 
 The worker receipts each postmaster it starts
-(`shared/cluster/dataplane/pg_foreground.py:start_foreground_postgres`). The
+(`base/cluster/dataplane/pg_foreground.py:start_foreground_postgres`). The
 data directory is receipted before launch, and the native birth right after.
 The controller then closes in this order (`operation.custody.close_operation`):
 
@@ -89,7 +89,7 @@ thread; a stop arriving meanwhile waits for their outcome, then propagates.
 Cancellation sends SIGTERM for the kind's grace (3 s; 45 s for an
 operator drill, to stop its sandbox and write evidence), then runs the closure
 above. An `ExecDomainBirthError` closes the pinned group at once
-([[shared/native_process/group-closure.ava.okf.md|closure core]]). Admission
+([[base/native_process/group-closure.ava.okf.md|closure core]]). Admission
 finishes a quarantine or retirement its controller had proven but not
 completed. A failing progress sink (a closed operator pipe) is dropped.
 

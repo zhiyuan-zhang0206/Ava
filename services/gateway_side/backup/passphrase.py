@@ -30,8 +30,8 @@ import tempfile
 from contextlib import suppress
 from pathlib import Path
 
-from shared.deploy.release.verified_file import regular_bytes
-from shared.host.private_storage import private_file_problem, write_private_bytes
+from base.deploy.release.verified_file import regular_bytes
+from base.host.private_storage import private_file_problem, write_private_bytes
 
 PIN_NAME = "logical-backup.passphrase"
 _PASSPHRASE = re.compile(r"^[0-9a-f]{64}$")
@@ -137,7 +137,7 @@ def pin_existing_home(home: Path, cluster_secret: str) -> str:
 
 def logical_backup_passphrase() -> str:
     """This home's logical-backup passphrase (see the module docstring)."""
-    from shared.paths import ava_home
+    from base.paths import ava_home
 
     return resolve(ava_home())
 

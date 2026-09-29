@@ -33,7 +33,7 @@ identity-bound protocol evidence. Root generation changes invalidate the result.
 Startup returns success and publishes serving only when the complete roster is
 ready. Boot and update callers receive the same verdict; no readiness waiver
 turns an incomplete launch into success. Failed launches retain their diagnostic
-record through `shared/deploy/lifecycle/launch_failures.py`.
+record through `base/deploy/lifecycle/launch_failures.py`.
 
 A retained-image update admits the captured image and operation before any
 startup effect. It verifies prepared dependencies and schema rather than
@@ -47,4 +47,4 @@ readiness before resuming work.
 - [[cli/start_identity.ava.okf.md]] — first-start identity and operation admission.
 - [[cli/release_transition/release_transition.ava.okf.md]] — retained execution,
   selected-image transitions and recovery.
-- [[shared/cluster/machine.ava.okf.md]] — capabilities and the selected service roster.
+- [[base/cluster/machine.ava.okf.md]] — capabilities and the selected service roster.

@@ -8,12 +8,12 @@ network, no Tempo; the mirror walk uses tmp_path files.
 
 Also locks the 2026-09-27 "unanchored checkout reaches production" fix:
 `_mirror_dir` / `_cluster_secret` / `_gateway_get` resolve `$AVA_HOME` via
-`shared.host.env.dotenv_boot.resolve_ava_home` instead of guessing `~/.ava` — an
+`base.host.env.dotenv_boot.resolve_ava_home` instead of guessing `~/.ava` — an
 unanchored checkout must never read a guessed home's `.env` or dial a
-guessed gateway with its secret (see `tests/shared/test_unanchored_checkout.py`
-for the same bug class against `shared.config` itself).
+guessed gateway with its secret (see `tests/base/test_unanchored_checkout.py`
+for the same bug class against `base.config` itself).
 
-AVA_CLUSTER_SECRET is also a `shared.config.Settings` field alias, but
+AVA_CLUSTER_SECRET is also a `base.config.Settings` field alias, but
 `read_trace.py` reads it straight from `os.environ` by design (the same
 Settings-free stance as the rest of this skill script) — `monkeypatch.
 setitem(os.environ, ...)` is used below instead of `monkeypatch.setenv` /
@@ -21,13 +21,13 @@ setitem(os.environ, ...)` is used below instead of `monkeypatch.setenv` /
 stays meaningful for tests that DO exercise Settings.
 
 `_common.py::source_root` tests (2026-09-28 fix, PR #3550 follow-up P2-2):
-`read_trace.py` / `fetch_trace.py` each need to locate the `shared` package
-before they can import `shared.host.env.dotenv_boot.resolve_ava_home` — a bootstrap
+`read_trace.py` / `fetch_trace.py` each need to locate the `base` package
+before they can import `base.host.env.dotenv_boot.resolve_ava_home` — a bootstrap
 problem `resolve_ava_home` itself cannot solve. The walk-up-from-`__file__`
 branch (the dev checkout, or a converged `$AVA_HOME/skills/...` copy invoked
-with an interpreter that already carries `shared` on `sys.path`) needs no fix
+with an interpreter that already carries `base` on `sys.path`) needs no fix
 and is exercised by every `_load()` above. The tests below lock the *other*
-branch: when no `shared` package is found above the script and the
+branch: when no `base` package is found above the script and the
 converged-copy fallback (`$AVA_HOME/source`) is consulted, that fallback must
 require an explicit `AVA_HOME` — never `Path(os.environ.get("AVA_HOME",
 "~/.ava"))`, the same "unanchored checkout reaches production" bug class
@@ -35,7 +35,7 @@ require an explicit `AVA_HOME` — never `Path(os.environ.get("AVA_HOME",
 one level down. They run `_common.py` in a subprocess with a from-scratch
 environment (the `_common.py::ava_home` technique from
 `test_ava_memory_common_home.py`) and copy it to an isolated directory with no
-`shared` package anywhere above it, so the walk-up branch is forced to fail
+`base` package anywhere above it, so the walk-up branch is forced to fail
 and the fallback branch actually runs.
 """
 
@@ -515,7 +515,7 @@ def _run_source_root(
 
 def test_source_root_walks_up_to_the_real_checkout() -> None:
     """The unmodified dev-checkout invocation needs no `AVA_HOME` at all —
-    `_common.py` lives under the real repo, whose root has `shared/__init__.py`."""
+    `_common.py` lives under the real repo, whose root has `base/__init__.py`."""
     res = _run_source_root(_SCRIPTS_DIR, {})
 
     assert res.returncode == 0, res.stdout + res.stderr
@@ -524,7 +524,7 @@ def test_source_root_walks_up_to_the_real_checkout() -> None:
 
 
 def _isolated_scripts_dir(tmp_path: Path) -> Path:
-    """Copy `_common.py` somewhere with no `shared` package above it, forcing
+    """Copy `_common.py` somewhere with no `base` package above it, forcing
     the walk-up branch to fail so the AVA_HOME fallback branch actually runs."""
     isolated = tmp_path / "isolated" / "scripts"
     isolated.mkdir(parents=True)
@@ -566,7 +566,7 @@ def test_source_root_uses_the_explicit_ava_home(tmp_path: Path) -> None:
     home = tmp_path / "dev-cluster-home"
     source = home / "source"
     (source / "shared").mkdir(parents=True)
-    (source / "shared" / "__init__.py").write_text("")
+    (source / "base" / "__init__.py").write_text("")
 
     res = _run_source_root(isolated, {"AVA_HOME": str(home)})
 

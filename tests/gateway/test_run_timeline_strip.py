@@ -9,9 +9,9 @@ from typing import Literal
 import pytest
 from fastapi import HTTPException
 
+from base.agents.history import checkpoint
+from base.agents.history.timeline import TimelineItem
 from gateway.run_timeline import strip
-from shared.agents.history import checkpoint
-from shared.agents.history.timeline import TimelineItem
 
 _ItemKind = Literal[
     "inbound_chat",

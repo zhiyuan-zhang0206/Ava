@@ -33,7 +33,7 @@ from typing import Any
 from loguru import logger
 from pydantic import AnyUrl
 
-from shared.paths import ava_home
+from base.paths import ava_home
 
 # Loopback callback port for the authorization-code redirect. It is part of the
 # registered redirect_uris (OAuth requires exact-match redirect URIs), so it is

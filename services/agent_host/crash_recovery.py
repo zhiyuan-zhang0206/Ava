@@ -17,7 +17,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 from agent.ownership.corpse_reap import ReapedCorpse
-from shared.log import logger
+from base.log import logger
 
 
 async def recover_reaped_corpses(reaped: Sequence[ReapedCorpse]) -> None:

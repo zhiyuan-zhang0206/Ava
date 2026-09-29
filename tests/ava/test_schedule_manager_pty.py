@@ -19,11 +19,11 @@ import psycopg
 import pytest
 from psycopg_pool import ConnectionPool
 
+from base.cluster import session_name
+from base.deploy.lifecycle.start_serving import RootBirth
+from base.native_process.os_platform import IS_WINDOWS
+from base.sessions.backend import get_shell_backend
 from gateway.schedules import manager as sm
-from shared.cluster import session_name
-from shared.deploy.lifecycle.start_serving import RootBirth
-from shared.native_process.os_platform import IS_WINDOWS
-from shared.sessions.backend import get_shell_backend
 
 REPO = Path(__file__).resolve().parents[2]
 
@@ -49,7 +49,7 @@ def _pty_home(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
     # .env; point it at the test database so a `sleep 30` schedule stays up
     # long enough to observe (the runner's own semantics are covered by
     # test_schedule_runner.py).
-    from shared.config import settings as _settings
+    from base.config import settings as _settings
 
     (home / ".env").write_text(f"AVA_DB_URL={_settings.data_plane.db_url}\n")
     prior_home = os.environ.get("AVA_HOME")
@@ -59,7 +59,7 @@ def _pty_home(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
     try:
         yield str(home)
     finally:
-        from shared.sessions.pty import cli as pty_cli
+        from base.sessions.pty import cli as pty_cli
 
         for name in list(pty_cli.live_sessions()):
             try:
@@ -75,7 +75,7 @@ def _pty_home(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
 
 @pytest.fixture(scope="module")
 def pool() -> Iterator[ConnectionPool[psycopg.Connection]]:
-    from shared.config import settings
+    from base.config import settings
 
     p: ConnectionPool[psycopg.Connection] = ConnectionPool(
         settings.data_plane.db_url, min_size=1, max_size=2, open=True
@@ -117,7 +117,7 @@ def _point_backend_home(monkeypatch: pytest.MonkeyPatch, _pty_home: str) -> None
     # process carries one home).
     monkeypatch.setitem(os.environ, "AVA_HOME", _pty_home)
     monkeypatch.setitem(os.environ, "AVA_HOME_OVERRIDE", "1")
-    from shared.config import settings
+    from base.config import settings
 
     monkeypatch.setattr(settings.general, "ava_home", Path(_pty_home))
 
@@ -125,7 +125,7 @@ def _point_backend_home(monkeypatch: pytest.MonkeyPatch, _pty_home: str) -> None
 @pytest.fixture(autouse=True)
 def _host_is_serving(serving_root: RootBirth, _point_backend_home: None) -> Iterator[None]:
     """PTY schedule cases model a gateway that completed its start gate."""
-    from shared.deploy.lifecycle import start_serving
+    from base.deploy.lifecycle import start_serving
 
     generation = start_serving.begin_start()
     assert start_serving.mark_serving(generation, runtime=serving_root.runtime) is True

@@ -8,9 +8,9 @@ from datetime import UTC, datetime
 import psycopg
 import pytest
 
+from base.daemon.schedules.completion_notices import CompletionNotice, record_hourly_notice
+from base.db import create_agent
 from gateway.agents import completion_notice_flusher
-from shared.daemon.schedules.completion_notices import CompletionNotice, record_hourly_notice
-from shared.db import create_agent
 
 
 def _agent(db_conn: psycopg.Connection) -> int:
@@ -27,7 +27,7 @@ def _agent(db_conn: psycopg.Connection) -> int:
 def test_flush_once_delivers_one_digest_and_marks_the_authoritative_events(
     db_conn: psycopg.Connection,
 ) -> None:
-    import shared.db
+    import base.db
 
     agent_id = _agent(db_conn)
     record_hourly_notice(
@@ -57,7 +57,7 @@ def test_flush_once_delivers_one_digest_and_marks_the_authoritative_events(
         )
     db_conn.commit()
 
-    pool = shared.db.pool(max_size=2)
+    pool = base.db.pool(max_size=2)
     try:
         assert (
             asyncio.run(
@@ -93,7 +93,7 @@ def test_flush_once_delivers_one_digest_and_marks_the_authoritative_events(
             (datetime(2026, 9, 14, 10, tzinfo=UTC), agent_id),
         )
     db_conn.commit()
-    pool = shared.db.pool(max_size=2)
+    pool = base.db.pool(max_size=2)
     try:
         assert (
             asyncio.run(
@@ -116,7 +116,7 @@ def test_flush_once_continues_after_one_digest_delivery_failure(
     db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """One unavailable digest does not prevent another agent's completed hour."""
-    import shared.db
+    import base.db
 
     blocked_agent = _agent(db_conn)
     delivered_agent = _agent(db_conn)
@@ -146,7 +146,7 @@ def test_flush_once_continues_after_one_digest_delivery_failure(
         return await real_deliver(pool, agent_id, **kwargs)  # type: ignore[arg-type]
 
     monkeypatch.setattr(completion_notice_flusher, "deliver_chat_inbound", fail_one)
-    pool = shared.db.pool(max_size=2)
+    pool = base.db.pool(max_size=2)
     try:
         delivered = asyncio.run(
             completion_notice_flusher.flush_once(pool, now=datetime(2026, 9, 22, 12, tzinfo=UTC))

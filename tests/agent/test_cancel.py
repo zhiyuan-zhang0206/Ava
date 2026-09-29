@@ -44,10 +44,10 @@ from agent.graph.exec.node import (
     _ExecTimedOut,
 )
 from agent.state import AgentState
-from shared.agents.context import AvaContext
-from shared.cluster.machine import machine_name
-from shared.db import create_agent
-from shared.events.live.projection import EVENT_ADAPTER, Cancelled
+from base.agents.context import AvaContext
+from base.cluster.machine import machine_name
+from base.db import create_agent
+from base.events.live.projection import EVENT_ADAPTER, Cancelled
 from tests.agent._fakes import make_fake_ops_pool
 
 # Most tests here drive exec_node/llm_node with mocked _run_in_subprocess / a
@@ -559,7 +559,7 @@ async def test_exec_node_dispatch_system_halt(
     the compact refresh. So the compact path appends no ToolMessage and emits
     no ExecOutput (only the ExecStart placeholder, which the compact refresh
     clears)."""
-    from shared.agents.lifecycle import SystemHalt
+    from base.agents.lifecycle import SystemHalt
 
     async def _fake(code, agent_id, cancel_event, timeout=60.0, chunk_publisher=None, **kwargs):
         return (_ExecLifecycle(output="user prep work\n", exc=SystemHalt()), None)
@@ -588,7 +588,7 @@ async def test_exec_node_dispatch_agent_termination(
     """_ExecLifecycle(AgentTermination) → halted=True + no envelope marker +
     exit_code_for_msg=IDLE_EXIT_CODE (claim side writes the lifecycle marker)."""
     from ava.self import AgentTermination
-    from shared.agents.exit_codes import IDLE_EXIT_CODE
+    from base.agents.exit_codes import IDLE_EXIT_CODE
 
     async def _fake(code, agent_id, cancel_event, timeout=60.0, chunk_publisher=None, **kwargs):
         return (_ExecLifecycle(output="", exc=AgentTermination()), None)
@@ -613,7 +613,7 @@ async def test_exec_node_dispatch_agent_restart(
     """_ExecLifecycle(AgentRestart) → halted=True + no envelope marker (symmetric
     with AgentTermination path)."""
     from ava.self import AgentRestart
-    from shared.agents.exit_codes import IDLE_EXIT_CODE
+    from base.agents.exit_codes import IDLE_EXIT_CODE
 
     async def _fake(code, agent_id, cancel_event, timeout=60.0, chunk_publisher=None, **kwargs):
         return (_ExecLifecycle(output="", exc=AgentRestart()), None)
@@ -668,7 +668,7 @@ async def test_exec_node_dispatch_unknown_lifecycle_subclass_raises(
     """A future new LifecycleExit subclass that is not handled in the match ladder
     → must fallthrough raise TypeError, not silently land on halted=False (CLAUDE.md
     enumeration dispatch must be exhaustive)."""
-    from shared.agents.lifecycle import LifecycleExit
+    from base.agents.lifecycle import LifecycleExit
 
     class _MysteryLifecycle(LifecycleExit):
         def __init__(self) -> None:

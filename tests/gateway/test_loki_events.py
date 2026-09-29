@@ -28,11 +28,9 @@ import httpx
 import pytest
 import yaml
 
-from gateway.lgtm import _loki_logql, loki_events, loki_events_cache, loki_query_budget
-from services.events_maintenance.resolution import EventClass
-from shared.config import settings
-from shared.events.contract import lineage_event_names
-from shared.telemetry.loki_index_labels import (
+from base.config import settings
+from base.events.contract import lineage_event_names
+from base.telemetry.loki_index_labels import (
     EVENT_STREAM_RETENTION,
     LINEAGE_RETENTION_PERIOD,
     LOKI_MAX_QUERY_SERIES,
@@ -44,6 +42,8 @@ from shared.telemetry.loki_index_labels import (
     retention_hours,
     validate_loki_deploy_config,
 )
+from gateway.lgtm import _loki_logql, loki_events, loki_events_cache, loki_query_budget
+from services.events_maintenance.resolution import EventClass
 
 
 def _selector_event_names(selector: str) -> set[str]:
@@ -343,11 +343,11 @@ def _wait_for_budget_waiters(expected: int) -> None:
 
 class TestGlobalQueryBudget:
     def test_budget_contract_is_reexported_from_shared(self) -> None:
-        spec = importlib.util.find_spec("shared.telemetry.loki_query_budget")
+        spec = importlib.util.find_spec("base.telemetry.loki_query_budget")
         assert spec is not None, (
-            "shared.telemetry.loki_query_budget must own the reusable budget contract"
+            "base.telemetry.loki_query_budget must own the reusable budget contract"
         )
-        shared_budget = importlib.import_module("shared.telemetry.loki_query_budget")
+        shared_budget = importlib.import_module("base.telemetry.loki_query_budget")
         for name in (
             "BudgetErrorFactory",
             "BudgetMetrics",
@@ -1075,8 +1075,8 @@ class TestObservabilityReadGate:
     ) -> None:
         home = tmp_path / ".ava-preview"
         home.mkdir()
-        monkeypatch.setattr("shared.cluster.machine.machine_role", lambda: frozenset({"gateway"}))
-        monkeypatch.setattr("shared.paths.ava_home", lambda: home)
+        monkeypatch.setattr("base.cluster.machine.machine_role", lambda: frozenset({"gateway"}))
+        monkeypatch.setattr("base.paths.ava_home", lambda: home)
         monkeypatch.delitem(os.environ, "AVA_TELEMETRY_LOKI_URL", raising=False)
 
         with pytest.raises(
@@ -1094,14 +1094,14 @@ class TestObservabilityReadGate:
     ) -> None:
         home = tmp_path / ".ava-preview"
         home.mkdir()
-        monkeypatch.setattr("shared.paths.ava_home", lambda: home)
+        monkeypatch.setattr("base.paths.ava_home", lambda: home)
         monkeypatch.delitem(os.environ, "AVA_TELEMETRY_LOKI_URL", raising=False)
         if override == "marker":
             (home / "lgtm-host").touch()
         elif override == "environment":
             monkeypatch.setitem(os.environ, "AVA_TELEMETRY_LOKI_URL", "http://loki.invalid:3100")
         role = "agent-runner" if override == "runner" else "gateway"
-        monkeypatch.setattr("shared.cluster.machine.machine_role", lambda: frozenset({role}))
+        monkeypatch.setattr("base.cluster.machine.machine_role", lambda: frozenset({role}))
 
         loki_events._read_gate()
 

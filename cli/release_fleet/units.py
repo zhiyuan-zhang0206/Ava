@@ -28,6 +28,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Protocol
 
+from base.api_contracts.release_handoff import ReleaseImageEntry
 from cli.release_fleet.listener import CoordinatorListener
 from cli.release_fleet.policy import UnitKey
 from cli.release_fleet.progress import (
@@ -42,7 +43,6 @@ from cli.release_fleet.progress import (
 from cli.release_fleet.request import FleetRequest, UnitSpec
 from cli.release_fleet.workload import UnitReport
 from cli.release_transition.journal import Journal
-from shared.api_contracts.release_handoff import ReleaseImageEntry
 
 Clock = Callable[[], datetime]
 # How long one barrier poll waits for the next answer before re-checking deadlines.
@@ -68,13 +68,13 @@ class OpsTransport:
         import asyncio
         import base64
 
-        from ops.cluster import RELEASE_ENTRY_TIMEOUT_S
-        from ops.cluster_rpc import dispatch_to_machine
-        from shared.api_contracts.release_handoff import (
+        from base.api_contracts.release_handoff import (
             ReleaseImageExecPayload,
             ReleaseImageExecResult,
             ReleaseImageRef,
         )
+        from ops.cluster import RELEASE_ENTRY_TIMEOUT_S
+        from ops.cluster_rpc import dispatch_to_machine
 
         payload = ReleaseImageExecPayload(
             entry=entry,
@@ -95,7 +95,7 @@ class OpsTransport:
 
 
 def _ops_url(unit: UnitKey) -> str:
-    from shared.db import connect
+    from base.db import connect
 
     with connect() as conn:
         row = conn.execute(

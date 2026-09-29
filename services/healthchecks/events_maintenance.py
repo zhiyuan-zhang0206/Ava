@@ -1,7 +1,7 @@
 """Read-only health probes for events maintenance; the root supervisor owns recovery."""
 
-from shared.config import settings
-from shared.daemon.health import DaemonProbe, health_port, probe_daemon
+from base.config import settings
+from base.daemon.health import DaemonProbe, health_port, probe_daemon
 
 # Daemon /healthz HTTP probe, same pattern as the other daemon healthchecks.
 _HEALTH_URL = (
@@ -11,7 +11,7 @@ _HEALTH_URL = (
 
 
 def _probe() -> DaemonProbe:
-    """Identity-verified liveness — see `shared.daemon.health.probe_daemon`."""
+    """Identity-verified liveness — see `base.daemon.health.probe_daemon`."""
     return probe_daemon(
         "events_maintenance",
         _HEALTH_URL,

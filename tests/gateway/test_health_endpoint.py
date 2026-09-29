@@ -2,7 +2,7 @@
 
 A 200 on the gateway port only proves *something* listens there. What makes the
 answer believable is the identity the body carries, so every field in it is a
-contract with `shared.daemon.health` and is pinned here rather than left to
+contract with `base.daemon.health` and is pinned here rather than left to
 whatever the handler happens to return.
 
 `name` is the newest of those fields and the reason this module exists: it is
@@ -21,10 +21,10 @@ import pytest
 from fastapi.testclient import TestClient
 from psycopg_pool import PoolTimeout
 
+from base.cluster.machine import machine_name
+from base.native_process import loaded_commit
+from base.paths import ava_home
 from gateway.app import app
-from shared.cluster.machine import machine_name
-from shared.native_process import loaded_commit
-from shared.paths import ava_home
 
 
 def _health() -> dict[str, object]:

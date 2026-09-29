@@ -42,6 +42,7 @@ import httpx
 from psycopg import Connection
 from psycopg_pool import ConnectionPool
 
+from base.cluster.machine import machine_name
 from ops import cluster_rpc as _cluster_rpc
 from ops.rpc_schemas import (
     BillingBalanceReport,
@@ -50,13 +51,12 @@ from ops.rpc_schemas import (
     BillingResurrectAgentResponse,
     BillingResurrectResponse,
 )
-from shared.cluster.machine import machine_name
 
 _log = logging.getLogger(__name__)
 
 # Advisory-lock key for the single-flight guard. Arbitrary but stable
 # cluster-wide (ASCII "AVBR" = Ava Billing Recovery) — same construction as
-# the migration lock's "AVMI" (shared/deploy/schema/migrations.py).
+# the migration lock's "AVMI" (base/deploy/schema/migrations.py).
 _RUN_LOCK_KEY = 0x41564252
 
 # The per-agent summary status; the whitelist listing also rides it ('candidate').
@@ -100,8 +100,8 @@ def enumerate_candidates(conn: Connection) -> list[BillingCandidate]:
     as an empty candidate set (the same fail-closed shape as
     ``ops.lifecycle.resurrect_gates``).
     """
-    from shared.agents import TerminationSource
-    from shared.agents.recovery_breaker import (
+    from base.agents import TerminationSource
+    from base.agents.recovery_breaker import (
         HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS,
         PERMANENT_REJECT_REASON_BILLING,
     )
@@ -141,7 +141,7 @@ def enumerate_halted_alive(conn: Connection) -> list[BillingHaltedAlive]:
     (a just-resurrected row stays listed until its first successful turn
     clears the streak).
     """
-    from shared.agents.recovery_breaker import (
+    from base.agents.recovery_breaker import (
         HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS,
         PERMANENT_REJECT_REASON_BILLING,
     )
@@ -168,12 +168,12 @@ def _provider_key() -> str | None:
     ``.env`` file. The gateway profile pops agent-runner capability keys from
     os.environ (Task #856), so ``settings.lm.deepseek_api_key`` resolves None
     there while the cluster ``.env`` stays the authoritative source — the same
-    fallback shape as ``shared/lm/factory.py::_ensure_provider_key``. The file
+    fallback shape as ``base/lm/factory.py::_ensure_provider_key``. The file
     read is the sanctioned gateway-side consumption path, registered in
-    ``tests/shared/test_gateway_consumer_guard.py::_FALLBACK_CONSUMED_READS``.
+    ``tests/base/test_gateway_consumer_guard.py::_FALLBACK_CONSUMED_READS``.
     """
-    from shared.config import field_alias, settings
-    from shared.host.env.runtime_config import read_env_aliases
+    from base.config import field_alias, settings
+    from base.host.env.runtime_config import read_env_aliases
 
     key = settings.lm.deepseek_api_key
     if key is not None:
@@ -190,8 +190,8 @@ def fetch_provider_balance() -> BillingBalanceReport:
     keys). Any transport, HTTP, or payload surprise returns ``ok=False`` with
     the reason; the run refuses rather than acting on an unverified account.
     """
-    from shared.config import settings
-    from shared.host.net import http_dial
+    from base.config import settings
+    from base.host.net import http_dial
 
     threshold = float(settings.daemon.billing_recovery_min_balance)
     url = settings.daemon.billing_recovery_balance_url
@@ -296,9 +296,9 @@ async def run_billing_recovery(*, execute: bool, pool: ConnectionPool) -> Billin
 async def resurrect_billing_agent_op(agent_id: int) -> BillingResurrectAgentResponse:
     """The versioned ``resurrect-billing-v1`` action (home runner), also used
     as the in-process fallback when the local ops server is unreachable."""
+    from base.agents import MachinePaused, ResurrectAlreadyAlive, ResurrectRefused
     from ops.agents.resurrection_retry import ResurrectSettlementDeferredError
     from ops.agents.wake import resurrect_agent
-    from shared.agents import MachinePaused, ResurrectAlreadyAlive, ResurrectRefused
 
     try:
         await asyncio.to_thread(
@@ -316,7 +316,7 @@ async def resurrect_billing_agent_op(agent_id: int) -> BillingResurrectAgentResp
 
 
 async def _dispatch_all(candidates: list[BillingCandidate]) -> list[BillingResurrectAgentOutcome]:
-    from shared.config import settings
+    from base.config import settings
 
     sem = asyncio.Semaphore(int(settings.daemon.billing_recovery_dispatch_concurrency))
 
@@ -403,8 +403,8 @@ def _outcome(
 def _record_run_event(
     balance: BillingBalanceReport, outcomes: list[BillingResurrectAgentOutcome]
 ) -> None:
-    from shared import telemetry
-    from shared.telemetry.audit_events import insert_event_log
+    from base import telemetry
+    from base.telemetry.audit_events import insert_event_log
 
     resurrected = [o.agent_id for o in outcomes if o.status == "resurrected"]
     refused = [o.agent_id for o in outcomes if o.status == "refused"]

@@ -25,6 +25,10 @@ from pydantic import (
     model_validator,
 )
 
+from base.agents.messages.envelope import reject_unnegotiated_caller, validate_writable_source
+from base.agents.observation.evidence import AvailabilityReason
+from base.api_contracts.op_envelope import OpEnvelope as OpEnvelope
+
 # Re-exported so existing `ops.rpc_schemas` importers keep their import paths.
 from ops.rpc_schemas.billing_recovery import BillingBalanceReport as BillingBalanceReport
 from ops.rpc_schemas.billing_recovery import BillingHaltedAliveRow as BillingHaltedAliveRow
@@ -49,9 +53,6 @@ from ops.rpc_schemas.terminate import OpenTaskRow as OpenTaskRow
 from ops.rpc_schemas.terminate import OpenTasksHint as OpenTasksHint
 from ops.rpc_schemas.terminate import TerminateAgentRequest as TerminateAgentRequest
 from ops.rpc_schemas.terminate import TerminateAgentResponse as TerminateAgentResponse
-from shared.agents.messages.envelope import reject_unnegotiated_caller, validate_writable_source
-from shared.agents.observation.evidence import AvailabilityReason
-from shared.api_contracts.op_envelope import OpEnvelope as OpEnvelope
 
 
 class CancelRequested(BaseModel):
@@ -129,7 +130,7 @@ class SpawnAgentRequest(BaseModel):
         # deferring to the agent claim node, where wrap_inbound raises
         # ValueError on the bad source and kills the just-spawned process.
         # Same legal set as the claim-side wrap — single-sourced via
-        # shared.agents.messages.envelope.validate_source.
+        # base.agents.messages.envelope.validate_source.
         if self.prompt_source is not None:
             validate_writable_source(self.prompt_source)
         return self
@@ -203,7 +204,7 @@ class ResurrectAgentRequest(BaseModel):
     composes it into the marker `[system ts] You have been resurrected
     by {resurrected_by}` so the agent knows who resurrected it.
 
-    The value must pass `shared.agents.messages.envelope.validate_source` (same check as
+    The value must pass `base.agents.messages.envelope.validate_source` (same check as
     `AgentMessageIn.source`): the same value becomes the prompt chat
     inbound's source, and the claim node's envelope wrap raises on
     anything outside the whitelist — killing the freshly resurrected
@@ -258,7 +259,7 @@ class RestartAgentRequest(BaseModel):
     def _validate_config_overlay(self) -> "RestartAgentRequest":
         if self.config_overlay is None:
             return self
-        from shared.packages.plugins.config_registration import (
+        from base.packages.plugins.config_registration import (
             InvalidConfigOverlay,
             validate_config_overlay,
         )
@@ -398,7 +399,7 @@ OpKind = Literal[
     "shell_capture",
     "upload_receive",
     # The frozen v1 image-exec handoff; its payload and result are the
-    # settings-free `shared.api_contracts.release_handoff` models.
+    # settings-free `base.api_contracts.release_handoff` models.
     "release_image_exec",
 ]
 

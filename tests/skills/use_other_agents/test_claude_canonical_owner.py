@@ -15,7 +15,7 @@ from types import ModuleType
 import pytest
 
 from ava.shell.coding_tools import _claude_checks, _common, claude
-from shared.sessions import coding_session_owner
+from base.sessions import coding_session_owner
 
 _REFERENCE = (
     Path(__file__).parents[3] / "ava_builtins" / "skills" / "ava-use-other-agents" / "reference"

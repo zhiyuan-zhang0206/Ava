@@ -13,13 +13,13 @@ import sys
 from pathlib import Path
 from typing import get_args
 
-from shared.api_contracts.release_handoff import (
+from base.api_contracts.release_handoff import (
     RELEASE_REQUEST_MAX_BYTES,
     Envelope,
     ReleaseImageEntry,
     read_envelope,
 )
-from shared.deploy.release.verified_file import regular_bytes
+from base.deploy.release.verified_file import regular_bytes
 
 
 def _code_root() -> Path:

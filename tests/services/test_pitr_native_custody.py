@@ -16,14 +16,14 @@ from types import SimpleNamespace
 import psutil
 import pytest
 
+from base.native_process import native_boot_id, ownership
+from base.native_process.ownership import OwnedProcess
 from services.pitr.base_backup import candidate
 from services.pitr.operation import custody
 from services.pitr.operation.custody import NativeProcess
 from services.pitr.restore import postgres, proof
 from services.pitr.restore.postgres import SandboxPostgresIdentity
 from services.pitr.restore.proof import LivePostgresIdentity, RestoreProofError
-from shared.native_process import native_boot_id, ownership
-from shared.native_process.ownership import OwnedProcess
 
 
 def _current() -> NativeProcess:
@@ -372,8 +372,8 @@ def test_worker_bootstrap_refuses_code_outside_its_root(tmp_path: Path) -> None:
 async def test_launch_failure_quarantines_and_the_next_run_proceeds(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    from base.native_process.exec_domain import ExecProcessDomain
     from services.pitr.operation import worker_process
-    from shared.native_process.exec_domain import ExecProcessDomain
 
     def exhausted(*_args: object, **_kwargs: object) -> None:
         raise OSError(24, "Too many open files")
@@ -423,8 +423,8 @@ async def test_custody_steps_run_off_the_event_loop(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A slow group close never stalls the scheduler's health loop."""
+    from base.native_process.exec_domain import ExecProcessDomain
     from services.pitr.operation import worker_process
-    from shared.native_process.exec_domain import ExecProcessDomain
     from tests.services.test_pitr_operation_owner import _worker
 
     _worker(tmp_path, monkeypatch, "Path(sys.argv[2]).write_text('{}')\n")
@@ -623,8 +623,8 @@ async def test_commit_holds_the_kind_lock_against_another_controller(
 ) -> None:
     """A committing operation holds `closure.json` without `committed.json`;
     another controller's admission must never quarantine it as a stopped one."""
+    from base.native_process.os_platform import LockTimeoutError
     from services.pitr.operation import worker_process
-    from shared.native_process.os_platform import LockTimeoutError
     from tests.services.test_pitr_operation_owner import _worker
 
     _worker(tmp_path, monkeypatch, "Path(sys.argv[2]).write_text('{}')\n")
@@ -730,9 +730,9 @@ async def test_a_busy_kind_defers_a_scheduled_run_instead_of_failing_it(
     from contextlib import ExitStack
     from datetime import UTC, datetime
 
+    from base.native_process.os_platform import LockTimeoutError, file_lock
     from services.pitr import base_scheduler_daemon as scheduler
     from services.pitr.operation import worker_process
-    from shared.native_process.os_platform import LockTimeoutError, file_lock
 
     kind = _kind(tmp_path)
     kind.control_root.mkdir(parents=True)

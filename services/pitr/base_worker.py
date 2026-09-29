@@ -9,6 +9,11 @@ from contextlib import suppress
 from functools import partial
 from pathlib import Path
 
+from base.config import settings
+from base.log import init_cli_process
+from base.native_process.child_env import inherited_process_env
+from base.native_process.os_platform import LockTimeoutError
+from base.paths import ava_home
 from services.pitr.base_backup.candidate import (
     commit_base_candidate,
     prepare_base_candidate,
@@ -27,11 +32,6 @@ from services.pitr.operation.worker_process import (
     worker_request,
 )
 from services.pitr.stores.factory import get_store_group
-from shared.config import settings
-from shared.log import init_cli_process
-from shared.native_process.child_env import inherited_process_env
-from shared.native_process.os_platform import LockTimeoutError
-from shared.paths import ava_home
 
 
 def candidate_kind(root: Path | None = None) -> OperationKind:
@@ -124,8 +124,8 @@ def _commit(
 
 
 def main() -> None:
-    # Importing `shared.log` drops loguru's default handler: without sinks,
-    # every record `shared.db`, `shared.cluster.dataplane.pg_tools` and the candidate code write
+    # Importing `base.log` drops loguru's default handler: without sinks,
+    # every record `base.db`, `base.cluster.dataplane.pg_tools` and the candidate code write
     # is discarded. Stderr is the operation's `stderr.log`, whose tail a
     # failure carries; the file is `$AVA_HOME/logs/pitr-base-worker.log`.
     init_cli_process(name="pitr-base-worker")

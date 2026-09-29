@@ -10,9 +10,9 @@ from pathlib import Path
 
 import pytest
 
+from base.host.env import runtime_config
 from cli.commands.data_plane import _pitr_activation_config as activation_config
 from services.pitr.activation.state import ActivationRecord
-from shared.host.env import runtime_config
 
 
 def _write_private_file(path: Path, content: str | bytes) -> Path:

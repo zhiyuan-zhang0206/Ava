@@ -12,6 +12,11 @@ import sys
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
+from base.deploy.progress_timeout import (
+    CRITICAL_SERVICE_SESSIONS,
+    NON_CRITICAL_SERVICE_READY_TIMEOUT_S,
+    SERVICE_READY_TIMEOUT_S,
+)
 from ops.roster import build_services
 from services.ava_root.health import HealthConfig, HealthMonitor
 from services.ava_root.probes import ProbeError, ProbeRegistry
@@ -19,11 +24,6 @@ from services.ava_root.selfcheck import SelfCheckConfig, TreeSelfCheck
 from services.ava_root.wiring import WiringContext, WiringParticipant
 from services.ava_root_glue.diagnostic_probes import build_diagnostics
 from services.ava_root_glue.diagnostics import Diagnostic, DiagnosticMonitor, RootHealthRounds
-from shared.deploy.progress_timeout import (
-    CRITICAL_SERVICE_SESSIONS,
-    NON_CRITICAL_SERVICE_READY_TIMEOUT_S,
-    SERVICE_READY_TIMEOUT_S,
-)
 
 STATIC_PROBES: Mapping[str, str] = {}
 """Spec-less unit id -> `"module:attribute"` probe reference.
@@ -37,8 +37,8 @@ contract).
 
 def build_wiring(context: WiringContext) -> list[WiringParticipant]:
     """The reference participant set: health monitor + tree self-check."""
-    from shared.deploy.release.runtime_interpreter import capture_loaded_runtime
-    from shared.paths import ava_home
+    from base.deploy.release.runtime_interpreter import capture_loaded_runtime
+    from base.paths import ava_home
 
     home = ava_home().resolve(strict=True)
     identity = capture_loaded_runtime(home)

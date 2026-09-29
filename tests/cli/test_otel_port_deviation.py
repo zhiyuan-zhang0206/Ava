@@ -5,9 +5,9 @@ from __future__ import annotations
 import pytest
 
 import shared.db
+from base.config import settings
 from cli.commands.observability import otel_collector as oc
 from services.heartbeat import station_probe
-from shared.config import settings
 from tests.cli.test_converge_otel_collector import _render_real_template
 
 
@@ -56,7 +56,7 @@ def test_runner_does_not_discover_station(monkeypatch: pytest.MonkeyPatch) -> No
     def fail_discovery(base: str) -> None:
         pytest.fail("pure runners must use their published gateway relay")
 
-    monkeypatch.setattr("shared.telemetry.station_endpoint.resolve_station_target", fail_discovery)
+    monkeypatch.setattr("base.telemetry.station_endpoint.resolve_station_target", fail_discovery)
     cfg = _render_real_template(
         monkeypatch, frozenset({"agent-runner"}), observability_url="http://10.0.0.46"
     )

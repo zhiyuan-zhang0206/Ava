@@ -11,18 +11,18 @@ from pathlib import Path
 
 import pytest
 
-from cli.release_build import ApplicationBuild
-from cli.release_prepare import FileInput, LocalInputs, Preparation, PreparationReceipt, TreeInput
-from cli.release_prepare import prepare as preparation
-from shared.deploy.release.runtime_prepare import PrepareInputs, inventory_digest, tree_inventory
-from shared.deploy.release.runtime_release import (
+from base.deploy.release.runtime_prepare import PrepareInputs, inventory_digest, tree_inventory
+from base.deploy.release.runtime_release import (
     MANIFEST_VERSION,
     ReleaseRejectedError,
     VerifiedRelease,
     file_sha256,
     verify_release,
 )
-from shared.runtime_abi import current_abi
+from base.runtime_abi import current_abi
+from cli.release_build import ApplicationBuild
+from cli.release_prepare import FileInput, LocalInputs, Preparation, PreparationReceipt, TreeInput
+from cli.release_prepare import prepare as preparation
 
 # ruff: noqa: S603 -- commands operate only on a generated fixture repository or isolated test child.
 
@@ -42,7 +42,7 @@ def request_fixture(tmp_path: Path) -> Preparation:
     repo.mkdir()
     for name in ("shared", "db", "migrations"):
         (repo / name).mkdir()
-    (repo / "shared/__init__.py").write_text('VALUE = "committed"\n')
+    (repo / "base/__init__.py").write_text('VALUE = "committed"\n')
     (repo / "db/schema.sql").write_text("SELECT 1;\n")
     (repo / "uv.lock").write_text("version = 1\n")
     (repo / "migrations/.gitkeep").write_text("")
@@ -174,7 +174,7 @@ def test_committed_build_receipt_binds_real_installed_image_without_external_eff
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     request = request_fixture
-    (request.repo / "shared/__init__.py").write_text('VALUE = "dirty"\n')
+    (request.repo / "base/__init__.py").write_text('VALUE = "dirty"\n')
     (request.repo / "uv.lock").write_text("dirty working lock must not be used\n")
     before = _protected(request)
     monkeypatch.setattr(preparation, "prepare_release", _assemble)
@@ -392,13 +392,13 @@ import builtins, sys
 sys.path.insert(0, sys.argv[1])
 original = builtins.__import__
 def guarded(name, *args, **kwargs):
-    if name == 'shared.config' or name.startswith('cli.commands') or name.startswith('cli.release_transition'):
+    if name == 'base.config' or name.startswith('cli.commands') or name.startswith('cli.release_transition'):
         raise AssertionError('preparation imported runtime lifecycle: ' + name)
     return original(name, *args, **kwargs)
 builtins.__import__ = guarded
 from cli.release_prepare import Preparation
 from cli.release_prepare.__main__ import main
-assert 'shared.config' not in sys.modules
+assert 'base.config' not in sys.modules
 """
     result = subprocess.run(
         [sys.executable, "-I", "-B", "-c", code, str(Path(__file__).resolve().parents[3])],
@@ -420,7 +420,7 @@ import importlib.abc, pathlib, sys
 sys.path.insert(0, sys.argv[1])
 class DenyRuntime(importlib.abc.MetaPathFinder):
     def find_spec(self, fullname, *args):
-        if fullname.startswith(('shared.config', 'shared.db', 'cli.commands', 'cli.release_transition', 'services.')):
+        if fullname.startswith(('base.config', 'base.db', 'cli.commands', 'cli.release_transition', 'services.')):
             raise AssertionError('preparation imported runtime authority: ' + fullname)
 sys.meta_path.insert(0, DenyRuntime())
 from cli.release_prepare import Preparation
@@ -434,7 +434,7 @@ request = Preparation.model_validate_json(pathlib.Path(sys.argv[2]).read_bytes()
 try:
     prepare.prepare_image(request)
 except AssemblyBoundary:
-    assert 'shared.config' not in sys.modules
+    assert 'base.config' not in sys.modules
 else:
     raise AssertionError('controller did not reach native assembly')
 """

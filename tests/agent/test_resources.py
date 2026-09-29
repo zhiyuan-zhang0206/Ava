@@ -10,8 +10,8 @@ import psycopg
 import pytest
 from psycopg.types.json import Jsonb
 
-from shared.agents.incarnation.hosted_force import install_hosted_force
-from shared.agents.incarnation.resources import (
+from base.agents.incarnation.hosted_force import install_hosted_force
+from base.agents.incarnation.resources import (
     ExecAllocation,
     IncarnationResources,
     ResourceBirth,
@@ -23,8 +23,8 @@ from shared.agents.incarnation.resources import (
     freeze_resources,
     register_exec,
 )
-from shared.db import create_agent
-from shared.native_process.runtime_incarnation import RuntimeIncarnation
+from base.db import create_agent
+from base.native_process.runtime_incarnation import RuntimeIncarnation
 
 
 def _process(pid: int, birth: float) -> ResourceProcess:

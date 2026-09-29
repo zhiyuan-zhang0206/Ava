@@ -13,7 +13,7 @@ gateway's enrollment store. Routes, under `/v1/op/<operation>/unit/<unit key>`
 - `POST .../capability` is the per-operation capability exchange, slice
   dbgen-8, and answers `501` naming it.
 
-Every request authenticates with `shared.cluster.authority.channel`: an HMAC
+Every request authenticates with `base.cluster.authority.channel`: an HMAC
 proof keyed by the unit's enrollment secret, checked against the gateway's
 current record (a rotated or revoked enrollment stops at once) inside one
 replay window per run. A continuation starts a new window, so every route is
@@ -49,20 +49,20 @@ from uuid import UUID
 
 from pydantic import ValidationError
 
-from cli.release_fleet.policy import UnitKey
-from cli.release_fleet.progress import Instruction, Report
-from shared.cluster.authority.channel import (
+from base.cluster.authority.channel import (
     ChannelRefusedError,
     ReplayWindow,
     RequestProof,
     verify_request,
 )
-from shared.cluster.authority.unit import Enrollment, UnitIdentity, load_enrollment
-from shared.deploy.progress_timeout import (
+from base.cluster.authority.unit import Enrollment, UnitIdentity, load_enrollment
+from base.deploy.progress_timeout import (
     COORDINATOR_READ_TIMEOUT_S,
     COORDINATOR_REQUEST_DEADLINE_S,
 )
-from shared.log import logger
+from base.log import logger
+from cli.release_fleet.policy import UnitKey
+from cli.release_fleet.progress import Instruction, Report
 
 MAX_BODY_BYTES = 64 * 1024
 _DECIMAL = re.compile(r"[0-9]+")

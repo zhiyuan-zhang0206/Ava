@@ -19,23 +19,23 @@ from psycopg_pool import AsyncConnectionPool
 
 from agent.graph.claim.node import claim_node
 from agent.state import BaseAgentState
+from base.agents.context import AvaContext
+from base.agents.incarnation.resources import (
+    IncarnationResources,
+    ResourceProcess,
+    decode_resources,
+)
+from base.deploy.maintenance import pause_owner
+from base.deploy.maintenance.cohort import _classify, _RuntimeRow
+from base.deploy.maintenance.state import MaintenanceHold
+from base.native_process.runtime_incarnation import RuntimeIncarnation
 from services.agent_host import dispatcher
 from services.agent_host import host as host_module
 from services.agent_host import runtime as runtime_module
 from services.agent_host.dispatcher import InboundWakeDispatcher, TurnScheduler
 from services.agent_host.host import AgentHost
-from shared.agents.context import AvaContext
-from shared.agents.incarnation.resources import (
-    IncarnationResources,
-    ResourceProcess,
-    decode_resources,
-)
-from shared.deploy.maintenance import pause_owner
-from shared.deploy.maintenance.cohort import _classify, _RuntimeRow
-from shared.deploy.maintenance.state import MaintenanceHold
-from shared.native_process.runtime_incarnation import RuntimeIncarnation
 from tests.agent.test_hosted_db_recovery import _admit
-from tests.shared.poll_until import poll_until_async
+from tests.base.poll_until import poll_until_async
 
 
 def _accept_model(**_kwargs: object) -> None:

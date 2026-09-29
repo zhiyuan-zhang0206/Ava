@@ -20,11 +20,11 @@ from langgraph.types import Command, interrupt
 from psycopg_pool import AsyncConnectionPool
 
 from agent.ownership.hosted import admit_hosted_runtime, settle_hosted_runtime
+from base.agents.incarnation import exec_request_evidence
+from base.cluster.machine import machine_name
+from base.db import insert_inbound_message
+from base.deploy.maintenance import cohort, pause_owner
 from ops.agent_pause import resume_agents
-from shared.agents.incarnation import exec_request_evidence
-from shared.cluster.machine import machine_name
-from shared.db import insert_inbound_message
-from shared.deploy.maintenance import cohort, pause_owner
 from tests.agent.test_maintenance import WHEN, _agent
 from tests.agent.test_maintenance import isolate as isolate
 
@@ -281,7 +281,7 @@ def _no_process_iteration(*_args: Any, **_kwargs: Any) -> Iterator[Any]:
 def _hide_machine_processes(monkeypatch: pytest.MonkeyPatch) -> None:
     """This box runs other agents' exec children; isolate the test's own legs."""
     monkeypatch.setattr(
-        "shared.agents.incarnation.exec_request_evidence.psutil.process_iter", _no_process_iteration
+        "base.agents.incarnation.exec_request_evidence.psutil.process_iter", _no_process_iteration
     )
 
 
@@ -289,10 +289,10 @@ def _exec_request_dirs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple
     exec_dir = tmp_path / "exec"
     quarantine = tmp_path / "quarantined-exec-requests"
     monkeypatch.setattr(
-        "shared.agents.incarnation.exec_request_evidence.exec_run_dir", lambda: exec_dir
+        "base.agents.incarnation.exec_request_evidence.exec_run_dir", lambda: exec_dir
     )
     monkeypatch.setattr(
-        "shared.agents.incarnation.exec_request_evidence.quarantined_exec_requests_dir",
+        "base.agents.incarnation.exec_request_evidence.quarantined_exec_requests_dir",
         lambda: quarantine,
     )
     return exec_dir, quarantine
@@ -334,8 +334,7 @@ def test_unattributable_exec_envelope_refuses_cold_prepare_with_disposition(
     message = str(excinfo.value)
     assert request.name in message
     assert (
-        f"--agent {agent}" in message
-        and "shared.agents.incarnation.exec_request_evidence" in message
+        f"--agent {agent}" in message and "base.agents.incarnation.exec_request_evidence" in message
     )
     assert request.exists() and not quarantine.exists()
     assert db_conn.execute("SELECT status FROM agents_meta WHERE id=%s", (agent,)).fetchone() == (
@@ -407,7 +406,7 @@ def test_failed_current_lifecycle_cannot_be_parked(db_conn: psycopg.Connection[A
 def test_checkpoint_replaced_by_real_second_connection_refuses_normalization(
     db_conn: psycopg.Connection[Any], monkeypatch: pytest.MonkeyPatch, restart: bool
 ) -> None:
-    from shared.deploy.maintenance import cold
+    from base.deploy.maintenance import cold
 
     agent = _retired(db_conn, restart=restart)
     original = cold.require_persisted_end

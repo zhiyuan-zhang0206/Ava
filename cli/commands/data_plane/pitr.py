@@ -9,6 +9,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import cast
 
+from base.cluster.dataplane.pg_tools import pg_tool
+from base.config import settings
+from base.paths import ava_home
 from services.pitr.base_backup.manifest import CandidateManifest
 from services.pitr.operation.custody import OperationKind
 from services.pitr.restore.rollback_snapshot_archive import (
@@ -22,9 +25,6 @@ from services.pitr.restore.rollback_snapshot_archive import (
 )
 from services.pitr.retention.planner import inspect_dry_run_plan
 from services.pitr.stores.factory import get_store_group
-from shared.cluster.dataplane.pg_tools import pg_tool
-from shared.config import settings
-from shared.paths import ava_home
 
 
 def cmd_pitr_retention_status() -> int:
@@ -424,8 +424,8 @@ def cmd_pitr_operations_status() -> int:
 
 def cmd_pitr_operations_retire(*, confirm: bool) -> int:
     """Re-prove closure of blocked operations; `--confirm` quarantines the proven ones."""
+    from base.native_process.os_platform import LockTimeoutError
     from services.pitr.operation.custody import retire_blocked
-    from shared.native_process.os_platform import LockTimeoutError
 
     refused = found = False
     for kind in _operation_kinds():
@@ -462,10 +462,10 @@ def cmd_pitr_operations_discard_candidate(*, chain: str, confirm: bool) -> int:
     never resumed while activation holds the schedule. `--confirm` removes it;
     it refuses while a base-candidate operation runs or its kind is blocked.
     """
+    from base.native_process.os_platform import LockTimeoutError, file_lock
     from services.pitr.base_backup.candidate import BaseCandidateError, discard_resumable_candidate
     from services.pitr.base_worker import candidate_kind
     from services.pitr.operation.custody import blocked_operations
-    from shared.native_process.os_platform import LockTimeoutError, file_lock
 
     root = ava_home() / "physical-backup"
     kind = candidate_kind(root)

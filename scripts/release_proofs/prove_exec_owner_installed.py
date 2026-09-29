@@ -16,14 +16,14 @@ import psutil
 
 import agent.exec_domain_owner
 from agent.graph.exec.protocol import write_request
-from shared.agents.incarnation.exec_owner_protocol import (
+from base.agents.incarnation.exec_owner_protocol import (
     OwnerClosed,
     OwnerContext,
     OwnerControl,
     OwnerReady,
     publish_owner_message,
 )
-from shared.agents.incarnation.resources import ExecAllocation
+from base.agents.incarnation.resources import ExecAllocation
 
 
 def main() -> None:  # noqa: PLR0915

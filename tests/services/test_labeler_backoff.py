@@ -11,10 +11,10 @@ from collections.abc import Iterator
 import psycopg
 import pytest
 
+from base.config import settings
+from base.daemon.health import Liveness
+from base.db import create_agent, pool
 from services.labeler import daemon
-from shared.config import settings
-from shared.daemon.health import Liveness
-from shared.db import create_agent, pool
 
 
 @pytest.fixture(autouse=True)

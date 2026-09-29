@@ -26,15 +26,15 @@ import pytest
 from dotenv import dotenv_values
 from psycopg import sql
 
+from base import cluster
+from base.cluster import authority, ownership
+from base.config import settings
+from base.db.pg_admin import owner_session
 from cli.commands.data_plane import bringup
 from cli.commands.data_plane import cluster_instance as ci
 from cli.commands.data_plane import pgbouncer as pooler
 from cli.commands.lifecycle.migrations import cmd_migrations_apply
 from scripts import cutover_db_authority as cutover
-from shared import cluster
-from shared.cluster import authority, ownership
-from shared.config import settings
-from shared.db.pg_admin import owner_session
 from tests._containers import _free_port
 
 pytestmark = pytest.mark.skipif(

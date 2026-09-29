@@ -1,6 +1,6 @@
 """Event-registry zero-enforcement gate — R2-C \u5355\u4e00\u4e8b\u5b9e\u6e90\u7eaa\u5f8b.
 
-`shared/events/contract.py` \u7684 `EVENTS` \u662f event_name \u552f\u4e00\u4e8b\u5b9e\u6765\u6e90\uff1b\u672c\u6a21\u5757\u662f
+`base/events/contract.py` \u7684 `EVENTS` \u662f event_name \u552f\u4e00\u4e8b\u5b9e\u6765\u6e90\uff1b\u672c\u6a21\u5757\u662f
 **\u9a8c\u8bc1\u8005**\uff08\u4e0d\u662f\u63a5\u7f1d——\u6ce8\u518c\u8868\u4e4b\u5916\u4e0d\u518d\u6709\u624b\u5de5\u5feb\u7167\uff09\u3002\u4e94\u4e2a\u5b88\u536b\uff1a
 
 1. **\u524d\u5411**\uff1a\u751f\u4ea7\u4ee3\u7801\u91cc\u6bcf\u4e2a\u9759\u6001 `event=` \u5b57\u9762\u91cf\u5fc5\u987b\u5df2\u6ce8\u518c\u3002\u672a\u6ce8\u518c =
@@ -9,7 +9,7 @@
 2. **\u53cd\u5411**\uff1a`EVENTS` \u6bcf\u4e2a\u6761\u76ee\u5fc5\u987b\u6709\u751f\u4ea7\u8005\uff08`event=` / `label=` /
    `event_type=` \u5b57\u9762\u91cf\uff0c\u6216\u4e0b\u65b9 SQL/\u52a8\u6001\u6e05\u5355\uff09——\u9632\u5220\u9664/\u6539\u540d\u4e8b\u4ef6\u7559\u4e0b\u6ce8\u518c\u8868
    \u6b8b\u7559\uff08category \u6620\u5c04\u7ee7\u7eed\u5b58\u6d3b\u4e00\u4e2a\u65e0\u4eba\u4ea7\u751f\u7684\u4e8b\u4ef6\uff09\u3002
-3. **\u6587\u6863\u6f02\u79fb**\uff1a`shared/events/registry.md` \u5fc5\u987b\u4e0e\u751f\u6210\u5668\u8f93\u51fa\u9010\u5b57\u4e00\u81f4\uff08R2-C\uff1a
+3. **\u6587\u6863\u6f02\u79fb**\uff1a`base/events/registry.md` \u5fc5\u987b\u4e0e\u751f\u6210\u5668\u8f93\u51fa\u9010\u5b57\u4e00\u81f4\uff08R2-C\uff1a
    \u6587\u6863\u662f\u751f\u6210\u7269\uff09\u3002
 4. **SQL \u952e\u6ce8\u5165**\uff1a\u8bfb\u53d6\u7aef SQL \u91cc\u7684 attributes \u952e\u5b57\u9762\u91cf\uff08`->>'` \u4e0e `?`
    \u4e24\u79cd\u5f62\u6001\uff09\u5fc5\u987b\u662f\u4e00\u4e2a payload TypedDict \u7684\u58f0\u660e\u952e\uff08`registered_payload_keys`\uff09
@@ -28,11 +28,11 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from shared.events import scan_kinds  # namespace package — pythonpath = ["."]
-from shared.events.contract import EVENTS, registered_payload_keys, telemetry_events
+from base.events import scan_kinds  # namespace package — pythonpath = ["."]
+from base.events.contract import EVENTS, registered_payload_keys, telemetry_events
 
 _REPO = Path(__file__).resolve().parents[1]
-_REGISTRY = _REPO / "shared" / "events" / "registry.md"
+_REGISTRY = _REPO / "base" / "events" / "registry.md"
 
 # Kinds whose production site has no static `event=` literal, so scan_kinds
 # cannot see them. Each entry carries its emission site; removing a kind from
@@ -47,10 +47,10 @@ _SQL_OR_DYNAMIC_KINDS = frozenset(
         "delivery_wake_suppressed",  # services/delivery_watchdog/resurrect_guard.py:_alert_wake_suppressed
         "billing_resurrect_run",  # ops/lifecycle/billing_recovery.py:_record_run_event telemetry.emit("telemetry", ...)
         "delivery_recovery_decision",  # services/delivery_watchdog/stall_recovery.py:_request_harvest
-        # Outbox emissions go through the module helper (shared/agents/messages/delivery_outbox.py:_emit),
+        # Outbox emissions go through the module helper (base/agents/messages/delivery_outbox.py:_emit),
         # which passes the name positionally — no `event=` literal to scan.
-        "delivery_outbox_flushed",  # shared/agents/messages/delivery_outbox.py:flush
-        "delivery_outbox_abandoned",  # shared/agents/messages/delivery_outbox.py:_abandon
+        "delivery_outbox_flushed",  # base/agents/messages/delivery_outbox.py:flush
+        "delivery_outbox_abandoned",  # base/agents/messages/delivery_outbox.py:_abandon
         "lifecycle_pointer_done_torn",  # gateway/ttl_reaper/lifecycle_fences.py:_scan_torn_lifecycle_pointers_blocking (positional emit)
         "lifecycle_fences_settled_absent_machine",  # gateway/ttl_reaper/lifecycle_fences.py:settle_absent_machine_fences (positional emit)
         "heartbeat_nudged",  # services/heartbeat/daemon.py:_alert_idle
@@ -71,13 +71,13 @@ _SQL_OR_DYNAMIC_KINDS = frozenset(
         "chrome_page_ttl_expired",  # services/browser/page_lifecycle.py:reap_expired_pages telemetry.emit("log", ...)
         "chrome_page_ttl_renewed",  # services/browser/page_lifecycle.py:renew_agent_page telemetry.emit("telemetry", ...)
         "frontend_interaction",  # gateway/routers/frontend_telemetry.py telemetry.emit("telemetry", ...)
-        "editable_pth_repaired",  # shared/deploy/release/editable_install.py:repair_editable_ava_pth
-        "editable_direct_url_repaired",  # shared/deploy/release/editable_install.py:repair_editable_direct_url
-        "exec_editable_install_poisoned",  # shared/deploy/release/editable_install.py:guard_editable_install
+        "editable_pth_repaired",  # base/deploy/release/editable_install.py:repair_editable_ava_pth
+        "editable_direct_url_repaired",  # base/deploy/release/editable_install.py:repair_editable_direct_url
+        "exec_editable_install_poisoned",  # base/deploy/release/editable_install.py:guard_editable_install
         "lgtm_dashboard_render_failed",  # cli/commands/observability/_lgtm_provisioning.py:_render_ava_ops_dashboard telemetry.emit("telemetry", ...)
-        "event_log_drop",  # shared/telemetry/loss.py:loss_event constructs Event directly
-        "sdk_call",  # ava/sdk_surface/metering.py recorder (via shared/sdk_telemetry)
-        # shared/packages/plugins/activation.py:emit binds event=PLUGIN_ACTIVATION_EVENT (a
+        "event_log_drop",  # base/telemetry/loss.py:loss_event constructs Event directly
+        "sdk_call",  # ava/sdk_surface/metering.py recorder (via base/sdk_telemetry)
+        # base/packages/plugins/activation.py:emit binds event=PLUGIN_ACTIVATION_EVENT (a
         # module constant, like sdk_call), so the literal scan cannot see it.
         "plugin_activation",
         "gateway_latency",  # gateway/middleware/latency.py:emit_bucket telemetry.emit("telemetry", ...)
@@ -91,13 +91,13 @@ _SQL_OR_DYNAMIC_KINDS = frozenset(
         "pitr_remote_inventory",  # services/pitr/retention/scheduler.py:refresh (positional emit)
         "backup_operation_custody",  # services/pitr/operation/custody.py:report (positional emit)
         "recovery_drill_failed",  # services/backup_scheduler/daemon.py:_run_due_local_dump_restore + services/pitr/base_scheduler_daemon.py:run (positional emit)
-        "plugin_load_failed",  # shared/packages/plugins/load_report.py:report_plugin_load_failure telemetry.emit("telemetry", ...)
-        "converge_file_preserved",  # shared/host/converge/preserve_report.py:report_converge_preserve telemetry.emit("telemetry", ...)
+        "plugin_load_failed",  # base/packages/plugins/load_report.py:report_plugin_load_failure telemetry.emit("telemetry", ...)
+        "converge_file_preserved",  # base/host/converge/preserve_report.py:report_converge_preserve telemetry.emit("telemetry", ...)
         "loki_query_budget",  # gateway/lgtm/loki_query_budget.py:_emit_observation
         "telemetry_read_stale",  # gateway/lgtm/telemetry_staleness.py:_emit
         "telemetry_read_recovered",  # gateway/lgtm/telemetry_staleness.py:_emit
-        "otlp_backend_disabled",  # shared/telemetry/otlp/telemetry_otlp.py:_emit_backend_event
-        "otlp_backend_recovered",  # shared/telemetry/otlp/telemetry_otlp.py:_emit_backend_event
+        "otlp_backend_disabled",  # base/telemetry/otlp/telemetry_otlp.py:_emit_backend_event
+        "otlp_backend_recovered",  # base/telemetry/otlp/telemetry_otlp.py:_emit_backend_event
         "prom_query_budget",  # gateway/lgtm/prom_metrics.py:_emit_budget_observation
         # Class-resolution markers select their name from the event level at
         # runtime; services/events_maintenance/resolution.py emits the reopen
@@ -109,7 +109,7 @@ _SQL_OR_DYNAMIC_KINDS = frozenset(
         "resolution_status",
         "checkpoint_table_sizes",  # services/events_maintenance/blob_vacuum.py telemetry.emit (positional)
         "pause_lifecycle_wait",  # ops/agent_pause/__init__.py:_emit_lifecycle_wait (positional emit)
-        "pause_orphan_claim_settled",  # shared/deploy/maintenance/cohort.py:_emit_orphan_settlements
+        "pause_orphan_claim_settled",  # base/deploy/maintenance/cohort.py:_emit_orphan_settlements
         "update_straggler_reaped",  # ops/agent_pause/__init__.py:_reap_agents (positional emit)
         # Positional emit from the frozen-archive reader (task #2004).
         "archive_fetch_degraded",  # gateway/inspect/neighbors.py:_emit_archive_degraded
@@ -121,7 +121,7 @@ _SQL_OR_DYNAMIC_KINDS = frozenset(
         "stats_dashboard_stale",  # gateway/cluster/_stats_dashboard.py:_emit_stale (positional emit)
         # The hierarchy worker's trigger + guardrails (task #4674): positional
         # emits behind helpers, invisible to the literal scanner.
-        "hierarchy_enqueue_failed",  # shared/agents/history/checkpoint_cleanup.py:_enqueue_failed
+        "hierarchy_enqueue_failed",  # base/agents/history/checkpoint_cleanup.py:_enqueue_failed
         "hierarchy_regen_alert",  # services/hierarchy_worker/execute.py:_try_emit
         "hierarchy_regen_halt",  # services/hierarchy_worker/execute.py:_try_emit
         "hierarchy_regen_low_reuse",  # services/hierarchy_worker/execute.py:_try_emit
@@ -135,9 +135,9 @@ _SQL_OR_DYNAMIC_KINDS = frozenset(
         "exec(timeout)",
         # audit dynamic event_type: not an `event_type="x"` literal, invisible to the scanner.
         "spawn",  # ops/agents/spawn.py:349 event_type = "fork" if ... else "spawn"
-        "send_message",  # shared/db/__init__.py:497 inbound kind->event_type mapping value
-        "terminate",  # shared/db/__init__.py:498 same as above
-        "cancel",  # shared/db/__init__.py:500 same as above
+        "send_message",  # base/db/__init__.py:497 inbound kind->event_type mapping value
+        "terminate",  # base/db/__init__.py:498 same as above
+        "cancel",  # base/db/__init__.py:500 same as above
         # Historic producer-less events (registry §7.4): existing DB rows and schema
         # comments still reference them; registration stays until the unified model
         # lands and retirement is confirmed.
@@ -191,23 +191,23 @@ def test_every_static_event_kind_is_registered() -> None:
     event_kinds, _, _ = _code_kinds()
     unregistered = sorted(k for k in event_kinds if k not in EVENTS)
     assert not unregistered, (
-        "event= kind(s) missing from shared/events/contract.py EVENTS: "
+        "event= kind(s) missing from base/events/contract.py EVENTS: "
         f"{unregistered}. Register each in the same PR that introduces it "
-        "(one EventSpec line — shared/events/registry.md regenerates)."
+        "(one EventSpec line — base/events/registry.md regenerates)."
     )
 
 
 def test_production_scan_excludes_only_the_top_level_deploy_directory(tmp_path: Path) -> None:
-    """`deploy/` at the root is service configuration; `shared/deploy/` is a
+    """`deploy/` at the root is service configuration; `base/deploy/` is a
     package, and skipping it by name would hide every producer inside it."""
     (tmp_path / "deploy").mkdir()
     (tmp_path / "deploy" / "render.py").write_text("")
-    (tmp_path / "shared" / "deploy").mkdir(parents=True)
-    (tmp_path / "shared" / "deploy" / "emit.py").write_text("")
+    (tmp_path / "base" / "deploy").mkdir(parents=True)
+    (tmp_path / "base" / "deploy" / "emit.py").write_text("")
 
     scanned = [rel for rel, _ in scan_kinds.iter_production_py(tmp_path)]
 
-    assert scanned == ["shared/deploy/emit.py"]
+    assert scanned == ["base/deploy/emit.py"]
 
 
 def test_registered_telemetry_events_have_producers() -> None:
@@ -229,7 +229,7 @@ def test_registered_telemetry_events_have_producers() -> None:
 
 
 def test_registry_doc_matches_generated() -> None:
-    """shared/events/registry.md is a generated artifact (R2-C): it must equal
+    """base/events/registry.md is a generated artifact (R2-C): it must equal
     the generator's output byte-for-byte. A registry change without running
     `scripts/codegen/gen_event_registry.py` fails here (and in the pre-commit
     `events-registry-fresh` hook)."""
@@ -238,7 +238,7 @@ def test_registry_doc_matches_generated() -> None:
     generated = render()
     current = _REGISTRY.read_text(encoding="utf-8")
     assert current == generated, (
-        "shared/events/registry.md is out of sync with the EVENTS registry — "
+        "base/events/registry.md is out of sync with the EVENTS registry — "
         "run .venv/bin/python scripts/codegen/gen_event_registry.py and commit the "
         "regenerated doc in the same PR."
     )
@@ -248,7 +248,7 @@ _ATTRIBUTES_KEY_RE = re.compile(r"""attributes(?:->>|\s*\?\s*)'([^']+)'""")
 
 # The SQL-fragment definition site — `_sql_keys` builds `attributes->>'<key>'`
 # from registered payload keys; every other file must not hand-write literals.
-_EXEMPT_SQL_KEY_FILES = frozenset({"shared/events/contract.py"})
+_EXEMPT_SQL_KEY_FILES = frozenset({"base/events/contract.py"})
 
 
 def test_attributes_key_literals_are_registered() -> None:
@@ -258,7 +258,7 @@ def test_attributes_key_literals_are_registered() -> None:
     A reader referencing a key no producer declares is a contract violation,
     not a query detail — it would silently NULL out after a payload rename.
     New read sites should consume the per-event SQL fragment constants
-    (LLM_USAGE_KEYS etc.) from shared/events/contract.py instead of writing
+    (LLM_USAGE_KEYS etc.) from base/events/contract.py instead of writing
     literals; this gate is the safety net for hand-written ones.
     """
     unregistered: list[tuple[str, int, str]] = []
@@ -289,7 +289,7 @@ def test_attributes_key_literals_are_registered() -> None:
                     unregistered.append((rel, lineno, key))
     assert not unregistered, (
         "attributes key literal(s) not declared in any payload TypedDict "
-        f"(shared/events/contract.py): {unregistered[:10]}. Declare the key "
+        f"(base/events/contract.py): {unregistered[:10]}. Declare the key "
         "on the event's payload TypedDict, or use the registry SQL fragment "
         "constants."
     )
@@ -319,7 +319,7 @@ def test_label_only_calls_derive_registered_names() -> None:
     ]
     assert not unregistered, (
         "label-only call(s) with an unregistered label: "
-        f"{unregistered}. Register the label in shared/events/contract.py "
+        f"{unregistered}. Register the label in base/events/contract.py "
         "EVENTS (one EventSpec line), or pass an explicit event=."
     )
 
@@ -328,7 +328,7 @@ def test_label_only_calls_derive_registered_names() -> None:
 # fail-closed (dynamic), and negative (event= chains, non-logger `label=`
 # surfaces). A scanner regression must not ride on the repo-wide scan alone.
 
-_SYNTHETIC_IMPORT = "from shared.log import logger\n"
+_SYNTHETIC_IMPORT = "from base.log import logger\n"
 
 
 def test_label_scan_flags_literal_and_dynamic_labels() -> None:
@@ -371,15 +371,15 @@ def test_label_scan_merges_chains_and_skips_event_or_non_logger() -> None:
 
 def test_label_scan_covers_loguru_imports_and_module_aliases() -> None:
     """Every logger-root spelling is matched: the loguru-direct import, a
-    renamed import, a `shared.log` module alias, and the literal
-    `shared.log.logger` attribute chain."""
+    renamed import, a `base.log` module alias, and the literal
+    `base.log.logger` attribute chain."""
     findings = scan_kinds.find_label_only_calls(
-        "import shared.log as _log\n"
-        "import shared.log\n"
+        "import base.log as _log\n"
+        "import base.log\n"
         "from loguru import logger as lg\n"
-        "from shared.log import logger\n"
+        "from base.log import logger\n"
         '_log.logger.info("m", label="alias")\n'
-        'shared.log.logger.warning("m", label="attr-chain")\n'
+        'base.log.logger.warning("m", label="attr-chain")\n'
         'lg.info("m", label="renamed-import")\n'
         'logger.info("m", label="plain")\n',
         filename="synthetic.py",

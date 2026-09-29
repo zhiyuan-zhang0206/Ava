@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from ava.attachment_transport import attach, take_attachments
-from shared.lm.attach_constants import ATTACH_MAX_FILE_BYTES, ATTACH_MAX_LABEL_CHARS
+from base.lm.attach_constants import ATTACH_MAX_FILE_BYTES, ATTACH_MAX_LABEL_CHARS
 
 
 @pytest.fixture(autouse=True)
@@ -23,7 +23,7 @@ def _media_capable_model(monkeypatch: pytest.MonkeyPatch) -> None:
     """The attach transport is a media-capable-model feature: a text-only
     model's attach call is rejected at the model gate (user ruling 2026-08-28),
     so the buffer contract tests run as a media-capable agent."""
-    from shared.config import settings
+    from base.config import settings
 
     monkeypatch.setattr(settings.lm, "llm_model", "gpt-5.6-sol")
 
@@ -117,7 +117,7 @@ def test_rejects_text_only_model(monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     """A text-only model's attach call fails at the model gate with a clear
     error and registers nothing — the member is hidden from its SDK docs, so
     the call is the only path that can reach it (user ruling 2026-08-28)."""
-    from shared.config import settings
+    from base.config import settings
 
     _exec_child(monkeypatch, tmp_path)
     monkeypatch.setattr(settings.lm, "llm_model", "deepseek-v4-pro")
@@ -136,9 +136,9 @@ def test_rejects_model_withdrawn_to_its_text_only_fallback(
     """A withdrawn vision pin is gated as its text-only fallback (task #3212)."""
     from dataclasses import replace
 
-    from shared.config import settings
-    from shared.lm.plugin_providers import ensure_provider_plugins_loaded
-    from shared.lm.registry import MODELS
+    from base.config import settings
+    from base.lm.plugin_providers import ensure_provider_plugins_loaded
+    from base.lm.registry import MODELS
 
     _exec_child(monkeypatch, tmp_path)
     ensure_provider_plugins_loaded()
@@ -169,7 +169,7 @@ def test_rejects_modality_not_supported_by_model(
     """A file whose modality the model's attach set excludes is rejected at
     registration with the allowed set in the error — never a silent pack-time
     skip (user ruling 2026-08-28)."""
-    from shared.config import settings
+    from base.config import settings
 
     _exec_child(monkeypatch, tmp_path)
     # gpt-5.6-sol is image-only.
@@ -190,7 +190,7 @@ def test_attach_modality_matrix_follows_registry(
     video (image/pdf/audio/video), Claude rejects it (image/pdf) — the
     registry's declared media matrix is the attach contract (user ruling
     2026-08-28)."""
-    from shared.config import settings
+    from base.config import settings
 
     _exec_child(monkeypatch, tmp_path)
     video = tmp_path / "clip.mp4"

@@ -19,7 +19,7 @@ from pydantic import (
     model_validator,
 )
 
-from shared.events.contract import EventTier
+from base.events.contract import EventTier
 
 
 class AgentEventRow(BaseModel):
@@ -58,7 +58,7 @@ class EventRow(BaseModel):
 
     Every signal shares this shape (event-system design doc §1): audit
     (legacy `event_log`), telemetry and log (formerly `agent_events`) all land
-    in it, written through the unified emitter (`shared/telemetry/emitter.py`).
+    in it, written through the unified emitter (`base/telemetry/emitter.py`).
     `trace_id` is the correlation key — one turn = one trace id, every event
     inside it carries the same value. `agent_id` is None for service-level
     events (gateway / daemons); `machine` is the host dimension. `level` is
@@ -217,7 +217,7 @@ class AgentMetricsItem(BaseModel):
     """One agent's row in the fleet metrics breakdown — headline counters
     aggregated over its events within the report window. `label` is the
     agent's display name (None = unset; frontend falls back to "#id").
-    `cost_usd` prices each call via `shared.lm.pricing.cost_usd`; calls on an
+    `cost_usd` prices each call via `base.lm.pricing.cost_usd`; calls on an
     unpriced model contribute 0. `cache_hit_pct` = cached / in * 100 (in=0
     degrades to 0). `exec_failed` is every exec outcome other than plain
     `exec` — same exec-ok/exec-failed split as the metrics report."""

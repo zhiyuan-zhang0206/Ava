@@ -57,8 +57,8 @@ from ava_builtins.plugins.ava_syntax_fix.agent_runtime import (
     _strip_code_fence,
     syntax_fix_before_exec,
 )
-from shared.agents.context import AvaContext
-from shared.config import settings
+from base.agents.context import AvaContext
+from base.config import settings
 
 # --- _fix_chinese_punctuation ---
 
@@ -1075,7 +1075,7 @@ class TestLlmRepairSyntax:
 
         fake = MagicMock()
         fake.ainvoke = AsyncMock(return_value=MagicMock(content="x = 1"))
-        with patch("shared.lm.factory.build_chat_model", return_value=fake):
+        with patch("base.lm.factory.build_chat_model", return_value=fake):
             from ava_builtins.plugins.ava_syntax_fix.agent_runtime import _llm_repair_syntax
 
             out = await _llm_repair_syntax("x = 'broken", "SyntaxError: ...")
@@ -1084,7 +1084,7 @@ class TestLlmRepairSyntax:
     async def test_model_unavailable_returns_none(self):
         from unittest.mock import patch
 
-        with patch("shared.lm.factory.build_chat_model", side_effect=RuntimeError("no key")):
+        with patch("base.lm.factory.build_chat_model", side_effect=RuntimeError("no key")):
             from ava_builtins.plugins.ava_syntax_fix.agent_runtime import _llm_repair_syntax
 
             out = await _llm_repair_syntax("x = 'broken", "SyntaxError: ...")
@@ -1095,7 +1095,7 @@ class TestLlmRepairSyntax:
 
         fake = MagicMock()
         fake.ainvoke = AsyncMock(return_value=MagicMock(content="   "))
-        with patch("shared.lm.factory.build_chat_model", return_value=fake):
+        with patch("base.lm.factory.build_chat_model", return_value=fake):
             from ava_builtins.plugins.ava_syntax_fix.agent_runtime import _llm_repair_syntax
 
             out = await _llm_repair_syntax("x = 'broken", "SyntaxError: ...")

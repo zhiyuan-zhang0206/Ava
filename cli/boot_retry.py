@@ -1,8 +1,8 @@
 """`ava boot` — `ava start`, re-run while the machine is still coming up.
 
 The Windows ONLOGON startup retry operation. macOS delegates retry to launchd;
-Linux automatic boot delegates to systemd (`shared/host/system/boot_unit.py`). The policy
-is stated in `shared/host/system/boot_policy.py`.
+Linux automatic boot delegates to systemd (`base/host/system/boot_unit.py`). The policy
+is stated in `base/host/system/boot_policy.py`.
 
 Retries with no attempt limit, which is what launchd does on the platform that
 has a scheduler-level answer -- the three platforms must agree, or a box whose
@@ -28,8 +28,8 @@ import sys
 import time
 from typing import IO
 
-from shared.host.env.dotenv_boot import resolve_ava_home
-from shared.host.system.boot_policy import BOOT_RETRY_INTERVAL_S
+from base.host.env.dotenv_boot import resolve_ava_home
+from base.host.system.boot_policy import BOOT_RETRY_INTERVAL_S
 
 
 def _start_command(start_args: list[str]) -> list[str]:
@@ -78,7 +78,7 @@ def run_boot(argv: list[str]) -> int:
     host whose boot start never succeeded -- the OS watchdog probe revives a dead
     watchdog and nothing more -- so giving up would leave the box down until a
     human noticed, which is the outage this exists to prevent. See
-    `shared/host/system/boot_policy.py`.
+    `base/host/system/boot_policy.py`.
 
     `argv` is forwarded verbatim to `ava start`, so the boot job can carry
     whatever flags a hand-run start would.

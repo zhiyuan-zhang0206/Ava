@@ -37,9 +37,9 @@ from agent.graph.exec._process import (
 from agent.graph.exec._result import _ExecCrashed
 from agent.graph.exec._stream import StreamingTextIO
 from agent.graph.exec._subprocess import _collect_child, _spawn
-from shared.native_process.ownership import OwnedProcess
-from shared.native_process.turn_identity import HostedTurnResources, bind_hosted_resources
-from shared.sessions.posixproc import _group_empty
+from base.native_process.ownership import OwnedProcess
+from base.native_process.turn_identity import HostedTurnResources, bind_hosted_resources
+from base.sessions.posixproc import _group_empty
 from tests.e2e._proc import kill_group_or_prove_already_gone
 
 _AGENT_ID = 424242
@@ -75,7 +75,7 @@ async def _assert_group_gone(pgid: int, timeout_s: float = 5.0) -> None:
     ``killpg(pgid, 0)`` keeps succeeding while any member — including a
     zombie awaiting its reaper — remains in the group table, so a one-shot
     ``ProcessLookupError`` expectation races the OS reaper; poll instead.
-    ``_group_empty`` is the same production check ``shared.sessions.posixproc`` uses:
+    ``_group_empty`` is the same production check ``base.sessions.posixproc`` uses:
     macOS answers a zombie-only group's ``killpg(pgid, 0)`` with EPERM, not
     ESRCH, so a raw ``except ProcessLookupError`` here would leave that EPERM
     uncaught instead of falling through to its psutil member scan.
@@ -606,7 +606,7 @@ async def test_live_signal_refusal_returns_unresolved_without_reap(
 ) -> None:
     import errno
 
-    from shared.native_process.ownership import OwnedProcess
+    from base.native_process.ownership import OwnedProcess
 
     proc, domain = ExecProcessDomain.launch_posix(
         [sys.executable, "-I", "-c", "import time;time.sleep(60)"],
@@ -623,7 +623,7 @@ async def test_live_signal_refusal_returns_unresolved_without_reap(
         assert pgid == proc.pid
         raise PermissionError(errno.EPERM, "private live group signal refusal")
 
-    monkeypatch.setattr("shared.native_process.exec_domain.os.killpg", denied)
+    monkeypatch.setattr("base.native_process.exec_domain.os.killpg", denied)
     try:
         failures = await asyncio.wait_for(
             settle_resources(root_exit, reap, closer, None, request_stop=True),
@@ -635,7 +635,7 @@ async def test_live_signal_refusal_returns_unresolved_without_reap(
         assert closer.task.done() and reap.done() and root_exit.cancelled()
         assert proc.returncode is None and native.live()
     finally:
-        monkeypatch.setattr("shared.native_process.exec_domain.os.killpg", original_signal)
+        monkeypatch.setattr("base.native_process.exec_domain.os.killpg", original_signal)
         domain.close_confirmed(time.monotonic() + 5)
         proc.wait(timeout=5)
         root_exit.cancel()

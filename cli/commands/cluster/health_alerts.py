@@ -22,8 +22,8 @@ from typing import Any, Literal
 
 import httpx
 
-from shared.deploy.release.operation import InFlight
-from shared.deploy.transition import transition_severity
+from base.deploy.release.operation import InFlight
+from base.deploy.transition import transition_severity
 
 # Transition state for owner alerts: message, episode starts_at, last-fired
 # severity (empty until the episode reaches WARNING), one logical field per
@@ -68,10 +68,10 @@ def notify_owner(text: str) -> None:
     §7 option B): at-most-once, never silent — failure is logged to stderr.
     The R3 migration shape is ``Policy(max_attempts=1, idempotent=False,
     on_final_failure=log)``."""
-    from shared.cluster import home_label
-    from shared.config import settings
-    from shared.daemon.health import health_port
-    from shared.paths import ava_home
+    from base.cluster import home_label
+    from base.config import settings
+    from base.daemon.health import health_port
+    from base.paths import ava_home
 
     if not settings.alerts.im_notify_enabled:
         print("  (owner alert skipped: IM notifications disabled)", file=sys.stderr)
@@ -119,8 +119,8 @@ def _alert_summary(*, recovered: bool, message: str) -> str:
     uniformly: the gateway's IM fan-out and the ops panel row both carry the
     `[<cluster>]` prefix, so a preview cluster's alert never reads like a
     prod incident."""
-    from shared.cluster import home_label
-    from shared.paths import ava_home
+    from base.cluster import home_label
+    from base.paths import ava_home
 
     label = home_label(ava_home())
     if recovered:
@@ -154,7 +154,7 @@ def _ingest_alert(
     writing the row and sending the IM itself (`_ingest_alert_fallback`);
     alerting is a side channel and must never break health observation.
     """
-    from shared.telemetry.alerts import fingerprint as compute_fingerprint
+    from base.telemetry.alerts import fingerprint as compute_fingerprint
 
     summary = _alert_summary(recovered=status == "resolved", message=message)
     stable_labels = {"alertname": OPS_RULE_NAME}
@@ -176,7 +176,7 @@ def _ingest_alert(
         ],
     }
     try:
-        from shared.cluster.machine import gateway_api_base, gateway_auth_headers
+        from base.cluster.machine import gateway_api_base, gateway_auth_headers
 
         resp = httpx.post(
             f"{gateway_api_base()}/api/alerts",
@@ -258,14 +258,14 @@ def _ingest_alert_fallback(
     still hears, which matters more than the row when the UI is dark too.
     """
     import shared.db
-    from shared.telemetry.alerts import (
+    from base.telemetry.alerts import (
         display_language,
         notify_im,
         notify_text,
         stamp_notified,
         upsert_alert,
     )
-    from shared.telemetry.alerts import (
+    from base.telemetry.alerts import (
         fingerprint as compute_fingerprint,
     )
 
@@ -337,7 +337,7 @@ def _alert_failure(
     A new episode starts now, or at `started_at` when the caller knows when
     the condition truly began.
     """
-    from shared.config import settings
+    from base.config import settings
 
     marker = home / ALERT_STATE_FILE
     if marker.exists():
@@ -416,8 +416,8 @@ def _alert_recovery(home: Path) -> None:
 
 def _release_operation() -> InFlight | None:
     """This home's in-flight release or PITR operation; an unreadable one explains nothing."""
-    from shared.deploy.release.operation import operation_in_flight
-    from shared.paths import ava_home
+    from base.deploy.release.operation import operation_in_flight
+    from base.paths import ava_home
 
     try:
         return operation_in_flight(ava_home())

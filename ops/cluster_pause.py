@@ -13,10 +13,10 @@ from typing import cast
 import psycopg
 from psycopg_pool import ConnectionPool
 
-import shared.deploy.state.host_deploy_state
-from shared.daemon.health import health_port
-from shared.deploy.maintenance.pause_owner import PauseOwnerSnapshot
-from shared.host.net import http_dial
+import base.deploy.state.host_deploy_state
+from base.daemon.health import health_port
+from base.deploy.maintenance.pause_owner import PauseOwnerSnapshot
+from base.host.net import http_dial
 
 _log = logging.getLogger(__name__)
 _UNSET = object()
@@ -28,7 +28,7 @@ _POOL_RELEASE_TIMEOUT_S = 5.0
 
 
 def is_paused(
-    state: shared.deploy.state.host_deploy_state.HostDeployState | object | None = _UNSET,
+    state: base.deploy.state.host_deploy_state.HostDeployState | object | None = _UNSET,
 ) -> bool:
     """Whether this host is paused — the `host_deploy_state.posture` row written
     by the gateway's pause fan-out (R1, Task #1021).
@@ -40,7 +40,7 @@ def is_paused(
     """
     if state is _UNSET:
         try:
-            resolved_state = shared.deploy.state.host_deploy_state.read()
+            resolved_state = base.deploy.state.host_deploy_state.read()
         except Exception:
             _log.warning(
                 "[cluster] is_paused: host_deploy_state read failed; reading as not paused",
@@ -48,7 +48,7 @@ def is_paused(
             )
             return False
     else:
-        resolved_state = cast(shared.deploy.state.host_deploy_state.HostDeployState | None, state)
+        resolved_state = cast(base.deploy.state.host_deploy_state.HostDeployState | None, state)
     return resolved_state is not None and resolved_state.posture == "paused"
 
 
@@ -66,8 +66,8 @@ def pause_local_cluster() -> None:
     replaced by the fleet release transition; it stays until its straggler-reap
     tests move to the release drain (recorded debt).
     """
+    from base.config import settings
     from ops.agent_pause import pause_agents
-    from shared.config import settings
 
     pause_agents(settings.gateway.update_quiesce_timeout_seconds, reap=True)
 
@@ -79,8 +79,8 @@ def unpause_local_cluster() -> None:
     (task #4016): the compensating resume of an aborted wave runs while this
     host stayed up, so the marker rows would otherwise outlive their drain.
     """
+    from base.deploy.maintenance import admission
     from ops.agent_pause import resume_agents
-    from shared.deploy.maintenance import admission
 
     current = admission.snapshot()
     if current is None:
@@ -111,9 +111,9 @@ def _settle_stranded_reaps() -> None:
     admission run the existing inbound reconcile and re-deliver the work the
     reap truncated (task #4016).
     """
-    from shared.cluster.machine import machine_name
-    from shared.db import connect
-    from shared.deploy.maintenance.straggler_reap import (
+    from base.cluster.machine import machine_name
+    from base.db import connect
+    from base.deploy.maintenance.straggler_reap import (
         announce_settled,
         publish_settled_wakes,
         settle_stranded_reaps,
@@ -145,7 +145,7 @@ def _hold_refusal(current: PauseOwnerSnapshot) -> str | None:
             f"then ava maintenance repair --operation {current.holder} "
             f"--acquired-at {current.acquired_at.isoformat()}"
         )
-    from shared.deploy.lifecycle import start_serving
+    from base.deploy.lifecycle import start_serving
 
     if (
         current.maintenance is not None
@@ -158,8 +158,8 @@ def _hold_refusal(current: PauseOwnerSnapshot) -> str | None:
 
 def _unpause_local_cluster() -> None:
     """Restore this unit's HTTP posture without launching any agent or service."""
-    from shared.deploy.maintenance import admission
-    from shared.deploy.state.host_deploy_state import set_posture
+    from base.deploy.maintenance import admission
+    from base.deploy.state.host_deploy_state import set_posture
 
     admission.require_start_allowed()
     set_posture("idle")
@@ -195,7 +195,7 @@ def release_local_db_pools(
 
     try:
         if ops_pool is not None:
-            from shared.db.pool_release import release_idle_sync
+            from base.db.pool_release import release_idle_sync
 
             released["ops"] = release_idle_sync(ops_pool)
     except Exception as exc:

@@ -41,7 +41,7 @@ from pathlib import Path
 from typing import Any
 
 # Third-party only. These import no project module, so they are safe above the
-# env block; every `shared.*` / `ava.*` / `tests.*` import is below it.
+# env block; every `base.*` / `ava.*` / `tests.*` import is below it.
 import psycopg
 import pytest
 import pytest_asyncio
@@ -51,7 +51,7 @@ import redis
 @pytest.fixture(autouse=True)
 def isolate_runtime_incarnation(monkeypatch: pytest.MonkeyPatch) -> None:
     """A test's process admission must not become another test's exit identity."""
-    from shared.native_process import runtime_incarnation
+    from base.native_process import runtime_incarnation
 
     monkeypatch.setattr(runtime_incarnation, "_child_incarnation", None)
 
@@ -61,15 +61,15 @@ def suite_is_not_inside_an_exec_domain(monkeypatch: pytest.MonkeyPatch) -> None:
     """Normalize the ambient session to the CI shape (issue #2331).
 
     A suite launched from a fleet agent's `execute_code` runs inside the call's
-    exec-domain session, so `shared.host.proc.hosting_exec_domain` reports it and any
+    exec-domain session, so `base.host.proc.hosting_exec_domain` reports it and any
     unrelated test that reaches an in-process lifecycle leg (`ava restart`,
     pause/stop) would refuse — red on an agent box, green
     in CI. A pty-session or login-shell run (the fleet's test convention) never
     sees this. The predicate's own membership behaviour is exercised in spawned
-    child processes (`tests/shared/test_proc.py`), whose sessions are built for
+    child processes (`tests/base/test_proc.py`), whose sessions are built for
     the case; a lifecycle test that wants the refusal patches this back.
     """
-    monkeypatch.setattr("shared.host.proc.hosting_exec_domain", lambda: None)
+    monkeypatch.setattr("base.host.proc.hosting_exec_domain", lambda: None)
 
 
 from fastapi.testclient import TestClient
@@ -90,7 +90,7 @@ from tests._test_env_file import rewrite_line as _rewrite_test_env_file_line
 # startup" (HINT: set LC_ALL to a valid locale) on macOS when the locale
 # environment is missing: locale init goes through CoreFoundation, which
 # spawns a thread, and the postmaster refuses to run multithreaded. The suite
-# provisions its own throwaway postmaster via `pg_ctl` (shared/cluster/dataplane/pg_tools.py),
+# provisions its own throwaway postmaster via `pg_ctl` (base/cluster/dataplane/pg_tools.py),
 # which inherits this process's environment, so pinning LC_ALL here — above
 # every project import and any postmaster spawn — fixes every run on a box
 # whose shell (session backend / launchd / CI) never set it. Only macOS needs this;
@@ -100,7 +100,7 @@ if sys.platform == "darwin":
 
 # ── The unit's home: redirected here, not further down ──
 #
-# `shared.host.env.dotenv_boot` resolves the home ONCE at import (`resolve_ava_home()` ->
+# `base.host.env.dotenv_boot` resolves the home ONCE at import (`resolve_ava_home()` ->
 # `_HOME` -> `AVA_ENV_PATH`, module constants) and `resolve_ava_home` reads
 # AVA_HOME first. So whichever runs first wins permanently: set AVA_HOME before
 # that import and the whole boot is redirected; set it after and the constant is
@@ -117,7 +117,7 @@ if sys.platform == "darwin":
 #     suite holding production credentials is the real severity here; the file
 #     write below is the visible symptom, not the problem.
 #   - (pre-2026-08-01) AVA_CONFIG_SOURCE=gateway came in with them, which was
-#     the condition `shared/config/__init__.py` checked before calling
+#     the condition `base/config/__init__.py` checked before calling
 #     `inject_config_from_gateway()`. Every pytest run on an enrolled box made a
 #     real authenticated GET to the production gateway at import — before any
 #     fixture exists, so no fixture-based guard can reach it. Today the source
@@ -195,14 +195,14 @@ os.environ.pop("AVA_PROCESS_PROFILE", None)
 
 # ── Boot mode: the suite exercises the eager config chain ──
 #
-# `import shared.config` boots the boot-lite state by default (lazy v2, task
+# `import base.config` boots the boot-lite state by default (lazy v2, task
 # #3621): the boot-path fields resolve from the generated index without
 # constructing Settings, and the eager chain builds on the first touch of
 # anything else. The suite's fixtures and assertions (Settings construction,
 # `model_fields_set` probes, the metadata walks) assume the eager chain from
 # import time, so pin it here; the lite paths are exercised in their own
-# subprocess tests (tests/shared/test_config_boot_lite.py). Read at
-# `shared.config` import, hence inside this block.
+# subprocess tests (tests/base/test_config_boot_lite.py). Read at
+# `base.config` import, hence inside this block.
 os.environ.setdefault("AVA_CONFIG_BOOT", "eager")
 
 # ── OS-scheduled jobs: the suite never arms one ──
@@ -219,12 +219,12 @@ os.environ.setdefault("AVA_CONFIG_BOOT", "eager")
 # monkeypatch that was meant to stop it never reached the child. Nine
 # `com.ava.ava_e2e_home_*.health-probe` LaunchAgents survived on a dev box,
 # firing `--auto-rollback` every 300s against whatever `ava` PATH resolved to.
-# `shared.host.system.cron.os_jobs_enabled` gates all four registrars on this; the
+# `base.host.system.cron.os_jobs_enabled` gates all four registrars on this; the
 # unregister paths stay live so cleanup still works.
 os.environ["AVA_OS_JOBS_ENABLED"] = "false"
 
 # Import-time sentinel for the required-no-default Settings fields (db_url /
-# redis_url). Set BEFORE shared.config is imported so Settings() constructs from
+# redis_url). Set BEFORE base.config is imported so Settings() constructs from
 # the sentinel even with no AVA_DB_URL in the environment (CI / a fresh clone),
 # and a stray connection that bypasses a provisioning fixture fails loudly
 # instead of hitting a real database. load_dotenv(override=False) won't clobber
@@ -266,7 +266,7 @@ os.environ["AVA_PGBOUNCER_ENABLED"] = "false"
 # test agents (task #1201: distinct agents 1d 76 -> 131). Set in the
 # ENVIRONMENT (not only on the settings singleton) exactly because the leak
 # was in subprocesses. The OTLP-specific tests
-# (tests/shared/test_telemetry_otlp.py) re-enable the flag and install
+# (tests/base/test_telemetry_otlp.py) re-enable the flag and install
 # in-memory providers where the path is under test.
 os.environ["AVA_TELEMETRY_OTLP_ENABLED"] = "false"
 
@@ -285,7 +285,7 @@ os.environ["AVA_TELEMETRY_OTLP_ENABLED"] = "false"
 # Pinned unconditionally, like the gateway/telegram sentinels: local runs
 # resolve the same loopback host everywhere, and a test that needs a remote
 # Tempo URL or host address monkeypatches the settings explicitly
-# (tests/shared/test_machine.py does for machine_host).
+# (tests/base/test_machine.py does for machine_host).
 os.environ["AVA_TELEMETRY_TEMPO_QUERY_URL"] = "http://127.0.0.1:3200"
 os.environ["AVA_TELEMETRY_TEMPO_ENDPOINT"] = "http://127.0.0.1:14318"
 # The OTLP ingress port is rendered into the collector config, the roster gate
@@ -359,7 +359,7 @@ os.environ["AVA_PERMISSIONS_HELPER_SPAWN"] = "false"
 # The spawn-attribution marker rides a second channel the pin above cannot
 # close: the signed helper stamps AVA_PERMISSIONS_HELPER_PID (its own pid)
 # into every direct child (services/permissions_helper/helper/main.swift),
-# descendants inherit it, and shared/helper_chain_guard.parent_chain_intact
+# descendants inherit it, and base/helper_chain_guard.parent_chain_intact
 # treats a marked process whose ancestor chain lacks the helper as an
 # orphaned child — the agent-host heartbeat then self-terminates with os._exit(70),
 # killing an in-process test run (test_host_turn_progress_publish.py,
@@ -373,7 +373,7 @@ os.environ.pop("AVA_PERMISSIONS_HELPER_PORT", None)
 # ── PITR backup domain: no ambient AVA_PITR_* config in the suite ──
 #
 # Same shell-leak class as the telegram token above, with a subtler symptom.
-# Candidate validation (shared/config/candidate.py) reconstructs a patched
+# Candidate validation (base/config/candidate.py) reconstructs a patched
 # domain from the captured `.env` image and the patch, and for a field the file
 # does not pin it falls back to the BOOT-TIME environment value. A pytest run
 # inside an agent process carries the production AVA_PITR_* set — including
@@ -465,7 +465,7 @@ def _assert_env_precedes_project_imports() -> None:
 
     So assert the precondition instead of documenting it. `tests` itself is
     excluded (this module is being imported as `tests.conftest` right now);
-    `shared` is the one that matters, since it is what binds AVA_ENV_PATH.
+    `base` is the one that matters, since it is what binds AVA_ENV_PATH.
     """
     leaked = sorted(
         name
@@ -477,7 +477,7 @@ def _assert_env_precedes_project_imports() -> None:
             "tests/conftest.py: a project module was imported before the env block "
             f"finished: {leaked[:5]}{'...' if len(leaked) > 5 else ''}. Everything above "
             "this line sets env vars that are read at IMPORT time — AVA_HOME decides "
-            "which .env `shared.host.env.dotenv_boot` binds AVA_ENV_PATH to, permanently. An "
+            "which .env `base.host.env.dotenv_boot` binds AVA_ENV_PATH to, permanently. An "
             "import above it silently pins the suite to the operator's real ~/.ava, "
             "production credentials included. Move the import below this assertion."
         )
@@ -485,11 +485,11 @@ def _assert_env_precedes_project_imports() -> None:
 
 _assert_env_precedes_project_imports()
 
-# ava / shared.config read AVA_DB_URL + AVA_HOME at import — must come after the
+# ava / base.config read AVA_DB_URL + AVA_HOME at import — must come after the
 # env block above, which is what the assertion just enforced.
 import ava
-from shared.config import set_field, settings
-from shared.daemon.health import _HEALTH_PORT_OVERRIDES
+from base.config import set_field, settings
+from base.daemon.health import _HEALTH_PORT_OVERRIDES
 
 # The host-scope isolation pins (env block above) must have taken effect before
 # Settings construction: the native LGTM render reads the Tempo URLs at use
@@ -514,8 +514,8 @@ assert settings.general.machine_host == "localhost"
 assert settings.alerts.grafana_admin_password is None or (
     settings.alerts.grafana_admin_password.get_secret_value() == ""
 )
-from shared.db.test_db_guard import assert_test_db_url
-from shared.native_process.os_platform import raise_fd_limit
+from base.db.test_db_guard import assert_test_db_url
+from base.native_process.os_platform import raise_fd_limit
 from tests._containers import postgres, redis_server
 from tests._os_jobs import host_ava_os_jobs, is_test_owned_job, remove_os_job
 
@@ -550,7 +550,7 @@ os.environ["AVA_EXEC_TIMEOUT_SECONDS"] = "60.0"
 # (exec_timeout_seconds=300) instead of the pinned 60 for the whole session
 # (2026-08-06 CI: test_config 300-vs-60 flake). Warming it here pins the
 # complete-instance snapshot at the pristine env.
-from shared.config.service_read import _all_domains_settings as _prewarm_full_settings
+from base.config.service_read import _all_domains_settings as _prewarm_full_settings
 
 _prewarm_full_settings()
 
@@ -651,7 +651,7 @@ _pin_setting("frontend_healthcheck_url", f"http://127.0.0.1:{_free_port()}")
 _pin_setting("milvus_port", _free_port())
 
 # Belt-and-suspenders on the OS-jobs switch already in `os.environ` at the top of
-# this file: an operator's real `~/.ava/.env` is loaded by `shared.host.env.dotenv_boot`
+# this file: an operator's real `~/.ava/.env` is loaded by `base.host.env.dotenv_boot`
 # before Settings constructs, so pin the singleton rather than trust that the env
 # value is what survived. (`_pin_setting` rewrites the env var too, harmlessly.)
 _pin_setting("os_jobs_enabled", False)
@@ -715,7 +715,7 @@ def _provisioned_db() -> Iterator[str]:
     with postgres() as url:
         # Belt: the throwaway provisioning must itself stay on a test database.
         # If the throwaway db name ever changes, this assertion makes the
-        # change explicit (update shared/db/test_db_guard.py) instead of silently
+        # change explicit (update base/db/test_db_guard.py) instead of silently
         # loosening the session-start guard above.
         assert_test_db_url(url, context="_provisioned_db")
         settings.data_plane.db_url = url
@@ -905,13 +905,13 @@ def _restore_ava_home_override() -> Iterator[None]:
 
 @pytest.fixture(autouse=True)
 def _otlp_export_off(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Keep the test session hermetic: the OTLP dual-write (shared.telemetry ->
-    shared.telemetry.otlp.telemetry_otlp, default ON since the 2026-08-11 stack decision) would
+    """Keep the test session hermetic: the OTLP dual-write (base.telemetry ->
+    base.telemetry.otlp.telemetry_otlp, default ON since the 2026-08-11 stack decision) would
     otherwise fire real OTLP/HTTP requests at 127.0.0.1:4318 from every
-    event-emitting test. tests/shared/test_telemetry_otlp.py re-enables the
+    event-emitting test. tests/base/test_telemetry_otlp.py re-enables the
     flag and installs in-memory providers where the OTLP path is under test.
     """
-    monkeypatch.setattr("shared.config.settings.observability.telemetry_otlp_enabled", False)
+    monkeypatch.setattr("base.config.settings.observability.telemetry_otlp_enabled", False)
 
 
 @pytest.fixture(autouse=True)
@@ -960,8 +960,8 @@ def _clean_state(
     cluster_secret is no longer a bypass — auth is fail-closed and the gateway
     refuses to start without a secret — so the explicit flag is what disables it.
     """
-    monkeypatch.setattr("shared.config.settings.data_plane.cluster_secret", "")
-    monkeypatch.setattr("shared.config.settings.gateway.auth_middleware_enabled", False)
+    monkeypatch.setattr("base.config.settings.data_plane.cluster_secret", "")
+    monkeypatch.setattr("base.config.settings.gateway.auth_middleware_enabled", False)
     # Barrier before the TRUNCATE: the telemetry drain thread may hold a batch
     # dequeued during the previous test (events are written by that single
     # thread up to one flush_interval after enqueue). sync() drains the queue
@@ -970,7 +970,7 @@ def _clean_state(
     # exact-content flake class). Cheap: a marker
     # round-trip on an idle drain thread. No-op when the pipeline is absent or
     # already stopped.
-    from shared import telemetry
+    from base import telemetry
 
     telemetry.sync()
     with psycopg.connect(settings.data_plane.db_url) as conn:
@@ -978,7 +978,7 @@ def _clean_state(
         # on the TRUNCATE below (a background writer leaked from a prior test on
         # this worker) can also DEADLOCK this TRUNCATE, not just write to a dead
         # id. The
-        # straggler's snapshot query (`shared/agents/observation/snapshot.py`: agents_meta
+        # straggler's snapshot query (`base/agents/observation/snapshot.py`: agents_meta
         # LEFT JOIN inbound_messages) takes its relation locks in the opposite
         # order to this TRUNCATE list (inbound_messages first, agents_meta
         # second) — and other product transactions (deliver_chat_inbound) lock in
@@ -1026,7 +1026,7 @@ def _clean_state(
 def _machine_identity(*, role: str, name: str | None = None) -> Generator[None]:
     """Switch this process's resolved machine identity, restoring on exit.
 
-    Injects via shared.cluster.machine.set_identity so every `from shared.cluster.machine import
+    Injects via base.cluster.machine.set_identity so every `from base.cluster.machine import
     machine_role` / `machine_name` call site sees the new value without
     per-module patching. `name=None` leaves machine_name as-is — no injection; it
     resolves lazily from `$AVA_HOME/machine_name` if not yet cached, otherwise
@@ -1034,7 +1034,7 @@ def _machine_identity(*, role: str, name: str | None = None) -> Generator[None]:
     session default is restored — no per-field save/restore is needed because the
     holder re-resolves lazily after reset.
     """
-    from shared.cluster.machine import reset_identity, set_identity
+    from base.cluster.machine import reset_identity, set_identity
 
     if name is None:
         set_identity(role=role)  # pyright: ignore[reportArgumentType]  # str passthrough to MachineRole literal
@@ -1049,7 +1049,7 @@ def _machine_identity(*, role: str, name: str | None = None) -> Generator[None]:
 @pytest.fixture
 def set_machine_identity() -> Iterator[object]:
     """Factory: switch machine role (and optionally name) at the source via
-    shared.cluster.machine.set_identity.
+    base.cluster.machine.set_identity.
 
         def test_x(set_machine_identity, db_conn):
             set_machine_identity(role="gateway", name="cloud-test")
@@ -1057,7 +1057,7 @@ def set_machine_identity() -> Iterator[object]:
     May be called more than once within a test to flip roles; the last call
     wins, and the holder is reset at teardown (restoring the session default).
     """
-    from shared.cluster.machine import reset_identity, set_identity
+    from base.cluster.machine import reset_identity, set_identity
 
     def _set(role: str, name: str | None = None) -> None:
         if name is None:
@@ -1140,7 +1140,7 @@ def unit_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]
     `tests/cli/conftest.py` — a module takes it with one line:
     `pytestmark = pytest.mark.usefixtures("_installed_machine_identity")`.
     """
-    from shared.cluster.machine import reset_identity
+    from base.cluster.machine import reset_identity
 
     monkeypatch.setattr(settings.general, "ava_home", tmp_path)
     reset_identity()
@@ -1190,7 +1190,7 @@ def _fail_on_leaked_os_jobs(session: pytest.Session) -> None:
         f"{len(leaked)} job(s) on the host:\n  "
         + "\n  ".join(leaked)
         + "\nThe suite runs with AVA_OS_JOBS_ENABLED=false (see "
-        "shared.host.system.cron.os_jobs_enabled), and the helper native-effect guard is on. "
+        "base.host.system.cron.os_jobs_enabled), and the helper native-effect guard is on. "
         "A new test-owned job means a test bypassed one of these boundaries. "
         "Jobs under this suite's own homes were removed; any others were left "
         "for you to check.",
@@ -1351,7 +1351,7 @@ async def aredis_inbound_listener():
     fixed pseudo-agent channel (agent_id=0); tests that park in a real wake need
     the listener's channel to match their agent, so they build their own
     per-agent listener instead. Closed on teardown."""
-    from shared.events.live.redis_listener import RedisInboundListener
+    from base.events.live.redis_listener import RedisInboundListener
 
     listener = RedisInboundListener(settings.data_plane.redis_url, agent_id=0)
     try:
@@ -1399,9 +1399,9 @@ def spawn_agent(
     **kw: Any,
 ) -> int:
     """Allocate a real agent row and publish its normal host-dispatch wake."""
+    from base.cluster.machine import machine_name
+    from base.db import publish_inbound_wake
     from ops.agents.spawn import create_agent_row
-    from shared.cluster.machine import machine_name
-    from shared.db import publish_inbound_wake
 
     agent_id, _, _prompt_id, _attempt_id = create_agent_row(
         spawner=spawner, machine=machine_name(), config=config, **kw
@@ -1423,7 +1423,7 @@ def _stub_everywhere(
     already loaded are touched.
 
     **This is not the same job as reaching a name through its owning module**
-    (`shared.cluster.session_name(...)` — see the rule in
+    (`base.cluster.session_name(...)` — see the rule in
     `conventions/python-conventions.md`). That convention stops a *new* frozen
     alias from being created, so the owner is the only surface and a reader can move
     modules without taking its patch out of reach. It can only apply to code this
@@ -1599,14 +1599,14 @@ def _guard_process_exec(monkeypatch: pytest.MonkeyPatch) -> None:
     Patching the four `execv*` names covers all eight — stdlib `os.execl*` are
     thin wrappers that call the module-global `execv`/`execvp`. Real in-process
     exec is never intended from a test: the production call sites are either a
-    dedicated `__main__` that runs in a subprocess (`shared._reparent`,
+    dedicated `__main__` that runs in a subprocess (`base._reparent`,
     `services.browser.daemon`, `services.milvus.daemon`) or a CLI re-exec. Tests
     that assert an exec *would* have happened patch `os.exec*` themselves
     inside the test body (`tests/lifecycle/transition/test_pitr_execution.py`)
     — last-write-wins over this default, restored LIFO at teardown.
 
     `os._exit` is deliberately NOT guarded: it is the correct call in a forked
-    child (`shared._reparent`), and hijacking it there would resurrect a pytest
+    child (`base._reparent`), and hijacking it there would resurrect a pytest
     process inside the fork.
     """
 
@@ -1634,7 +1634,7 @@ def _guard_bootstrap_fetch(monkeypatch: pytest.MonkeyPatch) -> None:
     agent-runner's Settings build calls `inject_config_from_gateway()` at
     import, and on an enrolled dev box that is a live GET /api/bootstrap
     against the real cluster gateway. This guard sits at the cause. A runner's
-    first start also funnels through `shared.host.env.bootstrap.fetch_bootstrap_config`
+    first start also funnels through `base.host.env.bootstrap.fetch_bootstrap_config`
     (the only caller of this module's `dial_get`); nothing is written until that
     fetch returns, so refusing the dial blocks the whole chain: no request to
     the gateway, no joined state.
@@ -1647,24 +1647,24 @@ def _guard_bootstrap_fetch(monkeypatch: pytest.MonkeyPatch) -> None:
     env block above; this guard is the second net for any test that drives a
     Settings build directly.
 
-    Narrow by construction: `shared.host.env.bootstrap` binds `dial_get` at module level,
-    so only the bootstrap egress is touched — the ~30 other `shared.host.net.http_dial`
+    Narrow by construction: `base.host.env.bootstrap` binds `dial_get` at module level,
+    so only the bootstrap egress is touched — the ~30 other `base.host.net.http_dial`
     call sites are untouched. Every test that legitimately drives the fetch
     already substitutes its own transport at exactly this seam
-    (`tests/shared/test_bootstrap_fetch.py` routes it through an in-process
+    (`tests/base/test_bootstrap_fetch.py` routes it through an in-process
     TestClient; the retry tests hand it a fake), and those patches win by LIFO.
     """
-    import shared.host.env.bootstrap
+    import base.host.env.bootstrap
 
     def _boom(url: object = "", *_args: object, **_kwargs: object) -> object:
         raise AssertionError(
             f"a real GET {url} would leave the test process — this is the call that "
             "reaches a live gateway and, on an enrolled runner, rewrites the operator's "
-            "~/.ava/.env. Stub the caller, or patch shared.host.env.bootstrap.dial_get in the test "
-            "body with a fake transport (see tests/shared/test_bootstrap_fetch.py)."
+            "~/.ava/.env. Stub the caller, or patch base.host.env.bootstrap.dial_get in the test "
+            "body with a fake transport (see tests/base/test_bootstrap_fetch.py)."
         )
 
-    monkeypatch.setattr(shared.host.env.bootstrap, "dial_get", _boom)
+    monkeypatch.setattr(base.host.env.bootstrap, "dial_get", _boom)
 
 
 @pytest.fixture(autouse=True)
@@ -1672,7 +1672,7 @@ def _restore_db_authority_refusal(monkeypatch: pytest.MonkeyPatch) -> None:
     """A test that drives a boot pass (`load_ava_env`, a runner's bootstrap
     injection) may record a per-process database-authority refusal; restore the
     suite's value afterwards so the refusal never leaks into later tests' dials."""
-    from shared.host.env import dotenv_boot
+    from base.host.env import dotenv_boot
 
     monkeypatch.setattr(dotenv_boot, "_db_authority_refusal", dotenv_boot._db_authority_refusal)
 
@@ -1760,7 +1760,7 @@ def milvus_client(milvus_server: str, monkeypatch: pytest.MonkeyPatch) -> Iterat
     # Settings module-loaded once BaseSettings, setenv then settings.services.milvus_uri
     # does not re-read env. Directly monkeypatch.setattr change Settings instance field, consistent with
     # tests/ava/test_web.py and other monkeypatch patterns.
-    from shared.config import settings
+    from base.config import settings
 
     monkeypatch.setattr(settings.services, "milvus_uri", milvus_server)
     from services.memory_indexer.backends.milvus import _COLLECTION, MilvusBackend
@@ -1804,10 +1804,10 @@ def loguru_records() -> Iterator[list[dict[str, Any]]]:
 def _no_stdlib_telemetry_bridge() -> Iterator[None]:
     """Keep stdlib logging off the loguru->telemetry bridge during tests.
 
-    shared/log/__init__.py's `_install_stdlib_intercept()` (called by init_gateway_process
+    base/log/__init__.py's `_install_stdlib_intercept()` (called by init_gateway_process
     and friends) installs a root-logger handler that forwards stdlib records
     into loguru, whose `_postgres_sink` turns them into telemetry 'log' events.
-    Any test that monkeypatches `shared.telemetry.emit` and triggers a log
+    Any test that monkeypatches `base.telemetry.emit` and triggers a log
     record then sees the bridge's forwarded 'log' event in its captured events
     (pgbouncer healthcheck tests, fixed 2026-08-09 via #2136). Tests that
     exercise the bridge itself re-install it inside their body
@@ -1816,7 +1816,7 @@ def _no_stdlib_telemetry_bridge() -> Iterator[None]:
     """
     import logging
 
-    from shared.log import _StdlibInterceptHandler
+    from base.log import _StdlibInterceptHandler
 
     root = logging.getLogger()
     saved = root.handlers[:]
@@ -1825,7 +1825,7 @@ def _no_stdlib_telemetry_bridge() -> Iterator[None]:
     root.handlers = saved
 
 
-from shared.deploy.lifecycle.start_serving import RootBirth
+from base.deploy.lifecycle.start_serving import RootBirth
 
 
 @pytest.fixture
@@ -1835,9 +1835,9 @@ def serving_root(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> RootBirth:
     Maintenance/readiness unit tests retain the actual marker and locking code.
     Native IPC and loaded-origin contracts have independent real socket tests.
     """
-    from shared.deploy.lifecycle import start_serving
-    from shared.deploy.release.runtime_interpreter import LoadedRuntimeIdentity
-    from shared.native_process.evidence import ExpectedProcess
+    from base.deploy.lifecycle import start_serving
+    from base.deploy.release.runtime_interpreter import LoadedRuntimeIdentity
+    from base.native_process.evidence import ExpectedProcess
 
     runtime = LoadedRuntimeIdentity(
         kind="source",
@@ -1865,7 +1865,7 @@ def seed_write_generation() -> Callable[[Path], Any]:
     operator consumption): the catalog side is proven on real PostgreSQL in
     tests/lifecycle/db_authority/. Returns the generation's secret record.
     """
-    from shared.cluster.authority import (
+    from base.cluster.authority import (
         GATEWAY_GROUP,
         RUNNER_GROUP,
         BirthAuthority,
@@ -1875,7 +1875,7 @@ def seed_write_generation() -> Callable[[Path], Any]:
         create_ledger,
         read_secret,
     )
-    from shared.cluster.authority.ledger import begin_mint
+    from base.cluster.authority.ledger import begin_mint
 
     def seed(home: Path) -> Any:
         home = home.resolve()
@@ -1904,7 +1904,7 @@ def served_gateway_home(
     Returns the generation's secret record."""
     import shutil
 
-    from shared.host.env import runtime_config as rt
+    from base.host.env import runtime_config as rt
 
     shutil.copy(rt.env_file_path(), tmp_path / ".env")
     monkeypatch.setattr(rt, "_ava_home", lambda: tmp_path)

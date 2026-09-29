@@ -11,7 +11,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from shared.deploy.progress_timeout import UNIT_BUNDLE_MAX_TTL_S, UNIT_BUNDLE_TTL_S
+from base.deploy.progress_timeout import UNIT_BUNDLE_MAX_TTL_S, UNIT_BUNDLE_TTL_S
 
 
 def _h_cluster_update(args: argparse.Namespace) -> int:

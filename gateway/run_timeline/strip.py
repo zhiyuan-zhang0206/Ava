@@ -2,7 +2,7 @@
 
 The window endpoint's ``messages`` field projection lives here together with
 its on-demand text read (``GET .../run-timeline/message``). Both render the
-SAME ``shared.agents.history.timeline.build_timeline_items`` projection the console timeline
+SAME ``base.agents.history.timeline.build_timeline_items`` projection the console timeline
 serves, so humans and agents read one rendering of the context; per-message
 text stays out of the window response and is served by the detail route.
 """
@@ -18,6 +18,10 @@ from typing import Annotated, cast
 from fastapi import APIRouter, Depends, HTTPException, Query
 from langchain_core.messages import BaseMessage
 
+from base.agents.history.timeline import TimelineItem, build_timeline_items, needs_chat_anchors
+from base.config import settings
+from base.db import InboundRow
+from base.log import logger
 from gateway.agents.eval_guard import deny_isolated_result_read
 from gateway.run_timeline.schemas import (
     RunTimelineMessage,
@@ -27,10 +31,6 @@ from gateway.run_timeline.schemas import (
     RunTimelineMessagePart,
     RunTimelineMessagePartKind,
 )
-from shared.agents.history.timeline import TimelineItem, build_timeline_items, needs_chat_anchors
-from shared.config import settings
-from shared.db import InboundRow
-from shared.log import logger
 
 router = APIRouter()
 
@@ -38,7 +38,7 @@ router = APIRouter()
 # --- raw context strip (P4-2, task #4023) -----------------------------------
 #
 # The strip's per-message entries come from the SAME projection the console
-# timeline serves (`shared.agents.history.timeline.build_timeline_items` over checkpoint
+# timeline serves (`base.agents.history.timeline.build_timeline_items` over checkpoint
 # segments), so humans and agents read one rendering of the context. Message
 # text stays out of the window response; `GET .../run-timeline/message`
 # serves it on demand for the panel.
@@ -51,7 +51,7 @@ router = APIRouter()
 _MESSAGE_SEGMENT_WALK_MAX = 3
 
 # Messages predating `ava_created_at` render with epoch-anchored synthesized
-# timestamps (shared.agents.history.timeline's legacy anchor path). They cannot be placed on
+# timestamps (base.agents.history.timeline's legacy anchor path). They cannot be placed on
 # a real time axis; the strip excludes them and reports truncation instead of
 # stacking them at the window's left edge.
 _LEGACY_TS_FLOOR = datetime(2020, 1, 1, tzinfo=UTC)
@@ -119,7 +119,7 @@ _STRIP_CACHE = SegmentReadCache(_CACHE_MAX_ENTRIES)
 
 
 def _cached_current_messages(agent_id: int) -> list[BaseMessage]:
-    from shared.agents.history.checkpoint import load_checkpoint_messages
+    from base.agents.history.checkpoint import load_checkpoint_messages
 
     return cast(
         "list[BaseMessage]",
@@ -132,7 +132,7 @@ def _cached_current_messages(agent_id: int) -> list[BaseMessage]:
 
 
 def _cached_boundaries(agent_id: int) -> list[str]:
-    from shared.agents.history.checkpoint import list_compact_boundary_checkpoint_ids
+    from base.agents.history.checkpoint import list_compact_boundary_checkpoint_ids
 
     return cast(
         "list[str]",
@@ -145,7 +145,7 @@ def _cached_boundaries(agent_id: int) -> list[str]:
 
 
 def _cached_segment_messages(agent_id: int, boundary: str) -> list[BaseMessage]:
-    from shared.agents.history.checkpoint import load_checkpoint_messages_segment
+    from base.agents.history.checkpoint import load_checkpoint_messages_segment
 
     return cast(
         "list[BaseMessage]",
@@ -246,7 +246,7 @@ def _chat_inbound_anchors(agent_id: int) -> list[InboundRow]:
     """Chat inbound rows backing legacy ts alignment — read only when the
     segment still carries legacy rows (`needs_chat_anchors`); the same source
     and bound the console timeline reads."""
-    from shared.db import list_inbound_messages, pool
+    from base.db import list_inbound_messages, pool
 
     db_pool = pool(autocommit=True)
     with db_pool.connection() as conn:

@@ -40,7 +40,7 @@ Hidden directories (`.git`, `.venv`, `.claude`, …) are auto-ignored, so
 running from the repo root is safe. To scope to the Python source tree only
 (mirrors the sweeper's scope, skips `tests/` noise):
 ```
-.venv/bin/radon cc -a -s ava/ agent/ gateway/ cli/ services/ shared/ plugins/
+.venv/bin/radon cc -a -s ava/ agent/ gateway/ cli/ services/ base/ plugins/
 ```
 
 - `-s` shows the numeric complexity next to the A–F rank.

@@ -16,7 +16,7 @@ from unittest.mock import patch
 # subprocesses use -I and cannot see this checkout.
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from shared.deploy.release.runtime_prepare import (
+from base.deploy.release.runtime_prepare import (
     CollectorInput,
     FrontendInput,
     PluginInput,
@@ -29,14 +29,14 @@ from shared.deploy.release.runtime_prepare import (
     tree_inventory,
     verify_loaded_images,
 )
-from shared.deploy.release.runtime_release import (
+from base.deploy.release.runtime_release import (
     ReleaseRejectedError,
     VerifiedRelease,
     file_sha256,
     release_abi,
     verify_release,
 )
-from shared.runtime_abi import current_abi
+from base.runtime_abi import current_abi
 
 
 def _copy_proof(root: Path, checkout: Path, rel: str) -> Path:
@@ -272,7 +272,7 @@ def prove_half_plugin_refusal(store: Path, inputs: PrepareInputs) -> None:
     entry.rename(held)
     try:
         half = replace(inputs.plugins, digest=inventory_digest(tree_inventory(inputs.plugins.root)))
-        with patch("shared.deploy.release.runtime_prepare._run") as execute:
+        with patch("base.deploy.release.runtime_prepare._run") as execute:
             try:
                 prepare_release(store, replace(inputs, plugins=half))
             except ReleaseRejectedError as exc:
@@ -315,10 +315,8 @@ def prove_copy_race(
             stream.write(b"untrusted-copy-race")
 
     with (
-        patch(
-            "shared.deploy.release.runtime_prepare._copy_python", side_effect=corrupt_private_copy
-        ),
-        patch("shared.deploy.release.runtime_prepare._run") as execute,
+        patch("base.deploy.release.runtime_prepare._copy_python", side_effect=corrupt_private_copy),
+        patch("base.deploy.release.runtime_prepare._run") as execute,
     ):
         try:
             prepare_release(store, race_inputs)
@@ -483,7 +481,7 @@ def main() -> None:
     requirements.write_text(requirements.read_text() + "\n# failure-injection input\n")
     failed_inputs = replace(inputs, requirements_digest=file_sha256(requirements))
     with patch(
-        "shared.deploy.release.runtime_prepare._run",
+        "base.deploy.release.runtime_prepare._run",
         side_effect=ReleaseRejectedError("injected preparation failure"),
     ):
         try:

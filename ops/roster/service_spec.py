@@ -7,8 +7,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-from shared.cluster.machine import MachineRole
-from shared.daemon.health import DaemonProbe
+from base.cluster.machine import MachineRole
+from base.daemon.health import DaemonProbe
 
 # The capability groups a service can belong to. These are `MachineRole` values
 # (`machine_role()` returns a frozenset of them); "capability" and "role" are the
@@ -26,7 +26,7 @@ class ServiceSpec:
 
     Attributes:
         session: bare service kebab (e.g. ``gateway``, ``frontend``); the real
-            session name is composed by ``shared.cluster.session_name``.
+            session name is composed by ``base.cluster.session_name``.
         cmd: shell command run in the session (wrapped in ``cd <repo> && ...``).
         capabilities: which machine capabilities run this service. A host runs the
             service iff its role set intersects this — so a gateway-only host runs

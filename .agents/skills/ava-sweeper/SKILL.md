@@ -46,7 +46,7 @@ surface merged-but-still-listed-as-pending mismatches.
 ### 3. fail-fast anti-patterns (whole-repo)
 
 `rg` across the tracked source roots — the canonical list is `SCAN_DIRS` in
-`run.sh` (`ava/ ava_builtins/ agent/ gateway/ cli/ ops/ schedules/ services/ shared/`;
+`run.sh` (`ava/ ava_builtins/ agent/ gateway/ cli/ ops/ schedules/ services/ base/`;
 the stale `plugins/` path was corrected 2026-09-23 — no such tracked dir exists) — for:
 `get() or {}`, `case _:` defaults, `(rare|shouldn't happen|almost never)`
 comments. False positives in config-defaults and external boundaries are
@@ -81,7 +81,7 @@ cases (2026-09-23): transport `Protocol` signatures read as unused parameters
 (interface, not dead code; bullet added above), and a file that fails vulture's
 `type_comments=True` parse — a `# type:`-prefixed comment does it — is skipped
 whole, so scan the run output for parse-error lines before trusting coverage
-(one instance: `shared/agents/history/timeline.py`, fixed in the same pass).
+(one instance: `base/agents/history/timeline.py`, fixed in the same pass).
 
 ### 6. boundary (anchored on recent PRs — the reasoned class)
 

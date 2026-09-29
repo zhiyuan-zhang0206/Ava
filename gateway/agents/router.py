@@ -22,6 +22,22 @@ from uuid import UUID, uuid4
 from fastapi import APIRouter, HTTPException, Query, Request, Response
 from psycopg_pool import ConnectionPool
 
+from base.agents import (
+    AgentLaunchFailed,
+    AgentNotFound,
+    ForkConfigChangeNotAllowed,
+    InvalidModelConfig,
+    SpawnTargetNotAgentRunner,
+)
+from base.agents.labels import publish_label_updated, spawn_prompt_with_label
+from base.agents.observation import roster
+from base.agents.observation import snapshot as snapshot_module
+from base.agents.observation.evidence import AgentAvailability, AvailabilityReason
+from base.cluster.machine import machine_name
+from base.config import settings
+from base.db.transaction import write_transaction
+from base.events.live.announce import publish_agent_updated_sync
+from base.log import logger
 from gateway.agents import forward
 from gateway.agents.forward import _forward_spawn_to_remote
 from gateway.agents.schemas import AgentRow, LabelPatchRequest
@@ -36,22 +52,6 @@ from ops.rpc_schemas import (
     SpawnAgentRequest,
     SpawnedAgent,
 )
-from shared.agents import (
-    AgentLaunchFailed,
-    AgentNotFound,
-    ForkConfigChangeNotAllowed,
-    InvalidModelConfig,
-    SpawnTargetNotAgentRunner,
-)
-from shared.agents.labels import publish_label_updated, spawn_prompt_with_label
-from shared.agents.observation import roster
-from shared.agents.observation import snapshot as snapshot_module
-from shared.agents.observation.evidence import AgentAvailability, AvailabilityReason
-from shared.cluster.machine import machine_name
-from shared.config import settings
-from shared.db.transaction import write_transaction
-from shared.events.live.announce import publish_agent_updated_sync
-from shared.log import logger
 
 router = APIRouter()
 
@@ -84,14 +84,14 @@ def get_models() -> ModelsResponse:
     the versioned pricing catalog. The default mirrors `settings.lm.llm_model`
     so the UI can pre-select it.
     """
+    from base.lm.factory import SUPPORTED_MODELS, ensure_provider_plugins_loaded
+    from base.lm.pricing import rates_at
     from gateway.schemas.models import ModelInfo, ModelPricing
-    from shared.lm.factory import SUPPORTED_MODELS, ensure_provider_plugins_loaded
-    from shared.lm.pricing import rates_at
 
     # Plugin provider models register here (once per process) — the spawn
     # dropdown must list them even though the gateway never loads plugin.py.
     ensure_provider_plugins_loaded()
-    from shared.lm.registry import MODELS, explain_setting
+    from base.lm.registry import MODELS, explain_setting
 
     # Stable model facts come off the registry; volatile prices come off the
     # effective-dated catalog. `effort_levels` is the same vocabulary the factory
@@ -184,8 +184,8 @@ def _spawn_preflight_blocking(
     is ``(requested, resolved)`` when a withdrawn ``llm_model`` was rewritten,
     else None.
     """
-    from shared.agents import MachinePaused
-    from shared.cluster.machines import is_paused, lookup_role
+    from base.agents import MachinePaused
+    from base.cluster.machines import is_paused, lookup_role
 
     # Capability is read from the cluster registry — the same source the forward
     # resolves the target's ops URL from — uniformly for every target, local
@@ -224,12 +224,12 @@ def _spawn_preflight_blocking(
     # 9/20-21 recurrence wrote 12 retired ids through this path, silently).
     model_receipt: tuple[str, str] | None = None
     if body.config:
-        from shared.lm.registry import normalize_overlay_llm_model
+        from base.lm.registry import normalize_overlay_llm_model
 
         model_receipt = normalize_overlay_llm_model(body.config)
     # Validate model config before forwarding — fail fast at the gateway
     # instead of letting the agent process silently hang on a missing API key.
-    from shared.lm.factory import validate_model_config
+    from base.lm.factory import validate_model_config
 
     try:
         validate_model_config(model=settings.lm.llm_model, config=body.config)

@@ -20,7 +20,7 @@ import psutil
 from agent.graph.exec._result import _ExecCrashed, _ExecResult
 from agent.graph.exec._stream import ExecOutputChunkPublisher, StreamingTextIO
 from agent.graph.exec.protocol import KILL_GRACE_S, ResultPayload, write_request
-from shared.agents.incarnation.exec_owner_protocol import (
+from base.agents.incarnation.exec_owner_protocol import (
     OwnerClosed,
     OwnerContext,
     OwnerControl,
@@ -29,7 +29,7 @@ from shared.agents.incarnation.exec_owner_protocol import (
     read_owner_bytes,
     validate_native_ready,
 )
-from shared.agents.incarnation.resources import (
+from base.agents.incarnation.resources import (
     ExecAllocation,
     IncarnationResources,
     ResourceEvidenceError,
@@ -39,10 +39,10 @@ from shared.agents.incarnation.resources import (
     decode_resources,
     register_exec,
 )
-from shared.db.transaction import write_transaction
-from shared.native_process.runtime_incarnation import RuntimeIncarnation, current_incarnation
-from shared.native_process.turn_identity import current_hosted_resources
-from shared.paths import exec_run_dir
+from base.db.transaction import write_transaction
+from base.native_process.runtime_incarnation import RuntimeIncarnation, current_incarnation
+from base.native_process.turn_identity import current_hosted_resources
+from base.paths import exec_run_dir
 
 
 def managed_target(agent_id: int | None) -> RuntimeIncarnation | None:
@@ -374,7 +374,7 @@ async def run_owned(  # noqa: PLR0915 -- one caller retains exact allocation and
                 try:
                     await asyncio.shield(attached_completion())
                 except Exception as exc:
-                    from shared.log import logger
+                    from base.log import logger
 
                     logger.error("exec owner remains unresolved: {error}", error=exc)
 

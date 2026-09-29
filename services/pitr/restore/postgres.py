@@ -17,6 +17,8 @@ import psutil
 import psycopg
 from psycopg import sql
 
+from base.cluster.dataplane.pg_foreground import start_foreground_postgres
+from base.cluster.dataplane.pg_tools import pg_start_env
 from services.pitr.base_backup.manifest import CandidateManifest, lsn
 from services.pitr.operation.custody import NativeProcess
 from services.pitr.restore.proof import (
@@ -26,8 +28,6 @@ from services.pitr.restore.proof import (
     _same_live,
     update_restore_owner,
 )
-from shared.cluster.dataplane.pg_foreground import start_foreground_postgres
-from shared.cluster.dataplane.pg_tools import pg_start_env
 
 
 def _migration_hash(conn: psycopg.Connection[tuple[object, ...]]) -> str:

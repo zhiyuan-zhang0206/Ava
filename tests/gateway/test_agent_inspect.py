@@ -10,11 +10,11 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
+from base.config import settings
 from gateway.app import app
 from gateway.inspect import router as inspect_router
 from gateway.lgtm import loki_events
 from services.heartbeat import JITTER_SPAN_S, STALE_PENDING_S
-from shared.config import settings
 
 
 def _insert_agent_row(db: psycopg.Connection, label: str = "t") -> int:

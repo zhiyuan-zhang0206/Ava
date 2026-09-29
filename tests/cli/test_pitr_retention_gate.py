@@ -19,6 +19,8 @@ from typing import Any, cast
 
 import pytest
 
+from base.config.physical_backup import PhysicalBackupSettings
+from base.host.env import runtime_config
 from cli.commands.data_plane import pitr as pitr_commands
 from cli.commands.data_plane.pitr import (
     cmd_pitr_retention_arm,
@@ -35,8 +37,6 @@ from services.pitr.retention.manifest import (
     RetentionPlan,
 )
 from services.pitr.retention.planner import DryRunResult
-from shared.config.physical_backup import PhysicalBackupSettings
-from shared.host.env import runtime_config
 
 _PIN_TOKEN = "av-test-pin"  # noqa: S105 — opaque test fixture pin, not a secret
 

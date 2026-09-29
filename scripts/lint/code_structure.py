@@ -64,7 +64,7 @@ tests/ directory are exempt.
 one owning module; any other module making that decision is a bypass. Today:
 `postgres-dial` — a psycopg connect (module, class, or `from psycopg import
 connect`) or a construction of a psycopg_pool pool or of this repo's own
-`*ConnectionPool` subclass belongs to `shared/db/connections.py`, which owns the
+`*ConnectionPool` subclass belongs to `base/db/connections.py`, which owns the
 transport posture. A site that genuinely cannot go through the owner goes in that
 decision's `allowed` map with a one-line reason; an allowed module that stops
 bypassing, or no longer exists, fails as stale.
@@ -130,7 +130,7 @@ import ast
 import os
 import subprocess
 import sys
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(_REPO_ROOT))
@@ -153,7 +153,7 @@ _SCAN_DIRS = (
     "ava",
     "ava_builtins",
     "gateway",
-    "shared",
+    "base",
     "services",
     "ops",
     "cli",
@@ -171,8 +171,8 @@ _MACHINE_ROLE_ALLOWED: dict[str, str] = {
     "cli/commands/lifecycle/_temporary_stop.py": "Which selected local services and data plane does this unit own during explicit pause/stop? No execution is routed elsewhere.",
     "ops/agent_pause/__init__.py": "Does this unit serve an agent host whose admitted cohort and actual continuation completion must be verified before local shutdown?",
     "cli/commands/lifecycle/maintenance.py": "Which services/data plane does this explicitly local, DB-offline-capable stop/start own? Fleet transport is operator-coordinated.",
-    "shared/cluster/machine.py": "defines machine_role() and its capability wrappers is_gateway()/is_agent_runner() — the implementation itself",
-    "shared/telemetry/observability.py": "does this process serve the gateway capability whose LGTM marker governs telemetry (what do I serve)",
+    "base/cluster/machine.py": "defines machine_role() and its capability wrappers is_gateway()/is_agent_runner() — the implementation itself",
+    "base/telemetry/observability.py": "does this process serve the gateway capability whose LGTM marker governs telemetry (what do I serve)",
     "services/healthchecks/otel_collector.py": "does this unit own the LGTM collector healthcheck, preserving pure-runner relay behavior (what do I serve)",
     "cli/commands/lifecycle/start.py": "which daemons do I bring up (what do I serve)",
     "cli/commands/_repo.py": "resolve this host's capability set, None when unset, for stop/status/converge (what do I serve)",
@@ -209,8 +209,8 @@ _TYPE_CHECKING_ALLOWED: frozenset[str] = frozenset(
         # LM provider registration surface: the chat-model stack is a heavy
         # import on the exec-child boot path, which never uses the type
         # (annotation-only references; task #3633).
-        "shared/lm/provider_api.py",
-        "shared/lm/factory.py",
+        "base/lm/provider_api.py",
+        "base/lm/factory.py",
         "ava_builtins/plugins/lm_alibaba/provider.py",
         "ava_builtins/plugins/lm_anthropic/provider.py",
         "ava_builtins/plugins/lm_deepseek/provider.py",
@@ -222,18 +222,18 @@ _TYPE_CHECKING_ALLOWED: frozenset[str] = frozenset(
         # LangChain message-stack trim on the same registration path: message
         # types appear in annotations only, or (pricing) import at the call
         # site of a runtime isinstance (task #3633).
-        "shared/lm/stop.py",
-        "shared/lm/pricing.py",
-        "shared/agents/messages/kwargs.py",
+        "base/lm/stop.py",
+        "base/lm/pricing.py",
+        "base/agents/messages/kwargs.py",
         # Exec-child boot path (`_run_code` -> sdk_telemetry): ToolMessage is
         # runtime-only (imported at the isinstance call site), BaseMessage
         # annotation-only (task #3633).
-        "shared/agents/sdk/telemetry.py",
+        "base/agents/sdk/telemetry.py",
         # Boot-lite facade: the names are served at runtime by the lite latch;
-        # TYPE_CHECKING keeps `from shared.config import X` consumers resolving
+        # TYPE_CHECKING keeps `from base.config import X` consumers resolving
         # without an eager import that would rebuild the config chain the lite
         # facade defers (task #3621).
-        "shared/config/__init__.py",
+        "base/config/__init__.py",
         # Boot-path trim: the skill-index stack is a heavy import every exec
         # child pays; `SkillFile` is annotation-only on the mount helpers
         # (script/module-level imports removed for task #3816).
@@ -243,8 +243,8 @@ _TYPE_CHECKING_ALLOWED: frozenset[str] = frozenset(
         # annotation-only here, imported at the raise sites (task #3816).
         "ava_builtins/plugins/ava_fleet/task_registry.py",
         "ava_builtins/plugins/ava_fleet/_task_update.py",
-        "shared/agents/tasks/reparent.py",
-        "shared/agents/tasks/rules.py",
+        "base/agents/tasks/reparent.py",
+        "base/agents/tasks/rules.py",
     }
 )
 
@@ -386,19 +386,37 @@ def _budget_targets(targets: list[Path]) -> tuple[set[Path], set[Path]]:
     return files, directories
 
 
-def _parse_baseline(shards: dict[str, str]) -> dict[str, dict[str, int]]:
-    """Merge the baseline shards (name -> JSON text) and validate every entry."""
+def _parse_baseline(
+    shards: dict[str, str], *, renames: dict[str, str] | None = None
+) -> dict[str, dict[str, int]]:
+    """Merge the baseline shards (name -> JSON text) and validate every entry.
+
+    `renames` (the base revision's baseline only) widens the scopes by the
+    top-level directories a detected rename carries into them, so a renamed
+    governed package still validates under its old name.
+    """
     sections = ("directories", "files", *quality.QUALITY_SECTIONS, *_SITE_SECTIONS)
     baseline = baseline_shards.merge(shards, sections)
+    structure_dirs = _carried_scope(_STRUCTURE_DIRS, renames or {})
     for kind in quality.QUALITY_SECTIONS:
-        quality.validate_quality_entries(kind, baseline[kind], _STRUCTURE_DIRS)
+        quality.validate_quality_entries(kind, baseline[kind], structure_dirs)
     for kind in _SITE_SECTIONS:
-        locality.validate_entries(kind, baseline[kind], _SCAN_DIRS)
-    _validate_structure_entries(baseline)
+        locality.validate_entries(kind, baseline[kind], _carried_scope(_SCAN_DIRS, renames or {}))
+    _validate_structure_entries(baseline, structure_dirs)
     return baseline
 
 
-def _validate_structure_entries(baseline: dict[str, dict[str, int]]) -> None:
+def _carried_scope(scope: tuple[str, ...], renames: dict[str, str]) -> tuple[str, ...]:
+    """`scope` plus every top-level directory a detected rename moves files into it from."""
+    carried = {
+        PurePosixPath(old).parts[0] for old, new in renames.items() if new.split("/")[0] in scope
+    }
+    return tuple(sorted(set(scope) | carried))
+
+
+def _validate_structure_entries(
+    baseline: dict[str, dict[str, int]], structure_dirs: tuple[str, ...]
+) -> None:
     for kind, ceiling in (("directories", _DIRECTORY_CEILING), ("files", _HARD_CEILING)):
         entries = baseline[kind]
         if not isinstance(entries, dict):
@@ -411,7 +429,7 @@ def _validate_structure_entries(baseline: dict[str, dict[str, int]]) -> None:
                 or path.is_absolute()
                 or path.as_posix() != name
                 or ".." in path.parts
-                or path.parts[0] not in _STRUCTURE_DIRS
+                or path.parts[0] not in structure_dirs
                 or (kind == "files" and path.suffix != ".py")
                 or type(count) is not int
                 or count <= ceiling
@@ -477,15 +495,42 @@ def _rename_map_or_empty() -> dict[str, str]:
         return {}
 
 
+def _directory_renames(renames: dict[str, str]) -> dict[str, str]:
+    """Old -> new directories the detected file renames move wholesale.
+
+    `a/x/y.py -> b/x/y.py` carries `a -> b` and `a/x -> b/x`, every directory
+    along the unchanged tail. A directory whose files disagree on the target, or
+    one that still exists (a split, not a move), is not carried.
+    """
+    targets: dict[str, set[str]] = {}
+    for old, new in renames.items():
+        src, dst = PurePosixPath(old).parts[:-1], PurePosixPath(new).parts[:-1]
+        tail = 0
+        while tail < min(len(src), len(dst)) and src[-1 - tail] == dst[-1 - tail]:
+            tail += 1
+        for keep in range(tail + 1):
+            before, after = src[: len(src) - tail + keep], dst[: len(dst) - tail + keep]
+            if before and before != after:
+                targets.setdefault("/".join(before), set()).add("/".join(after))
+    return {
+        before: next(iter(after))
+        for before, after in targets.items()
+        if len(after) == 1 and not (_REPO_ROOT / before).is_dir()
+    }
+
+
 def _remap_renamed_keys(
     kind: str, entries: dict[str, int], renames: dict[str, str]
 ) -> dict[str, int]:
-    """Carry each renamed file's entry over to its new path (files/complexity/nesting)."""
-    if not renames or kind == "directories":
+    """Carry each renamed file's entry over to its new path (a moved directory's too)."""
+    if not renames:
         return entries
+    directories = _directory_renames(renames) if kind == "directories" else {}
     remapped: dict[str, int] = {}
     for name, value in entries.items():
-        if kind == "files":
+        if kind == "directories":
+            target = directories.get(name, name)
+        elif kind == "files":
             target = renames.get(name, name)
         else:
             path, separator, qualname = name.partition("::")
@@ -564,7 +609,7 @@ def _baseline_guard(
         )
         return []
     try:
-        previous = _parse_baseline(shards)
+        previous = _parse_baseline(shards, renames=renames)
     except ValueError as exc:
         return [f"{baseline_shards.SHARD_DIR}: invalid base baseline ({base}): {exc}"]
     errors: list[str] = []

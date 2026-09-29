@@ -30,7 +30,7 @@ socket, also as the password-less monitoring role `ava_monitor` through the
 `pg_ident` map `_pg_ident_body` writes; every other role SCRAM) and
 `require_authenticated_hba` proves the running postmaster demands passwords
 after every rewrite. `bringup` wires the write generation
-([[shared/cluster/authority/wiring.ava.okf.md|delivery and wiring]]): birth runs
+([[base/cluster/authority/wiring.ava.okf.md|delivery and wiring]]): birth runs
 groups -> monitor -> retire legacy logins -> ledger -> mint generation 0 ->
 pooler serving that pair -> pooled proof of both logins -> activate; an
 ordinary start re-grants the groups after migrations, converges the monitor,
@@ -40,14 +40,14 @@ each launched service its class login.
 
 ## Native custody
 
-`shared.cluster.ownership` is the common startup/maintenance observer: home
+`base.cluster.ownership` is the common startup/maintenance observer: home
 paths, native process birth and all listener PIDs must agree before config,
 reload or ACL effects. Redis ACL and maintenance shutdown each retain one
 observed connection; a reconnect loses authority and fails. PostgreSQL admin
 and pooler dials use only the home's canonical Unix socket directory. Owned
 provisioning, checkpoint, grant and migration dials verify their native
 backend against the home's postmaster before DDL, which acts as the schema
-owner (`shared.db.pg_admin`).
+owner (`base.db.pg_admin`).
 
 ## Pooler
 
@@ -57,8 +57,8 @@ restart it (a reload never revokes a user). A live pooler with closed listeners
 retains custody: normal start cannot repeat its shutdown signal or escalate to
 force. A graceful stop timeout fails without killing the survivor.
 
-PgBouncer and Redis are spawned with `shared.native_process.child_env.daemon_process_env`,
-and the Postgres postmaster with `shared.cluster.dataplane.pg_tools.pg_start_env` (the same set
+PgBouncer and Redis are spawned with `base.native_process.child_env.daemon_process_env`,
+and the Postgres postmaster with `base.cluster.dataplane.pg_tools.pg_start_env` (the same set
 plus the macOS locale fallback): the operator's PATH, home, user, temp dir,
 timezone and locale only. The gateway login, write generation and API token
 the boot pass delivered to `ava start`, and the human secret and Redis admin

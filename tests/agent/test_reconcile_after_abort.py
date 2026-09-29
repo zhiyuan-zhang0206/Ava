@@ -8,7 +8,7 @@ no-op), idempotent re-runs (the later boot reconcile changes nothing), and that
 a committed row is not re-delivered by the next claim.
 
 Task #4788: the committed-id source is the claim window's `messages` write rows
-(side-loaded from `shared/agents/history/inbound_sideload.py`), so the common
+(side-loaded from `base/agents/history/inbound_sideload.py`), so the common
 paths never read the settled checkpoint at all. These lock that source
 strategy: the no-read guard, the window resolution, the committed-then-removed
 proof, and both fallbacks (unresolved window, thread without messages write
@@ -34,16 +34,16 @@ from agent import state as states
 from agent.db import claim_inbound_batch
 from agent.ownership.inbound import RuntimeOwnershipLostError
 from agent.startup import reconcile_claimed_inbounds_at_startup
-from services.agent_host import settlement as settlement_mod
-from shared.agents.context import AvaContext
-from shared.agents.history.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
-from shared.agents.history.inbound_sideload import (
+from base.agents.context import AvaContext
+from base.agents.history.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
+from base.agents.history.inbound_sideload import (
     _claim_window_start,
     _messages_writes_in_window,
     committed_ids_for_reconcile,
     sideload_committed_ids,
 )
-from shared.native_process.turn_identity import bind_turn_identity
+from base.native_process.turn_identity import bind_turn_identity
+from services.agent_host import settlement as settlement_mod
 from tests.agent.test_hosted_db_recovery import _admit
 
 
@@ -486,7 +486,7 @@ async def test_unresolved_window_falls_back_to_the_full_read(
     orphan = _insert_claimed(db_conn, agent, "orphan")
     saver = await _seed_counting_checkpoint(aops_pool, agent, committed)
 
-    import shared.agents.history.inbound_sideload as sideload_mod
+    import base.agents.history.inbound_sideload as sideload_mod
 
     async def _unresolved(*args: Any, **kwargs: Any) -> None:
         return None
@@ -748,7 +748,7 @@ async def test_incomplete_full_write_scan_preserves_claimed_row(
     claimed = _insert_claimed(db_conn, agent, "unresolved")
     saver = _CountingSaver(aops_pool)
 
-    import shared.agents.history.inbound_sideload as sideload_mod
+    import base.agents.history.inbound_sideload as sideload_mod
 
     async def _failed_scan(*args: Any, **kwargs: Any) -> set[int]:
         raise RuntimeError("history unavailable")

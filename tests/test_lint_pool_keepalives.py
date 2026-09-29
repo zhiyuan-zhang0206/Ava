@@ -7,7 +7,7 @@ a query on one has no application-level bound. Three sync pools each wrote
 makes impossible to reintroduce.
 
 These cases pin both shapes a real site takes (the sync construction that should
-have called `shared.db.pool()`, and the generic-subscripted async pool that
+have called `base.db.pool()`, and the generic-subscripted async pool that
 legitimately unpacks the constant itself), plus the things that must NOT be
 flagged: annotations, `check_connection`, and the constant reached through a
 module attribute.
@@ -93,7 +93,7 @@ def test_subclass_of_connection_pool_is_covered():
 
 
 def test_constant_reached_by_module_attribute_is_clean():
-    src = "pool = ConnectionPool(url, kwargs={**shared.db.PG_KEEPALIVE_KWARGS})\n"
+    src = "pool = ConnectionPool(url, kwargs={**base.db.PG_KEEPALIVE_KWARGS})\n"
     assert _violations(src) == []
 
 

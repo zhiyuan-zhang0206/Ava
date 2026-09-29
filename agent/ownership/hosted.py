@@ -12,26 +12,26 @@ import psutil
 import psycopg
 from psycopg_pool import AsyncConnectionPool
 
-from shared.agents.incarnation.host_process_evidence import local_host_evidence
-from shared.agents.incarnation.lifecycle_acceptance import (
+from base.agents.incarnation.host_process_evidence import local_host_evidence
+from base.agents.incarnation.lifecycle_acceptance import (
     RECORD_APPLIED,
     terminate_kills_shell_sessions,
 )
-from shared.agents.incarnation.resource_admission import admit_resources_async
-from shared.agents.incarnation.resources import (
+from base.agents.incarnation.resource_admission import admit_resources_async
+from base.agents.incarnation.resources import (
     IncarnationResources,
     ResourceEvidenceError,
     ResourceProcess,
     decode_resources,
 )
-from shared.agents.observation.evidence import AdmissionOutcome
-from shared.db.transaction import async_write_transaction
-from shared.deploy.maintenance import admission
-from shared.deploy.progress_timeout import (
+from base.agents.observation.evidence import AdmissionOutcome
+from base.db.transaction import async_write_transaction
+from base.deploy.maintenance import admission
+from base.deploy.progress_timeout import (
     AGENT_LEASE_TTL_S,
     LEGACY_HOST_ADOPTION_SILENCE_S,
 )
-from shared.deploy.writers.runtime_admission import (
+from base.deploy.writers.runtime_admission import (
     AdmissionDecision,
     CurrentAdmission,
     PublicationAdmissionDeferredError,
@@ -39,11 +39,11 @@ from shared.deploy.writers.runtime_admission import (
     process_runtime_admission,
     require_current_for_managed,
 )
-from shared.events.live.announce import publish_agent_updated
-from shared.log import logger
-from shared.native_process.runtime_incarnation import RUNTIME_PROTOCOL_V1, RuntimeIncarnation
-from shared.paths import ava_home
-from shared.telemetry.audit_events import insert_event_log_async
+from base.events.live.announce import publish_agent_updated
+from base.log import logger
+from base.native_process.runtime_incarnation import RUNTIME_PROTOCOL_V1, RuntimeIncarnation
+from base.paths import ava_home
+from base.telemetry.audit_events import insert_event_log_async
 
 
 class _HostedAdmissionRefusedError(Exception):
@@ -111,12 +111,12 @@ async def apply_hosted_lifecycle(
     lock before the `terminated` write: the last step is over, and a crash
     cannot commit the death without the kill — the retry kills again.
     """
-    from shared.native_process.turn_identity import hosted_resources_settled
+    from base.native_process.turn_identity import hosted_resources_settled
 
     if not hosted_resources_settled():
         return None
     async with async_write_transaction(pool) as conn:
-        from shared.agents.incarnation.resource_admission import require_resources_closed_async
+        from base.agents.incarnation.resource_admission import require_resources_closed_async
 
         await require_resources_closed_async(conn, incarnation.agent_id)
         cursor = await conn.execute(
@@ -188,7 +188,7 @@ async def align_accepting_binding(
     """Align an open lease's accepting-incarnation binding with the admitted
     incarnation, in the admission transaction (issue #2052).
 
-    The lazy inheritance in ``shared.agents.impersonation.native_status`` runs only at
+    The lazy inheritance in ``base.agents.impersonation.native_status`` runs only at
     the replacement's first held wake. A lease released or expired between a
     hosted restart and that wake still fires
     ``restore_native_impersonation_owner``, which writes the recorded
@@ -302,7 +302,7 @@ async def _legacy_dead_host_adoption(
       ``LEGACY_HOST_ADOPTION_SILENCE_S`` — the predecessor's ownership beat
       stopped, not merely its owner UUID;
     - no live same-home agent-host daemon and no live exec child of this agent
-      (``shared.agents.incarnation.host_process_evidence``) — no concurrent owner survives;
+      (``base.agents.incarnation.host_process_evidence``) — no concurrent owner survives;
     - the row is unmarked (``last_turn_fatal_at IS NULL``): crash corpses keep
       their own reaper/resurrect recovery.
 
@@ -375,7 +375,7 @@ async def _dead_predecessor_evidence(
     """
     # Resolved at call time: the exact-exit probe is monkeypatched at its
     # source module in the resident tests.
-    from shared.agents.incarnation.exec_owner_recovery import process_ended
+    from base.agents.incarnation.exec_owner_recovery import process_ended
 
     if previous[1] == owner or previous[3] != machine:
         return None, False
@@ -419,7 +419,7 @@ async def admit_hosted_runtime(
     before its lease expires only through the evidence-gated proposal of
     ``_legacy_dead_host_adoption``, re-checked under this row lock.
     """
-    from shared.agents.incarnation.exec_owner_recovery import recover_local_resources
+    from base.agents.incarnation.exec_owner_recovery import recover_local_resources
 
     attempt_at = await _admission_attempt_at(pool)
     if admission.held() and not await _held_owner_matches(pool, agent_id, owner):
@@ -614,7 +614,7 @@ async def settle_hosted_runtime(
     or an open circuit breaker) leaves it for the reaper. Writing it here would
     only relabel a crash-dead row healthy and resume its lease renewal forever.
     """
-    from shared.native_process.turn_identity import hosted_resources_settled
+    from base.native_process.turn_identity import hosted_resources_settled
 
     if not hosted_resources_settled():
         return False

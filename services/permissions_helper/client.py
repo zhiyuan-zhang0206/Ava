@@ -27,10 +27,10 @@ import time
 from pathlib import Path
 from typing import Any, NotRequired, TypedDict
 
-from shared.host.converge.accessibility import AccessibilityState, AccessibilityStatus
-from shared.host.converge.screen_capture import ScreenCaptureState, ScreenCaptureStatus
-from shared.host.net.resilience import Policy, retry
-from shared.paths import permissions_helper_socket
+from base.host.converge.accessibility import AccessibilityState, AccessibilityStatus
+from base.host.converge.screen_capture import ScreenCaptureState, ScreenCaptureStatus
+from base.host.net.resilience import Policy, retry
+from base.paths import permissions_helper_socket
 
 # Transport selection: named pipe on Windows, Unix socket elsewhere. A module
 # constant (not a live os.name check) so tests can flip the transport without

@@ -20,7 +20,7 @@ import time
 
 import psycopg
 
-from shared.config import settings
+from base.config import settings
 
 
 def wait_for_status(agent_id: int, target: str, timeout: float = 90.0) -> None:

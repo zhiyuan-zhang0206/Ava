@@ -13,7 +13,7 @@ import pytest
 from langchain_core.messages import AIMessage
 
 from agent.llm.usage import log_llm_usage
-from shared.lm.plugin_providers import ensure_provider_plugins_loaded
+from base.lm.plugin_providers import ensure_provider_plugins_loaded
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -182,8 +182,8 @@ def test_log_llm_usage_emits_agent_billing_span(
     """
     from opentelemetry import trace as otel_trace
 
-    from shared.lm.pricing import quote
-    from shared.telemetry import tracing as tracing_mod
+    from base.lm.pricing import quote
+    from base.telemetry import tracing as tracing_mod
 
     class _Span:
         def __init__(self, start_time: int | None) -> None:
@@ -209,7 +209,7 @@ def test_log_llm_usage_emits_agent_billing_span(
     priced_at = datetime(2026, 8, 17, 0, 0, tzinfo=UTC)
     expected = quote("deepseek-v4-pro", 1_000, 100, 800, at=priced_at)
     assert expected is not None
-    monkeypatch.setattr("shared.config.settings.observability.trace_enabled", True)
+    monkeypatch.setattr("base.config.settings.observability.trace_enabled", True)
     monkeypatch.setitem(tracing_mod._state, "initialized", True)
     monkeypatch.setattr(otel_trace, "get_tracer", lambda _name: tracer)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr("time.time_ns", lambda: 5_000_000_000)
@@ -252,7 +252,7 @@ def test_log_llm_usage_skips_billing_when_usage_metadata_is_incomplete(
     """
     from opentelemetry import trace as otel_trace
 
-    from shared.telemetry import tracing as tracing_mod
+    from base.telemetry import tracing as tracing_mod
 
     class _Span:
         def set_attribute(self, _key: str, _value: Any) -> None:
@@ -271,7 +271,7 @@ def test_log_llm_usage_skips_billing_when_usage_metadata_is_incomplete(
             return span
 
     tracer = _Tracer()
-    monkeypatch.setattr("shared.config.settings.observability.trace_enabled", True)
+    monkeypatch.setattr("base.config.settings.observability.trace_enabled", True)
     monkeypatch.setitem(tracing_mod._state, "initialized", True)
     monkeypatch.setattr(otel_trace, "get_tracer", lambda _name: tracer)  # pyright: ignore[reportUnknownArgumentType]
     message = AIMessage(
@@ -308,7 +308,7 @@ def test_price_snapshot_absent_for_unpriced_model(
     assert len(warnings) == 1
     warning = warnings[0]["message"]
     assert "no-such-model" in warning
-    assert "shared/lm/pricing_catalog_archive.json" in warning
+    assert "base/lm/pricing_catalog_archive.json" in warning
     assert "plugin price registry" in warning
 
 

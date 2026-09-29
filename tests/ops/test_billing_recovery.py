@@ -21,6 +21,10 @@ import psycopg
 import pytest
 from psycopg_pool import ConnectionPool
 
+from base.agents import ResurrectRefused
+from base.agents.recovery_breaker import PERMANENT_REJECT_REASON_BILLING
+from base.db import create_agent
+from base.telemetry import Event
 from ops.agents import wake
 from ops.agents.wake import resurrect_agent
 from ops.lifecycle import billing_recovery
@@ -30,17 +34,13 @@ from ops.lifecycle.billing_recovery import (
     run_billing_recovery,
 )
 from ops.rpc_schemas import BillingBalanceReport
-from shared.agents import ResurrectRefused
-from shared.agents.recovery_breaker import PERMANENT_REJECT_REASON_BILLING
-from shared.db import create_agent
-from shared.telemetry import Event
 
 
 @pytest.fixture()
 def pool() -> Iterator[ConnectionPool]:
-    import shared.db
+    import base.db
 
-    p = shared.db.pool(max_size=4)
+    p = base.db.pool(max_size=4)
     yield p
     p.close()
 
@@ -151,8 +151,8 @@ def _capture_events(
     def _record_telemetry(*a: Any, **kw: Any) -> None:
         telemetry.append((a, kw))
 
-    monkeypatch.setattr("shared.telemetry.audit_events.insert_event_log", _record_audit)
-    monkeypatch.setattr("shared.telemetry.emit", _record_telemetry)
+    monkeypatch.setattr("base.telemetry.audit_events.insert_event_log", _record_audit)
+    monkeypatch.setattr("base.telemetry.emit", _record_telemetry)
     return audits, telemetry
 
 
@@ -429,9 +429,9 @@ def _configure_probe(
 ) -> None:
     from pydantic import SecretStr
 
-    from shared.config import settings
-    from shared.host.env import runtime_config
-    from shared.host.net import http_dial
+    from base.config import settings
+    from base.host.env import runtime_config
+    from base.host.net import http_dial
 
     monkeypatch.setattr(
         settings.lm, "deepseek_api_key", None if key is None else SecretStr(key), raising=False

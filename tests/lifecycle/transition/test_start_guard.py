@@ -10,17 +10,17 @@ from uuid import uuid4
 
 import pytest
 
-from cli.release_fleet.request import FleetRequest
-from cli.release_transition.journal import create
-from cli.release_transition.request import ReleaseRef
-from shared.deploy.progress_timeout import EXECUTOR_HEARTBEAT_TTL_S
-from shared.deploy.release.operation import (
+from base.deploy.progress_timeout import EXECUTOR_HEARTBEAT_TTL_S
+from base.deploy.release.operation import (
     authorized_start,
     operation_in_flight,
     require_start_authorized,
 )
-from shared.deploy.release.runtime_release import ReleaseRejectedError
-from shared.deploy.release.start_inputs import configuration_digest
+from base.deploy.release.runtime_release import ReleaseRejectedError
+from base.deploy.release.start_inputs import configuration_digest
+from cli.release_fleet.request import FleetRequest
+from cli.release_transition.journal import create
+from cli.release_transition.request import ReleaseRef
 
 
 def _operation(home: Path) -> Path:
@@ -309,9 +309,9 @@ def test_complete_phase_with_unresolved_error_does_not_release_startup(
 def test_operation_start_preserves_exact_hold_after_service_result(
     operation_path: Path, monkeypatch: pytest.MonkeyPatch, result: int
 ) -> None:
+    from base.deploy.lifecycle import start_serving
+    from base.deploy.maintenance import admission
     from cli.commands.lifecycle._pause_resume import resume_after_start
-    from shared.deploy.lifecycle import start_serving
-    from shared.deploy.maintenance import admission
 
     _set_state(operation_path, phase="starting")
     _hold(operation_path, monkeypatch)
@@ -332,8 +332,8 @@ def test_operation_start_preserves_exact_hold_after_service_result(
 
 
 def _hold(path: Path, monkeypatch: pytest.MonkeyPatch, *, kind: str = "exact") -> None:
-    from shared import paths
-    from shared.deploy.maintenance.state import MaintenanceHold
+    from base import paths
+    from base.deploy.maintenance.state import MaintenanceHold
 
     home = _home(path)
     (home / "run").mkdir(exist_ok=True)
@@ -360,8 +360,8 @@ def _hold(path: Path, monkeypatch: pytest.MonkeyPatch, *, kind: str = "exact") -
 def test_operation_start_cannot_bypass_missing_changed_or_unsettled_hold(
     operation_path: Path, monkeypatch: pytest.MonkeyPatch, kind: str, ambient_authority: bool
 ) -> None:
+    from base.deploy.maintenance import admission
     from cli.commands.lifecycle._pause_resume import resume_after_start
-    from shared.deploy.maintenance import admission
 
     _set_state(operation_path, phase="starting")
     _hold(operation_path, monkeypatch, kind=kind)

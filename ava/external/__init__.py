@@ -14,11 +14,11 @@ from typing import Any, Self
 from uuid import uuid4
 
 from ava import agent_identity
-from shared.agents import impersonation as control
-from shared.cluster.machine import machine_name
-from shared.config.turn_view import bind_agent_config, resolve_agent_config_pins
-from shared.native_process.ownership import process_metadata
-from shared.packages.plugins.config_view import bind_agent_plugin_config, resolve_agent_plugin_pins
+from base.agents import impersonation as control
+from base.cluster.machine import machine_name
+from base.config.turn_view import bind_agent_config, resolve_agent_config_pins
+from base.native_process.ownership import process_metadata
+from base.packages.plugins.config_view import bind_agent_plugin_config, resolve_agent_plugin_pins
 
 from .state import (
     apply_plugin_delta,
@@ -48,14 +48,14 @@ def _deliver_telemetry_before_detach() -> None:
     Mirror the exec-child delivery order without importing telemetry for an
     attachment that emitted no records.
     """
-    if "shared.telemetry" not in sys.modules:
+    if "base.telemetry" not in sys.modules:
         return
     with suppress(Exception):
-        from shared import telemetry
+        from base import telemetry
 
         telemetry.sync(bounded=True)
-        if "shared.telemetry.otlp.telemetry_otlp" in sys.modules:
-            from shared.telemetry.otlp import telemetry_otlp
+        if "base.telemetry.otlp.telemetry_otlp" in sys.modules:
+            from base.telemetry.otlp import telemetry_otlp
 
             telemetry_otlp.finalize()
 
@@ -127,7 +127,7 @@ class Attachment:
         if self._closed:
             raise RuntimeError("external attachment is closed")
         if self._closing and not allow_closing:
-            from shared.agents.impersonation_manifest import local_sdk_call_was_admitted
+            from base.agents.impersonation_manifest import local_sdk_call_was_admitted
 
             if not local_sdk_call_was_admitted():
                 raise RuntimeError("external attachment is closing")
@@ -183,7 +183,7 @@ class Attachment:
 
     def _open_manifest_participant(self) -> None:
         """Register this controller before it can emit a protocol-v1 event."""
-        from shared.agents.impersonation_manifest import (
+        from base.agents.impersonation_manifest import (
             LocalParticipant,
             bind_local_participant,
             is_protocol_v1,
@@ -207,12 +207,12 @@ class Attachment:
         """Close admission, drain local SDK work, then seal the durable receipt."""
         if self._manifest_participant is None:
             return
-        from shared.agents.impersonation_manifest import (
+        from base.agents.impersonation_manifest import (
             alert_if_participant_still_open,
             close_local_participant_admission,
             seal_local_participant,
         )
-        from shared.config import settings
+        from base.config import settings
 
         # This timer is deliberately diagnostic-only. A live SDK finally may
         # outlast the detach wait and seal later; only a real capture failure
@@ -244,7 +244,7 @@ class Attachment:
         if self._manifest_participant is None:
             self._closing = True
             return
-        from shared.agents.impersonation_manifest import begin_local_participant_close
+        from base.agents.impersonation_manifest import begin_local_participant_close
 
         # The gate lock makes setting `_closing` and closing admission one
         # linearization point. A call admitted before it may drain; one that
@@ -265,7 +265,7 @@ class Attachment:
         self._closed = True
         try:
             if self._manifest_participant is not None:
-                from shared.agents.impersonation_manifest import unbind_local_participant
+                from base.agents.impersonation_manifest import unbind_local_participant
 
                 unbind_local_participant(self._manifest_participant)
                 self._manifest_participant = None
@@ -303,7 +303,7 @@ def attach(session_id: int | str, *, agent_id: int | None = None) -> Attachment:
     plugin-state operations recheck the lease. Direct reads of loaded Python
     objects do not. Attaching never renews the lease.
     """
-    from shared.agents.impersonation.sessions import private_id
+    from base.agents.impersonation.sessions import private_id
 
     if isinstance(session_id, int) and not isinstance(session_id, bool) and agent_id is not None:
         return Attachment(private_id(agent_id, session_id))

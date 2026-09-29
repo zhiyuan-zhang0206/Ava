@@ -14,6 +14,10 @@ from typing import Any
 import psycopg
 from psycopg import sql
 
+from base.cluster import get_record, record_postgres_port
+from base.config import settings
+from base.db import pg_admin
+from base.paths import ava_home
 from services.pitr.activation.runtime import (
     PITR_ENV_FIELDS,
     file_evidence,
@@ -21,10 +25,6 @@ from services.pitr.activation.runtime import (
     pitr_env_is_desired,
 )
 from services.pitr.activation.state import ActivationRecord, load_record, write_record_cas
-from shared.cluster import get_record, record_postgres_port
-from shared.config import settings
-from shared.db import pg_admin
-from shared.paths import ava_home
 
 from .cluster_instance import pg_admin_url
 
@@ -33,7 +33,7 @@ from .cluster_instance import pg_admin_url
 def _pg_connection() -> Generator[psycopg.Connection[Any]]:
     """The admin session the archive settings are read and altered on.
 
-    `shared.db.pg_admin.connect` binds the backend to this home's recorded
+    `base.db.pg_admin.connect` binds the backend to this home's recorded
     postmaster before any `ALTER SYSTEM` or settings read.
     """
     cluster = get_record(ava_home())
@@ -166,7 +166,7 @@ def restore_archive_settings(
     home: Path, record: ActivationRecord, baseline: dict[str, str]
 ) -> ActivationRecord:
     """Restore persisted settings through exact SQL pre/postimage receipts."""
-    from shared.deploy.release.operation import require_pitr_authorized
+    from base.deploy.release.operation import require_pitr_authorized
 
     require_pitr_authorized(home)
     for name, desired in baseline.items():
@@ -212,7 +212,7 @@ def _env_payload(home: Path) -> bytes:
 def apply_wal_config(
     home: Path, record: ActivationRecord, desired: dict[str, str]
 ) -> ActivationRecord:
-    from shared.deploy.release.operation import require_pitr_authorized
+    from base.deploy.release.operation import require_pitr_authorized
 
     require_pitr_authorized(home)
     record = _apply_archive_settings(home, record, desired)
@@ -281,8 +281,8 @@ def _finish_archive_intent(
 
 def _apply_env(home: Path, record: ActivationRecord) -> bytes:
     """Append the four absent gate keys in one exact, crash-journaled CAS."""
-    from shared.config.candidate import validate_env_patch_for_write
-    from shared.host.env.dotenv_file import replace_env_bytes_cas
+    from base.config.candidate import validate_env_patch_for_write
+    from base.host.env.dotenv_file import replace_env_bytes_cas
 
     if record.pre_activation_env_b64 is None or record.pre_activation_env_digest is None:
         raise RuntimeError("PITR env provisioning requires its captured preimage")

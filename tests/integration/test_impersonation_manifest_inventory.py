@@ -39,12 +39,12 @@ _INVENTORY: dict[str, str] = {
     "ops/lifecycle/__init__.py::_recover_crash_marked_blocking": "central",
     "services/computer/mcp_daemon.py::ComputerMcpDaemon._emit_action": "central",
     "services/computer/mcp_daemon.py::ComputerMcpDaemon._emit_session_event": "central",
-    "shared/agents/messages/chat_delivery.py::_insert_chat_inbound_once": "central",
-    "shared/db/__init__.py::insert_inbound_message": "central",
-    "shared/db/__init__.py::announce_spawn_prompt": "central",
-    "shared/db/__init__.py::insert_restart_completed_inbound": "central",
-    "shared/db/__init__.py::insert_compact_request_inbound": "ineligible",
-    "shared/host/env/audit.py::_emit_audit_event": "ineligible",
+    "base/agents/messages/chat_delivery.py::_insert_chat_inbound_once": "central",
+    "base/db/__init__.py::insert_inbound_message": "central",
+    "base/db/__init__.py::announce_spawn_prompt": "central",
+    "base/db/__init__.py::insert_restart_completed_inbound": "central",
+    "base/db/__init__.py::insert_compact_request_inbound": "ineligible",
+    "base/host/env/audit.py::_emit_audit_event": "ineligible",
 }
 
 
@@ -54,7 +54,7 @@ def _audit_roots(root: Path) -> set[str]:
     for path in root.rglob("*.py"):
         relative = path.relative_to(root)
         if relative.parts[0] in {"tests", "scripts", ".venv"} or relative == Path(
-            "shared/telemetry/audit_events.py"
+            "base/telemetry/audit_events.py"
         ):
             continue
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
@@ -98,23 +98,23 @@ class _AuditRootVisitor(ast.NodeVisitor):
                 root = alias.asname or alias.name
                 self._audit_modules.add(f"{root}.telemetry.audit_events")
                 self._telemetry_modules.add(f"{root}.telemetry")
-            if alias.name == "shared.telemetry.audit_events":
+            if alias.name == "base.telemetry.audit_events":
                 self._audit_modules.add(alias.asname or alias.name)
-            if alias.name == "shared.telemetry":
-                self._telemetry_modules.add(alias.asname or "shared.telemetry")
+            if alias.name == "base.telemetry":
+                self._telemetry_modules.add(alias.asname or "base.telemetry")
         self.generic_visit(node)
 
     def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
         self._register_shared_module_aliases(node)
         self._register_function_aliases(
             node,
-            "shared.telemetry.audit_events",
+            "base.telemetry.audit_events",
             _AUDIT_HELPERS,
             self._audit_functions,
         )
         self._register_function_aliases(
             node,
-            "shared.telemetry",
+            "base.telemetry",
             _DIRECT_AUDIT_EMITTERS,
             self._telemetry_functions,
         )
@@ -125,7 +125,7 @@ class _AuditRootVisitor(ast.NodeVisitor):
             for alias in node.names:
                 if alias.name == "telemetry":
                     self._telemetry_modules.add(alias.asname or alias.name)
-        if node.module == "shared.telemetry":
+        if node.module == "base.telemetry":
             for alias in node.names:
                 if alias.name == "audit_events":
                     self._audit_modules.add(alias.asname or alias.name)
@@ -215,7 +215,7 @@ def test_scope_keys_survive_line_drift_and_require_count_and_name_updates(tmp_pa
     root.mkdir()
     path = root / "producer.py"
     source = (
-        "from shared.telemetry.audit_events import insert_event_log\n"
+        "from base.telemetry.audit_events import insert_event_log\n"
         "insert_event_log(event_type='module')\n"
         "class Producer:\n"
         "    async def emit(self):\n"
@@ -246,7 +246,7 @@ def test_an_unclassified_new_audit_construction_root_fails(tmp_path: Path) -> No
     root = tmp_path / "root"
     root.mkdir()
     (root / "new_producer.py").write_text(
-        "from shared.telemetry.audit_events import insert_event_log\n"
+        "from base.telemetry.audit_events import insert_event_log\n"
         "def emit():\n"
         "    insert_event_log(event_type='send_message', agent_id=1, source='agent:1')\n",
         encoding="utf-8",
@@ -259,7 +259,7 @@ def test_an_unclassified_aliased_direct_audit_emitter_fails(tmp_path: Path) -> N
     root = tmp_path / "root"
     root.mkdir()
     (root / "new_producer.py").write_text(
-        "from shared import telemetry as events\n"
+        "from base import telemetry as events\n"
         "def emit():\n"
         "    events.emit('audit', 'send_message')\n",
         encoding="utf-8",
@@ -272,7 +272,7 @@ def test_an_unclassified_aliased_audit_helper_fails(tmp_path: Path) -> None:
     root = tmp_path / "root"
     root.mkdir()
     (root / "new_producer.py").write_text(
-        "from shared.telemetry.audit_events import insert_event_log as audit\n"
+        "from base.telemetry.audit_events import insert_event_log as audit\n"
         "def emit():\n"
         "    audit(event_type='send_message', agent_id=1, source='agent:1')\n",
         encoding="utf-8",
@@ -285,7 +285,7 @@ def test_an_unclassified_import_shared_audit_emitter_fails(tmp_path: Path) -> No
     root = tmp_path / "root"
     root.mkdir()
     (root / "new_producer.py").write_text(
-        "import shared\ndef emit():\n    shared.telemetry.emit('audit', 'send_message')\n",
+        "import base\ndef emit():\n    base.telemetry.emit('audit', 'send_message')\n",
         encoding="utf-8",
     )
     with pytest.raises(AssertionError, match=r"new_producer\.py::emit"):
@@ -296,9 +296,9 @@ def test_an_unclassified_import_shared_audit_helper_fails(tmp_path: Path) -> Non
     root = tmp_path / "root"
     root.mkdir()
     (root / "new_producer.py").write_text(
-        "import shared\n"
+        "import base\n"
         "def emit():\n"
-        "    shared.telemetry.audit_events.insert_event_log(\n"
+        "    base.telemetry.audit_events.insert_event_log(\n"
         "        event_type='send_message', agent_id=1, source='agent:1'\n"
         "    )\n",
         encoding="utf-8",
@@ -308,11 +308,11 @@ def test_an_unclassified_import_shared_audit_helper_fails(tmp_path: Path) -> Non
 
 
 def test_an_unclassified_module_alias_audit_helper_fails(tmp_path: Path) -> None:
-    """The package-member form production uses (`from shared.telemetry import audit_events`)."""
+    """The package-member form production uses (`from base.telemetry import audit_events`)."""
     root = tmp_path / "root"
     root.mkdir()
     (root / "new_producer.py").write_text(
-        "from shared.telemetry import audit_events\n"
+        "from base.telemetry import audit_events\n"
         "def emit():\n"
         "    audit_events.prepare_event_log(event_type='send_message', agent_id=1)\n",
         encoding="utf-8",

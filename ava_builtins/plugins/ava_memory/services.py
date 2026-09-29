@@ -12,7 +12,7 @@ Discovery keys on this plugin's code being PRESENT on the machine (see
 below rather than the presence check.
 
 Deliberately light, like `ava_fleet/services.py`: it imports the ops service
-contract and roster probe helper plus `shared` — never `plugin.py` or the memory
+contract and roster probe helper plus `base` — never `plugin.py` or the memory
 domain code — so the ops/CLI/watchdog process that discovers it does not pull in
 the agent kernel. `services()` is a function so probe ports derived from settings
 are read at use-time.
@@ -22,11 +22,11 @@ from __future__ import annotations
 
 import os
 
+from base.cluster.machine import MachineRole
+from base.config import settings
+from base.daemon.health import health_port
 from ops.roster import daemon_identity
 from ops.roster.service_spec import ServiceSpec
-from shared.cluster.machine import MachineRole
-from shared.config import settings
-from shared.daemon.health import health_port
 
 # The indexer runs on the gateway capability: it indexes the gateway's
 # consolidated checkout, which only a gateway-capable unit has. Declared here

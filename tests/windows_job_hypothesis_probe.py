@@ -12,7 +12,7 @@ from uuid import uuid4
 
 import psutil
 
-from shared.native_process import winjob
+from base.native_process import winjob
 
 
 @unittest.skipUnless(sys.platform == "win32", "Windows named job semantics")

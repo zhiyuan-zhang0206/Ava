@@ -17,19 +17,19 @@ import psycopg
 from fastapi import HTTPException
 from psycopg_pool import ConnectionPool
 
-from ops import lifecycle as _ops
-from ops.agents import get_agent_status
-from shared.agents import AgentStatus
-from shared.agents.messages.caller_protocol import CallerProtocolUnavailableError
-from shared.agents.messages.chat_delivery import (
+from base.agents import AgentStatus
+from base.agents.messages.caller_protocol import CallerProtocolUnavailableError
+from base.agents.messages.chat_delivery import (
     ChatInboundReceipt,
     insert_chat_inbound_once,
     reconcile_chat_inbound,
 )
-from shared.agents.messages.inbound_provenance import InboundProvenance
-from shared.db import publish_inbound_wake
-from shared.events.live.announce import publish_agent_updated_sync
-from shared.log import logger
+from base.agents.messages.inbound_provenance import InboundProvenance
+from base.db import publish_inbound_wake
+from base.events.live.announce import publish_agent_updated_sync
+from base.log import logger
+from ops import lifecycle as _ops
+from ops.agents import get_agent_status
 
 # Strong references for fire-and-forget publishes: asyncio's event loop holds
 # only a WEAK reference to tasks, so an unreferenced task can be garbage

@@ -59,11 +59,11 @@ from agent.turn.progress import (
     turn_progress_age_s,
     turn_progress_snapshot,
 )
+from base.agents.observation.db_wait import database_wait_snapshot
+from base.deploy.maintenance import admission
+from base.deploy.stop_timing import CANCEL_UNWIND_TIMEOUT_S, CLOCK_READ_TIMEOUT_S
+from base.log import logger
 from services.agent_host.runtime import _active_turn_config_fingerprint
-from shared.agents.observation.db_wait import database_wait_snapshot
-from shared.deploy.maintenance import admission
-from shared.deploy.stop_timing import CANCEL_UNWIND_TIMEOUT_S, CLOCK_READ_TIMEOUT_S
-from shared.log import logger
 
 # The pattern one subscription covers: every agent's inbound channel. Kept
 # derived from `inbound_channel` (via the shared prefix) so the publish side
@@ -570,8 +570,8 @@ class InboundWakeDispatcher:
         its own failures leave a healthy subscription alone and retry with
         bounded backoff. This shared scan supplies durable recovery for all agents.
         """
-        from shared.cluster import redis_channel_prefix
-        from shared.events.live.redis_client import open_async_redis, retry_auth_failures_async
+        from base.cluster import redis_channel_prefix
+        from base.events.live.redis_client import open_async_redis, retry_auth_failures_async
 
         pattern = f"{redis_channel_prefix()}{_INBOUND_PATTERN_SUFFIX}"
         while True:

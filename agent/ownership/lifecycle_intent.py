@@ -15,11 +15,11 @@ from psycopg.pq import TransactionStatus
 from psycopg.types.json import Jsonb
 
 from agent.ownership.inbound import lock_inbound_owner
-from shared.agents.incarnation.lifecycle_acceptance import (
+from base.agents.incarnation.lifecycle_acceptance import (
     LifecycleIntent,
     accept_lifecycle_command_async,
 )
-from shared.native_process.runtime_incarnation import RuntimeIncarnation, current_incarnation
+from base.native_process.runtime_incarnation import RuntimeIncarnation, current_incarnation
 
 _OBSERVE_RESTART = (
     "UPDATE inbound_messages i SET observed_at=clock_timestamp(),status='done', "

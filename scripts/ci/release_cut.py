@@ -61,7 +61,7 @@ from pathlib import Path
 from typing import Any
 
 # Dated three-segment tag: v<major>.<minor>.<patch>-<YYYYMMDD>[-HHMM]
-from shared.deploy.release.tags import _TAG, pick_latest_tag
+from base.deploy.release.tags import _TAG, pick_latest_tag
 
 _SEED = (0, 8, 0)  # first dated release when no prior dated tag exists
 
@@ -113,7 +113,7 @@ def _staging_gate(target: str) -> None:
 def _latest_dated() -> tuple[str, tuple[int, int, int], date, str | None] | None:
     """Highest dated version: (tag_name, version, calendar_day, hhmm_or_None).
 
-    Selection rule lives in `shared.deploy.release.tags.pick_latest_tag`: highest
+    Selection rule lives in `base.deploy.release.tags.pick_latest_tag`: highest
     version wins; on equal versions the later HHMM wins; a tag without HHMM is
     earliest on its day.
     """

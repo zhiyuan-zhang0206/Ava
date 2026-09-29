@@ -65,10 +65,10 @@ import psutil
 from dotenv import dotenv_values
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, ValidationError, model_validator
 
+from base import cluster
+from base.host.env.port_block import LEGACY_AVA_PORTS, PORT_OFFSETS
 from cli.cutover_hold import ADOPTION_JOURNAL, legacy_hold_facts
 from scripts.cutover_legacy_jobs import Host, Jobs, discover
-from shared import cluster
-from shared.host.env.port_block import LEGACY_AVA_PORTS, PORT_OFFSETS
 
 VERSION = 1
 ARCHIVE = "cutover-rollback"
@@ -121,7 +121,7 @@ _AVA_NAMES = frozenset(
     {"postgres", "redis-server", "pgbouncer", "otelcol", "otelcol-contrib", "loki"}
     | {"prometheus", "grafana", "grafana-server"}
 )
-_AVA_TOKENS = ("services.", "shared.sessions", "cli.main", "ava-root", "ava_root")
+_AVA_TOKENS = ("services.", "base.sessions", "cli.main", "ava-root", "ava_root")
 _CRYPTEX = ("/System/Cryptexes/", "/var/run/com.apple.security.cryptexd/")
 _SECRET_WORDS = ("pass", "secret", "token", "key")
 
@@ -195,8 +195,8 @@ def read_journal(home: Path) -> dict[str, Any] | None:
     """The adoption journal; None before the first `--execute`. Refuses one whose
     completed `intent` step no longer has its start intent: a rollback (R0, R1)
     undid that adoption, and a retry must not read the home as adopted."""
+    from base.deploy.release.verified_file import regular_bytes
     from cli.start_identity import INTENT_NAME
-    from shared.deploy.release.verified_file import regular_bytes
 
     path = home / ADOPTION_JOURNAL
     try:
@@ -359,7 +359,7 @@ def env_changes(facts: Facts, inputs: Inputs) -> tuple[list[str], dict[str, str]
 
 
 def dead_keys_are_dead() -> None:
-    from shared.host.env.config_lite_table import FIELD_ALIASES
+    from base.host.env.config_lite_table import FIELD_ALIASES
 
     alive = set(DEAD_KEYS) & set(FIELD_ALIASES.values())
     if alive:
@@ -610,7 +610,7 @@ def row_verdict(pid: int, birth: float, boot: float, platform: str = sys.platfor
     before this boot, or a different macOS kernel start time: a reused pid), or
     left `unknown`: a Linux reading moves with wall-clock steps.
     """
-    from shared.native_process.ownership import stable_create_time
+    from base.native_process.ownership import stable_create_time
 
     try:
         live = stable_create_time(psutil.Process(pid))

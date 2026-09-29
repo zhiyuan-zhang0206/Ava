@@ -7,8 +7,8 @@ with `__description__` documenting its purpose.
 import pytest
 
 from agent.hooks import BUILTIN_PLUGINS
-from shared.packages.plugins.enable_config import parse_description
-from shared.paths import repo_plugins_dir
+from base.packages.plugins.enable_config import parse_description
+from base.paths import repo_plugins_dir
 
 
 def test_builtin_plugins_is_tuple_of_str():

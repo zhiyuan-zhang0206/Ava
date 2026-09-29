@@ -19,6 +19,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from types import FrameType
 
+from base.native_process.root_control.ipc import (
+    ErrorCode,
+    RequestPayload,
+    ResponsePayload,
+    Verb,
+    error_response,
+    ok_response,
+)
 from services.ava_root.manifest import ManifestError, load_manifests
 from services.ava_root.server import ControlServer
 from services.ava_root.singleton import (
@@ -34,14 +42,6 @@ from services.ava_root.wiring import (
     load_wiring,
     start_participants,
     stop_participants,
-)
-from shared.native_process.root_control.ipc import (
-    ErrorCode,
-    RequestPayload,
-    ResponsePayload,
-    Verb,
-    error_response,
-    ok_response,
 )
 
 _log = logging.getLogger("ava_root")

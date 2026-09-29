@@ -15,12 +15,12 @@ import psutil
 import pytest
 from pydantic import JsonValue
 
+from base.deploy.release.runtime_release import VerifiedRelease
+from base.native_process.ownership import OwnedProcess
 from cli.release_fleet.request import FleetRequest
 from cli.release_transition import journal, native
 from cli.release_transition import launcher_linux as linux
 from cli.release_transition.request import ReleaseRef
-from shared.deploy.release.runtime_release import VerifiedRelease
-from shared.native_process.ownership import OwnedProcess
 from tests.lifecycle.transition.phases import advance_to
 
 _NATIVE_OWNER = linux._owner

@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from shared import telemetry
-from shared.telemetry.loki_index_labels import LOKI_QUERY_CONCURRENCY
-from shared.telemetry.loki_query_budget import (
+from base import telemetry
+from base.telemetry.loki_index_labels import LOKI_QUERY_CONCURRENCY
+from base.telemetry.loki_query_budget import (
     BudgetErrorFactory,
     BudgetMetrics,
     BudgetObservation,

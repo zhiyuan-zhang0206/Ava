@@ -29,12 +29,12 @@ import platform
 import sys
 from pathlib import Path
 
+from base.api_contracts.release_handoff import read_envelope
 from cli.release_fleet.request import AdapterKind, UnitReceipt, UnitRequest, sql_inventory_digest
-from shared.api_contracts.release_handoff import read_envelope
 
 
 def _adapter() -> AdapterKind:
-    from shared.host.system.boot_unit import systemd_running
+    from base.host.system.boot_unit import systemd_running
 
     if systemd_running():
         return "linux-systemd-v1"
@@ -44,13 +44,13 @@ def _adapter() -> AdapterKind:
 
 
 def receipt(encoded: bytes) -> UnitReceipt:
+    from base.cluster import registry_path
+    from base.cluster.authority.unit import load_unit_enrollment
+    from base.cluster.machine import machine_name, machine_role
+    from base.deploy.release.start_inputs import configuration_digest
+    from base.runtime_abi import current_abi
     from cli.release_operator.current import current_release
     from cli.release_transition.request import ReleaseRef
-    from shared.cluster import registry_path
-    from shared.cluster.authority.unit import load_unit_enrollment
-    from shared.cluster.machine import machine_name, machine_role
-    from shared.deploy.release.start_inputs import configuration_digest
-    from shared.runtime_abi import current_abi
 
     envelope = read_envelope(encoded)
     home = Path(envelope.home)
@@ -77,11 +77,11 @@ def receipt(encoded: bytes) -> UnitReceipt:
 
 
 def preflight(encoded: bytes) -> dict[str, object]:
+    from base.cluster.authority.unit import load_unit_enrollment
+    from base.deploy.release.runtime_release import current_pointer
+    from base.deploy.release.verified_file import regular_bytes
     from cli.release_transition.journal import read_operation, read_request
     from cli.release_transition.local import LocalTransition
-    from shared.cluster.authority.unit import load_unit_enrollment
-    from shared.deploy.release.runtime_release import current_pointer
-    from shared.deploy.release.verified_file import regular_bytes
 
     request = read_request(encoded)
     if not isinstance(request, UnitRequest):

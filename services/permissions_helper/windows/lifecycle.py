@@ -18,7 +18,7 @@ import subprocess
 import time
 from pathlib import Path
 
-from shared.log import logger
+from base.log import logger
 
 _WINDOWS_DIR = Path(__file__).resolve().parent
 _SOURCE = _WINDOWS_DIR / "helper.cs"
@@ -185,7 +185,7 @@ def register_and_launch(exe: Path) -> None:
             raise RuntimeError(
                 f"schtasks /Create failed ({proc.returncode}): {proc.stderr.decode(errors='replace').strip()}"
             )
-    from shared.sessions.windows.logon_session import active_console_session_id
+    from base.sessions.windows.logon_session import active_console_session_id
 
     if active_console_session_id() is None:
         # Nobody is logged on interactively: an /IT task has no session to run
@@ -203,7 +203,7 @@ def register_and_launch(exe: Path) -> None:
 
 def converge() -> None:
     """Idempotent full bring-up: build + register + launch. Raises on failure."""
-    from shared.paths import run_dir
+    from base.paths import run_dir
 
     exe, _ = build(run_dir() / "permissions-helper")
     register_and_launch(exe)

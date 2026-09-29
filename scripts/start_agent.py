@@ -23,8 +23,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from shared.cluster.machine import gateway_api_base, gateway_auth_headers
-from shared.host.net.http_dial import post as dial_post
+from base.cluster.machine import gateway_api_base, gateway_auth_headers
+from base.host.net.http_dial import post as dial_post
 
 
 def main() -> None:

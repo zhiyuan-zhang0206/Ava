@@ -5,7 +5,7 @@ every cluster (including the prod default home) runs its own Postgres+Redis inst
 under its `$AVA_HOME`; the shared-instance + logical-isolation model and
 `cli/commands/_compose.py` are gone. Slice 3 (bundling the binaries so there is no
 brew/apt dependency) is **half done**: Postgres is vendored
-(`shared/cluster/dataplane/runtime_binaries.py`), redis is not. That remaining leg lives entirely in
+(`base/cluster/dataplane/runtime_binaries.py`), redis is not. That remaining leg lives entirely in
 [`vendored-data-plane-binaries.md`](vendored-data-plane-binaries.md) — this doc does
 not re-describe it.
 
@@ -57,7 +57,7 @@ across the machines on hand is simpler than engineering shared-instance isolatio
 
 The shared instance is gone, so every discriminator that existed to tell two
 clusters apart *inside one instance* is unnecessary. The bulk is in
-`cli/commands/_compose.py` and `shared/cluster/`:
+`cli/commands/_compose.py` and `base/cluster/`:
 
 - **Redis logical-DB index allocation + channel prefix** (`redis_db_index`,
   `redis_prefix`, `allocate_redis_index`, `redis_channel_prefix`,
@@ -72,7 +72,7 @@ clusters apart *inside one instance* is unnecessary. The bulk is in
   carried was retired 2026-09-20). Each instance
   `initdb`s its own superuser; a NOLOGIN owner role owns the db, and processes
   dial write-generation logins over SCRAM
-  ([authority](../../shared/cluster/authority/authority.ava.okf.md)).
+  ([authority](../../base/cluster/authority/authority.ava.okf.md)).
 - **Shared-instance foreign/neighbour probes** — `_shared_infra_running`,
   `_foreign_redis_error`, `_redis_listening`. A per-cluster instance on its own
   port with its own data dir under `$AVA_HOME` is unambiguously this cluster's;

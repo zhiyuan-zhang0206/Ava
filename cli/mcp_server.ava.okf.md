@@ -46,7 +46,7 @@ Search matches a label substring or exact agent ID, and each call reads at most
 argument of each turn. Ava agents act by writing Python, so dropping the code
 would show an agent that talks and never acts.
 The projection, common server instructions, and seven tool descriptions live in
-`shared/api_contracts/mcp_tool_contract.py`; stdio adds its cluster-specific
+`base/api_contracts/mcp_tool_contract.py`; stdio adds its cluster-specific
 instruction ending. Tool schemas still come from the local function signatures.
 
 ## Invariants
@@ -54,7 +54,7 @@ instruction ending. Tool schemas still come from the local function signatures.
 - **No control logic, no state.** Every tool is an authenticated gateway call
   the web UI already makes, so an MCP client can do exactly what a browser can
   and nothing more. New capability belongs on a gateway route first.
-- **Identity is not a parameter.** `shared.cluster.machine.gateway_api_base` +
+- **Identity is not a parameter.** `base.cluster.machine.gateway_api_base` +
   `gateway_auth_headers` resolve the gateway and bearer of the checkout
   the running `ava` belongs to — the same checkout-anchored rule as every CLI
   verb, so a bare `ava` serves the cluster `$AVA_HOME` names and a worktree's
@@ -62,7 +62,7 @@ instruction ending. Tool schemas still come from the local function signatures.
   get wrong.
 - **stdout is the wire.** Under stdio transport a stray `print()` corrupts the
   JSON-RPC stream. The mcp SDK logs through a stderr `RichHandler` and
-  `shared.log` adds only stderr sinks, which is what makes this path safe.
+  `base.log` adds only stderr sinks, which is what makes this path safe.
 - **Provenance is explicit.** Spawns carry `spawner="mcp"`, so fleet views group
   externally created agents on their own root; prompts and messages carry
   envelope source `user`, since an MCP client acts for the human driving it.

@@ -91,7 +91,7 @@ def test_bullet_glued_after_wikilink_blocks(tmp_path, monkeypatch, capsys):
 
 def test_bullet_glued_after_plain_word_blocks(tmp_path, monkeypatch, capsys):
     """No wikilink involved — a bullet fused directly onto the end of the
-    previous bullet's last word, the shared/shared.ava.okf.md shape found by
+    previous bullet's last word, the base/base.ava.okf.md shape found by
     the tree-wide sweep."""
     _node(
         tmp_path,

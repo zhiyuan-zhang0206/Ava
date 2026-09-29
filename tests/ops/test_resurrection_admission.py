@@ -14,27 +14,27 @@ from psycopg_pool import AsyncConnectionPool, ConnectionPool
 
 from agent.db import claim_inbound_batch
 from agent.ownership.hosted import admit_hosted_runtime, apply_hosted_lifecycle
+from base.agents import AgentStatus, ResurrectError, ResurrectRefused
+from base.agents.incarnation.predecessor_closure import ClosureEvidence, close_retired_predecessor
+from base.agents.incarnation.resources import (
+    IncarnationResources,
+    ResourceBirth,
+    decode_resources,
+)
+from base.cluster.machine import machine_name
+from base.config import settings
+from base.db import PG_KEEPALIVE_KWARGS, insert_inbound_message
+from base.deploy.maintenance import cohort, pause_owner
+from base.deploy.maintenance.straggler_reap import settle_stranded_reaps
+from base.native_process.runtime_incarnation import RuntimeIncarnation
+from base.native_process.turn_identity import bind_turn_identity
 from ops import lifecycle
 from ops.agents import wake
 from ops.agents.resurrection_retry import ResurrectSettlementDeferredError
 from ops.agents.spawn import create_agent_row
 from ops.cluster_rpc import ClusterOpFailed, ClusterOpUnreachable
 from ops.lifecycle import termination
-from shared.agents import AgentStatus, ResurrectError, ResurrectRefused
-from shared.agents.incarnation.predecessor_closure import ClosureEvidence, close_retired_predecessor
-from shared.agents.incarnation.resources import (
-    IncarnationResources,
-    ResourceBirth,
-    decode_resources,
-)
-from shared.cluster.machine import machine_name
-from shared.config import settings
-from shared.db import PG_KEEPALIVE_KWARGS, insert_inbound_message
-from shared.deploy.maintenance import cohort, pause_owner
-from shared.deploy.maintenance.straggler_reap import settle_stranded_reaps
-from shared.native_process.runtime_incarnation import RuntimeIncarnation
-from shared.native_process.turn_identity import bind_turn_identity
-from tests.shared.test_predecessor_closure import _retired
+from tests.base.test_predecessor_closure import _retired
 
 
 @pytest.fixture(autouse=True)

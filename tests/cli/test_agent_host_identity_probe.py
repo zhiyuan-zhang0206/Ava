@@ -8,10 +8,10 @@ from uuid import uuid4
 
 import pytest
 
+from base.config import settings
+from base.daemon.health import start_health_server, stop_health_server
 from ops.agent_pause.probe import host_identity
 from services.agent_host.daemon import _stats_route
-from shared.config import settings
-from shared.daemon.health import start_health_server, stop_health_server
 
 
 async def test_actual_stats_route_matches_configured_port_home_pid_and_owner(

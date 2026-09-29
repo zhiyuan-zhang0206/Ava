@@ -86,7 +86,7 @@ def stub_remote_probe(
     """
     from datetime import datetime
 
-    from shared.api_contracts.status import MachineStatus
+    from base.api_contracts.status import MachineStatus
 
     results = _RemoteProbeResults()
 
@@ -379,7 +379,7 @@ class TestProbeAgentRunner:
         it offline while /healthz answered in ~15ms)."""
         from datetime import UTC, datetime
 
-        from shared.config import settings
+        from base.config import settings
 
         monkeypatch.setattr(settings.gateway, "status_probe_timeout_seconds", 11.0)
         seen: dict[str, object] = {}
@@ -435,7 +435,7 @@ class TestProbeAgentRunner:
         timeout window."""
         from datetime import UTC, datetime
 
-        from shared.config import settings
+        from base.config import settings
 
         monkeypatch.setattr(settings.gateway, "status_probe_timeout_seconds", 0.01)
         cancelled = asyncio.Event()
@@ -606,7 +606,7 @@ class TestProbeBackoff:
     def test_window_base_is_config(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """The first re-probe gap follows the configured base (task #3507 lifted
         the schedule literals into config)."""
-        from shared.config import settings
+        from base.config import settings
 
         monkeypatch.setattr(settings.gateway, "status_probe_backoff_base_seconds", 2.0)
         now = roster_probe.time.monotonic()
@@ -619,7 +619,7 @@ class TestProbeBackoff:
     def test_window_cap_is_config(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """The window ceiling follows the configured cap (task #3507 lifted the
         schedule literals into config)."""
-        from shared.config import settings
+        from base.config import settings
 
         monkeypatch.setattr(settings.gateway, "status_probe_backoff_cap_seconds", 10.0)
         now = roster_probe.time.monotonic()
@@ -694,7 +694,7 @@ class TestFastFailBudget:
     the full anti-false-offline budget."""
 
     def test_budget_selection_is_state_driven(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        from shared.config import settings
+        from base.config import settings
 
         monkeypatch.setattr(settings.gateway, "status_probe_timeout_seconds", 11.0)
         monkeypatch.setattr(settings.gateway, "status_probe_fastfail_timeout_seconds", 2.0)
@@ -710,7 +710,7 @@ class TestFastFailBudget:
         anti-jitter margin, task #1200)."""
         from datetime import UTC, datetime
 
-        from shared.config import settings
+        from base.config import settings
 
         monkeypatch.setattr(settings.gateway, "status_probe_timeout_seconds", 11.0)
         monkeypatch.setattr(settings.gateway, "status_probe_fastfail_timeout_seconds", 2.0)
@@ -740,7 +740,7 @@ class TestFastFailBudget:
         fast-fail one — the anti-false-offline margin survives the change."""
         from datetime import UTC, datetime
 
-        from shared.config import settings
+        from base.config import settings
 
         monkeypatch.setattr(settings.gateway, "status_probe_timeout_seconds", 0.05)
         monkeypatch.setattr(settings.gateway, "status_probe_fastfail_timeout_seconds", 0.005)
@@ -837,7 +837,7 @@ class TestDetachedRecoveryDial:
         next read dials fresh as a first contact — full budget, and online."""
         from datetime import UTC, datetime
 
-        from shared.config import settings
+        from base.config import settings
 
         monkeypatch.setattr(settings.gateway, "status_probe_timeout_seconds", 7.0)
         monkeypatch.setattr(settings.gateway, "status_probe_fastfail_timeout_seconds", 0.5)
@@ -934,8 +934,8 @@ class TestDetachedRecoveryDial:
         (d) a landed failure renews the window per min(5 * 2**n, cap)."""
         from datetime import UTC, datetime
 
+        from base.config import settings
         from ops import cluster_rpc as rpc
-        from shared.config import settings
 
         monkeypatch.setattr(settings.gateway, "status_probe_timeout_seconds", 0.05)
         monkeypatch.setattr(settings.gateway, "status_probe_fastfail_timeout_seconds", 0.05)
@@ -1036,7 +1036,7 @@ class TestDetachedRecoveryDial:
         fast-fail budget inline."""
         from datetime import UTC, datetime
 
-        from shared.config import settings
+        from base.config import settings
 
         monkeypatch.setattr(settings.gateway, "status_probe_timeout_seconds", 1.0)
         monkeypatch.setattr(settings.gateway, "status_probe_fastfail_timeout_seconds", 0.4)
@@ -1153,7 +1153,7 @@ class TestPanelCarriesNoFrozenPin:
         def _forbidden(**_kw: object) -> str:
             raise AssertionError("the status panel must not read the retired pin")
 
-        monkeypatch.setattr("shared.deploy.state.cluster_pin.get_cluster_target_sha", _forbidden)
+        monkeypatch.setattr("base.deploy.state.cluster_pin.get_cluster_target_sha", _forbidden)
         monkeypatch.setattr(status_router, "prod_source_head_sha", lambda: "abc1234")
         with db_conn.cursor() as cur:
             panel = status_router._get_cluster_status(cur)

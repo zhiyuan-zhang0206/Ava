@@ -461,7 +461,7 @@ def test_child_lifecycle_envelope(tmp_path: Path) -> None:
     """A `LifecycleExit` raised by agent code becomes a lifecycle outcome with
     the class name — the parent reconstructs the exception from it."""
     proc, _request, result = _spawn(
-        tmp_path, "from shared.agents.lifecycle import AgentRestart\nraise AgentRestart()"
+        tmp_path, "from base.agents.lifecycle import AgentRestart\nraise AgentRestart()"
     )
     assert proc.returncode == 0
     payload = read_result(result)
@@ -599,7 +599,7 @@ def test_child_applies_overlay_framework_and_pops_env(tmp_path: Path) -> None:
     proc, _request, result = _spawn(
         tmp_path,
         (
-            "from shared.config import settings\n"
+            "from base.config import settings\n"
             "print(settings.lm.llm_model)\n"
             "print(settings.lm.llm_stream_ttft_timeout_seconds)\n"
             "import os\nprint(os.environ.get('AVA_AGENT_CONFIG_OVERLAY', 'GONE'))\n"
@@ -761,8 +761,8 @@ def test_child_help_hides_attach_for_withdrawn_model(
         tmp_path,
         "import ava, io, contextlib\n"
         "from dataclasses import replace\n"
-        "from shared.lm.plugin_providers import ensure_provider_plugins_loaded\n"
-        "from shared.lm.registry import MODELS\n"
+        "from base.lm.plugin_providers import ensure_provider_plugins_loaded\n"
+        "from base.lm.registry import MODELS\n"
         "ensure_provider_plugins_loaded()\n"
         "MODELS['deepseek-vision-fixture'] = replace(MODELS['deepseek-flash'], "
         "spawnable=False, unavailable_fallback='deepseek-flash', "

@@ -16,9 +16,9 @@ from urllib.parse import urlsplit
 
 import pytest
 
+from base import cluster
+from base.config import settings
 from scripts.data_plane_ops import rotate_data_plane_secrets as rotate
-from shared import cluster
-from shared.config import settings
 
 _OLD_REDIS_ADMIN = "old-redis-admin"
 _NEW_REDIS_ADMIN = "new-redis-admin"

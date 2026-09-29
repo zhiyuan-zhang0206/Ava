@@ -38,8 +38,8 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from shared.cluster import home_slug
-from shared.native_process.os_platform import file_lock
+from base.cluster import home_slug
+from base.native_process.os_platform import file_lock
 
 CAPABILITIES = ("gateway", "agent-runner", "observability-station")
 LGTM_BACKENDS = ("loki", "prometheus", "grafana")
@@ -94,7 +94,7 @@ class Host:
 
     @classmethod
     def current(cls) -> Host:
-        from shared.native_process.os_platform import user_systemd_unit_dir
+        from base.native_process.os_platform import user_systemd_unit_dir
 
         linux = sys.platform.startswith("linux")
         return cls(
@@ -372,7 +372,7 @@ def discover(home: Path, host: Host) -> Jobs:
 
 
 def _move(source: Path, destination: Path) -> None:
-    from shared.host.private_storage import ensure_private_dir
+    from base.host.private_storage import ensure_private_dir
 
     if not source.exists():
         return
@@ -392,7 +392,7 @@ def retire_launchd(host: Host, job: LaunchdJob, archive: Path) -> None:
 
 def remove_cron_lines(host: Host, lines: tuple[str, ...], archive: Path) -> int:
     """Remove exactly `lines` (whole-line equality) under the crontab lock."""
-    from shared.host.private_storage import ensure_private_dir, write_private_bytes
+    from base.host.private_storage import ensure_private_dir, write_private_bytes
 
     with file_lock(host.crontab_lock):
         content, error = read_crontab(host)
@@ -425,7 +425,7 @@ def retire_unit(host: Host, unit: SystemdUnit, archive: Path) -> None:
     without lingering, fails loudly before the file moves). Once the unit file
     is gone a re-run only reloads the manager: the retirement already ran.
     """
-    from shared.host.private_storage import ensure_private_dir, write_private_bytes
+    from base.host.private_storage import ensure_private_dir, write_private_bytes
 
     path = Path(unit.path)
     if unit.scope == "user":

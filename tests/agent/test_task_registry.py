@@ -22,7 +22,7 @@ import pytest
 import ava
 import ava.agent_identity
 from ava_builtins.plugins.ava_fleet import task_registry
-from shared.events.live import announce
+from base.events.live import announce
 
 
 def _seed_agent(db: psycopg.Connection, *, status: str = "running", spawner: str = "test") -> int:
@@ -529,7 +529,7 @@ def test_log_stamps_in_the_cluster_timezone(
     machine's local timezone. A fleet spans machines and one task's notes are
     appended by several of them, so host-local stamps put unmarked, mutually
     inconsistent wall clocks in one column of text."""
-    from shared.config import settings
+    from base.config import settings
 
     agent_id = _seed_agent(db_conn)
     original = ava.agent_identity._agent_id

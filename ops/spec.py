@@ -16,7 +16,7 @@ own ``ServiceSpec.gate`` keeps cluster-level enablement out of ``_gate_reason``.
 The fleet task daemon follows this path; see
 ``decisions/2026-07-19-plugin-registered-services.md``.
 
-Layer: the ``ops`` module family imports ``shared``, plus lazy function-local
+Layer: the ``ops`` module family imports ``base``, plus lazy function-local
 reaches into the shared-tier browser identity probe and gate app-port source.
 Nothing reaches up into cli/gateway, so start, root monitoring, and ``ava status``
 share one roster.
@@ -40,25 +40,25 @@ from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from ops.roster.service_spec import (
-    ServiceSpec as ServiceSpec,  # re-export: generated plugin fixtures
-)
-from shared.cluster.machine import MachineRoles
-from shared.config import settings
-from shared.host.system.probes import (
+from base.cluster.machine import MachineRoles
+from base.config import settings
+from base.host.system.probes import (
     browser_incapability,
     browser_mcp_incapability,
     permissions_helper_incapability,
     unix_sockets_available,
 )
-from shared.log import logger
-from shared.native_process.os_platform import IS_WINDOWS
-from shared.telemetry.observability import collector_allowed_for_home, gateway_observability_home
+from base.log import logger
+from base.native_process.os_platform import IS_WINDOWS
+from base.telemetry.observability import collector_allowed_for_home, gateway_observability_home
+from ops.roster.service_spec import (
+    ServiceSpec as ServiceSpec,  # re-export: generated plugin fixtures
+)
 
 
 def _bind_runtime_command(spec: ServiceSpec) -> ServiceSpec:
     """Bind Python services to the loaded runtime without changing their gates."""
-    from shared.deploy.release.runtime_interpreter import WHEEL_RUNTIME, runtime_python
+    from base.deploy.release.runtime_interpreter import WHEEL_RUNTIME, runtime_python
 
     prefix = ".venv/bin/python "
     if not WHEEL_RUNTIME or not spec.cmd.startswith(prefix):
@@ -71,7 +71,7 @@ def _bind_runtime_command(spec: ServiceSpec) -> ServiceSpec:
 def plugin_services() -> tuple[ServiceSpec, ...]:
     """The services contributed by the plugins PRESENT on this machine.
 
-    Discovery, not import-of-known-plugins: `shared.packages.plugins.enable_config` enumerates the
+    Discovery, not import-of-known-plugins: `base.packages.plugins.enable_config` enumerates the
     plugins installed on THIS machine (builtin + external), and each that ships a
     ``services.py`` exposing ``services() -> tuple[ServiceSpec, ...]`` gets folded
     into the roster. This keeps the direction "plugin declares, ops discovers" — no
@@ -87,7 +87,7 @@ def plugin_services() -> tuple[ServiceSpec, ...]:
     follow, since they derive from `build_services()`.
 
     The ``services.py`` module is loaded by FILE PATH (like
-    `shared.packages.plugins.enable_config.update_all_disk_images` loads `default_config.py`) so an
+    `base.packages.plugins.enable_config.update_all_disk_images` loads `default_config.py`) so an
     external plugin under ``~/.ava/plugins/`` — off the ``plugins.`` package path —
     can register too; it must import only light deps (ops / shared), never its
     own `plugin.py`, so this load does not drag the agent kernel into the ops
@@ -96,13 +96,13 @@ def plugin_services() -> tuple[ServiceSpec, ...]:
     Fail-soft per plugin (user ruling 2026-09-11): a ``services.py`` that fails
     to load, a file without a ``services()`` function, or a ``services()`` call
     that raises is skipped with a loud report
-    (``shared.packages.plugins.load_report``) — one broken plugin must not block
+    (``base.packages.plugins.load_report``) — one broken plugin must not block
     `ava start` / the watchdog roster for every other plugin. The session-name
     collision guard stays fail-closed: no rule can pick a winner between two
     owners of one session name.
     """
-    from shared.packages.plugins import load_report
-    from shared.packages.plugins.enable_config import installed_plugin_dirs
+    from base.packages.plugins import load_report
+    from base.packages.plugins.enable_config import installed_plugin_dirs
 
     specs: list[ServiceSpec] = []
     for name, plugin_dir in sorted(installed_plugin_dirs().items()):

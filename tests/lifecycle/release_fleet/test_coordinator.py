@@ -18,6 +18,7 @@ from uuid import uuid4
 import psycopg
 import pytest
 
+from base.deploy.maintenance.state import MaintenanceHold
 from cli.release_fleet.policy import FleetPolicy
 from cli.release_fleet.request import FleetRequest
 from cli.release_transition import journal as journal_module
@@ -31,7 +32,6 @@ from cli.release_transition.journal import (
 )
 from cli.release_transition.local import LocalTransition
 from cli.release_transition.request import ReleaseRef
-from shared.deploy.maintenance.state import MaintenanceHold
 from tests.lifecycle.release_fleet.fakes import Clock, FakeLease, OffDutyGateway, drive
 from tests.lifecycle.transition.phases import advance_to, journal_fence, journal_issue
 
@@ -588,10 +588,10 @@ def test_a_lost_lease_holds_instead_of_acting_on_a_cluster_it_no_longer_owns(
 def test_quiescing_rechecks_predecessor_after_readonly_preflights_before_any_disruption(
     request_record: FleetRequest, monkeypatch: pytest.MonkeyPatch, *, changed: bool
 ) -> None:
+    from base.deploy.maintenance import admission
+    from base.deploy.release.runtime_release import VerifiedRelease
     from cli.release_transition import root_service
     from ops import agent_pause
-    from shared.deploy.maintenance import admission
-    from shared.deploy.release.runtime_release import VerifiedRelease
 
     create(request_record)
     home = Path(request_record.home)
@@ -665,12 +665,12 @@ def test_resuming_reobserves_selected_root_before_admission_or_completion(
     pause_status: str,
     healthy: bool,
 ) -> None:
+    from base.deploy.lifecycle import start_serving
+    from base.deploy.maintenance import admission, pause_owner
+    from base.deploy.release.runtime_release import VerifiedRelease
+    from base.deploy.release.start_inputs import configuration_digest
     from cli.commands.lifecycle import maintenance as maintenance_commands
     from cli.release_transition import root_service
-    from shared.deploy.lifecycle import start_serving
-    from shared.deploy.maintenance import admission, pause_owner
-    from shared.deploy.release.runtime_release import VerifiedRelease
-    from shared.deploy.release.start_inputs import configuration_digest
 
     home = Path(request_record.home)
     request = request_record.model_copy(update={"configuration_digest": configuration_digest(home)})

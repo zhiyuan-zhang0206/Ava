@@ -8,9 +8,9 @@ from unittest.mock import Mock
 
 import pytest
 
+from base.cluster.registry import ClusterRecord
+from base.daemon.health import DaemonProbe
 from services.ava_root_glue.diagnostic_probes import pgbouncer
-from shared.cluster.registry import ClusterRecord
-from shared.daemon.health import DaemonProbe
 
 
 @pytest.mark.parametrize(
@@ -20,10 +20,10 @@ from shared.daemon.health import DaemonProbe
 def test_pooler_protocol_requires_native_custody_and_both_listeners(
     monkeypatch: pytest.MonkeyPatch, loopback: bool, public: bool, expected: str
 ) -> None:
+    from base.cluster import ownership
     from cli.commands.data_plane import pgbouncer as pooler
     from services.ava_root_glue import diagnostic_probes
     from services.healthchecks import owned_service
-    from shared.cluster import ownership
 
     owner = object()
 
@@ -35,9 +35,9 @@ def test_pooler_protocol_requires_native_custody_and_both_listeners(
 
     admin = SimpleNamespace(password="pooler-admin-credential")  # noqa: S106 — test fixture
 
-    monkeypatch.setattr("shared.cluster.get_record", _fake_get_record)
-    monkeypatch.setattr("shared.cluster.record_pgbouncer_port", _fake_record_pgbouncer_port)
-    monkeypatch.setattr("shared.cluster.authority.read_pooler_admin", Mock(return_value=admin))
+    monkeypatch.setattr("base.cluster.get_record", _fake_get_record)
+    monkeypatch.setattr("base.cluster.record_pgbouncer_port", _fake_record_pgbouncer_port)
+    monkeypatch.setattr("base.cluster.authority.read_pooler_admin", Mock(return_value=admin))
     monkeypatch.setattr(ownership, "pooler", Mock(return_value=owner))
     monkeypatch.setattr(
         diagnostic_probes,
@@ -75,5 +75,5 @@ def test_unknown_pooler_registry_is_unavailable(monkeypatch: pytest.MonkeyPatch)
     def _fake_get_record(_home: Path) -> ClusterRecord | None:
         return None
 
-    monkeypatch.setattr("shared.cluster.get_record", _fake_get_record)
+    monkeypatch.setattr("base.cluster.get_record", _fake_get_record)
     assert pgbouncer().verdict.value == "unavailable"

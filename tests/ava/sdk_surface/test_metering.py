@@ -20,7 +20,7 @@ import pytest
 
 import ava
 from ava.sdk_surface import metering
-from shared.agents.sdk import telemetry as sdk_usage_telemetry
+from base.agents.sdk import telemetry as sdk_usage_telemetry
 
 
 def _spy_emit(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, dict[str, object], float | None]]:
@@ -132,14 +132,14 @@ def test_instrument_targets_does_not_evaluate_raising_dynamic_member(
     (CI / isolated $AVA_HOME / schedule runner). The walk resolves members statically, so
     it never force-evaluates them — otherwise install() crashes load_extensions in the
     child (rc=1)."""
-    import shared.cluster.machine
+    import base.cluster.machine
 
     def _raise() -> str:
-        raise shared.cluster.machine.MachineNameMissing("machine name not set")
+        raise base.cluster.machine.MachineNameMissing("machine name not set")
 
-    monkeypatch.setattr(shared.cluster.machine, "machine_name", _raise)
+    monkeypatch.setattr(base.cluster.machine, "machine_name", _raise)
     # sanity: normal attribute access really does raise under this condition
-    with pytest.raises(shared.cluster.machine.MachineNameMissing):
+    with pytest.raises(base.cluster.machine.MachineNameMissing):
         _ = ava.self.SELF_MACHINE_NAME
 
     fqs = {fq for _parent, _attr, fq in metering._instrument_targets()}
@@ -412,8 +412,8 @@ def test_plain_python_import_installs_sdk_events(tmp_path: Path) -> None:
     code = """
 import json, sys
 import ava
-from shared import telemetry
-from shared.agents.sdk import call_policy as sdk_call_policy
+from base import telemetry
+from base.agents.sdk import call_policy as sdk_call_policy
 sdk_call_policy.policy = sdk_call_policy.SamplingPolicy
 rows = []
 telemetry.emit = lambda *args, **kwargs: rows.append(kwargs)
@@ -441,8 +441,8 @@ def test_borrowed_identity_is_stamped_on_external_sdk_events(
     from typing import Any
 
     from ava import agent_identity
-    from shared import telemetry
-    from shared.agents.sdk import call_policy
+    from base import telemetry
+    from base.agents.sdk import call_policy
 
     rows: list[dict[str, Any]] = []
 
@@ -472,7 +472,7 @@ async def test_plugin_wrap_preserves_awaited_single_event(
     from collections.abc import Awaitable, Callable
 
     from ava.sdk_surface import wraps
-    from shared.packages.plugins.context import PluginContext
+    from base.packages.plugins.context import PluginContext
 
     calls = _spy_emit(monkeypatch)
     clock = [0.0]

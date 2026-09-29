@@ -18,9 +18,9 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import NotRequired, TypedDict, cast
 
-from shared.config import get_field
-from shared.host.system.backend import get_backend
-from shared.paths import repo_root
+from base.config import get_field
+from base.host.system.backend import get_backend
+from base.paths import repo_root
 
 
 class SetupValues(TypedDict):
@@ -151,8 +151,8 @@ def _resolve_capability(cap: _Capability, arg_value: bool | None) -> bool:  # no
     does the capability default to off. The arg is not written back (see the
     module docstring).
     """
-    from shared.cluster.machine import parse_serve_value
-    from shared.paths import ava_home
+    from base.cluster.machine import parse_serve_value
+    from base.paths import ava_home
 
     env_val: bool | None = get_field(cap.settings_attr)
     if env_val is not None:
@@ -173,7 +173,7 @@ def _resolve_setup_field(field: _SetupField, arg_value: str | None) -> str | Non
     The field's validator gates whichever source wins; an invalid value raises
     immediately. The arg is not written back (see the module docstring).
     """
-    from shared.paths import ava_home
+    from base.paths import ava_home
 
     env_val = get_field(field.name).strip()
     if env_val:

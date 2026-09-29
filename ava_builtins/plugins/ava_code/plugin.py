@@ -55,8 +55,8 @@ import ava
 import ava.files as _ava_files_mod
 import ava.skills as _ava_skills
 from ava.sdk_surface.validation import coerce_str
-from shared.config import settings
-from shared.log import logger
+from base.config import settings
+from base.log import logger
 
 from . import _code_namespace
 from ._walk import find_context_files_along_path, project_skill_roots

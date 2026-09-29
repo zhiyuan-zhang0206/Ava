@@ -12,6 +12,8 @@ from typing import Any, cast
 
 import pytest
 
+from base.native_process import native_boot_id
+from base.native_process.ownership import OwnedProcess
 from services.pitr.base_backup.manifest import BaseObject, CandidateManifest, WalRange
 from services.pitr.operation.custody import NativeProcess
 from services.pitr.restore import drill
@@ -26,8 +28,6 @@ from services.pitr.restore.drill import (
 from services.pitr.restore.manifest import RestoreObject
 from services.pitr.restore.postgres import SandboxPostgresIdentity
 from services.pitr.restore.proof import LivePostgresIdentity
-from shared.native_process import native_boot_id
-from shared.native_process.ownership import OwnedProcess
 
 _SCHEMA_SQL = Path(__file__).resolve().parents[2] / "db" / "schema.sql"
 

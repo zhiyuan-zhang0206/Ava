@@ -7,7 +7,7 @@ via pre-commit hook.
 
 ## Why
 
-The clock lattice (`shared/deploy/timing.py`) is the single authority for every timing
+The clock lattice (`base/deploy/timing.py`) is the single authority for every timing
 constant that must hold an ORDER relative to its neighbours — boot stall < launch
 confirm < boot budget < reap grace, NO_PROGRESS < LOCK_TTL, the lease TTLs, the
 controller scan cadence, the wedged derivation. The orderings are load-bearing:
@@ -26,13 +26,13 @@ A module-level constant whose name contains lattice vocabulary (`STALL`, `GRACE`
 `SETTLE_TTL`, `LAUNCH_CONFIRM`, `LEASE_TTL`, `LEASE_RENEW`, `SCAN_INTERVAL`,
 `REAP_INTERVAL`) must be one of:
 
-1. **Defined in a lattice family module** — `shared/deploy/timing.py`,
-   `shared/deploy/progress_timeout.py`, `shared/deploy/stop_timing.py`,
-   `shared/daemon/schedules/timing.py`, `shared/deploy/state/cluster_lock.py`.
+1. **Defined in a lattice family module** — `base/deploy/timing.py`,
+   `base/deploy/progress_timeout.py`, `base/deploy/stop_timing.py`,
+   `base/daemon/schedules/timing.py`, `base/deploy/state/cluster_lock.py`.
    These are the lattice's homes; registering a
    new clock there and in `CLOCKS` is the correct way to add one.
 2. **An alias of a registered clock** — the assignment's value is a bare
-   reference to a clock registered in `shared.deploy.timing.CLOCKS`
+   reference to a clock registered in `base.deploy.timing.CLOCKS`
    (e.g. `_ROLLOUT_STALL_TIMEOUT_S: float = NO_PROGRESS_TIMEOUT_S`). The value is
    still defined once; the alias is just a local name.
 3. **Explicitly exempt** in `_INDEPENDENT_CLOCKS` below — the constant is either
@@ -46,9 +46,9 @@ at module level in its file — an exemption for a deleted symbol would silently
 pre-approve whatever next takes that name.
 
 Scope: non-test code only (tests monkeypatch clocks smaller on purpose).
-Settings fields are class-body definitions in `shared/config/` and are the
+Settings fields are class-body definitions in `base/config/` and are the
 operator-overridable configuration authority, not module constants — they are not
-scanned, and `shared/deploy/timing.py` registers them by reference.
+scanned, and `base/deploy/timing.py` registers them by reference.
 
 Error format `file:line: <reason>` + non-zero exit.
 """
@@ -100,25 +100,25 @@ _LATTICE_TERMS = (
 )
 
 # The lattice family modules: lattice vocabulary may be DEFINED here (and only
-# here). `shared/deploy/state/cluster_lock.py` holds the deploy-lease clocks.
+# here). `base/deploy/state/cluster_lock.py` holds the deploy-lease clocks.
 _FAMILY_MODULES = (
-    "shared/deploy/timing.py",
-    "shared/deploy/progress_timeout.py",
-    "shared/deploy/stop_timing.py",
-    "shared/daemon/schedules/timing.py",
-    "shared/deploy/state/cluster_lock.py",
+    "base/deploy/timing.py",
+    "base/deploy/progress_timeout.py",
+    "base/deploy/stop_timing.py",
+    "base/daemon/schedules/timing.py",
+    "base/deploy/state/cluster_lock.py",
 )
 
 _CONST_NAME = re.compile(r"^_?[A-Z][A-Z0-9_]*$")
 
 
 # Registered clock names, for the alias rule (rule 2): the assignment's value must
-# be a bare reference to one of these. Read from `shared/deploy/timing.py` once, at
+# be a bare reference to one of these. Read from `base/deploy/timing.py` once, at
 # import, with a pure AST parse (no import of the app's settings stack), so the
 # lint runs anywhere the source tree is present — the same zero-dependency shape
 # as every other scripts/ lint.
 def _parse_registered_clocks() -> frozenset[str]:
-    tree = ast.parse((_REPO_ROOT / "shared" / "deploy" / "timing.py").read_text(encoding="utf-8"))
+    tree = ast.parse((_REPO_ROOT / "base" / "deploy" / "timing.py").read_text(encoding="utf-8"))
     names: set[str] = set()
     for node in tree.body:
         if not isinstance(node, (ast.Assign, ast.AnnAssign)):
@@ -148,11 +148,11 @@ def _registered_clock_names() -> frozenset[str]:
 # lattice neighbour. Every entry states which.
 _INDEPENDENT_CLOCKS: dict[tuple[str, str], str] = {
     (
-        "shared/deploy/maintenance/straggler_reap.py",
+        "base/deploy/maintenance/straggler_reap.py",
         "REAP_LIFECYCLE_OUTCOME",
     ): "the honest lifecycle_result outcome value for a reaped command, not a clock",
     (
-        "shared/deploy/maintenance/straggler_reap.py",
+        "base/deploy/maintenance/straggler_reap.py",
         "REAP_LIFECYCLE_REASON",
     ): "the lifecycle_result reason value for the update straggler reap, not a clock",
     (
@@ -160,24 +160,24 @@ _INDEPENDENT_CLOCKS: dict[tuple[str, str], str] = {
         "_STALL_GUARD_EXEMPT",
     ): "frozenset of exempt node kinds, not a clock",
     (
-        "shared/native_process/exec_domain.py",
+        "base/native_process/exec_domain.py",
         "KILL_GRACE_S",
     ): "independent: SIGINT/SIGTERM -> SIGKILL grace ladder for the exec child, no lattice neighbour",
     (
-        "shared/host/proc.py",
+        "base/host/proc.py",
         "_TERMINATE_GRACE_S",
     ): "independent: TERM->KILL ladder wait in the terminate step, no lattice neighbour",
     (
         "cli/release_transition/pitr/transition.py",
         "_TERMINAL_GRACE_S",
     ): "independent: HUP/TERM->KILL ladder wait for PITR terminal closure — same class as "
-    "shared/host/proc.py's TERM->KILL ladder wait, no lattice neighbour",
+    "base/host/proc.py's TERM->KILL ladder wait, no lattice neighbour",
     (
         "services/pitr/operation/custody.py",
         "TERMINATE_GRACE_S",
     ): "independent: the SIGTERM courtesy window for one backup/PITR operation worker to "
     "unwind its own private cleanup (key files, decrypted scratch) before the controller's "
-    "confirmed group closure; the same class as shared/host/proc.py's TERM->KILL ladder wait, "
+    "confirmed group closure; the same class as base/host/proc.py's TERM->KILL ladder wait, "
     "no lattice neighbour",
     (
         "services/pitr/restore/operation_runtime.py",
@@ -186,11 +186,11 @@ _INDEPENDENT_CLOCKS: dict[tuple[str, str], str] = {
     "for its bounded sandbox stop, residue scan and evidence write; an operator command "
     "outside every daemon stop budget, no lattice neighbour",
     (
-        "shared/host/proc.py",
+        "base/host/proc.py",
         "_REAP_TIMEOUT_S",
     ): "independent: single wait_procs bound when reaping a process tree, no lattice neighbour",
     (
-        "shared/sessions/pty/host.py",
+        "base/sessions/pty/host.py",
         "_REAP_POLL_S",
     ): "independent: waitpid poll after SIGKILL to collect the zombie, no lattice neighbour",
     (
@@ -200,19 +200,19 @@ _INDEPENDENT_CLOCKS: dict[tuple[str, str], str] = {
     "(decisions/2026-09-28-stop-escalates-to-sigkill.md); the stop's own deadline caps it "
     "and nothing orders against it, no lattice neighbour",
     (
-        "shared/events/live/redis_listener.py",
+        "base/events/live/redis_listener.py",
         "_CONSUME_ABANDON_GRACE",
     ): "independent: pubsub consume-abandon window, no lattice neighbour",
     (
-        "shared/events/contract.py",
+        "base/events/contract.py",
         "DELIVERY_STALLED_KEYS",
     ): "SQL key set for the delivery_stalled view, not a clock",
     (
-        "shared/events/contract.py",
+        "base/events/contract.py",
         "DELIVERY_POISONED_KEYS",
     ): "SQL key set for the delivery_poisoned view, not a clock",
     (
-        "shared/agents/incarnation/lifecycle_acceptance.py",
+        "base/agents/incarnation/lifecycle_acceptance.py",
         "SYSTEM_REAPED_CRASH_ROW",
     ): "SQL predicate constant for the corpse-reaper's crash-marked rows, not a clock",
     (
@@ -234,7 +234,7 @@ _INDEPENDENT_CLOCKS: dict[tuple[str, str], str] = {
     "the commit-time pointer->done fence, next to the absent-machine fence settle); "
     "nothing orders against it",
     (
-        "shared/daemon/schedules/watcher.py",
+        "base/daemon/schedules/watcher.py",
         "AT_SESSION_TTL_GRACE_SECONDS",
     ): "independent: the at-watcher session's post-fire reclamation window (wake delivery + "
     "exit-notice latency); the TTL reaper's poll cadence only delays the kill beyond it — "
@@ -276,7 +276,7 @@ def _scan_file(path: Path) -> list[str]:
                 continue
             errors.append(
                 f"{path}:{node.lineno}: {name} — lattice-vocabulary clock outside "
-                "the lattice family modules; define it in shared/deploy/timing.py (and "
+                "the lattice family modules; define it in base/deploy/timing.py (and "
                 "register it in CLOCKS) or make it an alias of a registered clock"
             )
     return errors

@@ -19,12 +19,12 @@ from contextlib import AbstractContextManager, contextmanager
 import psutil
 import pytest
 
-from shared.config import settings
-from shared.deploy.lifecycle import service_selection as ds
-from shared.native_process.ownership import OwnedProcess
-from shared.paths import run_dir
-from shared.sessions.backend import PtySessionBackend
-from shared.sessions.record import SessionRecord
+from base.config import settings
+from base.deploy.lifecycle import service_selection as ds
+from base.native_process.ownership import OwnedProcess
+from base.paths import run_dir
+from base.sessions.backend import PtySessionBackend
+from base.sessions.record import SessionRecord
 
 
 @pytest.fixture
@@ -42,7 +42,7 @@ def _installed_machine_identity(unit_home: pathlib.Path) -> Iterator[None]:
     unit, not a virgin one. Modules exercising the install paths opt in with
     `pytestmark = pytest.mark.usefixtures("_installed_machine_identity")`.
     """
-    from shared.cluster.machine import reset_identity
+    from base.cluster.machine import reset_identity
 
     (unit_home / "machine_name").write_text("unit-test-machine", encoding="utf-8")
     reset_identity()
@@ -70,7 +70,7 @@ def as_machine(
     Shared rather than copied because it is exactly the kind of helper whose
     subtle half (the cache reset) gets dropped in the copy.
     """
-    from shared.cluster.machine import reset_identity
+    from base.cluster.machine import reset_identity
 
     @contextmanager
     def _enter(home: pathlib.Path) -> Generator[pathlib.Path]:
@@ -101,7 +101,7 @@ def _isolate_disabled_services_marker(
     it: a `cmd_start(disabled_services=("restarter",))` left "restarter durably
     disabled" behind, and a later `unpause_local_cluster` test in the same worker
     early-returned — neither respawning the restarter nor raising (CI #1172/#1173
-    shard-5 flake, task #2177). Same redirection `tests/shared/test_disabled_services.py`
+    shard-5 flake, task #2177). Same redirection `tests/base/test_disabled_services.py`
     uses: the marker is per-unit durable state, so each test gets a fresh one.
     """
     monkeypatch.setattr(ds, "selection_path", lambda: tmp_path / "service-selection.json")
@@ -110,7 +110,7 @@ def _isolate_disabled_services_marker(
 @pytest.fixture(autouse=True)
 def _isolate_local_pause_journal(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """A failed stop intentionally retains its hold; it must not hold the next test."""
-    from shared.deploy.maintenance import pause_owner
+    from base.deploy.maintenance import pause_owner
 
     monkeypatch.setattr(pause_owner, "state_path", lambda: tmp_path / "pause-owner.json")
     monkeypatch.setattr(pause_owner, "lock_path", lambda: tmp_path / "pause-owner.lock")
@@ -130,7 +130,7 @@ def cli_log_sinks(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     def record(*, name: str) -> None:
         opened.append(name)
 
-    monkeypatch.setattr("shared.log.init_cli_process", record)
+    monkeypatch.setattr("base.log.init_cli_process", record)
     return opened
 
 

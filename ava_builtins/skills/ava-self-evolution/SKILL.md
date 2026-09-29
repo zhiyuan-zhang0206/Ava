@@ -86,7 +86,7 @@ where user modification concentrates. Sweep them too:
 ```python
 import json, subprocess
 from datetime import UTC, datetime, timedelta
-from shared.paths import ava_home, plugins_dir
+from base.paths import ava_home, plugins_dir
 home = ava_home()  # checkout-anchored $AVA_HOME — never a guessed ~/.ava
 cutoff = (datetime.now(UTC) - timedelta(days=1)).isoformat()
 reg = json.loads((home / "installed.json").read_text())  # install registry
@@ -254,7 +254,7 @@ is the Loki read path, and a 0-run dataset is an ALERT (exit 2), never
 "nothing to act on" — except a TEST- only window (QA review of PR #698), which exits 0.
 
 **Transcript completeness.** Each record's `transcript` is the checkpoint's
-complete read path (`load_checkpoint_messages_full`, `shared/agents/history/checkpoint.py`):
+complete read path (`load_checkpoint_messages_full`, `base/agents/history/checkpoint.py`):
 retained `compact_boundary` snapshots stitched with the latest segment,
 dropping only the repeated leading system prompt; summaries and session notes
 stay. "Complete" = full history since the compact-boundary retention rule

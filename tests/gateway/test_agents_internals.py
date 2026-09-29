@@ -14,7 +14,17 @@ import pytest
 from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool, ConnectionPool
 
-import shared.db
+import base.db
+from base.agents import (
+    AgentNotFound,
+    ForkCheckpointNotFound,
+    ResurrectAlreadyAlive,
+    ResurrectError,
+)
+from base.agents.messages.envelope import wrap_inbound
+from base.agents.observation.snapshot import select_one
+from base.cluster.machine import machine_name
+from base.config import settings
 from ops.agents import (
     create_agent_row,
     resurrect_agent,
@@ -22,16 +32,6 @@ from ops.agents import (
 )
 from ops.agents.wake import ResurrectTriggerStaleError
 from ops.lifecycle import _force_mark_terminated
-from shared.agents import (
-    AgentNotFound,
-    ForkCheckpointNotFound,
-    ResurrectAlreadyAlive,
-    ResurrectError,
-)
-from shared.agents.messages.envelope import wrap_inbound
-from shared.agents.observation.snapshot import select_one
-from shared.cluster.machine import machine_name
-from shared.config import settings
 
 
 def _test_pool() -> ConnectionPool:
@@ -71,8 +71,8 @@ def test_machine_pause_resolves_old_and_new_fingerprint_alerts(
 
     from psycopg.types.json import Jsonb
 
+    from base.telemetry.alerts import fingerprint
     from gateway.cluster.machine_pause import _resolve_machine_alerts_blocking
-    from shared.telemetry.alerts import fingerprint
 
     identity_labels = {"alertname": "machine offline", "machine": "away"}
     old_labels = {**identity_labels, "severity": "warning"}
@@ -133,7 +133,7 @@ def _spawn_agent(
         prompt=prompt,
         prompt_source=prompt_source,
     )
-    shared.db.publish_inbound_wake(agent_id, "0")
+    base.db.publish_inbound_wake(agent_id, "0")
     return agent_id
 
 
@@ -199,7 +199,7 @@ class TestSpawnAgent:
         passes config_overlay= to _launch_agent_process. Both sides must work for
         the per-agent model override to actually take effect at boot.
         """
-        from shared.config import settings
+        from base.config import settings
 
         new_id = _spawn_agent(spawner="user", config={"llm_model": "gpt-5.6-sol"})
 
@@ -217,8 +217,8 @@ class TestSpawnAgent:
     ) -> None:
         from dataclasses import replace
 
-        from shared.lm.plugin_providers import ensure_provider_plugins_loaded
-        from shared.lm.registry import MODELS
+        from base.lm.plugin_providers import ensure_provider_plugins_loaded
+        from base.lm.registry import MODELS
 
         ensure_provider_plugins_loaded()
         model = "deepseek-vision-fixture"
@@ -265,7 +265,7 @@ async def _settle_hosted_force(
     db: psycopg.Connection, pool: AsyncConnectionPool, agent_id: int
 ) -> None:
     """Complete this inactive fixture through its retained hosted owner."""
-    from shared.agents.incarnation.hosted_force import original_host_force
+    from base.agents.incarnation.hosted_force import original_host_force
 
     row = db.execute("SELECT runtime_owner FROM agents_meta WHERE id=%s", (agent_id,)).fetchone()
     assert row is not None
@@ -352,7 +352,7 @@ class TestResurrectAgent:
         with db_conn.cursor() as cur:
             cur.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (agent_id,))
         db_conn.commit()
-        trigger_id = shared.db.insert_inbound_message(
+        trigger_id = base.db.insert_inbound_message(
             db_conn, agent_id, "work before repeated force", source="user"
         )
         with _test_pool() as pool:
@@ -380,7 +380,7 @@ class TestResurrectAgent:
         with db_conn.cursor() as cur:
             cur.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (agent_id,))
         db_conn.commit()
-        trigger_id = shared.db.insert_inbound_message(
+        trigger_id = base.db.insert_inbound_message(
             db_conn, agent_id, "wake after first death", source="user"
         )
 
@@ -421,7 +421,7 @@ class TestResurrectAgent:
         with db_conn.cursor() as cur:
             cur.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (agent_id,))
         db_conn.commit()
-        trigger_id = shared.db.insert_inbound_message(
+        trigger_id = base.db.insert_inbound_message(
             db_conn, agent_id, "already handled", source="user"
         )
         with db_conn.cursor() as cur:
@@ -452,7 +452,7 @@ class TestResurrectAgent:
         with db_conn.cursor() as cur:
             cur.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (agent_id,))
         db_conn.commit()
-        trigger_id = shared.db.insert_inbound_message(
+        trigger_id = base.db.insert_inbound_message(
             db_conn, agent_id, "new work after death", source="user"
         )
         returned = resurrect_agent(
@@ -479,7 +479,7 @@ class TestResurrectAgent:
         with db_conn.cursor() as cur:
             cur.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (agent_id,))
         db_conn.commit()
-        compact_id = shared.db.insert_inbound_message(
+        compact_id = base.db.insert_inbound_message(
             db_conn,
             agent_id,
             "",
@@ -513,7 +513,7 @@ class TestResurrectAgent:
                 (agent_id,),
             )
         db_conn.commit()
-        trigger_id = shared.db.insert_inbound_message(
+        trigger_id = base.db.insert_inbound_message(
             db_conn, agent_id, "wake the terminated agent", source="user"
         )
 
@@ -544,7 +544,7 @@ class TestResurrectAgent:
         with db_conn.cursor() as cur:
             cur.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (agent_id,))
         db_conn.commit()
-        compact_id = shared.db.insert_inbound_message(
+        compact_id = base.db.insert_inbound_message(
             db_conn,
             agent_id,
             "",
@@ -588,7 +588,7 @@ class TestResurrectAgent:
         with db_conn.cursor() as cur:
             cur.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (agent_id,))
         db_conn.commit()
-        compact_id = shared.db.insert_inbound_message(
+        compact_id = base.db.insert_inbound_message(
             db_conn,
             agent_id,
             "",
@@ -948,7 +948,7 @@ class TestSpawnFork:
         """The fork checkpoint never terminates its own walk. Forking exactly at a boundary
         continues down to the next boundary below it — with no boundary below, the window is
         the full chain (the old cut-at-the-boundary window read back empty; the read-back
-        assertions live in tests/shared/test_delta_read_compat.py)."""
+        assertions live in tests/base/test_delta_read_compat.py)."""
         source = _spawn_agent()
         _insert_checkpoint(db_conn, source, "a", parent_id=None)
         _insert_checkpoint(db_conn, source, "b", parent_id="a", compact_boundary=True)
@@ -1084,7 +1084,7 @@ class TestSpawnFork:
         seen: list[list[tuple]] = []
 
         def _spy_wake(agent_id: int, _payload: str) -> None:
-            with shared.db.connect() as conn, conn.cursor() as cur:
+            with base.db.connect() as conn, conn.cursor() as cur:
                 cur.execute(
                     "SELECT content, kind, source FROM inbound_messages "
                     "WHERE agent_id = %s ORDER BY id ASC",
@@ -1092,7 +1092,7 @@ class TestSpawnFork:
                 )
                 seen.append(cur.fetchall())  # pyright: ignore[reportUnknownMemberType]
 
-        monkeypatch.setattr(shared.db, "publish_inbound_wake", _spy_wake)
+        monkeypatch.setattr(base.db, "publish_inbound_wake", _spy_wake)
         _spawn_agent(fork_from=source, fork_checkpoint="ck", prompt="go do X", prompt_source="user")
 
         assert seen and all(
@@ -1120,8 +1120,8 @@ class TestSpawnFork:
         import json
         from datetime import UTC, datetime
 
-        from shared import telemetry
-        from shared.paths import logs_dir
+        from base import telemetry
+        from base.paths import logs_dir
 
         source = _spawn_agent()
         executor = _spawn_agent()
@@ -1162,8 +1162,8 @@ class TestSpawnFork:
         import json
         from datetime import UTC, datetime
 
-        from shared import telemetry
-        from shared.paths import logs_dir
+        from base import telemetry
+        from base.paths import logs_dir
 
         parent = _spawn_agent()
         new_id = _spawn_agent(spawner=f"agent:{parent}")
@@ -1202,12 +1202,12 @@ class TestSpawnFork:
         import json
         from datetime import UTC, datetime
 
-        from shared import telemetry
-        from shared.paths import logs_dir
+        from base import telemetry
+        from base.paths import logs_dir
 
         source = _spawn_agent()
         new_id = _spawn_agent()
-        shared.db.insert_inbound_message(db_conn, new_id, "", source=f"agent:{source}", kind="fork")
+        base.db.insert_inbound_message(db_conn, new_id, "", source=f"agent:{source}", kind="fork")
 
         telemetry.sync()
         day = datetime.now(UTC).strftime("%Y%m%d")

@@ -14,16 +14,16 @@ from uuid import uuid4
 
 from langchain_core.messages import AIMessage, BaseMessage
 
-from shared.agents.messages.kwargs import message_addl_kwargs, message_content
-from shared.lm.content import content_blocks
-from shared.log import logger
+from base.agents.messages.kwargs import message_addl_kwargs, message_content
+from base.lm.content import content_blocks
+from base.log import logger
 
 
 class _CropConfig(Protocol):
     """The crop knobs `crop_output` reads — declared structurally so this module
     never imports the eager config chain.
 
-    Naming `SandboxSettings` here would import `shared.config.sandbox` (and
+    Naming `SandboxSettings` here would import `base.config.sandbox` (and
     with it pydantic_settings) into every exec child's lite boot — this module
     sits on the `agent.graph` import path (task #3621). The protocol is also
     the truthful runtime contract: lite mode hands `crop_output` the config

@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 from ava.shell import sessions
-from shared.host.env import bootstrap, dotenv_boot
+from base.host.env import bootstrap, dotenv_boot
 
 
 class _CapturingBackend:
@@ -288,7 +288,7 @@ def test_unprojected_agent_child_still_hits_owner_url_guard(
         [
             sys.executable,
             "-c",
-            "from shared.config import settings\n"
+            "from base.config import settings\n"
             "try:\n"
             "    settings.data_plane.db_url\n"
             "except Exception as exc:\n"

@@ -13,6 +13,23 @@ from pathlib import Path
 
 from pydantic import Field
 
+from base.deploy.release.identity import ApplicationIdentity, read_application_identity
+from base.deploy.release.runtime_prepare import (
+    CollectorInput,
+    FrontendInput,
+    PluginInput,
+    PrepareInputs,
+    prepare_release,
+)
+from base.deploy.release.runtime_release import (
+    ReleaseRejectedError,
+    VerifiedRelease,
+    file_sha256,
+    release_abi,
+    verify_release,
+)
+from base.deploy.release.verified_file import regular_bytes
+from base.runtime_abi import current_abi
 from cli.release_build import (
     ApplicationBuild,
     build_application,
@@ -26,23 +43,6 @@ from cli.release_prepare.models import (
     PreparationReceipt,
     encode,
 )
-from shared.deploy.release.identity import ApplicationIdentity, read_application_identity
-from shared.deploy.release.runtime_prepare import (
-    CollectorInput,
-    FrontendInput,
-    PluginInput,
-    PrepareInputs,
-    prepare_release,
-)
-from shared.deploy.release.runtime_release import (
-    ReleaseRejectedError,
-    VerifiedRelease,
-    file_sha256,
-    release_abi,
-    verify_release,
-)
-from shared.deploy.release.verified_file import regular_bytes
-from shared.runtime_abi import current_abi
 
 
 class _BuildReceipt(ApplicationIdentity):

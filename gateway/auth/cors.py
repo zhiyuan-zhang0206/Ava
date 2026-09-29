@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from urllib.parse import urlsplit
 
-from shared.config import settings
+from base.config import settings
 
 
 def _frontend_port() -> int:

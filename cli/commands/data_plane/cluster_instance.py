@@ -5,7 +5,7 @@ Every cluster (including `main`) runs its OWN Postgres and Redis under its
 plane and cannot reach into each other's database/channels — this is the only
 data-plane path; there is no shared host instance.
 
-Model (mirrors `shared.cluster.dataplane.pg_tools.throwaway_postgres`, but persistent + authed):
+Model (mirrors `base.cluster.dataplane.pg_tools.throwaway_postgres`, but persistent + authed):
 
 - Postgres `initdb`s into `$AVA_HOME/pg` (cold) — cached through a host-level
   template dir so a new cluster / a test spins up by directory copy, not a fresh
@@ -14,7 +14,7 @@ Model (mirrors `shared.cluster.dataplane.pg_tools.throwaway_postgres`, but persi
   superuser is the sole passwordless identity (`peer` on the 0700 owner-only
   socket — the administrator authority), and every other role is SCRAM over
   the socket and TCP. The schema owner is NOLOGIN; application processes log in
-  only as the home's write generation (`shared.cluster.authority`). A no-secret
+  only as the home's write generation (`base.cluster.authority`). A no-secret
   cluster differs only in binding loopback alone.
 - Redis runs `redis-server` on the cluster's redis port and ALWAYS authenticates,
   whatever the bearer: `requirepass` = the gateway-only Redis admin password, and
@@ -54,10 +54,10 @@ import time
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from shared.cluster import ensure_cluster_redis_acl, ownership
-from shared.cluster import postgres as owned_postgres
-from shared.cluster.authority.monitor import MONITOR_MAP, MONITOR_ROLE
-from shared.cluster.dataplane.pg_tools import (
+from base.cluster import ensure_cluster_redis_acl, ownership
+from base.cluster import postgres as owned_postgres
+from base.cluster.authority.monitor import MONITOR_MAP, MONITOR_ROLE
+from base.cluster.dataplane.pg_tools import (
     PG_BIN_LINUX,
     brew_prefix,
     is_macos,
@@ -66,16 +66,16 @@ from shared.cluster.dataplane.pg_tools import (
     pg_tool,
     pg_tz_args,
 )
-from shared.cluster.machine import reachable_host
-from shared.config import settings
-from shared.config.physical_backup import pitr_replication_hba_lines
-from shared.db.pg_admin import pg_admin_url as _shared_pg_admin_url
-from shared.db.pg_admin import pg_socket_dir
-from shared.host.net.url_secret import url_host
-from shared.host.private_storage import write_private_bytes
-from shared.host.system.backend import get_backend
-from shared.native_process.child_env import daemon_process_env, inherited_process_env
-from shared.paths import ava_home
+from base.cluster.machine import reachable_host
+from base.config import settings
+from base.config.physical_backup import pitr_replication_hba_lines
+from base.db.pg_admin import pg_admin_url as _base_pg_admin_url
+from base.db.pg_admin import pg_socket_dir
+from base.host.net.url_secret import url_host
+from base.host.private_storage import write_private_bytes
+from base.host.system.backend import get_backend
+from base.native_process.child_env import daemon_process_env, inherited_process_env
+from base.paths import ava_home
 
 _LOOPBACK_ALIASES = frozenset({"127.0.0.1", "::1", "localhost", "ip6-localhost"})
 
@@ -340,19 +340,19 @@ def _ensure_pg_data() -> Path:
     return data
 
 
-# Thin shells over the shared admin-plane dial (moved to shared.db.pg_admin,
+# Thin shells over the shared admin-plane dial (moved to base.db.pg_admin,
 # 2026-08-31 — services layer reaches it without importing up into cli). The
 # underscore names stay for existing cli callers and their monkeypatches.
 def _pg_socket_dir(socket_root: Path | None = None) -> Path:
-    """Thin shell over shared.db.pg_admin.pg_socket_dir — the home resolution stays
+    """Thin shell over base.db.pg_admin.pg_socket_dir — the home resolution stays
     in the cli namespace so tests steering `ava_home` keep steering this probe."""
     return pg_socket_dir(socket_root, home=ava_home())
 
 
 def pg_admin_url(pg_port: int) -> str:
-    """Thin shell — the admin URL lives in shared.db.pg_admin (services import it
+    """Thin shell — the admin URL lives in base.db.pg_admin (services import it
     from there); this keeps the cli-side monkeypatch surface stable."""
-    return _shared_pg_admin_url(pg_port)
+    return _base_pg_admin_url(pg_port)
 
 
 def _pg_running(pg_port: int, host: str = "127.0.0.1") -> bool:
@@ -669,7 +669,7 @@ def print_data_plane_status() -> None:
     actually use — client SCRAM against the userlist plus the SCRAM pass-through
     backend hop. With PgBouncer disabled `pooled_db_url == db_url` and the probe
     is direct anyway."""
-    import shared.db
+    import base.db
 
     if settings.data_plane.is_remote:
         # A remote-managed plane has no local instance to manage — probe the
@@ -694,7 +694,7 @@ def print_data_plane_status() -> None:
         print(f"  ✗ postgres ({pg_host}:{pg_port}) unreachable")
     else:
         try:
-            with shared.db.connect() as conn:  # pooled front door (PgBouncer when enabled)
+            with base.db.connect() as conn:  # pooled front door (PgBouncer when enabled)
                 conn.execute("select 1")
             print(f"  ✓ postgres ({pg_host}:{pg_port})")
         except Exception as exc:
@@ -713,9 +713,9 @@ def _print_pooler_status() -> None:
     """The pooler line: its registry-derived listen port, probed through the
     admin console as the operator entry from the home's authority store. No
     registry record means the port is unknowable — say so instead of a false `:0`."""
+    from base.cluster import get_record, record_pgbouncer_port
+    from base.cluster.authority import AuthorityRefusedError, read_pooler_admin
     from cli.commands.data_plane.pgbouncer import pgbouncer_listener_reachable
-    from shared.cluster import get_record, record_pgbouncer_port
-    from shared.cluster.authority import AuthorityRefusedError, read_pooler_admin
 
     rec = get_record(ava_home())
     if rec is None:

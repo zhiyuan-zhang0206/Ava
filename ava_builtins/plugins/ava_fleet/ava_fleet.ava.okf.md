@@ -52,5 +52,5 @@ tags:
 
 ## Configuration
 
-- Enable/disable uses per-machine `~/.ava/plugins_config.json` (`shared/packages/plugins/enable_config.py:set_local_enabled` is the only writer), CLI `ava plugins enable/disable <name>` — no `AVA_FLEET_ENABLED` or similar env switch
+- Enable/disable uses per-machine `~/.ava/plugins_config.json` (`base/packages/plugins/enable_config.py:set_local_enabled` is the only writer), CLI `ava plugins enable/disable <name>` — no `AVA_FLEET_ENABLED` or similar env switch
 - After disabling: `ava.ui` falls back to pure page mode (no notifications), `ava.self`'s log/label methods disappear, `ava.tasks` namespace disappears, `spawn(label=…)` raises TypeError

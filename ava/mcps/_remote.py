@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Any
 
 from ava.mcp_config import MCPCallError, MCPConnectError, ToolInfo
-from shared.config import settings
+from base.config import settings
 
 
 class _RemoteMCPClient:
@@ -150,7 +150,7 @@ def _current_agent_id() -> int | None:
     scripts recovered an identity only when AVA_AGENT_ID is set; a hosted
     turn context (turn contextvar bound) wins over the ambient env."""
     from ava.agent_identity import validate_external_identity
-    from shared.native_process.turn_identity import effective_agent_id
+    from base.native_process.turn_identity import effective_agent_id
 
     borrowed = validate_external_identity()
     return borrowed if borrowed is not None else effective_agent_id()
@@ -160,10 +160,10 @@ def _socket_path_for() -> str:
     """Filesystem path of the shared MCP daemon socket — the client side of the
     convention. The daemon is a per-machine service (one for all agents;
     sessions isolated per connection). Thin alias of
-    `shared.paths.mcp_daemon_shared_socket`, the single source of truth (moved
-    to shared/ so the agent kernel's daemon can import it without going through
+    `base.paths.mcp_daemon_shared_socket`, the single source of truth (moved
+    to base/ so the agent kernel's daemon can import it without going through
     this SDK-disable-able module)."""
-    from shared.paths import mcp_daemon_shared_socket
+    from base.paths import mcp_daemon_shared_socket
 
     return mcp_daemon_shared_socket()
 

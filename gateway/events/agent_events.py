@@ -22,12 +22,12 @@ import httpx
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import StreamingResponse
 
+from base.config import settings
 from gateway.agents.eval_guard import deny_isolated_result_read
 from gateway.events.schemas import AgentEventRow
 from gateway.events.sse import event_stream
 from gateway.lgtm import loki_events, loki_query_budget
 from gateway.lgtm.backend_failure import raise_backend_unavailable
-from shared.config import settings
 
 router = APIRouter()
 

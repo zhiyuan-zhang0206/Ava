@@ -31,12 +31,12 @@ from agent.messages import NoteTag, system_note_message
 from agent.nodes import BEFORE_LLM, CLAIM, END
 from agent.state_channels import CIRCUIT_REASON_CONTEXT_OVERFLOW
 from ava.security import scan_inbound_content
-from shared.agents.context import AvaContext
-from shared.agents.messages.inbound import InboundKind
-from shared.agents.messages.kwargs import AvaMsgType, read_ava_kwargs
-from shared.config import now_timestamp, settings
-from shared.events.live.projection import Cancelled
-from shared.log import logger
+from base.agents.context import AvaContext
+from base.agents.messages.inbound import InboundKind
+from base.agents.messages.kwargs import AvaMsgType, read_ava_kwargs
+from base.config import now_timestamp, settings
+from base.events.live.projection import Cancelled
+from base.log import logger
 
 from ._routing import _ROUTING_KINDS, ClaimGoto, _Routing
 

@@ -13,10 +13,10 @@ import pytest
 from psycopg import sql
 
 import ava.impersonation.replay as reader
-import shared.agents.impersonation_manifest as manifest
-from shared.agents import impersonation as leases
-from shared.agents.impersonation import history as history
-from shared.agents.impersonation_manifest import (
+import base.agents.impersonation_manifest as manifest
+from base.agents import impersonation as leases
+from base.agents.impersonation import history as history
+from base.agents.impersonation_manifest import (
     LocalParticipant,
     bind_local_participant,
     capture_local_event,
@@ -24,15 +24,15 @@ from shared.agents.impersonation_manifest import (
     seal_local_participant,
     unbind_local_participant,
 )
-from shared.agents.impersonation_manifest_grants import grant_manifest_runner_access
-from shared.cluster.machine import machine_name
-from shared.config import settings
-from shared.db import create_agent
-from shared.native_process.runtime_incarnation import RuntimeIncarnation
-from shared.telemetry import Event
+from base.agents.impersonation_manifest_grants import grant_manifest_runner_access
+from base.cluster.machine import machine_name
+from base.config import settings
+from base.db import create_agent
+from base.native_process.runtime_incarnation import RuntimeIncarnation
+from base.telemetry import Event
 from tests._containers import grant_runner_login
+from tests.base import test_history as history_cases
 from tests.impersonation_support import attested_caller
-from tests.shared import test_history as history_cases
 
 # The capability group the receipt grants target, and the generation-shaped
 # login that inherits it (the only identity that logs in).
@@ -85,7 +85,7 @@ def _eligible_sdk_event(agent_id: int) -> Event:
 
 
 def _central_send_event(agent_id: int) -> Event:
-    from shared.telemetry.audit_events import prepare_event_log
+    from base.telemetry.audit_events import prepare_event_log
 
     return prepare_event_log(
         event_type="send_message",

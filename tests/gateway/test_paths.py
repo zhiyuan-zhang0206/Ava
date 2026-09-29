@@ -1,11 +1,11 @@
-"""shared/paths/__init__.py unit tests — AVA_HOME resolution + path helpers + first-access mkdir."""
+"""base/paths/__init__.py unit tests — AVA_HOME resolution + path helpers + first-access mkdir."""
 
 from pathlib import Path
 
 import pytest
 
-from shared import paths
-from shared.config import settings
+from base import paths
+from base.config import settings
 
 
 @pytest.fixture(autouse=True)

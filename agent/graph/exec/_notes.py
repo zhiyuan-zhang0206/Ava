@@ -35,7 +35,7 @@ from langgraph.graph.message import add_messages
 
 from agent.messages import NoteTag, system_note_message
 from ava.security import SecurityFindingEntry
-from shared.config import settings
+from base.config import settings
 
 
 def merge_exec_notes(

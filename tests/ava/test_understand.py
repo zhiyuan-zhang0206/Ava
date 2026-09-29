@@ -3,7 +3,7 @@ per-modality provider routing (text → settings.lm.understand_text_model defaul
 DeepSeek V4 Pro / media → settings.lm.understand_media_model default Gemini 3.5
 Flash), config adjustability, and error paths.
 
-Both paths mock `shared.lm.factory.build_chat_model` (the provider factory that
+Both paths mock `base.lm.factory.build_chat_model` (the provider factory that
 picks the model client by prefix — the media path has no Gemini SDK imports
 of its own anymore). Neither path hits a real API."""
 
@@ -17,7 +17,7 @@ import pytest
 from pydantic import SecretStr
 
 from ava.sdk_surface.batch import DEFAULT_BATCH_MAX_CONCURRENT
-from shared.config import settings
+from base.config import settings
 
 understand_mod = cast(Any, importlib.import_module("ava.understand"))
 
@@ -45,7 +45,7 @@ def fake_pdf(tmp_path: Path) -> Path:
 
 @pytest.fixture
 def mock_deepseek(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
-    """Patch `shared.lm.factory.build_chat_model` (the text path's provider) → fake llm.
+    """Patch `base.lm.factory.build_chat_model` (the text path's provider) → fake llm.
     Captures the model id it was asked to build and the message content."""
     llm = MagicMock(name="deepseek_chat_model")
     response = MagicMock()
@@ -59,13 +59,13 @@ def mock_deepseek(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         captured["reasoning_effort"] = kwargs.get("reasoning_effort")
         return llm
 
-    monkeypatch.setattr("shared.lm.factory.build_chat_model", _fake_build)
+    monkeypatch.setattr("base.lm.factory.build_chat_model", _fake_build)
     return captured
 
 
 @pytest.fixture
 def mock_gemini(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
-    """Patch `shared.lm.factory.build_chat_model` (the media path's provider
+    """Patch `base.lm.factory.build_chat_model` (the media path's provider
     factory) → fake llm. Captures the model id and the media-path kwargs the
     media path passes (media_resolution / media_thinking_level / base_url)."""
     monkeypatch.setattr(settings.lm, "gemini_api_key", SecretStr("fake-key-for-test"))
@@ -81,7 +81,7 @@ def mock_gemini(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         captured["kwargs"] = kwargs
         return llm
 
-    monkeypatch.setattr("shared.lm.factory.build_chat_model", _fake_build)
+    monkeypatch.setattr("base.lm.factory.build_chat_model", _fake_build)
     return captured
 
 
@@ -124,7 +124,7 @@ def test_text_effort_flows_to_build_chat_model(mock_deepseek: dict[str, Any]) ->
 def test_text_effort_accepts_enum_member(mock_deepseek: dict[str, Any]) -> None:
     """A ReasoningEffort member is accepted and equals its literal value —
     both spellings produce the same wire value."""
-    from shared.lm.effort import ReasoningEffort
+    from base.lm.effort import ReasoningEffort
 
     understand_mod.understand([{"prompt": "x", "text": "some text"}], effort=ReasoningEffort.XHIGH)
     assert mock_deepseek["reasoning_effort"] == "xhigh"
@@ -357,7 +357,7 @@ def test_media_wraps_missing_gemini_key(monkeypatch: pytest.MonkeyPatch, fake_im
     def _raise(model: str, **kwargs: object):
         raise RuntimeError("GEMINI_API_KEY not set")
 
-    monkeypatch.setattr("shared.lm.factory.build_chat_model", _raise)
+    monkeypatch.setattr("base.lm.factory.build_chat_model", _raise)
     with pytest.raises(understand_mod.UnderstandError, match="GEMINI_API_KEY"):
         understand_mod.understand([{"prompt": "x", "paths": [str(fake_image)]}])
 
@@ -369,7 +369,7 @@ def test_text_wraps_missing_deepseek_key(monkeypatch: pytest.MonkeyPatch) -> Non
     def _raise(model: str, **kwargs: object):
         raise RuntimeError("DEEPSEEK_API_KEY not set")
 
-    monkeypatch.setattr("shared.lm.factory.build_chat_model", _raise)
+    monkeypatch.setattr("base.lm.factory.build_chat_model", _raise)
     with pytest.raises(understand_mod.UnderstandError, match="DEEPSEEK_API_KEY"):
         understand_mod.understand([{"prompt": "x", "text": "some text"}])
 
@@ -530,7 +530,7 @@ def test_paths_auto_save_source_labels_list(
     def _fake_workspace(aid: int) -> Path:
         return ws
 
-    monkeypatch.setattr("shared.paths.workspace_dir", _fake_workspace)
+    monkeypatch.setattr("base.paths.workspace_dir", _fake_workspace)
     shot = tmp_path / "shot.png"
     shot.write_bytes(b"\x89PNG\r\n\x1a\n")
     understand_mod.understand([{"prompt": "compare", "paths": [str(fake_image), str(shot)]}])
@@ -788,7 +788,7 @@ def test_single_result_saved_to_exec_output(
     def _fake_workspace(aid: int) -> Path:
         return ws
 
-    monkeypatch.setattr("shared.paths.workspace_dir", _fake_workspace)
+    monkeypatch.setattr("base.paths.workspace_dir", _fake_workspace)
 
     understand_mod.understand([{"prompt": "summarize please", "text": "hello world"}])
 
@@ -816,7 +816,7 @@ def test_batch_results_saved_to_exec_output(
     def _fake_workspace(aid: int) -> Path:
         return ws
 
-    monkeypatch.setattr("shared.paths.workspace_dir", _fake_workspace)
+    monkeypatch.setattr("base.paths.workspace_dir", _fake_workspace)
 
     targets = [
         {"prompt": "question one", "text": "material one"},
@@ -845,7 +845,7 @@ def test_auto_save_prunes_old_files(
     def _fake_workspace(aid: int) -> Path:
         return ws
 
-    monkeypatch.setattr("shared.paths.workspace_dir", _fake_workspace)
+    monkeypatch.setattr("base.paths.workspace_dir", _fake_workspace)
 
     # Pre-create many old files, then force every mtime to the same value.
     # This is the condition the pruner has to be right under: files written in

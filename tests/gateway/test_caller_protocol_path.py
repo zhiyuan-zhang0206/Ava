@@ -20,12 +20,12 @@ from psycopg_pool import AsyncConnectionPool
 from agent.db import claim_inbound_batch
 from agent.graph._chat_inbound import build_chat_inbound
 from agent.ownership.hosted import admit_hosted_runtime, settle_hosted_runtime
+from base.config import settings
+from base.db import create_agent
+from base.native_process.runtime_incarnation import RuntimeIncarnation
+from base.native_process.turn_identity import bind_turn_identity
 from cli.commands.agents.control import cmd_agents_send
 from gateway.app import app
-from shared.config import settings
-from shared.db import create_agent
-from shared.native_process.runtime_incarnation import RuntimeIncarnation
-from shared.native_process.turn_identity import bind_turn_identity
 
 _SOURCE = "external_agent:codex:run-42"
 _CALLER = {"kind": "external_agent", "subject": "codex", "instance": "run-42"}
@@ -78,10 +78,10 @@ async def test_profile_through_auth_gate_and_real_hosted_claim(
     monkeypatch.setattr(settings.gateway, "auth_middleware_enabled", True)
     monkeypatch.setenv("AVA_AGENT_ID", "999")
     monkeypatch.setattr(
-        "shared.cluster.machine.gateway_api_base", Mock(return_value="http://testserver")
+        "base.cluster.machine.gateway_api_base", Mock(return_value="http://testserver")
     )
     monkeypatch.setattr(
-        "shared.cluster.machine.gateway_auth_headers",
+        "base.cluster.machine.gateway_auth_headers",
         Mock(return_value={"Authorization": f"Bearer {secret}"}),
     )
     with TestClient(app) as client:
@@ -89,7 +89,7 @@ async def test_profile_through_auth_gate_and_real_hosted_claim(
         def post(url: str, **kwargs: Any) -> httpx2.Response:
             return client.post(url, **kwargs)
 
-        monkeypatch.setattr("shared.host.net.http_dial.post", post)
+        monkeypatch.setattr("base.host.net.http_dial.post", post)
         # Explicit provenance (user ruling 2026-09-20): the send path never consults
         # AVA_CALLER_IDENTITY; the profile value travels as the explicit source.
         assert cmd_agents_send(incarnation.agent_id, "caller path proof", _SOURCE) == 0
@@ -204,7 +204,7 @@ def test_unknown_target_refusal_names_the_missing_row(db_conn: psycopg.Connectio
     The HTTP route answers 404 before the gate for a missing agent, so this
     exercises the gate contract directly.
     """
-    from shared.agents.messages.caller_protocol import (
+    from base.agents.messages.caller_protocol import (
         CallerProtocolUnavailableError,
         require_caller_protocol,
     )
@@ -222,7 +222,7 @@ def test_unknown_target_refusal_names_the_missing_row(db_conn: psycopg.Connectio
 async def test_gate_holds_owner_lock_until_transaction_ends(
     db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
 ) -> None:
-    from shared.agents.messages.caller_protocol import require_caller_protocol
+    from base.agents.messages.caller_protocol import require_caller_protocol
 
     incarnation = await _admit(db_conn, aops_pool)
     _after_proven_old_writer_barrier(db_conn, incarnation)
@@ -244,7 +244,7 @@ async def test_gate_holds_owner_lock_until_transaction_ends(
 async def test_lease_expiring_while_waiting_for_unchanged_row_lock_is_rejected(
     db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
 ) -> None:
-    from shared.agents.messages.caller_protocol import (
+    from base.agents.messages.caller_protocol import (
         CallerProtocolUnavailableError,
         require_caller_protocol,
     )

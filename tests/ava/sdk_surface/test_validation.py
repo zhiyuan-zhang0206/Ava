@@ -595,7 +595,7 @@ class TestMemoryEntries:
     def test_write_slug_unwraps(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         """Slug tuple unwraps; the entry lands under the unwrapped name."""
         from ava_builtins.plugins.ava_memory import sdk as memory_plugin
-        from shared.paths import workspace_dir
+        from base.paths import workspace_dir
 
         root = workspace_dir(900001) / "memory"
         monkeypatch.setattr(ava.agent_identity, "_agent_id", 900001)
@@ -644,7 +644,7 @@ class TestTasksEntries:
         with db_conn.cursor() as cur:
             cur.execute("INSERT INTO agents (id) VALUES (900001) ON CONFLICT (id) DO NOTHING")
         db_conn.commit()
-        from shared.events.live import announce
+        from base.events.live import announce
 
         monkeypatch.setattr(announce, "publish_task_created_sync", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType]
 
@@ -764,10 +764,10 @@ class TestSelfEntries:
         monkeypatch.setattr(ava.agent_identity, "agent_id", lambda: 900001)
         monkeypatch.setattr(ava.DB, "cursor", _FakeCursor)
         monkeypatch.setattr(self_mod, "_publish_self_inbound_wake", lambda: None)
-        import shared.telemetry.audit_events as _audit
+        import base.telemetry.audit_events as _audit
 
         monkeypatch.setattr(_audit, "insert_event_log", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType]
-        from shared.agents.lifecycle import SystemHalt
+        from base.agents.lifecycle import SystemHalt
 
         with pytest.raises(SystemHalt):
             self_mod.compact(("summary",))  # pyright: ignore[reportArgumentType]

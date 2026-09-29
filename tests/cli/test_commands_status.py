@@ -11,12 +11,12 @@ from typing import cast
 
 import pytest
 
+import base.deploy.git.cluster_drift as _cluster_drift
 import cli.commands._probe as _probe_commands
 import cli.commands._repo as _repo_commands
 import cli.commands.lifecycle.status as _status_commands
 import ops.roster as _roster
-import shared.deploy.git.cluster_drift as _cluster_drift
-from shared.config import settings
+from base.config import settings
 from tests.cli._commands_helpers import _fake_session_backends as _fake_session_backends
 from tests.cli._commands_helpers import _FakeResponse, _FakeResult, _patch_gateway_http, _sess
 from tests.cli._commands_helpers import _hermetic_gateway_base as _hermetic_gateway_base
@@ -27,7 +27,7 @@ def _local_status_boundary(monkeypatch: pytest.MonkeyPatch) -> None:
     """Status tests do not initialize a cluster or contact any live gateway."""
     import httpx
 
-    from shared.native_process.root_control.client import RootClientError
+    from base.native_process.root_control.client import RootClientError
 
     monkeypatch.setattr(_repo_commands, "_roles_or_none", lambda: frozenset({"gateway"}))
 
@@ -42,7 +42,7 @@ def _local_status_boundary(monkeypatch: pytest.MonkeyPatch) -> None:
             raise RootClientError("isolated status test")
 
     monkeypatch.setattr(httpx, "get", _unreachable)
-    monkeypatch.setattr("shared.native_process.root_control.client.RootClient", _AbsentRoot)
+    monkeypatch.setattr("base.native_process.root_control.client.RootClient", _AbsentRoot)
 
 
 # ─── gateway cluster-status probe carries the bearer ───────────────────────────
@@ -51,7 +51,7 @@ def _local_status_boundary(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_status_explains_persistently_unselected_services(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    from shared.deploy.lifecycle import service_selection
+    from base.deploy.lifecycle import service_selection
 
     monkeypatch.setattr(
         service_selection,
@@ -261,7 +261,7 @@ def test_status_reads_root_units(monkeypatch: pytest.MonkeyPatch, capsys) -> Non
                 },
             }
 
-    monkeypatch.setattr("shared.native_process.root_control.client.RootClient", _Client)
+    monkeypatch.setattr("base.native_process.root_control.client.RootClient", _Client)
 
     def fake_run(_args, **_kwargs):
         return _FakeResult(returncode=0, stdout="")
@@ -289,11 +289,11 @@ def test_status_root_mode_survives_an_unreachable_root(
             del timeout
 
         def status(self) -> dict[str, object]:
-            from shared.native_process.root_control.client import RootClientError
+            from base.native_process.root_control.client import RootClientError
 
             raise RootClientError("unreachable in test")
 
-    monkeypatch.setattr("shared.native_process.root_control.client.RootClient", _Down)
+    monkeypatch.setattr("base.native_process.root_control.client.RootClient", _Down)
 
     def fake_run(_args, **_kwargs):
         return _FakeResult(returncode=0, stdout="")
@@ -350,7 +350,7 @@ def test_detect_prod_source_drift_absent(monkeypatch: pytest.MonkeyPatch, tmp_pa
     """No source repo → None (nothing to check)."""
 
     monkeypatch.setattr(
-        "shared.deploy.git.cluster_drift._prod_source_dir", lambda: tmp_path / "source"
+        "base.deploy.git.cluster_drift._prod_source_dir", lambda: tmp_path / "source"
     )
     assert _cluster_drift.prod_source_branch_drift() is None
 
@@ -360,7 +360,7 @@ def test_detect_prod_source_drift_on_main(monkeypatch: pytest.MonkeyPatch, tmp_p
 
     _init_prod_source(tmp_path / "source")
     monkeypatch.setattr(
-        "shared.deploy.git.cluster_drift._prod_source_dir", lambda: tmp_path / "source"
+        "base.deploy.git.cluster_drift._prod_source_dir", lambda: tmp_path / "source"
     )
     assert _cluster_drift.prod_source_branch_drift() is None
 
@@ -373,7 +373,7 @@ def test_detect_prod_source_drift_feature_branch(
 
     _init_prod_source(tmp_path / "source", branch="ava-7/fix")
     monkeypatch.setattr(
-        "shared.deploy.git.cluster_drift._prod_source_dir", lambda: tmp_path / "source"
+        "base.deploy.git.cluster_drift._prod_source_dir", lambda: tmp_path / "source"
     )
     assert _cluster_drift.prod_source_branch_drift() == "ava-7/fix"
 
@@ -401,7 +401,7 @@ def _quiet_status(monkeypatch: pytest.MonkeyPatch, home: Path) -> None:
     monkeypatch.setattr(_repo_commands, "_roles_or_none", lambda: frozenset({"agent-runner"}))
     monkeypatch.setattr(_probe_commands, "_curl_ok", lambda _u: False)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr("cli.commands.lifecycle.status._detect_prod_source_drift", lambda: None)
-    monkeypatch.setattr("shared.paths.ava_home", lambda: home)
+    monkeypatch.setattr("base.paths.ava_home", lambda: home)
 
 
 def test_cmd_status_prints_no_frozen_cluster_pin(
@@ -411,7 +411,7 @@ def test_cmd_status_prints_no_frozen_cluster_pin(
     as the current target, nor a bare `ava cluster update` offered as a remedy."""
     _quiet_status(monkeypatch, tmp_path)
     monkeypatch.setattr(
-        "shared.deploy.state.cluster_pin.get_cluster_target_sha",
+        "base.deploy.state.cluster_pin.get_cluster_target_sha",
         lambda **_kw: "a" * 40,  # pyright: ignore[reportUnknownArgumentType]
     )
 
@@ -439,7 +439,7 @@ def test_cmd_status_names_the_source_checkout_it_runs(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
 ) -> None:
     _quiet_status(monkeypatch, tmp_path)
-    monkeypatch.setattr("shared.deploy.git.cluster_drift.checkout_head_sha", lambda _repo: "c" * 40)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("base.deploy.git.cluster_drift.checkout_head_sha", lambda _repo: "c" * 40)  # pyright: ignore[reportUnknownArgumentType]
 
     assert _status_commands.cmd_status() == 0
     out = capsys.readouterr().out
@@ -575,7 +575,7 @@ def test_status_host_reading_failure_does_not_hide_the_rest(
     monkeypatch.setattr(status_mod, "print_data_plane_status", lambda: None)
     monkeypatch.setattr(status_mod, "_print_service_row", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(
-        "shared.host.resource_sample.resource_sample",
+        "base.host.resource_sample.resource_sample",
         lambda: (_ for _ in ()).throw(RuntimeError("no psutil here")),
     )
 

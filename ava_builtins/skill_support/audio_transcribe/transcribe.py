@@ -17,7 +17,7 @@ for ASR while shrinking ~10x), and anything still over the limit (very long
 talks) is split into time segments, each transcribed and concatenated.
 
 Requires `ffmpeg` on PATH, `yt-dlp` (only when the source is a URL/video id),
-and `OPENAI_API_KEY` in `~/.ava/.env` (read via `shared.config.settings`).
+and `OPENAI_API_KEY` in `~/.ava/.env` (read via `base.config.settings`).
 
 The invoked CLI is the thin wrapper at `skills/audio-transcribe/transcribe.py`:
 
@@ -57,7 +57,7 @@ def _client() -> Any:
     the module loads without the SDK/key for callers that only need helpers."""
     from openai import OpenAI
 
-    from shared.config import settings
+    from base.config import settings
 
     key = settings.lm.openai_api_key
     if key is None:

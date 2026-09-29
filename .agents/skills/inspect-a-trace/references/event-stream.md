@@ -16,7 +16,7 @@ The base stream selector, shared by every reader:
 ```
 
 Since the 2026-08-23 index-label cutover (`INDEX_LABEL_CUTOVER_AT` in
-`shared/telemetry/loki_index_labels.py`, Task #1407 B2) the collector promotes
+`base/telemetry/loki_index_labels.py`, Task #1407 B2) the collector promotes
 `agent_id` and `event_name` to real Loki index labels, so a query over the
 indexed era narrows the stream itself instead of scanning the whole
 `unknown_service` family — the fast per-agent form is:
@@ -53,7 +53,7 @@ becomes `attributes_cost_usd`, and numbers parse as numbers, so
 
 `category` is `audit | telemetry | log`. `level` is
 `debug | info | warning | error | critical`, lowercase. The `event_name`
-vocabulary is the registry in `shared/events/contract.py` — read it there
+vocabulary is the registry in `base/events/contract.py` — read it there
 rather than guessing a name.
 
 **Multiple extractions in one `| json` stage is a parse error.** Each field

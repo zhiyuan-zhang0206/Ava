@@ -9,7 +9,7 @@ that is the separate, emergency-only control-plane bearer rotation.
 PostgreSQL has no rotatable password here: the schema owner is NOLOGIN, the
 administrator is the OS user over the owner-only socket, and application
 logins are write generations that rotate with each release transition
-(``shared.cluster.authority``). Redis credentials do not rotate per rollout;
+(``base.cluster.authority``). Redis credentials do not rotate per rollout;
 this script is the explicit operator action
 (decisions/2026-09-27-write-generation-rollout-choices.md).
 """
@@ -28,17 +28,17 @@ from pathlib import Path
 import redis
 from dotenv import dotenv_values
 
-from shared.cluster import (
+from base.cluster import (
     ensure_cluster_redis_acl,
     get_record,
     record_redis_port,
     redis_identity,
 )
-from shared.cluster.derive import REDIS_PASSWORD_ENV
-from shared.config import settings
-from shared.host.env.dotenv_file import upsert_env
-from shared.host.net.url_secret import url_host, url_with_password
-from shared.paths import ava_home
+from base.cluster.derive import REDIS_PASSWORD_ENV
+from base.config import settings
+from base.host.env.dotenv_file import upsert_env
+from base.host.net.url_secret import url_host, url_with_password
+from base.paths import ava_home
 
 _TOKEN_BYTES = 32
 _SCOPES = frozenset({"admin", "runner", "both"})

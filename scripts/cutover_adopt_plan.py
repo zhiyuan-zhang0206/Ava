@@ -95,7 +95,7 @@ def _ours(facts: Facts) -> bool:
 
 
 def selection_payload(names: list[str]) -> bytes:
-    """Byte-identical to what `shared.deploy.lifecycle.service_selection` writes for an except-list."""
+    """Byte-identical to what `base.deploy.lifecycle.service_selection` writes for an except-list."""
     import json
 
     return (json.dumps({"version": 1, "mode": "except", "names": sorted(names)}) + "\n").encode()
@@ -253,7 +253,7 @@ def intent_document(
 
 
 def _service_path_refusals(facts: Facts, inputs: Inputs) -> list[str]:
-    from shared.sessions.env_forwarding import admit_service_path
+    from base.sessions.env_forwarding import admit_service_path
 
     declared = facts.env.get("AVA_SERVICE_PATH")
     if inputs.service_path is None:

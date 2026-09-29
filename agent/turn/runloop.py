@@ -22,11 +22,11 @@ from agent.state_channels import (
     CIRCUIT_REASON_SCHEMA,
     CircuitState,
 )
-from shared.agents.context import AvaContext
-from shared.config.turn_view import turn_settings
-from shared.events.live.projection import Error
-from shared.log import logger
-from shared.telemetry.audit_events import insert_event_log_async
+from base.agents.context import AvaContext
+from base.config.turn_view import turn_settings
+from base.events.live.projection import Error
+from base.log import logger
+from base.telemetry.audit_events import insert_event_log_async
 
 # LangGraph recursion_limit defaults to 25 — far too low for this graph even
 # per-turn: one invocation is one TURN, and a turn is a whole work bout (the
@@ -116,7 +116,7 @@ def _model_vendor() -> str | None:
     anthropic-compat path (``provider=anthropic`` — the 2026-09-18 billing
     wave, task #3916). ``None`` for an unregistered model prefix.
     """
-    from shared.lm.factory import provider_key_of_model
+    from base.lm.factory import provider_key_of_model
 
     return provider_key_of_model(turn_settings.lm.llm_model)
 
@@ -130,7 +130,7 @@ async def _record_permanent_reject_outcome(
 ) -> None:
     """Count one permanent-class rejection; at the halt threshold trip the breaker.
 
-    `shared/agents/recovery_breaker.py` owns the semantics: two consecutive permanent
+    `base/agents/recovery_breaker.py` owns the semantics: two consecutive permanent
     rejections with no successful turn between them halt every automatic
     recovery path until a turn succeeds (task #3617, design #3610 section 12).
     Every halted rejection re-runs the escalation — with automatic recovery
@@ -139,7 +139,7 @@ async def _record_permanent_reject_outcome(
     idempotent. All of it is best-effort: none may mask the provider rejection
     that aborted the turn.
     """
-    from shared.agents.recovery_breaker import (
+    from base.agents.recovery_breaker import (
         HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS,
         SUPPRESS_REASON_PERMANENT_REJECT,
         halt_automatic_recovery,

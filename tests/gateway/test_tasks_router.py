@@ -27,10 +27,10 @@ import pytest
 from fastapi.testclient import TestClient
 from starlette.requests import Request
 
+from base.agents import AgentStatus
 from gateway.agents import state as _agents_state
 from gateway.app import app
 from gateway.routers.tasks import get_tasks
-from shared.agents import AgentStatus
 
 
 def _make_agent(db: psycopg.Connection) -> int:
@@ -488,7 +488,7 @@ class TestTimestampOffset:
     """tz audit PR-1 behavior lock. `_row_to_task` builds `created_at`/
     `updated_at` with a bare `.isoformat()` on the value psycopg3 read back —
     the offset it carries is whatever the PG SESSION timezone was, not a
-    fixed one. Pinning that session timezone to UTC (shared/cluster/dataplane/pg_tools.py:
+    fixed one. Pinning that session timezone to UTC (base/cluster/dataplane/pg_tools.py:
     pg_tz_args, cli/commands/data_plane/cluster_instance.py) is what makes this `+00:00`
     instead of drifting with the host OS timezone."""
 

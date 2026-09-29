@@ -107,7 +107,7 @@ then add a member, then check. A fixture that builds the whole world first and
 applies the operation last covers every member by construction and can never fail,
 which is how a grant matrix asserted over a dozen tables while the class stayed
 open. Same family as *a guard only guards if the regression actually fails it*.
-Evidence: PR #208 — `shared/cluster/provision.py` granted the runner role
+Evidence: PR #208 — `base/cluster/provision.py` granted the runner role
 `SELECT ON ALL TABLES` once at install birth, so `extensions`, created by the
 first post-baseline migration to add a table, was unreadable on every pure
 agent-runner for the life of the cluster. It surfaced as a *materialization*
@@ -170,11 +170,11 @@ report is the thing under test, not the evidence.
 
 ### The blast radius is where the consumers' guards live
 
-Not where the diff's lines are. `shared/` sits at the bottom of the import
+Not where the diff's lines are. `base/` sits at the bottom of the import
 layering, so every layer above consumes it — and this repo deliberately places
 exhaustiveness assertions over enums and field sets in the **consumer's** test
 file, as review forcing functions. Edit-adjacency is structurally blind to them.
-A `shared/` change requires full-suite coverage in CI. Locally, select bounded
+A `base/` change requires full-suite coverage in CI. Locally, select bounded
 consumer tests by dependency; never launch the full backend suite locally
 (user ruling 2026-09-22; see the run-local-tests skill).
 Evidence: [`postmortems/0003`](../postmortems/0003-touched-areas-is-not-the-blast-radius.md).
@@ -191,7 +191,7 @@ Evidence: [`postmortems/0003`](../postmortems/0003-touched-areas-is-not-the-blas
 ### A guard that looks redundant is the one that catches the fix
 
 Two producers of the same fact, pinned against each other, feel like a test of
-something nobody would get wrong. `tests/shared/test_cluster_env.py:test_health_port_env_matches_derive_env_for_the_same_base`
+something nobody would get wrong. `tests/base/test_cluster_env.py:test_health_port_env_matches_derive_env_for_the_same_base`
 pins `derive_env` (first-start) against `health_port_env` (runner-join) for one
 base — and what it caught was not the original bug but the FIX for it: adding
 `agent_host` to the late-health-slot set made the two producers disagree, and

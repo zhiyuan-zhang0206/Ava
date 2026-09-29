@@ -20,9 +20,9 @@ from langchain_core.messages import HumanMessage
 
 from agent.messages import attach_message
 from agent.state import AttachState, BaseAgentState
-from shared.agents.context import AvaContext
-from shared.config.turn_view import turn_settings
-from shared.lm.attach import AttachEntry, pack_attachments
+from base.agents.context import AvaContext
+from base.config.turn_view import turn_settings
+from base.lm.attach import AttachEntry, pack_attachments
 
 
 def build_attach_message(pending: AttachState, model: str) -> HumanMessage | None:

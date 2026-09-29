@@ -17,14 +17,14 @@ from pathlib import Path
 import psutil
 import pytest
 
+from base.config import settings
+from base.daemon.health import DaemonProbe
+from base.native_process.root_control.client import owned_process
 from ops.roster import build_services
 from services.ava_root.manifest import RestartPolicy, UnitManifest, UnitRegistry
 from services.ava_root.server import ControlServer
 from services.ava_root.supervisor import Supervisor, SupervisorConfig
 from services.healthchecks import gate
-from shared.config import settings
-from shared.daemon.health import DaemonProbe
-from shared.native_process.root_control.client import owned_process
 from tests.services.test_gate import _FakeApp, _FakeGateway, _request, _Servers
 from tests.services.test_gate import servers as servers
 
@@ -47,7 +47,7 @@ async def test_gate_native_child_readiness_restart_and_stop(
         reservation.bind(("127.0.0.1", 0))
         port = reservation.getsockname()[1]
     monkeypatch.setattr(settings.services, "frontend_healthcheck_url", f"http://127.0.0.1:{port}")
-    monkeypatch.setattr("shared.paths.root_run_dir", lambda: short_tmp)
+    monkeypatch.setattr("base.paths.root_run_dir", lambda: short_tmp)
     spec = next(spec for spec in build_services() if spec.session == "gate")
     assert spec.identity_probe is not None
     assert spec.capabilities == frozenset({"gateway"})
@@ -105,7 +105,7 @@ def test_gate_protocol_rejects_another_homes_payload(monkeypatch: pytest.MonkeyP
 def test_gate_health_is_independent_of_auth_and_application(servers: _Servers) -> None:
     import os
 
-    from shared.paths import ava_home
+    from base.paths import ava_home
 
     _FakeGateway.down = True
     status, body, headers = _request(servers["gate"] + "/__ava/healthz")

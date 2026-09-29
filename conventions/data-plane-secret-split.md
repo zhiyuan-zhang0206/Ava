@@ -21,7 +21,7 @@ A local plane's `.env` carries only the credential-free database endpoint
 (`postgresql://<owner>@host:port/<db>`). The schema owner is `NOLOGIN` without
 a password. Every application login is a write generation: `ava_g<n>_gateway`
 and `ava_g<n>_runner`, which inherit the `NOLOGIN` groups `ava_gateway` /
-`ava_runner` and own nothing (`shared/cluster/authority/`).
+`ava_runner` and own nothing (`base/cluster/authority/`).
 
 Delivery:
 

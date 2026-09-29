@@ -8,10 +8,10 @@ import psycopg
 from psycopg.types.json import Jsonb
 
 from ava.gateway_client.transport import get
-from shared.agents.impersonation import lock_lease
-from shared.agents.impersonation.events import consume_events
-from shared.agents.impersonation.history import event_belongs_to_agent
-from shared.agents.impersonation_manifest import (
+from base.agents.impersonation import lock_lease
+from base.agents.impersonation.events import consume_events
+from base.agents.impersonation.history import event_belongs_to_agent
+from base.agents.impersonation_manifest import (
     ManifestNotSealedError,
     certify,
     freeze_manifest,
@@ -19,8 +19,8 @@ from shared.agents.impersonation_manifest import (
     is_protocol_v1,
     set_pending_reason,
 )
-from shared.config import settings
-from shared.db.transaction import write_transaction
+from base.config import settings
+from base.db.transaction import write_transaction
 
 _EVENT_PAGE_SIZE = 1000
 _EVENT_OFFSET_MAX = 10_000

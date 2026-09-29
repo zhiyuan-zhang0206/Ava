@@ -46,7 +46,7 @@ the ``except`` line or the ``pass`` line (mirrors ``# emoji-ok`` / ``# env-ok``
           pass  # fail-fast-ok: best-effort cancel cleanup, re-raise is wrong here
 
 Scope: every ``*.py`` under the 7 framework dirs
-``ava/ plugins/ agent/ gateway/ cli/ services/ shared/``. Run it standalone
+``ava/ plugins/ agent/ gateway/ cli/ services/ base/``. Run it standalone
 (`.venv/bin/python scripts/lint/fail_fast.py`); fail -> exit 1. Also wired as the
 `lint-fail-fast` pre-commit hook.
 """

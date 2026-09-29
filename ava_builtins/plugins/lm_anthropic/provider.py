@@ -12,8 +12,8 @@ if TYPE_CHECKING:
     from langchain_core.language_models.chat_models import BaseChatModel
 from loguru import logger
 
-from shared.lm.effort import clamp_effort
-from shared.lm.provider_api import (
+from base.lm.effort import clamp_effort
+from base.lm.provider_api import (
     AttachPolicy,
     BuildContext,
     PricePeriod,
@@ -23,8 +23,8 @@ from shared.lm.provider_api import (
     register,
     require_key,
 )
-from shared.lm.registry import MODELS, ModelSpec, ModelTuning, resolve_setting
-from shared.lm.stop import StopSpec
+from base.lm.registry import MODELS, ModelSpec, ModelTuning, resolve_setting
+from base.lm.stop import StopSpec
 
 # Budget used when AVA_REASONING_EFFORT clamps an extended-thinking-only claude
 # model to its "on" tier and no explicit AVA_CLAUDE_THINKING_BUDGET_TOKENS is
@@ -87,7 +87,7 @@ def build(ctx: BuildContext) -> BaseChatModel:
     wire returns thinking text the timeline can render. Reasoning effort
     rides the `effort` field, gated per model.
     """
-    from shared.lm.compat.anthropic_thinking import ThinkingTokensChatAnthropic
+    from base.lm.compat.anthropic_thinking import ThinkingTokensChatAnthropic
 
     # Fail fast on missing key — the same posture as every other provider
     # branch. Without it, ChatAnthropic reads ANTHROPIC_API_KEY from env
@@ -102,7 +102,7 @@ def build(ctx: BuildContext) -> BaseChatModel:
     if spec is None or spec.max_output_tokens is None:
         raise ValueError(
             f"Unknown claude model {ctx.model!r} — register it (with "
-            f"max_output_tokens) in `shared/lm/registry.py:MODELS`"
+            f"max_output_tokens) in `base/lm/registry.py:MODELS`"
         )
 
     thinking = _effective_thinking(ctx, spec)
@@ -330,7 +330,7 @@ register(
         # claude-opus-4-6, claude-sonnet-4-6, and claude-haiku-4-5
         # were never selectable here (implicit spawnable=False) and have no
         # live references. Historical prices remain in
-        # shared/lm/pricing_catalog_archive.json.
+        # base/lm/pricing_catalog_archive.json.
     },
     pricing={
         "claude-sonnet-5": PriceRates(

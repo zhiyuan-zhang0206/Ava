@@ -408,18 +408,18 @@ def test_ast_rules_retain_the_eight_package_scope(
 def test_ast_allowlists_and_stale_role_entry_are_preserved(
     tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    path = _write(tmp_path, "shared/example.py", 0)
+    path = _write(tmp_path, "base/example.py", 0)
     path.write_text(
         "if typing.TYPE_CHECKING:\n    import example\nmachine_role()\n", encoding="utf-8"
     )
-    monkeypatch.setattr(lcs, "_TYPE_CHECKING_ALLOWED", frozenset({"shared/example.py"}))
-    monkeypatch.setattr(lcs, "_MACHINE_ROLE_ALLOWED", {"shared/example.py": "Test host capability"})
+    monkeypatch.setattr(lcs, "_TYPE_CHECKING_ALLOWED", frozenset({"base/example.py"}))
+    monkeypatch.setattr(lcs, "_MACHINE_ROLE_ALLOWED", {"base/example.py": "Test host capability"})
     assert lcs.main([]) == 0
     assert capsys.readouterr().out == ""
 
     path.write_text("value = 1\n", encoding="utf-8")
     assert lcs.main([]) == 1
-    assert "shared/example.py:1: stale machine_role() allowlist entry" in capsys.readouterr().out
+    assert "base/example.py:1: stale machine_role() allowlist entry" in capsys.readouterr().out
 
 
 @pytest.mark.parametrize("destination_scope", ["shared", "docs"])
@@ -438,7 +438,7 @@ def test_explicit_alias_preserves_resolved_ast_scope(
     output = capsys.readouterr().out
     assert "hard ceiling" not in output
     if destination_scope == "shared":
-        assert "shared/original.py:802:" in output
+        assert "base/original.py:802:" in output
         assert "TYPE_CHECKING" in output
     else:
         assert output == ""
@@ -756,7 +756,7 @@ def test_guard_rejects_an_invalid_base_baseline(
 def test_ast_and_radon_share_one_parse(
     tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    _source(tmp_path, _branches(2), "shared/q.py")
+    _source(tmp_path, _branches(2), "base/q.py")
     parse = Mock(wraps=ast.parse)
     measure = Mock(wraps=quality.measure_quality)
     visitor = Mock(wraps=cast(Any, quality.ComplexityVisitor).from_ast)

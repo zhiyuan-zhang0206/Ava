@@ -18,19 +18,19 @@ from psycopg_pool import AsyncConnectionPool
 from agent.ownership.hosted import settle_stale_running_rows
 from agent.state import AgentState
 from agent.turn import progress
+from base.agents.incarnation import hosted_force
+from base.agents.incarnation import resources as resource_codec
+from base.cluster.machine import machine_name
+from base.db import insert_inbound_message
 from services.agent_host import dispatcher
 from services.agent_host import host as host_module
 from services.agent_host import runtime as runtime_module
 from services.agent_host.dispatcher import InboundWakeDispatcher, TurnScheduler
 from services.agent_host.host import AgentHost
-from shared.agents.incarnation import hosted_force
-from shared.agents.incarnation import resources as resource_codec
-from shared.cluster.machine import machine_name
-from shared.db import insert_inbound_message
 from tests.agent.test_hosted_db_recovery import _admit, _graph
+from tests.base.poll_until import poll_until_async
 from tests.services.test_agent_host import _PendingScanPool
 from tests.services.test_turn_dispatcher import _ScanScheduler, _stale_age
-from tests.shared.poll_until import poll_until_async
 
 
 def _accept_model_config(**_kwargs: object) -> str:

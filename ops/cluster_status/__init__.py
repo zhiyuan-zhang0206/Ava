@@ -23,23 +23,23 @@ from typing import Any
 
 from pydantic import BaseModel
 
-import shared.cluster
-import shared.db
-import shared.deploy.state.host_deploy_state
-from ops import cluster_pause
-from ops.cluster_status.schema_mismatch import status as schema_mismatch_status
-from ops.rpc_schemas import AgentSessionGroup, SessionInfo, ShellInfo
-from shared.api_contracts.status import PausedReason, SchemaMismatchStatus
-from shared.cluster.machine import (
+import base.cluster
+import base.db
+import base.deploy.state.host_deploy_state
+from base.api_contracts.status import PausedReason, SchemaMismatchStatus
+from base.cluster.machine import (
     is_agent_runner,
     is_gateway,
     is_observability_station,
     machine_name,
 )
-from shared.config import cluster_tz
-from shared.host.proc import process_alive
-from shared.host.resource_sample import ResourceSample
-from shared.sessions.page_session import is_page_label
+from base.config import cluster_tz
+from base.host.proc import process_alive
+from base.host.resource_sample import ResourceSample
+from base.sessions.page_session import is_page_label
+from ops import cluster_pause
+from ops.cluster_status.schema_mismatch import status as schema_mismatch_status
+from ops.rpc_schemas import AgentSessionGroup, SessionInfo, ShellInfo
 
 _log = logging.getLogger(__name__)
 
@@ -66,7 +66,7 @@ class ClusterStatus(BaseModel):
 
     machine_name: str
     # Three orthogonal capability flags (any combination on a single host) —
-    # never a single categorical "role". See shared/cluster/machine.py.
+    # never a single categorical "role". See base/cluster/machine.py.
     # serve_observability_station defaults False so a client on pre-station
     # code still parses a station host's snapshot.
     serve_gateway: bool
@@ -88,7 +88,7 @@ class ClusterStatus(BaseModel):
     # the multi-machine view shows each node's checkout.
     head_sha: str | None = None
     # The commit the process answering this probe actually loaded, frozen at its
-    # own boot (`shared.native_process.loaded_commit`), or None when it never froze one. Distinct
+    # own boot (`base.native_process.loaded_commit`), or None when it never froze one. Distinct
     # from head_sha: head_sha is the checkout, running_sha is code the live
     # process holds. They differ when the checkout advanced (`git pull`) but the
     # process was not restarted — the roster marks that node's code as stale.
@@ -172,9 +172,9 @@ def _group_agent_sessions(
 
 
 # Session name prefix — sessions are named `ava-<service>` (see
-# shared/cluster.py:session_name; the per-home session-record namespace already
+# base/cluster.py:session_name; the per-home session-record namespace already
 # scopes them to this cluster). The prefix filter drops non-ava sessions.
-_CLUSTER_SESSION_PREFIX = f"{shared.cluster.session_name('')}"  # "ava-"
+_CLUSTER_SESSION_PREFIX = f"{base.cluster.session_name('')}"  # "ava-"
 
 # A bare agent main-process session (`ava-agent-<id>`). Agent processes are
 # pid records, not sessions — `_collect_sessions` filters them out so the
@@ -256,7 +256,7 @@ def capture_shell(
         raise ShellNotFoundError(f"agent {agent_id} has no live shell {session_id} on this host")
 
     full_name = _shell_session_name(agent_id, shell)
-    from shared.sessions.backend import get_shell_backend
+    from base.sessions.backend import get_shell_backend
 
     try:
         captured = get_shell_backend().capture_pane(full_name, lines)
@@ -296,7 +296,7 @@ def kill_shell(agent_id: int, session_id: int) -> tuple[str, bool, str | None]:
     if shell is None:
         return "absent", False, None
     full_name = _shell_session_name(agent_id, shell)
-    from shared.sessions.backend import get_shell_backend
+    from base.sessions.backend import get_shell_backend
 
     backend = get_shell_backend()
     try:
@@ -323,7 +323,7 @@ def kill_agent_shells(agent_id: int) -> list[int]:
     so the agent's explicit shells and its watchers go, while another agent's
     sessions and the agent's own process session are never touched. Page-server
     sessions (`ava.ui.serve`, the `page-` label owned by
-    `shared.sessions.page_session`) are spared: a page keeps its own lifecycle.
+    `base.sessions.page_session`) are spared: a page keeps its own lifecycle.
     The backend's kill is idempotent, so a session that ended between the
     listing and its kill still counts as killed — it is gone either way. No
     notice is produced here (an owner-level kill is silent) and nothing is
@@ -334,7 +334,7 @@ def kill_agent_shells(agent_id: int) -> list[int]:
     shells = [shell for shell in agent_shell_sessions(agent_id) if not is_page_label(shell.name)]
     if not shells:
         return []
-    from shared.sessions.backend import get_shell_backend
+    from base.sessions.backend import get_shell_backend
 
     backend = get_shell_backend()
 
@@ -352,7 +352,7 @@ def kill_agent_shells(agent_id: int) -> list[int]:
 
 def _shell_session_name(agent_id: int, shell: ShellInfo) -> str:
     """The full backend session name of one listed shell (its `-<name>` kept)."""
-    return shared.cluster.session_name(f"agent-{agent_id}-shell-{shell.id}") + (
+    return base.cluster.session_name(f"agent-{agent_id}-shell-{shell.id}") + (
         f"-{shell.name}" if shell.name else ""
     )
 
@@ -371,7 +371,7 @@ def _collect_sessions() -> tuple[list[SessionInfo], int, int]:
     filtered out here — this covers the daemons + the agents' persistent
     shells. A backend that is down degrades to empty data.
     """
-    from shared.sessions.backend import get_backend, get_shell_backend
+    from base.sessions.backend import get_backend, get_shell_backend
 
     rows: dict[str, SessionInfo] = {}
     now = datetime.now().astimezone(cluster_tz())
@@ -407,19 +407,19 @@ def _collect_sessions() -> tuple[list[SessionInfo], int, int]:
 def _read_deploy_snapshot(
     pool: Any | None,
 ) -> tuple[
-    shared.deploy.state.host_deploy_state.HostDeployState | None,
+    base.deploy.state.host_deploy_state.HostDeployState | None,
     int,
     SchemaMismatchStatus | None,
 ]:
     """Read deploy state, agents, and schema through one snapshot-local connection."""
     try:
         connection = (
-            shared.db.connect(autocommit=True)
+            base.db.connect(autocommit=True)
             if pool is None
             else pool.connection(timeout=_POOL_BORROW_TIMEOUT_S)
         )
         with connection as conn:
-            state = shared.deploy.state.host_deploy_state.read(conn=conn)
+            state = base.deploy.state.host_deploy_state.read(conn=conn)
             agent_count = _count_local_agents(conn) if is_agent_runner() else 0
             schema_status = schema_mismatch_status(conn=conn)
         return state, agent_count, schema_status
@@ -442,7 +442,7 @@ def _read_deploy_snapshot(
 def _read_resource_sample() -> ResourceSample | None:
     """One live resource sample, degraded to None on any psutil failure."""
     try:
-        from shared.host.resource_sample import resource_sample
+        from base.host.resource_sample import resource_sample
 
         return resource_sample()
     except Exception:  # fail-fast-ok: psutil may not be installed; degrade gracefully
@@ -451,7 +451,7 @@ def _read_resource_sample() -> ResourceSample | None:
 
 
 def _paused_reason(
-    state: shared.deploy.state.host_deploy_state.HostDeployState | None,
+    state: base.deploy.state.host_deploy_state.HostDeployState | None,
 ) -> PausedReason | None:
     """The first true clause of the `paused` verdict, in its own clause order.
 
@@ -462,8 +462,8 @@ def _paused_reason(
     clause fired. `state` is the snapshot's already-read row, so this adds no
     central-DB dial of its own.
     """
-    from shared.deploy.lifecycle import start_serving
-    from shared.deploy.maintenance import admission
+    from base.deploy.lifecycle import start_serving
+    from base.deploy.maintenance import admission
 
     if state is None:
         return "no_state"
@@ -478,7 +478,7 @@ def _paused_reason(
 
 def _supervisor_online() -> bool | None:
     """An observed native root is online; unavailable inspection stays unknown."""
-    from shared.native_process.root_control.client import RootClientError, root_process
+    from base.native_process.root_control.client import RootClientError, root_process
 
     try:
         return root_process() is not None
@@ -489,14 +489,14 @@ def _supervisor_online() -> bool | None:
 def status_snapshot(pool: Any | None = None) -> ClusterStatus:
     """Assemble this host's cluster state — used by `/api/cluster/status`.
 
-    When setup is missing, shared/cluster/machine.py's machine_name /
+    When setup is missing, base/cluster/machine.py's machine_name /
     machine_role raise specific exceptions; this function passes them
     through and FastAPI surfaces as default 500 (admin endpoint, not
     consumed by SDK).
     """
-    from shared.config import settings
-    from shared.deploy.git.cluster_drift import prod_source_head_sha
-    from shared.native_process import loaded_commit as _process_sha
+    from base.config import settings
+    from base.deploy.git.cluster_drift import prod_source_head_sha
+    from base.native_process import loaded_commit as _process_sha
 
     agent_host_alive = (
         _check_pidfile(str(settings.services.agent_host_pidfile))[0] if is_agent_runner() else None

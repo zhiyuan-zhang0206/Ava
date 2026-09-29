@@ -3,23 +3,23 @@ on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
     paths:
-      - 'shared/agents/incarnation/resources.py'
+      - 'base/agents/incarnation/resources.py'
       - 'tests/agent/test_resources*.py'
       - 'migrations/*incarnation-resources*'
       - '.github/workflows/exec-domain-owner.yml'
       - 'agent/graph/exec/_process.py'
-      - 'shared/native_process/winjob.py'
+      - 'base/native_process/winjob.py'
       - 'tests/agent/test_exec_domain_confirmation.py'
       - 'agent/exec*owner*.py'
       - 'agent/graph/exec/_owned_run.py'
-      - 'shared/exec_owner*.py'
-      - 'shared/agents/incarnation/resource_admission.py'
-      - 'shared/native_process/winjob_pipes.py'
-      - 'shared/native_process/winjob_spawn.py'
-      - 'shared/native_process/exec_domain.py'
+      - 'base/exec_owner*.py'
+      - 'base/agents/incarnation/resource_admission.py'
+      - 'base/native_process/winjob_pipes.py'
+      - 'base/native_process/winjob_spawn.py'
+      - 'base/native_process/exec_domain.py'
       - 'tests/agent/test_exec_owner_entry.py'
       - 'tests/agent/test_resource_admission.py'
-      - 'shared/deploy/writers/runtime_admission.py'
+      - 'base/deploy/writers/runtime_admission.py'
       - 'tests/agent/test_publication_runtime_admission.py'
 permissions:
   contents: read
@@ -43,9 +43,9 @@ jobs:
         run: |
           mkdir -p proof
           git rev-parse HEAD > proof/head-sha.txt
-          uv run pyright shared/agents/incarnation/resources.py shared/agents/incarnation/resource_admission.py shared/agents/incarnation/exec_owner_protocol.py shared/agents/incarnation/exec_owner_recovery.py agent/graph/exec/_owned_run.py agent/exec_domain_owner.py agent/exec_owner_child.py tests/agent/test_resources.py tests/ava/test_migration_baseline.py tests/agent/test_resource_admission.py
+          uv run pyright base/agents/incarnation/resources.py base/agents/incarnation/resource_admission.py base/agents/incarnation/exec_owner_protocol.py base/agents/incarnation/exec_owner_recovery.py agent/graph/exec/_owned_run.py agent/exec_domain_owner.py agent/exec_owner_child.py tests/agent/test_resources.py tests/ava/test_migration_baseline.py tests/agent/test_resource_admission.py
 
-          uv run pyright shared/deploy/writers/runtime_admission.py tests/agent/test_publication_runtime_admission.py
+          uv run pyright base/deploy/writers/runtime_admission.py tests/agent/test_publication_runtime_admission.py
           timeout 240 uv run pytest tests/agent/test_resources.py tests/ava/test_migration_baseline.py tests/agent/test_resource_admission.py tests/agent/test_publication_runtime_admission.py -q --junitxml=proof/resource-fences.xml
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: always()
@@ -79,8 +79,8 @@ jobs:
           # The existing cross-platform domain uses IS_WINDOWS, which pyright
           # cannot narrow; type its POSIX API surface explicitly, and check the
           # native Job implementation against Windows separately on every lane.
-          uv run pyright --pythonplatform Linux shared/native_process/winjob.py shared/native_process/exec_domain.py agent/graph/exec/_process.py tests/agent/test_exec_domain_confirmation.py
-          uv run pyright --pythonplatform Windows shared/native_process/winjob.py shared/native_process/winjob_pipes.py shared/agents/incarnation/exec_owner_protocol.py
+          uv run pyright --pythonplatform Linux base/native_process/winjob.py base/native_process/exec_domain.py agent/graph/exec/_process.py tests/agent/test_exec_domain_confirmation.py
+          uv run pyright --pythonplatform Windows base/native_process/winjob.py base/native_process/winjob_pipes.py base/agents/incarnation/exec_owner_protocol.py
           uv run pytest --confcutdir=tests/agent tests/agent/test_exec_domain_confirmation.py tests/agent/test_exec_owner_entry.py -q --junitxml=proof/native-domain.xml
       - name: Original buffered-control regression must fail on Linux
         if: matrix.os == 'ubuntu-24.04'
@@ -89,15 +89,15 @@ jobs:
           git fetch --no-tags --depth=1 origin 4faff03726be6135b9a43c8b1e555c15182c6155
           cp agent/exec_domain_owner.py proof/current-owner.py
           trap 'cp proof/current-owner.py agent/exec_domain_owner.py' EXIT
-          git show 4faff03726be6135b9a43c8b1e555c15182c6155:agent/exec_domain_owner.py | sed -e 's|shared\.exec_process_domain|shared.native_process.exec_domain|g' -e 's|shared\.platform|shared.native_process.os_platform|g' -e 's|shared\.winjob_pipes|shared.native_process.winjob_pipes|g' -e 's|shared\.winjob|shared.native_process.winjob|g' > agent/exec_domain_owner.py
-          # The frozen blob predates the shared/agents/incarnation split (PR #3646); its own
+          git show 4faff03726be6135b9a43c8b1e555c15182c6155:agent/exec_domain_owner.py | sed -e 's|shared\.exec_process_domain|base.native_process.exec_domain|g' -e 's|shared\.platform|base.native_process.os_platform|g' -e 's|shared\.winjob_pipes|base.native_process.winjob_pipes|g' -e 's|shared\.winjob|base.native_process.winjob|g' > agent/exec_domain_owner.py
+          # The frozen blob predates the base/agents/incarnation split (PR #3646); its own
           # imports still name the pre-move paths, which no longer exist in this tree. This
           # regression proof is about exec_domain_owner.py's own buffered-control logic, not
           # import-path history, so retarget just those two lines to their current location —
           # same names, same behavior, nothing else in the frozen blob changes.
           sed -i \
-            -e 's/^from shared\.exec_owner_protocol import (/from shared.agents.incarnation.exec_owner_protocol import (/' \
-            -e 's/^from shared\.incarnation_resources import ResourceProcess/from shared.agents.incarnation.resources import ResourceProcess/' \
+            -e 's/^from shared\.exec_owner_protocol import (/from base.agents.incarnation.exec_owner_protocol import (/' \
+            -e 's/^from shared\.incarnation_resources import ResourceProcess/from base.agents.incarnation.resources import ResourceProcess/' \
             agent/exec_domain_owner.py
           set +e
           uv run pytest --confcutdir=tests/agent tests/agent/test_exec_owner_entry.py::test_completed_owner_exits_while_original_host_keeps_control_open -q > proof/old-buffered-control.txt 2>&1

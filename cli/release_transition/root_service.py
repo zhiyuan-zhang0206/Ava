@@ -9,10 +9,10 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+from base.deploy.release.runtime_release import VerifiedRelease
+from base.host.system.boot_unit import BootStartAction, BootUnitContext, install, unit_name
 from cli.release_transition.journal import Operation
 from cli.release_transition.request import ReleaseRef
-from shared.deploy.release.runtime_release import VerifiedRelease
-from shared.host.system.boot_unit import BootStartAction, BootUnitContext, install, unit_name
 
 
 def _context(home: Path, registry: Path, image: VerifiedRelease) -> BootUnitContext:
@@ -53,7 +53,7 @@ def stage_environment(home: Path, registry: Path, home_dir: Path) -> tuple[tuple
 
 
 def start(operation: Operation, image: VerifiedRelease) -> None:
-    from shared.host.system.boot_unit import manager_properties, privileged
+    from base.host.system.boot_unit import manager_properties, privileged
 
     context = _context(Path(operation.request.home), Path(operation.request.registry), image)
     action = BootStartAction(
@@ -81,7 +81,7 @@ def start(operation: Operation, image: VerifiedRelease) -> None:
 
 
 def observe(operation: Operation, image: VerifiedRelease) -> None:
-    from shared.host.proc import run_bounded
+    from base.host.proc import run_bounded
 
     context = _context(Path(operation.request.home), Path(operation.request.registry), image)
     result = run_bounded(
@@ -105,7 +105,7 @@ def observe(operation: Operation, image: VerifiedRelease) -> None:
 
 def preflight(operation: Operation, image: VerifiedRelease, *, previous: bool) -> None:
     """Both complete startup rosters must be preparable before draining work."""
-    from shared.host.proc import run_bounded
+    from base.host.proc import run_bounded
 
     arguments = ["--operation", str(operation.request.path), "--preflight"]
     if previous:

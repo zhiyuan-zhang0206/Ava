@@ -16,19 +16,19 @@ import psycopg
 import pytest
 from psycopg_pool import ConnectionPool
 
+from base.cluster.machine import machine_name
+from base.db import create_agent, insert_inbound_message
+from base.deploy.maintenance import admission, pause_owner
+from base.deploy.state.host_deploy_state import HostDeployState
 from ops import agent_pause, cluster_pause
 from ops.cluster_pause import unpause_local_cluster as _real_unpause_local_cluster
-from shared.cluster.machine import machine_name
-from shared.db import create_agent, insert_inbound_message
-from shared.deploy.maintenance import admission, pause_owner
-from shared.deploy.state.host_deploy_state import HostDeployState
 
 
 @pytest.fixture
 def posture(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     """Record every `set_posture` call so the pairing is observable without a DB."""
     calls: list[str] = []
-    monkeypatch.setattr("shared.deploy.state.host_deploy_state.set_posture", calls.append)
+    monkeypatch.setattr("base.deploy.state.host_deploy_state.set_posture", calls.append)
     return calls
 
 
@@ -36,7 +36,7 @@ def posture(monkeypatch: pytest.MonkeyPatch) -> list[str]:
 def local_runtime(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> _StubBackend:
     """Keep each operation's journal private and leave real DB drain intact."""
     backend = _StubBackend()
-    monkeypatch.setattr("shared.sessions.backend.get_backend", lambda: backend)
+    monkeypatch.setattr("base.sessions.backend.get_backend", lambda: backend)
     monkeypatch.setattr(pause_owner, "state_path", lambda: tmp_path / "pause.json")
     monkeypatch.setattr(pause_owner, "lock_path", lambda: tmp_path / "pause.lock")
     monkeypatch.setattr(agent_pause, "host_running", lambda: False)
@@ -82,7 +82,7 @@ def test_is_paused_judges_a_pre_read_state_without_another_db_read(
     def _unexpected_read() -> HostDeployState | None:
         raise AssertionError("is_paused re-read host deploy state")
 
-    monkeypatch.setattr("shared.deploy.state.host_deploy_state.read", _unexpected_read)
+    monkeypatch.setattr("base.deploy.state.host_deploy_state.read", _unexpected_read)
 
     assert cluster_pause.is_paused(_state("paused")) is True
     assert cluster_pause.is_paused(_state("idle")) is False
@@ -99,7 +99,7 @@ def test_is_paused_without_an_argument_still_reads_fresh(
         reads += 1
         return _state("paused")
 
-    monkeypatch.setattr("shared.deploy.state.host_deploy_state.read", _read)
+    monkeypatch.setattr("base.deploy.state.host_deploy_state.read", _read)
 
     assert cluster_pause.is_paused() is True
     assert reads == 1
@@ -191,7 +191,7 @@ def test_drain_timeout_retains_hold_and_action_dependencies(
         (agent, machine_name(), owner, generation),
     )
     db_conn.commit()
-    monkeypatch.setattr("shared.config.settings.gateway.update_quiesce_timeout_seconds", 0.01)
+    monkeypatch.setattr("base.config.settings.gateway.update_quiesce_timeout_seconds", 0.01)
 
     with pytest.raises(TimeoutError, match="without force") as raised:
         cluster_pause.pause_local_cluster()
@@ -225,9 +225,9 @@ def test_stall_report_names_the_predecessor_owner_fence(
     was not consuming a row left by its predecessor; the report must name the
     owner mismatch, which is the fence that requires explicit resolution.
     """
+    from base.deploy.maintenance.state import MaintenanceHold
     from ops.agent_pause import _stall_report
     from ops.agent_pause.probe import HostIdentity
-    from shared.deploy.maintenance.state import MaintenanceHold
 
     agent = create_agent(db_conn)
     predecessor, successor, generation = uuid4(), uuid4(), uuid4()
@@ -263,12 +263,12 @@ def test_unpause_refuses_a_held_unit_whose_services_stopped(
     monkeypatch: pytest.MonkeyPatch, posture: list[str]
 ) -> None:
     """A held unit whose services stopped resumes only after `ava start` passes readiness."""
-    from shared.deploy.maintenance.state import MaintenanceHold
+    from base.deploy.maintenance.state import MaintenanceHold
 
     when = datetime(2026, 9, 10, tzinfo=UTC)
     pause_owner.begin_maintenance("wsl:pid1", when)
     pause_owner.change_maintenance("wsl:pid1", when, MaintenanceHold(), MaintenanceHold("stopping"))
-    monkeypatch.setattr("shared.deploy.lifecycle.start_serving.is_serving", lambda: False)
+    monkeypatch.setattr("base.deploy.lifecycle.start_serving.is_serving", lambda: False)
 
     with pytest.raises(RuntimeError) as raised:
         cluster_pause.unpause_local_cluster()
@@ -282,7 +282,7 @@ def test_release_local_db_pools_dials_the_host_and_releases_the_ops_pool(
     """The stop's last step: host pools over loopback, then this daemon's own."""
     from types import SimpleNamespace
 
-    from shared.db import pool_release
+    from base.db import pool_release
 
     posted: list[str] = []
 
@@ -317,7 +317,7 @@ def test_release_local_db_pools_reports_failures_without_raising(
     """Both arms are best-effort: the stop must complete on either failure."""
     from types import SimpleNamespace
 
-    from shared.db import pool_release
+    from base.db import pool_release
 
     def _refused(_url: str, **_kwargs: object) -> object:
         raise RuntimeError("connection refused")

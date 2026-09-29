@@ -23,7 +23,7 @@ from typing import Any, cast
 
 from pydantic_core import PydanticUndefined
 
-from shared.api_contracts.config import (
+from base.api_contracts.config import (
     ConfigAuditView,
     ConfigFieldView,
     ConfigView,
@@ -43,8 +43,8 @@ def _anchored_gateway_base() -> str | None:
     install before first start) or when the checkout is unanchored — an
     unanchored checkout has NO home of its own; its rule-4 scratch home carries
     no identity to read."""
-    from shared.host.env import runtime_config
-    from shared.host.env.dotenv_boot import AVA_ENV_PATH, checkout_anchored
+    from base.host.env import runtime_config
+    from base.host.env.dotenv_boot import AVA_ENV_PATH, checkout_anchored
 
     if not checkout_anchored():
         return None
@@ -119,15 +119,15 @@ def _auth_headers() -> dict[str, str]:
     secret (environment, then `.env`); else, on a remote unit, its installed
     capability's API token, only while this process runs the admitted runtime.
     """
-    from shared.cluster.auth import bearer_header, delivered_token
-    from shared.host.env import runtime_config
+    from base.cluster.auth import bearer_header, delivered_token
+    from base.host.env import runtime_config
 
     bearer = delivered_token() or os.environ.get("AVA_CLUSTER_SECRET")
     if bearer is None:
         bearer = runtime_config.read_env_aliases().get("AVA_CLUSTER_SECRET", "")
     home = runtime_config.env_file_path().parent
     if not bearer and (home / "db-authority" / "unit.json").exists():
-        from shared.cluster.authority.unit import consume_unit
+        from base.cluster.authority.unit import consume_unit
 
         api = consume_unit(home.resolve()).api
         bearer = "" if api is None else api.token
@@ -135,7 +135,7 @@ def _auth_headers() -> dict[str, str]:
 
 
 def _get_config(machine: str | None) -> ConfigView:
-    from shared.host.net.http_dial import get as dial_get
+    from base.host.net.http_dial import get as dial_get
 
     params = {"machine": machine} if machine else None
     resp = dial_get(
@@ -149,7 +149,7 @@ def _get_config(machine: str | None) -> ConfigView:
 
 
 def _get_config_audit(machine: str | None, last: int) -> ConfigAuditView:
-    from shared.host.net.http_dial import get as dial_get
+    from base.host.net.http_dial import get as dial_get
 
     params: dict[str, str] = {"last": str(last)}
     if machine:
@@ -165,7 +165,7 @@ def _get_config_audit(machine: str | None, last: int) -> ConfigAuditView:
 
 
 def _put_config(body: dict[str, Any], machine: str | None) -> ConfigWriteResult:
-    from shared.host.net.http_dial import put as dial_put
+    from base.host.net.http_dial import put as dial_put
 
     _guard_gateway_write(_gateway_base())
     params = {"machine": machine} if machine else None
@@ -209,7 +209,7 @@ def _field_extra(field_info: Any) -> dict[str, Any]:
 
 def _local_fields() -> dict[str, _LocalConfigField]:
     """Build local-edit metadata from the registry, never from Settings values."""
-    from shared.host.env.config_registry import FIELD_INFOS, field_alias, field_editor_type
+    from base.host.env.config_registry import FIELD_INFOS, field_alias, field_editor_type
 
     fields: dict[str, _LocalConfigField] = {}
     for name, info in FIELD_INFOS.items():
@@ -254,7 +254,7 @@ def _resolve_local_field(key: str, index: dict[str, _LocalConfigField]) -> _Loca
 
 
 def _config_source_is_local() -> bool:
-    from shared.host.env.bootstrap import config_source_is_local
+    from base.host.env.bootstrap import config_source_is_local
 
     return config_source_is_local()
 
@@ -289,7 +289,7 @@ def _reject_local_machine(machine: str | None, verb: str) -> int | None:
 
 
 def _local_get(key: str | None) -> int:
-    from shared.host.env import runtime_config
+    from base.host.env import runtime_config
 
     aliases = runtime_config.read_env_aliases()
     fields = _local_fields()
@@ -330,7 +330,7 @@ def _resolve_field(key: str, index: dict[str, ConfigFieldView]) -> ConfigFieldVi
 
 
 def _field_editable(field: ConfigFieldView, *, remote: bool) -> bool:
-    # Mirrors shared.config.editing.field_editable. The CLI has the wire view,
+    # Mirrors base.config.editing.field_editable. The CLI has the wire view,
     # not ConfigFieldMeta, so these two definitions must stay in lockstep.
     return field.remote_writable if remote and field.scope == "host" else field.writable
 
@@ -427,8 +427,8 @@ def cmd_config_audit(last: int, key: str | None, machine: str | None) -> int:
     if not 1 <= last <= 200:
         print("[ava config audit] --last must be between 1 and 200", file=sys.stderr)
         return 1
-    from shared.cluster.machine import machine_name
-    from shared.host.env.audit import read_env_write_records
+    from base.cluster.machine import machine_name
+    from base.host.env.audit import read_env_write_records
 
     if machine is None:
         records = [{**record, "machine": machine_name()} for record in read_env_write_records(last)]
@@ -529,7 +529,7 @@ def _build_local_patch(
     pairs: dict[str, str] | None, unset_keys: list[str] | None
 ) -> tuple[dict[str, object], set[str], list[_LocalConfigField]]:
     """Resolve, gate, and coerce one direct `.env` patch before validation."""
-    from shared.config.editing import coerce_config_scalar
+    from base.config.editing import coerce_config_scalar
 
     index = _index_local_fields(_local_fields())
     writes: dict[str, object] = {}
@@ -555,9 +555,9 @@ def _edit_local_config(
     pairs: dict[str, str] | None, unset_keys: list[str] | None, verb: str
 ) -> int:
     """Validate and persist one local `.env` patch without booting Settings."""
-    from shared.config.candidate import validate_env_patch_for_write
-    from shared.host.env import runtime_config
-    from shared.host.env.dotenv_boot import checkout_anchored
+    from base.config.candidate import validate_env_patch_for_write
+    from base.host.env import runtime_config
+    from base.host.env.dotenv_boot import checkout_anchored
 
     if not checkout_anchored():
         print(

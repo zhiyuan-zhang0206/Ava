@@ -22,7 +22,7 @@ import pytest
 import ava
 from ava import watcher
 from ava.shell import background
-from shared.native_process.os_platform import IS_WINDOWS
+from base.native_process.os_platform import IS_WINDOWS
 
 pytestmark = [
     pytest.mark.skipif(IS_WINDOWS, reason="PTY supervisor is POSIX-only"),
@@ -85,7 +85,7 @@ def test_watcher_script_dir_is_tmp_per_agent(_agent_row: int) -> None:
     # per-agent subdir makes cross-agent collision impossible.
     import tempfile
 
-    from shared.paths import ava_home
+    from base.paths import ava_home
 
     d = watcher._watchers_dir()
     td = pathlib.Path(tempfile.gettempdir())
@@ -240,10 +240,10 @@ def test_at_registers_ttl_row_from_fires_at_plus_grace(
     db_conn: psycopg.Connection, _agent_row: int
 ) -> None:
     """Task #3411: an at watcher's session TTL is its fire moment plus the
-    grace (`shared.daemon.schedules.watcher.AT_SESSION_TTL_GRACE_SECONDS`), so the wake
+    grace (`base.daemon.schedules.watcher.AT_SESSION_TTL_GRACE_SECONDS`), so the wake
     delivery and the session's exit notice complete before the reaper may
     reclaim it."""
-    from shared.daemon.schedules.watcher import AT_SESSION_TTL_GRACE_SECONDS
+    from base.daemon.schedules.watcher import AT_SESSION_TTL_GRACE_SECONDS
 
     when = datetime.datetime.now(datetime.UTC) + datetime.timedelta(hours=2)
     wid = watcher.at(when, "wake", name="test-at-ttl")
@@ -301,7 +301,7 @@ def test_watcher_child_dies_when_pty_host_dies(_agent_row: int, tmp_path: pathli
         child = psutil.Process(child_pid)
         shell = psutil.Process(child.ppid())
         host = psutil.Process(shell.ppid())
-        assert "shared.sessions.pty.host" in " ".join(host.cmdline())
+        assert "base.sessions.pty.host" in " ".join(host.cmdline())
 
         os.kill(host.pid, signal.SIGKILL)
 
@@ -508,8 +508,8 @@ def test_at_announcement_uses_cluster_zone_when_authoritative(
 ) -> None:
     """at() passes the cluster timezone to the generated script when the
     process holds an authoritative one (user ruling 2026-08-27)."""
-    from shared.config import settings
-    from shared.config.general import GeneralSettings
+    from base.config import settings
+    from base.config.general import GeneralSettings
 
     monkeypatch.setattr(
         settings, "general", GeneralSettings.model_construct(timezone="Asia/Shanghai")
@@ -535,8 +535,8 @@ def test_at_announcement_uses_host_clock_without_authoritative_zone(
     """A settings-lite process (no authoritative cluster timezone) passes
     None: the announcement renders in the watcher's own wall clock — the
     documented lite degradation."""
-    from shared.config import settings
-    from shared.config.general import GeneralSettings
+    from base.config import settings
+    from base.config.general import GeneralSettings
 
     monkeypatch.setattr(settings, "general", GeneralSettings.model_construct())
     captured: dict[str, Any] = {}
@@ -559,8 +559,8 @@ def test_cron_defaults_to_host_zone_without_authoritative_zone(
 ) -> None:
     """settings-lite cron (no authoritative cluster timezone) defaults to the
     host's own zone — not the silent America/Los_Angeles field default."""
-    from shared.config import host_tz_name, settings
-    from shared.config.general import GeneralSettings
+    from base.config import host_tz_name, settings
+    from base.config.general import GeneralSettings
 
     monkeypatch.setattr(settings, "general", GeneralSettings.model_construct())
     captured: dict[str, Any] = {}
@@ -577,7 +577,7 @@ def test_cron_defaults_to_host_zone_without_authoritative_zone(
 
 
 def test_cron_invalid_expr_raises(_agent_row: int) -> None:
-    from shared.daemon.schedules.watcher import CronExprError
+    from base.daemon.schedules.watcher import CronExprError
 
     with pytest.raises(CronExprError):
         watcher.cron("not a cron", "msg", name="test-bad-cron")
@@ -822,7 +822,7 @@ def test_at_future_time_ok(_agent_row: int, monkeypatch: pytest.MonkeyPatch) -> 
 
 def test_boot_inlines_agent_identity(tmp_path: pathlib.Path) -> None:
     """The bootstrap must set AVA_AGENT_ID itself: the session env allowlist
-    (shared/host/env/registry.py child_env, Task #856) deliberately does
+    (base/host/env/registry.py child_env, Task #856) deliberately does
     not forward agent-scope knobs to session children, so a child that relied
     on inheritance would see ava.self.AGENT_ID=None and its wake-up
     send_message would 422 on /api/agents/None/messages (Task #964). The
@@ -1063,7 +1063,7 @@ def test_kill_does_not_touch_any_registry_table(_agent_row: int) -> None:
     passes on the new."""
     import psycopg
 
-    from shared.config import settings
+    from base.config import settings
 
     wid = watcher.launch("import time\ntime.sleep(60)\n", timeout="1h", name="test-no-registry")
     with psycopg.connect(settings.data_plane.db_url, autocommit=True) as conn, conn.cursor() as cur:

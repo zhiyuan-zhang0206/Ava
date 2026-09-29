@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import NamedTuple
 from uuid import UUID
 
+from base.log import logger
 from cli.release_fleet.alerting import Delivery, deliveries
 from cli.release_fleet.policy import AlertRoute, Cohort
 from cli.release_fleet.progress import AlertRecord
@@ -45,7 +46,6 @@ from cli.release_fleet.workload import CORE_SIGNALS, AgentReport, CoreReport, Un
 from cli.release_transition.journal import Operation
 from cli.release_transition.local import LocalTransition
 from cli.release_transition.request import ReleaseRef
-from shared.log import logger
 
 _STATE = "fleet-state.json"
 _MAX_STATE_BYTES = 256 * 1024
@@ -68,14 +68,14 @@ def _probe(check: Callable[[], object]) -> str | None:
 
 
 def _database() -> None:
-    from shared.db import connect
+    from base.db import connect
 
     with connect() as conn:
         conn.execute("SELECT 1")
 
 
 def _redis() -> None:
-    from shared.events.live.redis_client import sync_redis
+    from base.events.live.redis_client import sync_redis
 
     sync_redis().ping()  # pyright: ignore[reportUnknownMemberType] — redis-py types **kwargs as Unknown
 
@@ -107,7 +107,7 @@ class DeployLease:
         a first hold means. Both writes stay compare-and-set, so a lease taken
         between the read and the write still refuses.
         """
-        from shared.deploy.state.cluster_lock import (
+        from base.deploy.state.cluster_lock import (
             acquire_update_lock,
             renew_update_lock,
             update_lock_holder,
@@ -124,8 +124,8 @@ class DeployLease:
         self._renewer.start()
 
     def _renew(self) -> None:
-        from shared.deploy.progress_timeout import LEASE_RENEW_INTERVAL_S
-        from shared.deploy.state.cluster_lock import lease_may_lapse, renew_update_lock
+        from base.deploy.progress_timeout import LEASE_RENEW_INTERVAL_S
+        from base.deploy.state.cluster_lock import lease_may_lapse, renew_update_lock
 
         renewed = time.monotonic()
         while not self._stop.wait(LEASE_RENEW_INTERVAL_S):
@@ -147,7 +147,7 @@ class DeployLease:
 
     def release(self) -> None:
         """Stop renewing, then release; a lease this operation never took is left alone."""
-        from shared.deploy.state.cluster_lock import release_update_lock
+        from base.deploy.state.cluster_lock import release_update_lock
 
         self._stop.set()
         if self._renewer is not None:
@@ -227,7 +227,7 @@ class GatewayUnit(LocalTransition):
         self, cohort: Cohort, since: datetime, observed: datetime
     ) -> tuple[AgentReport, ...]:
         """One sample per cohort agent; an unreadable roster yields none (unknown)."""
-        from shared.db import connect
+        from base.db import connect
 
         members = cohort.members
         try:
@@ -256,7 +256,7 @@ class GatewayUnit(LocalTransition):
 
     def publish(self, completion: Completion) -> None:
         """Write `releases/fleet-state.json` once per operation; a retry is a no-op."""
-        from shared.host.atomic_io import write_text_atomic
+        from base.host.atomic_io import write_text_atomic
 
         prior = read_state(self.home)
         if prior is not None and prior.operation == completion.operation:
@@ -298,7 +298,7 @@ class GatewayUnit(LocalTransition):
 
 def read_state(home: Path) -> FleetState | None:
     """The published cluster release state, or None before the first completion."""
-    from shared.deploy.release.verified_file import regular_bytes
+    from base.deploy.release.verified_file import regular_bytes
 
     path = home / "releases" / _STATE
     try:

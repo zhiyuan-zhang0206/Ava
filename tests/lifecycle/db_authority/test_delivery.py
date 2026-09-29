@@ -18,10 +18,10 @@ from typing import Any
 
 import pytest
 
-from shared.cluster import authority
-from shared.cluster.authority import delivery
-from shared.db.connections import NoDatabaseAuthorityError, _guard_db_url
-from shared.host.env import dotenv_boot
+from base.cluster import authority
+from base.cluster.authority import delivery
+from base.db.connections import NoDatabaseAuthorityError, _guard_db_url
+from base.host.env import dotenv_boot
 
 _ENDPOINT = "postgresql://ava@127.0.0.1:6433/ava"
 _REPO = Path(__file__).resolve().parents[3]
@@ -100,7 +100,7 @@ def test_a_tampered_secret_is_never_delivered(home: Path, seeded: Any) -> None:
 
 
 def test_a_pending_generation_is_never_delivered(home: Path) -> None:
-    from shared.cluster.authority.ledger import begin_mint
+    from base.cluster.authority.ledger import begin_mint
 
     birth = authority.BirthAuthority()
     groups = authority.Groups(gateway=authority.GATEWAY_GROUP, runner=authority.RUNNER_GROUP)
@@ -250,8 +250,8 @@ _ADMIN = "postgresql://osuser@/ava?host=/tmp/ava-pg-x&port=5433&options=-c%20rol
 def test_only_the_adopted_administrator_url_passes_a_recorded_refusal(
     boot: Path, seeded: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from shared.config import settings
-    from shared.db import connections
+    from base.config import settings
+    from base.db import connections
 
     del seeded
     _intent(boot, tmp_path / "candidate-image")
@@ -275,7 +275,7 @@ def test_only_the_adopted_administrator_url_passes_a_recorded_refusal(
 
 
 def test_a_urls_own_startup_options_survive_the_statement_ceiling() -> None:
-    from shared.db.connections import PG_STATEMENT_TIMEOUT_KWARGS, _statement_kwargs
+    from base.db.connections import PG_STATEMENT_TIMEOUT_KWARGS, _statement_kwargs
 
     assert _statement_kwargs(_ENDPOINT) is PG_STATEMENT_TIMEOUT_KWARGS
     assert _statement_kwargs(_ADMIN)["options"] == (

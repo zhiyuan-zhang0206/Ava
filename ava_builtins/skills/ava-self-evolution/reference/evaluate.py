@@ -41,8 +41,8 @@ import ava
 from ava_builtins.skill_support.self_evolution.audit import LeakPaths
 from ava_builtins.skill_support.self_evolution.collect import collect_one
 from ava_builtins.skill_support.self_evolution.rubric import scores
-from shared.db import connect
-from shared.paths import ava_home, workspace_dir
+from base.db import connect
+from base.paths import ava_home, workspace_dir
 
 # Tool-call prefixes that make a run unsafe to re-run: fleet/user-facing side
 # effects, process lifecycle, arbitrary OS (shell can rm / curl / git push),

@@ -6,16 +6,16 @@ import psycopg
 from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 
+from base import telemetry
+from base.agents import AgentNotFound, AgentStatus
+from base.agents.incarnation.lifecycle_acceptance import KILL_ALL_SHELL_SESSIONS
+from base.agents.messages.envelope import validate_writable_source
+from base.db import publish_inbound_wake
+from base.db.transaction import write_transaction
+from base.log import logger
+from base.telemetry.audit_events import prepare_event_log
 from ops.lifecycle.events import publish_page_closed as publish_page_closed
 from ops.pages import list_open_page_names
-from shared import telemetry
-from shared.agents import AgentNotFound, AgentStatus
-from shared.agents.incarnation.lifecycle_acceptance import KILL_ALL_SHELL_SESSIONS
-from shared.agents.messages.envelope import validate_writable_source
-from shared.db import publish_inbound_wake
-from shared.db.transaction import write_transaction
-from shared.log import logger
-from shared.telemetry.audit_events import prepare_event_log
 
 
 def _insert_termination_pair(
@@ -29,7 +29,7 @@ def _insert_termination_pair(
     """Insert an optional pending chat followed by its terminate command.
 
     `kill_all_shell_sessions` rides the command's payload
-    (`shared.agents.incarnation.lifecycle_acceptance.KILL_ALL_SHELL_SESSIONS`), so the request is
+    (`base.agents.incarnation.lifecycle_acceptance.KILL_ALL_SHELL_SESSIONS`), so the request is
     durable in the same statement as the termination it accompanies.
     """
     message_id: int | None = None
@@ -153,7 +153,7 @@ def _stage_termination_event(
     event = prepare_event_log(
         event_type="terminate", agent_id=agent_id, source=source, payload=payload
     )
-    from shared.agents.impersonation_manifest import stage_central_expected_event
+    from base.agents.impersonation_manifest import stage_central_expected_event
 
     return stage_central_expected_event(
         conn, event, origin_kind="ops_terminate", origin_id=inbound_id
@@ -219,7 +219,7 @@ def _force_terminate_transaction(
     `kill_all_shell_sessions` is recorded on the force command and in its audit
     event; the caller kills the sessions once this fence commits, and the host
     sweeps them again when it observes the force quiescent
-    (`shared.agents.incarnation.hosted_force`). The fence supersedes any unapplied graceful
+    (`base.agents.incarnation.hosted_force`). The fence supersedes any unapplied graceful
     terminate, including a shell-session kill that terminate carried: a force
     kills sessions only when asked itself.
     """
@@ -242,7 +242,7 @@ def _force_terminate_transaction(
             message=message,
             kill_all_shell_sessions=kill_all_shell_sessions,
         )
-        from shared.agents.incarnation.lifecycle_acceptance import record_unowned_termination
+        from base.agents.incarnation.lifecycle_acceptance import record_unowned_termination
 
         # Judged on the row as it is before this force ends it: no incarnation
         # to settle leaves a receipt resurrection accepts.
@@ -256,10 +256,10 @@ def _force_terminate_transaction(
             "WHERE id = %s",
             (terminate_inbound_id, agent_id),
         )
-        from shared.agents.incarnation.lifecycle_acceptance import supersede_lifecycle_for_force
+        from base.agents.incarnation.lifecycle_acceptance import supersede_lifecycle_for_force
 
         supersede_lifecycle_for_force(conn, agent_id, terminate_inbound_id)
-        from shared.agents.incarnation.hosted_force import install_hosted_force
+        from base.agents.incarnation.hosted_force import install_hosted_force
 
         install_hosted_force(conn, agent_id, terminate_inbound_id)
         prepared_event = _stage_termination_event(

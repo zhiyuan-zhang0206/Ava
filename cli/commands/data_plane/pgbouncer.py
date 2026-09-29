@@ -15,7 +15,7 @@ Auth — always authenticated, whatever the cluster secret (decisions/
 2026-09-26-internal-data-plane-always-authenticated.md):
 
 - **client → pgbouncer**: `auth_type = scram-sha-256` against a `userlist.txt`
-  (0600) rendered by `shared.cluster.authority.render_userlist`: exactly the
+  (0600) rendered by `base.cluster.authority.render_userlist`: exactly the
   delivered write generation's two logins with their stored SCRAM verifiers,
   plus the operator admin-console entry `ava_pooler_admin` (a userlist-only
   name, never a PostgreSQL role). No plaintext password, no owner entry.
@@ -50,7 +50,15 @@ from typing import Literal
 
 import psutil
 
-import shared.cluster.port_preflight
+import base.cluster.port_preflight
+from base.cluster import ownership
+from base.cluster.authority import POOLER_ADMIN
+from base.cluster.dataplane.pg_tools import brew_prefix, is_macos
+from base.cluster.machine import reachable_host
+from base.host.proc import process_alive
+from base.native_process.child_env import daemon_process_env
+from base.native_process.os_platform import LockTimeoutError
+from base.paths import ava_home
 from cli.commands.converge.spec import ConvergeCtx
 from cli.commands.data_plane._pooler_stop import OwnedPooler
 from cli.commands.data_plane.cluster_instance import (
@@ -59,14 +67,6 @@ from cli.commands.data_plane.cluster_instance import (
     _pg_socket_dir,
     _wait_for_reachable_bind,
 )
-from shared.cluster import ownership
-from shared.cluster.authority import POOLER_ADMIN
-from shared.cluster.dataplane.pg_tools import brew_prefix, is_macos
-from shared.cluster.machine import reachable_host
-from shared.host.proc import process_alive
-from shared.native_process.child_env import daemon_process_env
-from shared.native_process.os_platform import LockTimeoutError
-from shared.paths import ava_home
 
 # Transaction-pooling defaults. max_client_conn
 # caps total in-flight psycopg connections through the pooler; default_pool_size is
@@ -135,7 +135,7 @@ def _render_ini(*, pg_port: int, listen_port: int, db_name: str, cluster_secret:
     `track_extra_parameters` cannot deliver statement_timeout (only GUC_REPORT
     parameters Postgres reports to clients can be tracked), so the connect_query
     SET is the one pooler-side path that reaches the backend. Same value +
-    constant as shared/db/__init__.py's client-side SET (imported lazily — this module
+    constant as base/db/__init__.py's client-side SET (imported lazily — this module
     runs in data-plane bring-up, before any settings/env load is guaranteed).
 
     `server_reset_query = DISCARD ALL` — one statement, unquoted (pgbouncer
@@ -149,11 +149,11 @@ def _render_ini(*, pg_port: int, listen_port: int, db_name: str, cluster_secret:
     always=1 was tried and rejected (405 ruling 2026-09-03, option B): firing
     after EVERY transaction end, its DISCARD ALL wiped the client's SETs too
     (borrowers measured statement_timeout=0). Between-transaction pollution is
-    defended client-side (shared/db/__init__.py baseline restore per dial/borrow +
+    defended client-side (base/db/__init__.py baseline restore per dial/borrow +
     read-write write posture; 2026-09-02 P0)."""
     listen_addr = ", ".join(_bind_addrs(cluster_secret))
     socket_dir = _pg_socket_dir()
-    from shared.db import PG_STATEMENT_TIMEOUT_SET_SQL
+    from base.db import PG_STATEMENT_TIMEOUT_SET_SQL
 
     connect_query = f"connect_query='{PG_STATEMENT_TIMEOUT_SET_SQL}'"
     # One statement, unquoted (verbatim pass-through; rationale in the
@@ -198,7 +198,7 @@ def _write_config(
 ) -> bool:
     """Write pgbouncer.ini + userlist.txt (0600); True when either file's bytes
     changed, which requires a pooler restart (a reload never revokes a user)."""
-    from shared.host.private_storage import write_private_bytes
+    from base.host.private_storage import write_private_bytes
 
     ini = _render_ini(
         pg_port=pg_port, listen_port=listen_port, db_name=db_name, cluster_secret=cluster_secret
@@ -301,8 +301,8 @@ def _admin_reachable(listen_port: int, admin_password: str, host: str = "127.0.0
     Backend readiness is proven separately by the caller, as each delivered
     login. Public bind verification reads the socket table, never a self-dial.
     """
-    from shared.db.connections import connect_url
-    from shared.host.net.url_secret import url_with_userinfo
+    from base.db.connections import connect_url
+    from base.host.net.url_secret import url_with_userinfo
 
     url = url_with_userinfo(
         f"postgresql://@{host}:{listen_port}/pgbouncer", POOLER_ADMIN, admin_password
@@ -342,7 +342,7 @@ def pgbouncer_public_listener_reachable(listen_port: int, role: str, cluster_sec
     if _bind_addrs(cluster_secret) == ["127.0.0.1"]:
         return True
     reachable = reachable_host()
-    addrs = shared.cluster.port_preflight.listener_addrs(listen_port)
+    addrs = base.cluster.port_preflight.listener_addrs(listen_port)
     return bool(addrs & {reachable, "0.0.0.0", "::", "*"})  # noqa: S104 — matching OS wildcard binds, not opening one
 
 
@@ -385,7 +385,7 @@ def ensure_pgbouncer(
     """Bring up (or reload) this cluster's PgBouncer on `listen_port`, pooling in
     front of the local Postgres on `pg_port`. Idempotent. Returns 0 on success.
 
-    `userlist` is the exact `auth_file` (`shared.cluster.authority.render_userlist`)
+    `userlist` is the exact `auth_file` (`base.cluster.authority.render_userlist`)
     and `admin_password` the admin-console credential it carries. Outcomes for a
     running pooler:
 
@@ -612,11 +612,11 @@ def ensure_pgbouncer_step(ctx: ConvergeCtx) -> None:
 
     from dotenv import dotenv_values
 
-    from shared.cluster import get_record, record_pgbouncer_port, record_postgres_port
-    from shared.config import settings
-    from shared.host.env.dotenv_boot import UNANCHORED_DB_SENTINEL
-    from shared.host.env.dotenv_file import remove_env, upsert_env
-    from shared.host.net.url_secret import url_with_port
+    from base.cluster import get_record, record_pgbouncer_port, record_postgres_port
+    from base.config import settings
+    from base.host.env.dotenv_boot import UNANCHORED_DB_SENTINEL
+    from base.host.env.dotenv_file import remove_env, upsert_env
+    from base.host.net.url_secret import url_with_port
 
     if settings.data_plane.is_remote:
         # The pooler is a local-instance component; a remote/SaaS plane's URL

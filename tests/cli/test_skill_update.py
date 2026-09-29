@@ -12,8 +12,8 @@ from pathlib import Path
 
 import pytest
 
+from base.packages.extensions import install_registry as reg
 from cli.commands.extensions.skill import cmd_skill_update, cmd_skill_upgrade
-from shared.packages.extensions import install_registry as reg
 
 # Every test here installs a package, which records `local:<machine>` provenance
 # in the cluster registry — that needs a machine identity, which a bare
@@ -303,7 +303,7 @@ def test_update_refuses_worktree_repo_for_default_home(
     """`ava skill update` from a worktree checkout must not write the prod home
     (the R5 worktree that synced ava-serious-research into prod)."""
 
-    monkeypatch.setattr("shared.cluster.derive.default_home", lambda: unit_home)
+    monkeypatch.setattr("base.cluster.derive.default_home", lambda: unit_home)
     wt_repo = tmp_path / "repo" / ".worktrees" / "ava-9999-task"
     _write_skill(wt_repo / "ava_builtins" / "skills", "builtin-a")
     assert cmd_skill_update(None, repo=wt_repo) == 1

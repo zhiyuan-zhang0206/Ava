@@ -10,7 +10,7 @@ the one-shot close (a finished ask closes its tab; keep_tab / wait=False keep
 it). The chrome MCP seam is mocked so nothing drives a browser.
 
 The `_utils._cluster` tests below (2026-09-28 fix, PR #3550 follow-up P2-2)
-lock its home-derived download label to `shared.host.env.dotenv_boot.resolve_ava_home`
+lock its home-derived download label to `base.host.env.dotenv_boot.resolve_ava_home`
 instead of a raw `os.environ.get("AVA_HOME", "~/.ava")` guess — the same
 anti-pattern flagged for `_source_root` / the `web-sources` feed adapters,
 just for a cosmetic label rather than a write or credential target.

@@ -12,11 +12,11 @@ from agent.graph.exec._result import _ExecDone
 from agent.graph.exec._stream import ExecOutputChunkPublisher
 from agent.graph.exec.node import _run_agent_code
 from agent.state import AgentState
-from shared.agents.context import AvaContext
-from shared.config import settings
-from shared.config.turn_view import bind_agent_config, resolve_agent_config_pins
-from shared.native_process.turn_identity import bind_turn_identity
-from shared.packages.plugins.config_view import bind_agent_plugin_config
+from base.agents.context import AvaContext
+from base.config import settings
+from base.config.turn_view import bind_agent_config, resolve_agent_config_pins
+from base.native_process.turn_identity import bind_turn_identity
+from base.packages.plugins.config_view import bind_agent_plugin_config
 
 
 def _plugin(unit_home: Path) -> None:
@@ -27,7 +27,7 @@ def _plugin(unit_home: Path) -> None:
     )
     (plugin / "default_config.py").write_text(
         "from pydantic import BaseModel, Field\n"
-        "from shared.packages.plugins.config_registration import register_plugin_config\n"
+        "from base.packages.plugins.config_registration import register_plugin_config\n"
         "class Config(BaseModel):\n"
         "    exec_probe_marker: str = Field(default='default-marker', json_schema_extra={'per_agent': True})\n"
         "register_plugin_config(Config)\n"
@@ -56,7 +56,7 @@ async def test_concurrent_turn_configs_reach_real_children_without_cross_talk(
     )
     code = (
         "import json, os\n"
-        "from shared.config import settings\n"
+        "from base.config import settings\n"
         "from ava._settings import plugins\n"
         "print('CONFIG=' + json.dumps([settings.lm.llm_model, "
         "settings.lm.llm_stream_ttft_timeout_seconds, "

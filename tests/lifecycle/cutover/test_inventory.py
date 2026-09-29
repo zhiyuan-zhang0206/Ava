@@ -11,8 +11,8 @@ from typing import Any
 import psutil
 import pytest
 
+from base.native_process.ownership import stable_create_time
 from scripts import cutover_inventory as inventory
-from shared.native_process.ownership import stable_create_time
 from tests.lifecycle.cutover.conftest import CANARY, SERVICE_PATH, LegacyHome, arm_health_probe
 
 Make = Callable[..., LegacyHome]
@@ -101,8 +101,8 @@ def test_a_dead_key_left_in_the_environment_is_inert(monkeypatch: pytest.MonkeyP
     the adoption's `env` step removes it, or after a rollback restored the legacy
     file) boots, and the key configures nothing: `AVA_TRACK_MODE=releases` no
     longer selects what an update converges to, and no child receives it."""
-    from shared.config.general import GeneralSettings
-    from shared.host.env.registry import child_env
+    from base.config.general import GeneralSettings
+    from base.host.env.registry import child_env
 
     inventory.dead_keys_are_dead()
     for key in inventory.DEAD_KEYS:
@@ -343,7 +343,7 @@ def test_running_inside_an_ava_process_of_the_home_refuses(
     import os
 
     legacy = make_legacy()
-    pty_host = legacy.spawn("shared.sessions.pty.host")
+    pty_host = legacy.spawn("base.sessions.pty.host")
     monkeypatch.setattr(inventory, "_lineage", lambda: {os.getpid(), pty_host.pid})
     rows = tmp_path / "rows.json"
     rows.write_text("[]")

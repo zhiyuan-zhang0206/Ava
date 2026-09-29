@@ -11,7 +11,7 @@ Load dynamic workflow skill: ava.help(ava.skills.ava_dynamic_workflow)
 Use reference/codebase_sweep_orchestrator.py to scan Ava repo's legacy code.
 
 Directly execute with script:
-- Wave 1: 4 scout agents scan agent/ ava/ shared/ plugins/
+- Wave 1: 4 scout agents scan agent/ ava/ base/ plugins/
 - Wave 2: 8 verify agents cross-verify (2 per issue type)
 - Wave 3: 1 writer composes initial report
 - Wave 4: 3 adversarial agents try to overturn findings

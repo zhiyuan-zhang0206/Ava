@@ -22,7 +22,7 @@ Every module under the door's package, recursively, whose path has no component
 starting with `_` (checked against the leading-underscore rule `_is_private` below —
 `__init__.py` is not private, since it starts with `__`). A private module or
 private subpackage is excluded along with everything it contains. A door may also
-name a single top-level module file directly (`shared/db/__init__.py`) instead of a package.
+name a single top-level module file directly (`base/db/__init__.py`) instead of a package.
 
 ## Public surface of one module
 
@@ -80,9 +80,9 @@ _COMMAND = ".venv/bin/python scripts/structure/contracts.py --write"
 
 # (dotted door, source path, snapshot path) — all repo-relative POSIX paths.
 DOORS: tuple[tuple[str, str, str], ...] = (
-    ("shared.db", "shared/db/__init__.py", "shared/db/api.txt"),
-    ("shared.agents", "shared/agents", "shared/agents/api.txt"),
-    ("shared.events", "shared/events", "shared/events/api.txt"),
+    ("base.db", "base/db/__init__.py", "base/db/api.txt"),
+    ("base.agents", "base/agents", "base/agents/api.txt"),
+    ("base.events", "base/events", "base/events/api.txt"),
 )
 
 _ALLOWED_DUNDERS = frozenset(

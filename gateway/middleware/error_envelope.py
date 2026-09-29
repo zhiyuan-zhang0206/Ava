@@ -9,9 +9,9 @@ from uuid import uuid4
 from fastapi import Request, Response
 from fastapi.responses import JSONResponse
 
+from base import telemetry
+from base.agents import ErrorReason
 from gateway.schemas.errors import ErrorEnvelope
-from shared import telemetry
-from shared.agents import ErrorReason
 
 
 def _trace_id(request: Request) -> str:

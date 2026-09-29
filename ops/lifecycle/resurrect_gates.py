@@ -9,13 +9,13 @@ Read failures propagate: a failed read must never degrade into a wake the
 policy forbids.
 """
 
-import shared.db
-from shared.agents import AgentNotFound
-from shared.agents.incarnation.lifecycle_acceptance import is_system_notice_source
+import base.db
+from base.agents import AgentNotFound
+from base.agents.incarnation.lifecycle_acceptance import is_system_notice_source
 
 
 def wake_suppression_active(agent_id: int) -> bool:
-    with shared.db.connect() as conn:
+    with base.db.connect() as conn:
         row = conn.execute(
             "SELECT wake_suppressed_until >= now() FROM agents_meta WHERE id=%s",
             (agent_id,),
@@ -32,9 +32,9 @@ def recovery_halted(agent_id: int) -> bool:
     consecutive permanent provider rejections) — NOT the wake-suppression
     window, which a claim clears by design; only the streak can carry an
     until-human halt (task #3617)."""
-    from shared.agents.recovery_breaker import HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS
+    from base.agents.recovery_breaker import HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS
 
-    with shared.db.connect() as conn:
+    with base.db.connect() as conn:
         row = conn.execute(
             "SELECT permanent_reject_streak >= %s FROM agents_meta WHERE id=%s",
             (HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS, agent_id),
@@ -60,7 +60,7 @@ def system_notice_source_of_trigger(agent_id: int, trigger_inbound_id: int) -> s
     not be silently swallowed into a "skip" (the suppression / breaker checks
     above fail loudly the same way).
     """
-    with shared.db.connect() as conn:
+    with base.db.connect() as conn:
         row = conn.execute(
             "SELECT kind, source, payload FROM inbound_messages WHERE id=%s AND agent_id=%s",
             (trigger_inbound_id, agent_id),
@@ -84,12 +84,12 @@ def recovery_halt_reason(agent_id: int) -> str | None:
     cannot clear; it always reports `permanent_provider_reject`. An active
     wake-suppression window without a tripped breaker reports its
     operator-readable reason (or the `wake_suppressed` fallback)."""
-    from shared.agents.recovery_breaker import (
+    from base.agents.recovery_breaker import (
         HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS,
         SUPPRESS_REASON_PERMANENT_REJECT,
     )
 
-    with shared.db.connect() as conn:
+    with base.db.connect() as conn:
         row = conn.execute(
             "SELECT permanent_reject_streak >= %s, wake_suppress_reason, "
             "(wake_suppressed_until IS NOT NULL AND wake_suppressed_until >= now()) "
@@ -107,7 +107,7 @@ def recovery_halt_reason(agent_id: int) -> str | None:
 
 
 def clear_wake_suppression(agent_id: int) -> None:
-    with shared.db.connect() as conn:
+    with base.db.connect() as conn:
         conn.execute(
             "UPDATE agents_meta SET wake_suppressed_until=NULL, wake_suppress_reason=NULL "
             "WHERE id=%s AND wake_suppressed_until IS NOT NULL",

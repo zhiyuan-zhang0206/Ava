@@ -7,8 +7,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from base.agents.messages.envelope import reject_unnegotiated_caller, validate_writable_source
 from ops.rpc_schemas.content import UserContent
-from shared.agents.messages.envelope import reject_unnegotiated_caller, validate_writable_source
 
 
 class TerminateAgentRequest(BaseModel):

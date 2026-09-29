@@ -18,8 +18,8 @@ from typing import Any
 import pytest
 
 from ava.shell.coding_tools import _common, codex
-from shared.native_process.os_platform import IS_WINDOWS
-from shared.sessions import coding_session_owner
+from base.native_process.os_platform import IS_WINDOWS
+from base.sessions import coding_session_owner
 
 _REFERENCE = (
     Path(__file__).parents[3] / "ava_builtins" / "skills" / "ava-use-other-agents" / "reference"
@@ -142,7 +142,7 @@ def test_codex_supervisor_uses_projected_session_environment(
 ) -> None:
     """The runner's real sessions.new path must remove an inherited foreign venv."""
     from ava.shell import sessions
-    from shared.sessions.backend import PtySessionBackend
+    from base.sessions.backend import PtySessionBackend
 
     owner = _owner(unit_home)
     workspace = Path(owner.key.workspace)

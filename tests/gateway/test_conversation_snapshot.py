@@ -12,8 +12,8 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
+from base.db import create_agent, insert_inbound_message
 from gateway.app import app
-from shared.db import create_agent, insert_inbound_message
 
 
 @pytest.fixture
@@ -29,7 +29,7 @@ def _put_checkpoint(agent_id: int, messages: list) -> None:
     from langgraph.checkpoint.base import empty_checkpoint
     from langgraph.checkpoint.postgres import PostgresSaver
 
-    from shared.config import settings
+    from base.config import settings
 
     ckpt = empty_checkpoint()
     ckpt["channel_values"] = {"messages": messages}

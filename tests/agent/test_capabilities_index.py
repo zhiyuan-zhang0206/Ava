@@ -29,7 +29,7 @@ import ava.skills as skills_mod
 from agent.graph.capabilities import _disabled_by_sdk_config, capabilities_section
 from agent.graph.system_prompt import _delegation_check_section, build_system_prompt
 from ava.sdk_surface import sdk_disable
-from shared.config import FIELD_INFOS, settings
+from base.config import FIELD_INFOS, settings
 
 
 @pytest.fixture(autouse=True)
@@ -41,7 +41,7 @@ def _isolate_load_dir(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         return {p.name for p in d.iterdir() if p.is_dir()} if d.is_dir() else set()
 
     monkeypatch.setattr(
-        "shared.packages.extensions.install_registry.loadable_skill_names", _all_enabled
+        "base.packages.extensions.install_registry.loadable_skill_names", _all_enabled
     )
 
 

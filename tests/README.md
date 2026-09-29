@@ -180,7 +180,7 @@ vars are set in `os.environ`, not only on the settings singleton, so subprocesse
 reads one `~/Library/LaunchAgents` per user, `crontab` edits one table per user,
 schtasks owns one `\Ava\` folder per user. So the suite does not redirect it — it
 refuses to write to it at all, via `AVA_OS_JOBS_ENABLED=false`
-(`shared.host.system.cron.os_jobs_enabled` gates all four registrars; the unregister paths
+(`base.host.system.cron.os_jobs_enabled` gates all four registrars; the unregister paths
 stay live). `pytest_sessionfinish` then diffs the host's Ava jobs against a
 snapshot taken at conftest import and fails the run on anything new, removing the
 jobs that name this suite's own homes and reporting anything else.
@@ -245,7 +245,7 @@ while time.monotonic() < deadline:
 ```
 
 and it keeps its deadline while losing its only throttle — so it spins at full speed
-for the whole bound. `shared.sessions.posixproc._terminate_tree` — the loop a graceful
+for the whole bound. `base.sessions.posixproc._terminate_tree` — the loop a graceful
 `kill_session(graceful=True)` reaches, with a 15 s default bound per session — is that shape, and on 2026-07-30 one `tests/cli` test reached it: it spun at
 ~500k iterations/s appending to the test's own recorder list, `pytest tests/cli` hit
 **26 GB** on a 16 GB box, swap ran out, and agent boots went from 850 ms to 78-93 s.

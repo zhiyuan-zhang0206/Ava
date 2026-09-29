@@ -20,16 +20,16 @@ from contextlib import suppress
 from typing import Any
 from urllib.parse import urlsplit
 
+from base.cluster.auth import client_bearer
+from base.cluster.machine import gateway_api_base
+from base.config import settings
+from base.log import logger
 from services.browser.mcp_upstream import _await_stop_or_timeout
 from services.browser.session import (
     gateway_session_is_valid,
     inject_session_cookie,
     last_injected_cookie,
 )
-from shared.cluster.auth import client_bearer
-from shared.cluster.machine import gateway_api_base
-from shared.config import settings
-from shared.log import logger
 
 # Gateway session cookie refresh: the default server-side lifetime is 24h;
 # refreshing every 6h leaves a comfortable margin and self-heals a lost,

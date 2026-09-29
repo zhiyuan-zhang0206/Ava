@@ -5,7 +5,7 @@ import) because Homebrew PostgreSQL's postmaster aborts with "postmaster became
 multithreaded during startup" on macOS when the locale environment is missing:
 locale init goes through CoreFoundation, which spawns a thread, and the
 postmaster refuses to run multithreaded. The suite provisions its own throwaway
-postmaster via `pg_ctl` (shared/cluster/dataplane/pg_tools.py), which inherits this process's
+postmaster via `pg_ctl` (base/cluster/dataplane/pg_tools.py), which inherits this process's
 environment, so a deleted or reordered conftest block breaks the whole suite on
 macOS dev boxes — while CI stays green because Linux never hits the
 CoreFoundation path.
@@ -24,7 +24,7 @@ import os
 
 import pytest
 
-import shared.native_process.os_platform as plat
+import base.native_process.os_platform as plat
 
 pytestmark = pytest.mark.skipif(not plat.IS_MACOS, reason="macOS-only postmaster locale check")
 

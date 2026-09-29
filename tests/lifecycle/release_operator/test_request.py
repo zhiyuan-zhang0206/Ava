@@ -17,16 +17,16 @@ from uuid import UUID
 
 import pytest
 
-import shared.cluster as cluster_pkg
+import base.cluster as cluster_pkg
+from base import paths as base_paths
+from base.cluster import machine as base_machine
+from base.deploy.release.runtime_release import activate_release
+from base.runtime_abi import current_abi
 from cli.release_fleet.policy import AlertRoute
 from cli.release_fleet.request import FleetRequest
 from cli.release_operator import request as request_module
 from cli.release_operator.layout import receipt_path
 from cli.release_transition.request import ReleaseRef
-from shared import paths as shared_paths
-from shared.cluster import machine as shared_machine
-from shared.deploy.release.runtime_release import activate_release
-from shared.runtime_abi import current_abi
 from tests.lifecycle.release_operator.conftest import build_image
 
 _COMMIT = "a" * 40
@@ -46,9 +46,9 @@ def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, rows: dict[str, set[An
     path = tmp_path / "home"
     path.mkdir()
     rows["units"].add(("test-unit", str(path)))
-    monkeypatch.setattr(shared_paths, "ava_home", lambda: path)
+    monkeypatch.setattr(base_paths, "ava_home", lambda: path)
     monkeypatch.setattr(cluster_pkg, "registry_path", lambda: tmp_path / "clusters.json")
-    monkeypatch.setattr(shared_machine, "machine_name", lambda: "test-unit")
+    monkeypatch.setattr(base_machine, "machine_name", lambda: "test-unit")
     monkeypatch.setattr(
         request_module,
         "registered_units",

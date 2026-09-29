@@ -7,7 +7,7 @@ home-only here, deliberately without the pid comparison the daemon healthchecks
 apply — uvicorn reload serves from a worker forked out of the process that wrote
 `gateway_pidfile`, so a healthy gateway routinely answers with an unrecorded pid.
 
-The check itself is `shared.daemon.health.probe_home`, shared with the operator
+The check itself is `base.daemon.health.probe_home`, shared with the operator
 surfaces (`ava status` / `ava cluster health-probe` reach it through
 `ServiceSpec.identity_probe`) so the watchdog and the human cannot be told
 different things about the same port. These tests exercise it through the
@@ -27,10 +27,10 @@ from typing import Any
 
 import pytest
 
-import shared.daemon.health as dh
+import base.daemon.health as dh
+from base.daemon.health import DaemonProbe, ProbeVerdict
+from base.paths import ava_home
 from services.healthchecks import gateway as hc
-from shared.daemon.health import DaemonProbe, ProbeVerdict
-from shared.paths import ava_home
 
 
 class _FakeResponse:
@@ -126,7 +126,7 @@ def test_probe_survives_an_http_exception(monkeypatch: pytest.MonkeyPatch, caplo
         raise http.client.IncompleteRead(b"half a body")
 
     monkeypatch.setattr(urllib.request, "urlopen", _boom)
-    with caplog.at_level(logging.ERROR, logger="shared.daemon.health"):  # pyright: ignore[reportUnknownMemberType]
+    with caplog.at_level(logging.ERROR, logger="base.daemon.health"):  # pyright: ignore[reportUnknownMemberType]
         probe = hc._probe()
     assert probe.alive is False
     assert "IncompleteRead" in probe.detail

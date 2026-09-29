@@ -13,8 +13,8 @@ from pathlib import Path
 
 import httpx
 
-from shared.api_contracts.status import MachineStatus
-from shared.cluster.machine import format_capabilities
+from base.api_contracts.status import MachineStatus
+from base.cluster.machine import format_capabilities
 
 _CLUSTER_STATUS_PROBE_TIMEOUT_S = 8.0
 # Roster `role` column width: the widest label format_capabilities emits is
@@ -31,8 +31,8 @@ def cmd_cluster_mark_staging(name: str, *, is_staging: bool) -> int:
     target set (`list_agent_runners`: the heartbeat probe and cluster
     fan-outs). Exit 1 when the gateway reports no such machine.
     """
-    from shared.cluster.machine import gateway_api_base, gateway_auth_headers
-    from shared.host.net.http_dial import post as dial_post
+    from base.cluster.machine import gateway_api_base, gateway_auth_headers
+    from base.host.net.http_dial import post as dial_post
 
     url = f"{gateway_api_base()}/api/cluster/machines/{name}/staging"
     resp = dial_post(
@@ -64,8 +64,8 @@ def cmd_cluster_pause(name: str, *, reason: str | None = None) -> int:
     its active members. The registration row (URL/role) is preserved for resume.
     Exit 1 when the gateway reports no such machine or refuses (own gateway).
     """
-    from shared.cluster.machine import gateway_api_base, gateway_auth_headers
-    from shared.host.net.http_dial import post as dial_post
+    from base.cluster.machine import gateway_api_base, gateway_auth_headers
+    from base.host.net.http_dial import post as dial_post
 
     url = f"{gateway_api_base()}/api/cluster/machines/{name}/pause"
     resp = dial_post(
@@ -108,8 +108,8 @@ def cmd_cluster_resume(name: str) -> int:
     machine. Prints the ops checklist for the machine's own side (it is away,
     and its reachable address may have changed while it was out).
     """
-    from shared.cluster.machine import gateway_api_base, gateway_auth_headers
-    from shared.host.net.http_dial import post as dial_post
+    from base.cluster.machine import gateway_api_base, gateway_auth_headers
+    from base.host.net.http_dial import post as dial_post
 
     url = f"{gateway_api_base()}/api/cluster/machines/{name}/resume"
     resp = dial_post(
@@ -157,12 +157,12 @@ def cmd_cluster_status() -> int:
     down machine can push the gateway's own response past this client's
     timeout budget (#219).
     """
-    from shared.cluster.machine import (
+    from base.cluster.machine import (
         GatewayApiBaseMissing,
         gateway_api_base,
         gateway_auth_headers,
     )
-    from shared.host.net.http_dial import get as dial_get
+    from base.host.net.http_dial import get as dial_get
 
     try:
         url = f"{gateway_api_base()}/api/cluster/roster"
@@ -328,8 +328,8 @@ def fetch_gateway_cluster_status() -> dict[str, object]:
     Fails fast (`raise_for_status()`) on any HTTP error rather than masking an
     unreachable gateway.
     """
-    from shared.cluster.machine import gateway_api_base, gateway_auth_headers
-    from shared.host.net.http_dial import get as dial_get
+    from base.cluster.machine import gateway_api_base, gateway_auth_headers
+    from base.host.net.http_dial import get as dial_get
 
     url = f"{gateway_api_base()}/api/cluster/status"
     resp = dial_get(url, timeout=10.0, headers=gateway_auth_headers())
@@ -344,10 +344,10 @@ def _gateway_authority_home(verb: str) -> Path | None:
     plane has no write generation or enrollment store), and no release
     operation may be incomplete: it captured the units it releases.
     """
-    from shared.config import settings
-    from shared.deploy.release.operation import require_configuration_write_authorized
-    from shared.host.env.bootstrap import config_source_is_local
-    from shared.paths import ava_home
+    from base.config import settings
+    from base.deploy.release.operation import require_configuration_write_authorized
+    from base.host.env.bootstrap import config_source_is_local
+    from base.paths import ava_home
 
     if not config_source_is_local() or settings.data_plane.is_remote:
         print(
@@ -371,8 +371,8 @@ def _change_enrollment(verb: str, machine: str, home: str) -> tuple[str, str] | 
     None means the refusal was printed. Only the enrollment id leaves this
     function, never the secret.
     """
-    from shared.cluster.authority import AuthorityRefusedError
-    from shared.cluster.authority.unit import (
+    from base.cluster.authority import AuthorityRefusedError
+    from base.cluster.authority.unit import (
         UnitIdentity,
         revoke_enrollment,
         rotate_enrollment,
@@ -444,10 +444,10 @@ def cmd_db_authority_issue_unit(*, machine: str, home: str, out: str, ttl_hours:
     Refused on a pure agent-runner, a remote-managed plane, a home without an
     active generation, and while a release operation is incomplete.
     """
-    from shared.cluster.authority import AuthorityRefusedError
-    from shared.cluster.authority.unit import UnitIdentity, issue_bundle, write_bundle
-    from shared.config import settings
-    from shared.config.service_read import served_db_endpoint
+    from base.cluster.authority import AuthorityRefusedError
+    from base.cluster.authority.unit import UnitIdentity, issue_bundle, write_bundle
+    from base.config import settings
+    from base.config.service_read import served_db_endpoint
 
     target = Path(out).expanduser().absolute()
     gateway_home = _gateway_authority_home("issue-unit")

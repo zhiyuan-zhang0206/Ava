@@ -9,12 +9,12 @@ import subprocess
 import sys
 from pathlib import Path
 
+from base.cluster import frontend_service_cmd
+from base.deploy.release.runtime_interpreter import WHEEL_RUNTIME, runtime_python, runtime_venv
+from base.deploy.schema.migrations import required_migration_set
+from base.host.system.backend import get_backend
+from base.sessions.env_forwarding import forward_env_dict, venv_activation_prefix
 from ops.spec import build_services
-from shared.cluster import frontend_service_cmd
-from shared.deploy.release.runtime_interpreter import WHEEL_RUNTIME, runtime_python, runtime_venv
-from shared.deploy.schema.migrations import required_migration_set
-from shared.host.system.backend import get_backend
-from shared.sessions.env_forwarding import forward_env_dict, venv_activation_prefix
 
 
 def require(condition: bool, detail: str) -> None:  # noqa: FBT001 — assertion predicate, not a mode flag.
@@ -24,8 +24,8 @@ def require(condition: bool, detail: str) -> None:  # noqa: FBT001 — assertion
 
 def prove_frontend_config_rejection(python: Path, root: Path) -> None:
     probe = """
-from shared.config import settings
-from shared.cluster import frontend_service_cmd
+from base.config import settings
+from base.cluster import frontend_service_cmd
 assert settings.gateway.gateway_port == 8001, 'negative config was not applied'
 try:
     frontend_service_cmd(43871)
@@ -117,7 +117,7 @@ def main() -> None:
     no_home = os.environ.copy()
     no_home.pop("AVA_HOME", None)
     rejected = subprocess.run(  # noqa: S603 — fail-closed bootstrap probe, no data access.
-        [str(python), "-I", "-B", "-c", "import shared.host.env.dotenv_boot"],
+        [str(python), "-I", "-B", "-c", "import base.host.env.dotenv_boot"],
         cwd=root,
         env=no_home,
         capture_output=True,

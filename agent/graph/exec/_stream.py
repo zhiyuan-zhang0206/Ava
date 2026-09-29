@@ -20,9 +20,9 @@ import time
 from collections import deque
 from dataclasses import dataclass
 
-from shared.config import settings
-from shared.events.live.projection import ExecOutputChunk
-from shared.events.live.publisher import AgentEventPublisher
+from base.config import settings
+from base.events.live.projection import ExecOutputChunk
+from base.events.live.publisher import AgentEventPublisher
 
 # Spliced in where the accumulation budget dropped the middle, so a reader of
 # the retained text sees the gap at the position it happened. It sits between

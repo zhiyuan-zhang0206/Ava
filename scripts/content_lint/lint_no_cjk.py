@@ -34,7 +34,7 @@ text always carries.
   e.g. `ui/web/messages/{en,zh}.json`).
 - `**/locales/**` and `**/*.po` — gettext-style locale trees, should they
   ever appear.
-- `shared/telemetry/alerts_copy.py`, `shared/packages/docs/pages_copy.py` — the Python locale
+- `base/telemetry/alerts_copy.py`, `base/packages/docs/pages_copy.py` — the Python locale
   modules: IM alert-push copy and the page-expired page copy, both zh/en
   variants selected by `user_settings.display.language`, the same
   language-switching mechanism as the frontend catalogs (documented as
@@ -93,9 +93,7 @@ def _is_locale_path(rel_path: str) -> bool:
 # The Python locale modules (zh/en by user_settings display.language, the
 # same language-switching mechanism as the frontend catalogs): the IM
 # alert-push copy and the page-expired page copy.
-_LOCALE_PY_FILES = frozenset(
-    {"shared/telemetry/alerts_copy.py", "shared/packages/docs/pages_copy.py"}
-)
+_LOCALE_PY_FILES = frozenset({"base/telemetry/alerts_copy.py", "base/packages/docs/pages_copy.py"})
 
 
 def _tracked_files() -> list[str]:
@@ -141,7 +139,7 @@ def main(argv: list[str] | None = None) -> int:
             "\nRaw CJK found in the repo. Translate prose/copy to English, or "
             "escape functional CJK data as \\uXXXX (runtime-identical). The only "
             "exemption is i18n / locale copy: <dir>/messages/*.json, */locales/*, "
-            "*.po, and the shared/*_copy.py locale modules. See the docstring at the top of "
+            "*.po, and the base/*_copy.py locale modules. See the docstring at the top of "
             "scripts/content_lint/lint_no_cjk.py.",
             file=sys.stderr,
         )

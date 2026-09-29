@@ -7,7 +7,7 @@ tree with one provider anchor and callers that attest (or do not) against it.
 
 from typing import Any
 
-from shared.native_process import native_boot_id
+from base.native_process import native_boot_id
 
 
 def native_identity(birth: float) -> dict[str, object]:

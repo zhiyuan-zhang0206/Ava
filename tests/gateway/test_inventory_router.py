@@ -20,12 +20,12 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
+from base.config import settings
 from gateway.app import app
 from gateway.cluster import roster_probe
 from gateway.extensions import inventory as inventory_router
 from ops import cluster_rpc as _cluster_rpc
 from ops.rpc_schemas import FieldWriteResult, InventoryReadResult, InventoryWriteOpResult
-from shared.config import settings
 
 
 def _read(

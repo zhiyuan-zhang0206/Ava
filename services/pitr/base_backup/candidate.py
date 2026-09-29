@@ -21,6 +21,9 @@ import psutil
 import psycopg
 from psycopg.conninfo import conninfo_to_dict, make_conninfo
 
+from base.cluster.dataplane.pg_tools import pg_tool
+from base.db import connect_url
+from base.db.pg_admin import OwnerAuthority, local_owner_authority
 from services.backup import backup_lock
 from services.pitr.base_backup.manifest import (
     SCHEMA_VERSION,
@@ -34,9 +37,6 @@ from services.pitr.operation.custody import NativeProcess, OperationWorker, owne
 from services.pitr.operation.worker_process import StopSignal
 from services.pitr.stores.base_object_store import RestartableStreamingObjectStore
 from services.pitr.stores.checksums import CRC32C, KNOWN_CHECKSUM_ALGOS
-from shared.cluster.dataplane.pg_tools import pg_tool
-from shared.db import connect_url
-from shared.db.pg_admin import OwnerAuthority, local_owner_authority
 
 
 class BaseCandidateError(RuntimeError):
@@ -332,7 +332,7 @@ def _capture_facts(owner: OwnerAuthority, replication_db_url: str) -> CandidateF
     """The capture-time identity facts, read as this home's schema owner.
 
     The administrator acting as the owner over the home's own socket
-    (`shared.db.pg_admin`) is custody-checked against the home's postmaster and
+    (`base.db.pg_admin`) is custody-checked against the home's postmaster and
     needs no write-generation login; the replication URL must name the same
     server port.
     """

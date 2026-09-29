@@ -11,10 +11,10 @@ from typing import Any
 import psutil
 import pytest
 
+from base.native_process.evidence import ExpectedProcess
+from base.native_process.ownership import OwnedProcess
 from cli.commands.data_plane import maintenance_stop as data
 from cli.release_transition.pitr.evidence import DataOwner, DataStop
-from shared.native_process.evidence import ExpectedProcess
-from shared.native_process.ownership import OwnedProcess
 from tests.lifecycle.transition.test_pitr_execution import _constant
 
 

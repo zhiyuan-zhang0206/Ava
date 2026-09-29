@@ -14,7 +14,7 @@ import pytest
 from agent.graph.exec import _subprocess
 from agent.graph.exec._result import ExecChildError, _ExecCrashed, _ExecDone
 from agent.graph.exec._subprocess import _run_in_subprocess
-from shared.deploy.release import editable_install
+from base.deploy.release import editable_install
 
 _AGENT_ID = 424242
 
@@ -156,7 +156,7 @@ def test_execute_code_child_cannot_read_manifest_certification_proof(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """Probe the exact env passed to model-executed Python, not a policy copy."""
-    from shared.host.env.registry import MANIFEST_CERTIFICATION_SECRET_ENV
+    from base.host.env.registry import MANIFEST_CERTIFICATION_SECRET_ENV
 
     monkeypatch.setenv(MANIFEST_CERTIFICATION_SECRET_ENV, "host-finalizer-proof")
     env = _subprocess._build_child_env(None, tmp_path / "request", tmp_path / "result")
@@ -167,7 +167,7 @@ def test_execute_code_child_boot_cannot_rematerialize_manifest_certification_pro
     tmp_path: Path,
 ) -> None:
     """A proof-free exec env stays proof-free after its real config boot reads `.env`."""
-    from shared.host.env.registry import MANIFEST_CERTIFICATION_SECRET_ENV
+    from base.host.env.registry import MANIFEST_CERTIFICATION_SECRET_ENV
 
     home = tmp_path / "home"
     home.mkdir()
@@ -188,7 +188,7 @@ def test_execute_code_child_boot_cannot_rematerialize_manifest_certification_pro
         [
             sys.executable,
             "-c",
-            "import os; from shared.config import settings; "
+            "import os; from base.config import settings; "
             "settings.general.impersonation_event_manifest_certification_secret; "
             f"print(os.environ.get({MANIFEST_CERTIFICATION_SECRET_ENV!r}, ''))",
         ],

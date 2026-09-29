@@ -22,13 +22,13 @@ from agent.graph.exec.node import exec_node
 from agent.impersonation import protect_native_hooks
 from agent.ownership.hosted import admit_hosted_runtime, settle_hosted_runtime
 from agent.startup import wrap_saver_writes_with_nstep_interval
+from base.agents.context import AvaContext
+from base.agents.history.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
+from base.cluster.machine import machine_name
+from base.db import create_agent, insert_inbound_message
+from base.deploy.maintenance import admission, cohort, pause_owner
 from services.agent_host.host import AgentHost
 from services.agent_host.runtime import TurnOutcome
-from shared.agents.context import AvaContext
-from shared.agents.history.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
-from shared.cluster.machine import machine_name
-from shared.db import create_agent, insert_inbound_message
-from shared.deploy.maintenance import admission, cohort, pause_owner
 
 WHEN = datetime(2026, 9, 6, tzinfo=UTC)
 
@@ -303,8 +303,8 @@ async def test_admitted_model_finishes_real_exec_and_after_exec_before_drain_rec
         # Drop the old host's in-memory graph/cache: recovery consumes the
         # durable restart pointer and real cold checkpoint after explicit release.
         assert current.maintenance is not None
+        from base.deploy.lifecycle import start_serving
         from cli.commands.lifecycle._pause_resume import resume_after_start
-        from shared.deploy.lifecycle import start_serving
 
         monkeypatch.setattr("ops.cluster_pause._unpause_local_cluster", MagicMock())
         monkeypatch.setattr("ops.agent_pause._wake", MagicMock())

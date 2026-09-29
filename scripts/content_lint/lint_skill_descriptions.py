@@ -4,7 +4,7 @@
 Three gates over every repo-shipped SKILL.md:
 
 1. **Frontmatter validity (hard fail).** The file must parse with the SAME
-   parser the runtime loader uses (`shared.packages.docs.frontmatter.parse_frontmatter`) and
+   parser the runtime loader uses (`base.packages.docs.frontmatter.parse_frontmatter`) and
    carry the required `name` + `description` fields. This is the merge gate the
    runtime loader cannot be: every agent reads every skill's frontmatter while
    assembling its system prompt, so a single malformed SKILL.md (an unquoted
@@ -33,7 +33,7 @@ Three gates over every repo-shipped SKILL.md:
 
 3. **Identity consistency (hard fail).** The frontmatter `name:` must fold
    to the same key as the SKILL.md's own directory name (dash/underscore are
-   one name — `shared.packages.skills.names.SkillIdentity`). The directory is the
+   one name — `base.packages.skills.names.SkillIdentity`). The directory is the
    skill's identity source; a frontmatter name that denotes a different
    skill would load under a name that is not its own, and the runtime
    loader now refuses it — so it must be caught here at merge time for
@@ -56,8 +56,8 @@ import re
 import sys
 from pathlib import Path
 
-from shared.packages.skills.index import SkillFile, SkillIndex
-from shared.packages.skills.names import match_key
+from base.packages.skills.index import SkillFile, SkillIndex
+from base.packages.skills.names import match_key
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
@@ -79,7 +79,7 @@ def length_units(text: str) -> int:
 def _skill_entries() -> list[SkillFile]:
     """Every repo-shipped SKILL.md as a materialized index entry.
 
-    The scan is `shared.packages.skills.index.SkillIndex.build` — the SAME builder the
+    The scan is `base.packages.skills.index.SkillIndex.build` — the SAME builder the
     runtime loader uses (doorplate ⑤), so the lint and the loader cannot drift.
     Roots: `ava_builtins/skills/` + `ava_builtins/plugins/` (a bare `skills/`
     at the repo root no longer exists — #864) and the repo's own `.agents/skills`

@@ -11,7 +11,7 @@ on/off is the explicit `AVA_TASK_MAINTENANCE_ENABLED` settings gate below. See
 `decisions/2026-07-19-plugin-registered-services.md`.
 
 This module is deliberately light: it imports only the ops service contract and
-roster probe helper plus `shared` — never `plugin.py` or the fleet
+roster probe helper plus `base` — never `plugin.py` or the fleet
 domain code — so the ops/CLI/watchdog process that discovers it does not pull the
 agent kernel in. `services()` is a function (not a module constant) so probe
 ports derived from settings / monkeypatched `health_port()` are read at use-time,
@@ -20,11 +20,11 @@ matching `build_services()`'s use-time contract.
 
 from __future__ import annotations
 
+from base.cluster.machine import MachineRole
+from base.config import settings
+from base.daemon.health import health_port
 from ops.roster import daemon_identity
 from ops.roster.service_spec import ServiceSpec
-from shared.cluster.machine import MachineRole
-from shared.config import settings
-from shared.daemon.health import health_port
 
 # task-maintenance runs on the gateway capability, like the other cluster-wide
 # daemons. Declared here (not reaching into ops's private `_GATEWAY`) so the

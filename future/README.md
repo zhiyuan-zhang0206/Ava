@@ -30,7 +30,7 @@ These four plans co-locate with the code they plan for, per the 2026-08-12 doc r
 | File | What's left |
 |------|------|
 | [Agent-runner as server](infra/agent-runner-as-server.md) | Implemented as the sole runtime; remaining question is host fault isolation |
-| [Vendored data-plane binaries](infra/vendored-data-plane-binaries.md) | **Redis leg only** — Postgres vendoring landed (`shared/cluster/dataplane/runtime_binaries.py`), redis still comes from brew/apt. Also the single home for slice 3 of the doc below |
+| [Vendored data-plane binaries](infra/vendored-data-plane-binaries.md) | **Redis leg only** — Postgres vendoring landed (`base/cluster/dataplane/runtime_binaries.py`), redis still comes from brew/apt. Also the single home for slice 3 of the doc below |
 | [Embedded per-cluster data plane](infra/embedded-per-cluster-data-plane.md) | Design record; slices 1+2 done. Only the redis half of slice 3 remains, tracked in the row above |
 | [Auth / TLS design](infra/auth-tls-design.md) | **Phase 3 (TLS) only** — Phase 1 (fail-closed gateway auth) and Phase 2 (cookie session auth) are deployed |
 | [Cluster consistency: commit-level pinning](infra/commit-pinned-cluster.md) | **Superseded.** Increments A + B were retired with the in-place updater: the pin has no writer and is not shown; the retained release journal is the release record. The remaining hard fail-fast enforcement is **overtaken** by the fail-fast-vs-reconcile decision and the [unified cluster lifecycle](infra/unified-cluster-lifecycle.md), and needs re-litigating before it is built |
@@ -49,7 +49,7 @@ These four plans co-locate with the code they plan for, per the 2026-08-12 doc r
 | [Checkpoint storage rebuild](infra/checkpoint-storage-rebuild.md) | **Observation-window calibrations (Section 7)** — delta-channel storage, keep-everything retention (R1–R4), read-time fold, and the reader-first write switch are all landed and deployed (write switch 2026-09-14, task #3180) |
 | [Heartbeat design](infra/heartbeat-design.md) | Research record; Tier 2 shipped as a simpler opt-out design. Kept for the rejected two-tier proposal |
 | [Process / service lifecycle final state](infra/lifecycle-final-state.md) | Implementation slices **P1–P7** (task #3195) — F1, the multi-level attribution measurement, runs first; the one-shot migration window is booked with the user |
-| [Model providers as plugins](../shared/lm/model-providers-as-plugins.md) | **Mechanics + Grok pilot landed** — registry, dispatch, vocabularies, key channel, and lazy load are built. Left: plugin dependency installation and deciding which remaining core providers should extract |
+| [Model providers as plugins](../base/lm/model-providers-as-plugins.md) | **Mechanics + Grok pilot landed** — registry, dispatch, vocabularies, key channel, and lazy load are built. Left: plugin dependency installation and deciding which remaining core providers should extract |
 
 ## Top level
 

@@ -6,7 +6,7 @@ import httpx
 import psycopg
 import pytest
 
-from shared.config import settings
+from base.config import settings
 from tests.e2e._ports import GATEWAY_URL
 
 

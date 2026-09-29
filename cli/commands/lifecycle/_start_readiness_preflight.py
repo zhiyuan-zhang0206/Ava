@@ -40,13 +40,13 @@ import os
 import sys
 from pathlib import Path
 
-from cli.start_runtime import StartRuntime
-from shared.cluster.machine import MachineRoles
-from shared.host.private_storage import (
+from base.cluster.machine import MachineRoles
+from base.host.private_storage import (
     private_file_problem,
     private_tree_root_problem,
     scan_non_regular_nodes,
 )
+from cli.start_runtime import StartRuntime
 
 _TREE_ROOTS = ("logs", "workspaces", "memory")
 
@@ -65,7 +65,7 @@ def preflight_start_readiness(
     runtime instead validates its complete image and exact interpreter, without
     editable checkout or source-converge checks.
     """
-    from shared.paths import ava_home
+    from base.paths import ava_home
 
     home = ava_home()
     if runtime is not None:
@@ -108,9 +108,9 @@ def preflight_start_readiness(
 
 def _prod_checkout_problem(repo: Path) -> str | None:
     """`ava start`'s first refusal — the prod home may only launch from its own
-    anchored checkout (`shared.paths.prod_service_checkout_error`) — moved ahead
+    anchored checkout (`base.paths.prod_service_checkout_error`) — moved ahead
     of the stop. Cheap and read-only; a non-prod unit always passes it."""
-    from shared.paths import prod_service_checkout_error
+    from base.paths import prod_service_checkout_error
 
     return prod_service_checkout_error(repo)
 
@@ -147,12 +147,12 @@ def _port_findings(repo: Path, home: Path, roles: MachineRoles) -> tuple[list[st
     """
     import cli.commands._probe as _probe_commands
     import ops.roster as _roster
+    from base import cluster
+    from base.cluster.port_preflight import env_port_drift
+    from base.deploy.lifecycle.service_selection import resolve_selection
     from cli.commands.converge.port_preflight import collect_port_conflicts
     from cli.commands.converge.spec import ConvergeCtx
     from cli.commands.lifecycle.root_driver import _root_tree_roster
-    from shared import cluster
-    from shared.cluster.port_preflight import env_port_drift
-    from shared.deploy.lifecycle.service_selection import resolve_selection
 
     try:
         available = {s.session for s in _roster.build_services()}
@@ -244,7 +244,7 @@ def _migration_findings() -> list[str]:
     stop; this asks the next question the applier will ask — can the file be
     opened — while the answer is still free.
     """
-    from shared.deploy.schema.migrations import MigrationLayoutError, unreadable_migration_files
+    from base.deploy.schema.migrations import MigrationLayoutError, unreadable_migration_files
 
     try:
         problems = unreadable_migration_files()
@@ -273,7 +273,7 @@ def _venv_findings(repo: Path, *, check_launcher: bool) -> list[str]:
       `ava restart` never execs it, and refusing a bounce over an entry point it
       does not use would block a viable restart.
     """
-    from shared.host.system.backend import get_backend
+    from base.host.system.backend import get_backend
 
     backend = get_backend()
     findings = _entrypoint_findings(

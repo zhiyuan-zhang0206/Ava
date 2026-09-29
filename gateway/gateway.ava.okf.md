@@ -37,7 +37,7 @@ database posture is a status projection, not this gate's authority.
 - **MCP control plane**: revocable scoped tokens guard default-off `/mcp`; human-credential-only `/api/mcp/clients` manages them
 - **Per-agent command views**: `GET /api/commands?agent_id=` resolves the agent's runner then asks its `agent_skill_view` op for the command catalog that runner discovers from its own converged load dir plus the agent's persisted cwd; an unavailable, unknown, or version-skewed runner falls back to the gateway-local catalog
 - **Authentication and browser-origin policy**: server-side `web_sessions` + bearer-secret auth, exact-origin CORS checks, and the Secure cookie policy — [[gateway/auth/web-sessions.ava.okf.md]].
-- **Inbound provenance**: gateway-created inbounds persist the server-verified credential kind, ingress transport, exact-content SHA-256, and a nullable agent source/token comparison. These are audit facts only and never reject delivery — [[shared/agents/messages/inbound-provenance.ava.okf.md]].
+- **Inbound provenance**: gateway-created inbounds persist the server-verified credential kind, ingress transport, exact-content SHA-256, and a nullable agent source/token comparison. These are audit facts only and never reject delivery — [[base/agents/messages/inbound-provenance.ava.okf.md]].
 
 ## Architecture
 
@@ -51,7 +51,7 @@ Browser (frontend:3000) ──HTTP──▶ Gateway (:8000) ──▶ Postgres /
 - **agents**: spawn / lifecycle uniformly goes through `_forward_to_home_machine` → `cluster_rpc` POST `/ops` to the agent-ops daemon, the runner commits durable work and publishes a wake to its agent host — **even if the target is the local machine, there is no in-process shortcut** (`gateway/agents/forward.py:_forward_to_home_machine()`)
 - **schedules**: `gateway/schedules/manager.py:ScheduleManager._launch` is gateway's **only** path that directly manages sessions (agent processes are hosted by the native supervisor on the runner side, not by the gateway)
 
-- Gateway connects to Postgres via one `shared.db.pool()` per process, borrowing one connection per request. Going through the factory rather than constructing a `ConnectionPool` is what gives the borrows `prepare_threshold=None` (never prepare; transaction-pooling-safe under PgBouncer) and `PG_KEEPALIVE_KWARGS` (a request-serving pool outlives host sleeps; without keepalives a borrow on a half-dead socket stalls on the OS TCP-retransmit timeout). Rule 5 (`postgres-dial`) enforces it
+- Gateway connects to Postgres via one `base.db.pool()` per process, borrowing one connection per request. Going through the factory rather than constructing a `ConnectionPool` is what gives the borrows `prepare_threshold=None` (never prepare; transaction-pooling-safe under PgBouncer) and `PG_KEEPALIVE_KWARGS` (a request-serving pool outlives host sleeps; without keepalives a borrow on a half-dead socket stalls on the OS TCP-retransmit timeout). Rule 5 (`postgres-dial`) enforces it
 - Event publishing uses a process-level shared `aredis.Redis` instance
 - SSE subscribers open a separate Redis connection per request
 

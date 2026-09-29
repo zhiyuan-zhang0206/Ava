@@ -137,42 +137,42 @@ def test_multiple_private_names_from_one_module_count_as_one_site(
 
 
 def _shared_lm_and_db(tmp_path: pathlib.Path) -> None:
-    _write(tmp_path, "shared/lm/_scratch.py", "x = 1\n")
-    _write(tmp_path, "shared/db.py", "class Foo:\n    _x = 1\n\n\ndef _restore(): ...\n")
+    _write(tmp_path, "base/lm/_scratch.py", "x = 1\n")
+    _write(tmp_path, "base/db.py", "class Foo:\n    _x = 1\n\n\ndef _restore(): ...\n")
 
 
 def test_attribute_reach_in_via_import_module(tmp_path: pathlib.Path) -> None:
     _shared_lm_and_db(tmp_path)
-    tree = _parse("import shared.lm\nshared.lm._scratch.x\n")
+    tree = _parse("import base.lm\nbase.lm._scratch.x\n")
 
     sites = locality.private_imports(tree, "gateway/x.py", ("shared",), tmp_path)
 
-    assert sites == {"gateway/x.py::shared.lm._scratch": [2]}
+    assert sites == {"gateway/x.py::base.lm._scratch": [2]}
 
 
 def test_attribute_reach_in_via_from_import_package(tmp_path: pathlib.Path) -> None:
     _shared_lm_and_db(tmp_path)
-    tree = _parse("from shared import lm\nlm._scratch\n")
+    tree = _parse("from base import lm\nlm._scratch\n")
 
     sites = locality.private_imports(tree, "gateway/x.py", ("shared",), tmp_path)
 
-    assert sites == {"gateway/x.py::shared.lm._scratch": [2]}
+    assert sites == {"gateway/x.py::base.lm._scratch": [2]}
 
 
 def test_attribute_reach_in_via_from_import_module(tmp_path: pathlib.Path) -> None:
     _shared_lm_and_db(tmp_path)
-    tree = _parse("from shared import db\ndb._restore()\n")
+    tree = _parse("from base import db\ndb._restore()\n")
 
     sites = locality.private_imports(tree, "gateway/x.py", ("shared",), tmp_path)
 
-    assert sites == {"gateway/x.py::shared.db._restore": [2]}
+    assert sites == {"gateway/x.py::base.db._restore": [2]}
 
 
 def test_attribute_on_an_imported_class_is_not_a_module_reach_in(tmp_path: pathlib.Path) -> None:
     """`Foo` is bound to a class, not a module or package on disk, so its
     private attribute is out of Rule 4's reach."""
     _shared_lm_and_db(tmp_path)
-    tree = _parse("from shared.db import Foo\nFoo._x\n")
+    tree = _parse("from base.db import Foo\nFoo._x\n")
 
     assert locality.private_imports(tree, "gateway/x.py", ("shared",), tmp_path) == {}
 
@@ -181,7 +181,7 @@ def test_attribute_chain_past_a_class_stops_at_the_module_boundary(
     tmp_path: pathlib.Path,
 ) -> None:
     _shared_lm_and_db(tmp_path)
-    tree = _parse("from shared import db\ndb.Foo._x\n")
+    tree = _parse("from base import db\ndb.Foo._x\n")
 
     assert locality.private_imports(tree, "gateway/x.py", ("shared",), tmp_path) == {}
 
@@ -194,18 +194,18 @@ def test_an_unbound_local_attribute_is_never_a_reach_in(tmp_path: pathlib.Path) 
 
 def test_attribute_reach_in_from_inside_the_owner_is_not_flagged(tmp_path: pathlib.Path) -> None:
     _shared_lm_and_db(tmp_path)
-    tree = _parse("import shared.lm\nshared.lm._scratch.x\n")
+    tree = _parse("import base.lm\nbase.lm._scratch.x\n")
 
-    assert locality.private_imports(tree, "shared/lm/other.py", ("shared",), tmp_path) == {}
+    assert locality.private_imports(tree, "base/lm/other.py", ("shared",), tmp_path) == {}
 
 
 def test_a_long_attribute_chain_counts_the_site_once(tmp_path: pathlib.Path) -> None:
     _shared_lm_and_db(tmp_path)
-    tree = _parse("import shared.lm\nshared.lm._scratch.a.b\n")
+    tree = _parse("import base.lm\nbase.lm._scratch.a.b\n")
 
     sites = locality.private_imports(tree, "gateway/x.py", ("shared",), tmp_path)
 
-    assert sites == {"gateway/x.py::shared.lm._scratch": [2]}
+    assert sites == {"gateway/x.py::base.lm._scratch": [2]}
 
 
 # --- private_imports: `ava` has no exemption ---------------------------------
@@ -254,15 +254,15 @@ def test_ava_privates_are_open_inside_ava(tmp_path: pathlib.Path) -> None:
 def test_an_alias_shadowed_by_a_function_parameter_is_not_followed(
     tmp_path: pathlib.Path,
 ) -> None:
-    _write(tmp_path, "shared/telemetry/__init__.py", "x = 1\n")
-    tree = _parse("from shared import telemetry\ndef f(telemetry): return telemetry._state\n")
+    _write(tmp_path, "base/telemetry/__init__.py", "x = 1\n")
+    tree = _parse("from base import telemetry\ndef f(telemetry): return telemetry._state\n")
 
     assert locality.private_imports(tree, "gateway/x.py", ("shared", "gateway"), tmp_path) == {}
 
 
 def test_an_alias_shadowed_by_reassignment_is_not_followed(tmp_path: pathlib.Path) -> None:
-    _write(tmp_path, "shared/telemetry/__init__.py", "x = 1\n")
-    tree = _parse("from shared import telemetry\ntelemetry = object()\ntelemetry._state\n")
+    _write(tmp_path, "base/telemetry/__init__.py", "x = 1\n")
+    tree = _parse("from base import telemetry\ntelemetry = object()\ntelemetry._state\n")
 
     assert locality.private_imports(tree, "gateway/x.py", ("shared", "gateway"), tmp_path) == {}
 
@@ -273,8 +273,8 @@ def test_an_alias_literally_named_self_is_not_followed_inside_a_method(
     """`self` is an extremely common parameter name; if a module alias happens to
     share it, the scope-free rebound check must still suppress it rather than
     flooding every method with a bogus reach-in."""
-    _write(tmp_path, "shared/self.py", "x = 1\n")
-    tree = _parse("from shared import self\nclass C:\n    def m(self): return self._x\n")
+    _write(tmp_path, "base/self.py", "x = 1\n")
+    tree = _parse("from base import self\nclass C:\n    def m(self): return self._x\n")
 
     assert locality.private_imports(tree, "gateway/x.py", ("shared", "gateway"), tmp_path) == {}
 
@@ -282,12 +282,12 @@ def test_an_alias_literally_named_self_is_not_followed_inside_a_method(
 def test_an_unshadowed_alias_is_still_flagged(tmp_path: pathlib.Path) -> None:
     """Control case: with no rebinding anywhere in the module, the same alias
     form as the tests above is flagged normally."""
-    _write(tmp_path, "shared/telemetry/__init__.py", "x = 1\n")
-    tree = _parse("from shared import telemetry\ntelemetry._state\n")
+    _write(tmp_path, "base/telemetry/__init__.py", "x = 1\n")
+    tree = _parse("from base import telemetry\ntelemetry._state\n")
 
     sites = locality.private_imports(tree, "gateway/x.py", ("shared", "gateway"), tmp_path)
 
-    assert sites == {"gateway/x.py::shared.telemetry._state": [2]}
+    assert sites == {"gateway/x.py::base.telemetry._state": [2]}
 
 
 # --- private_imports: case-exact filesystem checks --------------------------
@@ -300,9 +300,9 @@ def test_an_attribute_of_a_module_level_class_is_not_matched_by_case_folding(
     case-folding filesystem (macOS) would make `Registry.py` and the real
     `registry.py` collide — `_exists_exact` checks the directory listing, not
     just `Path.is_file()`, so this must hold on macOS and Linux alike."""
-    _write(tmp_path, "shared/pkg/__init__.py", "x = 1\n")
-    _write(tmp_path, "shared/pkg/registry.py", "class Registry: pass\n")
-    tree = _parse("from shared import pkg\npkg.Registry._cache.clear()\n")
+    _write(tmp_path, "base/pkg/__init__.py", "x = 1\n")
+    _write(tmp_path, "base/pkg/registry.py", "class Registry: pass\n")
+    tree = _parse("from base import pkg\npkg.Registry._cache.clear()\n")
 
     assert locality.private_imports(tree, "gateway/x.py", ("shared", "gateway"), tmp_path) == {}
 
@@ -310,16 +310,16 @@ def test_an_attribute_of_a_module_level_class_is_not_matched_by_case_folding(
 def test_a_wrong_case_module_path_does_not_resolve_to_the_real_module(
     tmp_path: pathlib.Path,
 ) -> None:
-    """`shared.Mod` (capital M) does not exist case-exactly even though
-    `shared/mod.py` does — the owner must resolve to the non-existent
-    `shared.Mod` "package", not silently fold onto the real module, so the
+    """`base.Mod` (capital M) does not exist case-exactly even though
+    `base/mod.py` does — the owner must resolve to the non-existent
+    `base.Mod` "package", not silently fold onto the real module, so the
     importer (which is not inside that non-existent package) is flagged."""
-    _write(tmp_path, "shared/mod.py", "x = 1\n")
-    tree = _parse("from shared.Mod import _x\n")
+    _write(tmp_path, "base/mod.py", "x = 1\n")
+    tree = _parse("from base.Mod import _x\n")
 
-    sites = locality.private_imports(tree, "shared/other.py", ("shared",), tmp_path)
+    sites = locality.private_imports(tree, "base/other.py", ("shared",), tmp_path)
 
-    assert sites == {"shared/other.py::shared.Mod._x": [1]}
+    assert sites == {"base/other.py::base.Mod._x": [1]}
 
 
 def test_exists_exact_listing_is_refreshed_when_the_directory_changes(
@@ -428,7 +428,7 @@ def test_non_dial_calls_are_not_flagged(source: str) -> None:
 def test_the_owner_module_itself_is_exempt() -> None:
     tree = _parse("import psycopg\npsycopg.connect('dsn')\n")
 
-    assert locality.owner_bypasses(tree, "shared/db/connections.py", ()) == {}
+    assert locality.owner_bypasses(tree, "base/db/connections.py", ()) == {}
 
 
 # --- measure: test *directories* are exempt, test-prefixed files are not ----
@@ -599,7 +599,7 @@ def test_allowlist_entry_is_stale_once_the_module_stops_bypassing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     decision = locality.Decision(
-        owners=frozenset({"shared/owner.py"}),
+        owners=frozenset({"base/owner.py"}),
         find=lambda _tree, _roots: [],
         fix="use the owner",
         allowed={"gateway/legacy.py": "historical exemption"},
@@ -619,7 +619,7 @@ def test_allowlist_entry_is_not_stale_while_it_still_bypasses(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     decision = locality.Decision(
-        owners=frozenset({"shared/owner.py"}),
+        owners=frozenset({"base/owner.py"}),
         find=lambda _tree, _roots: [3],
         fix="use the owner",
         allowed={"gateway/legacy.py": "historical exemption"},
@@ -731,28 +731,28 @@ def test_validate_owner_bypasses_accepts_a_known_decision_name() -> None:
 
 
 def test_unpaired_additions_same_file_same_leaf_pairs() -> None:
-    previous = {"gateway/db.py::shared._old": 2}
-    current = {"gateway/db.py::shared.sub._old": 2}
+    previous = {"gateway/db.py::base._old": 2}
+    current = {"gateway/db.py::base.sub._old": 2}
 
     assert locality.unpaired_additions(current, previous) == []
 
 
 def test_unpaired_additions_same_file_different_leaf_does_not_pair() -> None:
-    previous = {"gateway/db.py::shared._old": 2}
-    current = {"gateway/db.py::shared._new": 2}
+    previous = {"gateway/db.py::base._old": 2}
+    current = {"gateway/db.py::base._new": 2}
 
-    assert locality.unpaired_additions(current, previous) == ["gateway/db.py::shared._new"]
+    assert locality.unpaired_additions(current, previous) == ["gateway/db.py::base._new"]
 
 
 def test_unpaired_additions_different_file_does_not_pair() -> None:
-    previous = {"gateway/db.py::shared._old": 2}
-    current = {"other/db.py::shared._old": 2}
+    previous = {"gateway/db.py::base._old": 2}
+    current = {"other/db.py::base._old": 2}
 
-    assert locality.unpaired_additions(current, previous) == ["other/db.py::shared._old"]
+    assert locality.unpaired_additions(current, previous) == ["other/db.py::base._old"]
 
 
 def test_unpaired_additions_value_above_the_removed_one_does_not_pair() -> None:
-    previous = {"gateway/db.py::shared._old": 1}
-    current = {"gateway/db.py::shared.sub._old": 2}
+    previous = {"gateway/db.py::base._old": 1}
+    current = {"gateway/db.py::base.sub._old": 2}
 
-    assert locality.unpaired_additions(current, previous) == ["gateway/db.py::shared.sub._old"]
+    assert locality.unpaired_additions(current, previous) == ["gateway/db.py::base.sub._old"]

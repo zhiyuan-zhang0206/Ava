@@ -9,11 +9,11 @@ import sys
 from pathlib import Path
 
 from agent.extensions import load_extensions
+from base import paths
+from base.deploy.release.runtime_interpreter import runtime_plugins_dir
+from base.packages.plugins import enable_config
 from ops.spec import plugin_services
 from services.agent_host.daemon import _plugins_fingerprint
-from shared import paths
-from shared.deploy.release.runtime_interpreter import runtime_plugins_dir
-from shared.packages.plugins import enable_config
 
 
 def require(value: bool, message: str) -> None:  # noqa: FBT001 — assertion predicate.

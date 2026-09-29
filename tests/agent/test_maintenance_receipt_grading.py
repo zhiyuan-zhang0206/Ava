@@ -8,9 +8,9 @@ import psycopg
 import pytest
 from psycopg_pool import PoolTimeout
 
+from base.deploy.maintenance import admission, pause_owner
+from base.deploy.maintenance.state import MaintenanceHold
 from services.agent_host import maintenance as receipts
-from shared.deploy.maintenance import admission, pause_owner
-from shared.deploy.maintenance.state import MaintenanceHold
 from tests.agent.test_maintenance import WHEN
 from tests.agent.test_maintenance import isolate as isolate
 

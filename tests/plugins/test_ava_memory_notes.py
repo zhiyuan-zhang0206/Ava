@@ -26,8 +26,8 @@ def memory_plugin() -> Any:
     first is what makes the load — and therefore the registration — actually
     happen, exactly as the full plugin load (`agent.extensions`) does it.
     """
-    from shared.packages.plugins.config_registration import bind_from_disk
-    from shared.packages.plugins.context import PluginContext
+    from base.packages.plugins.config_registration import bind_from_disk
+    from base.packages.plugins.context import PluginContext
 
     clear_plugin_registrations()
     for name in list(sys.modules):
@@ -262,7 +262,7 @@ def test_memory_index_injection_guard(
     agent's cold-start context) is prefixed with a visible security warning
     before injection."""
     from ava_builtins.plugins.ava_memory.notes import memory_index_note
-    from shared.config import settings
+    from base.config import settings
 
     monkeypatch.setattr(settings.agent, "memory_index_inject_enabled", True)
     pool = tmp_path / "pool"
@@ -284,7 +284,7 @@ def test_memory_index_note_is_suppressed_for_eval_isolation(
 ) -> None:
     """An eval agent never receives the shared pool index in its context."""
     from ava_builtins.plugins.ava_memory import notes
-    from shared.config import settings
+    from base.config import settings
 
     monkeypatch.setattr(settings.agent, "eval_isolation", True)
     monkeypatch.setattr(notes, "memory_dir", lambda: tmp_path)
@@ -298,8 +298,8 @@ def test_personal_index_uses_hosted_turn_identity(
 ) -> None:
     from ava import agent_identity
     from ava_builtins.plugins.ava_memory import notes
-    from shared.config import settings
-    from shared.native_process.turn_identity import bind_turn_identity
+    from base.config import settings
+    from base.native_process.turn_identity import bind_turn_identity
 
     def workspace(agent_id: int) -> Path:
         return tmp_path / str(agent_id)
@@ -324,7 +324,7 @@ def test_personal_index_skips_unestablished_identity(
 ) -> None:
     from ava import agent_identity
     from ava_builtins.plugins.ava_memory import notes
-    from shared.config import settings
+    from base.config import settings
 
     def workspace(agent_id: int) -> Path:
         return tmp_path / str(agent_id)

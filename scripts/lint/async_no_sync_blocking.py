@@ -110,11 +110,11 @@ _DEFINITION_DIRS = (
     "agent",
     "ava",
     "ava_builtins",
+    "base",
     "cli",
     "gateway",
     "ops",
     "services",
-    "shared",
 )
 
 # Module-qualified sync calls (any attribute of these modules).

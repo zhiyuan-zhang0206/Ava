@@ -13,17 +13,17 @@ import pytest
 from psycopg_pool import AsyncConnectionPool, ConnectionPool
 
 from agent.turn import progress
+from base.agents.observation import db_wait
+from base.agents.observation.db_wait import database_wait_snapshot
+from base.cluster.machine import machine_name
+from base.config import settings
+from base.db import insert_inbound_message
+from base.deploy.maintenance import cohort, pause_owner
+from base.native_process.turn_identity import bind_turn_identity
 from services.agent_host import daemon, db_recovery
 from services.agent_host.dispatcher import InboundWakeDispatcher, PendingInboundWake, TurnScheduler
 from services.agent_host.host import AgentHost
 from services.delivery_watchdog import turn_liveness
-from shared.agents.observation import db_wait
-from shared.agents.observation.db_wait import database_wait_snapshot
-from shared.cluster.machine import machine_name
-from shared.config import settings
-from shared.db import insert_inbound_message
-from shared.deploy.maintenance import cohort, pause_owner
-from shared.native_process.turn_identity import bind_turn_identity
 from tests.agent.test_hosted_db_recovery import _admit, _graph
 from tests.services.test_delivery_watchdog_turn_liveness import FakeRedis
 
@@ -214,7 +214,7 @@ async def test_heartbeat_preserves_progress_and_cannot_extend_wait_proof(
         async def set(self, _key: str, value: str, *, ex: int) -> None:
             writes.append(json.loads(value))
 
-    monkeypatch.setattr(daemon.shared.events.live.redis_client, "get_async_redis", CaptureRedis)
+    monkeypatch.setattr(daemon.base.events.live.redis_client, "get_async_redis", CaptureRedis)
     try:
         with db_wait.database_wait(incarnation) as waiting:
             waiting.renew()
@@ -244,7 +244,7 @@ async def test_success_handoff_clears_on_actual_node_progress(
         async def set(self, _key: str, value: str, *, ex: int) -> None:
             writes.append(json.loads(value))
 
-    monkeypatch.setattr(daemon.shared.events.live.redis_client, "get_async_redis", CaptureRedis)
+    monkeypatch.setattr(daemon.base.events.live.redis_client, "get_async_redis", CaptureRedis)
     try:
         with db_wait.database_wait(incarnation) as waiting:
             waiting.renew()

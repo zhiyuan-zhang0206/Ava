@@ -18,14 +18,14 @@ import psutil
 import pytest
 from pydantic import ValidationError
 
-from ops import cluster
-from ops.rpc_schemas import is_op_kind
-from services.agent_ops.dispatch_sync import dispatch_sync
-from shared.api_contracts.release_handoff import (
+from base.api_contracts.release_handoff import (
     HandoffRefusedError,
     ReleaseImageExecPayload,
     ReleaseImageRef,
 )
+from ops import cluster
+from ops.rpc_schemas import is_op_kind
+from services.agent_ops.dispatch_sync import dispatch_sync
 from tests.lifecycle.handoff.conftest import Store, entry_argv_tail
 
 pytestmark = pytest.mark.skipif(os.name == "nt", reason="the recording interpreter is POSIX")

@@ -29,6 +29,6 @@ A gateway-owned daemon — every `AVA_TASK_MAINTENANCE_INTERVAL_SECONDS` (defaul
 - Healthcheck `plugins/ava_fleet/task_maintenance/healthcheck.py` (HTTP `/healthz` :8108 protocol, centrally bound to captured root ancestry)
 
 ## Notes
-- Configuration gate `AVA_TASK_MAINTENANCE_ENABLED` (default on): turning it off disables reminders for the whole cluster. The gating logic (`gate`) travels with the plugin's `ServiceSpec`, not hardcoded in `ops/spec.py:_gate_reason`; operational configuration (interval/backoff/escalate_n + pidfile + port 8108) remains in global `shared.config` / `shared.daemon.health`, isomorphic with other gateway daemons.
+- Configuration gate `AVA_TASK_MAINTENANCE_ENABLED` (default on): turning it off disables reminders for the whole cluster. The gating logic (`gate`) travels with the plugin's `ServiceSpec`, not hardcoded in `ops/spec.py:_gate_reason`; operational configuration (interval/backoff/escalate_n + pidfile + port 8108) remains in global `base.config` / `base.daemon.health`, isomorphic with other gateway daemons.
 - The plugin ServiceSpec selects task-maintenance into the gateway root manifest. Root health probes that exact unit and owns verified recovery; the plugin probe has no independent launch authority.
 - Difference from [[services/gateway_side/heartbeat.ava.okf.md]]: heartbeat wakes idle agents to work, task-maintenance reminds overdue tasks; both only INSERT inbound, both are one per cluster on gateway.

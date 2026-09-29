@@ -20,9 +20,9 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-# Label parsing helpers live in shared/telemetry/alerts.py — the ingest core shared
+# Label parsing helpers live in base/telemetry/alerts.py — the ingest core shared
 # with the health probe and the machine liveness pass.
-from shared.telemetry.alerts import parse_alertname, parse_severity
+from base.telemetry.alerts import parse_alertname, parse_severity
 
 __all__ = [
     "AlertIngestResult",
@@ -83,7 +83,7 @@ class AlertWebhookPayload(BaseModel):
     alerts: list[AlertWebhookAlert] = Field(default_factory=list)
 
     def flattened(self) -> list[dict[str, Any]]:
-        """Each alert as the plain dict shared/telemetry/alerts.py consumes, with the
+        """Each alert as the plain dict base/telemetry/alerts.py consumes, with the
         top-level status as the per-alert fallback (the Grafana-managed
         webhook carries status only at the top level)."""
 

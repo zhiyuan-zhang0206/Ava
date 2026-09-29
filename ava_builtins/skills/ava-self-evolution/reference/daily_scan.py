@@ -41,7 +41,7 @@ from pathlib import Path
 from typing import Any, NamedTuple
 
 from ava_builtins.skill_support.self_evolution import collect, mirror_backfill
-from shared.paths import ava_home
+from base.paths import ava_home
 
 ORCHESTRATION_SKILLS = ("ava-workflow", "ava-dynamic-workflow", "ava-goal")
 

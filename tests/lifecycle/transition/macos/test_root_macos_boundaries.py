@@ -11,13 +11,13 @@ from typing import Any
 import pytest
 from pydantic import JsonValue, ValidationError
 
+from base.native_process import ownership
+from base.native_process.ownership import OwnedProcess
 from cli.release_fleet.request import FleetRequest
 from cli.release_transition import journal, native, root_macos, root_service, stage
 from cli.release_transition.journal import Journal, Operation, Phase
 from cli.release_transition.launchd_custody import Birth, RootCustody
 from cli.release_transition.local import LocalTransition
-from shared.native_process import ownership
-from shared.native_process.ownership import OwnedProcess
 from tests.lifecycle.transition.macos.launchd_fake import EXECUTOR_BIRTH, Harness
 from tests.lifecycle.transition.macos.launchd_fake import harness as harness
 from tests.lifecycle.transition.phases import advance_to
@@ -154,7 +154,7 @@ def test_root_owner_follows_the_recorded_executor_kind() -> None:
 
 
 def _transition(harness: Harness, monkeypatch: pytest.MonkeyPatch) -> LocalTransition:
-    from shared.deploy.maintenance import admission
+    from base.deploy.maintenance import admission
 
     request = journal.read_operation(harness.path).request
     assert isinstance(request, FleetRequest)
@@ -202,9 +202,9 @@ def test_start_observe_and_steady_state_dispatch_by_recorded_kind(
 def test_stop_authenticates_the_helper_before_and_proves_its_stop_intent_after(
     harness: Harness, monkeypatch: pytest.MonkeyPatch, kind: str
 ) -> None:
+    from base.deploy.maintenance import admission
     from cli.commands.lifecycle import maintenance as maintenance_commands
     from cli.commands.lifecycle import root_driver, service_stop
-    from shared.deploy.maintenance import admission
 
     transition = _transition(harness, monkeypatch)
     hold = SimpleNamespace(phase="drained")
@@ -246,7 +246,7 @@ def _darwin_operation(harness: Harness) -> Operation:
 def test_macos_start_action_must_be_a_finite_tool_of_the_recorded_executor(
     harness: Harness, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from shared.host.system import boot_unit
+    from base.host.system import boot_unit
 
     operation = _darwin_operation(harness)
     home = Path(operation.request.home)
@@ -274,7 +274,7 @@ def test_macos_start_action_must_be_a_finite_tool_of_the_recorded_executor(
 def test_linux_start_action_still_requires_the_boot_unit(
     harness: Harness, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from shared.host.system import boot_unit
+    from base.host.system import boot_unit
 
     operation = journal.read_operation(harness.path).model_copy(
         update={"launch": {"kind": native.LINUX}}
@@ -287,7 +287,7 @@ def test_linux_start_action_still_requires_the_boot_unit(
 def test_macos_observation_has_no_boot_unit_but_must_run_on_macos(
     harness: Harness, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from shared.host.system import boot_unit
+    from base.host.system import boot_unit
 
     operation = _darwin_operation(harness)
     monkeypatch.setattr(boot_unit, "manager_properties", lambda _home: pytest.fail("systemd"))

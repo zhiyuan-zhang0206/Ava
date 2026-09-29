@@ -27,12 +27,12 @@ from typing import get_args
 
 import pytest
 
-from shared.agents import AgentStatus, TerminationSource
-from shared.agents.messages.inbound import InboundKind
-from shared.agents.tasks.status import TaskStatus
-from shared.cluster.machine import MachineRole
-from shared.packages.extensions.install_registry import TrustTier
-from shared.packages.extensions.registry import ExtensionKind
+from base.agents import AgentStatus, TerminationSource
+from base.agents.messages.inbound import InboundKind
+from base.agents.tasks.status import TaskStatus
+from base.cluster.machine import MachineRole
+from base.packages.extensions.install_registry import TrustTier
+from base.packages.extensions.registry import ExtensionKind
 
 # Strip `-- ...` line comments first: the CHECK value lists carry inline comments
 # whose prose can contain `)` (e.g. "ava.compact(summary)"), which would otherwise
@@ -61,7 +61,7 @@ _CASES: dict[tuple[str, str], set[str]] = {
     ("extensions", "trust"): set(get_args(TrustTier)),
     # The task lifecycle status. The SDK validation, the gateway wire schemas,
     # and the generated frontend types all reference
-    # shared.agents.tasks.status.TaskStatus ('ongoing' was removed 2026-09-15); this
+    # base.agents.tasks.status.TaskStatus ('ongoing' was removed 2026-09-15); this
     # locks the DB CHECK to the same set.
     ("agent_tasks", "status"): {s.value for s in TaskStatus},
 }

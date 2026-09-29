@@ -33,9 +33,9 @@ from agent.graph.system_prompt import register_system_prompt_section
 from agent.hooks import Hook, register_after_exec, register_after_init
 from agent.messages import NoteTag, system_note_message
 from agent.state import AgentState, register_plugin_state
-from shared.config.turn_view import turn_settings
-from shared.log import logger
-from shared.paths import workspace_dir
+from base.config.turn_view import turn_settings
+from base.log import logger
+from base.paths import workspace_dir
 
 from . import plugin as _surface
 

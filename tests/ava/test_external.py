@@ -19,11 +19,11 @@ from agent import state as state_module
 from ava import agent_identity, external
 from ava.external import state
 from ava.external.state import apply_plugin_delta, decode_plugin_delta, encode_plugin_delta
-from shared import telemetry
-from shared.config.turn_view import bind_agent_config, current_agent_config_pins, turn_settings
-from shared.packages.plugins.config_view import bind_agent_plugin_config, current_plugin_config_view
-from shared.telemetry import Event as TelemetryEvent
-from shared.telemetry.otlp import telemetry_otlp
+from base import telemetry
+from base.config.turn_view import bind_agent_config, current_agent_config_pins, turn_settings
+from base.packages.plugins.config_view import bind_agent_plugin_config, current_plugin_config_view
+from base.telemetry import Event as TelemetryEvent
+from base.telemetry.otlp import telemetry_otlp
 
 
 def _union(left: set[str], right: set[str]) -> set[str]:
@@ -108,7 +108,7 @@ def attached_runtime(
         return False
 
     monkeypatch.setattr(
-        "shared.agents.impersonation_manifest.open_local_participant", no_local_participant
+        "base.agents.impersonation_manifest.open_local_participant", no_local_participant
     )
     return lease, snapshot, staged
 
@@ -142,7 +142,7 @@ def test_legacy_attachment_never_opens_a_manifest_receipt(
         pytest.fail("legacy attachment opened a manifest receipt")
 
     monkeypatch.setattr(
-        "shared.agents.impersonation_manifest.open_local_participant",
+        "base.agents.impersonation_manifest.open_local_participant",
         unexpected_open,
     )
 
@@ -375,7 +375,7 @@ def test_close_rejects_a_new_sdk_effect_before_it_reaches_the_gateway(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Close fences a new SDK call before its gateway effect, not only at detach."""
-    from shared.agents import impersonation_manifest as manifest
+    from base.agents import impersonation_manifest as manifest
 
     attachment = external.attach("lease")
     participant = manifest.LocalParticipant("lease", attachment.agent_id, 0, "post-close-sdk")
@@ -403,7 +403,7 @@ def test_close_does_not_revoke_an_sdk_call_admitted_before_the_fence(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """An SDK call already inside its metering admission finishes its gateway effect."""
-    from shared.agents import impersonation_manifest as manifest
+    from base.agents import impersonation_manifest as manifest
 
     attachment = external.attach("lease")
     participant = manifest.LocalParticipant("lease", attachment.agent_id, 0, "pre-close-sdk")

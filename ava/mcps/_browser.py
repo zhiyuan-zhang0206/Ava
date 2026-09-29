@@ -22,7 +22,7 @@ import json
 from contextlib import AsyncExitStack, suppress
 from typing import Any
 
-from shared.host.net.resilience import Policy, aretry
+from base.host.net.resilience import Policy, aretry
 
 # A single tool result (screenshot / DOM snapshot) can be multi-MB on one
 # line; lift the stream buffer cap well above StreamReader's 64KiB default
@@ -190,7 +190,7 @@ async def connect_browser_direct() -> tuple[BrowserLineSession, AsyncExitStack]:
     the session's CURRENT socket: on a desync the session re-dials internally,
     so the original writer may no longer be the live one.
     """
-    from shared.paths import chrome_mcp_socket
+    from base.paths import chrome_mcp_socket
 
     sock = str(chrome_mcp_socket())
     reader, writer = await _dial_browser_mcp(sock)
@@ -221,7 +221,7 @@ async def release_agent_chrome_pages(agent_id: int) -> bool:
     dead-page reaper.
     """
     try:
-        from shared.paths import chrome_mcp_socket
+        from base.paths import chrome_mcp_socket
 
         return await asyncio.wait_for(
             _release_roundtrip(str(chrome_mcp_socket()), agent_id),

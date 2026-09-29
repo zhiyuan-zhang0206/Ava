@@ -7,11 +7,11 @@ from datetime import UTC, datetime
 from hashlib import sha256
 from typing import Any, cast
 
+from base import telemetry
+from base.config import settings
+from base.events.contract import EventTier
+from base.telemetry.loki_index_labels import LokiReadEra, LokiReadSlice
 from gateway.lgtm import _loki_logql, _loki_transport, loki_events_cache
-from shared import telemetry
-from shared.config import settings
-from shared.events.contract import EventTier
-from shared.telemetry.loki_index_labels import LokiReadEra, LokiReadSlice
 
 _event_id = telemetry.event_id
 

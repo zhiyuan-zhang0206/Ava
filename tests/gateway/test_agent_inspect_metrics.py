@@ -27,13 +27,13 @@ import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
+from base.telemetry.metrics.plugin_metrics import MetricSpec, registered_metrics
 from gateway.app import app
 from gateway.inspect import _plugin_metrics
 from gateway.inspect._plugin_metrics import (
     _render_metric_query,
     _translate_macros,
 )
-from shared.telemetry.metrics.plugin_metrics import MetricSpec, registered_metrics
 
 # A valid inspector query — the static-SQL shape (task #180 PR C): the
 # template era (macros + {event_name}/{category}/{{agent_id}} placeholders)
@@ -594,9 +594,9 @@ def test_in_process_loader_imports_shipped_metrics() -> None:
     """The loader imports every shipped plugin metrics.py under its plugin
     context plus the core definition modules — plugin metrics first, then
     core, the old snapshot's two-section order. No file involved."""
-    from shared.packages.plugins.context import PluginContext
-    from shared.telemetry.metrics.core import catalog
-    from shared.telemetry.metrics.plugin_metrics import clear_registry
+    from base.packages.plugins.context import PluginContext
+    from base.telemetry.metrics.core import catalog
+    from base.telemetry.metrics.plugin_metrics import clear_registry
 
     # Re-run the registrations fresh — earlier tests in the session may have
     # cleared or reloaded the process-global registries (a module already in
@@ -645,7 +645,7 @@ def test_in_process_loader_drops_partial_registrations_and_recovers(
     (plugin_dir / "__init__.py").write_text("", encoding="utf-8")
     metrics_py = plugin_dir / "metrics.py"
     source = (
-        "from shared.telemetry.metrics.plugin_metrics import MetricSpec, register_metric\n"
+        "from base.telemetry.metrics.plugin_metrics import MetricSpec, register_metric\n"
         "register_metric(MetricSpec(name='drop_partial_one', title='Drop partial one', "
         "event_name='task_update', category='audit', output=['inspector'], "
         f"query={_STAT_QUERY!r}))\n"

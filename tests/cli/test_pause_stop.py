@@ -13,16 +13,16 @@ import pytest
 
 import cli.commands._repo as _repo_commands
 import cli.commands.lifecycle.root_driver as _root_driver_commands
+from base.agents.exit_codes import SERVICES_NOT_READY_EXIT_CODE
+from base.deploy.lifecycle import start_serving
+from base.deploy.maintenance import admission, pause_owner
+from base.deploy.maintenance.state import MaintenanceHold
+from base.sessions.backend import PtySessionBackend
 from cli.commands.lifecycle import _temporary_stop as command
 from cli.commands.lifecycle import stop as entry
 from cli.commands.lifecycle._pause_resume import StartDelegation, resume_after_start
 from cli.parsers import build_parser
 from ops import agent_pause
-from shared.agents.exit_codes import SERVICES_NOT_READY_EXIT_CODE
-from shared.deploy.lifecycle import start_serving
-from shared.deploy.maintenance import admission, pause_owner
-from shared.deploy.maintenance.state import MaintenanceHold
-from shared.sessions.backend import PtySessionBackend
 from tests.agent.test_maintenance import WHEN
 from tests.agent.test_maintenance import isolate as isolate
 from tests.cli.conftest import PtyReaper
@@ -53,8 +53,8 @@ def dependencies(monkeypatch: pytest.MonkeyPatch) -> None:
         ],
     )
     monkeypatch.setattr(command, "ops_quiescent", lambda _timeout: None)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr("shared.host.proc.hosting_supervised_session", lambda: None)
-    monkeypatch.setattr("shared.deploy.state.host_deploy_state.set_posture", lambda _value: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("base.host.proc.hosting_supervised_session", lambda: None)
+    monkeypatch.setattr("base.deploy.state.host_deploy_state.set_posture", lambda _value: None)  # pyright: ignore[reportUnknownArgumentType]
 
 
 def test_pause_preserves_unselected_process_and_real_pty(
@@ -215,7 +215,7 @@ def test_repeated_stop_needs_no_live_database_or_host(
     )
     monkeypatch.setattr(agent_pause, "connect", MagicMock(side_effect=AssertionError("DB is down")))
     monkeypatch.setattr(
-        "shared.deploy.state.host_deploy_state.set_posture",
+        "base.deploy.state.host_deploy_state.set_posture",
         MagicMock(side_effect=AssertionError("DB is down")),
     )
     assert entry.cmd_pause(timeout=1) == 0
@@ -311,7 +311,7 @@ def test_explicit_force_stops_host_and_preserves_only_pause_terminals(
     monkeypatch.setitem(os.environ, "AVA_HOME", str(home))
     monkeypatch.setenv("AVA_HOME_OVERRIDE", "1")
     monkeypatch.setenv("HOME", str(home))
-    monkeypatch.setattr("shared.sessions.backend.get_shell_backend", PtySessionBackend)
+    monkeypatch.setattr("base.sessions.backend.get_shell_backend", PtySessionBackend)
     monkeypatch.setattr(_repo_commands, "_roles_or_none", lambda: frozenset({"agent-runner"}))
     monkeypatch.setattr(entry, "_announce_stopping", lambda: None)
     for name in ("stop_permissions_helper",):
@@ -570,7 +570,7 @@ def test_pause_refused_inside_an_exec_domain(monkeypatch: pytest.MonkeyPatch) ->
     process group; the refusal names `run_background` — a pause retains
     persistent terminals, so a session hosted there survives."""
     dependencies(monkeypatch)
-    monkeypatch.setattr("shared.host.proc.hosting_exec_domain", lambda: "agent.exec_child")
+    monkeypatch.setattr("base.host.proc.hosting_exec_domain", lambda: "agent.exec_child")
 
     with pytest.raises(RuntimeError, match=r"ava\.shell\.run_background"):
         entry.cmd_pause(timeout=1)
@@ -581,7 +581,7 @@ def test_stop_refused_inside_an_exec_domain(monkeypatch: pytest.MonkeyPatch) -> 
     unit's persistent terminals — the refusal points at a shell no ava session
     hosts instead of `run_background`."""
     dependencies(monkeypatch)
-    monkeypatch.setattr("shared.host.proc.hosting_exec_domain", lambda: "agent.exec_child")
+    monkeypatch.setattr("base.host.proc.hosting_exec_domain", lambda: "agent.exec_child")
 
     with pytest.raises(RuntimeError, match="login shell"):
         entry.cmd_stop(require_confirmation=False, timeout=1)

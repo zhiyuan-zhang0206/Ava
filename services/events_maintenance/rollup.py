@@ -53,15 +53,15 @@ from datetime import time as datetime_time
 import psycopg
 from psycopg import sql
 
-from shared.log import logger
-from shared.telemetry.loki_index_labels import (
+from base.log import logger
+from base.telemetry.loki_index_labels import (
     EVENT_STREAM_RETENTION,
     LokiReadEra,
     escape_logql_label,
     event_stream_selector,
     split_index_label_window,
 )
-from shared.telemetry.loki_query_budget import FairQueryBudget
+from base.telemetry.loki_query_budget import FairQueryBudget
 
 _HTTP_TIMEOUT_S = 60.0
 # Serialized by design (capacity 1): the maintenance sweep must not crowd out
@@ -252,7 +252,7 @@ def _query_instant(logql: str, at: datetime) -> list[tuple[dict[str, str], float
     or HTTP failure — the daemon pass reports and retries next round (a
     silently-zero day would be worse than a loud skip). The process-local
     capacity-one budget also governs resolution.py, which imports this seam."""
-    from shared.config import settings
+    from base.config import settings
 
     base = settings.observability.telemetry_loki_url.rstrip("/")
     params = urllib.parse.urlencode({"query": logql, "time": at.timestamp()})
@@ -612,7 +612,7 @@ def compute_rollup(
     did not land. A retention gap is still unrecoverable without the JSONL
     mirror and is reported before the retained candidate scan begins.
     """
-    from shared.config import settings
+    from base.config import settings
 
     pass_started = time.monotonic()
     if lookback_days is None:

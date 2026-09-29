@@ -7,7 +7,7 @@ import logging
 from dataclasses import dataclass
 from pathlib import Path
 
-from shared.config import settings
+from base.config import settings
 
 _log = logging.getLogger("services.im_bridge.state")
 

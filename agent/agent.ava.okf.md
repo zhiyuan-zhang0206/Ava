@@ -27,7 +27,7 @@ Overview of the Agent subsystem.
 - **Mode (not a framework concept)** — "one-shot vs persistent" are **not** framework-level modes, just differences in
   the **initial prompt template** used at spawn: there is no mode field in the graph. Adding a new agent type = writing a
   new initial prompt, no framework change.
-- **Lifecycle verbs** (state enumeration / wire format see [[shared/agents-contract.ava.okf.md|cross-process contract]],
+- **Lifecycle verbs** (state enumeration / wire format see [[base/agents-contract.ava.okf.md|cross-process contract]],
   inbound kind see [[agent/db/db.ava.okf.md|database layer]], implementation in `ops/agents/spawn.py` + `ops/agents/wake.py`) — the distinction is
   "whether the new process needs to be told what it went through":
   - **spawn** — create new agent, **no inbound message delivered** (from nothing, no "why was I called" issue).

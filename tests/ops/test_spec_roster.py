@@ -16,10 +16,10 @@ from typing import cast
 
 import pytest
 
+from base.cluster.machine import MachineRole
 from cli.commands import _repo
 from ops import roster, spec
 from ops.roster import service_spec
-from shared.cluster.machine import MachineRole
 
 _GATEWAY_SESSIONS = {
     "gate",
@@ -290,7 +290,7 @@ def test_browser_mcp_gated_out_without_af_unix(monkeypatch: pytest.MonkeyPatch) 
     Before the split gate both services shared `browser_incapability()`, so
     browser-mcp was unconditionally in a Windows runner's roster, failed every
     launch, and `ava status` showed no skip annotation to say why."""
-    monkeypatch.setattr("shared.host.system.probes.unix_sockets_available", lambda: False)
+    monkeypatch.setattr("base.host.system.probes.unix_sockets_available", lambda: False)
     monkeypatch.setattr("ops.spec.browser_incapability", lambda: None)
     annotated = _agent_runner_annotated(monkeypatch)
     assert annotated["browser"] is None
@@ -304,8 +304,8 @@ def test_browser_mcp_gated_out_without_af_unix(monkeypatch: pytest.MonkeyPatch) 
 def test_browser_mcp_ungated_with_af_unix(monkeypatch: pytest.MonkeyPatch) -> None:
     """On a capable POSIX host both services start — the AF_UNIX prong is the
     only thing the two gates differ by."""
-    monkeypatch.setattr("shared.host.system.probes.unix_sockets_available", lambda: True)
-    monkeypatch.setattr("shared.host.system.probes.browser_incapability", lambda: None)
+    monkeypatch.setattr("base.host.system.probes.unix_sockets_available", lambda: True)
+    monkeypatch.setattr("base.host.system.probes.browser_incapability", lambda: None)
     monkeypatch.setattr("ops.spec.browser_incapability", lambda: None)
     annotated = _agent_runner_annotated(monkeypatch)
     assert annotated["browser"] is None
@@ -315,9 +315,9 @@ def test_browser_mcp_ungated_with_af_unix(monkeypatch: pytest.MonkeyPatch) -> No
 def test_browser_mcp_gated_out_when_browser_is(monkeypatch: pytest.MonkeyPatch) -> None:
     """browser-mcp's gate is a SUPERSET: an incapable browser host also drops
     browser-mcp, with the browser reason (not the AF_UNIX one)."""
-    monkeypatch.setattr("shared.host.system.probes.unix_sockets_available", lambda: True)
+    monkeypatch.setattr("base.host.system.probes.unix_sockets_available", lambda: True)
     monkeypatch.setattr(
-        "shared.host.system.probes.browser_incapability", lambda: "no display (headless)"
+        "base.host.system.probes.browser_incapability", lambda: "no display (headless)"
     )
     monkeypatch.setattr("ops.spec.browser_incapability", lambda: "no display (headless)")
     annotated = _agent_runner_annotated(monkeypatch)
@@ -369,9 +369,9 @@ def test_every_service_declares_an_identity_probe() -> None:
 def test_healthy_protocol_cannot_certify_an_unowned_listener(
     monkeypatch: pytest.MonkeyPatch, service: str
 ) -> None:
+    from base.daemon.health import DaemonProbe
+    from base.native_process.ownership import OwnedProcess
     from services.healthchecks import owned_service
-    from shared.daemon.health import DaemonProbe
-    from shared.native_process.ownership import OwnedProcess
 
     def _fake_probe_home(*_a: object, **_kw: object) -> DaemonProbe:
         return DaemonProbe.up("healthy")
@@ -393,7 +393,7 @@ def test_healthy_protocol_cannot_certify_an_unowned_listener(
 
     monkeypatch.setattr(roster, "probe_home", _fake_probe_home)
     monkeypatch.setattr(roster, "_browser_probe", _fake_browser_probe)
-    monkeypatch.setattr("shared.daemon.health._probe_daemon", _fake_probe_daemon)
+    monkeypatch.setattr("base.daemon.health._probe_daemon", _fake_probe_daemon)
     monkeypatch.setattr(roster, "daemon_identity", _fake_daemon_identity)
     monkeypatch.setattr(owned_service, "listener_pids", _fake_listener_pids)
     monkeypatch.setattr(owned_service, "owned_process", _fake_owned_process)
@@ -408,8 +408,8 @@ def test_browser_identity_is_the_profile_probe_not_a_curl() -> None:
     dialled), but the verdict comes from the profile-anchored probe — CDP itself
     carries no field we control, so a 200 there says nothing about whose Chrome
     answered."""
+    from base.daemon.health import DaemonProbe
     from services.browser.probe import probe_browser
-    from shared.daemon.health import DaemonProbe
 
     browser = next(s for s in roster.build_services() if s.session == "browser")
     probe = browser.identity_probe
@@ -431,11 +431,11 @@ def test_daemon_identity_binds_the_probe_to_one_daemons_facts(
 
     def _capture(name: str, url: str, *, pidfile: Path, **_kw: object) -> object:
         seen.update(name=name, url=url, pidfile=pidfile)
-        from shared.daemon.health import DaemonProbe
+        from base.daemon.health import DaemonProbe
 
         return DaemonProbe.up("stub")
 
-    monkeypatch.setattr("shared.daemon.health._probe_daemon", _capture)
+    monkeypatch.setattr("base.daemon.health._probe_daemon", _capture)
     pidfile = tmp_path / "ops.pid"
     assert roster.daemon_identity("ops", pidfile)().alive is True
     assert seen["name"] == "ops"
@@ -447,7 +447,7 @@ def test_im_bridge_gated_when_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
     """AVA_IM_BRIDGE_ENABLED=false gates im-bridge out of the roster — the
     no-adapter daemon otherwise exits immediately and the watchdog fails its
     healthcheck every round (2026-08-10 preview noise)."""
-    from shared.config import settings
+    from base.config import settings
 
     monkeypatch.setattr(settings.services, "im_bridge_enabled", False)
     annotated = {
@@ -462,7 +462,7 @@ def test_milvus_gated_out_unless_milvus_backend(monkeypatch: pytest.MonkeyPatch)
     """The milvus-lite server gates on the memory-search backend: numpy
     (default) and pgvector never dial it, so the ~1GB daemon must not be in
     the start roster (2026-09-02 numpy-default ruling, task #2347)."""
-    from shared.config import settings
+    from base.config import settings
 
     monkeypatch.setattr(settings.services, "memory_search_backend", "numpy")
     reason = spec.gate_reason_for_session("milvus")

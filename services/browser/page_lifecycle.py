@@ -53,10 +53,10 @@ from urllib.parse import urlsplit
 
 from mcp import types
 
+from base import telemetry
+from base.config import settings
+from base.log import logger
 from services.browser.protocol import Request, Response
-from shared import telemetry
-from shared.config import settings
-from shared.log import logger
 
 # The upstream connection generation. chrome-devtools-mcp mints page ids from
 # a process-local counter — they restart at 1 in every new upstream process —

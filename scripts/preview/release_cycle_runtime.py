@@ -17,6 +17,8 @@ from typing import Any
 
 from dotenv import dotenv_values
 
+from base.deploy.release.runtime_release import VerifiedRelease, current_pointer
+from base.deploy.release.verified_file import regular_bytes
 from cli.release_fleet.request import FleetRequest
 from cli.release_transition.journal import Operation, read_operation
 from cli.release_transition.launcher_linux import LinuxJob, readback, retire_current
@@ -24,8 +26,6 @@ from cli.release_transition.request import ReleaseRef, sql_inventory
 from scripts.preview import local
 from scripts.preview.linux_observer import _require_context
 from scripts.preview.linux_runtime import bound_runtime
-from shared.deploy.release.runtime_release import VerifiedRelease, current_pointer
-from shared.deploy.release.verified_file import regular_bytes
 
 # The captured watch window of each cycle release: long enough for the
 # coordinator's own samples, short against the 900 s executor wait.
@@ -92,7 +92,7 @@ def prepare(
 ) -> None:
     """Capture both images; each release request is built later, at its dispatch,
     by the public `ava cluster release request` in the then-admitted image."""
-    from shared.host.system.boot_unit import systemd_running, unit_name
+    from base.host.system.boot_unit import systemd_running, unit_name
 
     if not systemd_running():
         raise RuntimeError("image cycle requires the native Linux system manager")

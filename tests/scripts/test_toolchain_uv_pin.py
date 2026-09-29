@@ -1,6 +1,6 @@
 """The uv version every install path uses comes from one canonical source.
 
-``shared.host.brew_pin`` (UV_VERSION / UV_ASSET_SHA256) is canonical. toolchain.sh
+``base.host.brew_pin`` (UV_VERSION / UV_ASSET_SHA256) is canonical. toolchain.sh
 embeds the same values because it runs before Python exists on a fresh box, the
 CI workflows pin setup-uv with the same version, and the Windows setup guide
 (conventions/windows-setup.md, a WSL2 install) routes uv through toolchain.sh;
@@ -13,7 +13,7 @@ import re
 import subprocess
 from pathlib import Path
 
-from shared.host import brew_pin
+from base.host import brew_pin
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _TOOLCHAIN = _REPO_ROOT / "scripts" / "provision" / "toolchain.sh"

@@ -17,10 +17,10 @@ from pathlib import Path
 
 import pytest
 
+from base.config import settings
+from base.daemon import health
+from base.native_process.os_platform import LockTimeoutError
 from services.backup_scheduler import daemon
-from shared.config import settings
-from shared.daemon import health
-from shared.native_process.os_platform import LockTimeoutError
 
 
 def _at(hour: int = 3, minute: int = 0) -> datetime:

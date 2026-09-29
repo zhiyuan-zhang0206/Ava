@@ -14,9 +14,9 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
+from base.agents import AgentStatus
+from base.cluster.machine import machine_name
 from gateway.app import app
-from shared.agents import AgentStatus
-from shared.cluster.machine import machine_name
 
 
 def _seed_agent(db_conn: psycopg.Connection, status: str = "idling") -> int:

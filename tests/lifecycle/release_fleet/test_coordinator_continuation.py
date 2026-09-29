@@ -244,9 +244,9 @@ def test_an_alert_undelivered_at_completion_is_logged_and_kept_for_status(
     """Completion does not wait for a delivery that keeps failing, but it
     never drops one silently: the error is logged, and the journal keeps the
     alert with the routes it has not reached, which `release status` shows."""
+    from base import paths as base_paths
+    from base.cluster import machine as base_machine
     from cli.release_operator import status as status_module
-    from shared import paths as shared_paths
-    from shared.cluster import machine as shared_machine
 
     create(request_record)
     effects = Effects(request_record, fail="starting")
@@ -257,8 +257,8 @@ def test_an_alert_undelivered_at_completion_is_logged_and_kept_for_status(
     errors = [r["message"] for r in loguru_records if r["level"].name == "ERROR"]
     assert any("recovering" in message and "undelivered" in message for message in errors)
 
-    monkeypatch.setattr(shared_paths, "ava_home", lambda: Path(request_record.home))
-    monkeypatch.setattr(shared_machine, "machine_name", lambda: request_record.machine)
+    monkeypatch.setattr(base_paths, "ava_home", lambda: Path(request_record.home))
+    monkeypatch.setattr(base_machine, "machine_name", lambda: request_record.machine)
 
     def nothing_selected(_home: Path) -> None:
         return None

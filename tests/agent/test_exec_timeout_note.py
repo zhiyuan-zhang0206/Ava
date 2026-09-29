@@ -13,9 +13,9 @@ from __future__ import annotations
 import pytest
 
 from agent.graph.context_notes import exec_timeout_note
-from shared.agents.messages.kwargs import NoteTag
-from shared.config import settings
-from shared.native_process.turn_identity import bind_turn_identity
+from base.agents.messages.kwargs import NoteTag
+from base.config import settings
+from base.native_process.turn_identity import bind_turn_identity
 
 
 @pytest.fixture(autouse=True)

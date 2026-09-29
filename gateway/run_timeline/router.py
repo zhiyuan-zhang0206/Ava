@@ -20,6 +20,8 @@ from typing import Annotated, Literal, cast
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
 
+from base.config import settings
+from base.log import logger
 from gateway.agents.eval_guard import deny_isolated_result_read
 from gateway.lgtm.backend_failure import raise_backend_unavailable
 from gateway.run_timeline import _events
@@ -39,8 +41,6 @@ from gateway.run_timeline.schemas import (
 )
 from gateway.run_timeline.strip import router as strip_router
 from gateway.run_timeline.strip import strip_for_window_or_none
-from shared.config import settings
-from shared.log import logger
 
 router = APIRouter()
 # The strip surface (P4-2) rides this router: app.py is at its line budget,
@@ -691,8 +691,8 @@ def _narrative_for_window(
     to the window) that the sealed coverage does not explain -- the
     placeholders the layer track draws.
     """
-    from shared.agents.history.hierarchy.serve import pending_spans, select_layers
-    from shared.agents.history.hierarchy.store import load_coverage_extent, load_window_nodes
+    from base.agents.history.hierarchy.serve import pending_spans, select_layers
+    from base.agents.history.hierarchy.store import load_coverage_extent, load_window_nodes
 
     try:
         nodes = load_window_nodes(agent_id, window_start, window_end)
@@ -758,7 +758,7 @@ def _inbounds_for_window(
     of delivery. One windowed index read; a read failure degrades to None
     rather than failing the endpoint (the narrative-read posture).
     """
-    from shared.db import list_chat_inbound_facts
+    from base.db import list_chat_inbound_facts
 
     try:
         facts = list_chat_inbound_facts(agent_id, window_start, window_end)
@@ -777,8 +777,8 @@ def _latest_compact_summary(agent_id: int) -> str | None:
     One latest-snapshot checkpoint read (the same read the context panel does);
     a read failure or an agent without a compaction degrades to None.
     """
-    from shared.agents.history.checkpoint import load_checkpoint_messages
-    from shared.agents.messages.kwargs import AvaMsgType, message_content, read_ava_kwargs
+    from base.agents.history.checkpoint import load_checkpoint_messages
+    from base.agents.messages.kwargs import AvaMsgType, message_content, read_ava_kwargs
 
     try:
         messages = load_checkpoint_messages(agent_id)

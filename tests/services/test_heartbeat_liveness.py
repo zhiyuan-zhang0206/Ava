@@ -19,12 +19,12 @@ import pytest
 from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 
+from base.config import settings
 from services.heartbeat.liveness import (
     _OFFLINE_AFTER_FAILURES,
     _merge_liveness,
     run_liveness_pass,
 )
-from shared.config import settings
 from tests.conftest import spawn_agent
 
 _MACHINE = "test-runner-1"
@@ -200,7 +200,7 @@ class TestLivenessPass:
         3.0s budget flipped a slow-but-healthy WSL runner offline). A probe
         that outgrows the budget must be a failure (counted toward offline),
         never a success."""
-        from shared.config import settings
+        from base.config import settings
 
         monkeypatch.setattr(settings.gateway, "status_probe_timeout_seconds", 12.0)
         _register_machine(db_conn)
@@ -404,7 +404,7 @@ class TestMachineAlertEdges:
     """Machine offline/online edges write alerts rows + IM (Task #1224).
 
     The liveness pass runs the shared alerts core directly (source=
-    'machine-probe'); the IM fan-out is mocked at shared.telemetry.alerts.notify_im.
+    'machine-probe'); the IM fan-out is mocked at base.telemetry.alerts.notify_im.
     """
 
     async def _run(self, pool: ConnectionPool, probe: FakeProbe) -> None:
@@ -419,7 +419,7 @@ class TestMachineAlertEdges:
             return cur.fetchall()
 
     def _mock_notify(self, monkeypatch: pytest.MonkeyPatch, func: Callable[[str], bool]) -> None:
-        monkeypatch.setattr("shared.telemetry.alerts.notify_im", func)
+        monkeypatch.setattr("base.telemetry.alerts.notify_im", func)
 
     def test_recent_failure_tracks_episode_without_alerting(
         self, db_conn: psycopg.Connection, pool: ConnectionPool, monkeypatch: pytest.MonkeyPatch
@@ -519,7 +519,7 @@ class TestMachineAlertEdges:
         _register_machine(db_conn)
         _set_machine_probe(db_conn, _MACHINE, online=False, failures=2)
         _age_transition(db_conn, _MACHINE, seconds=601)
-        monkeypatch.setattr("shared.deploy.state.cluster_lock.read_update_lease", object)
+        monkeypatch.setattr("base.deploy.state.cluster_lock.read_update_lease", object)
         notified: list[str] = []
         self._mock_notify(monkeypatch, lambda text: notified.append(text) or True)
 
@@ -528,7 +528,7 @@ class TestMachineAlertEdges:
         asyncio.run(self._run(pool, FakeProbe({_MACHINE: False})))
         assert self._alerts(db_conn) == []
 
-        monkeypatch.setattr("shared.deploy.state.cluster_lock.read_update_lease", lambda: None)
+        monkeypatch.setattr("base.deploy.state.cluster_lock.read_update_lease", lambda: None)
         asyncio.run(self._run(pool, FakeProbe({_MACHINE: False})))
         assert self._alerts(db_conn)[0][1] == "error"
         assert len(notified) == 1
@@ -539,9 +539,9 @@ class TestMachineAlertEdges:
         _register_machine(db_conn)
         _set_machine_probe(db_conn, _MACHINE, online=False, failures=2)
         _age_transition(db_conn, _MACHINE, seconds=601)
-        monkeypatch.setattr("shared.deploy.state.cluster_lock.read_update_lease", lambda: None)
+        monkeypatch.setattr("base.deploy.state.cluster_lock.read_update_lease", lambda: None)
         monkeypatch.setattr(
-            "shared.deploy.state.host_deploy_state.read_all",
+            "base.deploy.state.host_deploy_state.read_all",
             lambda: {_MACHINE: SimpleNamespace(updater_live=True)},
         )
 
@@ -557,7 +557,7 @@ class TestMachineAlertEdges:
         _set_machine_probe(db_conn, _MACHINE, online=False, failures=2)
         _age_transition(db_conn, _MACHINE, seconds=601)
         monkeypatch.setattr(
-            "shared.deploy.state.cluster_lock.read_update_lease",
+            "base.deploy.state.cluster_lock.read_update_lease",
             lambda: (_ for _ in ()).throw(RuntimeError("unreadable")),
         )
 
@@ -569,7 +569,7 @@ class TestMachineAlertEdges:
     def test_recovery_resolves_preconvention_and_stable_fingerprint_rows(
         self, db_conn: psycopg.Connection, pool: ConnectionPool, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from shared.telemetry.alerts import fingerprint
+        from base.telemetry.alerts import fingerprint
 
         _register_machine(db_conn)
         _set_machine_probe(db_conn, _MACHINE, online=False, failures=3)

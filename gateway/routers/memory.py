@@ -28,6 +28,10 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Response
 
+from base.agents import IndexerUnavailable
+from base.config import settings
+from base.packages.docs.notes import Note, extract_md_links, parse_note, walk_notes
+from base.paths import gateway_memory_dir
 from gateway.agents.eval_guard import deny_isolated_result_read
 from gateway.schemas.memory import (
     MemoryGraphEdge,
@@ -39,10 +43,6 @@ from gateway.schemas.memory import (
     MemorySearchResponse,
     MemorySearchResultItem,
 )
-from shared.agents import IndexerUnavailable
-from shared.config import settings
-from shared.packages.docs.notes import Note, extract_md_links, parse_note, walk_notes
-from shared.paths import gateway_memory_dir
 
 router = APIRouter()
 
@@ -50,7 +50,7 @@ router = APIRouter()
 # the backend's async client); the semaphore caps in-flight Gemini query
 # embeds so a burst of searches cannot pile up unbounded on the shared key.
 # Sized by `memory_search_max_concurrency` (env
-# AVA_MEMORY_SEARCH_MAX_CONCURRENCY, default 20 — see shared/config/services.py):
+# AVA_MEMORY_SEARCH_MAX_CONCURRENCY, default 20 — see base/config/services.py):
 # the historical hardcoded 2 predated the async-embed fix (2026-08-03, when a
 # sync embed on the event loop froze the whole gateway for up to ~4.5 minutes
 # and cost 13 restarts in 8h) and starved passive recall behind a queue
@@ -405,7 +405,7 @@ async def post_memory_refresh() -> MemoryRefreshResponse:
     04:06-04:35 watchdog kill loop). `asyncio.to_thread` — the same hop the
     memory indexer uses for its own pull.
     """
-    from shared.deploy.git import memory_repo
+    from base.deploy.git import memory_repo
 
     head = await asyncio.to_thread(memory_repo.pull_main)
     return MemoryRefreshResponse(head=head)
@@ -544,7 +544,7 @@ def _build_pool_bundle(root: Path) -> tuple[str, bytes]:
     transport/OS layer."""
     import tempfile
 
-    from shared.host.proc import run_bounded
+    from base.host.proc import run_bounded
 
     with tempfile.TemporaryDirectory(prefix="memory-pool-bundle-") as tmp:
         bundle_path = Path(tmp) / "pool.bundle"

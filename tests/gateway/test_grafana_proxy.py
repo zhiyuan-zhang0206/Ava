@@ -29,9 +29,9 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
+from base import config
 from gateway.app import app
 from gateway.routers import grafana as grafana_router
-from shared import config
 
 _SECRET = "test-cluster-secret"  # noqa: S105 — test fixture
 

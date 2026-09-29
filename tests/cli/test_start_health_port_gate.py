@@ -31,11 +31,11 @@ import pytest
 import cli.commands._probe as _probe_commands
 import cli.commands.lifecycle.root_driver as _root_driver_commands
 import cli.commands.lifecycle.start as _start_commands
+from base.daemon.health import DaemonProbe
 from cli.commands._probe import ReadinessWait
 from cli.commands.lifecycle import start as start_mod
 from cli.commands.lifecycle.root_driver import LaunchOutcome
 from ops.roster.service_spec import _AGENT_RUNNER, _GATEWAY, ServiceSpec
-from shared.daemon.health import DaemonProbe
 from tests.cli.test_start_readiness_gate import (
     _hermetic_start as _base_start,  # noqa: F401 — shared fixture  # pyright: ignore[reportUnusedImport] — pytest fixture import
 )

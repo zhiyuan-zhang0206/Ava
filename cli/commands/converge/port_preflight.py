@@ -24,25 +24,25 @@ import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
-from cli.commands.converge.spec import ConvergeCtx
-from shared import cluster
-from shared.cluster.port_preflight import (
+from base import cluster
+from base.cluster.port_preflight import (
     env_port_drift,
     occupied_ports,
     unit_port_map,
 )
 
-# The listener-scan / ownership predicates live in shared/cluster/port_preflight.py
+# The listener-scan / ownership predicates live in base/cluster/port_preflight.py
 # (the #1603/#1606 lineage) so `ava stop`'s orphan sweep and the rollout's
 # readiness gate apply the SAME rule (Task #965); this module keeps its legacy
 # private aliases so nothing here re-implements them.
-from shared.cluster.port_preflight import (
+from base.cluster.port_preflight import (
     listener_is_ours as _listener_is_ours,
 )
-from shared.cluster.port_preflight import (
+from base.cluster.port_preflight import (
     listeners_on as _listeners_on,
 )
-from shared.host.proc import process_cmdline
+from base.host.proc import process_cmdline
+from cli.commands.converge.spec import ConvergeCtx
 
 
 def _occupant_detail(port: int) -> str:

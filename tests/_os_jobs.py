@@ -22,10 +22,10 @@ import os
 import subprocess
 from pathlib import Path
 
-from shared.native_process.os_platform import IS_WINDOWS
+from base.native_process.os_platform import IS_WINDOWS
 
 # The crontab comment markers the registrars stamp their lines with
-# (`shared.host.system.cron` / `autostart` / `os_watchdog_probe` / `os_hold_watchdog` / `logs_job`). A line carrying one
+# (`base.host.system.cron` / `autostart` / `os_watchdog_probe` / `os_hold_watchdog` / `logs_job`). A line carrying one
 # is an Ava job; anything else in the user's crontab is theirs and is ignored.
 _CRON_MARKERS = (
     "# ava-health-probe",
@@ -123,7 +123,7 @@ def remove_os_job(job: str) -> None:
     The guard removes what leaked rather than only reporting it: nine plists
     accumulated on one box precisely because every individual run only ever
     reported (to nobody). Deliberately not routed through
-    `shared.os_*.unregister_*` — those address a job by the cluster that owns it,
+    `base.os_*.unregister_*` — those address a job by the cluster that owns it,
     and a leaked job's cluster is by definition gone.
     """
     kind, _, value = job.partition(":")

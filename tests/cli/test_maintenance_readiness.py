@@ -5,10 +5,10 @@ from fastapi.testclient import TestClient
 
 import cli.commands._probe as _probe_commands
 import cli.commands.lifecycle.start as _start_commands
+from base.deploy.lifecycle import start_serving
+from base.deploy.maintenance import admission
+from base.deploy.state import host_deploy_state
 from gateway.app import app
-from shared.deploy.lifecycle import start_serving
-from shared.deploy.maintenance import admission
-from shared.deploy.state import host_deploy_state
 from tests.agent.test_maintenance import isolate as isolate
 from tests.cli.test_start_readiness_gate import _hermetic_start as _hermetic_start
 from tests.cli.test_start_readiness_gate import _roster

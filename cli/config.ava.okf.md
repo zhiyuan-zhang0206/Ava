@@ -18,9 +18,9 @@ gateway response names the restart targets.
 
 `--local` operates directly on this unit's `$AVA_HOME/.env` and never dials the
 gateway. It reads aliases, sensitivity, scope, editability, type, choices, and
-restart metadata from `shared.host.env.config_registry`; sensitive values are masked.
+restart metadata from `base.host.env.config_registry`; sensitive values are masked.
 Before writing, it validates the full affected candidate through
-`shared.config.candidate`, so a cross-field-invalid patch cannot replace the
+`base.config.candidate`, so a cross-field-invalid patch cannot replace the
 only local config file. Host fields are locally writable; a pure runner cannot
 write cluster fields locally because its cluster configuration is fetched from
 the gateway.
@@ -34,4 +34,4 @@ generation-independent MCP client tokens authenticate) change only by editing
 the gateway `.env` on its host. Otherwise any authenticated caller, a machine token included, could pick
 a credential that outlives its own admission. Writable secrets are outbound
 credentials (provider, search, chat and backup-store keys) only;
-`tests/shared/test_config_editing.py` pins that classification.
+`tests/base/test_config_editing.py` pins that classification.

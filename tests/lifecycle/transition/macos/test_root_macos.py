@@ -17,15 +17,15 @@ from typing import Any
 
 import pytest
 
+from base import paths
+from base.deploy.release.runtime_release import VerifiedRelease
+from base.native_process import ownership
+from base.native_process.ownership import OwnedProcess
+from base.native_process.root_control import client as root_client
 from cli.release_fleet.request import FleetRequest
 from cli.release_transition import journal, root_macos, root_service
 from cli.release_transition.launchd_custody import Birth, RootCustody
 from services.permissions_helper import client, finite_artifact
-from shared import paths
-from shared.deploy.release.runtime_release import VerifiedRelease
-from shared.native_process import ownership
-from shared.native_process.ownership import OwnedProcess
-from shared.native_process.root_control import client as root_client
 from tests.lifecycle.transition.macos.launchd_fake import HELPER, Harness
 from tests.lifecycle.transition.macos.launchd_fake import harness as harness
 from tests.lifecycle.transition.phases import advance_to
@@ -483,7 +483,7 @@ def test_start_action_runs_the_selected_image_stage_as_a_bounded_finite_tool(
 ) -> None:
     import pwd
 
-    from shared.host import proc
+    from base.host import proc
 
     calls: list[dict[str, Any]] = []
 

@@ -17,7 +17,7 @@ import ast
 SECTION = "path_imports"
 _SCOPE = ("ava_builtins/",)
 FIX = (
-    "move the shared code into a governed package (ava/, shared/, or the plugin's own "
+    "move the shared code into a governed package (ava/, base/, or the plugin's own "
     "package) and import it normally; keep the script a thin entry point"
 )
 _PATH_MUTATORS = frozenset({"insert", "append", "extend", "remove", "pop", "clear"})

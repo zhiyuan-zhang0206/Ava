@@ -18,19 +18,17 @@ from unittest.mock import patch
 
 import psycopg
 
-from cli.commands.lifecycle.start import cmd_start
-from cli.start_runtime import StartRuntime
-from shared.cluster.machine import machine_name
-from shared.config import settings
-from shared.deploy.lifecycle import home_lifecycle_locks
-from shared.deploy.release.identity import ApplicationIdentity
-from shared.deploy.release.runtime_release import (
+from base.cluster.machine import machine_name
+from base.config import settings
+from base.deploy.lifecycle import home_lifecycle_locks
+from base.deploy.release.identity import ApplicationIdentity
+from base.deploy.release.runtime_release import (
     ReleaseRejectedError,
     current_pointer,
     verify_release,
 )
-from shared.deploy.release.verified_file import regular_bytes
-from shared.deploy.schema.migrations import (
+from base.deploy.release.verified_file import regular_bytes
+from base.deploy.schema.migrations import (
     MIGRATIONS_DIR,
     MigrationAuthorityMismatch,
     applied_migration_names,
@@ -38,11 +36,13 @@ from shared.deploy.schema.migrations import (
     check_schema_version,
     required_migration_set,
 )
-from shared.deploy.schema.runtime_migration import (
+from base.deploy.schema.runtime_migration import (
     ReleaseMigrationContext,
     installed_migration_paths,
 )
-from shared.runtime_abi import current_abi
+from base.runtime_abi import current_abi
+from cli.commands.lifecycle.start import cmd_start
+from cli.start_runtime import StartRuntime
 
 
 def require(condition: bool, message: str) -> None:  # noqa: FBT001 — proof predicate.

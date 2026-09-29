@@ -206,7 +206,7 @@ def test_host_wiring_leaves_existing_editable_install_unchanged(
     scripts.mkdir()
     files = {pointer: pointer.read_bytes()}
     modes = {path: stat.S_IMODE(path.stat().st_mode) for path in (site, scripts, pointer)}
-    monkeypatch.setattr("shared.deploy.git.cluster_drift.prod_source_dir", lambda: source)
+    monkeypatch.setattr("base.deploy.git.cluster_drift.prod_source_dir", lambda: source)
 
     def default_home(_home: Path) -> bool:
         return True
@@ -253,13 +253,13 @@ def test_converge_host_skips_host_global_in_worktree_even_if_cluster_default(
 
 def _capable_helper_ctx(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     """A host the capability probe clears, with an empty .env."""
-    from shared.config import settings
+    from base.config import settings
 
     ava_home = tmp_path / "avahome"
     ava_home.mkdir()
     (ava_home / ".env").write_text("")
     monkeypatch.setattr(converge_host.sys, "platform", "darwin")
-    monkeypatch.setattr("shared.host.system.probes.permissions_helper_incapability", lambda: None)
+    monkeypatch.setattr("base.host.system.probes.permissions_helper_incapability", lambda: None)
     monkeypatch.setattr(settings.services, "permissions_helper_enabled", True)
     return _ctx(tmp_path, ava_home)
 
@@ -321,8 +321,8 @@ def test_cmd_converge_unconfigured_returns_zero(
     home, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
     import cli.commands._repo as _repo_commands
-    from shared.cluster.dataplane import runtime_binaries as rb
-    from shared.config import settings
+    from base.cluster.dataplane import runtime_binaries as rb
+    from base.config import settings
 
     repo = tmp_path / "repo"
     (repo / ".venv" / "bin").mkdir(parents=True)
@@ -439,7 +439,7 @@ def _pgbouncer_ctx(
     """Wire ensure_pgbouncer_step's deps: a default-home record (no pgbouncer key
     → derived pooler 6433 / pg 5433), settings reflecting the toggle, and an
     optional existing .env carrying the pre-cutover AVA_DB_URL."""
-    from shared import cluster
+    from base import cluster
 
     rec = cluster.ClusterRecord(
         # A deliberately-partial record (no pgbouncer slot) to exercise the derive path.
@@ -548,7 +548,7 @@ def test_ensure_pgbouncer_step_without_env_writes_nothing(
 def _rw_url(pw: str, *, host: str, user: str = "") -> str:
     """Build a credentialed redis URL from parts, so the source carries no
     `scheme://user:password@host` literal for a secret scanner to flag (same
-    convention as tests/shared/test_url_secret.py) — every value is a throwaway
+    convention as tests/base/test_url_secret.py) — every value is a throwaway
     fixture, not a real credential."""
     return f"redis://{user}:{pw}@{host}/0"
 
@@ -564,19 +564,19 @@ def _rw_pg_url(pw: str, *, host: str, user: str = "ava_main") -> str:
 def _screen_capture_env(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, enabled=True, incapability=None
 ):
-    from shared.config import settings
+    from base.config import settings
 
-    monkeypatch.setattr("shared.host.converge.screen_capture.ava_home", lambda: tmp_path)
+    monkeypatch.setattr("base.host.converge.screen_capture.ava_home", lambda: tmp_path)
     monkeypatch.setattr(settings.services, "permissions_helper_enabled", enabled)
     monkeypatch.setattr(
-        "shared.host.system.probes.permissions_helper_incapability", lambda: incapability
+        "base.host.system.probes.permissions_helper_incapability", lambda: incapability
     )
 
 
 def test_screen_capture_step_records_the_helpers_answer(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
 ):
-    from shared.host.converge.screen_capture import (
+    from base.host.converge.screen_capture import (
         ScreenCaptureState,
         ScreenCaptureStatus,
         read_status,
@@ -599,7 +599,7 @@ def test_screen_capture_step_records_the_helpers_answer(
 def test_screen_capture_step_clears_a_stale_file_when_the_grant_is_back(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    from shared.host.converge.screen_capture import (
+    from base.host.converge.screen_capture import (
         ScreenCaptureState,
         ScreenCaptureStatus,
         read_status,
@@ -627,7 +627,7 @@ def test_screen_capture_step_skips_hosts_with_no_helper(
 ):
     """Nothing to ask when no helper can exist here -- and the helper step has
     already said so, making a second derived complaint noise rather than news."""
-    from shared.host.converge.screen_capture import (
+    from base.host.converge.screen_capture import (
         ScreenCaptureState,
         ScreenCaptureStatus,
         read_status,
@@ -653,19 +653,19 @@ def _accessibility_env(
     enabled: bool = True,
     incapability: str | None = None,
 ) -> None:
-    from shared.config import settings
+    from base.config import settings
 
-    monkeypatch.setattr("shared.host.converge.accessibility.ava_home", lambda: tmp_path)
+    monkeypatch.setattr("base.host.converge.accessibility.ava_home", lambda: tmp_path)
     monkeypatch.setattr(settings.services, "permissions_helper_enabled", enabled)
     monkeypatch.setattr(
-        "shared.host.system.probes.permissions_helper_incapability", lambda: incapability
+        "base.host.system.probes.permissions_helper_incapability", lambda: incapability
     )
 
 
 def test_accessibility_step_records_the_helpers_answer(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ):
-    from shared.host.converge.accessibility import (
+    from base.host.converge.accessibility import (
         AccessibilityState,
         AccessibilityStatus,
         read_status,
@@ -688,7 +688,7 @@ def test_accessibility_step_records_the_helpers_answer(
 def test_accessibility_step_clears_a_stale_file_when_the_grant_is_back(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    from shared.host.converge.accessibility import (
+    from base.host.converge.accessibility import (
         AccessibilityState,
         AccessibilityStatus,
         read_status,
@@ -717,7 +717,7 @@ def test_accessibility_step_skips_hosts_with_no_helper(
     enabled: bool,
     incapability: str | None,
 ):
-    from shared.host.converge.accessibility import (
+    from base.host.converge.accessibility import (
         AccessibilityState,
         AccessibilityStatus,
         read_status,
@@ -757,7 +757,7 @@ class TestWarnUntrackedMigrations:
         self, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
         monkeypatch.setattr(
-            "shared.deploy.schema.migrations.untracked_migration_files",
+            "base.deploy.schema.migrations.untracked_migration_files",
             lambda: ["20260808T010000_add-foo.sql"],
         )
         converge_host._warn_untracked_migrations(_ctx(tmp_path, tmp_path))
@@ -769,7 +769,7 @@ class TestWarnUntrackedMigrations:
     def test_silent_when_nothing_untracked(
         self, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
-        monkeypatch.setattr("shared.deploy.schema.migrations.untracked_migration_files", list)
+        monkeypatch.setattr("base.deploy.schema.migrations.untracked_migration_files", list)
         converge_host._warn_untracked_migrations(_ctx(tmp_path, tmp_path))
         assert capsys.readouterr().out == ""
 

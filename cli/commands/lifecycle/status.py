@@ -15,6 +15,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from base.cluster.machine import MachineRoles
+from base.deploy.lifecycle import service_selection
 from cli.commands._probe import (
     _detect_prod_source_drift,
     _print_service_row,
@@ -28,8 +30,6 @@ from cli.commands._repo import (
 from cli.commands.converge.redis_bridge import print_redis_bridge_status
 from cli.commands.data_plane.cluster_instance import print_data_plane_status
 from ops.roster.service_spec import ServiceSpec
-from shared.cluster.machine import MachineRoles
-from shared.deploy.lifecycle import service_selection
 
 
 def _root_tree_units() -> dict[str, dict[str, object]]:
@@ -143,9 +143,9 @@ def _release_identity_lines(repo: Path) -> list[str]:
     home without one runs its source checkout. Unreadable records print as
     unreadable — never replaced by a guess or by a historical value.
     """
-    from shared.deploy.git.cluster_drift import checkout_head_sha
-    from shared.deploy.release.runtime_release import current_pointer
-    from shared.paths import ava_home
+    from base.deploy.git.cluster_drift import checkout_head_sha
+    from base.deploy.release.runtime_release import current_pointer
+    from base.paths import ava_home
 
     home = ava_home()
     try:
@@ -169,8 +169,8 @@ def _release_identity_lines(repo: Path) -> list[str]:
 
 def _home_operation_line(home: Path) -> str | None:
     """The active release/PITR operation unless it completed cleanly."""
+    from base.deploy.release.verified_file import regular_bytes
     from cli.release_transition.journal import read_operation
-    from shared.deploy.release.verified_file import regular_bytes
 
     try:
         journal = Path(regular_bytes(home / "updates" / "active").decode().strip())
@@ -201,7 +201,7 @@ def _print_host_resources() -> None:
     and the data-plane view below it.
     """
     try:
-        from shared.host.resource_sample import resource_sample
+        from base.host.resource_sample import resource_sample
 
         s = resource_sample()
     except Exception as e:  # fail-fast-ok: psutil may be absent; the rest of status still prints
@@ -225,14 +225,14 @@ def _print_gateway_cluster_status() -> None:
     """
     import httpx
 
-    from cli.commands.cluster.control import fetch_gateway_cluster_status
-    from ops.cluster_status import ClusterStatus
-    from shared.cluster.machine import (
+    from base.cluster.machine import (
         GatewayApiBaseMissing,
         MachineRoleInvalid,
         MachineRoleMissing,
         format_capabilities,
     )
+    from cli.commands.cluster.control import fetch_gateway_cluster_status
+    from ops.cluster_status import ClusterStatus
 
     print("\ngateway cluster status (GET /api/cluster/status):")
     try:

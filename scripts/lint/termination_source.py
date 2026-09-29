@@ -34,7 +34,7 @@ For every `cur.execute(...)` / `await cur.execute(...)` whose SQL is an
 filter is a read, not a write, and is ignored). If the SET clause assigns `status` a
 value that can be `'terminated'` — either the literal, or a `%s` placeholder whose
 corresponding argument mentions `TERMINATED` — then the SET clause must also assign
-`termination_source`. The stamped value must be a `shared.agents.TerminationSource`
+`termination_source`. The stamped value must be a `base.agents.TerminationSource`
 member, so a typo'd source (which the DB CHECK would only catch at runtime, against
 a real database) fails here too.
 
@@ -106,7 +106,7 @@ _SET_SOURCE_VALUE = re.compile(
 def _termination_source_values() -> frozenset[str]:
     """The legal source values — read from the enum, so adding a member auto-syncs."""
     sys.path.insert(0, str(_REPO_ROOT))
-    from shared.agents import TerminationSource
+    from base.agents import TerminationSource
 
     return frozenset(s.value for s in TerminationSource)
 
@@ -182,7 +182,7 @@ def _check_statement(
                 "on termination_source, so NULL is never picked up and any queued "
                 "inbound work is silently stranded). Add `termination_source = "
                 "'<source>'` to this SET clause; pick the value from "
-                "shared.agents.TerminationSource"
+                "base.agents.TerminationSource"
             )
         value_match = _SET_SOURCE_VALUE.search(set_clause)
         if value_match is None or value_match.group("param") is not None:
@@ -201,7 +201,7 @@ def _check_statement(
         if literal not in legal_sources:
             return (
                 f"UPDATE agents_meta stamps termination_source = '{literal}', which is "
-                f"not a shared.agents.TerminationSource member "
+                f"not a base.agents.TerminationSource member "
                 f"({sorted(legal_sources)}) — the column's CHECK would reject this "
                 f"write at runtime"
             )

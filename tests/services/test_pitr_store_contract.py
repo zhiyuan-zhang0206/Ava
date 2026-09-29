@@ -593,7 +593,7 @@ def test_factory_rejects_unknown_backend_without_falling_back() -> None:
 def test_factory_reads_the_configured_backend(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from shared.config import settings
+    from base.config import settings
 
     monkeypatch.setattr(settings.physical_backup, "pitr_store_backend", "gcs")
     assert isinstance(get_store_group(), PitrStoreGroup)
@@ -618,8 +618,8 @@ def test_factory_reads_the_configured_backend(
 
 
 def test_get_store_group_passes_the_delete_credential(monkeypatch: pytest.MonkeyPatch) -> None:
+    from base.config import settings
     from services.pitr.stores import factory
-    from shared.config import settings
 
     config = settings.physical_backup
     uploader = Path("up.json")

@@ -60,7 +60,7 @@ def test_openapi_component_sources_are_in_types_hook() -> None:
 
 
 def test_event_contract_sources_are_in_events_hook() -> None:
-    sources = SourceGraph(ROOT).imported_sources("shared.events.contract")
+    sources = SourceGraph(ROOT).imported_sources("base.events.contract")
     assert_sources_covered(sources, HOOKS["events-registry-fresh"]["files"])
 
 
@@ -73,7 +73,7 @@ def test_closure_follows_new_and_moved_definitions_without_name_collisions(tmp_p
         "gateway/schemas/__init__.py": "from gateway.schemas.probe import WireModel\n",
         "gateway/schemas/probe.py": "class WireModel: pass\n",
         "services/im_bridge/types.py": "class WireModel: pass\n",
-        "shared/new_model.py": "class NewModel: pass\n",
+        "base/new_model.py": "class NewModel: pass\n",
     }
     for name, content in files.items():
         path = tmp_path / name
@@ -85,33 +85,33 @@ def test_closure_follows_new_and_moved_definitions_without_name_collisions(tmp_p
 
     # A new annotation must be followed even before openapi.json is regenerated.
     (tmp_path / "gateway/schemas/probe.py").write_text(
-        "from shared.new_model import NewModel\nclass WireModel:\n    child: NewModel\n"
+        "from base.new_model import NewModel\nclass WireModel:\n    child: NewModel\n"
     )
     sources = SourceGraph(tmp_path).schema_sources({"WireModel"}, set())
-    with TestCase().assertRaisesRegex(AssertionError, "shared/new_model.py"):
+    with TestCase().assertRaisesRegex(AssertionError, "base/new_model.py"):
         assert_sources_covered(sources, r"^gateway/")
 
-    (tmp_path / "shared/moved_model.py").write_text("class WireModel: pass\n")
-    (tmp_path / "gateway/schemas/probe.py").write_text("from shared.moved_model import WireModel\n")
+    (tmp_path / "base/moved_model.py").write_text("class WireModel: pass\n")
+    (tmp_path / "gateway/schemas/probe.py").write_text("from base.moved_model import WireModel\n")
     sources = SourceGraph(tmp_path).schema_sources({"WireModel"}, set())
-    with TestCase().assertRaisesRegex(AssertionError, "shared/moved_model.py"):
+    with TestCase().assertRaisesRegex(AssertionError, "base/moved_model.py"):
         assert_sources_covered(sources, r"^gateway/")
 
 
 def test_events_closure_follows_payload_moves_outside_package(tmp_path: Path) -> None:
     sources = {
-        "shared/events/contract.py": "from .payloads import Spawn\n",
-        "shared/events/payloads.py": "from shared.moved_payload import Spawn\n",
-        "shared/moved_payload.py": "class Spawn: pass\n",
+        "base/events/contract.py": "from .payloads import Spawn\n",
+        "base/events/payloads.py": "from base.moved_payload import Spawn\n",
+        "base/moved_payload.py": "class Spawn: pass\n",
     }
     for name, content in sources.items():
         path = tmp_path / name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content)
-    paths = SourceGraph(tmp_path).imported_sources("shared.events.contract")
+    paths = SourceGraph(tmp_path).imported_sources("base.events.contract")
     assert paths == sources.keys()
-    with TestCase().assertRaisesRegex(AssertionError, "shared/moved_payload.py"):
-        assert_sources_covered(paths, r"^shared/events/")
+    with TestCase().assertRaisesRegex(AssertionError, "base/moved_payload.py"):
+        assert_sources_covered(paths, r"^base/events/")
 
 
 def test_closure_resolves_module_alias_reexports_before_regeneration(tmp_path: Path) -> None:
@@ -121,18 +121,17 @@ def test_closure_resolves_module_alias_reexports_before_regeneration(tmp_path: P
             "@router.get('/probe')\ndef route() -> WireModel: ...\n"
         ),
         "gateway/schemas/probe.py": (
-            "from shared import public_models\nclass WireModel:\n"
-            "    child: public_models.NewModel\n"
+            "from base import public_models\nclass WireModel:\n    child: public_models.NewModel\n"
         ),
-        "shared/__init__.py": "from . import private_models as public_models\n",
-        "shared/private_models.py": "class NewModel: pass\n",
+        "base/__init__.py": "from . import private_models as public_models\n",
+        "base/private_models.py": "class NewModel: pass\n",
     }
     for name, content in sources.items():
         path = tmp_path / name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content)
     paths = SourceGraph(tmp_path).schema_sources({"WireModel"}, set())
-    with TestCase().assertRaisesRegex(AssertionError, "shared/private_models.py"):
+    with TestCase().assertRaisesRegex(AssertionError, "base/private_models.py"):
         assert_sources_covered(paths, r"^gateway/")
 
 
@@ -143,9 +142,9 @@ def test_closure_rejects_reachable_conditional_imports(tmp_path: Path) -> None:
             "@router.get('/probe')\ndef route() -> WireModel: ...\n"
         ),
         "gateway/schemas/probe.py": (
-            "if flag:\n    from shared.new_model import NewModel\nclass WireModel: pass\n"
+            "if flag:\n    from base.new_model import NewModel\nclass WireModel: pass\n"
         ),
-        "shared/new_model.py": "class NewModel: pass\n",
+        "base/new_model.py": "class NewModel: pass\n",
     }
     for name, content in sources.items():
         path = tmp_path / name
@@ -252,7 +251,7 @@ def test_selector_ids_and_regexes_follow_hook_config() -> None:
     assert set(ast.literal_eval(assignments["codegen_ids"])) == CODEGEN
     assert ".pre-commit-config.yaml" in SCRIPT
     assert 'hooks[hook_id]["files"]' in SCRIPT
-    for path in ("shared/events/", "ui/web/openapi.json", "shared/config/"):
+    for path in ("base/events/", "ui/web/openapi.json", "base/config/"):
         assert path in SCRIPT
 
 
@@ -285,41 +284,41 @@ def test_every_codegen_input_family_selects_freshness() -> None:
         "gateway/app.py",
         "gateway/routers/tasks.py",
         "gateway/agents/router.py",
-        "shared/agents/contract.py",
-        "shared/api_contracts/contracts.py",
-        "shared/agents/tasks/priority.py",
-        "shared/agents/tasks/status.py",
-        "shared/agents/history/timeline.py",
-        "shared/agents/observation/roster.py",
-        "shared/agents/observation/evidence.py",
-        "shared/agents/history/timeline_item.py",
+        "base/agents/contract.py",
+        "base/api_contracts/contracts.py",
+        "base/agents/tasks/priority.py",
+        "base/agents/tasks/status.py",
+        "base/agents/history/timeline.py",
+        "base/agents/observation/roster.py",
+        "base/agents/observation/evidence.py",
+        "base/agents/history/timeline_item.py",
         "ops/rpc_schemas/messages.py",
         "ops/rpc_schemas/completion.py",
         "ops/rpc_schemas/billing_recovery.py",
         "ops/cluster_status/__init__.py",
-        "shared/agents/impersonation/history.py",
-        "shared/agents/sdk/telemetry.py",
-        "shared/agents/observation/snapshot.py",
-        "shared/host/resource_sample.py",
+        "base/agents/impersonation/history.py",
+        "base/agents/sdk/telemetry.py",
+        "base/agents/observation/snapshot.py",
+        "base/host/resource_sample.py",
         "ops/rpc_schemas/__init__.py",
         "ops/rpc_schemas/terminate.py",
         "ui/web/src/lib/types-generated.ts",
         "ui/web/openapi.json",
-        "shared/events/live/projection.py",
+        "base/events/live/projection.py",
         "scripts/codegen/dump_frontend_constants.py",
         "ui/web/src/lib/constants-generated.ts",
-        "shared/events/contract.py",
-        "shared/events/registry.py",
-        "shared/events/registry_ops.py",
-        "shared/events/payloads.py",
-        "shared/events/registry_lifecycle.py",
-        "shared/events/system.py",
+        "base/events/contract.py",
+        "base/events/registry.py",
+        "base/events/registry_ops.py",
+        "base/events/payloads.py",
+        "base/events/registry_lifecycle.py",
+        "base/events/system.py",
         "scripts/codegen/gen_event_registry.py",
-        "shared/events/registry.md",
-        "shared/host/env/config_registry.py",
-        "shared/config/agent.py",
+        "base/events/registry.md",
+        "base/host/env/config_registry.py",
+        "base/config/agent.py",
         "scripts/codegen/gen_config_lite_table.py",
-        "shared/host/env/config_lite_table.json",
+        "base/host/env/config_lite_table.json",
     )
     for path in paths:
         assert (ROOT / path).is_file(), f"Freshness matrix path no longer exists: {path}"
@@ -381,7 +380,7 @@ def test_selector_config_and_runtime_failures_run_freshness() -> None:
     ):
         output, log, _ = select(
             "pull_request",
-            ("shared/agents/observation/roster.py",),
+            ("base/agents/observation/roster.py",),
             selector_patch=patch(target, side_effect=error),
         )
         assert output == "run=true\n"
@@ -391,7 +390,7 @@ def test_selector_config_and_runtime_failures_run_freshness() -> None:
 
 def test_missing_hook_defaults_to_run() -> None:
     with patch("yaml.safe_load", return_value={"repos": []}):
-        output, log, _ = select("pull_request", ("shared/agents/observation/roster.py",))
+        output, log, _ = select("pull_request", ("base/agents/observation/roster.py",))
     assert output == "run=true\n"
     assert "::warning::Codegen selector failed (KeyError)" in log
 
@@ -429,7 +428,7 @@ def test_selector_import_failure_defaults_to_run() -> None:
         return original(name, *args, **kwargs)
 
     with patch("builtins.__import__", side_effect=importing):
-        output, log, _ = select("pull_request", ("shared/agents/observation/roster.py",))
+        output, log, _ = select("pull_request", ("base/agents/observation/roster.py",))
     assert output == "run=true\n"
     assert "::warning::Codegen selector failed (ImportError)" in log
 

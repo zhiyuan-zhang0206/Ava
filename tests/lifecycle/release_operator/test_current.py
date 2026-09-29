@@ -7,10 +7,10 @@ from pathlib import Path
 
 import pytest
 
+from base.deploy.release.runtime_release import ReleaseRejectedError, activate_release
+from base.runtime_abi import current_abi
 from cli.release_operator.current import current_release
 from cli.release_transition.request import ReleaseRef
-from shared.deploy.release.runtime_release import ReleaseRejectedError, activate_release
-from shared.runtime_abi import current_abi
 from tests.lifecycle.release_operator.conftest import build_image, canonical
 
 

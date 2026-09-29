@@ -1,4 +1,4 @@
-"""shared/agents/tasks/rules.py — the registry's transition rules, locked against a
+"""base/agents/tasks/rules.py — the registry's transition rules, locked against a
 real database.
 
 Both write surfaces call these (the fleet plugin's create/update and the gateway
@@ -12,7 +12,7 @@ from itertools import count
 
 import psycopg
 
-from shared.agents.tasks import rules
+from base.agents.tasks import rules
 
 _TITLE = count(1)
 

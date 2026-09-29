@@ -28,21 +28,21 @@ import psycopg
 import pytest
 from dotenv import dotenv_values
 
+from base import config
+from base.cluster import authority
+from base.cluster.authority import unit
+from base.cluster.authority.api import API_TOKEN_ENV
+from base.config import settings
+from base.config.service_read import served_db_endpoint
+from base.db.connections import NoDatabaseAuthorityError, _guard_db_url
+from base.deploy.progress_timeout import UNIT_BUNDLE_MAX_TTL_S
+from base.host.env import bootstrap, dotenv_boot
 from cli import start_intent
 from cli.commands.data_plane import bringup
 from cli.commands.data_plane import cluster_instance as ci
 from cli.commands.data_plane import pgbouncer as pooler
 from cli.commands.lifecycle.start_generation import _write_generation
 from scripts import cutover_db_authority as cutover
-from shared import config
-from shared.cluster import authority
-from shared.cluster.authority import unit
-from shared.cluster.authority.api import API_TOKEN_ENV
-from shared.config import settings
-from shared.config.service_read import served_db_endpoint
-from shared.db.connections import NoDatabaseAuthorityError, _guard_db_url
-from shared.deploy.progress_timeout import UNIT_BUNDLE_MAX_TTL_S
-from shared.host.env import bootstrap, dotenv_boot
 from tests.lifecycle._start_identity import prepare_start_identity
 from tests.lifecycle.db_authority import test_single_box as _single_box
 from tests.lifecycle.db_authority.test_single_box import Born, _refused
@@ -362,7 +362,7 @@ def test_a_pure_runners_launcher_delivers_the_installed_capability(
     runner_boot: unit.UnitCapability, runner_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(settings.general, "ava_home", str(runner_home))
-    monkeypatch.setattr("shared.host.env.bootstrap.config_source_is_local", lambda: False)
+    monkeypatch.setattr("base.host.env.bootstrap.config_source_is_local", lambda: False)
     assert bringup.db_delivery("runner") == {
         "AVA_DB_URL": runner_boot.dsn,
         authority.GENERATION_ENV: "0",
@@ -384,7 +384,7 @@ def _serve_on_loopback(monkeypatch: pytest.MonkeyPatch, born: Born) -> None:
     """Serve bootstrap from `born`'s `.env`. The single-box gateway binds
     loopback (empty bearer), so its served endpoint must stay on loopback for
     the co-located runner under test."""
-    from shared.host.env import runtime_config
+    from base.host.env import runtime_config
 
     monkeypatch.setattr(runtime_config, "_ava_home", lambda: born.home)
     monkeypatch.setattr(config, "_self_machine_host", lambda: "localhost")
@@ -469,7 +469,7 @@ def test_issued_bundle_starts_a_runner_that_connects_as_the_generation_login(
     # scoped patch: the gateway fixture's teardown still acts on its own home.)
     with monkeypatch.context() as scoped:
         scoped.setattr(settings.general, "ava_home", str(runner))
-        scoped.setattr("shared.host.env.bootstrap.config_source_is_local", lambda: False)
+        scoped.setattr("base.host.env.bootstrap.config_source_is_local", lambda: False)
         assert bringup.db_delivery("runner") == {
             "AVA_DB_URL": capability.dsn,
             authority.GENERATION_ENV: "0",
@@ -735,10 +735,10 @@ def test_networked_cutover_rotates_the_bearer_once_before_issuing_bundles(
     """Step `api`: the human secret every runner held rotates once, after the
     logical-backup passphrase is pinned; the bundles issued afterwards carry the
     rotated telemetry token and the generation's API admission."""
+    from base.cluster.authority.api import telemetry_token
+    from base.host.env.dotenv_file import upsert_env
     from scripts.data_plane_ops import rotate_cluster_secret as bearer
     from services.gateway_side.backup import passphrase
-    from shared.cluster.authority.api import telemetry_token
-    from shared.host.env.dotenv_file import upsert_env
 
     born = networked
     upsert_env(born.home / ".env", {"AVA_CLUSTER_SECRET": _HUMAN}, audit_site="test")

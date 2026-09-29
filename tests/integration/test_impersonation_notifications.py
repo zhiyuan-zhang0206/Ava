@@ -17,21 +17,21 @@ from agent.db import claim_inbound_batch
 from agent.graph.claim.node import claim_node
 from agent.ownership.hosted import admit_hosted_runtime, apply_hosted_lifecycle
 from agent.state import BaseAgentState
+from base.agents import impersonation as leases
+from base.agents.context import AvaContext
+from base.agents.impersonation.maintenance import remind_expiring_impersonations
+from base.agents.incarnation.hosted_force import original_host_force
+from base.agents.messages.caller_identity import CallerIdentity
+from base.cluster.machine import machine_name
+from base.db import create_agent, pool
+from base.native_process.runtime_incarnation import RuntimeIncarnation
+from base.native_process.turn_identity import bind_turn_identity
 from cli.commands.agents import impersonation_relay as relay
 from ops.agents.wake import resurrect_agent
 from ops.lifecycle.termination import (
     _enqueue_termination_inbounds,
     _force_terminate_transaction,
 )
-from shared.agents import impersonation as leases
-from shared.agents.context import AvaContext
-from shared.agents.impersonation.maintenance import remind_expiring_impersonations
-from shared.agents.incarnation.hosted_force import original_host_force
-from shared.agents.messages.caller_identity import CallerIdentity
-from shared.cluster.machine import machine_name
-from shared.db import create_agent, pool
-from shared.native_process.runtime_incarnation import RuntimeIncarnation
-from shared.native_process.turn_identity import bind_turn_identity
 from tests.impersonation_support import recorded_tree
 
 

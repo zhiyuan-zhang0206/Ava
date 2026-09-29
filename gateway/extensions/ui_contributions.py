@@ -25,14 +25,14 @@ from typing import Any, cast
 
 from fastapi import APIRouter, HTTPException
 
+from base.packages.plugins import enable_config
+from base.packages.plugins.manifest import ManifestError, load_manifest
 from gateway.extensions.schemas import (
     UiContributionsResponse,
     UiNavContribution,
     UiStatContribution,
     UiThemeContribution,
 )
-from shared.packages.plugins import enable_config
-from shared.packages.plugins.manifest import ManifestError, load_manifest
 
 router = APIRouter()
 

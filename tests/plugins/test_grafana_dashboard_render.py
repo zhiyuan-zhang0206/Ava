@@ -3,8 +3,8 @@
 The provisioning file ``deploy/lgtm/config/grafana/provisioning/dashboards/
 ava-ops-main.json`` is on its way to becoming a render of the metric
 registries instead of a hand-maintained file. This module locks the renderer
-(``shared.telemetry.metrics.grafana_dashboard``) and the plugin suppliers
-(``shared.telemetry.metrics.grafana_dashboard_supply``):
+(``base.telemetry.metrics.grafana_dashboard``) and the plugin suppliers
+(``base.telemetry.metrics.grafana_dashboard_supply``):
 
 1. **Fidelity vs the as-is board** — for every registered ``grafana`` spec,
    the rendered panel must equal its counterpart in the current provisioning
@@ -56,9 +56,9 @@ from typing import Any, cast
 import psycopg
 import pytest
 
-from shared.packages.plugins.context import PluginContext
-from shared.telemetry.metrics.core import catalog
-from shared.telemetry.metrics.grafana_dashboard import (
+from base.packages.plugins.context import PluginContext
+from base.telemetry.metrics.core import catalog
+from base.telemetry.metrics.grafana_dashboard import (
     _CORE_SECTIONS_PREFIX,
     _CORE_SECTIONS_SUFFIX,
     DashboardRenderError,
@@ -66,11 +66,11 @@ from shared.telemetry.metrics.grafana_dashboard import (
     render_dashboard,
     render_to_json,
 )
-from shared.telemetry.metrics.grafana_dashboard_supply import (
+from base.telemetry.metrics.grafana_dashboard_supply import (
     load_installed_plugin_specs,
     load_repo_plugin_specs,
 )
-from shared.telemetry.metrics.plugin_metrics import (
+from base.telemetry.metrics.plugin_metrics import (
     MetricSpec,
     clear_registry,
     registered_metrics,
@@ -401,9 +401,9 @@ def test_render_is_deterministic_and_environment_independent(
     script = (
         "import hashlib, sys;"
         f"sys.path.insert(0, {str(_REPO_ROOT)!r});"
-        "from shared.telemetry.metrics.core import catalog;"
-        "from shared.telemetry.metrics.grafana_dashboard import render_dashboard, render_to_json;"
-        "from shared.telemetry.metrics.grafana_dashboard_supply import collect_plugin_specs;"
+        "from base.telemetry.metrics.core import catalog;"
+        "from base.telemetry.metrics.grafana_dashboard import render_dashboard, render_to_json;"
+        "from base.telemetry.metrics.grafana_dashboard_supply import collect_plugin_specs;"
         "plugins = collect_plugin_specs();"
         "core = catalog.collect_core_metrics();"
         "print(hashlib.sha256(render_to_json(render_dashboard(core, plugins.specs)).encode()).hexdigest())"
@@ -450,14 +450,14 @@ def test_repo_supplier_reports_a_broken_plugin_loudly(
     plugins_dir = tmp_path / "plugins"
     (plugins_dir / "good_one").mkdir(parents=True)
     (plugins_dir / "good_one" / "metrics.py").write_text(
-        "from shared.telemetry.metrics.plugin_metrics import MetricSpec, register_metric\n"
+        "from base.telemetry.metrics.plugin_metrics import MetricSpec, register_metric\n"
         "register_metric(MetricSpec(name='good_one_calls', title='Good', event_name='x', "
         "category='telemetry', query='sum(count_over_time({service_name=\"unknown_service\"} | "
         "json [$__range]))', query_type='logql', target_names=['a']))\n"
     )
     (plugins_dir / "broken_one").mkdir()
     (plugins_dir / "broken_one" / "metrics.py").write_text("raise RuntimeError('boom')\n")
-    import shared.telemetry.metrics.grafana_dashboard_supply as supply
+    import base.telemetry.metrics.grafana_dashboard_supply as supply
 
     monkeypatch.setattr(supply, "_REPO_PLUGINS_DIR", plugins_dir)
     for name in ("good_one", "broken_one"):
@@ -475,12 +475,12 @@ def test_installed_supplier_loads_a_registry_row(
     """An enabled installed plugin row renders from its blob: register a tree
     with a metrics.py, load it through the supplier, and — after S3's
     ordering — see it in the render."""
-    from shared.packages.extensions import registry as registry
+    from base.packages.extensions import registry as registry
 
     tree = tmp_path / "installed_plugin"
     tree.mkdir()
     (tree / "metrics.py").write_text(
-        "from shared.telemetry.metrics.plugin_metrics import MetricSpec, register_metric\n"
+        "from base.telemetry.metrics.plugin_metrics import MetricSpec, register_metric\n"
         "register_metric(MetricSpec(name='installed_demo_calls', title='Installed demo', "
         "event_name='x', category='telemetry', query='sum(count_over_time("
         "{service_name=\"unknown_service\"} | json [$__range]))', query_type='logql', "

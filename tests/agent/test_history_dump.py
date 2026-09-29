@@ -45,10 +45,10 @@ from agent.hooks import history_dump
 from agent.hooks.compact import auto_compact_for_llm, compose_summary_message
 from agent.messages import NoteTag, system_note_message
 from agent.state import AgentState
-from shared.agents.context import AvaContext
-from shared.config import settings
-from shared.config.agent_compaction import AgentCompactionSettings
-from shared.lm.context_budget import ContextBudget
+from base.agents.context import AvaContext
+from base.config import settings
+from base.config.agent_compaction import AgentCompactionSettings
+from base.lm.context_budget import ContextBudget
 from tests.conftest import spawn_agent
 
 # ── helpers ──

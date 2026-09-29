@@ -31,6 +31,11 @@ from redis.asyncio.retry import Retry
 from redis.backoff import NoBackoff
 from redis.exceptions import RedisError
 
+from base.cluster import ownership
+from base.cluster import postgres as owned_postgres
+from base.config import settings
+from base.deploy.release.verified_file import regular_bytes
+from base.native_process.evidence import ExpectedProcess
 from cli.commands.data_plane import cluster_instance as instance
 from cli.commands.data_plane import pgbouncer as pooler
 from cli.commands.data_plane._pooler_stop import OwnedPooler
@@ -42,11 +47,6 @@ from cli.commands.lifecycle.service_stop import (
     wait_for_exit,
 )
 from cli.release_transition.pitr.evidence import DataOwner, DataStop
-from shared.cluster import ownership
-from shared.cluster import postgres as owned_postgres
-from shared.config import settings
-from shared.deploy.release.verified_file import regular_bytes
-from shared.native_process.evidence import ExpectedProcess
 
 
 def capture_postgres() -> OwnedProcess | None:
@@ -233,13 +233,13 @@ async def _close_receipt_client(client: Redis) -> None:
 
 
 def _receipt_resources() -> tuple[int, int, int]:
-    from shared.cluster import (
+    from base.cluster import (
         get_record,
         record_pgbouncer_port,
         record_postgres_port,
         record_redis_port,
     )
-    from shared.paths import ava_home
+    from base.paths import ava_home
 
     if sys.platform == "win32" or settings.data_plane.is_remote:
         raise RuntimeError("durable data stop requires an owned POSIX data plane")

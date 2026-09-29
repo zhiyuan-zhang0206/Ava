@@ -6,7 +6,7 @@
 > updated. Corrected here.
 >
 > **Built** — `ava/security.py` (~240 lines), a rule-based scanner gated on
-> `AVA_SECURITY_SCAN_ENABLED` (`shared/config/agent.py`), **default on**. It is
+> `AVA_SECURITY_SCAN_ENABLED` (`base/config/agent.py`), **default on**. It is
 > wired into every one of these ingestion points:
 >
 > | Call site | Source tag |
@@ -29,7 +29,7 @@
 >
 > **Not built** — everything structural: the sandboxed deprivileged reader, egress
 > allowlisting, privilege separation. (On-install skill scanning **is** built —
-> `shared/packages/skills/scan.py` refuses a third-party skill package carrying critical
+> `base/packages/skills/scan.py` refuses a third-party skill package carrying critical
 > supply-chain patterns; see
 > [`skill-supply-chain-trust.md`](skill-supply-chain-trust.md).) Those remain
 > deferred for the reasons this doc lays out, and they are the ones that would

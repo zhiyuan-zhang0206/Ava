@@ -61,14 +61,14 @@ from agent.messages import (
 )
 from agent.nodes import CLAIM, INIT_CONTEXT
 from agent.state import AgentState, CompactState, ContextReset
-from shared.agents.context import AvaContext, agent_id_from_config
-from shared.agents.history.checkpoint_cleanup import mark_compact_boundary
-from shared.agents.messages.kwargs import AvaMsgType, read_ava_kwargs
-from shared.config.turn_view import turn_settings
-from shared.events.live.projection import Cancelled, CompactDone
-from shared.lm.context_budget import latest_input_tokens, resolve_context_budget
-from shared.log import logger
-from shared.telemetry.audit_events import insert_event_log_async
+from base.agents.context import AvaContext, agent_id_from_config
+from base.agents.history.checkpoint_cleanup import mark_compact_boundary
+from base.agents.messages.kwargs import AvaMsgType, read_ava_kwargs
+from base.config.turn_view import turn_settings
+from base.events.live.projection import Cancelled, CompactDone
+from base.lm.context_budget import latest_input_tokens, resolve_context_budget
+from base.log import logger
+from base.telemetry.audit_events import insert_event_log_async
 
 # Compaction bookkeeping lives in the nested `compact` sub-state (CompactState)
 # on BaseAgentState — read via `state.compact.version` etc.; writers overwrite
@@ -244,7 +244,7 @@ async def generate_summary(
     response, used_explicit_cache = await ainvoke_with_cache_retry(llm, compaction_input)
     model = getattr(llm, "model_name", None) or turn_settings.lm.llm_model
     if isinstance(model, str) and model:
-        from shared.lm.usage import (
+        from base.lm.usage import (
             CACHE_MECHANISM_MIXED,
             CACHE_SCOPE_EXPLICIT_BLOCK,
             log_usage_from_message,
@@ -301,7 +301,7 @@ def _is_permanent_provider_failure(exc: BaseException) -> bool:
     other failure (transient network / provider 5xx / empty-model-output) must
     NOT trigger the wipe fallback: it would destroy the conversation for a
     blip that a retry or a later attempt clears."""
-    from shared.lm.errors import ErrorClass, classify_error
+    from base.lm.errors import ErrorClass, classify_error
 
     return classify_error(exc).error_class is ErrorClass.PERMANENT
 

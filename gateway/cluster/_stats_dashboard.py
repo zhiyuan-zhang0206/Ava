@@ -18,14 +18,14 @@ from typing import Any, NamedTuple, cast
 import httpx
 from psycopg_pool import ConnectionPool
 
+from base import telemetry
+from base.config import settings
+from base.events.contract import StatsDashboardStaleReason
+from base.packages.plugins import stats
+from base.telemetry.loki_index_labels import ledger_gap_plan, retention_floor
 from gateway.cluster.schemas import PluginStat, PluginStatStatus, StatsDashboard
 from gateway.lgtm.loki_query_budget import LokiQueryBudgetError
 from gateway.schemas.stats import StatsWindowHours
-from shared import telemetry
-from shared.config import settings
-from shared.events.contract import StatsDashboardStaleReason
-from shared.packages.plugins import stats
-from shared.telemetry.loki_index_labels import ledger_gap_plan, retention_floor
 
 _cache: dict[int, tuple[float, StatsDashboard]] = {}
 _cache_lock = threading.Lock()

@@ -21,6 +21,7 @@ from typing import Annotated, Literal, Self
 
 from pydantic import Field, field_validator, model_validator
 
+from base.deploy.release.runtime_release import VerifiedRelease
 from cli.release_fleet.policy import FleetPolicy, UnitKey
 from cli.release_fleet.publication import FleetRelease
 from cli.release_transition.request import (
@@ -30,7 +31,6 @@ from cli.release_transition.request import (
     Request,
     sql_inventory,
 )
-from shared.deploy.release.runtime_release import VerifiedRelease
 
 AdapterKind = Literal["linux-systemd-v1", "darwin-launchd-v1"]
 # A remote unit never serves the gateway: the coordinator's home is the one gateway.

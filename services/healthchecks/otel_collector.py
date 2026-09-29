@@ -4,12 +4,12 @@ import re
 import urllib.request
 from dataclasses import dataclass
 
-from shared.cluster.machine import MachineRoleInvalid, MachineRoleMissing, machine_role
-from shared.cluster.port_preflight import ListenerDiscoveryError, strict_listeners_on
-from shared.config import settings
-from shared.daemon.health import DaemonProbe
-from shared.native_process.ownership import OwnedProcess, leader_owns_pids
-from shared.telemetry.observability import collector_allowed_for_home, gateway_observability_home
+from base.cluster.machine import MachineRoleInvalid, MachineRoleMissing, machine_role
+from base.cluster.port_preflight import ListenerDiscoveryError, strict_listeners_on
+from base.config import settings
+from base.daemon.health import DaemonProbe
+from base.native_process.ownership import OwnedProcess, leader_owns_pids
+from base.telemetry.observability import collector_allowed_for_home, gateway_observability_home
 
 _QUEUE_SAMPLE = re.compile(
     r"^otelcol_exporter_queue_(?P<kind>capacity|size)\{(?P<labels>[^}]*)\}\s+(?P<value>[0-9.eE+-]+)$"
@@ -78,7 +78,7 @@ def _foreign_listeners(holders: dict[int, set[int]], owner: OwnedProcess) -> lis
 
 def _owned_collector_process() -> OwnedProcess | DaemonProbe:
     """Root's captured collector process identity, or the probe explaining its absence."""
-    from shared.native_process.root_control.client import RootClientError, owned_process
+    from base.native_process.root_control.client import RootClientError, owned_process
 
     try:
         owner = owned_process("otel-collector")

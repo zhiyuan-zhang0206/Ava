@@ -46,6 +46,16 @@ import psycopg
 from psycopg_pool import ConnectionPool
 from pydantic import ValidationError
 
+from base.agents import AvaAgentError, ResurrectRefused
+from base.cluster.machine import machine_name
+from base.cluster.transport_encryption import verify_transport_encryption
+from base.config import settings
+from base.daemon.health import health_port, start_health_server, stop_health_server
+from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
+from base.daemon.shutdown import hard_exit as _hard_exit
+from base.db.transaction import write_transaction
+from base.log import init_gateway_process
+
 # The synchronous op arms and the op modules they call live in
 # `services.agent_ops.dispatch_sync` (split at the file-size ceiling, task
 # #4129 I4). The op modules below are re-exported through the daemon because
@@ -73,15 +83,6 @@ from services.agent_ops._boot import (
 )
 from services.agent_ops.dispatch_sync import dispatch_sync
 from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
-from shared.agents import AvaAgentError, ResurrectRefused
-from shared.cluster.machine import machine_name
-from shared.cluster.transport_encryption import verify_transport_encryption
-from shared.config import settings
-from shared.daemon.health import health_port, start_health_server, stop_health_server
-from shared.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
-from shared.daemon.shutdown import hard_exit as _hard_exit
-from shared.db.transaction import write_transaction
-from shared.log import init_gateway_process
 
 _log = logging.getLogger("services.agent_ops.daemon")
 
@@ -458,7 +459,7 @@ async def _main() -> None:
 
     # Schema-current assertion: if the central DB is ahead of this checkout,
     # abort before serving any op that assumes its columns.
-    from shared.deploy.schema.migrations import assert_schema_current
+    from base.deploy.schema.migrations import assert_schema_current
 
     try:
         assert_schema_current(settings.data_plane.db_url)
@@ -538,7 +539,7 @@ def main(*, argv: list[str] | None = None) -> None:
     argparse.ArgumentParser(description=__doc__).parse_args(argv)
     # Task #3621: ops is on the full-validation whitelist — build the eager
     # config chain at the entry, before serving.
-    from shared.config import ensure_eager
+    from base.config import ensure_eager
 
     ensure_eager()
     init_gateway_process(name="ops")

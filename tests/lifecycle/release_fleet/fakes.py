@@ -14,6 +14,7 @@ from collections.abc import Callable
 from datetime import datetime, timedelta
 from pathlib import Path
 
+from base.deploy.maintenance.state import MaintenanceHold
 from cli.release_fleet.coordinator import Coordinator
 from cli.release_fleet.gateway import GatewayUnit, Samples
 from cli.release_fleet.policy import AlertRoute, Cohort
@@ -25,7 +26,6 @@ from cli.release_fleet.workload import CORE_SIGNALS, AgentReport, CoreReport, Un
 from cli.release_transition.authority_evidence import GenerationRef
 from cli.release_transition.journal import Journal, Operation
 from cli.release_transition.request import ReleaseRef
-from shared.deploy.maintenance.state import MaintenanceHold
 from tests.lifecycle.transition.phases import generation
 
 

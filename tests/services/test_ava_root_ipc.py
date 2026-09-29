@@ -1,4 +1,4 @@
-"""shared.native_process.root_control.ipc + server/client: the K1 wire protocol.
+"""base.native_process.root_control.ipc + server/client: the K1 wire protocol.
 
 One JSON object per line, validated fail-fast on both ends: a malformed
 request or a response that drifts from the agreed shape is rejected at the
@@ -15,10 +15,9 @@ from pathlib import Path
 import psutil
 import pytest
 
-from services.ava_root.server import ControlServer
-from shared.native_process.ownership import OwnedProcess
-from shared.native_process.root_control.client import RootClient, RootClientError
-from shared.native_process.root_control.ipc import (
+from base.native_process.ownership import OwnedProcess
+from base.native_process.root_control.client import RootClient, RootClientError
+from base.native_process.root_control.ipc import (
     ErrorCode,
     ProtocolError,
     RequestPayload,
@@ -30,6 +29,7 @@ from shared.native_process.root_control.ipc import (
     parse_request,
     parse_response,
 )
+from services.ava_root.server import ControlServer
 
 
 def _root_row() -> dict[str, object]:
@@ -238,8 +238,8 @@ async def test_serving_reads_bound_runtime_from_native_peer(
     short_tmp: Path, monkeypatch: pytest.MonkeyPatch, bad: str | None
 ) -> None:
     """Real local transport plus strict local receipt; no application launch."""
-    from shared.deploy.lifecycle import start_serving
-    from shared.deploy.release.runtime_interpreter import LoadedRuntimeIdentity
+    from base.deploy.lifecycle import start_serving
+    from base.deploy.release.runtime_interpreter import LoadedRuntimeIdentity
 
     short_tmp = short_tmp.resolve()
     runtime = LoadedRuntimeIdentity(
@@ -293,7 +293,7 @@ def test_linux_ipc_requires_both_observed_tick_identities(
 ) -> None:
     from types import SimpleNamespace
 
-    from shared.native_process.root_control import client
+    from base.native_process.root_control import client
 
     monkeypatch.setattr(client, "sys", SimpleNamespace(platform="linux"))
 
@@ -335,8 +335,8 @@ def test_ipc_native_birth_rules_preserve_platform_authority(
 ) -> None:
     from types import SimpleNamespace
 
-    from shared.native_process import ownership
-    from shared.native_process.root_control import client
+    from base.native_process import ownership
+    from base.native_process.root_control import client
 
     # Both halves of the rule read the platform: the client's tick requirement
     # and the identity comparison itself.

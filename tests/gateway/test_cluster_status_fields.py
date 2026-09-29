@@ -43,8 +43,8 @@ def test_collect_sessions_enumerates_both_backends(monkeypatch):
         ["ava-main-restarter", "ava-main-gateway", "ava-main-agent-9", "other-stray"]
     )
     shell = _FakeBackend(["ava-main-agent-7-shell-0", "ava-main-agent-7-shell-0-watcher"])
-    monkeypatch.setattr("shared.sessions.backend.get_backend", lambda: svc)  # pyright: ignore[reportUnknownMemberType]
-    monkeypatch.setattr("shared.sessions.backend.get_shell_backend", lambda: shell)  # pyright: ignore[reportUnknownMemberType]
+    monkeypatch.setattr("base.sessions.backend.get_backend", lambda: svc)  # pyright: ignore[reportUnknownMemberType]
+    monkeypatch.setattr("base.sessions.backend.get_shell_backend", lambda: shell)  # pyright: ignore[reportUnknownMemberType]
 
     sessions, shell_count, total = cluster_status._collect_sessions()
     names = {s.name for s in sessions}
@@ -70,7 +70,7 @@ def test_collect_sessions_records_uptime_when_started_at_known(monkeypatch):
             return {n: self.session_started_at(n) for n in names}
 
     backend = _FakeBackend()
-    monkeypatch.setattr("shared.sessions.backend.get_backend", lambda: backend)  # pyright: ignore[reportUnknownMemberType]
+    monkeypatch.setattr("base.sessions.backend.get_backend", lambda: backend)  # pyright: ignore[reportUnknownMemberType]
 
     empty = type(
         "_Empty",
@@ -80,7 +80,7 @@ def test_collect_sessions_records_uptime_when_started_at_known(monkeypatch):
             "session_started_ats": staticmethod(lambda _names: {}),  # pyright: ignore[reportUnknownArgumentType]
         },
     )
-    monkeypatch.setattr("shared.sessions.backend.get_shell_backend", lambda: empty)  # pyright: ignore[reportUnknownMemberType]
+    monkeypatch.setattr("base.sessions.backend.get_shell_backend", lambda: empty)  # pyright: ignore[reportUnknownMemberType]
     sessions, _, _ = cluster_status._collect_sessions()
     assert sessions[0].created_at is not None
     assert sessions[0].uptime_seconds > 0
@@ -158,7 +158,7 @@ def _stub_capture_backend(
                 raise error
             return output
 
-    monkeypatch.setattr("shared.sessions.backend.get_shell_backend", _FakeBackend)
+    monkeypatch.setattr("base.sessions.backend.get_shell_backend", _FakeBackend)
 
 
 def test_capture_shell_reconstructs_name_and_captures(monkeypatch: pytest.MonkeyPatch):
@@ -166,7 +166,7 @@ def test_capture_shell_reconstructs_name_and_captures(monkeypatch: pytest.Monkey
     full session name (with `-<name>` suffix), captures with the requested
     depth through the shell backend, and returns (name, lines) with the
     trailing newline stripped."""
-    from shared.cluster import session_name
+    from base.cluster import session_name
 
     stub = f"{session_name('agent-7')}-shell-3-watcher"
     _stub_sessions(monkeypatch, stub)
@@ -182,7 +182,7 @@ def test_capture_shell_reconstructs_name_and_captures(monkeypatch: pytest.Monkey
 
 def test_capture_shell_unnamed_session_no_suffix(monkeypatch: pytest.MonkeyPatch):
     """An unnamed shell (no `-<name>` segment) → full name without suffix."""
-    from shared.cluster import session_name
+    from base.cluster import session_name
 
     stub = f"{session_name('agent-7')}-shell-1"
     _stub_sessions(monkeypatch, stub)
@@ -205,8 +205,8 @@ def test_capture_shell_unknown_session_raises(monkeypatch: pytest.MonkeyPatch):
 
 
 def test_kill_shell_resolves_full_name(monkeypatch: pytest.MonkeyPatch) -> None:
+    from base.cluster import session_name
     from ops.rpc_schemas import ShellInfo
-    from shared.cluster import session_name
 
     killed: list[str] = []
 
@@ -221,7 +221,7 @@ def test_kill_shell_resolves_full_name(monkeypatch: pytest.MonkeyPatch) -> None:
         "agent_shell_sessions",
         lambda _agent_id: [ShellInfo(id=3, name="build", uptime_seconds=1)],  # pyright: ignore[reportUnknownArgumentType]
     )
-    monkeypatch.setattr("shared.sessions.backend.get_shell_backend", _Backend)
+    monkeypatch.setattr("base.sessions.backend.get_shell_backend", _Backend)
 
     # the verdict rides the kill itself (one call, no separate probe)
     assert cluster_status.kill_shell(7, 3) == ("killed", True, "build")
@@ -250,7 +250,7 @@ def test_kill_shell_uninspectable_backend_reports_interrupted(
         "agent_shell_sessions",
         lambda _agent_id: [ShellInfo(id=3, name=None, uptime_seconds=1)],  # pyright: ignore[reportUnknownArgumentType]
     )
-    monkeypatch.setattr("shared.sessions.backend.get_shell_backend", _Backend)
+    monkeypatch.setattr("base.sessions.backend.get_shell_backend", _Backend)
 
     assert cluster_status.kill_shell(7, 3) == ("killed", True, None)
 
@@ -272,7 +272,7 @@ def test_kill_shell_idle_session_reports_not_interrupted(
         "agent_shell_sessions",
         lambda _agent_id: [ShellInfo(id=3, name=None, uptime_seconds=1)],  # pyright: ignore[reportUnknownArgumentType]
     )
-    monkeypatch.setattr("shared.sessions.backend.get_shell_backend", _Backend)
+    monkeypatch.setattr("base.sessions.backend.get_shell_backend", _Backend)
 
     assert cluster_status.kill_shell(7, 3) == ("killed", False, None)
 
@@ -306,8 +306,8 @@ def test_kill_agent_shells_kills_only_the_owners_shell_sessions(
     watchers included; another agent's shells, non-shell sessions and the
     owner's `ava.ui.serve` page sessions (named by the page daemon's grammar)
     stay."""
-    from shared.cluster import session_name
-    from shared.sessions.page_session import page_session_name
+    from base.cluster import session_name
+    from base.sessions.page_session import page_session_name
 
     page = page_session_name(7, "dash_board", 3)
     _stub_sessions(
@@ -322,7 +322,7 @@ def test_kill_agent_shells_kills_only_the_owners_shell_sessions(
         "ava-restarter",
     )
     backend = _KillAllBackend()
-    monkeypatch.setattr("shared.sessions.backend.get_shell_backend", lambda: backend)
+    monkeypatch.setattr("base.sessions.backend.get_shell_backend", lambda: backend)
 
     assert cluster_status.kill_agent_shells(7) == [0, 2, 5]
     assert sorted(backend.killed) == sorted(
@@ -339,11 +339,11 @@ def test_kill_agent_shells_kills_only_the_owners_shell_sessions(
 def test_kill_agent_shells_raises_after_trying_every_session(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from shared.cluster import session_name
+    from base.cluster import session_name
 
     _stub_sessions(monkeypatch, "ava-agent-7-shell-0", "ava-agent-7-shell-1")
     backend = _KillAllBackend(survives=frozenset({session_name("agent-7-shell-0")}))
-    monkeypatch.setattr("shared.sessions.backend.get_shell_backend", lambda: backend)
+    monkeypatch.setattr("base.sessions.backend.get_shell_backend", lambda: backend)
 
     with pytest.raises(RuntimeError, match=r"shell session\(s\) \[0\] of agent 7"):
         cluster_status.kill_agent_shells(7)
@@ -641,7 +641,7 @@ def test_gather_stamps_the_lease_sentence_on_every_row(monkeypatch: pytest.Monke
     """The live lease is cluster-global: its sentence (settle note included) is
     stamped on ALL rows. No per-host settle verdict rides the wire — nothing
     records a settle hold's waiting set any more."""
-    from shared.deploy.state.cluster_lock import DeployLease, settle_note
+    from base.deploy.state.cluster_lock import DeployLease, settle_note
 
     monkeypatch.setattr(status_mod, "cluster_is_paused", lambda: False)
     monkeypatch.setattr(status_mod, "prod_source_head_sha", lambda: "abc123")
@@ -664,7 +664,7 @@ def test_gather_stamps_the_lease_sentence_on_every_row(monkeypatch: pytest.Monke
 def test_gather_stamps_hold_for_an_executing_lease(monkeypatch: pytest.MonkeyPatch):
     """A lease with no settle fact (for example PITR provisioning) is stamped so the
     roster can explain a refused acquire."""
-    from shared.deploy.state.cluster_lock import DeployLease
+    from base.deploy.state.cluster_lock import DeployLease
 
     monkeypatch.setattr(status_mod, "cluster_is_paused", lambda: False)
     monkeypatch.setattr(status_mod, "prod_source_head_sha", lambda: "abc123")
@@ -693,7 +693,7 @@ def test_read_deploy_lease_degrades_on_operational_error(monkeypatch: pytest.Mon
     def _boom() -> None:
         raise psycopg.OperationalError("connection refused")
 
-    monkeypatch.setattr("shared.deploy.state.cluster_lock.read_update_lease", _boom)
+    monkeypatch.setattr("base.deploy.state.cluster_lock.read_update_lease", _boom)
     assert status_mod._read_deploy_lease() is None
 
 
@@ -738,8 +738,8 @@ def test_gather_cluster_status_carries_probe_paused_reason(monkeypatch: pytest.M
 
 
 def test_status_schemas_omit_retired_updater_projections() -> None:
+    from base.api_contracts.status import MachineStatus
     from gateway.cluster.schemas import ClusterPanel
-    from shared.api_contracts.status import MachineStatus
 
     retired = {"current_orchestration", "last_updater_outcome", "last_update"}
     for model in (cluster_status.ClusterStatus, ClusterPanel, MachineStatus):

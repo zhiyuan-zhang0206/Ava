@@ -27,14 +27,14 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
-from gateway.app import app
-from gateway.inspect import _plugin_widgets
-from shared.packages.plugins.context import PluginContext
-from shared.packages.plugins.inspector import (
+from base.packages.plugins.context import PluginContext
+from base.packages.plugins.inspector import (
     InspectWidgetSpec,
     clear_registry,
     register_inspect_widget,
 )
+from gateway.app import app
+from gateway.inspect import _plugin_widgets
 
 
 @pytest.fixture(autouse=True)
@@ -327,7 +327,7 @@ def test_loader_filters_widgets_of_disabled_plugins(monkeypatch: pytest.MonkeyPa
 
 def test_enabled_modules_skips_a_disabled_plugin(monkeypatch: pytest.MonkeyPatch) -> None:
     """`_enabled_inspector_modules` reads the enable bit per request."""
-    from shared.packages.plugins import enable_config
+    from base.packages.plugins import enable_config
 
     module = _shipped_fleet_module()
     monkeypatch.setattr(
@@ -365,7 +365,7 @@ def test_loader_skips_a_plugin_whose_inspector_fails_to_import(
     at module import) restated for the inspector surface: the load must not
     raise, the remaining plugin still serves, and the failure is loud on both
     channels (loguru ERROR + the plugin_load_failed telemetry event)."""
-    import shared.telemetry
+    import base.telemetry
 
     good = _shipped_fleet_module()
     bad = _plugin_widgets._PLUGINS_DIR / "broken_plugin" / "inspector.py"
@@ -384,7 +384,7 @@ def test_loader_skips_a_plugin_whose_inspector_fails_to_import(
     ) -> None:
         events.append((event_name, attributes or {}))
 
-    monkeypatch.setattr(shared.telemetry, "emit", fake_emit)
+    monkeypatch.setattr(base.telemetry, "emit", fake_emit)
 
     real_import_module = importlib.import_module
 
@@ -429,14 +429,14 @@ def test_loader_drops_partial_widget_registrations_and_recovers(
     the loader drops the dying attempt's widgets, so a fixed file recovers on
     the next request instead of dying on DuplicateInspectWidget
     (fail-soft, user ruling 2026-09-11)."""
-    from shared.packages.plugins.inspector import registered_inspect_widgets
+    from base.packages.plugins.inspector import registered_inspect_widgets
 
     plugin_dir = tmp_path / "drop_partial_insp"
     plugin_dir.mkdir()
     (plugin_dir / "__init__.py").write_text("", encoding="utf-8")
     inspector_py = plugin_dir / "inspector.py"
     source = (
-        "from shared.packages.plugins.inspector import InspectWidgetSpec, register_inspect_widget\n"
+        "from base.packages.plugins.inspector import InspectWidgetSpec, register_inspect_widget\n"
         "register_inspect_widget(InspectWidgetSpec(id='drop_partial_widget', "
         "kind='taskList', order=50))\n"
     )

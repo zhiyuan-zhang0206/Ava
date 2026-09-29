@@ -33,7 +33,7 @@ class _FakeBackend:
 def fake_backend(monkeypatch: pytest.MonkeyPatch) -> Callable[[str], _FakeBackend]:
     def _install(captured: str) -> _FakeBackend:
         backend = _FakeBackend(captured)
-        monkeypatch.setattr("shared.sessions.backend._shell_backend", backend)
+        monkeypatch.setattr("base.sessions.backend._shell_backend", backend)
         return backend
 
     return _install

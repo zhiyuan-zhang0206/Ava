@@ -11,6 +11,10 @@ import sys
 import tarfile
 from pathlib import Path
 
+from base.deploy.release.runtime_release import ReleaseRejectedError, file_sha256
+from base.deploy.release.verified_file import regular_bytes
+from base.host.brew_pin import UV_VERSION
+from base.runtime_plugins import declared_plugins
 from cli.release_build import CapturedSource, capture_source
 from cli.release_prepare import acquisition_assets as assets
 from cli.release_prepare.acquisition_dependencies import (
@@ -26,10 +30,6 @@ from cli.release_prepare.acquisition_process import Commands
 from cli.release_prepare.inputs import validate_inputs
 from cli.release_prepare.models import FileInput, LocalInputs, TreeInput, encode
 from cli.release_prepare.source_distributions import validate_distributions
-from shared.deploy.release.runtime_release import ReleaseRejectedError, file_sha256
-from shared.deploy.release.verified_file import regular_bytes
-from shared.host.brew_pin import UV_VERSION
-from shared.runtime_plugins import declared_plugins
 
 
 def _input_paths(request: Acquisition) -> list[Path]:
@@ -84,7 +84,7 @@ def _source_inputs(request: Acquisition, captured: CapturedSource) -> dict[str, 
         )
     if request.collector:
         names.extend(
-            ("scripts/prepare_otel_release.py", "shared/deploy/release/collector_artifact.py")
+            ("scripts/prepare_otel_release.py", "base/deploy/release/collector_artifact.py")
         )
     return {name: file_input(captured.source / name) for name in names}
 

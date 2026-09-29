@@ -1,12 +1,12 @@
 """Per-call SDK usage metering — the wrapping half of the SDK Usage instrumentation
-(the runtime state + emit path live in ``shared/agents/sdk/telemetry.py``, kept there so an
+(the runtime state + emit path live in ``base/agents/sdk/telemetry.py``, kept there so an
 SDK function body in the ``ava`` layer can ``annotate()`` its own call).
 
 Every public ``ava.*`` callable is wrapped, once, by a transparent recorder installed
 at SDK import and again at agent-graph build time after plugins load. On each top-level call the recorder (via ``run_metered``) writes one ``sdk_call``
 event into the unified ``events`` stream, carrying the dotted function name in ``attributes.fn``
 (``files.read``, ``shell.run``, ``self.compact``) plus any ``detail`` the call
-annotated. ``shared.telemetry.metrics.aggregate``'s sdk_usage counts those events — replacing the old regex
+annotated. ``base.telemetry.metrics.aggregate``'s sdk_usage counts those events — replacing the old regex
 scrape of code-event *source text*, which counted any ``ava.X(`` occurrence in comments,
 string literals, docstrings, and agent-written example code (so ``ava._private(`` from a
 private call, ``ava.bootDefaultActor(`` from a comment, and ``ava.x.y(`` from a
@@ -59,8 +59,8 @@ _WRAPPED: list[tuple[Any, str]] = []
 @contextlib.contextmanager
 def _caller() -> Generator[None, None, None]:
     """Snapshot provenance before the call; metering never changes SDK behavior."""
-    from shared.agents.messages.external_caller import external_caller
-    from shared.agents.sdk import telemetry as sdk_usage_telemetry
+    from base.agents.messages.external_caller import external_caller
+    from base.agents.sdk import telemetry as sdk_usage_telemetry
 
     identity = {}
     with contextlib.suppress(Exception):
@@ -87,11 +87,11 @@ def _caller() -> Generator[None, None, None]:
 
 def _make_recorder(original: Callable[..., Any], fq: str) -> Callable[..., Any]:
     """Transparent proxy around ``original`` that meters the call as ``fq`` (the frame /
-    tally / emit logic lives in ``shared.agents.sdk.telemetry.run_metered``)."""
+    tally / emit logic lives in ``base.agents.sdk.telemetry.run_metered``)."""
 
     @functools.wraps(original)
     def recorder(*args: Any, **kwargs: Any) -> Any:
-        from shared.agents.sdk.telemetry import run_metered
+        from base.agents.sdk.telemetry import run_metered
 
         with _caller():
             return run_metered(fq, original, args, kwargs)
@@ -100,7 +100,7 @@ def _make_recorder(original: Callable[..., Any], fq: str) -> Callable[..., Any]:
 
         @functools.wraps(original)
         async def async_recorder(*args: Any, **kwargs: Any) -> Any:
-            from shared.agents.sdk import telemetry as sdk_usage_telemetry
+            from base.agents.sdk import telemetry as sdk_usage_telemetry
 
             with _caller():
                 return await sdk_usage_telemetry.run_metered_async(fq, original, args, kwargs)
@@ -124,7 +124,7 @@ def _make_mcp_recorder(original: Callable[..., Any]) -> Callable[..., Any]:
 
     @functools.wraps(original)
     def recorder(server: str, tool: str, *args: Any, **kwargs: Any) -> Any:
-        from shared.agents.sdk.telemetry import run_metered
+        from base.agents.sdk.telemetry import run_metered
 
         with _caller():
             return run_metered(f"mcps.{server}.{tool}", original, (server, tool, *args), kwargs)

@@ -16,7 +16,7 @@ scripts, handle them:
 
 Both run on the gateway, against the home's own PostgreSQL, as the OS-user
 administrator acting as the schema owner over the owner-only socket
-(`shared.db.pg_admin.owner_session`). The read modes also work against the legacy
+(`base.db.pg_admin.owner_session`). The read modes also work against the legacy
 postmaster, which has no custody record; `--execute` additionally binds the
 session to the home's postmaster, so it runs only after the data-plane
 authority cutover brought the plane up under new custody. Run them with the
@@ -102,7 +102,7 @@ cause, and the same inputs continue it.
 | `lease` | Releases the legacy deploy lease (phase `stable`, holder, times and settle hold cleared), only once no pending publication remains. |
 | `posture` | `paused` postures of included hosts become `idle`, in the journal's first run only: once a run completed, a `paused` posture is a held unit's own (every start inside a hold writes it, W8 and W9 included), and no later run plans a posture effect. No held start precedes that first run: the gateway's `--start` refuses until a run completed, and a runner's joins through the gateway. Paused machines keep theirs; stranded-hold columns stay for the retired-storage cleanup. A `converging` posture or a live updater lease refuses. |
 | `units` | Deletes the retired `machine_units` rows. Units of paused machines, this gateway's own unit and attested homes refuse. The stale `machines` row itself stays (the cluster machine-delete endpoint removes it). |
-| `incarnations` | `shared.agents.incarnation.predecessor_closure.close_retired_predecessor` per convertible row: the closed-predecessor form, with the before image, attestation digest, operator and reason recorded on the receipt ([why](../decisions/2026-09-27-existing-agent-closed-predecessor-admission.md)). The journal keeps both before images, the resources and the receipt's payload (NULL included), and both are compared. A row the guards refuse is recorded `refused: <why>` and the run continues. |
+| `incarnations` | `base.agents.incarnation.predecessor_closure.close_retired_predecessor` per convertible row: the closed-predecessor form, with the before image, attestation digest, operator and reason recorded on the receipt ([why](../decisions/2026-09-27-existing-agent-closed-predecessor-admission.md)). The journal keeps both before images, the resources and the receipt's payload (NULL included), and both are compared. A row the guards refuse is recorded `refused: <why>` and the run continues. |
 | `identities` | One effect per attested machine: each convertible identity-less terminated row takes `runtime_kind='hosted'`, a minted UUID generation and owner, and `pid=NULL`, so resurrection accepts it; the resurrection clears it again. Resources stay NULL; no receipt or other row is written ([why](../decisions/2026-09-28-legacy-terminated-agents-resurrectable-at-cutover.md)). One compare-and-swap restates every identity-less condition and each row's before image. The result is `applied`, `already` (a continued run finds its minted pair), or names the rows that changed since planning, which it leaves unchanged; the run continues. |
 
 D-1 reads `attention` whenever `deployment_state.managed_writer_evidence`
@@ -137,7 +137,7 @@ successor would take once converted, a settled receipt (the drain's applied
 restart held as the lifecycle pointer, or an applied and observed terminate),
 and an attestation of its machine that proves every recorded identity gone.
 The survey and the conversion judge the row with one rule
-(`shared.agents.incarnation.predecessor_closure.successor_refusal`), which is the successor's own
+(`base.agents.incarnation.predecessor_closure.successor_refusal`), which is the successor's own
 admission: an idling row with its owner released (admission observes only a
 restart pointer), or a terminated row that still records exactly the closed
 hosted incarnation and holds no lifecycle pointer (what resurrection requires).
@@ -252,7 +252,7 @@ An identity-less terminated row whose lifecycle pointer names a forced
 terminate that was applied but never observed reads `pointer` at W7 and stays
 fenced: resurrection defers on that pointer. The new agent host settles such a
 force when it boots on the row's machine, before its scheduler starts
-(`shared.agents.incarnation.hosted_force.recover_orphaned_hosted_forces`, logged as
+(`base.agents.incarnation.hosted_force.recover_orphaned_hosted_forces`, logged as
 `hosted boot recovery: observed <n> orphaned force(s)`), but only for a row
 that kept a hosted kind, generation and owner (identity-less through a
 leftover pid) and a force targeting exactly that pair; every other `pointer`

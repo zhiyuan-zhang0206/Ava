@@ -1,7 +1,7 @@
 """Rate-limit contract tests for POST /api/auth/login.
 
 The login endpoint is the gateway's only unauthenticated credential check,
-so it is protected by a per-IP failure lockout (shared/cluster/rate_limit.py):
+so it is protected by a per-IP failure lockout (base/cluster/rate_limit.py):
 ``gateway.login_max_failures`` consecutive failures lock the IP for
 ``gateway.login_lockout_seconds`` (defaults 5 / 900);
 a successful login resets the counter; lockout expiry restores normal
@@ -16,10 +16,10 @@ from collections.abc import Iterator
 import pytest
 from fastapi.testclient import TestClient
 
+from base import config
+from base.cluster import rate_limit
+from base.cluster.rate_limit import login_limiter
 from gateway.app import app
-from shared import config
-from shared.cluster import rate_limit
-from shared.cluster.rate_limit import login_limiter
 
 _SECRET = "test-cluster-secret"  # noqa: S105 — test fixture
 

@@ -32,7 +32,7 @@ def lint(monkeypatch, tmp_path):
 
     `_REPO_ROOT` is redirected too, so a case can write the target `.py` it
     anchors at. Leaving it pointed at the real repo would make every assertion
-    here depend on whatever `shared/` happens to define today.
+    here depend on whatever `base/` happens to define today.
     """
     mod = importlib.import_module("scripts.content_lint.lint_doc_anchors")
     docs = tmp_path / "conventions"

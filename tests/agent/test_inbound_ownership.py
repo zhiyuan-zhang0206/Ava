@@ -16,10 +16,10 @@ from agent.db import (
 from agent.graph.claim._batch import _defer_chats_to_pending
 from agent.ownership.hosted import admit_hosted_runtime
 from agent.ownership.inbound import RuntimeOwnershipLostError, lock_inbound_owner
-from shared.db import create_agent
-from shared.db.transaction import async_write_transaction
-from shared.native_process.runtime_incarnation import RuntimeIncarnation
-from shared.native_process.turn_identity import bind_turn_identity
+from base.db import create_agent
+from base.db.transaction import async_write_transaction
+from base.native_process.runtime_incarnation import RuntimeIncarnation
+from base.native_process.turn_identity import bind_turn_identity
 
 
 def _agent(conn: psycopg.Connection) -> int:

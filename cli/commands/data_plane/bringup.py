@@ -21,12 +21,12 @@ from urllib.parse import urlsplit
 
 import psycopg
 
+from base.cluster.authority.model import Generation
+from base.cluster.registry import ClusterRecord
+from base.config import settings
+from base.host.net.url_secret import url_host
+from base.log import logger
 from ops.roster.service_spec import DbAccess
-from shared.cluster.authority.model import Generation
-from shared.cluster.registry import ClusterRecord
-from shared.config import settings
-from shared.host.net.url_secret import url_host
-from shared.log import logger
 
 
 def ensure_gateway_data_plane() -> int:
@@ -35,13 +35,13 @@ def ensure_gateway_data_plane() -> int:
     Pooler startup belongs to ``complete_gateway_data_plane``, after schema and
     runner grants. Storage ports always come from this home's reservation.
     """
-    from cli.commands.data_plane.cluster_instance import ensure_cluster_storage
-    from shared.cluster import (
+    from base.cluster import (
         get_record,
         redis_identity,
         redis_password_from_env,
     )
-    from shared.paths import ava_home
+    from base.paths import ava_home
+    from cli.commands.data_plane.cluster_instance import ensure_cluster_storage
 
     rec = get_record(ava_home())
     if rec is None:
@@ -79,8 +79,8 @@ def ensure_gateway_data_plane() -> int:
         print(f"  ✓ remote data plane reachable ({pg_line}; {redis_line})")
         return 0
 
+    from base.cluster.authority import load_ledger
     from cli.start_identity import needs_provision
-    from shared.cluster.authority import load_ledger
 
     if not needs_provision(ava_home()) and load_ledger(ava_home().resolve()) is None:
         # A home born before the data plane always authenticated: refuse before
@@ -106,17 +106,17 @@ def remote_pg_reachable() -> tuple[bool, str]:
     """Probe a remote-managed Postgres through its own AVA_DB_URL.
 
     The two-stage shape of the local probe, minus the local machinery:
-    `shared.db.connect()` dials the URL as every consumer does (auth included),
+    `base.db.connect()` dials the URL as every consumer does (auth included),
     so an unreachable host and a wrong credential both report a real detail
     line. Bounded by the connect keepalives (5s connect timeout). Returns
     (ok, detail) and never raises.
     """
-    import shared.db
+    import base.db
 
     host = url_host(settings.data_plane.db_url)
     port = urlsplit(settings.data_plane.db_url).port or 5432
     try:
-        with shared.db.connect() as conn:
+        with base.db.connect() as conn:
             conn.execute("select 1")
         return True, f"postgres ({host}:{port})"
     except Exception as exc:
@@ -171,8 +171,8 @@ def warn_orphaned_local_instance() -> None:
     leaving them. Never raises: this is a hint on an already-successful path.
     """
     try:
-        from shared.cluster import get_record
-        from shared.paths import ava_home
+        from base.cluster import get_record
+        from base.paths import ava_home
 
         rec = get_record(ava_home())
         if rec is None:
@@ -204,10 +204,10 @@ def warn_orphaned_local_instance() -> None:
 
 def prepare_gateway_schema() -> None:
     """Initialize only a journal-owned fresh database, before any pooled login."""
+    from base import cluster
+    from base.paths import ava_home
     from cli.commands.data_plane.cluster_instance import pg_admin_url
     from cli.start_identity import needs_provision
-    from shared import cluster
-    from shared.paths import ava_home
 
     if settings.data_plane.is_remote or not needs_provision(ava_home()):
         return
@@ -244,14 +244,14 @@ def prepare_memory_vectors() -> None:
     """
     if settings.services.memory_search_backend != "pgvector":
         return
-    import shared.db
+    import base.db
+    from base.db.pg_admin import local_owner_authority
     from services.memory_indexer.backends.pgvector import prepare_table
     from services.memory_indexer.embeddings.factory import get_provider
-    from shared.db.pg_admin import local_owner_authority
 
     dim = get_provider().dim
     if settings.data_plane.is_remote:
-        with shared.db.connect(direct=True) as conn:
+        with base.db.connect(direct=True) as conn:
             prepare_table(conn, dim)
         return
     with local_owner_authority().session() as conn:
@@ -287,10 +287,10 @@ def admin_session(rec: ClusterRecord, database: str) -> Generator[psycopg.Connec
     autocommit, custody-checked against the home's own postmaster."""
     from psycopg.conninfo import make_conninfo
 
+    from base.cluster import record_postgres_port
+    from base.db import pg_admin
+    from base.paths import ava_home
     from cli.commands.data_plane.cluster_instance import pg_admin_url
-    from shared.cluster import record_postgres_port
-    from shared.db import pg_admin
-    from shared.paths import ava_home
 
     url = make_conninfo(pg_admin_url(record_postgres_port(rec)), dbname=database)
     with pg_admin.connect(url, expected_data_dir=ava_home() / "pg", autocommit=True) as conn:
@@ -301,7 +301,7 @@ def db_endpoint() -> str:
     """The home's credential-free database endpoint, as its `.env` records it."""
     from dotenv import dotenv_values
 
-    from shared.paths import ava_home
+    from base.paths import ava_home
 
     endpoint = dotenv_values(ava_home() / ".env").get("AVA_DB_URL")
     if not endpoint:
@@ -320,12 +320,12 @@ def db_delivery(cls: DbAccess) -> dict[str, str]:
     remote-managed gateway plane delivers nothing here: its agents keep the
     provider projection.
     """
-    from shared.cluster.authority import GENERATION_ENV, write_grant
-    from shared.host.env.bootstrap import config_source_is_local
-    from shared.paths import ava_home
+    from base.cluster.authority import GENERATION_ENV, write_grant
+    from base.host.env.bootstrap import config_source_is_local
+    from base.paths import ava_home
 
     if not config_source_is_local():
-        from shared.cluster.authority.unit import unit_delivery
+        from base.cluster.authority.unit import unit_delivery
 
         if cls != "runner":
             raise RuntimeError(f"a pure agent-runner cannot launch a {cls}-class database service")
@@ -346,12 +346,12 @@ def api_delivery(cls: DbAccess) -> dict[str, str]:
     A remote-managed plane keeps no write generations and delivers nothing; its
     gateway-local services present the human secret.
     """
-    from shared.cluster.authority.api import API_TOKEN_ENV, api_token
-    from shared.host.env.bootstrap import config_source_is_local
-    from shared.paths import ava_home
+    from base.cluster.authority.api import API_TOKEN_ENV, api_token
+    from base.host.env.bootstrap import config_source_is_local
+    from base.paths import ava_home
 
     if not config_source_is_local():
-        from shared.cluster.authority.unit import unit_api_delivery
+        from base.cluster.authority.unit import unit_api_delivery
 
         if cls != "runner":
             raise RuntimeError(f"a pure agent-runner cannot launch a {cls}-class service")
@@ -365,9 +365,9 @@ def _ensure_pooler(rec: ClusterRecord, database: str, home: Path, generation: Ge
     """Serve exactly `generation` through the owned pooler (restart on change)."""
     if not settings.data_plane.pgbouncer_enabled:
         return
+    from base.cluster import record_pgbouncer_port, record_postgres_port
+    from base.cluster.authority import read_pooler_admin, render_userlist
     from cli.commands.data_plane.pgbouncer import ensure_pgbouncer
-    from shared.cluster import record_pgbouncer_port, record_postgres_port
-    from shared.cluster.authority import read_pooler_admin, render_userlist
 
     rc = ensure_pgbouncer(
         pg_port=record_postgres_port(rec),
@@ -384,9 +384,9 @@ def _ensure_pooler(rec: ClusterRecord, database: str, home: Path, generation: Ge
 def prove_generation_logins(home: Path, generation: Generation, endpoint: str) -> None:
     """Both logins of `generation` answer `SELECT 1` through the consumer endpoint
     (the pooler when enabled: SCRAM client auth plus the pass-through hop)."""
+    from base.cluster.authority import read_secret
+    from base.host.net.url_secret import url_with_userinfo
     from cli.commands.converge.health_preflight import probe_postgres
-    from shared.cluster.authority import read_secret
-    from shared.host.net.url_secret import url_with_userinfo
 
     secret = read_secret(home, generation)
     for role in (secret.roles.gateway, secret.roles.runner):
@@ -401,7 +401,7 @@ def adopt_gateway_login(home: Path, endpoint: str) -> None:
     its own boot, which ran before the ledger existed."""
     import os
 
-    from shared.cluster.authority import GENERATION_ENV, write_grant
+    from base.cluster.authority import GENERATION_ENV, write_grant
 
     grant = write_grant(home, "gateway")
     os.environ["AVA_DB_URL"] = grant.dsn(endpoint)
@@ -414,8 +414,8 @@ def _birth_generation(conn: psycopg.Connection[Any], home: Path, database: str) 
     generation 0."""
     from functools import partial
 
-    from shared import cluster
-    from shared.cluster import authority
+    from base import cluster
+    from base.cluster import authority
 
     owner = cluster.db_identity()
     groups = authority.Groups(gateway=authority.GATEWAY_GROUP, runner=authority.RUNNER_GROUP)
@@ -437,8 +437,8 @@ def _admitted_generation(
 ) -> Generation:
     """Ordinary start: re-grant after migrations, converge the monitor, sweep,
     then the invariant holds."""
-    from shared import cluster
-    from shared.cluster import authority
+    from base import cluster
+    from base.cluster import authority
 
     ledger = authority.load_ledger(home)
     if ledger is None:
@@ -474,22 +474,22 @@ def complete_gateway_data_plane(*, refresh_schema: bool = True) -> None:
     pair (restarted only when its bytes change). A home without a ledger is a
     legacy home and refuses with the cutover instruction — never converted here.
     """
+    from base import cluster
+    from base.paths import ava_home
     from cli.commands.converge.health_preflight import probe_postgres, probe_redis
     from cli.start_identity import mark_phase, needs_provision
-    from shared import cluster
-    from shared.paths import ava_home
 
     if settings.data_plane.is_remote:
         if refresh_schema:
             prepare_memory_vectors()
-        from shared.cluster.derive import runner_db_url_projection
+        from base.cluster.derive import runner_db_url_projection
 
         urls = [settings.data_plane.db_url, runner_db_url_projection()]
         for url in urls:
             if error := probe_postgres(url):
                 raise RuntimeError(f"consumer database readiness failed: {error}")
     else:
-        from shared.cluster import authority
+        from base.cluster import authority
 
         home = ava_home().resolve()
         rec = cluster.get_record(ava_home())

@@ -16,8 +16,8 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
+from base.db import create_agent
 from gateway.app import app
-from shared.db import create_agent
 
 
 @pytest.fixture
@@ -33,7 +33,7 @@ def _put_checkpoint_with_trace(agent_id: int, messages: list, trace_id: str) -> 
     from langgraph.checkpoint.base import CheckpointMetadata, empty_checkpoint
     from langgraph.checkpoint.postgres import PostgresSaver
 
-    from shared.config import settings
+    from base.config import settings
 
     ckpt = empty_checkpoint()
     ckpt["channel_values"] = {"messages": messages}
@@ -104,8 +104,8 @@ def test_503_on_checkpoint_read_failure(
     db_conn: psycopg.Connection, test_client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A store read failure is not disguised as pruned — 503, caller retries."""
+    from base.agents.history import checkpoint as checkpoint_mod
     from gateway.agents import state as agents_mod
-    from shared.agents.history import checkpoint as checkpoint_mod
 
     tid = create_agent(db_conn)
 

@@ -40,7 +40,7 @@ from agent.graph.exec.protocol import (
 
 def _exec_envelope_events() -> list[dict[str, Any]]:
     """Read the durable telemetry mirror's exec-envelope rows."""
-    from shared.paths import logs_dir
+    from base.paths import logs_dir
 
     path = logs_dir() / f"events-{datetime.now(UTC):%Y%m%d}.jsonl"
     if not path.exists():
@@ -129,8 +129,8 @@ def test_request_envelope_round_trip(tmp_path: Path) -> None:
 def test_request_envelope_transfers_emit_size_and_serialize_time(tmp_path: Path) -> None:
     """Request writes and reads record the final envelope size and their own
     serialization cost in the durable event stream."""
-    from shared import telemetry
-    from shared.log import add_postgres_sink, logger
+    from base import telemetry
+    from base.log import add_postgres_sink, logger
 
     events_before = len(_exec_envelope_events())
     sink_id = add_postgres_sink(process="test-exec-envelope")

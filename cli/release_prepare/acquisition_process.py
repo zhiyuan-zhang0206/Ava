@@ -11,11 +11,11 @@ from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 
+from base.deploy.release.runtime_release import ReleaseRejectedError, file_sha256
+from base.host.atomic_io import write_text_atomic
+from base.native_process.posix_command import run_owned_command
 from cli.release_prepare.acquisition_models import CommandEvidence
 from cli.release_prepare.models import FileInput
-from shared.deploy.release.runtime_release import ReleaseRejectedError, file_sha256
-from shared.host.atomic_io import write_text_atomic
-from shared.native_process.posix_command import run_owned_command
 
 
 @contextmanager

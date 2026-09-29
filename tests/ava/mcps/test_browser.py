@@ -20,7 +20,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 import ava.mcps._browser as browser_mod
-from shared.host.net import resilience
+from base.host.net import resilience
 
 
 class _FakeWriter:
@@ -136,7 +136,7 @@ async def test_request_id_mismatch_reconnects_then_next_call_succeeds(
     """A desynced response rebuilds the socket (ids restart at 1) instead of
     poisoning the session: the call that observed the mismatch raises, and the
     next call succeeds on the fresh connection. The old socket is closed."""
-    from shared import paths
+    from base import paths
 
     sock_path = Path(f"/tmp/ava-browser-sock-{os.getpid()}.sock")  # noqa: S108 — test-only short AF_UNIX path
     with contextlib.suppress(OSError):
@@ -192,7 +192,7 @@ async def test_corrupt_line_reconnects_then_next_call_succeeds(
 ) -> None:
     """A non-JSON response line also means the stream is lost — rebuild the
     connection so a single corrupt line cannot brick it for good."""
-    from shared import paths
+    from base import paths
 
     sock_path = Path(f"/tmp/ava-browser-sock-{os.getpid()}.sock")  # noqa: S108 — test-only short AF_UNIX path
     with contextlib.suppress(OSError):
@@ -260,7 +260,7 @@ async def test_connect_browser_direct_dials_socket(
 ) -> None:
     """connect_browser_direct opens one unix connection and returns a session
     whose stack closes the writer on exit."""
-    from shared import paths
+    from base import paths
 
     # AF_UNIX paths cap at ~104 chars; pytest tmp_path is far longer, so use a
     # short fixed path (test-only, unique per run via pid).
@@ -288,7 +288,7 @@ async def test_connect_browser_direct_retries_until_socket_appears(
 ) -> None:
     """A cold-start race (service socket not yet bound) retries instead of
     failing immediately — mirrors the wrapper's connect retry."""
-    from shared import paths
+    from base import paths
 
     sock_path = Path(f"/tmp/ava-browser-sock-{os.getpid()}.sock")  # noqa: S108 — test-only short AF_UNIX path
     with contextlib.suppress(OSError):
@@ -412,7 +412,7 @@ async def test_release_agent_chrome_pages_sends_release_and_reports_ok(
 ) -> None:
     """The exit-hook release dials the service once and sends the release
     request carrying the agent id; a truthful `ok` is returned."""
-    from shared import paths
+    from base import paths
 
     sock_path = Path(f"/tmp/ava-browser-sock-{os.getpid()}.sock")  # noqa: S108 — test-only short AF_UNIX path
     with contextlib.suppress(OSError):
@@ -443,7 +443,7 @@ async def test_release_agent_chrome_pages_no_service_returns_false(
 ) -> None:
     """No browser service on this machine (socket absent) must degrade to a
     clean False — the exit path never raises on the cleanup nicety."""
-    from shared import paths
+    from base import paths
 
     sock_path = Path(f"/tmp/ava-browser-sock-{os.getpid()}.sock")  # noqa: S108 — test-only short AF_UNIX path
     with contextlib.suppress(OSError):

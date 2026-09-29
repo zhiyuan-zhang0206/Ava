@@ -15,14 +15,14 @@ from pathlib import Path
 
 import pytest
 
-from cli.commands import release_inventory as inventory
-from shared.deploy.release.runtime_publication_input import PreparationReceipt, _receipt_expected
-from shared.deploy.release.runtime_release import ReleaseRejectedError
-from shared.deploy.writers.observation import (
+from base.deploy.release.runtime_publication_input import PreparationReceipt, _receipt_expected
+from base.deploy.release.runtime_release import ReleaseRejectedError
+from base.deploy.writers.observation import (
     ExcludedRegistration,
     ExpectedLauncher,
     ExpectedUnitWriters,
 )
+from cli.commands import release_inventory as inventory
 
 HOME = Path("/unit")
 

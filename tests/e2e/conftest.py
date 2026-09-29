@@ -50,8 +50,8 @@ from langgraph.checkpoint.postgres import PostgresSaver
 from playwright.sync_api import Browser, BrowserContext, Page, Playwright, sync_playwright
 from psycopg import sql
 
-from shared.agents import AgentStatus
-from shared.config import settings
+from base.agents import AgentStatus
+from base.config import settings
 from tests._containers import runner_projection
 from tests.e2e._env import E2EEnv
 from tests.e2e._ports import FRONTEND_PORT, FRONTEND_URL, GATEWAY_PORT, GATEWAY_SOCKET, GATEWAY_URL
@@ -285,8 +285,8 @@ def _e2e_process_env(_provisioned_db: str, _provisioned_redis: str) -> Iterator[
     # Derived from the same map `health_port()` consults, not hand-listed: the
     # hand-listed version had already drifted (events_maintenance missing), and a
     # newly registered daemon would silently re-open this hole.
-    from shared.daemon.health import _HEALTH_PORT_OVERRIDES
-    from shared.host.env.registry import cluster_scope_aliases
+    from base.daemon.health import _HEALTH_PORT_OVERRIDES
+    from base.host.env.registry import cluster_scope_aliases
 
     _health_port_keys: frozenset[str] = frozenset(
         f"AVA_{attr.upper()}" for attr in _HEALTH_PORT_OVERRIDES.values()

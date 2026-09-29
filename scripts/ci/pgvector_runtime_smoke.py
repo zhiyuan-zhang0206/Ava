@@ -29,8 +29,8 @@ from urllib.parse import urlsplit
 
 import psycopg
 
-from shared.cluster.dataplane import runtime_binaries as rb
-from shared.cluster.dataplane.pg_tools import throwaway_postgres
+from base.cluster.dataplane import runtime_binaries as rb
+from base.cluster.dataplane.pg_tools import throwaway_postgres
 
 
 def _assert_platform_supported() -> None:

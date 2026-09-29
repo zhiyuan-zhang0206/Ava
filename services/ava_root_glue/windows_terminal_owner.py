@@ -13,25 +13,25 @@ from typing import Literal
 import psutil
 from pydantic import BaseModel, ConfigDict, Field
 
-from services.ava_root.custody import ServiceCustody
-from services.ava_root.windows.process import ApplicationProcess, spawn
-from shared.native_process.ownership import OwnedProcess
-from shared.native_process.root_control.ipc import (
+from base.native_process.ownership import OwnedProcess
+from base.native_process.root_control.ipc import (
     MAX_MESSAGE_BYTES,
     ErrorCode,
     encode,
     error_response,
     ok_response,
 )
-from shared.native_process.root_control.windows.native import command_argv
-from shared.native_process.root_control.windows.transport import PipeServer
-from shared.sessions.windows.terminal.record import (
+from base.native_process.root_control.windows.native import command_argv
+from base.native_process.root_control.windows.transport import PipeServer
+from base.sessions.windows.terminal.record import (
     NativeBirth,
     TerminalRecord,
     endpoint,
     publish,
     read,
 )
+from services.ava_root.custody import ServiceCustody
+from services.ava_root.windows.process import ApplicationProcess, spawn
 
 
 class ControlRequest(BaseModel):
@@ -137,7 +137,7 @@ class TerminalOwner:
 
 
 async def run(name: str, env: dict[str, str]) -> None:
-    from shared.paths import logs_dir, run_dir
+    from base.paths import logs_dir, run_dir
 
     pending = read(name)
     if pending is None or pending.state != "pending":

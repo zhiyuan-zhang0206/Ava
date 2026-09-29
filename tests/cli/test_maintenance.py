@@ -11,13 +11,13 @@ from uuid import uuid4
 
 import pytest
 
+from base.deploy.lifecycle import start_serving
+from base.deploy.lifecycle.start_serving import RootBirth
+from base.deploy.maintenance import admission, hold_driver, pause_owner
+from base.deploy.maintenance.state import MaintenanceHold
 from cli.commands.lifecycle import maintenance as command
 from ops.agent_pause.probe import HostIdentity
 from ops.agent_pause.probe import host_identity_or_none as real_host_identity_or_none
-from shared.deploy.lifecycle import start_serving
-from shared.deploy.lifecycle.start_serving import RootBirth
-from shared.deploy.maintenance import admission, hold_driver, pause_owner
-from shared.deploy.maintenance.state import MaintenanceHold
 from tests.agent.test_maintenance import WHEN
 from tests.agent.test_maintenance import isolate as isolate
 
@@ -31,7 +31,7 @@ def cli_dependencies(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(command, "connect", MagicMock())
     monkeypatch.setattr(command.cohort, "verify_drained", MagicMock())
     monkeypatch.setattr("ops.agent_pause._wake", MagicMock())
-    monkeypatch.setattr("shared.deploy.state.host_deploy_state.set_posture", MagicMock())
+    monkeypatch.setattr("base.deploy.state.host_deploy_state.set_posture", MagicMock())
     monkeypatch.setattr(command, "ops_quiescent", MagicMock())
 
 
@@ -254,7 +254,7 @@ def test_data_plane_keep_still_requires_native_root_absence(
     phase("stopped")
     monkeypatch.setattr(command, "machine_role", lambda: frozenset({"gateway"}))
     root = tmp_path / "root"
-    monkeypatch.setattr("shared.paths.root_run_dir", lambda: root)
+    monkeypatch.setattr("base.paths.root_run_dir", lambda: root)
     shutdown = MagicMock()
     monkeypatch.setattr(command, "stop_data_plane", shutdown)
     owner = acquire_instance_lock(root)
@@ -272,7 +272,7 @@ def test_data_plane_terminal_assertion_only_bypasses_terminal_guard(
 ) -> None:
     phase("stopped")
     monkeypatch.setattr(command, "machine_role", lambda: frozenset({"gateway"}))
-    monkeypatch.setattr("shared.paths.root_run_dir", lambda: tmp_path / "root")
+    monkeypatch.setattr("base.paths.root_run_dir", lambda: tmp_path / "root")
     terminals = MagicMock(side_effect=RuntimeError("live terminal"))
     shutdown = MagicMock(return_value=[])
     monkeypatch.setattr(command, "require_no_terminals", terminals)

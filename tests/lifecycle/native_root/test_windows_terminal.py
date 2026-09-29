@@ -9,7 +9,7 @@ from typing import cast
 import psutil
 import pytest
 
-from shared.sessions.windows.terminal.record import TerminalRecord, read
+from base.sessions.windows.terminal.record import TerminalRecord, read
 from tests.lifecycle.native_root.test_windows_root import (
     _root,
     ended,
@@ -29,8 +29,8 @@ def _read_record(name: str) -> TerminalRecord:
 
 @pytest.fixture
 def terminal_backend(native_env, monkeypatch):
-    from shared.config import settings
-    from shared.sessions.windows.terminal.backend import WindowsTerminalBackend
+    from base.config import settings
+    from base.sessions.windows.terminal.backend import WindowsTerminalBackend
 
     monkeypatch.setattr(settings.general, "ava_home", native_env["AVA_HOME"])
     monkeypatch.setattr(settings.general, "cluster_registry", native_env["AVA_CLUSTER_REGISTRY"])
@@ -47,7 +47,7 @@ def test_terminal_brokered_from_service_survives_root_exit_then_closes_complete_
     # The requester is itself inside an application Job. Only the explicit
     # resource call reaches root; no breakaway/local-spawn route is available.
     service_code = f"""import os,signal,time,pathlib,json
-from shared.sessions.windows.terminal.backend import WindowsTerminalBackend
+from base.sessions.windows.terminal.backend import WindowsTerminalBackend
 signal.signal(signal.SIGBREAK, lambda *args: exit(0))
 WindowsTerminalBackend().new_session('native-terminal', {command!r}, pathlib.Path({str(tmp_path)!r}), env=dict(os.environ))
 pathlib.Path({str(birth_receipt)!r}).write_text('ready')
@@ -91,7 +91,7 @@ while True: time.sleep(0.02)
 def test_terminal_owner_death_closes_members_without_fabricating_receipt(
     tmp_path, native_env, terminal_backend
 ):
-    from shared.sessions.windows.terminal.record import record_path
+    from base.sessions.windows.terminal.record import record_path
 
     descendant = tmp_path / "terminal-child"
     command = subprocess.list2cmdline([sys.executable, "-u", "-c", sleeping_service(descendant)])

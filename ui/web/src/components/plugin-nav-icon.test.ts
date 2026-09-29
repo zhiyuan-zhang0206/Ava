@@ -1,6 +1,6 @@
 // The nav vocabularies have two halves each, and each pair must be one set.
 //
-// `shared/packages/plugins/ui_contributions.py:NAV_ICONS` is what a manifest may declare;
+// `base/packages/plugins/ui_contributions.py:NAV_ICONS` is what a manifest may declare;
 // `PLUGIN_NAV_ICONS` is what the console can draw. A name in the validator but
 // not the map renders a fallback icon nobody asked for; a name in the map but
 // not the validator is a promise no manifest can use. Neither shows up at
@@ -17,7 +17,7 @@ import { NAV_LOCATIONS } from "@/lib/plugin-nav";
 
 function validatorTuple(name: string): string[] {
   const source = readFileSync(
-    resolve(__dirname, "../../../../shared/packages/plugins/ui_contributions.py"),
+    resolve(__dirname, "../../../../base/packages/plugins/ui_contributions.py"),
     "utf-8",
   );
   // Non-greedy to the first `)`, so a one-line tuple (NAV_LOCATIONS) and a

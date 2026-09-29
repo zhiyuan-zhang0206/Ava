@@ -7,8 +7,8 @@ from typing import Any
 
 import pytest
 
+from base import telemetry
 from gateway.lgtm import telemetry_staleness
-from shared import telemetry
 
 
 @pytest.fixture(autouse=True)

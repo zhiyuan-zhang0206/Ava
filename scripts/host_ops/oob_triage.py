@@ -75,8 +75,8 @@ _JOURNAL_COMMAND = 'cat "$HOME/.ava/run/deploy-pause-owner.json"'
 _RESUME_PHASES = ("preparing", "draining", "drained")
 _START_PHASES = ("stopping", "stopped", "starting")
 
-# Vocabulary mirrors shared.deploy.maintenance.pause_owner / shared.deploy.maintenance.hold_driver /
-# shared.deploy.maintenance.state; an unknown value is a structural surprise and the
+# Vocabulary mirrors base.deploy.maintenance.pause_owner / base.deploy.maintenance.hold_driver /
+# base.deploy.maintenance.state; an unknown value is a structural surprise and the
 # caller falls through to the next source.
 _PHASES = ("preparing", "draining", "drained", "stopping", "stopped", "starting", "ready")
 _STATES = ("paused", "resumed")
@@ -260,7 +260,7 @@ def classify_status(payload: Payload, *, host: str, now: float | None = None) ->
     """Classify one `ava maintenance status` reading (the primary source).
 
     The status payload is the only source carrying the shepherd's liveness
-    (`driver.liveness`, judged by shared.deploy.maintenance.hold_driver), so it is the only source
+    (`driver.liveness`, judged by base.deploy.maintenance.hold_driver), so it is the only source
     that can classify beyond `undetermined`. A structural surprise raises and
     the caller falls back to the journal read.
     """
@@ -306,7 +306,7 @@ def classify_status(payload: Payload, *, host: str, now: float | None = None) ->
     # (ops/controllers/stranded_pause.py, `stranded_hold_verdict`): failed
     # receipts read `stranded` (never releasable), a dead shepherd with none
     # reads `orphaned`, and a missing/unreadable shepherd is never a release
-    # license (shared/deploy/maintenance/hold_driver.py: `missing` is definitional, only `dead`
+    # license (base/deploy/maintenance/hold_driver.py: `missing` is definitional, only `dead`
     # is the unambiguous birth-checked absence) -- so both stay `undetermined`.
     if failures > 0:
         classification: Classification = "stranded"

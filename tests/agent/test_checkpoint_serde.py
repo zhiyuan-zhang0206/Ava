@@ -36,7 +36,7 @@ from agent.state import (
     clear_plugin_registrations,
     register_plugin_state,
 )
-from shared.packages.plugins.context import PluginContext
+from base.packages.plugins.context import PluginContext
 
 _SERDE_LOGGER = "langgraph.checkpoint.serde.jsonplus"
 
@@ -198,7 +198,7 @@ def test_allowlist_static_entries_always_present() -> None:
 def test_static_allowlist_covers_all_nested_substates() -> None:
     """Hard guard for the allowlist contract: every nested sub-state — a
     BaseAgentState field whose value is a BaseModel instance — must be named
-    in `shared/agents/history/checkpoint_serde.py::STATIC_CHECKPOINT_MSGPACK_TYPES`. A new
+    in `base/agents/history/checkpoint_serde.py::STATIC_CHECKPOINT_MSGPACK_TYPES`. A new
     sub-state added without registration deserializes as a raw dict the
     moment the permissive default is gone (fails loudly on load, but the
     channel is already broken); this test makes the miss fail at CI time
@@ -210,7 +210,7 @@ def test_static_allowlist_covers_all_nested_substates() -> None:
     from pydantic import BaseModel as PydanticBaseModel
 
     from agent.state import BaseAgentState
-    from shared.agents.history.checkpoint_serde import STATIC_CHECKPOINT_MSGPACK_TYPES
+    from base.agents.history.checkpoint_serde import STATIC_CHECKPOINT_MSGPACK_TYPES
 
     nested: list[tuple[str, str]] = []
     for field in BaseAgentState.model_fields.values():
@@ -221,7 +221,7 @@ def test_static_allowlist_covers_all_nested_substates() -> None:
     for key in nested:
         assert key in STATIC_CHECKPOINT_MSGPACK_TYPES, (
             f"nested sub-state {key} missing from "
-            f"shared/agents/history/checkpoint_serde.py::STATIC_CHECKPOINT_MSGPACK_TYPES — add it "
+            f"base/agents/history/checkpoint_serde.py::STATIC_CHECKPOINT_MSGPACK_TYPES — add it "
             f"or the channel degrades to a raw dict on checkpoint load"
         )
 

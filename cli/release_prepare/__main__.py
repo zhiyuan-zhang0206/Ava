@@ -7,9 +7,9 @@ import subprocess
 import sys
 from pathlib import Path
 
+from base.deploy.release.verified_file import regular_bytes
 from cli.release_prepare import LocalInputs, Preparation, prepare_image
 from cli.release_prepare.models import encode
-from shared.deploy.release.verified_file import regular_bytes
 
 
 def main() -> int:

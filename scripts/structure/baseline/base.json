@@ -1,0 +1,5 @@
+{
+  "complexity": {
+    "base/runtime_plugins.py::verify_plugin_dependencies": 15
+  }
+}

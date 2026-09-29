@@ -3,7 +3,7 @@
 Asserts the declared field defaults via `model_fields` rather than constructing
 `Settings()` (which needs required env fields and is env-dependent)."""
 
-from shared.config import FIELD_INFOS
+from base.config import FIELD_INFOS
 
 
 def test_browser_defaults() -> None:

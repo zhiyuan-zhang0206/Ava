@@ -285,7 +285,7 @@ class TestEventsApi:
         (``AVA_EVENTS_DEFAULT_LIMIT``); the literal 100 is only that field's
         default, not a hard-coded page size. The meta echo reports the
         resolved window, not the raw None."""
-        from shared.config import settings
+        from base.config import settings
 
         monkeypatch.setattr(settings.display, "events_default_limit", 7)
         with TestClient(app) as client:

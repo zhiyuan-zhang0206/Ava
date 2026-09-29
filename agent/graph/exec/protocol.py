@@ -43,9 +43,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, cast
 
-from shared.log import logger
-from shared.native_process.exec_domain import KILL_GRACE_S as KILL_GRACE_S
-from shared.native_process.runtime_incarnation import RuntimeIncarnation, current_incarnation
+from base.log import logger
+from base.native_process.exec_domain import KILL_GRACE_S as KILL_GRACE_S
+from base.native_process.runtime_incarnation import RuntimeIncarnation, current_incarnation
 
 # Envelope schema versions — bumped only on a breaking shape change.
 REQUEST_VERSION = 1
@@ -157,7 +157,7 @@ class ResultPayload:
     state_update_error: str | None = None
     findings: list[dict[str, Any]] | None = None
     attachments: list[dict[str, Any]] | None = None
-    # The run's SDK-call tally in `shared.agents.sdk.telemetry.tally_entries` shape
+    # The run's SDK-call tally in `base.agents.sdk.telemetry.tally_entries` shape
     # (`[{"method": ..., "count": N}, ...]`); the exec node attaches it to the
     # exec_output ToolMessage as `additional_kwargs["sdk_calls"]`. None = the
     # code never ran (boot crash) — "ran, zero calls" is `[]`, a real zero.
@@ -365,7 +365,7 @@ def _write_json(path: Path, envelope: dict[str, Any]) -> None:
     `path` only through the final rename, so a writer killed mid-write can
     never leave a zero-byte or partial envelope behind (task #3619 D-3: a
     0-byte request envelope used to defer hosted boot recovery forever — see
-    shared/agents/incarnation/exec_request_evidence.py). Owner-only from creation — `mkstemp`
+    base/agents/incarnation/exec_request_evidence.py). Owner-only from creation — `mkstemp`
     opens 0600 before any content lands, and the rename keeps that inode's
     mode, so no byte of message history ever sits at looser perms.
     """

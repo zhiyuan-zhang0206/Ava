@@ -18,12 +18,12 @@ from typing import Any, cast
 
 from dotenv import dotenv_values
 
+from base import cluster
+from base.host.atomic_io import fsync_parent, write_text_atomic
+from base.host.env.dotenv_file import upsert_env
+from base.host.private_storage import ensure_private_dir, ensure_private_file
+from base.native_process.os_platform import file_lock
 from cli.start_runtime import StartRuntime
-from shared import cluster
-from shared.host.atomic_io import fsync_parent, write_text_atomic
-from shared.host.env.dotenv_file import upsert_env
-from shared.host.private_storage import ensure_private_dir, ensure_private_file
-from shared.native_process.os_platform import file_lock
 
 INTENT_NAME = "start-intent.json"
 _CAPS = ("gateway", "agent-runner", "observability-station")

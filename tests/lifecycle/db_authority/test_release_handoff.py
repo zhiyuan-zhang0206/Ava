@@ -36,6 +36,15 @@ import pytest
 from pydantic import JsonValue
 
 import cli.release_handoff.__main__ as entry
+from base import cluster
+from base.cluster import authority
+from base.cluster.authority import delivery
+from base.config import settings
+from base.db import connections
+from base.deploy.release.runtime_release import VerifiedRelease, current_pointer
+from base.deploy.release.start_inputs import configuration_digest
+from base.host.env import dotenv_boot
+from base.log import logger
 from cli.commands.data_plane import pgbouncer as pooler
 from cli.main import _normalize_process_profile
 from cli.release_fleet.coordinator import Coordinator
@@ -51,15 +60,6 @@ from cli.release_transition.authority import adopt_executor_authority
 from cli.release_transition.journal import exclusive, read_operation
 from cli.release_transition.request import ReleaseRef
 from cli.start_identity import mark_phase
-from shared import cluster
-from shared.cluster import authority
-from shared.cluster.authority import delivery
-from shared.config import settings
-from shared.db import connections
-from shared.deploy.release.runtime_release import VerifiedRelease, current_pointer
-from shared.deploy.release.start_inputs import configuration_digest
-from shared.host.env import dotenv_boot
-from shared.log import logger
 from tests.lifecycle.db_authority.test_fleet_of_one import (
     _AGENT,
     _MACHINE,
@@ -185,15 +185,15 @@ def _process(environment: Mapping[str, str]) -> Generator[None]:
 @pytest.fixture
 def cycle(born: Born, monkeypatch: pytest.MonkeyPatch) -> Iterator[Cycle]:
     """The born home as the cluster's one registered unit, selecting image A."""
-    import shared.cluster.machine
+    import base.cluster.machine
 
     home = born.home
     registry = Path(cluster.registry_path())
     cluster.save_record_locked(born.record, path=registry)
     mark_phase(home, "provisioned")
     mark_phase(home, "ready")
-    monkeypatch.setattr(shared.cluster.machine, "machine_name", lambda: _MACHINE)
-    monkeypatch.setattr(shared.cluster.machine, "machine_role", lambda: frozenset({"gateway"}))
+    monkeypatch.setattr(base.cluster.machine, "machine_name", lambda: _MACHINE)
+    monkeypatch.setattr(base.cluster.machine, "machine_role", lambda: frozenset({"gateway"}))
     with born.admin() as conn:
         conn.execute(
             "INSERT INTO machines (name, role) VALUES (%s, '{gateway,agent-runner}')", (_MACHINE,)

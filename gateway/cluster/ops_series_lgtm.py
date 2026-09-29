@@ -1,7 +1,7 @@
 """LGTM-backed ops series — the query core behind `GET /api/ops/monitor`
 (the Insights Ops panel), task #1197.
 
-Replaces `shared/ops_series` (the PG `ops_metrics` read path, retired with
+Replaces `base/ops_series` (the PG `ops_metrics` read path, retired with
 the ops-monitor migration): same report shape and the same fixed bucket grid
 (`OPS_GRID_ORIGIN`-aligned; 1h→60s, 6h→300s, 24h→1800s, 7d→3600s,
 zero-filled), but the three metric groups now come from Loki + Prometheus
@@ -49,8 +49,8 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from base.events.contract import LLM_ERROR_FAMILY, OPS_GRID_ORIGIN, family_events
 from gateway.lgtm import loki_events, prom_metrics
-from shared.events.contract import LLM_ERROR_FAMILY, OPS_GRID_ORIGIN, family_events
 
 # Window -> (seconds, bucket seconds). Bucket count per window is fixed:
 # 1h=60, 6h=72, 24h=48, 7d=168 points — enough shape, small payloads.
@@ -64,7 +64,7 @@ WINDOWS: dict[str, tuple[int, int]] = {
 _GRID_ORIGIN = OPS_GRID_ORIGIN
 _LLM_ERROR_EVENTS = family_events(LLM_ERROR_FAMILY)
 
-# OTLP instrument names on the Prometheus side (see shared/telemetry/otlp/telemetry_otlp):
+# OTLP instrument names on the Prometheus side (see base/telemetry/otlp/telemetry_otlp):
 # int payload fields -> counters named `ava_<event>_<field>` (Prometheus
 # appends `_total`), float fields -> histograms (`_bucket`/`_sum`/`_count`).
 _LLM_CALLS = "ava_llm_usage_latency_milliseconds_count"

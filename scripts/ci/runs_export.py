@@ -101,7 +101,7 @@ class RepoCollection:
 
 def cluster_tz() -> ZoneInfo:
     """Return the configured cluster clock used for every date label."""
-    from shared.config import settings
+    from base.config import settings
 
     return ZoneInfo(settings.general.timezone)
 
@@ -692,8 +692,8 @@ def emit_snapshot(snapshot: dict[str, Any]) -> None:
     the exporter process dimension: the schedule calls this module's ``main``
     rather than emitting a second, schedule-named event stream.
     """
-    from shared import telemetry
-    from shared.telemetry.otlp import telemetry_otlp
+    from base import telemetry
+    from base.telemetry.otlp import telemetry_otlp
 
     telemetry.init_telemetry(process=PROCESS_NAME)
     telemetry_otlp.warmup()
@@ -738,7 +738,7 @@ def main(argv: list[str] | None = None) -> int:
     now = datetime.now(UTC)
     days = complete_days(now, args.window_days, tz)
     if args.state_dir is None:
-        from shared.paths import ava_home
+        from base.paths import ava_home
 
         state_dir = ava_home() / _STATE_DIR_RELATIVE
     else:

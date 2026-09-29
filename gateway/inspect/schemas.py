@@ -10,11 +10,11 @@ from pydantic import (
     NonNegativeInt,
 )
 
+from base.agents.observation.evidence import AgentObservation
+from base.agents.observation.snapshot import OpenNotice
+from base.agents.tasks.priority import Priority
 from gateway.schemas.stats import StatsWindowHours
 from ops.rpc_schemas import ShellInfo
-from shared.agents.observation.evidence import AgentObservation
-from shared.agents.observation.snapshot import OpenNotice
-from shared.agents.tasks.priority import Priority
 
 
 class AgentCost(BaseModel):
@@ -334,7 +334,7 @@ class PluginMetricResult(BaseModel):
     """One plugin metric rendered for the inspector surface — an element of
     GET /api/agents/{id}/inspect/metrics.
 
-    Mirrors the registered MetricSpec (see `shared/telemetry/metrics/plugin_metrics.py`):
+    Mirrors the registered MetricSpec (see `base/telemetry/metrics/plugin_metrics.py`):
     `panel` selects the payload — `timeseries` / `barchart` / `table` metrics
     carry `series` (a bounded recent window, 24h in 1h buckets by default, so
     at most a couple of dozen points), `stat` metrics carry `value` (the
@@ -379,7 +379,7 @@ class InspectWidgetResult(BaseModel):
     GET /api/agents/{id}/inspect/widgets.
 
     The resolved twin of a registered `InspectWidgetSpec`
-    (`shared/packages/plugins/inspector.py`): `plugin` + `id` name the registration,
+    (`base/packages/plugins/inspector.py`): `plugin` + `id` name the registration,
     `kind` selects the console renderer (a closed set; an unknown kind is
     skipped by the console), and the payload field the kind reads (`tasks`)
     carries the kernel-resolved rows. A widget with an empty payload is

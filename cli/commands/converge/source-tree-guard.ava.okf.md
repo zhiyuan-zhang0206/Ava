@@ -18,7 +18,7 @@ A source-run home imports its code from the prod source checkout
 half-installed plugin left the tree in a state that crashed every agent tool
 call; earlier incidents shared the same shape). User ruling 2026-08-28:
 tampering is detected before exec crashes, and legitimate runtime artifacts are
-allowlisted. `shared/deploy/git/source_tree_guard.py` owns the whitelist and the git reads.
+allowlisted. `base/deploy/git/source_tree_guard.py` owns the whitelist and the git reads.
 
 ## Lifecycle flow
 

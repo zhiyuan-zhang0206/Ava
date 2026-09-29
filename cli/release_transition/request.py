@@ -16,13 +16,13 @@ from pydantic import (
     model_validator,
 )
 
-from shared.deploy.release.runtime_release import (
+from base.deploy.release.runtime_release import (
     ReleaseRejectedError,
     VerifiedRelease,
     verify_release,
 )
-from shared.deploy.release.start_inputs import files_digest, require_configuration
-from shared.runtime_abi import current_abi
+from base.deploy.release.start_inputs import files_digest, require_configuration
+from base.runtime_abi import current_abi
 
 Digest = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
 Commit = Annotated[str, Field(pattern=r"^[0-9a-f]{40}$")]
@@ -43,7 +43,7 @@ class ReleaseRef(Record):
         the image's ABI tag against this host as observed now (never a captured
         request value: a reboot between phases can change the host).
         """
-        from shared.deploy.release.identity import read_application_identity
+        from base.deploy.release.identity import read_application_identity
 
         image = verify_release(
             home / "releases",

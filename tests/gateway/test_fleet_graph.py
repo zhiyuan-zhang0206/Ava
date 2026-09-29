@@ -24,12 +24,12 @@ import pytest
 from fastapi.testclient import TestClient
 from psycopg import errors as pg_errors
 
+from base.cluster import home_label
+from base.paths import ava_home
+from base.telemetry.loki_index_labels import ARCHIVE_FREEZE_AT, INDEX_LABEL_CUTOVER_AT
 from gateway.app import app
 from gateway.lgtm import loki_events, prom_metrics, telemetry_staleness
 from gateway.routers import fleet_graph
-from shared.cluster import home_label
-from shared.paths import ava_home
-from shared.telemetry.loki_index_labels import ARCHIVE_FREEZE_AT, INDEX_LABEL_CUTOVER_AT
 from tests.gateway.loki_fake import FakeLoki
 
 
@@ -222,7 +222,7 @@ def test_decay_lambda_comes_from_display_config(
     (``AVA_FLEET_GRAPH_DECAY_LAMBDA``); the literal 0.5 is only that field's
     default, not a hard-coded decay constant. A zero decay keeps an old message
     edge above the 0.01 drop threshold."""
-    from shared.config import settings
+    from base.config import settings
 
     source = _seed_agent(db_conn)
     target = _seed_agent(db_conn)

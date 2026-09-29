@@ -16,10 +16,10 @@ echo "=== Preview cluster validation ($REPO_ROOT) ==="
 import time
 from pathlib import Path
 
-from shared.host.net.http_dial import get as dial_get
-from shared.host.net.http_dial import post as dial_post
-from shared.cluster.machine import gateway_api_base, gateway_auth_headers
-from shared.paths import ava_home
+from base.host.net.http_dial import get as dial_get
+from base.host.net.http_dial import post as dial_post
+from base.cluster.machine import gateway_api_base, gateway_auth_headers
+from base.paths import ava_home
 
 base = gateway_api_base()
 # /api/agents is an authenticated route once the cluster has a secret; the

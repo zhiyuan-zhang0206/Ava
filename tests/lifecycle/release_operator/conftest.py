@@ -16,9 +16,9 @@ import hashlib
 import json
 from pathlib import Path
 
+from base.deploy.release.runtime_release import MANIFEST_VERSION
+from base.runtime_abi import current_abi
 from cli.release_transition.request import ReleaseRef
-from shared.deploy.release.runtime_release import MANIFEST_VERSION
-from shared.runtime_abi import current_abi
 
 _SITE = "venv/lib/python3.12/site-packages"
 _BASELINE = b"SELECT 1;\n"

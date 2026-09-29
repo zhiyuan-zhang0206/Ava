@@ -12,21 +12,21 @@ from uuid import uuid4
 import pytest
 from pydantic import JsonValue, ValidationError
 
-from cli.release_transition import journal
-from cli.release_transition.journal import read_request
-from cli.release_transition.pitr.evidence import PitrSeal
-from cli.release_transition.pitr.inputs import read_record, require_inputs
-from cli.release_transition.request import PitrRequest, ReleaseRef
-from services.pitr.activation.state import ActivationRecord, record_path, write_record
-from shared.deploy.release.operation import (
+from base.deploy.release.operation import (
     authorized_pitr,
     authorized_start,
     require_configuration_write_authorized,
     require_pitr_authorized,
     require_start_authorized,
 )
-from shared.deploy.release.start_inputs import configuration_files, files_digest
-from shared.native_process.evidence import ExpectedProcess
+from base.deploy.release.start_inputs import configuration_files, files_digest
+from base.native_process.evidence import ExpectedProcess
+from cli.release_transition import journal
+from cli.release_transition.journal import read_request
+from cli.release_transition.pitr.evidence import PitrSeal
+from cli.release_transition.pitr.inputs import read_record, require_inputs
+from cli.release_transition.request import PitrRequest, ReleaseRef
+from services.pitr.activation.state import ActivationRecord, record_path, write_record
 from tests.lifecycle.transition.phases import at_phase
 from tests.lifecycle.transition.test_launcher_linux import _constant
 
@@ -282,9 +282,9 @@ def test_rollback_refuses_unclosed_executor(pitr_request: PitrRequest) -> None:
 def test_rollback_submission_preserves_held_generation_or_renews_after_resume(
     pitr_request: PitrRequest, monkeypatch: pytest.MonkeyPatch, post_resume: bool
 ) -> None:
+    from base.deploy.maintenance import pause_owner
     from cli.release_transition import launcher_linux
     from cli.release_transition.pitr import submission
-    from shared.deploy.maintenance import pause_owner
 
     journal.create(pitr_request)
     home = Path(pitr_request.home)
@@ -359,10 +359,10 @@ def test_rollback_cannot_decide_while_native_attempt_is_unknown(
 def test_new_rollback_after_release_uses_selected_image_and_same_activation(
     pitr_request: PitrRequest, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    from base import cluster, paths
+    from base.cluster import machine
     from cli.release_fleet.request import FleetRequest
     from cli.release_transition.pitr import submission
-    from shared import cluster, paths
-    from shared.cluster import machine
 
     # The activation was born under A. A subsequent completed release selected B.
     # The capture boundary reads the business identity; full phase proofs are
@@ -440,7 +440,7 @@ def test_pitr_input_admission_imports_without_settings_or_database() -> None:
     program = (
         f"import sys; sys.path.insert(0, {str(root)!r}); "
         "import cli.release_transition.pitr.inputs; "
-        "assert not {'shared.config', 'shared.db', 'shared.host.env.runtime_config'} & sys.modules.keys()"
+        "assert not {'base.config', 'base.db', 'base.host.env.runtime_config'} & sys.modules.keys()"
     )
     result = subprocess.run(  # noqa: S603 — fixed import probe in the candidate source
         [sys.executable, "-I", "-B", "-c", program],

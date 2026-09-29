@@ -17,10 +17,10 @@ from urllib.parse import urlsplit
 import pytest
 from dotenv import dotenv_values
 
+from base import cluster
+from base.native_process.os_platform import file_lock
 from cli import start_identity as identity
 from cli import start_intent
-from shared import cluster
-from shared.native_process.os_platform import file_lock
 from tests.lifecycle._start_identity import prepare_start_identity
 
 
@@ -416,7 +416,7 @@ def _runner_start(
     inputs: identity.IdentityInput, monkeypatch: pytest.MonkeyPatch, *extra: str
 ) -> Any:
     """A remote runner's first start against a gateway serving the endpoint only."""
-    from shared.host.env import bootstrap
+    from base.host.env import bootstrap
 
     monkeypatch.setattr(start_intent, "_checkout", lambda: inputs.checkout)
     monkeypatch.setenv("AVA_HOME", str(inputs.home))
@@ -450,7 +450,7 @@ def test_runner_without_a_capability_refuses_before_persisting(
 ) -> None:
     """Bootstrap serves no login, so a runner's first start needs its unit
     capability; without one it refuses before any identity is written."""
-    from shared.cluster.authority import unit
+    from base.cluster.authority import unit
 
     args = _runner_start(inputs, monkeypatch)
     with pytest.raises(ValueError, match="holds no database capability"):
@@ -639,7 +639,7 @@ def test_public_start_holds_home_lock_through_runtime_start(
     inputs: identity.IdentityInput, monkeypatch: pytest.MonkeyPatch
 ) -> None:
 
-    from shared.native_process.os_platform import LockTimeoutError, file_lock
+    from base.native_process.os_platform import LockTimeoutError, file_lock
 
     monkeypatch.setattr(start_intent, "_checkout", lambda: inputs.checkout)
     monkeypatch.setenv("AVA_HOME", str(inputs.home))
@@ -689,8 +689,8 @@ def test_failed_boot_publication_clears_serving_and_refuses_success(
     inputs: identity.IdentityInput, monkeypatch: pytest.MonkeyPatch
 ) -> None:
 
+    from base.deploy.lifecycle import start_serving
     from cli.commands.lifecycle import root_driver
-    from shared.deploy.lifecycle import start_serving
 
     monkeypatch.setattr(start_intent, "_checkout", lambda: inputs.checkout)
     monkeypatch.setenv("AVA_HOME", str(inputs.home))

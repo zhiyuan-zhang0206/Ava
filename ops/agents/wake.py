@@ -7,14 +7,8 @@ import psycopg
 from psycopg import sql
 from psycopg.types.json import Jsonb
 
-from ops.agents.resurrection_retry import (
-    ResurrectSettlementDeferredError,
-    hosted_resurrection_target,
-)
-from ops.agents.resurrection_retry import ResurrectTriggerStaleError as ResurrectTriggerStaleError
-from ops.agents.resurrection_retry import lock_active_home_machine as _lock_active_home_machine
-from shared import telemetry
-from shared.agents import (
+from base import telemetry
+from base.agents import (
     AgentNotFound,
     AgentStatus,
     MachinePaused,
@@ -22,19 +16,25 @@ from shared.agents import (
     ResurrectBudgetExhausted,
     ResurrectRefused,
 )
-from shared.agents.incarnation.lifecycle_acceptance import (
+from base.agents.incarnation.lifecycle_acceptance import (
     LIFECYCLE_RELEASE,
     UNOWNED_TERMINATION_ID,
     UNOWNED_TERMINATION_RECORDED,
 )
-from shared.cluster.machine import machine_name
-from shared.config import field_alias, get_field, settings
-from shared.db import fetch_one, publish_inbound_wake
-from shared.db.transaction import write_transaction
-from shared.events.live.announce import publish_agent_updated_sync
-from shared.log import logger
-from shared.native_process.runtime_incarnation import RuntimeIncarnation
-from shared.telemetry.audit_events import prepare_event_log
+from base.cluster.machine import machine_name
+from base.config import field_alias, get_field, settings
+from base.db import fetch_one, publish_inbound_wake
+from base.db.transaction import write_transaction
+from base.events.live.announce import publish_agent_updated_sync
+from base.log import logger
+from base.native_process.runtime_incarnation import RuntimeIncarnation
+from base.telemetry.audit_events import prepare_event_log
+from ops.agents.resurrection_retry import (
+    ResurrectSettlementDeferredError,
+    hosted_resurrection_target,
+)
+from ops.agents.resurrection_retry import ResurrectTriggerStaleError as ResurrectTriggerStaleError
+from ops.agents.resurrection_retry import lock_active_home_machine as _lock_active_home_machine
 
 # The exact retained hosted identity; or, all three NULL, a never-admitted row
 # whose fresh-INSERT birth marker is still unconsumed, or a row whose unowned
@@ -80,11 +80,11 @@ def _transition_terminated_to_unclaimed_idling(
         unowned_termination,
     )
     if trigger_inbound_id is not None:
-        from shared.agents.incarnation.lifecycle_acceptance import (
+        from base.agents.incarnation.lifecycle_acceptance import (
             FAILED_RESTART_FOR_CURRENT_TARGET,
             SYSTEM_REAPED_CRASH_ROW,
         )
-        from shared.agents.recovery_breaker import RECOVERY_BREAKER_CLEAR
+        from base.agents.recovery_breaker import RECOVERY_BREAKER_CLEAR
 
         assert trigger_inbound_kind is not None  # validated at public helper boundary  # noqa: S101
         cur.execute(
@@ -169,7 +169,7 @@ def _auto_resurrect_max_attempts() -> int:
     local hosted resurrection still runs this transaction in-process. The
     cluster `.env` remains the configuration authority in that profile.
     """
-    from shared.host.env.runtime_config import read_env_aliases
+    from base.host.env.runtime_config import read_env_aliases
 
     raw = read_env_aliases().get(field_alias("auto_resurrect_max_attempts"))
     if raw is not None:
@@ -199,9 +199,9 @@ def _prepare_resurrect_attempt(
     (`ResurrectRefused`) — the batch entry only reinstates the recorded
     billing cohort.
     """
-    from shared.agents.incarnation.exec_owner_recovery import recover_local_resources
-    from shared.agents.incarnation.lifecycle_acceptance import supersede_lifecycle_for_resurrect
-    from shared.agents.messages.envelope import reject_unnegotiated_caller
+    from base.agents.incarnation.exec_owner_recovery import recover_local_resources
+    from base.agents.incarnation.lifecycle_acceptance import supersede_lifecycle_for_resurrect
+    from base.agents.messages.envelope import reject_unnegotiated_caller
 
     reject_unnegotiated_caller(resurrected_by)
     recover_local_resources(agent_id, machine_name())
@@ -229,7 +229,7 @@ def _prepare_resurrect_attempt(
             unowned_termination=unowned_termination,
         )
         if billing_recovery:
-            from shared.agents.recovery_breaker import (
+            from base.agents.recovery_breaker import (
                 HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS,
                 PERMANENT_REJECT_REASON_BILLING,
             )
@@ -320,7 +320,7 @@ def _stage_resurrect_event(
         target_agent_id=_resurrect_event_target(resurrected_by),
         payload=payload,
     )
-    from shared.agents.impersonation_manifest import stage_central_expected_event
+    from base.agents.impersonation_manifest import stage_central_expected_event
 
     return stage_central_expected_event(conn, event, origin_kind="agent_wake", origin_id=origin_id)
 

@@ -16,14 +16,14 @@ import ava
 from agent import state as state_module
 from ava import agent_identity, external
 from ava.external.state import decode_plugin_delta, load_snapshot
-from shared.agents import impersonation as leases
-from shared.agents.impersonation import history
-from shared.agents.messages.caller_identity import CallerIdentity
-from shared.cluster.machine import machine_name
-from shared.config import settings
-from shared.db import create_agent
-from shared.native_process.runtime_incarnation import RuntimeIncarnation
-from shared.packages.plugins.context import PluginContext
+from base.agents import impersonation as leases
+from base.agents.impersonation import history
+from base.agents.messages.caller_identity import CallerIdentity
+from base.cluster.machine import machine_name
+from base.config import settings
+from base.db import create_agent
+from base.native_process.runtime_incarnation import RuntimeIncarnation
+from base.packages.plugins.context import PluginContext
 from tests.impersonation_support import attested_caller, recorded_tree
 
 
@@ -278,7 +278,7 @@ def test_external_memory_write_uses_borrowed_identity(
     stale_process_identity: bool,
 ) -> None:
     from ava_builtins.plugins.ava_memory import sdk as memory_sdk
-    from shared import paths
+    from base import paths
 
     def workspace(agent_id: int) -> Path:
         return tmp_path / str(agent_id)
@@ -324,7 +324,7 @@ def test_external_memory_rechecks_lease_before_filesystem_effects(
     operation: str,
 ) -> None:
     from ava_builtins.plugins.ava_memory import notes, sdk
-    from shared import paths
+    from base import paths
 
     def workspace(agent_id: int) -> Path:
         return tmp_path / str(agent_id)

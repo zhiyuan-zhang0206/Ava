@@ -8,7 +8,7 @@ tasks #2915 / #3267).
 ## The version
 
 - **Bare form:** `YYYY.M.D` from the commit date of the checkout's HEAD
-  (`shared/deploy/git/host_version.py:host_version`) — e.g. `2026.9.13`. This is the
+  (`base/deploy/git/host_version.py:host_version`) — e.g. `2026.9.13`. This is the
   string every gate compares, so it always exists on every checkout-mode
   machine, advances by itself, and needs no release process.
 - **Display form:** `YYYY.M.D+g<short-sha>` (`host_version_display`) — for

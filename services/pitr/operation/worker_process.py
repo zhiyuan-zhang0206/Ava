@@ -47,6 +47,11 @@ from typing import Protocol, cast
 
 import psutil
 
+from base.cluster.dataplane.pg_foreground import record_postmasters_in
+from base.native_process import native_boot_id
+from base.native_process.exec_domain import ExecDomainBirthError, ExecProcessDomain
+from base.native_process.group_closure import confirm_closure
+from base.native_process.os_platform import LockTimeoutError, file_lock
 from services.pitr.operation.custody import (
     NativeProcess,
     OperationBusyError,
@@ -62,11 +67,6 @@ from services.pitr.operation.custody import (
     report,
     retire_controls,
 )
-from shared.cluster.dataplane.pg_foreground import record_postmasters_in
-from shared.native_process import native_boot_id
-from shared.native_process.exec_domain import ExecDomainBirthError, ExecProcessDomain
-from shared.native_process.group_closure import confirm_closure
-from shared.native_process.os_platform import LockTimeoutError, file_lock
 
 _log = logging.getLogger(__name__)
 CLOSE_DEADLINE_S = 20.0

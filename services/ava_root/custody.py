@@ -12,7 +12,7 @@ import os
 from dataclasses import asdict
 from pathlib import Path
 
-from shared.native_process.ownership import OwnedProcess
+from base.native_process.ownership import OwnedProcess
 
 
 def require_clear(run_dir: Path) -> None:
@@ -40,7 +40,7 @@ class ServiceCustody:
         self._body: dict[str, object] = {"version": 1, "unit": unit, "stage": "spawning"}
         self._expected = json.dumps(self._body)
         if os.name == "nt":
-            from shared.native_process.root_control.windows.storage import publish
+            from base.native_process.root_control.windows.storage import publish
 
             publish(self.path, self._expected, exclusive=True)
             return
@@ -61,11 +61,11 @@ class ServiceCustody:
             "stage": "running",
             "processes": [asdict(item) for item in sorted(identities, key=lambda p: p.pid)],
         }
-        from shared.host.atomic_io import write_text_atomic
+        from base.host.atomic_io import write_text_atomic
 
         self._expected = json.dumps(self._body)
         if os.name == "nt":
-            from shared.native_process.root_control.windows.storage import publish
+            from base.native_process.root_control.windows.storage import publish
 
             publish(self.path, self._expected)
             return
@@ -75,7 +75,7 @@ class ServiceCustody:
         """Remove only this owner's record after completed native cleanup."""
         self._require_unchanged()
         if os.name == "nt":
-            from shared.native_process.root_control.windows.storage import clear
+            from base.native_process.root_control.windows.storage import clear
 
             clear(self.path)
             return

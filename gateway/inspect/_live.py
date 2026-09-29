@@ -8,13 +8,13 @@ from typing import Any, Literal, NamedTuple, cast
 from fastapi import HTTPException
 from psycopg_pool import ConnectionPool
 
+from base.agents import AgentStatus
+from base.agents.observation.evidence import AgentObservation, observation
+from base.agents.observation.snapshot import OpenNotice
+from base.config import settings
+from base.db import NOTICE_FYI_TTL_DAYS
 from gateway.inspect.schemas import HeartbeatInfo, HeartbeatLastPause
 from services.heartbeat import JITTER_SPAN_S, STALE_PENDING_S
-from shared.agents import AgentStatus
-from shared.agents.observation.evidence import AgentObservation, observation
-from shared.agents.observation.snapshot import OpenNotice
-from shared.config import settings
-from shared.db import NOTICE_FYI_TTL_DAYS
 
 
 class InspectDbRows(NamedTuple):

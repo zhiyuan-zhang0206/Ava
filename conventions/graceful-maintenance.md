@@ -164,7 +164,7 @@ checkpoint still refuses; queued ordinary messages remain available for resume.
 Preparation settles orphaned ordinary claims on non-cold parked agents and
 bounded-waits unfinished lifecycle commands. Maintenance-authored commands
 still refuse immediately. See the
-[preparation settlement and wait contract](../shared/deploy/maintenance/lifecycle-wait.ava.okf.md)
+[preparation settlement and wait contract](../base/deploy/maintenance/lifecycle-wait.ava.okf.md)
 for eligibility, stale cutoff, and retry semantics.
 
 ## Explicit maintenance steps

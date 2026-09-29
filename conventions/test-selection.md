@@ -28,7 +28,7 @@ SELECTED replaces the backend pytest fan-out, and only in enforce mode.
 | --- | --- | --- |
 | 1 | Not a pull_request, or head ref begins trunk-merge/ or trunk-temp/ | FULL (queue-or-non-pr) |
 | 2 | Every path is a documentation path | SKIP |
-| 3 | A path is under shared/, ava/, agent/, ava_builtins/, db/, migrations/, or evals/ | FULL (the report names the forced root) |
+| 3 | A path is under base/, ava/, agent/, ava_builtins/, db/, migrations/, or evals/ | FULL (the report names the forced root) |
 | 4 | A path is pyproject.toml, .test_durations, or any conftest.py | FULL |
 | 5 | A path is under tests/e2e/ | FULL |
 | 6 | A path is neither a current collectable backend test, a direct-map source key, nor documentation | FULL (unmapped) |
@@ -47,7 +47,7 @@ population was red on tests/test_lint_event_kinds.py). Name a new scan test
 `test_lint_*.py` to join automatically, or extend `_TREE_SCAN_TESTS`;
 tests/scripts/test_test_selector.py guards completeness and staleness.
 
-The documentation predicate reuses shared.deploy.git.repo_change.is_doc_path. Files under
+The documentation predicate reuses base.deploy.git.repo_change.is_doc_path. Files under
 scripts/, schedules/, and tests/ are deliberately not treated as documentation
 by the selector even when their name ends in Markdown: operational schedule and
 test changes must remain conservative.
@@ -57,8 +57,8 @@ test changes must remain conservative.
 The map AST-parses every Python file under tests/, except files named
 conftest.py, and walks imports in every scope. It includes both module imports
 and absolute from-import targets; for example, from agent import exec_child
-reaches agent/exec_child.py, and from shared import lm reaches
-shared/lm/__init__.py when those paths exist. Relative imports and unresolved
+reaches agent/exec_child.py, and from base import lm reaches
+base/lm/__init__.py when those paths exist. Relative imports and unresolved
 modules are omitted.
 
 Only importer files named test_*.py or *_test.py outside tests/e2e/ are

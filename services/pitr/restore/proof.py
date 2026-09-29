@@ -17,6 +17,7 @@ from typing import Protocol, cast
 
 import psutil
 
+from base.native_process import native_boot_id
 from services.pitr.base_backup.manifest import CandidateManifest
 from services.pitr.base_backup.restore_crypto import (
     authenticate_base_ciphertext,
@@ -36,7 +37,6 @@ from services.pitr.restore.wal_validate import validate_wal_file
 from services.pitr.stores.object_store import RemoteObjectAck
 from services.pitr.stores.restore_object_store import GenerationPinnedObjectReader
 from services.pitr.wal.crypto import MAGIC, decrypt_archive
-from shared.native_process import native_boot_id
 
 
 class RestoreProofError(RuntimeError):

@@ -7,9 +7,9 @@ import httpx
 import pytest
 from fastapi import HTTPException
 
+from base.native_process.turn_identity import bind_turn_identity, current_turn_agent_id
 from gateway.run_timeline import _events as reads
 from gateway.run_timeline import router as timeline
-from shared.native_process.turn_identity import bind_turn_identity, current_turn_agent_id
 
 
 @pytest.mark.parametrize("tied", [False, True])

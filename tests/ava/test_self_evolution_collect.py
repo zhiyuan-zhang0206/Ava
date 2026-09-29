@@ -485,10 +485,10 @@ class _ScriptedClient:
 
 
 def _capture_sleeps(monkeypatch: pytest.MonkeyPatch) -> list[float]:
-    """Pin shared.host.net.resilience's sleep seam (its own tests' pattern) so retry
+    """Pin base.host.net.resilience's sleep seam (its own tests' pattern) so retry
     tests assert the wait budget instead of sleeping it."""
     sleeps: list[float] = []
-    monkeypatch.setattr("shared.host.net.resilience._sleep", sleeps.append)
+    monkeypatch.setattr("base.host.net.resilience._sleep", sleeps.append)
     return sleeps
 
 

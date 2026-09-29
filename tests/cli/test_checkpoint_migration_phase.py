@@ -65,11 +65,11 @@ class _FakeAdminConnection:
 
 @pytest.fixture
 def migration_phase(monkeypatch: pytest.MonkeyPatch) -> list[str]:
-    import shared.db
-    import shared.deploy.schema.migrations
-    from shared import cluster
-    from shared.cluster import ownership
-    from shared.db import pg_admin
+    import base.db
+    import base.deploy.schema.migrations
+    from base import cluster
+    from base.cluster import ownership
+    from base.db import pg_admin
 
     calls: list[str] = []
     conn = object()
@@ -107,12 +107,12 @@ def migration_phase(monkeypatch: pytest.MonkeyPatch) -> list[str]:
         calls.append("ownership")
 
     monkeypatch.setattr(ownership, "require_postgres_connection", record_ownership)
-    monkeypatch.setattr(shared.db, "connect", fake_connect)
-    monkeypatch.setattr(shared.db, "direct_db_url", lambda: "postgresql://direct/ava")
+    monkeypatch.setattr(base.db, "connect", fake_connect)
+    monkeypatch.setattr(base.db, "direct_db_url", lambda: "postgresql://direct/ava")
     monkeypatch.setattr(pg_admin, "local_owner_authority", lambda: authority)
     monkeypatch.setattr(pg_admin.psycopg, "connect", fake_admin_connect)
     monkeypatch.setattr(
-        shared.deploy.schema.migrations, "apply_pending_migrations", fake_ava_migrations
+        base.deploy.schema.migrations, "apply_pending_migrations", fake_ava_migrations
     )
     monkeypatch.setattr(
         cluster, "assert_checkpoint_dependency_pinned", fake_dependency_gate, raising=False
@@ -128,8 +128,8 @@ def test_start_phase_verifies_checkpoint_schema_after_ava_migrations(
 ) -> None:
     """A locally owned plane migrates as the admin acting as the owner, then
     every capability shares the read-only post-migration checkpoint gate."""
+    from base.db import pg_admin
     from cli.commands.lifecycle.migrations import cmd_migrations_apply
-    from shared.db import pg_admin
 
     authority = pg_admin.local_owner_authority()
     applied = cmd_migrations_apply()
@@ -147,8 +147,8 @@ def test_start_phase_verifies_checkpoint_schema_after_ava_migrations(
 def test_foreign_connected_postgres_refuses_before_migration_ddl(
     migration_phase: list[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    from base.cluster import ownership
     from cli.commands.lifecycle.migrations import cmd_migrations_apply
-    from shared.cluster import ownership
 
     def refuse(_conn: object, _data: Path) -> None:
         raise RuntimeError("foreign connected backend")
@@ -164,8 +164,8 @@ def test_admin_session_without_owner_role_refuses_before_migration_ddl(
 ) -> None:
     """A dial that dropped the startup role (a pooler) would create
     superuser-owned objects; the owner check refuses before any DDL."""
+    from base.db import pg_admin
     from cli.commands.lifecycle.migrations import cmd_migrations_apply
-    from shared.db import pg_admin
 
     def superuser_dial(_url: str, **_kwargs: object) -> _FakeAdminConnection:
         return _FakeAdminConnection("postgres")
@@ -179,9 +179,9 @@ def test_admin_session_without_owner_role_refuses_before_migration_ddl(
 def test_remote_managed_migration_preserves_explicit_provider_authority(
     migration_phase: list[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    from base.config import settings
+    from base.db import pg_admin
     from cli.commands.lifecycle.migrations import cmd_migrations_apply
-    from shared.config import settings
-    from shared.db import pg_admin
 
     monkeypatch.setattr(settings.data_plane, "db_url", "postgresql://owner@db.example/ava")
     monkeypatch.setattr(settings.data_plane, "redis_url", "redis://cache.example/0")
@@ -204,9 +204,9 @@ def _bind_private_database(conn: psycopg.Connection, monkeypatch: pytest.MonkeyP
     native custody proof is replaced by a same-instance check: the admin dial
     must reach the data directory the authority names.
     """
-    from shared.cluster import ownership
-    from shared.config import settings
-    from shared.db import pg_admin
+    from base.cluster import ownership
+    from base.config import settings
+    from base.db import pg_admin
 
     row = conn.execute(
         "SELECT current_setting('data_directory'), current_database(), current_user"
@@ -230,8 +230,8 @@ def test_real_start_phase_converges_ava_then_is_idempotent(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Real PG proves both migration domains are exact on repeated starts."""
+    from base.deploy.schema.migrations import required_migration_set
     from cli.commands.lifecycle.migrations import cmd_migrations_apply
-    from shared.deploy.schema.migrations import required_migration_set
 
     _bind_private_database(db_conn, monkeypatch)
     db_conn.execute("DELETE FROM machine_units")
@@ -260,8 +260,8 @@ def test_dependency_drift_fails_before_any_database_change(
     """
     from langgraph.checkpoint.postgres import PostgresSaver
 
+    from base.cluster.provision import CheckpointDependencyDriftError
     from cli.commands.lifecycle.migrations import cmd_migrations_apply
-    from shared.cluster.provision import CheckpointDependencyDriftError
 
     _bind_private_database(db_conn, monkeypatch)
     db_conn.execute("DELETE FROM machine_units")
@@ -281,7 +281,7 @@ def test_dependency_drift_fails_before_any_database_change(
 
 def test_checkpoint_schema_upstream_baseline_is_frozen() -> None:
     """Future versions extend the paired-migration manifest, never baseline."""
-    from shared.cluster.provision import (
+    from base.cluster.provision import (
         CHECKPOINT_SCHEMA_AVA_MIGRATIONS,
         CHECKPOINT_SCHEMA_UPSTREAM_BASELINE_VERSION,
     )
@@ -293,7 +293,7 @@ def test_checkpoint_schema_upstream_baseline_is_frozen() -> None:
 def test_checkpoint_migration_manifest_must_be_contiguous(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from shared.cluster import provision
+    from base.cluster import provision
 
     monkeypatch.setattr(provision, "CHECKPOINT_SCHEMA_AVA_MIGRATIONS", {11: "future"})
 
@@ -305,7 +305,7 @@ def test_checkpoint_migration_manifest_follows_upstream_version_order(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Ava applies filenames forward/down in reverse, so mapping order is semantic."""
-    from shared.cluster import provision
+    from base.cluster import provision
 
     monkeypatch.setattr(
         provision,
@@ -333,8 +333,8 @@ def test_checkpoint_migration_manifest_requires_tracked_up_and_down(
     write_up: bool,
     write_down: bool,
 ) -> None:
-    from shared.cluster import provision
-    from shared.deploy.schema import migrations
+    from base.cluster import provision
+    from base.deploy.schema import migrations
 
     name = "20990101T000000_checkpoint-v10"
     if write_up:

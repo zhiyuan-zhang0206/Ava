@@ -18,9 +18,9 @@ from urllib.parse import urlsplit
 import pytest
 import yaml
 
+from base.deploy.release import collector_artifact as artifact
+from base.host.net import resilience
 from cli.commands.observability import otel_collector as oc
-from shared.deploy.release import collector_artifact as artifact
-from shared.host.net import resilience
 
 
 def _fail_ensure_otel_collector(*_args: object, **_kwargs: object) -> None:
@@ -55,15 +55,15 @@ def test_generate_config_bakes_settings(monkeypatch: pytest.MonkeyPatch, tmp_pat
         encoding="utf-8",
     )
     monkeypatch.setattr(
-        "shared.config.settings.observability.telemetry_tempo_endpoint", "http://10.0.0.2:14318"
+        "base.config.settings.observability.telemetry_tempo_endpoint", "http://10.0.0.2:14318"
     )
     monkeypatch.setattr(
-        "shared.config.settings.observability.telemetry_loki_url", "http://10.0.0.2:3100"
+        "base.config.settings.observability.telemetry_loki_url", "http://10.0.0.2:3100"
     )
     monkeypatch.setattr(
-        "shared.config.settings.observability.telemetry_prometheus_url", "http://10.0.0.2:9090"
+        "base.config.settings.observability.telemetry_prometheus_url", "http://10.0.0.2:9090"
     )
-    monkeypatch.setattr("shared.config.settings.observability.trace_retention_days", 7)
+    monkeypatch.setattr("base.config.settings.observability.trace_retention_days", 7)
 
     out = oc.generate_config(repo, Path("/home/u/.ava"), roles=None)
     assert "ava_home: /home/u/.ava" in out
@@ -87,20 +87,18 @@ def test_generate_config_two_state_observability_url(
         encoding="utf-8",
     )
     monkeypatch.setattr(
-        "shared.config.settings.observability.telemetry_tempo_endpoint", "http://127.0.0.1:14318"
+        "base.config.settings.observability.telemetry_tempo_endpoint", "http://127.0.0.1:14318"
     )
     monkeypatch.setattr(
-        "shared.config.settings.observability.telemetry_loki_url", "http://127.0.0.1:3100"
+        "base.config.settings.observability.telemetry_loki_url", "http://127.0.0.1:3100"
     )
     monkeypatch.setattr(
-        "shared.config.settings.observability.telemetry_prometheus_url", "http://127.0.0.1:9090"
+        "base.config.settings.observability.telemetry_prometheus_url", "http://127.0.0.1:9090"
     )
-    monkeypatch.setattr(
-        "shared.config.settings.observability.observability_url", "http://10.0.0.46"
-    )
+    monkeypatch.setattr("base.config.settings.observability.observability_url", "http://10.0.0.46")
     # A remote observatory is a split-cluster shape: the relay authenticates
     # with the cluster bearer, so the secret must be set (empty fails closed).
-    monkeypatch.setattr("shared.config.settings.data_plane.cluster_secret", "cluster-token")
+    monkeypatch.setattr("base.config.settings.data_plane.cluster_secret", "cluster-token")
 
     out = oc.generate_config(repo, Path("/home/u/.ava"), roles=None)
     # WP4: a remote observatory is reached through the station's ONE
@@ -109,7 +107,7 @@ def test_generate_config_two_state_observability_url(
     assert "prom: http://10.0.0.46:4318" in out
     assert "tempo: http://127.0.0.1:14318" in out
 
-    monkeypatch.setattr("shared.config.settings.observability.observability_url", "")
+    monkeypatch.setattr("base.config.settings.observability.observability_url", "")
     out = oc.generate_config(repo, Path("/home/u/.ava"), roles=None)
     assert "loki: http://127.0.0.1:3100/otlp" in out
     assert "prom: http://127.0.0.1:9090/api/v1/otlp" in out
@@ -172,15 +170,15 @@ def test_ensure_skips_download_when_version_matches(
     )
 
     monkeypatch.setattr(
-        "shared.config.settings.observability.telemetry_tempo_endpoint", "http://127.0.0.1:14318"
+        "base.config.settings.observability.telemetry_tempo_endpoint", "http://127.0.0.1:14318"
     )
     monkeypatch.setattr(
-        "shared.config.settings.observability.telemetry_loki_url", "http://127.0.0.1:3100"
+        "base.config.settings.observability.telemetry_loki_url", "http://127.0.0.1:3100"
     )
     monkeypatch.setattr(
-        "shared.config.settings.observability.telemetry_prometheus_url", "http://127.0.0.1:9090"
+        "base.config.settings.observability.telemetry_prometheus_url", "http://127.0.0.1:9090"
     )
-    monkeypatch.setattr("shared.config.settings.observability.trace_retention_days", 3)
+    monkeypatch.setattr("base.config.settings.observability.trace_retention_days", 3)
 
     oc.ensure_otel_collector(repo, tmp_path, roles=None)
     assert downloaded == []
@@ -204,15 +202,15 @@ def test_ensure_downloads_when_missing(monkeypatch: pytest.MonkeyPatch, tmp_path
     )
 
     monkeypatch.setattr(
-        "shared.config.settings.observability.telemetry_tempo_endpoint", "http://127.0.0.1:14318"
+        "base.config.settings.observability.telemetry_tempo_endpoint", "http://127.0.0.1:14318"
     )
     monkeypatch.setattr(
-        "shared.config.settings.observability.telemetry_loki_url", "http://127.0.0.1:3100"
+        "base.config.settings.observability.telemetry_loki_url", "http://127.0.0.1:3100"
     )
     monkeypatch.setattr(
-        "shared.config.settings.observability.telemetry_prometheus_url", "http://127.0.0.1:9090"
+        "base.config.settings.observability.telemetry_prometheus_url", "http://127.0.0.1:9090"
     )
-    monkeypatch.setattr("shared.config.settings.observability.trace_retention_days", 3)
+    monkeypatch.setattr("base.config.settings.observability.trace_retention_days", 3)
 
     oc.ensure_otel_collector(repo, tmp_path, roles=None)
     assert len(downloaded) == 1
@@ -240,7 +238,7 @@ _DELIVERED = "postgresql://ava_g3_gateway:generation-login-password@127.0.0.1:1/
 
 def _local_data_plane(monkeypatch: pytest.MonkeyPatch) -> None:
     """A loopback Redis and this home's registry record (the DB URL stays the caller's)."""
-    from shared import cluster
+    from base import cluster
 
     record = cluster.ClusterRecord(
         ports=cast("cluster.ClusterPorts", {"postgres": _PG_PORT, "redis": 6380}),
@@ -253,9 +251,9 @@ def _local_data_plane(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(cluster, "get_record", _get_record)
     monkeypatch.setattr(
-        "shared.config.settings.data_plane.redis_url", "redis://ava:runtime@127.0.0.1:6380/0"
+        "base.config.settings.data_plane.redis_url", "redis://ava:runtime@127.0.0.1:6380/0"
     )
-    monkeypatch.setattr("shared.config.settings.data_plane.redis_admin_password", "abc")
+    monkeypatch.setattr("base.config.settings.data_plane.redis_admin_password", "abc")
 
 
 def _render_real_template(
@@ -271,21 +269,21 @@ def _render_real_template(
 ) -> dict[str, Any]:
     """Render the shipped template for `roles` and parse it as YAML."""
     _local_data_plane(monkeypatch)
-    monkeypatch.setattr("shared.config.settings.gateway.gateway_url", gateway_url)
-    from shared.host.net.url_secret import url_with_host
+    monkeypatch.setattr("base.config.settings.gateway.gateway_url", gateway_url)
+    from base.host.net.url_secret import url_with_host
 
     monkeypatch.setattr(
-        "shared.config.settings.observability.gateway_otlp_endpoint",
+        "base.config.settings.observability.gateway_otlp_endpoint",
         url_with_host("http://localhost:4318", urlsplit(gateway_url).hostname or ""),
     )
-    monkeypatch.setattr("shared.config.settings.data_plane.cluster_secret", cluster_secret)
+    monkeypatch.setattr("base.config.settings.data_plane.cluster_secret", cluster_secret)
     monkeypatch.setattr(
-        "shared.config.settings.observability.otel_collector_metrics_port", self_metrics_port
+        "base.config.settings.observability.otel_collector_metrics_port", self_metrics_port
     )
-    monkeypatch.setattr("shared.config.settings.observability.telemetry_otlp_enabled", otlp_enabled)
-    monkeypatch.setattr("shared.config.settings.observability.observability_url", observability_url)
-    monkeypatch.setattr("shared.cluster.machine.reachable_host", lambda: machine_host)
-    monkeypatch.setattr("shared.cluster.machine.machine_name", lambda: "test-machine")
+    monkeypatch.setattr("base.config.settings.observability.telemetry_otlp_enabled", otlp_enabled)
+    monkeypatch.setattr("base.config.settings.observability.observability_url", observability_url)
+    monkeypatch.setattr("base.cluster.machine.reachable_host", lambda: machine_host)
+    monkeypatch.setattr("base.cluster.machine.machine_name", lambda: "test-machine")
     repo = Path(__file__).resolve().parents[2]
     out = oc.generate_config(repo, _HOME, roles)
     # No placeholder left unconsumed. (A literal dollar survives on purpose:
@@ -405,10 +403,10 @@ def test_gateway_config_scrapes_this_clusters_own_data_plane(
     over the home's owner-only socket as the password-less monitoring role,
     never as the write-generation login the start process adopted (revoked by
     the next rollout); Redis with its admin password."""
-    from shared.cluster.authority import MONITOR_ROLE
-    from shared.db.pg_admin import pg_socket_path
+    from base.cluster.authority import MONITOR_ROLE
+    from base.db.pg_admin import pg_socket_path
 
-    monkeypatch.setattr("shared.config.settings.data_plane.db_url", _DELIVERED)
+    monkeypatch.setattr("base.config.settings.data_plane.db_url", _DELIVERED)
     cfg = _render_real_template(monkeypatch, frozenset({"gateway", "agent-runner"}))
     rendered = yaml.safe_dump(cfg)
     assert "generation-login-password" not in rendered and "ava_g3_gateway" not in rendered
@@ -454,15 +452,15 @@ def test_remote_managed_plane_omits_the_postgres_receiver(
     this host (its provider monitors it), so only Redis is scraped; the
     provider's database credential never reaches the config."""
     monkeypatch.setattr(
-        "shared.config.settings.data_plane.db_url",
+        "base.config.settings.data_plane.db_url",
         "postgresql://ava:provider-password@10.0.0.2:5433/ava",
     )
-    monkeypatch.setattr("shared.config.settings.data_plane.redis_url", "redis://10.0.0.2:6380/0")
-    monkeypatch.setattr("shared.config.settings.data_plane.redis_admin_password", "abc")
-    monkeypatch.setattr("shared.config.settings.gateway.gateway_url", "http://localhost:8000")
-    monkeypatch.setattr("shared.config.settings.data_plane.cluster_secret", "")
-    monkeypatch.setattr("shared.cluster.machine.reachable_host", lambda: "localhost")
-    monkeypatch.setattr("shared.cluster.machine.machine_name", lambda: "test-machine")
+    monkeypatch.setattr("base.config.settings.data_plane.redis_url", "redis://10.0.0.2:6380/0")
+    monkeypatch.setattr("base.config.settings.data_plane.redis_admin_password", "abc")
+    monkeypatch.setattr("base.config.settings.gateway.gateway_url", "http://localhost:8000")
+    monkeypatch.setattr("base.config.settings.data_plane.cluster_secret", "")
+    monkeypatch.setattr("base.cluster.machine.reachable_host", lambda: "localhost")
+    monkeypatch.setattr("base.cluster.machine.machine_name", lambda: "test-machine")
     repo = Path(__file__).resolve().parents[2]
 
     rendered = oc.generate_config(repo, _HOME, frozenset({"gateway", "agent-runner"}))
@@ -891,13 +889,13 @@ def test_remote_observatory_relay_without_secret_fails_closed(
 def test_station_otlp_ingress_port_follows_single_source(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The station's advertised unit url (shared.cluster.machines.unit_dial_url) and
+    """The station's advertised unit url (base.cluster.machines.unit_dial_url) and
     its remote receiver bind the SAME port — AVA_TELEMETRY_OTLP_PORT is the
     single knob for both (WP4, task #1946)."""
-    monkeypatch.setattr("shared.config.settings.observability.telemetry_otlp_port", 4321)
+    monkeypatch.setattr("base.config.settings.observability.telemetry_otlp_port", 4321)
     cfg = _render_real_template(monkeypatch, frozenset({"observability-station"}))
     assert cfg["receivers"]["otlp/remote"]["protocols"]["http"]["endpoint"] == ("10.0.0.10:4321")
-    from shared.cluster.machines import unit_dial_url
+    from base.cluster.machines import unit_dial_url
 
     assert unit_dial_url(frozenset({"observability-station"})) == "http://10.0.0.10:4321"
 
@@ -906,7 +904,7 @@ def test_local_ingress_port_does_not_change_gateway_projection(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Local receivers follow this unit's port; relay targets follow bootstrap."""
-    monkeypatch.setattr("shared.config.settings.observability.telemetry_otlp_port", 4319)
+    monkeypatch.setattr("base.config.settings.observability.telemetry_otlp_port", 4319)
     gateway_cfg = _render_real_template(monkeypatch, frozenset({"gateway"}))
     assert gateway_cfg["receivers"]["otlp"]["protocols"]["http"] == {"endpoint": "127.0.0.1:4319"}
     assert gateway_cfg["receivers"]["otlp/remote"]["protocols"]["http"]["endpoint"] == (
@@ -1124,10 +1122,10 @@ def test_config_file_is_owner_only(monkeypatch: pytest.MonkeyPatch, tmp_path: Pa
     )
     monkeypatch.setattr(artifact, "download_and_verify", lambda _tag, _dir: None)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(
-        "shared.config.settings.observability.gateway_otlp_endpoint", "http://10.0.0.10:4318"
+        "base.config.settings.observability.gateway_otlp_endpoint", "http://10.0.0.10:4318"
     )
-    monkeypatch.setattr("shared.config.settings.data_plane.cluster_secret", "cluster-token")
-    monkeypatch.setattr("shared.cluster.machine.reachable_host", lambda: "10.0.0.10")
+    monkeypatch.setattr("base.config.settings.data_plane.cluster_secret", "cluster-token")
+    monkeypatch.setattr("base.cluster.machine.reachable_host", lambda: "10.0.0.10")
     repo = Path(__file__).resolve().parents[2]
 
     replace = Path.replace

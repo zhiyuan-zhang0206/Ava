@@ -23,9 +23,9 @@ from typing import Any
 
 import pytest
 
+from base.deploy.state.cluster_lock import DeployLease, settle_note
+from base.deploy.state.host_deploy_state import HostDeployState
 from ops import deploy_window as dw
-from shared.deploy.state.cluster_lock import DeployLease, settle_note
-from shared.deploy.state.host_deploy_state import HostDeployState
 
 _PIN = "abc1234abc1234"
 _OLD = "0ld0ld0ld0ld0l"
@@ -47,11 +47,11 @@ def _runner(head: str, running: str) -> dict[str, object]:
 @pytest.fixture(autouse=True)
 def _quiet_cluster(monkeypatch: pytest.MonkeyPatch) -> None:
     """An idle cluster. Each test re-arms exactly the signal it is about."""
-    monkeypatch.setattr("shared.deploy.state.cluster_lock.read_update_lease", lambda: None)
-    monkeypatch.setattr("shared.cluster.machines.list_all", list)
-    monkeypatch.setattr("shared.cluster.machine_exclusions.list_excluded_machines", list)
+    monkeypatch.setattr("base.deploy.state.cluster_lock.read_update_lease", lambda: None)
+    monkeypatch.setattr("base.cluster.machines.list_all", list)
+    monkeypatch.setattr("base.cluster.machine_exclusions.list_excluded_machines", list)
     monkeypatch.setattr(dw, "_read_deploy_states", dict)
-    monkeypatch.setattr("shared.deploy.state.cluster_pin.get_cluster_target_sha", lambda: _PIN)
+    monkeypatch.setattr("base.deploy.state.cluster_pin.get_cluster_target_sha", lambda: _PIN)
 
 
 def _probing(results: dict[str, dict[str, object]]):
@@ -72,8 +72,8 @@ def test_lease_holds_even_when_every_host_is_unreachable(monkeypatch: pytest.Mon
     """**The case a probe-only design gets wrong.** `ops` is itself stopped by a
     runner's self-update, so during the stop -> start window no host answers. The
     lease is held by the gateway and does not care."""
-    monkeypatch.setattr("shared.deploy.state.cluster_lock.read_update_lease", lambda: _EXECUTING)
-    monkeypatch.setattr("shared.cluster.machines.list_all", lambda: [("win", "http://win:8600")])
+    monkeypatch.setattr("base.deploy.state.cluster_lock.read_update_lease", lambda: _EXECUTING)
+    monkeypatch.setattr("base.cluster.machines.list_all", lambda: [("win", "http://win:8600")])
     monkeypatch.setattr(dw, "_probe_machines", _probing({}))  # nobody answers
 
     window = dw.deploy_in_flight()
@@ -88,7 +88,7 @@ def test_lease_outranks_the_other_signals(monkeypatch: pytest.MonkeyPatch) -> No
     def _never(_machines: list[tuple[str, str | None]]) -> dict[str, dict[str, object]]:
         raise AssertionError("probed hosts despite a live lease")
 
-    monkeypatch.setattr("shared.deploy.state.cluster_lock.read_update_lease", lambda: _EXECUTING)
+    monkeypatch.setattr("base.deploy.state.cluster_lock.read_update_lease", lambda: _EXECUTING)
     monkeypatch.setattr(dw, "_probe_machines", _never)
     assert dw.deploy_in_flight().active is True
 
@@ -101,9 +101,9 @@ def test_sees_a_lease_less_update_on_another_machine(monkeypatch: pytest.MonkeyP
     R1 (Task #1021): the signal is the machine's `host_deploy_state` posture row."""
     from datetime import UTC, datetime
 
-    from shared.deploy.state.host_deploy_state import HostDeployState
+    from base.deploy.state.host_deploy_state import HostDeployState
 
-    monkeypatch.setattr("shared.cluster.machines.list_all", lambda: [("win", "http://win:8600")])
+    monkeypatch.setattr("base.cluster.machines.list_all", lambda: [("win", "http://win:8600")])
     monkeypatch.setattr(
         dw,
         "_read_deploy_states",
@@ -128,7 +128,7 @@ def test_unreachable_machine_does_not_block_a_deploy_forever(
     """With no lease, an absent host is not a deploying host — otherwise one dead
     machine wedges every future deploy. This is the permissive polarity, and the
     documented blind spot; the lease is what covers it."""
-    monkeypatch.setattr("shared.cluster.machines.list_all", lambda: [("gone", "http://gone:8600")])
+    monkeypatch.setattr("base.cluster.machines.list_all", lambda: [("gone", "http://gone:8600")])
     monkeypatch.setattr(dw, "_read_deploy_states", dict)
     assert dw.deploy_in_flight().active is False
 
@@ -137,7 +137,7 @@ def test_remote_leg_is_skippable(monkeypatch: pytest.MonkeyPatch) -> None:
     def _never() -> dict[str, object]:
         raise AssertionError("remote read ran despite include_remote=False")
 
-    monkeypatch.setattr("shared.cluster.machines.list_all", lambda: [("win", "http://win:8600")])
+    monkeypatch.setattr("base.cluster.machines.list_all", lambda: [("win", "http://win:8600")])
     monkeypatch.setattr(dw, "_read_deploy_states", _never)
     assert dw.deploy_in_flight(include_remote=False).active is False
 
@@ -178,9 +178,9 @@ def test_excluded_machines_stale_posture_does_not_block(
     exclusion means), so before the cohort filter this one row refused every
     update cluster-wide until the operator resumed the machine or learned to
     pass `--force`."""
-    monkeypatch.setattr("shared.cluster.machines.list_all", lambda: [("win", "http://win:18121")])
+    monkeypatch.setattr("base.cluster.machines.list_all", lambda: [("win", "http://win:18121")])
     monkeypatch.setattr(
-        "shared.cluster.machine_exclusions.list_excluded_machines",
+        "base.cluster.machine_exclusions.list_excluded_machines",
         lambda: [("win", "paused", _paused_since_0909())],
     )
     monkeypatch.setattr(
@@ -198,9 +198,9 @@ def test_a_live_updater_outranks_the_exclusion(monkeypatch: pytest.MonkeyPatch) 
     machine that must not block above still blocks here — and `detail` says
     both facts, because a refusal that names an excluded machine owes the
     reader the reason."""
-    monkeypatch.setattr("shared.cluster.machines.list_all", lambda: [("win", "http://win:18121")])
+    monkeypatch.setattr("base.cluster.machines.list_all", lambda: [("win", "http://win:18121")])
     monkeypatch.setattr(
-        "shared.cluster.machine_exclusions.list_excluded_machines",
+        "base.cluster.machine_exclusions.list_excluded_machines",
         lambda: [("win", "paused", _paused_since_0909())],
     )
     monkeypatch.setattr(
@@ -222,7 +222,7 @@ def test_stale_posture_on_a_cohort_machine_still_blocks(monkeypatch: pytest.Monk
     checkout may have moved, and the cluster's own recovery (not this window)
     is what ends the state. `detail` now dates the evidence so the reader can
     tell how stale "mid-deploy" is."""
-    monkeypatch.setattr("shared.cluster.machines.list_all", lambda: [("macmini", "http://m:8106")])
+    monkeypatch.setattr("base.cluster.machines.list_all", lambda: [("macmini", "http://m:8106")])
     monkeypatch.setattr(
         dw,
         "_read_deploy_states",
@@ -241,11 +241,9 @@ def test_a_staging_machine_with_a_stale_posture_does_not_block(
     """The third latch. A staging host is registered and visible but never a
     rollout target, and the flag carries no date column — the diagnostic reads
     it bare."""
+    monkeypatch.setattr("base.cluster.machines.list_all", lambda: [("stage", "http://stage:9000")])
     monkeypatch.setattr(
-        "shared.cluster.machines.list_all", lambda: [("stage", "http://stage:9000")]
-    )
-    monkeypatch.setattr(
-        "shared.cluster.machine_exclusions.list_excluded_machines",
+        "base.cluster.machine_exclusions.list_excluded_machines",
         lambda: [("stage", "staging", None)],
     )
     monkeypatch.setattr(
@@ -264,9 +262,9 @@ def test_the_skip_line_names_exclusion_freshness_and_lease(
     "not blocking" — the line carries the machine, the exclusion and its date,
     the posture's age and the absence of a live lease, so "deliberately
     ignored" cannot be confused with "never read"."""
-    monkeypatch.setattr("shared.cluster.machines.list_all", lambda: [("win", "http://win:18121")])
+    monkeypatch.setattr("base.cluster.machines.list_all", lambda: [("win", "http://win:18121")])
     monkeypatch.setattr(
-        "shared.cluster.machine_exclusions.list_excluded_machines",
+        "base.cluster.machine_exclusions.list_excluded_machines",
         lambda: [("win", "paused", _paused_since_0909())],
     )
     monkeypatch.setattr(
@@ -293,8 +291,8 @@ def test_an_unreadable_exclusion_read_still_refuses(monkeypatch: pytest.MonkeyPa
     def _fail():
         raise RuntimeError("db down")
 
-    monkeypatch.setattr("shared.cluster.machine_exclusions.list_excluded_machines", _fail)
-    monkeypatch.setattr("shared.cluster.machines.list_all", lambda: [("win", "http://win:18121")])
+    monkeypatch.setattr("base.cluster.machine_exclusions.list_excluded_machines", _fail)
+    monkeypatch.setattr("base.cluster.machines.list_all", lambda: [("win", "http://win:18121")])
     monkeypatch.setattr(
         dw,
         "_read_deploy_states",
@@ -312,12 +310,12 @@ def test_settle_hold_is_released_once_every_host_reaches_the_pin(
 ) -> None:
     """A hold whose hosts converged in the first thirty seconds must not keep the
     cluster blocked for the rest of its window."""
-    monkeypatch.setattr("shared.deploy.state.cluster_lock.read_update_lease", lambda: _SETTLING)
-    monkeypatch.setattr("shared.cluster.machines.list_all", lambda: [("win", "http://win:8600")])
+    monkeypatch.setattr("base.deploy.state.cluster_lock.read_update_lease", lambda: _SETTLING)
+    monkeypatch.setattr("base.cluster.machines.list_all", lambda: [("win", "http://win:8600")])
     monkeypatch.setattr(dw, "_probe_machines", _probing({"win": _runner(_PIN, _PIN)}))
     released: list[str] = []
     monkeypatch.setattr(
-        "shared.deploy.state.cluster_lock.release_settle_hold",
+        "base.deploy.state.cluster_lock.release_settle_hold",
         lambda h: released.append(h) or True,  # pyright: ignore[reportUnknownArgumentType]
     )
 
@@ -343,11 +341,11 @@ def test_settle_release_prints_the_hold_duration(
         settle_started_at=None,  # a real DB read supplies the elapsed directly
         settle_elapsed_s=600.0,
     )
-    monkeypatch.setattr("shared.deploy.state.cluster_lock.read_update_lease", lambda: settling)
-    monkeypatch.setattr("shared.cluster.machines.list_all", lambda: [("win", "http://win:8600")])
+    monkeypatch.setattr("base.deploy.state.cluster_lock.read_update_lease", lambda: settling)
+    monkeypatch.setattr("base.cluster.machines.list_all", lambda: [("win", "http://win:8600")])
     monkeypatch.setattr(dw, "_probe_machines", _probing({"win": _runner(_PIN, _PIN)}))
     monkeypatch.setattr(
-        "shared.deploy.state.cluster_lock.release_settle_hold",
+        "base.deploy.state.cluster_lock.release_settle_hold",
         lambda _h: True,  # pyright: ignore[reportUnknownArgumentType]
     )
 
@@ -367,8 +365,8 @@ def test_settle_hold_stands_while_a_host_still_runs_the_old_code(
 ) -> None:
     """Checkout landed, processes not — the `code` drift. That host is exactly what
     the hold is waiting for, so `head_sha` alone would release far too early."""
-    monkeypatch.setattr("shared.deploy.state.cluster_lock.read_update_lease", lambda: _SETTLING)
-    monkeypatch.setattr("shared.cluster.machines.list_all", lambda: [("win", "http://win:8600")])
+    monkeypatch.setattr("base.deploy.state.cluster_lock.read_update_lease", lambda: _SETTLING)
+    monkeypatch.setattr("base.cluster.machines.list_all", lambda: [("win", "http://win:8600")])
     monkeypatch.setattr(dw, "_probe_machines", _probing({"win": _runner(_PIN, _OLD)}))
 
     window = dw.deploy_in_flight()
@@ -379,8 +377,8 @@ def test_settle_hold_stands_while_a_host_still_runs_the_old_code(
 def test_silence_is_not_convergence(monkeypatch: pytest.MonkeyPatch) -> None:
     """The conservative polarity, and the opposite of the refusal path's: a host that
     cannot be reached is the *least* likely to have finished, so it keeps the hold."""
-    monkeypatch.setattr("shared.deploy.state.cluster_lock.read_update_lease", lambda: _SETTLING)
-    monkeypatch.setattr("shared.cluster.machines.list_all", lambda: [("win", "http://win:8600")])
+    monkeypatch.setattr("base.deploy.state.cluster_lock.read_update_lease", lambda: _SETTLING)
+    monkeypatch.setattr("base.cluster.machines.list_all", lambda: [("win", "http://win:8600")])
     monkeypatch.setattr(dw, "_probe_machines", _probing({}))
     assert dw.deploy_in_flight().active is True
 
@@ -397,9 +395,9 @@ def test_release_probes_only_the_hosts_the_hold_was_taken_over(
 
     So the release asks about exactly the acked hosts the hold names, and the machine
     table is used only to look their dial URLs up."""
-    monkeypatch.setattr("shared.deploy.state.cluster_lock.read_update_lease", lambda: _SETTLING)
+    monkeypatch.setattr("base.deploy.state.cluster_lock.read_update_lease", lambda: _SETTLING)
     monkeypatch.setattr(
-        "shared.cluster.machines.list_all",
+        "base.cluster.machines.list_all",
         lambda: [
             ("win", "http://win:8600"),  # the held host
             ("gw", "http://gw:8000"),  # gateway-only: runs no ops daemon, never answers
@@ -413,7 +411,7 @@ def test_release_probes_only_the_hosts_the_hold_was_taken_over(
         return {"win": _runner(_PIN, _PIN)}
 
     monkeypatch.setattr(dw, "_probe_machines", _fake)
-    monkeypatch.setattr("shared.deploy.state.cluster_lock.release_settle_hold", lambda _h: True)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("base.deploy.state.cluster_lock.release_settle_hold", lambda _h: True)  # pyright: ignore[reportUnknownArgumentType]
 
     assert dw.deploy_in_flight().active is False, "the hold must release"
     # The FIRST round is the convergence question, and it must ask only the held host.
@@ -425,10 +423,8 @@ def test_release_probes_only_the_hosts_the_hold_was_taken_over(
 def test_a_held_host_that_vanished_never_releases(monkeypatch: pytest.MonkeyPatch) -> None:
     """A host named by the hold but no longer registered cannot be probed, so its
     convergence cannot be proven — fall back to the TTL rather than release."""
-    monkeypatch.setattr("shared.deploy.state.cluster_lock.read_update_lease", lambda: _SETTLING)
-    monkeypatch.setattr(
-        "shared.cluster.machines.list_all", lambda: [("other", "http://other:8600")]
-    )
+    monkeypatch.setattr("base.deploy.state.cluster_lock.read_update_lease", lambda: _SETTLING)
+    monkeypatch.setattr("base.cluster.machines.list_all", lambda: [("other", "http://other:8600")])
     assert dw.deploy_in_flight().active is True
 
 
@@ -438,14 +434,14 @@ def test_a_hold_that_names_nobody_never_releases(monkeypatch: pytest.MonkeyPatch
     empty = DeployLease(
         holder="gateway-host:pid1", held_for_s=1.0, expires_in_s=600.0, settle_hosts=[]
     )
-    monkeypatch.setattr("shared.deploy.state.cluster_lock.read_update_lease", lambda: empty)
+    monkeypatch.setattr("base.deploy.state.cluster_lock.read_update_lease", lambda: empty)
     assert dw.deploy_in_flight().active is True
 
 
 def test_an_unreadable_pin_never_releases_a_hold(monkeypatch: pytest.MonkeyPatch) -> None:
     """Convergence must be *proven*; an unknown pin proves nothing."""
-    monkeypatch.setattr("shared.deploy.state.cluster_lock.read_update_lease", lambda: _SETTLING)
-    monkeypatch.setattr("shared.deploy.state.cluster_pin.get_cluster_target_sha", lambda: None)
+    monkeypatch.setattr("base.deploy.state.cluster_lock.read_update_lease", lambda: _SETTLING)
+    monkeypatch.setattr("base.deploy.state.cluster_pin.get_cluster_target_sha", lambda: None)
     assert dw.deploy_in_flight().active is True
 
 
@@ -454,12 +450,12 @@ def test_an_executing_lease_is_never_convergence_released(
 ) -> None:
     """Only a settle hold (settle fields set) is re-examined. Releasing a lease an
     orchestration is executing under would unlock a live rollout."""
-    monkeypatch.setattr("shared.deploy.state.cluster_lock.read_update_lease", lambda: _EXECUTING)
+    monkeypatch.setattr("base.deploy.state.cluster_lock.read_update_lease", lambda: _EXECUTING)
 
     def _never(_holder: str) -> bool:
         raise AssertionError("tried to release a lease that is actively executing")
 
-    monkeypatch.setattr("shared.deploy.state.cluster_lock.release_settle_hold", _never)
+    monkeypatch.setattr("base.deploy.state.cluster_lock.release_settle_hold", _never)
     assert dw.deploy_in_flight().active is True
 
 
@@ -469,9 +465,9 @@ def test_an_executing_lease_is_never_convergence_released(
 @pytest.mark.parametrize(
     "broken",
     [
-        "shared.deploy.state.cluster_lock.read_update_lease",
-        "shared.cluster.machines.list_all",
-        "shared.cluster.machine_exclusions.list_excluded_machines",
+        "base.deploy.state.cluster_lock.read_update_lease",
+        "base.cluster.machines.list_all",
+        "base.cluster.machine_exclusions.list_excluded_machines",
         "ops.deploy_window._read_deploy_states",
     ],
 )

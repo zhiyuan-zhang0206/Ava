@@ -31,10 +31,10 @@ from typing import Any
 import psutil
 import pytest
 
+from base.cluster import home_slug
+from base.host.env.port_block import PORT_OFFSETS
+from base.sessions.env_forwarding import normalize_service_path
 from scripts.cutover_legacy_jobs import Host
-from shared.cluster import home_slug
-from shared.host.env.port_block import PORT_OFFSETS
-from shared.sessions.env_forwarding import normalize_service_path
 
 CANARY = "canary-3f9a-never-printed"
 MACHINE_KEY = "OPENAI_API_KEY"

@@ -32,10 +32,10 @@ from unittest.mock import AsyncMock, patch
 import psutil
 import pytest
 
+from base.config import settings
+from base.native_process.exec_domain import ExecProcessDomain
 from ops.agent_pause import PAUSE_TIMEOUT_SECONDS
 from services.backup_scheduler import daemon, worker
-from shared.config import settings
-from shared.native_process.exec_domain import ExecProcessDomain
 from tests.services.daemon_shutdown_test_support import (
     EXIT_BOUND_S,
     KILL_SLACK_S,
@@ -108,7 +108,7 @@ def _backup_patches(root: Path, mode: str) -> contextlib.ExitStack:
 
 
 def _restore(root: Path, mode: str, postgres_base: Path) -> None:
-    from shared.cluster.dataplane.pg_tools import throwaway_postgres
+    from base.cluster.dataplane.pg_tools import throwaway_postgres
 
     with throwaway_postgres(base=postgres_base, foreground=True) as url:
         import psycopg
@@ -331,7 +331,7 @@ async def test_restore_job_accepts_clean_foreground_postgres_exit(
 
 def _exercise_close_stop(root: Path) -> None:
     """The daemon loop, with its stop request landing inside the group close."""
-    from shared.daemon.shutdown import cancel_and_drain
+    from base.daemon.shutdown import cancel_and_drain
 
     close = ExecProcessDomain.close_confirmed
     launch = ExecProcessDomain.launch_posix

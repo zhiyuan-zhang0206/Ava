@@ -14,10 +14,10 @@ from types import SimpleNamespace
 
 import pytest
 
+from base import db, paths
+from base.packages.extensions import materialize
 from cli.commands.converge.rendered_file import write_rendered_guarded
 from cli.commands.extensions.materialize import materialize_cluster_extensions
-from shared import db, paths
-from shared.packages.extensions import materialize
 
 
 def _capture_emit(monkeypatch: pytest.MonkeyPatch) -> list[tuple[object, ...]]:
@@ -26,7 +26,7 @@ def _capture_emit(monkeypatch: pytest.MonkeyPatch) -> list[tuple[object, ...]]:
     def record_emit(*args: object, **kwargs: object) -> None:
         emitted.append((*args, kwargs))
 
-    monkeypatch.setattr("shared.telemetry.emit", record_emit)
+    monkeypatch.setattr("base.telemetry.emit", record_emit)
     return emitted
 
 

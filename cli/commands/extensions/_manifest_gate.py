@@ -17,8 +17,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from shared import paths
-from shared.packages.plugins import manifest as manifest_module
+from base import paths
+from base.packages.plugins import manifest as manifest_module
 
 
 def manifest_install_errors(pkg_dir: Path, *, mirror_pyproject: bool = False) -> list[str]:
@@ -31,7 +31,7 @@ def manifest_install_errors(pkg_dir: Path, *, mirror_pyproject: bool = False) ->
         return []
 
     errors: list[str] = []
-    from shared.deploy.git import host_version as host_version_mod
+    from base.deploy.git import host_version as host_version_mod
 
     try:
         host = host_version_mod.host_version(paths.repo_root())
@@ -41,7 +41,7 @@ def manifest_install_errors(pkg_dir: Path, *, mirror_pyproject: bool = False) ->
     errors += manifest_module.check_host_commit(manifest, paths.repo_root())
 
     if mirror_pyproject:
-        from shared.packages.plugins import pyproject_mirror
+        from base.packages.plugins import pyproject_mirror
 
         pyproject = pkg_dir / "pyproject.toml"
         if pyproject.is_file():

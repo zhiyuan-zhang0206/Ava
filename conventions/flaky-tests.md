@@ -33,7 +33,7 @@ asynchronously collects it, and `pid_exists` remains true meanwhile. PR #964
 applied the same discipline to the forced-shutdown PITR test in
 `tests/services/test_pitr_base_scheduler.py`; its root-cause fix was a daemon
 ownership-adoption `Event`, not a test relaxation. PR #1303 made
-`shared/sessions/posixproc.py` liveness zombie-aware
+`base/sessions/posixproc.py` liveness zombie-aware
 (`is_running()` and `status() != STATUS_ZOMBIE`) and exposed a separate
 regression: `_FakeProc` did not implement the new `status()` probe, so CI shard
 8 failed twice at the same `AttributeError`.
@@ -225,7 +225,7 @@ count.
 test uses real time or a lattice clock; a new timing constant defines a relation
 outside the lattice.
 
-**Evidence.** [`shared/deploy/timing.py`](../shared/deploy/timing.py) makes `CLOCKS` the
+**Evidence.** [`base/deploy/timing.py`](../base/deploy/timing.py) makes `CLOCKS` the
 single authority for ordered timing constants, including boot stall, launch
 confirmation, boot budget, and reap grace, as well as `NO_PROGRESS` and
 `LOCK_TTL`. In the 2026-07-30 spawn incident, launch confirmation was extended
@@ -242,7 +242,7 @@ state by a fixed wall-clock instant.
 **Lintability — lintable now.** The
 [clock-lattice lint](../scripts/lint/clock_lattice.py) rejects
 lattice-vocabulary constants outside approved lattice modules, while
-`tests/shared/test_timing_topology.py` verifies the declared relations.
+`tests/base/test_timing_topology.py` verifies the declared relations.
 Pinned-count gates remain a review heuristic.
 
 ## 8. Generate and compare visual references in one environment

@@ -22,6 +22,15 @@ import pytest
 import redis as sync_redis
 from fastapi.testclient import TestClient
 
+from base.config import settings
+from base.db import create_agent
+from base.events.live.projection import (
+    GLOBAL_ROLES,
+    SYSTEM_ROLES,
+    ChatDelta,
+    CodeDelta,
+    LabelUpdated,
+)
 from gateway.app import app
 from gateway.events.sse import (
     _decode_frames_for_test,
@@ -29,15 +38,6 @@ from gateway.events.sse import (
     _sse_frame,
     event_stream,
     throttled_event_stream,
-)
-from shared.config import settings
-from shared.db import create_agent
-from shared.events.live.projection import (
-    GLOBAL_ROLES,
-    SYSTEM_ROLES,
-    ChatDelta,
-    CodeDelta,
-    LabelUpdated,
 )
 
 

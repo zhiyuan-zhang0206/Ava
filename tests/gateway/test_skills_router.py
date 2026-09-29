@@ -11,10 +11,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from base import paths
+from base.packages.extensions import install_registry
+from base.packages.extensions.install_registry import InstalledPackage, PackageOrigin, tree_hash
 from gateway.extensions.skills import get_skills
-from shared import paths
-from shared.packages.extensions import install_registry
-from shared.packages.extensions.install_registry import InstalledPackage, PackageOrigin, tree_hash
 
 
 def _mk_skill(name: str, body: str = "# skill\n") -> Path:

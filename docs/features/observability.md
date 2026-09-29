@@ -97,4 +97,4 @@ shipping is not the live delivery mechanism.
 
 - Unified event model: `../../decisions/2026-08-04-event-system-design.md`
 - Tempo-only viewer (Jaeger dropped): `../../deploy/lgtm/README.md`
-- Trace v2 content stripping: `../../shared/telemetry/tracing.py` module docstring
+- Trace v2 content stripping: `../../base/telemetry/tracing.py` module docstring

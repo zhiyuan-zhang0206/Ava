@@ -16,9 +16,9 @@ import ava
 from ava.agents import AgentStatus as S
 from schedules.agent_status_guard import ensure_agent_status_members
 from schedules.catchup import catch_up, fire_slot_once
-from shared.config import settings
-from shared.telemetry.observability import observability_refusal_detail
-from shared.daemon.schedules.watcher import next_fire
+from base.config import settings
+from base.telemetry.observability import observability_refusal_detail
+from base.daemon.schedules.watcher import next_fire
 
 ensure_agent_status_members(
     S,
@@ -68,9 +68,9 @@ def count_events(since: datetime) -> int:
 
     import httpx
 
-    from shared.paths import ava_home
+    from base.paths import ava_home
 
-    from shared.cluster.auth import delivered_token
+    from base.cluster.auth import delivered_token
 
     env_file = Path(ava_home()) / ".env"
     secret = delivered_token() or ""
@@ -118,14 +118,14 @@ def _count_mirror_events(since: datetime) -> int:
 
     The fallback when the gateway refuses observability reads (no
     observability stack on this cluster). The mirror (logs/events-<UTC
-    day>.jsonl — shared/telemetry's local copy of every event this box
+    day>.jsonl — base/telemetry's local copy of every event this box
     emitted, 7-day retention) partitions rows by append day, not by ts, so a
     boundary day's file needs the timestamp filter. The emitter can duplicate
     a row (see mirror_backfill's Task #1408 note), so the count is an upper
     bound — accurate enough for this trigger's coarse volume bands, not an
     accounting figure.
     """
-    from shared.paths import logs_dir
+    from base.paths import logs_dir
 
     now = datetime.now(UTC)
     since_utc = since.astimezone(UTC)

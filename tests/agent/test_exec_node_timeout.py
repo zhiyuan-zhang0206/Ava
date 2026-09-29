@@ -17,7 +17,7 @@ from langgraph.runtime import Runtime
 
 from agent.graph.exec.node import _exec_node_impl
 from agent.state import AgentState
-from shared.agents.context import AvaContext
+from base.agents.context import AvaContext
 from tests.agent._fakes import make_fake_ops_pool
 
 _CONFIG: RunnableConfig = {"configurable": {"thread_id": "7"}}
@@ -53,7 +53,7 @@ async def test_exec_node_timeout_fires_asyncio_wait_for(
     simulating a framework wait that the inner code-exec timeout missed.
     """
     # Graph-level timeout very short, inner timeout irrelevant (patched out)
-    monkeypatch.setattr("shared.config.settings.sandbox.exec_node_timeout_seconds", 0.05)
+    monkeypatch.setattr("base.config.settings.sandbox.exec_node_timeout_seconds", 0.05)
 
     async def _hang_forever(*args, **kwargs):
         await asyncio.Future()  # never completes
@@ -93,8 +93,8 @@ async def test_exec_node_timeout_does_not_fire_when_fast(
 ) -> None:
     """When _run_in_subprocess completes quickly, exec_node_timeout_seconds
     does NOT fire — the normal path returns _ExecDone."""
-    monkeypatch.setattr("shared.config.settings.sandbox.exec_node_timeout_seconds", 10.0)
-    monkeypatch.setattr("shared.config.settings.sandbox.exec_timeout_seconds", 30.0)
+    monkeypatch.setattr("base.config.settings.sandbox.exec_node_timeout_seconds", 10.0)
+    monkeypatch.setattr("base.config.settings.sandbox.exec_timeout_seconds", 30.0)
 
     from agent.graph.exec.node import _ExecDone, _ExecResult
     from agent.graph.exec.protocol import ResultPayload

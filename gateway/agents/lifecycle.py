@@ -22,6 +22,10 @@ from fastapi import APIRouter, Body, HTTPException, Request
 from psycopg_pool import ConnectionPool, PoolTimeout
 from pydantic import BaseModel, Field
 
+from base.agents.impersonation import ImpersonationError
+from base.agents.impersonation.maintenance import force_expire_impersonation
+from base.db import agent_exists, insert_compact_request_inbound
+from base.db.transaction import write_transaction
 from gateway.agents.forward import _forward_to_home_machine
 from gateway.agents.schemas import CancelRequest, CompactEnqueued
 from ops import lifecycle as _ops
@@ -38,10 +42,6 @@ from ops.rpc_schemas import (
     TerminateAgentRequest,
     TerminateAgentResponse,
 )
-from shared.agents.impersonation import ImpersonationError
-from shared.agents.impersonation.maintenance import force_expire_impersonation
-from shared.db import agent_exists, insert_compact_request_inbound
-from shared.db.transaction import write_transaction
 
 router = APIRouter()
 

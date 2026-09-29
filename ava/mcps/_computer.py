@@ -16,7 +16,7 @@ import json
 from contextlib import AsyncExitStack, suppress
 from typing import Any
 
-from shared.host.net.resilience import Policy, aretry
+from base.host.net.resilience import Policy, aretry
 
 # Snapshot results stay small (PNG metadata), but keep the same generous line
 # cap as the browser direct-dial so a future inline-image tier fits.
@@ -149,7 +149,7 @@ async def connect_computer_direct(
     empty (the socket is the whole connection; nothing to close beyond the
     session's own writer), kept for interface parity with the stdio path."""
     if sock is None:
-        from shared.paths import computer_mcp_socket
+        from base.paths import computer_mcp_socket
 
         sock = str(computer_mcp_socket())
     reader, writer = await _dial_computer_mcp(sock)

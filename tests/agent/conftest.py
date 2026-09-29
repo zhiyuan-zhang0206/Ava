@@ -24,8 +24,8 @@ import pytest
 from psycopg_pool import AsyncConnectionPool
 
 from agent.graph.interrupt import InterruptEvent
-from shared.config import settings
-from shared.db.test_db_guard import assert_test_db_url
+from base.config import settings
+from base.db.test_db_guard import assert_test_db_url
 from tests._containers import grant_runner_login
 
 

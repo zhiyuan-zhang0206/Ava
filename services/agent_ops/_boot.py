@@ -20,8 +20,8 @@ import psycopg
 from psycopg.rows import TupleRow
 from psycopg_pool import ConnectionPool
 
-import shared.db
-from shared.config import settings
+import base.db
+from base.config import settings
 
 _log = logging.getLogger("services.agent_ops.daemon")
 
@@ -49,8 +49,8 @@ def _register_boot() -> None:
     outage this function exists to prevent. The failure is logged at error so a
     permanently unregistered runner is visible rather than quietly absent.
     """
-    from shared.cluster.machine import machine_role
-    from shared.cluster.machines import register_self, unit_dial_url
+    from base.cluster.machine import machine_role
+    from base.cluster.machines import register_self, unit_dial_url
 
     try:
         url = unit_dial_url(machine_role())
@@ -96,9 +96,9 @@ def _ops_acceptance() -> frozenset[str] | None:
     active: fail closed). A remote-managed plane keeps no write generations and
     accepts the human secret its gateway presents instead.
     """
-    from shared.cluster.authority.api import acceptance, token_digest
-    from shared.cluster.authority.unit import load_unit_capability
-    from shared.paths import ava_home
+    from base.cluster.authority.api import acceptance, token_digest
+    from base.cluster.authority.unit import load_unit_capability
+    from base.paths import ava_home
 
     home = ava_home().resolve()
     capability = load_unit_capability(home)
@@ -120,7 +120,7 @@ def _open_db_pool() -> ConnectionPool[psycopg.Connection[TupleRow]]:
     connection only briefly, so the cap bounds concurrent dispatch rather than
     request rate.
 
-    Built by `shared.db.pool()` so the borrows carry `prepare_threshold=None` and
+    Built by `base.db.pool()` so the borrows carry `prepare_threshold=None` and
     `PG_KEEPALIVE_KWARGS` from the one place that defines them. The keepalives are
     not incidental for this daemon in particular: it is the longest-lived ava
     process on an agent-runner, which is typically a laptop-grade box that sleeps
@@ -138,7 +138,7 @@ def _open_db_pool() -> ConnectionPool[psycopg.Connection[TupleRow]]:
     # the first dispatch of the day dies with psycopg.OperationalError
     # 'the connection is closed' (Task #1027). The check discards the dead conn
     # and hands out a fresh one.
-    return shared.db.pool(
+    return base.db.pool(
         min_size=0,  # an idle daemon holds no client connection; borrows open lazily
         max_size=max(2, settings.services.ops_concurrency + 2),
         check_connections=True,
