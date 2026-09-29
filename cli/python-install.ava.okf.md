@@ -46,8 +46,13 @@ that can create the environment (native sync, mirror `uv venv`) therefore pass
 the checkout's `.python-version` pin, or the caller's explicit `--python`, as
 `--python`. The offline export stays unpinned: it is universal, and a missing
 pinned interpreter must remain fetchable by the creating step. Native sync
-recreates an existing environment whose interpreter misses the pin; the mirror
-transport reuses an existing target environment as it is.
+recreates an existing environment whose interpreter misses the pin. The mirror
+transport asks an existing target's interpreter for its own version (never a
+directory name or `pyvenv.cfg`): a match is reused; a mismatch with
+`.python-version` prints the old and new versions, removes the checkout's own
+`.venv` and creates it on the pin. It refuses to remove a symlinked `.venv` or
+one that resolves outside the checkout. An explicit `--python` is the caller's
+choice, so its existing target is reused without that check.
 
 Configuration precedence, limits, and first-rollout cautions:
 [Machine Python indexes](../conventions/dev-setup.md#machine-python-indexes).

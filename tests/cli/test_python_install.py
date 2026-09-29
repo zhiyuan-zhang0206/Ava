@@ -5,6 +5,9 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import platform
+import subprocess
+import sys
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -156,16 +159,12 @@ def test_environment_creation_names_the_checkout_python_pin(
     assert "--python" not in calls[0]
 
 
-def test_mirror_host_config_still_creates_the_declared_python(
-    python_mirror: PythonMirror, tmp_path: Path
-) -> None:
-    import platform
-    import subprocess
-    import sys
+def _declare_host_mirror_python(python_mirror: PythonMirror, tmp_path: Path) -> str:
+    """Pin the running Python and name the mirror only in a host uv.toml.
 
-    # A host uv.toml naming a mirror selects the `uv venv --no-config` transport.
-    # Unpinned, uv takes the newest interpreter it finds, so this discriminates
-    # on any host that also has a newer minor installed.
+    That host file selects the `uv venv --no-config` transport. Unpinned, uv
+    takes the newest interpreter it finds.
+    """
     declared = platform.python_version()
     (python_mirror.repo / ".python-version").write_text(f"{declared}\n")
     config = tmp_path / "xdg" / "uv" / "uv.toml"
@@ -179,24 +178,93 @@ def test_mirror_host_config_still_creates_the_declared_python(
         XDG_CONFIG_DIRS=str(tmp_path / "xdg-system"),
         PATH=f"{base}{os.pathsep}{python_mirror.env['PATH']}",
     )
+    return declared
+
+
+def _venv_python(python_mirror: PythonMirror) -> Path:
+    bin_python = "Scripts/python.exe" if sys.platform == "win32" else "bin/python"
+    return python_mirror.repo / ".venv" / bin_python
+
+
+def _reported(python: Path) -> str:
+    return subprocess.run(  # noqa: S603 — the disposable virtualenv interpreter
+        [str(python), "-c", "import platform; print(platform.python_version())"],
+        capture_output=True,
+        text=True,
+        timeout=20,
+        check=True,
+    ).stdout.strip()
+
+
+def test_mirror_host_config_still_creates_the_declared_python(
+    python_mirror: PythonMirror, tmp_path: Path
+) -> None:
+    # Discriminates on any host that also has a newer minor installed.
+    declared = _declare_host_mirror_python(python_mirror, tmp_path)
 
     result = python_mirror.install("--no-dev", explicit_python=False)
 
     assert result.returncode == 0, result.stderr
     assert any("probe_runtime-1.0.0" in p for p in python_mirror.requests)
-    interpreter = (
-        python_mirror.repo
-        / ".venv"
-        / ("Scripts/python.exe" if sys.platform == "win32" else "bin/python")
+    assert _reported(_venv_python(python_mirror)) == declared
+
+
+def test_mirror_recreates_an_environment_whose_interpreter_misses_the_pin(
+    python_mirror: PythonMirror, tmp_path: Path
+) -> None:
+    declared = _declare_host_mirror_python(python_mirror, tmp_path)
+    assert python_mirror.install("--no-dev", explicit_python=False).returncode == 0
+    venv = python_mirror.repo / ".venv"
+    marker = venv / "marker"
+    marker.write_text("old environment")
+    # Its lib/pythonX.Y directory and pyvenv.cfg still name the pin; only the
+    # interpreter's own report reveals the drift.
+    [site] = [*venv.glob("lib/python*/site-packages"), *venv.glob("Lib/site-packages")]
+    (site / "sitecustomize.py").write_text(
+        "import platform\nplatform.python_version = lambda: '3.11.0'\n"
     )
-    created = subprocess.run(  # noqa: S603 — the disposable virtualenv interpreter
-        [str(interpreter), "-c", "import platform; print(platform.python_version())"],
-        capture_output=True,
-        text=True,
-        timeout=20,
-        check=True,
-    )
-    assert created.stdout.strip() == declared
+    interpreter = _venv_python(python_mirror)
+    assert _reported(interpreter) == "3.11.0"
+
+    result = python_mirror.install("--no-dev", explicit_python=False)
+
+    assert result.returncode == 0, result.stderr
+    assert f"Python 3.11.0 -> {declared}" in result.stderr
+    assert not marker.exists()
+    assert _reported(interpreter) == declared
+    assert python_mirror.inspect()["packages"]["probe-runtime"] == "1.0.0"
+    assert (python_mirror.repo / "uv.lock").read_bytes() == python_mirror.lock
+
+
+def test_mirror_reuses_an_environment_on_the_declared_python(
+    python_mirror: PythonMirror, tmp_path: Path
+) -> None:
+    _declare_host_mirror_python(python_mirror, tmp_path)
+    assert python_mirror.install("--no-dev", explicit_python=False).returncode == 0
+    marker = python_mirror.repo / ".venv" / "marker"
+    marker.write_text("kept environment")
+    (python_mirror.repo / ".venv" / "lib" / "python3.11").mkdir(parents=True)
+
+    result = python_mirror.install("--no-dev", explicit_python=False)
+
+    assert result.returncode == 0, result.stderr
+    assert "Recreating" not in result.stderr
+    assert marker.read_text() == "kept environment"
+
+
+def test_venv_removal_refuses_a_link_out_of_the_checkout(tmp_path: Path) -> None:
+    from cli.python_install import _remove_checkout_venv
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    outside = tmp_path / "elsewhere"
+    outside.mkdir()
+    (outside / "keep").write_text("not the checkout's")
+    (repo / ".venv").symlink_to(outside, target_is_directory=True)
+    with pytest.raises(ValueError, match="Refusing to remove"):
+        _remove_checkout_venv(repo)
+    assert (outside / "keep").read_text() == "not the checkout's"
+    assert (repo / ".venv").is_symlink()
 
 
 def test_update_keeps_installed_dev_packages_and_official_mode_accepts_same_lock(

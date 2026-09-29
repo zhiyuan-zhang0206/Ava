@@ -1,6 +1,6 @@
 {
   "complexity": {
     "cli/main.py::main": 23,
-    "cli/python_install.py::install": 17
+    "cli/python_install.py::install": 16
   }
 }
