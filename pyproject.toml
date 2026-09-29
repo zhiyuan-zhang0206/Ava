@@ -502,9 +502,12 @@ filterwarnings = [
 # copies), so measuring them would drag the ava_builtins floor toward dead
 # lines instead of executable ones.
 source = ["agent", "ava", "cli", "gateway", "shared", "ui", "ops", "services", "ava_builtins"]
+# Package `__init__.py` files are measured: a module that becomes a package
+# keeps its code in the package door (`x.py` -> `x/__init__.py`), and omitting
+# doors would drop that code from its domain's floor. An empty or re-export-only
+# door costs nothing — its lines run on import.
 omit = [
     "*/__main__.py",
-    "*/__init__.py",
     "*/tests/*",
     # ava_builtins/skill_support/** is a pure relocation of code that lived at
     # ava_builtins/skills/*/reference/* (path_imports fix, Rule 6) — same
