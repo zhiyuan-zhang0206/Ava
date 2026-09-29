@@ -54,7 +54,7 @@ plugins disable` changed nothing about startup). Host boot passes the enabled
 set of the *external* plugins it scans; the graph build adds the built-ins.
 Machine-level roster paths sit outside the enable plane by design: the
 `services.py` roster and the shipped-`metrics.py` scan key on presence, not
-enable-state (`ops/spec.py:_plugin_services`).
+enable-state (`ops/spec.py:plugin_services`).
 
 ## The external `plugins` prefix is registered, not resolved from sys.path
 `register_plugin_parent_packages` (`ava/sdk_surface/plugin_loader.py`, applied by the loader for

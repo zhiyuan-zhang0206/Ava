@@ -10,7 +10,7 @@ selects services whose capabilities intersect the host's roles. A service also
 declares ``requires_db`` so database-dependent readiness remains explicit.
 
 Plugins expose ``services() -> tuple[ServiceSpec, ...]`` from their services
-module. ``_plugin_services()`` discovers code-present plugins and appends them
+module. ``plugin_services()`` discovers code-present plugins and appends them
 to the roster: plugin declares, ops discovers. Each plugin service's
 own ``ServiceSpec.gate`` keeps cluster-level enablement out of ``_gate_reason``.
 The fleet task daemon follows this path; see
@@ -68,7 +68,7 @@ def _bind_runtime_command(spec: ServiceSpec) -> ServiceSpec:
     )
 
 
-def _plugin_services() -> tuple[ServiceSpec, ...]:
+def plugin_services() -> tuple[ServiceSpec, ...]:
     """The services contributed by the plugins PRESENT on this machine.
 
     Discovery, not import-of-known-plugins: `shared.plugins_config` enumerates the
@@ -414,7 +414,7 @@ class Spec:
 # build_services`, scripts/prepare_plugin_fixture.py's generated
 # `services.py` template, tests) take the canonical roster from this module.
 # Placed at the BOTTOM deliberately: roster's build_services calls back into
-# this module's helpers (_bind_runtime_command / _plugin_services /
+# this module's helpers (_bind_runtime_command / plugin_services /
 # _assert_unique_sessions) lazily, so this edge must not run while this module
 # is partially initialized (spec → roster at the top would be a load-time
 # edge in the opposite direction of the call-time edge — keep both lazy).

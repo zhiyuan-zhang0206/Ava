@@ -8,7 +8,7 @@ plugin's, end to end: disable ava_memory and there is no pool to index, no
 `ava.memory` to search it with, and now no daemon indexing it either.
 
 Discovery keys on this plugin's code being PRESENT on the machine (see
-`ops.spec._plugin_services`), so the cluster-level on/off is the explicit gate
+`ops.spec.plugin_services`), so the cluster-level on/off is the explicit gate
 below rather than the presence check.
 
 Deliberately light, like `ava_fleet/services.py`: it imports the ops service
@@ -61,7 +61,7 @@ def services() -> tuple[ServiceSpec, ...]:
     """The ops services the memory plugin contributes to the roster.
 
     The gateway-side indexing daemon. Ordering against milvus (which it
-    cold-start-connects to) is preserved by `_plugin_services()` folding plugin
+    cold-start-connects to) is preserved by `ops.spec.plugin_services()` folding plugin
     services onto the tail of the roster, well after the gateway group.
     """
     return (

@@ -32,7 +32,7 @@ def _bind_runtime_command(spec: ServiceSpec) -> ServiceSpec:
 
 
 def _plugin_services() -> tuple[ServiceSpec, ...]:
-    from ops.spec import _plugin_services as plugin_services
+    from ops.spec import plugin_services
 
     return plugin_services()
 

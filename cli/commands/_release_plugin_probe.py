@@ -9,7 +9,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from agent.extensions import load_extensions
-from ops.spec import _plugin_services
+from ops.spec import plugin_services
 from shared import paths, plugins_config
 from shared.lm.plugin_providers import ensure_provider_plugins_loaded
 from shared.runtime_plugins import declared_plugins
@@ -57,7 +57,7 @@ def prove_plugin_registration(root: Path, required: tuple[str, ...]) -> None:
         ),
     ):
         load_extensions()
-        services = _plugin_services()
+        services = plugin_services()
         ensure_provider_plugins_loaded()
     for name in required:
         module = sys.modules[f"plugins.{name}.plugin"]

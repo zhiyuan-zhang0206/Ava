@@ -3,7 +3,7 @@
 A plugin that runs its own long-lived gateway/agent-runner daemon declares it
 here instead of hardcoding a ServiceSpec into the core `ops/roster/__init__.py`: a
 plugin ships a `services.py` exposing ``services() -> tuple[ServiceSpec, ...]``,
-and `ops.spec._plugin_services()` discovers + folds it into the single
+and `ops.spec.plugin_services()` discovers + folds it into the single
 `build_services()` roster (so watchdog keepalive / `ava start` / `ava status`
 all still derive from one place). Discovery keys on this plugin's code being
 PRESENT on the machine, not the agent-facing enable-state — the cluster-level
