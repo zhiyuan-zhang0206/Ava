@@ -89,7 +89,7 @@ jobs:
           git fetch --no-tags --depth=1 origin 4faff03726be6135b9a43c8b1e555c15182c6155
           cp agent/exec_domain_owner.py proof/current-owner.py
           trap 'cp proof/current-owner.py agent/exec_domain_owner.py' EXIT
-          git show 4faff03726be6135b9a43c8b1e555c15182c6155:agent/exec_domain_owner.py > agent/exec_domain_owner.py
+          git show 4faff03726be6135b9a43c8b1e555c15182c6155:agent/exec_domain_owner.py | sed -e 's|shared\.exec_process_domain|shared.native_process.exec_domain|g' -e 's|shared\.platform|shared.native_process.os_platform|g' -e 's|shared\.winjob_pipes|shared.native_process.winjob_pipes|g' -e 's|shared\.winjob|shared.native_process.winjob|g' > agent/exec_domain_owner.py
           set +e
           uv run pytest --confcutdir=tests/agent tests/agent/test_exec_owner_entry.py::test_completed_owner_exits_while_original_host_keeps_control_open -q > proof/old-buffered-control.txt 2>&1
           status=$?
