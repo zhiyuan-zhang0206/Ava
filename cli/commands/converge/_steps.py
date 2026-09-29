@@ -8,10 +8,10 @@ import subprocess
 import sys
 from pathlib import Path
 
+from base.host.private_storage import converge_private_tree, ensure_private_file
+from base.host.system.backend import get_backend
+from base.paths import repo_root
 from cli.commands.converge.spec import ConvergeCtx
-from shared.paths import repo_root
-from shared.platform_backend import get_backend
-from shared.private_storage import converge_private_tree, ensure_private_file
 
 # --- host-wiring steps (no preconditions) ---------------------------------
 
@@ -89,11 +89,11 @@ def _ensure_ava_home_dirs(ctx: ConvergeCtx) -> None:
 
 def _ensure_pg_binaries_step(ctx: ConvergeCtx) -> None:  # noqa: ARG001
     """Prepare the selected PostgreSQL 17 runtime and its pgvector extension."""
-    from shared.config import settings
+    from base.config import settings
 
     if not get_backend().supports_data_plane() or settings.data_plane.is_remote:
         return
-    from shared.pg_runtime import ensure_pg_runtime
+    from base.cluster.dataplane.pg_runtime import ensure_pg_runtime
 
     ensure_pg_runtime()
 

@@ -14,10 +14,10 @@ from typing import Any, cast
 import psutil
 import pytest
 
+from base.native_process.ownership import OwnedProcess
 from services.ava_root.inputs import InputSeal
 from services.ava_root.manifest import RestartPolicy, UnitManifest, UnitRegistry
 from services.ava_root.supervisor import Supervisor, SupervisorConfig
-from shared.native_process.ownership import OwnedProcess
 
 
 def root(tmp_path: Path, code: str, *, env: tuple[tuple[str, str], ...] = ()) -> Supervisor:

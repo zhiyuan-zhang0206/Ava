@@ -16,7 +16,7 @@ from __future__ import annotations
 import inspect
 from typing import Any
 
-from shared.env_registry import network_proxy_configured
+from base.host.env.registry import network_proxy_configured
 
 
 def ws_connect_kwargs() -> dict[str, Any]:
@@ -35,7 +35,7 @@ def ws_connect_kwargs() -> dict[str, Any]:
     endpoint is wss — the standard ``HTTPS_PROXY`` spelling is what covers it.
 
     Which keys count as "configured" is the env registry's declaration
-    (``shared/env_registry.py:NETWORK_PROXY_KEYS`` — the same keys a service
+    (``base/host/env/registry.py:NETWORK_PROXY_KEYS`` — the same keys a service
     child receives, so the WS path and the child env agree on one list).
     """
     import websockets

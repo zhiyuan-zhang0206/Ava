@@ -17,12 +17,12 @@ from typing import cast
 import yaml
 
 import ava as _ava
-import shared.machine
-import shared.paths
+import base.cluster.machine
+import base.paths
 from ava import gateway_client as _client
-from ava.sdk_validation import coerce_str, coerce_typed
-from shared.agents import IndexerUnavailable as IndexerUnavailable
-from shared.paths import ava_home as _ava_home
+from ava.sdk_surface.validation import coerce_str, coerce_typed
+from base.agents import IndexerUnavailable as IndexerUnavailable
+from base.paths import ava_home as _ava_home
 
 __all_for_ava__ = ["PATH", "search", "write"]
 
@@ -93,11 +93,11 @@ def _entry_path(slug: str, store: str, agent_id: int) -> tuple[Path, bool]:
     if store == "personal":
         if not _PERSONAL_SLUG_RE.fullmatch(slug):
             raise ValueError("personal memory slug must be one kebab-case name without slashes")
-        return shared.paths.workspace_dir(agent_id) / "memory" / f"{slug}.md", False
+        return base.paths.workspace_dir(agent_id) / "memory" / f"{slug}.md", False
     if store == "shared":
         if relative == Path("MEMORY"):
             raise ValueError("shared memory slug cannot replace MEMORY.md")
-        return shared.paths.memory_dir() / relative.with_suffix(".md"), True
+        return base.paths.memory_dir() / relative.with_suffix(".md"), True
     raise ValueError("memory store must be 'personal' or 'shared'")
 
 
@@ -613,7 +613,7 @@ def write(
 
     now = datetime.now(UTC).replace(microsecond=0)
     if is_shared:
-        machine = shared.machine.machine_name()
+        machine = base.cluster.machine.machine_name()
         generated = [
             ("type", "Memory"),
             ("ava_agent", str(agent_id)),
@@ -643,9 +643,7 @@ def write(
         # write entry point so callers cannot publish entries a sweep must repair.
         written += "\n"
     _write_atomically(entry, written)
-    root = (
-        shared.paths.memory_dir() if is_shared else shared.paths.workspace_dir(agent_id) / "memory"
-    )
+    root = base.paths.memory_dir() if is_shared else base.paths.workspace_dir(agent_id) / "memory"
     _upsert_index(
         root, entry.relative_to(root).as_posix(), note_title, note_description, shared=is_shared
     )

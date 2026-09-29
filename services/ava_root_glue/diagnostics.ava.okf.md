@@ -33,7 +33,7 @@ grace; first readiness or the deadline ends that grace.
 | `lgtm-write-path` | selected root Loki unit | Captured Loki listener ancestry around a unique write/read probe. Failed and persistently throttled paths retain their registered events; no backend restart. |
 
 Native Redis observations use the public
-`shared.cluster.ownership.RedisConnectionCustody.capture` reader shared with
+`base.cluster.ownership.RedisConnectionCustody.capture` reader shared with
 maintenance. Its explicit endpoint, data directory, deadline, and dedicated
 connection establish native custody; the caller retains its reconnect guard
 until that connection closes. A refused endpoint is DOWN; inspection or

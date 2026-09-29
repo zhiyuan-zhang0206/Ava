@@ -1,6 +1,6 @@
 """GET /api/config/resolved — the per-model resolution view.
 
-The endpoint is a read-only mirror of `shared/lm/registry.py:explain_setting`,
+The endpoint is a read-only mirror of `base/lm/registry.py:explain_setting`,
 so the tests pin the three things a mirror can get wrong: it must enumerate
 EXACTLY the per-model-defaultable set (no hand-maintained second list), it must
 name the winning layer correctly for each of the three layers, and every row's
@@ -18,9 +18,9 @@ from dataclasses import fields as dataclass_fields
 import pytest
 from fastapi.testclient import TestClient
 
+from base.config import field_names, settings
+from base.lm.registry import DEFAULT_TUNING, MODELS, ModelSpec, ModelTuning, tuning_field_names
 from gateway.app import app
-from shared.config import field_names, settings
-from shared.lm.registry import DEFAULT_TUNING, MODELS, ModelSpec, ModelTuning, tuning_field_names
 
 TUNED_MODEL = "test-tuned-model"
 

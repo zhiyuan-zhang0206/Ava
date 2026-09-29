@@ -8,12 +8,15 @@ import httpx
 import psycopg
 import pytest
 
-from shared.config import settings
-from shared.db import publish_inbound_wake
-from shared.live_announce import publish_agent_updated_sync, publish_impersonation_changed_sync
+from base.config import settings
+from base.db import publish_inbound_wake
+from base.events.live.announce import (
+    publish_agent_updated_sync,
+    publish_impersonation_changed_sync,
+)
+from tests.base.poll_until import poll_until
 from tests.e2e._env import E2EEnv
 from tests.e2e.fakes.scenarios.force_expire import FIRST_REPLY, RESUMED_REPLY
-from tests.shared.poll_until import poll_until
 
 
 def _seed_active_lease(agent_id: int) -> tuple[UUID, int]:

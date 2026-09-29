@@ -17,7 +17,7 @@ reader of the new form first, use it one release later).
 
 ## Envelope
 
-The contract lives in the settings-free `shared/api_contracts/release_handoff.py`
+The contract lives in the settings-free `base/api_contracts/release_handoff.py`
 (envelope reader, exec argv, wire models), so the ops server can serve it too.
 
 Every request document carries `version` (the JSON integer `1`), `kind`,
@@ -53,7 +53,7 @@ on stdin.
   home's selected image until its operation selects it, so its boot pass
   admits it to no write generation, yet its submission reads the registered
   units. The CLI, running the home's admitted runtime, takes the login its
-  skipped boot pass would have delivered (`shared.dotenv_boot.operator_db_delivery`):
+  skipped boot pass would have delivered (`base.host.env.dotenv_boot.operator_db_delivery`):
   the active gateway login and its generation marker (`AVA_DB_URL`,
   `AVA_DB_GENERATION`), without the gateway API token. It travels only in the
   exec environment (never argv, a file or a log); the executor's boot pass
@@ -67,7 +67,7 @@ on stdin.
   the submission launches receives none of this: its launch environment is
   fixed, and it dials as the OS-user administrator
   ([[cli/release_transition/write-generations.ava.okf.md]]).
-- **Ops** (`release_image_exec`, `ops/ops_cluster.py`): `{entry, image,
+- **Ops** (`release_image_exec`, `ops/cluster.py`): `{entry, image,
   request}` with the request base64-encoded. The unit's ops server requires
   the envelope to name its own home and machine and `image` as executor,
   verifies it in its own store, runs the entry on stdin with a 120 s bound (the
@@ -96,4 +96,4 @@ admissible now. The previous image needed nothing new for them.
   commit.
 - The coordinator's own listener and its per-unit authentication (the
   enrollment secret) are separate: see
-  [[shared/cluster/authority/wiring.ava.okf.md]].
+  [[base/cluster/authority/wiring.ava.okf.md]].

@@ -214,7 +214,7 @@ def test_batch_rows_cap_follows_config(monkeypatch: pytest.MonkeyPatch) -> None:
     from pydantic import ValidationError
 
     import services.memory_search.app as app_module
-    from shared.config import settings
+    from base.config import settings
 
     try:
         with monkeypatch.context() as m:

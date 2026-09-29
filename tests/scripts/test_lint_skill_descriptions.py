@@ -1,4 +1,4 @@
-"""scripts/lint_skill_descriptions.py: the frontmatter gates reach deep skill trees.
+"""scripts/content_lint/lint_skill_descriptions.py: the frontmatter gates reach deep skill trees.
 
 The 2026-08 malformed-frontmatter incident (ava-serious-research
 practices/reproduce/SKILL.md with an unquoted `: ` in description) shipped
@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from scripts import lint_skill_descriptions as lint
+from scripts.content_lint import lint_skill_descriptions as lint
 
 
 @pytest.fixture

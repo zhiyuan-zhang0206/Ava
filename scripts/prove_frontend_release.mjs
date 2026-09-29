@@ -47,7 +47,7 @@ try {
   let executable = path.join(target, "node");
   let arguments_ = [path.join(target, "server", "server.js")];
   if (process.argv[3]) {
-    const result = spawnSync(process.argv[3], ["-I", "-B", "-c", "from shared.cluster import frontend_service_cmd; print(frontend_service_cmd(43871))"], {
+    const result = spawnSync(process.argv[3], ["-I", "-B", "-c", "from base.cluster import frontend_service_cmd; print(frontend_service_cmd(43871))"], {
       cwd: target, encoding: "utf8",
       env: { PATH: "/usr/bin:/bin", HOME: temporary, AVA_HOME: process.argv[4], AVA_CONFIG_FETCH: "skip", AVA_TIMEZONE: "UTC", AVA_DB_URL: "postgresql://unused@127.0.0.1:1/unused", AVA_REDIS_URL: "redis://127.0.0.1:1/0" },
     });

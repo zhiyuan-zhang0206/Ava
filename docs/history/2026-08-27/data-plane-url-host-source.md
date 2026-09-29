@@ -42,7 +42,7 @@ a shared `url_host` read was rejected as the same pattern repeated five times.
 
 QA #3242 flagged two gaps, folded into a follow-up PR:
 
-- `scripts/rotate_data_plane_secrets.py` still dialed literal `127.0.0.1` in
+- `scripts/data_plane_ops/rotate_data_plane_secrets.py` still dialed literal `127.0.0.1` in
   four places (the pg/redis preflight+verify probes, the CONFIG SET dial, and
   the ACL-provisioning admin URL). `RotationState` now carries
   `pg_host`/`redis_host` (defaulted loopback, so a pre-upgrade rotation journal

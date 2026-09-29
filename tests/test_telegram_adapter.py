@@ -17,8 +17,8 @@ import httpx
 import pytest
 
 import services.im_bridge.adapters.telegram as telegram_module
+from base.config import settings
 from services.im_bridge.adapters.telegram import InboundMessage, TelegramAdapter
-from shared.config import settings
 
 
 class FakeCore:

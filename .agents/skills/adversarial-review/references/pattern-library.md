@@ -72,7 +72,7 @@ otherwise. Each entry: symptom → how it reads in a diff → evidence anchor.
 
 - **D1 Hand-rolled retry loops.** A new retry loop with its own
   backoff/jitter/transient classification instead of converging on
-  `shared/resilience.py` (design invariant D1 — "the only retry loop").
+  `base/host/net/resilience.py` (design invariant D1 — "the only retry loop").
   The loops drift: one retries 429, another doesn't; one jitters, another
   sleeps negative.
 - **D2 Retry re-executes non-idempotent work.** A timeout-then-retry of a
@@ -149,7 +149,7 @@ otherwise. Each entry: symptom → how it reads in a diff → evidence anchor.
 - **G5 e2e without proof-of-work.** No junitxml/artifact assertion — a
   no-op e2e job stays green.
 - **G6 Tests that reach the real world.** Tests invoking code that can
-  POST to Telegram, register os_cron/launchd jobs, or apply migrations —
+  POST to Telegram, register cron/launchd jobs, or apply migrations —
   the shell leaks prod `.env` into test processes; non-pytest scripts bypass
   conftest guards entirely. (Two P0 incidents: real Telegram pushes from
   pytest; a worktree debug script rewriting the prod health-probe plist.)

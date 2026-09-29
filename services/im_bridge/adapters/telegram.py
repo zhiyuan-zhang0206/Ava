@@ -24,9 +24,9 @@ from typing import Any
 
 import httpx
 
+from base.config import settings
+from base.log import logger
 from services.im_bridge.types import IMAdapter, InboundMessage
-from shared.config import settings
-from shared.log import logger
 
 # Telegram's per-message cap for plain-text messages.
 _MAX_MESSAGE_LEN = 4096

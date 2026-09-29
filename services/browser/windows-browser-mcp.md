@@ -7,7 +7,7 @@ blockers in [`../../gateway/windows-gateway.md`](../../gateway/windows-gateway.m
 inside the supported topology.
 
 `browser` works there. `browser-mcp` does not, and is now gated out
-(`shared/platform_probes.py:browser_mcp_incapability`, consumed by
+(`base/host/system/probes.py:browser_mcp_incapability`, consumed by
 `ops/spec.py:_gate_reason`). A Windows agent-runner gets a supervised headed
 Chrome reachable over CDP, and no MCP front end for it.
 
@@ -16,7 +16,7 @@ Chrome reachable over CDP, and no MCP front end for it.
 One thing, in two places:
 
 - `services/browser/mcp_daemon.py` — `asyncio.start_unix_server`
-- `ava/_mcp_browser.py` — `asyncio.open_unix_connection` (the in-daemon line
+- `ava/mcps/_browser.py` — `asyncio.open_unix_connection` (the in-daemon line
   client that replaced the per-agent `services/browser/mcp_wrapper.py` stdio
   bridge; same AF_UNIX requirement)
 
@@ -52,7 +52,7 @@ if a second consumer ever needs to reach the daemon off-box.
 
 ## What to remove when it lands
 
-- The AF_UNIX prong in `shared/platform_probes.py:browser_mcp_incapability`
+- The AF_UNIX prong in `base/host/system/probes.py:browser_mcp_incapability`
   (and `browser_mcp_incapability` itself, if the gate then equals browser's).
 - `"unix_socket": true` from `ava_builtins/mcps/chrome/.mcp.json`, and — if no
   other server declares it — the `unix_socket` entry in

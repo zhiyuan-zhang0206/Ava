@@ -56,21 +56,24 @@ from typing import Any, cast
 
 from psycopg_pool import ConnectionPool
 
+from base.agents.observation.evidence import (
+    LIVENESS_PASS_INTERVAL_S,
+    MACHINE_OFFLINE_AFTER_FAILURES,
+)
+from base.cluster.machines import list_agent_runners
+from base.config import settings
+from base.db.transaction import write_transaction
+from base.deploy.state import cluster_lock, host_deploy_state
+from base.deploy.transition import transition_severity
+from base.events.live.announce import publish_agent_updated_sync
 from ops import cluster_rpc
 from ops.cluster_status import ClusterStatus
-from shared import cluster_lock, host_deploy_state
-from shared.agent_observation import LIVENESS_PASS_INTERVAL_S, MACHINE_OFFLINE_AFTER_FAILURES
-from shared.config import settings
-from shared.db_transaction import write_transaction
-from shared.live_announce import publish_agent_updated_sync
-from shared.machines import list_agent_runners
-from shared.transition import transition_severity
 
 _log = logging.getLogger("services.heartbeat.liveness")
 
 # Per-machine status_probe timeout — `settings.gateway.status_probe_timeout_seconds`
 # (default 8s), the SAME setting the roster's probe reads
-# (gateway/routers/status.py), so the two probes stay aligned by construction
+# (gateway/cluster/status.py), so the two probes stay aligned by construction
 # (task #1200: a 3.0s hardcode here and in the roster flipped a slow-but-healthy
 # WSL runner offline — its status_snapshot measured 3.07-3.27s — while a
 # genuinely offline host still refuses fast, so the wider budget costs only the
@@ -139,7 +142,7 @@ def _machine_alert_edges(
     (DB errors propagate to the caller's per-pass catch, IM errors are
     swallowed by ``notify_im``).
     """
-    from shared.alerts import (
+    from base.telemetry.alerts import (
         display_language,
         fingerprint,
         notify_im,

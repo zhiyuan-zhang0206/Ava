@@ -33,9 +33,9 @@ from typing import Any, NotRequired, Required, Union, get_args, get_origin, get_
 import pytest
 import yaml
 
-from shared.events.contract import EVENTS, payload_keys, telemetry_events
-from shared.telemetry.otlp.telemetry_otlp import _METRIC_DISPOSITION
-from shared.telemetry.otlp.telemetry_otlp_metrics import _strip_unit_suffix, _unit_for
+from base.events.contract import EVENTS, payload_keys, telemetry_events
+from base.telemetry.otlp.telemetry_otlp import _METRIC_DISPOSITION
+from base.telemetry.otlp.telemetry_otlp_metrics import _strip_unit_suffix, _unit_for
 
 _RULES = (
     Path(__file__).resolve().parent.parent.parent
@@ -726,7 +726,7 @@ def test_rate_limit_rule_groups_http_429s_by_provider() -> None:
 
 def test_billing_rule_keys_on_the_billing_flag_not_a_status_list() -> None:
     """The discriminator is the emitted `billing` verdict
-    (shared/lm/errors.py's cross-provider predicate), never a status list
+    (base/lm/errors.py's cross-provider predicate), never a status list
     re-spelled in LogQL: a provider added to that vocabulary must be covered
     here without touching this file."""
     rules = {r["uid"]: r for r in _load_rules()}
@@ -745,7 +745,7 @@ def test_billing_rule_names_vendor_and_model_in_the_notification() -> None:
     summary = rule["annotations"]["summary"]
     assert "{{ $labels.attributes_vendor }}" in summary
     assert "{{ $labels.attributes_model }}" in summary
-    # shared/alerts.py:notify_text truncates the summary at 200 chars; the
+    # base/telemetry/alerts.py:notify_text truncates the summary at 200 chars; the
     # template must still say what happened once the labels expand.
     assert len(summary) <= 200, f"summary is {len(summary)} chars, IM truncates at 200"
 

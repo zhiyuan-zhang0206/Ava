@@ -18,7 +18,7 @@ _TIMEOUT_S = 15.0
 
 
 def _gateway_base() -> str:
-    from shared.machine import gateway_api_base
+    from base.cluster.machine import gateway_api_base
 
     return gateway_api_base()
 
@@ -28,8 +28,8 @@ def _gateway_base() -> str:
 
 def cmd_presets_ls() -> int:
     """`ava presets ls` — list all presets (id / name / label / description)."""
-    from shared.http_dial import get as dial_get
-    from shared.machine import gateway_auth_headers
+    from base.cluster.machine import gateway_auth_headers
+    from base.host.net.http_dial import get as dial_get
 
     url = f"{_gateway_base()}/api/presets"
     resp = dial_get(url, timeout=_TIMEOUT_S, headers=gateway_auth_headers())
@@ -57,8 +57,8 @@ def cmd_presets_get(identifier: str) -> int:
 
     Tries name match first (list + filter), then integer id. Prints the full
     preset including its config JSON."""
-    from shared.http_dial import get as dial_get
-    from shared.machine import gateway_auth_headers
+    from base.cluster.machine import gateway_auth_headers
+    from base.host.net.http_dial import get as dial_get
 
     # Try numeric id first — fast path
     preset_id: int | None = None
@@ -96,8 +96,8 @@ def cmd_presets_create(
     name: str, label: str, description: str | None, config_json: str | None
 ) -> int:
     """`ava presets create --name N --label L [--description D] [--config JSON]`."""
-    from shared.http_dial import post as dial_post
-    from shared.machine import gateway_auth_headers
+    from base.cluster.machine import gateway_auth_headers
+    from base.host.net.http_dial import post as dial_post
 
     config: dict[str, object] = {}
     if config_json:
@@ -143,8 +143,8 @@ def cmd_presets_update(
 
     Partial update — only the fields passed change. At least one of --name / --label /
     --description / --config must be given."""
-    from shared.http_dial import patch as dial_patch
-    from shared.machine import gateway_auth_headers
+    from base.cluster.machine import gateway_auth_headers
+    from base.host.net.http_dial import patch as dial_patch
 
     # Resolve identifier to id
     preset_id = _resolve_id(identifier)
@@ -203,8 +203,8 @@ def cmd_presets_delete(identifier: str, *, force: bool = False) -> int:
     Prompts for confirmation unless --force. Does NOT affect agents already
     spawned from this preset — they carry a snapshot of their config at spawn
     time and are independent of the preset thereafter."""
-    from shared.http_dial import delete as dial_delete
-    from shared.machine import gateway_auth_headers
+    from base.cluster.machine import gateway_auth_headers
+    from base.host.net.http_dial import delete as dial_delete
 
     preset_id = _resolve_id(identifier)
     if preset_id is None:
@@ -232,8 +232,8 @@ def cmd_presets_delete(identifier: str, *, force: bool = False) -> int:
 def _resolve_id(identifier: str) -> int | None:
     """Resolve a name-or-id string to a numeric preset id. Returns None + prints
     to stderr on lookup failure."""
-    from shared.http_dial import get as dial_get
-    from shared.machine import gateway_auth_headers
+    from base.cluster.machine import gateway_auth_headers
+    from base.host.net.http_dial import get as dial_get
 
     with contextlib.suppress(ValueError):
         return int(identifier)

@@ -1,0 +1,770 @@
+"""LLM config — LmSettings.
+
+Split out of the former flat Settings god object; each field keeps its exact
+env alias so the .env surface is unchanged. Aggregated by base/config.
+"""
+
+from __future__ import annotations
+
+from pydantic import Field, SecretStr
+
+from base.config.base import EnvSettings
+
+
+class LmSettings(EnvSettings):
+    llm_model: str = Field(
+        default="deepseek-flash",
+        alias="AVA_MODEL",
+        description=(
+            "Agent model name, e.g. deepseek-flash or claude-*. Per-agent "
+            "overridable; a cross-provider override needs that provider's API key "
+            "set on the host, or model build fails fast."
+        ),
+        json_schema_extra={
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": False,
+            # capability=common: the cluster-wide spawn default, read by the
+            # gateway (spawn pre-select / default-model endpoint) AND frozen
+            # into agents at spawn — owned by neither capability alone.
+            "capability": "common",
+            # per_agent: gates the spawn/restart config-overlay (read by
+            # base/packages/plugins/config_registration.py for both framework Settings and
+            # plugin config fields). Orthogonal to scope: scope is the ownership
+            # axis (drives bootstrap distribution); per_agent is the override
+            # gate. They coexist on llm_model.
+            "per_agent": True,
+            "lifecycle": "frozen",
+            "scope": "cluster-default",
+        },
+    )
+
+    labeler_model: str = Field(
+        # The flash tier is the only DeepSeek tier left after the V4 Pro
+        # withdrawal (user order 2026-09-10; the surviving tier is served as
+        # `deepseek-flash` — the V4 ids are retired, 2026-09-20 user report).
+        # The pro-over-flash pick here was a measurement against the pre-V4.1
+        # Flash backend (issue #178: flash *executed* machine-authored briefs
+        # instead of summarizing them, 15 of 56 attempts) — re-measure if
+        # label quality regresses. Staying inside DeepSeek keeps the
+        # gateway's required-key surface unchanged.
+        default="deepseek-flash",
+        alias="AVA_LABELER_MODEL",
+        description=(
+            "Model used only to generate a conversation's short display name "
+            "from its first message. Same provider matrix as llm_model; one "
+            "cluster-wide value (no per-agent override). Prompts on this path "
+            "are frequently machine-authored agent briefs, which a weaker model "
+            "executes instead of summarizing — measure before downgrading."
+        ),
+        json_schema_extra={
+            "restart_required": "",
+            "writable": True,
+            "sensitive": False,
+            # The labeler daemon runs on the gateway side (services/labeler) —
+            # its model key must survive the gateway profile pop.
+            "capability": "gateway",
+            "scope": "cluster-pinned",
+        },
+    )
+
+    hierarchy_model: str = Field(
+        default="deepseek-flash",
+        alias="AVA_HIERARCHY_MODEL",
+        description=(
+            "Fallback model for the understanding-layer generation pass "
+            "(hierarchical run-timeline node summaries, task #3704). The "
+            "worker and the manual build normally generate on the TARGET "
+            "agent's own effective model (task #4674) so requests hit the "
+            "same provider-side prefix cache as the agent's own calls; this "
+            "value is the last-resort fallback when that lookup fails. Cheap "
+            "tier by design: a full day's recap cards measure at 0.7-0.9% of "
+            "that day's agent input tokens at this tier. Staying inside "
+            "DeepSeek keeps the gateway's required-key surface unchanged "
+            "(same rationale as labeler_model)."
+        ),
+        json_schema_extra={
+            "restart_required": "",
+            "writable": True,
+            "sensitive": False,
+            # The generation worker runs on the gateway side (same landing as
+            # the labeler daemon) — its model key must survive the gateway
+            # profile pop.
+            "capability": "gateway",
+            "scope": "cluster-pinned",
+        },
+    )
+
+    llm_non_streaming_fallback_timeout_seconds: float = Field(
+        default=600.0,
+        alias="AVA_LLM_NON_STREAMING_FALLBACK_TIMEOUT_SECONDS",
+        description=(
+            "Total timeout (seconds) for the non-streaming fallback after a "
+            "corrupted stream. 600s leaves headroom for a slow thinking-model "
+            "single response."
+        ),
+        json_schema_extra={
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    llm_invoke_timeout_seconds: float = Field(
+        default=60.0,
+        alias="AVA_LLM_INVOKE_TIMEOUT_SECONDS",
+        description=(
+            "Total timeout (seconds) for one non-streaming model invoke on the "
+            "SDK paths (ava.understand, ava.web.fetch's answer step). Bounds a "
+            "wedged provider that would otherwise hold the call at the provider "
+            "SDK default (~600s). Applies per attempt; llm_invoke_retry_attempts "
+            "restarts the whole bounded call."
+        ),
+        json_schema_extra={
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    llm_invoke_retry_attempts: int = Field(
+        default=1,
+        alias="AVA_LLM_INVOKE_RETRY_ATTEMPTS",
+        description=(
+            "Retries after a timed-out or transiently-failed non-streaming "
+            "invoke (ava.understand, ava.web.fetch answer). The call is "
+            "read-only/idempotent, so a bounded retry is safe; 0 disables."
+        ),
+        json_schema_extra={
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    llm_invoke_retry_delay_seconds: float = Field(
+        default=2.0,
+        alias="AVA_LLM_INVOKE_RETRY_DELAY_SECONDS",
+        description=(
+            "Base wait (seconds) for non-streaming invoke retries; doubles "
+            "per attempt (exponential backoff) up to "
+            "AVA_LLM_INVOKE_RETRY_MAX_DELAY_SECONDS, plus up to 1s jitter."
+        ),
+        json_schema_extra={
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    llm_invoke_retry_max_delay_seconds: float = Field(
+        default=30.0,
+        alias="AVA_LLM_INVOKE_RETRY_MAX_DELAY_SECONDS",
+        description=(
+            "Cap (seconds) on the exponential-backoff interval between "
+            "non-streaming invoke retries (ava.understand / ava.web.fetch "
+            "answer). The base AVA_LLM_INVOKE_RETRY_DELAY_SECONDS doubles per "
+            "attempt up to this cap, plus up to 1s jitter; a provider "
+            "Retry-After header asking for longer than the backoff is "
+            "respected (capped at 120s)."
+        ),
+        json_schema_extra={
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    llm_max_concurrent: str = Field(
+        default="",
+        alias="AVA_LLM_MAX_CONCURRENT",
+        description=(
+            "Per-provider outbound LLM concurrency caps, format "
+            "'provider:limit,provider:limit' (e.g. 'deepseek:31,anthropic:200'; "
+            "provider keys are the model prefixes: deepseek/claude/gpt/gemini/"
+            "mimo/kimi/glm/qwen). Empty (the default) disables all caps. A "
+            "configured cap limits concurrent async calls across the hosted "
+            "process, not per agent. Sync callers use a separate process-local "
+            "limiter. The cap wraps "
+            "the whole SDK call (SDK-internal retries included) and queues "
+            "excess calls instead of 429ing the provider. Set it only when "
+            "agent count or batch jobs approach a provider's account "
+            "concurrency ceiling; allocate that budget across processes and "
+            "hosts independently of agent admission or database pool sizes. An unknown "
+            "provider key fails fast at first use."
+        ),
+        json_schema_extra={
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    llm_compact_timeout_seconds: float = Field(
+        default=120.0,
+        alias="AVA_LLM_COMPACT_TIMEOUT_SECONDS",
+        description=(
+            "Total timeout (seconds) for one compaction-summary generation "
+            "(auto-compact + compact_request). The summary call is larger than "
+            "a plain invoke, hence a wider default than "
+            "llm_invoke_timeout_seconds; bounds an agent wedged mid-compact."
+        ),
+        json_schema_extra={
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    llm_stream_ttft_timeout_seconds: float | None = Field(
+        default=None,
+        alias="AVA_LLM_STREAM_TTFT_TIMEOUT_SECONDS",
+        description=(
+            "Streaming time-to-first-token timeout (seconds): abort the turn if no "
+            "first chunk arrives in time. Separate from the inter-chunk timeout so a "
+            "slow cold-starting model isn't killed mid-stream. Unset resolves the "
+            "per-model default (base/lm/registry.py; shared floor 30). Raise for "
+            "slow providers; per-agent overridable."
+        ),
+        json_schema_extra={
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-default",
+            "per_agent": True,
+            "lifecycle": "live",
+        },
+    )
+
+    llm_stream_total_timeout_seconds: float | None = Field(
+        default=None,
+        alias="AVA_LLM_STREAM_TOTAL_TIMEOUT_SECONDS",
+        description=(
+            "Total duration ceiling (seconds) for one streaming LLM attempt, "
+            "even while chunks keep arriving. This bounds a drip-fed stream and "
+            "is independent of the TTFT and inter-chunk gap timeouts. Unset "
+            "resolves the per-model default (base/lm/registry.py; shared floor "
+            "3600). Per-agent overridable."
+        ),
+        json_schema_extra={
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-default",
+            "per_agent": True,
+            "lifecycle": "live",
+        },
+    )
+
+    llm_stream_inter_chunk_timeout_seconds: float | None = Field(
+        default=None,
+        alias="AVA_LLM_STREAM_INTER_CHUNK_TIMEOUT_SECONDS",
+        description=(
+            "Streaming inter-chunk timeout (seconds): abort the turn if the gap "
+            "between chunks exceeds this. Unset resolves the per-model default "
+            "(base/lm/registry.py; shared floor 10). The floor is tight — raise "
+            "it on false positives."
+        ),
+        json_schema_extra={
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-default",
+            "per_agent": True,
+            "lifecycle": "live",
+        },
+    )
+
+    llm_retry_max_attempts: int | None = Field(
+        default=None,
+        alias="AVA_LLM_RETRY_MAX_ATTEMPTS",
+        description=(
+            "Max LLM attempts per turn (initial + retries). Unset resolves the "
+            "per-model default (base/lm/registry.py; shared floor 6, sized for "
+            "DeepSeek's intermittent tool-call drift)."
+        ),
+        json_schema_extra={
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    llm_retry_max_total_seconds: float = Field(
+        default=420.0,
+        gt=0,
+        alias="AVA_LLM_RETRY_MAX_TOTAL_SECONDS",
+        description=(
+            "Hard wall-clock budget (seconds) across an LLM node's initial "
+            "attempt, retries, and retry waits. The retry policy clips its next "
+            "wait to the remaining budget and halts instead of invoking again "
+            "after it expires."
+        ),
+        json_schema_extra={
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    llm_retry_initial_interval_seconds: float = Field(
+        default=30.0,
+        alias="AVA_LLM_RETRY_INITIAL_INTERVAL_SECONDS",
+        description="First LLM retry wait (seconds); doubles each attempt (30→60→120→…).",
+        json_schema_extra={
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    llm_retry_max_interval_seconds: float = Field(
+        default=480.0,
+        alias="AVA_LLM_RETRY_MAX_INTERVAL_SECONDS",
+        description="Cap on the LLM retry backoff interval (seconds).",
+        json_schema_extra={
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    llm_retry_max_consecutive_same_error: int = Field(
+        default=3,
+        alias="AVA_LLM_RETRY_MAX_CONSECUTIVE_SAME_ERROR",
+        description=(
+            "Fail fast after this many consecutive retries with the same exception "
+            "type — a deterministic error won't be fixed by retrying. 0 disables "
+            "(always exhaust retries)."
+        ),
+        json_schema_extra={
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    llm_stall_retry_initial_interval_seconds: float = Field(
+        default=300.0,
+        gt=0,
+        alias="AVA_LLM_STALL_RETRY_INITIAL_INTERVAL_SECONDS",
+        description=(
+            "First wait (seconds) before retrying an LLM call that ended in two "
+            "adjacent stalls (stream segment + non-streaming fallback). Starts at "
+            "5 minutes on purpose: a stalled provider is degraded, so an immediate "
+            "retry re-stalls — the wait rides out the short queue depressions. "
+            "Doubles per consecutive pair up to llm_stall_retry_max_interval_seconds."
+        ),
+        json_schema_extra={
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    llm_stall_retry_max_interval_seconds: float = Field(
+        default=1800.0,
+        gt=0,
+        alias="AVA_LLM_STALL_RETRY_MAX_INTERVAL_SECONDS",
+        description=(
+            "Cap (seconds) on the stalled-call retry wait. 30 minutes: beyond it "
+            "the longer wait stops improving recovery odds while pushing the next "
+            "attempt further out, and — with the ±jitter below — one wait plus one "
+            "bounded attempt must stay under the hosted no-progress stall guard "
+            "(AVA_HOST_TURN_NO_PROGRESS_TIMEOUT_SECONDS, default 2400s)."
+        ),
+        json_schema_extra={
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    llm_stall_retry_max_consecutive: int = Field(
+        default=4,
+        ge=0,
+        alias="AVA_LLM_STALL_RETRY_MAX_CONSECUTIVE",
+        description=(
+            "Consecutive two-adjacent-stall terminations retried on the delayed "
+            "schedule before the turn gives up and falls back to the regular wake "
+            "path. 4 pairs cover ~5+10+20+30 = 65 minutes while the observed stall "
+            "waves ran ~2.5-3h — past this coverage an in-turn hold is worse than "
+            "settling to idle and letting the next wake retry. 0 disables the "
+            "delayed schedule (pair errors then retry like any transient)."
+        ),
+        json_schema_extra={
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    llm_stall_retry_jitter_fraction: float = Field(
+        default=0.25,
+        ge=0.0,
+        lt=1.0,
+        alias="AVA_LLM_STALL_RETRY_JITTER_FRACTION",
+        description=(
+            "Multiplicative jitter (± this fraction) on each stalled-call retry "
+            "wait. The 2026-09-14/15 wave hit 36 agents on 3 machines within 10s — "
+            "without jitter the fleet's delayed retries re-synchronize into a fresh "
+            "burst; ±25% spreads them (band chosen in the incident review). 0 keeps "
+            "the schedule deterministic (not recommended for a shared provider)."
+        ),
+        json_schema_extra={
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    llm_fatal_provider_error_types: str = Field(
+        default="engine_overloaded_error",
+        alias="AVA_LLM_FATAL_PROVIDER_ERROR_TYPES",
+        description=(
+            "Comma-separated provider error `type` strings (from the response body "
+            "`error.type`) treated as fatal — fail fast, no retry. Empty disables "
+            "error-type fast-fail."
+        ),
+        json_schema_extra={
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-default",
+            "per_agent": True,
+            "lifecycle": "live",
+        },
+    )
+
+    llm_silent_idle_max_output_tokens: int = Field(
+        default=2048,
+        alias="AVA_LLM_SILENT_IDLE_MAX_OUTPUT_TOKENS",
+        description=(
+            "Cumulative output-token budget ceiling for consecutive silent-idle "
+            "turns (reasoning but no text and no tool_call). A provider-reported "
+            "zero-output silent idle still consumes one budget token, so it cannot "
+            "loop indefinitely. The next silent idle that reaches the ceiling halts "
+            "instead of spending another model call. 0 disables the cost boundary."
+        ),
+        json_schema_extra={
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    llm_override: str = Field(
+        default="",
+        alias="AVA_LLM_OVERRIDE",
+        description="Test-only fake-chat-model injection, format `module.path:factory_name`. Empty = use the real provider.",
+        json_schema_extra={
+            "restart_required": "agent",
+            "writable": False,
+            "sensitive": False,
+            "scope": "agent",
+        },
+    )
+
+    reasoning_effort: str | None = Field(
+        default=None,
+        alias="AVA_REASONING_EFFORT",
+        description=(
+            "Cross-provider reasoning effort (`` / `none` / `minimal` / `low` / "
+            "`medium` / `high` / `xhigh` / `max`). Unset resolves the per-model "
+            "default (base/lm/registry.py); an explicitly empty value pins each "
+            "provider's own default. Mapped and clamped per provider at model "
+            "build; unknown values fail fast. Per-agent overridable."
+        ),
+        json_schema_extra={
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-default",
+            "per_agent": True,
+            "lifecycle": "frozen",
+        },
+    )
+
+    claude_thinking_budget_tokens: int | None = Field(
+        default=None,
+        alias="AVA_CLAUDE_THINKING_BUDGET_TOKENS",
+        description=(
+            "Extended-thinking token budget for Claude models that default thinking "
+            "OFF (currently claude-haiku-4-5-20251001). 0 = explicitly leave off; when > 0 "
+            "the API requires 1024 <= N < max_tokens; unset resolves the per-model "
+            "default (base/lm/registry.py; shared floor 0). Ignored on "
+            "adaptive-thinking models (sonnet / opus / fable) — tune those via "
+            "reasoning_effort."
+        ),
+        json_schema_extra={
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-default",
+            "per_agent": True,
+            "lifecycle": "frozen",
+        },
+    )
+
+    understand_text_model: str = Field(
+        default="deepseek-flash",
+        alias="AVA_UNDERSTAND_TEXT_MODEL",
+        description="Model for `ava.understand`'s text path (strings and text files). Any agent model id works.",
+        json_schema_extra={
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    understand_media_model: str = Field(
+        default="gemini-3.5-flash",
+        alias="AVA_UNDERSTAND_MEDIA_MODEL",
+        description=(
+            "Model for `ava.understand`'s media path (image/video/audio/PDF). "
+            "Must be a Gemini model — the media wire format is Gemini-specific, "
+            "so a non-Gemini id fails fast with a clear error. The provider "
+            "abstraction (factory routing / endpoint override / quality knobs) "
+            "is in place for a second media provider to plug in later."
+        ),
+        json_schema_extra={
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    understand_media_resolution: str = Field(
+        default="high",
+        alias="AVA_UNDERSTAND_MEDIA_RESOLUTION",
+        description=(
+            "Media resolution for `ava.understand`'s media path: `low` / `medium` / "
+            "`high`. Higher costs more input tokens per image/frame; drop it to cut "
+            "cost on bulk media."
+        ),
+        json_schema_extra={
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    understand_media_thinking_level: str = Field(
+        default="medium",
+        alias="AVA_UNDERSTAND_MEDIA_THINKING_LEVEL",
+        description=(
+            "Thinking level for `ava.understand`'s media path: `minimal` / `low` / "
+            "`medium` / `high`. Higher = deeper but slower and pricier."
+        ),
+        json_schema_extra={
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    understand_media_base_url: str | None = Field(
+        default=None,
+        alias="AVA_UNDERSTAND_MEDIA_BASE_URL",
+        description=(
+            "Gemini endpoint override for `ava.understand`'s media path (the "
+            "`generativelanguage.googleapis.com` base). None = the SDK default "
+            "official endpoint. Point it at a self-hosted relay or a provider "
+            "mirror without code changes; the same auth as Gemini is sent "
+            "(GEMINI_API_KEY). Non-gemini media models ignore it."
+        ),
+        json_schema_extra={
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    gemini_explicit_cache_enabled: bool = Field(
+        default=False,
+        alias="AVA_GEMINI_EXPLICIT_CACHE_ENABLED",
+        description=(
+            "Opt-in: pin the system prompt + execute_code tool schema into a Gemini "
+            "explicit context cache (cachedContents API). Default off — Gemini 3.x "
+            "implicit caching covers the whole prompt prefix (threshold 4096 tokens) "
+            "and the API reports those hits honestly in cachedContentTokenCount, so "
+            "the reported cache-read share tracks the real billed share as "
+            "conversations grow (task #2660). Enable only for workloads dominated "
+            "by a huge stable system prompt: with an explicit cache attached the API "
+            "reports ONLY the explicit block, understating the hit rate. Ignored by "
+            "other providers; fail-open to implicit caching on any cache-layer error."
+        ),
+        json_schema_extra={
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-default",
+            "per_agent": True,
+            "lifecycle": "live",
+        },
+    )
+
+    gemini_cache_timeout_seconds: float = Field(
+        default=15.0,
+        alias="AVA_GEMINI_CACHE_TIMEOUT_SECONDS",
+        description=(
+            "Per-call timeout (seconds) for the Gemini explicit-cache API calls "
+            "(caches.list / create / update). The google-genai SDK has no default "
+            "timeout, so a wedged Gemini API would otherwise hold every agent's "
+            "LLM-call prelude at the SDK default; the cache layer is fail-open, "
+            "so a timeout falls back to implicit caching like any cache-layer error."
+        ),
+        json_schema_extra={
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-default",
+            "per_agent": True,
+            "lifecycle": "live",
+        },
+    )
+
+    deepseek_api_key: SecretStr | None = Field(
+        default=None,
+        alias="DEEPSEEK_API_KEY",
+        description="DeepSeek API key. Empty = deepseek-* models unavailable.",
+        json_schema_extra={
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": True,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    anthropic_api_key: SecretStr | None = Field(
+        default=None,
+        alias="ANTHROPIC_API_KEY",
+        description="Anthropic API key. Empty = claude-* models unavailable.",
+        json_schema_extra={
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": True,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    gemini_api_key: SecretStr | None = Field(
+        default=None,
+        alias="GEMINI_API_KEY",
+        description="Google Gemini API key, used by `ava.understand`'s media path and any gemini-* agent model. Empty = media understand raises.",
+        json_schema_extra={
+            # capability=common: consumed by memory_indexer (gateway-side
+            # embeddings) AND agent-side Gemini calls.
+            "capability": "common",
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": True,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    openai_api_key: SecretStr | None = Field(
+        default=None,
+        alias="OPENAI_API_KEY",
+        description="OpenAI API key. Empty = gpt-* models unavailable.",
+        json_schema_extra={
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": True,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    xiaomi_api_key: SecretStr | None = Field(
+        default=None,
+        alias="MIMO_API_KEY",
+        description="Xiaomi MiMo API key. Empty = mimo-* models unavailable.",
+        json_schema_extra={
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": True,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    moonshot_api_key: SecretStr | None = Field(
+        default=None,
+        alias="MOONSHOT_API_KEY",
+        description="Moonshot Kimi API key. Empty = kimi-* models unavailable.",
+        json_schema_extra={
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": True,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    zhipu_api_key: SecretStr | None = Field(
+        default=None,
+        alias="GLM_API_KEY",
+        description="Zhipu GLM API key. Empty = glm-* models unavailable.",
+        json_schema_extra={
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": True,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    dashscope_api_key: SecretStr | None = Field(
+        default=None,
+        alias="DASHSCOPE_API_KEY",
+        description=(
+            "Alibaba Cloud Model Studio (DashScope) API key, the platform serving "
+            "Qwen. Empty = qwen* models unavailable."
+        ),
+        json_schema_extra={
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": True,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    dashscope_base_url: str = Field(
+        default="https://dashscope.aliyuncs.com/compatible-mode/v1",
+        alias="AVA_DASHSCOPE_BASE_URL",
+        description=(
+            "OpenAI-compatible endpoint qwen* models dial. Defaults to Alibaba's "
+            "public Beijing endpoint; a dedicated Model Studio workspace serves the "
+            "same API on its own host "
+            "(https://<workspace-id>.cn-beijing.maas.aliyuncs.com/compatible-mode/v1), "
+            "which the default cannot reach. Keep the `/compatible-mode/v1` suffix — "
+            "`/api/v1` on those hosts is the native protocol, not this one. Regions "
+            "price differently, so pointing this at another region also means "
+            "re-checking base/lm/pricing_catalog_archive.json."
+        ),
+        json_schema_extra={
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )

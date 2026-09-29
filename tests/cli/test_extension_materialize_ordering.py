@@ -49,7 +49,7 @@ def _instrument_cold_start_seams(monkeypatch: pytest.MonkeyPatch, calls: list[st
     in `tests/cli/test_start_runtime.py` rather than inspecting source text."""
     import cli.commands._repo as _repo_commands
     import cli.commands.converge.host as converge_host
-    import cli.commands.start as _start_commands
+    import cli.commands.lifecycle.start as _start_commands
     from cli.commands.data_plane import bringup
     from cli.commands.extensions import materialize
 
@@ -98,7 +98,7 @@ def test_start_materializes_after_the_schema_check(monkeypatch: pytest.MonkeyPat
     table, and the symptom is a warning that looks transient rather than a
     failure.
     """
-    from cli.commands.start import _prepare_cold_start
+    from cli.commands.lifecycle.start import _prepare_cold_start
 
     calls: list[str] = []
     _instrument_cold_start_seams(monkeypatch, calls)
@@ -144,7 +144,7 @@ def test_start_adopts_before_it_materializes(monkeypatch: pytest.MonkeyPatch) ->
     cluster agreeing; materializing first leaves the machine one converge behind
     on the names it just uploaded.
     """
-    from cli.commands.start import _prepare_cold_start
+    from cli.commands.lifecycle.start import _prepare_cold_start
 
     calls: list[str] = []
     _instrument_cold_start_seams(monkeypatch, calls)

@@ -1,4 +1,4 @@
-"""scripts/migrate_skill_identity.py — the R2-B legacy-data migration tool.
+"""scripts/data_repair/migrate_skill_identity.py — the R2-B legacy-data migration tool.
 
 Check (default, read-only) and apply (fix, dir name authoritative) over the
 three identity surfaces: frontmatter-vs-dir mismatches in the skills load dir,
@@ -15,7 +15,7 @@ from typing import Any
 
 import pytest
 
-from scripts import migrate_skill_identity as mig
+from scripts.data_repair import migrate_skill_identity as mig
 
 
 @pytest.fixture
@@ -129,8 +129,8 @@ def test_apply_registry_contends_with_the_module_registry_lock(
     `installed.json.tmp` name as `install_registry.save`, so a concurrent save
     has its staged body overwritten and its rename left with nothing to rename.
     """
-    from shared import install_registry as reg
-    from shared.platform import LockTimeoutError
+    from base.native_process.os_platform import LockTimeoutError
+    from base.packages.extensions import install_registry as reg
 
     registry_path = home / "installed.json"
     dups = mig.scan_registry(registry_path)

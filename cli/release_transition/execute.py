@@ -12,12 +12,12 @@ from pathlib import Path
 
 from pydantic import JsonValue
 
+from base.deploy.release.operation import executor_heartbeat
+from base.log import init_cli_process
 from cli.release_fleet.request import FleetRequest
 from cli.release_transition.failure import OperationFailure, failure_detail
 from cli.release_transition.journal import Journal, Operation, exclusive, read_operation
 from cli.release_transition.request import PitrRequest
-from shared.log import init_cli_process
-from shared.release_operation import executor_heartbeat
 
 
 def execute(path: Path) -> None:
@@ -25,7 +25,7 @@ def execute(path: Path) -> None:
     request = operation.request
     os.environ["AVA_HOME"] = request.home
     os.environ["AVA_CLUSTER_REGISTRY"] = request.registry
-    from shared.runtime_interpreter import verify_loaded_image
+    from base.deploy.release.runtime_interpreter import verify_loaded_image
 
     image = request.executor.verify(Path(request.home))
     verify_loaded_image(
@@ -43,7 +43,7 @@ def execute(path: Path) -> None:
             raise RuntimeError("release executor belongs to a retired native launch attempt")
         journal.record_native(_executor_receipt(operation.launch))
         # The health probe trusts the journal to explain an outage only while
-        # this stamp is fresh (shared.release_operation.operation_in_flight).
+        # this stamp is fresh (base.deploy.release.operation.operation_in_flight).
         with executor_heartbeat(path):
             _drive(journal, path)
 
@@ -51,8 +51,8 @@ def execute(path: Path) -> None:
 def _drive(journal: Journal, path: Path) -> None:
     request = journal.operation.request
     if isinstance(request, PitrRequest):
+        from base.deploy.release.operation import authorized_pitr
         from cli.release_transition.pitr.inputs import require_inputs
-        from shared.release_operation import authorized_pitr
 
         require_inputs(journal.operation)
         with authorized_pitr(path, journal.pitr_record_write):
@@ -158,7 +158,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--operation", type=Path, required=True)
     operation = parser.parse_args().operation
-    # Importing `shared.log` drops loguru's default handler, so without this
+    # Importing `base.log` drops loguru's default handler, so without this
     # every record the executor writes (a routed failure's traceback, missed
     # heartbeat and lease rounds, the listener's refusal reasons) is discarded.
     # Stderr is what the native adapter keeps: the transient unit's systemd

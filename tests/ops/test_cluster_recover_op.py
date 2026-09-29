@@ -16,9 +16,9 @@ from typing import Literal
 
 import pytest
 
-import ops.ops_cluster as _ops
-from ops.ops_cluster import ClusterUpdateInProgress
-from shared.cluster_lock import DeployLease, RecoveryClaim
+import ops.cluster as _ops
+from base.deploy.state.cluster_lock import DeployLease, RecoveryClaim
+from ops.cluster import ClusterUpdateInProgress
 
 _Kind = Literal["rollout", "restart", "update"]
 
@@ -47,10 +47,10 @@ def recover_calls(monkeypatch: pytest.MonkeyPatch) -> dict[str, bool]:
     """Stub the collaborators; record whether the clear + unpause writes ran."""
     calls = {"released": False, "unpaused": False}
     monkeypatch.setattr(_ops, "machine_name", lambda: "m1")
-    # The pid probe itself moved to `shared.cluster_lock.holder_process_gone`
+    # The pid probe itself moved to `base.deploy.state.cluster_lock.holder_process_gone`
     # (the liveness rule the automatic reclaim shares), so its inputs are the
     # seams to pin: machine identity for the holder parse + process liveness.
-    monkeypatch.setattr("shared.machine.machine_name", lambda: "m1")
+    monkeypatch.setattr("base.cluster.machine.machine_name", lambda: "m1")
     monkeypatch.setattr(_ops, "updater_lease_live", lambda: False)
 
     def _claim(_holder: str, observed: DeployLease | None) -> RecoveryClaim:
@@ -73,7 +73,7 @@ def test_recover_never_touches_a_leftover_ui_update_marker(
 ) -> None:
     """No lifecycle owns Gate's retired update marker; recovery neither reads nor
     removes a file the retired updater left in the home."""
-    monkeypatch.setattr("shared.paths.ava_home", lambda: tmp_path)
+    monkeypatch.setattr("base.paths.ava_home", lambda: tmp_path)
     marker = tmp_path / "deploy-state.json"
     marker.write_text('{"schema_version":2,"state":"updating","generation":"stranded"}')
     _set_lease(monkeypatch, None)
@@ -89,7 +89,7 @@ def _set_lease(monkeypatch: pytest.MonkeyPatch, lease: DeployLease | None) -> No
 
 
 def _set_alive(monkeypatch: pytest.MonkeyPatch, alive: Callable[[int], bool]) -> None:
-    monkeypatch.setattr("shared.proc.process_alive", alive)
+    monkeypatch.setattr("base.host.proc.process_alive", alive)
 
 
 def test_dead_local_holders_unexpired_lease_is_cleared_at_once(
@@ -175,10 +175,10 @@ def test_recover_refuses_retained_normal_compensation_before_unpause(
 ) -> None:
     _set_lease(monkeypatch, None)
 
-    def refuse(_snapshot: _ops.updater_handoff.UpdaterHandoffSnapshot) -> bool:
+    def refuse(_snapshot: _ops.handoff.UpdaterHandoffSnapshot) -> bool:
         return False
 
-    monkeypatch.setattr(_ops.updater_handoff, "allows_generic_recovery", refuse)
+    monkeypatch.setattr(_ops.handoff, "allows_generic_recovery", refuse)
 
     with pytest.raises(ClusterUpdateInProgress, match="explicit checked recovery"):
         _ops.cluster_recover_op()

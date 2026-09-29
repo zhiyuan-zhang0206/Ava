@@ -30,8 +30,8 @@ import tempfile
 from contextlib import suppress
 from pathlib import Path
 
-from shared.private_storage import private_file_problem, write_private_bytes
-from shared.verified_file import regular_bytes
+from base.deploy.release.verified_file import regular_bytes
+from base.host.private_storage import private_file_problem, write_private_bytes
 
 PIN_NAME = "logical-backup.passphrase"
 _PASSPHRASE = re.compile(r"^[0-9a-f]{64}$")
@@ -120,14 +120,14 @@ def ensure_minted(home: Path) -> None:
 
 def logical_backup_passphrase() -> str:
     """This home's logical-backup passphrase (see the module docstring)."""
-    from shared.paths import ava_home
+    from base.paths import ava_home
 
     return resolve(ava_home())
 
 
 LEGACY_RESTORE_HINT = (
     "an artifact an empty-secret home wrote before its cutover pinned a minted passphrase "
-    "decrypts only with the explicit --legacy-empty-secret-passphrase of scripts/restore_drill.py"
+    "decrypts only with the explicit --legacy-empty-secret-passphrase of scripts/data_plane_ops/restore_drill.py"
 )
 
 

@@ -96,7 +96,7 @@ sys.path.insert(0, sys.argv[1])
 sys.argv = ['services.agent_ops.daemon', *sys.argv[2:]]
 class DenyEffects(importlib.abc.MetaPathFinder):
     def find_spec(self, fullname, *args):
-        if fullname.startswith(('shared.config', 'services.agent_ops._boot',
+        if fullname.startswith(('base.config', 'services.agent_ops._boot',
                                 'services.pidfile', 'ops')):
             raise AssertionError('ordinary startup imported before argv refusal: ' + fullname)
 sys.meta_path.insert(0, DenyEffects())
@@ -115,7 +115,7 @@ runpy.run_module('services.agent_ops.daemon', run_name='__main__')
 
 
 def test_unknown_main_argv_refuses_before_eager_config(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("shared.config.ensure_eager", _effect)
+    monkeypatch.setattr("base.config.ensure_eager", _effect)
     monkeypatch.setattr(daemon, "init_gateway_process", _effect)
     with pytest.raises(SystemExit) as failure:
         daemon.main(argv=["--bootstrap-observation", "/private/retired.json"])

@@ -18,17 +18,17 @@ from urllib.parse import SplitResult, urlsplit
 
 from dotenv import dotenv_values
 
-from cli.start_identity import IdentityInput, prepare_identity, read_intent
-from cli.start_runtime import StartRuntime
-from shared.env_registry import (
+from base.host.env.registry import (
     WSL_DEFAULT_HEALTH_PORT_BASE,
     derived_env_keys,
     env_identity_keys,
     health_port_env,
 )
-from shared.netutil import is_loopback_host
-from shared.platform import IS_WINDOWS, IS_WSL, file_lock
-from shared.private_storage import ensure_private_dir
+from base.host.net.predicates import is_loopback_host
+from base.host.private_storage import ensure_private_dir
+from base.native_process.os_platform import IS_WINDOWS, IS_WSL, file_lock
+from cli.start_identity import IdentityInput, prepare_identity, read_intent
+from cli.start_runtime import StartRuntime
 
 _CAP_ARGS = {
     "gateway": "serve_gateway",
@@ -39,9 +39,9 @@ _FIELDS = ("machine_name", "machine_host", "machine_description", "memory_remote
 
 
 # An unanchored process pins its private scratch home as AVA_HOME
-# (shared/dotenv_boot.py rule 4: `ava-unanchored-<16 hex>` under the temp dir);
+# (base/host/env/dotenv_boot.py rule 4: `ava-unanchored-<16 hex>` under the temp dir);
 # a child inheriting it claims no home either. Mirrored here because this entry
-# must not import shared.dotenv_boot, which resolves the home at import.
+# must not import base.host.env.dotenv_boot, which resolves the home at import.
 _UNANCHORED_SCRATCH = re.compile(r"ava-unanchored-[0-9a-f]{16}")
 
 
@@ -144,8 +144,8 @@ def _join(values: dict[str, str], home: Path, capability: str | None) -> None:
     machine API token of its capability — the carried bundle's at a join, the
     installed one's afterwards (none when the cluster's API is open).
     """
-    from shared.bootstrap import fetch_bootstrap_config
-    from shared.cluster.authority.unit import install_bundle
+    from base.cluster.authority.unit import install_bundle
+    from base.host.env.bootstrap import fetch_bootstrap_config
 
     if "AVA_CLUSTER_SECRET" in values:
         raise ValueError(
@@ -160,7 +160,7 @@ def _join(values: dict[str, str], home: Path, capability: str | None) -> None:
         raise ValueError("joining a remote gateway requires a reachable --machine-host")
     bundle, token = _join_credential(home, capability, remote=remote)
     # The join runs before this start publishes its home. Name it now: the
-    # bootstrap transport refuses an unanchored checkout (shared.dotenv_boot,
+    # bootstrap transport refuses an unanchored checkout (base.host.env.dotenv_boot,
     # resolved at its first import), and this start's home is the claim.
     os.environ["AVA_HOME"] = str(home)
     payload = fetch_bootstrap_config(gateway, bearer=token)
@@ -189,13 +189,13 @@ def _join_credential(home: Path, capability: str | None, *, remote: bool) -> tup
     A carried bundle is opened (authenticated, unexpired) before anything is
     fetched; without one the installed capability must exist.
     """
-    from shared.cluster.authority.unit import (
+    from base.cluster.authority.unit import (
         CAPABILITY_KEY_ENV,
         load_unit_capability,
         no_capability_message,
         open_bundle,
     )
-    from shared.verified_file import regular_bytes
+    from base.deploy.release.verified_file import regular_bytes
 
     transport_key = os.environ.pop(CAPABILITY_KEY_ENV, "")
     bundle = None
@@ -217,7 +217,7 @@ def _join_credential(home: Path, capability: str | None, *, remote: bool) -> tup
 def _config_values(args: argparse.Namespace, home: Path) -> tuple[dict[str, str], str | None]:
     if args.config_file is None:
         return {}, None
-    from shared.config_lite_table import FIELD_ALIASES
+    from base.host.env.config_lite_table import FIELD_ALIASES
 
     path = Path(args.config_file).expanduser().resolve(strict=True)
     if path.is_relative_to(home):
@@ -353,7 +353,7 @@ def _inputs(
 
 
 def _service_path(values: dict[str, str], home: Path) -> str:
-    from shared.session_env import admit_service_path
+    from base.sessions.env_forwarding import admit_service_path
 
     if "AVA_SERVICE_PATH" in values:
         return admit_service_path(values["AVA_SERVICE_PATH"])
@@ -427,7 +427,7 @@ def run_start(args: argparse.Namespace, *, runtime: StartRuntime | None = None) 
             runtime = StartRuntime.development(_checkout())
         home = _home(worktree=args.worktree, runtime=runtime)
         runtime.validate(home)
-        from shared.release_operation import require_start_authorized
+        from base.deploy.release.operation import require_start_authorized
 
         if runtime.release is not None:
             require_start_authorized(home)
@@ -439,7 +439,7 @@ def run_start(args: argparse.Namespace, *, runtime: StartRuntime | None = None) 
             from cli.main import _init_cli_logging
 
             _init_cli_logging(["start"])
-            from cli.commands.start import cmd_start
+            from cli.commands.lifecycle.start import cmd_start
 
             result = cmd_start(
                 disabled_services=tuple(args.disable_service),
@@ -449,8 +449,8 @@ def run_start(args: argparse.Namespace, *, runtime: StartRuntime | None = None) 
                 runtime=runtime,
             )
             if result == 0:
-                from cli.commands.root_driver import complete_boot_start
-                from shared.start_serving import clear_serving
+                from base.deploy.lifecycle.start_serving import clear_serving
+                from cli.commands.lifecycle.root_driver import complete_boot_start
 
                 try:
                     complete_boot_start()

@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from cli.commands import _ownership_preflight as _ownership
+from cli.commands.converge import _ownership_preflight as _ownership
 from cli.commands.converge import host as converge_host
 from cli.commands.converge.spec import ConvergeCtx
 

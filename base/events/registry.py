@@ -1,0 +1,785 @@
+"""Runtime event declarations and registry builders."""
+
+from typing import Any, Literal
+
+from base.events.payloads import (
+    LLM_ERROR_FAMILY,
+    CiRunsDaily,
+    CiRunsRun,
+    CiUsageDaily,
+    CiWorkflowWindow,
+    CompactionCompleted,
+    ComputerAction,
+    ComputerSessionEnd,
+    ComputerSessionStart,
+    DebtSweepDaily,
+    DeliveryOutboxAbandoned,
+    DeliveryOutboxFlushed,
+    DeliveryPoisoned,
+    DeliveryRecoveryDecision,
+    DeliveryStalled,
+    DeliveryWakeSuppressed,
+    EventLogDrop,
+    EventTier,
+    ExecChildBoot,
+    ExecEnvelope,
+    ExecFailed,
+    ExecPayload,
+    ExecRequestQuarantine,
+    ExecSubprocessKilled,
+    FrontendInteraction,
+    Halt,
+    HeartbeatBackoffRaised,
+    HeartbeatBackoffReset,
+    HeartbeatNudged,
+    HeartbeatPaused,
+    LlmProviderError,
+    LlmUsage,
+    LokiWritePathProbeFailed,
+    LokiWritePathProbeThrottled,
+    NodeExit,
+    PluginActivation,
+    PrFlowDaily,
+    PrFlowRun,
+    RetentionClass,
+    SdkCall,
+    ServiceStarted,
+    ShellTtlRenewed,
+    Spawn,
+    SseDrop,
+    StatusChange,
+    StreamStalledRetry,
+    StreamStallPairTerminated,
+    SyntaxFix,
+    TaskEscalation,
+    TaskReminderDigest,
+    TaskUpdate,
+    TurnEnd,
+)
+from base.events.system import (
+    EventSpec,
+    HostDispatcherScanFailed,
+    PluginLoadFailed,
+    ProcessExit,
+)
+
+
+def _audit(
+    name: str,
+    doc: str,
+    *,
+    payload: Any | None = None,
+    tier: EventTier = "business",
+    retention_class: RetentionClass | None = None,
+) -> EventSpec:
+    return EventSpec(
+        name=name,
+        category="audit",
+        tier=tier,
+        payload=payload,
+        doc=doc,
+        retention_class=retention_class,
+    )
+
+
+def _telemetry_audit(name: str, doc: str, *, payload: Any | None = None) -> EventSpec:
+    """A name that genuinely carries both categories (status_change: the
+    loguru side emits telemetry, audit_events emits audit)."""
+    return EventSpec(
+        name=name,
+        category="telemetry",
+        tier="noise",
+        extra_categories=frozenset({"audit"}),
+        payload=payload,
+        doc=doc,
+    )
+
+
+def _telemetry(
+    name: str,
+    doc: str,
+    *,
+    payload: Any | None = None,
+    family: str | None = None,
+    destination: Literal["events", "file"] = "events",
+    tier: EventTier = "observation",
+    retention_class: RetentionClass | None = None,
+) -> EventSpec:
+    return EventSpec(
+        name=name,
+        category="telemetry",
+        tier=tier,
+        payload=payload,
+        family=family,
+        destination=destination,
+        doc=doc,
+        retention_class=retention_class,
+    )
+
+
+_EVENTS_RUNTIME: dict[str, EventSpec] = {
+    # ── audit (category=audit, 29) — registry.md §2, append-only operations ──
+    # Keep spawn/fork/resurrect and their telemetry mirrors for complete lineage.
+    "spawn": _audit("spawn", "new agent born", payload=Spawn, retention_class="lineage"),
+    "fork": _audit("fork", "agent forked from another", retention_class="lineage"),
+    "send_message": _audit("send_message", "message sent to an agent"),
+    "terminate": _audit("terminate", "agent terminated"),
+    "restart": _audit("restart", "agent restart initiated"),
+    "cancel": _audit("cancel", "in-flight turn cancelled"),
+    "resurrect": _audit("resurrect", "terminated agent woken", retention_class="lineage"),
+    "billing_resurrect": _audit(
+        "billing_resurrect",
+        "billing batch recovery run: billing-class halt victims reinstated after "
+        "the provider balance gate passed (task #3919)",
+    ),
+    "restart_completed": _audit("restart_completed", "restart finished"),
+    "hosted_legacy_adoption": _audit(
+        "hosted_legacy_adoption",
+        "a hosted successor replaced a legacy NULL-resource owner before lease "
+        "expiry on machine-local evidence (dead predecessor probe set)",
+    ),
+    "compact": _audit("compact", "agent context compacted"),
+    "circuit_breaker": _audit(
+        "circuit_breaker",
+        "heartbeat circuit breaker opened — a permanent provider rejection stopped "
+        "heartbeat re-fires (context_overflow reason arms the forced-compact self-rescue)",
+    ),
+    "report_activity": _audit("report_activity", "activity report"),
+    "status_change": _telemetry_audit(
+        "status_change",
+        "agent status transition — both telemetry (loguru) and audit (audit_events) sides emit this name",
+        payload=StatusChange,
+    ),
+    "exit": _audit("exit", "agent process exited"),
+    "label_change": _audit("label_change", "agent label changed"),
+    "skill_invoked": _audit("skill_invoked", "skill invoked by an agent"),
+    "task_create": _audit("task_create", "task created"),
+    "task_update": _audit("task_update", "task updated", payload=TaskUpdate),
+    "report_breached": _audit("report_breached", "guarantee report breached"),
+    "computer_action": _audit(
+        "computer_action",
+        "computer-use desktop action (executed or refused)",
+        payload=ComputerAction,
+    ),
+    "env_write": _audit(
+        "env_write",
+        "official .env config write (actor and keys; old/new values for "
+        "non-sensitive fields stay in the local record; sensitive values never recorded)",
+    ),
+    "env_unauthorized_write": _audit(
+        "env_unauthorized_write",
+        "out-of-band .env modification detected (no official write recorded)",
+        tier="anomaly",
+    ),
+    "computer_session_start": _audit(
+        "computer_session_start",
+        "computer-use task session opened (first action with a task_id)",
+        payload=ComputerSessionStart,
+    ),
+    "computer_session_end": _audit(
+        "computer_session_end",
+        "computer-use task session closed (idle timeout)",
+        payload=ComputerSessionEnd,
+    ),
+    "mcp_tool_call": _audit(
+        "mcp_tool_call",
+        "MCP tool invoked through the gateway /mcp endpoint (client-scoped, args redacted)",
+    ),
+    # ── telemetry (category=telemetry) — registry.md §3 ──
+    # frontend user modeling
+    "frontend_interaction": _telemetry(
+        "frontend_interaction",
+        "tracked frontend interaction (click / page view / settings change)",
+        payload=FrontendInteraction,
+        tier="noise",
+    ),
+    # turn lifecycle
+    "llm_usage": _telemetry("llm_usage", "LLM call metering", payload=LlmUsage),
+    "turn_end": _telemetry("turn_end", "one turn finished", payload=TurnEnd),
+    "llm_turn_aborted": _telemetry(
+        "llm_turn_aborted", "turn aborted after retries", family=LLM_ERROR_FAMILY, tier="anomaly"
+    ),
+    "recovery_breaker_halt": _telemetry(
+        "recovery_breaker_halt",
+        "recovery circuit breaker tripped — consecutive permanent provider rejections "
+        "halted every automatic recovery path until a turn succeeds (task #3617)",
+        tier="anomaly",
+    ),
+    "compact_turn_aborted": _telemetry(
+        "compact_turn_aborted", "turn aborted because compaction failed", tier="anomaly"
+    ),
+    "llm_provider_error": _telemetry(
+        "llm_provider_error",
+        "LLM provider failure",
+        payload=LlmProviderError,
+        family=LLM_ERROR_FAMILY,
+        tier="anomaly",
+    ),
+    "stream_stalled_retry": _telemetry(
+        "stream_stalled_retry",
+        "stream stalled, retried (vendor/model/stage/elapsed_s carry the provider-health "
+        "dimension; elapsed_s also maps to an OTLP histogram)",
+        payload=StreamStalledRetry,
+        family=LLM_ERROR_FAMILY,
+        tier="anomaly",
+    ),
+    # Excluded from LLM_ERROR_FAMILY (task #3884, reaffirmed 2026-09-18):
+    # each pair co-emits 1:1 with stream_stalled_retry, so family sums would
+    # double-count the call. The Provider stalls panel/rule (task #3948)
+    # displays the pair; test_event_contract pins the family at 4.
+    "stream_stall_pair_terminated": _telemetry(
+        "stream_stall_pair_terminated",
+        "two adjacent stream stalls (stream segment + non-streaming fallback) terminated "
+        "the call early; retried on the delayed stall schedule",
+        payload=StreamStallPairTerminated,
+        tier="anomaly",
+    ),
+    "stream_overloaded_retry": _telemetry(
+        "stream_overloaded_retry",
+        "stream overloaded, retried",
+        family=LLM_ERROR_FAMILY,
+        tier="anomaly",
+    ),
+    "thinking_block_sanitized": _telemetry(
+        "thinking_block_sanitized", "thinking block sanitized", tier="noise"
+    ),
+    "llm_cancelled": _telemetry("llm_cancelled", "LLM call cancelled", tier="anomaly"),
+    # exec lifecycle
+    "exec": _telemetry("exec", "execute_code succeeded", payload=ExecPayload),
+    "exec_failed": _telemetry(
+        "exec_failed", "execute_code failed", payload=ExecFailed, tier="anomaly"
+    ),
+    "plugin_load_failed": _telemetry(
+        "plugin_load_failed",
+        "enabled plugin skipped because it failed to load (fail-soft)",
+        payload=PluginLoadFailed,
+        tier="anomaly",
+    ),
+    "exec_envelope": _telemetry(
+        "exec_envelope",
+        "exec envelope transfer cost (size + serialize time) — request snapshot / result delta",
+        payload=ExecEnvelope,
+    ),
+    "exec_child_boot": _telemetry(
+        "exec_child_boot",
+        "exec child bootstrap duration before agent-authored code",
+        payload=ExecChildBoot,
+        tier="noise",
+    ),
+    "exec_request_quarantine": _telemetry(
+        "exec_request_quarantine",
+        "stale exec request evidence preserved under the explicit quarantine",
+        payload=ExecRequestQuarantine,
+    ),
+    "exec_request_bounded_quarantine": _telemetry(
+        "exec_request_bounded_quarantine",
+        "an unreadable exec request envelope past the bounded-disposition bound "
+        "(twice the exec node timeout, no live process reference, no live host "
+        "process) was quarantined without review — the bytes are preserved with "
+        "a receipt and the recovery path no longer defers on it; off via "
+        "AVA_EXEC_REQUEST_BOUNDED_QUARANTINE_ENABLED restores unbounded retention",
+        tier="anomaly",
+    ),
+    "compaction_completed": _telemetry(
+        "compaction_completed",
+        "applied context compaction size reduction and completed count",
+        payload=CompactionCompleted,
+        tier="noise",
+    ),
+    "exec_cancelled": _telemetry("exec_cancelled", "execute_code cancelled", tier="anomaly"),
+    "exec(timeout)": _telemetry(
+        "exec(timeout)", "historical parenthesized name (migration target)", tier="anomaly"
+    ),
+    "exec(failed)": _telemetry(
+        "exec(failed)", "historical parenthesized name (migration target)", tier="anomaly"
+    ),
+    "exec(cancelled)": _telemetry(
+        "exec(cancelled)", "historical parenthesized name (migration target)", tier="anomaly"
+    ),
+    "exec(thread-stuck)": _telemetry(
+        "exec(thread-stuck)", "historical parenthesized name (migration target)", tier="anomaly"
+    ),
+    "exec_timeout": _telemetry("exec_timeout", "execute_code timed out", tier="anomaly"),
+    "exec_node_timeout": _telemetry("exec_node_timeout", "node-level timeout", tier="anomaly"),
+    "exec_subprocess_killed": _telemetry(
+        "exec_subprocess_killed",
+        "exec child survived the signal grace period and was SIGKILLed",
+        payload=ExecSubprocessKilled,
+        tier="anomaly",
+    ),
+    # Hosted runner dispatcher and turns (future/infra/agent-runner-as-server.md).
+    "host_stale_running_settled": _telemetry(
+        "host_stale_running_settled",
+        "hosted boot settle restored rows a previous host instance left running "
+        "without a task (crash / kill -9); carries n = rows settled",
+        tier="noise",
+    ),
+    "host_dispatcher_subscribed": _telemetry(
+        "host_dispatcher_subscribed",
+        "hosted dispatcher subscribed to the inbound wake pattern",
+        tier="noise",
+    ),
+    "host_recovery_wake_started": _telemetry(
+        "host_recovery_wake_started",
+        "hosted recovery wake started a turn and occupied an in-flight pacing slot",
+        tier="noise",
+    ),
+    "host_recovery_wake_released": _telemetry(
+        "host_recovery_wake_released",
+        "hosted recovery turn completed and released its in-flight pacing slot",
+        tier="noise",
+    ),
+    "host_dispatcher_reconnect": _telemetry(
+        "host_dispatcher_reconnect",
+        "hosted dispatcher's wake subscription dropped — reconnecting (wakes published "
+        "while down are lost; the delivery watchdog re-publish covers them)",
+        tier="noise",
+    ),
+    "host_dispatcher_scan_failed": _telemetry(
+        "host_dispatcher_scan_failed",
+        "hosted dispatcher's durable pending scan failed; the wake subscription remains "
+        "open and attributes carry the next scan backoff_s",
+        payload=HostDispatcherScanFailed,
+        tier="anomaly",
+    ),
+    "host_dispatcher_restart_required": _telemetry(
+        "host_dispatcher_restart_required",
+        "hosted dispatcher could not unwind a stale turn — exiting for supervisor recovery",
+        tier="anomaly",
+    ),
+    "host_dispatcher_bad_channel": _telemetry(
+        "host_dispatcher_bad_channel",
+        "hosted dispatcher ignored a wake whose channel name carried no agent id",
+        tier="anomaly",
+    ),
+    "host_config_rejected": _telemetry(
+        "host_config_rejected",
+        "a hosted wake was consumed without a turn because the agent's stored model "
+        "config cannot build (unknown model or missing provider key) — logged once per "
+        "stored config state (fingerprint); the pending inbound is kept until the "
+        "overlay is fixed",
+        tier="anomaly",
+    ),
+    "host_config_normalized": _telemetry(
+        "host_config_normalized",
+        "a hosted wake bound a stored llm_model pin as its registered fallback "
+        "because the registry has withdrawn the pinned model — the turn and its "
+        "usage attribution run on the fallback; logged once per stored config "
+        "state (fingerprint)",
+        tier="anomaly",
+    ),
+    # Write-side counterpart to wake-time host_config_normalized (task #4306).
+    "spawn_config_normalized": _telemetry(
+        "spawn_config_normalized",
+        "a spawn request's config_overlay carried a withdrawn llm_model — the "
+        "gateway settled it to the registered fallback before the row was "
+        "created, and the response carries the receipt (requested, resolved)",
+        tier="anomaly",
+    ),
+    "spawn_overlay_model_normalized": _telemetry(
+        "spawn_overlay_model_normalized",
+        "the spawn row INSERT settled a withdrawn llm_model in the overlay to "
+        "its registered fallback — the last-mile guard for client paths that "
+        "compose the map outside the gateway preflight",
+        tier="anomaly",
+    ),
+    "restart_config_normalized": _telemetry(
+        "restart_config_normalized",
+        "a restart config_overlay carried a withdrawn llm_model — it was "
+        "settled to the registered fallback before the overlay update and the "
+        "restart payload",
+        tier="anomaly",
+    ),
+    "host_turn_crashed": _telemetry(
+        "host_turn_crashed",
+        "a hosted turn task raised — the task is dropped and the next wake retries "
+        "from the checkpoint; neighbours are unaffected. Carries exception_type, plus "
+        "config_fingerprint when the stored config was read before the failure",
+        tier="anomaly",
+    ),
+    "host_agent_prepared": _telemetry(
+        "host_agent_prepared",
+        "the host built an agent's per-agent runtime (chat model + startup reconcile) "
+        "on a cold path — carries duration_ms and a reason of cold / config_changed / "
+        "evicted, so a wake that pays the cold cost is distinguishable from one that "
+        "does not, and a cache thrashing on config churn is visible as reason mix",
+        tier="noise",
+    ),
+    "host_started": _telemetry(
+        "host_started",
+        "the hosted agent-runner finished process-scope boot and its dispatcher is live",
+        tier="noise",
+    ),
+    "host_stdout_log_rotated": _telemetry(
+        "host_stdout_log_rotated",
+        "the hosted daemon rotated its raw stdout transcript at the size ceiling "
+        "(task #2356) — carries size and ceiling; a crash storm shows up as repeated "
+        "rotation events instead of an unbounded file",
+        tier="noise",
+    ),
+    "host_turn_uncancellable": _telemetry(
+        "host_turn_uncancellable",
+        "a hosted turn did not unwind after being cancelled — it is blocked where asyncio "
+        "cannot interrupt it (a C call), so the host stopped waiting and exited. Carries the "
+        "agent, how long the cancel was pending (waited_s), and the agent's real activity "
+        "clock (last_active_at / idle_s from agents_meta, NOT the /api/agents field of the "
+        "same name, which is MAX(inbound_messages.created_at) and goes stale during long "
+        "turns — issue #183) so a slow shutdown is distinguishable from a genuine wedge. The "
+        "turn resumes from its checkpoint on restart. Process mode had no equivalent because "
+        "SIGKILL always lands",
+        tier="anomaly",
+    ),
+    "host_turn_stall_timeout": _telemetry(
+        "host_turn_stall_timeout",
+        "the hosted stall guard aborted a graph.ainvoke whose turn clock "
+        "(agent/turn/progress.py: node enters + completed LLM steps) was "
+        "silent past AVA_HOST_TURN_NO_PROGRESS_TIMEOUT_SECONDS (turn activity = "
+        "node enter, completed LLM step, streamed chunk) — the turn-level "
+        "injection guard of task #2417. The invocation was cancelled and "
+        "unwound; the row settles to idling; the next wake resumes from the "
+        "checkpoint",
+        tier="anomaly",
+    ),
+    "host_turn_stall_uncancellable": _telemetry(
+        "host_turn_stall_uncancellable",
+        "a stalled invocation that had been cancelled for the bounded unwind "
+        "window REFUSED to unwind (blocked where asyncio cannot interrupt it "
+        "— a C call). The host cannot fix this in-process: it signals a "
+        "daemon restart so the supervisor recovers the turn from its "
+        "checkpoint",
+        tier="anomaly",
+    ),
+    # Corpse reaper (task #2609): mark crashed hosted rows, then terminate them.
+    "host_turn_corpse_marked": _telemetry(
+        "host_turn_corpse_marked",
+        "a hosted turn crashed and the row was stamped with the corpse marker "
+        "(last_turn_fatal_at) — the reaper terminates it once the grace window "
+        "elapses unless a completed turn clears the mark first",
+        tier="anomaly",
+    ),
+    "corpse_stamp_failed": _telemetry(
+        "corpse_stamp_failed",
+        "the corpse marker stamp failed after a hosted turn crash — the row "
+        "keeps looking alive until a later stamp or a completed turn; the "
+        "reaper cannot see this death",
+        tier="anomaly",
+    ),
+    "corpse_reaper_terminated": _telemetry(
+        "corpse_reaper_terminated",
+        "the corpse reaper terminated crash-marked idling rows past the grace "
+        "window (termination_source='reaper')",
+        tier="anomaly",
+    ),
+    "corpse_reaper_failed": _telemetry(
+        "corpse_reaper_failed",
+        "the beat's corpse reap pass failed — retried on the next beat; leases "
+        "of healthy rows are unaffected (renewal runs first)",
+        tier="anomaly",
+    ),
+    "corpse_reaper_publish_failed": _telemetry(
+        "corpse_reaper_publish_failed",
+        "a reaped corpse's frontend snapshot publish failed — best-effort; the "
+        "durable terminated flip already committed",
+        tier="noise",
+    ),
+    # Crash-recovery wake (task #4039): reap commits it; service consumes it.
+    "crash_recovery_wake_queued": _telemetry(
+        "crash_recovery_wake_queued",
+        "the corpse reaper committed a crash death's recovery wake — one "
+        "system-source chat carrying the hosted_turn_recovery marker — inside "
+        "the terminating transaction, so a committed reap always has a wake "
+        "to resume its owner (task #4039)",
+        tier="observation",
+    ),
+    "crash_recovery_wake_attempted": _telemetry(
+        "crash_recovery_wake_attempted",
+        "the service layer attempted the guarded auto-resurrect for a reaped "
+        "corpse's committed recovery wake; carries the status the attempt "
+        "returned (task #4039)",
+        tier="observation",
+    ),
+    "crash_recovery_wake_deferred": _telemetry(
+        "crash_recovery_wake_deferred",
+        "a reaped corpse's guarded resurrect attempt failed — the wake row "
+        "stays pending for the delivery watchdog's terminated-owner retry "
+        "until the stale age gate (task #4039)",
+        tier="observation",
+    ),
+    "host_recrash_reap_skipped": _telemetry(
+        "host_recrash_reap_skipped",
+        "the recrash prompt reap skipped terminating a re-crashed corpse "
+        "(fail-closed) — the grace-window reap stays the backstop. Carries the "
+        "reason: the gray switch is off (disabled), the turn never settled to "
+        "idling (settle_incomplete), or the row moved on since the crash "
+        "(row_moved_on)",
+        tier="noise",
+    ),
+    "host_turn_stall_aborted": _telemetry(
+        "host_turn_stall_aborted",
+        "a hosted turn task ended after its no-progress abort: the invocation "
+        "unwound and was dropped; the runtime was discarded by run_turn, so "
+        "the next wake re-runs the startup reconcile before resuming from "
+        "the checkpoint",
+        tier="anomaly",
+    ),
+    # Settled-abort reconcile (task #3615): dispose claims at settlement.
+    "host_abort_reconcile_skipped": _telemetry(
+        "host_abort_reconcile_skipped",
+        "the settled hosted turn abort skipped the immediate inbound reconcile "
+        "(fail-closed) — the claimed rows are left to the next cold admission. "
+        "Carries the reason: the soft switch is off (disabled), the turn's "
+        "resources never fully settled (resources_unsettled), or the runtime "
+        "ownership was already replaced (ownership_lost — the replacement "
+        "disposes the rows)",
+        tier="noise",
+    ),
+    "host_abort_reconcile_failed": _telemetry(
+        "host_abort_reconcile_failed",
+        "the immediate inbound reconcile at a settled hosted turn abort raised "
+        "— the host does not treat it as fatal and the next cold admission "
+        "retries the disposal of the claimed rows",
+        tier="anomaly",
+    ),
+    # Finished-turn reconcile (task #3999): dispose claims after checkpoint flush.
+    "host_turn_reconcile_skipped": _telemetry(
+        "host_turn_reconcile_skipped",
+        "the finished hosted turn skipped the immediate inbound reconcile "
+        "(fail-closed) — the claimed rows are left to the next cold admission. "
+        "Carries the reason: the soft switch is off (disabled), the turn's "
+        "resources never fully settled (resources_unsettled), or the runtime "
+        "ownership was already replaced (ownership_lost — the replacement "
+        "disposes the rows)",
+        tier="noise",
+    ),
+    "host_turn_reconcile_failed": _telemetry(
+        "host_turn_reconcile_failed",
+        "the immediate inbound reconcile at a finished hosted turn raised "
+        "— the host does not treat it as fatal and the next cold admission "
+        "retries the disposal of the claimed rows",
+        tier="anomaly",
+    ),
+    # Impersonation auto-stop (task #3998): close the lease on executor/relay death.
+    "impersonation_aborted": _telemetry(
+        "impersonation_aborted",
+        "the native impersonation supervisor detected a dead core component "
+        "(the executor's recorded process chain all dead/reused, or the bound "
+        "relay's heartbeat stale past the exception window) and closed the "
+        "lease: carries the agent, lease, session, the dead component "
+        "(executor | relay) and its detail; the end note is delivered through "
+        "the resume chain",
+        tier="anomaly",
+    ),
+    "host_admission_wait_exceeded": _telemetry(
+        "host_admission_wait_exceeded",
+        "a hosted turn has queued at the host admission gate "
+        "(AVA_HOST_MAX_CONCURRENT_TURNS) for at least "
+        "AVA_HOST_ADMISSION_WAIT_ALERT_SECONDS — carries the agent, its current "
+        "wait, the limit and the queue depth; reported once per wait episode. "
+        "Queueing is the configured memory/runtime trade-off working, not an "
+        "error; a wait this long means the queue is backing up (raise the limit "
+        "or inspect the turns holding slots). The wait is exempt from stall "
+        "cancellation — cancelling it would only re-queue it at the tail",
+        tier="anomaly",
+    ),
+    "hosted_boot_recovery_stalled": _telemetry(
+        "hosted_boot_recovery_stalled",
+        "hosted boot recovery was deferred for the same agent on three "
+        "consecutive boots — retained exec request evidence is not clearing on "
+        "its own, so the ordinary per-boot warning is escalated to this "
+        "counted anomaly event; inspect the named evidence and its disposition "
+        "commands",
+        tier="anomaly",
+    ),
+    "host_turn_stall_detected": _telemetry(
+        "host_turn_stall_detected",
+        "the hosted dispatcher's durable scan found an in-flight turn whose "
+        "turn-progress clock (agent/turn/progress.py: node enters, completed "
+        "LLM steps, streamed LLM chunks) has been silent past the wedged "
+        "budget while NO pending "
+        "inbound exists — the turn-level fake-alive shape (process alive, turn "
+        "dead) that pending-row and pid-based detectors cannot see. The turn "
+        "task is cancelled and the agent rescheduled; a turn that refuses to "
+        "unwind instead escalates to a daemon restart",
+        tier="anomaly",
+    ),
+    # node / process lifecycle
+    "node_enter": _telemetry(
+        "node_enter",
+        "LangGraph node entered — sink-filtered out of the event stream (PR #1758); log files only",
+        destination="file",
+        tier="noise",
+    ),
+    "node_exit": _telemetry("node_exit", "LangGraph node exited", payload=NodeExit, tier="noise"),
+    "process_exit": _telemetry(
+        "process_exit", "agent process exited", payload=ProcessExit, tier="noise"
+    ),
+    "service_started": _telemetry(
+        "service_started", "gateway/daemon started", payload=ServiceStarted, tier="noise"
+    ),
+    "halt": _telemetry("halt", "turn stopped (idle/compact/system)", payload=Halt, tier="noise"),
+    "agent_restarted": _telemetry("agent_restarted", "agent restarted (phase2 done)"),
+    "restart_handoff_host_unhealthy": _telemetry(
+        "restart_handoff_host_unhealthy",
+        "hosted restart ownership could not transfer: agent-host is unhealthy; row left restarting "
+        "for retry",
+        tier="anomaly",
+    ),
+    "heartbeat_nudged": _telemetry(
+        "heartbeat_nudged", "heartbeat reminder", payload=HeartbeatNudged, tier="noise"
+    ),
+    "heartbeat_backoff_raised": _telemetry(
+        "heartbeat_backoff_raised",
+        "no-op nudge backoff level raised",
+        payload=HeartbeatBackoffRaised,
+        tier="noise",
+    ),
+    "heartbeat_backoff_reset": _telemetry(
+        "heartbeat_backoff_reset",
+        "nudge backoff reset by real inbound or pause",
+        payload=HeartbeatBackoffReset,
+        tier="noise",
+    ),
+    "ci_usage_daily": _telemetry(
+        "ci_usage_daily",
+        "daily CI-minute reconciliation totals (C9)",
+        payload=CiUsageDaily,
+    ),
+    "debt_sweep_daily": _telemetry(
+        "debt_sweep_daily",
+        "daily tech-debt mechanical scan and clearing-worker dispatch",
+        payload=DebtSweepDaily,
+    ),
+    "pr_flow_daily": _telemetry(
+        "pr_flow_daily",
+        "daily PR-flow aggregates — ready->merged percentiles, QA rounds, "
+        "flake discoveries (absolute gauges, one sample per complete day)",
+        payload=PrFlowDaily,
+    ),
+    "pr_flow_run": _telemetry(
+        "pr_flow_run",
+        "PR-flow sampler run — point-in-time Trunk queue depth (absolute state)",
+        payload=PrFlowRun,
+    ),
+    "ci_runs_daily": _telemetry("ci_runs_daily", "daily CI-run aggregates", payload=CiRunsDaily),
+    "ci_workflow_window": _telemetry(
+        "ci_workflow_window", "trailing workflow fragility", payload=CiWorkflowWindow
+    ),
+    "ci_runs_run": _telemetry("ci_runs_run", "CI-run sampler breadcrumb", payload=CiRunsRun),
+    "task_reminder_digest": _telemetry(
+        "task_reminder_digest",
+        "overdue-task owner digest",
+        payload=TaskReminderDigest,
+        tier="noise",
+    ),
+    "task_escalation": _telemetry(
+        "task_escalation", "stalled-task escalation", payload=TaskEscalation
+    ),
+    "task_usage_record_failed": _telemetry(
+        "task_usage_record_failed", "task usage recording failed", tier="anomaly"
+    ),
+    "delivery_stalled": _telemetry(
+        "delivery_stalled", "delivery backlog", payload=DeliveryStalled, tier="anomaly"
+    ),
+    "loki_write_path_probe_failed": _telemetry(
+        "loki_write_path_probe_failed",
+        "Loki write-path probe failed",
+        payload=LokiWritePathProbeFailed,
+        tier="anomaly",
+    ),
+    "loki_write_path_probe_throttled": _telemetry(
+        "loki_write_path_probe_throttled",
+        "Loki write-path probe persistently throttled",
+        payload=LokiWritePathProbeThrottled,
+        tier="anomaly",
+    ),
+    "delivery_poisoned": _telemetry(
+        "delivery_poisoned",
+        "delivery backlog — permanently-failing inbound poisoned (dispatch cap reached)",
+        payload=DeliveryPoisoned,
+        tier="anomaly",
+    ),
+    "delivery_wake_suppressed": _telemetry(
+        "delivery_wake_suppressed",
+        "automatic delivery wakes suppressed after repeated resurrection failures",
+        payload=DeliveryWakeSuppressed,
+        tier="anomaly",
+    ),
+    "delivery_recovery_decision": _telemetry(
+        "delivery_recovery_decision",
+        "stalled crash-marked recovery decision (harvest / refusal)",
+        payload=DeliveryRecoveryDecision,
+        tier="anomaly",
+    ),
+    "delivery_outbox_flushed": _telemetry(
+        "delivery_outbox_flushed",
+        "delivery backlog — a deferred-send record was redelivered (task #3757)",
+        payload=DeliveryOutboxFlushed,
+    ),
+    "delivery_outbox_abandoned": _telemetry(
+        "delivery_outbox_abandoned",
+        "delivery backlog — a deferred-send record abandoned at its budget or on a "
+        "permanent failure (task #3757)",
+        payload=DeliveryOutboxAbandoned,
+        tier="anomaly",
+    ),
+    "claim_cas_lost": _telemetry(
+        "claim_cas_lost", "claim CAS race lost — another lifecycle op owns the row", tier="anomaly"
+    ),
+    "claim_cas_lost_exit": _telemetry(
+        "claim_cas_lost_exit",
+        "claim wait aborted by a lost CAS — process exiting cleanly",
+        tier="anomaly",
+    ),
+    "idle_cas_lost": _telemetry(
+        "idle_cas_lost", "idle-flip CAS race lost — degraded, not fatal", tier="anomaly"
+    ),
+    "boot_timing": _telemetry("boot_timing", "boot duration", tier="noise"),
+    "dangling_tool_pairing_repaired": _telemetry(
+        "dangling_tool_pairing_repaired", "dangling tool pairing repaired", tier="anomaly"
+    ),
+    "delta_read_compat": _telemetry(
+        "delta_read_compat",
+        "delta-written checkpoint messages reconstructed for a plain reader "
+        "(task #3180 transition layer)",
+        tier="noise",
+    ),
+    # sdk / channel health
+    "sdk_call": _telemetry("sdk_call", "SDK call metering", payload=SdkCall, tier="noise"),
+    "plugin_activation": _telemetry(
+        "plugin_activation",
+        "a plugin injection surface fired (hook / wrap / prompt section)",
+        payload=PluginActivation,
+        tier="noise",
+    ),
+    "sse_drop": _telemetry("sse_drop", "SSE event dropped", payload=SseDrop, tier="anomaly"),
+    "event_log_drop": _telemetry(
+        "event_log_drop", "event-pipeline row shed", payload=EventLogDrop, tier="anomaly"
+    ),
+    "heartbeat_paused": _telemetry("heartbeat_paused", "heartbeat paused", payload=HeartbeatPaused),
+    "shell_ttl_renewed": _telemetry(
+        "shell_ttl_renewed", "shell TTL deadline renewed", payload=ShellTtlRenewed
+    ),
+    "code": _telemetry("code", "LLM generated code block", payload=ExecPayload, tier="noise"),
+    # label-fallback events kept in the registry
+    "text": _telemetry("text", "LLM text output", tier="noise"),
+    "syntax_fix": _telemetry(
+        "syntax_fix", "syntax repair executed", payload=SyntaxFix, tier="noise"
+    ),
+    "inbound_reconcile": _telemetry("inbound_reconcile", "inbound reconciliation", tier="noise"),
+    "screen_capture_notify_failed": _telemetry(
+        "screen_capture_notify_failed", "screenshot notify failed", tier="anomaly"
+    ),
+    # ava.ui.serve page-restore
+    "page_restore_alive": _telemetry("page_restore_alive", "page restore alive", tier="noise"),
+    "page_restore_reserved": _telemetry(
+        "page_restore_reserved", "page restore reserved", tier="noise"
+    ),
+    "page_restore_query_failed": _telemetry(
+        "page_restore_query_failed", "page restore query failed", tier="anomaly"
+    ),
+    "page_restore_failed": _telemetry("page_restore_failed", "page restore failed", tier="anomaly"),
+    "page_restore_closed": _telemetry("page_restore_closed", "page restore closed", tier="noise"),
+    "page_restore_notified": _telemetry(
+        "page_restore_notified", "page restore notified", tier="noise"
+    ),
+}

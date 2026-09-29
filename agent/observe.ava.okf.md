@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Observability
-description: Main-conversation facade for canonical LLM usage accounting in `shared/lm/usage.py`.
+description: Main-conversation facade for canonical LLM usage accounting in `base/lm/usage.py`.
 tags: []
 ---
 
@@ -9,7 +9,7 @@ tags: []
 
 ## What it is
 `agent/llm/usage.py` preserves the main-conversation `log_llm_usage()` entry point
-and delegates accounting to `shared/lm/usage.py`. The shared emitter records
+and delegates accounting to `base/lm/usage.py`. The shared emitter records
 input tokens, cache hits, output tokens, reasoning tokens, usage-time price,
 and `usage_kind` for every metered LLM path.
 
@@ -20,7 +20,7 @@ and `usage_kind` for every metered LLM path.
 - **Turn-by-turn reasoning decrease monitoring**: turn 1 has long reasoning, subsequent turns' reasoning is transparently echoed into input (cache hit), reasoning volume decreases monotonically
 
 ## Key Dependencies
-- [[shared/lm/lm.ava.okf.md]] — `shared/lm/usage.py` owns LangChain `AIMessage.usage_metadata` extraction and billing
+- [[base/lm/lm.ava.okf.md]] — `base/lm/usage.py` owns LangChain `AIMessage.usage_metadata` extraction and billing
 - [[gateway-cli.ava.okf.md]] — gateway stats dashboard consumes model info in logs for cost accounting
 
 ## Entry Points
@@ -28,4 +28,4 @@ and `usage_kind` for every metered LLM path.
 
 ## Notes
 - Log format uses `[bracket]` prefix convention for easy grep
-- Cost calculation is not in the facade — pricing is the single source of truth in `shared/lm/pricing.py`
+- Cost calculation is not in the facade — pricing is the single source of truth in `base/lm/pricing.py`

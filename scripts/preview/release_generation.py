@@ -37,10 +37,10 @@ import psutil
 import psycopg
 from dotenv import dotenv_values
 
-from shared.cluster.authority import active_generation, read_secret, render_userlist
-from shared.native_process.ownership import OwnedProcess
-from shared.pg_admin import pg_socket_path
-from shared.private_storage import write_private_bytes
+from base.cluster.authority import active_generation, read_secret, render_userlist
+from base.db.pg_admin import pg_socket_path
+from base.host.private_storage import write_private_bytes
+from base.native_process.ownership import OwnedProcess
 
 # A refused login: SCRAM fails first for a login whose verifier was removed,
 # NOLOGIN after it; the pooler reports its own SCRAM failure.
@@ -95,7 +95,7 @@ class Context:
         """
         from psycopg.conninfo import make_conninfo
 
-        from shared.pg_admin import connect, pg_admin_url
+        from base.db.pg_admin import connect, pg_admin_url
 
         url = make_conninfo(pg_admin_url(self.ports()["postgres"]), dbname=self.database())
         with connect(url, expected_data_dir=self.home / "pg", connect_timeout=5) as connection:

@@ -8,6 +8,8 @@ from pathlib import Path
 
 from pydantic import JsonValue
 
+from base.deploy.release.operation import open_launch_grace
+from base.deploy.release.verified_file import regular_bytes
 from cli.release_fleet.gateway import GatewayUnit
 from cli.release_fleet.request import FleetRequest, UnitRequest
 from cli.release_transition.journal import (
@@ -19,8 +21,6 @@ from cli.release_transition.journal import (
 )
 from cli.release_transition.local import LocalTransition
 from cli.release_transition.request import PitrRequest
-from shared.release_operation import open_launch_grace
-from shared.verified_file import regular_bytes
 
 
 def _retire_previous(request: FleetRequest | UnitRequest | PitrRequest) -> None:
@@ -59,8 +59,8 @@ def submit_request(
     request: FleetRequest | UnitRequest | PitrRequest,
 ) -> tuple[Path, dict[str, JsonValue]]:
     """Reserve and dispatch one typed home operation, or join its retained attempt."""
+    from base.paths import ava_home
     from cli.release_transition import native
-    from shared.paths import ava_home
 
     if Path(request.home) != ava_home():
         raise ValueError("prepared request belongs to a different configured home")

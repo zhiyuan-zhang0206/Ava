@@ -8,12 +8,12 @@ from pathlib import Path
 
 import pytest
 
-from services.pitr.checksums import CRC32C, MD5, ObjectChecksum
-from services.pitr.cos_inventory import CosRetentionInventoryReader
-from services.pitr.cos_publish_store import CosProtectedManifestPublisher
-from services.pitr.cos_restore_store import CosGenerationPinnedObjectReader
-from services.pitr.object_store import PermanentObjectStoreError
-from services.pitr.restore_manifest import RestoreObject
+from services.pitr.restore.manifest import RestoreObject
+from services.pitr.stores.checksums import CRC32C, MD5, ObjectChecksum
+from services.pitr.stores.cos.inventory import CosRetentionInventoryReader
+from services.pitr.stores.cos.publish_store import CosProtectedManifestPublisher
+from services.pitr.stores.cos.restore_store import CosGenerationPinnedObjectReader
+from services.pitr.stores.object_store import PermanentObjectStoreError
 from tests.services.cos_test_support import FakeCos, cos_client_for
 
 OBJECT = "ava-pitr/wal/00000001/000000010000000000000001.enc"

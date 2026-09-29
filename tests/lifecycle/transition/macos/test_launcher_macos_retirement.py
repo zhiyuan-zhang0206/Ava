@@ -6,10 +6,10 @@ import subprocess
 
 import pytest
 
+from base.native_process.ownership import OwnedProcess
 from cli.release_transition import journal
 from cli.release_transition import launcher_macos as macos
 from services.permissions_helper import finite_artifact
-from shared.native_process.ownership import OwnedProcess
 from tests.lifecycle.transition.macos.launchd_fake import (
     EXECUTOR_BIRTH,
     HELPER,

@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from services.pitr.space_budget import (
+from services.pitr.base_backup.space_budget import (
     CandidateSpaceBudget,
     InsufficientCandidateSpaceError,
     require_candidate_space,
@@ -18,7 +18,7 @@ def test_space_preflight_refuses_before_candidate_birth(
     def disk_usage(_path: str | Path) -> Usage:
         return Usage()
 
-    monkeypatch.setattr("services.pitr.space_budget.shutil.disk_usage", disk_usage)
+    monkeypatch.setattr("services.pitr.base_backup.space_budget.shutil.disk_usage", disk_usage)
     budget = CandidateSpaceBudget(25, 25, 25, 25)
     with pytest.raises(InsufficientCandidateSpaceError):
         require_candidate_space(tmp_path, budget)

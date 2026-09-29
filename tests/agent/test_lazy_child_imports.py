@@ -1,22 +1,22 @@
 """Child start path stays off the agent-side heavy chains — PR-2 of the
 startup-path laziness work (task #3585).
 
-The exec child imports `agent.graph.exec_protocol` (request envelope),
+The exec child imports `agent.graph.exec.protocol` (request envelope),
 `agent.process_boot` (SDK helpers), and the media-gate resolution on
-`shared.lm.registry` before any user code runs. Each probe runs in a clean
+`base.lm.registry` before any user code runs. Each probe runs in a clean
 subprocess (isolated interpreter, agent-launch env vars stripped, repo root
 prepended to `sys.path`) and reports the heavy modules the touch left in
 `sys.modules`:
 
 - the `agent.graph` package init is lazy (PEP 562): importing a light
-  submodule must not pull the node set (`_build`/`_claim`/`_llm`/`_exec`) or
+  submodule must not pull the node set (`_build`/`claim.node`/`llm.node`/`exec.node`) or
   any langchain/langgraph module;
 - `read_request` on a state-less envelope must not pull the langgraph serde
   or `agent.state` (they load only when a state snapshot exists);
 - importing `agent.process_boot` must stay off the LM stack;
-- importing `shared.lm.registry` (the media-capability data leaf) must not
-  pull `shared.lm.factory` / `shared.lm.provider_api`;
-- the provider-registration surface (`shared.lm.provider_api` plus the `lm_*`
+- importing `base.lm.registry` (the media-capability data leaf) must not
+  pull `base.lm.factory` / `base.lm.provider_api`;
+- the provider-registration surface (`base.lm.provider_api` plus the `lm_*`
   provider plugins loaded by `ensure_provider_plugins_loaded`) must stay off
   the LM chat-model stack (task #3633);
 - the child's plugin autoload surface form (`ava.ensure_plugins_loaded(surface=True)`)
@@ -91,7 +91,7 @@ def _run_clean_probe(body: str) -> dict[str, object]:
 _GRAPH_LIGHT = """
 import importlib
 
-importlib.import_module("agent.graph.exec_protocol")
+importlib.import_module("agent.graph.exec.protocol")
 heavy = sorted(
     name
     for name in sys.modules
@@ -100,7 +100,7 @@ heavy = sorted(
         "agent.graph._build",
         "agent.graph.claim.node",
         "agent.graph.llm.node",
-        "agent.graph._exec",
+        "agent.graph.exec.node",
     )
 )
 langchain = sum(1 for name in sys.modules if name.startswith(("langchain", "langgraph", "langsmith")))
@@ -118,7 +118,7 @@ _STATELESS_REQUEST = """
 import tempfile
 from pathlib import Path
 
-from agent.graph.exec_protocol import read_request
+from agent.graph.exec.protocol import read_request
 
 req = Path(tempfile.mkdtemp(prefix="lazy-child-")) / "req-x.json"
 req.write_text(
@@ -146,7 +146,7 @@ import agent.process_boot  # noqa: F401
 loaded = sorted(
     name
     for name in sys.modules
-    if name in ("shared.lm.factory", "langchain_core.language_models.chat_models")
+    if name in ("base.lm.factory", "langchain_core.language_models.chat_models")
 )
 langchain = sum(1 for name in sys.modules if name.startswith(("langchain", "langgraph", "langsmith")))
 print(json.dumps({"loaded": loaded, "langchain": langchain}))
@@ -160,12 +160,12 @@ def test_import_process_boot_stays_off_the_lm_stack() -> None:
 
 
 _REGISTRY_LEAF = """
-import shared.lm.registry  # noqa: F401
+import base.lm.registry  # noqa: F401
 
 loaded = sorted(
     name
     for name in sys.modules
-    if name in ("shared.lm.factory", "shared.lm.provider_api")
+    if name in ("base.lm.factory", "base.lm.provider_api")
     or name.startswith(("langchain", "langgraph", "langsmith"))
 )
 print(json.dumps({"loaded": loaded}))
@@ -178,7 +178,7 @@ def test_registry_media_resolution_is_a_data_leaf() -> None:
 
 
 _PROVIDER_REGISTRATION_SURFACE = """
-import shared.lm.provider_api  # noqa: F401
+import base.lm.provider_api  # noqa: F401
 
 heavy = sorted(
     name for name in sys.modules if name.startswith(("langchain", "langgraph", "langsmith"))
@@ -193,8 +193,8 @@ def test_provider_registration_surface_stays_off_the_lm_stack() -> None:
 
 
 _PROVIDER_PLUGIN_LOAD = """
-from shared.lm import provider_api
-from shared.lm.plugin_providers import ensure_provider_plugins_loaded
+from base.lm import provider_api
+from base.lm.plugin_providers import ensure_provider_plugins_loaded
 
 ensure_provider_plugins_loaded()
 heavy = sorted(
@@ -233,7 +233,7 @@ def test_graph_reexports_resolve_through_the_lazy_getattr() -> None:
 
 
 def test_factory_reexports_the_registry_resolution() -> None:
-    from shared.lm import factory, registry
+    from base.lm import factory, registry
 
     assert factory.media_types_for_model is registry.media_types_for_model
     assert factory.attach_modalities_for_model is registry.attach_modalities_for_model
@@ -334,7 +334,7 @@ def _craft_stateful_envelope(tmp_path: Path) -> Path:
     """A v1 request envelope carrying a typed state snapshot."""
     import base64
 
-    from agent.graph.exec_protocol import dumps_typed
+    from agent.graph.exec.protocol import dumps_typed
 
     tag, blob = dumps_typed({"ava_code__cwd": str(tmp_path)})
     req = tmp_path / "req-state.json"
@@ -357,7 +357,7 @@ def _craft_stateful_envelope(tmp_path: Path) -> Path:
 _STATEFUL_REQUEST_RAW = """
 from pathlib import Path
 
-from agent.graph.exec_protocol import read_request
+from agent.graph.exec.protocol import read_request
 
 payload = read_request(Path({req!r}))
 heavy = sorted(
@@ -391,7 +391,7 @@ from pathlib import Path
 
 import ava
 from agent import exec_child
-from agent.graph.exec_protocol import read_request
+from agent.graph.exec.protocol import read_request
 
 exec_child._import_runtime()  # the child boot's step that binds the SDK (mirrors `_run`)
 
@@ -450,7 +450,7 @@ from pathlib import Path
 
 import ava
 from agent import exec_child
-from agent.graph.exec_protocol import read_request
+from agent.graph.exec.protocol import read_request
 
 exec_child._import_runtime()  # the child boot's step that binds the SDK (mirrors `_run`)
 payload = read_request(Path({req!r}))
@@ -504,7 +504,7 @@ from pathlib import Path
 
 import ava
 from agent import exec_child
-from agent.graph.exec_protocol import read_request
+from agent.graph.exec.protocol import read_request
 
 exec_child._import_runtime()
 payload = read_request(Path({req!r}))

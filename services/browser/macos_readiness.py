@@ -29,11 +29,11 @@ from pathlib import Path
 
 import psutil
 
-import shared.paths
-import shared.private_storage
-import shared.proc
-from shared.native_process.ownership import stable_create_time
-from shared.platform import IS_MACOS
+import base.host.private_storage
+import base.host.proc
+import base.paths
+from base.native_process.os_platform import IS_MACOS
+from base.native_process.ownership import stable_create_time
 
 try:  # `pwd` is absent on Windows, where this module remains import-safe.
     import pwd
@@ -91,7 +91,7 @@ class _ProbeResult:
 def _run_probe(argv: list[str]) -> _ProbeResult:
     """Run a fixed read-only system query without letting a GUI prompt hang us."""
     try:
-        completed = shared.proc.run_bounded(
+        completed = base.host.proc.run_bounded(
             argv, timeout=_PROBE_TIMEOUT_S, capture_output=True, text=True
         )
     except FileNotFoundError:
@@ -179,7 +179,7 @@ def probe_startup_readiness() -> StartupReadiness:
 
 
 def _marker_path() -> Path:
-    return shared.paths.run_dir() / _WAIT_MARKER_NAME
+    return base.paths.run_dir() / _WAIT_MARKER_NAME
 
 
 def _current_process_started_at() -> float:
@@ -206,7 +206,7 @@ def mark_waiting(reason: str, *, context_missing: bool = False) -> None:
             "observed_at": time.time(),
             "context_missing": context_missing,
         }
-        shared.private_storage.write_private_bytes(_marker_path(), json.dumps(payload).encode())
+        base.host.private_storage.write_private_bytes(_marker_path(), json.dumps(payload).encode())
     except (OSError, psutil.Error):
         _log.warning("ava-browser: could not record macOS readiness wait state", exc_info=True)
 

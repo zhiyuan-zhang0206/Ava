@@ -21,8 +21,8 @@ import time
 from pathlib import Path
 
 import ava
-from shared import coding_session_owner
-from shared.agents import AgentNotFound, AgentStatus
+from base.agents import AgentNotFound, AgentStatus
+from base.sessions import coding_session_owner
 
 WORK_FILE = "/path/to/work.md"
 POLL_SECONDS = 60
@@ -96,7 +96,7 @@ def _session_crashed(owner: coding_session_owner.CodingSessionOwner) -> bool:
         return coding_session_owner.launch_is_stale(owner)
     if owner.status != "active" or owner.session_name is None:
         return False
-    from shared.session_backend import get_shell_backend
+    from base.sessions.backend import get_shell_backend
 
     return not get_shell_backend().has_session(owner.session_name)
 

@@ -17,10 +17,10 @@ import psycopg
 import pytest
 from psycopg_pool import ConnectionPool
 
+from base.deploy.maintenance import pause_owner
+from base.deploy.maintenance.state import MaintenanceHold
 from ops import pty_close_notices as notices
 from services.agent_ops import close_notices
-from shared import pause_owner
-from shared.maintenance_state import MaintenanceHold
 from tests.ops.test_pty_close_notices import _agent, _inbounds, _record
 from tests.ops.test_pty_close_notices import journal as journal
 from tests.ops.test_pty_close_notices import pool as pool

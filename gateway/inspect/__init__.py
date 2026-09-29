@@ -4,7 +4,7 @@ plugin extension resolution, and the cache/live/metrics reads behind them.
 Package door — no imports, no re-exports; callers use `gateway.inspect.router`
 (mounted in `gateway/app.py`), `gateway.inspect.schemas` (re-exported from
 `gateway.schemas`), and `gateway.inspect.neighbors` (also used by
-`gateway/routers/agents.py`'s born-chain endpoint). Modules:
+`gateway/agents/router.py`'s born-chain endpoint). Modules:
 
   - `router.py`          — mounted endpoints: /inspect/live, /inspect/statistics,
                             /neighbors, /inspect/metrics, /inspect/widgets

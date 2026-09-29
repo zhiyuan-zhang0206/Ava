@@ -13,7 +13,7 @@ from unittest.mock import Mock
 import pytest
 
 from ava.agents import AgentStatus as S
-from shared.config import settings
+from base.config import settings
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCHEDULE_PATH = REPO_ROOT / "schedules" / "debt-sweep-daily-schedule.py"
@@ -66,9 +66,9 @@ def test_dry_run_performs_no_agent_claim_database_or_telemetry_side_effects(
     monkeypatch.setattr(module, "catch_up", forbidden)
     monkeypatch.setattr(module, "fire_slot_once", forbidden)
     monkeypatch.setattr(module, "ava_home", forbidden)
-    monkeypatch.setattr("shared.db.connect", forbidden)
-    monkeypatch.setattr("shared.db.pool", forbidden)
-    monkeypatch.setattr("shared.telemetry.emit", forbidden)
+    monkeypatch.setattr("base.db.connect", forbidden)
+    monkeypatch.setattr("base.db.pool", forbidden)
+    monkeypatch.setattr("base.telemetry.emit", forbidden)
 
     module.main(["--once", "--dry-run", "--repo", str(REPO_ROOT)])
 
@@ -176,7 +176,7 @@ def test_scan_failure_is_passed_to_worker_and_registered(
     )
     monkeypatch.setattr(module, "init_gateway_process", lambda **_kwargs: None)
     monkeypatch.setattr(
-        "shared.telemetry.emit",
+        "base.telemetry.emit",
         lambda category, event_name, **kwargs: emitted.append(
             {"category": category, "event_name": event_name, **kwargs}
         ),

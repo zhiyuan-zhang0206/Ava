@@ -20,8 +20,8 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
+from base.native_process import process_birth_key
 from scripts.preview import local
-from shared.native_process import process_birth_key
 
 TERMINAL = "ava-preview-lifetime"
 
@@ -148,14 +148,14 @@ class LinuxCycle:
         preview = self.preview
         preview.command(
             "manager-install",
-            [self.python, "-c", "from shared.os_boot_unit import install; install()"],
+            [self.python, "-c", "from base.host.system.boot_unit import install; install()"],
         )
         preview.command(
             "manager-name",
             [
                 self.python,
                 "-c",
-                "from shared.os_boot_unit import unit_name; from shared.paths import ava_home; print(unit_name(ava_home()))",
+                "from base.host.system.boot_unit import unit_name; from base.paths import ava_home; print(unit_name(ava_home()))",
             ],
         )
         unit = Path(preview.data["steps"][-1]["log"]).read_text().strip().splitlines()[-1]
@@ -170,7 +170,7 @@ class LinuxCycle:
                 "-c",
                 "import os\n"
                 "from pathlib import Path\n"
-                "from shared.session_backend import get_shell_backend\n"
+                "from base.sessions.backend import get_shell_backend\n"
                 f"if not get_shell_backend().new_session({TERMINAL!r}, '', Path.cwd(), env=dict(os.environ)):\n"
                 "    raise RuntimeError('Could not create the native terminal fixture')\n",
             ],

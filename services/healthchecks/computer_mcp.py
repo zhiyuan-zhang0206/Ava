@@ -4,8 +4,8 @@ import json
 import logging
 import socket
 
+from base.paths import computer_mcp_socket
 from services.computer.protocol import Request, Response
-from shared.paths import computer_mcp_socket
 
 _log = logging.getLogger("services.healthchecks.computer_mcp")
 

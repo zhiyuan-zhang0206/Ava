@@ -10,8 +10,8 @@ from __future__ import annotations
 
 import pytest
 
+from base.config import settings
 from services.healthchecks import milvus as hc
-from shared.config import settings
 
 
 class _FakeClient:

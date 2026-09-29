@@ -82,7 +82,7 @@ A remote browser sends the secret to its own machine; the gateway log shows zero
 ✅ Good (secret injected, endpoint derived, property pinned by a test):
 ```python
 # base URL derived from machine config, secret from the environment
-gateway_base = shared.machine.reachable_host()        # AVA_MACHINE_HOST > machine_host > localhost
+gateway_base = base.cluster.machine.reachable_host()        # AVA_MACHINE_HOST > machine_host > localhost
 fetch(f"{gateway_base}/api/auth/login", {body: {password: os.environ["CLUSTER_SECRET"]}})
 # regression test: assert the login form targets reachable_host(), not 127.0.0.1 — fails if reverted
 ```

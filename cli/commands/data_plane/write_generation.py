@@ -14,17 +14,17 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from cli.commands.data_plane import pgbouncer as pooler
-from cli.commands.data_plane.pgbouncer import PoolerStop
-from shared.cluster import ownership
-from shared.cluster.authority import (
+from base.cluster import ownership
+from base.cluster.authority import (
     AuthorityRefusedError,
     ClosureEvidence,
     Generation,
     OperationAuthority,
 )
-from shared.cluster.registry import ClusterRecord
-from shared.config import settings
+from base.cluster.registry import ClusterRecord
+from base.config import settings
+from cli.commands.data_plane import pgbouncer as pooler
+from cli.commands.data_plane.pgbouncer import PoolerStop
 
 
 @dataclass(frozen=True)
@@ -36,8 +36,8 @@ class WriteFence:
 
 
 def _write_authority() -> tuple[Path, ClusterRecord, str]:
-    from shared.cluster import db_identity, get_record
-    from shared.paths import ava_home
+    from base.cluster import db_identity, get_record
+    from base.paths import ava_home
 
     if sys.platform == "win32" or settings.data_plane.is_remote:
         raise RuntimeError("write generations exist only on an owned POSIX data plane")
@@ -51,7 +51,7 @@ def _require_served(home: Path, generation: Generation) -> None:
     """The pooler's userlist on disk holds exactly `generation` (and the admin console)."""
     if not settings.data_plane.pgbouncer_enabled:
         return
-    from shared.cluster.authority import render_userlist
+    from base.cluster.authority import render_userlist
 
     try:
         served = (pooler.ini_path().parent / "userlist.txt").read_bytes()
@@ -71,8 +71,8 @@ def preflight_write_authority() -> Generation:
     generation closed; the catalog invariant holds for exactly that generation;
     no prepared transaction exists; the pooler serves exactly that pair.
     """
+    from base.cluster.authority import check_invariant, read_pooler_admin, require_ledger
     from cli.commands.data_plane.bringup import READONLY_GRANTEES, admin_session
-    from shared.cluster.authority import check_invariant, read_pooler_admin, require_ledger
 
     home, record, database = _write_authority()
     ledger = require_ledger(home)
@@ -110,9 +110,9 @@ def fence_write_generation(authority: OperationAuthority) -> WriteFence:
     login, keeping inert tombstones. A pooler reload never counts: PgBouncer
     keeps a removed user that already authenticated.
     """
+    from base.cluster import record_pgbouncer_port
+    from base.cluster.authority import close_revoked, prune, revoke
     from cli.commands.data_plane.bringup import admin_session
-    from shared.cluster import record_pgbouncer_port
-    from shared.cluster.authority import close_revoked, prune, revoke
 
     home, record, database = _write_authority()
     with admin_session(record, database) as conn:
@@ -140,19 +140,19 @@ def admit_write_generation(authority: OperationAuthority) -> Generation:
     before any service launches (`complete_gateway_data_plane`); observation
     proves it again (`verify_write_generation`).
     """
-    from cli.commands.data_plane.bringup import (
-        admin_session,
-        db_endpoint,
-        prove_generation_logins,
-    )
-    from shared.cluster import record_postgres_port
-    from shared.cluster.authority import (
+    from base.cluster import record_postgres_port
+    from base.cluster.authority import (
         activate,
         mint_generation,
         require_ledger,
         verify_generation,
     )
-    from shared.url_secret import url_with_port
+    from base.host.net.url_secret import url_with_port
+    from cli.commands.data_plane.bringup import (
+        admin_session,
+        db_endpoint,
+        prove_generation_logins,
+    )
 
     home, record, database = _write_authority()
     with admin_session(record, database) as conn:
@@ -173,13 +173,13 @@ def verify_write_generation(number: int, credential_digest: str) -> None:
     only that pair; no session of a stale application login, the owner, the
     groups or a dropped role survives; both logins answer through the endpoint.
     """
+    from base.cluster.authority import active_generation, check_invariant, stale_sessions
     from cli.commands.data_plane.bringup import (
         READONLY_GRANTEES,
         admin_session,
         db_endpoint,
         prove_generation_logins,
     )
-    from shared.cluster.authority import active_generation, check_invariant, stale_sessions
 
     home, record, database = _write_authority()
     active = active_generation(home)

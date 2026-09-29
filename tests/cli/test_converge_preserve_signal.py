@@ -14,9 +14,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from cli.commands._rendered_file import write_rendered_guarded
+from base import db, paths
+from base.packages.extensions import materialize
+from cli.commands.converge.rendered_file import write_rendered_guarded
 from cli.commands.extensions.materialize import materialize_cluster_extensions
-from shared import db, extension_materialize, paths
 
 
 def _capture_emit(monkeypatch: pytest.MonkeyPatch) -> list[tuple[object, ...]]:
@@ -25,7 +26,7 @@ def _capture_emit(monkeypatch: pytest.MonkeyPatch) -> list[tuple[object, ...]]:
     def record_emit(*args: object, **kwargs: object) -> None:
         emitted.append((*args, kwargs))
 
-    monkeypatch.setattr("shared.telemetry.emit", record_emit)
+    monkeypatch.setattr("base.telemetry.emit", record_emit)
     return emitted
 
 
@@ -84,7 +85,7 @@ def test_extensions_kept_local_edits_report_converge_file_preserved(
             landed=[], updated=[], kept_local_edits=["edit-demo"], missing_blob=[]
         )
 
-    monkeypatch.setattr(extension_materialize, "materialize_skills", kept_edit)
+    monkeypatch.setattr(materialize, "materialize_skills", kept_edit)
 
     materialize_cluster_extensions()
 

@@ -13,7 +13,7 @@ architecture overview (much of it is maintainer ops you can skip).
 hacking on the code:
 
 ```bash
-env -u VIRTUAL_ENV python3 scripts/guard_editable_venv.py .
+env -u VIRTUAL_ENV python3 scripts/host_ops/guard_editable_venv.py .
 env -u VIRTUAL_ENV uv sync    # Python deps + the `ava` CLI into this checkout's .venv
 .venv/bin/pre-commit install --hook-type pre-commit --hook-type pre-push
 ```

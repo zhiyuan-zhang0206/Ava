@@ -1,0 +1,5 @@
+{
+  "complexity": {
+    "agent/db/__init__.py::claim_inbound_batch": 15
+  }
+}

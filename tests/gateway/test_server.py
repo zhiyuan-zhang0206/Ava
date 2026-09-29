@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 
+from base.config import settings
 from gateway import _server
-from shared.config import settings
 
 
 def test_gateway_pins_uvicorn_to_one_worker_for_process_local_rate_limits(

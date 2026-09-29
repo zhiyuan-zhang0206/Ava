@@ -99,7 +99,7 @@ matters + suggested fix**. Match the diff against
 - Swallowed exceptions: top-level `except Exception` that logs and
   continues — what does the caller believe happened? A caught exception
   that still advances state is data loss.
-- Retry loops converge on `shared/resilience.py`; new hand-rolled loops
+- Retry loops converge on `base/host/net/resilience.py`; new hand-rolled loops
   with divergent backoff/jitter/classifier are violations.
 - Async called as sync: a never-awaited coroutine silently never runs (the
   redis `disconnect()` class).
@@ -136,7 +136,7 @@ matters + suggested fix**. Match the diff against
 - Fake-green channels: `|| true`, flaky groups allowed to fail, skips on
   missing deps, coverage sets drifting from CI's, gates with fallbacks below
   the real threshold, e2e without proof-of-work.
-- Tests that can reach the real world: Telegram, os_cron/launchd, migration
+- Tests that can reach the real world: Telegram, cron/launchd, migration
   application, prod `.env` leakage through the shell. Non-pytest scripts
   bypass conftest guards.
 - The behavior change is locked by a test asserting the new behavior;

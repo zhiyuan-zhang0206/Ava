@@ -11,7 +11,7 @@ from __future__ import annotations
 import importlib.util
 from pathlib import Path
 
-_SCRIPT = Path(__file__).parents[2] / "scripts" / "generate-ui-page.py"
+_SCRIPT = Path(__file__).parents[2] / "scripts" / "codegen" / "generate-ui-page.py"
 
 
 def _load_module():

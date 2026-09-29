@@ -42,15 +42,16 @@ def materialize_cluster_extensions() -> None:
     local-only result is drift; materialization is the moment a machine catches
     up.
     """
-    from shared import db, extension_materialize, paths
-    from shared.host.converge.converge_preserve_report import report_converge_preserve
+    from base import db, paths
+    from base.host.converge.preserve_report import report_converge_preserve
+    from base.packages.extensions import materialize
 
     try:
         # The pool opens eagerly and owns worker threads; close it here rather
         # than letting ConnectionPool.__del__ run at interpreter exit (it then
         # joins its own worker and prints "cannot join current thread" noise).
         with db.pool() as pool, pool.connection() as conn:
-            result = extension_materialize.materialize_skills(conn, dest_root=paths.skills_dir())
+            result = materialize.materialize_skills(conn, dest_root=paths.skills_dir())
     except Exception as exc:  # see the docstring: report, never block converge
         print(f"  ! extensions: cluster registry unreachable ({exc}); skipping", file=sys.stderr)
         return
@@ -80,14 +81,15 @@ def adopt_local_extensions() -> None:
     Same failure stance as its sibling and for the same reason: a machine that
     cannot reach the cluster is behind, not broken, and the next converge
     retries. The one thing worth being loud about is a name two machines
-    disagree on, which `shared.extension_adopt` logs and this reports again on
+    disagree on, which `base.packages.extensions.adopt` logs and this reports again on
     the operator's terminal — it is the only outcome here that needs a person.
     """
-    from shared import db, extension_adopt, paths
+    from base import db, paths
+    from base.packages.extensions import adopt
 
     try:
         with db.pool() as pool:
-            result = extension_adopt.adopt_local_installs(pool, skills_root=paths.skills_dir())
+            result = adopt.adopt_local_installs(pool, skills_root=paths.skills_dir())
     except Exception as exc:  # see the docstring: report, never block converge
         print(f"  ! extensions: could not adopt local installs ({exc}); skipping", file=sys.stderr)
         return

@@ -16,9 +16,9 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Generic, TypeVar
 
-import shared.db
-from shared.db_transaction import write_transaction
-from shared.daemon.schedules.watcher import previous_fire
+import base.db
+from base.db.transaction import write_transaction
+from base.daemon.schedules.watcher import previous_fire
 
 _log = logging.getLogger(__name__)
 
@@ -55,7 +55,7 @@ def _as_utc(value: datetime, *, field: str) -> datetime:
 
 def _catch_up_baseline(schedule_id: int) -> datetime:
     """Return the newest claimed slot, or schedule creation on first use."""
-    with shared.db.connect(autocommit=True) as conn, conn.cursor() as cur:
+    with base.db.connect(autocommit=True) as conn, conn.cursor() as cur:
         cur.execute(
             "SELECT COALESCE(MAX(f.slot_fire_at), s.created_at) "
             "FROM schedules AS s "

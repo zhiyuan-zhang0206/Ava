@@ -144,7 +144,7 @@ def audit_log(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
             }
         )
 
-    monkeypatch.setattr("shared.agents.impersonation_manifest.emit_staged_central_event", _stage)
+    monkeypatch.setattr("base.agents.impersonation_manifest.emit_staged_central_event", _stage)
     return log
 
 
@@ -939,7 +939,7 @@ async def test_concurrent_calls_are_safe(
 
 def _short_session(monkeypatch: pytest.MonkeyPatch) -> None:
     """Make the daemon's ScreenSession milliseconds-short (fast tests)."""
-    from shared.config import settings
+    from base.config import settings
 
     monkeypatch.setattr(settings.daemon, "computer_use_lease_s", 1.0)
     monkeypatch.setattr(settings.daemon, "computer_use_queue_timeout_s", 0.05)
@@ -1048,7 +1048,7 @@ async def test_task_session_emit_failure_warns_but_action_succeeds(
             }
         )  # pyright: ignore[reportUnknownMemberType]
 
-    monkeypatch.setattr("shared.agents.impersonation_manifest.emit_staged_central_event", _stage)
+    monkeypatch.setattr("base.agents.impersonation_manifest.emit_staged_central_event", _stage)
     d = _daemon()
     resp = await _call(d, "click", {"x": 1, "y": 2, "task_id": 42})
     assert resp["ok"] is True  # the action itself executed
@@ -1157,7 +1157,7 @@ async def test_high_priority_waiter_jumps_the_queue(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A high-priority call queues ahead of an earlier normal one (Phase 3)."""
-    from shared.config import settings
+    from base.config import settings
 
     monkeypatch.setattr(settings.daemon, "computer_use_lease_s", 1.0)
     monkeypatch.setattr(settings.daemon, "computer_use_queue_timeout_s", 0.5)

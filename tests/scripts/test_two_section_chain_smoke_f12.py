@@ -1,4 +1,4 @@
-"""Unit tests for the F12b/restart sampling helpers in scripts/two_section_chain_smoke.py.
+"""Unit tests for the F12b/restart sampling helpers in scripts/ci/two_section_chain_smoke.py.
 
 The smoke itself needs launchd, a compiled helper, and an unlocked desktop
 session, so CI cannot run it; these tests pin the pure parse/join/summary/
@@ -13,7 +13,7 @@ import sys
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-_SCRIPT = _REPO_ROOT / "scripts" / "two_section_chain_smoke.py"
+_SCRIPT = _REPO_ROOT / "scripts" / "ci" / "two_section_chain_smoke.py"
 
 
 def _load_script():

@@ -50,7 +50,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import collect
 import mirror_backfill
 
-from shared.paths import ava_home
+from base.paths import ava_home
 
 ORCHESTRATION_SKILLS = ("ava-workflow", "ava-dynamic-workflow", "ava-goal")
 

@@ -23,7 +23,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from shared.paths import logs_dir
+from base.paths import logs_dir
 
 _SOURCE = Path(__file__).with_name("ocr.swift")
 _BIN_DIR = logs_dir() / "computer" / "ocr-bin"

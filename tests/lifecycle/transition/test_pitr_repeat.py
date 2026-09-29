@@ -10,13 +10,13 @@ from pathlib import Path
 
 import pytest
 
+from base.deploy.release.operation import authorized_pitr
 from cli.release_fleet.request import FleetRequest
 from cli.release_transition import journal, submit
 from cli.release_transition.pitr import submission
 from cli.release_transition.pitr.inputs import require_inputs
 from cli.release_transition.request import PitrRequest
-from services.pitr.activation_state import mark_pre_mutation_rolled_back, record_path, write_record
-from shared.release_operation import authorized_pitr
+from services.pitr.activation.state import mark_pre_mutation_rolled_back, record_path, write_record
 from tests.lifecycle.transition.phases import at_phase
 from tests.lifecycle.transition.test_launcher_linux import _constant
 from tests.lifecycle.transition.test_pitr_operation import (  # noqa: F401 — fixture
@@ -70,8 +70,8 @@ def test_repeated_rollback_joins_exact_completed_business_receipt(
     completed = _rolled_back(pitr_request)
     active = _release(pitr_request) if later_release else completed
     home = Path(pitr_request.home)
-    monkeypatch.setattr("shared.paths.ava_home", lambda: home)
-    monkeypatch.setattr("shared.os_boot_unit.systemd_running", lambda: True)
+    monkeypatch.setattr("base.paths.ava_home", lambda: home)
+    monkeypatch.setattr("base.host.system.boot_unit.systemd_running", lambda: True)
     monkeypatch.setattr(submission, "_active", _constant(active))
     before = {path: path.read_bytes() for path in home.rglob("*") if path.is_file()}
     request = submission.prepare_request("rollback", origin="operator")
@@ -88,7 +88,7 @@ def test_terminal_repeat_rejects_unowned_business_bytes(
 ) -> None:
     _rolled_back(pitr_request)
     home = Path(pitr_request.home)
-    monkeypatch.setattr("shared.paths.ava_home", lambda: home)
+    monkeypatch.setattr("base.paths.ava_home", lambda: home)
     path = record_path(home)
     payload = json.loads(path.read_bytes())
     payload["origin"] = "unowned writer"
@@ -106,7 +106,7 @@ def test_rolled_back_record_without_completed_journal_refuses_before_reservation
     record = _record(pitr_request)
     write_record(home, record)
     mark_pre_mutation_rolled_back(home, record)
-    monkeypatch.setattr("shared.paths.ava_home", lambda: home)
+    monkeypatch.setattr("base.paths.ava_home", lambda: home)
     monkeypatch.setattr(submission, "_active", _constant(_release(pitr_request)))
     with pytest.raises(ValueError, match="retained home journal"):
         submission.prepare_request("rollback", origin="operator")

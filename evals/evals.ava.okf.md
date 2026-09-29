@@ -40,7 +40,7 @@ loader keeps parsing a newer file (`meta.schema_version` gates the shape).
 
 - [schedules](../schedules/README.md) — the adversarial weekly batch whose
   case machinery the migrated example dataset references.
-- [agent_eval.py](../shared/config/agent_eval.py) — isolation switches every
+- [agent_eval.py](../base/config/agent_eval.py) — isolation switches every
   line's runner reuses (eval isolation, network allowlist, container exec).
 
 ## Entry points

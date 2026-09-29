@@ -36,6 +36,15 @@ import pytest
 from pydantic import JsonValue
 
 import cli.release_handoff.__main__ as entry
+from base import cluster
+from base.cluster import authority
+from base.cluster.authority import delivery
+from base.config import settings
+from base.db import connections
+from base.deploy.release.runtime_release import VerifiedRelease, current_pointer
+from base.deploy.release.start_inputs import configuration_digest
+from base.host.env import dotenv_boot
+from base.log import logger
 from cli.commands.data_plane import pgbouncer as pooler
 from cli.main import _normalize_process_profile
 from cli.release_fleet.coordinator import Coordinator
@@ -51,13 +60,6 @@ from cli.release_transition.authority import adopt_executor_authority
 from cli.release_transition.journal import exclusive, read_operation
 from cli.release_transition.request import ReleaseRef
 from cli.start_identity import mark_phase
-from shared import cluster, db_connections, dotenv_boot
-from shared.cluster import authority
-from shared.cluster.authority import delivery
-from shared.config import settings
-from shared.log import logger
-from shared.runtime_release import VerifiedRelease, current_pointer
-from shared.start_inputs import configuration_digest
 from tests.lifecycle.db_authority.test_fleet_of_one import (
     _AGENT,
     _MACHINE,
@@ -183,15 +185,15 @@ def _process(environment: Mapping[str, str]) -> Generator[None]:
 @pytest.fixture
 def cycle(born: Born, monkeypatch: pytest.MonkeyPatch) -> Iterator[Cycle]:
     """The born home as the cluster's one registered unit, selecting image A."""
-    import shared.machine
+    import base.cluster.machine
 
     home = born.home
     registry = Path(cluster.registry_path())
     cluster.save_record_locked(born.record, path=registry)
     mark_phase(home, "provisioned")
     mark_phase(home, "ready")
-    monkeypatch.setattr(shared.machine, "machine_name", lambda: _MACHINE)
-    monkeypatch.setattr(shared.machine, "machine_role", lambda: frozenset({"gateway"}))
+    monkeypatch.setattr(base.cluster.machine, "machine_name", lambda: _MACHINE)
+    monkeypatch.setattr(base.cluster.machine, "machine_role", lambda: frozenset({"gateway"}))
     with born.admin() as conn:
         conn.execute(
             "INSERT INTO machines (name, role) VALUES (%s, '{gateway,agent-runner}')", (_MACHINE,)
@@ -222,7 +224,7 @@ def cycle(born: Born, monkeypatch: pytest.MonkeyPatch) -> Iterator[Cycle]:
     monkeypatch.setattr(dotenv_boot, "AVA_ENV_PATH", home / ".env")
     monkeypatch.setattr(dotenv_boot, "AVA_MIRROR_ENV_PATH", home / "mirror.env")
     monkeypatch.setattr(dotenv_boot, "_db_authority_refusal", None)
-    monkeypatch.setattr(db_connections, "_administrator_url", None)
+    monkeypatch.setattr(connections, "_administrator_url", None)
     # The simulated fact: which image the running process is.
     admit = delivery.require_admitted_runtime
 
@@ -330,7 +332,7 @@ def _execute(cycle: Cycle, request: FleetRequest, monkeypatch: pytest.MonkeyPatc
         adopt_executor_authority(cycle.home)
         with exclusive(request.path) as journal:
             Coordinator(journal, ImageGateway(request, cycle.born), RemoteUnits(request)).run()
-    monkeypatch.setattr(db_connections, "_administrator_url", None)
+    monkeypatch.setattr(connections, "_administrator_url", None)
     final = read_operation(request.path)
     assert final.fleet is not None and final.fleet.outcome == "clean", final.error
     assert current_pointer(cycle.home / "releases") == request.candidate.selector

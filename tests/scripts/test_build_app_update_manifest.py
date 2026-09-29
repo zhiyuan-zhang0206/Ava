@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-_SCRIPT = _REPO_ROOT / "scripts" / "build_app_update_manifest.py"
+_SCRIPT = _REPO_ROOT / "scripts" / "codegen" / "build_app_update_manifest.py"
 
 
 def _load_script():

@@ -28,7 +28,7 @@ from ava_builtins.plugins.ava_sdk_reminder._state import (
     hint_for,
     mentions_watcher,
 )
-from shared.context import AvaContext
+from base.agents.context import AvaContext
 
 
 def _pin_compact_budget(
@@ -38,7 +38,7 @@ def _pin_compact_budget(
     `resolve_context_budget` in the compact module. These tests use synthetic
     messages with no usage_metadata, so occupancy is the chars/4 fallback and
     `hard_tokens` is the absolute force-compact threshold the gate compares."""
-    from shared.lm.context_budget import ContextBudget
+    from base.lm.context_budget import ContextBudget
 
     budget = ContextBudget(
         max_context_tokens=1_000_000,
@@ -53,12 +53,12 @@ def _loaded() -> Iterator[Any]:
     """Load plugins.ava_sdk_reminder via the real plugin-registration path.
     Compact is now a core capability (Issue #1284) — its state fields live
     directly on BaseAgentState (nested compact/memory, etc.) and its config comes
-    from shared.config.settings. No separate plugin module to load.
+    from base.config.settings. No separate plugin module to load.
     Teardown clears registrations + unloads the module so the hooks do not
     leak into other tests.
     """
-    from shared.plugin_config_registry import bind_from_disk
-    from shared.plugin_context import PluginContext
+    from base.packages.plugins.config_registration import bind_from_disk
+    from base.packages.plugins.context import PluginContext
 
     clear_plugin_registrations()
     for name in list(sys.modules):
@@ -209,7 +209,7 @@ def _load_ava_code_plugin() -> Iterator[None]:
     included) so nothing leaks into the next test."""
     from importlib import import_module
 
-    from shared.plugin_context import PluginContext
+    from base.packages.plugins.context import PluginContext
 
     clear_plugin_registrations()
     for name in list(sys.modules):
@@ -288,7 +288,7 @@ async def test_code_every_time_cadence_hints_two_consecutive_matching_cells(
 ):
     """`every_time` bypasses the reminded gate for code categories, so two
     consecutive shell cells each receive the shell hint."""
-    from shared.config import settings
+    from base.config import settings
 
     monkeypatch.setattr(settings.agent, "sdk_code_reminder_cadence", "every_time")
     hook = _loaded.sdk_reminder_after_exec
@@ -313,7 +313,7 @@ async def test_code_once_cadence_hints_only_first_consecutive_matching_cell(
 ):
     """`once_per_compaction` (the default) preserves the existing behavior:
     the first shell cell hints and the next shell cell in the window no-ops."""
-    from shared.config import settings
+    from base.config import settings
 
     monkeypatch.setattr(settings.agent, "sdk_code_reminder_cadence", "once_per_compaction")
     hook = _loaded.sdk_reminder_after_exec
@@ -595,7 +595,7 @@ async def test_nameerror_without_prior_whole_name_is_noop(_loaded: Any):
 
 
 async def test_nameerror_hint_disabled_is_noop(_loaded: Any, monkeypatch: pytest.MonkeyPatch):
-    from shared.config import settings
+    from base.config import settings
 
     monkeypatch.setattr(settings.agent, "sdk_nameerror_hint_enabled", False)
     hook = _loaded.sdk_reminder_after_exec
@@ -759,7 +759,7 @@ async def test_agent_reply_once_cadence_dedups_and_rearms(
     """`once_per_compaction` (the default, set explicitly here): a second inbound
     in the same window no-ops, and a compaction re-arms so the note fires again.
     Pins the behavior to the config value rather than the field default."""
-    from shared.config import settings
+    from base.config import settings
 
     monkeypatch.setattr(settings.agent, "agent_reply_reminder_cadence", "once_per_compaction")
     hook = _loaded.sdk_reminder_agent_reply_before_llm
@@ -790,7 +790,7 @@ async def test_agent_reply_every_time_fires_even_when_already_reminded(
     """`every_time`: the note fires on every agent inbound, even one already
     marked in the shared `reminded` set — and it does not touch that set (the
     after_exec hook owns the code-category re-arm)."""
-    from shared.config import settings
+    from base.config import settings
 
     monkeypatch.setattr(settings.agent, "agent_reply_reminder_cadence", "every_time")
     hook = _loaded.sdk_reminder_agent_reply_before_llm
@@ -815,7 +815,7 @@ async def test_agent_reply_every_time_user_inbound_is_noop(
 ):
     """`every_time` still gates on an agent-sourced inbound — a user inbound
     never triggers the reminder."""
-    from shared.config import settings
+    from base.config import settings
 
     monkeypatch.setattr(settings.agent, "agent_reply_reminder_cadence", "every_time")
     hook = _loaded.sdk_reminder_agent_reply_before_llm
@@ -834,7 +834,7 @@ async def test_agent_reply_every_time_still_defers_on_compaction(
 ):
     """`every_time` defers exactly like `once_per_compaction` when auto-compact
     fires the same turn — the note would be clobbered by the message replacement."""
-    from shared.config import settings
+    from base.config import settings
 
     monkeypatch.setattr(settings.agent, "agent_reply_reminder_cadence", "every_time")
     _pin_compact_budget(monkeypatch, hard_tokens=1)

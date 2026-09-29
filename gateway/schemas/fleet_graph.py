@@ -12,7 +12,7 @@ from pydantic import (
     ConfigDict,
 )
 
-from shared.agents import AgentStatus
+from base.agents import AgentStatus
 
 
 class FleetGraphNode(BaseModel):

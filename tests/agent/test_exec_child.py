@@ -23,7 +23,7 @@ import pytest
 from langchain_core.messages import HumanMessage
 
 import ava
-from agent.graph.exec_protocol import (
+from agent.graph.exec.protocol import (
     make_request_path,
     make_result_path,
     read_result,
@@ -263,14 +263,14 @@ def test_crash_envelope_uses_stdlib_fallback_when_protocol_writer_fails(
 ) -> None:
     """A failed protocol writer cannot erase an already-caught child crash."""
     from agent import exec_child
-    from agent.graph import exec_protocol
+    from agent.graph.exec import protocol
 
     result = tmp_path / "result.json"
 
     def fail_write_result(_path: Path, _payload: object) -> None:
         raise OSError("synthetic protocol write failure")
 
-    monkeypatch.setattr(exec_protocol, "write_result", fail_write_result)
+    monkeypatch.setattr(protocol, "write_result", fail_write_result)
     exec_child._write_crashed_result(str(result), ValueError("fallback boom"))
 
     payload = read_result(result)
@@ -461,7 +461,7 @@ def test_child_lifecycle_envelope(tmp_path: Path) -> None:
     """A `LifecycleExit` raised by agent code becomes a lifecycle outcome with
     the class name — the parent reconstructs the exception from it."""
     proc, _request, result = _spawn(
-        tmp_path, "from shared.lifecycle import AgentRestart\nraise AgentRestart()"
+        tmp_path, "from base.agents.lifecycle import AgentRestart\nraise AgentRestart()"
     )
     assert proc.returncode == 0
     payload = read_result(result)
@@ -515,8 +515,8 @@ def test_child_installs_signal_handlers_before_reading_request(
     """A signal arriving during request decoding must become an in-band result,
     so SIGTERM's child handler is installed before the read begins."""
     from agent import exec_child
-    from agent.graph import exec_protocol
-    from agent.graph.exec_protocol import RequestPayload, ResultPayload
+    from agent.graph.exec import protocol
+    from agent.graph.exec.protocol import RequestPayload, ResultPayload
 
     old_sigint = signal.getsignal(signal.SIGINT)
     old_sigterm = signal.getsignal(signal.SIGTERM)
@@ -548,12 +548,12 @@ def test_child_installs_signal_handlers_before_reading_request(
         assert surface is True
 
     monkeypatch.setattr(exec_child, "_line_buffered_output", lambda: None)
-    monkeypatch.setattr(exec_protocol, "read_request", fake_read_request)
+    monkeypatch.setattr(protocol, "read_request", fake_read_request)
     monkeypatch.setattr(exec_child, "_pop_overlay_env", lambda: (None, None))
     monkeypatch.setattr(exec_child, "_apply_overlay_scope", fake_apply_scope)
     monkeypatch.setattr(exec_child, "_build_state_slot", fake_build_state_slot)
     monkeypatch.setattr(exec_child, "_run_code", fake_run_code)
-    monkeypatch.setattr(exec_protocol, "write_result", fake_write_result)
+    monkeypatch.setattr(protocol, "write_result", fake_write_result)
     monkeypatch.setattr("ava.ensure_plugins_loaded", fake_ensure_plugins_loaded)
     monkeypatch.setattr("ava.security.take_findings", list)
     monkeypatch.setattr("ava.attachment_transport.take_attachments", list)
@@ -599,7 +599,7 @@ def test_child_applies_overlay_framework_and_pops_env(tmp_path: Path) -> None:
     proc, _request, result = _spawn(
         tmp_path,
         (
-            "from shared.config import settings\n"
+            "from base.config import settings\n"
             "print(settings.lm.llm_model)\n"
             "print(settings.lm.llm_stream_ttft_timeout_seconds)\n"
             "import os\nprint(os.environ.get('AVA_AGENT_CONFIG_OVERLAY', 'GONE'))\n"
@@ -628,8 +628,8 @@ def test_child_overlay_phases_framework_then_plugin(
     after. A single framework-only pass (the PR1 shape) silently dropped
     plugin-scope overlay fields — this locks the sequencing."""
     from agent import exec_child
-    from agent.graph import exec_protocol
-    from agent.graph.exec_protocol import RequestPayload, ResultPayload
+    from agent.graph.exec import protocol
+    from agent.graph.exec.protocol import RequestPayload, ResultPayload
 
     events: list[str] = []
 
@@ -662,13 +662,13 @@ def test_child_overlay_phases_framework_then_plugin(
         assert surface is True
         events.append("plugins")
 
-    monkeypatch.setattr(exec_protocol, "read_request", fake_read_request)
+    monkeypatch.setattr(protocol, "read_request", fake_read_request)
     monkeypatch.setattr(exec_child, "_init_logger", fake_init_logger)
     monkeypatch.setattr("agent.process_boot._apply_per_agent_sdk_disable", fake_sdk_disable)
     monkeypatch.setattr("agent.process_boot._apply_per_agent_eval_isolation", fake_eval_isolation)
     monkeypatch.setattr(exec_child, "_build_state_slot", fake_build_state_slot)
     monkeypatch.setattr(exec_child, "_run_code", fake_run_code)
-    monkeypatch.setattr(exec_protocol, "write_result", fake_write_result)
+    monkeypatch.setattr(protocol, "write_result", fake_write_result)
     monkeypatch.setattr("ava.security.take_findings", fake_take_findings)
     monkeypatch.setattr("ava.ensure_plugins_loaded", fake_plugins_loaded)
 
@@ -761,8 +761,8 @@ def test_child_help_hides_attach_for_withdrawn_model(
         tmp_path,
         "import ava, io, contextlib\n"
         "from dataclasses import replace\n"
-        "from shared.lm.plugin_providers import ensure_provider_plugins_loaded\n"
-        "from shared.lm.registry import MODELS\n"
+        "from base.lm.plugin_providers import ensure_provider_plugins_loaded\n"
+        "from base.lm.registry import MODELS\n"
         "ensure_provider_plugins_loaded()\n"
         "MODELS['deepseek-vision-fixture'] = replace(MODELS['deepseek-flash'], "
         "spawnable=False, unavailable_fallback='deepseek-flash', "

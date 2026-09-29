@@ -1,0 +1,5 @@
+{
+  "nesting": {
+    "ava/mcps/_daemon.py::_handle_client": 7
+  }
+}

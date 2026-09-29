@@ -14,15 +14,15 @@ from psycopg_pool import AsyncConnectionPool
 from agent import state as states
 from agent.impersonation import flush_checkpoint
 from agent.startup import wrap_saver_writes_with_nstep_interval
+from base.agents.context import AvaContext
+from base.agents.history.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
+from base.cluster.machine import machine_name
+from base.config import settings
+from base.db import insert_inbound_message
+from base.deploy.maintenance import admission, cohort, pause_owner
 from services.agent_host import host as host_module
 from services.agent_host import runtime as runtime_module
 from services.agent_host.runtime import TurnOutcome
-from shared import maintenance, maintenance_cohort, pause_owner
-from shared.agents.history.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
-from shared.config import settings
-from shared.context import AvaContext
-from shared.db import insert_inbound_message
-from shared.machine import machine_name
 from tests.agent.test_maintenance import WHEN, _agent
 from tests.agent.test_maintenance import isolate as isolate
 
@@ -94,7 +94,7 @@ async def test_prior_ordinary_failure_can_drain_without_replaying_work(
     assert original is not None
     db_conn.commit()
     pause_owner.begin_maintenance("after-crash", WHEN)
-    hold = maintenance_cohort.prepare(
+    hold = cohort.prepare(
         db_conn,
         machine=machine_name(),
         host_owner=host._owner,
@@ -103,10 +103,10 @@ async def test_prior_ordinary_failure_can_drain_without_replaying_work(
     )
     assert [wake.agent_id for wake in await host.pending_inbound_wakes(300)] == [agent]
     await host.run_turn(agent)
-    current = maintenance.require_operation("after-crash", WHEN)
+    current = admission.require_operation("after-crash", WHEN)
     assert current.maintenance is not None
     assert current.maintenance.drained == (agent,)
-    maintenance_cohort.verify_drained(db_conn, current.maintenance)
+    cohort.verify_drained(db_conn, current.maintenance)
     assert calls == ["save", "fail"]
     reader = AsyncPostgresSaver(aops_pool)
     wrap_saver_reads_with_delta_reconstruction(reader)
@@ -134,7 +134,7 @@ async def test_prior_tail_flush_outage_defers_receipt_until_reflushed(
     agent = _agent(db_conn)
     host, _saver, config, tail, calls = await _failed_turn(aops_pool, agent, monkeypatch)
     pause_owner.begin_maintenance("failed-flush", WHEN)
-    hold = maintenance_cohort.prepare(
+    hold = cohort.prepare(
         db_conn,
         machine=machine_name(),
         host_owner=host._owner,
@@ -157,7 +157,7 @@ async def test_prior_tail_flush_outage_defers_receipt_until_reflushed(
     # not certify before a successful re-flush; for delta threads the flush
     # itself is a no-op (#3180), and what this pins is the deferral path and
     # its failure handling.
-    current = maintenance.require_operation("failed-flush", WHEN)
+    current = admission.require_operation("failed-flush", WHEN)
     assert current.maintenance is not None
     assert current.maintenance.failures == {}
     assert current.maintenance.undelivered == {agent: "OperationalError"}
@@ -176,11 +176,11 @@ async def test_prior_tail_flush_outage_defers_receipt_until_reflushed(
     # only the resulting applied command certifies the drain.
     assert [wake.agent_id for wake in await host.pending_inbound_wakes(300)] == [agent]
     await host.run_turn(agent)
-    current = maintenance.require_operation("failed-flush", WHEN)
+    current = admission.require_operation("failed-flush", WHEN)
     assert current.maintenance is not None
     assert current.maintenance.undelivered == {agent: "OperationalError"}
     assert current.maintenance.drained == (agent,)
-    maintenance_cohort.verify_drained(db_conn, current.maintenance)
+    cohort.verify_drained(db_conn, current.maintenance)
     assert await host.pending_inbound_wakes(300) == []
     assert db_conn.execute(
         "SELECT status,applied_at IS NOT NULL,observed_at FROM inbound_messages WHERE id=%s",

@@ -1,7 +1,7 @@
 """An incomplete operation explains an outage only while its executor provably lives.
 
 The finite executor stamps a heartbeat beside its journal while it runs
-(`shared.release_operation.executor_heartbeat`). The health probe lets an
+(`base.deploy.release.operation.executor_heartbeat`). The health probe lets an
 incomplete release or PITR operation pause alert grading only while that
 stamp is fresh (`operation_in_flight`); a killed, OOM'd or rebooted executor,
 or one that never launched, stops stamping, so its operation explains nothing
@@ -20,6 +20,10 @@ from uuid import uuid4
 import pytest
 from pydantic import JsonValue
 
+from base import paths
+from base.deploy.progress_timeout import EXECUTOR_HEARTBEAT_TTL_S
+from base.deploy.release.operation import InFlight, executor_heartbeat, operation_in_flight
+from base.deploy.release.start_inputs import configuration_digest
 from cli.commands.cluster import health as cluster_health
 from cli.commands.cluster import health_alerts
 from cli.release_fleet.request import FleetRequest
@@ -29,10 +33,6 @@ from cli.release_transition import native, submit
 from cli.release_transition.journal import create
 from cli.release_transition.native import LINUX
 from cli.release_transition.request import ReleaseRef
-from shared import paths
-from shared.deploy_timing import EXECUTOR_HEARTBEAT_TTL_S
-from shared.release_operation import InFlight, executor_heartbeat, operation_in_flight
-from shared.start_inputs import configuration_digest
 from tests.cli.test_cluster_health import _all_checks_pass as _all_checks_pass
 from tests.cli.test_cluster_health import _home as _home
 from tests.cli.test_cluster_health import _no_deploy_in_flight as _no_deploy_in_flight

@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-_GUARD = _REPO_ROOT / "scripts" / "guard_editable_venv.py"
+_GUARD = _REPO_ROOT / "scripts" / "host_ops" / "guard_editable_venv.py"
 
 
 def _run(checkout: Path, *, virtual_env: Path | None = None) -> subprocess.CompletedProcess[str]:

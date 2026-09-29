@@ -25,13 +25,13 @@ import pytest
 from psycopg import sql
 from psycopg.conninfo import conninfo_to_dict
 
+from base.config import settings
+from base.native_process.os_platform import LockTimeoutError
 from services import backup
 from services.gateway_side.backup.passphrase import logical_backup_passphrase
-from services.pitr import logical_dump_names, store_factory
-from services.pitr.checksums import MD5, ObjectChecksum
-from services.pitr.object_store import RemoteObjectAck
-from shared.config import settings
-from shared.platform import LockTimeoutError
+from services.pitr.stores import factory, logical_dump_names
+from services.pitr.stores.checksums import MD5, ObjectChecksum
+from services.pitr.stores.object_store import RemoteObjectAck
 
 _CLUSTER_TZ = "America/Los_Angeles"
 _REPO = Path(__file__).resolve().parents[2]
@@ -63,7 +63,7 @@ def _disable_offsite(monkeypatch: pytest.MonkeyPatch) -> None:
     def _no_store_group() -> Any:
         raise RuntimeError("no backup store configured")
 
-    monkeypatch.setattr(store_factory, "get_store_group", _no_store_group)
+    monkeypatch.setattr(factory, "get_store_group", _no_store_group)
 
 
 def _spawn_backup_lock_holder(
@@ -77,7 +77,7 @@ def _spawn_backup_lock_holder(
 
         sys.path.insert(0, {str(_REPO)!r})
         from services.backup import backup_lock
-        from shared.config import settings
+        from base.config import settings
 
         settings.general.ava_home = Path({str(ava_home)!r})
         with backup_lock(timeout_s=60):
@@ -256,9 +256,9 @@ def test_publish_offsite_standalone_success_is_visible(tmp_path: Path) -> None:
 
         sys.path.insert(0, {str(_REPO)!r})
         from services.backup import _main
-        from services.pitr import store_factory
-        from services.pitr.checksums import MD5, ObjectChecksum
-        from services.pitr.object_store import RemoteObjectAck
+        from services.pitr.stores import factory
+        from services.pitr.stores.checksums import MD5, ObjectChecksum
+        from services.pitr.stores.object_store import RemoteObjectAck
 
         class _Store:
             def put_base_if_absent(self, *, source, object_name, metadata, cancelled=None):
@@ -275,7 +275,7 @@ def test_publish_offsite_standalone_success_is_visible(tmp_path: Path) -> None:
             def restartable_streaming_object_store(self):
                 return _Store()
 
-        store_factory.get_store_group = _Group
+        factory.get_store_group = _Group
         raise SystemExit(_main(["--publish-offsite", {str(artifact)!r}]))
     """)
     proc = subprocess.run(  # noqa: S603
@@ -298,12 +298,12 @@ def test_publish_offsite_standalone_failure_behavior_unchanged(tmp_path: Path) -
 
         sys.path.insert(0, {str(_REPO)!r})
         from services.backup import _main
-        from services.pitr import store_factory
+        from services.pitr.stores import factory
 
         def _no_store_group():
             raise RuntimeError("no backup store configured")
 
-        store_factory.get_store_group = _no_store_group
+        factory.get_store_group = _no_store_group
         raise SystemExit(_main(["--publish-offsite", {str(artifact)!r}]))
     """)
     proc = subprocess.run(  # noqa: S603
@@ -327,7 +327,7 @@ def test_publish_offsite_standalone_publish_failure_keeps_exit_and_artifact(
 
         sys.path.insert(0, {str(_REPO)!r})
         from services.backup import _main
-        from services.pitr import store_factory
+        from services.pitr.stores import factory
 
         class _Store:
             def put_base_if_absent(self, *, source, object_name, metadata, cancelled=None):
@@ -337,7 +337,7 @@ def test_publish_offsite_standalone_publish_failure_keeps_exit_and_artifact(
             def restartable_streaming_object_store(self):
                 return _Store()
 
-        store_factory.get_store_group = _Group
+        factory.get_store_group = _Group
         raise SystemExit(_main(["--publish-offsite", {str(artifact)!r}]))
     """)
     proc = subprocess.run(  # noqa: S603
@@ -864,7 +864,7 @@ def test_offsite_publish_goes_through_the_store_contract(
         def restartable_streaming_object_store(self) -> _Store:
             return _Store()
 
-    monkeypatch.setattr(store_factory, "get_store_group", _Group)
+    monkeypatch.setattr(factory, "get_store_group", _Group)
 
     published = backup._publish_offsite(artifact)
 
@@ -890,7 +890,7 @@ def test_offsite_store_unavailable_keeps_local_artifact(
     def _no_store_group() -> Any:
         raise RuntimeError("no backup store configured")
 
-    monkeypatch.setattr(store_factory, "get_store_group", _no_store_group)
+    monkeypatch.setattr(factory, "get_store_group", _no_store_group)
 
     assert backup._publish_offsite(artifact) is None
     assert artifact.read_bytes() == b"encrypted artifact"
@@ -938,7 +938,7 @@ def test_run_backup_publishes_offsite_via_store_contract(
             return _Store()
 
     monkeypatch.setattr(backup.subprocess, "run", _fake_run)
-    monkeypatch.setattr(store_factory, "get_store_group", _Group)
+    monkeypatch.setattr(factory, "get_store_group", _Group)
 
     artifact = backup.run_backup(_dt(2026, 8, 8, 3, 0), db_url="dbname=whatever")
 

@@ -29,6 +29,11 @@ from uuid import uuid4
 import psycopg
 import pytest
 
+from base.cluster import authority, ownership
+from base.config import settings
+from base.db import connections
+from base.host.env import dotenv_boot
+from base.host.net.url_secret import url_with_userinfo
 from cli.commands.data_plane import bringup, write_generation
 from cli.commands.data_plane import cluster_instance as ci
 from cli.commands.data_plane import pgbouncer as pooler
@@ -36,10 +41,6 @@ from cli.release_fleet.request import FleetRequest
 from cli.release_transition import authority as release_authority
 from cli.release_transition.journal import Operation, create, exclusive, read_operation
 from cli.release_transition.request import ReleaseRef
-from shared import db_connections, dotenv_boot
-from shared.cluster import authority, ownership
-from shared.config import settings
-from shared.url_secret import url_with_userinfo
 from tests.lifecycle.db_authority.test_single_box import Born, _refused
 from tests.lifecycle.db_authority.test_single_box import born as born
 from tests.lifecycle.db_authority.test_single_box import configured as configured
@@ -402,7 +403,7 @@ def test_a_changed_verifier_after_a_death_holds_instead_of_minting_again(
 def test_a_surviving_session_holds_the_fence_without_a_closure_receipt(
     born: Born, release: FleetRequest, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from shared.cluster.authority import fence as library_fence
+    from base.cluster.authority import fence as library_fence
 
     def unconfirmed(_conn: Any, _pid: int, _timeout_ms: int) -> bool:
         return False  # the signal is never confirmed, so the session stays
@@ -431,7 +432,7 @@ def test_a_surviving_session_holds_the_fence_without_a_closure_receipt(
 @pytest.fixture
 def executor(born: Born, monkeypatch: pytest.MonkeyPatch) -> Iterator[str]:
     """The finite executor's adopted authority; restored after the test."""
-    monkeypatch.setattr(db_connections, "_administrator_url", None)
+    monkeypatch.setattr(connections, "_administrator_url", None)
     monkeypatch.setattr(settings.data_plane, "db_url", settings.data_plane.db_url)
     release_authority.adopt_executor_authority(born.home)
     yield settings.data_plane.db_url
@@ -440,13 +441,13 @@ def executor(born: Born, monkeypatch: pytest.MonkeyPatch) -> Iterator[str]:
 def test_executor_dials_the_owner_socket_acting_as_the_gateway_group(
     born: Born, executor: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import shared.db
+    import base.db
 
     # The boot pass refused the candidate image any generation login.
     monkeypatch.setattr(dotenv_boot, "db_authority_refusal", lambda: "candidate image")
     # A socket URL names no port to swap: the admin dial is already direct.
-    assert shared.db.direct_db_url() == executor
-    for dial in (shared.db.connect, lambda: shared.db.connect(direct=True)):
+    assert base.db.direct_db_url() == executor
+    for dial in (base.db.connect, lambda: base.db.connect(direct=True)):
         with dial() as conn:
             identity = conn.execute("SELECT session_user, current_user").fetchone()
             assert identity is not None and identity[1] == "ava_gateway"
@@ -457,22 +458,22 @@ def test_executor_dials_the_owner_socket_acting_as_the_gateway_group(
             with pytest.raises(psycopg.errors.InsufficientPrivilege):
                 conn.execute("CREATE TABLE executor_must_not_create (id int)")
             conn.rollback()
-    with shared.db.pool(min_size=1, max_size=1) as pool, pool.connection() as conn:
+    with base.db.pool(min_size=1, max_size=1) as pool, pool.connection() as conn:
         assert conn.execute("SELECT current_user").fetchone() == ("ava_gateway",)
     # Only the adopted URL is exempt from the refusal; the endpoint is not.
-    with pytest.raises(db_connections.NoDatabaseAuthorityError):
-        db_connections._guard_db_url(born.endpoint())
+    with pytest.raises(connections.NoDatabaseAuthorityError):
+        connections._guard_db_url(born.endpoint())
     with pytest.raises(ValueError, match="password-free owner-only socket"):
-        db_connections.adopt_administrator(url_with_userinfo(born.endpoint(), "ava", "pw"))
+        connections.adopt_administrator(url_with_userinfo(born.endpoint(), "ava", "pw"))
 
 
 def test_the_fence_never_terminates_the_executors_own_sessions(
     born: Born, release: FleetRequest, executor: str
 ) -> None:
-    import shared.db
+    import base.db
 
     del executor
-    with shared.db.connect(autocommit=True) as conn:
+    with base.db.connect(autocommit=True) as conn:
         _fence(release)
         assert conn.execute("SELECT current_user").fetchone() == ("ava_gateway",)
 

@@ -32,17 +32,17 @@ import time
 import psycopg
 from psycopg_pool import ConnectionPool
 
-import shared.db
+import base.db
+from base import telemetry
+from base.config import settings
+from base.daemon.health import Liveness, health_port, start_health_server, stop_health_server
+from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
+from base.daemon.shutdown import hard_exit as _hard_exit
+from base.db.transaction import write_transaction
+from base.log import init_gateway_process
 from services.heartbeat import JITTER_SPAN_S, STALE_PENDING_S
 from services.heartbeat.liveness import _PASS_INTERVAL_S, run_liveness_pass
 from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
-from shared import telemetry
-from shared.config import settings
-from shared.daemon_health import Liveness, health_port, start_health_server, stop_health_server
-from shared.daemon_shutdown import cancel_and_drain, install_graceful_shutdown
-from shared.daemon_shutdown import hard_exit as _hard_exit
-from shared.db_transaction import write_transaction
-from shared.log import init_gateway_process
 
 _log = logging.getLogger("services.heartbeat.daemon")
 
@@ -242,7 +242,7 @@ def _send_heartbeat_checkin(pool: ConnectionPool, agent_id: int, idle_minutes: f
         cur.execute("UPDATE agents_meta SET last_heartbeat_at = now() WHERE id = %s", (agent_id,))
         # The event name 'heartbeat_nudged' is stored row data — renaming it
         # would strand the existing history. Emit through the unified pipeline
-        # (`shared/telemetry/emitter.py`).
+        # (`base/telemetry/emitter.py`).
         #
         # ts time-source note: the emitter stamps datetime.now(UTC) at ENQUEUE
         # time (process clock, one time source for the whole stream) — the old
@@ -260,9 +260,9 @@ def _send_heartbeat_checkin(pool: ConnectionPool, agent_id: int, idle_minutes: f
     # The inbound is committed on `with` exit (the emit above is enqueued and
     # lands on the emitter's next batch — best-effort, JSONL-mirrored). The wake
     # is published after the inbound row is durable. Best-effort wake (see
-    # shared.db.publish_inbound_wake); heartbeat carries no user-facing inbound
+    # base.db.publish_inbound_wake); heartbeat carries no user-facing inbound
     # id, so "0".
-    shared.db.publish_inbound_wake(agent_id, "0")
+    base.db.publish_inbound_wake(agent_id, "0")
 
 
 def _reconcile_checkin_outcomes(
@@ -572,7 +572,7 @@ async def run() -> None:
     health = await start_health_server("heartbeat", liveness=liveness)
     _log.info("[heartbeat] healthz listening on :%s", health_port("heartbeat"))
 
-    pool = shared.db.pool()
+    pool = base.db.pool()
     # Liveness pass (Task #1174): a slow independent task alongside the check-in
     # loop, so a stalled probe fan-out (bounded by _PROBE_TIMEOUT_S) can never
     # delay a check-in. One pass per _PASS_INTERVAL_S, first pass after one full
@@ -595,10 +595,10 @@ def main() -> None:
     """Entry point: init logger + run asyncio loop.
 
     SIGTERM (the graceful stop `ava cluster update` sends) and Ctrl-C converge on
-    the same `KeyboardInterrupt` unwind — see `shared.daemon_shutdown`. `ava stop`
+    the same `KeyboardInterrupt` unwind — see `base.daemon.shutdown`. `ava stop`
     default force-kill does not reach this.
     """
-    from shared.migrations import assert_schema_current
+    from base.deploy.schema.migrations import assert_schema_current
 
     # Pre-startup sanity: schema version must match code; raises SchemaVersionMismatch if not.
     assert_schema_current(settings.data_plane.db_url)

@@ -1,0 +1,6 @@
+{
+  "complexity": {
+    "base/lm/pricing.py::_parse_catalog": 17,
+    "base/lm/registry.py::_validate_registry": 18
+  }
+}

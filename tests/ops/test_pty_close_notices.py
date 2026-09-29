@@ -17,9 +17,9 @@ import psycopg
 import pytest
 from psycopg_pool import ConnectionPool
 
+from base.config import settings
+from base.db import create_agent
 from ops import pty_close_notices as notices
-from shared.config import settings
-from shared.db import create_agent
 
 _WHEN = datetime(2026, 9, 10, 1, 2, 3, tzinfo=UTC)
 
@@ -32,9 +32,9 @@ def journal(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 @pytest.fixture()
 def pool() -> Iterator[ConnectionPool]:
-    import shared.db
+    import base.db
 
-    p = shared.db.pool(max_size=2)
+    p = base.db.pool(max_size=2)
     yield p
     p.close()
 

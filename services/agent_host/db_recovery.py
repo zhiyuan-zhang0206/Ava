@@ -17,17 +17,17 @@ from agent.startup import (
     reconcile_claimed_inbounds_at_startup,
     repair_dangling_tool_use_at_startup,
 )
-from services.agent_host.recovery_interrupt import RecoveryInterrupt
-from shared.agents.history.delta_read_compat import (
+from base.agents.history.delta_read_compat import (
     RecoveryReconstructionScope,
     recovery_reconstruction_scope,
 )
-from shared.config import settings
-from shared.db_transaction import async_write_transaction
-from shared.deploy_timing import AGENT_LEASE_TTL_S
-from shared.hosted_db_wait import DatabaseWait, database_wait
-from shared.log import logger
-from shared.runtime_incarnation import RuntimeIncarnation, current_incarnation
+from base.agents.observation.db_wait import DatabaseWait, database_wait
+from base.config import settings
+from base.db.transaction import async_write_transaction
+from base.deploy.progress_timeout import AGENT_LEASE_TTL_S
+from base.log import logger
+from base.native_process.runtime_incarnation import RuntimeIncarnation, current_incarnation
+from services.agent_host.recovery_interrupt import RecoveryInterrupt
 
 _PROBE_TIMEOUT_SECONDS = 5.0
 # The observed checkpoint read/recovery band reaches 25-45s under load, and a

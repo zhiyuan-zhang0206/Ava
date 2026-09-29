@@ -13,6 +13,10 @@ import psycopg
 import pytest
 from psycopg_pool import ConnectionPool
 
+from base import telemetry
+from base.config import settings
+from base.db import insert_inbound_message
+from base.events.live.redis_listener import RedisInboundListener
 from services.delivery_watchdog.daemon import (
     dispatch_wakes,
     gc_alerted,
@@ -24,10 +28,6 @@ from services.delivery_watchdog.daemon import (
     select_pending_ids,
     select_stale_pending,
 )
-from shared import telemetry
-from shared.config import settings
-from shared.db import insert_inbound_message
-from shared.redis_listener import RedisInboundListener
 
 _THRESHOLD_S = 30.0
 _DISPATCH_THRESHOLD_S = 1.0
@@ -188,7 +188,7 @@ class TestScanOnce:
         from datetime import UTC as _UTC
         from datetime import datetime as _dt
 
-        from shared.paths import logs_dir
+        from base.paths import logs_dir
 
         def _stalled() -> dict[str, object] | None:
             telemetry.flush()
@@ -327,14 +327,14 @@ class TestDispatchWakes:
     ) -> None:
         """dispatch_wakes re-publishes one wake (payload = inbound id) per
         stale pending row of an idling owner — the lost-wake recovery."""
-        import shared.db
+        import base.db
 
         aid = _make_idling_agent(db_conn)
         iid = _insert_old_inbound(db_conn, aid, age_s=_DISPATCH_THRESHOLD_S + 0.5)
 
         calls: list[tuple[int, str]] = []
         monkeypatch.setattr(
-            shared.db,
+            base.db,
             "publish_inbound_wake",
             lambda agent_id, payload: calls.append((agent_id, payload)) or True,  # pyright: ignore[reportUnknownArgumentType]
         )
@@ -352,7 +352,7 @@ class TestDispatchWakes:
     ) -> None:
         """A failing publish is logged, not raised — the alert path and the
         claim loop's 30s recheck remain as backstops."""
-        import shared.db
+        import base.db
 
         aid = _make_idling_agent(db_conn)
         _insert_old_inbound(db_conn, aid, age_s=_DISPATCH_THRESHOLD_S + 0.5)
@@ -360,7 +360,7 @@ class TestDispatchWakes:
         def boom(*_a, **_k) -> bool:
             return False
 
-        monkeypatch.setattr(shared.db, "publish_inbound_wake", boom)  # pyright: ignore[reportUnknownArgumentType]
+        monkeypatch.setattr(base.db, "publish_inbound_wake", boom)  # pyright: ignore[reportUnknownArgumentType]
         assert (
             dispatch_wakes(
                 pool,
@@ -380,7 +380,7 @@ class TestDispatchWakes:
         """End-to-end: dispatch_wakes publishes on the agent's Redis channel,
         so a listener subscribed to it wakes immediately — the lost-wake window
         collapses from 30s to ~1 tick."""
-        from shared.redis_listener import RedisInboundListener
+        from base.events.live.redis_listener import RedisInboundListener
 
         aid = _make_idling_agent(db_conn)
         _insert_old_inbound(db_conn, aid, age_s=_DISPATCH_THRESHOLD_S + 0.5)
@@ -436,7 +436,7 @@ class TestDispatchBackoffAndPoison:
             calls.append((agent_id, payload))
             return True
 
-        monkeypatch.setattr("shared.db.publish_inbound_wake", record_publish)
+        monkeypatch.setattr("base.db.publish_inbound_wake", record_publish)
 
         assert self._dispatch(pool) == 1
         with db_conn.cursor() as cur:
@@ -461,7 +461,7 @@ class TestDispatchBackoffAndPoison:
         def accept_publish(_agent_id: int, _payload: str) -> bool:
             return True
 
-        monkeypatch.setattr("shared.db.publish_inbound_wake", accept_publish)
+        monkeypatch.setattr("base.db.publish_inbound_wake", accept_publish)
         assert self._dispatch(pool) == 1
 
         assert (
@@ -510,7 +510,7 @@ class TestDispatchBackoffAndPoison:
         def fail_publish(*_args: object) -> bool:
             return False
 
-        monkeypatch.setattr("shared.db.publish_inbound_wake", fail_publish)
+        monkeypatch.setattr("base.db.publish_inbound_wake", fail_publish)
         assert self._dispatch(pool) == 0
         with db_conn.cursor() as cur:
             cur.execute(
@@ -538,7 +538,7 @@ class TestDispatchBackoffAndPoison:
             db_conn.commit()
             return True
 
-        monkeypatch.setattr("shared.db.publish_inbound_wake", publish_and_claim)
+        monkeypatch.setattr("base.db.publish_inbound_wake", publish_and_claim)
         assert self._dispatch(pool) == 1
         with db_conn.cursor() as cur:
             cur.execute(
@@ -557,7 +557,7 @@ class TestDispatchBackoffAndPoison:
         import json
         from datetime import UTC, datetime
 
-        from shared.paths import logs_dir
+        from base.paths import logs_dir
 
         aid = _make_idling_agent(db_conn)
         iid = _insert_old_inbound(db_conn, aid, age_s=_DISPATCH_THRESHOLD_S + 1)
@@ -565,7 +565,7 @@ class TestDispatchBackoffAndPoison:
         def accept_publish(_agent_id: int, _payload: str) -> bool:
             return True
 
-        monkeypatch.setattr("shared.db.publish_inbound_wake", accept_publish)
+        monkeypatch.setattr("base.db.publish_inbound_wake", accept_publish)
 
         for _ in range(_MAX_DISPATCH_COUNT):
             self._set_last_dispatch_age(db_conn, iid, 1000.0)
@@ -652,7 +652,7 @@ class TestDispatchBackoffAndPoison:
             calls.append((agent_id, payload))
             return True
 
-        monkeypatch.setattr("shared.db.publish_inbound_wake", record_unexpected_publish)
+        monkeypatch.setattr("base.db.publish_inbound_wake", record_unexpected_publish)
 
         assert self._dispatch(pool) == 0
         assert calls == []
@@ -684,7 +684,7 @@ class TestDispatchBackoffAndPoison:
             calls.append((agent_id, payload))
             return True
 
-        monkeypatch.setattr("shared.db.publish_inbound_wake", record_publish)
+        monkeypatch.setattr("base.db.publish_inbound_wake", record_publish)
 
         assert self._dispatch(pool) == 1
         assert calls == [(aid, str(iid))]
@@ -710,7 +710,7 @@ class TestDispatchBackoffAndPoison:
             calls.append((agent_id, payload))
             return True
 
-        monkeypatch.setattr("shared.db.publish_inbound_wake", record_publish)
+        monkeypatch.setattr("base.db.publish_inbound_wake", record_publish)
 
         for _ in range(20):
             self._set_last_dispatch_age(db_conn, iid, 1000.0)
@@ -1543,7 +1543,7 @@ class TestSystemNoticeSourcePredicateParity:
         from psycopg import sql
         from psycopg.types.json import Jsonb
 
-        from shared.lifecycle_acceptance import (
+        from base.agents.incarnation.lifecycle_acceptance import (
             SYSTEM_NOTICE_SOURCE,
             is_system_notice_source,
         )
@@ -1581,7 +1581,7 @@ class TestSystemNoticeSourcePredicateParity:
                     assert row[0] == is_system_notice_source(source, payload), (source, label)
 
     def test_only_the_exact_boolean_true_marker_exempts(self) -> None:
-        from shared.lifecycle_acceptance import is_system_notice_source
+        from base.agents.incarnation.lifecycle_acceptance import is_system_notice_source
 
         for source in ("system", "system:notice-reply"):
             for label, payload, exempt in self._PAYLOAD_SAMPLES:
@@ -1600,9 +1600,9 @@ class TestResurrectRetry:
     ) -> None:
         import asyncio
 
-        import ops.ops_lifecycle as ol
+        import ops.lifecycle as ol
         import services.delivery_watchdog.daemon as dw
-        from shared.agents import AgentStatus
+        from base.agents import AgentStatus
 
         aid = _make_terminated_agent(db_conn)
         trigger_id = insert_inbound_message(db_conn, aid, "hello?", source="user")
@@ -1670,9 +1670,9 @@ class TestResurrectRetry:
     async def test_success_resets_failure_and_suppression_escalation_counts(
         self, db_conn: psycopg.Connection, pool: ConnectionPool, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        import ops.ops_lifecycle as ol
+        import ops.lifecycle as ol
         import services.delivery_watchdog.daemon as dw
-        from shared.agents import AgentStatus
+        from base.agents import AgentStatus
 
         aid = _make_terminated_agent(db_conn)
         trigger_id = insert_inbound_message(db_conn, aid, "hello?", source="user")
@@ -1695,10 +1695,10 @@ class TestResurrectRetry:
         pool: ConnectionPool,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        import ops.ops_lifecycle as ol
+        import ops.lifecycle as ol
         import services.delivery_watchdog.daemon as dw
+        from base.agents import AgentStatus
         from services.delivery_watchdog.daemon import select_terminated_owners_with_pending
-        from shared.agents import AgentStatus
 
         aid = _make_terminated_agent(db_conn)
         trigger_id = insert_inbound_message(db_conn, aid, "hello?", source="user")
@@ -1746,7 +1746,7 @@ class TestResurrectRetry:
         finally timestamp prevents the next tick from retrying immediately."""
         import asyncio
 
-        import ops.ops_lifecycle as ol
+        import ops.lifecycle as ol
         import services.delivery_watchdog.daemon as dw
 
         aid = _make_terminated_agent(db_conn)
@@ -1783,7 +1783,7 @@ class TestResurrectRetry:
         retry cooldown once the RPC body has started."""
         import asyncio
 
-        import ops.ops_lifecycle as ol
+        import ops.lifecycle as ol
         import services.delivery_watchdog.daemon as dw
 
         aid = _make_terminated_agent(db_conn)
@@ -1823,7 +1823,7 @@ class TestResurrectRetry:
         accounting, so the following tick can fairly admit owner B."""
         import asyncio
 
-        import ops.ops_lifecycle as ol
+        import ops.lifecycle as ol
         import services.delivery_watchdog.daemon as dw
 
         dead_a = _make_terminated_agent(db_conn)
@@ -1871,7 +1871,7 @@ class TestResurrectRetry:
         must reuse its in-flight attempt instead of building a task herd."""
         import asyncio
 
-        import ops.ops_lifecycle as ol
+        import ops.lifecycle as ol
         import services.delivery_watchdog.daemon as dw
 
         aid = _make_terminated_agent(db_conn)
@@ -1916,7 +1916,7 @@ class TestResurrectRetry:
         unreachable home machine drains over ticks, never as a burst."""
         import asyncio
 
-        import ops.ops_lifecycle as ol
+        import ops.lifecycle as ol
         import services.delivery_watchdog.daemon as dw
 
         dead_a = _make_terminated_agent(db_conn)
@@ -1975,7 +1975,7 @@ class TestResurrectRetry:
         stamps the per-agent attempt clock (drives the 60s cooldown)."""
         import time
 
-        import ops.ops_lifecycle as ol
+        import ops.lifecycle as ol
         import services.delivery_watchdog.daemon as dw
 
         aid = _make_terminated_agent(db_conn)
@@ -2162,7 +2162,7 @@ class TestStalledCrashMarkedRecovery:
     ) -> None:
         import asyncio
 
-        import ops.ops_lifecycle as ol
+        import ops.lifecycle as ol
         from services.delivery_watchdog import stall_recovery as sr
 
         zombie = _make_crash_marked_agent(db_conn)
@@ -2209,7 +2209,7 @@ class TestStalledCrashMarkedRecovery:
     ) -> None:
         import asyncio
 
-        import ops.ops_lifecycle as ol
+        import ops.lifecycle as ol
         from services.delivery_watchdog import stall_recovery as sr
 
         zombie = _make_crash_marked_agent(db_conn)
@@ -2243,7 +2243,7 @@ class TestStalledCrashMarkedRecovery:
     ) -> None:
         import asyncio
 
-        import ops.ops_lifecycle as ol
+        import ops.lifecycle as ol
         from services.delivery_watchdog import stall_recovery as sr
 
         zombie = _make_crash_marked_agent(db_conn)

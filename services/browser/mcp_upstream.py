@@ -18,8 +18,8 @@ from datetime import timedelta
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import get_default_environment, stdio_client
 
-from shared.config import settings
-from shared.log import logger
+from base.config import settings
+from base.log import logger
 
 # Pinned exact version — do NOT go back to @latest. npx re-resolves @latest on
 # every daemon (re)start, so an upstream release can silently break the browser

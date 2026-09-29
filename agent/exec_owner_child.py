@@ -14,7 +14,7 @@ import time
 from datetime import UTC, datetime
 from pathlib import Path
 
-from shared.exec_owner_protocol import (
+from base.agents.incarnation.exec_owner_protocol import (
     MAX_OWNER_MESSAGE,
     OwnerControl,
     read_owner_bytes,

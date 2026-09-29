@@ -35,8 +35,8 @@ if sys.platform == "win32":
 def _backup_passphrase_pinned() -> None:
     """The suite home as a gateway birth leaves it: its logical-backup
     passphrase pinned (backups never derive a key from the cluster secret)."""
+    from base.paths import ava_home
     from services.gateway_side.backup import passphrase
-    from shared.paths import ava_home
 
     passphrase.ensure_minted(ava_home())
 

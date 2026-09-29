@@ -21,5 +21,5 @@ Each sub-skill is a self-contained CLI (agent runs via bash, prints JSON to stdo
 
 ## Key dependencies
 - [[ava_builtins/skills/skills.ava.okf.md|Skills index]] — full skills catalog
-- [[ava/mcps.ava.okf.md|MCP integration]] — drive logged-in browser via [[ava_builtins/mcps/chrome/chrome.ava.okf.md|Chrome MCP]]
+- [[ava/mcps/mcps.ava.okf.md|MCP integration]] — drive logged-in browser via [[ava_builtins/mcps/chrome/chrome.ava.okf.md|Chrome MCP]]
 - [[ava_builtins/skills/web-sources/web-sources.ava.okf.md|web-sources]] — same logged-in browser, same CLI+JSON form (fetch content vs drive model)

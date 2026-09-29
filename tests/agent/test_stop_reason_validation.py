@@ -32,7 +32,7 @@ from agent.graph.llm_errors import (
     LLMStreamTruncatedError,
     LLMStreamUnexpectedStopReasonError,
 )
-from shared.lm.plugin_providers import ensure_provider_plugins_loaded
+from base.lm.plugin_providers import ensure_provider_plugins_loaded
 
 ensure_provider_plugins_loaded()
 
@@ -276,7 +276,7 @@ async def test_llm_node_validator_wired(
 
     from agent.graph import llm_node
     from agent.state import AgentState
-    from shared.context import AvaContext
+    from base.agents.context import AvaContext
     from tests.agent._fakes import make_fake_ops_pool
 
     async def _truncated_stream() -> AsyncIterator[AIMessageChunk]:

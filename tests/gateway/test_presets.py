@@ -1,5 +1,5 @@
 """Tests for gateway/routers/presets.py (the /api/presets CRUD surface) and the
-spawn-with-preset config merge in gateway/routers/agents.py.
+spawn-with-preset config merge in gateway/agents/router.py.
 
 Driven through TestClient(app) against the real test DB. Spawn tests rely on the
 autouse `_local_spawn_in_process` fixture (tests/gateway/conftest.py) to run the

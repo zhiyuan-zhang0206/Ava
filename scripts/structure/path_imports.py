@@ -5,7 +5,7 @@ a module from a file (`importlib.util.spec_from_file_location`,
 `importlib.machinery.SourceFileLoader`, `runpy.run_path`) turns its directory into
 an unreviewed code package that sidesteps the package doors, budgets and locality
 rules. Shared code belongs in a governed package the script imports normally, and
-the script stays a thin entry point. Rule 6 in scripts/lint_code_structure.py; the
+the script stays a thin entry point. Rule 6 in scripts/lint/code_structure.py; the
 frozen sites live in the `path_imports` section of the scripts/structure/baseline/ shards
 as `path::target -> site count`, matched exactly like the locality sections.
 
@@ -42,7 +42,7 @@ SECTION = "path_imports"
 _SCOPE = ("ava_builtins/",)
 _SKILLS_SCOPE = "ava_builtins/skills/"
 FIX = (
-    "move the shared code into a governed package (ava/, shared/, or the plugin's own "
+    "move the shared code into a governed package (ava/, base/, or the plugin's own "
     "package) and import it normally; keep the script a thin entry point"
 )
 _PATH_MUTATORS = frozenset({"insert", "append", "extend", "remove", "pop", "clear"})

@@ -28,7 +28,7 @@ from langgraph.runtime import Runtime
 
 from agent.hooks import Hook
 from agent.state import AgentState
-from shared.context import AvaContext
+from base.agents.context import AvaContext
 
 
 class _Ok(Hook):

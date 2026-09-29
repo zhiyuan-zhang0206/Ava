@@ -9,8 +9,8 @@ from typing import Any
 import psycopg
 import pytest
 
-from scripts import backfill_llm_usage_hourly as backfill
-from shared.config import settings
+from base.config import settings
+from scripts.data_repair import backfill_llm_usage_hourly as backfill
 
 
 def _row(ts: str, **attributes: Any) -> dict[str, Any]:

@@ -2,8 +2,8 @@
 
 Every exec child pays `import ava` before any user code runs; that import must
 stop at the config/effort layer and never pull langchain / langgraph /
-langsmith or the provider API (`shared.lm.provider_api`). The attachment
-constants live in an import-free leaf (`shared.lm.attach_constants`) precisely
+langsmith or the provider API (`base.lm.provider_api`). The attachment
+constants live in an import-free leaf (`base.lm.attach_constants`) precisely
 so the SDK surfaces do not drag the LangChain-backed packing machinery in.
 
 The probe runs in a clean subprocess (isolated interpreter, agent-launch env
@@ -45,7 +45,7 @@ _FORBIDDEN_PREFIXES = (
     "langchain",
     "langgraph",
     "langsmith",
-    "shared.lm.provider_api",
+    "base.lm.provider_api",
 )
 
 _PROBE = """

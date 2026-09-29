@@ -24,15 +24,17 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
-from gateway import loki_events, loki_query_budget
+from base import telemetry
+from base.cluster import home_label
+from base.config import settings
+from base.packages.plugins import stats
+from base.paths import ava_home
+from base.telemetry.loki_index_labels import EVENT_STREAM_RETENTION, retention_floor
 from gateway.app import app
-from gateway.routers import _stats_dashboard, status
-from gateway.schemas import StatsDashboard, StatsWindowHours, window_delta
-from shared import plugin_stats, telemetry
-from shared.cluster import home_label
-from shared.config import settings
-from shared.loki_index_labels import EVENT_STREAM_RETENTION, retention_floor
-from shared.paths import ava_home
+from gateway.cluster import _stats_dashboard, status
+from gateway.cluster.schemas import StatsDashboard
+from gateway.lgtm import loki_events, loki_query_budget
+from gateway.schemas.stats import StatsWindowHours, window_delta
 from tests.gateway.loki_fake import FakeLoki
 
 
@@ -468,7 +470,6 @@ def test_dashboard_168h_reads_tokens_from_ledger(
     with TestClient(app) as client:
         body = client.get("/api/stats/dashboard", params={"hours": 168}).json()
     floor_after = retention_floor()
-
     expected_hours = int(EVENT_STREAM_RETENTION.total_seconds() // 3600)
     assert body["window_hours"] == 168
     assert body["applied_window_hours"] == expected_hours
@@ -994,7 +995,7 @@ def test_dashboard_carries_plugin_stat_values_unwindowed() -> None:
     value is a point-in-time fact and the window selector must not pretend to
     aggregate it. Declarations are joined by the console from
     /api/ui/contributions on (plugin, id)."""
-    plugin_stats.upsert(
+    stats.upsert(
         plugin="codex_usage",
         id="codex-zhang0206",
         value="6%",
@@ -1002,7 +1003,7 @@ def test_dashboard_carries_plugin_stat_values_unwindowed() -> None:
         status="warn",
         updated_by="macmini",
     )
-    plugin_stats.upsert(
+    stats.upsert(
         plugin="codex_usage",
         id="codex-wuji",
         value="!",

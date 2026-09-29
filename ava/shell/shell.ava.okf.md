@@ -43,4 +43,4 @@ omitted activation. Other ambient variables remain inherited; explicit
 envfile activation and watcher runner overrides still win. This is a
 creation-time rule; a later `cd` does not change it.
 
-Page servers opened with `ava.ui.serve` run in your own sessions (`page-<name>`, one entry per open page; the label grammar is owned by `shared/sessions/page_session.py`) and appear in `sessions.list()`; see the [[ava/ui.ava.okf.md]] server lifecycle for closure through `close()` or TTL expiry — killing the entry does not close the page, and a terminate's `kill_all_shell_sessions` spares them.
+Page servers opened with `ava.ui.serve` run in your own sessions (`page-<name>`, one entry per open page; the label grammar is owned by `base/sessions/page_session.py`) and appear in `sessions.list()`; see the [[ava/ui.ava.okf.md]] server lifecycle for closure through `close()` or TTL expiry — killing the entry does not close the page, and a terminate's `kill_all_shell_sessions` spares them.

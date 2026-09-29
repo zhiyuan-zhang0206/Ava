@@ -17,10 +17,10 @@ from typing import Any
 
 import pytest
 
-from services.pitr import retention_scheduler
-from services.pitr.retention_executor import RetentionExecutionSummary
-from services.pitr.retention_planner import DryRunResult
-from services.pitr.retention_scheduler import (
+from services.pitr.retention import scheduler
+from services.pitr.retention.executor import RetentionExecutionSummary
+from services.pitr.retention.planner import DryRunResult
+from services.pitr.retention.scheduler import (
     RetentionDryRunState,
     delete_tick,
     health_component,
@@ -96,21 +96,19 @@ class _SilentTelemetry:
 
 
 def _arm(monkeypatch: pytest.MonkeyPatch, *, armed: bool, digest: str | None = DIGEST) -> None:
-    monkeypatch.setattr(retention_scheduler, "_live_delete_armed", lambda **_kw: armed)
-    monkeypatch.setattr(retention_scheduler, "_live_approved_digest", lambda **_kw: digest)
+    monkeypatch.setattr(scheduler, "_live_delete_armed", lambda **_kw: armed)
+    monkeypatch.setattr(scheduler, "_live_approved_digest", lambda **_kw: digest)
 
 
 @pytest.fixture
 def wired(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     """Replace the module's seams with recording fakes."""
     calls: dict[str, Any] = {"execute": [], "plans": 0, "writes": [], "group": _FakeGroup()}
-    monkeypatch.setattr(retention_scheduler, "get_store_group", lambda: calls["group"])
-    monkeypatch.setattr(retention_scheduler, "_logical_retention", _logical_policy_stub)
-    monkeypatch.setattr(
-        retention_scheduler, "_build_verify_absent", lambda *_args, **_kw: lambda _name: True
-    )
-    monkeypatch.setattr(retention_scheduler, "inspect_dry_run_plan", lambda _root: "plan")
-    monkeypatch.setattr(retention_scheduler, "telemetry", _SilentTelemetry())
+    monkeypatch.setattr(scheduler, "get_store_group", lambda: calls["group"])
+    monkeypatch.setattr(scheduler, "_logical_retention", _logical_policy_stub)
+    monkeypatch.setattr(scheduler, "_build_verify_absent", lambda *_args, **_kw: lambda _name: True)
+    monkeypatch.setattr(scheduler, "inspect_dry_run_plan", lambda _root: "plan")
+    monkeypatch.setattr(scheduler, "telemetry", _SilentTelemetry())
 
     def fake_write(
         root: Path,
@@ -134,13 +132,13 @@ def wired(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         calls["execute"].append((plan, kwargs))
         return calls.get("summary") or _summary()
 
-    monkeypatch.setattr(retention_scheduler, "write_dry_run_plan", fake_write)
-    monkeypatch.setattr(retention_scheduler, "execute_retention_plan", fake_execute)
+    monkeypatch.setattr(scheduler, "write_dry_run_plan", fake_write)
+    monkeypatch.setattr(scheduler, "execute_retention_plan", fake_execute)
     return calls
 
 
 def _config() -> Any:
-    from shared.config import settings
+    from base.config import settings
 
     return settings.physical_backup
 
@@ -291,7 +289,7 @@ def test_execution_error_is_recorded_and_state_stays_armed(
     def boom(plan: object, **kwargs: object) -> RetentionExecutionSummary:
         raise RuntimeError("store exploded")
 
-    monkeypatch.setattr(retention_scheduler, "execute_retention_plan", boom)
+    monkeypatch.setattr(scheduler, "execute_retention_plan", boom)
     delete_tick(state, _config())
     assert state.delete.status == "armed"
     assert "store exploded" in (state.delete.last_error or "")
@@ -323,21 +321,21 @@ def test_health_disables_delete_by_default() -> None:
 
 
 def test_live_armed_reads_the_carrier(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(retention_scheduler, "_read_carrier", lambda _alias: "true")
-    assert retention_scheduler._live_delete_armed(boot_value=False) is True
-    monkeypatch.setattr(retention_scheduler, "_read_carrier", lambda _alias: "false")
-    assert retention_scheduler._live_delete_armed(boot_value=True) is False
-    monkeypatch.setattr(retention_scheduler, "_read_carrier", lambda _alias: None)
-    assert retention_scheduler._live_delete_armed(boot_value=True) is True
+    monkeypatch.setattr(scheduler, "_read_carrier", lambda _alias: "true")
+    assert scheduler._live_delete_armed(boot_value=False) is True
+    monkeypatch.setattr(scheduler, "_read_carrier", lambda _alias: "false")
+    assert scheduler._live_delete_armed(boot_value=True) is False
+    monkeypatch.setattr(scheduler, "_read_carrier", lambda _alias: None)
+    assert scheduler._live_delete_armed(boot_value=True) is True
 
 
 def test_live_approved_digest_normalizes(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(retention_scheduler, "_read_carrier", lambda _alias: "  abc  ")
-    assert retention_scheduler._live_approved_digest(boot_value=None) == "abc"
-    monkeypatch.setattr(retention_scheduler, "_read_carrier", lambda _alias: "   ")
-    assert retention_scheduler._live_approved_digest(boot_value="boot") is None
-    monkeypatch.setattr(retention_scheduler, "_read_carrier", lambda _alias: None)
-    assert retention_scheduler._live_approved_digest(boot_value="boot") == "boot"
+    monkeypatch.setattr(scheduler, "_read_carrier", lambda _alias: "  abc  ")
+    assert scheduler._live_approved_digest(boot_value=None) == "abc"
+    monkeypatch.setattr(scheduler, "_read_carrier", lambda _alias: "   ")
+    assert scheduler._live_approved_digest(boot_value="boot") is None
+    monkeypatch.setattr(scheduler, "_read_carrier", lambda _alias: None)
+    assert scheduler._live_approved_digest(boot_value="boot") == "boot"
 
 
 def test_build_verify_absent_uses_the_viewer_stat(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -349,12 +347,12 @@ def test_build_verify_absent_uses_the_viewer_stat(monkeypatch: pytest.MonkeyPatc
         def viewer_object_store(self) -> _Viewer:
             return _Viewer()
 
-    from shared.config import settings
+    from base.config import settings
 
-    monkeypatch.setattr(retention_scheduler, "get_store_group", _Group)
+    monkeypatch.setattr(scheduler, "get_store_group", _Group)
     config = settings.physical_backup
     monkeypatch.setattr(config, "pitr_store_backend", "oss")
-    probe = retention_scheduler._build_verify_absent(config)
+    probe = scheduler._build_verify_absent(config)
     assert probe("any") is True
 
 
@@ -379,10 +377,10 @@ def test_build_verify_absent_polls_for_baidu(monkeypatch: pytest.MonkeyPatch) ->
         def viewer_object_store(self) -> _Viewer:
             return self.viewer
 
-    from shared.config import settings
+    from base.config import settings
 
     monkeypatch.setattr(
-        retention_scheduler,
+        scheduler,
         "time",
         types.SimpleNamespace(sleep=lambda _seconds: None, time=time.time),
     )
@@ -390,11 +388,11 @@ def test_build_verify_absent_polls_for_baidu(monkeypatch: pytest.MonkeyPatch) ->
     monkeypatch.setattr(config, "pitr_store_backend", "baidu")
 
     viewer = _Viewer(absent_after=3)
-    monkeypatch.setattr(retention_scheduler, "get_store_group", lambda: _Group(viewer))
-    assert retention_scheduler._build_verify_absent(config)("any") is True
+    monkeypatch.setattr(scheduler, "get_store_group", lambda: _Group(viewer))
+    assert scheduler._build_verify_absent(config)("any") is True
     assert viewer.calls == 3
 
     sticky = _Viewer(absent_after=None)
-    monkeypatch.setattr(retention_scheduler, "get_store_group", lambda: _Group(sticky))
-    assert retention_scheduler._build_verify_absent(config)("any") is False
+    monkeypatch.setattr(scheduler, "get_store_group", lambda: _Group(sticky))
+    assert scheduler._build_verify_absent(config)("any") is False
     assert sticky.calls == 5

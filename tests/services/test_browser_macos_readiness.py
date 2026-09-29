@@ -181,7 +181,7 @@ def test_wait_loop_records_the_missing_gui_context_in_the_marker(
 def test_wait_marker_requires_the_recorded_owner_to_still_be_alive(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    monkeypatch.setattr(readiness.shared.paths, "run_dir", lambda: tmp_path)
+    monkeypatch.setattr(readiness.base.paths, "run_dir", lambda: tmp_path)
     monkeypatch.setattr(readiness.os, "getpid", lambda: 123)
     monkeypatch.setattr(readiness, "_current_process_started_at", lambda: 1.0)
 
@@ -204,7 +204,7 @@ def test_wait_marker_requires_the_recorded_owner_to_still_be_alive(
 def test_wait_marker_carries_the_context_flag(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    monkeypatch.setattr(readiness.shared.paths, "run_dir", lambda: tmp_path)
+    monkeypatch.setattr(readiness.base.paths, "run_dir", lambda: tmp_path)
 
     def _owner_alive(_pid: int, _started: float) -> bool:
         return True
@@ -226,7 +226,7 @@ def test_wait_marker_context_flag_fails_quiet_on_malformed_values(
 ) -> None:
     """A marker without the field (older daemon) or with a non-boolean value
     must not trigger the healthcheck's GUI-domain relaunch on its own."""
-    monkeypatch.setattr(readiness.shared.paths, "run_dir", lambda: tmp_path)
+    monkeypatch.setattr(readiness.base.paths, "run_dir", lambda: tmp_path)
 
     def _owner_alive(_pid: int, _started: float) -> bool:
         return True

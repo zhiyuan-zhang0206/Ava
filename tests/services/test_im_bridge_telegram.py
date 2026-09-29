@@ -14,8 +14,8 @@ from typing import Any
 import httpx
 import pytest
 
+from base.config import settings
 from services.im_bridge.adapters.telegram import TelegramAdapter
-from shared.config import settings
 
 FAKE_BOT_TOKEN = "123456:TEST-TOKEN"  # noqa: S105 - test fixture, never a real secret
 OWNER = 123456789

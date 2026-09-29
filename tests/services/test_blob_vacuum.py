@@ -25,13 +25,13 @@ import pytest
 from psycopg import sql
 from psycopg_pool import ConnectionPool
 
+from base.config import settings
 from services.events_maintenance import blob_vacuum
 from services.events_maintenance.blob_vacuum import (
     in_low_traffic_window,
     run_blob_vacuum,
     vacuum_checkpoint_tables,
 )
-from shared.config import settings
 
 _SCHEMA = """
 CREATE TABLE checkpoints (
@@ -198,7 +198,7 @@ def test_vacuum_without_maintain_is_a_failure_not_a_silent_skip(
     """The daemon dials as a gateway-class login, not the owner. PostgreSQL 17
     skips a VACUUM the session may not MAINTAIN with only a WARNING; the pass
     must fail instead of reporting a reclamation that never ran."""
-    from shared.cluster.authority import VacuumSkippedError
+    from base.cluster.authority import VacuumSkippedError
 
     with pool.connection() as conn:
         url = conn.info.dsn
@@ -314,9 +314,9 @@ def test_run_skips_missing_tables_fresh_cluster(
     def _fake_connect(*_a, **_k):
         return pool.connection()  # PoolConnection — usable as a `with` target
 
-    import shared.db
+    import base.db
 
-    monkeypatch.setattr(shared.db, "connect", _fake_connect)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(base.db, "connect", _fake_connect)  # pyright: ignore[reportUnknownArgumentType]
     # Drop the tables the fixture created, simulating a greenfield cluster.
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute("DROP TABLE checkpoint_blobs, checkpoints, checkpoint_writes")

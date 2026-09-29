@@ -25,8 +25,8 @@ import ava
 import ava.agents
 from agent.graph.system_prompt import build_system_prompt
 from agent.state import clear_plugin_registrations
-from shared.agent_snapshot import select_one
-from shared.plugin_context import PluginContext
+from base.agents.observation.snapshot import select_one
+from base.packages.plugins.context import PluginContext
 
 
 def _seed_agent(db: psycopg.Connection) -> int:
@@ -55,7 +55,7 @@ def _sdk_via_inprocess_gateway(monkeypatch: pytest.MonkeyPatch):
     from gateway.app import app
 
     with TestClient(app, base_url="http://test-gateway") as tc:
-        monkeypatch.setattr("ava._gateway_transport._client", tc)
+        monkeypatch.setattr("ava.gateway_client.transport._client", tc)
         yield
 
 
@@ -187,7 +187,7 @@ def test_prompt_section_reduce_context_switch_gating(
     from ava_builtins.plugins.ava_fleet.agent_runtime import (
         _reduce_context_switch_section,
     )
-    from shared.config import settings
+    from base.config import settings
 
     monkeypatch.setattr(settings.agent, "reduce_context_switch", True)
     assert "Queue, never push" in _reduce_context_switch_section()
@@ -206,7 +206,7 @@ def test_prompt_section_reduce_context_switch_content(
     from ava_builtins.plugins.ava_fleet.agent_runtime import (
         _reduce_context_switch_section,
     )
-    from shared.config import settings
+    from base.config import settings
 
     monkeypatch.setattr(settings.agent, "reduce_context_switch", True)
     section = _reduce_context_switch_section()
@@ -228,7 +228,7 @@ def test_reduce_context_switch_reaches_the_prompt(
     """End to end: the toggle gates the section's presence in the assembled
     system prompt."""
     from agent.graph.system_prompt import build_system_prompt
-    from shared.config import settings
+    from base.config import settings
 
     monkeypatch.setattr(settings.agent, "reduce_context_switch", True)
     assert "## Reduce context switch for the human" in build_system_prompt()
@@ -565,7 +565,7 @@ def test_response_notice_content_edits_publish_refreshed_snapshot(
     NoticePosted refreshes the Inbox queue; AgentUpdated requests current
     detail so the inspector can read the edited response-required notice.
     """
-    from gateway.routers import notices as notices_router
+    from gateway.agents import notices as notices_router
 
     published_agent_ids: list[int] = []
 
@@ -678,7 +678,7 @@ def test_supersede_and_withdraw_publish_notice_resolved_for_both_kinds(
     never surface in the resolved history."""
     # Events now publish from the gateway (R3 door ④ unified write API), not
     # the SDK — patch the gateway-side publisher.
-    import ops.ops_lifecycle as ops_mod
+    import ops.lifecycle as ops_mod
 
     resolved: list[int] = []
 
@@ -710,7 +710,7 @@ def test_dismissing_response_notice_refreshes_inspector_snapshot(
     monkeypatch: pytest.MonkeyPatch,
 ):
     """Removing the dismiss snapshot refresh leaves the inspector stale."""
-    from gateway.routers import notices as notices_router
+    from gateway.agents import notices as notices_router
 
     published_awaiting: list[list[str]] = []
 
@@ -743,7 +743,7 @@ def test_cross_type_supersede_refreshes_inbox_and_inspector_projections(
     monkeypatch: pytest.MonkeyPatch,
 ):
     """Each cross-type replacement announces both consumers' new state."""
-    from gateway.routers import notices as notices_router
+    from gateway.agents import notices as notices_router
 
     published_awaiting: list[list[str]] = []
     posted: list[int] = []

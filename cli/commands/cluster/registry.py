@@ -26,7 +26,7 @@ def _subprocess_env(*, gateway_home: Path) -> dict[str, str]:
     - `env_identity_keys()` (serve flags / name / gateway-url /
       memory-remote) — else the child inherits this host's identity.
     """
-    from shared.env_registry import derived_env_keys, env_identity_keys
+    from base.host.env.registry import derived_env_keys, env_identity_keys
 
     stripped = derived_env_keys() | env_identity_keys()
     env = {k: v for k, v in os.environ.items() if k not in stripped}
@@ -52,7 +52,7 @@ def cmd_cluster_down(*, path: str) -> int:
     Both a CLI verb (`ava cluster down --path`) and the first step of
     `cmd_cluster_destroy`. It addresses a cluster you are NOT in, by home path —
     to stop the one you are in, use `ava stop`."""
-    from shared import cluster as cl
+    from base import cluster as cl
 
     home = Path(path).expanduser()
     rec = cl.get_record(home)
@@ -95,7 +95,7 @@ def cmd_cluster_destroy(*, path: str, drop_db: bool = False) -> int:
     (`cli/preflight.py`), which refuses a home the registry does not corroborate
     — no record at all, or a record whose port block its `.env` contradicts.
     """
-    from shared import cluster as cl
+    from base import cluster as cl
 
     home = Path(path).expanduser().resolve()
     if cl.is_default_home(home):
@@ -111,10 +111,10 @@ def cmd_cluster_destroy(*, path: str, drop_db: bool = False) -> int:
         print(f"✗ ava cluster destroy: no cluster at '{home}' in the registry", file=sys.stderr)
         return 1
 
+    from base.host.private_storage import write_private_bytes
+    from base.native_process.os_platform import file_lock
     from cli.start_identity import retire_checkout_binding
     from services.permissions_helper.launchd_job import unregister_helper
-    from shared.platform import file_lock
-    from shared.private_storage import write_private_bytes
 
     # Publish a terminal intent before stopping. Concurrent/internal starts must
     # refuse it even while this home still owns its reservation.
@@ -169,10 +169,10 @@ def _unregister_scheduled_jobs(home: Path) -> None:
     Every job must be retired before the registry slot can be freed. An
     unavailable scheduler is ambiguous custody, so failures are raised.
     """
-    from shared.os_autostart import unregister_autostart
-    from shared.os_cron import unregister_os_cron
-    from shared.os_logs_job import unregister_logs_job
-    from shared.os_packages import unregister_packages_job
+    from base.host.system.autostart import unregister_autostart
+    from base.host.system.cron import unregister_os_cron
+    from base.host.system.logs_job import unregister_logs_job
+    from base.host.system.packages_job import unregister_packages_job
 
     jobs: list[tuple[str, Callable[[], None]]] = [
         ("health probe", lambda: unregister_os_cron(home)),
@@ -193,7 +193,7 @@ def _unregister_scheduled_jobs(home: Path) -> None:
 
 def cmd_cluster_ls() -> int:
     """List all registered clusters (label = home basename, computed display)."""
-    from shared import cluster as cl
+    from base import cluster as cl
 
     registry = cl.load_registry()
     if not registry:

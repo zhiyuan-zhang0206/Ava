@@ -12,7 +12,7 @@ the signed helper as root's ancestor; Linux has no helper. There are no per-back
 launchd jobs, systemd units, shell lifecycle commands or foreign-job retirement.
 
 `lgtm_native.py` prepares pinned, checksum-verified assets and rendered configuration.
-`shared/lgtm_local.py` owns executable arguments, local probe addresses and the
+`base/telemetry/lgtm_local.py` owns executable arguments, local probe addresses and the
 configuration digest bound into the root generation. Configuration or roster
 changes require a normal stop before a new generation; repeated unchanged start
 keeps the existing root. Observation data is retained across stops.

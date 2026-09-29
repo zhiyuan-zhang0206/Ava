@@ -13,16 +13,16 @@ from pathlib import Path
 
 import pytest
 
-from scripts import (
-    lint_clock_lattice,
-    lint_code_structure,
-    lint_fail_fast,
-    lint_no_emoji,
-    lint_pool_keepalives,
-    lint_termination_source,
-    lint_time_bomb,
+from scripts.lint import (
+    clock_lattice,
+    code_structure,
+    fail_fast,
+    logger_add_diagnose,
+    loguru_format,
+    no_emoji,
+    termination_source,
+    time_bomb,
 )
-from scripts.lint import lint_logger_add_diagnose, loguru_format
 from scripts.structure import lint_common
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -49,13 +49,12 @@ def test_missing_scan_dir_is_an_error(tmp_path: Path) -> None:
 @pytest.mark.parametrize(
     "scan_dirs",
     [
-        lint_clock_lattice._SCAN_DIRS,
-        lint_code_structure._SCAN_DIRS,
-        lint_no_emoji._SCAN_DIRS,
-        lint_pool_keepalives._SCAN_DIRS,
-        lint_termination_source._SCAN_DIRS,
-        lint_time_bomb._SCAN_DIRS,
-        lint_logger_add_diagnose._SCAN_DIRS,
+        clock_lattice._SCAN_DIRS,
+        code_structure._SCAN_DIRS,
+        no_emoji._SCAN_DIRS,
+        termination_source._SCAN_DIRS,
+        time_bomb._SCAN_DIRS,
+        logger_add_diagnose._SCAN_DIRS,
         loguru_format._SCAN_DIRS,
     ],
 )
@@ -65,5 +64,5 @@ def test_framework_scoped_lints_cover_every_framework_dir(scan_dirs: tuple[str, 
 
 
 def test_fail_fast_scans_every_framework_dir() -> None:
-    scanned = {p.relative_to(_REPO_ROOT).parts[0] for p in lint_fail_fast._framework_py_files()}
+    scanned = {p.relative_to(_REPO_ROOT).parts[0] for p in fail_fast._framework_py_files()}
     assert scanned == set(lint_common.FRAMEWORK_DIRS)

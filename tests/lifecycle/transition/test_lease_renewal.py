@@ -1,6 +1,6 @@
 """A finite executor's deploy lease survives a missed renewal round.
 
-`shared.deploy_timing` promises that a missed round (a slow database, one
+`base.deploy.progress_timeout` promises that a missed round (a slow database, one
 dropped connection) is never fatal: a renewal that raises is retried until
 the lease could lapse before the next round. A renewal that answers "not
 yours" — another holder, or already expired — loses it at once. The fleet
@@ -16,9 +16,10 @@ from uuid import uuid4
 
 import pytest
 
+from base.deploy import progress_timeout
+from base.deploy.state import cluster_lock
 from cli.release_fleet.gateway import DeployLease
-from services.pitr import activation_lease
-from shared import cluster_lock, deploy_timing
+from services.pitr.activation import lease as lease_module
 
 _INTERVAL_S = 0.01
 _TTL_S = 0.2
@@ -26,8 +27,8 @@ _TTL_S = 0.2
 
 @pytest.fixture(autouse=True)
 def _fast_rounds(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(deploy_timing, "LEASE_RENEW_INTERVAL_S", _INTERVAL_S)
-    monkeypatch.setattr(activation_lease, "LEASE_RENEW_INTERVAL_S", _INTERVAL_S)
+    monkeypatch.setattr(progress_timeout, "LEASE_RENEW_INTERVAL_S", _INTERVAL_S)
+    monkeypatch.setattr(lease_module, "LEASE_RENEW_INTERVAL_S", _INTERVAL_S)
     monkeypatch.setattr(cluster_lock, "LEASE_RENEW_INTERVAL_S", _INTERVAL_S)
     monkeypatch.setattr(cluster_lock, "LOCK_TTL_S", _TTL_S)
 
@@ -137,7 +138,7 @@ def test_an_executor_restart_rearms_its_own_live_lease(monkeypatch: pytest.Monke
 
 def test_pitr_activation_survives_a_missed_round(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        activation_lease, "renew_update_lock", _renewals(_forever(None, None, then=True))
+        lease_module, "renew_update_lock", _renewals(_forever(None, None, then=True))
     )
 
     def action(stop: threading.Event) -> str:
@@ -145,15 +146,15 @@ def test_pitr_activation_survives_a_missed_round(monkeypatch: pytest.MonkeyPatch
         assert not stop.is_set()
         return "activated"
 
-    assert activation_lease.run_while_renewing("pitr:test", action) == "activated"
+    assert lease_module.run_while_renewing("pitr:test", action) == "activated"
 
 
 def test_pitr_activation_answered_not_ours_stops_at_once(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(activation_lease, "renew_update_lock", _renewals(_forever(then=False)))
+    monkeypatch.setattr(lease_module, "renew_update_lock", _renewals(_forever(then=False)))
 
     def action(stop: threading.Event) -> str:
         assert stop.wait(5), "the lost lease stops the action"
         return "stopped"
 
     with pytest.raises(RuntimeError, match="lost its deployment lease"):
-        activation_lease.run_while_renewing("pitr:test", action)
+        lease_module.run_while_renewing("pitr:test", action)

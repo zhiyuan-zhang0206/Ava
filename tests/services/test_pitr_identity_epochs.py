@@ -18,9 +18,9 @@ import sys
 import psutil
 import pytest
 
-from services.pitr import restore_postgres, restore_proof
-from services.pitr.operation_custody import NativeProcess
-from services.pitr.restore_postgres import SandboxPostgresIdentity
+from services.pitr.operation.custody import NativeProcess
+from services.pitr.restore import postgres, proof
+from services.pitr.restore.postgres import SandboxPostgresIdentity
 
 _macos_correction = pytest.mark.skipif(
     sys.platform != "darwin", reason="psutil's macOS wall-clock correction is macOS-only"
@@ -72,9 +72,9 @@ def test_sandbox_identity_survives_an_epoch_shift(
     identity = SandboxPostgresIdentity(
         NativeProcess.capture(process), os.getpgid(process.pid), os.getsid(process.pid), "/data"
     )
-    assert restore_postgres._matching_sandbox(identity) is not None
+    assert postgres._matching_sandbox(identity) is not None
     monkeypatch.setattr(psosx, "INIT_BOOT_TIME", base)
-    assert restore_postgres._matching_sandbox(identity) is not None
+    assert postgres._matching_sandbox(identity) is not None
 
 
 @_macos_correction
@@ -88,6 +88,6 @@ def test_restore_owner_identity_survives_an_epoch_shift(
     process = psutil.Process()
     monkeypatch.setattr(psosx, "INIT_BOOT_TIME", base + seconds)
     recorded = NativeProcess.capture(process)  # what the owner-evidence writes store
-    assert restore_proof._matching_process(recorded) is not None
+    assert proof._matching_process(recorded) is not None
     monkeypatch.setattr(psosx, "INIT_BOOT_TIME", base)
-    assert restore_proof._matching_process(recorded) is not None
+    assert proof._matching_process(recorded) is not None

@@ -105,21 +105,21 @@ Still on you:
 2. Develop and commit in the new worktree (run `bash scripts/setup-worktree.sh`
    on first use; a fresh worktree needs its own real `.venv` first — worktree uv
    iron rule in [runbook](../../../conventions/runbook.md): discard an inherited
-   `VIRTUAL_ENV`, then `python scripts/guard_editable_venv.py .` and
+   `VIRTUAL_ENV`, then `python scripts/host_ops/guard_editable_venv.py .` and
    `env -u VIRTUAL_ENV uv sync`). A worktree
    `.venv` must be a real directory under this checkout, **never a symlink**
    to a shared venv (`ln -s ~/Ava/.venv .venv`): a later `uv sync` then writes
    through the symlink and re-points the shared venv's editable `.pth` at this
    worktree — breaking every other checkout that uses that venv (pyright
    phantom-error storms; a prod exec outage). Setting up manually:
-   `env -u VIRTUAL_ENV python scripts/guard_editable_venv.py . && env -u VIRTUAL_ENV uv sync`,
+   `env -u VIRTUAL_ENV python scripts/host_ops/guard_editable_venv.py . && env -u VIRTUAL_ENV uv sync`,
    then confirm `.venv/lib/python3.12/site-packages/_editable_impl_ava.pth`
    names this worktree. For a test-only run with no worktree venv of its own,
    reuse another worktree's real venv instead — see
    [run-local-tests](../run-local-tests/SKILL.md).
 3. Rebase onto latest main: `git fetch origin main && git rebase origin/main`
 4. Run targeted local tests before pushing; full test suites run only in CI
-   (including for shared-layer changes; user ruling 2026-09-22) — see [`.agents/skills/run-local-tests/SKILL.md`](../run-local-tests/SKILL.md).
+   (including for `base/` changes; user ruling 2026-09-22) — see [`.agents/skills/run-local-tests/SKILL.md`](../run-local-tests/SKILL.md).
    An explicit user CI-only constraint overrides local execution; record the
    skipped local gates and confirm that the corresponding CI checks actually run.
 5. Push branch → `gh pr create --base main`

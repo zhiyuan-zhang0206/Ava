@@ -10,7 +10,7 @@ import subprocess
 
 import pytest
 
-from scripts import lint_code_structure as lcs
+from scripts.lint import code_structure as lcs
 from scripts.structure import baseline_shards
 
 
@@ -102,21 +102,21 @@ def _commit_baseline(repo: pathlib.Path, message: str) -> None:
 def test_a_new_reach_in_fails_the_gate(
     _repo: pathlib.Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    _write(_repo, "shared/_priv/mod.py", "x = 1\n")
-    _write(_repo, "gateway/importer.py", "from shared._priv import mod\n")
+    _write(_repo, "base/_priv/mod.py", "x = 1\n")
+    _write(_repo, "gateway/importer.py", "from base._priv import mod\n")
 
     assert lcs.main([]) == 1
     output = capsys.readouterr().out
     assert "gateway/importer.py:1:" in output
-    assert "reaches private `shared._priv`" in output
+    assert "reaches private `base._priv`" in output
 
 
 def test_the_same_reach_in_frozen_in_the_baseline_passes(
     _repo: pathlib.Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    _write(_repo, "shared/_priv/mod.py", "x = 1\n")
-    _write(_repo, "gateway/importer.py", "from shared._priv import mod\n")
-    _baseline(_repo, private_imports={"gateway/importer.py::shared._priv": 1})
+    _write(_repo, "base/_priv/mod.py", "x = 1\n")
+    _write(_repo, "gateway/importer.py", "from base._priv import mod\n")
+    _baseline(_repo, private_imports={"gateway/importer.py::base._priv": 1})
 
     assert lcs.main([]) == 0
     assert capsys.readouterr().out == ""
@@ -125,13 +125,13 @@ def test_the_same_reach_in_frozen_in_the_baseline_passes(
 def test_removing_the_reach_in_but_keeping_the_entry_fails_as_stale(
     _repo: pathlib.Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    _write(_repo, "shared/_priv/mod.py", "x = 1\n")
+    _write(_repo, "base/_priv/mod.py", "x = 1\n")
     _write(_repo, "gateway/importer.py", "value = 1\n")
-    _baseline(_repo, private_imports={"gateway/importer.py::shared._priv": 1})
+    _baseline(_repo, private_imports={"gateway/importer.py::base._priv": 1})
 
     assert lcs.main([]) == 1
     output = capsys.readouterr().out
-    assert "stale private_imports entry gateway/importer.py::shared._priv" in output
+    assert "stale private_imports entry gateway/importer.py::base._priv" in output
     assert "remove it" in output
 
 
@@ -140,12 +140,12 @@ def test_a_docs_only_twin_directory_does_not_change_a_clean_module_owner(
 ) -> None:
     """Adding a same-named OKF docs folder beside a module must not flip the
     owner resolution for an importer that was already clean."""
-    _write(_repo, "shared/db.py", "def _restore(): ...\n")
-    _write(_repo, "shared/user.py", "from shared.db import _restore\n")
+    _write(_repo, "base/db.py", "def _restore(): ...\n")
+    _write(_repo, "base/user.py", "from base.db import _restore\n")
     assert lcs.main([]) == 0
     assert capsys.readouterr().out == ""
 
-    _write(_repo, "shared/db/db.ava.okf.md", "# docs\n")
+    _write(_repo, "base/db/db.ava.okf.md", "# docs\n")
     assert lcs.main([]) == 0
     assert capsys.readouterr().out == ""
 
@@ -158,13 +158,13 @@ def test_baseline_guard_rejects_an_unpaired_new_private_imports_key(
 ) -> None:
     _commit_baseline(_repo, "Freeze empty baseline")
 
-    _write(_repo, "shared/_priv/mod.py", "x = 1\n")
-    _write(_repo, "gateway/importer.py", "from shared._priv import mod\n")
-    _baseline(_repo, private_imports={"gateway/importer.py::shared._priv": 1})
+    _write(_repo, "base/_priv/mod.py", "x = 1\n")
+    _write(_repo, "gateway/importer.py", "from base._priv import mod\n")
+    _baseline(_repo, private_imports={"gateway/importer.py::base._priv": 1})
 
     assert lcs.main([]) == 1
     output = capsys.readouterr().out
-    assert "added private_imports entry gateway/importer.py::shared._priv" in output
+    assert "added private_imports entry gateway/importer.py::base._priv" in output
     assert (
         "added key without a same-file removal of the same private name: a split, "
         "move or swap cannot carry a frozen site" in output
@@ -174,14 +174,14 @@ def test_baseline_guard_rejects_an_unpaired_new_private_imports_key(
 def test_baseline_guard_accepts_a_same_file_owner_move_keeping_its_leaf(
     _repo: pathlib.Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """The owner package moves (`shared` -> `shared.sub`) but the private leaf
+    """The owner package moves (`base` -> `base.sub`) but the private leaf
     name `_priv` is unchanged — that's the one legitimate same-file addition."""
-    _baseline(_repo, private_imports={"gateway/importer.py::shared._priv": 1})
+    _baseline(_repo, private_imports={"gateway/importer.py::base._priv": 1})
     _commit_baseline(_repo, "Freeze the old owner location")
 
-    _write(_repo, "shared/sub/_priv/mod.py", "x = 1\n")
-    _write(_repo, "gateway/importer.py", "from shared.sub._priv import mod\n")
-    _baseline(_repo, private_imports={"gateway/importer.py::shared.sub._priv": 1})
+    _write(_repo, "base/sub/_priv/mod.py", "x = 1\n")
+    _write(_repo, "gateway/importer.py", "from base.sub._priv import mod\n")
+    _baseline(_repo, private_imports={"gateway/importer.py::base.sub._priv": 1})
 
     assert lcs.main([]) == 0
     assert capsys.readouterr().out == ""
@@ -194,7 +194,7 @@ def test_baseline_guard_rejects_a_same_file_leaf_swap(
     file (different private name, possibly a different owner entirely) is not
     a legitimate move — it must be fixed at the site, not laundered through
     the baseline."""
-    _baseline(_repo, private_imports={"gateway/importer.py::shared._old": 1})
+    _baseline(_repo, private_imports={"gateway/importer.py::base._old": 1})
     _commit_baseline(_repo, "Freeze the old reach-in")
 
     _write(_repo, "agent/_secret.py", "x = 1\n")
@@ -213,15 +213,15 @@ def test_baseline_guard_rejects_a_same_file_leaf_swap(
 def test_rename_carry_over_migrated_key_passes(
     _repo: pathlib.Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    _write(_repo, "shared/_priv/mod.py", "x = 1\n")
-    _write(_repo, "gateway/importer.py", "from shared._priv import mod\n")
-    _baseline(_repo, private_imports={"gateway/importer.py::shared._priv": 1})
+    _write(_repo, "base/_priv/mod.py", "x = 1\n")
+    _write(_repo, "gateway/importer.py", "from base._priv import mod\n")
+    _baseline(_repo, private_imports={"gateway/importer.py::base._priv": 1})
     _git(_repo, "init", "--quiet")
     _git(_repo, "add", "-A")
     _git(_repo, "commit", "--quiet", "-m", "Freeze the reach-in")
 
     _git(_repo, "mv", "gateway/importer.py", "gateway/importer_moved.py")
-    _baseline(_repo, private_imports={"gateway/importer_moved.py::shared._priv": 1})
+    _baseline(_repo, private_imports={"gateway/importer_moved.py::base._priv": 1})
 
     assert lcs.main([]) == 0
     assert capsys.readouterr().out == ""
@@ -230,9 +230,9 @@ def test_rename_carry_over_migrated_key_passes(
 def test_rename_carry_over_left_unmigrated_fails(
     _repo: pathlib.Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    _write(_repo, "shared/_priv/mod.py", "x = 1\n")
-    _write(_repo, "gateway/importer.py", "from shared._priv import mod\n")
-    _baseline(_repo, private_imports={"gateway/importer.py::shared._priv": 1})
+    _write(_repo, "base/_priv/mod.py", "x = 1\n")
+    _write(_repo, "gateway/importer.py", "from base._priv import mod\n")
+    _baseline(_repo, private_imports={"gateway/importer.py::base._priv": 1})
     _git(_repo, "init", "--quiet")
     _git(_repo, "add", "-A")
     _git(_repo, "commit", "--quiet", "-m", "Freeze the reach-in")
@@ -243,7 +243,7 @@ def test_rename_carry_over_left_unmigrated_fails(
     assert lcs.main([]) == 1
     output = capsys.readouterr().out
     assert (
-        "private_imports entry gateway/importer.py::shared._priv was not migrated "
+        "private_imports entry gateway/importer.py::base._priv was not migrated "
         "after its file moved to gateway/importer_moved.py" in output
     )
 

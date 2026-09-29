@@ -33,9 +33,9 @@ from agent.graph.system_prompt import register_system_prompt_section
 from agent.hooks import Hook, register_after_exec, register_after_init
 from agent.messages import NoteTag, system_note_message
 from agent.state import AgentState, register_plugin_state
-from shared.config.turn_view import turn_settings
-from shared.log import logger
-from shared.paths import workspace_dir
+from base.config.turn_view import turn_settings
+from base.log import logger
+from base.paths import workspace_dir
 
 from . import plugin as _surface
 
@@ -96,7 +96,7 @@ class AvaCodeState(BaseModel):
     # channel during the exec turn. The annotation must match BaseAgentState
     # exactly (incl. the add_messages reducer) — register_plugin_state
     # enforces it — and the exec node merges the plugin's messages delta with
-    # its own ToolMessage delta (agent/graph/_exec.py), so the notes ride in
+    # its own ToolMessage delta (agent/graph/exec/node.py), so the notes ride in
     # the same in-memory state update instead of a side-channel file.
     messages: Annotated[list[AnyMessage], add_messages] = Field(default_factory=list)
     injected_paths: set[str] = Field(default_factory=set)

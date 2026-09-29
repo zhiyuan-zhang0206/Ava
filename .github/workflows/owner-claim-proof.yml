@@ -36,7 +36,7 @@ jobs:
           git rev-parse HEAD > proof/head-sha.txt
           printf '%s\n' "$BASELINE_SHA" > proof/baseline-sha.txt
           timeout 240 uv run pytest tests/agent/test_inbound_ownership.py -q --junitxml=proof/head.xml
-          git show "$BASELINE_SHA:agent/db.py" > agent/db.py
+          git show "$BASELINE_SHA:agent/db.py" > agent/db/__init__.py
           set +e
           timeout 180 uv run pytest tests/agent/test_inbound_ownership.py -k stale_or_missing_owner -q --junitxml=proof/baseline.xml
           result=$?

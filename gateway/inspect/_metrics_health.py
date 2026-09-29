@@ -45,20 +45,20 @@ from typing import Any
 
 from psycopg.rows import dict_row
 
-from gateway.inspect.schemas import InspectMetricsMetadata
-from shared.alerts import (
+from base.cluster import home_label
+from base.config import settings
+from base.db.transaction import write_transaction
+from base.log import logger
+from base.paths import ava_home
+from base.telemetry.alerts import (
     display_language,
     notify_im,
     notify_text,
     stamp_notified,
     upsert_alert,
 )
-from shared.alerts import fingerprint as alert_fingerprint
-from shared.cluster import home_label
-from shared.config import settings
-from shared.db_transaction import write_transaction
-from shared.log import logger
-from shared.paths import ava_home
+from base.telemetry.alerts import fingerprint as alert_fingerprint
+from gateway.inspect.schemas import InspectMetricsMetadata
 
 _ALERT_NAME = "inspect metrics coverage"
 _FAMILIES = ("cost", "turns", "activity", "lifecycle")
@@ -192,9 +192,9 @@ def _emit_episode(pool: Any, agent_id: int, family: str, condition: str, *, firi
     if not row:
         return
     # SSE publish + IM are best-effort tails — same split as the ingest funnel
-    # (gateway/routers/alerts.py): row first, then the live/notification side.
+    # (gateway/alerts/router.py): row first, then the live/notification side.
     try:
-        from gateway.routers.alerts import publish_alert_rows
+        from gateway.alerts.router import publish_alert_rows
 
         publish_alert_rows([row])
     except Exception:

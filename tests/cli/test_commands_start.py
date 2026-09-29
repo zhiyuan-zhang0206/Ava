@@ -8,10 +8,10 @@ import pytest
 
 import cli.commands._repo as _repo_commands
 import cli.commands._setup as _setup_commands
-import cli.commands.root_driver as _root_driver_commands
-import cli.commands.start as _start_commands
+import cli.commands.lifecycle.root_driver as _root_driver_commands
+import cli.commands.lifecycle.start as _start_commands
+from base.config import settings
 from cli.commands._setup import _collect_setup_values as _real_collect_setup_values
-from shared.config import settings
 from tests.cli._commands_helpers import _FakeResult, _git_aware
 from tests.cli.test_start_readiness_gate import _hermetic_start as _hermetic_start
 
@@ -19,7 +19,7 @@ from tests.cli.test_start_readiness_gate import _hermetic_start as _hermetic_sta
 def test_cmd_start_needs_no_tty(monkeypatch: pytest.MonkeyPatch) -> None:
     """cmd_start runs without an interactive tty. The session PATH that once
     justified a tty gate is now forwarded authoritatively per session
-    (shared.session_env.forward_env_dict), so start works from cron / systemd / a
+    (base.sessions.env_forwarding.forward_env_dict), so start works from cron / systemd / a
     headless ssh, not only a terminal."""
     import sys as _sys
 
@@ -64,7 +64,7 @@ def test_start_missing_capability_reports_serve_flags_only(
     monkeypatch.setattr(settings.general, "machine_serve_observability_station", None)
     monkeypatch.setattr(settings.general, "memory_remote", "")
     monkeypatch.setattr(settings.gateway, "gateway_url", "")
-    from shared import paths
+    from base import paths
 
     monkeypatch.setattr(paths, "ava_home", lambda: tmp_path / "unconfigured")
     monkeypatch.setattr(_setup_commands, "_collect_setup_values", _real_collect_setup_values)
@@ -90,7 +90,7 @@ def test_start_missing_agent_runner_fields_reports_agent_runner_flags(
     monkeypatch.setattr(settings.general, "machine_serve_agent_runner", True)
     monkeypatch.setattr(settings.general, "memory_remote", "")
     monkeypatch.setattr(settings.gateway, "gateway_url", "")
-    from shared import paths
+    from base import paths
 
     monkeypatch.setattr(paths, "ava_home", lambda: tmp_path / "unconfigured")
     monkeypatch.setattr(_setup_commands, "_collect_setup_values", _real_collect_setup_values)
@@ -113,7 +113,7 @@ def test_start_missing_gateway_fields_reports_gateway_flags(
     monkeypatch.setattr(settings.general, "machine_serve_observability_station", None)
     monkeypatch.setattr(settings.general, "memory_remote", "")
     monkeypatch.setattr(settings.gateway, "gateway_url", "")
-    from shared import paths
+    from base import paths
 
     monkeypatch.setattr(paths, "ava_home", lambda: tmp_path / "unconfigured")
     monkeypatch.setattr(_setup_commands, "_collect_setup_values", _real_collect_setup_values)
@@ -130,7 +130,7 @@ def test_setup_field_resolves_env_then_home_file_then_arg_without_persisting(
 ) -> None:
     """env > `$AVA_HOME/<name>` file > CLI arg; a validator gates every source,
     and a CLI arg is never written back to the home (start identity owns it)."""
-    from shared import paths
+    from base import paths
 
     home = tmp_path / "home"
     home.mkdir()

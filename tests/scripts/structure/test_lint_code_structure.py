@@ -11,7 +11,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from scripts import lint_code_structure as lcs
+from scripts.lint import code_structure as lcs
 from scripts.structure import baseline_shards
 from scripts.structure import quality_budget as quality
 
@@ -99,7 +99,7 @@ def _isolated_repo(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> N
 
 
 @pytest.mark.parametrize("lines", [600, 601, 700, 800, 801])
-@pytest.mark.parametrize("scope", ["shared", "tests", "scripts"])
+@pytest.mark.parametrize("scope", ["base", "tests", "scripts"])
 def test_line_budget_boundary(
     tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str], scope: str, lines: int
 ) -> None:
@@ -292,14 +292,14 @@ def test_non_git_checkout_skips_guard(
 def test_directory_with_unreadable_member_is_skipped(
     tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    shared = _entries(tmp_path, "shared", 1)
-    (shared / "bad_utf8.py").write_bytes(b"\xff\xfe\x00bad")
-    (shared / "dangling.py").symlink_to(shared / "missing.py")
-    assert lcs.main([str(shared / "bad_utf8.py")]) == 0
-    assert lcs.main([str(shared)]) == 0
+    package = _entries(tmp_path, "base", 1)
+    (package / "bad_utf8.py").write_bytes(b"\xff\xfe\x00bad")
+    (package / "dangling.py").symlink_to(package / "missing.py")
+    assert lcs.main([str(package / "bad_utf8.py")]) == 0
+    assert lcs.main([str(package)]) == 0
     assert lcs.main([]) == 0
-    _write(shared, "big.py", 901)
-    assert lcs.main([str(shared)]) == 1
+    _write(package, "big.py", 901)
+    assert lcs.main([str(package)]) == 1
     assert "hard ceiling" in capsys.readouterr().out
 
 
@@ -379,7 +379,7 @@ def test_explicit_repository_root_reaches_budget_scope(
         "ava",
         "ava_builtins",
         "gateway",
-        "shared",
+        "base",
         "services",
         "ops",
         "cli",
@@ -408,37 +408,37 @@ def test_ast_rules_retain_the_eight_package_scope(
 def test_ast_allowlists_and_stale_role_entry_are_preserved(
     tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    path = _write(tmp_path, "shared/example.py", 0)
+    path = _write(tmp_path, "base/example.py", 0)
     path.write_text(
         "if typing.TYPE_CHECKING:\n    import example\nmachine_role()\n", encoding="utf-8"
     )
-    monkeypatch.setattr(lcs, "_TYPE_CHECKING_ALLOWED", frozenset({"shared/example.py"}))
-    monkeypatch.setattr(lcs, "_MACHINE_ROLE_ALLOWED", {"shared/example.py": "Test host capability"})
+    monkeypatch.setattr(lcs, "_TYPE_CHECKING_ALLOWED", frozenset({"base/example.py"}))
+    monkeypatch.setattr(lcs, "_MACHINE_ROLE_ALLOWED", {"base/example.py": "Test host capability"})
     assert lcs.main([]) == 0
     assert capsys.readouterr().out == ""
 
     path.write_text("value = 1\n", encoding="utf-8")
     assert lcs.main([]) == 1
-    assert "shared/example.py:1: stale machine_role() allowlist entry" in capsys.readouterr().out
+    assert "base/example.py:1: stale machine_role() allowlist entry" in capsys.readouterr().out
 
 
-@pytest.mark.parametrize("destination_scope", ["shared", "docs"])
+@pytest.mark.parametrize("destination_scope", ["base", "docs"])
 def test_explicit_alias_preserves_resolved_ast_scope(
     tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str], destination_scope: str
 ) -> None:
     destination = _write(tmp_path, f"{destination_scope}/original.py", 801)
     with destination.open("a", encoding="utf-8") as stream:
         stream.write("if TYPE_CHECKING:\n    import example\n")
-    alias_scope = "docs" if destination_scope == "shared" else "shared"
+    alias_scope = "docs" if destination_scope == "base" else "base"
     alias = tmp_path / alias_scope / "alias.py"
     alias.parent.mkdir(parents=True, exist_ok=True)
     alias.symlink_to(destination)
 
-    assert lcs.main([str(alias)]) == (1 if destination_scope == "shared" else 0)
+    assert lcs.main([str(alias)]) == (1 if destination_scope == "base" else 0)
     output = capsys.readouterr().out
     assert "hard ceiling" not in output
-    if destination_scope == "shared":
-        assert "shared/original.py:802:" in output
+    if destination_scope == "base":
+        assert "base/original.py:802:" in output
         assert "TYPE_CHECKING" in output
     else:
         assert output == ""
@@ -756,7 +756,7 @@ def test_guard_rejects_an_invalid_base_baseline(
 def test_ast_and_radon_share_one_parse(
     tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    _source(tmp_path, _branches(2), "shared/q.py")
+    _source(tmp_path, _branches(2), "base/q.py")
     parse = Mock(wraps=ast.parse)
     measure = Mock(wraps=quality.measure_quality)
     visitor = Mock(wraps=cast(Any, quality.ComplexityVisitor).from_ast)

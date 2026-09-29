@@ -20,7 +20,10 @@ import tempfile
 import time
 from pathlib import Path
 
-import shared.paths
+import base.paths
+from base.config import settings
+from base.host.proc import run_bounded
+from base.paths import logs_dir, permissions_helper_socket
 from services.permissions_helper import hardened_runtime
 from services.permissions_helper.build_state import (
     BUILD_STATE_NAME,
@@ -39,9 +42,6 @@ from services.permissions_helper.launchd_job import (
     helper_stop_intent,
     require_retired_helper,
 )
-from shared.config import settings
-from shared.paths import logs_dir, permissions_helper_socket
-from shared.proc import run_bounded
 
 _CERT_CN = "Ava Permissions Helper Code Signing"
 _BUNDLE_ID = HELPER_BUNDLE_ID  # alias: the job identity lives in launchd_job
@@ -49,7 +49,7 @@ _SERVICE_DIR = Path(__file__).resolve().parent
 _SOURCE = _SERVICE_DIR / "helper" / "main.swift"
 _INFO_PLIST = _SERVICE_DIR / "helper" / "Info.plist"
 _LOCALES = _SERVICE_DIR / "helper" / "locales"
-_BUILD_DIR = shared.paths.permissions_helper_app_dir()
+_BUILD_DIR = base.paths.permissions_helper_app_dir()
 _HELPER_PING_ATTEMPTS = 10
 _HELPER_PING_SETTLE_S = 0.5
 _IDENTITY_RE = re.compile(
@@ -86,7 +86,7 @@ _SIGNING_REACH_REMEDY = (
 # recover from; the recovery machinery was never the gap, the trigger was. None
 # of these is a performance budget -- each sits well above what the work costs.
 #
-# The bound is applied by `shared.proc.run_bounded`, not `subprocess.run(timeout=)`,
+# The bound is applied by `base.host.proc.run_bounded`, not `subprocess.run(timeout=)`,
 # which kills only the process Python spawned and leaves its descendants running.
 # Every git-driving module bounds git through the same helper.
 _TIMEOUTS_S = {
@@ -515,7 +515,7 @@ def ensure_signing_cert() -> None:
 
 def _build_directory(destination: Path | None) -> Path:
     """Choose an immutable artifact destination outside the installed bundle tree."""
-    from shared.cluster import default_home
+    from base.cluster import default_home
 
     build_dir = _BUILD_DIR if destination is None else destination
     protected = {_BUILD_DIR.resolve(), (default_home() / "helper").resolve()}
@@ -701,7 +701,7 @@ def install_and_load(app: Path, *, rebuilt: bool) -> None:
         "ProgramArguments": [str(exe)],
         "EnvironmentVariables": {
             "AVA_PERMISSIONS_HELPER_SOCKET": str(permissions_helper_socket()),
-            "AVA_PERMISSIONS_HELPER_ROOT_SEED": str(shared.paths.root_run_dir() / "seed.json"),
+            "AVA_PERMISSIONS_HELPER_ROOT_SEED": str(base.paths.root_run_dir() / "seed.json"),
         },
         "RunAtLoad": True,
         "KeepAlive": {"SuccessfulExit": False},
@@ -713,7 +713,7 @@ def install_and_load(app: Path, *, rebuilt: bool) -> None:
     new_bytes = plistlib.dumps(plist)
     plist_changed = not path.exists() or path.read_bytes() != new_bytes
     loaded = _is_loaded()
-    if loaded and helper_stop_intent(shared.paths.ava_home()):
+    if loaded and helper_stop_intent(base.paths.ava_home()):
         raise PermissionsHelperBuildError(
             "helper retirement is incomplete; finish ava stop externally before starting"
         )
@@ -723,8 +723,8 @@ def install_and_load(app: Path, *, rebuilt: bool) -> None:
             "this home's helper from outside its process tree before activating the replacement"
         )
     if not loaded:
-        shared.paths.root_run_dir().mkdir(mode=0o700, parents=True, exist_ok=True)
-        clear_helper_stop_intent(shared.paths.ava_home())
+        base.paths.root_run_dir().mkdir(mode=0o700, parents=True, exist_ok=True)
+        clear_helper_stop_intent(base.paths.ava_home())
         path.write_bytes(new_bytes)
         _run(["launchctl", "bootstrap", _domain(), str(path)])
     if not _helper_answers_ping():
@@ -759,7 +759,7 @@ def _helper_answers_ping() -> bool:
 
 def _require_usable_socket_paths() -> None:
     """Refuse impossible macOS IPC names before signing or registering jobs."""
-    paths = (permissions_helper_socket(), shared.paths.root_run_dir() / "ava-root.sock")
+    paths = (permissions_helper_socket(), base.paths.root_run_dir() / "ava-root.sock")
     for path in paths:
         # Darwin sockaddr_un.sun_path has 104 bytes, including the terminating NUL.
         if len(os.fsencode(path)) >= 104:

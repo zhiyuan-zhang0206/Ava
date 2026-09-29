@@ -12,10 +12,10 @@ from pathlib import Path
 
 import pytest
 
+from base import paths as base_paths
 from cli.release_operator import exclude as exclude_module
 from cli.release_operator.exclude import exclude_unit
 from cli.release_transition.journal import create, exclusive, read_operation
-from shared import paths as shared_paths
 from tests.lifecycle.release_fleet.remote import (
     Exchange,
     Gateway,
@@ -33,7 +33,7 @@ from tests.lifecycle.transition.phases import advance_to
 def operation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, str]:
     request = fleet_request(tmp_path.resolve())
     create(request)
-    monkeypatch.setattr(shared_paths, "ava_home", lambda: Path(request.home))
+    monkeypatch.setattr(base_paths, "ava_home", lambda: Path(request.home))
     return request.path, request.units[0].unit.label
 
 

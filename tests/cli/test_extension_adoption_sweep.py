@@ -20,9 +20,10 @@ from pathlib import Path
 
 import psycopg
 
-from shared import db, install_registry, paths
-from shared import extension_adopt as adopt
-from shared import extension_registry as reg
+from base import db, paths
+from base.packages.extensions import adopt as adopt
+from base.packages.extensions import install_registry
+from base.packages.extensions import registry as reg
 
 _AsMachine = Callable[[Path], AbstractContextManager[Path]]
 
@@ -90,7 +91,7 @@ def test_a_swept_name_crosses_to_a_machine_that_never_had_it(
         original = (src / "SKILL.md").read_text(encoding="utf-8")
 
     with as_machine(tmp_path / "home-b") as home_b:
-        from shared import extension_materialize as mat
+        from base.packages.extensions import materialize as mat
 
         result = mat.materialize_skills(db_conn, dest_root=paths.skills_dir())
         assert result.landed == ["crossing-demo"]

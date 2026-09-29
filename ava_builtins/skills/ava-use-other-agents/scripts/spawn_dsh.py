@@ -41,8 +41,8 @@ import time
 from pathlib import Path
 
 import ava
-from shared import coding_session_owner
-from shared.agents import AgentNotFound, AgentStatus
+from base.agents import AgentNotFound, AgentStatus
+from base.sessions import coding_session_owner
 
 _HERE = Path(__file__).resolve().parent
 _PLUGIN = _HERE / "ava-relay-dsh" / "ava-relay.mjs"
@@ -128,7 +128,7 @@ def _wait_for_session(sid: int, timeout: float = 90.0) -> str:
 
 def _takeover_bootstrap_message(agent_id: int, name: str, brief: str) -> str:
     """Inline the briefing; a takeover reads no task or work file."""
-    from ava.impersonation_launch import bootstrap_message
+    from ava.impersonation.launch import bootstrap_message
 
     guide = _HERE.parents[3] / ".agents" / "skills" / "impersonator-guide" / "SKILL.md"
     return bootstrap_message(agent_id, name, "dsh", brief, guide)

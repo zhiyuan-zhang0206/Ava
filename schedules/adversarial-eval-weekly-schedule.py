@@ -20,9 +20,9 @@ from typing import Any, TypedDict, cast
 import ava
 from ava.agents import AgentRow
 from ava.agents import AgentStatus as S
-from shared.config import settings
-from shared.paths import ava_home
-from shared.daemon.schedules.watcher import next_fire
+from base.config import settings
+from base.paths import ava_home
+from base.daemon.schedules.watcher import next_fire
 
 from schedules.adversarial_eval_cases import (
     AuditResult,

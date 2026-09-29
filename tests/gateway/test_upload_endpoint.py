@@ -599,7 +599,7 @@ class TestRemoteAgentPull:
         assert resp.status_code == 200  # upload never fails on a failed pull
         content = _inbound_rows(db_conn, agent_id)[0][0]
         dest = tmp_path / "Downloads" / f"AvaAgent-{agent_id}" / "hello.txt"
-        from shared.machine import machine_name
+        from base.cluster.machine import machine_name
 
         assert str(dest) in content
         assert f"machine: {machine_name()}" in content
@@ -685,7 +685,7 @@ class TestRemoteAgentPull:
         assert resp.status_code == 200
         content = _inbound_rows(db_conn, agent_id)[0][0]
         base = tmp_path / "Downloads" / f"AvaAgent-{agent_id}"
-        from shared.machine import machine_name
+        from base.cluster.machine import machine_name
 
         lines = content.splitlines()[1:]
         assert len(lines) == 3

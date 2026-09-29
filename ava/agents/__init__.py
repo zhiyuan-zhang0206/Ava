@@ -7,26 +7,26 @@ from typing import Literal
 import ava
 import ava.agent_identity
 from ava import gateway_client as _client
-from ava.sdk_validation import coerce_str, coerce_typed
-from shared.agents import AgentLaunchFailed as AgentLaunchFailed
+from ava.sdk_surface.validation import coerce_str, coerce_typed
+from base.agents import AgentLaunchFailed as AgentLaunchFailed
 
 # Redundant-alias re-exports: importable from this module but deliberately not
 # in __all_for_ava__ — error types never render into the SDK docs every agent carries;
 # a traceback names them clearly on the rare occasion one fires. The aliases keep
 # pyright from flagging them unused.
-from shared.agents import AgentNotFound as AgentNotFound
-from shared.agents import AgentStatus, RestartResult, ResurrectResult, TerminateResult
-from shared.agents import CrossMachineGatewayUnavailable as CrossMachineGatewayUnavailable
-from shared.agents import ForkCheckpointNotFound as ForkCheckpointNotFound
-from shared.agents import ForkConfigChangeNotAllowed as ForkConfigChangeNotAllowed
-from shared.agents import ForkError as ForkError
-from shared.agents import ForkSourceEmpty as ForkSourceEmpty
-from shared.agents import GatewayUnavailable as GatewayUnavailable
-from shared.agents import InvalidModelConfig as InvalidModelConfig
-from shared.agents import MachineNotRegistered as MachineNotRegistered
-from shared.agents import ResurrectError as ResurrectError
-from shared.agents import SpawnTargetNotAgentRunner as SpawnTargetNotAgentRunner
-from shared.config import cluster_tz, settings
+from base.agents import AgentNotFound as AgentNotFound
+from base.agents import AgentStatus, RestartResult, ResurrectResult, TerminateResult
+from base.agents import CrossMachineGatewayUnavailable as CrossMachineGatewayUnavailable
+from base.agents import ForkCheckpointNotFound as ForkCheckpointNotFound
+from base.agents import ForkConfigChangeNotAllowed as ForkConfigChangeNotAllowed
+from base.agents import ForkError as ForkError
+from base.agents import ForkSourceEmpty as ForkSourceEmpty
+from base.agents import GatewayUnavailable as GatewayUnavailable
+from base.agents import InvalidModelConfig as InvalidModelConfig
+from base.agents import MachineNotRegistered as MachineNotRegistered
+from base.agents import ResurrectError as ResurrectError
+from base.agents import SpawnTargetNotAgentRunner as SpawnTargetNotAgentRunner
+from base.config import cluster_tz, settings
 
 from . import presets as presets
 
@@ -437,7 +437,7 @@ def spawn_impl(
                     f"config_overlay['preset'] must be a non-empty string, got {name!r}"
                 )
         if overlay:
-            from shared.plugin_config_registry import validate_config_overlay
+            from base.packages.plugins.config_registration import validate_config_overlay
 
             validate_config_overlay(overlay)
     return _client.spawn(
@@ -551,7 +551,7 @@ def send_system_note(
 
     Returns the durable inbound id. Does not wait for the target to act.
     """  # lint-docstring: ok "resurrect" is public behaviour, not impl detail
-    from shared.message_kwargs import NoteTag
+    from base.agents.messages.kwargs import NoteTag
 
     agent_id = coerce_typed(agent_id, "agent_id", int)
     content = coerce_str(content, "content")

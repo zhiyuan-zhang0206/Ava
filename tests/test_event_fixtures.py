@@ -1,11 +1,11 @@
 """Wire-format equivalence test (Python side).
 
 Each SystemEvent class has a sample fixture in `tests/fixtures/events/<role>.json`
-(generated + validated by `scripts/dump_event_fixtures.py`). This test:
+(generated + validated by `scripts/codegen/dump_event_fixtures.py`). This test:
 
 1. Each fixture JSON must be parseable by EVENT_ADAPTER — when backend adds a
    new required field to event class and the old fixture lacks it → this test fails
-   → must update fixture (re-run `.venv/bin/python scripts/dump_event_fixtures.py`)
+   → must update fixture (re-run `.venv/bin/python scripts/codegen/dump_event_fixtures.py`)
 2. The parsed event.role must equal the filename (without .json) — filename as ground-truth
    to prevent role string typos inside fixtures
 3. Fixtures completely cover the SYSTEM_ROLES set — if a new role is added but fixture
@@ -21,7 +21,7 @@ from pathlib import Path
 
 import pytest
 
-from shared.live_events import EVENT_ADAPTER, SYSTEM_ROLES
+from base.events.live.projection import EVENT_ADAPTER, SYSTEM_ROLES
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures" / "events"
 
@@ -37,7 +37,7 @@ def test_fixture_validates_via_event_adapter(fixture_path: Path) -> None:
 
     When backend adds a required field to event class but fixture lacks it, Pydantic
     strict validation throws ValidationError, this test fails → prompting user to (1) re-run
-    `scripts/dump_event_fixtures.py` to update fixture (2) sync frontend
+    `scripts/codegen/dump_event_fixtures.py` to update fixture (2) sync frontend
     `event-fixtures.test.ts` per-role required field assertions.
     """
     raw = fixture_path.read_text(encoding="utf-8")
@@ -57,14 +57,14 @@ def test_fixture_validates_via_event_adapter(fixture_path: Path) -> None:
 def test_all_system_roles_have_fixtures() -> None:
     """Fixtures completely cover SYSTEM_ROLES — if a new role is added but fixture forgotten, this test fails.
 
-    SYSTEM_ROLES is the set that the frontend SSE channels actually forward from `shared.live_events`,
+    SYSTEM_ROLES is the set that the frontend SSE channels actually forward from `base.events.live.projection`,
     fixtures must mirror 1:1."""
     fixture_roles = {p.stem for p in _all_fixture_paths()}
     missing = SYSTEM_ROLES - fixture_roles
     extra = fixture_roles - SYSTEM_ROLES
     assert not missing, (
         f"SYSTEM_ROLES has {len(missing)} role(s) without fixture: {sorted(missing)}. "
-        f"Run `.venv/bin/python scripts/dump_event_fixtures.py` to add"
+        f"Run `.venv/bin/python scripts/codegen/dump_event_fixtures.py` to add"
     )
     assert not extra, (
         f"fixture has role(s) not listed in SYSTEM_ROLES: {sorted(extra)}. "

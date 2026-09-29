@@ -26,18 +26,18 @@ import pytest
 from fastapi.testclient import TestClient
 from starlette.requests import Request
 
+from base.cluster import authority
+from base.cluster.auth import bearer_header, client_bearer, cookie_name
+from base.cluster.authority import api, ledger, unit
+from base.cluster.machine import MachineRole, gateway_auth_headers
+from base.config import settings
+from base.daemon.http_transport import start_daemon_http
 from cli.commands.data_plane import bringup
-from gateway import request_principal
-from gateway.request_principal import cluster_credential
-from gateway.routers._webhook_auth import authenticate_webhook
-from ops.service_spec import ServiceSpec, api_access
+from gateway.auth import request_principal
+from gateway.auth.request_principal import cluster_credential
+from gateway.auth.webhook import authenticate_webhook
+from ops.roster.service_spec import ServiceSpec, api_access
 from services.agent_ops import _boot as ops_boot
-from shared.cluster import authority
-from shared.cluster.authority import api, ledger, unit
-from shared.cluster_auth import bearer_header, client_bearer, cookie_name
-from shared.config import settings
-from shared.daemon_http import start_daemon_http
-from shared.machine import MachineRole, gateway_auth_headers
 
 _HUMAN = "human-" + "h" * 40
 _ENDPOINT = "postgresql://ava@10.0.0.7:6433/ava"
@@ -270,8 +270,8 @@ def test_the_sessions_list_shows_only_sessions_that_authenticate(gateway: Path) 
     """`/api/auth/sessions` lists what the session check would still admit: a
     runner-minted session leaves the list when the fence revokes its generation,
     and an id without a mint (the pre-mint format) never appears."""
-    from gateway.session_store import create_session
-    from shared.cluster_auth import new_session_id
+    from base.cluster.auth import new_session_id
+    from gateway.auth.session_store import create_session
 
     runner = _tokens(gateway).api.runner
     with TestClient(config_app()) as client:
@@ -297,7 +297,7 @@ def test_a_machine_token_cannot_choose_the_human_secret(
 ) -> None:
     """A runner token authenticates the administrator, but it must not turn a
     generation-bound admission into a human bearer of its choosing."""
-    from shared import runtime_config
+    from base.host.env import runtime_config
 
     store = tmp_path / "config-store"
     store.mkdir()
@@ -319,7 +319,7 @@ def test_a_machine_token_cannot_open_the_mcp_endpoint(
 ) -> None:
     """Switching `/mcp` on decides whether MCP client tokens, which outlive
     every generation, authenticate at all: no config write may choose it."""
-    from shared import runtime_config
+    from base.host.env import runtime_config
 
     store = tmp_path / "config-store"
     store.mkdir()
@@ -339,7 +339,7 @@ def test_only_a_human_credential_manages_mcp_clients(gateway: Path) -> None:
     A generation-bound admission (either machine token, or a session a runner
     token minted) must not mint one that outlives it, nor list or revoke them;
     the human secret and the sessions it minted manage them."""
-    from gateway import mcp_clients
+    from gateway.mcp_server import clients
 
     tokens = _tokens(gateway).api
     with TestClient(config_app()) as client:
@@ -360,7 +360,7 @@ def test_only_a_human_credential_manages_mcp_clients(gateway: Path) -> None:
             assert minted.status_code == 403, minted.text
             assert client.get("/api/mcp/clients", headers=headers).status_code == 403
             assert client.post("/api/mcp/clients/1/revoke", headers=headers).status_code == 403
-        assert mcp_clients.list_clients(pool) == []
+        assert clients.list_clients(pool) == []
 
         human = (
             bearer_header(_HUMAN),
@@ -480,7 +480,7 @@ _PRODUCTION = (
     "ops",
     "scripts",
     "services",
-    "shared",
+    "base",
 )
 
 
@@ -537,7 +537,7 @@ def test_ops_reads_its_acceptance_once_so_only_a_root_stopped_fence_revokes() ->
     release fence, whose effect `LocalTransition.fence` runs after
     `require_root_absent` (next test). A new caller here must stop the ops
     daemon first, or `/ops` must read its acceptance per request."""
-    assert _callers("begin_revoke") == ["shared/cluster/authority/fence.py::revoke"]
+    assert _callers("begin_revoke") == ["base/cluster/authority/fence.py::revoke"]
     assert _callers("revoke") == [
         "cli/commands/data_plane/write_generation.py::fence_write_generation"
     ]
@@ -566,7 +566,7 @@ def test_the_release_fence_revokes_only_after_root_and_its_services_are_gone(
 ) -> None:
     """`require_root_absent` proves root down and every service it birthed (the
     ops daemon included) positively cleaned up; the fence revokes nothing before."""
-    from cli.commands import root_driver
+    from cli.commands.lifecycle import root_driver
     from cli.release_transition import authority as release_authority
     from cli.release_transition.local import LocalTransition
 
@@ -669,7 +669,7 @@ def test_launch_delivers_the_class_token_only_while_authenticated(
     gateway: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     tokens = _tokens(gateway).api
-    monkeypatch.setattr("shared.bootstrap.config_source_is_local", lambda: True)
+    monkeypatch.setattr("base.host.env.bootstrap.config_source_is_local", lambda: True)
     assert bringup.api_delivery("gateway") == {api.API_TOKEN_ENV: tokens.gateway}
     assert bringup.api_delivery("runner") == {api.API_TOKEN_ENV: tokens.runner}
     monkeypatch.setattr(settings.data_plane, "cluster_secret", "")
@@ -679,7 +679,7 @@ def test_launch_delivers_the_class_token_only_while_authenticated(
 def test_a_pure_runner_launch_delivers_its_capability_token(
     gateway: Path, runner_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr("shared.bootstrap.config_source_is_local", lambda: False)
+    monkeypatch.setattr("base.host.env.bootstrap.config_source_is_local", lambda: False)
     assert bringup.api_delivery("runner") == {api.API_TOKEN_ENV: _tokens(gateway).api.runner}
     with pytest.raises(RuntimeError, match="cannot launch a gateway-class"):
         bringup.api_delivery("gateway")

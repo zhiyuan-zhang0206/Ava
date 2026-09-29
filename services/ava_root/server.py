@@ -20,7 +20,7 @@ from collections.abc import Awaitable, Callable
 from contextlib import suppress
 from pathlib import Path
 
-from shared.root_control.ipc import (
+from base.native_process.root_control.ipc import (
     MAX_MESSAGE_BYTES,
     ErrorCode,
     ProtocolError,
@@ -31,7 +31,7 @@ from shared.root_control.ipc import (
     error_response,
     parse_request,
 )
-from shared.root_control.windows.transport import PipeServer
+from base.native_process.root_control.windows.transport import PipeServer
 
 _log = logging.getLogger(__name__)
 

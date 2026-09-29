@@ -8,9 +8,9 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
+from base.telemetry.metrics.observed_metrics import MetricObservation, write_observations
 from gateway.app import app
 from gateway.inspect import _metrics
-from shared.metrics.observed_metrics import MetricObservation, write_observations
 
 
 def _agent(conn: psycopg.Connection, born: datetime) -> int:
@@ -267,8 +267,8 @@ def test_state_intervals_exclude_terminated_gaps(db_conn: psycopg.Connection) ->
 def test_statistics_http_does_not_read_logs_or_current_state(
     db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from gateway import loki_events
     from gateway.inspect import router as inspect_router
+    from gateway.lgtm import loki_events
 
     now = datetime.now(UTC)
     aid = _agent(db_conn, now)

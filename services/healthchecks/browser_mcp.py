@@ -4,8 +4,8 @@ import json
 import logging
 import socket
 
+from base.paths import chrome_mcp_socket
 from services.browser.protocol import Request, Response
-from shared.paths import chrome_mcp_socket
 
 _log = logging.getLogger("services.healthchecks.browser_mcp")
 

@@ -107,7 +107,7 @@ Rust format/clippy, Android-target checking, and overlay/manifest tests.
 artifacts for `app-v*` tags. OS signing and updater signing activate only for
 complete secret groups; tag releases fail closed when any required signing
 group is absent, while manual dispatch may still produce unsigned evidence.
-`scripts/build_app_update_manifest.py` emits signed updater entries only, and
+`scripts/codegen/build_app_update_manifest.py` emits signed updater entries only, and
 the mutable `app-latest` release carries the stable `latest.json` endpoint.
 
 ## Limits

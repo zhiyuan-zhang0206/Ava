@@ -45,7 +45,7 @@ def ensure_no_frontend_env_overrides(ctx: ConvergeCtx) -> None:
       up again). These
       vars belong nowhere in the unit .env: NEXT_PUBLIC_GATEWAY_PORT is derived
       from AVA_GATEWAY_PORT and injected on the build command line
-      (shared.cluster.fe_build_env), never read from .env.
+      (base.cluster.fe_build_env), never read from .env.
     """
     frontend = ctx.repo / "ui" / "web"
     present = [name for name in _FORBIDDEN_FRONTEND_ENV_FILES if (frontend / name).exists()]

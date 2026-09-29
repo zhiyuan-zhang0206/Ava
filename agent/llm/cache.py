@@ -107,7 +107,7 @@ async def ainvoke_with_cache_retry(
     """
     import asyncio
 
-    from shared.config import settings
+    from base.config import settings
 
     async def _invoke() -> tuple[AIMessage, bool]:
         invocation = await prepare_invocation(llm, messages)

@@ -16,13 +16,13 @@ import hashlib
 import json
 from pathlib import Path
 
+from base.deploy.release.runtime_release import MANIFEST_VERSION
+from base.runtime_abi import current_abi
 from cli.release_transition.request import ReleaseRef
-from shared.runtime_abi import current_abi
-from shared.runtime_release import MANIFEST_VERSION
 
 _SITE = "venv/lib/python3.12/site-packages"
 _BASELINE = b"SELECT 1;\n"
-# `shared.runtime_release.sql_inventory` (used by `verify_pair`) refuses any
+# `cli.release_transition.request.sql_inventory` (used by `verify_pair`) refuses any
 # image with zero migration files, even a self-consistent one — every fixture
 # image needs at least one, and every `build_image` call uses this same fixed
 # content, so any two fixture images already agree (the happy-path case).

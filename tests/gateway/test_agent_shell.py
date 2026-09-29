@@ -149,7 +149,7 @@ def test_shell_capture_default_lines_follow_display_config(
 ) -> None:
     """Omitted ?lines= resolves through settings.display.shell_capture_default_lines
     (AVA_SHELL_CAPTURE_DEFAULT_LINES); 200 is only that field's default."""
-    from shared.config import settings
+    from base.config import settings
 
     monkeypatch.setattr(settings.display, "shell_capture_default_lines", 137)
     aid = _insert_agent(db_conn)

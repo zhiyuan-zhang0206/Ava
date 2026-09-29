@@ -6,12 +6,12 @@ import os
 import shutil
 from pathlib import Path
 
+from base.deploy.release.runtime_prepare import inventory_digest, tree_inventory
+from base.deploy.release.runtime_release import ReleaseRejectedError, file_sha256
 from cli.release_prepare.acquisition_dependencies import tree_input
 from cli.release_prepare.acquisition_models import FrontendTools
 from cli.release_prepare.acquisition_process import Commands
 from cli.release_prepare.models import TreeInput
-from shared.runtime_prepare import inventory_digest, tree_inventory
-from shared.runtime_release import ReleaseRejectedError, file_sha256
 
 
 def validate_frontend_tools(tools: FrontendTools) -> None:
@@ -84,7 +84,7 @@ def collector(commands: Commands, source: Path, python: Path) -> TreeInput:
 import importlib.abc, runpy, sys
 class DenyRuntime(importlib.abc.MetaPathFinder):
     def find_spec(self, fullname, *args):
-        if fullname.startswith(('shared.config', 'shared.db', 'cli.commands', 'services.')):
+        if fullname.startswith(('base.config', 'base.db', 'cli.commands', 'services.')):
             raise RuntimeError('collector preparation imported runtime authority: ' + fullname)
 sys.meta_path.insert(0, DenyRuntime())
 sys.path.insert(0, sys.argv[1])

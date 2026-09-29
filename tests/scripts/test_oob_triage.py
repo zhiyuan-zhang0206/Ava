@@ -1,4 +1,4 @@
-"""Tests for scripts/oob_triage.py (task #3608).
+"""Tests for scripts/host_ops/oob_triage.py (task #3608).
 
 The pure layer is exercised directly: classification over both payload shapes
 (the `ava maintenance status` output and the raw pause-owner journal), the
@@ -23,7 +23,7 @@ from typing import cast
 import pytest
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-_SCRIPT = _REPO_ROOT / "scripts" / "oob_triage.py"
+_SCRIPT = _REPO_ROOT / "scripts" / "host_ops" / "oob_triage.py"
 
 # The real post-recovery pair (2026-09-17): the status verb's compact JSON and
 # the journal it reads. The paused variants below flip only the state word --
@@ -53,7 +53,7 @@ _STATUS_SAMPLE: dict[str, object] = {
 
 def _triage_module() -> ModuleType:
     if not _SCRIPT.exists():
-        pytest.fail("scripts/oob_triage.py is not implemented")
+        pytest.fail("scripts/host_ops/oob_triage.py is not implemented")
     spec = importlib.util.spec_from_file_location("oob_triage", _SCRIPT)
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)

@@ -20,24 +20,25 @@ from psycopg_pool import AsyncConnectionPool, PoolTimeout
 
 from agent import state as states
 from agent.db import claim_inbound_batch
-from agent.hosted_ownership import admit_hosted_runtime
+from agent.ownership.hosted import admit_hosted_runtime
 from agent.ownership.inbound import RuntimeOwnershipLostError
 from agent.startup import wrap_saver_writes_with_nstep_interval
-from ops.agent_spawn import create_agent_row
+from base.agents.context import AvaContext
+from base.agents.history.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
+from base.agents.incarnation.hosted_force import install_hosted_force
+from base.agents.incarnation.resources import ResourceBirth
+from base.agents.observation import db_wait
+from base.agents.observation.db_wait import database_wait_snapshot
+from base.cluster.machine import machine_name
+from base.config import settings
+from base.db import insert_inbound_message
+from base.deploy.maintenance import admission, cohort, pause_owner
+from base.deploy.maintenance.state import MaintenanceHold
+from base.native_process.runtime_incarnation import RuntimeIncarnation
+from base.native_process.turn_identity import bind_turn_identity
+from ops.agents.spawn import create_agent_row
 from services.agent_host import db_recovery
 from services.agent_host.host import AgentHost
-from shared import hosted_db_wait, maintenance, maintenance_cohort, pause_owner
-from shared.agents.history.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
-from shared.config import settings
-from shared.context import AvaContext
-from shared.db import insert_inbound_message
-from shared.hosted_db_wait import database_wait_snapshot
-from shared.hosted_force import install_hosted_force
-from shared.incarnation_resources import ResourceBirth
-from shared.machine import machine_name
-from shared.maintenance_state import MaintenanceHold
-from shared.runtime_incarnation import RuntimeIncarnation
-from shared.turn_identity import bind_turn_identity
 
 
 @pytest.fixture(autouse=True)
@@ -199,7 +200,7 @@ async def test_cancelling_database_wait_keeps_checkpoint_and_does_not_ack_pause(
     graph, saver = await _graph(aops_pool, agent, never)
     acquired = datetime.now(UTC)
     pause_owner.begin_maintenance("outage", acquired)
-    hold = maintenance_cohort.prepare(
+    hold = cohort.prepare(
         db_conn,
         machine=machine_name(),
         host_owner=incarnation.owner,
@@ -223,7 +224,7 @@ async def test_cancelling_database_wait_keeps_checkpoint_and_does_not_ack_pause(
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
             await asyncio.wait_for(task, 1)
-    current = maintenance.require_operation("outage", acquired)
+    current = admission.require_operation("outage", acquired)
     assert current.maintenance is not None and not current.maintenance.drained
     assert db_conn.execute(
         "SELECT status,applied_at FROM inbound_messages WHERE id=%s", (hold.commands[agent],)
@@ -236,7 +237,7 @@ async def test_cancelling_database_wait_keeps_checkpoint_and_does_not_ack_pause(
         await db_recovery.recover_database(
             pool=aops_pool, graph=graph, checkpointer=saver, incarnation=incarnation
         )
-    resumed = maintenance.require_operation("outage", acquired)
+    resumed = admission.require_operation("outage", acquired)
     assert resumed.maintenance is not None and not resumed.maintenance.drained
     assert db_conn.execute(
         "SELECT applied_at FROM inbound_messages WHERE id=%s", (hold.commands[agent],)
@@ -424,7 +425,7 @@ async def _seed_stalled_repair_scenario(
         # crash shape is the dangling call persisted, not a buffered tail.
     at = datetime.now(UTC)
     pause_owner.begin_maintenance("private-slow-recovery", at)
-    hold = maintenance_cohort.prepare(
+    hold = cohort.prepare(
         db_conn,
         machine=machine_name(),
         host_owner=incarnation.owner,
@@ -508,7 +509,7 @@ async def test_healthy_stages_each_get_their_own_deadline(
             "SELECT applied_at FROM inbound_messages WHERE id=%s",
             (hold.commands[incarnation.agent_id],),
         ).fetchone() == (None,)
-        current = maintenance.require_operation("private-slow-recovery", at)
+        current = admission.require_operation("private-slow-recovery", at)
         assert current.maintenance is not None and not current.maintenance.drained
     assert sum(event[:2] == ("reconcile", "done") for event in events) == 1
     assert sum(event[:2] == ("repair", "done") for event in events) == 1
@@ -778,4 +779,4 @@ def test_db_wait_proof_ttl_covers_widened_recovery_stages() -> None:
     slack_seconds = 10 + 3 + 15 + 12  # heartbeat, publication, sleep, scheduling
     assert (
         2 * db_recovery._DATABASE_PHASE_TIMEOUT_SECONDS + slack_seconds
-    ) <= hosted_db_wait.DB_WAIT_PROOF_TTL_SECONDS
+    ) <= db_wait.DB_WAIT_PROOF_TTL_SECONDS

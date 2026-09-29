@@ -16,17 +16,14 @@ from types import SimpleNamespace
 import psutil
 import pytest
 
-from services.pitr import (
-    base_candidate,
-    restore_postgres,
-    restore_proof,
-)
-from services.pitr import operation_custody as custody
-from services.pitr.operation_custody import NativeProcess
-from services.pitr.restore_postgres import SandboxPostgresIdentity
-from services.pitr.restore_proof import LivePostgresIdentity, RestoreProofError
-from shared.native_process import native_boot_id, ownership
-from shared.native_process.ownership import OwnedProcess
+from base.native_process import native_boot_id, ownership
+from base.native_process.ownership import OwnedProcess
+from services.pitr.base_backup import candidate
+from services.pitr.operation import custody
+from services.pitr.operation.custody import NativeProcess
+from services.pitr.restore import postgres, proof
+from services.pitr.restore.postgres import SandboxPostgresIdentity
+from services.pitr.restore.proof import LivePostgresIdentity, RestoreProofError
 
 
 def _current() -> NativeProcess:
@@ -61,7 +58,7 @@ def test_linux_clock_correction_preserves_receipt_and_live_database_identity(
     second = replace(first, native=after)
     assert first.unchanged(second)
     assert not first.unchanged(replace(second, system_identifier="other"))
-    restore_proof._same_live(first, second)
+    proof._same_live(first, second)
 
 
 @pytest.mark.parametrize("change", ["tick", "pid", "boot"])
@@ -103,8 +100,8 @@ def _partial(root: Path, state: str, native: NativeProcess) -> tuple[Path, Path]
 def test_expired_spawn_does_not_delete_live_creator_work(tmp_path: Path) -> None:
     partial, owner = _partial(tmp_path, "spawning", _current())
     receipt = owner.read_bytes()
-    with pytest.raises(base_candidate.BaseCandidateError, match="unresolved"):
-        base_candidate._recover_owned_partials(tmp_path)
+    with pytest.raises(candidate.BaseCandidateError, match="unresolved"):
+        candidate._recover_owned_partials(tmp_path)
     assert partial.is_dir()
     assert owner.read_bytes() == receipt
 
@@ -117,7 +114,7 @@ def test_dead_leader_with_unknown_group_retains_partial(
     partial, owner = _partial(tmp_path, "running", wrong)
     receipt = owner.read_bytes()
     with pytest.raises(RuntimeError, match="unresolved"):
-        base_candidate._recover_owned_partials(tmp_path)
+        candidate._recover_owned_partials(tmp_path)
     assert partial.is_dir()
     assert owner.read_bytes() == receipt
 
@@ -126,7 +123,7 @@ def test_restore_publication_refuses_changed_receipt(tmp_path: Path) -> None:
     owner = tmp_path / "owner.json"
     owner.write_bytes(b'{"generation":2}')
     with pytest.raises(RestoreProofError, match="receipt changed"):
-        restore_proof._atomic_owner(owner, {"state": "stopped"}, b'{"generation":1}')
+        proof._atomic_owner(owner, {"state": "stopped"}, b'{"generation":1}')
     assert owner.read_bytes() == b'{"generation":2}'
 
 
@@ -160,8 +157,8 @@ def test_matching_process_treats_a_zombie_as_not_live() -> None:
     masked the real failure. A zombie runs nothing and is not live."""
     process, pid, _created_at, _pgid = _dead_child()
     try:
-        assert restore_proof._matching_process(NativeProcess.capture(psutil.Process(pid))) is None
-        assert not restore_proof._sandbox_is_live(
+        assert proof._matching_process(NativeProcess.capture(psutil.Process(pid))) is None
+        assert not proof._sandbox_is_live(
             {"sandbox_native": NativeProcess.capture(psutil.Process(pid)).value()}
         )
     finally:
@@ -174,7 +171,7 @@ def test_matching_sandbox_treats_a_zombie_as_not_live() -> None:
         identity = SandboxPostgresIdentity(
             NativeProcess.capture(psutil.Process(pid)), pgid, os.getsid(0), "/data"
         )
-        assert restore_postgres._matching_sandbox(identity) is None
+        assert postgres._matching_sandbox(identity) is None
     finally:
         process.wait(timeout=10)
 
@@ -300,12 +297,12 @@ def test_restore_quarantine_removes_plaintext_and_keeps_evidence(tmp_path: Path)
     owner.write_text(json.dumps({"partial": str(partial), "native": _current().value()}))
     work = tmp_path / "work"
     work.mkdir()
-    restore_proof.quarantine_restore_staging(tmp_path, work, worker)
+    proof.quarantine_restore_staging(tmp_path, work, worker)
     assert not partial.exists() and not owner.exists()
     kept = work / "business" / "restore-20260926T000000Z-abcdef"
     assert sorted(path.name for path in kept.iterdir()) == ["sandbox-postgres.log"]
     assert (work / "business" / owner.name).is_file()
-    restore_proof.reconcile_restore_runtime(tmp_path)  # the next proof may start
+    proof.reconcile_restore_runtime(tmp_path)  # the next proof may start
 
 
 def test_base_quarantine_drops_incomplete_copies_and_keeps_resumable_captures(
@@ -324,12 +321,12 @@ def test_base_quarantine_drops_incomplete_copies_and_keeps_resumable_captures(
         (facts / f"{chain}.owner.json").write_text(json.dumps(owner))
     work = tmp_path / "work"
     work.mkdir()
-    base_candidate.quarantine_candidate_staging(tmp_path, work, worker)
+    candidate.quarantine_candidate_staging(tmp_path, work, worker)
     assert [path.name for path in candidates.iterdir()] == ["20260927T000000Z.ready"]
     assert sorted(path.name for path in facts.iterdir()) == ["20260927T000000Z.json"]
     assert [path.name for path in plans.iterdir()] == ["20260927T000000Z.plan.json"]
     assert len(list((work / "business").glob("*.owner.json"))) == 2
-    base_candidate._recover_owned_partials(tmp_path)  # a resuming worker may start
+    candidate._recover_owned_partials(tmp_path)  # a resuming worker may start
 
 
 def test_logical_kinds_have_separate_control_roots(
@@ -351,7 +348,7 @@ def test_logical_kinds_have_separate_control_roots(
 
 def test_worker_bootstrap_refuses_code_outside_its_root(tmp_path: Path) -> None:
     """Workers run the controller's checkout, never another editable install."""
-    from services.pitr import worker_process
+    from services.pitr.operation import worker_process
 
     _BOOT = [sys.executable, "-I", "-B", "-c", worker_process._BOOTSTRAP]  # noqa: N806
     foreign = subprocess.run(  # noqa: S603
@@ -375,8 +372,8 @@ def test_worker_bootstrap_refuses_code_outside_its_root(tmp_path: Path) -> None:
 async def test_launch_failure_quarantines_and_the_next_run_proceeds(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from services.pitr import worker_process
-    from shared.exec_process_domain import ExecProcessDomain
+    from base.native_process.exec_domain import ExecProcessDomain
+    from services.pitr.operation import worker_process
 
     def exhausted(*_args: object, **_kwargs: object) -> None:
         raise OSError(24, "Too many open files")
@@ -394,13 +391,13 @@ async def test_worker_secrets_and_progress_never_touch_retained_files(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The live URL arrives on stdin; stderr progress reaches the operator live."""
-    from services.pitr import worker_process
+    from services.pitr.operation import worker_process
     from tests.services.test_pitr_operation_owner import _worker
 
     _worker(
         tmp_path,
         monkeypatch,
-        "import hashlib\nfrom services.pitr.worker_process import worker_secrets\n"
+        "import hashlib\nfrom services.pitr.operation.worker_process import worker_secrets\n"
         "seen=hashlib.sha256(worker_secrets()['live_db_url'].encode()).hexdigest()\n"
         "sys.stderr.write('downloading base\\nbase extracted\\n');sys.stderr.flush()\n"
         "Path(sys.argv[2]).write_text(json.dumps({'seen':seen}))\n",
@@ -426,8 +423,8 @@ async def test_custody_steps_run_off_the_event_loop(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A slow group close never stalls the scheduler's health loop."""
-    from services.pitr import worker_process
-    from shared.exec_process_domain import ExecProcessDomain
+    from base.native_process.exec_domain import ExecProcessDomain
+    from services.pitr.operation import worker_process
     from tests.services.test_pitr_operation_owner import _worker
 
     _worker(tmp_path, monkeypatch, "Path(sys.argv[2]).write_text('{}')\n")
@@ -462,7 +459,8 @@ async def test_activation_cancel_names_an_unresolved_closure(
     """Lease loss never hides blocked restore controls behind "cancelled"."""
     import threading
 
-    from services.pitr import activation_runtime, base_operation_runtime
+    from services.pitr.activation import runtime
+    from services.pitr.restore import operation_runtime
     from tests.services.test_pitr_base_scheduler import _candidate
 
     async def unresolved(_candidate: object) -> dict[str, str]:
@@ -472,11 +470,11 @@ async def test_activation_cancel_names_an_unresolved_closure(
             raise cancelled from custody.OperationCustodyError(Path("/controls/.operation-x"))
         return {}
 
-    monkeypatch.setattr(base_operation_runtime, "run_restore", unresolved)
+    monkeypatch.setattr(operation_runtime, "run_restore", unresolved)
     stop = threading.Event()
     stop.set()
     with pytest.raises(RuntimeError, match="closure is unresolved") as caught:
-        await activation_runtime._restore_activation_candidate(_candidate("c"), stop)
+        await runtime._restore_activation_candidate(_candidate("c"), stop)
     assert isinstance(caught.value.__cause__, custody.OperationCustodyError)
 
 
@@ -485,14 +483,14 @@ async def test_cancelled_drill_gets_time_to_write_its_evidence(
 ) -> None:
     """A stopped drill stops its sandbox (up to 20 s) before writing evidence;
     its grace covers that instead of killing it after three seconds."""
-    from services.pitr import base_operation_runtime
+    from services.pitr.restore import operation_runtime
     from tests.services.test_pitr_operation_owner import _restore_inputs, _worker
 
     started, scratch = tmp_path / "started", tmp_path / "scratch"
     _worker(
         tmp_path,
         monkeypatch,
-        "from services.pitr.worker_process import worker_request\n"
+        "from services.pitr.operation.worker_process import worker_request\n"
         "request, output = worker_request(sys.argv)\n"
         "scratch=Path(request['drill']['scratch']);scratch.mkdir()\n"
         "try:\n"
@@ -501,7 +499,7 @@ async def test_cancelled_drill_gets_time_to_write_its_evidence(
         " time.sleep(4);(scratch/'drill-evidence.json').write_text('{\"outcome\":\"fail\"}')\n",
     )
     task = asyncio.create_task(
-        base_operation_runtime.run_drill_input(
+        operation_runtime.run_drill_input(
             _restore_inputs(tmp_path),
             scratch=scratch,
             target_lsn="0/180",
@@ -575,8 +573,8 @@ def test_a_malformed_receipt_never_wedges_the_sanitizers(tmp_path: Path) -> None
         json.dumps({"state": "running", "chain_id": chain, "native": _current().value()})
     )
     for sanitize in (
-        restore_proof.quarantine_restore_staging,
-        base_candidate.quarantine_candidate_staging,
+        proof.quarantine_restore_staging,
+        candidate.quarantine_candidate_staging,
     ):
         work = tmp_path / f"work-{sanitize.__name__}"
         work.mkdir()
@@ -625,8 +623,8 @@ async def test_commit_holds_the_kind_lock_against_another_controller(
 ) -> None:
     """A committing operation holds `closure.json` without `committed.json`;
     another controller's admission must never quarantine it as a stopped one."""
-    from services.pitr import worker_process
-    from shared.platform import LockTimeoutError
+    from base.native_process.os_platform import LockTimeoutError
+    from services.pitr.operation import worker_process
     from tests.services.test_pitr_operation_owner import _worker
 
     _worker(tmp_path, monkeypatch, "Path(sys.argv[2]).write_text('{}')\n")
@@ -647,8 +645,8 @@ def test_each_kind_quarantines_and_prunes_only_its_own_entries(
     """A huge stranded dump never evicts another kind's newest evidence, and
     each kind's pruning runs under that kind's own lock."""
     from services.backup_scheduler import worker as logical
-    from services.pitr.base_operation_runtime import drill_kind, restore_kind
     from services.pitr.base_worker import candidate_kind
+    from services.pitr.restore.operation_runtime import drill_kind, restore_kind
 
     monkeypatch.setattr(logical, "ava_home", lambda: tmp_path)
     physical = tmp_path / "physical-backup"
@@ -676,7 +674,7 @@ async def test_a_stop_during_the_grace_keeps_the_original_failure_on_record(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The stop propagates, yet the quarantine records why the operation failed."""
-    from services.pitr import worker_process
+    from services.pitr.operation import worker_process
     from tests.services.test_pitr_operation_owner import _until, _worker
 
     started = tmp_path / "started"
@@ -703,7 +701,7 @@ async def test_a_broken_progress_sink_never_loses_a_passing_operation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """An operator's closed stderr pipe must not fail or cancel a healthy drill."""
-    from services.pitr import worker_process
+    from services.pitr.operation import worker_process
     from tests.services.test_pitr_operation_owner import _worker
 
     _worker(
@@ -732,9 +730,9 @@ async def test_a_busy_kind_defers_a_scheduled_run_instead_of_failing_it(
     from contextlib import ExitStack
     from datetime import UTC, datetime
 
+    from base.native_process.os_platform import LockTimeoutError, file_lock
     from services.pitr import base_scheduler_daemon as scheduler
-    from services.pitr import worker_process
-    from shared.platform import LockTimeoutError, file_lock
+    from services.pitr.operation import worker_process
 
     kind = _kind(tmp_path)
     kind.control_root.mkdir(parents=True)

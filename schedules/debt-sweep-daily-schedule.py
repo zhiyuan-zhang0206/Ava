@@ -21,14 +21,14 @@ from typing import Literal, Sequence, cast
 from zoneinfo import ZoneInfo
 
 import ava
-import shared
+import base
 from ava.agents import AgentStatus as S
 from schedules.agent_status_guard import ensure_agent_status_members
 from schedules.catchup import catch_up, claimed_slot, fire_slot_once
-from shared.config import settings
-from shared.log import init_gateway_process
-from shared.paths import ava_home
-from shared.daemon.schedules.watcher import next_fire
+from base.config import settings
+from base.log import init_gateway_process
+from base.paths import ava_home
+from base.daemon.schedules.watcher import next_fire
 
 ensure_agent_status_members(
     S,
@@ -38,7 +38,7 @@ ensure_agent_status_members(
 
 CRON = "30 6 * * *"
 TZ = settings.general.timezone
-_REPO_ROOT = Path(shared.__file__).resolve().parents[1]
+_REPO_ROOT = Path(base.__file__).resolve().parents[1]
 _LEDGER_PATH = "future/tech-debt/ledger.md"
 _PROCESS_NAME = "schedule-debt-sweep-daily"
 _WORKER_LABEL_ENV = "AVA_DEBT_SWEEP_AGENT_LABEL"
@@ -224,7 +224,7 @@ def _fire(_payload: None) -> None:
         )
         dispatch = ensure_worker(_worker_label(), worker_prompt(day, scan))
         init_gateway_process(name=_PROCESS_NAME)
-        from shared import telemetry
+        from base import telemetry
 
         telemetry.emit(
             "telemetry",

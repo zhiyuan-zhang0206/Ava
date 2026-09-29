@@ -3,23 +3,27 @@ on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
     paths:
-      - 'shared/agent_observation.py'
-      - 'shared/agent_snapshot.py'
-      - 'shared/agent_roster.py'
-      - 'shared/live_announce.py'
+      - 'base/agents/observation/evidence.py'
+      - 'base/agents/observation/snapshot.py'
+      - 'base/agents/observation/roster.py'
+      - 'base/events/live/announce.py'
       - 'services/heartbeat/**'
       - 'gateway/inspect/_cache.py'
       - 'gateway/inspect/_live.py'
       - 'gateway/inspect/_metrics.py'
       - 'gateway/inspect/router.py'
-      - 'gateway/routers/agents*.py'
+      - 'gateway/agents/router.py'
+      - 'gateway/agents/forward.py'
+      - 'gateway/agents/lifecycle.py'
+      - 'gateway/agents/state.py'
       - 'gateway/schemas/**'
+      - 'gateway/*/schemas.py'
       - 'gateway/app.py'
       - 'scripts/codegen-types.sh'
-      - 'scripts/dump_openapi.py'
-      - 'tests/shared/test_agent_observation.py'
-      - 'tests/shared/test_live_announce.py'
-      - 'tests/shared/test_agent_snapshot_scope.py'
+      - 'scripts/codegen/dump_openapi.py'
+      - 'tests/base/test_observation_evidence.py'
+      - 'tests/base/test_announce.py'
+      - 'tests/base/test_agent_snapshot_scope.py'
       - 'tests/services/test_heartbeat_liveness.py'
       - 'tests/gateway/test_agent_inspect.py'
       - 'tests/gateway/test_agents_endpoints.py'
@@ -65,7 +69,7 @@ jobs:
       - name: Generate authoritative schema types
         run: bash scripts/codegen-types.sh
       - name: Verify existing database observations and failure distinction
-        run: uv run pytest tests/shared/test_agent_observation.py tests/shared/test_live_announce.py tests/services/test_heartbeat_liveness.py tests/gateway/test_agent_inspect.py tests/gateway/test_agents_endpoints.py tests/shared/test_agent_snapshot_scope.py -q
+        run: uv run pytest tests/base/test_observation_evidence.py tests/base/test_announce.py tests/services/test_heartbeat_liveness.py tests/gateway/test_agent_inspect.py tests/gateway/test_agents_endpoints.py tests/base/test_agent_snapshot_scope.py -q
       - name: Verify rendered observation states
         if: success() || failure()
         working-directory: ui/web

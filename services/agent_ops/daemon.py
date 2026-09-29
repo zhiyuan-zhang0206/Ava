@@ -3,7 +3,7 @@
 The ONLY long-running ava process on an agent-runner the gateway dials
 DIRECTLY (the runner's other services — agent-host, browser,
 mcp-daemon — are local or health-checked). Serves POST /ops; each request
-executes in-process against `ops/ops_*.py` and returns {status, result}.
+executes in-process against the `ops` op clusters and returns {status, result}.
 
 Usage: .venv/bin/python -m services.agent_ops.daemon — a per-machine
 singleton via pidfile, supervised by the application root. Registers
@@ -46,26 +46,26 @@ import psycopg
 from psycopg_pool import ConnectionPool
 from pydantic import ValidationError
 
+from base.agents import AvaAgentError, ResurrectRefused
+from base.cluster.machine import machine_name
+from base.cluster.transport_encryption import verify_transport_encryption
+from base.config import settings
+from base.daemon.health import health_port, start_health_server, stop_health_server
+from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
+from base.daemon.shutdown import hard_exit as _hard_exit
+from base.db.transaction import write_transaction
+from base.log import init_gateway_process
+
 # The synchronous op arms and the op modules they call live in
 # `services.agent_ops.dispatch_sync` (split at the file-size ceiling, task
 # #4129 I4). The op modules below are re-exported through the daemon because
 # the routing tests patch them through this module's name
-# (`daemon.ops_cluster`); the arms reference the same module objects.
-from ops import (
-    ops_cluster as ops_cluster,
-)
-from ops import (
-    ops_config as ops_config,
-)
-from ops import (
-    ops_inventory as ops_inventory,
-)
-from ops import (
-    ops_lifecycle,
-)
-from ops import (
-    ops_uploads as ops_uploads,
-)
+# (`daemon.cluster`); the arms reference the same module objects.
+from ops import cluster as cluster
+from ops import host_config as host_config
+from ops import inventory as inventory
+from ops import lifecycle
+from ops import uploads as uploads
 from ops.cluster_status import ShellNotFoundError
 from ops.rpc_schemas import (
     LaunchAgentRequest,
@@ -83,15 +83,6 @@ from services.agent_ops._boot import (
 )
 from services.agent_ops.dispatch_sync import dispatch_sync
 from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
-from shared.agents import AvaAgentError, ResurrectRefused
-from shared.config import settings
-from shared.daemon_health import health_port, start_health_server, stop_health_server
-from shared.daemon_shutdown import cancel_and_drain, install_graceful_shutdown
-from shared.daemon_shutdown import hard_exit as _hard_exit
-from shared.db_transaction import write_transaction
-from shared.log import init_gateway_process
-from shared.machine import machine_name
-from shared.transport_encryption import verify_transport_encryption
 
 _log = logging.getLogger("services.agent_ops.daemon")
 
@@ -217,14 +208,14 @@ def _dispatch_sync(kind: str, payload: dict[str, Any]) -> tuple[str, dict[str, o
 
 
 async def _dispatch(kind: str, payload: dict[str, Any]) -> tuple[str, dict[str, object]]:
-    """Execute one op in-process by calling `ops/ops_*.py`.
+    """Execute one op in-process by calling the `ops` op clusters.
 
     `kind` ranges over `ops.rpc_schemas.OpKind` (the canonical op vocabulary);
     this `match` must stay exhaustive over it, and an unrecognized kind falls
     through the `case _` to a 'failed' result rather than crashing the ops
     server. Each arm validates its payload into the per-kind request model and
     serializes the per-kind result model — the wire contract lives in the models
-    (`ops/rpc_schemas.py`), not in hand-written isinstance guards here.
+    (`ops/rpc_schemas/__init__.py`), not in hand-written isinstance guards here.
 
     Returns (status, result) where status is 'completed' or 'failed' and result
     is a JSON-serializable dict (response body on success, error info on
@@ -250,7 +241,7 @@ async def _dispatch(kind: str, payload: dict[str, Any]) -> tuple[str, dict[str, 
     try:
         match kind:
             case "spawn-launch" | "spawn-launch-v2":
-                spawned = await ops_lifecycle.launch_agent_op(
+                spawned = await lifecycle.launch_agent_op(
                     LaunchAgentRequest.model_validate(payload), pool
                 )
                 # `exclude_none`: the settlement receipt is present only when a
@@ -259,7 +250,7 @@ async def _dispatch(kind: str, payload: dict[str, Any]) -> tuple[str, dict[str, 
                 return "completed", spawned.model_dump(mode="json", exclude_none=True)
             case "lifecycle":
                 lc = LifecyclePayload.model_validate(payload)
-                resp = await ops_lifecycle.lifecycle_op(
+                resp = await lifecycle.lifecycle_op(
                     lc.path,
                     lc.body,
                     pool,
@@ -280,7 +271,7 @@ async def _dispatch(kind: str, payload: dict[str, Any]) -> tuple[str, dict[str, 
         }
     except (ValidationError, ValueError) as exc:
         # ValidationError: a payload that failed its per-kind model_validate.
-        # ValueError: ops_lifecycle.lifecycle_op raises it for an unparseable path.
+        # ValueError: lifecycle.lifecycle_op raises it for an unparseable path.
         return "failed", {"error": f"{type(exc).__name__}: {exc}"}
     except (ShellNotFoundError, ResurrectRefused) as exc:
         # A capture for a shell session that no longer exists (capture_shell's
@@ -468,7 +459,7 @@ async def _main() -> None:
 
     # Schema-current assertion: if the central DB is ahead of this checkout,
     # abort before serving any op that assumes its columns.
-    from shared.migrations import assert_schema_current
+    from base.deploy.schema.migrations import assert_schema_current
 
     try:
         assert_schema_current(settings.data_plane.db_url)
@@ -548,7 +539,7 @@ def main(*, argv: list[str] | None = None) -> None:
     argparse.ArgumentParser(description=__doc__).parse_args(argv)
     # Task #3621: ops is on the full-validation whitelist — build the eager
     # config chain at the entry, before serving.
-    from shared.config import ensure_eager
+    from base.config import ensure_eager
 
     ensure_eager()
     init_gateway_process(name="ops")

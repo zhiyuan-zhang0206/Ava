@@ -20,8 +20,8 @@ from pathlib import Path
 from types import FrameType
 from typing import Any
 
+from base.native_process import pidfd
 from scripts.preview.local import write_json
-from shared.native_process import pidfd
 
 _CLOSE_SECONDS = 5.0
 _POLL_SECONDS = 0.05

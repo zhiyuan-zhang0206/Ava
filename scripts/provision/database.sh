@@ -16,7 +16,7 @@
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_lib.sh"
 
 # The operator-approved PgBouncer build (pgdg, Ubuntu 24.04). The CI install
-# action pins the same string; shared/brew_pin.py holds the canonical value and
+# action pins the same string; base/host/brew_pin.py holds the canonical value and
 # tests/ci/test_pgbouncer_pin.py asserts the copies match.
 PGBOUNCER_APT_VERSION="1.26.0-1.pgdg24.04+1"
 

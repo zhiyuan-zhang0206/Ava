@@ -1,0 +1,5 @@
+{
+  "complexity": {
+    "agent/turn/runloop.py::_handle_fatal_llm_error": 26
+  }
+}

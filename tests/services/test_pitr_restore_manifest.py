@@ -4,8 +4,8 @@ import json
 
 import pytest
 
-from services.pitr.base_manifest import BaseObject, CandidateManifest, WalRange
-from services.pitr.restore_manifest import (
+from services.pitr.base_backup.manifest import BaseObject, CandidateManifest, WalRange
+from services.pitr.restore.manifest import (
     ProtectedManifest,
     RestoreObject,
     RestoreProof,

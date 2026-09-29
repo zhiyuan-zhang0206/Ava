@@ -17,10 +17,10 @@ from urllib.parse import urlsplit
 import pytest
 from dotenv import dotenv_values
 
+from base import cluster
+from base.native_process.os_platform import file_lock
 from cli import start_identity as identity
 from cli import start_intent
-from shared import cluster
-from shared.platform import file_lock
 from tests.lifecycle._start_identity import prepare_start_identity
 
 
@@ -416,7 +416,7 @@ def _runner_start(
     inputs: identity.IdentityInput, monkeypatch: pytest.MonkeyPatch, *extra: str
 ) -> Any:
     """A remote runner's first start against a gateway serving the endpoint only."""
-    from shared import bootstrap
+    from base.host.env import bootstrap
 
     monkeypatch.setattr(start_intent, "_checkout", lambda: inputs.checkout)
     monkeypatch.setenv("AVA_HOME", str(inputs.home))
@@ -450,7 +450,7 @@ def test_runner_without_a_capability_refuses_before_persisting(
 ) -> None:
     """Bootstrap serves no login, so a runner's first start needs its unit
     capability; without one it refuses before any identity is written."""
-    from shared.cluster.authority import unit
+    from base.cluster.authority import unit
 
     args = _runner_start(inputs, monkeypatch)
     with pytest.raises(ValueError, match="holds no database capability"):
@@ -639,7 +639,7 @@ def test_public_start_holds_home_lock_through_runtime_start(
     inputs: identity.IdentityInput, monkeypatch: pytest.MonkeyPatch
 ) -> None:
 
-    from shared.platform import LockTimeoutError, file_lock
+    from base.native_process.os_platform import LockTimeoutError, file_lock
 
     monkeypatch.setattr(start_intent, "_checkout", lambda: inputs.checkout)
     monkeypatch.setenv("AVA_HOME", str(inputs.home))
@@ -653,7 +653,7 @@ def test_public_start_holds_home_lock_through_runtime_start(
             pytest.fail("another lifecycle operation entered during start")
         return 0
 
-    monkeypatch.setattr("cli.commands.start.cmd_start", runtime)
+    monkeypatch.setattr("cli.commands.lifecycle.start.cmd_start", runtime)
     assert start_intent.run_start(_args("--worktree")) == 0
 
 
@@ -668,7 +668,7 @@ def test_public_start_publishes_boot_pid_only_after_complete_success(
     inputs: identity.IdentityInput, monkeypatch: pytest.MonkeyPatch, result: int
 ) -> None:
 
-    from cli.commands import root_driver
+    from cli.commands.lifecycle import root_driver
 
     calls: list[str] = []
     monkeypatch.setattr(start_intent, "_checkout", lambda: inputs.checkout)
@@ -679,7 +679,7 @@ def test_public_start_publishes_boot_pid_only_after_complete_success(
         calls.append("complete wrapped start")
         return result
 
-    monkeypatch.setattr("cli.commands.start.cmd_start", runtime)
+    monkeypatch.setattr("cli.commands.lifecycle.start.cmd_start", runtime)
     monkeypatch.setattr(root_driver, "complete_boot_start", lambda: calls.append("publish PID"))
     assert start_intent.run_start(_args("--worktree")) == result
     assert calls == ["complete wrapped start"] + (["publish PID"] if result == 0 else [])
@@ -689,8 +689,8 @@ def test_failed_boot_publication_clears_serving_and_refuses_success(
     inputs: identity.IdentityInput, monkeypatch: pytest.MonkeyPatch
 ) -> None:
 
-    from cli.commands import root_driver
-    from shared import start_serving
+    from base.deploy.lifecycle import start_serving
+    from cli.commands.lifecycle import root_driver
 
     monkeypatch.setattr(start_intent, "_checkout", lambda: inputs.checkout)
     monkeypatch.setenv("AVA_HOME", str(inputs.home))
@@ -700,7 +700,7 @@ def test_failed_boot_publication_clears_serving_and_refuses_success(
     def ready(**_kw: object) -> int:
         return 0
 
-    monkeypatch.setattr("cli.commands.start.cmd_start", ready)
+    monkeypatch.setattr("cli.commands.lifecycle.start.cmd_start", ready)
     monkeypatch.setattr(start_serving, "clear_serving", lambda: calls.append("cleared"))
 
     def fail() -> None:

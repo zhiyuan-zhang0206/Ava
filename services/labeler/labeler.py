@@ -9,12 +9,12 @@ import re
 from langchain_core.messages import HumanMessage, SystemMessage
 from loguru import logger
 
-from shared.config import settings
-from shared.db_transaction import write_transaction
-from shared.labels import publish_label_updated
-from shared.lm.content import content_blocks
-from shared.lm.factory import build_chat_model
-from shared.message_kwargs import message_content
+from base.agents.labels import publish_label_updated
+from base.agents.messages.kwargs import message_content
+from base.config import settings
+from base.db.transaction import write_transaction
+from base.lm.content import content_blocks
+from base.lm.factory import build_chat_model
 
 _LABEL_SYSTEM_PROMPT_TEMPLATE = (
     "Summarize the user request delimited by <user_request> tags below "
@@ -172,7 +172,7 @@ async def generate_label_async(agent_id: int, prompt: str, model: str) -> bool |
                 HumanMessage(content=f"<user_request>{prompt}</user_request>"),
             ]
         )
-        from shared.lm.usage import log_usage_from_message
+        from base.lm.usage import log_usage_from_message
 
         log_usage_from_message(
             response,

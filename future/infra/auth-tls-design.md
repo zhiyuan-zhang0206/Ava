@@ -40,8 +40,8 @@ cluster secret existed but was only used for data-plane auth (pg/redis passwords
 ## Phase 1 — gateway auth middleware (landed)
 
 `Authorization: Bearer <secret>` on every `/api/*` route, constant-time compared
-(`shared/cluster_auth.py`: `bearer_header()` / `verify_bearer()`, pure stdlib). The
-SDK transport (`ava/_gateway_transport.py`) and `scripts/start_agent.py` inject the header
+(`base/cluster/auth.py`: `bearer_header()` / `verify_bearer()`, pure stdlib). The
+SDK transport (`ava/gateway_client/transport.py`) and `scripts/start_agent.py` inject the header
 automatically.
 
 Two things changed versus the original Phase-1 draft:
@@ -73,7 +73,7 @@ forcing function is what produced Phase 2.
 ### Decision: cookie-based session auth
 
 `POST /api/auth/login` verifies the password (the cluster secret) and sets an
-HttpOnly `ava_session` cookie (`gateway/routers/auth.py`); the browser then carries
+HttpOnly `ava_session` cookie (`gateway/auth/router.py`); the browser then carries
 it automatically on both `fetch()` and `EventSource`. CORS allows exact configured
 origins (or derives the local and gateway-host frontend origins), since the frontend
 (`:3000`) and gateway (`:8000`) are co-located but cross-origin. Cookie-authenticated

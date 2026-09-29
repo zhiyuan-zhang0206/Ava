@@ -16,11 +16,11 @@ from typing import cast
 
 import pytest
 
+import base.cluster as cl
 import cli.commands.data_plane.bringup as dp
 import cli.commands.data_plane.cluster_instance as ci
 import cli.commands.data_plane.pgbouncer as pgb
-import shared.cluster as cl
-from shared.config import settings
+from base.config import settings
 
 _ADMIN = "pooler-admin-fixture"
 
@@ -48,7 +48,7 @@ def test_pgbouncer_line_uses_registry_port(
     monkeypatch.setattr(cl, "record_pgbouncer_port", lambda _rec: 6433)  # pyright: ignore[reportUnknownArgumentType]
 
     monkeypatch.setattr(
-        "shared.cluster.authority.read_pooler_admin",
+        "base.cluster.authority.read_pooler_admin",
         lambda _home: SimpleNamespace(password=_ADMIN),  # pyright: ignore[reportUnknownArgumentType]
     )
     probed: dict[str, object] = {}
@@ -123,7 +123,7 @@ def test_postgres_probe_dials_pooled_front_door(
     F8a (user ruling 2026-08 "always PgBouncer"): the pooled SELECT 1 proves the
     path every consumer dials (client scram at the pooler + the SCRAM
     pass-through backend hop); a direct probe would test a path no consumer uses."""
-    import shared.db
+    import base.db
 
     monkeypatch.setattr(ci, "_pg_running", lambda _p, _h: True)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(ci, "_redis_reachable", lambda _p, _h: False)  # pyright: ignore[reportUnknownArgumentType]
@@ -144,7 +144,7 @@ def test_postgres_probe_dials_pooled_front_door(
         calls.append(kwargs)
         return _FakeConn()
 
-    monkeypatch.setattr(shared.db, "connect", _fake_connect)
+    monkeypatch.setattr(base.db, "connect", _fake_connect)
     # pgbouncer off: pooled_db_url == db_url, the probe is direct in effect.
     monkeypatch.setattr(settings.data_plane, "pgbouncer_enabled", False)
     ci.print_data_plane_status()
@@ -155,7 +155,7 @@ def test_postgres_probe_dials_pooled_front_door(
     monkeypatch.setattr(settings.data_plane, "pgbouncer_enabled", True)
     monkeypatch.setattr(pgb, "pgbouncer_listener_reachable", lambda *_a: True)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(
-        "shared.cluster.authority.read_pooler_admin",
+        "base.cluster.authority.read_pooler_admin",
         lambda _home: SimpleNamespace(password=_ADMIN),  # pyright: ignore[reportUnknownArgumentType]
     )
     ci.print_data_plane_status()

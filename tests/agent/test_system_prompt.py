@@ -22,7 +22,7 @@ from agent.graph.system_prompt import (
     effective_sdk_expand,
 )
 from ava.sdk_surface import plugins, sdk_disable
-from shared.config import FIELD_INFOS, AgentSettings, settings
+from base.config import FIELD_INFOS, AgentSettings, settings
 
 # The framework-owned top-level namespaces the wildcard must always surface.
 # Asserted as a subset (not equality) so a plugin namespace registered into

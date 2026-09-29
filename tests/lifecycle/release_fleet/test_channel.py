@@ -20,6 +20,14 @@ from uuid import uuid4
 
 import pytest
 
+from base.cluster.authority.channel import ChannelRefusedError, sign_request
+from base.cluster.authority.unit import (
+    Enrollment,
+    UnitIdentity,
+    ensure_enrollment,
+    revoke_enrollment,
+    rotate_enrollment,
+)
 from cli.release_fleet import listener as listener_module
 from cli.release_fleet.client import (
     CapabilityDeferredError,
@@ -31,14 +39,6 @@ from cli.release_fleet.listener import CoordinatorListener, proof_headers, route
 from cli.release_fleet.policy import UnitKey
 from cli.release_fleet.progress import Instruction, Report
 from cli.release_fleet.request import CoordinatorEndpoint
-from shared.cluster.authority.channel import ChannelRefusedError, sign_request
-from shared.cluster.authority.unit import (
-    Enrollment,
-    UnitIdentity,
-    ensure_enrollment,
-    revoke_enrollment,
-    rotate_enrollment,
-)
 
 _RUNNER = UnitKey(machine="macbook-air", home="/Users/zzy/.ava")
 _OTHER = UnitKey(machine="company-mini", home="/Users/zhiyuan-output/.ava")

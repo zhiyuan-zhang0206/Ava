@@ -13,7 +13,7 @@ import psycopg.conninfo
 import pytest
 from psycopg_pool import AsyncConnectionPool, PoolTimeout
 
-from shared.cluster.authority import (
+from base.cluster.authority import (
     CatalogRefusedError,
     ClosureRefusedError,
     OperationAuthority,
@@ -29,10 +29,10 @@ from shared.cluster.authority import (
     revoke,
     sweep,
 )
-from shared.cluster.authority import fence as fence_module
-from shared.cluster.authority import ledger as ledger_module
-from shared.cluster.authority import roles as roles_module
-from shared.cluster.authority.model import SurvivingSession
+from base.cluster.authority import fence as fence_module
+from base.cluster.authority import ledger as ledger_module
+from base.cluster.authority import roles as roles_module
+from base.cluster.authority.model import SurvivingSession
 from tests.lifecycle.db_authority.conftest import AuthorityCluster
 
 
@@ -469,7 +469,7 @@ def test_prune_retry_after_crash_before_recording_the_drop(
 def test_stale_sessions_is_the_closure_census_without_termination(
     authority_postgres: AuthorityCluster,
 ) -> None:
-    from shared.cluster.authority import stale_sessions
+    from base.cluster.authority import stale_sessions
 
     cluster = authority_postgres
     authority = _operation()

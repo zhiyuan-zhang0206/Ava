@@ -8,7 +8,7 @@ it shares the bound actor; any other command runs as a subprocess. An uncaught
 crash's traceback is written to ``schedules.last_error``.
 
 Version-controlled schedule templates (manifest + scripts) live in
-``schedules/`` — provisioned via ``shared/daemon/schedules/builtin_schedules.py``.
+``schedules/`` — provisioned via ``base/daemon/schedules/builtin_schedules.py``.
 
 Every process execution appends one row to ``schedule_runs`` (the run-history
 drawer's data source): opened with ``ok = NULL`` (in-progress) when the runner
@@ -46,11 +46,11 @@ from types import FrameType
 
 from loguru import logger
 
-import shared.db
-import shared.proc
-from shared.config import settings
-from shared.db_transaction import write_transaction
-from shared.paths import ava_home, prod_service_checkout_error
+import base.db
+import base.host.proc
+from base.config import settings
+from base.db.transaction import write_transaction
+from base.paths import ava_home, prod_service_checkout_error
 
 # A .py schedule script is run in-process, so a single call that hangs (a
 # wedged gateway, a black-holed DB connection, a stuck import) parks the whole
@@ -104,7 +104,7 @@ def _script_filename(command: str) -> str:
 def _load(schedule_id: int) -> tuple[str, str] | None:
     """Return (script, command) for an enabled schedule, or None if it is gone /
     disabled (a benign race: the manager launched it, then it was deleted)."""
-    with shared.db.connect(autocommit=True) as conn, conn.cursor() as cur:
+    with base.db.connect(autocommit=True) as conn, conn.cursor() as cur:
         cur.execute(
             "SELECT script, command FROM schedules WHERE id = %s AND enabled = true",
             (schedule_id,),
@@ -127,7 +127,7 @@ def _mark_completed(schedule_id: int) -> None:
     crash — this is the durable signal the ScheduleManager reads to leave the
     schedule alone instead of relaunching / counting it toward the crash breaker.
     The manager reads liveness before status, so a session that is gone is
-    guaranteed to have this write already committed (see schedule_manager)."""
+    guaranteed to have this write already committed (see gateway/schedules/manager.py)."""
     with write_transaction() as conn, conn.cursor() as cur:
         cur.execute(
             "UPDATE schedules SET status = 'completed', updated_at = now() WHERE id = %s",
@@ -230,7 +230,7 @@ def _stall_action(schedule_id: int, message: str, run_id: int | None) -> None:
         # Snapshot descendants while ancestry still proves ownership. Retain
         # their identities through TERM/KILL; never signal the shared PTY group.
         # setsid alone stays covered; already-reparented daemons are exempt.
-        shared.proc.kill_process_tree(os.getpid(), include_root=False)
+        base.host.proc.kill_process_tree(os.getpid(), include_root=False)
     except Exception:
         logger.exception("Schedule {} child cleanup failed", schedule_id)
     try:

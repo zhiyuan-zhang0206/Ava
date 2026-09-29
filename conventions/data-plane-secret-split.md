@@ -21,7 +21,7 @@ A local plane's `.env` carries only the credential-free database endpoint
 (`postgresql://<owner>@host:port/<db>`). The schema owner is `NOLOGIN` without
 a password. Every application login is a write generation: `ava_g<n>_gateway`
 and `ava_g<n>_runner`, which inherit the `NOLOGIN` groups `ava_gateway` /
-`ava_runner` and own nothing (`shared/cluster/authority/`).
+`ava_runner` and own nothing (`base/cluster/authority/`).
 
 Delivery:
 
@@ -77,7 +77,7 @@ tickets, or put passwords in command arguments.
 
 PostgreSQL has nothing to rotate by hand: the owner never logs in, and
 application logins rotate as write generations with each release transition.
-`scripts/rotate_data_plane_secrets.py` rotates the Redis credentials only; they
+`scripts/data_plane_ops/rotate_data_plane_secrets.py` rotates the Redis credentials only; they
 do not rotate per rollout
 ([decision](../decisions/2026-09-27-write-generation-rollout-choices.md)).
 
@@ -86,9 +86,9 @@ process context (not an agent shell). It defaults to dry-run and has no
 `--home` flag.
 
 ```bash
-.venv/bin/python scripts/rotate_data_plane_secrets.py
-.venv/bin/python scripts/rotate_data_plane_secrets.py --scope admin --execute
-.venv/bin/python scripts/rotate_data_plane_secrets.py --scope runner --execute
+.venv/bin/python scripts/data_plane_ops/rotate_data_plane_secrets.py
+.venv/bin/python scripts/data_plane_ops/rotate_data_plane_secrets.py --scope admin --execute
+.venv/bin/python scripts/data_plane_ops/rotate_data_plane_secrets.py --scope runner --execute
 ```
 
 `--scope admin` rotates the Redis `default` password (`requirepass`);
@@ -104,8 +104,8 @@ reloads its Redis URL. Each execute writes a 0600 recovery file beneath
 never hold it. Rotate it only for a confirmed leak:
 
 ```bash
-.venv/bin/python scripts/rotate_cluster_secret.py              # dry run
-.venv/bin/python scripts/rotate_cluster_secret.py --execute
+.venv/bin/python scripts/data_plane_ops/rotate_cluster_secret.py              # dry run
+.venv/bin/python scripts/data_plane_ops/rotate_cluster_secret.py --execute
 ```
 
 The script stages the next secret (`backups/secret-rotation/bearer.pending`),

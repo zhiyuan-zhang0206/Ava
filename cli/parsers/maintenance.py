@@ -27,7 +27,7 @@ def _acquired_at_arg(value: str) -> str:
 
 
 def _handle(args: argparse.Namespace) -> int:
-    from cli.commands.maintenance import run
+    from cli.commands.lifecycle.maintenance import run
 
     return run(args)
 

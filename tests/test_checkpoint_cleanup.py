@@ -1,4 +1,4 @@
-"""Tests for shared/agents/history/checkpoint_cleanup.py.
+"""Tests for base/agents/history/checkpoint_cleanup.py.
 
 These drive the REAL LangGraph AsyncPostgresSaver against the session's test
 Postgres (the same saver prod uses), so the trim SQL is exercised against
@@ -27,12 +27,12 @@ from langgraph.graph.message import _messages_delta_reducer
 from psycopg.rows import DictRow
 from psycopg_pool import AsyncConnectionPool
 
-from shared.agents.history.checkpoint_cleanup import (
+from base.agents.history.checkpoint_cleanup import (
     count_checkpoints,
     mark_compact_boundary,
     trim_checkpoints,
 )
-from shared.config import settings
+from base.config import settings
 
 
 def _saver(pool: AsyncConnectionPool) -> AsyncPostgresSaver:
@@ -195,7 +195,7 @@ async def test_interrupted_trim_keeps_every_survivor_readable(
     aops_pool: AsyncConnectionPool, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A committed batch must stand alone if no later batch ever executes."""
-    import shared.agents.history.checkpoint_cleanup as cleanup
+    import base.agents.history.checkpoint_cleanup as cleanup
 
     ids = await _put_turns(aops_pool, "1", 8, with_scratch=True)
     monkeypatch.setattr(cleanup, "_TRIM_MAX_ROUNDS", 1)
@@ -216,7 +216,7 @@ async def test_trim_preserves_compaction_ancestors_for_fork(
     aops_pool: AsyncConnectionPool, db_conn: psycopg.Connection
 ) -> None:
     """Fork's real recursive chain copy must still reach retained segments."""
-    from ops.agent_spawn import _copy_checkpoint_chain
+    from ops.agents.spawn import _copy_checkpoint_chain
 
     ids = await _put_turns(aops_pool, "1", 8)
     async with aops_pool.connection() as conn:

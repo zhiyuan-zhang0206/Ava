@@ -1,15 +1,6 @@
 {
   "complexity": {
-    "ops/agent_pause.py::drain": 21,
-    "ops/agent_spawn.py::create_agent_row": 16,
-    "ops/ops_cluster.py::cluster_recover_op": 16,
-    "ops/ops_config.py::config_write_op": 24
-  },
-  "directories": {
-    "ops": 37
-  },
-  "private_imports": {
-    "ops/cluster_pause.py::services.agent_ops.daemon._db_pool": 1,
-    "ops/ops_cluster.py::ava_builtins.plugins.ava_code._walk": 1
+    "ops/cluster.py::cluster_recover_op": 16,
+    "ops/host_config.py::config_write_op": 24
   }
 }

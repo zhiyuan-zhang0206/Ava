@@ -1,4 +1,4 @@
-"""`scripts/lint/lint_async_no_sync_blocking.py` — sync calls in async bodies, and a
+"""`scripts/lint/async_no_sync_blocking.py` — sync calls in async bodies, and a
 current repo-helper list (a retired helper's name must not linger)."""
 
 from __future__ import annotations
@@ -9,18 +9,18 @@ from pathlib import Path
 
 import pytest
 
-_lint = importlib.import_module("scripts.lint.lint_async_no_sync_blocking")
+_lint = importlib.import_module("scripts.lint.async_no_sync_blocking")
 
 
 @pytest.fixture()
 def tree(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """A scratch source tree with one repo helper defined in `shared/`."""
+    """A scratch source tree with one repo helper defined in `base/`."""
     monkeypatch.setattr(_lint, "_ROOT", tmp_path)
-    monkeypatch.setattr(_lint, "_DEFINITION_DIRS", ("shared",))
+    monkeypatch.setattr(_lint, "_DEFINITION_DIRS", ("base",))
     monkeypatch.setattr(_lint, "_SCAN_DIRS", ("gateway",))
     monkeypatch.setattr(_lint, "_REPO_BLOCKING_HELPERS", {"sync_op"})
     monkeypatch.setattr(_lint, "_BLOCKING_NAMES", _lint._LIBRARY_BLOCKING_NAMES | {"sync_op"})
-    _write(tmp_path, "shared/ops.py", "def sync_op() -> None:\n    pass\n")
+    _write(tmp_path, "base/ops.py", "def sync_op() -> None:\n    pass\n")
     (tmp_path / "gateway").mkdir()
     return tmp_path
 
@@ -49,7 +49,7 @@ def test_a_stale_helper_fails_the_lint(
 
 
 def test_async_helper_definitions_count(tree: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    _write(tree, "shared/aio.py", "async def async_op[T](value: T) -> T:\n    return value\n")
+    _write(tree, "base/aio.py", "async def async_op[T](value: T) -> T:\n    return value\n")
     monkeypatch.setattr(_lint, "_REPO_BLOCKING_HELPERS", {"sync_op", "async_op"})
     assert _lint._stale_repo_helpers() == []
 

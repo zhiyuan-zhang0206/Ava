@@ -15,9 +15,9 @@ from unittest.mock import MagicMock, patch
 import httpx
 import pytest
 
-from shared.agents import AgentNotFound, GatewayUnavailable
-from shared.agents.messages import delivery_outbox as outbox
-from shared.config import settings
+from base.agents import AgentNotFound, GatewayUnavailable
+from base.agents.messages import delivery_outbox as outbox
+from base.config import settings
 
 
 def _limits(**overrides: object) -> outbox.DeliveryOutboxLimits:
@@ -65,7 +65,7 @@ def _records(journal: Path) -> list[outbox.OutboxEntry]:
     ]
 
 
-@patch("ava._gateway_transport._client")
+@patch("ava.gateway_client.transport._client")
 def test_failed_send_records_with_the_key_it_used(mock_client: MagicMock, journal: Path) -> None:
     from ava.gateway_client import send_message
 
@@ -82,7 +82,7 @@ def test_failed_send_records_with_the_key_it_used(mock_client: MagicMock, journa
     assert entry.state == "pending" and entry.attempts == 1
 
 
-@patch("ava._gateway_transport._client")
+@patch("ava.gateway_client.transport._client")
 def test_retry_chain_shares_one_key_and_success_retires_the_record(
     mock_client: MagicMock, journal: Path
 ) -> None:
@@ -110,7 +110,7 @@ def test_retry_chain_shares_one_key_and_success_retires_the_record(
     assert _keys(mock_client) != [first_key]
 
 
-@patch("ava._gateway_transport._client")
+@patch("ava.gateway_client.transport._client")
 def test_permanent_wire_failure_is_not_recorded(mock_client: MagicMock, journal: Path) -> None:
     from ava.gateway_client import send_message
 
@@ -125,7 +125,7 @@ def test_permanent_wire_failure_is_not_recorded(mock_client: MagicMock, journal:
     assert _records(journal) == []
 
 
-@patch("ava._gateway_transport._client")
+@patch("ava.gateway_client.transport._client")
 def test_broken_outbox_never_changes_the_send_outcome(
     mock_client: MagicMock, journal: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -141,7 +141,7 @@ def test_broken_outbox_never_changes_the_send_outcome(
     assert _records(journal) == []
 
 
-@patch("ava._gateway_transport._client")
+@patch("ava.gateway_client.transport._client")
 def test_disabled_outbox_records_nothing_and_never_reuses_keys(
     mock_client: MagicMock, journal: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

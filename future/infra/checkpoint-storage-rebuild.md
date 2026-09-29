@@ -32,7 +32,7 @@ append-style delta storage, keep everything, and fold at read time.**
 - **Keep everything (R1-R4).** Nothing is deleted — tail-replaced old copies,
   compact-boundary snapshots, and the full delta log are all retained. The target state has
   no deletion path; cleanup may only append new snapshots/baselines (Section 1.4).
-- **Read model — fold at read time.** A read-compat layer (`shared/agents/history/delta_read_compat.py`
+- **Read model — fold at read time.** A read-compat layer (`base/agents/history/delta_read_compat.py`
   plus saver-level injection) folds delta threads transparently, so every reader keeps
   working across the transition (PR #2321, deployed to every machine).
 - **Cutover — reader-first and gated.** The read-compat layer is live everywhere before the
@@ -153,7 +153,7 @@ metadata or a `_DeltaSnapshot` value), with a snapshot-point regression test.
   anchor (no deletion at boundaries).
 
 **Active deletion paths today.** The only deletion machinery is `_TRIM_SQL`
-(`shared/agents/history/checkpoint_cleanup.py`), reachable from the reaper and compaction and gated on
+(`base/agents/history/checkpoint_cleanup.py`), reachable from the reaper and compaction and gated on
 both (reaper default off; delta threads exempt). `blob_vacuum` is not deletion (dead-tuple
 reclaim). `prune()` / `delete_thread` have zero non-test callers.
 
@@ -272,7 +272,7 @@ Failure modes and interactions (required evidence for a go/no-go):
 1. **Retention severs the chain, silently.** Blunt keep-latest-3 emulation (delete older
    checkpoints and their writes) on the delta thread: `state.messages` reconstructs
    **240 -> 4 messages**, no error raised. This is the same hazard the repo's
-   `shared/agents/history/checkpoint_cleanup.py` invariant and langgraph `BaseCheckpointSaver.prune`'s
+   `base/agents/history/checkpoint_cleanup.py` invariant and langgraph `BaseCheckpointSaver.prune`'s
    warning describe. Resolution under this design: deletion is disabled outright (R1-R4,
    Section 1.4) — ancestor chains are never severed, so no retention snapshot-forcing step
    (the earlier T3) is needed — and the trim predicate keeps an explicit delta-thread
@@ -291,7 +291,7 @@ Failure modes and interactions (required evidence for a go/no-go):
    `db_recovery` boundaries must stay readable for external readers; the read side
    reconstructs at mount time (`load_snapshot`, PR #2321), and forcing a snapshot at the
    boundary remains available where a self-contained record is preferred.
-5. **Read paths.** Pregel's load is delta-aware already; `shared/agents/history/checkpoint.py` readers
+5. **Read paths.** Pregel's load is delta-aware already; `base/agents/history/checkpoint.py` readers
    (messages, message-count via raw blob header, compact-segment reads, trace reads) and the
    gateway timeline/state endpoints must use the delta-aware API. **Landed (PR #2321):** the
    compat layer covers all of them; the message-count reader falls back to reconstruct-based
@@ -365,12 +365,12 @@ semantics of the two-phase upgrade (old incumbents finish their turn; the n-step
 the last old-shape write; no mixed writers on one thread; readers span both shapes
 throughout):
 
-1. **Read-compat layer (PR #2321, merged and deployed).** `shared/agents/history/delta_read_compat.py` plus
+1. **Read-compat layer (PR #2321, merged and deployed).** `base/agents/history/delta_read_compat.py` plus
    saver-level injection fold delta threads at read time. Coverage: pool saver
-   `get_tuple`/`aget_tuple` (folded values injected); `shared/agents/history/checkpoint.py` readers
+   `get_tuple`/`aget_tuple` (folded values injected); `base/agents/history/checkpoint.py` readers
    (messages / count with reconstruct fallback / segment / full / by-trace);
-   `ava/external_state.load_snapshot`; fork chain copy (`_copy_checkpoint_chain`, writes
-   chain included); `agent/startup/__init__.py` inbound reconciliation; `scripts/restore_drill.py`;
+   `ava/external/state.py:load_snapshot`; fork chain copy (`_copy_checkpoint_chain`, writes
+   chain included); `agent/startup/__init__.py` inbound reconciliation; `scripts/data_plane_ops/restore_drill.py`;
    the self-evolution recorder. Vanilla data passes through unchanged — verified inert on
    real production read paths (production-clone subset, wrapped == native x5). Deployed to
    every machine 2026-09-13 (`30df11a83`).

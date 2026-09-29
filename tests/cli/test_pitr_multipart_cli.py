@@ -15,8 +15,8 @@ import pytest
 
 from cli.commands.data_plane import pitr as pitr_commands
 from cli.commands.data_plane.pitr import cmd_pitr_multipart_abort, cmd_pitr_multipart_list
-from services.pitr import oss_credentials
-from services.pitr.oss_multipart import OSSMultipartUploads
+from services.pitr.stores.oss import credentials
+from services.pitr.stores.oss.multipart import OSSMultipartUploads
 from tests.services.oss_test_support import FakeOssBucket
 
 
@@ -51,7 +51,7 @@ def cli_env(
         opened_calls.append(kwargs)
         return fake
 
-    monkeypatch.setattr(oss_credentials, "open_oss_bucket", fake_open)
+    monkeypatch.setattr(credentials, "open_oss_bucket", fake_open)
     monkeypatch.setattr(
         pitr_commands,
         "settings",

@@ -23,10 +23,10 @@ from agent.hooks import Hook, register_after_exec, register_before_llm
 from agent.hooks.compact import auto_compact_will_fire
 from agent.messages import NoteTag, system_note_message, tail_has_agent_inbound
 from agent.state import AgentState, register_plugin_state
-from shared.config.turn_view import turn_settings
-from shared.context import AvaContext
-from shared.log import logger
-from shared.message_kwargs import message_content
+from base.agents.context import AvaContext
+from base.agents.messages.kwargs import message_content
+from base.config.turn_view import turn_settings
+from base.log import logger
 
 from ._state import (
     AGENT_REPLY_CATEGORY,

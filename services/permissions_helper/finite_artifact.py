@@ -21,8 +21,8 @@ from pathlib import Path
 import psutil
 from pydantic import BaseModel, ConfigDict, Field
 
-from shared.native_process.ownership import OwnedProcess
-from shared.verified_file import regular_bytes
+from base.deploy.release.verified_file import regular_bytes
+from base.native_process.ownership import OwnedProcess
 
 # A macOS release needs the finite mode plus the keeper's durable stop, shutdown
 # and seed report: admission refuses an older helper before any work stops.
@@ -53,7 +53,7 @@ def executable_sha256(executable: Path) -> str:
 
 def home_app(home: Path) -> Path:
     """This home's installed helper bundle: the explicit artifact dir or ``home/helper``."""
-    from shared.config import settings
+    from base.config import settings
 
     override = settings.services.permissions_helper_artifact_dir
     return (home / "helper" if override is None else Path(override)) / _APP
@@ -86,8 +86,8 @@ def home_helper(home: Path) -> tuple[OwnedProcess, Path]:
     by the PID it reports about itself, and its running image must be a valid
     hardened-runtime image satisfying the stable requirement.
     """
+    from base import paths
     from services.permissions_helper import client, lifecycle
-    from shared import paths
 
     if paths.ava_home() != home:
         raise RuntimeError("helper socket configuration belongs to a different home")

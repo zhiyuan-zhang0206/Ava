@@ -1,4 +1,4 @@
-"""Unit tests for `gateway/loki_events.py` — the Loki read side of the
+"""Unit tests for `gateway/lgtm/loki_events.py` — the Loki read side of the
 unified event stream (task #1197, LGTM cutover).
 
 The module's only I/O is httpx GETs through the shared client accessor
@@ -28,11 +28,9 @@ import httpx
 import pytest
 import yaml
 
-from gateway import _loki_logql, loki_events, loki_events_cache, loki_query_budget
-from services.events_maintenance.resolution import EventClass
-from shared.config import settings
-from shared.events.contract import lineage_event_names
-from shared.loki_index_labels import (
+from base.config import settings
+from base.events.contract import lineage_event_names
+from base.telemetry.loki_index_labels import (
     EVENT_STREAM_RETENTION,
     LINEAGE_RETENTION_PERIOD,
     LOKI_MAX_QUERY_SERIES,
@@ -44,6 +42,8 @@ from shared.loki_index_labels import (
     retention_hours,
     validate_loki_deploy_config,
 )
+from gateway.lgtm import _loki_logql, loki_events, loki_events_cache, loki_query_budget
+from services.events_maintenance.resolution import EventClass
 
 
 def _selector_event_names(selector: str) -> set[str]:
@@ -342,10 +342,12 @@ def _wait_for_budget_waiters(expected: int) -> None:
 
 
 class TestGlobalQueryBudget:
-    def test_budget_contract_is_reexported_from_shared(self) -> None:
-        spec = importlib.util.find_spec("shared.loki_query_budget")
-        assert spec is not None, "shared.loki_query_budget must own the reusable budget contract"
-        shared_budget = importlib.import_module("shared.loki_query_budget")
+    def test_budget_contract_is_reexported_from_base(self) -> None:
+        spec = importlib.util.find_spec("base.telemetry.loki_query_budget")
+        assert spec is not None, (
+            "base.telemetry.loki_query_budget must own the reusable budget contract"
+        )
+        base_budget = importlib.import_module("base.telemetry.loki_query_budget")
         for name in (
             "BudgetErrorFactory",
             "BudgetMetrics",
@@ -356,7 +358,7 @@ class TestGlobalQueryBudget:
             "FairQueryBudget",
             "LokiQueryBudgetError",
         ):
-            assert getattr(loki_query_budget, name) is getattr(shared_budget, name)
+            assert getattr(loki_query_budget, name) is getattr(base_budget, name)
 
     def test_matches_loki_real_max_concurrent(self) -> None:
         repo = Path(__file__).parents[2]
@@ -1073,8 +1075,8 @@ class TestObservabilityReadGate:
     ) -> None:
         home = tmp_path / ".ava-preview"
         home.mkdir()
-        monkeypatch.setattr("shared.machine.machine_role", lambda: frozenset({"gateway"}))
-        monkeypatch.setattr("shared.paths.ava_home", lambda: home)
+        monkeypatch.setattr("base.cluster.machine.machine_role", lambda: frozenset({"gateway"}))
+        monkeypatch.setattr("base.paths.ava_home", lambda: home)
         monkeypatch.delitem(os.environ, "AVA_TELEMETRY_LOKI_URL", raising=False)
 
         with pytest.raises(
@@ -1092,16 +1094,14 @@ class TestObservabilityReadGate:
     ) -> None:
         home = tmp_path / ".ava-preview"
         home.mkdir()
-        monkeypatch.setattr("shared.paths.ava_home", lambda: home)
+        monkeypatch.setattr("base.paths.ava_home", lambda: home)
         monkeypatch.delitem(os.environ, "AVA_TELEMETRY_LOKI_URL", raising=False)
         if override == "marker":
             (home / "lgtm-host").touch()
-            monkeypatch.setattr("shared.machine.machine_role", lambda: frozenset({"gateway"}))
         elif override == "environment":
-            monkeypatch.setattr("shared.machine.machine_role", lambda: frozenset({"gateway"}))
             monkeypatch.setitem(os.environ, "AVA_TELEMETRY_LOKI_URL", "http://loki.invalid:3100")
-        else:
-            monkeypatch.setattr("shared.machine.machine_role", lambda: frozenset({"agent-runner"}))
+        role = "agent-runner" if override == "runner" else "gateway"
+        monkeypatch.setattr("base.cluster.machine.machine_role", lambda: frozenset({role}))
 
         loki_events._read_gate()
 

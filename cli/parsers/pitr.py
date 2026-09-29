@@ -12,7 +12,7 @@ def _target_wall_arg(value: str) -> str:
     Requires an offset-carrying ISO-8601 timestamp; reuses the drill service's
     parser so the CLI boundary and the drill agree on one definition.
     """
-    from services.pitr.restore_drill import DrillError, parse_target_wall
+    from services.pitr.restore.drill import DrillError, parse_target_wall
 
     try:
         parse_target_wall(value)

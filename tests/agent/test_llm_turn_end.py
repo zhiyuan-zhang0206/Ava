@@ -4,7 +4,7 @@
 `logger.info` in the finally block emitted but didn't capture exc_info, so from the
 framework's perspective "why it failed" was completely invisible. Fix:
 `logger.opt(exception=True).warning(...)` on the ok=False path, together with
-`shared.log._postgres_sink` automatically injecting traceback / exception_type /
+`base.log._postgres_sink` automatically injecting traceback / exception_type /
 exception_value into events.payload.
 
 Tests focus on the two branches of the finally block (ok=True / ok=False), without

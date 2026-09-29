@@ -1,9 +1,9 @@
 """Preview data must satisfy the browser's current read contracts."""
 
-from scripts.post_deploy_visual_fixtures import AGENT, AGENT_CARD
-from scripts.post_deploy_visual_matrix import fixture_for
-from shared.agent_roster import AgentCard, AgentDirectoryPage, AgentRoster
-from shared.agent_snapshot import AgentSnapshot
+from base.agents.observation.roster import AgentCard, AgentDirectoryPage, AgentRoster
+from base.agents.observation.snapshot import AgentSnapshot
+from scripts.post_deploy_visual.fixtures import AGENT, AGENT_CARD
+from scripts.post_deploy_visual.matrix import fixture_for
 
 
 def test_preview_agent_reads_resolve_roster_directory_and_selected_detail() -> None:

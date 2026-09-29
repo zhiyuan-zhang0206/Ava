@@ -9,10 +9,12 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import cast
 
-from services.pitr.base_manifest import CandidateManifest
-from services.pitr.operation_custody import OperationKind
-from services.pitr.retention_planner import inspect_dry_run_plan
-from services.pitr.rollback_snapshot_archive import (
+from base.cluster.dataplane.pg_tools import pg_tool
+from base.config import settings
+from base.paths import ava_home
+from services.pitr.base_backup.manifest import CandidateManifest
+from services.pitr.operation.custody import OperationKind
+from services.pitr.restore.rollback_snapshot_archive import (
     RollbackSnapshotArchive,
     archive_rollback_snapshot,
     drop_rollback_snapshot_table,
@@ -21,14 +23,12 @@ from services.pitr.rollback_snapshot_archive import (
     retire_rollback_snapshot,
     verify_rollback_snapshot,
 )
-from services.pitr.store_factory import get_store_group
-from shared.config import settings
-from shared.paths import ava_home
-from shared.pg_tools import pg_tool
+from services.pitr.retention.planner import inspect_dry_run_plan
+from services.pitr.stores.factory import get_store_group
 
 
 def cmd_pitr_retention_status() -> int:
-    from services.pitr.retention_gate import (
+    from services.pitr.retention.gate import (
         CarrierState,
         display_armed,
         iso_timestamp,
@@ -78,7 +78,7 @@ def cmd_pitr_retention_status() -> int:
 
 
 def cmd_pitr_retention_arm(*, digest: str, confirm: bool) -> int:
-    from services.pitr.retention_gate import (
+    from services.pitr.retention.gate import (
         CarrierState,
         append_gate_record,
         plan_line,
@@ -124,7 +124,7 @@ def cmd_pitr_retention_arm(*, digest: str, confirm: bool) -> int:
 
 
 def cmd_pitr_retention_disable(*, confirm: bool) -> int:
-    from services.pitr.retention_gate import (
+    from services.pitr.retention.gate import (
         CarrierState,
         append_gate_record,
         clear_arm_carriers,
@@ -148,7 +148,7 @@ def cmd_pitr_retention_disable(*, confirm: bool) -> int:
 
 def cmd_pitr_retention_run_once(*, confirm: bool) -> int:
     """One deletion pass on the operator's explicit command (design 3.5)."""
-    from services.pitr.retention_gate import CarrierState
+    from services.pitr.retention.gate import CarrierState
 
     carriers = CarrierState.read()
     if not carriers.armed or carriers.approved_digest is None:
@@ -163,10 +163,10 @@ def cmd_pitr_retention_run_once(*, confirm: bool) -> int:
             "and run one bounded pass through the executor; re-run with --confirm"
         )
         return 0
-    from services.pitr import retention_scheduler
+    from services.pitr.retention import scheduler
 
     try:
-        summary = retention_scheduler.run_operator_once(settings.physical_backup)
+        summary = scheduler.run_operator_once(settings.physical_backup)
     except ValueError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
@@ -186,7 +186,7 @@ def cmd_pitr_retention_run_once(*, confirm: bool) -> int:
 
 
 def cmd_pitr_retention_inspect() -> int:
-    from services.pitr.retention_gate import CarrierState
+    from services.pitr.retention.gate import CarrierState
 
     try:
         plan = inspect_dry_run_plan(ava_home() / "physical-backup")
@@ -303,7 +303,8 @@ def cmd_pitr_drill(
     """
     import asyncio
 
-    from services.pitr.base_operation_runtime import (
+    from services.pitr.restore.drill import parse_target_wall
+    from services.pitr.restore.operation_runtime import (
         RestoreWorkerInput,
         live_data_directory,
         live_probe_conninfo,
@@ -311,8 +312,7 @@ def cmd_pitr_drill(
         restore_store_args,
         run_drill_input,
     )
-    from services.pitr.restore_drill import parse_target_wall
-    from services.pitr.restore_proof import RestoreSpaceBudget
+    from services.pitr.restore.proof import RestoreSpaceBudget
 
     scratch_path = Path(scratch).expanduser().absolute()
     evidence_path = scratch_path / "drill-evidence.json"
@@ -387,8 +387,8 @@ def _drill_summary(evidence: dict[str, object], path: Path) -> dict[str, object]
 
 def _operation_kinds() -> list[OperationKind]:
     from services.backup_scheduler.worker import dump_kind, restore_drill_kind
-    from services.pitr.base_operation_runtime import drill_kind, restore_kind
     from services.pitr.base_worker import candidate_kind
+    from services.pitr.restore.operation_runtime import drill_kind, restore_kind
 
     root = ava_home() / "physical-backup"
     return [
@@ -402,7 +402,7 @@ def _operation_kinds() -> list[OperationKind]:
 
 def cmd_pitr_operations_status() -> int:
     """Show which operation kinds are blocked and what quarantine holds."""
-    from services.pitr.operation_custody import blocked_operations, quarantine_entries
+    from services.pitr.operation.custody import blocked_operations, quarantine_entries
 
     kinds = _operation_kinds()
     blocked_any = False
@@ -424,8 +424,8 @@ def cmd_pitr_operations_status() -> int:
 
 def cmd_pitr_operations_retire(*, confirm: bool) -> int:
     """Re-prove closure of blocked operations; `--confirm` quarantines the proven ones."""
-    from services.pitr.operation_custody import retire_blocked
-    from shared.platform import LockTimeoutError
+    from base.native_process.os_platform import LockTimeoutError
+    from services.pitr.operation.custody import retire_blocked
 
     refused = found = False
     for kind in _operation_kinds():
@@ -462,10 +462,10 @@ def cmd_pitr_operations_discard_candidate(*, chain: str, confirm: bool) -> int:
     never resumed while activation holds the schedule. `--confirm` removes it;
     it refuses while a base-candidate operation runs or its kind is blocked.
     """
-    from services.pitr.base_candidate import BaseCandidateError, discard_resumable_candidate
+    from base.native_process.os_platform import LockTimeoutError, file_lock
+    from services.pitr.base_backup.candidate import BaseCandidateError, discard_resumable_candidate
     from services.pitr.base_worker import candidate_kind
-    from services.pitr.operation_custody import blocked_operations
-    from shared.platform import LockTimeoutError, file_lock
+    from services.pitr.operation.custody import blocked_operations
 
     root = ava_home() / "physical-backup"
     kind = candidate_kind(root)
@@ -506,8 +506,8 @@ def _resolve_drill_candidate(chain: str | None, candidate: str | None) -> Candid
 
 def cmd_pitr_multipart_list(*, prefix: str, credentials_file: str | None) -> int:
     """List every incomplete multipart upload (orphan shard) under ``prefix``."""
-    from services.pitr.object_store import ObjectStoreError
-    from services.pitr.oss_multipart import OSSMultipartUploads
+    from services.pitr.stores.object_store import ObjectStoreError
+    from services.pitr.stores.oss.multipart import OSSMultipartUploads
 
     try:
         endpoint, bucket, path = _multipart_target(credentials_file)
@@ -533,8 +533,8 @@ def cmd_pitr_multipart_abort(
     *, key: str, upload_id: str, credentials_file: str | None, confirm: bool
 ) -> int:
     """Abort exactly one incomplete multipart upload; --confirm is the switch."""
-    from services.pitr.object_store import ObjectStoreError
-    from services.pitr.oss_multipart import AbortOutcome, OSSMultipartUploads
+    from services.pitr.stores.object_store import ObjectStoreError
+    from services.pitr.stores.oss.multipart import AbortOutcome, OSSMultipartUploads
 
     try:
         endpoint, bucket, path = _multipart_target(credentials_file)

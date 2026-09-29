@@ -20,7 +20,7 @@ from agent.graph.system_prompt import (
     _invest_in_the_future_section,
     build_system_prompt,
 )
-from shared.config import settings
+from base.config import settings
 
 
 @pytest.mark.parametrize(
@@ -355,7 +355,7 @@ def test_every_narrating_style_renders_a_distinct_section() -> None:
     from typing import get_args
 
     from agent.graph.system_prompt import _COMMUNICATION_STYLE_SECTIONS
-    from shared.config.agent import AgentSettings
+    from base.config.agent import AgentSettings
 
     annotation = AgentSettings.model_fields["agent_communication_style"].annotation
     # The field is None-sentinel'd (`Literal[...] | None` — unset resolves the
@@ -429,7 +429,7 @@ def test_user_tone_uses_strong_gemini_variant(monkeypatch: pytest.MonkeyPatch) -
     the registry rather than hardcoded: a model swap (gemini-3.7-flash ->
     gemini-3.8-flash, #1535) must not break this contract test by drifting the
     id out of MODELS."""
-    from shared.lm.registry import MODELS
+    from base.lm.registry import MODELS
 
     gemini_id = next(
         model for model, spec in MODELS.items() if spec.provider == "gemini" and spec.spawnable
@@ -538,7 +538,7 @@ def test_model_knowledge_cutoff_all_entries_valid():
     """Every entry in MODEL_KNOWLEDGE_CUTOFF is a YYYY-MM string."""
     import re
 
-    from shared.lm.factory import MODEL_KNOWLEDGE_CUTOFF
+    from base.lm.factory import MODEL_KNOWLEDGE_CUTOFF
 
     assert len(MODEL_KNOWLEDGE_CUTOFF) > 0
     for model, cutoff in MODEL_KNOWLEDGE_CUTOFF.items():
@@ -547,7 +547,7 @@ def test_model_knowledge_cutoff_all_entries_valid():
 
 def test_supported_models_all_have_cutoff(monkeypatch: pytest.MonkeyPatch):
     """Every model in SUPPORTED_MODELS has an entry in MODEL_KNOWLEDGE_CUTOFF."""
-    from shared.lm.factory import MODEL_KNOWLEDGE_CUTOFF, SUPPORTED_MODELS
+    from base.lm.factory import MODEL_KNOWLEDGE_CUTOFF, SUPPORTED_MODELS
 
     for models in SUPPORTED_MODELS.values():
         for model in models:
@@ -676,8 +676,8 @@ def test_plugin_prompt_section_records_an_activation(monkeypatch: pytest.MonkeyP
     identifiable without storing the text. A section returning "" contributed
     nothing and records nothing."""
     from agent.graph import system_prompt
-    from shared import plugin_activation
-    from shared.plugin_context import PluginContext
+    from base.packages.plugins import activation
+    from base.packages.plugins.context import PluginContext
 
     recorded: list[tuple[str, str, str, str]] = []
 
@@ -685,7 +685,7 @@ def test_plugin_prompt_section_records_an_activation(monkeypatch: pytest.MonkeyP
         if plugin is not None:
             recorded.append((plugin, surface, identifier, detail))
 
-    monkeypatch.setattr(plugin_activation, "record", spy)
+    monkeypatch.setattr(activation, "record", spy)
 
     def loud_section() -> str:
         return "## Loud\n\nsomething."

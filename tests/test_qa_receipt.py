@@ -5,8 +5,8 @@ from typing import Any
 
 import pytest
 
-from scripts import qa_gate
-from scripts.qa_receipt import QA_ACCOUNT_ID, REPOSITORY, TRUNK_ACCOUNT_ID, approved
+from scripts.ci import qa_gate
+from scripts.ci.qa_receipt import QA_ACCOUNT_ID, REPOSITORY, TRUNK_ACCOUNT_ID, approved
 
 
 def _pr() -> dict[str, Any]:

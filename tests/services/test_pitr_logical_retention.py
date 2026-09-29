@@ -19,9 +19,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from services.pitr.logical_dump_names import REMOTE_ROOT, relative_name
-from services.pitr.retention_inventory import InventorySnapshot, RetentionInventoryReader
-from services.pitr.retention_manifest import (
+from services.pitr.retention.manifest import (
     OrphanSidecar,
     RetentionDecision,
     RetentionObject,
@@ -29,8 +27,10 @@ from services.pitr.retention_manifest import (
     RetentionSidecar,
     SidecarPair,
 )
-from services.pitr.retention_planner import build_local_evidence, write_dry_run_plan
-from services.pitr.retention_policy import LogicalRetention, RetentionEvidence, plan_retention
+from services.pitr.retention.planner import build_local_evidence, write_dry_run_plan
+from services.pitr.retention.policy import LogicalRetention, RetentionEvidence, plan_retention
+from services.pitr.stores.logical_dump_names import REMOTE_ROOT, relative_name
+from services.pitr.stores.retention_inventory import InventorySnapshot, RetentionInventoryReader
 from tests.services.test_pitr_retention_policy import (
     SEGMENT,
     _candidate,

@@ -9,9 +9,9 @@ from typing import cast
 
 import pytest
 
+from base.native_process.ownership import OwnedProcess
 from services.healthchecks import permissions_helper as hc
 from services.permissions_helper import client
-from shared.native_process.ownership import OwnedProcess
 
 # Real `launchctl print` excerpts (F5 run-09/10c/11 evidence), shortened. The
 # stuck shape deliberately keeps BOTH the top-level `state = spawn scheduled`
@@ -74,7 +74,7 @@ def _macos_probe(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 class _Recorder:
-    """Stands in for shared.log.logger; records every structured call."""
+    """Stands in for base.log.logger; records every structured call."""
 
     def __init__(self) -> None:
         self.calls: list[dict[str, object]] = []
@@ -91,10 +91,10 @@ class _Recorder:
 
 @pytest.fixture
 def recorder(monkeypatch: pytest.MonkeyPatch) -> _Recorder:
-    import shared.log as shared_log
+    import base.log as base_log
 
     rec = _Recorder()
-    monkeypatch.setattr(shared_log, "logger", rec)
+    monkeypatch.setattr(base_log, "logger", rec)
     return rec
 
 
@@ -142,7 +142,7 @@ def test_ping_uses_short_timeout_and_helper_wire_protocol(
         return pid == 42
 
     socket_path = tmp_path / "helper.sock"
-    monkeypatch.setattr(client, "_connect", connect)
+    monkeypatch.setattr(client, "connect", connect)
     monkeypatch.setattr(hc, "permissions_helper_socket", lambda: socket_path)
     monkeypatch.setattr(hc, "_helper_parent", _fake_helper_parent)
     monkeypatch.setattr(hc, "_parent_still_live", _fake_parent_still_live)
@@ -199,7 +199,7 @@ def test_ping_alive_short_circuits_to_healthy() -> None:
 
 
 def test_reporting_is_episode_gated_without_repair(recorder: _Recorder) -> None:
-    from shared.daemon_health import DaemonProbe
+    from base.daemon.health import DaemonProbe
 
     bad = DaemonProbe.down("lwcr-stuck; needs LWCR update")
     hc.report(bad)
@@ -261,7 +261,7 @@ def test_connected_helper_peer_must_be_root_native_parent(
 
     import psutil
 
-    from shared.root_control import client as root_client
+    from base.native_process.root_control import client as root_client
 
     root = SimpleNamespace(pid=10, live=lambda: True)
     parent = SimpleNamespace(pid=20, live=lambda: True)
@@ -278,6 +278,6 @@ def test_connected_helper_peer_must_be_root_native_parent(
     monkeypatch.setattr(root_client, "root_process", lambda: root)
     monkeypatch.setattr(hc.psutil, "Process", _fake_process)
     monkeypatch.setattr(hc.OwnedProcess, "capture", _fake_capture)
-    monkeypatch.setattr("shared.root_control.client.peer_pid", _fake_peer_pid)
+    monkeypatch.setattr("base.native_process.root_control.client.peer_pid", _fake_peer_pid)
     with pytest.raises(hc._ParentEvidenceError, match="not the captured root parent"):
         hc._helper_parent(cast(socket.socket, object()))

@@ -19,9 +19,9 @@ echo "=== Spawning sample agents ($REPO_ROOT) ==="
 import time
 from pathlib import Path
 
-from shared.http_dial import get as dial_get
-from shared.http_dial import post as dial_post
-from shared.machine import gateway_api_base, gateway_auth_headers
+from base.host.net.http_dial import get as dial_get
+from base.host.net.http_dial import post as dial_post
+from base.cluster.machine import gateway_api_base, gateway_auth_headers
 
 base = gateway_api_base()
 headers = gateway_auth_headers()

@@ -15,8 +15,8 @@ from pathlib import Path
 
 import pytest
 
-from ops import agent_pause_probe
-from shared.config import settings
+from base.config import settings
+from ops.agent_pause import probe
 
 
 def _pidfile(tmp_path: Path, pid: int) -> Path:
@@ -31,13 +31,13 @@ def _stub_backend(monkeypatch: pytest.MonkeyPatch, *, has_session: bool) -> None
             del name
             return has_session
 
-    monkeypatch.setattr("shared.session_backend.get_backend", _Backend)
+    monkeypatch.setattr("base.sessions.backend.get_backend", _Backend)
 
 
 def _stub_root_client(
     monkeypatch: pytest.MonkeyPatch, *, response: object = None, unreachable: bool = False
 ) -> None:
-    from shared.root_control.client import RootClientError
+    from base.native_process.root_control.client import RootClientError
 
     class _Client:
         def __init__(self, socket_path: Path, *, timeout: float = 1.0) -> None:
@@ -48,7 +48,7 @@ def _stub_root_client(
                 raise RootClientError("no root answers")
             return response
 
-    monkeypatch.setattr("shared.root_control.client.RootClient", _Client)
+    monkeypatch.setattr("base.native_process.root_control.client.RootClient", _Client)
 
 
 def _root_response(*, state: str, pid: int, unit_id: str = "agent-host") -> dict[str, object]:
@@ -57,7 +57,7 @@ def _root_response(*, state: str, pid: int, unit_id: str = "agent-host") -> dict
 
 def test_host_running_true_when_session_recorded(monkeypatch: pytest.MonkeyPatch) -> None:
     _stub_backend(monkeypatch, has_session=True)
-    assert agent_pause_probe.host_running() is True
+    assert probe.host_running() is True
 
 
 def test_host_running_true_for_root_supervised_pidfile(
@@ -67,7 +67,7 @@ def test_host_running_true_for_root_supervised_pidfile(
     monkeypatch.setattr(settings.services, "agent_host_pidfile", _pidfile(tmp_path, pid))
     _stub_backend(monkeypatch, has_session=False)
     _stub_root_client(monkeypatch, response=_root_response(state="running", pid=pid))
-    assert agent_pause_probe.host_running() is True
+    assert probe.host_running() is True
 
 
 def test_host_running_rejects_live_pid_when_root_unreachable(
@@ -77,7 +77,7 @@ def test_host_running_rejects_live_pid_when_root_unreachable(
     _stub_backend(monkeypatch, has_session=False)
     _stub_root_client(monkeypatch, unreachable=True)
     with pytest.raises(RuntimeError, match="without its owned service session"):
-        agent_pause_probe.host_running()
+        probe.host_running()
 
 
 def test_host_running_rejects_live_pid_when_root_does_not_own_it(
@@ -88,7 +88,7 @@ def test_host_running_rejects_live_pid_when_root_does_not_own_it(
     _stub_backend(monkeypatch, has_session=False)
     _stub_root_client(monkeypatch, response=_root_response(state="running", pid=pid + 1))
     with pytest.raises(RuntimeError, match="without its owned service session"):
-        agent_pause_probe.host_running()
+        probe.host_running()
 
 
 def test_host_running_rejects_live_pid_when_root_unit_is_down(
@@ -99,7 +99,7 @@ def test_host_running_rejects_live_pid_when_root_unit_is_down(
     _stub_backend(monkeypatch, has_session=False)
     _stub_root_client(monkeypatch, response=_root_response(state="stopped", pid=pid))
     with pytest.raises(RuntimeError, match="without its owned service session"):
-        agent_pause_probe.host_running()
+        probe.host_running()
 
 
 def test_host_running_retries_the_scan_once_past_a_leaked_permission_error(
@@ -111,7 +111,7 @@ def test_host_running_retries_the_scan_once_past_a_leaked_permission_error(
     real answer still lands (the 2026-09-18 flake)."""
     _stub_backend(monkeypatch, has_session=False)
     monkeypatch.setattr(settings.services, "agent_host_pidfile", tmp_path / "absent.pid")
-    monkeypatch.setattr(agent_pause_probe, "ava_home", lambda: tmp_path)
+    monkeypatch.setattr(probe, "ava_home", lambda: tmp_path)
     calls: list[int] = []
 
     class _UnrecordedHost:
@@ -130,7 +130,7 @@ def test_host_running_retries_the_scan_once_past_a_leaked_permission_error(
 
     monkeypatch.setattr("psutil.process_iter", process_iter)
     with pytest.raises(RuntimeError, match="still running without its service record"):
-        agent_pause_probe.host_running()
+        probe.host_running()
     assert len(calls) == 2
 
 
@@ -142,7 +142,7 @@ def test_host_running_stays_loud_when_the_process_scan_is_unreadable(
     declaring the host absent."""
     _stub_backend(monkeypatch, has_session=False)
     monkeypatch.setattr(settings.services, "agent_host_pidfile", tmp_path / "absent.pid")
-    monkeypatch.setattr(agent_pause_probe, "ava_home", lambda: tmp_path)
+    monkeypatch.setattr(probe, "ava_home", lambda: tmp_path)
     calls: list[int] = []
 
     def process_iter(attrs: list[str]) -> Iterator[object]:
@@ -152,7 +152,7 @@ def test_host_running_stays_loud_when_the_process_scan_is_unreadable(
 
     monkeypatch.setattr("psutil.process_iter", process_iter)
     with pytest.raises(RuntimeError, match="cannot verify whether an unrecorded agent-host"):
-        agent_pause_probe.host_running()
+        probe.host_running()
     assert len(calls) == 2
 
 
@@ -195,10 +195,10 @@ def _stub_ops_wait(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, calls: li
         "pid": os.getpid(),
         "maintenance": {"protocol": 1, "requests": 0, "workers": 0},
     }
-    monkeypatch.setattr(agent_pause_probe, "ava_home", lambda: tmp_path)
+    monkeypatch.setattr(probe, "ava_home", lambda: tmp_path)
     monkeypatch.setattr(settings.services, "ops_pidfile", pidfile)
     monkeypatch.setattr(
-        agent_pause_probe,
+        probe,
         "build_opener",
         lambda *_args, **_kwargs: _HealthzOpener(calls, payload),  # pyright: ignore[reportUnknownArgumentType]
     )
@@ -212,7 +212,7 @@ def test_ops_quiescent_skips_without_session_and_root_unit(
     _stub_root_client(monkeypatch, response={"ok": True, "result": {"units": []}})
     calls: list[str] = []
     _stub_ops_wait(monkeypatch, tmp_path, calls=calls)
-    agent_pause_probe.ops_quiescent(0.5)
+    probe.ops_quiescent(0.5)
     assert calls == []
 
 
@@ -225,7 +225,7 @@ def test_ops_quiescent_skips_when_root_unit_is_down(
     )
     calls: list[str] = []
     _stub_ops_wait(monkeypatch, tmp_path, calls=calls)
-    agent_pause_probe.ops_quiescent(0.5)
+    probe.ops_quiescent(0.5)
     assert calls == []
 
 
@@ -236,7 +236,7 @@ def test_ops_quiescent_skips_when_root_unreachable(
     _stub_root_client(monkeypatch, unreachable=True)
     calls: list[str] = []
     _stub_ops_wait(monkeypatch, tmp_path, calls=calls)
-    agent_pause_probe.ops_quiescent(0.5)
+    probe.ops_quiescent(0.5)
     assert calls == []
 
 
@@ -250,7 +250,7 @@ def test_ops_quiescent_waits_when_the_root_runs_ops(
     )
     calls: list[str] = []
     _stub_ops_wait(monkeypatch, tmp_path, calls=calls)
-    agent_pause_probe.ops_quiescent(1.0)
+    probe.ops_quiescent(1.0)
     assert len(calls) == 1
     assert calls[0].endswith("/healthz")
 
@@ -264,8 +264,8 @@ def test_ops_quiescent_session_gate_does_not_consult_the_tree(
     def _explode(*_args: object, **_kwargs: object) -> object:
         raise AssertionError("root consulted although the session records ops")
 
-    monkeypatch.setattr("shared.root_control.client.RootClient", _explode)
+    monkeypatch.setattr("base.native_process.root_control.client.RootClient", _explode)
     calls: list[str] = []
     _stub_ops_wait(monkeypatch, tmp_path, calls=calls)
-    agent_pause_probe.ops_quiescent(1.0)
+    probe.ops_quiescent(1.0)
     assert len(calls) == 1

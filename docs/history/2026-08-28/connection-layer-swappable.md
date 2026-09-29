@@ -49,7 +49,7 @@ misfires on the pre-install or admin-socket paths.
 | watchdog roster (gateway) | `redis-acl` + `pgbouncer` repairs | both skipped (no local ACL user / pooler to repair) |
 | credential split (`_data_plane_admin_secrets`) | journaled local transition | no-op (provider owns credentials) |
 | runner-grant refresh after migration | local `GRANT` refresh | skipped with a note (provider provisions roles) |
-| `scripts/rotate_data_plane_secrets.py` | local ALTER ROLE / ACL / pooler userlist | fail fast: rotate at the provider, update the URLs here |
+| `scripts/data_plane_ops/rotate_data_plane_secrets.py` | local ALTER ROLE / ACL / pooler userlist | fail fast: rotate at the provider, update the URLs here |
 | `ava cluster ensure-db-role` | local role provisioning | fail fast: provisioned at the provider |
 | converge pooler step (`_ensure_pgbouncer_step`) | rewrites AVA_DB_URL port to the pooler listener | skipped: the URL's port is the provider's, never this cluster's |
 
@@ -108,7 +108,7 @@ which one does not.
 - `cli/commands/start.py`: `_ensure_gateway_data_plane` remote branch (probe,
   skip bring-up, fail fast); runner-grant refresh skip.
 - `cli/commands/_data_plane_admin_secrets.py`, `_pgbouncer.py`,
-  `ensure_db_role.py`, `scripts/rotate_data_plane_secrets.py`,
+  `ensure_db_role.py`, `scripts/data_plane_ops/rotate_data_plane_secrets.py`,
   `services/watchdog/daemon.py`: remote guards per the table above.
 
 ## Alternatives rejected

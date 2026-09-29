@@ -14,9 +14,9 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
+from base.agents import AgentStatus
+from base.cluster.machine import machine_name
 from gateway.app import app
-from shared.agents import AgentStatus
-from shared.machine import machine_name
 
 
 def _seed_agent(db_conn: psycopg.Connection, status: str = "idling") -> int:
@@ -86,7 +86,7 @@ def test_compact_passes_inserted_id_and_kind_to_guarded_resurrect(
 ) -> None:
     """The durable compact row itself is the final CAS evidence; the route
     cannot call the unguarded explicit resurrection path."""
-    import gateway.routers.agents_lifecycle as lifecycle
+    from gateway.agents import lifecycle
 
     tid = _seed_agent(db_conn)
     calls: list[tuple[int, int | None, str | None]] = []

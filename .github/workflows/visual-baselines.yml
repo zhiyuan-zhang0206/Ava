@@ -105,7 +105,7 @@ jobs:
         id: check
         run: |
           set +e
-          uv run python scripts/refresh_visual_baselines.py --check-only
+          uv run python scripts/post_deploy_visual/refresh_visual_baselines.py --check-only
           EXIT_CODE="$?"
           set -e
           echo "exit_code=$EXIT_CODE" >> "$GITHUB_OUTPUT"
@@ -117,7 +117,7 @@ jobs:
         if: >-
           github.event_name == 'workflow_dispatch' ||
           steps.check.outputs.exit_code == '10'
-        run: uv run python scripts/refresh_visual_baselines.py --regenerate
+        run: uv run python scripts/post_deploy_visual/refresh_visual_baselines.py --regenerate
 
       - name: Check preview-gate goldens
         if: github.event_name == 'push'

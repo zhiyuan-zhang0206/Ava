@@ -3,25 +3,28 @@ on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
     paths:
-      - 'agent/db.py'
-      - 'agent/hosted_ownership.py'
+      - 'agent/db/__init__.py'
+      - 'agent/ownership/hosted.py'
       - 'agent/graph/_chat_inbound.py'
       - 'services/agent_host/**'
-      - 'gateway/mcp_endpoint.py'
-      - 'gateway/routers/delivery.py'
-      - 'gateway/routers/agents*.py'
+      - 'gateway/mcp_server/endpoint.py'
+      - 'gateway/agents/delivery.py'
+      - 'gateway/agents/router.py'
+      - 'gateway/agents/forward.py'
+      - 'gateway/agents/lifecycle.py'
+      - 'gateway/agents/state.py'
       - 'cli/commands/agents/control.py'
-      - 'ops/rpc_schemas.py'
-      - 'shared/audit_events.py'
-      - 'shared/caller*.py'
-      - 'shared/agents/messages/chat_delivery.py'
-      - 'shared/db.py'
-      - 'shared/agents/messages/envelope.py'
-      - 'shared/runtime_incarnation.py'
-      - 'shared/turn_identity.py'
+      - 'ops/rpc_schemas/__init__.py'
+      - 'base/telemetry/audit_events.py'
+      - 'base/caller*.py'
+      - 'base/agents/messages/chat_delivery.py'
+      - 'base/db/__init__.py'
+      - 'base/agents/messages/envelope.py'
+      - 'base/native_process/runtime_incarnation.py'
+      - 'base/native_process/turn_identity.py'
       - 'tests/gateway/test_*caller*.py'
       - 'tests/gateway/test_mcp_endpoint.py'
-      - 'tests/shared/test_caller_persistence.py'
+      - 'tests/base/test_caller_persistence.py'
       - 'tests/agent/test_hosted_ownership.py'
       - 'tests/conftest.py'
       - 'tests/_*.py'
@@ -55,7 +58,7 @@ jobs:
         run: |
           mkdir -p proof
           git rev-parse HEAD > proof/head-sha.txt
-          timeout 180 uv run pytest tests/gateway/test_caller_protocol_path.py tests/gateway/test_mcp_caller_protocol.py tests/gateway/test_caller_write_fence.py tests/shared/test_caller_persistence.py tests/agent/test_hosted_ownership.py -q --junitxml=proof/caller-path.xml
+          timeout 180 uv run pytest tests/gateway/test_caller_protocol_path.py tests/gateway/test_mcp_caller_protocol.py tests/gateway/test_caller_write_fence.py tests/base/test_caller_persistence.py tests/agent/test_hosted_ownership.py -q --junitxml=proof/caller-path.xml
       - if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:

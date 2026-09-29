@@ -135,7 +135,7 @@ def _record_finding(
     inject into — a buffered finding could never be attributed to the right
     turn, which is exactly the side-channel flaw this in-memory design
     removes)."""
-    from shared.config import settings
+    from base.config import settings
 
     if not settings.agent.security_scan_enabled:
         return

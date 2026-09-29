@@ -15,7 +15,7 @@ import { useUiContributions } from "./ui-contributions";
 
 /** The console surfaces a nav entry may claim.
  *
- * The closed set `shared/plugin_ui_contributions.py:NAV_LOCATIONS` validates
+ * The closed set `base/packages/plugins/ui_contributions.py:NAV_LOCATIONS` validates
  * against, mirrored here as a value so the two halves can be asserted equal
  * (`plugin-nav-icon.test.ts`): a location the validator accepts but no surface
  * renders would drop a plugin's entry with nothing to see. */

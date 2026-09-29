@@ -23,10 +23,10 @@ import psycopg
 import pytest
 from pydantic import ValidationError
 
+from base.config.daemon import DaemonSettings
+from base.telemetry.loki_index_labels import INDEX_LABEL_CUTOVER_AT, LokiReadEra, LokiReadSlice
 from services.events_maintenance import rollup
 from services.events_maintenance.rollup import MetricsRow, RollupResult, TokensRow, compute_rollup
-from shared.config.daemon import DaemonSettings
-from shared.loki_index_labels import INDEX_LABEL_CUTOVER_AT, LokiReadEra, LokiReadSlice
 
 # A fixed "now" so today = 2026-06-10 (UTC); retained days are 06-08..06-09.
 # Noon so the test does not ride on a midnight edge. The retention floor at

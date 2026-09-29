@@ -1,6 +1,6 @@
 """Write-generation records of a release journal: one fence and one issue per direction.
 
-The home's ledger (`shared.cluster.authority`) is the authority; these records
+The home's ledger (`base.cluster.authority`) is the authority; these records
 are the operation's intent and its non-secret receipts, ordered around the
 ledger's own transitions. A fence names the generation it revokes before any
 revocation, and records the closure census once closed. An issue names the
@@ -16,8 +16,8 @@ from typing import Literal, Self
 
 from pydantic import Field, model_validator
 
+from base.cluster.authority.model import Direction, Generation, RoleName
 from cli.release_transition.request import Digest, Record
-from shared.cluster.authority.model import Direction, Generation, RoleName
 
 _DIRECTIONS: tuple[Direction, ...] = ("candidate", "previous")
 # Release phases, in order, at which a direction's closed fence (and, from

@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from scripts import refresh_visual_baselines as refresh
+from scripts.post_deploy_visual import refresh_visual_baselines as refresh
 
 RunResult = subprocess.CompletedProcess[str]
 

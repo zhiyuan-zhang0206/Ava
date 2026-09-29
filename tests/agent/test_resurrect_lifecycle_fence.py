@@ -18,16 +18,16 @@ import pytest
 from psycopg_pool import AsyncConnectionPool, ConnectionPool
 
 from agent.db import claim_inbound_batch
-from agent.hosted_ownership import admit_hosted_runtime, apply_hosted_lifecycle
+from agent.ownership.hosted import admit_hosted_runtime, apply_hosted_lifecycle
 from agent.ownership.lifecycle_intent import accept_lifecycle_intent
-from ops.agent_wake import resurrect_agent
-from ops.ops_exit import _force_terminate_transaction
-from ops.resurrection_retry import ResurrectSettlementDeferredError
-from shared.config import settings
-from shared.db import PG_KEEPALIVE_KWARGS, create_agent
-from shared.db_transaction import async_write_transaction
-from shared.runtime_incarnation import RuntimeIncarnation
-from shared.turn_identity import bind_turn_identity
+from base.config import settings
+from base.db import PG_KEEPALIVE_KWARGS, create_agent
+from base.db.transaction import async_write_transaction
+from base.native_process.runtime_incarnation import RuntimeIncarnation
+from base.native_process.turn_identity import bind_turn_identity
+from ops.agents.resurrection_retry import ResurrectSettlementDeferredError
+from ops.agents.wake import resurrect_agent
+from ops.lifecycle.termination import _force_terminate_transaction
 
 
 def _agent(conn: psycopg.Connection) -> int:
@@ -209,7 +209,7 @@ async def test_force_on_unadmitted_row_cannot_create_a_hosted_successor(
     db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
 ) -> None:
     """A force on an unknown historical runtime cannot authorize its adoption."""
-    from shared.agents import ResurrectRefused
+    from base.agents import ResurrectRefused
 
     agent_id = _agent(db_conn)
     with ConnectionPool[psycopg.Connection](

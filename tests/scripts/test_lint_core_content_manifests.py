@@ -1,4 +1,4 @@
-"""scripts/lint_core_content_manifests.py — the core-content manifest gate.
+"""scripts/content_lint/lint_core_content_manifests.py — the core-content manifest gate.
 
 Hard checks (red): a core manifest that fails validation, whose `engines.ava`
 excludes the repo's derived host version, or whose `requires_commit` is not an
@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from scripts import lint_core_content_manifests as lint
+from scripts.content_lint import lint_core_content_manifests as lint
 
 _COMMIT_DATE = "2026-01-02T12:00:00+00:00"
 
@@ -73,7 +73,7 @@ def _write(repo: Path, rel: str, payload: dict[str, object]) -> None:
 
 
 def test_derived_version_resolves_from_fixture_commit(repo: Path) -> None:
-    from shared import host_version
+    from base.deploy.git import host_version
 
     assert host_version.host_version(repo) == "2026.1.2"
 

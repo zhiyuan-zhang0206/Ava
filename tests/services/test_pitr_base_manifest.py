@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from services.pitr.base_manifest import BaseObject, CandidateManifest, WalRange
+from services.pitr.base_backup.manifest import BaseObject, CandidateManifest, WalRange
 
 
 def _manifest() -> CandidateManifest:

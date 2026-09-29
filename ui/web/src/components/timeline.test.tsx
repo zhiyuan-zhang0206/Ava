@@ -4414,7 +4414,7 @@ describe("detail-block duration display (Last mode)", () => {
 });
 
 describe("Marker contract: every dispatch-set source renders without the red alarm", () => {
-  // The backend NoteTag enum (shared/message_kwargs.py) is asserted to be a
+  // The backend NoteTag enum (base/agents/messages/kwargs.py) is asserted to be a
   // subset of these dispatch sets by tests/test_lint_marker_contract.py (CI
   // backend job). This test closes the loop on the frontend side: every
   // member of each exported set actually renders as its intended chip and

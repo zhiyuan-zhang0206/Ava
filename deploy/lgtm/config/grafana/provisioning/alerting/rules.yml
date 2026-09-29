@@ -46,7 +46,7 @@
 # operator's SRE loop".
 #
 # Index-label selectors (task #1467): since the 2026-08-23 cutover
-# (shared/loki_index_labels.py, INDEX_LABEL_CUTOVER_AT) the collector promotes
+# (base/telemetry/loki_index_labels.py, INDEX_LABEL_CUTOVER_AT) the collector promotes
 # event_name/agent_id to stream labels, so event-scoped rules match them
 # inside the stream selector (`{service_name="unknown_service", event_name=...}`)
 # and keep `| json` only for the level/category/attributes filters (those
@@ -2777,9 +2777,9 @@ groups:
       # so it stays true for 15m after the last failure and then resolves. One
       # episode = one firing IM + one resolved IM, the same dedup semantics the
       # siblings get from their `for` window (alerts are deduped on
-      # fingerprint x starts_at by shared/alerts.py, not on `for`).
+      # fingerprint x starts_at by base/telemetry/alerts.py, not on `for`).
       #
-      # `billing` is emitted by shared/lm/errors.py from its cross-provider
+      # `billing` is emitted by base/lm/errors.py from its cross-provider
       # predicate (HTTP 402, plus a
       # per-vendor vocabulary matched against the response body's error.type AND
       # error.code — DashScope reports the specific reason only in the latter) —
@@ -2866,7 +2866,7 @@ groups:
                     params: [C]
 
       # ── R17: Gateway latency by route — fast routes only. The exclusion
-      #        source is gateway/_latency.py. p95 bucket > 3s for 5m =
+      #        source is gateway/middleware/latency.py. p95 bucket > 3s for 5m =
       #        warning; > 10s for 5m = error. Calibrated 2026-08-23 on 7d
       #        data: fast-route max p95 sits under ~5.5s with typical
       #        sub-second values; 3s/10s two-tier follows the PM slow-request

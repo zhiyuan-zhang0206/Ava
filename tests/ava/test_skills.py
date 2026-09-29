@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 
 import ava.skills as skills_mod
+from base.packages.extensions import install_registry
 
 
 @pytest.fixture(autouse=True)
@@ -27,15 +28,14 @@ def _overlay_all_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
     overlay as a tracked+enabled skill, so the parse/merge tests below stay
     focused on scanning rather than the install-registry reservation.
 
-    The reservation behavior gets its own tests that re-patch
-    `loadable_skill_names` to a controlled set (a per-test setattr overrides
-    this autouse one)."""
+    The reservation behavior gets its own tests that re-patch `loadable_skill_names` to a
+    controlled set (a per-test setattr overrides this autouse one)."""
 
     def _all_enabled() -> set[str]:
         d = skills_mod._skills_dir()
         return {p.name for p in d.iterdir() if p.is_dir()} if d.is_dir() else set()
 
-    monkeypatch.setattr("shared.install_registry.loadable_skill_names", _all_enabled)
+    monkeypatch.setattr(install_registry, "loadable_skill_names", _all_enabled)
 
 
 @pytest.fixture
@@ -112,7 +112,7 @@ def test_names_sorted_by_attr(fake_skills_dir: Path) -> None:
 
 def test_names_returns_full_description_untruncated(fake_skills_dir: Path) -> None:
     """names() returns the description verbatim — length is governed at the
-    source by scripts/lint_skill_descriptions.py, not truncated at read time."""
+    source by scripts/content_lint/lint_skill_descriptions.py, not truncated at read time."""
     long_desc = "x" * 500
     _write_skill(fake_skills_dir, "long", f"name: long\ndescription: {long_desc}")
     out = skills_mod.names()
@@ -297,7 +297,7 @@ def test_untracked_skill_not_surfaced(
 ) -> None:
     """A skill dir in the load dir that the registry doesn't track is skipped."""
     _write_skill(fake_skills_dir, "ext", "name: ext\ndescription: external")
-    monkeypatch.setattr("shared.install_registry.loadable_skill_names", set)
+    monkeypatch.setattr(install_registry, "loadable_skill_names", set)
     assert skills_mod.names() == []
 
 
@@ -306,7 +306,7 @@ def test_disabled_skill_not_surfaced(
 ) -> None:
     """A tracked-but-disabled skill (not in the enabled set) is skipped."""
     _write_skill(fake_skills_dir, "ext", "name: ext\ndescription: external")
-    monkeypatch.setattr("shared.install_registry.loadable_skill_names", lambda: {"other"})
+    monkeypatch.setattr(install_registry, "loadable_skill_names", lambda: {"other"})
     assert skills_mod.names() == []
 
 
@@ -315,7 +315,7 @@ def test_tracked_enabled_skill_surfaced(
 ) -> None:
     """A tracked+enabled skill is surfaced."""
     _write_skill(fake_skills_dir, "ext", "name: ext\ndescription: external")
-    monkeypatch.setattr("shared.install_registry.loadable_skill_names", lambda: {"ext"})
+    monkeypatch.setattr(install_registry, "loadable_skill_names", lambda: {"ext"})
     assert [s["name"] for s in skills_mod.names()] == ["ext"]
 
 
@@ -328,9 +328,9 @@ def test_gate_applies_to_namespace_top_level(
     _write_skill(
         fake_skills_dir / "superpowers", "brainstorming", "name: brainstorming\ndescription: bs"
     )
-    monkeypatch.setattr("shared.install_registry.loadable_skill_names", lambda: {"superpowers"})
+    monkeypatch.setattr(install_registry, "loadable_skill_names", lambda: {"superpowers"})
     assert [s["name"] for s in skills_mod.names()] == ["brainstorming"]
-    monkeypatch.setattr("shared.install_registry.loadable_skill_names", set)
+    monkeypatch.setattr(install_registry, "loadable_skill_names", set)
     assert skills_mod.names() == []
 
 
@@ -874,7 +874,7 @@ def test_auto_promote_help_renders_root_skill(
 #
 # Dash is canonical on disk and in `identifier`; underscore is the Python
 # projection rendered by `target` and used for attribute access. Everything in
-# between folds through `shared.packages.skills.skill_names.match_key`.
+# between folds through `base.packages.skills.names.match_key`.
 
 
 def test_dash_dir_renders_dash_identifier_and_underscore_target(fake_skills_dir: Path) -> None:
@@ -919,7 +919,7 @@ def test_registry_gate_matches_across_the_dash_underscore_fold(
     every skill would silently vanish between the code upgrade and the next
     converge."""
     _write_skill(fake_skills_dir, "ava-goal", "name: ava-goal\ndescription: d")
-    monkeypatch.setattr("shared.install_registry.loadable_skill_names", lambda: {"ava-goal"})
+    monkeypatch.setattr(install_registry, "loadable_skill_names", lambda: {"ava-goal"})
     assert [skills_mod.identifier(s) for s in skills_mod.names()] == ["ava-goal"]
 
 
@@ -928,7 +928,7 @@ def test_registry_gate_still_hides_an_unlisted_skill(
 ) -> None:
     """The normalized gate must not turn into a pass-through."""
     _write_skill(fake_skills_dir, "ava-goal", "name: ava-goal\ndescription: d")
-    monkeypatch.setattr("shared.install_registry.loadable_skill_names", lambda: {"something-else"})
+    monkeypatch.setattr(install_registry, "loadable_skill_names", lambda: {"something-else"})
     assert skills_mod.names() == []
 
 
@@ -960,7 +960,7 @@ def test_two_skills_claiming_one_frontmatter_name_are_refused(fake_skills_dir: P
     identity check fires first."""
     _write_skill(fake_skills_dir, "first", "name: first\ndescription: a")
     _write_skill(fake_skills_dir, "second", "name: first\ndescription: b")
-    from shared.packages.skills.skill_names import SkillIdentityMismatch
+    from base.packages.skills.names import SkillIdentityMismatch
 
     with pytest.raises(SkillIdentityMismatch):
         skills_mod.names()
@@ -1397,7 +1397,7 @@ def test_a_swallowed_db_error_reports_failure(
     def _boom(*_a: object, **_k: object) -> None:
         raise RuntimeError("emitter broken")
 
-    monkeypatch.setattr("shared.audit_events.insert_event_log_many", _boom)
+    monkeypatch.setattr("base.telemetry.audit_events.insert_event_log_many", _boom)
     (skill,) = skills_mod.names()
     assert skills_mod._insert_skill_events(1, [skill]) is False
 
@@ -1416,7 +1416,7 @@ def test_insert_skill_events_writes_only_the_loaded_depth(
     def _capture(*, payloads: list[dict[str, str]], **_: object) -> None:
         captured.extend(payloads)
 
-    monkeypatch.setattr("shared.audit_events.insert_event_log_many", _capture)
+    monkeypatch.setattr("base.telemetry.audit_events.insert_event_log_many", _capture)
     (skill,) = skills_mod.names()
     assert skills_mod._insert_skill_events(1, [skill]) is True
     assert captured == [{"skill": "alpha", "identifier": "alpha", "invocation_depth": "loaded"}]
@@ -1435,7 +1435,7 @@ def test_index_gate_folds_dash_underscore(
     SKILL.md; the merged traversal must not keep that drift."""
     (fake_skills_dir / "foo_bar").mkdir()
     (fake_skills_dir / "foo_bar" / "INDEX.md").write_text("namespace doc", encoding="utf-8")
-    monkeypatch.setattr("shared.install_registry.loadable_skill_names", lambda: {"foo-bar"})
+    monkeypatch.setattr(install_registry, "loadable_skill_names", lambda: {"foo-bar"})
     assert skills_mod.foo_bar.__doc__ == "namespace doc"
 
 
@@ -1446,7 +1446,7 @@ def test_index_gate_still_hides_unlisted_dirs(
     directory's INDEX.md sets no doc."""
     _write_skill(fake_skills_dir, "foo_bar", "name: foo-bar\ndescription: s")
     (fake_skills_dir / "foo_bar" / "INDEX.md").write_text("namespace doc", encoding="utf-8")
-    monkeypatch.setattr("shared.install_registry.loadable_skill_names", lambda: {"something-else"})
+    monkeypatch.setattr(install_registry, "loadable_skill_names", lambda: {"something-else"})
     assert skills_mod.names() == []
 
 
@@ -1483,8 +1483,8 @@ def test_frontmatter_name_not_folding_to_dir_is_refused(
     under a name that was not its own; the loader refuses it now (same
     family as SkillNameCollision)."""
     _write_skill(fake_skills_dir, "wechat-ocr", "name: wechat\ndescription: read wechat")
-    monkeypatch.setattr("shared.install_registry.loadable_skill_names", lambda: {"wechat-ocr"})
-    from shared.packages.skills.skill_names import SkillIdentityMismatch
+    monkeypatch.setattr(install_registry, "loadable_skill_names", lambda: {"wechat-ocr"})
+    from base.packages.skills.names import SkillIdentityMismatch
 
     with pytest.raises(SkillIdentityMismatch):
         skills_mod.names()
@@ -1498,6 +1498,6 @@ def test_namespaced_subskill_folds_against_its_leaf_dir(
     `name: console` is consistent."""
     (fake_skills_dir / "web_ai").mkdir()
     _write_skill(fake_skills_dir / "web_ai", "console", "name: console\ndescription: d")
-    monkeypatch.setattr("shared.install_registry.loadable_skill_names", lambda: {"web_ai"})
+    monkeypatch.setattr(install_registry, "loadable_skill_names", lambda: {"web_ai"})
     (skill,) = skills_mod.names()
     assert skills_mod.identifier(skill) == "web-ai:console"

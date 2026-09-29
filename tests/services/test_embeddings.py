@@ -30,6 +30,9 @@ import httpx
 import numpy as np
 import pytest
 
+from base.config import settings
+from base.host.net.resilience import ExponentialBackoff, Policy
+from base.lm.plugin_providers import ensure_provider_plugins_loaded
 from services.memory_indexer.embeddings import factory, gemini
 from services.memory_indexer.embeddings.base import EmbeddingAPIError
 from services.memory_indexer.embeddings.gemini import (
@@ -40,9 +43,6 @@ from services.memory_indexer.embeddings.gemini import (
     DIM,
     GeminiEmbeddingProvider,
 )
-from shared.config import settings
-from shared.lm.plugin_providers import ensure_provider_plugins_loaded
-from shared.resilience import ExponentialBackoff, Policy
 
 
 def _provider() -> GeminiEmbeddingProvider:
@@ -138,11 +138,11 @@ class _RecordingTracer:
 
 
 def _enable_tracing(monkeypatch: pytest.MonkeyPatch) -> _RecordingTracer:
-    from shared import trace as trace_mod
+    from base.telemetry import tracing as tracing_mod
 
     tracer = _RecordingTracer()
-    monkeypatch.setattr("shared.config.settings.observability.trace_enabled", True)
-    monkeypatch.setitem(trace_mod._state, "initialized", True)
+    monkeypatch.setattr("base.config.settings.observability.trace_enabled", True)
+    monkeypatch.setitem(tracing_mod._state, "initialized", True)
     monkeypatch.setattr("opentelemetry.trace.get_tracer", lambda _name: tracer)  # pyright: ignore[reportUnknownArgumentType]
     return tracer
 
@@ -153,7 +153,7 @@ def _embedding_cost(tok_in: int) -> float:
     Text input $0.20/1M tokens; embeddings have no output and no cache, so
     the billed cost is tok_in × 0.20 / 1M, rounded the way emit_billing_event
     rounds it (6 decimals)."""
-    from shared.lm.pricing import quote
+    from base.lm.pricing import quote
 
     priced = quote(_MODEL_ID, tok_in, 0, 0)
     assert priced is not None  # gemini-embedding-2 is registered in the catalog
@@ -217,25 +217,25 @@ def _dummy_gemini_key(monkeypatch: pytest.MonkeyPatch) -> None:
     """
     from pydantic import SecretStr
 
-    from shared.config import settings
+    from base.config import settings
 
     monkeypatch.setattr(settings.lm, "gemini_api_key", SecretStr("test-gemini-key"))
 
 
 @pytest.fixture(autouse=True)
 def _no_retry_sleep(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Neutralize shared.resilience backoff sleeps so retry-path tests do
+    """Neutralize base.host.net.resilience backoff sleeps so retry-path tests do
     not hang; the retry loop itself is still exercised (call counts). The
     provider's policy is a module constant (R2-D), no longer settings-driven.
     `_asleep` must be a REAL coroutine function: `aretry` awaits it, so a sync
     lambda turns every async retry into `TypeError: object NoneType can't be
     used in 'await' expression`."""
-    monkeypatch.setattr("shared.resilience._sleep", lambda _s: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("base.host.net.resilience._sleep", lambda _s: None)  # pyright: ignore[reportUnknownArgumentType]
 
     async def _no_asleep(_s: float) -> None:
         return None
 
-    monkeypatch.setattr("shared.resilience._asleep", _no_asleep)
+    monkeypatch.setattr("base.host.net.resilience._asleep", _no_asleep)
 
 
 # ── provider surface (the contract) ───────────────────────────────────────
@@ -414,7 +414,7 @@ def test_embed_survives_billing_emit_failure(monkeypatch: pytest.MonkeyPatch) ->
     def _boom(**kwargs: object) -> None:
         raise RuntimeError("billing exploded")
 
-    monkeypatch.setattr("shared.lm.billing.emit_billing_event", _boom)
+    monkeypatch.setattr("base.lm.billing.emit_billing_event", _boom)
 
     result = _provider().embed_batch(["hello"])
 
@@ -470,7 +470,7 @@ def test_embed_4xx_fails_immediately(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_embed_timeout_from_settings(monkeypatch: pytest.MonkeyPatch) -> None:
     """The per-request timeout comes from config (AVA_EMBED_TIMEOUT_SECONDS,
     task #698 G8); the retry policy is a module constant (R2-D)."""
-    from shared.config import settings
+    from base.config import settings
 
     monkeypatch.setattr(settings.services, "memory_embed_timeout_seconds", 12.5)
     fake = _AsyncClient(vectors=[[1.0] * DIM], raises_times=1)
@@ -489,7 +489,7 @@ def test_embed_no_api_key_raises(monkeypatch: pytest.MonkeyPatch) -> None:
     Overrides the autouse dummy key back to None so this branch stays a
     tested behavior even though every other provider test injects a key.
     """
-    from shared.config import settings
+    from base.config import settings
 
     monkeypatch.setattr(settings.lm, "gemini_api_key", None)
     # No key must mean no network attempt — this makes that observable.
@@ -569,8 +569,8 @@ def test_worst_case_single_attempt_has_no_sleep(monkeypatch: pytest.MonkeyPatch)
     from dataclasses import replace
     from unittest.mock import Mock
 
+    from base.config import settings
     from services.memory_indexer.embeddings import gemini
-    from shared.config import settings
 
     backoff = Mock(side_effect=AssertionError("one attempt must not evaluate backoff"))
     monkeypatch.setattr(
@@ -582,7 +582,7 @@ def test_worst_case_single_attempt_has_no_sleep(monkeypatch: pytest.MonkeyPatch)
 
 def test_factory_default_is_gemini() -> None:
     """The unset switch yields the Gemini provider — behavior unchanged."""
-    from shared.config import settings
+    from base.config import settings
 
     assert settings.services.embedding_backend == "gemini"
     assert isinstance(factory.get_provider(), GeminiEmbeddingProvider)
@@ -592,7 +592,7 @@ def test_factory_unknown_backend_fails_fast(monkeypatch: pytest.MonkeyPatch) -> 
     """An unrecognized AVA_EMBEDDING_BACKEND must not silently fall back to
     gemini — a typo would keep the old provider while the operator believes
     the switch happened."""
-    from shared.config import settings
+    from base.config import settings
 
     monkeypatch.setattr(settings.services, "embedding_backend", "openai")
     with pytest.raises(ValueError, match="unknown embedding provider"):
@@ -601,7 +601,7 @@ def test_factory_unknown_backend_fails_fast(monkeypatch: pytest.MonkeyPatch) -> 
 
 def test_factory_provider_named_dispatch(monkeypatch: pytest.MonkeyPatch) -> None:
     """AVA_EMBEDDING_BACKEND=gemini yields the Gemini adapter."""
-    from shared.config import settings
+    from base.config import settings
 
     monkeypatch.setattr(settings.services, "embedding_backend", "gemini")
     assert isinstance(factory.get_provider_named("gemini"), GeminiEmbeddingProvider)
@@ -728,7 +728,7 @@ def test_embed_trickle_total_deadline(
     attempts: int,
 ) -> None:
     """Bound one attempt AND retry exhaustion on real sockets, despite timely reads."""
-    from shared import resilience
+    from base.host.net import resilience
 
     endpoint, requests = trickle_server
     timeout = 0.25
@@ -761,7 +761,7 @@ def test_embed_compressed_trickle_deadline(
     monkeypatch: pytest.MonkeyPatch, attempts: int, mode: str
 ) -> None:
     """Gzip metadata cannot hide body reads from the deadline or retry budget."""
-    from shared import resilience
+    from base.host.net import resilience
 
     timeout = 0.2
     monkeypatch.setattr(settings.services, "memory_embed_timeout_seconds", timeout)
@@ -795,7 +795,7 @@ def test_embed_framing_drip_deadline(
     monkeypatch: pytest.MonkeyPatch, mode: str, framing: str, attempts: int
 ) -> None:
     """Chunk extensions and trailers cannot hide timely reads from cancellation."""
-    from shared import resilience
+    from base.host.net import resilience
 
     timeout = 0.2
     monkeypatch.setattr(settings.services, "memory_embed_timeout_seconds", timeout)
@@ -837,7 +837,7 @@ def test_embed_slow_error_body_preserves_status(
     monkeypatch: pytest.MonkeyPatch, mode: str, status: int
 ) -> None:
     """Real HTTPX rejects error headers immediately, preserving classification and delay."""
-    from shared import resilience
+    from base.host.net import resilience
 
     sleeps: list[float] = []
     classified: list[Exception] = []

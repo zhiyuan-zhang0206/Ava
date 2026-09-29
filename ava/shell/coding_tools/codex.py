@@ -32,7 +32,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import ava
-from shared import coding_session_owner
+from base.sessions import coding_session_owner
 
 from ._common import cancel as _cancel_generation
 from ._common import impersonator_guide, init_file, new_generation, worker_bootstrap
@@ -259,7 +259,7 @@ def _app_server_command(
     cheap sleep, and a 1s grace lets the server exit on SIGTERM (and unlink its
     socket) before the SIGKILL.
     """
-    from shared.external_caller import launch_caller_assignment
+    from base.agents.messages.external_caller import launch_caller_assignment
 
     if owner.state_dir is None:
         raise RuntimeError("launching owner has no generation state directory")
@@ -349,7 +349,7 @@ def _codex_command(
     ``resume`` the TUI reopens that recorded session (``codex resume <id>``)
     instead of starting a new one.
     """
-    from shared.external_caller import launch_caller_assignment
+    from base.agents.messages.external_caller import launch_caller_assignment
 
     prefix = "clear && " if remote is not None else ""
     subcommand = f"resume {shlex.quote(resume)} " if resume is not None else ""
@@ -366,7 +366,7 @@ def _takeover_bootstrap_message(
     agent_id: int, name: str, brief: str, codex_remote: str, guide: Path
 ) -> str:
     """Inline the briefing and the shared app-server endpoint; no task/work file."""
-    from ava.impersonation_launch import bootstrap_message
+    from ava.impersonation.launch import bootstrap_message
 
     return bootstrap_message(agent_id, name, "codex", brief, guide, codex_remote=codex_remote)
 
@@ -574,7 +574,7 @@ def launch(
     instead of starting a new one. Prints one ``key=value`` per line and
     returns the exit code.
     """
-    from shared.external_caller import launch_caller_assignment
+    from base.agents.messages.external_caller import launch_caller_assignment
 
     request = _LaunchRequest(
         workspace,

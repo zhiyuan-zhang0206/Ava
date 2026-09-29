@@ -29,9 +29,9 @@ import pytest
 from pydantic import SecretStr
 
 import ava
-from ava._batch import DEFAULT_BATCH_MAX_CONCURRENT
+from ava.sdk_surface.batch import DEFAULT_BATCH_MAX_CONCURRENT
 from ava.web import FetchError, SearchError, WebError
-from shared.config import settings
+from base.config import settings
 
 
 class _FakeResp:
@@ -52,9 +52,9 @@ class _FakeResp:
 
 @pytest.fixture(autouse=True)
 def _no_retry_sleep(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Neutralize shared.resilience backoff sleeps so retry-path tests run
+    """Neutralize base.host.net.resilience backoff sleeps so retry-path tests run
     instantly; the retry loop itself is still exercised (call counts)."""
-    monkeypatch.setattr("shared.resilience._sleep", lambda _s: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("base.host.net.resilience._sleep", lambda _s: None)  # pyright: ignore[reportUnknownArgumentType]
 
 
 def _make_brave_response(results: list[dict]) -> bytes:
@@ -486,7 +486,7 @@ class _FakeLLM:
 
 @pytest.fixture
 def mock_llm(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
-    """Patch `shared.lm.factory.build_chat_model` so fetch's answer step never
+    """Patch `base.lm.factory.build_chat_model` so fetch's answer step never
     calls a real LLM. Captures the model, reasoning_effort, and input content
     blocks; returns "FAKE ANSWER" by default, or raises `captured["error"]`
     when a test sets one."""
@@ -504,7 +504,7 @@ def mock_llm(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         captured["reasoning_effort"] = reasoning_effort
         return _FakeLLM(captured)
 
-    monkeypatch.setattr("shared.lm.factory.build_chat_model", _fake_build)
+    monkeypatch.setattr("base.lm.factory.build_chat_model", _fake_build)
     return captured
 
 
@@ -1000,7 +1000,7 @@ def test_fetch_effort_accepts_enum_member(
     monkeypatch: pytest.MonkeyPatch, mock_llm: dict[str, Any]
 ) -> None:
     """A ReasoningEffort member is accepted — same wire value as its literal."""
-    from shared.lm.effort import ReasoningEffort
+    from base.lm.effort import ReasoningEffort
 
     monkeypatch.setattr(settings.web, "jina_api_key", None)
     payload = _make_jina_response(content="ok")
@@ -1037,7 +1037,7 @@ def test_fetch_llm_build_error_wraps_as_fetcherror(
     ):
         raise RuntimeError("DEEPSEEK_API_KEY not set")
 
-    monkeypatch.setattr("shared.lm.factory.build_chat_model", _failing_build)
+    monkeypatch.setattr("base.lm.factory.build_chat_model", _failing_build)
     payload = _make_jina_response(content="ok")
     with (
         patch("ava.web.urllib.request.urlopen", return_value=_FakeResp(payload)),

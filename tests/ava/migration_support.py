@@ -12,8 +12,8 @@ import psycopg
 import pytest
 from psycopg import sql
 
-from shared.config import settings
-from shared.migrations import (
+from base.config import settings
+from base.deploy.schema.migrations import (
     _BASELINE_NAME,
     _MIGRATION_LOCK_KEY,
     required_migration_set,

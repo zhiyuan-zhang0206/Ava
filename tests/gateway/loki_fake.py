@@ -1,12 +1,12 @@
 """In-memory Loki stand-in shared by the gateway read-side tests.
 
 Rows are added with `add(...)` (the same shape the old `events` INSERTs had);
-the fake honors the same filter/window/paging semantics `gateway.loki_events`
+the fake honors the same filter/window/paging semantics `gateway.lgtm.loki_events`
 relies on (categories, event_name regex, attribute filters, exclude_agent_ids,
 from_/to, newest-first, +1 lookahead has_more, forward direction, projected
 line_format rows, grouped counts). `count_events` / `count_grouped` /
 `query_events` / `query_projected_lines` mirror the real module's signatures
-so a test can `monkeypatch.setattr("gateway.loki_events.<fn>", fake.<fn>)` or
+so a test can `monkeypatch.setattr("gateway.lgtm.loki_events.<fn>", fake.<fn>)` or
 pass the instance straight to `fetch_aggregate(..., loki=fake)`.
 """
 
@@ -111,7 +111,7 @@ class FakeLoki:
             out.append(r)
         return out
 
-    # ── gateway.loki_events surface ────────────────────────────────────────
+    # ── gateway.lgtm.loki_events surface ────────────────────────────────────────
 
     def count_events(self, **kwargs: Any) -> int:
         return len(self._match(**kwargs))
@@ -136,7 +136,7 @@ class FakeLoki:
 
     def count_event_classes(self, **kwargs: Any) -> dict[Any, int]:
         """Per-class counts over [from_, to], mirroring
-        gateway.loki_events.count_event_classes: keys are resolution
+        gateway.lgtm.loki_events.count_event_classes: keys are resolution
         EventClass values, warning/error/critical levels only."""
         from services.events_maintenance import resolution
 
@@ -186,7 +186,7 @@ class FakeLoki:
 
     def attribute_max_series(self, **kwargs: Any) -> list[tuple[int, float]]:
         """Per-step max of a numeric attribute (bucket END times aligned to
-        `from_`), mirroring gateway.loki_events.attribute_max_series."""
+        `from_`), mirroring gateway.lgtm.loki_events.attribute_max_series."""
         step_s = kwargs["step_s"]
         from_: Any = kwargs.get("from_")
         to: Any = kwargs.get("to")
@@ -218,7 +218,7 @@ class FakeLoki:
 
     def attribute_aggregate(self, **kwargs: Any) -> float | list[tuple[str, float]]:
         """Scalar sum/count over one payload attribute, mirroring
-        gateway.loki_events.attribute_aggregate for the agg/field/filters the
+        gateway.lgtm.loki_events.attribute_aggregate for the agg/field/filters the
         dashboard reads use (sum + count; group_by returns the grouped list)."""
         field = kwargs["field"]
         agg = kwargs["agg"]

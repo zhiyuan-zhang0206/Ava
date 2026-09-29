@@ -18,7 +18,7 @@ from typing import Any
 import httpx
 import pytest
 
-from shared.config import settings
+from base.config import settings
 
 _PATH = (
     Path(__file__).parents[2]

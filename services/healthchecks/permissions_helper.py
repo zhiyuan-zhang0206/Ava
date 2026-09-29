@@ -12,16 +12,16 @@ from dataclasses import dataclass
 
 import psutil
 
+from base.daemon.health import DaemonProbe
+from base.native_process.os_platform import IS_MACOS
+from base.native_process.ownership import OwnedProcess
+from base.paths import permissions_helper_socket
 from services.permissions_helper import client
 from services.permissions_helper.launchd_job import (
     HelperJobState,
     parse_job_state,
     read_helper_job,
 )
-from shared.daemon_health import DaemonProbe
-from shared.native_process.ownership import OwnedProcess
-from shared.paths import permissions_helper_socket
-from shared.platform import IS_MACOS
 
 _PING_TIMEOUT_S = 3.0
 _PING_RESPONSE_LIMIT = 64 * 1024
@@ -47,7 +47,7 @@ def _helper_parent(sock: socket.socket) -> tuple[OwnedProcess, OwnedProcess]:
 
 
 def _read_helper_parent(sock: socket.socket) -> tuple[OwnedProcess, OwnedProcess]:
-    from shared.root_control.client import peer_pid, root_process
+    from base.native_process.root_control.client import peer_pid, root_process
 
     root = root_process()
     if root is None:
@@ -75,7 +75,7 @@ def _parent_still_live(root: OwnedProcess, parent: OwnedProcess, reply_pid: int)
 
 def _ping() -> bool:
     """Ping the real helper protocol with a watchdog-sized response timeout."""
-    sock = client._connect(str(permissions_helper_socket()))
+    sock = client.connect(str(permissions_helper_socket()))
     try:
         sock.settimeout(_PING_TIMEOUT_S)
         root, parent = _helper_parent(sock)
@@ -93,7 +93,7 @@ def _ping() -> bool:
     finally:
         sock.close()
 
-    result: client.PingResult = client._parse_reply(bytes(reply), "ping")
+    result: client.PingResult = client.parse_reply(bytes(reply), "ping")
     if "pid" not in result or not _parent_still_live(root, parent, result["pid"]):
         raise _ParentEvidenceError("helper reply lost captured parent identity")
     return result["pong"] is True
@@ -190,7 +190,7 @@ def _job_fields(observation: _Observation) -> dict[str, object]:
 
 def _emit_unhealthy(observation: _Observation) -> None:
     """One registered event per episode — the report the operator surfaces inherit."""
-    from shared.log import logger
+    from base.log import logger
 
     logger.error(
         "[permissions-helper healthcheck] helper unhealthy ({classification})",

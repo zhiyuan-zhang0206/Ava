@@ -301,7 +301,7 @@ export default tseslint.config(
 
   // ── English-only UI copy (AGENTS.md "English only — no raw CJK") ──
   // No lint previously covered this: the only CJK-forbidding lint in the repo
-  // (scripts/lint_agent_docstrings.py) is Python-only (`types: [python]`),
+  // (scripts/lint/agent_docstrings.py) is Python-only (`types: [python]`),
   // scoped to ava/*.py + plugins/*/*.py agent-visible SDK docstrings — it
   // structurally cannot reach .tsx. This mirrors its CJK ranges (Unified
   // Ideographs + CJK punctuation + fullwidth ASCII) for JSX text and the

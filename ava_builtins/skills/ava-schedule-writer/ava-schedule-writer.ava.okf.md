@@ -17,5 +17,5 @@ A **schedule** is a persistent session supervised by the gateway: the gateway ru
 
 ## Key Dependencies
 - [[ava_builtins/skills/skills.ava.okf.md|Skills index]] — full skills catalog
-- [[gateway/routers/scheduler.ava.okf.md|Scheduler router]] — `/api/schedules` + session supervision + circuit breaker itself
+- [[gateway/schedules/schedules.ava.okf.md|Scheduler router]] — `/api/schedules` + session supervision + circuit breaker itself
 - [[ava_builtins/skills/ava-watcher/ava-watcher.ava.okf.md|watcher skill]] — lightweight agent-self background wake-up (contrast: schedule is gateway-managed, survives agent restart)

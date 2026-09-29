@@ -7,6 +7,7 @@ from typing import Literal, Self
 
 from pydantic import AwareDatetime, Field, field_validator, model_validator
 
+from base.deploy.release.identity import ApplicationIdentity
 from cli.release_prepare.models import (
     Commit,
     FileInput,
@@ -16,7 +17,6 @@ from cli.release_prepare.models import (
     _absolute,
     ordered_plugins,
 )
-from shared.release_identity import ApplicationIdentity
 
 
 class FrontendTools(Record):

@@ -6,13 +6,13 @@
     "tests/cli/test_pgbouncer_config.py::test_render_ini_is_transaction_scram_and_socket_server": 17
   },
   "directories": {
-    "tests/cli": 130
+    "tests/cli": 129
   },
   "files": {
-    "tests/cli/test_cluster_health.py": 2117,
+    "tests/cli/test_cluster_health.py": 2115,
     "tests/cli/test_config_cmd.py": 804,
     "tests/cli/test_converge_otel_collector.py": 1249,
     "tests/cli/test_impersonation_bridge.py": 965,
-    "tests/cli/test_pitr_activation.py": 1785
+    "tests/cli/test_pitr_activation.py": 1780
   }
 }

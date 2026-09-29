@@ -37,8 +37,8 @@ from langgraph.types import Command
 from agent import state as _state
 from agent.nodes import INIT_CONTEXT, NodeName
 from agent.state import CapabilitiesState, ContextReset
-from shared.context import AvaContext, agent_id_from_config
-from shared.log import logger
+from base.agents.context import AvaContext, agent_id_from_config
+from base.log import logger
 
 from .capabilities import indexed_skill_identifiers
 from .context_notes import context_notes

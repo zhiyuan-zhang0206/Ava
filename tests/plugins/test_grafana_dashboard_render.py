@@ -3,8 +3,8 @@
 The provisioning file ``deploy/lgtm/config/grafana/provisioning/dashboards/
 ava-ops-main.json`` is on its way to becoming a render of the metric
 registries instead of a hand-maintained file. This module locks the renderer
-(``shared.metrics.grafana_dashboard``) and the plugin suppliers
-(``shared.metrics.grafana_dashboard_supply``):
+(``base.telemetry.metrics.grafana_dashboard``) and the plugin suppliers
+(``base.telemetry.metrics.grafana_dashboard_supply``):
 
 1. **Fidelity vs the as-is board** — for every registered ``grafana`` spec,
    the rendered panel must equal its counterpart in the current provisioning
@@ -56,8 +56,9 @@ from typing import Any, cast
 import psycopg
 import pytest
 
-from shared.metrics.core import core_metrics
-from shared.metrics.grafana_dashboard import (
+from base.packages.plugins.context import PluginContext
+from base.telemetry.metrics.core import catalog
+from base.telemetry.metrics.grafana_dashboard import (
     _CORE_SECTIONS_PREFIX,
     _CORE_SECTIONS_SUFFIX,
     DashboardRenderError,
@@ -65,12 +66,16 @@ from shared.metrics.grafana_dashboard import (
     render_dashboard,
     render_to_json,
 )
-from shared.metrics.grafana_dashboard_supply import (
+from base.telemetry.metrics.grafana_dashboard_supply import (
     load_installed_plugin_specs,
     load_repo_plugin_specs,
 )
-from shared.plugin_context import PluginContext
-from shared.plugin_metrics import MetricSpec, clear_registry, registered_metrics, render_title
+from base.telemetry.metrics.plugin_metrics import (
+    MetricSpec,
+    clear_registry,
+    registered_metrics,
+    render_title,
+)
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _DASHBOARD_FILE = (
@@ -89,7 +94,7 @@ def _load_world() -> tuple[list[MetricSpec], list[MetricSpec], dict[str, Any]]:
     """Register the shipped plugin + core metrics from fresh modules and
     render — the registry-hygiene pattern the existing sync-lock test uses."""
     clear_registry()
-    core_metrics.clear_core_registry()
+    catalog.clear_core_registry()
     for name in _PLUGINS:
         module_name = f"ava_builtins.plugins.{name}.metrics"
         module = sys.modules.get(module_name)
@@ -98,9 +103,9 @@ def _load_world() -> tuple[list[MetricSpec], list[MetricSpec], dict[str, Any]]:
                 importlib.import_module(module_name)
             else:
                 importlib.reload(module)
-    for module_name in core_metrics._CORE_DEFINITION_MODULES:
+    for module_name in catalog._CORE_DEFINITION_MODULES:
         sys.modules.pop(module_name, None)
-    core_specs = core_metrics.collect_core_metrics()
+    core_specs = catalog.collect_core_metrics()
     plugin_specs = registered_metrics()
     return core_specs, plugin_specs, render_dashboard(core_specs, plugin_specs)
 
@@ -396,11 +401,11 @@ def test_render_is_deterministic_and_environment_independent(
     script = (
         "import hashlib, sys;"
         f"sys.path.insert(0, {str(_REPO_ROOT)!r});"
-        "from shared.metrics.core import core_metrics;"
-        "from shared.metrics.grafana_dashboard import render_dashboard, render_to_json;"
-        "from shared.metrics.grafana_dashboard_supply import collect_plugin_specs;"
+        "from base.telemetry.metrics.core import catalog;"
+        "from base.telemetry.metrics.grafana_dashboard import render_dashboard, render_to_json;"
+        "from base.telemetry.metrics.grafana_dashboard_supply import collect_plugin_specs;"
         "plugins = collect_plugin_specs();"
-        "core = core_metrics.collect_core_metrics();"
+        "core = catalog.collect_core_metrics();"
         "print(hashlib.sha256(render_to_json(render_dashboard(core, plugins.specs)).encode()).hexdigest())"
     )
     scrubbed = subprocess.run(  # noqa: S603 — our own interpreter + a literal script
@@ -445,14 +450,14 @@ def test_repo_supplier_reports_a_broken_plugin_loudly(
     plugins_dir = tmp_path / "plugins"
     (plugins_dir / "good_one").mkdir(parents=True)
     (plugins_dir / "good_one" / "metrics.py").write_text(
-        "from shared.plugin_metrics import MetricSpec, register_metric\n"
+        "from base.telemetry.metrics.plugin_metrics import MetricSpec, register_metric\n"
         "register_metric(MetricSpec(name='good_one_calls', title='Good', event_name='x', "
         "category='telemetry', query='sum(count_over_time({service_name=\"unknown_service\"} | "
         "json [$__range]))', query_type='logql', target_names=['a']))\n"
     )
     (plugins_dir / "broken_one").mkdir()
     (plugins_dir / "broken_one" / "metrics.py").write_text("raise RuntimeError('boom')\n")
-    import shared.metrics.grafana_dashboard_supply as supply
+    import base.telemetry.metrics.grafana_dashboard_supply as supply
 
     monkeypatch.setattr(supply, "_REPO_PLUGINS_DIR", plugins_dir)
     for name in ("good_one", "broken_one"):
@@ -470,12 +475,12 @@ def test_installed_supplier_loads_a_registry_row(
     """An enabled installed plugin row renders from its blob: register a tree
     with a metrics.py, load it through the supplier, and — after S3's
     ordering — see it in the render."""
-    from shared import extension_registry as registry
+    from base.packages.extensions import registry as registry
 
     tree = tmp_path / "installed_plugin"
     tree.mkdir()
     (tree / "metrics.py").write_text(
-        "from shared.plugin_metrics import MetricSpec, register_metric\n"
+        "from base.telemetry.metrics.plugin_metrics import MetricSpec, register_metric\n"
         "register_metric(MetricSpec(name='installed_demo_calls', title='Installed demo', "
         "event_name='x', category='telemetry', query='sum(count_over_time("
         "{service_name=\"unknown_service\"} | json [$__range]))', query_type='logql', "

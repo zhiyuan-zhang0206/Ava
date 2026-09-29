@@ -758,8 +758,8 @@ class TestPatternMatchesTheRealChannel:
         leaves agents asleep despite successful publishes."""
         from fnmatch import fnmatchcase
 
+        from base.cluster import inbound_channel, redis_channel_prefix
         from services.agent_host.dispatcher import _INBOUND_PATTERN_SUFFIX
-        from shared.cluster import inbound_channel, redis_channel_prefix
 
         pattern = f"{redis_channel_prefix()}{_INBOUND_PATTERN_SUFFIX}"
         for agent_id in (1, 42, 999999):
@@ -857,10 +857,10 @@ class TestPendingScan:
     ) -> None:
         """Stop leg leaves rows untouched; start leg scans even while held
         because pub/sub has no replay."""
-        from shared import maintenance
+        from base.deploy.maintenance import admission
 
         state = {"in_stop_leg": True}
-        monkeypatch.setattr(maintenance, "in_stop_leg", lambda: state["in_stop_leg"])
+        monkeypatch.setattr(admission, "in_stop_leg", lambda: state["in_stop_leg"])
         scanner_calls: list[int] = []
         scheduler = _ScanScheduler()
 
@@ -1124,7 +1124,7 @@ class TestAdmissionWaitExemption:
     async def test_a_queued_turn_is_exempt_from_the_turn_level_scan(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from agent import turn_progress as progress
+        from agent.turn import progress
 
         scheduler = _ScanScheduler({23})
         monkeypatch.setattr(dispatcher, "turn_progress_age_s", _stale_age)
@@ -1147,7 +1147,7 @@ class TestAdmissionWaitExemption:
     async def test_a_queued_stale_candidate_is_not_cancelled_before_its_wake(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from agent import turn_progress as progress
+        from agent.turn import progress
 
         scheduler = _ScanScheduler({17})
         monkeypatch.setattr(dispatcher, "turn_progress_age_s", _stale_age)
@@ -1209,7 +1209,7 @@ def _patch_redis(monkeypatch: pytest.MonkeyPatch, pubsub: _QueueingPubSub) -> li
         clients.append(client)
         return client
 
-    from shared import redis_client
+    from base.events.live import redis_client
 
     monkeypatch.setattr(redis_client, "open_async_redis", _open)
     return clients
@@ -1407,7 +1407,7 @@ class TestSubscriptionRecovery:
                 second_opened.set()
             return client
 
-        from shared import redis_client
+        from base.events.live import redis_client
 
         monkeypatch.setattr(redis_client, "open_async_redis", _open)
         disp = InboundWakeDispatcher(

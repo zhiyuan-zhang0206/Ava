@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
+from base.deploy.maintenance.state import MaintenanceHold
 from cli.release_fleet.policy import (
     AlertRoute,
     Cohort,
@@ -14,7 +15,6 @@ from cli.release_fleet.policy import (
     capture_cohort,
     drain_report,
 )
-from shared.maintenance_state import MaintenanceHold
 from tests.lifecycle.release_fleet.conftest import GATEWAY, RUNNER, at, two_units
 
 

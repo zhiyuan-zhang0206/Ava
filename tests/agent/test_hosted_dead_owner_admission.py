@@ -12,19 +12,19 @@ import pytest
 from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
 
-from agent.hosted_ownership import admit_hosted_runtime
-from shared.db import create_agent
-from shared.incarnation_resources import (
+from agent.ownership.hosted import admit_hosted_runtime
+from base.agents.incarnation.resources import (
     ExecAllocation,
     IncarnationResources,
     ResourceEvidenceError,
     ResourceProcess,
     decode_resources,
 )
-from shared.managed_writer_publication import AdmissionDecision, CurrentAdmission
-from shared.native_process.ownership import stable_create_time
-from shared.runtime_admission import RuntimeAdmission
-from shared.runtime_incarnation import RuntimeIncarnation
+from base.db import create_agent
+from base.deploy.writers.publication import AdmissionDecision, CurrentAdmission
+from base.deploy.writers.runtime_admission import RuntimeAdmission
+from base.native_process.ownership import stable_create_time
+from base.native_process.runtime_incarnation import RuntimeIncarnation
 
 
 class _CurrentAdmission(RuntimeAdmission):

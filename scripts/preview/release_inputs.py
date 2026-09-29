@@ -11,15 +11,15 @@ from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
 
+from base.deploy.release.runtime_prepare import inventory_digest, tree_inventory
+from base.deploy.release.runtime_release import ReleaseRejectedError, file_sha256
+from base.deploy.release.verified_file import regular_bytes
 from cli.release_prepare import LocalInputs, Preparation, PreparationReceipt, prepare_image
 from cli.release_prepare.acquire import acquire_inputs, verify_acquisition
 from cli.release_prepare.acquisition_models import Acquisition, AcquisitionReceipt
 from cli.release_prepare.inputs import validate_inputs
 from cli.release_prepare.models import FileInput, TreeInput, encode
 from scripts.preview.release_fixture import FixtureWheel, build_fixture
-from shared.runtime_prepare import inventory_digest, tree_inventory
-from shared.runtime_release import ReleaseRejectedError, file_sha256
-from shared.verified_file import regular_bytes
 
 
 def _write(path: Path, value: object) -> None:

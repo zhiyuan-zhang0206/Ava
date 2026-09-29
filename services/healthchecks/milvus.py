@@ -5,7 +5,7 @@ from __future__ import annotations
 import contextlib
 import logging
 
-from shared.config import settings
+from base.config import settings
 
 _log = logging.getLogger("services.healthchecks.milvus")
 

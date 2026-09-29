@@ -97,7 +97,7 @@ def _run_capture(root: pathlib.Path | None, *extra: str) -> tuple[int, str]:
         ("ui/web/openapi.json", False),  # generated
         ("ui/web/src/lib/api-generated.ts", False),  # generated glob
         ("db/schema.sql", False),  # generated
-        ("shared/foo.api.txt", False),  # generated glob (*.api.txt is not a src ext either)
+        ("base/foo.api.txt", False),  # generated glob (*.api.txt is not a src ext either)
         ("ui/web/src/lib/api.ts", True),
         ("migrations/20260101T000000_x.sql", True),
         ("scripts/install-cli-tools.sh", True),

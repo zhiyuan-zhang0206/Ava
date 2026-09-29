@@ -54,14 +54,14 @@ the watchdog respawns it on death.
 ## Wire path
 ```
 agent execute_code
-  -> ava.mcps.computer_use.<tool>        [ava/mcps.py — generic client]
-  -> mcp-daemon                          [ava/_mcps_daemon.py, shared="computer_use"]
-  -> ava/_mcp_computer.py (direct dial, per-connection socket)
+  -> ava.mcps.computer_use.<tool>        [ava/mcps/__init__.py — generic client]
+  -> mcp-daemon                          [ava/mcps/_daemon.py, shared="computer_use"]
+  -> ava/mcps/_computer.py (direct dial, per-connection socket)
   -> services/computer/{mcp_daemon,execute,ocr_text,screen,errors}.py
                                          [serialize + audit + execute]
   -> services/permissions_helper.client  [the one TCC grant-holder]
 ```
-`agent_id` rides the request envelope (`ava/mcps.py` stamps it from
+`agent_id` rides the request envelope (`ava/mcps/__init__.py` stamps it from
 `AVA_AGENT_ID`; the mcp daemon forwards it onto the computer line protocol).
 It lands in the audit stream, where it is likewise self-reported by the
 agent's own process. Local fallback (no mcp-daemon):

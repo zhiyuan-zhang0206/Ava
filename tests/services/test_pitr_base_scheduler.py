@@ -10,27 +10,27 @@ from pathlib import Path
 
 import pytest
 
-import services.pitr.base_operation_runtime as restore_runtime
 import services.pitr.base_scheduler_daemon as daemon
-from services.pitr import retention_scheduler
-from services.pitr import worker_process as workers
-from services.pitr.activation_state import ActivationRecord, write_record
-from services.pitr.base_manifest import BaseObject, CandidateManifest, WalRange
+import services.pitr.restore.operation_runtime as restore_runtime
+from base import telemetry
+from base.native_process.child_env import restricted_process_env
+from base.native_process.os_platform import LockTimeoutError
+from services.pitr.activation.state import ActivationRecord, write_record
+from services.pitr.base_backup.manifest import BaseObject, CandidateManifest, WalRange
 from services.pitr.base_scheduler_daemon import BaseCandidateState, _components, is_due
-from services.pitr.restore_manifest import (
+from services.pitr.operation import worker_process as workers
+from services.pitr.restore.manifest import (
     ProtectedManifest,
     RestoreObject,
     RestoreProof,
     candidate_sha256,
     required_archive_names,
 )
-from services.pitr.restore_proof import RestoreSpaceBudget
-from services.pitr.retention_planner import DryRunResult
-from services.pitr.retention_scheduler import RetentionDryRunState
-from services.pitr.retention_scheduler import health_component as retention_health_component
-from shared import telemetry
-from shared.platform import LockTimeoutError
-from shared.process_env import restricted_process_env
+from services.pitr.restore.proof import RestoreSpaceBudget
+from services.pitr.retention import scheduler
+from services.pitr.retention.planner import DryRunResult
+from services.pitr.retention.scheduler import RetentionDryRunState
+from services.pitr.retention.scheduler import health_component as retention_health_component
 
 
 def _candidate(chain_id: str) -> CandidateManifest:
@@ -91,7 +91,7 @@ def test_restore_worker_exec_import_boundary_has_no_publisher_or_settings(tmp_pa
     assert not any(name.startswith(("AVA_", "GOOGLE_", "PG")) for name in environment)
     script = (
         "import sys; import services.pitr.restore_worker; "
-        "forbidden={'shared.config','services.pitr.restore_publish_store'}; "
+        "forbidden={'base.config','services.pitr.stores.restore_publish_store'}; "
         "raise SystemExit(1 if forbidden & set(sys.modules) else 0)"
     )
     completed = subprocess.run(  # noqa: S603
@@ -166,7 +166,7 @@ async def test_restore_worker_popen_forwards_host_proxy_env(
 def test_store_args_validate_against_the_backend_constructor(
     tmp_path: Path,
 ) -> None:
-    from services.pitr.store_factory import construct_store_group
+    from services.pitr.stores.factory import construct_store_group
 
     gcs = construct_store_group(
         "gcs",
@@ -206,8 +206,8 @@ def test_store_args_validate_against_the_backend_constructor(
 def test_restore_worker_input_builds_baidu_store_args(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from services.pitr import base_operation_runtime as restore_runtime
-    from shared.config import settings
+    from base.config import settings
+    from services.pitr.restore import operation_runtime as restore_runtime
 
     monkeypatch.setattr(settings.physical_backup, "pitr_store_backend", "baidu")
     monkeypatch.setattr(settings.physical_backup, "pitr_restore_proof_enabled", True)
@@ -234,8 +234,8 @@ def test_restore_worker_input_builds_baidu_store_args(
 def test_restore_worker_input_builds_cos_store_args(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from services.pitr import base_operation_runtime as restore_runtime
-    from shared.config import settings
+    from base.config import settings
+    from services.pitr.restore import operation_runtime as restore_runtime
 
     monkeypatch.setattr(settings.physical_backup, "pitr_store_backend", "cos")
     monkeypatch.setattr(settings.physical_backup, "pitr_restore_proof_enabled", True)
@@ -427,7 +427,7 @@ def test_health_surfaces_corrupt_activation_state_without_throwing(
     operation = tmp_path / "physical-backup" / "activation" / "operation.json"
     operation.parent.mkdir(parents=True)
     operation.write_text("{corrupt")
-    monkeypatch.setattr("services.pitr.activation_runtime.ava_home", lambda: tmp_path)
+    monkeypatch.setattr("services.pitr.activation.runtime.ava_home", lambda: tmp_path)
     components = daemon._components(BaseCandidateState())
     activation_component = next(item for item in components if item["name"] == "pitr_activation")
     assert activation_component["status"] == "degraded"
@@ -659,7 +659,7 @@ def test_retention_health_is_explicitly_dry_run_only(tmp_path: Path) -> None:
 def test_retention_refresh_emits_backend_inventory_gauges(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    from shared.config import settings
+    from base.config import settings
 
     result = DryRunResult(
         tmp_path / "plan",
@@ -706,13 +706,13 @@ def test_retention_refresh_emits_backend_inventory_gauges(
     def logical_retention() -> object:
         return object()
 
-    monkeypatch.setattr(retention_scheduler, "get_store_group", get_store_group)
-    monkeypatch.setattr(retention_scheduler, "write_dry_run_plan", write_plan)
-    monkeypatch.setattr(retention_scheduler, "_logical_retention", logical_retention)
-    monkeypatch.setattr(retention_scheduler, "ava_home", lambda: tmp_path)
-    monkeypatch.setattr("shared.telemetry.emit", record_emit)
+    monkeypatch.setattr(scheduler, "get_store_group", get_store_group)
+    monkeypatch.setattr(scheduler, "write_dry_run_plan", write_plan)
+    monkeypatch.setattr(scheduler, "_logical_retention", logical_retention)
+    monkeypatch.setattr(scheduler, "ava_home", lambda: tmp_path)
+    monkeypatch.setattr("base.telemetry.emit", record_emit)
 
-    assert retention_scheduler.refresh(config) == result
+    assert scheduler.refresh(config) == result
     assert calls == [
         (
             "telemetry",
@@ -729,7 +729,7 @@ def test_retention_refresh_emits_backend_inventory_gauges(
 
 
 def test_restore_proof_runs_once_after_the_monthly_window(monkeypatch: pytest.MonkeyPatch) -> None:
-    from shared.config import settings
+    from base.config import settings
 
     monkeypatch.setattr(settings.general, "timezone", "UTC")
     before_window = datetime(2026, 9, 1, 5, 59, tzinfo=UTC)
@@ -804,7 +804,7 @@ async def test_degraded_domain_condition_keeps_healthz_200() -> None:
     fix it, so the watchdog would restart-flap a healthy daemon every 60s.
     The component reports degraded with gate_readiness=False; readiness
     follows process liveness only."""
-    from shared.daemon_health import Liveness, start_health_server, stop_health_server
+    from base.daemon.health import Liveness, start_health_server, stop_health_server
 
     state = BaseCandidateState(base_error="GCS credentials rejected")
     port = _find_free_port()

@@ -16,9 +16,9 @@ from collections.abc import Callable, Sequence
 from contextlib import suppress
 from dataclasses import dataclass
 
+from base.daemon.health import DaemonProbe, ProbeVerdict
+from base.paths import ava_home
 from services.ava_root.health import HealthMonitor, ProbeRunner
-from shared.daemon_health import DaemonProbe, ProbeVerdict
-from shared.paths import ava_home
 
 _log = logging.getLogger(__name__)
 
@@ -90,7 +90,7 @@ class DiagnosticMonitor:
         if key == state.reported:
             return
         state.reported = key
-        from shared.log import logger
+        from base.log import logger
 
         logger.log(
             "INFO" if result.alive else "WARNING",
@@ -149,7 +149,7 @@ class RootHealthRounds:
 
     async def run_round(self) -> None:
         await asyncio.gather(self._health.run_round(), self._diagnostics.run_round())
-        from shared.log import logger
+        from base.log import logger
 
         self._last_completed = time.time()
         logger.info(
@@ -163,7 +163,7 @@ class RootHealthRounds:
     async def start(self) -> None:
         if self._task is not None:
             raise RuntimeError("root health rounds already started")
-        from shared.log import init_gateway_process, logger
+        from base.log import init_gateway_process, logger
 
         init_gateway_process(name="ava-root")
         self._expected_since = time.time()
@@ -192,7 +192,7 @@ class RootHealthRounds:
             task.cancel()
             with suppress(asyncio.CancelledError):
                 await task
-            from shared.log import logger
+            from base.log import logger
 
             logger.info(
                 "root health rounds intentionally stopped",
@@ -202,6 +202,6 @@ class RootHealthRounds:
                 expected_since_timestamp_seconds=0.0,
             )
             self._expected_since = None
-            from shared import telemetry
+            from base import telemetry
 
             await asyncio.to_thread(telemetry.sync, timeout=2, bounded=True)

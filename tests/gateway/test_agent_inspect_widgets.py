@@ -27,14 +27,14 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
-from gateway.app import app
-from gateway.inspect import _plugin_widgets
-from shared.plugin_context import PluginContext
-from shared.plugin_inspector import (
+from base.packages.plugins.context import PluginContext
+from base.packages.plugins.inspector import (
     InspectWidgetSpec,
     clear_registry,
     register_inspect_widget,
 )
+from gateway.app import app
+from gateway.inspect import _plugin_widgets
 
 
 @pytest.fixture(autouse=True)
@@ -327,31 +327,31 @@ def test_loader_filters_widgets_of_disabled_plugins(monkeypatch: pytest.MonkeyPa
 
 def test_enabled_modules_skips_a_disabled_plugin(monkeypatch: pytest.MonkeyPatch) -> None:
     """`_enabled_inspector_modules` reads the enable bit per request."""
-    from shared import plugins_config
+    from base.packages.plugins import enable_config
 
     module = _shipped_fleet_module()
     monkeypatch.setattr(
-        plugins_config,
+        enable_config,
         "installed_plugin_dirs",
         lambda: {"ava_fleet": module.parent},
     )
 
-    def _loader(config: plugins_config.PluginsConfig) -> Any:
-        def _load(_known: set[str]) -> plugins_config.PluginsConfig:
+    def _loader(config: enable_config.PluginsConfig) -> Any:
+        def _load(_known: set[str]) -> enable_config.PluginsConfig:
             return config
 
         return _load
 
-    enabled = plugins_config.PluginsConfig(
-        plugins={"ava_fleet": plugins_config.PluginEntry(enabled=True)}
+    enabled = enable_config.PluginsConfig(
+        plugins={"ava_fleet": enable_config.PluginEntry(enabled=True)}
     )
-    monkeypatch.setattr(plugins_config, "load_for_runtime", _loader(enabled))
+    monkeypatch.setattr(enable_config, "load_for_runtime", _loader(enabled))
     assert _plugin_widgets._enabled_inspector_modules() == [module]
 
-    disabled = plugins_config.PluginsConfig(
-        plugins={"ava_fleet": plugins_config.PluginEntry(enabled=False)}
+    disabled = enable_config.PluginsConfig(
+        plugins={"ava_fleet": enable_config.PluginEntry(enabled=False)}
     )
-    monkeypatch.setattr(plugins_config, "load_for_runtime", _loader(disabled))
+    monkeypatch.setattr(enable_config, "load_for_runtime", _loader(disabled))
     assert _plugin_widgets._enabled_inspector_modules() == []
 
 
@@ -365,7 +365,7 @@ def test_loader_skips_a_plugin_whose_inspector_fails_to_import(
     at module import) restated for the inspector surface: the load must not
     raise, the remaining plugin still serves, and the failure is loud on both
     channels (loguru ERROR + the plugin_load_failed telemetry event)."""
-    import shared.telemetry
+    import base.telemetry
 
     good = _shipped_fleet_module()
     bad = _plugin_widgets._PLUGINS_DIR / "broken_plugin" / "inspector.py"
@@ -384,7 +384,7 @@ def test_loader_skips_a_plugin_whose_inspector_fails_to_import(
     ) -> None:
         events.append((event_name, attributes or {}))
 
-    monkeypatch.setattr(shared.telemetry, "emit", fake_emit)
+    monkeypatch.setattr(base.telemetry, "emit", fake_emit)
 
     real_import_module = importlib.import_module
 
@@ -429,14 +429,14 @@ def test_loader_drops_partial_widget_registrations_and_recovers(
     the loader drops the dying attempt's widgets, so a fixed file recovers on
     the next request instead of dying on DuplicateInspectWidget
     (fail-soft, user ruling 2026-09-11)."""
-    from shared.plugin_inspector import registered_inspect_widgets
+    from base.packages.plugins.inspector import registered_inspect_widgets
 
     plugin_dir = tmp_path / "drop_partial_insp"
     plugin_dir.mkdir()
     (plugin_dir / "__init__.py").write_text("", encoding="utf-8")
     inspector_py = plugin_dir / "inspector.py"
     source = (
-        "from shared.plugin_inspector import InspectWidgetSpec, register_inspect_widget\n"
+        "from base.packages.plugins.inspector import InspectWidgetSpec, register_inspect_widget\n"
         "register_inspect_widget(InspectWidgetSpec(id='drop_partial_widget', "
         "kind='taskList', order=50))\n"
     )
