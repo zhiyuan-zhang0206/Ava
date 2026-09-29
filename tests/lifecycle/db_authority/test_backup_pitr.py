@@ -67,11 +67,6 @@ def maintenance(born: Born, monkeypatch: pytest.MonkeyPatch) -> Born:
     monkeypatch.delitem(os.environ, authority.GENERATION_ENV, raising=False)
     monkeypatch.delenv("AVA_DB_ADMIN_PASSWORD", raising=False)
     assert "AVA_DB_ADMIN_PASSWORD" not in (born.home / ".env").read_text()
-
-    def _registry() -> dict[str, cluster.ClusterRecord]:
-        return {str(born.home): born.record}
-
-    monkeypatch.setattr(cluster, "load_registry", _registry)
     monkeypatch.setattr(factory, "get_store_group", _no_store)
     return born
 

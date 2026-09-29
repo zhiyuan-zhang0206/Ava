@@ -15,9 +15,11 @@ from cli.release_transition.journal import Operation
 from cli.release_transition.request import ReleaseRef
 
 
-def _context(home: Path, registry: Path, image: VerifiedRelease) -> BootUnitContext:
+def _context(home: Path, image: VerifiedRelease) -> BootUnitContext:
     import grp
     import pwd
+
+    from base.paths import host_state_dir
 
     account = pwd.getpwuid(os.getuid())
     return BootUnitContext(
@@ -26,15 +28,17 @@ def _context(home: Path, registry: Path, image: VerifiedRelease) -> BootUnitCont
         user=account.pw_name,
         group=grp.getgrgid(account.pw_gid).gr_name,
         home_dir=Path(account.pw_dir),
-        registry=registry,
+        host_state_dir=host_state_dir(),
     )
 
 
 def _environment(context: BootUnitContext) -> tuple[tuple[str, str], ...]:
-    return stage_environment(context.home, context.registry, context.home_dir)
+    return stage_environment(context.home, context.host_state_dir, context.home_dir)
 
 
-def stage_environment(home: Path, registry: Path, home_dir: Path) -> tuple[tuple[str, str], ...]:
+def stage_environment(
+    home: Path, host_state_dir: Path, home_dir: Path
+) -> tuple[tuple[str, str], ...]:
     """The complete environment of every stage action, on every platform.
 
     The service PATH declaration is read from the home's persisted settings.
@@ -47,7 +51,7 @@ def stage_environment(home: Path, registry: Path, home_dir: Path) -> tuple[tuple
     return (
         ("HOME", str(home_dir)),
         ("AVA_HOME", str(home)),
-        ("AVA_CLUSTER_REGISTRY", str(registry)),
+        ("AVA_HOST_STATE_DIR", str(host_state_dir)),
         ("PATH", os.defpath),
     )
 
@@ -55,7 +59,7 @@ def stage_environment(home: Path, registry: Path, home_dir: Path) -> tuple[tuple
 def start(operation: Operation, image: VerifiedRelease) -> None:
     from base.host.system.boot_unit import manager_properties, privileged
 
-    context = _context(Path(operation.request.home), Path(operation.request.registry), image)
+    context = _context(Path(operation.request.home), image)
     action = BootStartAction(
         image.module_argv(
             "cli.release_transition.stage", "--operation", str(operation.request.path)
@@ -83,7 +87,7 @@ def start(operation: Operation, image: VerifiedRelease) -> None:
 def observe(operation: Operation, image: VerifiedRelease) -> None:
     from base.host.proc import run_bounded
 
-    context = _context(Path(operation.request.home), Path(operation.request.registry), image)
+    context = _context(Path(operation.request.home), image)
     result = run_bounded(
         list(
             image.module_argv(
@@ -110,7 +114,7 @@ def preflight(operation: Operation, image: VerifiedRelease, *, previous: bool) -
     arguments = ["--operation", str(operation.request.path), "--preflight"]
     if previous:
         arguments.append("--previous")
-    context = _context(Path(operation.request.home), Path(operation.request.registry), image)
+    context = _context(Path(operation.request.home), image)
     result = run_bounded(
         list(image.module_argv("cli.release_transition.stage", *arguments)),
         cwd=image.cwd,
@@ -126,23 +130,19 @@ def preflight(operation: Operation, image: VerifiedRelease, *, previous: bool) -
 def restore_boot(operation: Operation, image: VerifiedRelease) -> None:
     """A completed operation must not become a permanent boot command."""
     reference = operation.reference
-    install_steady(Path(operation.request.home), Path(operation.request.registry), reference, image)
+    install_steady(Path(operation.request.home), reference, image)
 
 
-def install_steady(
-    home: Path, registry: Path, reference: ReleaseRef, image: VerifiedRelease
-) -> None:
+def install_steady(home: Path, reference: ReleaseRef, image: VerifiedRelease) -> None:
     """Install one pinned ordinary boot action without fabricating an operation."""
     if reference.verify(home) != image:
         raise ValueError("steady boot image differs from its captured reference")
-    context = _context(home, registry, image)
+    context = _context(home, image)
     action = BootStartAction(
         image.module_argv(
             "cli.release_transition.boot",
             "--home",
             str(home),
-            "--registry",
-            str(registry),
             "--artifact",
             reference.artifact_digest,
             "--manifest",

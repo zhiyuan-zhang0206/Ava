@@ -263,10 +263,10 @@ class GeneralSettings(EnvSettings):
         },
     )
 
-    cluster_registry: Path = Field(
-        default_factory=lambda: Path.home() / ".ava" / "clusters.json",
-        alias="AVA_CLUSTER_REGISTRY",
-        description="Host-level cluster registry file (name -> db/redis/ports), shared across all units on this host so parallel clusters see one index.",
+    host_state_dir: Path = Field(
+        default_factory=lambda: Path.home() / ".ava",
+        alias="AVA_HOST_STATE_DIR",
+        description="Host-level state shared by every unit on this host (Postgres template, runtime binaries, coding-session owner records, PTY allocation freeze). Lists no clusters: each home describes only itself.",
         json_schema_extra={
             "restart_required": "",
             "writable": False,

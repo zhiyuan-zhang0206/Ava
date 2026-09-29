@@ -296,7 +296,6 @@ def test_release_identity_does_not_write_binding_into_sealed_package(
     prepare_identity(
         IdentityInput(
             home,
-            home.parent / "registry.json",
             runtime.code_root,
             False,
             frozenset({"agent-runner"}),
@@ -372,7 +371,6 @@ def _operation_fixture(image: VerifiedRelease, phase: str) -> SimpleNamespace:
     reference.verify = verify
     request = SimpleNamespace(
         home=str(home),
-        registry=str(home.parent / "registry.json"),
         candidate=reference,
         previous=reference,
         configuration_digest=configuration_digest(home),
@@ -408,11 +406,10 @@ def test_operation_preflight_checks_actual_roster_without_selection_or_effects(
 
     home = image.root.parent.parent
     (image.root.parent / "current-release").unlink()
-    # stage.preflight_operation writes AVA_HOME/AVA_CLUSTER_REGISTRY straight into the
-    # live os.environ (cli/release_transition/stage.py), not through Settings, so the
-    # raw-env seam (not monkeypatch.setenv) is what actually restores it after the test.
+    # stage.preflight_operation writes AVA_HOME straight into the live os.environ
+    # (cli/release_transition/stage.py), not through Settings, so the raw-env seam
+    # (not monkeypatch.setenv) is what actually restores it after the test.
     monkeypatch.setitem(os.environ, "AVA_HOME", str(home))
-    monkeypatch.setitem(os.environ, "AVA_CLUSTER_REGISTRY", str(home.parent / "registry.json"))
 
     def operation(_path: Path) -> SimpleNamespace:
         return _operation_fixture(image, "prepared")
@@ -485,10 +482,9 @@ def test_operation_observation_requires_every_selected_service_ready(
     from ops import spec as ops_spec
 
     home = image.root.parent.parent
-    # Same raw-env seam as above: stage.preflight_operation writes these directly to
+    # Same raw-env seam as above: stage.preflight_operation writes this directly to
     # os.environ, not Settings.
     monkeypatch.setitem(os.environ, "AVA_HOME", str(home))
-    monkeypatch.setitem(os.environ, "AVA_CLUSTER_REGISTRY", str(home.parent / "registry.json"))
     runtime = _admit(image)
     roles: frozenset[MachineRole] = frozenset({"gateway"})
     roster = tuple(
@@ -587,7 +583,6 @@ def test_release_run_start_checks_configuration_before_identity_and_settings(
     request = FleetRequest(
         id=uuid4(),
         home=str(home),
-        registry=str(home.parent / "registry.json"),
         created_at=datetime.now(UTC),
         machine="fixture",
         previous=reference.model_copy(
@@ -626,11 +621,10 @@ def test_release_run_start_checks_configuration_before_identity_and_settings(
         raise AssertionError("changed configuration reached Settings-dependent startup")
 
     # start_intent.run_start's whole point here is a pre-Settings identity bootstrap
-    # (cli/start_intent.py): it reads AVA_HOME/AVA_CLUSTER_REGISTRY from the live
-    # os.environ before Settings loads, so the raw-env seam is the real one, and the
-    # test asserts a later env change never reaches the Settings-dependent path.
+    # (cli/start_intent.py): it reads AVA_HOME from the live os.environ before
+    # Settings loads, so the raw-env seam is the real one, and the test asserts a
+    # later env change never reaches the Settings-dependent path.
     monkeypatch.setitem(os.environ, "AVA_HOME", str(home))
-    monkeypatch.setitem(os.environ, "AVA_CLUSTER_REGISTRY", request.registry)
     monkeypatch.setattr(start_intent, "_prepare_start_locked", prepare)
     monkeypatch.setattr(main, "_init_cli_logging", forbidden_logging)
     if change_at == "before-identity":

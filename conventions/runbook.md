@@ -108,8 +108,9 @@ current directory. `ava start --worktree` selects an isolated home and writes
 the checkout pointer. Bare repeated start keeps identity and desired service
 selection. Unknown existing resources, conflicting inputs, missing reservations,
 and a terminal destroy intent refuse rather than reconstructing ownership.
-The host registry at `~/.ava/clusters.json` (`AVA_CLUSTER_REGISTRY`) is keyed
-by home path. See [[cli/start_identity.ava.okf.md]].
+A home describes only itself: its record is its own start intent, and no host
+file lists clusters (host-level caches sit in `AVA_HOST_STATE_DIR`, default
+`~/.ava`). See [[cli/start_identity.ava.okf.md]].
 
 A runner fetches the gateway's authenticated bootstrap configuration before
 recording local identity. Bootstrap serves no database login: `AVA_DB_URL` is the
@@ -1283,7 +1284,6 @@ ava pause
 ava stop -y
 ava restart
 ava cluster status
-ava cluster ls
 ava cluster down --path PATH
 ava cluster destroy --path PATH [--drop-db]
 ```
@@ -1291,7 +1291,7 @@ ava cluster destroy --path PATH [--drop-db]
 `pause` retains infrastructure, browser and persistent PTYs. Full `stop` closes
 those resources; `--keep-infra` and repeated `--keep-service` preserve explicitly
 selected resources. `restart` is the ordinary local pause/start path. Destroy
-retires this home's native jobs and registry reservation; `--drop-db` additionally
+retires this home's native jobs and marks it detached; `--drop-db` additionally
 removes its data directories. It refuses the default production home.
 
 A runner joins through the same first-start entry. Supply the capability
@@ -1333,7 +1333,7 @@ leaves a unit out of a held operation; `status` is read-only — see
 [release operator surface](../cli/release_operator/release_operator.ava.okf.md).
 
 Release preparation completes before maintenance. The prepared request captures
-exact previous/candidate/executor image identities, home/registry, configuration
+exact previous/candidate/executor image identities, home, configuration
 and operation generation:
 
 ```bash
@@ -2409,7 +2409,7 @@ Uncertain leftover ownership blocks a second generation. Service readiness check
 protocol behavior and the captured native owner; an unrelated listener or missing
 inspection cannot certify the service. Application stop and persistent terminal
 stop are distinct operations, and native data-plane shutdown has its own verified
-boundary. A full destroy frees the registry reservation only after cleanup succeeds.
+boundary. A full destroy marks the home detached only after cleanup succeeds.
 
 Use the normal lifecycle through the [local preview controller](../scripts/preview/README.md)
 for branch validation. Root framework tests under `tests/services/test_ava_root_*`

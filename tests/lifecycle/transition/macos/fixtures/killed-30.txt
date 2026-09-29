@@ -14,9 +14,9 @@ gui/501/com.ava.release-executor.db29b1b58c3d172a8220cb1c8be1015f.a0 = {
 		--group-receipt
 		/fixture/job/home/updates/0985a8d2-d9a8-4430-89fd-b8df3e0695f8/executor/a0/group.json
 		--env
-		AVA_CLUSTER_REGISTRY=/fixture/job/clusters.json
-		--env
 		AVA_HOME=/fixture/job/home
+		--env
+		AVA_HOST_STATE_DIR=/fixture/job
 		--env
 		HOME=/fixture/user
 		--env

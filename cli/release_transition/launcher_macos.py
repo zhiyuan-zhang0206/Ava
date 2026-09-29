@@ -183,9 +183,9 @@ def _plan(
         or not runtime.cwd.is_relative_to(runtime.root)
     ):
         raise ValueError("executor runtime differs from captured release request")
-    registry = Path(request.registry)
-    if registry.resolve(strict=True) != registry:
-        raise ValueError("release launch registry must be canonical")
+    from base.paths import host_state_dir
+
+    state_dir = host_state_dir()
     account = pwd.getpwuid(os.getuid())
     product, build = _supported_macos()
     label = (
@@ -197,7 +197,7 @@ def _plan(
         "operation": str(operation),
         "attempt": current.attempt,
         "home": str(home),
-        "registry": str(registry),
+        "host_state_dir": str(state_dir),
         "label": label,
         "domain": f"gui/{account.pw_uid}",
         "uid": account.pw_uid,
@@ -221,7 +221,7 @@ def _plan(
         "environment": {
             "HOME": account.pw_dir,
             "AVA_HOME": str(home),
-            "AVA_CLUSTER_REGISTRY": str(registry),
+            "AVA_HOST_STATE_DIR": str(state_dir),
             "PATH": f"{runtime.interpreter.parent}:/usr/bin:/bin:/usr/sbin:/sbin",
         },
         "exit_timeout": EXIT_TIMEOUT_S,

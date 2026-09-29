@@ -210,7 +210,7 @@ ava cluster update --prepared /absolute/path/to/request.json
 ```
 
 The prepared request captures the exact previous/candidate/executor image
-identities, home/registry, configuration and operation generation to roll out;
+identities, home, configuration and operation generation to roll out;
 see [the runbook](conventions/runbook.md) for how to produce one. Never
 `git pull` + `ava start` on a production checkout — the update path is
 `ava cluster update --prepared REQUEST` only.

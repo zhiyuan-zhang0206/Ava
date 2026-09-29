@@ -170,7 +170,7 @@ bot-PR pattern for manual refreshes too.
 
 `tests/conftest.py` redirects every host resource the suite could otherwise
 share with the operator's live cluster: `$AVA_HOME` (tmpfs), the database and
-Redis (throwaway per-worker instances), the cluster registry, every daemon health
+Redis (throwaway per-worker instances), the host state dir, every daemon health
 port, and the session home. Each of those works because the resource is addressed
 by a value the process reads — redirect the value, redirect the resource. Env
 vars are set in `os.environ`, not only on the settings singleton, so subprocesses

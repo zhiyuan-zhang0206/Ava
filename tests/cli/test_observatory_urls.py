@@ -75,7 +75,11 @@ def test_registered_pooler_is_rendered_as_direct_postgres(
             {"gateway": 20016, "postgres": 20027, "redis": 20028, "pgbouncer": 20029},
         ),
     )
-    monkeypatch.setattr(cluster, "load_registry", lambda: {home: record})
+
+    def _record(_home: Path) -> cluster.ClusterRecord:
+        return record
+
+    monkeypatch.setattr(cluster, "get_record", _record)
     monkeypatch.setattr(settings.data_plane, "db_url", "postgresql://reader@127.0.0.1:20029/ava")
     monkeypatch.setattr(settings.data_plane, "pgbouncer_enabled", True)
     assert _render(tmp_path)["AVA_PG_URL"] == "127.0.0.1:20027"

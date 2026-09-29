@@ -44,7 +44,6 @@ def _adapter() -> AdapterKind:
 
 
 def receipt(encoded: bytes) -> UnitReceipt:
-    from base.cluster import registry_path
     from base.cluster.authority.unit import load_unit_enrollment
     from base.cluster.machine import machine_name, machine_role
     from base.deploy.release.start_inputs import configuration_digest
@@ -63,7 +62,6 @@ def receipt(encoded: bytes) -> UnitReceipt:
     return UnitReceipt(
         machine=envelope.machine,
         home=envelope.home,
-        registry=str(registry_path()),
         roles=tuple(sorted(machine_role())),
         abi=current_abi().to_json(),
         platform=platform.platform(),

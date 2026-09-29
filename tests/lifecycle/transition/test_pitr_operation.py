@@ -57,7 +57,6 @@ def pitr_request(tmp_path: Path) -> PitrRequest:
     return PitrRequest(
         id=uuid4(),
         home=str(home),
-        registry=str(home.parent / "registry.json"),
         created_at=datetime.now(UTC),
         machine="test",
         image=image,
@@ -359,7 +358,7 @@ def test_rollback_cannot_decide_while_native_attempt_is_unknown(
 def test_new_rollback_after_release_uses_selected_image_and_same_activation(
     pitr_request: PitrRequest, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from base import cluster, paths
+    from base import paths
     from base.cluster import machine
     from cli.release_fleet.request import FleetRequest
     from cli.release_transition.pitr import submission
@@ -399,12 +398,9 @@ def test_new_rollback_after_release_uses_selected_image_and_same_activation(
             }
         )
     )
-    registry = Path(pitr_request.registry)
-    registry.write_text("{}")
     monkeypatch.setattr(submission, "_active", _constant(completed))
     monkeypatch.setattr(submission, "selected_image", _constant(image_b))
     monkeypatch.setattr(paths, "ava_home", lambda: home)
-    monkeypatch.setattr(cluster, "registry_path", lambda: registry)
     monkeypatch.setattr(machine, "machine_name", lambda: pitr_request.machine)
     result = submission.prepare_request("rollback", origin="operator")
     assert result.image == image_b and result.executor == image_b

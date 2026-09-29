@@ -260,8 +260,8 @@ class DataPlaneSettings(EnvSettings):
             "that host, and the self-dial loopback rewrite (`_loopback_if_self`) "
             "passes a foreign host through untouched. The URLs, not this knob, "
             "are what every process dials — this field only decides the host "
-            "they are born with; the registry record snapshots it at birth "
-            "(`cli.commands.cluster.registry.ensure_record`)."
+            "they are born with; the home's start intent records it at birth "
+            "(`cli.start_identity`)."
         ),
         json_schema_extra={
             "restart_required": "all",

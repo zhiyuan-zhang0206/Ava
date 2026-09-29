@@ -575,11 +575,11 @@ os.environ.pop("AVA_AGENT_ID", None)
 # the import-time boot reads, this is what in-process `settings.general.ava_home`
 # readers get. Both point at the same tmpfs dir, removed in `pytest_sessionfinish`.
 settings.general.ava_home = _TEST_AVA_HOME
-# The host-level cluster registry is independent of AVA_HOME and defaults to the
-# real `~/.ava/clusters.json`; redirect it into the tmpfs home too so tests never
-# read or write the operator's prod registry.
-settings.general.cluster_registry = _TEST_AVA_HOME / "clusters.json"
-os.environ["AVA_CLUSTER_REGISTRY"] = str(_TEST_AVA_HOME / "clusters.json")
+# The host state dir is independent of AVA_HOME and defaults to the real `~/.ava`;
+# redirect it into the tmpfs home too so tests never read or write the operator's
+# host-level state (Postgres template, runtime binaries, PTY freeze).
+settings.general.host_state_dir = _TEST_AVA_HOME
+os.environ["AVA_HOST_STATE_DIR"] = str(_TEST_AVA_HOME)
 # multi-machine setup: spawn_agent / claim_agent_row reads machine_name()
 # from `$AVA_HOME/machine_name`; must write one into tmpfs first otherwise MachineNameMissing.
 (_TEST_AVA_HOME / "machine_name").write_text(f"test-{_SESSION_SUFFIX}")

@@ -89,7 +89,7 @@ that made a `cluster destroy` deregister prod's jobs.
 
 The one idea worth keeping is its **per-cluster-parameterized container data
 plane**: container names, published ports, volume names and the data-plane
-identity all driven from the cluster's registry record via compose `${VAR}`
+identity all driven from the cluster's own record via compose `${VAR}`
 substitution, so co-located clusters do not collide. If the container direction
 is ever taken, that shape is right and these three defects in that
 implementation are not:

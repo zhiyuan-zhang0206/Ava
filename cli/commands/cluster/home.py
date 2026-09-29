@@ -57,7 +57,7 @@ def cmd_cluster_down(*, path: str) -> int:
     home = Path(path).expanduser()
     rec = cl.get_record(home)
     if rec is None:
-        print(f"✗ ava cluster down: no cluster at '{home}' in the registry", file=sys.stderr)
+        print(f"✗ ava cluster down: no cluster record at '{home}'", file=sys.stderr)
         return 1
 
     # The child stop runs with AVA_HOME = the target home, so its data-plane
@@ -78,22 +78,20 @@ def cmd_cluster_down(*, path: str) -> int:
 
 
 def cmd_cluster_destroy(*, path: str, drop_db: bool = False) -> int:
-    """Remove a cluster: stop it, delete its registry entry, optionally remove its
-    data dirs.
+    """Detach a cluster: stop it, retire its OS jobs and checkout binding, mark the
+    home detached, optionally remove its data dirs.
 
     Refuses to destroy the default home (`~/.ava`) — it is prod. Returns 0 on
-    success, 1 if the path is not registered or is the default home.
+    success, 1 if the path holds no cluster record or is the default home.
 
-    Deliberately leaves the home's own files alone (`.env` included) without
-    `--drop-db`: destroy frees the *slot*, and a destroyed home's `.env` is the
+    Nothing on the host lists clusters, so there is no slot to free: once its
+    services stop, the home's port block is simply unbound. Without `--drop-db`
+    the home's own files stay (`.env` included): a detached home's `.env` is the
     only copy of that cluster's secret, of any key hand-added beyond
-    `SEED_ENV_KEYS`, and of the URLs its data-plane identity is read from — so
-    deleting it would make "free the port block" discard credentials that exist
-    nowhere else (it would not strand the preserved pg data: the role password
-    is re-affirmed from the current secret on every bring-up). What stops the leftover home
-    from being booted onto a block since reallocated is the start gate
-    (`cli/preflight.py`), which refuses a home the registry does not corroborate
-    — no record at all, or a record whose port block its `.env` contradicts.
+    `SEED_ENV_KEYS`, and of the URLs its data-plane identity is read from. The
+    `detached` destroy intent is what stops the leftover home from starting
+    again (`cli.start_identity.prepare_identity` refuses it), and the start port
+    preflight refuses a home whose block another cluster has since taken.
     """
     from base import cluster as cl
 
@@ -108,7 +106,7 @@ def cmd_cluster_destroy(*, path: str, drop_db: bool = False) -> int:
 
     rec = cl.get_record(home)
     if rec is None:
-        print(f"✗ ava cluster destroy: no cluster at '{home}' in the registry", file=sys.stderr)
+        print(f"✗ ava cluster destroy: no cluster record at '{home}'", file=sys.stderr)
         return 1
 
     from base.host.private_storage import write_private_bytes
@@ -117,29 +115,22 @@ def cmd_cluster_destroy(*, path: str, drop_db: bool = False) -> int:
     from services.permissions_helper.launchd_job import unregister_helper
 
     # Publish a terminal intent before stopping. Concurrent/internal starts must
-    # refuse it even while this home still owns its reservation.
+    # refuse it from the first moment of the teardown.
     with file_lock(home / "start-intent.lock", timeout_s=30):
         write_private_bytes(home / "destroy-intent.json", b'{"version":1,"state":"destroying"}\n')
         rc = cmd_cluster_down(path=str(home))
         if rc != 0:
-            print(
-                "cluster stop incomplete; reservation and destroy intent retained", file=sys.stderr
-            )
+            print("cluster stop incomplete; destroy intent retained", file=sys.stderr)
             return rc
         try:
             _unregister_scheduled_jobs(home)
             unregister_helper(home, helper_port=rec.ports["permissions_helper"])
             retire_checkout_binding(home)
         except (OSError, RuntimeError, ValueError, TypeError) as exc:
-            print(f"cluster cleanup incomplete; reservation retained: {exc}", file=sys.stderr)
+            print(f"cluster cleanup incomplete: {exc}", file=sys.stderr)
             return 1
-        with cl.registry_lock():
-            current = cl.get_record(home)
-            if current != rec:
-                raise RuntimeError("cluster reservation changed during destroy")
-            cl.delete_record_locked(home)
         write_private_bytes(home / "destroy-intent.json", b'{"version":1,"state":"detached"}\n')
-        print(f"removed {home} from cluster registry after exact cleanup")
+        print(f"detached {home} after exact cleanup")
 
     if drop_db:
         # The whole Postgres+Redis instance is this cluster's own, so removing its
@@ -166,7 +157,7 @@ def _unregister_scheduled_jobs(home: Path) -> None:
     the prod checkout (the documented way to address a cluster) would tear down
     prod's own health probe and autostart.
 
-    Every job must be retired before the registry slot can be freed. An
+    Every job must be retired before the home is marked detached. An
     unavailable scheduler is ambiguous custody, so failures are raised.
     """
     from base.host.system.autostart import unregister_autostart
@@ -189,23 +180,3 @@ def _unregister_scheduled_jobs(home: Path) -> None:
 
     if failed:
         raise RuntimeError("could not remove scheduled jobs: " + ", ".join(failed))
-
-
-def cmd_cluster_ls() -> int:
-    """List all registered clusters (label = home basename, computed display)."""
-    from base import cluster as cl
-
-    registry = cl.load_registry()
-    if not registry:
-        print("(no clusters registered)")
-        return 0
-
-    for rec in registry.values():
-        # ports always holds the full PORT_OFFSETS set by contract — index, don't .get.
-        print(
-            f"{cl.home_label(Path(rec.gateway_home))}"
-            f"  gateway={rec.ports['gateway']}  frontend={rec.ports['frontend']}"
-            f"  pg={rec.ports['postgres']}  redis={rec.ports['redis']}"
-            f"  home={rec.gateway_home}"
-        )
-    return 0

@@ -336,7 +336,7 @@ def test_cmd_converge_unconfigured_returns_zero(
     # A unit test must not reach Maven Central: seed the vendored Postgres tree so
     # the vendored-binaries step takes ensure_pg_binaries()'s idempotent early
     # return (the real download is covered by tests/integration/test_vendored_binaries.py).
-    monkeypatch.setattr(settings.general, "cluster_registry", str(tmp_path / "clusters.json"))
+    monkeypatch.setattr(settings.general, "host_state_dir", tmp_path)
     seeded_bin = rb.vendored_pg_dir() / "bin"
     seeded_bin.mkdir(parents=True)
     (seeded_bin / "initdb").write_text("#!/bin/sh\n")

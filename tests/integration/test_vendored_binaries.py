@@ -29,9 +29,9 @@ from base.host.net import resilience
 
 @pytest.fixture()
 def isolated_runtime(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Point the host-level runtime root at a tmp dir (via the cluster-registry
+    """Point the host-level runtime root at a tmp dir (via the host-state-dir
     anchor), so a test never touches the real ~/.ava/runtime."""
-    monkeypatch.setattr(settings.general, "cluster_registry", str(tmp_path / "clusters.json"))
+    monkeypatch.setattr(settings.general, "host_state_dir", tmp_path)
 
 
 def test_pg_tool_prefers_vendored_dir(isolated_runtime: None) -> None:

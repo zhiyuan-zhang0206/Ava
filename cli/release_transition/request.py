@@ -64,12 +64,11 @@ class HomeRequest(Record):
     version: Literal[1] = 1
     id: UUID
     home: str
-    registry: str
     created_at: AwareDatetime
     machine: str = Field(min_length=1, max_length=128)
     configuration_digest: Digest
 
-    @field_validator("home", "registry")
+    @field_validator("home")
     @classmethod
     def absolute_path(cls, value: str) -> str:
         path = Path(value)

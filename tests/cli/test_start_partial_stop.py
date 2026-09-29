@@ -25,7 +25,6 @@ def partial_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     prepare_identity(
         IdentityInput(
             home,
-            tmp_path / "registry.json",
             tmp_path,
             False,
             frozenset({"gateway", "agent-runner"}),

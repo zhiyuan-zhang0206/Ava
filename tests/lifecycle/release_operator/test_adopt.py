@@ -25,8 +25,8 @@ from uuid import uuid4
 
 import pytest
 
-import base.cluster as cluster_pkg
 from base import paths as base_paths
+from base.config import settings
 from base.deploy.release.runtime_release import activate_release, current_pointer
 from base.host.system.boot_unit import BootStartAction, BootUnitContext
 from base.runtime_abi import current_abi
@@ -43,7 +43,7 @@ def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     path = tmp_path / "home"
     path.mkdir()
     monkeypatch.setattr(base_paths, "ava_home", lambda: path)
-    monkeypatch.setattr(cluster_pkg, "registry_path", lambda: tmp_path / "clusters.json")
+    monkeypatch.setattr(settings.general, "host_state_dir", tmp_path)
     return path
 
 
@@ -169,7 +169,6 @@ def test_a_rerun_refuses_while_a_release_operation_holds_startup(
     request = FleetRequest(
         id=uuid4(),
         home=str(home),
-        registry=str(tmp_path / "clusters.json"),
         created_at=datetime.now(UTC),
         machine="test-unit",
         previous=previous,
@@ -215,5 +214,5 @@ def test_first_selection_activates_and_installs_the_steady_boot_action(
     assert len(calls) == 1
     context, action = calls[0]
     assert context.home == home
-    assert context.registry == Path(cluster_pkg.registry_path())
+    assert context.host_state_dir == base_paths.host_state_dir()
     assert reference.source_commit in action.argv
