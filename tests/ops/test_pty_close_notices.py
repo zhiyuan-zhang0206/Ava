@@ -55,6 +55,7 @@ def _record(
         shell_birth=birth,
         operation="local-pause:macmini:1:uuid",
         acquired_at=_WHEN,
+        reason=notices.STOP_REASON,
     )
     assert path is not None
     return path
@@ -108,6 +109,7 @@ def test_a_close_that_left_processes_running_names_them_once(
         shell_birth="starttime:4242",
         operation="local-pause:macmini:1:uuid",
         acquired_at=_WHEN,
+        reason=notices.STOP_REASON,
         survivors=[(4242, "sudo")],
     )
     again = notices.record_close(
@@ -117,6 +119,7 @@ def test_a_close_that_left_processes_running_names_them_once(
         shell_birth="starttime:4242",
         operation="local-pause:macmini:1:uuid",
         acquired_at=_WHEN,
+        reason=notices.STOP_REASON,
         survivors=[(4242, "sudo"), (4343, "python3")],
     )
     assert first is not None and again == first
@@ -175,6 +178,7 @@ def test_record_close_rejects_non_agent_shell_names(journal: Path) -> None:
             shell_birth="birth:1.0",
             operation="local-pause:macmini:1:uuid",
             acquired_at=_WHEN,
+            reason=notices.STOP_REASON,
         )
         is None
     )

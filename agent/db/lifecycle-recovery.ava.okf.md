@@ -21,8 +21,39 @@ execution is settled. Cold recovery only completes a command when its
 original owner and resources are positively absent; unresolved evidence
 remains pending.
 
-Historical process-target evidence stays readable in existing rows. It is
-compatibility data for settlement, not authority to launch an agent process.
+Resurrection requires the terminated hosted incarnation's retained generation
+and owner, no per-agent PID, and no outstanding applied lifecycle command. A
+row with no runtime identity resurrects as a fresh hosted birth instead, in
+two cases, each rechecked in the final CAS. One is a never-admitted row whose
+birth marker is still unconsumed. The other is a row this runtime
+force-terminated while no incarnation owned it: the force records
+`unowned_termination` on its own command, but only when the row's unowned
+state has a lifecycle origin. That origin is the spawn's birth epoch
+(`last_resurrect_inbound_id = 0`), or a `lifecycle_release` receipt on the
+resurrection, applied restart or straggler settlement that left the row
+unowned. The receipt must belong to the current life, that is, have an id
+above the epoch fence
+(`decisions/2026-09-29-unowned-termination-resurrects.md`).
+Historical process runtimes, unknown runtime kinds, incomplete hosted
+identities and resources the current model cannot decode refuse resurrection
+(`runtime_cutover_required`) pending explicit one-time cutover reconciliation.
+For a terminated row with NULL resources and an incomplete identity, that
+reconciliation is the cutover's identity mint: on an attested machine it
+writes a hosted kind and a fresh generation and owner, which this gate then
+accepts and the resurrection CAS clears
+(`decisions/2026-09-28-legacy-terminated-agents-resurrectable-at-cutover.md`).
+It reaches only rows terminated before their machine's attestation; a row
+whose pointer names a forced terminate is minted at the cutover's W12 late
+conversion once boot recovery settled that force. Rows the mint does not
+reach keep refusing, and so does a legacy unowned row this runtime
+force-terminated without having released it first.
+An automatic resurrection that meets such a refusal leaves its inbound queued
+and logs a WARNING naming the reason.
+No process-exit observer adopts those rows or settles a hosted logical lifecycle.
+
+Hosted protocol-zero rows with NULL resource metadata retain their existing
+settlement behavior. NULL is not a resource-closure proof; the broader resource
+and database cutover remains required.
 
 ## Force and later commands
 
@@ -65,4 +96,3 @@ terminated-owner retry as the backstop.
 - `agent/hosted_ownership.py` — native completion and resource settlement
 - `agent/lifecycle_observe.py` — successor admission observation
 - `ops/agent_wake.py` — transactional resurrection
-- `shared/lifecycle_termination_observe.py` — prior termination evidence

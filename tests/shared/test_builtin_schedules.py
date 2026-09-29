@@ -14,6 +14,7 @@ from typing import Any
 
 import psycopg
 import pytest
+from psycopg_pool import ConnectionPool
 
 from shared.daemon.schedules.builtin_schedules import (
     ManifestError,
@@ -112,6 +113,28 @@ class TestLoadManifest:
 
 
 class TestProvision:
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("automatic", [False, True])
+    async def test_gateway_boot_respects_seeding_without_disabling_explicit_provision(
+        self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, automatic: bool
+    ) -> None:
+        from gateway.schedule_manager import ScheduleManager
+        from shared.config import settings
+
+        monkeypatch.setattr(settings.gateway, "provision_builtin_schedules", automatic)
+        assert _names(db_conn) == set()
+        expected = {item.name for item in load_manifest()}
+        with ConnectionPool(settings.data_plane.db_url, min_size=1, max_size=1) as pool:
+            manager = ScheduleManager(pool)
+            await manager.provision_builtins()
+            assert _names(db_conn) == (expected if automatic else set())
+            # Manual provisioning remains a deliberate action, even on an unseeded home.
+            provision_builtin_schedules(db_conn)
+            db_conn.commit()
+            before = {name: _row(db_conn, name) for name in expected}
+            await manager.provision_builtins()
+            assert {name: _row(db_conn, name) for name in expected} == before
+
     def test_creates_missing_with_manifest_defaults(
         self, db_conn: psycopg.Connection, tmp_path: Path
     ) -> None:

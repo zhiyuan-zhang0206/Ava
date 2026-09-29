@@ -21,6 +21,7 @@ from contextlib import suppress
 from typing import Any
 
 from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
+from shared.cluster.authority.api import token_digest
 from shared.config import settings
 from shared.daemon_health import Liveness, health_port, start_health_server, stop_health_server
 from shared.daemon_shutdown import cancel_and_drain, install_graceful_shutdown
@@ -129,7 +130,7 @@ async def _handle_send(core: Any) -> Any:
 
     Body: ``{"text": str}`` — fanned out to every loaded adapter's owner chat
     via ``core.notify_user``. The gateway calls this with the cluster secret
-    as Bearer (the health server's ``auth_token``). Returns per-channel
+    as Bearer (the health server's ``auth_digests``). Returns per-channel
     results; a channel that failed to send is reported, not fatal. When
     EVERY channel failed (or none is loaded) the route answers 502 instead
     of 200 — the caller (shared/alerts.py) keys ``notified_at`` off the status
@@ -179,9 +180,12 @@ async def run() -> None:
             "im_bridge",
             liveness=liveness,
             extra_routes={("POST", "/send"): await _handle_send(core)},
-            # Bearer = the cluster secret; empty-secret clusters (single-box
-            # no-auth posture) get no auth — consistent with the gateway.
-            auth_token=settings.data_plane.cluster_secret or None,
+            # Bearer = the cluster secret (a gateway-local caller); empty-secret
+            # clusters (single-box no-auth posture) get no auth — consistent
+            # with the gateway.
+            auth_digests=frozenset({token_digest(settings.data_plane.cluster_secret)})
+            if settings.data_plane.cluster_secret
+            else None,
         )
     except Exception:
         _remove_pidfile()

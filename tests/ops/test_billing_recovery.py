@@ -61,13 +61,15 @@ def _halt(
     status: str = "terminated",
     legacy_closed: bool = False,
 ) -> None:
-    """Seed a row's death shape (the incident signature by default).
+    """Seed a hosted incarnation's death shape (the incident signature by default).
 
     `legacy_closed` stamps the `closed_at` column the retired closed-agent
     concept wrote (decisions/2026-09-27-terminate-has-no-closed-state.md);
     no gate reads it any more."""
     conn.execute(
         "UPDATE agents_meta SET status=%s, termination_source=%s, "
+        "runtime_kind='hosted', runtime_generation=gen_random_uuid(), "
+        "runtime_owner=gen_random_uuid(), "
         "permanent_reject_streak=%s, last_permanent_reject_reason=%s, "
         "closed_at=CASE WHEN %s THEN now() ELSE NULL END WHERE id=%s",
         (status, source, streak, reason, legacy_closed, agent_id),

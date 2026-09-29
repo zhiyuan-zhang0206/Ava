@@ -22,7 +22,7 @@ from shared.incarnation_resources import (
     decode_resources,
 )
 from shared.managed_writer_publication import AdmissionDecision, CurrentAdmission
-from shared.proc_tree import stable_create_time
+from shared.native_process.ownership import stable_create_time
 from shared.runtime_admission import RuntimeAdmission
 from shared.runtime_incarnation import RuntimeIncarnation
 
@@ -42,7 +42,7 @@ def exited_host() -> ResourceProcess:
     )
     try:
         native = psutil.Process(process.pid)
-        identity = ResourceProcess(pid=native.pid, birth=stable_create_time(native))
+        identity = ResourceProcess.capture(native)
     finally:
         # kill(), not terminate(): a SIGTERM-ignoring session (Ava shell
         # sessions inherit SIG_IGN) would leave the child alive and hang here.
@@ -155,10 +155,12 @@ async def test_reused_pid_identifies_old_host_exit_without_touching_replacement(
     aops_pool: AsyncConnectionPool,
 ) -> None:
     native = psutil.Process()
-    current = ResourceProcess(pid=native.pid, birth=stable_create_time(native))
-    # A recycled pid cannot start within the 2.0s identity tolerance: the
-    # predecessor's birth must lie beyond it to model a different process.
-    prior = ResourceProcess(pid=current.pid, birth=current.birth - 60)
+    current = ResourceProcess.capture(native)
+    prior = current.model_copy(
+        update={"starttime": current.starttime + 1}
+        if current.starttime is not None
+        else {"birth": current.birth - 60}
+    )
     agent_id, _ = _seed(db_conn, prior)
     admitted = await admit_hosted_runtime(
         aops_pool,

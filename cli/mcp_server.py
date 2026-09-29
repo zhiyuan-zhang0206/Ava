@@ -15,8 +15,9 @@ one MCP tool per gateway route, no logic of its own, so an external agent
 
 Which cluster it drives is not a parameter: `shared.machine.gateway_api_base`
 resolves the gateway of the checkout this `ava` belongs to, and
-`gateway_auth_headers` presents that cluster's secret. So the prod `ava` on PATH
-serves prod, and a worktree's `.venv/bin/ava` serves that worktree's cluster —
+`gateway_auth_headers` presents that cluster's secret. The host's global `ava`
+only forwards to the cluster `AVA_HOME` names, and refuses without it; a
+worktree's `.venv/bin/ava` serves that worktree's cluster directly —
 the same rule every other verb follows.
 
 Transport is stdio: **stdout is the JSON-RPC channel**, so nothing on this path

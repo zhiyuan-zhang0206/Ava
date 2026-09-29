@@ -305,6 +305,13 @@ def test_mirror_dir_never_guesses_the_default_home_when_unanchored(
 # --- _cluster_secret: explicit env wins; an unanchored home is never read ---
 
 
+@pytest.fixture(autouse=True)
+def _no_inherited_api_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A launched process's machine token outranks every other bearer; keep
+    one inherited from the test runner's environment out of these cases."""
+    monkeypatch.delitem(os.environ, "AVA_API_TOKEN", raising=False)
+
+
 def test_cluster_secret_prefers_explicit_env(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -339,6 +346,33 @@ def test_cluster_secret_never_reads_an_unanchored_home(
     (home / ".env").write_text("AVA_CLUSTER_SECRET=planted-prod-bearer\n")
 
     assert rt._cluster_secret(home, False) == ""
+
+
+def test_cluster_secret_prefers_the_machine_api_token_when_anchored(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setitem(os.environ, "AVA_API_TOKEN", "machine-token")
+    monkeypatch.setitem(os.environ, "AVA_CLUSTER_SECRET", "explicit-secret")
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / ".env").write_text("AVA_CLUSTER_SECRET=file-secret\n")
+
+    assert rt._cluster_secret(home, True) == "machine-token"
+
+
+def test_cluster_secret_never_sends_an_inherited_token_when_unanchored(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An unanchored checkout sends only what the operator handed it
+    explicitly: an inherited machine token names no gateway it may dial."""
+    monkeypatch.setitem(os.environ, "AVA_API_TOKEN", "inherited-token")
+    monkeypatch.delitem(os.environ, "AVA_CLUSTER_SECRET", raising=False)
+    home = tmp_path / "scratch"
+    home.mkdir()
+
+    assert rt._cluster_secret(home, False) == ""
+    monkeypatch.setitem(os.environ, "AVA_CLUSTER_SECRET", "explicit-secret")
+    assert rt._cluster_secret(home, False) == "explicit-secret"
 
 
 # --- _gateway_get: an unanchored checkout dials nothing without an explicit secret ---
@@ -384,6 +418,19 @@ def _allow_network(monkeypatch: pytest.MonkeyPatch, seen_requests: list[Any]) ->
 def test_gateway_get_refuses_when_unanchored_with_no_explicit_secret(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    monkeypatch.delitem(os.environ, "AVA_CLUSTER_SECRET", raising=False)
+    scratch = tmp_path / "ava-unanchored-deadbeefdeadbeef"
+    monkeypatch.setattr(rt, "resolve_ava_home", lambda: (scratch, False))
+    _forbid_network(monkeypatch)
+
+    with pytest.raises(SystemExit, match="unanchored"):
+        rt._gateway_get("http://localhost:8000", "/api/events")
+
+
+def test_gateway_get_refuses_when_unanchored_with_only_an_inherited_token(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setitem(os.environ, "AVA_API_TOKEN", "inherited-token")
     monkeypatch.delitem(os.environ, "AVA_CLUSTER_SECRET", raising=False)
     scratch = tmp_path / "ava-unanchored-deadbeefdeadbeef"
     monkeypatch.setattr(rt, "resolve_ava_home", lambda: (scratch, False))

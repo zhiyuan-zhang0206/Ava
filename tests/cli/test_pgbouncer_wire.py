@@ -1,9 +1,10 @@
 """End-to-end: a real PgBouncer in transaction pooling in front of a throwaway
 Postgres. Proves the load-bearing wire behaviour the unit tests cannot:
 
-- scram-sha-256 client auth against a plaintext userlist entry (the chosen auth
-  scheme), with a credential-less server hop (here TCP loopback trust, mirroring
-  the prod unix-socket trust),
+- scram-sha-256 client auth against a userlist entry, with a credential-less
+  server hop (here TCP loopback trust — the pooling behavior under test is
+  independent of the hop's auth; the production verifier userlist and SCRAM
+  pass-through socket hop are proven in tests/lifecycle/db_authority/test_single_box.py),
 - transaction pooling with `prepare_threshold=None` (never prepare) — the same
   query run across many autocommit transactions never hits "prepared statement
   does not exist" as different backends are handed out,
@@ -30,10 +31,11 @@ from pathlib import Path
 import psycopg
 import pytest
 from psycopg import sql
-from psycopg.conninfo import conninfo_to_dict
+from psycopg.conninfo import conninfo_to_dict, make_conninfo
 from psycopg_pool import AsyncConnectionPool, ConnectionPool
 
 from cli.commands.data_plane.pgbouncer import pgbouncer_bin
+from shared.cluster.authority import POOLER_ADMIN
 from tests._containers import _free_port, _wait_port, postgres
 
 _SECRET = "pgbouncerwiretestsecret"  # noqa: S105 — test fixture, not a real credential
@@ -58,9 +60,9 @@ def _pgbouncer_in_front(
     read_only_default: bool = False,
 ) -> Generator[str]:
     """Start a transaction-pooling PgBouncer in front of the throwaway Postgres at
-    `pg_url`; yield the pooled connection URL. Config mirrors cli/commands/pgbouncer,
-    but the server hop is TCP loopback (the throwaway's trust posture) rather than the
-    prod unix socket — behaviourally the same credential-less trust hop.
+    `pg_url`; yield the pooled connection URL. Pooling config mirrors
+    cli/commands/pgbouncer; the server hop is TCP loopback under the throwaway's
+    trust posture rather than the production SCRAM pass-through socket hop.
 
     `listen_addr` lets a test bind the listener on a specific loopback address —
     e.g. 127.0.0.2 to prove the degraded-bind probe dials exactly the bound
@@ -99,7 +101,8 @@ def _pgbouncer_in_front(
     tmp = Path(tempfile.mkdtemp(prefix="ava-pgbouncer-test-"))
     listen_port = _free_port()
     userlist = tmp / "userlist.txt"
-    userlist.write_text(f'"{role}" "{_SECRET}"\n')
+    # Mirrors _render_ini: the admin console belongs to the pooler admin alone.
+    userlist.write_text(f'"{role}" "{_SECRET}"\n"{POOLER_ADMIN}" "{_SECRET}"\n')
     ini = tmp / "pgbouncer.ini"
     ini.write_text(
         "\n".join(
@@ -131,7 +134,7 @@ def _pgbouncer_in_front(
                 "max_client_conn = 100",
                 f"default_pool_size = {pool_size}",  # tiny, so transactions genuinely reuse backends
                 "ignore_startup_parameters = extra_float_digits,options",
-                f"admin_users = {role}",
+                f"admin_users = {POOLER_ADMIN}",
                 f"logfile = {tmp / 'pgbouncer.log'}",
                 f"pidfile = {tmp / 'pgbouncer.pid'}",
                 "",
@@ -161,6 +164,12 @@ def _pgbouncer_in_front(
             pid = int((tmp / "pgbouncer.pid").read_text().strip())
             os.kill(pid, signal.SIGTERM)
         shutil.rmtree(tmp, ignore_errors=True)
+
+
+def _admin_console_url(pooled: str) -> str:
+    """The admin console of a `_pgbouncer_in_front` pooler, dialed as the
+    pooler admin — its only `admin_users` entry (the pooled role is refused)."""
+    return make_conninfo(pooled, user=POOLER_ADMIN, password=_SECRET, dbname="pgbouncer")
 
 
 def test_scram_client_auth_and_pooled_select() -> None:
@@ -501,10 +510,10 @@ def test_langgraph_saver_setup_and_roundtrip_through_pgbouncer() -> None:
 
 
 def test_admin_probe_reaches_the_bound_address_only() -> None:
-    """P4: the load-bearing premise of the degraded-bind probe — a psycopg dial
-    to an address pgbouncer failed to bind actually FAILS, while the bound one
-    answers. `_admin_reachable(host=...)` is what `pgbouncer_public_listener_
-    reachable` trusts to tell a silently degraded pooler from a healthy one.
+    """P4: the admin-console probe authenticates as the pooler admin and dials
+    exactly the address it names — an address pgbouncer did not bind FAILS,
+    while the bound one answers. (Public-bind verification itself reads the
+    socket table, `pgbouncer_public_listener_reachable`, never a self-dial.)
 
     127.0.0.2 is local on Linux (CI runs this); macOS needs an lo0 alias, so
     skip there."""
@@ -519,8 +528,8 @@ def test_admin_probe_reaches_the_bound_address_only() -> None:
         _pgbouncer_in_front(pg_url, listen_addr="127.0.0.2") as pooled,
     ):
         listen_port = int(str(conninfo_to_dict(pooled)["port"]))
-        assert _admin_reachable(listen_port, "ava_citest", _SECRET, host="127.0.0.2") is True
-        assert _admin_reachable(listen_port, "ava_citest", _SECRET, host="127.0.0.1") is False
+        assert _admin_reachable(listen_port, _SECRET, host="127.0.0.2") is True
+        assert _admin_reachable(listen_port, _SECRET, host="127.0.0.1") is False
 
 
 # ── Pooled session-GUC pollution (2026-09-02 P0) ────────────────────────────

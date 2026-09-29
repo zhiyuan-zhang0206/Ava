@@ -1,1 +1,1 @@
-"""Whole-cluster verbs, the health probe, watchdogs, and the cluster registry."""
+"""Whole-cluster verbs, the health probe and its cron job, and the cluster registry."""

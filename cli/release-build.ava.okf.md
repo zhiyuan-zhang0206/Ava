@@ -14,6 +14,9 @@ new private output directory. It does not change the source checkout, prepare
 a complete runtime, select a release, stop services, or access the database.
 Build tools are explicit existing paths. The build is offline; missing cached
 backend dependencies refuse before maintenance can begin.
+Build constraints are mandatory, hash-required and privately captured; every
+backend requirement must be compatible with that supplied closure. The build
+receipt records the constraints digest, and changed constraints refuse.
 Callers using a non-default tool cache supply `--cache-dir` explicitly, including
 the CI setup action; the build does not inherit ambient tool configuration.
 
@@ -24,9 +27,18 @@ Git redirection. The retained archive supplies the source tree. The embedded
 and required migration set. Archive SQL coverage must match the committed tree;
 wheel SQL paths and bytes must match an inventory captured before the backend
 runs. A build hook cannot rewrite both sides of the SQL comparison.
+`capture_source` exposes this same archive mechanism to
+[[cli/release_prepare/acquisition/acquisition.ava.okf.md]]; acquisition has no separate Git
+snapshot implementation.
+
+Git and build commands use the shared POSIX owned-command runner. It retains
+the native process-group leader until all ordinary members finish, and confirms
+bounded group closure before reaping on timeout/interruption. A parent exit
+cannot erase ownership of a reparented build child or turn unfinished work into
+a successful receipt.
 
 The emitted `build-receipt.json` binds the wheel digest. Failed output directories
-remain available for diagnosis and cannot be reused. `read_application_identity`
+remain available for diagnosis and cannot be reused. `shared.release_identity.read_application_identity`
 requires an already verified runtime and rechecks the embedded member against
 that manifest and the expected target. Complete manifests have an explicit
 32 MiB read budget; ordinary unit receipts retain their smaller default budget.
@@ -36,7 +48,8 @@ match their manifest hashes and each other byte for byte. Extra installations,
 a mirror without its primary, and conflicting identity bytes refuse.
 
 `python -m cli.release_build --repo PATH --commit SHA --output NEW_DIRECTORY
---uv ABSOLUTE_UV --python ABSOLUTE_PYTHON` is the preparation entry. It supplies
+--uv ABSOLUTE_UV --python ABSOLUTE_PYTHON --build-constraints HASHED_REQUIREMENTS`
+is the preparation entry. It supplies
 an application input to runtime preparation; it does not prove bootability,
 database compatibility, full fleet coverage, or rollout readiness. The complete
 release-context producer and normal updater entry remain separate consumers.

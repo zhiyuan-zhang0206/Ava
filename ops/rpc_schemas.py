@@ -12,7 +12,7 @@ are re-exported here so every import path stays stable.
 """
 
 from datetime import datetime
-from typing import Any, Literal
+from typing import Any, Literal, TypeGuard, get_args
 from uuid import UUID
 
 from pydantic import (
@@ -377,33 +377,26 @@ OpKind = Literal[
     "spawn-launch",
     "spawn-launch-v2",
     "lifecycle",
-    "cluster_stop",
-    "cluster_update",
-    "cluster_resume",
     "status_probe",
     "config_read",
     "config_write",
     "config_audit_read",
     "inventory_read",
     "inventory_write",
-    "cluster_fetch",
-    "cluster_prepare_facts",
-    "cluster_prepare_dispatch",
-    "cluster_bootstrap_hop",
-    "cluster_bootstrap_recovery_read",
-    "cluster_normal_continue",
     "shell_probe",
     "shell_kill",
     "agent_skill_view",
     "shell_capture",
     "upload_receive",
+    # The frozen v1 image-exec handoff; its payload and result are the
+    # settings-free `shared.api_contracts.release_handoff` models.
+    "release_image_exec",
 ]
 
 
-# `OpEnvelope` moved to shared/api_contracts/op_envelope.py (re-exported in the import block
-# above) so the restricted bootstrap observer can validate the same envelope
-# without importing this module -- which pulls shared.config transitively. The
-# name stays importable from here for every existing importer.
+def is_op_kind(kind: str) -> TypeGuard[OpKind]:
+    """Admit the current wire vocabulary before lookup, dedupe or dispatch effects."""
+    return kind in get_args(OpKind)
 
 
 class OpResponse(BaseModel):
@@ -440,42 +433,6 @@ class LifecyclePayload(BaseModel):
     body: dict[str, Any] = Field(default_factory=dict)
     trigger_inbound_id: int | None = Field(default=None, gt=0)
     trigger_inbound_kind: Literal["chat", "compact_request", "system_note"] | None = None
-
-
-class ClusterUpdatePayload(BaseModel):
-    """`cluster_update` op payload."""
-
-    restart_only: bool = False
-    target_sha: str | None = None
-    mode: str = "smooth"
-    force_reap: bool = False
-
-
-class ClusterTransitionPayload(BaseModel):
-    """Exact deploy-lease capability for one stop/resume generation.
-
-    Both fields are required. A delayed request from generation A must not be
-    authorized by whichever generation happens to own the lease when it lands.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    deploy_holder: str = Field(min_length=1)
-    deploy_acquired_at: datetime
-
-    @field_validator("deploy_acquired_at", mode="before")
-    @classmethod
-    def _require_rfc3339_offset(cls, value: object) -> object:
-        if not isinstance(value, str):
-            # Pydantic v2 converts ValueError into a 422 ValidationError; a
-            # TypeError escapes validation and would turn malformed JSON into 500.
-            raise ValueError(  # noqa: TRY004 — Pydantic validation contract
-                "deploy_acquired_at must be an RFC3339 string"
-            )
-        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-        if parsed.tzinfo is None:
-            raise ValueError("deploy_acquired_at must carry a timezone offset")
-        return value
 
 
 class ConfigWritePayload(BaseModel):
@@ -634,14 +591,6 @@ class InventoryWriteOpResult(BaseModel):
     plugin_results: dict[str, FieldWriteResult]
     mcp_results: dict[str, FieldWriteResult]
     applied: bool
-
-
-class ClusterSpawnSession(BaseModel):
-    """`cluster_update` op result — the detached updater session's name +
-    its tee'd log path (the shape `spawn_update` / `spawn_restart` return)."""
-
-    session: str
-    log: str
 
 
 class ShellProbeResult(BaseModel):

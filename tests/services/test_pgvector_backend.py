@@ -3,10 +3,10 @@
 `tests/conftest.py` provisions an isolated `ava_test_<pid>_<ts>` database per
 session and `shared.db` dials it, so these tests run against the real engine
 the backend targets (CI's `install-pg-redis` action installs
-`postgresql-17-pgvector`). The backend owns its schema at `connect()` — same
-derived-cache philosophy as the milvus collection, no migrations involved —
-so the autouse fixture drops the table between tests and `connect()` rebuilds
-it.
+`postgresql-17-pgvector`). The table is a derived cache prepared at gateway
+start (`prepare_table`); a runtime `connect()` only validates it. The autouse
+fixture drops the table between tests and the backend fixture prepares it the
+way start does.
 """
 
 from __future__ import annotations
@@ -20,7 +20,12 @@ import psycopg
 import pytest
 from psycopg import sql as pgsql
 
-from services.memory_indexer.backends.pgvector import _TABLE, PGVectorBackend, _ensure_schema
+from services.memory_indexer.backends.pgvector import (
+    _TABLE,
+    PGVectorBackend,
+    _validate_schema,
+    prepare_table,
+)
 
 _DIM = 8
 _FP = "test:gemini:dim=8"
@@ -34,8 +39,8 @@ def _vec(seed: int) -> np.ndarray:
 @pytest.fixture(autouse=True)
 def _fresh_table(db_conn: psycopg.Connection) -> None:
     """Drop the backend's table before each test (autouse = runs first, so
-    `connect()` in the backend fixture recreates it). The extension itself
-    stays — idempotent and shared with the dim-mismatch test."""
+    the backend fixture's start-time preparation recreates it). The extension
+    itself stays — idempotent and shared with the dim-mismatch test."""
     with db_conn.cursor() as cur:
         cur.execute("CREATE EXTENSION IF NOT EXISTS vector")
         cur.execute("DROP TABLE IF EXISTS memory_embeddings")
@@ -43,7 +48,8 @@ def _fresh_table(db_conn: psycopg.Connection) -> None:
 
 
 @pytest.fixture
-def backend() -> Iterator[PGVectorBackend]:
+def backend(db_conn: psycopg.Connection) -> Iterator[PGVectorBackend]:
+    prepare_table(db_conn, _DIM)
     b = PGVectorBackend(dim=_DIM, fingerprint=_FP)
     b.connect()
     try:
@@ -61,34 +67,21 @@ def _rows(db_conn: psycopg.Connection) -> list[tuple[Any, ...]]:
         return list(cur.fetchall())
 
 
-# ── schema management ─────────────────────────────────────────────────────
-
-
-def test_connect_creates_extension_and_table(
-    db_conn: psycopg.Connection, backend: PGVectorBackend
-) -> None:
-    """connect() provisions the extension + table at the provider's dim."""
+def _table_dim(db_conn: psycopg.Connection) -> int | None:
     with db_conn.cursor() as cur:
-        cur.execute("SELECT to_regclass(%s)", (_TABLE,))
-        row = cur.fetchone()
-        assert row is not None and row[0] == _TABLE
         cur.execute(
             "SELECT atttypmod FROM pg_attribute "
             "WHERE attrelid = to_regclass(%s) AND attname = 'vector'",
             (_TABLE,),
         )
         row = cur.fetchone()
-        assert row is not None and row[0] == _DIM
+    return None if row is None else row[0]
 
 
-def test_connect_drops_and_recreates_on_dim_mismatch(
-    db_conn: psycopg.Connection, backend: PGVectorBackend
-) -> None:
-    """A table at another provider's dim (or missing a column) is a stale cache — dropped and
-    recreated at the current dim (cold-start rebuilds the rows)."""
-    wrong_dim = _DIM // 4
+def _create_stale_table(db_conn: psycopg.Connection, dim: int) -> None:
+    """A pre-provider-era table: another width and no `embedder` column."""
     with db_conn.cursor() as cur:
-        cur.execute("DROP TABLE memory_embeddings")
+        cur.execute("DROP TABLE IF EXISTS memory_embeddings")
         cur.execute(
             pgsql.SQL(
                 "CREATE TABLE memory_embeddings ("
@@ -96,33 +89,81 @@ def test_connect_drops_and_recreates_on_dim_mismatch(
                 "kind VARCHAR(16) NOT NULL, chunk_idx BIGINT NOT NULL, "
                 "mtime DOUBLE PRECISION NOT NULL, content_hash VARCHAR(128) NOT NULL, "
                 "vector vector({dim}) NOT NULL)"
-            ).format(dim=pgsql.Literal(wrong_dim))
+            ).format(dim=pgsql.Literal(dim))
         )
     db_conn.commit()
 
+
+# ── schema management ─────────────────────────────────────────────────────
+
+
+def test_prepare_table_creates_table_at_provider_dim(db_conn: psycopg.Connection) -> None:
+    """Start preparation creates the table at the provider's dim, idempotently."""
+    prepare_table(db_conn, _DIM)
+    prepare_table(db_conn, _DIM)
+    assert _table_dim(db_conn) == _DIM
+
+
+def test_prepare_table_drops_and_recreates_on_dim_mismatch(db_conn: psycopg.Connection) -> None:
+    """A table at another provider's dim (or missing a column) is a stale cache — dropped and
+    recreated at the current dim (cold-start rebuilds the rows)."""
+    _create_stale_table(db_conn, _DIM // 4)
+
+    prepare_table(db_conn, _DIM)
+
+    assert _table_dim(db_conn) == _DIM
     fresh = PGVectorBackend(dim=_DIM, fingerprint=_FP)
     fresh.connect()
+    fresh.close()
+
+
+def test_prepare_table_leaves_database_without_extension_alone(
+    db_conn: psycopg.Connection,
+) -> None:
+    """No pgvector binaries: start leaves the table absent; the indexer preflight
+    owns that failure surface."""
+    with db_conn.cursor() as cur:
+        cur.execute("DROP EXTENSION vector")
+    db_conn.commit()
     try:
-        with db_conn.cursor() as cur:
-            cur.execute(
-                "SELECT atttypmod FROM pg_attribute "
-                "WHERE attrelid = to_regclass(%s) AND attname = 'vector'",
-                (_TABLE,),
-            )
-            row = cur.fetchone()
-            assert row is not None and row[0] == _DIM
+        prepare_table(db_conn, _DIM)
+        assert _table_dim(db_conn) is None
     finally:
-        fresh.close()
+        with db_conn.cursor() as cur:
+            cur.execute("CREATE EXTENSION IF NOT EXISTS vector")
+        db_conn.commit()
 
 
-def test_readonly_ensure_schema_refuses_dim_mismatch_without_dropping_rows(
+def test_runtime_connect_never_creates_the_table(db_conn: psycopg.Connection) -> None:
+    """Runtime connections validate only: a missing table fails connect()."""
+    writable = PGVectorBackend(dim=_DIM, fingerprint=_FP)
+
+    with pytest.raises(RuntimeError, match="is missing"):
+        writable.connect()
+
+    assert writable._pool is None
+    assert _table_dim(db_conn) is None
+
+
+def test_runtime_connect_never_rebuilds_a_stale_table(db_conn: psycopg.Connection) -> None:
+    """A dim mismatch is refused at connect(), and the stale table survives."""
+    _create_stale_table(db_conn, _DIM // 4)
+    writable = PGVectorBackend(dim=_DIM, fingerprint=_FP)
+
+    with pytest.raises(RuntimeError, match="vector dimension 2, expected 8"):
+        writable.connect()
+
+    assert _table_dim(db_conn) == _DIM // 4
+
+
+def test_validate_schema_refuses_dim_mismatch_without_dropping_rows(
     db_conn: psycopg.Connection, backend: PGVectorBackend
 ) -> None:
     """D3 regression: a comparison validation cannot rebuild the live table."""
     backend.upsert("/survives.md", 1.0, "hash", _vec(0))
 
     with pytest.raises(RuntimeError, match="vector dimension 8, expected 9"):
-        _ensure_schema(db_conn, _DIM + 1, readonly=True)
+        _validate_schema(db_conn, _DIM + 1)
 
     assert _rows(db_conn) == [("/survives.md\x1fbody\x1f0", "/survives.md", "body", 0, 1.0, "hash")]
 
@@ -141,26 +182,23 @@ def test_readonly_connect_forwards_validation_and_closes_pool_on_mismatch(
     assert _rows(db_conn) == [("/survives.md\x1fbody\x1f0", "/survives.md", "body", 0, 1.0, "hash")]
 
 
-def test_readonly_ensure_schema_accepts_matching_table(
+def test_validate_schema_accepts_matching_table(
     db_conn: psycopg.Connection, backend: PGVectorBackend
 ) -> None:
     """Validation reads the current schema without provisioning anything."""
     backend.upsert("/present.md", 1.0, "hash", _vec(0))
 
-    _ensure_schema(db_conn, _DIM, readonly=True)
+    _validate_schema(db_conn, _DIM)
 
     assert _rows(db_conn) == [("/present.md\x1fbody\x1f0", "/present.md", "body", 0, 1.0, "hash")]
 
 
-def test_readonly_ensure_schema_refuses_missing_table(db_conn: psycopg.Connection) -> None:
+def test_validate_schema_refuses_missing_table(db_conn: psycopg.Connection) -> None:
     """Validation cannot create an absent derived-cache table."""
     with pytest.raises(RuntimeError, match="is missing"):
-        _ensure_schema(db_conn, _DIM, readonly=True)
+        _validate_schema(db_conn, _DIM)
 
-    with db_conn.cursor() as cur:
-        cur.execute("SELECT to_regclass(%s)", (_TABLE,))
-        row = cur.fetchone()
-    assert row is not None and row[0] is None
+    assert _table_dim(db_conn) is None
 
 
 # ── write path (indexer daemon contract) ──────────────────────────────────
@@ -252,7 +290,7 @@ def test_search_topk_async_matches_sync(backend: PGVectorBackend) -> None:
 def test_backend_without_connect_uses_short_lived_connections(db_conn: psycopg.Connection) -> None:
     """The gateway path never calls connect(): each operation dials a
     short-lived connection, and close() is a no-op. The table pre-exists
-    (the indexer daemon's connect() created it at startup)."""
+    (gateway start prepared it)."""
     with db_conn.cursor() as cur:
         # typmod is a DDL literal, not a bindable param — composed via psycopg.sql.
         cur.execute(

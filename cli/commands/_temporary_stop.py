@@ -8,308 +8,27 @@ import subprocess
 import sys
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
 from datetime import datetime
 
 import psutil
 
-from cli.commands._maintenance_stop import (
+from cli.commands._repo import _repo_root, build_services, session_name
+from cli.commands.service_stop import (
     OwnedProcess,
     capture_tree,
+    close_terminals,
     deadline_after,
     remaining,
     stop_data_plane,
-    stop_services,
     wait_for_exit,
 )
-from cli.commands._maintenance_stop_report import (
-    StopIncompleteError,
-    SurvivorInventory,
-    capture_survivor,
-    live_identities,
-)
-from cli.commands._repo import _repo_root, build_services, session_name
-from cli.commands._retired_services import stop_retired_services
-from ops import pty_close_notices
 from ops.agent_pause import PAUSE_TIMEOUT_SECONDS, pause_agents
 from ops.agent_pause_probe import ops_quiescent
 from shared import maintenance, start_serving
 from shared.exit_codes import SERVICES_NOT_READY_EXIT_CODE
 from shared.lifecycle_status import begin, finish, phase, status_path
-from shared.machine import MachineRoles, machine_name, machine_role
-from shared.paths import run_dir
-from shared.session_backend import WinprocSessionBackend, get_shell_backend
-from shared.session_record import SessionRecord
-from shared.sessions.pty import session_tree
-
-# How long a normal stop's terminal closure waits between its HUP/TERM and the
-# SIGKILL of whatever is left (decisions/2026-09-28-stop-escalates-to-sigkill.md):
-# a job that handles TERM gets this long to clean up. The stop's own deadline
-# caps it as well.
-_TERMINAL_STOP_GRACE_S = 10.0
-
-# The SIGKILL leg's own bound: each wait inside a session kill, and the wait for
-# the killed sessions' hosts to clear their records. Every wait ends as soon as
-# its processes are gone. The leg runs even when the grace spent the rest of the
-# stop deadline — a stop that reached its terminal phase closes its terminals —
-# so a stop can overrun its deadline by this bounded leg.
-_TERMINAL_KILL_WAIT_S = 3.0
-
-
-@dataclass
-class _Terminal:
-    """One persistent shell a stop closes, with everything captured as its session's."""
-
-    name: str
-    capture: session_tree.SessionCapture
-    busy: bool
-
-    @property
-    def shell(self) -> OwnedProcess:
-        return self.capture.leader
-
-
-def _capture_terminals(names: list[str]) -> list[_Terminal]:
-    """Each live shell's session membership, captured before any signal.
-
-    The membership is `session_tree`'s: the shell, its descendants, and every
-    process in its POSIX session — a `cmd &` job in its own group, a
-    double-forked orphan — each pinned by birth identity. Anything beyond the
-    shell is running work, so the session is busy.
-    """
-    terminals: list[_Terminal] = []
-    for name in names:
-        record = SessionRecord.read(run_dir() / "pty" / f"{name}.json")
-        if record is None:
-            continue
-        shell = OwnedProcess(record.pid, record.create_time, record.starttime)
-        capture = session_tree.capture_session(shell)
-        if capture.members:
-            terminals.append(_Terminal(name, capture, busy=len(capture.members) > 1))
-    return terminals
-
-
-def _hang_up(terminals: list[_Terminal]) -> None:
-    """SIGHUP every shell, then SIGTERM every other captured member.
-
-    The shells go first: an interactive shell's own SIGHUP makes bash exit
-    (re-sending HUP to its jobs), so a loop that restarts its job cannot keep
-    producing new descendants during the grace — the 2026-09-09 field evidence
-    showed a restart loop outliving every interrupt aimed at its current job
-    (#2045).
-    """
-    session_tree.terminate([terminal.shell for terminal in terminals], signal.SIGHUP)
-    for terminal in terminals:
-        session_tree.terminate(set(terminal.capture.members) - {terminal.shell})
-
-
-def _await_members(terminals: list[_Terminal], until: float) -> bool:
-    """Wait for every captured member to exit; False when `until` passes first.
-
-    Each poll folds each session's newcomers into its capture
-    (`session_tree.refresh`): a live member's new descendants, and anything
-    else in the session while its id is proven — a helper a job forked on TERM
-    and orphaned before the next poll included. A member can fork while the
-    poll that finds it gone is still scanning, so a quiet poll only counts
-    once a second one, whose scan began after every member was gone, is quiet
-    too.
-    """
-    captures = [terminal.capture for terminal in terminals]
-    quiet = False
-    while True:
-        if not session_tree.refresh(captures):
-            if quiet:
-                return True
-            quiet = True
-            continue
-        quiet = False
-        left = until - time.monotonic()
-        if left <= 0:
-            return False
-        time.sleep(min(0.05, left))
-
-
-def _kill_leftovers(terminals: list[_Terminal]) -> list[tuple[_Terminal, OwnedProcess]]:
-    """SIGKILL each session's remaining membership; return what outlived it.
-
-    One last refresh first, so every kill starts from its session's newest
-    capture and proof; a session that can yield nothing more is skipped.
-    """
-    session_tree.refresh(terminal.capture for terminal in terminals)
-    survivors: list[tuple[_Terminal, OwnedProcess]] = []
-    for terminal in terminals:
-        capture = terminal.capture
-        if not capture.active:
-            continue
-        result = session_tree.kill_session_tree(
-            capture.leader,
-            also=capture.members,
-            wait_s=_TERMINAL_KILL_WAIT_S,
-            proven_at=capture.proven_at,
-        )
-        survivors += [(terminal, identity) for identity in result.survivors]
-    return survivors
-
-
-def _terminals_incomplete(survivors: list[tuple[_Terminal, OwnedProcess]]) -> StopIncompleteError:
-    """The report for processes that outlived their SIGKILL (issue #2162's inventory).
-
-    Each survivor names its owning session and its identity so the operator
-    can find and judge the exact process — typically another user's (a root
-    `sudo`), which this stop may not signal.
-    """
-    owners = {identity: terminal for terminal, identity in survivors}
-    live = live_identities(owners)
-    report = [
-        capture_survivor(
-            identity,
-            service=owners[identity].name,
-            role="terminal" if identity == owners[identity].shell else "job",
-        )
-        for identity in live
-    ]
-    surviving = sorted({owners[identity].name for identity in live})
-    return StopIncompleteError(
-        f"terminal stop incomplete — processes outlived their SIGKILL: "
-        f"{[identity.pid for identity in live]} from sessions: {surviving}\n"
-        f"{SurvivorInventory(survivors=report, groups=[]).render(stage='terminals', killed=True)}",
-        stage="terminals",
-        survivors=[survivor.payload() for survivor in report],
-    )
-
-
-def _await_no_terminals(until: float) -> None:
-    """Wait for every terminal host to clear its record; raise at `until`.
-
-    A host ends on its own once its shell is gone. Its protocol deliberately
-    ignores SIGTERM, so signalling host processes is not a stop API.
-    """
-    from cli.commands._maintenance_stop import live_terminals
-
-    while True:
-        left = live_terminals()
-        if not left:
-            return
-        if time.monotonic() >= until:
-            raise StopIncompleteError(
-                f"terminal stop incomplete — terminals still present after this stop "
-                f"closed every session it captured: {left}",
-                stage="terminals",
-            )
-        time.sleep(0.05)
-
-
-def _stop_terminals(deadline: float, operation: str, acquired_at: datetime) -> None:
-    """Close this unit's terminals: HUP/TERM, a bounded grace, then SIGKILL.
-
-    Each shell's whole session is captured before any signal and hung up
-    (`_hang_up`); whatever is still alive after `_TERMINAL_STOP_GRACE_S` is
-    SIGKILLed with its session (`session_tree`).
-
-    Busy sessions whose shell is verified gone — a job the SIGKILL cut short
-    included — leave a durable closure notice for their owner agent (issue
-    #2044): the gateway and ops server are already down by now, so the notice
-    is delivered at the next ops-daemon startup. That holds when a process
-    outlived the SIGKILL too (the notice names it) and when another session
-    keeps the stop incomplete (`_close_out`).
-    """
-    backend = get_shell_backend()
-    names = backend.list_sessions()
-    if isinstance(backend, WinprocSessionBackend):
-        from cli.commands._maintenance_stop import _TERMINAL_NAME
-
-        names = [name for name in names if _TERMINAL_NAME.match(name)]
-        stop_services(remaining(deadline), keep_terminals=True, selected=frozenset(names))
-        return
-    terminals = _capture_terminals(names)
-    _hang_up(terminals)
-    grace_end = min(deadline, time.monotonic() + _TERMINAL_STOP_GRACE_S)
-    survivors = [] if _await_members(terminals, grace_end) else _kill_leftovers(terminals)
-    _close_out(terminals, survivors, operation, acquired_at)
-    _await_no_terminals(max(deadline, time.monotonic() + _TERMINAL_KILL_WAIT_S))
-
-
-def _close_out(
-    terminals: list[_Terminal],
-    survivors: list[tuple[_Terminal, OwnedProcess]],
-    operation: str,
-    acquired_at: datetime,
-) -> None:
-    """Record every busy session whose shell is verified gone, then fail on what outlived its SIGKILL.
-
-    The shell is the session as its owner uses it: once it is gone the session
-    cannot be used again, so its notice is recorded, naming whatever of it
-    outlived the SIGKILL (issue #2044's "notify only what actually closed",
-    judged by the shell). A session whose shell still lives records nothing; a
-    retry sees it again. The notices go first: a closed session's record is
-    gone by any retry.
-    """
-    stuck = set(live_identities(identity for _terminal, identity in survivors))
-    left: dict[str, list[OwnedProcess]] = {}
-    for terminal, identity in survivors:
-        if identity in stuck:
-            left.setdefault(terminal.name, []).append(identity)
-    closed = {
-        terminal.name: (terminal.shell, left.get(terminal.name, []))
-        for terminal in terminals
-        if terminal.busy and not live_identities([terminal.shell])
-    }
-    _record_close_notices(closed, operation, acquired_at)
-    if stuck:
-        raise _terminals_incomplete(survivors)
-
-
-def _named(identities: list[OwnedProcess]) -> list[tuple[int, str]]:
-    """(pid, command name) of each process still running as its captured identity."""
-    named: list[tuple[int, str]] = []
-    for identity in sorted(identities, key=lambda identity: identity.pid):
-        try:
-            name = psutil.Process(identity.pid).name()
-        except psutil.NoSuchProcess:
-            continue
-        except psutil.Error:
-            name = "<unreadable>"
-        if live_identities([identity]):  # the name was read from that process
-            named.append((identity.pid, name))
-    return named
-
-
-def _record_close_notices(
-    closed: dict[str, tuple[OwnedProcess, list[OwnedProcess]]],
-    operation: str,
-    acquired_at: datetime,
-) -> None:
-    """Durably record one closure notice per busy session verified closed.
-
-    Each entry is a session whose shell identity is verified gone, with the
-    processes of it that outlived the SIGKILL; an idle session, a session
-    whose shell lives, or a Windows unit records nothing. A write failure is
-    loud but never fails the stop — the resources are already closed and
-    retrying the whole stop would not restore them.
-    """
-    for name, (shell, left) in closed.items():
-        if shell.starttime is not None:
-            birth = f"starttime:{shell.starttime}"
-        else:
-            birth = f"birth:{shell.birth!r}"
-        try:
-            pty_close_notices.record_close(
-                machine=machine_name(),
-                name=name,
-                shell_pid=shell.pid,
-                shell_birth=birth,
-                operation=operation,
-                acquired_at=acquired_at,
-                survivors=_named(left),
-            )
-        except Exception as exc:
-            # The side-channel notice must never fail a stop whose resources
-            # are already closed; stay loud so the gap is visible either way.
-            print(
-                f"closure notice for session {name!r} could not be recorded: "
-                f"{type(exc).__name__}: {exc}",
-                file=sys.stderr,
-            )
+from shared.machine import MachineRoles, machine_role
+from shared.native_process.ownership import retain_processes
 
 
 def _stop_browser(deadline: float) -> None:
@@ -319,9 +38,9 @@ def _stop_browser(deadline: float) -> None:
     for pid in find_cluster_chrome():
         try:
             identity = OwnedProcess.capture(psutil.Process(pid))
-            trees.update(capture_tree(identity))
+            retain_processes(trees, capture_tree(identity))
             if identity.live():
-                psutil.Process(pid).send_signal(signal.SIGTERM)
+                identity.send_signal(signal.SIGTERM)
         except psutil.NoSuchProcess:
             continue
     wait_for_exit(trees, deadline)
@@ -330,23 +49,17 @@ def _stop_browser(deadline: float) -> None:
 
 
 def _stop_extras(deadline: float) -> None:
-    from cli.commands._stop_extras import (
-        stop_gate_service,
-        stop_lgtm_services,
-        stop_permissions_helper,
-    )
+    from cli.commands._stop_extras import stop_permissions_helper
 
-    stop_gate_service(timeout_s=remaining(deadline))
     stop_permissions_helper(timeout_s=remaining(deadline))
-    stop_lgtm_services(timeout_s=remaining(deadline))
 
 
 # The compensating `ava start` gets its own budget: the failed stop already spent
 # the shared deadline, and this restore is what the operator is waiting on. 600s
-# matches `UV_SYNC_TIMEOUT_S`, the longest single step a start can legitimately
-# run on its own (a source-integrity `uv sync`), so a compensation cut off at
-# this bound is wedged, not slow. Deliberately a local constant rather than a
-# `PAUSE_TIMEOUT_SECONDS` reuse: the two bound different jobs.
+# covers the longest single step a start can legitimately run on its own (a
+# source-integrity `uv sync`), so a compensation cut off at this bound is wedged,
+# not slow. Deliberately a local constant rather than a `PAUSE_TIMEOUT_SECONDS`
+# reuse: the two bound different jobs.
 _COMPENSATION_TIMEOUT_S = 600.0
 
 
@@ -427,7 +140,11 @@ def _compensate_services_restore(preserved: frozenset[str]) -> bool:
 
 
 def _compensate_data_plane_failure(
-    phases: list[tuple[str, float]], *, data_plane_stopped: bool, preserved: frozenset[str]
+    phases: list[tuple[str, float]],
+    *,
+    data_plane_stopped: bool,
+    preserved: frozenset[str],
+    unstarted: bool = False,
 ) -> bool | None:
     """Run the services restore when (and only when) the data-plane phase failed.
 
@@ -440,7 +157,7 @@ def _compensate_data_plane_failure(
     work is already done: both stay report-only. Returns the `compensated`
     verdict for the stop report; None when nothing was attempted.
     """
-    if data_plane_stopped or "data-plane" not in {label for label, _ in phases}:
+    if unstarted or data_plane_stopped or "data-plane" not in {label for label, _ in phases}:
         return None
     try:
         return _compensate_services_restore(preserved)
@@ -554,24 +271,52 @@ def _stop_plan(
     return roles, selected, preserved
 
 
-def _services_phase_action(
-    *, preserved: frozenset[str], selected: frozenset[str], deadline: float
-) -> Callable[[], object]:
-    """The "services" phase's action: root-driven tree stop, or the session stop.
+def _services_phase_action(*, preserved: frozenset[str], deadline: float) -> Callable[[], object]:
+    """Stop services through their root owner, preserving explicitly retained units."""
+    import cli.commands.root_driver as _root_driver_commands
 
-    Root-driven hosts stop the tree through ava-root; `preserved` (pause's
-    browser, --keep-service) becomes a selective unit stop, and an empty
-    preserve set stops the tree and the root together. The choice is read at
-    call time, like every other phase, so it sees the settings of the process
-    actually running the stop.
-    """
-    from cli.commands import _root_driver
+    return lambda: _root_driver_commands._stop_root_service_tree(
+        preserve=preserved, timeout_s=remaining(deadline)
+    )
 
-    if _root_driver._root_driven_enabled():
-        return lambda: _root_driver._stop_root_service_tree(
-            preserve=preserved, timeout_s=remaining(deadline)
-        )
-    return lambda: stop_services(remaining(deadline), keep_terminals=True, selected=selected)
+
+def _require_unstarted_initialization() -> bool:
+    """Positive first-start evidence that no application could have admitted work."""
+    from cli.commands.root_driver import require_root_absent
+    from cli.commands.service_stop import require_no_terminals
+    from cli.start_identity import read_intent
+    from shared.paths import ava_home, root_manifests_path
+
+    intent = read_intent(ava_home())
+    if intent is None or intent["phase"] != "configured":
+        return False
+    if "gateway" not in intent["roles"]:
+        return False  # A joined runner may refer to already-existing external work.
+    if start_serving.state_path().exists() or root_manifests_path().exists():
+        raise RuntimeError("initialization journal conflicts with application launch evidence")
+    require_root_absent()
+    require_no_terminals()
+    return True
+
+
+def _stop_initialization(
+    phases: list[tuple[str, float]],
+    deadline: float,
+    *,
+    keep_infra: bool,
+    keep_browser: bool,
+    teardown_extras: bool,
+) -> None:
+    """Close a proven pre-application attempt through the existing native owners."""
+    _timed_phase(
+        phases, "services", _services_phase_action(preserved=frozenset(), deadline=deadline)
+    )
+    if not keep_browser:
+        _timed_phase(phases, "browser", lambda: _stop_browser(deadline))
+    if teardown_extras:
+        _timed_phase(phases, "extras", lambda: _stop_extras(deadline))
+    if not keep_infra:
+        _timed_phase(phases, "data-plane", lambda: stop_data_plane(remaining(deadline), save=True))
 
 
 def stop(
@@ -588,7 +333,8 @@ def stop(
     """Drain via normal restart, then stop selected resources.
 
     Services and the data plane are never forced. Closing terminals (stop, not
-    pause) SIGKILLs what outlives its bounded grace (`_stop_terminals`).
+    pause) SIGKILLs what outlives its bounded grace
+    (`service_stop.close_terminals`).
     """
     from cli.commands.stop import _announce_stopping, _confirm_stop
 
@@ -614,7 +360,7 @@ def stop(
         )
     if hosting_supervised_session() is not None:
         raise RuntimeError("pause/stop must run outside the work it drains; use a login shell")
-    roles, selected, preserved = _stop_plan(
+    roles, _selected, preserved = _stop_plan(
         preserve_sessions=preserve_sessions, keep_browser=keep_browser, keep_infra=keep_infra
     )
     print(
@@ -634,9 +380,19 @@ def stop(
     # (agent drain vs services vs terminals) — never a bare timeout (#2045).
     phases: list[tuple[str, float]] = []
     data_plane_stopped = False
+    unstarted = False
 
     try:
-        _timed_phase(phases, "retired", lambda: stop_retired_services(remaining(deadline)))
+        unstarted = _require_unstarted_initialization()
+        if unstarted:
+            _stop_initialization(
+                phases,
+                deadline,
+                keep_infra=keep_infra,
+                keep_browser=keep_browser,
+                teardown_extras=teardown_extras,
+            )
+            return _finish_stop(owns_journal=owns_journal)
         # Task #3270: an operator's own stop/pause binds the hold to this
         # command's shepherding process; daemon-driven pauses stay unbound.
         from shared.hold_driver import mint_driver
@@ -662,7 +418,7 @@ def stop(
         _timed_phase(
             phases,
             "services",
-            _services_phase_action(preserved=preserved, selected=selected, deadline=deadline),
+            _services_phase_action(preserved=preserved, deadline=deadline),
         )
         if not keep_browser and "browser" not in preserved:
             _timed_phase(phases, "browser", lambda: _stop_browser(deadline))
@@ -670,7 +426,7 @@ def stop(
             _timed_phase(
                 phases,
                 "terminals",
-                lambda: _stop_terminals(deadline, holder, acquired_at),
+                lambda: close_terminals(deadline, holder, acquired_at),
             )
         if teardown_extras:
             _timed_phase(phases, "extras", lambda: _stop_extras(deadline))
@@ -686,10 +442,17 @@ def stop(
             phases,
             owns_journal=owns_journal,
             compensated=_compensate_data_plane_failure(
-                phases, data_plane_stopped=data_plane_stopped, preserved=preserved
+                phases,
+                data_plane_stopped=data_plane_stopped,
+                preserved=preserved,
+                unstarted=unstarted,
             ),
         )
         return 1
+    return _finish_stop(owns_journal=owns_journal)
+
+
+def _finish_stop(*, owns_journal: bool) -> int:
     if owns_journal:
         finish(0)
     return 0

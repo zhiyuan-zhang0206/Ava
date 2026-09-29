@@ -179,11 +179,18 @@ def vacuum_checkpoint_tables(conn: Any) -> VacuumResult:
     dead-tuple count before and after so the reclamation trend is visible in
     the daemon log (the convergence signal for Task #1130: 790MB -> steady
     state <=150MB).
+
+    The daemon dials as a gateway-class login, which maintains these tables
+    through PostgreSQL 17 `MAINTAIN`; a VACUUM the server skips with only a
+    WARNING (missing privilege) raises `VacuumSkippedError` instead of
+    reporting a reclamation that never ran.
     """
+    from shared.cluster.authority import vacuum_or_fail
+
     with conn.cursor() as cur:
         before, _ = _checkpoint_state(cur)
         for table in _TABLES:
-            cur.execute(f"VACUUM (ANALYZE) {table}")  # table names are module constants
+            vacuum_or_fail(conn, table)
         after, dead = _checkpoint_state(cur)
     result = VacuumResult(ran=True, total_bytes=after.blobs_bytes, dead_tuples=dead)
     telemetry.emit("telemetry", "checkpoint_table_sizes", attributes=_sizes_attributes(after))

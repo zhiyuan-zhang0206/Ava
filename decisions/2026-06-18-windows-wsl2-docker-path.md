@@ -45,3 +45,5 @@ native port anticipated above was taken for the agent-runner half (winproc,
 schtasks) and not for the gateway half. Windows now carries `agent-runner` only;
 running a gateway inside WSL2 remains available, but is a workaround rather than
 the platform's documented shape. -->
+
+Superseded in part by: [decisions/2026-09-28-retire-windows-docker-compose.md](2026-09-28-retire-windows-docker-compose.md) — the Docker Compose data plane this entry chose for Windows is retired; a gateway on Windows hardware runs inside WSL2 on the native Linux path.

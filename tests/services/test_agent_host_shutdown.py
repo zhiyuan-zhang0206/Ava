@@ -6,12 +6,16 @@ with a default-executor job mid-flight.
 """
 
 import asyncio
+import contextlib
 import json
 import signal
 import subprocess
 import sys
+import time
+from collections.abc import AsyncGenerator
 from functools import partial
 from pathlib import Path
+from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -184,3 +188,34 @@ def test_sigterm_bounded_exit_with_wedged_executor(tmp_path: Path) -> None:
         )
     finally:
         child.close()
+
+
+class _UnreachablePool:
+    """Every borrow waits, as a pool whose server is gone does until its timeout."""
+
+    @contextlib.asynccontextmanager
+    async def connection(self, timeout: float | None = None) -> AsyncGenerator[object]:
+        del timeout
+        await asyncio.Event().wait()
+        yield object()
+
+
+async def test_stop_releases_ownership_within_a_bound_when_postgres_is_unreachable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A/B/A run 6: with the pooler gone, the stop path's ownership release waited
+    out the control pool's 30 s acquire timeout, so ava-root's 10 s TERM window
+    expired first and root retained custody of the still-exiting agent-host."""
+    from services.agent_host import host as host_mod
+
+    monkeypatch.setattr(host_mod, "_RELEASE_OWNER_TIMEOUT_S", 0.05)
+    host = host_mod.AgentHost(
+        pool=cast(Any, _UnreachablePool()),
+        checkpointer=cast(Any, object()),
+        graph=cast(Any, object()),
+        machine="this-box",
+    )
+    started = time.monotonic()
+    with pytest.raises(TimeoutError, match="ownership release"):
+        await asyncio.wait_for(host.aclose(), timeout=2.0)
+    assert time.monotonic() - started < 1.0

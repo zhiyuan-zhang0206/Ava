@@ -38,7 +38,7 @@ _GATEWAY_URL_KEYS = ("AVA_GATEWAY_URL",)
 
 def _anchored_gateway_base() -> str | None:
     """This checkout's own home gateway identity: its persisted ``gateway_url``
-    file first (machine identity, written at first start / enroll), then the
+    file first (machine identity, written at the home's first `ava start`), then the
     home `.env` aliases. None when the home carries no identity yet (fresh
     install before first start) or when the checkout is unanchored — an
     unanchored checkout has NO home of its own; its rule-4 scratch home carries
@@ -80,7 +80,7 @@ def _gateway_base() -> str:
         return anchored
     raise _ConfigError(
         "gateway_url unset — this checkout is not anchored to a cluster home: "
-        "run `scripts/install.sh --worktree` to give it its own cluster, or "
+        "run `.venv/bin/ava start --worktree` to give it its own cluster, or "
         "`export AVA_GATEWAY_URL=<gateway url>` to target one explicitly. "
         "(An unanchored checkout never falls back to the default home's gateway.)"
     )
@@ -100,7 +100,7 @@ def _guard_gateway_write(target: str) -> None:
         raise _ConfigError(
             "refusing to write gateway config: this checkout is not anchored "
             "to a cluster home (no `.ava_home` pointer). Run "
-            "`scripts/install.sh --worktree` for a dev cluster, or run this "
+            "`.venv/bin/ava start --worktree` for a dev cluster, or run this "
             "command from the target home's own checkout."
         )
     if target != anchored:
@@ -112,14 +112,26 @@ def _guard_gateway_write(target: str) -> None:
 
 
 def _auth_headers() -> dict[str, str]:
-    """Read this unit's bearer secret without constructing Settings."""
-    from shared import runtime_config
-    from shared.cluster_auth import bearer_header
+    """This unit's bearer, read without constructing Settings.
 
-    secret = os.environ.get("AVA_CLUSTER_SECRET")
-    if secret is None:
-        secret = runtime_config.read_env_aliases().get("AVA_CLUSTER_SECRET", "")
-    return bearer_header(secret) if secret else {}
+    A delivered machine API token first (the boot pass gives an admitted
+    operator process on the gateway home its token); else the gateway's human
+    secret (environment, then `.env`); else, on a remote unit, its installed
+    capability's API token, only while this process runs the admitted runtime.
+    """
+    from shared import runtime_config
+    from shared.cluster_auth import bearer_header, delivered_token
+
+    bearer = delivered_token() or os.environ.get("AVA_CLUSTER_SECRET")
+    if bearer is None:
+        bearer = runtime_config.read_env_aliases().get("AVA_CLUSTER_SECRET", "")
+    home = runtime_config.env_file_path().parent
+    if not bearer and (home / "db-authority" / "unit.json").exists():
+        from shared.cluster.authority.unit import consume_unit
+
+        api = consume_unit(home.resolve()).api
+        bearer = "" if api is None else api.token
+    return bearer_header(bearer) if bearer else {}
 
 
 def _get_config(machine: str | None) -> ConfigView:
@@ -552,7 +564,7 @@ def _edit_local_config(
             "[ava config] refusing to write local config: this checkout is not "
             "anchored to a cluster home (no `.ava_home` pointer) — it boots on a "
             "throwaway scratch home, so a write would configure nothing. Run "
-            "`scripts/install.sh --worktree` for a dev cluster.",
+            "`.venv/bin/ava start --worktree` for a dev cluster.",
             file=sys.stderr,
         )
         return 1

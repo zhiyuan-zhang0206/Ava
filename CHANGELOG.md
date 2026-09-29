@@ -7,6 +7,20 @@ and the matching GitHub Releases, cut by `scripts/release_cut.py`.
 
 ## [Unreleased]
 
+### Changed
+- The internal database plane always authenticates, whatever
+  `AVA_CLUSTER_SECRET` says: `pg_hba` admits only the OS-user administrator by
+  peer on the owner-only socket and SCRAM application logins; PgBouncer always
+  uses SCRAM against the active write generation's verifier userlist (plus the
+  `ava_pooler_admin` console entry) and restarts when it changes. The schema
+  owner is NOLOGIN, `AVA_DB_ADMIN_PASSWORD` and local `AVA_RUNNER_DB_PASSWORD`
+  are retired, and `.env` holds a credential-free `AVA_DB_URL`. First start
+  mints write generation 0 (`ava_g0_gateway` / `ava_g0_runner`, inheriting the
+  NOLOGIN groups `ava_gateway` / `ava_runner`); the root launcher delivers each
+  service its class login. Existing homes are refused until converted once with
+  `scripts/cutover_db_authority.py` (new step `db`);
+  `scripts/rotate_data_plane_secrets.py` now rotates Redis credentials only.
+
 ### Added
 - The Ops dashboard gains a `Dev/CI` row backed by daily GitHub Actions run
   classification: per-PR duration and trigger percentiles, red/self-healed
@@ -65,6 +79,14 @@ and the matching GitHub Releases, cut by `scripts/release_cut.py`.
   a `chrome_page_ttl_expired` / `chrome_page_ttl_renewed` event (task #3035).
 
 ### Changed
+- Redis always authenticates, including a single box with an empty
+  `AVA_CLUSTER_SECRET`: first start mints `AVA_REDIS_ADMIN_PASSWORD` (the
+  `requirepass`) and the runtime ACL password in `AVA_REDIS_URL`, and no ACL user
+  is ever created `nopass`. The passwords do not rotate per rollout. `ava start`
+  refuses a home born without them; convert it once with
+  `scripts/cutover_db_authority.py --home <home> --execute` (application
+  stopped) or re-birth a disposable development home. The bearer still decides
+  only Redis's network reach.
 - The ops-facing `ava` CLI moves its remaining argument checks to the parse
   layer (task #4092 batch B4, user ruling 2026-09-20): `schedules create`
   requires exactly one of `--script` / `--script-file`; `schedules update`

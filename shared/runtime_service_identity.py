@@ -13,12 +13,11 @@ from pathlib import Path
 
 import psutil
 
-from shared.managed_writer_barrier import Digest, EvidenceModel
-from shared.managed_writer_observation import ExpectedProcess
-from shared.proc_tree import stable_create_time
+from shared.native_process import pid_starttime_ticks
+from shared.native_process.ownership import stable_create_time
+from shared.process_evidence import Digest, EvidenceModel, ExpectedProcess
 from shared.runtime_interpreter import WHEEL_RUNTIME, runtime_venv
 from shared.runtime_release import ReleaseRejectedError, file_sha256
-from shared.session_record import pid_starttime_ticks
 
 
 class NormalRuntimeIdentity(EvidenceModel):
@@ -65,7 +64,7 @@ def _identity(home: str, pid: int) -> NormalRuntimeIdentity:
 
 
 def normal_runtime_identity(home: str) -> dict[str, object] | None:
-    """Legacy/development health stays unchanged; installed identity fails closed."""
+    """Source development returns no image identity; installed identity fails closed."""
     if not WHEEL_RUNTIME:
         return None
     return _identity(home, psutil.Process().pid).model_dump(mode="json")

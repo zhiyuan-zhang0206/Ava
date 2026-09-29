@@ -170,7 +170,7 @@ def test_incapability_checks_display_first(monkeypatch: pytest.MonkeyPatch) -> N
 
 
 def test_npx_incapability_reason_is_exported_once_for_both_probe_variants() -> None:
-    """Changing the npx operator guidance must not split runtime and enroll probes."""
+    """Changing the npx operator guidance must not split runtime and converge probes."""
     assert getattr(pp, "NPX_INCAPABILITY_REASON", None) == (
         "no npx (install Node.js for chrome-devtools-mcp)"
     )

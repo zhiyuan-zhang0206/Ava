@@ -45,10 +45,11 @@ from pathlib import Path
 import psutil
 
 from shared.log import logger
+from shared.native_process import pid_starttime_ticks
+from shared.native_process.ownership import stable_create_time
 from shared.paths import logs_dir, run_dir
 from shared.platform import CREATE_NO_WINDOW
-from shared.proc_tree import stable_create_time
-from shared.session_record import SessionRecord, pid_starttime_ticks
+from shared.session_record import SessionRecord
 
 # psutil exceptions that mean "the process is already gone / not ours to touch" —
 # benign during a teardown race.
@@ -141,8 +142,6 @@ def new_session(
     *,
     env: dict[str, str],
     stderr_append: Path | None = None,
-    gate_fd: int | None = None,
-    receipt: tuple[Path, str] | None = None,
 ) -> bool:
     """Launch `cmd` as a detached, named background session.
 
@@ -154,15 +153,6 @@ def new_session(
     to the session log; `stderr_append`, when given, splits stderr to that file
     (the agent stderr log).
 
-    `gate_fd` + `receipt` are the updater's gated-spawn channel, an
-    all-or-nothing pair (`shared.spawn_receipt` owns the mechanism): the
-    descriptor of the held per-session flock (passed to the helper via
-    `pass_fds`, inherited by the fork child and surviving exec), and
-    `(receipt_path, nonce)` for the child's pre-exec birth receipt. The pair is
-    refused here when only one half is given — a gate without a receipt cannot
-    be adjudicated, and a receipt without a gate cannot prove "never born".
-    Omitted (the default), the launch is byte-identical to the historical path.
-
     The child is double-forked via `shared._reparent` so it reparents to init and
     the spawner accretes no zombie. An existing live session of the same name is
     left untouched (idempotent), matching the has-session guard at the call site.
@@ -171,10 +161,7 @@ def new_session(
 
     Raises:
         RuntimeError: the reparent helper failed to launch / report a pid.
-        ValueError: gate_fd and receipt were not supplied together.
     """
-    if (gate_fd is None) != (receipt is None):
-        raise ValueError("gated spawn requires the session gate and its receipt together")
     if has_session(name):
         return True
     argv = ["/bin/sh", "-c", cmd] if isinstance(cmd, str) else list(cmd)
@@ -188,14 +175,7 @@ def new_session(
     # forking the real child). Waiting reaps the helper — the spawner's ONLY
     # direct child — so no zombie is left; the real child is already reparented
     # to init. The helper prints the child's pid to stdout.
-    helper = [sys.executable, "-m", "shared._reparent"]
-    pass_fds: tuple[int, ...] = ()
-    if receipt is not None:
-        if gate_fd is None:  # the pair check above makes this unreachable; keep types honest
-            raise ValueError("gated spawn requires the session gate descriptor")
-        helper += ["--receipt", str(receipt[0]), "--nonce", receipt[1]]
-        pass_fds = (gate_fd,)
-    helper += [str(stdout_path), str(stderr_path), *argv]
+    helper = [sys.executable, "-m", "shared._reparent", str(stdout_path), str(stderr_path), *argv]
     result = subprocess.run(  # noqa: S603 — argv composed from repo-internal literals + int agent_id
         helper,
         cwd=str(cwd),
@@ -206,7 +186,6 @@ def new_session(
         text=True,
         timeout=_SPAWN_HELPER_TIMEOUT_S,
         check=False,
-        pass_fds=pass_fds,
     )
     child_pid_str = result.stdout.strip()
     if result.returncode != 0 or not child_pid_str.isdigit():

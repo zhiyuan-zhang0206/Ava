@@ -9,23 +9,19 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import PurePosixPath, PureWindowsPath
-from typing import Annotated, Literal, Self
+from typing import Literal, Self
 from uuid import UUID
 
 import psycopg
 from psycopg.pq import TransactionStatus
 from psycopg.types.json import Jsonb
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import AwareDatetime, Field, field_validator, model_validator
 
-Digest = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
+from shared.process_evidence import Digest, EvidenceModel
 
 
 class ManagedWriterBarrierError(RuntimeError):
     """The managed-writer closure or operation authority is unknown/stale."""
-
-
-class EvidenceModel(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
 
 
 class RolloutIdentity(EvidenceModel):

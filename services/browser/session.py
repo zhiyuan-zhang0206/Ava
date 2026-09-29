@@ -13,7 +13,7 @@ is host-only for the configured gateway URL (no Domain attribute, matching the
 login cookie), so it is never sent to any other host.
 
 Runs inside the browser-mcp daemon process, which shares the machine with
-Chrome and the cluster secret.
+Chrome and holds its launch-delivered runner API token (the login credential).
 """
 
 from __future__ import annotations

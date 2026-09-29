@@ -250,14 +250,14 @@ def test_probe_reads_a_vanished_entry_after_validation_as_gone(
     the raw read found no /proc entry because the process was reaped in
     between — "no such pid", the unambiguous gone (the 2026-09-20 wave-2
     class), never a release deferred as unreadable."""
-    from shared import session_record
+    from shared import native_process
 
     child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
     pid = child.pid
-    starttime = session_record.pid_starttime_ticks(pid)
+    starttime = native_process.pid_starttime_ticks(pid)
     assert starttime is not None
     ref = ProcessRef(pid=pid, birth=0.5, starttime=starttime, argv="")
-    real_read = session_record.pid_starttime_ticks
+    real_read = native_process.pid_starttime_ticks
 
     def reaping_read(reading_pid: int) -> int | None:
         if reading_pid == pid:
@@ -265,7 +265,7 @@ def test_probe_reads_a_vanished_entry_after_validation_as_gone(
             child.wait()
         return real_read(reading_pid)
 
-    monkeypatch.setattr(session_record, "pid_starttime_ticks", reaping_read)
+    monkeypatch.setattr(native_process, "pid_starttime_ticks", reaping_read)
     try:
         assert ref.probe() == "gone"
     finally:
@@ -280,12 +280,12 @@ def test_probe_keeps_unreadable_when_a_present_process_cannot_be_read(
 ) -> None:
     """A pid that still exists while its start time cannot be read is never a
     death license."""
-    from shared import session_record
+    from shared import native_process
 
     ref = ProcessRef(pid=os.getpid(), birth=0.5, starttime=1, argv="")
 
     def unreadable_read(_pid: int) -> int | None:
         return None
 
-    monkeypatch.setattr(session_record, "pid_starttime_ticks", unreadable_read)
+    monkeypatch.setattr(native_process, "pid_starttime_ticks", unreadable_read)
     assert ref.probe() == "unreadable"

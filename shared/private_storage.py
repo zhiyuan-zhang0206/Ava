@@ -195,6 +195,36 @@ def scan_non_regular_nodes(root: Path) -> list[Path]:
     return out
 
 
+def create_private_bytes(path: Path, data: bytes) -> None:
+    """Publish owner-only `data` at `path` complete or not at all; never overwrite.
+
+    Two racing creators cannot both win: the loser gets `FileExistsError` and
+    reads the winner's file instead.
+    """
+    ensure_private_dir(path.parent)
+    temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    try:
+        if os.name != "nt":
+            os.fchmod(fd, 0o600)
+        with os.fdopen(fd, "wb") as file:
+            fd = -1
+            file.write(data)
+            file.flush()
+            os.fsync(file.fileno())
+        os.link(temporary, path)
+        if os.name != "nt":
+            directory_fd = os.open(path.parent, os.O_RDONLY)
+            try:
+                os.fsync(directory_fd)
+            finally:
+                os.close(directory_fd)
+    finally:
+        if fd != -1:
+            os.close(fd)
+        temporary.unlink(missing_ok=True)
+
+
 def write_private_bytes(path: Path, data: bytes) -> None:
     """Atomically replace `path` with owner-only `data` in its private directory."""
     ensure_private_dir(path.parent)

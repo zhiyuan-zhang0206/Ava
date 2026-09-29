@@ -710,7 +710,7 @@ def test_bootstrap_from_gateway_missing_gateway_url_fails_loud(
         _machine,
         "gateway_api_base",
         lambda: (_ for _ in ()).throw(
-            _machine.GatewayApiBaseMissing("gateway_url unset — `ava enroll` writes it")
+            _machine.GatewayApiBaseMissing("gateway_url unset — `ava start` writes it")
         ),
     )
     set_identity(role="agent-runner", name="test-host-2")

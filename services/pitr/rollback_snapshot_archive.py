@@ -21,6 +21,8 @@ from services.pitr.restore_manifest import RestoreObject
 from services.pitr.restore_object_store import GenerationPinnedObjectReader
 from shared import db
 from shared.api_contracts import strict_decode
+from shared.config import settings
+from shared.pg_admin import local_owner_authority
 from shared.pg_tools import pg_tool, throwaway_postgres
 from shared.private_storage import write_private_bytes
 from shared.proc import run_bounded
@@ -229,9 +231,13 @@ def retire_rollback_snapshot(
 
 
 def export_rollback_snapshot_table(table: str, destination: Path) -> None:
-    """Create an owner-only custom-format dump of one finite snapshot table."""
+    """Create an owner-only custom-format dump of one finite snapshot table.
+
+    It reads through the logical backup's dial (`backup.dump_source`): the
+    administrator acting as the schema owner on a locally owned plane.
+    """
     _require_snapshot_table(table)
-    conninfo, password = backup._passwordless_conninfo(db.direct_db_url())
+    conninfo, password = backup._passwordless_conninfo(backup.dump_source())
     destination.touch(mode=0o600, exist_ok=False)
     destination.chmod(0o600)
     result = run_bounded(
@@ -286,14 +292,23 @@ def restore_rollback_snapshot_table(table: str, dump: Path) -> None:
 
 
 def drop_rollback_snapshot_table(table: str) -> None:
-    """Retire one finite snapshot with an idempotent direct Postgres DDL call."""
+    """Retire one finite snapshot with an idempotent DDL call as its owner.
+
+    A migration created the table, so only the schema owner may drop it: a
+    locally owned plane drops it as the administrator acting as the owner over
+    the home's own socket (`shared.pg_admin`); a remote-managed plane's
+    provider URL is its only authority.
+    """
     _require_snapshot_table(table)
-    with db.connect(direct=True, autocommit=True) as connection:
-        connection.execute(
-            sql.SQL("DROP TABLE IF EXISTS {}.{}").format(
-                sql.Identifier("public"), sql.Identifier(table)
-            )
-        )
+    statement = sql.SQL("DROP TABLE IF EXISTS {}.{}").format(
+        sql.Identifier("public"), sql.Identifier(table)
+    )
+    if settings.data_plane.is_remote:
+        with db.connect(direct=True, autocommit=True) as connection:
+            connection.execute(statement)
+        return
+    with local_owner_authority().session(autocommit=True) as connection:
+        connection.execute(statement)
 
 
 def _record_path(ava_home: Path, table: str) -> Path:

@@ -505,20 +505,6 @@ class TaskUpdated(_Base):
     task_id: int
 
 
-class ClusterUpdateStarted(_Base):
-    """Published after a whole-cluster rollout or restart orchestration is
-    successfully spawned. The frontend treats it only as a hint to reload
-    through Gate, which projects the persistent marker and owns the page/clock.
-
-    This cluster-level event has no owning agent, so ``agent_id`` is always 0.
-    It is a non-authoritative reload hint and is never persisted.
-    """
-
-    role: Literal["cluster_update_started"] = "cluster_update_started"
-    kind: Literal["rollout", "restart"]
-    origin: str
-
-
 Event = Annotated[
     ChatStart
     | ChatDelta
@@ -549,8 +535,7 @@ Event = Annotated[
     | NoticePosted
     | NoticeResolved
     | TaskCreated
-    | TaskUpdated
-    | ClusterUpdateStarted,
+    | TaskUpdated,
     Field(discriminator="role"),
 ]
 
@@ -590,7 +575,6 @@ _ROLE_CLASSES: tuple[tuple[type[Event], bool], ...] = (
     (NoticeResolved, True),
     (TaskCreated, True),
     (TaskUpdated, True),
-    (ClusterUpdateStarted, True),
 )
 
 

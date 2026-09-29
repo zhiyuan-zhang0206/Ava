@@ -2,6 +2,7 @@
 
 import os
 from pathlib import Path
+from typing import Any
 from urllib.parse import urlsplit
 
 import httpx
@@ -15,11 +16,16 @@ from shared import bootstrap, config, resilience
 def test_fetch_bootstrap_config_against_live_endpoint(
     db_conn,
     monkeypatch: pytest.MonkeyPatch,
+    served_gateway_home: Any,
 ) -> None:
-    # Suite runs multi-host on: the gateway requires the cluster secret, and the
-    # fetch reads it from os.environ. Set both ends so the live fetch authenticates.
+    # An authenticated gateway: the runner presents its delivered machine API
+    # token (the active generation's runner token), never the human secret.
+    from shared import runtime_config as rt
+
     monkeypatch.setattr(config.settings.data_plane, "cluster_secret", "live-secret")
-    monkeypatch.setitem(os.environ, "AVA_CLUSTER_SECRET", "live-secret")
+    monkeypatch.setattr("shared.paths.ava_home", rt._ava_home)
+    monkeypatch.setitem(os.environ, "AVA_API_TOKEN", served_gateway_home.api.runner)
+    monkeypatch.delitem(os.environ, "AVA_CLUSTER_SECRET")
 
     # Route shared.bootstrap's dial_get (shared.http_dial.get) through the
     # in-process ASGI app.
@@ -29,24 +35,19 @@ def test_fetch_bootstrap_config_against_live_endpoint(
 
     monkeypatch.setattr(bootstrap, "dial_get", fake_get)  # pyright: ignore[reportUnknownArgumentType]
     values = bootstrap.fetch_bootstrap_config("http://cp")
-    # Bootstrap serves the runner projection. A multi-host gateway also rewrites
-    # its loopback host to the reachable address for remote runners.
-    from shared import runtime_config
-    from shared.cluster.derive import RUNNER_DB_PASSWORD_ENV, RUNNER_ROLE
-    from shared.url_secret import url_with_userinfo
-
-    expected = url_with_userinfo(
-        str(config.settings.data_plane.db_url),
-        RUNNER_ROLE,
-        runtime_config.read_env_aliases()[RUNNER_DB_PASSWORD_ENV],
-    )
+    # Bootstrap serves the credential-free endpoint even though this gateway
+    # keeps an active write generation: its runner login never travels here. A
+    # multi-host gateway also rewrites its loopback host to the reachable
+    # address for remote runners.
+    runner = served_gateway_home.roles.runner
+    expected = str(config.settings.data_plane.db_url)
     reachable = config._self_machine_host()
     if not config.is_loopback_host(reachable):
         expected = config.url_with_host(expected, reachable)
     actual_parts = urlsplit(values["AVA_DB_URL"])
     expected_parts = urlsplit(expected)
     # libpq dial hints such as hostaddr are implementation-specific query
-    # parameters. The runner projection's connection identity must still match.
+    # parameters. The endpoint's connection identity must still match.
     assert (
         actual_parts.scheme,
         actual_parts.username,
@@ -57,11 +58,15 @@ def test_fetch_bootstrap_config_against_live_endpoint(
     ) == (
         expected_parts.scheme,
         expected_parts.username,
-        expected_parts.password,
+        None,
         expected_parts.hostname,
         expected_parts.port,
         expected_parts.path.lstrip("/"),
     )
+    assert runner.password not in "".join(values.values())
+    # Nor does it serve the human secret: a remote unit never holds it.
+    assert "AVA_CLUSTER_SECRET" not in values
+    assert "test-cluster-secret" not in "".join(values.values())
 
 
 # NOTE: shared/bootstrap.py reads os.environ directly (it must run BEFORE
@@ -87,8 +92,8 @@ def test_inject_config_updates_environ(
 def test_inject_derives_missing_gateway_health_url(
     monkeypatch: pytest.MonkeyPatch, _snapshot_home: Path
 ) -> None:
-    """A pure runner probes the remote gateway, never localhost, when enroll
-    carries no explicit health override."""
+    """A pure runner probes the remote gateway, never localhost, when its first
+    start carried no explicit health override."""
     monkeypatch.setitem(os.environ, "AVA_GATEWAY_URL", "http://gateway.tailnet:8123/")
     monkeypatch.delitem(os.environ, "AVA_GATEWAY_HEALTH_URL", raising=False)
     monkeypatch.setattr(
@@ -155,7 +160,7 @@ def test_inject_without_gateway_url_fails_fast(
         "fetch_bootstrap_config",
         lambda *_a, **_k: called.append("fetch"),  # pyright: ignore[reportUnknownArgumentType]
     )
-    with pytest.raises(bootstrap.BootstrapFetchError, match="ava enroll"):
+    with pytest.raises(bootstrap.BootstrapFetchError, match=r"ava start .*--gateway-url"):
         bootstrap.inject_config_from_gateway()
     assert called == []  # never fetched without a URL
 

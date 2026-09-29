@@ -1,6 +1,0 @@
-{
-  "complexity": {
-    "services/watchdog/daemon.py::_checks_for_capability": 19,
-    "services/watchdog/daemon.py::_checks_for_round": 16
-  }
-}

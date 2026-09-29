@@ -44,7 +44,9 @@ endpoint replaces over time.
 - **Auth**: `/mcp` bypasses the cluster middleware and its ASGI wrapper requires
   `Authorization: Bearer <MCP client token>`. Tokens are generated per client,
   stored only as SHA-256 hashes in `mcp_clients`, and can be revoked through the
-  cluster-authenticated `/api/mcp/clients` admin routes. A no-secret cluster
+  `/api/mcp/clients` admin routes. A token outlives every write generation, so
+  those routes admit only the human secret or a session it minted; a machine
+  token or a runner-minted session gets 403. A no-secret cluster
   still requires an MCP client token; cluster cookies and secrets never count.
   Messages written through this boundary record `mcp_client:<id>` as their
   server-verified credential fact without storing the token.

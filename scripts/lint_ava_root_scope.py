@@ -14,12 +14,14 @@ process tree. By design (ruling 2026-09-12) it must stay free of any
 permission-domain content, so that the privileged identity / desktop-permission
 machinery lives in a separate program behind an explicit adapter boundary.
 This lint is the machine-checkable half of that constraint: it scans the root
-supervisor's own code for permission-domain and platform-specific names —
-including comments and strings, because a mention is how a coupling starts.
+supervisor's own code for permission-domain and platform-specific names,
+including comments and executable string values. Architecture documentation
+may describe the external platform boundaries without importing their authority.
 
 ## What is scanned
 
-Every text file under the scanned roots. Binary files (a NUL byte in the
+Every non-Markdown text file under the scanned roots. Python docstrings are
+documentation; other string values remain checked. Binary files (a NUL byte in the
 file head) and non-UTF-8 files are skipped; `__pycache__` directories and
 `.pyc` files are skipped.
 
@@ -52,6 +54,7 @@ Error format `file:line: <symbol> | <line content>` + non-zero exit.
 
 from __future__ import annotations
 
+import ast
 import io
 import re
 import sys
@@ -178,6 +181,8 @@ def _exempt_lines(text: str) -> set[int]:
 
 def scan_file(path: Path) -> list[Violation]:
     """Return violations [(lineno, symbol, line_stripped), ...] for one file."""
+    if path.suffix == ".md":
+        return []
     try:
         data = path.read_bytes()
     except OSError:
@@ -189,6 +194,8 @@ def scan_file(path: Path) -> list[Violation]:
     except UnicodeDecodeError:
         return []  # not UTF-8 text
     exempt_lines = _exempt_lines(text)
+    if path.suffix in {".py", ".pyi"}:
+        exempt_lines |= _docstring_lines(text)
     violations: list[Violation] = []
     for lineno, line in enumerate(text.splitlines(), start=1):
         if lineno in exempt_lines:
@@ -199,6 +206,32 @@ def scan_file(path: Path) -> list[Violation]:
                 violations.append((lineno, match.group(0), line.strip()))
                 break
     return violations
+
+
+def _docstring_lines(text: str) -> set[int]:
+    """Exclude real AST docstrings, never arbitrary strings containing code."""
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return set()
+    lines: set[int] = set()
+    source = text.splitlines()
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        if not ast.get_docstring(node, clean=False):
+            continue
+        doc = node.body[0]
+        for lineno in range(doc.lineno, (doc.end_lineno or doc.lineno) + 1):
+            line = source[lineno - 1].encode()
+            # An executable statement may share the opening/closing line with
+            # a docstring; that line must retain its ordinary scope check.
+            if lineno == doc.lineno and line[: doc.col_offset].strip():
+                continue
+            if lineno == doc.end_lineno and line[doc.end_col_offset :].strip():
+                continue
+            lines.add(lineno)
+    return lines
 
 
 def main(argv: list[str] | None = None) -> int:

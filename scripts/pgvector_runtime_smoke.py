@@ -6,10 +6,10 @@ the injected pgvector extension files work end to end, with no host Postgres:
 download the pinned zonky PG (ensure_pg_binaries) -> inject the pinned pgvector
 files (ensure_pgvector) -> start a throwaway cluster on the vendored binaries ->
 CREATE EXTENSION vector + distance queries -> NOSUPERUSER semantics (the
-indexer's connect() issues CREATE EXTENSION IF NOT EXISTS as the cluster's
-NOSUPERUSER role; with the extension pre-created by `ava start`'s superuser
-connection that must be a harmless no-op, not a privilege error — verified
-empirically on a real injected tree).
+extension is listed to a NOSUPERUSER role, and once `ava start`'s superuser
+connection has pre-created it, that role's CREATE EXTENSION IF NOT EXISTS is a
+harmless no-op, not a privilege error — verified empirically on a real
+injected tree).
 
 Runs as the dedicated CI job `backend-pgvector-smoke` on Linux x86_64 (the
 acceptance evidence for the PGDG deb leg) and locally on supported hosts

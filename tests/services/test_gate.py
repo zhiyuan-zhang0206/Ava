@@ -1,4 +1,4 @@
-"""End-to-end behavior of the always-up gate, against real loopback sockets.
+"""End-to-end behavior of the root-owned Gate, against real loopback sockets.
 
 The gate's whole point is external behavior (what the browser sees during a
 rollout), so these tests exercise the real HTTP path: a fake gateway (auth
@@ -7,9 +7,7 @@ check + 503 mode), a fake app, and the gate itself, all on ephemeral ports.
 
 from __future__ import annotations
 
-import datetime as dt
 import json
-import re
 import threading
 import types
 import urllib.error
@@ -183,13 +181,12 @@ def servers(tmp_path: Path) -> Iterator[_Servers]:
     gw = ThreadingHTTPServer(("127.0.0.1", 0), _FakeGateway)
     app = ThreadingHTTPServer(("127.0.0.1", 0), _FakeApp)
     gate_server = ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
-    # The Gate-owned marker is controllable here; absent means down.
+    # Where the retired updater wrote its UI marker; Gate never reads it.
     marker = tmp_path / "deploy-state.json"
     gate = Gate(
         gateway_base=f"http://127.0.0.1:{gw.server_port}",
         app_base=f"http://127.0.0.1:{app.server_port}",
         static_dir=STATIC,
-        state_path=str(marker),
     )
     gate_server.gate = gate  # type: ignore[attr-defined]
     for s in (gw, app, gate_server):
@@ -577,149 +574,27 @@ def test_unauthenticated_serves_static_login(servers) -> None:
     assert "login" in body.lower()
 
 
-def test_gateway_503_serves_updating_page_when_flag_set(servers) -> None:
-    """Phase A: the gateway 503s while the updating flag is set — the user must
-    see the updating page, not a dead-app error."""
+def test_a_leftover_update_marker_never_owns_the_entry(
+    servers: _Servers, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """No lifecycle produces Gate's update marker, and a release transition stops
+    Gate with the rest of root. A marker file left by the retired updater in the
+    home must not pin the entry on "System updating": Gate answers from the live
+    gateway/app."""
+    monkeypatch.setattr("shared.paths.ava_home", lambda: servers["flag"].parent)
+    _write_v2(servers["flag"])
     _FakeGateway.authenticated = True
     _FakeGateway.down = True
-    _write_v2(servers["flag"])  # pyright: ignore[reportUnknownArgumentType]
-    status, body = _get(servers["gate"] + "/")  # pyright: ignore[reportUnknownArgumentType]
-    assert status == 503
-    assert "System updating" in body
-
-
-def test_active_snapshot_fast_path_never_probes_gateway_or_app(servers) -> None:
-    _write_v2(servers["flag"])  # pyright: ignore[reportUnknownArgumentType]
-
-    status, body = _get(servers["gate"] + "/")  # pyright: ignore[reportUnknownArgumentType]
-
-    assert status == 503
-    assert "System updating" in body
-    assert _FakeGateway.requests == 0
-    assert _FakeApp.requests == 0
-
-
-def test_one_request_reuses_its_initial_snapshot_when_file_changes_during_auth(servers) -> None:
-    _FakeGateway.authenticated = True
-    _FakeGateway.down = False
-    _FakeGateway.auth_hook = lambda: _write_v2(servers["flag"])  # pyright: ignore[reportUnknownArgumentType]
-    servers["app"].shutdown()  # pyright: ignore[reportUnknownMemberType]
-
-    status, body = _get(servers["gate"] + "/")  # pyright: ignore[reportUnknownArgumentType]
+    status, body = _get(servers["gate"] + "/")
     assert status == 503
     assert "Service unavailable" in body
     assert "System updating" not in body
 
-    # Only the next request may observe the newly committed generation.
-    _FakeGateway.auth_hook = None
-    status, body = _get(servers["gate"] + "/")  # pyright: ignore[reportUnknownArgumentType]
-    assert status == 503
-    assert "System updating" in body
-
-
-def test_same_origin_snapshot_hint_is_served_without_gateway_or_app(servers) -> None:
-    _write_v2(servers["flag"], kind="rollout")  # pyright: ignore[reportUnknownArgumentType]
-
-    status, body, headers = _request(servers["gate"] + "/__ava/deploy-state")  # pyright: ignore[reportUnknownArgumentType]
-
-    assert status == 200
-    assert json.loads(body) == {
-        "status": "updating",
-        "generation": "rollout-generation",
-    }
-    assert headers["Cache-Control"] == "no-store"
-    assert headers["Content-Type"] == "application/json"
-    assert _FakeGateway.requests == 0
-    assert _FakeApp.requests == 0
-
-
-def test_same_origin_snapshot_hint_is_get_only_and_never_probes(servers: _Servers) -> None:
-    status, body, headers = _request(servers["gate"] + "/__ava/deploy-state", method="POST")
-
-    assert status == 405
-    assert body == ""
-    assert headers["Allow"] == "GET"
-    assert _FakeGateway.requests == 0
-    assert _FakeApp.requests == 0
-
-
-@pytest.mark.parametrize(
-    ("raw", "expected"),
-    [(None, {"status": "inactive", "generation": None}), ("{bad-json", None)],
-)
-def test_same_origin_snapshot_hint_projects_inactive_and_invalid_without_probes(
-    servers: _Servers,
-    raw: str | None,
-    expected: dict[str, object] | None,
-) -> None:
-    if raw is not None:
-        servers["flag"].write_text(raw)
-
-    status, body = _get(servers["gate"] + "/__ava/deploy-state")
-
-    assert status == 200
-    payload = json.loads(body)
-    if expected is None:
-        assert payload["status"] == "invalid"
-        assert payload["generation"] is None
-    else:
-        assert payload == expected
-    assert _FakeGateway.requests == 0
-    assert _FakeApp.requests == 0
-
-
-def test_updating_page_uses_the_flags_stable_started_at(
-    servers: _Servers,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The static page must reconstruct elapsed time from the persisted update
-    snapshot; browser storage/new tabs are not deployment state."""
-    _FakeGateway.authenticated = True
-    _FakeGateway.down = True
-    started = dt.datetime(2026, 8, 24, 12, 34, 56, tzinfo=dt.UTC)
-    fixed_now = started + dt.timedelta(seconds=75)
-
-    class _FixedDateTime(dt.datetime):
-        @classmethod
-        def now(cls, tz: dt.tzinfo | None = None) -> dt.datetime:
-            return fixed_now if tz is not None else fixed_now.replace(tzinfo=None)
-
-    monkeypatch.setattr(gate_daemon.dt, "datetime", _FixedDateTime)
-    started_at = started.isoformat()
-    servers["flag"].write_text(
-        json.dumps(
-            {
-                "schema_version": 2,
-                "generation": started_at,
-                "state": "updating",
-                "kind": "rollout",
-                "started_at": started_at,
-                "updated_at": started_at,
-                "phase": "phase-b",
-                "origin": "test",
-            }
-        )
-    )
-    status, body = _get(servers["gate"] + "/")
-    assert status == 503
-    assert f'window.__AVA_DEPLOY_STARTED_AT__ = "{started_at}"' in body
-    match = re.search(r"window\.__AVA_UPDATE_BASE_ELAPSED_MS__ = (\d+);", body)
-    assert match is not None
-    assert int(match.group(1)) == 75_000
-    assert "/*__AVA_" not in body
-    assert "sessionStorage" not in body
-
-
-def test_gateway_refused_serves_updating_page_when_flag_set(servers) -> None:
-    """Local leg: the gateway process is down entirely (connection refused) but
-    the rollout marked the flag — updating page."""
-    _FakeGateway.authenticated = True
     _FakeGateway.down = False
-    _write_v2(servers["flag"])  # pyright: ignore[reportUnknownArgumentType]
-    servers["gw"].shutdown()  # pyright: ignore[reportUnknownMemberType]
-    status, body = _get(servers["gate"] + "/")  # pyright: ignore[reportUnknownArgumentType]
-    assert status == 503
-    assert "System updating" in body
+    status, body = _get(servers["gate"] + "/fleet")
+    assert (status, body) == (200, "APP-PAGE /fleet")
+    status, body = _get(servers["gate"] + "/__ava/deploy-state")
+    assert (status, body) == (200, "APP-PAGE /__ava/deploy-state")
 
 
 def test_gateway_503_without_flag_serves_down_page(servers) -> None:
@@ -746,19 +621,6 @@ def test_gateway_refused_without_flag_serves_down_page(servers) -> None:
     assert "System updating" not in body
 
 
-def test_each_failed_request_uses_the_current_persisted_snapshot(servers) -> None:
-    """The gate may change pages only when the persisted deploy snapshot changes;
-    a transport phase never invents a second state."""
-    _FakeGateway.authenticated = True
-    _FakeGateway.down = True
-    _write_v2(servers["flag"])  # pyright: ignore[reportUnknownArgumentType]
-    _, body = _get(servers["gate"] + "/")  # pyright: ignore[reportUnknownArgumentType]
-    assert "System updating" in body
-    servers["flag"].unlink()  # pyright: ignore[reportUnknownMemberType]
-    _, body = _get(servers["gate"] + "/")  # pyright: ignore[reportUnknownArgumentType]
-    assert "Service unavailable" in body
-
-
 def test_app_transport_failure_without_active_marker_is_service_unavailable(servers) -> None:
     """Gateway-up/app-down is the exact recovery gap observed in production.
 
@@ -777,33 +639,7 @@ def test_app_transport_failure_without_active_marker_is_service_unavailable(serv
     assert _FakeGateway.requests == 1
 
 
-@pytest.mark.parametrize(
-    "raw",
-    [
-        "{not-json",
-        '{"schema_version":2,"state":"mystery","started_at":null}',
-        '{"schema_version":2,"state":"updating","started_at":"not-a-time"}',
-        '{"posture":"paused","updated_at":"2026-08-24T12:34:56+00:00"}',
-    ],
-)
-def test_malformed_or_unknown_flag_fails_to_service_unavailable(
-    servers: _Servers,
-    raw: str,
-) -> None:
-    """Corrupt/unknown state is never guessed to mean an update. The gate stays
-    available, reports Not Working, and leaves an observable warning."""
-    _FakeGateway.authenticated = True
-    _FakeGateway.down = True
-    servers["flag"].write_text(raw)
-
-    status, body = _get(servers["gate"] + "/")
-    assert status == 503
-    assert "Service unavailable" in body
-    assert "No update is in progress" not in body
-    assert "System updating" not in body
-
-
-@pytest.mark.parametrize("page", ["login_page", "updating_page", "down_page"])
+@pytest.mark.parametrize("page", ["login_page", "down_page"])
 def test_pages_ship_self_contained(servers, page: str) -> None:
     """Every page carries its own styling and theme bootstrap.
 

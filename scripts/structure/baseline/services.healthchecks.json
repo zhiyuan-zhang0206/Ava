@@ -1,7 +1,4 @@
 {
-  "complexity": {
-    "services/healthchecks/browser.py::main": 17
-  },
   "directories": {
     "services/healthchecks": 31
   },

@@ -4,7 +4,7 @@ The JSONL history records `.env` aliases, metadata, digests, the initiating
 credential fact, and — for non-sensitive fields only — the old→new value diff:
 configuration values of sensitive (or unregistered) keys never enter this file,
 and configuration values never enter the unified event stream at all.
-Bootstrap provisioning (`cli.install_cluster` and `cli.enroll`) intentionally
+First-start provisioning (`cli/start_identity.py`) intentionally
 creates a fresh `.env` without audit history or an armed marker, so the guard
 remains unarmed until an audited runtime write.
 """

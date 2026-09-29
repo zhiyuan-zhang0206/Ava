@@ -36,7 +36,7 @@ The pattern is uniform across four convergence points, but **the mechanism is in
 
 ### A. Env keys — `EnvRegistry` (declaration registry, see [[okf/design/design.ava.okf.md|lexicon]])
 
-Moved to [[okf/design/r2-single-source-of-truth/env-registry.ava.okf.md|R2 Env Registry]] — every env key declared exactly once; forwarding/keep-drop/seed-allowlist are pure projections; invariants A1–A3.
+Moved to [[okf/design/r2-single-source-of-truth/env-registry.ava.okf.md|R2 Env Registry]] — declared keys, forwarding and keep/drop projections; invariants A1–A3.
 
 ### B. Skill names — `SkillIdentity` (an entity, not a string)
 

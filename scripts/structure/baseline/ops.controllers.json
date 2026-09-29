@@ -1,7 +1,0 @@
-{
-  "complexity": {
-    "ops/controllers/stranded_pause.py::_executing_owner": 19,
-    "ops/controllers/stranded_pause.py::recover_stranded_pause": 16,
-    "ops/controllers/stranded_pause.py::stranded_hold_verdict": 26
-  }
-}

@@ -19,10 +19,11 @@ from typing import Protocol, TypedDict, cast
 import psutil
 
 from shared.log import logger
+from shared.native_process import pid_starttime_ticks
+from shared.native_process.ownership import stable_create_time
 from shared.paths import logs_dir, run_dir
-from shared.proc_tree import stable_create_time
 from shared.session_backend import SessionBackend
-from shared.session_record import SessionRecord, pid_starttime_ticks
+from shared.session_record import SessionRecord
 
 _GONE = (psutil.NoSuchProcess, psutil.AccessDenied, OSError)
 _CREATE_TIME_TOLERANCE_S = 2.0
@@ -172,17 +173,8 @@ class HelperProcSessionBackend(SessionBackend):
         login_shell: bool = True,
         exec_cmd: bool = True,
         stderr_append: Path | None = None,
-        gate_fd: int | None = None,
-        receipt: tuple[Path, str] | None = None,
     ) -> bool:
-        """Spawn a session through the helper and persist its process identity.
-
-        The gated-spawn channel is Linux-only (design R8) and this backend is
-        the macOS permissions-helper route, so a gated request is refused
-        rather than silently launched without its gate and birth receipt.
-        """
-        if gate_fd is not None or receipt is not None:
-            raise NotImplementedError(f"{type(self).__name__} has no gated spawn")
+        """Spawn a session through the helper and persist its process identity."""
         if self.has_session(name):
             return True
 

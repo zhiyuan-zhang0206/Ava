@@ -55,10 +55,11 @@ instruction ending. Tool schemas still come from the local function signatures.
   the web UI already makes, so an MCP client can do exactly what a browser can
   and nothing more. New capability belongs on a gateway route first.
 - **Identity is not a parameter.** `shared.machine.gateway_api_base` +
-  `gateway_auth_headers` resolve the gateway and cluster secret of the checkout
+  `gateway_auth_headers` resolve the gateway and bearer of the checkout
   the running `ava` belongs to — the same checkout-anchored rule as every CLI
-  verb, so `ava` on PATH serves prod and a worktree's `.venv/bin/ava` serves that
-  worktree's cluster. There is no cluster argument to get wrong.
+  verb, so a bare `ava` serves the cluster `$AVA_HOME` names and a worktree's
+  `.venv/bin/ava` serves that worktree's cluster. There is no cluster argument to
+  get wrong.
 - **stdout is the wire.** Under stdio transport a stray `print()` corrupts the
   JSON-RPC stream. The mcp SDK logs through a stderr `RichHandler` and
   `shared.log` adds only stderr sinks, which is what makes this path safe.

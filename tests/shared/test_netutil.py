@@ -27,7 +27,7 @@ def test_non_loopback_hosts(host: str) -> None:
 
 def test_netutil_imports_without_config() -> None:
     """netutil must not pull shared.config (which builds Settings at import and
-    fails on a fresh host) — enroll depends on this."""
+    fails on a fresh host) — a first `ava start` imports it before any settings."""
     import ast
 
     src = Path(__file__).resolve().parents[2] / "shared" / "netutil.py"

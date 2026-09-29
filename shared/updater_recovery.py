@@ -1,4 +1,8 @@
-"""Strict durable evidence schemas for updater recovery and continuation."""
+"""Strict schemas for the retained updater recovery evidence.
+
+The retired updater wrote these journals; `shared.updater_handoff` only reads
+them now, to refuse generic recovery while one is unfinished or malformed.
+"""
 
 from __future__ import annotations
 
@@ -9,10 +13,10 @@ from uuid import UUID
 
 from pydantic import AwareDatetime, Field, field_validator, model_validator
 
-from shared.managed_writer_barrier import Digest, EvidenceModel, RolloutIdentity
-from shared.managed_writer_closure import LauncherTerminal
+from shared.managed_writer_barrier import RolloutIdentity
 from shared.managed_writer_observation import ExpectedUnitWriters, ObservationChallenge
 from shared.managed_writer_publication import PublishedUnit, UnitActivationReadback
+from shared.process_evidence import Digest, EvidenceModel
 
 BootstrapRecoveryStage = Literal[
     "prepared",
@@ -135,58 +139,6 @@ class NormalReleaseRecoveryJournal(EvidenceModel):
         return self
 
 
-def validate_normal_recovery_transition(
-    previous: NormalReleaseRecoveryJournal | None,
-    current: NormalReleaseRecoveryJournal,
-) -> None:
-    """Validate one monotonic journal CAS while retaining activation identity."""
-    if previous is None:
-        if current.stage != "waiting":
-            raise ValueError("normal recovery must begin at waiting")
-        return
-    if (
-        current.request_path,
-        current.operation_context,
-        current.unit,
-        current.previous_selector,
-    ) != (
-        previous.request_path,
-        previous.operation_context,
-        previous.unit,
-        previous.previous_selector,
-    ):
-        raise ValueError("normal recovery identity changed")
-    allowed: dict[str, frozenset[str]] = {
-        "waiting": frozenset({"selected"}),
-        "selected": frozenset({"bootstrap_stopped"}),
-        "bootstrap_stopped": frozenset({"starting"}),
-        "starting": frozenset({"starting", "observed"}),
-        "observed": frozenset({"committed"}),
-        "committed": frozenset(),
-    }
-    if current.stage not in allowed[previous.stage]:
-        raise ValueError(
-            f"normal recovery cannot transition from {previous.stage} to {current.stage}"
-        )
-    if current.stage == "starting":
-        # I8: the single slot may only be replaced with its displaced attempt
-        # already adjudicated — an empty slot carries no verdict, an occupied
-        # slot demands one plus a fresh nonce (a new attempt is a new attempt).
-        if previous.starting_attempt is None:
-            if current.replaces is not None:
-                raise ValueError("a first start displaces no attempt verdict")
-        else:
-            if current.replaces is None:
-                raise ValueError("replacing a starting attempt requires its adjudication witness")
-            if (
-                current.starting_attempt is None
-                or current.starting_attempt.nonce == previous.starting_attempt.nonce
-            ):
-                raise ValueError("a replacement start requires a fresh attempt nonce")
-    if previous.stage == "observed" and current.readback != previous.readback:
-        raise ValueError("committed normal recovery changed observed readback")
-
-
 class LaunchdRecovery(EvidenceModel):
     """Exact private original for one admitted restricted bootstrap launcher."""
 
@@ -195,6 +147,28 @@ class LaunchdRecovery(EvidenceModel):
     loaded: Literal[False]
     custody: str = Field(min_length=1, max_length=4096)
     mode: Literal[384, 420]  # Owner-write-only 0600 or 0644 definitions.
+
+
+class LauncherTerminal(EvidenceModel):
+    """One prepared launcher's terminal record in the retired updater's hop ledger.
+
+    ``label`` is the prepared launcher's name (``ExpectedLauncher.name``: the
+    launchd label, or the crontab definition digest). ``removed`` records that
+    the launcher definition was removed; ``rebound`` records that it was
+    rewritten to exactly ``new_digest``.
+    """
+
+    label: str = Field(min_length=1, max_length=256, pattern=r"^[^\x00-\x1f]+$")
+    kind: Literal["removed", "rebound"]
+    new_digest: Digest | None = None
+
+    @model_validator(mode="after")
+    def coherent_digest(self) -> Self:
+        if self.kind == "rebound" and self.new_digest is None:
+            raise ValueError("rebound terminal requires its new definition digest")
+        if self.kind == "removed" and self.new_digest is not None:
+            raise ValueError("removed terminal carries no new digest")
+        return self
 
 
 class BootstrapRecoveryJournal(EvidenceModel):
@@ -211,7 +185,7 @@ class BootstrapRecoveryJournal(EvidenceModel):
     # The hop ledger's launcher facts: one terminal per prepared launcher,
     # written once at the proven native quiesce and carried
     # unchanged afterwards; empty before that write and in journals written
-    # before this field existed. The collector consumes these directly.
+    # before this field existed.
     launcher_terminals: tuple[LauncherTerminal, ...] = ()
     normal_release: NormalReleaseRecoveryJournal | None = None
 

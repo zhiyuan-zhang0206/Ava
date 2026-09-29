@@ -91,7 +91,7 @@ SDK dependencies remain available through prepare/drain. Service stop closes
 new ordinary ops admission and waits for admitted handlers and executor work before
 signalling services. `ava pause` retains infrastructure and persistent PTYs;
 `ava stop` closes terminal jobs and shells and stops home-owned infrastructure
-unless explicitly preserved. `_maintenance_stop` verifies process identities
+unless explicitly preserved. `service_stop` verifies process identities
 and exits; `data_plane/maintenance_stop` saves Redis before its verified shutdown.
 `_stop_extras` covers home-owned Gate/helper/native LGTM outside the session
 roster, retaining desired configuration and data. None of these local checks
@@ -100,8 +100,8 @@ proves that every remote or unregistered writer has stopped.
 During a stopped/starting hold, gateway `GET /api/health` remains a control-plane
 identity and real database probe. It remains public and reports database
 failure as degraded; it does not certify business admission. Ops `status_probe`
-and `cluster_resume` also stay reachable and remain counted through completion.
-Their existing authentication requirements are unchanged.
+also stays reachable and remains counted through completion. Its existing
+authentication requirements are unchanged.
 Resume still checks the exact generation, failure receipts and actual serving
 state. Ordinary start proves readiness before releasing the hold; an exit-code
 waiver never marks either serving or explicit maintenance `ready`. Business APIs

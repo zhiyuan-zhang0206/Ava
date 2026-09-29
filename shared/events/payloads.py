@@ -421,7 +421,7 @@ class HeartbeatPaused(TypedDict):
 
 
 class PauseLifecycleWait(TypedDict):
-    """`pause_lifecycle_wait` payload — ops/agent_pause.py::_prepare.
+    """`pause_lifecycle_wait` payload — ops/agent_pause.py::prepare.
 
     One row per preparation episode that met in-flight work it did not author
     (task #3591). ``waited_s`` is the bounded retry time before the outcome:
@@ -445,7 +445,7 @@ class PauseOrphanClaimSettled(TypedDict):
 
 
 class UpdateStragglerReaped(TypedDict):
-    """`update_straggler_reaped` payload — ops/agent_pause.py::_drain.
+    """`update_straggler_reaped` payload — ops/agent_pause.py::drain.
 
     One row per drain pass that reaped stragglers (task #4016): the cohort
     members CAS-marked 'restarting' past the configured restart window, and

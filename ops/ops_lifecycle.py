@@ -89,6 +89,7 @@ from ops.resurrect_gates import (
 from ops.resurrect_gates import (
     wake_suppression_active as _wake_suppression_active,
 )
+from ops.resurrection_retry import report_auto_resurrect_failure
 from ops.rpc_schemas import (
     BillingResurrectAgentResponse,
     CancelRequested,
@@ -288,20 +289,17 @@ async def resurrect_agent_op(
     trigger_inbound_id: int | None = None,
     trigger_inbound_kind: Literal["chat", "compact_request", "system_note"] | None = None,
 ) -> ResurrectAgentResponse:
-    """Local-target resurrect (UPDATE terminated -> idling + detached process launch).
+    """Commit hosted resurrection intent, then publish a wake to the home host.
 
     `trigger_inbound_id` carries the internal auto-resurrect CAS to the home
-    runner; manual resurrects omit it and retain their unconditional contract.
+    runner; manual resurrects omit it and may reopen a closed hosted agent.
     """
     s = await asyncio.to_thread(get_agent_status, agent_id)
     if s is not AgentStatus.TERMINATED:
         return ResurrectAgentResponse(status="already_alive")
     try:
-        # resurrect_agent synchronously launches the agent and polls up to
-        # launch_confirm_timeout_seconds for it to claim. Run it off the event loop: a
-        # resurrected agent self-fetches its config from THIS gateway at boot, so
-        # blocking the loop here would deadlock that fetch. (spawn avoids this by
-        # always dispatching to the ops daemon; a local resurrect runs in-process.)
+        # Keep the synchronous row-lock transaction and wake publication off
+        # the gateway event loop. The agent host admits the successor later.
         await asyncio.to_thread(
             resurrect_agent,
             agent_id,
@@ -341,9 +339,9 @@ async def resurrect_if_terminated(
 
     Returns the agent's status after the attempt: the post-resurrect status when
     a process was spawned, otherwise the unchanged status (a non-terminated agent
-    is returned untouched). A resurrect failure (e.g. the launch path is
-    unreachable) is logged and swallowed — the inbound is already queued, so a
-    later manual resurrect picks it up.
+    is returned untouched). A resurrect failure is logged and swallowed — the
+    inbound is already queued, so a later manual resurrect picks it up; a
+    durable refusal (e.g. `runtime_cutover_required`) is a WARNING naming it.
 
     The process must start on the agent's home machine (`agents_meta.machine`)
     — launching it here when the agent lives elsewhere trips the boot placement
@@ -439,13 +437,8 @@ async def resurrect_if_terminated(
             agent_id,
             exc,
         )
-    except Exception:
-        _log.info(
-            "resurrect_if_terminated: auto-resurrect agent %s failed; "
-            "inbound queued, manual resurrect will pick it up",
-            agent_id,
-            exc_info=True,
-        )
+    except Exception as exc:
+        report_auto_resurrect_failure(agent_id, exc)
     return status
 
 

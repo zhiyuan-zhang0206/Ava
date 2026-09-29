@@ -20,7 +20,11 @@ from psycopg_pool import AsyncConnectionPool
 from services.agent_host.pools import build_control_pool, build_shared_pool
 from shared.config import settings
 from tests._containers import postgres
-from tests.cli.test_pgbouncer_wire import _pgbouncer_available, _pgbouncer_in_front
+from tests.cli.test_pgbouncer_wire import (
+    _admin_console_url,
+    _pgbouncer_available,
+    _pgbouncer_in_front,
+)
 
 pytestmark = pytest.mark.skipif(
     not _pgbouncer_available(), reason="pgbouncer not installed (brew/apt install pgbouncer)"
@@ -62,7 +66,7 @@ async def test_more_than_twenty_workload_leases_share_bounded_backends(
             build_shared_pool() as workload,
             build_control_pool() as control,
             await psycopg.AsyncConnection[DictRow].connect(
-                pooled, dbname="pgbouncer", autocommit=True, row_factory=dict_row
+                _admin_console_url(pooled), autocommit=True, row_factory=dict_row
             ) as admin,
         ):
             borrower_count = 64
@@ -177,7 +181,7 @@ async def test_six_host_pools_settle_one_thousand_short_requests_through_pgbounc
             )
             admin = await stack.enter_async_context(
                 await psycopg.AsyncConnection[DictRow].connect(
-                    pooled, dbname="pgbouncer", autocommit=True, row_factory=dict_row
+                    _admin_console_url(pooled), autocommit=True, row_factory=dict_row
                 )
             )
             workloads = [

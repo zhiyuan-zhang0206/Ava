@@ -124,6 +124,14 @@ def test_compact_terminated_agent_auto_resurrects(
     the resurrect win while the compact_request still applies."""
 
     tid = _seed_agent(db_conn, status="terminated")
+    # Resurrection resumes only a retained hosted incarnation; a historical
+    # row without hosted authority requires cutover reconciliation instead.
+    db_conn.execute(
+        "UPDATE agents_meta SET runtime_kind = 'hosted', runtime_generation = gen_random_uuid(), "
+        "runtime_owner = gen_random_uuid() WHERE id = %s",
+        (tid,),
+    )
+    db_conn.commit()
     with TestClient(app) as client:
         resp = client.post(f"/api/agents/{tid}/compact")
     assert resp.status_code == 200

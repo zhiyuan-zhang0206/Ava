@@ -1,7 +1,8 @@
 """Setup-field resolution (env > $AVA_HOME/<name> file > CLI arg).
 
-Called by `cmd_start`, which writes the resolved value to file when the arg is
-given so subsequent starts need no flags.
+Called by `cmd_start`. Resolution never writes `$AVA_HOME/<name>`; the first
+start's durable identity is persisted by `cli/start_identity.py`, so subsequent
+starts need no flags.
 
 Capabilities (serve_gateway / serve_agent_runner / serve_observability_station)
 are independent booleans, each resolved env (settings bool) >
@@ -18,6 +19,8 @@ from dataclasses import dataclass
 from typing import NotRequired, TypedDict, cast
 
 from shared.config import get_field
+from shared.paths import repo_root
+from shared.platform_backend import get_backend
 
 
 class SetupValues(TypedDict):
@@ -142,12 +145,11 @@ _SETUP_FIELDS: tuple[_SetupField, ...] = (
 
 
 def _resolve_capability(cap: _Capability, arg_value: bool | None) -> bool:  # noqa: FBT001 — tri-state capability flag, passed by name
-    """env (settings bool) > `$AVA_HOME/<file>` > arg (write file + return) > False.
+    """env (settings bool) > `$AVA_HOME/<file>` > arg > False.
 
     A non-None env / file / arg is honored as-is; only when all three are unset
-    does the capability default to off. When the arg is given, write the file so
-    a subsequent `ava start` resolves the same value without the flag (mirroring
-    `_resolve_setup_field`'s persistence behavior).
+    does the capability default to off. The arg is not written back (see the
+    module docstring).
     """
     from shared.machine import parse_serve_value
     from shared.paths import ava_home
@@ -161,18 +163,15 @@ def _resolve_capability(cap: _Capability, arg_value: bool | None) -> bool:  # no
         if text.strip():
             return parse_serve_value(text, str(p))
     if arg_value is not None:
-        p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text("true" if arg_value else "false")
-        print(f"  · wrote {p} ({cap.file}={'true' if arg_value else 'false'})")
         return arg_value
     return False
 
 
 def _resolve_setup_field(field: _SetupField, arg_value: str | None) -> str | None:
-    """env > file > arg (write file + return) > None.
+    """env > file > arg > None.
 
-    If arg is given, validate before writing — invalid values raise immediately
-    (do not persist the bad value to file).
+    The field's validator gates whichever source wins; an invalid value raises
+    immediately. The arg is not written back (see the module docstring).
     """
     from shared.paths import ava_home
 
@@ -191,9 +190,6 @@ def _resolve_setup_field(field: _SetupField, arg_value: str | None) -> str | Non
     if arg_value:
         if field.validator:
             field.validator(arg_value)
-        p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(arg_value)
-        print(f"  · wrote {p} ({field.name}={arg_value})")
         return arg_value
     return None
 
@@ -281,30 +277,44 @@ def _print_missing_setup_error(missing: list[_SetupField | _Capability], role: s
             file=sys.stderr,
         )
     caps = {c.strip() for c in role.split(",")} if role else set()
+    cli = _checkout_cli()
     print("\nfirst-time setup example:", file=sys.stderr)
     if role is None:
         print(
             "  # single box (owns data plane + runs agents):\n"
-            "  ava start --machine-name <name> --serve-gateway --serve-agent-runner \\\n"
+            f"  {cli} start --machine-name <name> --serve-gateway --serve-agent-runner \\\n"
             "            --gateway-url http://localhost:8000",
             file=sys.stderr,
         )
     if role is None or "gateway" in caps:
         print(
             "  # gateway (data plane + HTTP gateway):\n"
-            "  ava start --machine-name <name> --serve-gateway \\\n"
+            f"  {cli} start --machine-name <name> --serve-gateway \\\n"
             "            --memory-remote <git-url> --gateway-url <https-url>",
             file=sys.stderr,
         )
     if role is None or "agent-runner" in caps:
         print(
-            "  # agent-runner (machine key set via `ava enroll`):\n"
-            "  ava start --machine-name <name> --serve-agent-runner \\\n"
+            "  # agent-runner (machine identity selected on first `ava start`):\n"
+            f"  {cli} start --machine-name <name> --serve-agent-runner \\\n"
             "            --memory-remote <git-url> --gateway-url <https-url>",
             file=sys.stderr,
         )
     print(
         "\nAfter the first successful run, the CLI writes values to $AVA_HOME/<field> "
-        "files; subsequent `ava start` calls do not need the args.",
+        "files; subsequent `ava start` calls do not need the args (a bare `ava` acts on "
+        "the cluster $AVA_HOME names once that run has linked its $AVA_HOME/ava).",
         file=sys.stderr,
     )
+
+
+def _checkout_cli() -> str:
+    """The CLI a first start runs: this checkout's own `.venv/bin/ava`.
+
+    The host's bare `ava` runs `$AVA_HOME/ava`, which the first start's converge
+    links, so it cannot reach a home before that start. Windows has no launcher
+    (`supports_ava_symlink()` is False); its `ava` on PATH is the venv's own.
+    """
+    if not get_backend().supports_ava_symlink():
+        return "ava"
+    return str(repo_root() / ".venv" / "bin" / "ava")

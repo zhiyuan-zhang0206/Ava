@@ -295,6 +295,20 @@ DECISIONS: dict[str, Decision] = {
             "posture (prepare_threshold=None, keepalives, statement ceiling, sslmode, "
             "pooled-session scrub)"
         ),
+        allowed={
+            "shared/pg_admin.py": (
+                "the OS-user administrator's peer-socket dial (roles, grants, schema DDL); "
+                "shared.db only dials the cluster's application login URL"
+            ),
+            "shared/cluster/authority/unit.py": (
+                "probes an installed unit capability's own runner login at the served "
+                "endpoint, the credential under test"
+            ),
+            "cli/commands/data_plane/cluster_instance.py": (
+                "proves the running postmaster demands a password by dialing a role "
+                "that cannot exist, with no credential"
+            ),
+        },
     ),
 }
 

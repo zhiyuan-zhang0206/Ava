@@ -415,16 +415,10 @@ def test_delete_targets_the_given_slug_not_this_process(monkeypatch: pytest.Monk
 # only `schtasks` itself stubbed) is what keeps that honest.
 
 
-def _register_watchdog_probe() -> str | None:
-    from shared import os_watchdog_probe
-
-    return os_watchdog_probe._register_windows("agent-runner", 60)
-
-
 def _register_health_probe() -> str | None:
     from shared import os_cron
 
-    return os_cron._register_windows(300, 3)
+    return os_cron._register_windows(300)
 
 
 def _register_autostart() -> str | None:
@@ -436,7 +430,6 @@ def _register_autostart() -> str | None:
 @pytest.mark.parametrize(
     ("register", "kind", "time_limit"),
     [
-        (_register_watchdog_probe, "watchdog-probe-agent-runner", "PT5M"),
         (_register_health_probe, "health-probe", "PT30M"),
         # The boot job is deliberately unbounded — see os_autostart._register_windows.
         (_register_autostart, "autostart", "PT0S"),
@@ -463,8 +456,7 @@ def test_every_call_site_gets_the_hardened_settings(
 @pytest.mark.parametrize(
     ("register", "arguments"),
     [
-        (_register_watchdog_probe, "-m cli.main cluster watchdog-probe --role agent-runner"),
-        (_register_health_probe, "-m cli.main cluster health-probe --auto-rollback --threshold 3"),
+        (_register_health_probe, "-m cli.main cluster health-probe"),
         (_register_autostart, "-m cli.main boot"),
     ],
 )

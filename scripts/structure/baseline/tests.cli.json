@@ -1,39 +1,18 @@
 {
   "complexity": {
-    "tests/cli/test_converge_lgtm.py::test_native_grafana_renders_from_the_repo_and_host_setting": 28,
-    "tests/cli/test_data_plane_admin_secrets.py::test_missing_values_are_minted_activated_and_persisted": 15,
+    "tests/cli/test_converge_lgtm.py::test_native_grafana_renders_from_the_repo_and_host_setting": 25,
     "tests/cli/test_lgtm_native.py::test_ensure_renders_configs_with_native_paths_and_loopback": 24,
-    "tests/cli/test_maintenance_stop.py::test_bash_node_layered_chain_converges": 16,
-    "tests/cli/test_maintenance_stop_report.py::test_layered_shell_node_chain_reports_the_surviving_node_process": 19,
-    "tests/cli/test_maintenance_stop_report.py::test_refusing_service_failure_names_its_full_identity": 16,
-    "tests/cli/test_managed_writer_dispatch.py::test_assemble_phase_inputs_binds_each_projection_to_its_content_name": 26,
-    "tests/cli/test_managed_writer_dispatch.py::test_begin_chain_reads_the_context_opens_the_journal_and_dispatches": 32,
     "tests/cli/test_packages_refresh.py::test_refresh_applies_only_the_changed_package": 17,
-    "tests/cli/test_pgbouncer_config.py::test_render_ini_is_transaction_scram_and_socket_server": 17,
-    "tests/cli/test_update_pitr.py::test_fresh_point_is_complete_and_published_before_returning": 16
+    "tests/cli/test_pgbouncer_config.py::test_render_ini_is_transaction_scram_and_socket_server": 17
   },
   "directories": {
-    "tests/cli": 194
+    "tests/cli": 130
   },
   "files": {
-    "tests/cli/test_cluster_health.py": 2315,
-    "tests/cli/test_cluster_lifecycle.py": 868,
+    "tests/cli/test_cluster_health.py": 2117,
     "tests/cli/test_config_cmd.py": 804,
-    "tests/cli/test_converge.py": 1908,
-    "tests/cli/test_converge_lgtm.py": 1175,
-    "tests/cli/test_converge_otel_collector.py": 1268,
-    "tests/cli/test_enroll.py": 1093,
+    "tests/cli/test_converge_otel_collector.py": 1249,
     "tests/cli/test_impersonation_bridge.py": 965,
-    "tests/cli/test_maintenance_stop.py": 1145,
-    "tests/cli/test_managed_writer_collector.py": 1098,
-    "tests/cli/test_managed_writer_dispatch.py": 985,
-    "tests/cli/test_managed_writer_mode.py": 1017,
-    "tests/cli/test_pitr_activation.py": 1833,
-    "tests/cli/test_release_normal.py": 1702,
-    "tests/cli/test_start_readiness_gate.py": 1469,
-    "tests/cli/test_update_publication.py": 890
-  },
-  "nesting": {
-    "tests/cli/test_update_uv_sync.py::test_prod_source_never_imports_dev_only_modules": 6
+    "tests/cli/test_pitr_activation.py": 1785
   }
 }

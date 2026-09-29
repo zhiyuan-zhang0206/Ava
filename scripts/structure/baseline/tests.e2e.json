@@ -8,8 +8,5 @@
   },
   "directories": {
     "tests/e2e": 31
-  },
-  "files": {
-    "tests/e2e/conftest.py": 812
   }
 }

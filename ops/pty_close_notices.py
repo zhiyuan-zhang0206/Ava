@@ -1,16 +1,26 @@
-"""Durable close-notice outbox for persistent shells interrupted by `ava stop` (issue #2044).
+"""Durable close-notice outbox for busy persistent shells a unit closes (issue #2044).
 
-`ava stop` closes busy persistent-shell sessions AFTER the gateway and ops
-server are already down, so the closure notice for each owner agent cannot be
-delivered synchronously. The stop path records one notice per busy session it
-VERIFIED closed (its shell's exact identity gone — also when another session
-leaves the stop incomplete, and naming any process of the session that outlived
-its SIGKILL) under
-``$AVA_HOME/state/pty-close-notices/`` — durable across the data-plane
-shutdown. The ops daemon flushes the journal at its next startup: a notice for
-a live owner becomes a system inbound message, one for a terminated/restarting
-owner is dropped without delivery (a closure notice must never resurrect a dead
-agent — the TTL reaper's boundary, gateway/ttl_reaper.py:83).
+`ava stop`, a release transition and a PITR activation close busy
+persistent-shell sessions AFTER the gateway and ops server are already down, so
+the closure notice for each owner agent cannot be delivered synchronously. Each
+records one notice per busy session under ``$AVA_HOME/state/pty-close-notices/``
+— durable across the data-plane shutdown — naming why it closed. `ava stop`
+records only sessions it VERIFIED closed (its shell's exact identity gone —
+also when another session leaves the stop incomplete): its closure may be
+refused. A release or a PITR activation records before its cancel: no terminal
+survives either boundary
+(decisions/2026-09-27-fleet-release-and-cutover-policies.md item 2;
+decisions/2026-09-27-unit-join-pitr-closure-fleet-policy.md item 2), so the
+notice is that closure's intent and an interrupted executor cannot lose it.
+Once a session's shell is verified gone, its notice names any process of the
+session that outlived its SIGKILL — a release's by rewriting its intent record
+under the same dedup key.
+The ops daemon flushes the journal at its next startup, once that start has
+released its maintenance hold (`services/agent_ops/close_notices.py`): a
+notice for a live owner becomes a system inbound message, one for a
+terminated/restarting owner is dropped without delivery (a closure notice
+must never resurrect a dead agent — the TTL reaper's boundary,
+gateway/ttl_reaper.py:83).
 
 One file per (machine, agent_id, session_id, shell-birth) dedup key: a stop
 retry or a CLI re-entry overwrites the same record instead of stacking a
@@ -39,27 +49,29 @@ from shared.atomic_io import write_text_atomic
 from shared.db import insert_inbound_message, publish_inbound_wake
 from shared.db_transaction import write_transaction
 from shared.log import logger
+from shared.native_process.ownership import shown_name
 from shared.paths import ava_home
-from shared.proc_tree import shown_name
 
 # The reaper's notifiable boundary: only these statuses receive a closure
 # notice; anything else (terminated / restarting / missing) drops the record.
 _NOTIFIABLE_STATUSES = ("running", "idling")
 
-# The only caller that reaches terminal closure through this journal is the
-# operator's `ava stop` (updates and pause retain terminals; see
-# cli/commands/_temporary_stop.stop).
-_REASON = "an operator stop (ava stop)"
+# Why a unit closed the session, as the owner's notice names it. A pause
+# retains terminals and records nothing.
+STOP_REASON = "an operator stop (ava stop)"
+RELEASE_REASON = "a release transition"
+PITR_REASON = "a PITR activation"
 
 
 @dataclass(frozen=True)
 class ClosureNotice:
-    """One verified-closed busy session and the stop that closed it.
+    """One closed busy session and the stop or release that closed it.
 
-    `survivors` are the session's processes that outlived the stop's SIGKILL
-    (typically another user's, which neither the stop nor the agent may
-    signal), as (pid, command name); empty when every process is gone. They
-    are not part of the dedup key: the notice is about the shell.
+    `survivors` are the session's processes that outlived the closure's SIGKILL
+    (typically another user's, which neither the closure nor the agent may
+    signal), as (pid, command name); empty when every process is gone, and in
+    a release's intent recorded before its cancel. They are not part of the
+    dedup key: the notice is about the shell.
     """
 
     machine: str
@@ -109,15 +121,17 @@ def record_close(
     shell_birth: str,
     operation: str,
     acquired_at: datetime,
+    reason: str,
     survivors: Sequence[tuple[int, str]] = (),
 ) -> Path | None:
-    """Durably record one verified-closed busy session; None when not an agent shell.
+    """Durably record one closed busy session; None when not an agent shell.
 
-    The caller guarantees the session was busy and its shell's exact process
-    identity verified gone; `survivors` names, as (pid, command name), the
-    session's processes that outlived the SIGKILL. Returns the record path, or
-    None when the session name is not an agent-owned shell (the canonical
-    ``-agent-<id>-shell-<sid>`` shape).
+    The caller guarantees the session was busy and that it closes it for
+    `reason` (see the module docstring for when each caller records);
+    `survivors` names, as (pid, command name), the session's processes that
+    outlived the SIGKILL once its shell is verified gone. Returns the record
+    path, or None when the session name is not an agent-owned shell (the
+    canonical ``-agent-<id>-shell-<sid>`` shape).
     """
     match = _AGENT_SHELL_RE.search(name)
     if match is None:
@@ -133,7 +147,7 @@ def record_close(
         acquired_at=acquired_at.astimezone(UTC).isoformat()
         if acquired_at.tzinfo
         else acquired_at.isoformat(),
-        reason=_REASON,
+        reason=reason,
         closed_at=datetime.now(UTC).isoformat(),
         survivors=tuple(survivors),
     )
@@ -233,7 +247,7 @@ def _content(notice: ClosureNotice) -> str:
     if notice.survivors:
         left = ", ".join(f"pid {pid} ({shown_name(name)})" for pid, name in notice.survivors)
         text += (
-            f" Processes of the session the stop could not end are still running: {left}. "
+            f" Processes of the session the closure could not end are still running: {left}. "
             "Such a process usually belongs to another user (a root sudo), which you may "
             "not signal either."
         )

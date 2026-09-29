@@ -70,6 +70,16 @@ def test_job_limit_structures_match_windows_x64_abi() -> None:
         assert ctypes.sizeof(winjob._ExtendedLimitInformation) == 144
 
 
+def test_application_job_refuses_process_breakaway(monkeypatch: pytest.MonkeyPatch) -> None:
+    api = _FakeKernel32()
+    monkeypatch.setattr(winjob, "_kernel32", lambda: api)
+    job = winjob.WindowsJob.create(allow_breakaway=False)
+    try:
+        assert api.set_flags == [winjob._JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE]
+    finally:
+        job.close()
+
+
 def test_set_limits_failure_preserves_error_before_closing_handle(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -93,7 +103,7 @@ def test_job_assign_failure_is_loud_and_handle_remains_owned(
     def _error(action: str, _code: int | None = None) -> OSError:
         return OSError(action)
 
-    monkeypatch.setattr(winjob, "_last_error", _error)
+    monkeypatch.setattr(winjob, "last_error", _error)
     job = winjob.WindowsJob.create()
 
     with pytest.raises(OSError, match="AssignProcessToJobObject"):

@@ -39,9 +39,9 @@ marker gate declines export and applies at restart.
 Production-identity pure agent-runner homes retain their authenticated relay
 collector regardless of the marker: they are transport participants, not
 competing backend owners. Non-production runners require an explicit endpoint.
-The collector also omits its Postgres receiver when the direct URL has no
-password because otelcol-contrib rejects that configuration; its valid no-auth
-Redis receiver remains.
+The collector's Postgres receiver reads the home's own instance over its
+owner-only socket as the password-less monitoring role (peer), so it carries no
+database credential; a remote-managed plane omits it.
 
 ## Read boundary
 
