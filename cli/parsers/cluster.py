@@ -213,8 +213,8 @@ def _add_db_authority_parser(
     issue_unit_p = db_authority_sub.add_parser(
         "issue-unit",
         help="on the gateway: seal the active generation's runner login and the unit's "
-        "enrollment secret into a 0600 bundle for one agent-runner unit (join, the "
-        "one-time cutover, emergencies); prints its transport key once",
+        "enrollment secret into a 0600 bundle for one agent-runner unit (join, "
+        "emergencies); prints its transport key once",
     )
     issue_unit_p.add_argument("--machine", required=True, help="the unit's machine name")
     issue_unit_p.add_argument(

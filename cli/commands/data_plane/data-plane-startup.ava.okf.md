@@ -20,8 +20,7 @@ comes from `db_identity()` (the URL's database), the Redis ACL user from
 effects, and the identity owner writes each URL before storage comes up; no
 runtime identity backfill exists. Startup refuses missing Redis credentials,
 and a home without a database authority ledger that is not mid-birth, before
-any native effect (naming `scripts/cutover_db_authority.py`); it never
-substitutes the bearer. Explicit remote-managed URLs retain provider authority.
+any native effect (no conversion exists); it never substitutes the bearer. Explicit remote-managed URLs retain provider authority.
 
 ## Authentication and the write generation
 

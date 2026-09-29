@@ -85,7 +85,7 @@ def ensure_gateway_data_plane() -> int:
     if not needs_provision(ava_home()) and load_ledger(ava_home().resolve()) is None:
         # A home born before the data plane always authenticated: refuse before
         # any native effect (hba rewrite, migrations). Never converted here.
-        print(f"  ✗ {cutover_instruction(ava_home().resolve())}", file=sys.stderr)
+        print(f"  ✗ {legacy_home_refusal(ava_home().resolve())}", file=sys.stderr)
         return 1
     return ensure_cluster_storage(
         pg_port=rec.ports["postgres"],
@@ -264,20 +264,12 @@ def prepare_memory_vectors() -> None:
 READONLY_GRANTEES = ("grafana_ro",)
 
 
-def cutover_instruction(home: Path) -> str:
-    """The one explicit conversion an ordinary start names for a legacy home.
-
-    An adopted home is already stopped under its cutover hold, and its start
-    is the cutover's held first start (`cli.cutover_hold`).
-    """
-    from cli.cutover_hold import standing_hold, start_instruction
-
-    stop = "" if standing_hold(home) else "`ava stop --keep-infra`, then "
+def legacy_home_refusal(home: Path) -> str:
+    """Why an ordinary start refuses a home born before the data plane always
+    authenticated: nothing converts it."""
     return (
         f"home {home} has no database authority ledger (born before the data plane "
-        f"always authenticated). Convert it once with its application stopped: {stop}"
-        f"`.venv/bin/python scripts/cutover_db_authority.py --home {home} --execute` "
-        f"(dry-run without --execute), then {start_instruction(home)}."
+        "always authenticated) and no conversion exists; re-birth it as a new home"
     )
 
 
@@ -442,7 +434,7 @@ def _admitted_generation(
 
     ledger = authority.load_ledger(home)
     if ledger is None:
-        raise RuntimeError(cutover_instruction(home))
+        raise RuntimeError(legacy_home_refusal(home))
     if ledger.owner != cluster.db_identity():
         raise RuntimeError(
             f"the database authority ledger records owner {ledger.owner!r}, but AVA_DB_URL "
@@ -472,7 +464,7 @@ def complete_gateway_data_plane(*, refresh_schema: bool = True) -> None:
     generation. Ordinary start: groups re-granted after migrations, the NOLOGIN
     sweep, then the fail-closed catalog invariant; the pooler serves the active
     pair (restarted only when its bytes change). A home without a ledger is a
-    legacy home and refuses with the cutover instruction — never converted here.
+    legacy home and refuses (`legacy_home_refusal`) — never converted here.
     """
     from cli.commands._health_preflight import probe_postgres, probe_redis
     from cli.start_identity import mark_phase, needs_provision
@@ -508,7 +500,7 @@ def complete_gateway_data_plane(*, refresh_schema: bool = True) -> None:
             prepare_memory_vectors()
         birth = needs_provision(ava_home())
         if not birth and authority.load_ledger(home) is None:
-            raise RuntimeError(cutover_instruction(home))
+            raise RuntimeError(legacy_home_refusal(home))
         with admin_session(rec, database) as conn:
             if birth:
                 generation = _birth_generation(conn, home, database)

@@ -71,8 +71,7 @@ PORT_OFFSETS: dict[str, int] = {
     # gateway application is down). It takes offset 20, which the removed
     # idle-shell-reminder daemon vacated on 2026-08-27: nothing binds it on an
     # existing cluster, so reusing it moves no live port and keeps every block
-    # (and BLOCK_SIZE) unchanged. Existing records gain the key through the
-    # one-time cutover adoption (scripts/cutover_adopt_home.py).
+    # (and BLOCK_SIZE) unchanged.
     "coordinator": 20,
     # The backup scheduler is a first-class health daemon. Append its slot so
     # existing cluster records retain their assigned ports.

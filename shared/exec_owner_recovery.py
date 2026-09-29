@@ -39,8 +39,7 @@ def process_ended(identity: ResourceProcess) -> bool:
 
 def _recoverable(value: object) -> object:
     """The decoded set, or None for a retired shape: it has no exact local
-    evidence to recover, and admission and resurrection refuse it until the
-    cutover reconciliation replaces it."""
+    evidence to recover, and admission and resurrection refuse it."""
     try:
         return decode_resources(value)
     except ResourceShapeError:

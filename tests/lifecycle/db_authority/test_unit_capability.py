@@ -5,8 +5,8 @@ unit-bound bundle of the ACTIVE write generation's runner login plus the
 unit's enrollment secret; the runner installs it at start and its launcher
 delivers it. The single-box gateway fixture (real PostgreSQL 17, PgBouncer and
 Redis) proves the end-to-end path, that a bearer-only runner receives nothing,
-that a revoked generation's bundle never installs, and the networked cutover
-step. The tamper, binding and boot-pass checks need no database.
+and that a revoked generation's bundle never installs. The tamper, binding and
+boot-pass checks need no database.
 """
 
 from __future__ import annotations
@@ -15,12 +15,11 @@ import json
 import math
 import os
 import re
-import subprocess
 import time
 from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 from urllib.parse import urlsplit
 from uuid import uuid4
 
@@ -30,10 +29,8 @@ from dotenv import dotenv_values
 
 from cli import start_intent
 from cli.commands.data_plane import bringup
-from cli.commands.data_plane import cluster_instance as ci
 from cli.commands.data_plane import pgbouncer as pooler
 from cli.commands.start_generation import _write_generation
-from scripts import cutover_db_authority as cutover
 from shared import bootstrap, config, dotenv_boot
 from shared.cluster import authority
 from shared.cluster.authority import unit
@@ -477,7 +474,7 @@ def test_issued_bundle_starts_a_runner_that_connects_as_the_generation_login(
 
 def test_a_remote_unit_home_holding_the_human_secret_refuses_to_start(tmp_path: Path) -> None:
     """A remote unit never holds the human secret; a home that still records
-    it (not adopted) refuses before any fetch or identity effect."""
+    it refuses before any fetch or identity effect."""
     home = (tmp_path / "legacy-runner").resolve()
     home.mkdir(mode=0o700)
     values = {"AVA_GATEWAY_URL": "http://10.0.0.7:8000", "AVA_CLUSTER_SECRET": _HUMAN}
@@ -557,238 +554,3 @@ def test_a_revoked_generations_bundle_never_installs(
             served_endpoint=endpoint,
             probe=_refusing_probe,
         )
-
-
-# ── the networked cutover step ──────────────────────────────────────────────
-
-
-def _redis_shutdown(port: int, admin_password: str) -> None:
-    subprocess.run(  # noqa: S603 — the home-owned redis-cli, admin via env
-        [ci._redis_cli_bin(), "-p", str(port), "shutdown", "nosave"],
-        env=ci._redis_cli_env(admin_password),
-        check=False,
-        capture_output=True,
-    )
-
-
-_MINI, _WIN = ("mini", "/Users/u/.ava"), ("win", "C:\\Users\\u\\.ava")
-
-
-@pytest.fixture
-def networked(
-    born: Born, monkeypatch: pytest.MonkeyPatch, set_machine_identity: Callable[..., None]
-) -> Born:
-    """The gateway fixture with two remote units registered; `win` is paused."""
-    _serve_on_loopback(monkeypatch, born)
-    # At the identity source: an earlier test may already have cached a name.
-    set_machine_identity(role="gateway", name="gw")
-    with born.admin() as conn:
-        for machine, home in (("gw", str(born.home)), _MINI, _WIN):
-            conn.execute(
-                "INSERT INTO machine_units (machine_name, home) VALUES (%s, %s)", (machine, home)
-            )
-        conn.execute("INSERT INTO machines (name, paused_at) VALUES ('win', now())")
-    return born
-
-
-@pytest.mark.parametrize(
-    ("plan", "match"),
-    [
-        (cutover.UnitPlan(), "unclassified"),
-        (cutover.UnitPlan(include=(_MINI, _WIN), bundle_dir=Path("/unused")), "paused machines"),
-        (cutover.UnitPlan(include=(_MINI,), exclude=(_WIN,)), "--bundle-dir"),
-        (cutover.UnitPlan(include=(_MINI,), exclude=(_WIN, ("ghost", "/h"))), "unknown"),
-    ],
-)
-def test_networked_cutover_refuses_an_unclassified_or_paused_unit(
-    networked: Born, plan: cutover.UnitPlan, match: str
-) -> None:
-    before = (networked.home / ".env").read_bytes()
-    with pytest.raises(cutover.CutoverRefusedError, match=match):
-        cutover.convert_remote_units(networked.home, networked.record, plan, execute=True)
-    assert "remote-units" not in cutover.read_journal(networked.home)
-    assert (networked.home / ".env").read_bytes() == before
-
-
-def _assert_redis_admin_rotated(born: Born, old_admin: str) -> str:
-    redis_port = born.record.ports["redis"]
-    new_admin = dotenv_values(born.home / ".env")["AVA_REDIS_ADMIN_PASSWORD"]
-    assert new_admin and new_admin != old_admin
-    assert not cutover._authenticates(redis_port, old_admin)
-    assert cutover._authenticates(redis_port, new_admin)
-    assert f'requirepass "{new_admin}"' in (ci.redis_data_dir() / "redis.conf").read_text()
-    assert not (born.home / "db-authority" / "redis-admin.pending").exists()
-    return new_admin
-
-
-def _assert_redis_runtime_rotated(born: Born, old_runtime: str) -> None:
-    """Runner homes, their residue and the W3 copies hold the runtime password too:
-    it must stop authenticating, and the URL bootstrap serves carries the new one."""
-    redis_port = born.record.ports["redis"]
-    values = dotenv_values(born.home / ".env")
-    url = urlsplit(values["AVA_REDIS_URL"] or "")
-    user, new_runtime = url.username, values["AVA_REDIS_PASSWORD"]
-    assert user and new_runtime and new_runtime != old_runtime
-    assert url.password == new_runtime
-    assert not cutover._authenticates(redis_port, old_runtime, user)
-    assert cutover._authenticates(redis_port, new_runtime, user)
-    assert not (born.home / "db-authority" / "redis-runtime.pending").exists()
-
-
-def _assert_one_bundle_for_mini(outcome: str, bundles: Path) -> None:
-    [(path, key)] = re.findall(r"(\S+\.bundle) transport key (\S+)", outcome)
-    assert Path(path).parent == bundles
-    assert bundles.stat().st_mode & 0o777 == 0o700
-    assert [p.name.split("-")[0] for p in bundles.iterdir()] == ["mini"]
-    issued = unit.open_bundle(Path(path).read_bytes(), key)
-    assert issued.capability.unit == unit.UnitIdentity(machine=_MINI[0], home=_MINI[1])
-    assert issued.capability.generation.number == 0
-
-
-def test_networked_cutover_rotates_both_redis_passwords_and_issues_one_bundle_per_unit(
-    networked: Born, tmp_path: Path
-) -> None:
-    born = networked
-    redis_port = born.record.ports["redis"]
-    old_admin, old_runtime = (
-        born.values["AVA_REDIS_ADMIN_PASSWORD"],
-        born.values["AVA_REDIS_PASSWORD"],
-    )
-    bundles = tmp_path / "bundles"
-    classified = cutover.UnitPlan(include=(_MINI,), exclude=(_WIN,), bundle_dir=bundles)
-    dry = cutover.convert_remote_units(born.home, born.record, classified, execute=False)
-    assert dry.startswith("remote-units: would rotate")
-    assert cutover._authenticates(redis_port, old_admin)
-    try:
-        outcome = cutover.convert_remote_units(born.home, born.record, classified, execute=True)
-        new_admin = _assert_redis_admin_rotated(born, old_admin)
-        _assert_redis_runtime_rotated(born, old_runtime)
-        assert cutover.read_journal(born.home)["remote-units"] == "done"
-        _assert_one_bundle_for_mini(outcome, bundles)
-        # A repeat is a verified no-op: no second rotation, no new bundles.
-        repeat = cutover.convert_remote_units(born.home, born.record, classified, execute=True)
-        assert repeat.startswith("remote-units: verified")
-        assert dotenv_values(born.home / ".env")["AVA_REDIS_ADMIN_PASSWORD"] == new_admin
-    finally:
-        _redis_shutdown(
-            redis_port, dotenv_values(born.home / ".env")["AVA_REDIS_ADMIN_PASSWORD"] or ""
-        )
-
-
-def test_an_interrupted_rotation_resumes_with_the_staged_passwords(
-    networked: Born, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Redis took both new passwords, then `.env` failed to record them: the re-run
-    applies the same staged values instead of minting others."""
-    born = networked
-    redis_port = born.record.ports["redis"]
-    staged = born.home / "db-authority"
-    plan = cutover.UnitPlan(include=(_MINI,), exclude=(_WIN,), bundle_dir=tmp_path / "bundles")
-    upsert = cutover.upsert_env
-    monkeypatch.setattr(cutover, "upsert_env", MagicMock(side_effect=OSError("disk full")))
-    try:
-        with pytest.raises(OSError, match="disk full"):
-            cutover.convert_remote_units(born.home, born.record, plan, execute=True)
-        admin, runtime = (
-            (staged / f"redis-{name}.pending").read_text().strip() for name in ("admin", "runtime")
-        )
-        assert cutover.read_journal(born.home)["remote-units"] == "issuing"
-        monkeypatch.setattr(cutover, "upsert_env", upsert)
-        cutover.convert_remote_units(born.home, born.record, plan, execute=True)
-        values = dotenv_values(born.home / ".env")
-        assert (values["AVA_REDIS_ADMIN_PASSWORD"], values["AVA_REDIS_PASSWORD"]) == (
-            admin,
-            runtime,
-        )
-        assert not list(staged.glob("redis-*.pending"))
-    finally:
-        for password in {born.values["AVA_REDIS_ADMIN_PASSWORD"], _env_admin(born)}:
-            _redis_shutdown(redis_port, password)
-
-
-def _env_admin(born: Born) -> str:
-    pending = born.home / "db-authority" / "redis-admin.pending"
-    if pending.exists():
-        return pending.read_text().strip()
-    return dotenv_values(born.home / ".env")["AVA_REDIS_ADMIN_PASSWORD"] or ""
-
-
-def test_a_single_box_has_no_remote_units(
-    born: Born, set_machine_identity: Callable[..., None]
-) -> None:
-    set_machine_identity(role="gateway", name="gw")
-    with born.admin() as conn:
-        conn.execute(
-            "INSERT INTO machine_units (machine_name, home) VALUES ('gw', %s)", (str(born.home),)
-        )
-    outcome = cutover.convert_remote_units(born.home, born.record, cutover.UnitPlan(), execute=True)
-    assert outcome == "remote-units: none (single box)"
-    assert cutover._authenticates(
-        born.record.ports["redis"], born.values["AVA_REDIS_ADMIN_PASSWORD"]
-    )
-
-
-def test_networked_cutover_rotates_the_bearer_once_before_issuing_bundles(
-    networked: Born, tmp_path: Path
-) -> None:
-    """Step `api`: the human secret every runner held rotates once, after the
-    logical-backup passphrase is pinned; the bundles issued afterwards carry the
-    rotated telemetry token and the generation's API admission."""
-    from scripts import rotate_cluster_secret as bearer
-    from services.gateway_side.backup import passphrase
-    from shared.cluster.authority.api import telemetry_token
-    from shared.envfile import upsert_env
-
-    born = networked
-    upsert_env(born.home / ".env", {"AVA_CLUSTER_SECRET": _HUMAN}, audit_site="test")
-    # A home born before births minted a passphrase: it encrypted under sha256(secret).
-    passphrase.pin_path(born.home).unlink()
-    dry = cutover.convert_api(born.home, born.record, execute=False)
-    assert dry.startswith("api: would pin the logical-backup passphrase and rotate")
-    assert dotenv_values(born.home / ".env")["AVA_CLUSTER_SECRET"] == _HUMAN
-
-    outcome = cutover.convert_api(born.home, born.record, execute=True)
-    rotated = dotenv_values(born.home / ".env")["AVA_CLUSTER_SECRET"] or ""
-    assert outcome.startswith("api: AVA_CLUSTER_SECRET rotated once") and rotated != _HUMAN
-    assert passphrase.pinned(born.home) == passphrase.derive(_HUMAN)
-    journal = json.loads(cutover.journal_path(born.home).read_text())
-    assert journal["steps"]["api"] == "done" and journal["api"]["state"] == "done"
-    assert _HUMAN not in json.dumps(journal) and rotated not in json.dumps(journal)
-    assert bearer.bearer_fingerprint(rotated) == journal["api"]["new"]
-    # A repeat verifies; it never rotates a second time.
-    assert cutover.convert_api(born.home, born.record, execute=True).startswith("api: AVA")
-    assert dotenv_values(born.home / ".env")["AVA_CLUSTER_SECRET"] == rotated
-
-    bundles = tmp_path / "bundles"
-    plan = cutover.UnitPlan(include=(_MINI,), exclude=(_WIN,), bundle_dir=bundles)
-    try:
-        outcome = cutover.convert_remote_units(born.home, born.record, plan, execute=True)
-    finally:
-        _redis_shutdown(
-            born.record.ports["redis"],
-            dotenv_values(born.home / ".env")["AVA_REDIS_ADMIN_PASSWORD"] or "",
-        )
-    [(path, key)] = re.findall(r"(\S+\.bundle) transport key (\S+)", outcome)
-    api = unit.open_bundle(Path(path).read_bytes(), key).capability.api
-    secret = authority.read_secret(born.home, authority.active_generation(born.home))
-    assert api is not None and api.token == secret.api.runner
-    assert api.telemetry == telemetry_token(rotated) != telemetry_token(_HUMAN)
-
-
-def test_a_single_box_keeps_its_bearer_and_pins_its_backup_passphrase(
-    born: Born, set_machine_identity: Callable[..., None]
-) -> None:
-    """A home born before births minted a passphrase, with an empty secret: the
-    step pins a minted passphrase (never the public sha256(""))."""
-    from services.gateway_side.backup import passphrase
-
-    passphrase.pin_path(born.home).unlink()
-    set_machine_identity(role="gateway", name="gw")
-    assert cutover.convert_api(born.home, born.record, execute=False).startswith("api: would pin")
-    assert passphrase.pinned(born.home) is None
-    outcome = cutover.convert_api(born.home, born.record, execute=True)
-    assert outcome.startswith("api: single box keeps its bearer")
-    pinned = passphrase.pinned(born.home)
-    assert pinned is not None and pinned != passphrase.LEGACY_EMPTY_SECRET_PASSPHRASE
-    assert dotenv_values(born.home / ".env")["AVA_CLUSTER_SECRET"] == ""
-    assert "api" not in cutover.read_journal(born.home)

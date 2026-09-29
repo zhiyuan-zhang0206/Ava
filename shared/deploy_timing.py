@@ -160,7 +160,7 @@ NON_CRITICAL_SERVICE_READY_TIMEOUT_S = 45.0
 # How long a unit capability bundle (`ava cluster db-authority issue-unit`,
 # `shared.cluster.authority.unit.issue_bundle`) stays installable: the default
 # `--ttl-hours`, and the most it may ask for. A bundle is carried by hand to one
-# unit (a join, the cutover), so a day covers the trip and three cover a
+# unit (a join, an emergency), so a day covers the trip and three cover a
 # weekend. The expiry is the installer's check, not the cipher's: it bounds how
 # long an old bundle can be installed, not what a stolen bundle and its
 # transport key disclose.

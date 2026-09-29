@@ -343,9 +343,9 @@ def test_ordinary_start_refuses_a_home_without_a_ledger_before_any_effect(
     intent["phase"] = "provisioned"
     (configured.home / "start-intent.json").write_text(json.dumps(intent))
     assert bringup.ensure_gateway_data_plane() == 1
-    assert "cutover_db_authority.py" in capsys.readouterr().err
+    assert "no conversion exists" in capsys.readouterr().err
     assert not (configured.home / "pg").exists()
-    with pytest.raises(RuntimeError, match="cutover_db_authority"):
+    with pytest.raises(RuntimeError, match="no database authority ledger"):
         bringup.complete_gateway_data_plane()
 
 

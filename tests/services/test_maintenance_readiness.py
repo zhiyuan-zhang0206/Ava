@@ -167,7 +167,7 @@ def _authenticated(monkeypatch: pytest.MonkeyPatch) -> str:
 def test_held_gateway_serves_bootstrap_only_to_an_authenticated_caller(
     monkeypatch: pytest.MonkeyPatch, served_gateway_home: Any
 ) -> None:
-    """Bootstrap is control-plane: a runner's held first start and its processes'
+    """Bootstrap is control-plane: a runner started under a hold and its processes'
     config resolution read it before any hold is released. The exemption keeps
     the authentication and serves no database login; business stays closed."""
     _authenticated(monkeypatch)
@@ -188,12 +188,12 @@ def test_held_gateway_serves_bootstrap_only_to_an_authenticated_caller(
 
 
 @pytest.mark.usefixtures("held")
-def test_a_runners_held_first_start_joins_a_held_gateway(
+def test_a_runners_first_start_joins_a_held_gateway(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, served_gateway_home: Any
 ) -> None:
-    """The cutover's W9: the runner's first start joins (`_join`) with the bundle
-    the gateway's data-plane cutover issued, while the gateway's own hold still
-    stands, over the gateway's real middleware stack."""
+    """A runner's first start joins (`_join`) with the bundle the gateway issued
+    while the gateway's own hold still stands, over the gateway's real
+    middleware stack."""
     from cli import start_intent
     from shared import bootstrap
     from shared.cluster.authority import unit

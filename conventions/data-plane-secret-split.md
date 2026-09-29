@@ -8,7 +8,7 @@ internal data plane always authenticates, whatever the bearer
 |---|---|---|
 | `AVA_CLUSTER_SECRET` | Gateway only | Human/operator bearer for the gateway API and frontend login (never served by bootstrap, never held by a remote unit); empty = unauthenticated user-facing API and `/ops`, loopback-only listeners |
 | `AVA_API_TOKEN` (launch environment; also `$AVA_HOME/run/ava-root/manifests.json`, 0600) | Each launched service, admitted operator processes | The write generation's machine API token of the process's class: the gateway admits the active generation's tokens, a unit's `/ops` its generation's two; delivered only while the API is authenticated. The manifest copy is root's own record of what it launched — it persists until the next start rewrites it, and is inert once a release fence revokes the generation |
-| `$AVA_HOME/backups/logical-backup.passphrase` (0600) | Gateway home | The logical-backup passphrase: minted and pinned at birth (a home born earlier pinned `sha256(secret)` at its cutover), never derived and never changed by a secret rotation ([decision](../decisions/2026-09-28-backup-passphrase-minted-at-birth.md)); **backup-critical**: it is the only key to every logical backup |
+| `$AVA_HOME/backups/logical-backup.passphrase` (0600) | Gateway home | The logical-backup passphrase: minted and pinned at birth (a home born earlier carries `sha256(secret)`, pinned once), never derived and never changed by a secret rotation ([decision](../decisions/2026-09-28-backup-passphrase-minted-at-birth.md)); **backup-critical**: it is the only key to every logical backup |
 | OS user over the owner-only socket (`peer`) | Gateway host | Postgres administrator: provisioning, migrations (acting as the NOLOGIN schema owner), grants, the authority fence |
 | OS user mapped to `ava_monitor` (`peer map=ava_monitor`) | Gateway host's OTel collector | Password-less statistics reader (`pg_read_all_stats`, CONNECT); not a write generation, so no credential exists and rollouts leave it alone |
 | `$AVA_HOME/db-authority/` (0700; files 0600) | Gateway home | `ledger.json` (owner, groups, active generation), `generations/<n>.json` (the write generation's two logins with passwords and SCRAM verifiers, and its two machine API tokens), `pooler-admin.json` (PgBouncer admin console `ava_pooler_admin`), `units/<key>.json` (each remote unit's enrollment secret) |
@@ -54,99 +54,16 @@ Agents never receive an admin password, `AVA_REDIS_PASSWORD` as a standalone
 variable, or a gateway-class login. Agent-profile startup at the default home
 rejects a loopback non-runner URL on a secret-bearing cluster.
 
-## Convert an existing home
+## Homes born before this model
 
 A home born before the data plane always authenticated has empty Redis
-credentials, a LOGIN schema owner (with `AVA_DB_ADMIN_PASSWORD` on a secret
-home), a LOGIN `ava_runner` (`AVA_RUNNER_DB_PASSWORD`), trust `pg_hba` lines and
-no database authority ledger. `ava start` refuses it before any native effect
-and names `scripts/cutover_db_authority.py`, the one explicit conversion;
-nothing converts implicitly. Development and preview homes can be destroyed
-and re-born instead. A networked home (remote agent-runners) additionally
-rotates the human bearer once (step `api`) and classifies its remote units and
-issues their capabilities (step `remote-units`) below; the runner-side cleanup
-of retired keys, the human bearer included, belongs to the home adoption.
+credentials, a LOGIN schema owner, a LOGIN `ava_runner`, trust `pg_hba` lines
+and no database authority ledger. `ava start` refuses it before any native
+effect, and `scripts/rotate_data_plane_secrets.py` refuses it too; nothing
+converts it. Re-birth it as a new home.
 
-Run it from the checkout that owns the home (its `.venv`), in a gateway context,
-with the application stopped (a networked home adds `--unit` / `--exclude-unit`
-/ `--bundle-dir`):
-
-```bash
-ava stop --keep-infra
-.venv/bin/python scripts/cutover_db_authority.py --home "$AVA_HOME"            # dry-run
-.venv/bin/python scripts/cutover_db_authority.py --home "$AVA_HOME" --execute
-ava start
-```
-
-A home in the fleet cutover is the exception: the home adoption
-([cutover home adoption](cutover-home-adoption.md)) already stopped it under
-the cutover hold, so skip `ava stop`, and never follow the conversion with
-bare `ava start`. The script's last line names the next steps instead: the
-[database records repair](cutover-db-records.md), then the held first start
-`scripts/cutover_adopt_home.py --home "$AVA_HOME" --start`. While that hold
-stands, an ordinary start refuses before the held first start and keeps the
-hold after it.
-
-`--home` must name the checkout's own home. The script refuses a remote-managed
-plane, a home without a registry record, an active release operation, a running
-application root and persistent terminals. The steps run in order:
-
-- `redis` mints both passwords into `.env` (the runtime one also inside
-  `AVA_REDIS_URL`), stops the owned password-less Redis under native custody
-  with a final save, restarts it from a `redis.conf` carrying `requirepass`,
-  re-affirms the ACL user with its password, and proves that an unauthenticated
-  client is refused.
-- `db` stops the owned pooler, rewrites the always-authenticated `pg_hba` and
-  proves the running postmaster demands passwords, applies pending migrations,
-  demotes the owner and `ava_runner` to `NOLOGIN` without passwords, creates
-  `ava_gateway` and both groups' grants, proves every legacy session closed,
-  creates the ledger, mints generation 0, restarts the pooler serving exactly
-  that pair, proves both logins, activates the generation, checks the catalog
-  invariant, and only then rewrites `.env` (credential-free `AVA_DB_URL`; the
-  owner and runner passwords removed). A superuser owner is refused first.
-- `api`: every home first pins its logical-backup passphrase to
-  `$AVA_HOME/backups/logical-backup.passphrase`: `sha256(secret)`, what it has
-  encrypted under so far, so every earlier logical backup keeps decrypting (an
-  existing pin is kept; an empty secret pins a minted one, and its earlier
-  artifacts restore only with
-  `scripts/restore_drill.py --legacy-empty-secret-passphrase`). A single box
-  keeps its secret. On a networked home every runner holds a copy of
-  `AVA_CLUSTER_SECRET` and from now on authenticates with its generation's API
-  token, so the secret rotates once (`scripts/rotate_cluster_secret.advance`,
-  recorded in this journal as fingerprints only, pinning before it writes the
-  new secret). The pinned file is backup-critical: verify the gateway's copy
-  with its other backup keys before any runner copy of the old material is
-  archived and removed. The telemetry relay token derives from the secret and
-  changes here exactly once.
-- `remote-units` reads `machine_units`: every unit other than this gateway unit
-  must be classified exactly once, `--unit MACHINE:HOME` (included) or
-  `--exclude-unit MACHINE:HOME` (paused or offline; it stays fenced); units of
-  paused machines must be excluded. It rotates both Redis passwords, since
-  runner homes, their archived residue and the pre-cutover backups hold copies
-  of each: the admin one (applied with `CONFIG SET requirepass`, persisted to
-  `redis.conf` and `.env`) and the runtime ACL one (re-affirmed on the ACL user,
-  persisted to `.env` and `AVA_REDIS_URL`; runners fetch the new URL from
-  bootstrap at their next start, which a held gateway still serves: the route
-  is control-plane). Each is staged in
-  `db-authority/redis-<admin|runtime>.pending` so a crash resumes with the same
-  value, and each old password is proven refused. It then writes one sealed
-  bundle per included unit into `--bundle-dir` (an
-  owner-only directory), printing each transport key once; bundles issued after
-  `api` carry the rotated telemetry token and the generation's API admission.
-  A single box has no remote unit and the step is a no-op.
-
-A home already born authenticated is only verified. Each step records its
-intent before its effect in `$AVA_HOME/db-authority/cutover.json` (0600): an
-interrupted run continues with what it already wrote (the same generation, the
-same passwords), and a completed run repeats as a verified no-op. Ambiguous
-state is refused before any change: partial Redis credentials, a Redis that
-demands a password the home does not record, a ledger for another owner, or a
-journal that contradicts `.env` or the ledger.
-
-The rewritten `.env` changes the configuration digest, so a release request
-prepared before the cutover must be prepared again.
-
-Verify a converted home without printing credentials:
+Verify that a home carries no retired credential key without printing
+credentials:
 
 ```bash
 grep -E '^(AVA_DB_ADMIN_PASSWORD|AVA_RUNNER_DB_PASSWORD|AVA_REDIS_ADMIN_PASSWORD|AVA_REDIS_PASSWORD)=' "$AVA_HOME/.env" | cut -d= -f1
@@ -194,8 +111,8 @@ never hold it. Rotate it only for a confirmed leak:
 The script stages the next secret (`backups/secret-rotation/bearer.pending`),
 journals the rotation as fingerprints (`backups/secret-rotation/bearer.json`),
 verifies the pinned logical-backup passphrase (the secret never touches it;
-only a home the cutover is converting pins `sha256(secret)` here), and only
-then writes the new secret into the gateway `.env`; a re-run
+a home without a pin pins `sha256(secret)` here), and only then writes the new
+secret into the gateway `.env`; a re-run
 resumes an interrupted rotation from its journal. Restart the gateway, then
 issue every remote unit a new capability bundle: its telemetry relay token
 derives from the secret. New browser logins use the new secret.

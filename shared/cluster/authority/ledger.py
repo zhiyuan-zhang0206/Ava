@@ -40,7 +40,6 @@ from shared.cluster.authority.model import (
     ApiTokens,
     BirthAuthority,
     ClosureEvidence,
-    CutoverAuthority,
     Generation,
     GenerationSecret,
     Groups,
@@ -156,8 +155,7 @@ def require_ledger(home: Path) -> Ledger:
     ledger = load_ledger(home)
     if ledger is None:
         raise LedgerRefusedError(
-            "no database authority ledger: a new home is born by first start, "
-            "an existing home converts through the explicit cutover"
+            "no database authority ledger: a home is born with one by its first start"
         )
     return ledger
 
@@ -219,13 +217,11 @@ def _publish_exclusive(path: Path, data: bytes) -> None:
     _fsync_dir(directory)
 
 
-def create_ledger(
-    home: Path, *, owner: str, groups: Groups, authority: BirthAuthority | CutoverAuthority
-) -> Ledger:
-    """Create the empty ledger for a birth or cutover; an identical ledger is kept.
+def create_ledger(home: Path, *, owner: str, groups: Groups, authority: BirthAuthority) -> Ledger:
+    """Create the empty ledger for a birth; an identical ledger is kept.
 
-    The authority argument is the caller's capability; birth and cutover are the
-    only paths that may establish a home's authority store.
+    The authority argument is the caller's capability; birth is the only path
+    that may establish a home's authority store.
     """
     del authority
     with _locked(home):
@@ -252,7 +248,7 @@ def _require_mint_authority(ledger: Ledger, authority: MintAuthority) -> None:
         and ledger.unrevoked.origin == origin_of(authority)
     )
     if not first:
-        raise LedgerRefusedError("birth and cutover authority mint only generation 0")
+        raise LedgerRefusedError("birth authority mints only generation 0")
 
 
 def _new_secret(home: Path, number: int, encrypt: Encrypt) -> GenerationSecret:

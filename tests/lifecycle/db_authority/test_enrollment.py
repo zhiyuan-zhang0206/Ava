@@ -1,7 +1,7 @@
 """The unit enrollment secret: gateway store, rotation, revocation, coordinator channel.
 
-A unit is enrolled when it first receives a bundle (its join or the one-time
-cutover). Only explicit operator commands change the gateway record. The
+A unit is enrolled when it first receives a bundle. Only explicit operator
+commands change the gateway record. The
 secret keys the release coordinator channel: requests authenticate by HMAC
 against the gateway's CURRENT record (so rotation and revocation take effect
 at once), replays and skewed clocks refuse, and sealed payloads open only for
