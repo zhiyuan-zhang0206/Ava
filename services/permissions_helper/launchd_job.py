@@ -5,7 +5,9 @@ domain — and for bounded ``launchctl print`` inspection of the job. The
 build/cert/repair steps stay in ``lifecycle``; that module delegates the job
 identity here so the label formula exists once, and the helper healthcheck
 (task #3393) reads and parses the job here so the ``launchctl print`` field
-vocabulary exists once too.
+vocabulary exists once too. Exact-home retirement (``ava stop``) lives here, and
+so does ``require_retired_helper``, which admits replacing a stale installed
+artifact only once that retirement is complete.
 
 The parse reads the ``job state`` line deliberately: a stuck job's top-level
 ``state`` still reads ``spawn scheduled``/``xpcproxy`` — ``spawn failed`` lives
@@ -116,6 +118,50 @@ def _retirement_command(args: list[str], deadline: float) -> subprocess.Complete
     if remaining <= 0:
         raise TimeoutError("helper retirement deadline expired; registry must be retained")
     return run_bounded(["launchctl", *args], timeout=remaining, capture_output=True)
+
+
+def helper_job_loaded() -> bool:
+    """Whether launchd holds this home's helper job; an unknown answer raises."""
+    target = f"{helper_job_domain()}/{helper_job_label()}"
+    return retirement_query(target, time.monotonic() + _READ_TIMEOUT_S) is not None
+
+
+def require_retired_helper(executable: Path) -> None:
+    """Refuse replacing this home's installed helper executable while it may still run.
+
+    The helper is ava-root's parent, so its artifact is replaced only after
+    ``ava stop`` retired it: launchd holds no job under this home's label, the
+    job's plist is gone, and no live process runs ``executable``. An unknown
+    launchd answer raises from ``retirement_query``; it never reads as absence.
+    """
+    plist = helper_job_plist_path()
+    if helper_job_loaded():
+        blocker = f"launchd still has {helper_job_domain()}/{helper_job_label()} loaded"
+    elif plist.exists() or plist.is_symlink():
+        blocker = f"its job definition {plist} is still registered"
+    elif pids := _executable_pids(executable):
+        blocker = f"pid {', '.join(map(str, pids))} still runs {executable}"
+    else:
+        return
+    raise RuntimeError(
+        f"the installed permissions helper is stale but still in use ({blocker}); "
+        "run `ava stop` first, then `ava start` replaces it"
+    )
+
+
+def _executable_pids(executable: Path) -> list[int]:
+    """Live processes whose image was loaded from the file at ``executable``.
+
+    A process whose executable path the kernel does not report (another user's,
+    a zombie's, or one whose image file was already unlinked) cannot be running
+    the file now at that path, so replacing it cannot disturb that process.
+    """
+    target = executable.resolve()
+    return sorted(
+        process.pid
+        for process in psutil.process_iter(["exe"])
+        if process.info["exe"] and Path(process.info["exe"]).resolve() == target
+    )
 
 
 def _retirement_plist(path: Path, home: Path, socket_path: Path) -> tuple[bytes, str]:

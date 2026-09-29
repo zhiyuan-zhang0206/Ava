@@ -1,4 +1,4 @@
-"""Durable outer-owner intent and isolated signed-artifact preparation."""
+"""Durable outer-owner intent, helper retirement, and signed-artifact preparation."""
 
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -71,6 +72,160 @@ def test_isolated_helper_rejects_installed_destination_before_signing(
     monkeypatch.setattr(lifecycle, "_BUILD_DIR", tmp_path)
     with pytest.raises(lifecycle.PermissionsHelperBuildError, match="outside the installed"):
         lifecycle.build_and_sign(destination=tmp_path)
+
+
+def _recorder(events: list[str], event: str, result: object = None) -> Callable[..., object]:
+    def step(*_args: object) -> object:
+        events.append(event)
+        return result
+
+    return step
+
+
+def _stale_installed_helper(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, events: list[str], *, dr: str = "stable-dr"
+) -> Path:
+    """A validly signed, stale installed helper; launchd, scan, sign and build steps record."""
+    from services.permissions_helper import launchd_job as jobs
+
+    installed = tmp_path / "home" / "helper"
+    exe = installed / "AvaPermissionsHelper.app" / "Contents" / "MacOS" / "AvaPermissionsHelper"
+    exe.parent.mkdir(parents=True)
+    exe.write_bytes(b"old helper")
+    state = {"source_hash": "old", "dr": dr, "signed_at": "2026-09-29T00:00:00+00:00"}
+    (installed / "build-state.json").write_text(json.dumps(state))
+    (tmp_path / "agents").mkdir()
+    monkeypatch.setattr("shared.paths.ava_home", lambda: tmp_path / "home")
+    monkeypatch.setattr(jobs, "helper_job_agents_dir", lambda: tmp_path / "agents")
+    monkeypatch.setattr(lifecycle, "_BUILD_DIR", installed)
+    monkeypatch.setattr(lifecycle, "_source_content_hash", lambda: "new")
+    monkeypatch.setattr(lifecycle, "_expected_dr", lambda: "stable-dr")
+    monkeypatch.setattr(lifecycle, "_is_valid_stable_app", Path.exists)  # present = validly signed
+    monkeypatch.setattr(jobs, "retirement_query", _recorder(events, "launchd"))
+    monkeypatch.setattr(jobs, "_executable_pids", _recorder(events, "scan", []))
+    monkeypatch.setattr(lifecycle, "_keychain_lock_reason", _recorder(events, "keychain"))
+    monkeypatch.setattr(lifecycle, "_interactive_signing_reason", _recorder(events, "acl"))
+    monkeypatch.setattr(lifecycle, "preflight_signing_smoke", _recorder(events, "smoke"))
+    monkeypatch.setattr(lifecycle, "_verify_dr", _recorder(events, "verify", "stable-dr"))
+
+    def run(command: list[str]) -> subprocess.CompletedProcess[bytes]:
+        events.append(command[0])
+        if command[0] == "swiftc":
+            assert exe.read_bytes() == b"old helper", "the compile must precede removal"
+            Path(command[-1]).write_bytes(b"new helper")
+        return subprocess.CompletedProcess(command, 0, b"", b"")
+
+    monkeypatch.setattr(lifecycle, "_run", run)
+    return exe
+
+
+@pytest.mark.parametrize("blocker", ["loaded", "plist", "pid"])
+def test_stale_installed_helper_is_never_replaced_while_in_use(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, blocker: str
+) -> None:
+    from services.permissions_helper import launchd_job as jobs
+
+    events: list[str] = []
+    exe = _stale_installed_helper(tmp_path, monkeypatch, events)
+    state = (exe.parents[3] / "build-state.json").read_text()
+    if blocker == "loaded":
+        monkeypatch.setattr(jobs, "retirement_query", _recorder(events, "launchd", "pid = 321\n"))
+    elif blocker == "plist":
+        jobs.helper_job_plist_path().write_bytes(b"retained definition")
+    else:
+        monkeypatch.setattr(jobs, "_executable_pids", _recorder(events, "scan", [4242]))
+    reason = {"loaded": "launchd still has", "plist": "still registered", "pid": "pid 4242 still"}
+    with pytest.raises(RuntimeError, match=reason[blocker]) as refused:
+        lifecycle.build_and_sign()
+    assert "run `ava stop` first" in str(refused.value)
+    assert exe.read_bytes() == b"old helper"
+    assert (exe.parents[3] / "build-state.json").read_text() == state
+    assert not {"keychain", "acl", "smoke", "swiftc", "codesign"} & set(events)
+
+
+@pytest.mark.parametrize("previous_dr", ["stable-dr", "regenerated-identity-dr"])
+def test_retired_stale_installed_helper_is_replaced_after_signing_checks_and_compile(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    previous_dr: str,
+) -> None:
+    events: list[str] = []
+    exe = _stale_installed_helper(tmp_path, monkeypatch, events, dr=previous_dr)
+
+    assert lifecycle.build_and_sign() == (exe.parents[2], True)
+    assert exe.read_bytes() == b"new helper"
+    # Retirement is proved before the signing probes and again right before removal.
+    expected = "launchd scan keychain acl smoke swiftc launchd scan codesign verify"
+    assert " ".join(events) == expected
+    state = json.loads((exe.parents[3] / "build-state.json").read_text())
+    assert (state["source_hash"], state["dr"]) == ("new", "stable-dr")
+    # Grants carry over only under the recorded requirement; a new identity says so instead.
+    err = capsys.readouterr().err
+    assert ("grants carry over" in err) == (previous_dr == "stable-dr")
+    assert ("identity changed" in err) == (previous_dr != "stable-dr")
+
+
+@pytest.mark.parametrize("failing", ["keychain", "acl", "smoke", "swiftc"])
+def test_stale_installed_helper_survives_a_host_that_cannot_sign_or_compile(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failing: str
+) -> None:
+    events: list[str] = []
+    exe = _stale_installed_helper(tmp_path, monkeypatch, events)
+    state = (exe.parents[3] / "build-state.json").read_text()
+
+    def fail(*_args: object) -> None:
+        raise lifecycle.PermissionsHelperBuildError(f"{failing} failed")
+
+    if failing == "keychain":
+        monkeypatch.setattr(lifecycle, "_keychain_lock_reason", lambda: "keychain failed")
+    elif failing == "acl":
+        monkeypatch.setattr(lifecycle, "_interactive_signing_reason", lambda: "acl failed")
+    elif failing == "smoke":
+        monkeypatch.setattr(lifecycle, "preflight_signing_smoke", fail)
+    else:
+        monkeypatch.setattr(lifecycle, "_run", fail)
+    with pytest.raises(lifecycle.PermissionsHelperBuildError, match=f"{failing} failed"):
+        lifecycle.build_and_sign()
+    assert exe.read_bytes() == b"old helper"
+    assert (exe.parents[3] / "build-state.json").read_text() == state
+    assert "codesign" not in events
+
+
+def test_isolated_artifact_stays_immutable_without_consulting_the_home_job(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    events: list[str] = []
+    _stale_installed_helper(tmp_path, monkeypatch, events)
+    candidate = tmp_path / "candidate"
+    exe = candidate / "AvaPermissionsHelper.app" / "Contents" / "MacOS" / "AvaPermissionsHelper"
+    exe.parent.mkdir(parents=True)
+    exe.write_bytes(b"prepared helper")
+
+    with pytest.raises(lifecycle.PermissionsHelperBuildError, match="immutable"):
+        lifecycle.build_and_sign(destination=candidate)
+    assert exe.read_bytes() == b"prepared helper"
+    assert events == []
+
+
+def test_replacement_guard_names_a_live_process_running_the_artifact(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from services.permissions_helper import launchd_job as jobs
+
+    monkeypatch.setattr(jobs, "helper_job_loaded", lambda: False)
+    monkeypatch.setattr(jobs, "helper_job_agents_dir", lambda: tmp_path)
+    jobs.require_retired_helper(tmp_path / "unused-executable")  # nothing runs this file
+    # Never exec a copied binary or a fake helper: macOS launch constraints kill it with a
+    # GUI dialog. A live interpreter stands in; sys.executable is a venv symlink.
+    code = "import time; time.sleep(60)"
+    child = subprocess.Popen([sys.executable, "-c", code])  # noqa: S603 — disposable test child
+    try:
+        with pytest.raises(RuntimeError, match=rf"pid (\d+, )*{child.pid}\b.* still runs"):
+            jobs.require_retired_helper(Path(sys.executable))
+    finally:
+        child.kill()
+        child.wait(timeout=5)
 
 
 @pytest.mark.skipif(

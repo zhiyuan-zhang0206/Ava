@@ -1,15 +1,15 @@
-"""Prepare immutable signed macOS helper artifacts and register one home job.
+"""Prepare stably signed macOS helper artifacts and register one home job.
 
 A stable certificate preserves desktop permission identity. First start may
 build and register a helper; repeated start observes an unchanged loaded job.
-Replacing its artifact or job requires external stop and exact-home unregister
-first. Normal converge never unloads its own possible permission ancestor.
+A stale installed artifact is replaced only after `ava stop` retired its job and
+no process runs it; isolated artifacts stay immutable. Normal converge never
+unloads its own possible permission ancestor.
 """
 
 from __future__ import annotations
 
 import hashlib
-import json
 import os
 import plistlib
 import re
@@ -18,20 +18,26 @@ import subprocess
 import sys
 import tempfile
 import time
-from datetime import UTC, datetime
 from pathlib import Path
-from typing import TypedDict, cast
 
 import shared.paths
 from services.permissions_helper import hardened_runtime
+from services.permissions_helper.build_state import (
+    BUILD_STATE_NAME,
+    BuildState,
+    read_build_state,
+    write_build_state,
+)
 from services.permissions_helper.launchd_job import (
     HELPER_BUNDLE_ID,
     clear_helper_stop_intent,
     helper_job_agents_dir,
     helper_job_domain,
     helper_job_label,
+    helper_job_loaded,
     helper_job_plist_path,
     helper_stop_intent,
+    require_retired_helper,
 )
 from shared.config import settings
 from shared.paths import logs_dir, permissions_helper_socket
@@ -44,7 +50,6 @@ _SOURCE = _SERVICE_DIR / "helper" / "main.swift"
 _INFO_PLIST = _SERVICE_DIR / "helper" / "Info.plist"
 _LOCALES = _SERVICE_DIR / "helper" / "locales"
 _BUILD_DIR = shared.paths.permissions_helper_app_dir()
-_BUILD_STATE_NAME = "build-state.json"
 _HELPER_PING_ATTEMPTS = 10
 _HELPER_PING_SETTLE_S = 0.5
 _IDENTITY_RE = re.compile(
@@ -134,12 +139,6 @@ class PermissionsHelperSigningUnavailableError(PermissionsHelperBuildError):
     with nothing to bring them back (2026-08-09 -- a rollout's force-checkout
     freshens main.swift's mtime, which forces the rebuild that reaches for the
     key, so this fires on every rollout rather than rarely)."""
-
-
-class _BuildState(TypedDict):
-    source_hash: str
-    dr: str
-    signed_at: str
 
 
 def _run(cmd: list[str]) -> subprocess.CompletedProcess[bytes]:
@@ -415,44 +414,6 @@ def preflight_signing_smoke() -> None:
         )
 
 
-def _build_state_path() -> Path:
-    return _BUILD_DIR / _BUILD_STATE_NAME
-
-
-def _read_build_state(path: Path | None = None) -> _BuildState | None:
-    try:
-        raw: object = json.loads((path if path is not None else _build_state_path()).read_text())
-    except (FileNotFoundError, OSError, json.JSONDecodeError):
-        return None
-    if not isinstance(raw, dict):
-        return None
-    data = cast(dict[str, object], raw)
-    try:
-        source_hash = data["source_hash"]
-        dr = data["dr"]
-        signed_at = data["signed_at"]
-    except KeyError:
-        return None
-    if (
-        not isinstance(source_hash, str)
-        or not isinstance(dr, str)
-        or not isinstance(signed_at, str)
-    ):
-        return None
-    return _BuildState(source_hash=source_hash, dr=dr, signed_at=signed_at)
-
-
-def _write_build_state(source_hash: str, dr: str, path: Path | None = None) -> None:
-    target = path if path is not None else _build_state_path()
-    target.parent.mkdir(parents=True, exist_ok=True)
-    state = _BuildState(
-        source_hash=source_hash,
-        dr=dr,
-        signed_at=datetime.now(UTC).isoformat(),
-    )
-    target.write_text(json.dumps(state, indent=2, sort_keys=True) + "\n")
-
-
 def _app_executable(app: Path) -> Path:
     return app / "Contents" / "MacOS" / "AvaPermissionsHelper"
 
@@ -472,7 +433,7 @@ def _remove_app(app: Path) -> None:
         shutil.rmtree(app, ignore_errors=True)
 
 
-def _installed_build_is_current(app: Path, state: _BuildState | None, source_hash: str) -> bool:
+def _installed_build_is_current(app: Path, state: BuildState | None, source_hash: str) -> bool:
     return _is_valid_stable_app(app) and state is not None and state["source_hash"] == source_hash
 
 
@@ -572,19 +533,38 @@ def _build_directory(destination: Path | None) -> Path:
     return build_dir
 
 
+def _replaces_installed(exe: Path, destination: Path | None) -> bool:
+    """Whether this rebuild replaces an existing stale artifact, refusing when it must not.
+
+    An isolated destination's artifact is immutable. The installed one is replaced
+    only once `ava stop` retired this home's helper -- it is ava-root's parent --
+    and that is proved before the signing probes, so a host still running it is
+    turned away before anything reaches for the signing key."""
+    if not exe.exists():
+        return False
+    if destination is not None:
+        raise PermissionsHelperBuildError(
+            "signed helper artifacts are immutable; prepare a new AVA_PERMISSIONS_HELPER_ARTIFACT_DIR "
+            "and activate it after the home-specific helper job has been stopped and unregistered"
+        )
+    require_retired_helper(exe)
+    return True
+
+
 def build_and_sign(*, destination: Path | None = None) -> tuple[Path, bool]:
     """Compile and sign the helper; return (app bundle path, rebuilt).
 
     Skips the compile + sign only when the installed bundle is valid and its
     recorded content hash matches all source and identity inputs. Checkout
-    mtimes therefore cannot churn the binary or its TCC identity."""
+    mtimes therefore cannot churn the binary or its TCC identity. A stale
+    installed bundle is rebuilt in place, only when `_replaces_installed` admits it."""
     build_dir = _build_directory(destination)
-    state_path = build_dir / _BUILD_STATE_NAME
+    state_path = build_dir / BUILD_STATE_NAME
     app = build_dir / "AvaPermissionsHelper.app"
     exe = _app_executable(app)
     source_hash = _source_content_hash()
     expected_dr = _expected_dr()
-    state = _read_build_state(state_path)
+    state = read_build_state(state_path)
     if state is not None and state["dr"] != expected_dr:
         sys.stderr.write(
             "  ! permissions-helper: code-signing identity changed — "
@@ -593,16 +573,12 @@ def build_and_sign(*, destination: Path | None = None) -> tuple[Path, bool]:
 
     if _installed_build_is_current(app, state, source_hash):
         return app, False
-    if _app_executable(app).exists():
-        raise PermissionsHelperBuildError(
-            "signed helper artifacts are immutable; prepare a new AVA_PERMISSIONS_HELPER_ARTIFACT_DIR "
-            "and activate it after the home-specific helper job has been stopped and unregistered"
-        )
+    replacing = _replaces_installed(exe, destination)
 
     # Only a real rebuild needs the signing key, so neither check below can fail a
     # converge on a host whose helper is already current -- the common SSH case.
     # Both run before anything is compiled or written, so a host that cannot sign
-    # is turned away without a half-built bundle left behind.
+    # is turned away without a half-built bundle left behind, keeping any stale one.
     locked = _keychain_lock_reason()
     if locked is not None:
         raise PermissionsHelperSigningUnavailableError(
@@ -619,6 +595,8 @@ def build_and_sign(*, destination: Path | None = None) -> tuple[Path, bool]:
     binary = build_dir / "AvaPermissionsHelper"
     _run(["swiftc", "-O", str(_SOURCE), "-o", str(binary)])
 
+    if replacing:
+        require_retired_helper(exe)  # proved again right before the old artifact goes
     _remove_app(app)
     exe.parent.mkdir(parents=True, exist_ok=True)
     (app / "Contents" / "Info.plist").write_bytes(_INFO_PLIST.read_bytes())
@@ -650,7 +628,12 @@ def build_and_sign(*, destination: Path | None = None) -> tuple[Path, bool]:
     except PermissionsHelperBuildError as exc:
         raise PermissionsHelperBuildError(f"{exc}. {_AD_HOC_REFUSAL}") from exc
     actual_dr = _verify_dr(app)
-    _write_build_state(source_hash, actual_dr, state_path)
+    write_build_state(state_path, source_hash, actual_dr)
+    if replacing and state is not None and state["dr"] == actual_dr:
+        sys.stderr.write(
+            "  permissions-helper: replaced the stale signed artifact; its designated "
+            "requirement is unchanged, so macOS permission grants carry over\n"
+        )
     return app, True
 
 
@@ -671,9 +654,7 @@ def _domain() -> str:
 
 
 def _is_loaded() -> bool:
-    from services.permissions_helper.launchd_job import retirement_query
-
-    return retirement_query(f"{_domain()}/{_label()}", time.monotonic() + 30.0) is not None
+    return helper_job_loaded()
 
 
 def _stale_plists() -> list[Path]:
