@@ -246,7 +246,7 @@ def _gate_reason(spec: ServiceSpec) -> str | None:
             # Fail OPEN — run the service — and log, so one plugin's gate bug
             # can never take the supervisor down; the capability filter above
             # already scoped the service to this host's role.
-            logger.warning("gate for %s raised (failing open): %s", spec.session, exc)
+            logger.warning("gate for {} raised (failing open): {}", spec.session, exc)
             return None
     session = spec.session
     if session in ("browser", "browser-mcp"):
@@ -320,25 +320,6 @@ def services_for_capabilities(roles: MachineRoles) -> tuple[ServiceSpec, ...]:
     (config/capability-gated ones dropped). ``services_for_capabilities_annotated``
     is the diagnostic view that keeps the gated-out services + their reason."""
     return tuple(s for s, reason in services_for_capabilities_annotated(roles) if reason is None)
-
-
-def gate_reason_for_session(session: str) -> str | None:
-    """The roster gate reason for ONE service session, or None when it will run.
-
-    The start loop applies ``_gate_reason`` to the whole capability-union roster
-    at once; a spawner that launches a single service OUTSIDE that loop (the
-    pause lifecycle's restarter respawn) must ask the same question per session
-    or it drifts from the roster — the hosted restarter relaunch after every
-    rollout (2026-09-02, Task #2342: ``ava start`` skipped it correctly while the
-    unpause finally respawned it). Capability membership is deliberately not
-    part of the answer: the caller already knows it owns the session; only the
-    config/capability gate can differ between an orchestration context and
-    ``ava start``.
-    """
-    for spec in build_services():
-        if spec.session == session:
-            return _gate_reason(spec)
-    return "not a roster service (no spec with this session in ops.spec)"
 
 
 @dataclass(frozen=True)

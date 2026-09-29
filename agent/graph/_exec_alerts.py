@@ -84,13 +84,13 @@ def _post(agent_id: int, exc_type: str, exc_msg: str) -> None:
         )
         if resp.status_code >= 400:
             logger.warning(
-                "[exec-alert] bootstrap-failure alert ingest declined (HTTP %s) for agent %s",
+                "[exec-alert] bootstrap-failure alert ingest declined (HTTP {}) for agent {}",
                 resp.status_code,
                 agent_id,
             )
     except Exception as exc:  # transport / config errors — never raise from a thread
         logger.warning(
-            "[exec-alert] could not post bootstrap-failure alert for agent %s: %s",
+            "[exec-alert] could not post bootstrap-failure alert for agent {}: {}",
             agent_id,
             type(exc).__name__,
         )

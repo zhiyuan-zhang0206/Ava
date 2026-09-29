@@ -411,6 +411,39 @@ def test_backfill_sweeps_stale_orphan_temp_dirs(
     assert fresh.exists(), "young dir must survive"
 
 
+def test_sweep_skips_a_staging_dir_that_vanished(backfill_mod: Any, tmp_path: Path) -> None:
+    """A staging dir another run removes between the glob and the stat is
+    already gone — the sweep carries on (a dangling symlink stands in for it)."""
+    (tmp_path / "mirror-backfill-gone").symlink_to(tmp_path / "missing")
+    stale = tmp_path / "mirror-backfill-deadbeef"
+    stale.mkdir()
+    old = time.time() - 7200
+    os.utime(stale, (old, old))
+
+    backfill_mod._sweep_stale_staging_dirs(tmp_path)
+
+    assert not stale.exists()
+
+
+def test_sweep_raises_a_stat_failure_other_than_not_found(
+    backfill_mod: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Only "already gone" is tolerated; any other stat failure (here a
+    permission error) raises instead of being swallowed."""
+    locked = tmp_path / "mirror-backfill-locked"
+    locked.mkdir()
+    real_stat = Path.stat
+
+    def _denied(self: Path, **kwargs: Any) -> os.stat_result:
+        if self == locked:
+            raise PermissionError(13, "Permission denied", str(self))
+        return real_stat(self, **kwargs)
+
+    monkeypatch.setattr(Path, "stat", _denied)
+    with pytest.raises(PermissionError):
+        backfill_mod._sweep_stale_staging_dirs(tmp_path)
+
+
 def test_collect_from_mirror_returns_records_counts_missing_without_writing(
     backfill_mod: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

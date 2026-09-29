@@ -268,7 +268,7 @@ def _deliver(pool: ConnectionPool, notice: ClosureNotice) -> None:
         status = row[0] if row is not None else None
         if status not in _NOTIFIABLE_STATUSES:
             logger.info(
-                "[pty-close-notices] notice for agent %s (status %s) dropped — never resurrect",
+                "[pty-close-notices] notice for agent {} (status {}) dropped — never resurrect",
                 notice.agent_id,
                 status,
             )
@@ -283,7 +283,7 @@ def _deliver(pool: ConnectionPool, notice: ClosureNotice) -> None:
         )
     publish_inbound_wake(notice.agent_id, str(inbound_id))
     logger.info(
-        "[pty-close-notices] delivered closure notice for agent %s session %s",
+        "[pty-close-notices] delivered closure notice for agent {} session {}",
         notice.agent_id,
         notice.session_id,
     )
@@ -306,14 +306,14 @@ def flush(pool: ConnectionPool) -> int:
             continue
         notice = _read(path)
         if notice is None:
-            logger.warning("[pty-close-notices] unreadable record kept for inspection: %s", path)
+            logger.warning("[pty-close-notices] unreadable record kept for inspection: {}", path)
             remaining += 1
             continue
         try:
             _deliver(pool, notice)
         except Exception:
             logger.exception(
-                "[pty-close-notices] delivery failed for agent %s session %s; record kept: %s",
+                "[pty-close-notices] delivery failed for agent {} session {}; record kept: {}",
                 notice.agent_id,
                 notice.session_id,
                 path,

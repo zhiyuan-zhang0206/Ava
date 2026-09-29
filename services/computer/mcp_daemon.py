@@ -370,7 +370,7 @@ async def run(sock: str | None = None) -> None:
     path = Path(daemon._sock)
     if await _socket_in_use(path):
         logger.error(
-            "[computer-mcp] socket %s is already served by a live daemon — "
+            "[computer-mcp] socket {} is already served by a live daemon — "
             "refusing to start a second instance",
             path,
         )

@@ -15,7 +15,8 @@ where it matters and stays out of the way where emoji are a deliberate feature.
 
 ## Scope
 
-Scans `.py` under the in-scope dirs (`_SCAN_DIRS`): the agent + backend layers.
+Scans `.py` under the in-scope dirs (`_SCAN_DIRS`): the framework dirs
+(`lint_common.FRAMEWORK_DIRS`) plus `scripts/` and `tests/`.
 Deliberate-UX surfaces are exempt and NOT scanned (`_EXEMPT_PREFIXES`):
 
 - `cli/` — terminal output where emoji are intentional UX.
@@ -48,19 +49,12 @@ from pathlib import Path
 
 # Project root (this script lives under scripts/)
 _REPO_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(_REPO_ROOT))
 
-# In-scope dirs scanned by default (no argv) — agent + backend layers.
-_SCAN_DIRS = (
-    "agent",
-    "ava",
-    "gateway",
-    "services",
-    "shared",
-    "plugins",
-    "scripts",
-    "mcps",
-    "tests",
-)
+from scripts.structure import lint_common  # noqa: E402 - standalone script
+
+# In-scope dirs scanned by default (no argv); `_EXEMPT_PREFIXES` still applies.
+_SCAN_DIRS = (*lint_common.FRAMEWORK_DIRS, "scripts", "tests")
 
 # Path prefixes (repo-relative, posix) that are never scanned — deliberate-UX
 # surfaces and prose/content. Checked per file so a pre-commit-passed path under
@@ -184,7 +178,11 @@ def main(argv: list[str] | None = None) -> int:
             print(f"error: target path(s) not found: {', '.join(missing)}", file=sys.stderr)
             return 1
     # argv = explicit file list (manual run / pre-commit changed files); empty = scan every in-scope dir.
-    targets = [Path(a).resolve() for a in argv] if argv else [_REPO_ROOT / d for d in _SCAN_DIRS]
+    targets = (
+        [Path(a).resolve() for a in argv]
+        if argv
+        else lint_common.scan_roots(_REPO_ROOT, _SCAN_DIRS)
+    )
 
     total = 0
     for path in sorted(_iter_py_files(targets)):

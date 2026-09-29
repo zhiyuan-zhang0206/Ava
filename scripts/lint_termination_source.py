@@ -63,22 +63,15 @@ import sys
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(_REPO_ROOT))
+
+from scripts.structure import lint_common  # noqa: E402 - standalone script
 
 # Only OUR non-test code. Tests deliberately write unstamped corpses as fixtures.
 # Every tree that could reach agents_meta is covered, not just the ones that write it
 # today — `ava_builtins` currently only READS the table, and this is
 # what keeps a future write there from being the one site nobody was checking.
-_SCAN_DIRS = (
-    "agent",
-    "ava",
-    "ava_builtins",
-    "cli",
-    "gateway",
-    "ops",
-    "scripts",
-    "services",
-    "shared",
-)
+_SCAN_DIRS = (*lint_common.FRAMEWORK_DIRS, "scripts")
 
 _TEST_PATTERNS = (
     re.compile(r"(^|/)tests?/"),
@@ -264,7 +257,11 @@ def main(argv: list[str] | None = None) -> int:
             print(f"error: target path(s) not found: {', '.join(missing)}", file=sys.stderr)
             return 1
     # argv non-empty = pre-commit passed the changed-file list; empty = full scan.
-    targets = [Path(a).resolve() for a in argv] if argv else [_REPO_ROOT / d for d in _SCAN_DIRS]
+    targets = (
+        [Path(a).resolve() for a in argv]
+        if argv
+        else lint_common.scan_roots(_REPO_ROOT, _SCAN_DIRS)
+    )
     legal_sources = _termination_source_values()
 
     total = 0

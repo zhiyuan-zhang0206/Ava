@@ -149,6 +149,18 @@ repos:
         types: [python]
         pass_filenames: false
 
+      # Ban printf placeholders (%s / %d / %r ...) in loguru log calls. loguru
+      # formats with str.format, so `logger.warning("x %s", v)` logs the literal
+      # `%s` and silently drops every argument. stdlib `logging` loggers, where
+      # %s is correct, are never flagged. Deliberate literals opt out with
+      # `# log-format-ok: <reason>`; see scripts/lint/loguru_format.py header.
+      - id: lint-loguru-format
+        name: lint loguru format (no printf placeholders, no dropped arguments)
+        entry: .venv/bin/python scripts/lint/loguru_format.py
+        language: system
+        types: [python]
+        pass_filenames: false
+
       # Ban raw CJK characters anywhere in the repo — English-only source
       # (user ruling 2026-08-27, tightening English-primary). Exemption: i18n /
       # locale copy only (<dir>/messages/*.json, */locales/*, *.po, and
@@ -350,7 +362,7 @@ repos:
       # defensive swallow AGENTS.md's "Fail fast" principle bans. Sanctioned
       # explicit form is `contextlib.suppress(SpecificError)`; a justified
       # best-effort path uses an inline `# fail-fast-ok: <reason>`. The script
-      # self-filters to the 7 framework dirs, so files: \.py$ is a coarse gate.
+      # self-filters to the framework dirs, so files: \.py$ is a coarse gate.
       - id: lint-fail-fast
         name: lint-fail-fast
         language: system

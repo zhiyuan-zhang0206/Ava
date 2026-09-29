@@ -54,19 +54,12 @@ import sys
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(_REPO_ROOT))
+
+from scripts.structure import lint_common  # noqa: E402 - standalone script
 
 # Scan directories — only OUR code, never .venv / node_modules / vendored trees.
-_SCAN_DIRS = (
-    "agent",
-    "ava",
-    "ava_builtins",
-    "cli",
-    "gateway",
-    "ops",
-    "scripts",
-    "services",
-    "shared",
-)
+_SCAN_DIRS = (*lint_common.FRAMEWORK_DIRS, "scripts")
 
 # `shared/db_connections.py` owns the merged kwargs dict every other site routes through, so
 # it is the one file that writes the values as a literal rather than unpacking
@@ -197,7 +190,11 @@ def main(argv: list[str] | None = None) -> int:
             print(f"error: target path(s) not found: {', '.join(missing)}", file=sys.stderr)
             return 1
     # argv non-empty = pre-commit passed the changed-file list; empty = full scan.
-    targets = [Path(a).resolve() for a in argv] if argv else [_REPO_ROOT / d for d in _SCAN_DIRS]
+    targets = (
+        [Path(a).resolve() for a in argv]
+        if argv
+        else lint_common.scan_roots(_REPO_ROOT, _SCAN_DIRS)
+    )
 
     total = 0
     for path in sorted(_iter_py_files(targets)):

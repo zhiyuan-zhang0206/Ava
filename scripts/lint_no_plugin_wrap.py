@@ -1,6 +1,7 @@
 """Forbid bare monkey-patching of `ava.*` in plugins — wraps must go through `ava.extend.wrap`.
 
-Run: `.venv/bin/python scripts/lint_no_plugin_wrap.py [path ...]` (defaults to scanning `plugins/`;
+Run: `.venv/bin/python scripts/lint_no_plugin_wrap.py [path ...]` (defaults to scanning
+`ava_builtins/plugins/`, the built-in plugins; a missing default dir is an error;
 an explicit path that does not exist is an error (stderr + exit 1) rather than a
 silent no-op). Also run automatically via pre-commit hook before commit.
 
@@ -17,7 +18,7 @@ truth for "what did plugins inject."
 
 ## Rule
 
-In every `plugin.py` (and sibling modules) under `plugins/`, an assignment
+In every `plugin.py` (and sibling modules) under `ava_builtins/plugins/`, an assignment
 whose target is an `ava`-rooted attribute path ending in a function-style name
 is an error:
 
@@ -48,8 +49,11 @@ import sys
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(_REPO_ROOT))
 
-_SCAN_DIR = "plugins"
+from scripts.structure import lint_common  # noqa: E402 - standalone script
+
+_SCAN_DIR = "ava_builtins/plugins"
 
 _EXEMPTION = "# wrap-ok:"
 
@@ -158,9 +162,9 @@ def _under_plugins(path: Path) -> bool:
 
 def main(argv: list[str] | None = None) -> int:
     argv = argv if argv is not None else sys.argv[1:]
-    # argv non-empty = pre-commit passed changed files (any dir); keep only plugin
-    # paths (the plugins/ dir itself included, so it enumerates its members).
-    # Empty = default full scan of plugins/.
+    # argv non-empty = explicit paths (any dir); keep only plugin paths (the
+    # plugins dir itself included, so it enumerates its members).
+    # Empty = default full scan of the plugins dir.
     if argv:
         missing = [arg for arg in argv if not Path(arg).exists()]
         if missing:
@@ -168,7 +172,7 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         targets = [p for p in (Path(a).resolve() for a in argv) if _under_plugins(p)]
     else:
-        targets = [_REPO_ROOT / _SCAN_DIR]
+        targets = lint_common.scan_roots(_REPO_ROOT, (_SCAN_DIR,))
 
     total = 0
     for path in sorted(_iter_plugin_files(targets)):
