@@ -77,9 +77,9 @@ def unpause_local_cluster() -> None:
     host stayed up, so the marker rows would otherwise outlive their drain.
     """
     from ops.agent_pause import resume_agents
-    from shared.deploy.maintenance import admission as maintenance
+    from shared.deploy.maintenance import admission
 
-    current = maintenance.snapshot()
+    current = admission.snapshot()
     if current is None:
         _unpause_local_cluster()
         _settle_stranded_reaps()
@@ -93,7 +93,7 @@ def unpause_local_cluster() -> None:
             "cold admission re-drives their continuations: %s",
             sorted(current.maintenance.undelivered),
         )
-    with maintenance.authorized_start(current.holder, current.acquired_at):
+    with admission.authorized_start(current.holder, current.acquired_at):
         _unpause_local_cluster()
     resume_agents()
     _settle_stranded_reaps()
@@ -155,10 +155,10 @@ def _hold_refusal(current: PauseOwnerSnapshot) -> str | None:
 
 def _unpause_local_cluster() -> None:
     """Restore this unit's HTTP posture without launching any agent or service."""
-    from shared.deploy.maintenance import admission as maintenance
+    from shared.deploy.maintenance import admission
     from shared.deploy.state.host_deploy_state import set_posture
 
-    maintenance.require_start_allowed()
+    admission.require_start_allowed()
     set_posture("idle")
     _log.info("[cluster] unpaused: posture -> idle")
 

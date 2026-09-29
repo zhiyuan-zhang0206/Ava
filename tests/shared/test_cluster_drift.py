@@ -7,11 +7,13 @@ from pathlib import Path
 
 import pytest
 
+from shared.deploy.git import cluster_drift
 from shared.deploy.git.cluster_drift import (
     _prod_source_dir,
     checkout_head_sha,
     prod_source_branch_drift,
     prod_source_head_sha,
+    running_from_prod_source,
 )
 
 
@@ -120,3 +122,14 @@ def test_checkout_head_sha_reads_an_explicit_checkout(tmp_path: Path) -> None:
     sha = _init_prod_source(tmp_path / "wt")
     assert checkout_head_sha(tmp_path / "wt") == sha
     assert checkout_head_sha(tmp_path / "absent") is None
+
+
+def test_running_from_prod_source_recognizes_the_loaded_checkout(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The module anchors on the checkout it was imported from, not on its package depth."""
+    checkout = Path(__file__).resolve().parents[2]
+    monkeypatch.setattr(cluster_drift, "_prod_source_dir", lambda: checkout)
+    assert running_from_prod_source() is True
+    monkeypatch.setattr(cluster_drift, "_prod_source_dir", lambda: tmp_path)
+    assert running_from_prod_source() is False

@@ -104,7 +104,8 @@ def running_from_prod_source() -> bool:
     if source is None:
         return False
     try:
-        return Path(__file__).resolve().parents[1] == source.resolve()
+        # shared/deploy/git/cluster_drift.py -> the checkout root.
+        return Path(__file__).resolve().parents[3] == source.resolve()
     except OSError:
         return False
 

@@ -161,6 +161,11 @@ def test_release_root_and_services_use_captured_isolated_direct_argv(
     assert runtime.cwd == image.cwd
 
 
+def test_loaded_runtime_package_is_the_checkout_it_was_imported_from() -> None:
+    """The import root is anchored on runtime_interpreter's own path inside the tree."""
+    assert runtime_interpreter.loaded_runtime()[2] == Path(__file__).resolve().parents[2]
+
+
 @pytest.mark.parametrize("mismatch", ["executable", "prefix", "package", "isolation"])
 def test_loaded_runtime_must_match_verified_interpreter_and_package(
     image: VerifiedRelease,

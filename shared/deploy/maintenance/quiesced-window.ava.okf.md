@@ -7,7 +7,7 @@ status: current
 
 # Quiesced window — loops hold off, pools release
 
-`maintenance.quiesced()` (phases `drained` through `ready`) is the stop window
+`admission.quiesced()` (phases `drained` through `ready`) is the stop window
 read by local background loops: the host daemon holds off ownership renewal and
 page reconciliation, and the ops daemon's shell-closure-notice flush waits for
 the hold to release.

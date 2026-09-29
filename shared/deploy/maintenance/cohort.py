@@ -356,7 +356,7 @@ class _CommandRow(NamedTuple):
     kind: str
     status: str
     applied: bool
-    admission: object
+    maintenance: object
 
 
 def _refuse_inflight_lifecycle(

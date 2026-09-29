@@ -52,7 +52,7 @@ class LocalTransition:
         """Drain local agents under the operation's hold; the drained hold is the cohort."""
         from cli.release_transition.root_service import preflight
         from ops import agent_pause
-        from shared.deploy.maintenance import admission as maintenance
+        from shared.deploy.maintenance import admission
 
         self.preflight()
         preflight(operation, self.previous, previous=True)
@@ -68,7 +68,7 @@ class LocalTransition:
         holder, at = str(self.request.id), operation.maintenance_at
         agent_pause.prepare(holder, at)
         agent_pause.drain(holder, at, self.request.policy.drain_s, reap=True)
-        current = maintenance.require_operation(holder, at).maintenance
+        current = admission.require_operation(holder, at).maintenance
         if current is None:
             raise RuntimeError("release drain lost its maintenance cohort")
         return current
@@ -79,13 +79,12 @@ class LocalTransition:
         from cli.commands.root_driver import require_root_absent
         from cli.release_transition import root_macos
         from ops import pty_close_notices
-        from shared.deploy.maintenance import admission as maintenance
-        from shared.deploy.maintenance import pause_owner
+        from shared.deploy.maintenance import admission, pause_owner
 
         self.preflight()
         policy = self.request.policy
         holder, at = str(self.request.id), operation.maintenance_at
-        current = maintenance.require_operation(holder, at)
+        current = admission.require_operation(holder, at)
         hold = current.maintenance
         if hold is None:
             raise RuntimeError("release stop lost its maintenance cohort")
@@ -182,15 +181,15 @@ class LocalTransition:
     def start(self, journal: Journal) -> None:
         """Journal access lets the macOS owner record helper custody around its effect."""
         self.request.require_configuration()
-        from shared.deploy.maintenance import admission as maintenance
+        from shared.deploy.maintenance import admission
 
         operation = journal.operation
         holder, at = str(self.request.id), operation.maintenance_at
-        current = maintenance.require_operation(holder, at)
+        current = admission.require_operation(holder, at)
         if current.maintenance is None:
             raise RuntimeError("release start lost its maintenance cohort")
         if current.maintenance.phase == "stopped":
-            maintenance.set_phase(holder, at, "starting")
+            admission.set_phase(holder, at, "starting")
         elif current.maintenance.phase not in {"starting", "ready"}:
             raise RuntimeError("release start requires completed writer closure")
         if helper_root(operation.launch):
@@ -211,14 +210,14 @@ class LocalTransition:
 
     def observe(self, operation: Operation) -> None:
         self.request.require_configuration()
-        from shared.deploy.maintenance import admission as maintenance
+        from shared.deploy.maintenance import admission
 
         self.observe_root(operation)
         self.request.require_configuration()
         holder, at = str(self.request.id), operation.maintenance_at
-        current = maintenance.require_operation(holder, at)
+        current = admission.require_operation(holder, at)
         if current.maintenance is not None and current.maintenance.phase == "starting":
-            maintenance.set_phase(holder, at, "ready")
+            admission.set_phase(holder, at, "ready")
         if helper_root(operation.launch):
             from cli.release_transition.root_macos import restore_boot
         else:
@@ -229,8 +228,7 @@ class LocalTransition:
         self.request.require_configuration()
         from cli.commands import maintenance as maintenance_commands
         from shared.deploy.lifecycle import start_serving
-        from shared.deploy.maintenance import admission as maintenance
-        from shared.deploy.maintenance import pause_owner
+        from shared.deploy.maintenance import admission, pause_owner
 
         # An executor may have died after recording this phase. A durable
         # serving marker or an earlier observation cannot admit work now.
@@ -245,7 +243,7 @@ class LocalTransition:
             and start_serving.is_serving()
         ):
             return
-        maintenance.require_operation(holder, at)
+        admission.require_operation(holder, at)
         maintenance_commands.resume(holder, at, cancel=False)
 
     def restore(self, journal: Journal) -> None:

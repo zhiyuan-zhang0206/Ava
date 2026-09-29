@@ -311,7 +311,7 @@ def test_operation_start_preserves_exact_hold_after_service_result(
 ) -> None:
     from cli.commands._pause_resume import resume_after_start
     from shared.deploy.lifecycle import start_serving
-    from shared.deploy.maintenance import admission as maintenance
+    from shared.deploy.maintenance import admission
 
     _set_state(operation_path, phase="starting")
     _hold(operation_path, monkeypatch)
@@ -321,14 +321,14 @@ def test_operation_start_preserves_exact_hold_after_service_result(
 
     @resume_after_start
     def start() -> int:
-        assert maintenance.start_authorized()
+        assert admission.start_authorized()
         calls.append("start")
         return result
 
     with authorized_start(operation_path):
         assert start() == result
     assert calls == ["start"]
-    assert maintenance.held() and not maintenance.start_authorized()
+    assert admission.held() and not admission.start_authorized()
 
 
 def _hold(path: Path, monkeypatch: pytest.MonkeyPatch, *, kind: str = "exact") -> None:
@@ -361,11 +361,11 @@ def test_operation_start_cannot_bypass_missing_changed_or_unsettled_hold(
     operation_path: Path, monkeypatch: pytest.MonkeyPatch, kind: str, ambient_authority: bool
 ) -> None:
     from cli.commands._pause_resume import resume_after_start
-    from shared.deploy.maintenance import admission as maintenance
+    from shared.deploy.maintenance import admission
 
     _set_state(operation_path, phase="starting")
     _hold(operation_path, monkeypatch, kind=kind)
-    monkeypatch.setattr(maintenance, "start_authorized", lambda: ambient_authority)
+    monkeypatch.setattr(admission, "start_authorized", lambda: ambient_authority)
     calls: list[str] = []
     start = resume_after_start(lambda: calls.append("started") or 0)
     with authorized_start(operation_path), pytest.raises(RuntimeError):

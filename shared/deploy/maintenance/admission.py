@@ -227,7 +227,7 @@ def record_reaped(agent_id: int, reason: str) -> None:
     so this is deliberately NOT a `drained` receipt and never a `failures`
     latch -- it releases the drain for this agent and nothing more. The mark
     is settled at the successor boundary; certification of this member checks
-    the honest reap state instead (maintenance_cohort.verify_drained).
+    the honest reap state instead (cohort.verify_drained).
 
     A failure may race between the committed reap mark and this journal CAS.
     Keep that receipt for audit, but let the certified reap supersede it via

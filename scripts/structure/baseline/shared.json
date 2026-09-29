@@ -24,7 +24,7 @@
     "shared/winproc.py::graceful_signal": 16
   },
   "directories": {
-    "shared": 226
+    "shared": 162
   },
   "nesting": {
     "shared/daemon_http.py::start_daemon_http.<locals>.handle": 6

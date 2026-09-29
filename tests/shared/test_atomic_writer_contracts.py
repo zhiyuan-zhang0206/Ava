@@ -19,16 +19,16 @@ from shared.agents.messages import delivery_outbox
 from shared.deploy.lifecycle import home_lifecycle_locks, start_serving
 from shared.deploy.maintenance import pause_owner
 from shared.deploy.release import editable_install
-from shared.deploy.updater import handoff as handoff
+from shared.deploy.updater import handoff
 from shared.host import atomic_io
 from shared.sessions.pty import allocation_freeze
-from tests.shared.test_updater_handoff import (
+from tests.shared.test_handoff import (
     _isolated as _isolated,
 )
-from tests.shared.test_updater_handoff import (
+from tests.shared.test_handoff import (
     _isolated_attempts as _isolated_attempts,
 )
-from tests.shared.test_updater_handoff import (
+from tests.shared.test_handoff import (
     _normal_journal,
     _retained_bootstrap,
 )

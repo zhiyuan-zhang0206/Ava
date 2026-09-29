@@ -431,7 +431,7 @@ def _register_autostart() -> str | None:
     ("register", "kind", "time_limit"),
     [
         (_register_health_probe, "health-probe", "PT30M"),
-        # The boot job is deliberately unbounded — see os_autostart._register_windows.
+        # The boot job is deliberately unbounded — see autostart._register_windows.
         (_register_autostart, "autostart", "PT0S"),
     ],
 )

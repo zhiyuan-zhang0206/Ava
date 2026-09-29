@@ -126,7 +126,7 @@ def test_db_down_stop_continuation_uses_persisted_native_receipt_without_sql_dra
 ) -> None:
     from cli.commands import root_driver
     from cli.commands.data_plane import maintenance_stop
-    from shared.deploy.maintenance import admission as maintenance
+    from shared.deploy.maintenance import admission
 
     receipt = _custody(Path(pitr_request.home))
     operation = journal.create(pitr_request)
@@ -140,7 +140,7 @@ def test_db_down_stop_continuation_uses_persisted_native_receipt_without_sql_dra
     observed: list[object] = []
     monkeypatch.setattr(transition, "require_inputs", _constant(None))
     monkeypatch.setattr(
-        maintenance,
+        admission,
         "require_operation",
         _constant(SimpleNamespace(maintenance=SimpleNamespace(phase="stopped"))),
     )
@@ -291,7 +291,7 @@ def test_data_capture_refuses_postgres_replacement_before_any_data_signal(
     from cli.commands import maintenance as maintenance_commands
     from cli.commands import root_driver
     from cli.commands.data_plane import maintenance_stop
-    from shared.deploy.maintenance import admission as maintenance
+    from shared.deploy.maintenance import admission
 
     journal.create(pitr_request)
     driver = object.__new__(transition.PitrTransition)
@@ -305,7 +305,7 @@ def test_data_capture_refuses_postgres_replacement_before_any_data_signal(
     )
     monkeypatch.setattr(transition, "require_inputs", _constant(None))
     monkeypatch.setattr(
-        maintenance,
+        admission,
         "require_operation",
         _constant(SimpleNamespace(maintenance=SimpleNamespace(phase="drained"))),
     )

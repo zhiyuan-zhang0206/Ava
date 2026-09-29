@@ -142,9 +142,7 @@ def main() -> None:  # noqa: PLR0915 — ordered CI build, immutable input and c
 
     # Reuse reviewed private Python copy/verification, not another packaging engine.
     sys.path.insert(0, str(tools))
-    helpers = cast(
-        _PreparationHelpers, importlib.import_module("shared.deploy.release.runtime_prepare")
-    )
+    helpers = cast(_PreparationHelpers, importlib.import_module("shared.runtime_prepare"))
 
     home = root / "unit"
     image = home / "releases" / sha(application)

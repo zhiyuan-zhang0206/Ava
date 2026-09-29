@@ -41,7 +41,7 @@ Native vs installed (mirroring skills), the relative-path `.mcp.json` startup fo
 ## Key Dependencies
 - [[cli/mcp_server.ava.okf.md]] — the inbound direction: this cluster AS an MCP server
 - [[mcp-daemon.ava.okf.md]] — MCP daemon subprocess management
-- [[state.ava.okf.md]] — agent identity for socket path
+- [[agent/state.ava.okf.md]] — agent identity for socket path
 
 ## Entry Points
 - `ava/mcps.py` — agent-facing tool invocation interface

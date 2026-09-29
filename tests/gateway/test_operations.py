@@ -26,7 +26,7 @@ from ops.rpc_schemas import (
     SpawnAgentRequest,
     TerminateAgentRequest,
 )
-from tests.shared.test_maintenance import isolate as isolate
+from tests.shared.test_admission import isolate as isolate
 
 
 class TestSpawnAgentRequestSourceValidation:

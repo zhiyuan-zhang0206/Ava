@@ -168,7 +168,7 @@ def _register_windows() -> str | None:
     trigger cannot repeat. `schtasks /RI` — the only repetition knob the command
     line offers — is documented as "not applicable for schedule types: MINUTE,
     HOURLY, ONSTART, ONLOGON, ONIDLE, and ONEVENT", and wrapping the command in
-    a `cmd.exe` retry loop would reintroduce the console flash `os_schtasks`
+    a `cmd.exe` retry loop would reintroduce the console flash `schtasks`
     picks `pythonw.exe` to avoid. So the loop is ours (`cli/boot_retry.py`).
 
     That loop is also why this is the one job registered with NO execution time

@@ -136,7 +136,7 @@ matters + suggested fix**. Match the diff against
 - Fake-green channels: `|| true`, flaky groups allowed to fail, skips on
   missing deps, coverage sets drifting from CI's, gates with fallbacks below
   the real threshold, e2e without proof-of-work.
-- Tests that can reach the real world: Telegram, os_cron/launchd, migration
+- Tests that can reach the real world: Telegram, cron/launchd, migration
   application, prod `.env` leakage through the shell. Non-pytest scripts
   bypass conftest guards.
 - The behavior change is locked by a test asserting the new behavior;

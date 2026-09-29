@@ -154,7 +154,7 @@ def test_root_owner_follows_the_recorded_executor_kind() -> None:
 
 
 def _transition(harness: Harness, monkeypatch: pytest.MonkeyPatch) -> LocalTransition:
-    from shared.deploy.maintenance import admission as maintenance
+    from shared.deploy.maintenance import admission
 
     request = journal.read_operation(harness.path).request
     assert isinstance(request, FleetRequest)
@@ -165,9 +165,9 @@ def _transition(harness: Harness, monkeypatch: pytest.MonkeyPatch) -> LocalTrans
     monkeypatch.setattr(transition, "preflight", lambda: None)
     hold = SimpleNamespace(phase="stopped")
     monkeypatch.setattr(
-        maintenance, "require_operation", lambda *_args: SimpleNamespace(maintenance=hold)
+        admission, "require_operation", lambda *_args: SimpleNamespace(maintenance=hold)
     )
-    monkeypatch.setattr(maintenance, "set_phase", lambda *_args: None)
+    monkeypatch.setattr(admission, "set_phase", lambda *_args: None)
     return transition
 
 
@@ -204,12 +204,12 @@ def test_stop_authenticates_the_helper_before_and_proves_its_stop_intent_after(
 ) -> None:
     from cli.commands import maintenance as maintenance_commands
     from cli.commands import root_driver, service_stop
-    from shared.deploy.maintenance import admission as maintenance
+    from shared.deploy.maintenance import admission
 
     transition = _transition(harness, monkeypatch)
     hold = SimpleNamespace(phase="drained")
     monkeypatch.setattr(
-        maintenance, "require_operation", lambda *_args: SimpleNamespace(maintenance=hold)
+        admission, "require_operation", lambda *_args: SimpleNamespace(maintenance=hold)
     )
     events: list[str] = []
     monkeypatch.setattr(root_macos, "verified_helper", lambda _op: events.append("authenticate"))
@@ -246,14 +246,14 @@ def _darwin_operation(harness: Harness) -> Operation:
 def test_macos_start_action_must_be_a_finite_tool_of_the_recorded_executor(
     harness: Harness, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from shared.host.system import boot_unit as os_boot_unit
+    from shared.host.system import boot_unit
 
     operation = _darwin_operation(harness)
     home = Path(operation.request.home)
     monkeypatch.setattr(stage, "sys", SimpleNamespace(platform="darwin"))
     # The birth comparison reads its own platform: tick-less darwin births.
     monkeypatch.setattr(ownership, "sys", SimpleNamespace(platform="darwin"))
-    monkeypatch.setattr(os_boot_unit, "in_boot_unit", lambda _home: pytest.fail("not Linux"))
+    monkeypatch.setattr(boot_unit, "in_boot_unit", lambda _home: pytest.fail("not Linux"))
     parent = {"birth": EXECUTOR_BIRTH}
     monkeypatch.setattr(OwnedProcess, "capture", staticmethod(lambda _process: parent["birth"]))
     stage._require_native_root_owner(operation, home)
@@ -274,12 +274,12 @@ def test_macos_start_action_must_be_a_finite_tool_of_the_recorded_executor(
 def test_linux_start_action_still_requires_the_boot_unit(
     harness: Harness, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from shared.host.system import boot_unit as os_boot_unit
+    from shared.host.system import boot_unit
 
     operation = journal.read_operation(harness.path).model_copy(
         update={"launch": {"kind": native.LINUX}}
     )
-    monkeypatch.setattr(os_boot_unit, "in_boot_unit", lambda _home: False)
+    monkeypatch.setattr(boot_unit, "in_boot_unit", lambda _home: False)
     with pytest.raises(RuntimeError, match="inside the ordinary root boot unit"):
         stage._require_native_root_owner(operation, Path(operation.request.home))
 
@@ -287,10 +287,10 @@ def test_linux_start_action_still_requires_the_boot_unit(
 def test_macos_observation_has_no_boot_unit_but_must_run_on_macos(
     harness: Harness, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from shared.host.system import boot_unit as os_boot_unit
+    from shared.host.system import boot_unit
 
     operation = _darwin_operation(harness)
-    monkeypatch.setattr(os_boot_unit, "manager_properties", lambda _home: pytest.fail("systemd"))
+    monkeypatch.setattr(boot_unit, "manager_properties", lambda _home: pytest.fail("systemd"))
     monkeypatch.setattr(stage, "sys", SimpleNamespace(platform="darwin"))
     stage._require_root_owned(operation, Path(operation.request.home))
     monkeypatch.setattr(stage, "sys", SimpleNamespace(platform="linux"))

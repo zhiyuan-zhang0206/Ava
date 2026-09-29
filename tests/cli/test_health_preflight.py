@@ -273,8 +273,9 @@ def test_checkout_clean_is_silent_off_a_frozen_legacy_pin(
     telling the operator to run a bare `ava cluster update`) is a stale verdict."""
     ctx, _head, first = _git_repo(tmp_path, monkeypatch)
     monkeypatch.setattr(
-        "shared.deploy.state.cluster_pin.get_cluster_target_sha", lambda **_kw: first
-    )  # pyright: ignore[reportUnknownArgumentType]
+        "shared.deploy.state.cluster_pin.get_cluster_target_sha",
+        lambda **_kw: first,  # pyright: ignore[reportUnknownArgumentType]
+    )
 
     assert _hp._checkout_warnings(ctx) == []
 

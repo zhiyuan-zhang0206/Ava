@@ -19,7 +19,7 @@ The three systems are decoupled — plugins don't need skills, skills don't depe
 
 ## Key Dependencies
 - [[agent/graph/graph.ava.okf.md]] — plugin hook container nodes reside in the execution graph
-- [[state.ava.okf.md]] — plugins extend AgentState via `register_plugin_state`
+- [[agent/state.ava.okf.md]] — plugins extend AgentState via `register_plugin_state`
 - [[system-prompt.ava.okf.md]] — both plugins and skills inject system prompts
 - [[mcp-daemon.ava.okf.md]] — MCP daemon subprocess management
 - [[agents-contract.ava.okf.md]] — contracts for plugin context and configuration registration

@@ -7,7 +7,7 @@ status: current
 
 # Native pause and maintenance
 
-`maintenance.py`, `maintenance_state.py` and `maintenance_cohort.py` extend the
+`admission.py`, `state.py` and `cohort.py` extend the
 [pause-owner journal](pause_owner.ava.okf.md). There is no new database
 pause table or agent graph hook. The exact `(holder, acquired_at)` operation is
 stored in `$AVA_HOME/run/deploy-pause-owner.json`; it has no TTL. Invalid or
@@ -29,7 +29,7 @@ parked without being relaunched. Stale owners and ambiguous work refuse drain.
 Already-stopped hosted units also preserve legacy idle rows whose lease is
 NULL and whose PID/resources are empty, after proving the local host absent.
 An applied old restart and claimed ordinary work remain untouched for normal
-cold admission. `maintenance_cold.py` also recognizes retired owned idle rows
+cold admission. `cold.py` also recognizes retired owned idle rows
 with an expired lease, or a completed legacy restart stranded in `restarting`.
 Both require an absent native host/legacy consumer, empty PID/resources, no
 live or unattributable exec request evidence (a provably stale envelope is

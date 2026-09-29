@@ -133,7 +133,7 @@ class TestEnsureLineBufferedStdio:
 
 class TestLaunchdOwnership:
     """`launchd_job_loaded` / `descends_from_launchd_job` — the ownership checks
-    behind the self-reload guards (`shared/os_cron`, `shared/os_watchdog_probe`).
+    behind the self-reload guards (`shared/host/system/cron`, `shared/os_watchdog_probe`).
 
     The inherited `XPC_SERVICE_NAME` is not trustworthy: only the job's direct
     child reads the label, every exec'd descendant reads "0" (2026-09-17,

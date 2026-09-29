@@ -168,9 +168,9 @@ class ScheduleManager:
         await asyncio.to_thread(self._sync_blocking, schedule_id)
 
     def _sync_blocking(self, schedule_id: int) -> None:
-        from shared.deploy.maintenance import admission as maintenance
+        from shared.deploy.maintenance import admission
 
-        if maintenance.held():
+        if admission.held():
             return
         with self._lock:
             self._backoff.pop(schedule_id, None)
@@ -212,9 +212,9 @@ class ScheduleManager:
             self._reconcile_locked()
 
     def _reconcile_locked(self) -> None:
-        from shared.deploy.maintenance import admission as maintenance
+        from shared.deploy.maintenance import admission
 
-        if maintenance.held():
+        if admission.held():
             return
         # Read liveness before status: on a clean exit the runner commits
         # status='completed' before its process exits (and the session dies), so a
@@ -407,9 +407,9 @@ class ScheduleManager:
                 self._close_null_runs(sid)
 
     def _launch(self, schedule_id: int) -> None:
-        from shared.deploy.maintenance import admission as maintenance
+        from shared.deploy.maintenance import admission
 
-        if maintenance.held():
+        if admission.held():
             return
         name = session_name(f"schedule-{schedule_id}")
         backend = get_shell_backend()

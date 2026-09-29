@@ -203,7 +203,7 @@ jobs:
       - name: Publication ownership regression cases
         if: runner.os == 'Linux'
         shell: bash
-        run: uv run --locked pytest tests/shared/test_updater_handoff.py tests/shared/test_posixproc_expected_signal.py -q
+        run: uv run --locked pytest tests/shared/test_handoff.py tests/shared/test_posixproc_expected_signal.py -q
       - name: Retain independent resolver proof even when inherited hop fails
         if: always() && runner.os == 'Linux'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a

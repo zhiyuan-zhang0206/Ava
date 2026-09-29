@@ -106,7 +106,7 @@ def test_observe_launcher_passes_absent_through_and_unknowns_refuse(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """An absent definition is a fenced-removal fact, not a lost observation."""
-    from shared.deploy.writers import observation as observation
+    from shared.deploy.writers import observation
 
     expected = ExpectedLauncher(kind="launchd", name="com.ava.test", definition_digest="a" * 64)
     unit = ExpectedUnitWriters(

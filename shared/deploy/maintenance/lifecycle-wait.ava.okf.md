@@ -7,7 +7,7 @@ status: current
 
 # Bounded lifecycle wait during preparation
 
-Preparation freezes its cohort in `maintenance_cohort.prepare`. Before the
+Preparation freezes its cohort in `cohort.prepare`. Before the
 collision guards run, it settles orphaned ordinary claims on the parked agents
 selected by `_classify`, inside the same transaction holding their
 `agents_meta` row locks. Only `status='claimed'` rows with

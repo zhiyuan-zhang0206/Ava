@@ -175,10 +175,10 @@ def test_recover_refuses_retained_normal_compensation_before_unpause(
 ) -> None:
     _set_lease(monkeypatch, None)
 
-    def refuse(_snapshot: _ops.updater_handoff.UpdaterHandoffSnapshot) -> bool:
+    def refuse(_snapshot: _ops.handoff.UpdaterHandoffSnapshot) -> bool:
         return False
 
-    monkeypatch.setattr(_ops.updater_handoff, "allows_generic_recovery", refuse)
+    monkeypatch.setattr(_ops.handoff, "allows_generic_recovery", refuse)
 
     with pytest.raises(ClusterUpdateInProgress, match="explicit checked recovery"):
         _ops.cluster_recover_op()

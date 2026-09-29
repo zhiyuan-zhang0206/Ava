@@ -202,7 +202,7 @@ class PitrTransition:
         from cli.commands.data_plane.maintenance_stop import stop_captured
         from cli.commands.root_driver import require_root_absent
         from services.pitr.activation_runtime import restore_exact_file, settings_digest
-        from shared.deploy.maintenance import admission as maintenance
+        from shared.deploy.maintenance import admission
 
         progress = journal.operation.pitr
         if (
@@ -211,7 +211,7 @@ class PitrTransition:
             or record.pre_activation_pg_settings is None
         ):
             raise RuntimeError("offline rollback has no captured data-plane custody")
-        current = maintenance.require_operation(str(self.request.id), self.at)
+        current = admission.require_operation(str(self.request.id), self.at)
         if current.maintenance is None or current.maintenance.phase not in {"stopped", "starting"}:
             raise RuntimeError("offline rollback requires the exact stopped maintenance generation")
         require_root_absent()
@@ -300,9 +300,9 @@ class PitrTransition:
         require_inputs(operation)
         self._require_fleet_of_one()
         preflight(operation, self.image, previous=False)
-        from shared.deploy.maintenance import admission as maintenance
+        from shared.deploy.maintenance import admission
 
-        current = maintenance.snapshot()
+        current = admission.snapshot()
         if current is not None:
             if current.holder != str(self.request.id) or current.acquired_at != self.at:
                 raise RuntimeError("PITR cannot adopt another maintenance generation")
@@ -327,12 +327,11 @@ class PitrTransition:
             require_no_terminals,
         )
         from ops import pty_close_notices
-        from shared.deploy.maintenance import admission as maintenance
-        from shared.deploy.maintenance import pause_owner
+        from shared.deploy.maintenance import admission, pause_owner
         from shared.deploy.maintenance.state import MaintenanceHold
 
         require_inputs(journal.operation)
-        current = maintenance.require_operation(str(self.request.id), self.at)
+        current = admission.require_operation(str(self.request.id), self.at)
         hold = current.maintenance
         if hold is None:
             raise RuntimeError("PITR stop lost its captured maintenance cohort")
@@ -379,10 +378,10 @@ class PitrTransition:
     def stop_data(self, operation: Operation) -> None:
         from cli.commands.data_plane.maintenance_stop import stop_captured
         from cli.commands.root_driver import require_root_absent
-        from shared.deploy.maintenance import admission as maintenance
+        from shared.deploy.maintenance import admission
 
         require_inputs(operation)
-        current = maintenance.require_operation(str(self.request.id), self.at)
+        current = admission.require_operation(str(self.request.id), self.at)
         if current.maintenance is None or current.maintenance.phase != "stopped":
             raise RuntimeError("PITR data stop requires its stopped maintenance generation")
         require_root_absent()
@@ -392,24 +391,24 @@ class PitrTransition:
 
     def start(self, operation: Operation) -> None:
         from cli.release_transition.root_service import start
-        from shared.deploy.maintenance import admission as maintenance
+        from shared.deploy.maintenance import admission
 
         require_inputs(operation)
-        current = maintenance.require_operation(str(self.request.id), self.at)
+        current = admission.require_operation(str(self.request.id), self.at)
         if current.maintenance is None:
             raise RuntimeError("PITR start lost its maintenance generation")
         if current.maintenance.phase == "stopped":
-            maintenance.set_phase(str(self.request.id), self.at, "starting")
+            admission.set_phase(str(self.request.id), self.at, "starting")
         elif current.maintenance.phase not in {"starting", "ready"}:
             raise RuntimeError("PITR start requires completed native closure")
         start(operation, self.image)
 
     def observe(self, operation: Operation) -> None:
         from cli.release_transition.root_service import observe, restore_boot
-        from shared.deploy.maintenance import admission as maintenance
+        from shared.deploy.maintenance import admission
 
         observe(operation, self.image)
-        maintenance.set_phase(str(self.request.id), self.at, "ready")
+        admission.set_phase(str(self.request.id), self.at, "ready")
         restore_boot(operation, self.image)
 
     def resume(self, operation: Operation) -> None:

@@ -119,7 +119,8 @@ def resolve_runtime_publication_input() -> RuntimePublicationInput | None:
         return None
     if root.name != selector.artifact_digest:
         raise ReleaseRejectedError("loaded generation differs from canonical selector")
-    module_root = Path(__file__).resolve().parent.parent
+    # shared/deploy/release/runtime_publication_input.py -> the site-packages import root.
+    module_root = Path(__file__).resolve().parents[3]
     if not module_root.is_relative_to(prefix):
         raise ReleaseRejectedError("publication resolver is outside the loaded environment")
     # Independent installed baseline bytes, not the manifest's own assertion.

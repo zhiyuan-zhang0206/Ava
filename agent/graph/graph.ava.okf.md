@@ -74,7 +74,7 @@ actions is not lost, because the row is dispatched by the next claim pass.
 
 ## Key Dependencies
 
-- [[state.ava.okf.md]] — State channel definitions (BaseAgentState + plugin state merging)
+- [[agent/state.ava.okf.md]] — State channel definitions (BaseAgentState + plugin state merging)
 - [[agent/hooks/hooks.ava.okf.md]] — Hook registration/execution mechanism
 - [[llm.ava.okf.md]] — LLM node's streaming inference
 - [[tool-calls.ava.okf.md]] — exec node's fault-isolated child execution

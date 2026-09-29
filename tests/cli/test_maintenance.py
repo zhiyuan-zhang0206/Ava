@@ -29,7 +29,7 @@ def cli_dependencies(monkeypatch: pytest.MonkeyPatch) -> None:
         command, "host_identity_or_none", lambda: HostIdentity(uuid4(), frozenset())
     )
     monkeypatch.setattr(command, "connect", MagicMock())
-    monkeypatch.setattr(command.maintenance_cohort, "verify_drained", MagicMock())
+    monkeypatch.setattr(command.cohort, "verify_drained", MagicMock())
     monkeypatch.setattr("ops.agent_pause._wake", MagicMock())
     monkeypatch.setattr("shared.deploy.state.host_deploy_state.set_posture", MagicMock())
     monkeypatch.setattr(command, "ops_quiescent", MagicMock())
@@ -233,7 +233,7 @@ def test_keep_terminals_does_not_skip_drain_or_ops_checks(monkeypatch: pytest.Mo
     stop = MagicMock()
     monkeypatch.setattr(command, "stop_services", stop)
     verify = MagicMock(side_effect=RuntimeError("drain incomplete"))
-    monkeypatch.setattr(command.maintenance_cohort, "verify_drained", verify)
+    monkeypatch.setattr(command.cohort, "verify_drained", verify)
     with pytest.raises(RuntimeError, match="drain incomplete"):
         command.stop("local", WHEN, 2, gateway_last=False, keep_terminals=True)
     stop.assert_not_called()

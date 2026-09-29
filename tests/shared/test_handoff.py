@@ -20,8 +20,7 @@ from uuid import UUID
 import psutil
 import pytest
 
-from shared.deploy.updater import handoff as handoff
-from shared.deploy.updater import recovery as recovery
+from shared.deploy.updater import handoff, recovery
 from shared.deploy.writers.barrier import RolloutIdentity
 from shared.deploy.writers.observation import ExpectedUnitWriters, ObservationChallenge
 from shared.deploy.writers.publication import (

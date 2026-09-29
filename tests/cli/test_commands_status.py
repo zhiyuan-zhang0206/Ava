@@ -409,8 +409,9 @@ def test_cmd_status_prints_no_frozen_cluster_pin(
     as the current target, nor a bare `ava cluster update` offered as a remedy."""
     _quiet_status(monkeypatch, tmp_path)
     monkeypatch.setattr(
-        "shared.deploy.state.cluster_pin.get_cluster_target_sha", lambda **_kw: "a" * 40
-    )  # pyright: ignore[reportUnknownArgumentType]
+        "shared.deploy.state.cluster_pin.get_cluster_target_sha",
+        lambda **_kw: "a" * 40,  # pyright: ignore[reportUnknownArgumentType]
+    )
 
     assert _status_commands.cmd_status() == 0
     out = capsys.readouterr().out

@@ -163,7 +163,8 @@ class LoadedRuntimeIdentity(EvidenceModel):
 
 def loaded_runtime() -> tuple[Path, Path, Path, bool]:
     """Read actual imports without importing Settings or a higher application layer."""
-    package = Path(__file__).resolve().parents[1]
+    # shared/deploy/release/runtime_interpreter.py -> the import root (checkout or site-packages).
+    package = Path(__file__).resolve().parents[3]
     for name in ("shared", "cli", "ava", "agent", "gateway", "services"):
         module = sys.modules.get(name)
         if (

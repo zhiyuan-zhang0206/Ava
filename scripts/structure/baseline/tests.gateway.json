@@ -29,7 +29,7 @@
     "tests/gateway/test_agents_internals.py": 1276,
     "tests/gateway/test_alerts_api.py": 1014,
     "tests/gateway/test_auth.py": 1161,
-    "tests/gateway/test_cluster_endpoints.py": 1206,
+    "tests/gateway/test_cluster_endpoints.py": 1200,
     "tests/gateway/test_config_api.py": 1004,
     "tests/gateway/test_fleet_graph.py": 1049,
     "tests/gateway/test_idempotency.py": 859,

@@ -37,7 +37,7 @@ drain with the hold retained, exactly like the timeout it replaces, and the
 wave report carries a `reaped` count line next to the telemetry row.
 
 The mark is settled at a successor boundary: the agent-host boot, or the local
-unpause (`shared/straggler_reap.settle_stranded_reaps[_async]`, called from
+unpause (`shared/deploy/maintenance/straggler_reap.settle_stranded_reaps[_async]`, called from
 `ops.cluster_pause.unpause_local_cluster` — the compensating resume of an
 aborted wave runs while the host stayed up). Settlement closes the
 never-applied command as `done` with
@@ -64,4 +64,4 @@ remains; that residue settles through the ordinary lifecycle path — at worst
 one late restart, never a silent loss. Accepted at the 2026-09-19 review; the
 clear-exit enumeration guard
 (`tests/ops/test_straggler_reap.py::test_restarting_mark_exits_are_enumerated`)
-already names `shared.deploy.maintenance.cold.py` as the second exit.
+already names `shared/deploy/maintenance/cold.py` as the second exit.

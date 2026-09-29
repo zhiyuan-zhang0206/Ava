@@ -81,7 +81,7 @@ def launchd_job_loaded(label: str) -> bool:
 def descends_from_launchd_job(label: str) -> bool:
     """True when this process runs inside the live process tree of launchd job ``label``.
 
-    The ownership boundary behind the self-reload guards (``shared/os_cron``,
+    The ownership boundary behind the self-reload guards (``shared/host/system/cron``,
     ``shared/os_watchdog_probe``): ``launchctl bootout`` terminates the job's
     whole process tree, so a converge running beneath the job it is about to
     replace would kill its own recovery. The inherited ``XPC_SERVICE_NAME``

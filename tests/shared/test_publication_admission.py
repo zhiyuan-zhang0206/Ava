@@ -17,7 +17,7 @@ from shared.deploy.writers.publication import (
     publication_admission,
     publication_admission_async,
 )
-from tests.shared.test_managed_writer_publication import pending, seed_current, unit
+from tests.shared.test_publication import pending, seed_current, unit
 
 
 @pytest.mark.parametrize(

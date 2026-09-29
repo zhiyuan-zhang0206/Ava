@@ -9,7 +9,7 @@ tags:
 
 # Managed writer closure evidence
 
-`managed_writer_publication.py` defines the version-2 envelope in this SAME field:
+`publication.py` defines the version-2 envelope in this SAME field:
 `current` is a committed exact all-unit release tuple; `pending` preserves that
 predecessor while freezing ordinary births. Each unit binds machine, canonical
 home, artifact/manifest digests, the observer's `ExpectedUnitWriters` digest, and

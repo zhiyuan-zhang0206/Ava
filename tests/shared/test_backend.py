@@ -170,7 +170,7 @@ def test_venv_python_path() -> None:
 def test_linux_autostart_has_one_native_manager_and_explicit_home(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    from shared.host.system import boot_unit as os_boot_unit
+    from shared.host.system import boot_unit
 
     calls: list[Path | str] = []
 
@@ -182,8 +182,8 @@ def test_linux_autostart_has_one_native_manager_and_explicit_home(
         calls.append(home)
         return []
 
-    monkeypatch.setattr(os_boot_unit, "install", install)
-    monkeypatch.setattr(os_boot_unit, "uninstall", uninstall)
+    monkeypatch.setattr(boot_unit, "install", install)
+    monkeypatch.setattr(boot_unit, "uninstall", uninstall)
     backend = LinuxPlatformBackend()
     backend.register_autostart()
     backend.unregister_autostart(tmp_path)
@@ -191,8 +191,8 @@ def test_linux_autostart_has_one_native_manager_and_explicit_home(
 
 
 def test_linux_autostart_propagates_unavailable_systemd(monkeypatch: pytest.MonkeyPatch) -> None:
-    from shared.host.system import boot_unit as os_boot_unit
+    from shared.host.system import boot_unit
 
-    monkeypatch.setattr(os_boot_unit, "systemd_running", lambda: False)
+    monkeypatch.setattr(boot_unit, "systemd_running", lambda: False)
     with pytest.raises(RuntimeError, match="systemd"):
         LinuxPlatformBackend().register_autostart()

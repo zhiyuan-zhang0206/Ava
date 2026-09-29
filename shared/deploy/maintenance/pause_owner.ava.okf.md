@@ -24,7 +24,7 @@ An explicit [maintenance hold](maintenance.ava.okf.md) uses the same journal
 with a typed cohort/progress payload and the recorded shepherding process it
 was taken under (`shared/deploy/maintenance/hold_driver.py`). It has no expiry timer and no
 automatic release (see
-[[host_deploy_state/stranded-hold-recovery.ava.okf.md]]); only its exact
+[[shared/deploy/state/stranded-hold-recovery.ava.okf.md]]); only its exact
 operation's explicit `ava maintenance resume` (or `resume --cancel`) ends it; the fleet
 cutover's hold ends only through the cutover's go/no-go step (`cli/cutover_hold.py`). Ordinary
 compensation, force-clear and a newer rollout cannot release or overwrite it.

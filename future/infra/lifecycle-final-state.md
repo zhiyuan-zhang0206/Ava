@@ -78,7 +78,7 @@
 
 ### A0 · The current three-layer structure
 1. **Session/process execution layer**: `shared/session_backend.py` unified protocol + three implementations (posixproc / winproc / helperproc) + the `shared/_reparent` double-fork primitive.
-2. **OS job/host layer**: four job writers (`os_cron` health probe / `os_autostart` autostart / `os_logs_job` logs / `os_watchdog_probe` probe) + the platform-capability ABC (`platform_backend.py`) + the low-level fact source (`platform.py`).
+2. **OS job/host layer**: four job writers (`host.system.cron` health probe / `host.system.autostart` autostart / `host.system.logs_job` logs / `os_watchdog_probe` probe) + the platform-capability ABC (`shared/host/system/backend.py`) + the low-level fact source (`platform.py`).
 3. **Permission adaptation layer**: `services/permissions_helper/` (macOS Swift + Windows C#) + the status channels (`accessibility` / `screen_capture`) + firewall (`macos_firewall`).
 
 ### A1 · Ten key classes (condensed)

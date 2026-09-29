@@ -119,7 +119,7 @@ def test_every_deploy_family_clock_is_registered() -> None:
         value = getattr(deploy, name)
         if isinstance(value, (int, float)):
             assert name in registered, (
-                f"{name} defined in deploy_timing but not registered in CLOCKS"
+                f"{name} defined in progress_timeout but not registered in CLOCKS"
             )
 
 

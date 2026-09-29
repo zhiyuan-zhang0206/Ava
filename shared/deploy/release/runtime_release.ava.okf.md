@@ -76,6 +76,6 @@ tool). Preparation tools run through the stdlib-only
 [[process-group-closure.ava.okf.md|group-closure core]]: each leads its
 own process group, and its leader stays unreaped until a group-wide SIGKILL and a
 kernel listing of only that leader prove closure. The builder-embedded
-application identity and its verified read live in `release_identity.py`.
+application identity and its verified read live in `identity.py`.
 Current runtime consumers are not wired until packaging and resource closure,
 recovery and old-orchestrator bootstrapping gates are complete.
