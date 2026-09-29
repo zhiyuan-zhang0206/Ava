@@ -53,9 +53,7 @@ EXCLUDE_DIRS = {
     ".venv",
     "venv",
     "__pycache__",
-    ".ruff_cache",
-    ".pytest_cache",
-    ".mypy_cache",
+    ".cache",  # unified tool-cache root (pytest/ruff/import-linter/...)
     ".pyright",
     "demos",
     "deploy",
