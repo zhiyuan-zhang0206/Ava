@@ -187,7 +187,7 @@ def pg_tool(name: str) -> Path:
     vendored = vendored_pg_bin_dir()
     if vendored is not None and (vendored / name).exists():
         return vendored / name
-    from shared.platform_backend import get_backend
+    from shared.host.system.backend import get_backend
 
     platform_path = get_backend().pg_binary_path(name)
     if platform_path is not None and platform_path.exists():

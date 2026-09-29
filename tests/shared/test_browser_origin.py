@@ -97,8 +97,10 @@ def test_https_cookie_policy_preserves_direct_http(monkeypatch: pytest.MonkeyPat
 def test_prepared_frontend_refuses_unrepresented_browser_origin(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    monkeypatch.setattr("shared.runtime_interpreter.WHEEL_RUNTIME", True)
-    monkeypatch.setattr("shared.runtime_interpreter.runtime_frontend_dir", lambda: tmp_path)
+    monkeypatch.setattr("shared.deploy.release.runtime_interpreter.WHEEL_RUNTIME", True)
+    monkeypatch.setattr(
+        "shared.deploy.release.runtime_interpreter.runtime_frontend_dir", lambda: tmp_path
+    )
     monkeypatch.setattr("shared.cluster.derive.IS_WINDOWS", False)
     monkeypatch.setattr(settings.gateway, "gateway_port", 8800)
     monkeypatch.setattr(settings.gateway, "browser_origin", "")

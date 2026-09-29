@@ -25,10 +25,10 @@ from pydantic import JsonValue
 from cli.release_fleet.request import FleetRequest
 from cli.release_transition import journal, launcher_linux
 from cli.release_transition.request import ReleaseRef
+from shared.deploy.release.runtime_release import MANIFEST_VERSION, file_sha256
+from shared.host.system.boot_unit import unit_name
 from shared.native_process.ownership import OwnedProcess
-from shared.os_boot_unit import unit_name
 from shared.runtime_abi import current_abi
-from shared.runtime_release import MANIFEST_VERSION, file_sha256
 
 pytestmark = pytest.mark.skipif(
     sys.platform != "linux" or os.environ.get("AVA_NATIVE_RELEASE_LAUNCHER") != "1",

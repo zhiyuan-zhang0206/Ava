@@ -29,7 +29,7 @@ from services.ava_root.selfcheck import SelfCheckConfig
 from services.ava_root.wiring import WiringContext, WiringParticipant
 from services.ava_root_glue.glue import assemble
 from shared.daemon.health import DaemonProbe
-from shared.proc import process_alive
+from shared.host.proc import process_alive
 
 _DRILL_INTERVAL_S = 10.0
 _HEARTBEAT_TIMEOUT_S = 3.0

@@ -17,9 +17,9 @@ from cli.release_prepare.acquisition_models import Acquisition, AcquisitionRecei
 from cli.release_prepare.inputs import validate_inputs
 from cli.release_prepare.models import FileInput, TreeInput, encode
 from scripts.preview.release_fixture import FixtureWheel, build_fixture
-from shared.runtime_prepare import inventory_digest, tree_inventory
-from shared.runtime_release import ReleaseRejectedError, file_sha256
-from shared.verified_file import regular_bytes
+from shared.deploy.release.runtime_prepare import inventory_digest, tree_inventory
+from shared.deploy.release.runtime_release import ReleaseRejectedError, file_sha256
+from shared.deploy.release.verified_file import regular_bytes
 
 
 def _write(path: Path, value: object) -> None:

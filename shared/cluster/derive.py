@@ -208,7 +208,7 @@ def frontend_service_cmd(port: int, frontend_dir: str | Path = "ui/web") -> str:
             ``fe_build_env``.
     """
     from shared.config import settings
-    from shared.runtime_interpreter import WHEEL_RUNTIME, runtime_frontend_dir
+    from shared.deploy.release.runtime_interpreter import WHEEL_RUNTIME, runtime_frontend_dir
 
     if WHEEL_RUNTIME:
         if IS_WINDOWS:

@@ -1,6 +1,6 @@
 """shared.deploy.git.github_pr: derive the memory repo slug + gate on gh PR capability.
 
-`memory_repo_slug()` reads the remote URL through `shared.memory_repo.memory_remote`,
+`memory_repo_slug()` reads the remote URL through `shared.deploy.git.memory_repo.memory_remote`,
 which `github_pr` re-imports into its own namespace; tests patch
 `gp.memory_remote`. `github_pr_blocker()` shells out to `gh` via `shutil.which`
 + `subprocess.run`; tests patch both so no network / gh install is required.

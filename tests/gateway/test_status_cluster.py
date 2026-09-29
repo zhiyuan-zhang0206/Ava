@@ -1153,7 +1153,7 @@ class TestPanelCarriesNoFrozenPin:
         def _forbidden(**_kw: object) -> str:
             raise AssertionError("the status panel must not read the retired pin")
 
-        monkeypatch.setattr("shared.cluster_pin.get_cluster_target_sha", _forbidden)
+        monkeypatch.setattr("shared.deploy.state.cluster_pin.get_cluster_target_sha", _forbidden)
         monkeypatch.setattr(status_router, "prod_source_head_sha", lambda: "abc1234")
         with db_conn.cursor() as cur:
             panel = status_router._get_cluster_status(cur)

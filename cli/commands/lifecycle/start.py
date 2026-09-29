@@ -17,10 +17,10 @@ from cli.commands.lifecycle.migrations import cmd_migrations_apply
 from cli.commands.lifecycle.status import cmd_status
 from cli.start_runtime import StartRuntime
 from ops.roster.service_spec import ServiceSpec
-from shared import start_serving
 from shared.cluster import session_name
 from shared.cluster.machine import MachineRoles
-from shared.deploy_timing import SERVICE_READY_TIMEOUT_S
+from shared.deploy.lifecycle import start_serving
+from shared.deploy.progress_timeout import SERVICE_READY_TIMEOUT_S
 from shared.exit_codes import SERVICES_NOT_READY_EXIT_CODE
 from shared.paths import prod_service_checkout_error
 
@@ -205,9 +205,9 @@ def _cmd_start_body(  # noqa: PLR0915 — cohesive linear start sequence (conver
     import cli.commands._repo as _repo_commands
     import cli.commands._setup as _setup_commands
     import cli.commands.lifecycle.root_driver as _root_driver_commands
-    from shared import maintenance
+    from shared.deploy.maintenance import admission
 
-    maintenance.require_start_allowed()
+    admission.require_start_allowed()
     from shared.paths import ava_home
 
     if (ava_home() / "destroy-intent.json").exists():
@@ -260,7 +260,7 @@ def _cmd_start_body(  # noqa: PLR0915 — cohesive linear start sequence (conver
 
     # Resolve desired services without publishing changes before admission.
     from cli.commands._repo import _services_for_roles_annotated
-    from shared.service_selection import resolve_selection
+    from shared.deploy.lifecycle.service_selection import resolve_selection
 
     names = {spec.session for spec, _reason in _services_for_roles_annotated(roles)}
     launch_skip = resolve_selection(
@@ -345,7 +345,7 @@ def _cmd_start_body(  # noqa: PLR0915 — cohesive linear start sequence (conver
     if runtime.release is None:
         _record_running_sha(repo)
     else:
-        from shared import running_sha
+        from shared.deploy.git import running_sha
 
         assert runtime.source_commit is not None  # noqa: S101 — admitted release invariant
         running_sha.set(runtime.source_commit)
@@ -357,15 +357,15 @@ def _cmd_start_body(  # noqa: PLR0915 — cohesive linear start sequence (conver
     # Written unconditionally so a clean start clears a previous run's list; the
     # rollout's local leg is the consumer (`update._run_gateway_local_update`),
     # because its `ava start` is a child and an exit code cannot carry names.
-    from shared import launch_failures
+    from shared.deploy.lifecycle import launch_failures
 
     launch_failures.record(list(launch.failed))
 
     # The exact maintenance generation stays held through readiness. Its
     # authorized owner, or resume_after_start, alone may release admission.
-    from shared.host_deploy_state import set_posture
+    from shared.deploy.state.host_deploy_state import set_posture
 
-    set_posture("paused" if maintenance.held() else "idle")
+    set_posture("paused" if admission.held() else "idle")
 
     # Success requires real readiness for every launched service, frontend included.
     print("\n→ waiting for services to come up")
@@ -405,8 +405,8 @@ def _cmd_start_body(  # noqa: PLR0915 — cohesive linear start sequence (conver
 
     # 8) Readiness verdict last: its exit code and printed snapshot describe the same run.
     #
-    # Launch failures share the verdict: rollout reads `shared.launch_failures`, while the
-    # boot loop retries without an unbounded wait on one service (`shared/boot_policy.py`).
+    # Launch failures share the verdict: rollout reads `shared.deploy.lifecycle.launch_failures`, while the
+    # boot loop retries without an unbounded wait on one service (`shared/host/system/boot_policy.py`).
     if launch.failed:
         print(
             f"\n✗ {len(launch.failed)} service(s) could not be launched "

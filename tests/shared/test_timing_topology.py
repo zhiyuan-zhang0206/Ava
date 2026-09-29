@@ -8,14 +8,14 @@ from __future__ import annotations
 
 import pytest
 
-import shared.deploy_timing as deploy
-from shared.timing import CLOCKS, CONSTRAINTS, assert_clock_lattice, validate_clock_lattice
+import shared.deploy.progress_timeout as deploy
+from shared.deploy.timing import CLOCKS, CONSTRAINTS, assert_clock_lattice, validate_clock_lattice
 
 
 def test_default_lattice_holds() -> None:
     """The full declared lattice must hold for the settings defaults.
 
-    This is the topology pin: every constraint in `shared.timing.CONSTRAINTS`
+    This is the topology pin: every constraint in `shared.deploy.timing.CONSTRAINTS`
     (deploy / schedule-supervision / agent-lease / wedged / stop families) is asserted against the live default values. A change to
     any default that inverts a load-bearing ordering fails here, with the
     constraint's intent in the failure message.
@@ -38,7 +38,7 @@ def test_checker_catches_eq_violation(monkeypatch: pytest.MonkeyPatch) -> None:
     """A drifted settle hold (no longer equal to NO_PROGRESS) must be reported —
     two clocks disagreeing about "stopped making progress"."""
     monkeypatch.setattr(
-        "shared.cluster_lock.SETTLE_TTL_S",
+        "shared.deploy.state.cluster_lock.SETTLE_TTL_S",
         deploy.NO_PROGRESS_TIMEOUT_S + 100,
     )
     failures = validate_clock_lattice()
@@ -100,7 +100,7 @@ def test_renewal_clock_is_the_agent_hosts_actual_beat() -> None:
 
 def test_assert_clock_lattice_raises_on_violation(monkeypatch: pytest.MonkeyPatch) -> None:
     """The fail-fast entry point raises, never returns, on a violation."""
-    from shared.timing import ClockLatticeError
+    from shared.deploy.timing import ClockLatticeError
 
     monkeypatch.setattr(deploy, "NO_PROGRESS_TIMEOUT_S", CLOCKS["LOCK_TTL_S"].get() + 10)
     with pytest.raises(ClockLatticeError):
@@ -119,7 +119,7 @@ def test_every_deploy_family_clock_is_registered() -> None:
         value = getattr(deploy, name)
         if isinstance(value, (int, float)):
             assert name in registered, (
-                f"{name} defined in deploy_timing but not registered in CLOCKS"
+                f"{name} defined in progress_timeout but not registered in CLOCKS"
             )
 
 

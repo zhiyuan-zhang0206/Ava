@@ -171,7 +171,7 @@ def write_grant(home: Path, cls: GenerationClass) -> WriteGrant:
 
 
 def _intent_checkout(home: Path) -> Path:
-    from shared.verified_file import regular_bytes
+    from shared.deploy.release.verified_file import regular_bytes
 
     try:
         data: object = json.loads(regular_bytes(home / "start-intent.json", max_bytes=1 << 20))
@@ -195,7 +195,7 @@ def require_admitted_runtime(home: Path, *, code_root: Path, prefix: Path) -> No
     intent is admitted. A stale image's CLI, or a job still pointing at an old
     environment, receives nothing.
     """
-    from shared.runtime_release import current_pointer
+    from shared.deploy.release.runtime_release import current_pointer
 
     selected = current_pointer(home / "releases")
     if selected is not None:

@@ -17,8 +17,8 @@ from cli.release_fleet.request import FleetRequest
 from cli.release_transition import local, stage
 from cli.release_transition.journal import Phase
 from cli.release_transition.request import ReleaseRef
-from shared.runtime_release import ReleaseRejectedError
-from shared.start_inputs import configuration_digest
+from shared.deploy.release.runtime_release import ReleaseRejectedError
+from shared.deploy.release.start_inputs import configuration_digest
 from tests.lifecycle.transition.phases import at_phase
 
 
@@ -59,7 +59,7 @@ def _forbid_runtime_imports(monkeypatch: pytest.MonkeyPatch) -> None:
         if name in {
             "shared.config",
             "cli.start_runtime",
-            "shared.os_boot_unit",
+            "shared.host.system.boot_unit",
             "shared",
             "cli.commands.lifecycle.maintenance",
             "cli.commands.lifecycle.service_stop",
@@ -142,7 +142,7 @@ def guarded(name, *args, **kwargs):
         raise AssertionError("configuration admission imported runtime settings: " + name)
     return original(name, *args, **kwargs)
 builtins.__import__ = guarded
-from shared.start_inputs import configuration_digest
+from shared.deploy.release.start_inputs import configuration_digest
 from cli.release_fleet.request import FleetRequest
 assert configuration_digest(Path(sys.argv[2])) == sys.argv[3]
 assert "shared.config" not in sys.modules

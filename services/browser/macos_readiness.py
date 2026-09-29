@@ -29,9 +29,9 @@ from pathlib import Path
 
 import psutil
 
+import shared.host.private_storage
+import shared.host.proc
 import shared.paths
-import shared.private_storage
-import shared.proc
 from shared.native_process.os_platform import IS_MACOS
 from shared.native_process.ownership import stable_create_time
 
@@ -91,7 +91,7 @@ class _ProbeResult:
 def _run_probe(argv: list[str]) -> _ProbeResult:
     """Run a fixed read-only system query without letting a GUI prompt hang us."""
     try:
-        completed = shared.proc.run_bounded(
+        completed = shared.host.proc.run_bounded(
             argv, timeout=_PROBE_TIMEOUT_S, capture_output=True, text=True
         )
     except FileNotFoundError:
@@ -206,7 +206,9 @@ def mark_waiting(reason: str, *, context_missing: bool = False) -> None:
             "observed_at": time.time(),
             "context_missing": context_missing,
         }
-        shared.private_storage.write_private_bytes(_marker_path(), json.dumps(payload).encode())
+        shared.host.private_storage.write_private_bytes(
+            _marker_path(), json.dumps(payload).encode()
+        )
     except (OSError, psutil.Error):
         _log.warning("ava-browser: could not record macOS readiness wait state", exc_info=True)
 

@@ -14,6 +14,8 @@ from psycopg_pool import AsyncConnectionPool
 
 from agent.ownership.hosted import admit_hosted_runtime
 from shared.db import create_agent
+from shared.deploy.writers.publication import AdmissionDecision, CurrentAdmission
+from shared.deploy.writers.runtime_admission import RuntimeAdmission
 from shared.incarnation_resources import (
     ExecAllocation,
     IncarnationResources,
@@ -21,10 +23,8 @@ from shared.incarnation_resources import (
     ResourceProcess,
     decode_resources,
 )
-from shared.managed_writer_publication import AdmissionDecision, CurrentAdmission
 from shared.native_process.ownership import stable_create_time
 from shared.native_process.runtime_incarnation import RuntimeIncarnation
-from shared.runtime_admission import RuntimeAdmission
 
 
 class _CurrentAdmission(RuntimeAdmission):

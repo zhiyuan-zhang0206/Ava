@@ -21,9 +21,10 @@ from cli.commands.lifecycle import maintenance as maintenance_command
 from ops import cluster_pause
 from scripts import cutover_adopt_home as adopt
 from scripts import cutover_db_records as records
-from shared import maintenance, pause_owner, start_serving
 from shared.config import settings
-from shared.maintenance_state import MaintenanceHold
+from shared.deploy.lifecycle import start_serving
+from shared.deploy.maintenance import admission, pause_owner
+from shared.deploy.maintenance.state import MaintenanceHold
 from tests.lifecycle.cutover.conftest import SERVICE_PATH, LegacyHome, record_repair
 from tests.lifecycle.cutover.test_cutover_hold import _adopted, _bare_start
 
@@ -32,8 +33,8 @@ _UNPAUSE = cluster_pause.unpause_local_cluster
 
 
 def _ready(holder: str, at: datetime) -> None:
-    maintenance.set_phase(holder, at, "starting")
-    maintenance.set_phase(holder, at, "ready")
+    admission.set_phase(holder, at, "starting")
+    admission.set_phase(holder, at, "ready")
 
 
 def _resume_args(holder: str, at: datetime) -> argparse.Namespace:
@@ -48,7 +49,7 @@ def _release_seams(monkeypatch: pytest.MonkeyPatch, roles: frozenset[str]) -> Ma
     monkeypatch.setattr(maintenance_command, "machine_role", lambda: roles)
     monkeypatch.setattr(maintenance_command, "host_identity_or_none", lambda: None)
     monkeypatch.setattr(maintenance_command, "connect", MagicMock())
-    monkeypatch.setattr("shared.host_deploy_state.set_posture", MagicMock())
+    monkeypatch.setattr("shared.deploy.state.host_deploy_state.set_posture", MagicMock())
     monkeypatch.setattr("ops.cluster_pause._settle_stranded_reaps", MagicMock())
     monkeypatch.setattr(start_serving, "is_serving", lambda: True)
     wake = MagicMock()
@@ -67,12 +68,12 @@ def test_recover_refuses_while_the_cutover_hold_stands(
     _ready(holder, at)
     op = MagicMock(return_value={"unlocked_holder": None})
     monkeypatch.setattr("ops.cluster.cluster_recover_op", op)
-    monkeypatch.setattr("shared.cluster_lock.update_lock_holder", lambda: None)
+    monkeypatch.setattr("shared.deploy.state.cluster_lock.update_lock_holder", lambda: None)
 
     assert recover.cmd_cluster_recover() == 1
 
     op.assert_not_called()
-    assert maintenance.business_paused()
+    assert admission.business_paused()
     err = capsys.readouterr().err
     assert f"cutover_adopt_home.py --home {legacy.home} --resume" in err
 
@@ -89,7 +90,7 @@ def test_maintenance_resume_refuses_the_cutover_hold_and_names_the_gate(
 
     assert str(legacy.home) in str(refused.value)
     wake.assert_not_called()
-    assert maintenance.business_paused()
+    assert admission.business_paused()
 
 
 @pytest.mark.parametrize("later_holder", ["local-pause:legacy-box:77:later", "fleet:op-later"])
@@ -140,7 +141,7 @@ def test_an_unreadable_journal_never_resumes_a_cutover_holder(
 
     assert f"cutover_adopt_home.py --home {legacy.home} --resume" in str(refused.value)
     wake.assert_not_called()
-    assert maintenance.business_paused()
+    assert admission.business_paused()
     assert pause_owner.read().matches(holder, at)
 
 
@@ -161,7 +162,7 @@ def test_the_go_no_go_step_releases_a_ready_gateway_after_its_records_repair(
     record_repair(legacy.home, "started")
     assert _release(legacy) == 1
     assert "run is incomplete" in capsys.readouterr().err
-    assert maintenance.business_paused()
+    assert admission.business_paused()
     wake.assert_not_called()
     (legacy.home / records.JOURNAL).unlink()
     record_repair(legacy.home, "done")
@@ -170,7 +171,7 @@ def test_the_go_no_go_step_releases_a_ready_gateway_after_its_records_repair(
 
     current = pause_owner.read()
     assert current.status == "resumed" and current.matches(holder, at)
-    assert not maintenance.business_paused()
+    assert not admission.business_paused()
     wake.assert_called_once()
     assert _release(legacy) == 0  # already released: nothing more happens
     wake.assert_called_once()
@@ -220,13 +221,13 @@ def test_a_gateways_held_first_start_waits_for_its_records_repair(
     record_repair(legacy.home, "started")
     assert adopt.main(argv, checkout=legacy.checkout) == 1
     assert "run is incomplete" in capsys.readouterr().err
-    held = maintenance.require_operation(holder, at).maintenance
+    held = admission.require_operation(holder, at).maintenance
     assert starts == [] and held is not None and held.phase == "stopped"
     (legacy.home / records.JOURNAL).unlink()
     record_repair(legacy.home, "done")
 
     assert adopt.main(argv, checkout=legacy.checkout) == 0
 
-    held = maintenance.require_operation(holder, at).maintenance
+    held = admission.require_operation(holder, at).maintenance
     assert len(starts) == 1 and held is not None and held.phase == "ready"
-    assert maintenance.business_paused()
+    assert admission.business_paused()

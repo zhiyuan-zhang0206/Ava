@@ -112,7 +112,7 @@ standalone artifact and its original verification contract. Automatic Node
 acquisition is outside this API; no installed system Node is upgraded.
 
 The collector option invokes captured `scripts/prepare_otel_release.py`, which
-uses the settings-free `shared.collector_artifact` downloader. Runtime converge
+uses the settings-free `shared.deploy.release.collector_artifact` downloader. Runtime converge
 uses that same downloader. Its existing version and platform archive checksums
 are the acquisition authority; no second binary builder or runtime command
 dispatcher is involved. Missing output directories fail rather than becoming

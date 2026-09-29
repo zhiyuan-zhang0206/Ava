@@ -30,7 +30,7 @@ from cli.release_transition.request import (
     Request,
     sql_inventory,
 )
-from shared.runtime_release import VerifiedRelease
+from shared.deploy.release.runtime_release import VerifiedRelease
 
 AdapterKind = Literal["linux-systemd-v1", "darwin-launchd-v1"]
 # A remote unit never serves the gateway: the coordinator's home is the one gateway.

@@ -22,16 +22,20 @@ import psutil
 import psycopg
 
 from cli.commands import release_inventory as inventory
-from shared.managed_writer_observation import (
+from shared.deploy.release.runtime_prepare import tree_inventory
+from shared.deploy.release.runtime_release import (
+    ReleaseRejectedError,
+    VerifiedRelease,
+    verify_release,
+)
+from shared.deploy.writers.observation import (
     ExpectedUnitWriters,
     ObservationChallenge,
     UnitObserver,
 )
-from shared.native_job_observation import NativeReadUnavailableError
+from shared.host.system.job_observation import NativeReadUnavailableError
 from shared.native_process import pid_starttime_ticks
 from shared.runtime_abi import current_abi
-from shared.runtime_prepare import tree_inventory
-from shared.runtime_release import ReleaseRejectedError, VerifiedRelease, verify_release
 from shared.sessions.record import SessionRecord
 
 
@@ -105,7 +109,7 @@ def check_bounded_read(home: Path) -> None:
         replacement.replace(target)
         return original_open(target, flags)
 
-    with patch("shared.verified_file.os.open", side_effect=replace_before_open):
+    with patch("shared.deploy.release.verified_file.os.open", side_effect=replace_before_open):
         try:
             inventory._regular_bytes(path)
         except ReleaseRejectedError:

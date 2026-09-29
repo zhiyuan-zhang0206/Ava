@@ -7,9 +7,9 @@ from uuid import uuid4
 import psycopg
 import pytest
 
-from shared import maintenance_cohort, pause_owner
 from shared.cluster.machine import machine_name
 from shared.db import insert_inbound_message
+from shared.deploy.maintenance import cohort, pause_owner
 from tests.agent.test_maintenance import WHEN, _agent
 from tests.agent.test_maintenance import isolate as isolate
 
@@ -44,11 +44,11 @@ def test_cold_hosted_restart_tails_and_claimed_chat_are_preserved(
     db_conn.commit()
     pause_owner.begin_maintenance("cold", WHEN)
     with pytest.raises(RuntimeError):
-        maintenance_cohort.prepare(
+        cohort.prepare(
             db_conn, machine=machine_name(), host_owner=None, holder="cold", acquired_at=WHEN
         )
     db_conn.rollback()
-    held = maintenance_cohort.prepare(
+    held = cohort.prepare(
         db_conn,
         machine=machine_name(),
         host_owner=None,
@@ -57,7 +57,7 @@ def test_cold_hosted_restart_tails_and_claimed_chat_are_preserved(
         host_absent=True,
     )
     assert held.parked == (agent,) and held.commands == {} and held.drained == ()
-    maintenance_cohort.verify_drained(db_conn, held)
+    cohort.verify_drained(db_conn, held)
     assert db_conn.execute("SELECT * FROM agents_meta WHERE id=%s", (agent,)).fetchone() == before
     assert db_conn.execute(
         "SELECT status FROM inbound_messages WHERE id=%s", (chat,)
@@ -76,7 +76,7 @@ def test_expired_host_lease_does_not_prove_normal_shutdown(
     db_conn.commit()
     pause_owner.begin_maintenance("cold", WHEN)
     with pytest.raises(RuntimeError, match="live original native"):
-        maintenance_cohort.prepare(
+        cohort.prepare(
             db_conn,
             machine=machine_name(),
             host_owner=None,

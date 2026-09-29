@@ -60,7 +60,7 @@ def test_bare_lattice_clock_outside_family_is_rejected(scan_tmp) -> None:
 def test_family_module_definition_is_allowed(scan_tmp) -> None:
     errs = _errors(
         scan_tmp,
-        "shared/timing.py",
+        "shared/deploy/timing.py",
         """
         CONTROLLER_SCAN_INTERVAL_S = 30.0
         """,
@@ -82,7 +82,7 @@ def test_alias_of_registered_clock_is_allowed(scan_tmp) -> None:
 def test_exempt_clock_is_allowed(scan_tmp) -> None:
     errs = _errors(
         scan_tmp,
-        "shared/proc.py",
+        "shared/host/proc.py",
         """
         _TERMINATE_GRACE_S = 3.0
         """,
@@ -200,10 +200,10 @@ def test_exemption_for_a_deleted_file_is_stale(scan_tmp, monkeypatch) -> None:
 
 
 def test_exemption_for_a_removed_constant_is_stale(scan_tmp, monkeypatch) -> None:
-    _write(scan_tmp, "shared/proc.py", "_OTHER_GRACE_S = 1.0\n")
+    _write(scan_tmp, "shared/host/proc.py", "_OTHER_GRACE_S = 1.0\n")
     monkeypatch.setattr(_lint, "_FAMILY_MODULES", ())
     monkeypatch.setattr(
-        _lint, "_INDEPENDENT_CLOCKS", {("shared/proc.py", "_TERMINATE_GRACE_S"): "why"}
+        _lint, "_INDEPENDENT_CLOCKS", {("shared/host/proc.py", "_TERMINATE_GRACE_S"): "why"}
     )
     errs = _lint._stale_allowlist_entries()
     assert len(errs) == 1
@@ -211,11 +211,11 @@ def test_exemption_for_a_removed_constant_is_stale(scan_tmp, monkeypatch) -> Non
 
 
 def test_live_exemption_and_family_module_are_current(scan_tmp, monkeypatch) -> None:
-    _write(scan_tmp, "shared/proc.py", "_TERMINATE_GRACE_S: float = 1.0\n")
-    _write(scan_tmp, "shared/timing.py", "CLOCKS = {}\n")
-    monkeypatch.setattr(_lint, "_FAMILY_MODULES", ("shared/timing.py",))
+    _write(scan_tmp, "shared/host/proc.py", "_TERMINATE_GRACE_S: float = 1.0\n")
+    _write(scan_tmp, "shared/deploy/timing.py", "CLOCKS = {}\n")
+    monkeypatch.setattr(_lint, "_FAMILY_MODULES", ("shared/deploy/timing.py",))
     monkeypatch.setattr(
-        _lint, "_INDEPENDENT_CLOCKS", {("shared/proc.py", "_TERMINATE_GRACE_S"): "why"}
+        _lint, "_INDEPENDENT_CLOCKS", {("shared/host/proc.py", "_TERMINATE_GRACE_S"): "why"}
     )
     assert _lint._stale_allowlist_entries() == []
 

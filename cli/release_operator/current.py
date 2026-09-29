@@ -8,7 +8,7 @@ request` and `release status` both need exactly that — the "previous" side of
 a `Request`, or a status line, for a release nobody handed us labeled facts
 for. This module discovers it, then fully verifies the discovery through the
 same primitives everything else in this codebase trusts
-(`shared.runtime_release.verify_release`, `shared.release_identity.
+(`shared.deploy.release.runtime_release.verify_release`, `shared.deploy.release.identity.
 read_application_identity`): nothing here is trusted unverified, and no new
 trust shortcut is introduced.
 
@@ -21,10 +21,10 @@ import json
 from pathlib import Path
 
 from cli.release_transition.request import ReleaseRef
-from shared.release_identity import application_identity_members, read_application_identity
+from shared.deploy.release.identity import application_identity_members, read_application_identity
+from shared.deploy.release.runtime_release import VerifiedRelease, current_pointer, verify_release
+from shared.deploy.release.verified_file import regular_bytes
 from shared.runtime_abi import current_abi
-from shared.runtime_release import VerifiedRelease, current_pointer, verify_release
-from shared.verified_file import regular_bytes
 
 _MAX_MANIFEST_BYTES = 32 * 1024 * 1024
 

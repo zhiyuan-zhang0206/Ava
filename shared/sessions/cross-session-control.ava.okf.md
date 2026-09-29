@@ -32,7 +32,7 @@ The endpoint (an ephemeral loopback port) and a 128-bit delivery token are
 both bound to the record's exact verified identity — a caller can address the
 steward only by knowing the record. The channel is loopback TCP, not a
 filesystem socket: Windows CPython has no AF_UNIX (CPython issue #77589 —
-`shared/platform_probes.py` tracks the capability), so an AF_UNIX channel
+`shared/host/system/probes.py` tracks the capability), so an AF_UNIX channel
 could never bind on the platform this path exists for. The steward is a
 *sibling* of the target (both children of the spawner), never part of the
 target's tree, so a tree kill never reaches it; `winproc._spared_pids` spares

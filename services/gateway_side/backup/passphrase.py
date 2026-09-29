@@ -30,8 +30,8 @@ import tempfile
 from contextlib import suppress
 from pathlib import Path
 
-from shared.private_storage import private_file_problem, write_private_bytes
-from shared.verified_file import regular_bytes
+from shared.deploy.release.verified_file import regular_bytes
+from shared.host.private_storage import private_file_problem, write_private_bytes
 
 PIN_NAME = "logical-backup.passphrase"
 _PASSPHRASE = re.compile(r"^[0-9a-f]{64}$")

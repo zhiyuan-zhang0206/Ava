@@ -18,7 +18,7 @@ from services.pitr.activation.evidence import (
 )
 from services.pitr.base_backup.manifest import CandidateManifest
 from shared.api_contracts import strict_decode
-from shared.private_storage import ensure_private_dir
+from shared.host.private_storage import ensure_private_dir
 
 ActivationPhase = Literal[
     "shadow",
@@ -671,8 +671,8 @@ def load_record(home: Path) -> ActivationRecord | None:
 
 def write_record(home: Path, record: ActivationRecord) -> None:
     ActivationRecord.from_json(json.dumps(asdict(record)))
-    from shared.release_operation import note_pitr_write
-    from shared.verified_file import regular_bytes
+    from shared.deploy.release.operation import note_pitr_write
+    from shared.deploy.release.verified_file import regular_bytes
 
     path = record_path(home)
     try:

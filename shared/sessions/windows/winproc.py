@@ -13,7 +13,7 @@ session routes the break request over the steward's loopback control socket
 (whose endpoint and delivery token are bound to the record's exact pid +
 create_time identity); the steward executes the same verified private-console
 helper. The channel is loopback TCP rather than a filesystem socket: Windows
-CPython has no AF_UNIX (CPython issue #77589; `shared/platform_probes.py`
+CPython has no AF_UNIX (CPython issue #77589; `shared/host/system/probes.py`
 tracks the capability), so a filesystem-socket channel could never bind on the
 platform this path exists for. Same-session callers keep
 the direct one-shot helper. A cross-session target without a steward (legacy
@@ -99,7 +99,7 @@ def _steward_endpoint() -> tuple[str, int]:
 
     Loopback TCP is the transport because it is the one stream family the
     Windows CPython this leaf must run on actually implements: AF_UNIX does
-    not exist there (CPython issue #77589; `shared/platform_probes.py` tracks
+    not exist there (CPython issue #77589; `shared/host/system/probes.py` tracks
     the capability), so a filesystem-socket channel could never bind at
     launch. The port is reserved here (bound, then closed) and the steward
     binds it moments later at spawn; if another process wins the port in

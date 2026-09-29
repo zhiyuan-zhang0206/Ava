@@ -10,7 +10,7 @@ from cli.release_prepare import acquisition_assets as assets
 from cli.release_prepare.acquisition_dependencies import file_input, tree_input
 from cli.release_prepare.acquisition_models import FrontendTools
 from cli.release_prepare.acquisition_process import Commands
-from shared.runtime_release import ReleaseRejectedError
+from shared.deploy.release.runtime_release import ReleaseRejectedError
 
 
 class FrontendCommands(Commands):

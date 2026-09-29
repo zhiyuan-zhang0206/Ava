@@ -857,10 +857,10 @@ class TestPendingScan:
     ) -> None:
         """Stop leg leaves rows untouched; start leg scans even while held
         because pub/sub has no replay."""
-        from shared import maintenance
+        from shared.deploy.maintenance import admission
 
         state = {"in_stop_leg": True}
-        monkeypatch.setattr(maintenance, "in_stop_leg", lambda: state["in_stop_leg"])
+        monkeypatch.setattr(admission, "in_stop_leg", lambda: state["in_stop_leg"])
         scanner_calls: list[int] = []
         scheduler = _ScanScheduler()
 

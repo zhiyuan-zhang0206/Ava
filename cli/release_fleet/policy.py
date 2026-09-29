@@ -17,7 +17,7 @@ from uuid import UUID
 from pydantic import AwareDatetime, Field, field_validator, model_validator
 
 from cli.release_transition.request import Record
-from shared.maintenance_state import MaintenanceHold
+from shared.deploy.maintenance.state import MaintenanceHold
 
 # The largest cohort one release journal (256 KiB) carries through a
 # whole-cohort failure and its recovery. The journal keeps a few ids per agent

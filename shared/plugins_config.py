@@ -93,7 +93,7 @@ def discover_plugins() -> dict[str, Path]:
                 discovered[p.name] = p
 
     # External plugin: ~/.ava/plugins/<name>/plugin.py
-    from shared.runtime_interpreter import external_plugin_read_root
+    from shared.deploy.release.runtime_interpreter import external_plugin_read_root
 
     user_dir = external_plugin_read_root()
     if user_dir.exists():

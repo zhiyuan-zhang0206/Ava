@@ -12,12 +12,20 @@ import psutil
 import psycopg
 from psycopg_pool import AsyncConnectionPool
 
-from shared import maintenance
 from shared.agent_observation import AdmissionOutcome
 from shared.db_transaction import async_write_transaction
-from shared.deploy_timing import (
+from shared.deploy.maintenance import admission
+from shared.deploy.progress_timeout import (
     AGENT_LEASE_TTL_S,
     LEGACY_HOST_ADOPTION_SILENCE_S,
+)
+from shared.deploy.writers.runtime_admission import (
+    AdmissionDecision,
+    CurrentAdmission,
+    PublicationAdmissionDeferredError,
+    RuntimeAdmission,
+    process_runtime_admission,
+    require_current_for_managed,
 )
 from shared.host_process_evidence import local_host_evidence
 from shared.incarnation_resources import (
@@ -32,14 +40,6 @@ from shared.log import logger
 from shared.native_process.runtime_incarnation import RUNTIME_PROTOCOL_V1, RuntimeIncarnation
 from shared.paths import ava_home
 from shared.resource_admission import admit_resources_async
-from shared.runtime_admission import (
-    AdmissionDecision,
-    CurrentAdmission,
-    PublicationAdmissionDeferredError,
-    RuntimeAdmission,
-    process_runtime_admission,
-    require_current_for_managed,
-)
 from shared.telemetry.audit_events import insert_event_log_async
 
 
@@ -250,7 +250,7 @@ async def _held_owner_matches(pool: AsyncConnectionPool, agent_id: int, owner: U
     the successor fence — a crash that replaced the boot retains the hold and
     requires explicit cancellation or repair, never a fake ACK.
     """
-    if maintenance.pending_command(agent_id) is None:
+    if admission.pending_command(agent_id) is None:
         return False
     async with pool.connection() as conn:
         held_owner = await (
@@ -419,7 +419,7 @@ async def admit_hosted_runtime(
     from shared.exec_owner_recovery import recover_local_resources
 
     attempt_at = await _admission_attempt_at(pool)
-    if maintenance.held() and not await _held_owner_matches(pool, agent_id, owner):
+    if admission.held() and not await _held_owner_matches(pool, agent_id, owner):
         await _record_admission_refusal(
             pool, agent_id, machine, expected_from, attempt_at, AdmissionOutcome.MAINTENANCE_HOLD
         )
@@ -449,7 +449,7 @@ async def admit_hosted_runtime(
                 # without a receipt until the 300s timeout retained the hold
                 # (issue #2159). The alternative fence below (a successor
                 # boot) stays in force.
-                if maintenance.pending_command(agent_id) is None:
+                if admission.pending_command(agent_id) is None:
                     _refuse_hosted_admission(AdmissionOutcome.PUBLICATION_DEFERRED)
                 publication_decision = None
             previous = await (
@@ -462,8 +462,8 @@ async def admit_hosted_runtime(
             ).fetchone()
             if previous is None:
                 _refuse_hosted_admission()
-            if maintenance.held() and (
-                maintenance.pending_command(agent_id) is None or previous[1:3] != (owner, "hosted")
+            if admission.held() and (
+                admission.pending_command(agent_id) is None or previous[1:3] != (owner, "hosted")
             ):
                 # A successor cannot certify that its predecessor flushed.
                 # A host crash during drain therefore retains the hold and

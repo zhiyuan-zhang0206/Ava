@@ -42,7 +42,7 @@ from shared.cluster.port_preflight import (
 from shared.cluster.port_preflight import (
     listeners_on as _listeners_on,
 )
-from shared.proc import process_cmdline
+from shared.host.proc import process_cmdline
 
 
 def _occupant_detail(port: int) -> str:

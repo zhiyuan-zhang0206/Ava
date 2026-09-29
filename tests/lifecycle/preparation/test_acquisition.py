@@ -19,8 +19,8 @@ from cli.release_prepare.acquisition_dependencies import file_input, tree_input
 from cli.release_prepare.acquisition_models import Acquisition, AcquisitionReceipt, FrontendTools
 from cli.release_prepare.acquisition_process import Commands
 from cli.release_prepare.models import TreeInput
-from shared.runtime_prepare import inventory_digest, python_input_inventory
-from shared.runtime_release import ReleaseRejectedError
+from shared.deploy.release.runtime_prepare import inventory_digest, python_input_inventory
+from shared.deploy.release.runtime_release import ReleaseRejectedError
 
 # ruff: noqa: S603 -- real Git and isolated import checks use only generated fixture inputs.
 

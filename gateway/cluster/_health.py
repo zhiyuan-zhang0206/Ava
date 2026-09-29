@@ -12,9 +12,9 @@ from psycopg_pool import PoolTimeout
 
 from shared.cluster.machine import machine_name
 from shared.daemon.health_schema import DEGRADED, OK, component, render
+from shared.deploy.release.runtime_service_identity import normal_runtime_identity
 from shared.native_process import loaded_commit
 from shared.paths import ava_home
-from shared.runtime_service_identity import normal_runtime_identity
 
 _STARTED_AT = time.time()
 

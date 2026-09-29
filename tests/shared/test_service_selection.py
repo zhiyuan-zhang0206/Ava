@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from shared import service_selection as selection
+from shared.deploy.lifecycle import service_selection as selection
 
 
 @pytest.fixture(autouse=True)

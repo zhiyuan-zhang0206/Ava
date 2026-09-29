@@ -131,7 +131,7 @@ def commit_scheduled_backup(staged: Path, digest: str) -> Path:
     the operation's controls for quarantine.
     """
     from services.backup import backup_dir, prune_after_publish
-    from shared.private_storage import ensure_private_dir, ensure_private_file
+    from shared.host.private_storage import ensure_private_dir, ensure_private_file
 
     if staged.is_symlink() or not staged.is_file() or not DUMP_NAME_RE.fullmatch(staged.name):
         raise RuntimeError("scheduled backup result is not a managed regular artifact")

@@ -13,9 +13,9 @@ import psutil
 import pytest
 
 from cli.release_prepare.acquisition_process import Commands
+from shared.deploy.release.runtime_prepare import _run, tree_inventory
 from shared.native_process import posix_command
 from shared.native_process.exec_domain import ExecProcessDomain
-from shared.runtime_prepare import _run, tree_inventory
 
 pytestmark = pytest.mark.skipif(
     sys.platform not in {"darwin", "linux"}, reason="POSIX acquisition execution domain"

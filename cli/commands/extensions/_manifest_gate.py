@@ -30,7 +30,7 @@ def manifest_install_errors(pkg_dir: Path, *, mirror_pyproject: bool = False) ->
         return []
 
     errors: list[str] = []
-    from shared import host_version as host_version_mod
+    from shared.deploy.git import host_version as host_version_mod
 
     try:
         host = host_version_mod.host_version(paths.repo_root())

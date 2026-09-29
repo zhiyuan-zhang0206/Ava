@@ -14,7 +14,7 @@ from cli.commands.extensions._external_skill_fs import (
     _manifest_digest,
     _read_regular,
 )
-from shared.private_storage import write_private_bytes
+from shared.host.private_storage import write_private_bytes
 
 _FORMAT = 6
 _MARKER_NAME = ".ava-managed.json"

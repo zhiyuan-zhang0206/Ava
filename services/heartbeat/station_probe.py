@@ -39,10 +39,10 @@ from typing import Any
 
 import shared.db
 from shared.config import settings
+from shared.deploy.transition import transition_severity
 from shared.log import init_gateway_process, logger
 from shared.telemetry.station_endpoint import StationTarget as _StationTarget
 from shared.telemetry.station_endpoint import resolve_station_target
-from shared.transition import transition_severity
 
 _log = logging.getLogger("services.heartbeat.station_probe")
 

@@ -19,8 +19,8 @@ from cli.release_transition.journal import (
 )
 from cli.release_transition.local import LocalTransition
 from cli.release_transition.request import PitrRequest
-from shared.release_operation import open_launch_grace
-from shared.verified_file import regular_bytes
+from shared.deploy.release.operation import open_launch_grace
+from shared.deploy.release.verified_file import regular_bytes
 
 
 def _retire_previous(request: FleetRequest | UnitRequest | PitrRequest) -> None:

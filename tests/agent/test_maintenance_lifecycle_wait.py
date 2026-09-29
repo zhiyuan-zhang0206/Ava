@@ -21,11 +21,12 @@ from psycopg_pool import AsyncConnectionPool
 from agent.ownership.hosted import admit_hosted_runtime, settle_hosted_runtime
 from ops import agent_pause
 from ops.agent_pause.probe import HostIdentity
-from shared import maintenance, maintenance_cohort, pause_owner, telemetry
+from shared import telemetry
 from shared.cluster.machine import machine_name
 from shared.config import settings
 from shared.db import insert_inbound_message
-from shared.maintenance_state import MaintenanceHold
+from shared.deploy.maintenance import admission, cohort, pause_owner
+from shared.deploy.maintenance.state import MaintenanceHold
 from tests.agent.test_maintenance import WHEN, _agent
 from tests.agent.test_maintenance import isolate as isolate
 
@@ -94,8 +95,8 @@ async def test_member_collision_is_waitable_and_freezes_nothing(
     db_conn.commit()
     pause_owner.begin_maintenance("move", WHEN)
 
-    with pytest.raises(maintenance_cohort.LifecycleCollisionError) as raised:
-        maintenance_cohort.prepare(
+    with pytest.raises(cohort.LifecycleCollisionError) as raised:
+        cohort.prepare(
             db_conn, machine=machine_name(), host_owner=owner, holder="move", acquired_at=WHEN
         )
     assert raised.value.waitable
@@ -103,14 +104,14 @@ async def test_member_collision_is_waitable_and_freezes_nothing(
 
     # The collision ran before the capture: the journal still holds a clean
     # preparing boundary, so the retry re-derives the cohort from scratch.
-    hold = maintenance.require_operation("move", WHEN).maintenance
+    hold = admission.require_operation("move", WHEN).maintenance
     assert hold is not None and hold.phase == "preparing" and hold.commands == {}
 
     # The competing terminate resolves; preparation proceeds without the agent.
     _resolve_lifecycle_command(db_conn, command)
     db_conn.execute("UPDATE agents_meta SET status='terminated' WHERE id=%s", (agent,))
     db_conn.commit()
-    hold = maintenance_cohort.prepare(
+    hold = cohort.prepare(
         db_conn, machine=machine_name(), host_owner=owner, holder="move", acquired_at=WHEN
     )
     assert hold.phase == "draining"
@@ -133,20 +134,20 @@ async def test_prepare_waits_for_resolving_command_then_proceeds(
     monkeypatch.setattr(agent_pause, "_LIFECYCLE_WAIT_POLL_SECONDS", 0.05)
     events = _events(monkeypatch)
 
-    real_prepare = maintenance_cohort.prepare
+    real_prepare = cohort.prepare
     resolved: list[bool] = []
 
-    def resolving_prepare(*args: Any, **kwargs: Any) -> maintenance_cohort.MaintenanceHold:
+    def resolving_prepare(*args: Any, **kwargs: Any) -> cohort.MaintenanceHold:
         try:
             return real_prepare(*args, **kwargs)
-        except maintenance_cohort.LifecycleCollisionError:
+        except cohort.LifecycleCollisionError:
             if not resolved:
                 resolved.append(True)
                 _resolve_lifecycle_command(db_conn, command)
                 db_conn.commit()
             raise
 
-    monkeypatch.setattr(maintenance_cohort, "prepare", resolving_prepare)
+    monkeypatch.setattr(cohort, "prepare", resolving_prepare)
     await asyncio.to_thread(agent_pause.prepare, "move", WHEN)
 
     hold = agent_pause._hold("move", WHEN)
@@ -178,7 +179,7 @@ async def test_prepare_aborts_when_collision_outlives_the_bound(
 
     with pytest.raises(RuntimeError, match=r"waited .*still unfinished after the") as raised:
         agent_pause.prepare("move", WHEN)
-    assert not isinstance(raised.value, maintenance_cohort.LifecycleCollisionError)
+    assert not isinstance(raised.value, cohort.LifecycleCollisionError)
     assert "unfinished lifecycle command" in str(raised.value)
 
     # Fail-closed: nothing was captured, and the hold stays preparing.
@@ -227,7 +228,7 @@ async def test_maintenance_command_refuses_without_wait(
 
     with pytest.raises(RuntimeError, match="refusing without a wait") as raised:
         agent_pause.prepare("move", WHEN)
-    assert not isinstance(raised.value, maintenance_cohort.LifecycleCollisionError)
+    assert not isinstance(raised.value, cohort.LifecycleCollisionError)
     assert [event["attributes"]["outcome"] for event in events] == ["refused"]
 
 
@@ -239,8 +240,8 @@ def test_parked_agent_lifecycle_command_is_waitable(
     db_conn.commit()
     pause_owner.begin_maintenance("move", WHEN)
 
-    with pytest.raises(maintenance_cohort.LifecycleCollisionError) as raised:
-        maintenance_cohort.prepare(
+    with pytest.raises(cohort.LifecycleCollisionError) as raised:
+        cohort.prepare(
             db_conn, machine=machine_name(), host_owner=None, holder="move", acquired_at=WHEN
         )
     assert raised.value.waitable
@@ -270,7 +271,7 @@ def test_parked_claimed_ordinary_work_settles(
     events = _events(monkeypatch)
     pause_owner.begin_maintenance("move", WHEN)
 
-    hold = maintenance_cohort.prepare(
+    hold = cohort.prepare(
         db_conn, machine=machine_name(), host_owner=None, holder="move", acquired_at=WHEN
     )
     assert hold.phase == "draining" and hold.parked == (agent,) and hold.commands == {}
@@ -325,7 +326,7 @@ def test_parked_claimed_lifecycle_outliving_the_bound_aborts(
 
     with pytest.raises(RuntimeError, match=r"waited .*still unfinished after the") as raised:
         agent_pause.prepare("move", WHEN)
-    assert not isinstance(raised.value, maintenance_cohort.LifecycleCollisionError)
+    assert not isinstance(raised.value, cohort.LifecycleCollisionError)
     assert "unfinished lifecycle command" in str(raised.value)
 
     # Fail-closed: nothing was captured, and the hold stays preparing.
@@ -368,17 +369,17 @@ def test_orphan_cas_miss_accepts_concurrent_settlement(
     message = insert_inbound_message(db_conn, agent, "orphan", "user")
     _claim(db_conn, message)
     db_conn.commit()
-    read_claims = maintenance_cohort.orphaned_claims
+    read_claims = cohort.orphaned_claims
 
     def already_settled(conn: psycopg.Connection[Any], **kwargs: Any) -> Any:
         rows = read_claims(conn, **kwargs)
         conn.execute("UPDATE inbound_messages SET status='done' WHERE id=%s", (message,))
         return rows
 
-    monkeypatch.setattr(maintenance_cohort, "orphaned_claims", already_settled)
+    monkeypatch.setattr(cohort, "orphaned_claims", already_settled)
     events = _events(monkeypatch)
     pause_owner.begin_maintenance("move", WHEN)
-    hold = maintenance_cohort.prepare(
+    hold = cohort.prepare(
         db_conn, machine=machine_name(), host_owner=None, holder="move", acquired_at=WHEN
     )
     assert hold.phase == "draining" and hold.parked == (agent,)
@@ -404,8 +405,8 @@ def test_parked_maintenance_command_refuses_without_wait(
     db_conn.commit()
     pause_owner.begin_maintenance("move", WHEN)
 
-    with pytest.raises(maintenance_cohort.LifecycleCollisionError) as raised:
-        maintenance_cohort.prepare(
+    with pytest.raises(cohort.LifecycleCollisionError) as raised:
+        cohort.prepare(
             db_conn, machine=machine_name(), host_owner=None, holder="move", acquired_at=WHEN
         )
     assert not raised.value.waitable
@@ -428,12 +429,12 @@ def test_parked_claim_guards_agree_on_waitability(
     db_conn.commit()
     hold = MaintenanceHold(parked=(agent,))
 
-    with pytest.raises(maintenance_cohort.LifecycleCollisionError) as collision_guard:
-        maintenance_cohort._refuse_inflight_lifecycle(
+    with pytest.raises(cohort.LifecycleCollisionError) as collision_guard:
+        cohort._refuse_inflight_lifecycle(
             db_conn, hold, frozenset[int](), holder="move", acquired_at=WHEN
         )
-    with pytest.raises(maintenance_cohort.LifecycleCollisionError) as resolved_guard:
-        maintenance_cohort._require_resolved(db_conn, hold)
+    with pytest.raises(cohort.LifecycleCollisionError) as resolved_guard:
+        cohort._require_resolved(db_conn, hold)
     assert collision_guard.value.waitable and resolved_guard.value.waitable
     assert collision_guard.value.agent_ids == resolved_guard.value.agent_ids == (agent,)
 
@@ -448,10 +449,10 @@ def test_parked_claim_guards_agree_on_waitability(
     _claim(db_conn, command)
     db_conn.commit()
 
-    with pytest.raises(maintenance_cohort.LifecycleCollisionError) as collision_refused:
-        maintenance_cohort._refuse_inflight_lifecycle(
+    with pytest.raises(cohort.LifecycleCollisionError) as collision_refused:
+        cohort._refuse_inflight_lifecycle(
             db_conn, hold, frozenset[int](), holder="move", acquired_at=WHEN
         )
-    with pytest.raises(maintenance_cohort.LifecycleCollisionError) as resolved_refused:
-        maintenance_cohort._require_resolved(db_conn, hold)
+    with pytest.raises(cohort.LifecycleCollisionError) as resolved_refused:
+        cohort._require_resolved(db_conn, hold)
     assert not collision_refused.value.waitable and not resolved_refused.value.waitable

@@ -38,8 +38,8 @@ from cli.release_transition.request import ReleaseRef
 from cli.start_identity import mark_phase
 from shared import cluster
 from shared.cluster import authority
-from shared.maintenance_state import MaintenanceHold
-from shared.start_inputs import configuration_digest
+from shared.deploy.maintenance.state import MaintenanceHold
+from shared.deploy.release.start_inputs import configuration_digest
 from tests.lifecycle.db_authority.test_release_fence import executor as executor
 from tests.lifecycle.db_authority.test_single_box import Born
 from tests.lifecycle.db_authority.test_single_box import born as born

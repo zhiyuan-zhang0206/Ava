@@ -7,7 +7,7 @@
 >
 > - **Increment A (persist + visualize) — superseded.** Nothing writes
 >   `cluster_target_sha` any more: the `cluster_pin` row
->   (`shared/cluster_pin.py`) holds the value the retired updater last wrote, and
+>   (`shared/deploy/state/cluster_pin.py`) holds the value the retired updater last wrote, and
 >   no operator surface shows it — a frozen value presented as current would be
 >   worse than none. The release record is the retained release journal: `ava
 >   status` prints each home's selected image (or the source checkout it runs),
@@ -96,7 +96,7 @@ rollback-to-last-known-good-SHA on a failed upgrade. Ship that first.
 - A failed upgrade rolls the node back to the last-known-good SHA.
 
 > **Landed (2026-06-02): increment A — persist + visualize.** Bullet 1 is done: a
-> single source of truth (`cluster_pin` table + `shared/cluster_pin.py`,
+> single source of truth (`cluster_pin` table + `shared/deploy/state/cluster_pin.py`,
 > migration 0026). The gateway writes `cluster_target_sha` after its local
 > update reaches the target (`cli/commands/update.py:_persist_cluster_pin`), and
 > `ava status` shows each node's HEAD vs the pin (read-only drift surfacing —

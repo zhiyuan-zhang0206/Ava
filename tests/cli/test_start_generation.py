@@ -10,8 +10,8 @@ from typing import Any
 import pytest
 
 from cli.commands.lifecycle.start_generation import launch_digest
-from shared.runtime_interpreter import source_digest
-from shared.start_inputs import configuration_digest
+from shared.deploy.release.runtime_interpreter import source_digest
+from shared.deploy.release.start_inputs import configuration_digest
 
 
 def test_development_generation_includes_dirty_and_untracked_source(tmp_path: Path) -> None:
@@ -125,7 +125,7 @@ def test_live_admission_requires_positive_absence(monkeypatch: pytest.MonkeyPatc
 def test_loaded_source_identity_is_explicit_and_changes_with_source(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from shared import runtime_interpreter
+    from shared.deploy.release import runtime_interpreter
 
     subprocess.run(  # noqa: S603 — fixed argv in private test repository/interpreter
         ["git", "init", "-q", str(tmp_path)], check=True
@@ -177,7 +177,7 @@ class Poison(importlib.abc.MetaPathFinder):
         if fullname in {'shared.config', 'shared.paths', 'shared.host.env.dotenv_boot'}:
             raise AssertionError('Settings preload: ' + fullname)
 sys.meta_path.insert(0, Poison())
-import shared.runtime_interpreter
+import shared.deploy.release.runtime_interpreter
 assert 'shared.config' not in sys.modules
 """
     subprocess.run(  # noqa: S603 — fixed argv in private test repository/interpreter

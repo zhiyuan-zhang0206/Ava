@@ -95,7 +95,7 @@ def _ours(facts: Facts) -> bool:
 
 
 def selection_payload(names: list[str]) -> bytes:
-    """Byte-identical to what `shared.service_selection` writes for an except-list."""
+    """Byte-identical to what `shared.deploy.lifecycle.service_selection` writes for an except-list."""
     import json
 
     return (json.dumps({"version": 1, "mode": "except", "names": sorted(names)}) + "\n").encode()

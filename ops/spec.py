@@ -45,20 +45,20 @@ from ops.roster.service_spec import (
 )
 from shared.cluster.machine import MachineRoles
 from shared.config import settings
-from shared.log import logger
-from shared.native_process.os_platform import IS_WINDOWS
-from shared.platform_probes import (
+from shared.host.system.probes import (
     browser_incapability,
     browser_mcp_incapability,
     permissions_helper_incapability,
     unix_sockets_available,
 )
+from shared.log import logger
+from shared.native_process.os_platform import IS_WINDOWS
 from shared.telemetry.observability import collector_allowed_for_home, gateway_observability_home
 
 
 def _bind_runtime_command(spec: ServiceSpec) -> ServiceSpec:
     """Bind Python services to the loaded runtime without changing their gates."""
-    from shared.runtime_interpreter import WHEEL_RUNTIME, runtime_python
+    from shared.deploy.release.runtime_interpreter import WHEEL_RUNTIME, runtime_python
 
     prefix = ".venv/bin/python "
     if not WHEEL_RUNTIME or not spec.cmd.startswith(prefix):

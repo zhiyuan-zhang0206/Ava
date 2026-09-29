@@ -29,7 +29,7 @@ unknown operating system, C library, interpreter or malformed field refuses;
 nothing is guessed.
 
 Standard library only: the bare release-store contract imports this module
-through `shared.runtime_release`.
+through `shared.deploy.release.runtime_release`.
 """
 
 from __future__ import annotations

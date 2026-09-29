@@ -10,8 +10,8 @@ import sys
 from pathlib import Path
 
 from shared import runtime_binaries
+from shared.host.system.backend import get_backend
 from shared.pg_tools import pg_tool
-from shared.platform_backend import get_backend
 
 
 def _installed_server() -> Path | None:

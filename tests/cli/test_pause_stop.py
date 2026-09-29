@@ -18,9 +18,10 @@ from cli.commands.lifecycle import stop as entry
 from cli.commands.lifecycle._pause_resume import StartDelegation, resume_after_start
 from cli.parsers import build_parser
 from ops import agent_pause
-from shared import maintenance, pause_owner, start_serving
+from shared.deploy.lifecycle import start_serving
+from shared.deploy.maintenance import admission, pause_owner
+from shared.deploy.maintenance.state import MaintenanceHold
 from shared.exit_codes import SERVICES_NOT_READY_EXIT_CODE
-from shared.maintenance_state import MaintenanceHold
 from shared.sessions.backend import PtySessionBackend
 from tests.agent.test_maintenance import WHEN
 from tests.agent.test_maintenance import isolate as isolate
@@ -52,8 +53,8 @@ def dependencies(monkeypatch: pytest.MonkeyPatch) -> None:
         ],
     )
     monkeypatch.setattr(command, "ops_quiescent", lambda _timeout: None)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr("shared.proc.hosting_supervised_session", lambda: None)
-    monkeypatch.setattr("shared.host_deploy_state.set_posture", lambda _value: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("shared.host.proc.hosting_supervised_session", lambda: None)
+    monkeypatch.setattr("shared.deploy.state.host_deploy_state.set_posture", lambda _value: None)  # pyright: ignore[reportUnknownArgumentType]
 
 
 def test_pause_preserves_unselected_process_and_real_pty(
@@ -79,7 +80,7 @@ def test_pause_preserves_unselected_process_and_real_pty(
     assert entry.cmd_pause(timeout=5) == 0
     assert orchestration.poll() is None
     assert terminal.has_session(name) and identity.live()
-    current = maintenance.snapshot()
+    current = admission.snapshot()
     assert current is not None and current.maintenance is not None
     assert current.maintenance.phase == "stopped"
 
@@ -101,7 +102,7 @@ def test_root_stop_refusal_keeps_hold_without_force(
     assert entry.cmd_pause(timeout=0.2) == 1
     assert service.poll() is None
     assert psutil.Process(service.pid).create_time() == before
-    assert maintenance.held()
+    assert admission.held()
 
 
 def test_full_stop_closes_real_idle_terminal_after_drain(
@@ -137,15 +138,15 @@ def test_normal_start_releases_hold_only_after_successful_readiness(
 
     @resume_after_start
     def start(result: int) -> int:
-        maintenance.require_start_allowed()
-        assert maintenance.held()
+        admission.require_start_allowed()
+        assert admission.held()
         return result
 
     assert start(4) == 4
-    assert maintenance.held()
+    assert admission.held()
     assert "hold released" not in capsys.readouterr().out
     assert start(0) == 0
-    assert not maintenance.held()
+    assert not admission.held()
     # The start's status snapshot still read paused; the release is reported.
     assert "maintenance hold released" in capsys.readouterr().out
 
@@ -159,17 +160,17 @@ def test_delegated_start_leaves_authorization_and_resume_with_child(
     monkeypatch.setattr("ops.cluster_pause.unpause_local_cluster", unpause)
 
     def child() -> int:
-        assert not maintenance.start_authorized()
-        assert maintenance.held()
+        assert not admission.start_authorized()
+        assert admission.held()
         return 0
 
     @resume_after_start
     def start() -> StartDelegation:
-        assert maintenance.start_authorized()
+        assert admission.start_authorized()
         return StartDelegation(child)
 
     assert start() == 0
-    assert maintenance.held()
+    assert admission.held()
     unpause.assert_not_called()
 
 
@@ -178,7 +179,7 @@ def test_plain_start_and_parser_need_no_manual_operation(
 ) -> None:
     @resume_after_start
     def start() -> int:
-        assert not maintenance.held()
+        assert not admission.held()
         return 0
 
     assert start() == start() == 0
@@ -206,15 +207,16 @@ def test_repeated_stop_needs_no_live_database_or_host(
 ) -> None:
     dependencies(monkeypatch)
     drained()
-    maintenance.set_phase("local", WHEN, "stopping")
-    maintenance.set_phase("local", WHEN, "stopped")
+    admission.set_phase("local", WHEN, "stopping")
+    admission.set_phase("local", WHEN, "stopped")
     monkeypatch.setattr(command, "pause_agents", agent_pause.pause_agents)
     monkeypatch.setattr(
         agent_pause, "host_identity", MagicMock(side_effect=AssertionError("host is down"))
     )
     monkeypatch.setattr(agent_pause, "connect", MagicMock(side_effect=AssertionError("DB is down")))
     monkeypatch.setattr(
-        "shared.host_deploy_state.set_posture", MagicMock(side_effect=AssertionError("DB is down"))
+        "shared.deploy.state.host_deploy_state.set_posture",
+        MagicMock(side_effect=AssertionError("DB is down")),
     )
     assert entry.cmd_pause(timeout=1) == 0
 
@@ -223,7 +225,7 @@ def test_failed_flush_cannot_be_released_by_a_healthy_start(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     drained()
-    current = maintenance.require_operation("local", WHEN)
+    current = admission.require_operation("local", WHEN)
     assert current.maintenance is not None
     failed = MaintenanceHold("draining", commands={42: 7}, failures={42: "final flush failed"})
     pause_owner.change_maintenance("local", WHEN, current.maintenance, failed)
@@ -238,7 +240,7 @@ def test_failed_flush_cannot_be_released_by_a_healthy_start(
         unpause_local_cluster()
     with pytest.raises(RuntimeError, match="failed continuation/flush"):
         agent_pause.resume_agents()
-    assert maintenance.held()
+    assert admission.held()
 
 
 def test_two_pause_start_cycles_reuse_identity_not_old_operation(
@@ -255,9 +257,9 @@ def test_two_pause_start_cycles_reuse_identity_not_old_operation(
     for _ in range(2):
         assert entry.cmd_pause(timeout=3) == 0
         holders.append(pause_owner.read().holder)
-        assert maintenance.held()
+        assert admission.held()
         assert starts() == 0
-        assert not maintenance.held()
+        assert not admission.held()
     assert holders[0] != holders[1]
 
 
@@ -334,7 +336,7 @@ def test_explicit_force_stops_host_and_preserves_only_pause_terminals(
     assert rc == 0
     assert len(root_calls) == 1 and root_calls[0]["force"] is True
     assert terminal.has_session(name) is not full_stop
-    assert not maintenance.held(), "force must not invent a durable flush receipt"
+    assert not admission.held(), "force must not invent a durable flush receipt"
 
 
 # ── services restore after a data-plane stop failure (issue #2307) ────────────
@@ -568,7 +570,7 @@ def test_pause_refused_inside_an_exec_domain(monkeypatch: pytest.MonkeyPatch) ->
     process group; the refusal names `run_background` — a pause retains
     persistent terminals, so a session hosted there survives."""
     dependencies(monkeypatch)
-    monkeypatch.setattr("shared.proc.hosting_exec_domain", lambda: "agent.exec_child")
+    monkeypatch.setattr("shared.host.proc.hosting_exec_domain", lambda: "agent.exec_child")
 
     with pytest.raises(RuntimeError, match=r"ava\.shell\.run_background"):
         entry.cmd_pause(timeout=1)
@@ -579,7 +581,7 @@ def test_stop_refused_inside_an_exec_domain(monkeypatch: pytest.MonkeyPatch) -> 
     unit's persistent terminals — the refusal points at a shell no ava session
     hosts instead of `run_background`."""
     dependencies(monkeypatch)
-    monkeypatch.setattr("shared.proc.hosting_exec_domain", lambda: "agent.exec_child")
+    monkeypatch.setattr("shared.host.proc.hosting_exec_domain", lambda: "agent.exec_child")
 
     with pytest.raises(RuntimeError, match="login shell"):
         entry.cmd_stop(require_confirmation=False, timeout=1)

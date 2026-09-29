@@ -30,7 +30,7 @@ service ([[services/ava_root/ava_root.ava.okf.md]] is the server).
 - `windows/native.py` — current-user security descriptors and native command
   line parsing.
 
-Consumers below the service: the start-serving gate (`shared/start_serving.py`)
+Consumers below the service: the start-serving gate (`shared/deploy/lifecycle/start_serving.py`)
 authenticates the live root generation through `RootClient.status()`, and the
 Windows terminal backend (`shared/sessions/windows/terminal/`, dispatched by
 `shared/sessions/backend.py`) requests terminal births from the root and queries

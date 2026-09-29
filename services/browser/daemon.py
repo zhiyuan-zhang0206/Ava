@@ -38,9 +38,9 @@ from pathlib import Path
 from loguru import logger
 
 from shared.config import settings
+from shared.host.system.probes import browser_incapability, resolve_chrome_binary
 from shared.native_process.os_platform import IS_WINDOWS
 from shared.paths import logs_dir
-from shared.platform_probes import browser_incapability, resolve_chrome_binary
 
 from . import macos_readiness
 from . import profile as browser_profile
@@ -64,7 +64,7 @@ _CDP_WATCH_INTERVAL_S = 5.0
 def assert_browser_capable() -> None:
     """Raise RuntimeError with a precise, actionable message if this machine
     cannot host the shared headed browser. Called by the converge preflight and
-    main(). The capability check itself lives in shared.platform_probes
+    main(). The capability check itself lives in shared.host.system.probes
     (browser_incapability); this raises its reason so a launch fails loudly with
     the same wording the operator sees in `ava status`."""
     reason = browser_incapability()

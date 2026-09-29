@@ -12,7 +12,7 @@ from agent.extensions import load_extensions
 from ops.spec import plugin_services
 from services.agent_host.daemon import _plugins_fingerprint
 from shared import paths, plugins_config
-from shared.runtime_interpreter import runtime_plugins_dir
+from shared.deploy.release.runtime_interpreter import runtime_plugins_dir
 
 
 def require(value: bool, message: str) -> None:  # noqa: FBT001 — assertion predicate.

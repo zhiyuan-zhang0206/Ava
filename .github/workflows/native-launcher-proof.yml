@@ -11,7 +11,7 @@ on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
     paths:
-      - 'shared/os_boot_unit.py'
+      - 'shared/host/system/boot_unit.py'
       - 'cli/commands/lifecycle/root_driver.py'
       - 'cli/commands/lifecycle/start.py'
       - 'services/ava_root/**'
@@ -27,14 +27,14 @@ on:
       - 'cli/commands/lifecycle/stop.py'
       - 'tests/lifecycle/native_root/**'
       - 'tests/services/test_ava_root_daemon.py'
-      - 'shared/native_job_observation.py'
-      - 'shared/managed_writer_observation.py'
-      - 'shared/managed_writer_barrier.py'
+      - 'shared/host/system/job_observation.py'
+      - 'shared/deploy/writers/observation.py'
+      - 'shared/deploy/writers/barrier.py'
       - 'shared/daemon/http_transport.py'
       - 'shared/cluster/transport_encryption.py'
       - 'scripts/release_proofs/prove_native_launcher_reads.py'
-      - 'tests/shared/test_native_job_observation.py'
-      - 'tests/shared/test_managed_writer_observation.py'
+      - 'tests/shared/test_job_observation.py'
+      - 'tests/shared/test_observation.py'
       - 'tests/conftest.py'
       - 'tests/_*.py'
       - '.github/actions/install-pg-redis/**'
@@ -68,9 +68,9 @@ jobs:
         uses: ./.github/actions/install-pg-redis
       - uses: ./.github/actions/uv-sync
       - if: runner.os == 'Linux'
-        run: uv run pytest tests/shared/test_native_job_observation.py tests/shared/test_managed_writer_observation.py -q
+        run: uv run pytest tests/shared/test_job_observation.py tests/shared/test_observation.py -q
       - if: runner.os == 'Linux'
-        run: uv run pyright shared/native_job_observation.py shared/managed_writer_observation.py scripts/release_proofs/prove_native_launcher_reads.py tests/shared/test_native_job_observation.py
+        run: uv run pyright shared/host/system/job_observation.py shared/deploy/writers/observation.py scripts/release_proofs/prove_native_launcher_reads.py tests/shared/test_job_observation.py
       - name: Actual read-only OS query (no job registration)
         run: uv run python scripts/release_proofs/prove_native_launcher_reads.py
 

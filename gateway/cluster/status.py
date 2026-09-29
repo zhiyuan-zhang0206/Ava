@@ -49,10 +49,10 @@ from shared.cluster.machine import (
     is_observability_station,
     machine_name,
 )
-from shared.cluster_drift import prod_source_head_sha
-from shared.cluster_lock import DeployLease
 from shared.config import settings
-from shared.resource_sample import ResourceSample
+from shared.deploy.git.cluster_drift import prod_source_head_sha
+from shared.deploy.state.cluster_lock import DeployLease
+from shared.host.resource_sample import ResourceSample
 from shared.telemetry.observability import cluster_label
 
 router = APIRouter()
@@ -438,7 +438,7 @@ async def _probe_agent_runner(
 
 
 def _read_deploy_lease() -> DeployLease | None:
-    """The live deploy lease (`shared.cluster_lock.read_update_lease`), or None when
+    """The live deploy lease (`shared.deploy.state.cluster_lock.read_update_lease`), or None when
     the cluster is free / the row cannot be read.
 
     Read once per roster assembly and stamped onto every row: a hold is a
@@ -456,7 +456,7 @@ def _read_deploy_lease() -> DeployLease | None:
     """
     import psycopg
 
-    from shared.cluster_lock import read_update_lease
+    from shared.deploy.state.cluster_lock import read_update_lease
 
     try:
         return read_update_lease()
@@ -470,7 +470,7 @@ def _read_deploy_lease() -> DeployLease | None:
 def _local_resource_sample() -> ResourceSample | None:
     """One live resource reading for the gateway's own machine (no status_snapshot call)."""
     try:
-        from shared.resource_sample import resource_sample
+        from shared.host.resource_sample import resource_sample
 
         return resource_sample()
     except Exception:  # fail-fast-ok: psutil may not be installed; degrade gracefully

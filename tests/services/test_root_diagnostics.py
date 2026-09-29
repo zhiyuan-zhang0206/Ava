@@ -292,6 +292,6 @@ def test_missing_brew_probe_is_unavailable_not_an_empty_healthy_set(
     def missing(*_args: object, **_kwargs: object) -> NoReturn:
         raise FileNotFoundError("brew")
 
-    monkeypatch.setattr("shared.proc.run_bounded", missing)
+    monkeypatch.setattr("shared.host.proc.run_bounded", missing)
     with pytest.raises(FileNotFoundError):
         probes.brew_pins()  # ProbeRunner maps inspection failure to UNAVAILABLE.

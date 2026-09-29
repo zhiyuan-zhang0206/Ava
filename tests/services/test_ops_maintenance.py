@@ -11,10 +11,10 @@ import pytest
 
 from services.agent_ops import daemon
 from services.agent_ops import maintenance as activity
-from shared import pause_owner
 from shared.daemon.health import stop_health_server
 from shared.daemon.http_transport import start_daemon_http
-from shared.maintenance_state import MaintenanceHold
+from shared.deploy.maintenance import pause_owner
+from shared.deploy.maintenance.state import MaintenanceHold
 from tests.agent.test_maintenance import WHEN
 from tests.agent.test_maintenance import isolate as isolate
 

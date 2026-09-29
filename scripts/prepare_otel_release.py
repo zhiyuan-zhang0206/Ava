@@ -5,7 +5,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from shared.collector_artifact import (
+from shared.deploy.release.collector_artifact import (
     download_and_verify,
     platform_tag,
 )

@@ -69,10 +69,10 @@ from services.pitr.stores.logical_dump_names import (
 )
 from shared.config import settings
 from shared.db import connect, connect_url, direct_db_url
+from shared.host.private_storage import ensure_private_dir, ensure_private_file
 from shared.native_process.os_platform import LockTimeoutError, file_lock
 from shared.pg_admin import local_owner_authority
 from shared.pg_tools import pg_tool
-from shared.private_storage import ensure_private_dir, ensure_private_file
 
 _log = logging.getLogger(__name__)
 

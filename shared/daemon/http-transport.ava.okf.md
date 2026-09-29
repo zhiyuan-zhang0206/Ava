@@ -32,7 +32,7 @@ leases or managed-writer controllers. Native read errors remain unknown; PID
 reuse stays distinct from the expected process exiting. This evidence grants no
 startup or mutation authority.
 
-`shared.managed_writer_observation` adds session and launcher facts for the
+`shared.deploy.writers.observation` adds session and launcher facts for the
 prepared inventory producer. Its `UnitObserver` route
 checks an outstanding challenge before and after off-loop OS reads. Exact live
 processes, exited processes and reused PID identities remain distinct. Session
@@ -46,7 +46,7 @@ mounts only routes explicitly supplied by a caller.
 
 ## Native launcher observation
 
-`shared.native_job_observation` reuses the existing native user-crontab and
+`shared.host.system.job_observation` reuses the existing native user-crontab and
 launchd surfaces without importing Settings or registering jobs. Expected launchd
 identity is the plist Label plus SHA256 of its raw bytes; cron identity is SHA256
 of the exact job line without its newline. Reads are bounded by the outstanding

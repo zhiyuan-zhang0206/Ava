@@ -1,6 +1,6 @@
 """A finite executor's deploy lease survives a missed renewal round.
 
-`shared.deploy_timing` promises that a missed round (a slow database, one
+`shared.deploy.progress_timeout` promises that a missed round (a slow database, one
 dropped connection) is never fatal: a renewal that raises is retried until
 the lease could lapse before the next round. A renewal that answers "not
 yours" — another holder, or already expired — loses it at once. The fleet
@@ -18,7 +18,8 @@ import pytest
 
 from cli.release_fleet.gateway import DeployLease
 from services.pitr.activation import lease as lease_module
-from shared import cluster_lock, deploy_timing
+from shared.deploy import progress_timeout
+from shared.deploy.state import cluster_lock
 
 _INTERVAL_S = 0.01
 _TTL_S = 0.2
@@ -26,7 +27,7 @@ _TTL_S = 0.2
 
 @pytest.fixture(autouse=True)
 def _fast_rounds(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(deploy_timing, "LEASE_RENEW_INTERVAL_S", _INTERVAL_S)
+    monkeypatch.setattr(progress_timeout, "LEASE_RENEW_INTERVAL_S", _INTERVAL_S)
     monkeypatch.setattr(lease_module, "LEASE_RENEW_INTERVAL_S", _INTERVAL_S)
     monkeypatch.setattr(cluster_lock, "LEASE_RENEW_INTERVAL_S", _INTERVAL_S)
     monkeypatch.setattr(cluster_lock, "LOCK_TTL_S", _TTL_S)

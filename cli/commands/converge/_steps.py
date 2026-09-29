@@ -9,9 +9,9 @@ import sys
 from pathlib import Path
 
 from cli.commands.converge.spec import ConvergeCtx
+from shared.host.private_storage import converge_private_tree, ensure_private_file
+from shared.host.system.backend import get_backend
 from shared.paths import repo_root
-from shared.platform_backend import get_backend
-from shared.private_storage import converge_private_tree, ensure_private_file
 
 # --- host-wiring steps (no preconditions) ---------------------------------
 

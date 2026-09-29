@@ -14,7 +14,7 @@ from unittest.mock import patch
 
 import pytest
 
-from shared import private_storage
+from shared.host import private_storage
 
 
 def _mode(path: Path) -> int:

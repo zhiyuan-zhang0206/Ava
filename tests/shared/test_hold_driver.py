@@ -23,13 +23,13 @@ from typing import cast
 import psutil
 import pytest
 
-from shared.hold_driver import HoldDriver, ProcessRef, liveness, mint_driver
+from shared.deploy.maintenance.hold_driver import HoldDriver, ProcessRef, liveness, mint_driver
 from shared.native_process.os_platform import IS_LINUX
 
 _REPO = Path(__file__).resolve().parents[2]
 
 _MINT = (
-    "import json; from shared.hold_driver import mint_driver; "
+    "import json; from shared.deploy.maintenance.hold_driver import mint_driver; "
     "print(json.dumps(mint_driver().encode(), sort_keys=True), flush=True)"
 )
 
@@ -123,7 +123,7 @@ def test_without_a_readable_leader_the_direct_parent_is_the_fallback(
     session leader cannot be found in the ancestry -- no `getsid`, a dead
     leader, a reparented command -- the DIRECT PARENT is the recorded root,
     never a topmost shim."""
-    from shared import hold_driver
+    from shared.deploy.maintenance import hold_driver
 
     class _Proc:
         def __init__(self, pid: int) -> None:
@@ -212,7 +212,7 @@ def test_the_relay_predicate_reads_only_inline_command_shells() -> None:
     """`_is_relay_shim` decides the exclusion: an inline command (`-c`, `-lc`)
     is a one-shot relay; a script file, an interactive shell and non-shell
     commands are not."""
-    from shared import hold_driver
+    from shared.deploy.maintenance import hold_driver
 
     class _CmdProc:
         def __init__(self, argv: list[str]) -> None:

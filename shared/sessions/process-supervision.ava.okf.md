@@ -12,7 +12,7 @@ tags:
 
 `shared/sessions/posixproc.py`, `shared/sessions/windows/winproc.py`, `shared/sessions/backend.py`,
 `shared/daemon/shutdown.py`, `shared/daemon/health.py`,
-`shared/start_serving.py`: services, orchestration sessions and agent
+`shared/deploy/lifecycle/start_serving.py`: services, orchestration sessions and agent
 processes are **native** sessions; agent shells run on per-session **PTY
 hosts** ([[shared/sessions/pty/pty_sessions.ava.okf.md]]); Windows uses
 winproc. Start-serving gates recovery until readiness passes. Daemon health

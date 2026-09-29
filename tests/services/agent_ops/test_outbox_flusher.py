@@ -15,8 +15,8 @@ from typing import Any
 import pytest
 
 from services.agent_ops import outbox_flusher
-from shared import maintenance
 from shared.agents.messages import delivery_outbox as outbox
+from shared.deploy.maintenance import admission
 
 
 def _limits(interval: float) -> outbox.DeliveryOutboxLimits:
@@ -63,7 +63,7 @@ async def test_run_performs_an_immediate_pass_then_paces(
 
     monkeypatch.setattr(outbox, "flush", _fake_flush)
     monkeypatch.setattr(outbox, "limits", lambda: _limits(3600.0))
-    monkeypatch.setattr(maintenance, "quiesced", lambda: False)
+    monkeypatch.setattr(admission, "quiesced", lambda: False)
 
     task = asyncio.create_task(outbox_flusher._run(object(), 3600.0))  # type: ignore[arg-type]
     try:
@@ -85,7 +85,7 @@ async def test_run_defers_while_quiesced(monkeypatch: pytest.MonkeyPatch) -> Non
 
     monkeypatch.setattr(outbox, "flush", _fake_flush)
     monkeypatch.setattr(outbox, "limits", lambda: _limits(0.01))
-    monkeypatch.setattr(maintenance, "quiesced", lambda: state["quiesced"])
+    monkeypatch.setattr(admission, "quiesced", lambda: state["quiesced"])
 
     task = asyncio.create_task(outbox_flusher._run(object(), 0.01))  # type: ignore[arg-type]
     try:

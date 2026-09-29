@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from cli.commands.observability import lgtm
-from shared.service_selection import ServiceSelection
+from shared.deploy.lifecycle.service_selection import ServiceSelection
 
 
 def _wire(
@@ -13,7 +13,9 @@ def _wire(
 ) -> tuple[Path, list[dict[str, object]]]:
     marker = tmp_path / "lgtm-host"
     monkeypatch.setattr(lgtm, "lgtm_host_marker", lambda: marker)
-    monkeypatch.setattr("shared.service_selection.read_selection", lambda: selection)
+    monkeypatch.setattr(
+        "shared.deploy.lifecycle.service_selection.read_selection", lambda: selection
+    )
     calls: list[dict[str, object]] = []
 
     def start(**kwargs: object) -> int:

@@ -152,7 +152,7 @@ def _bootout_and_wait() -> bool:
 
 
 def _ensure_launchd(home: Path, repo: Path, config: RedisBridgeConfig) -> None:
-    from shared.os_cron import os_jobs_enabled, skip_os_job
+    from shared.host.system.cron import os_jobs_enabled, skip_os_job
 
     if not os_jobs_enabled():
         skip_os_job("Redis bridge LaunchAgent")

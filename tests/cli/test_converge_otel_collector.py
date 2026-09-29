@@ -19,7 +19,7 @@ import pytest
 import yaml
 
 from cli.commands.observability import otel_collector as oc
-from shared import collector_artifact as artifact
+from shared.deploy.release import collector_artifact as artifact
 from shared.host.net import resilience
 
 

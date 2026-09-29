@@ -20,7 +20,7 @@ import pytest
 from cli.commands.lifecycle import service_stop as strict
 from cli.commands.lifecycle._maintenance_stop_report import StopIncompleteError
 from ops import pty_close_notices
-from shared import maintenance
+from shared.deploy.maintenance import admission
 from shared.native_process.os_platform import IS_WINDOWS
 from shared.sessions.backend import PtySessionBackend
 from shared.sessions.pty import session_tree
@@ -291,7 +291,7 @@ def test_release_stop_closes_terminals_after_root_and_before_evidence(
     def drained(*_args: object) -> SimpleNamespace:
         return SimpleNamespace(maintenance=SimpleNamespace(phase="drained"))
 
-    monkeypatch.setattr(maintenance, "require_operation", drained)
+    monkeypatch.setattr(admission, "require_operation", drained)
     from cli.release_fleet.policy import FleetPolicy
 
     transition = object.__new__(local.LocalTransition)
@@ -353,7 +353,7 @@ def test_pitr_stop_apps_closes_terminals_after_root_and_before_evidence(
     from cli.commands.lifecycle import root_driver
     from cli.release_transition.pitr import transition as pitr_transition
     from ops import pty_close_notices
-    from shared import maintenance
+    from shared.deploy.maintenance import admission
 
     terminal = PtySessionBackend()
     _stop_env(monkeypatch, home, terminal)
@@ -382,7 +382,7 @@ def test_pitr_stop_apps_closes_terminals_after_root_and_before_evidence(
     def drained(*_args: object) -> SimpleNamespace:
         return SimpleNamespace(maintenance=SimpleNamespace(phase="drained"))
 
-    monkeypatch.setattr(maintenance, "require_operation", drained)
+    monkeypatch.setattr(admission, "require_operation", drained)
     driver = object.__new__(pitr_transition.PitrTransition)
     driver.request = SimpleNamespace(id=uuid4())  # type: ignore[assignment]
     # A non-None data_stop skips the post-evidence PostgreSQL capture: this
@@ -405,7 +405,7 @@ def test_pitr_stop_apps_evidence_check_refuses_a_terminal_live_after_closure(
     from cli.commands.lifecycle import maintenance as maintenance_commands
     from cli.commands.lifecycle import root_driver
     from cli.release_transition.pitr import transition as pitr_transition
-    from shared import maintenance
+    from shared.deploy.maintenance import admission
 
     def drained(*_args: object) -> SimpleNamespace:
         return SimpleNamespace(maintenance=SimpleNamespace(phase="drained"))
@@ -429,7 +429,7 @@ def test_pitr_stop_apps_evidence_check_refuses_a_terminal_live_after_closure(
     driver.request = SimpleNamespace(id=uuid4())  # type: ignore[assignment]
     monkeypatch.setattr(pitr_transition.PitrTransition, "at", property(lambda _self: WHEN))
     monkeypatch.setattr(pitr_transition, "require_inputs", _no_op)
-    monkeypatch.setattr(maintenance, "require_operation", drained)
+    monkeypatch.setattr(admission, "require_operation", drained)
     monkeypatch.setattr(strict, "await_terminal_work", no_busy)
     monkeypatch.setattr(maintenance_commands, "stop", root_stop)
     monkeypatch.setattr(strict, "close_release_terminals", closed_nothing)

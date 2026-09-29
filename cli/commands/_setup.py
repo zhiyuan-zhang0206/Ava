@@ -19,8 +19,8 @@ from dataclasses import dataclass
 from typing import NotRequired, TypedDict, cast
 
 from shared.config import get_field
+from shared.host.system.backend import get_backend
 from shared.paths import repo_root
-from shared.platform_backend import get_backend
 
 
 class SetupValues(TypedDict):

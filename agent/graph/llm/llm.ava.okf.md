@@ -30,7 +30,7 @@ Ava agent's LLM invocation layer — containing tool schema definition (`agent/l
 
 - [[tool-calls.ava.okf.md]] — LLM-generated code executed by exec node
 - [[system-prompt.ava.okf.md]] — dynamic assembly of system prompt
-- [[state.ava.okf.md]] — AIMessage stored into state.messages
+- [[agent/state.ava.okf.md]] — AIMessage stored into state.messages
 - [[db.ava.okf.md]] — Redis pub/sub wakeup for inbound messages
 
 ## Entry points

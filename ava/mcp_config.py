@@ -32,10 +32,10 @@ import json
 from pathlib import Path
 from typing import Any, TypedDict
 
+from shared.deploy.release.runtime_interpreter import external_plugin_read_root
+from shared.host.system.probes import display_available, unix_sockets_available
 from shared.native_process.os_platform import IS_WINDOWS
 from shared.paths import ava_home, mcps_dir, repo_root
-from shared.platform_probes import display_available, unix_sockets_available
-from shared.runtime_interpreter import external_plugin_read_root
 
 
 class MCPError(Exception):

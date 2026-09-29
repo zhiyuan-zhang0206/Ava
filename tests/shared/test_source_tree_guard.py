@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from shared import source_tree_guard as stg
+from shared.deploy.git import source_tree_guard as stg
 
 
 def _git(source: Path, *args: str) -> str:

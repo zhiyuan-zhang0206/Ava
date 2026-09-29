@@ -42,7 +42,7 @@ from pathlib import Path
 
 from cli.start_runtime import StartRuntime
 from shared.cluster.machine import MachineRoles
-from shared.private_storage import (
+from shared.host.private_storage import (
     private_file_problem,
     private_tree_root_problem,
     scan_non_regular_nodes,
@@ -152,7 +152,7 @@ def _port_findings(repo: Path, home: Path, roles: MachineRoles) -> tuple[list[st
     from cli.commands.lifecycle.root_driver import _root_tree_roster
     from shared import cluster
     from shared.cluster.port_preflight import env_port_drift
-    from shared.service_selection import resolve_selection
+    from shared.deploy.lifecycle.service_selection import resolve_selection
 
     try:
         available = {s.session for s in _roster.build_services()}
@@ -273,7 +273,7 @@ def _venv_findings(repo: Path, *, check_launcher: bool) -> list[str]:
       `ava restart` never execs it, and refusing a bounce over an entry point it
       does not use would block a viable restart.
     """
-    from shared.platform_backend import get_backend
+    from shared.host.system.backend import get_backend
 
     backend = get_backend()
     findings = _entrypoint_findings(

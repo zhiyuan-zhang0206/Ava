@@ -35,9 +35,9 @@ import subprocess
 import sys
 from pathlib import Path
 
-from shared import host_version
 from shared import plugin_manifest as pm
-from shared.proc import run_bounded
+from shared.deploy.git import host_version
+from shared.host.proc import run_bounded
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 

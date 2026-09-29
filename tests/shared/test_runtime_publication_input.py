@@ -5,13 +5,13 @@ import json
 import pytest
 from pydantic import ValidationError
 
-from shared.managed_writer_observation import ExpectedUnitWriters
-from shared.runtime_publication_input import (
+from shared.deploy.release.runtime_publication_input import (
     _published_unit,
     _receipt_expected,
     read_publication_selector,
     resolve_runtime_publication_input,
 )
+from shared.deploy.writers.observation import ExpectedUnitWriters
 
 
 def test_source_runtime_has_no_publication_input() -> None:

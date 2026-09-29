@@ -94,12 +94,12 @@ from shared.cluster import get_record, identity_from_url, record_redis_port
 from shared.cluster.derive import REDIS_PASSWORD_ENV
 from shared.cluster.registry import ClusterRecord
 from shared.config import settings
-from shared.deploy_timing import UNIT_BUNDLE_TTL_S
+from shared.deploy.progress_timeout import UNIT_BUNDLE_TTL_S
+from shared.deploy.release.verified_file import regular_bytes
 from shared.host.env.dotenv_file import upsert_env
 from shared.host.net.url_secret import url_with_userinfo
+from shared.host.private_storage import ensure_private_dir, write_private_bytes
 from shared.paths import ava_home
-from shared.private_storage import ensure_private_dir, write_private_bytes
-from shared.verified_file import regular_bytes
 
 _ADMIN_ENV = "AVA_REDIS_ADMIN_PASSWORD"
 _URL_ENV = "AVA_REDIS_URL"
@@ -726,7 +726,7 @@ def admitted_record(home: Path) -> ClusterRecord:
     gateway home: no application root, terminals or active release operation."""
     from cli.commands.lifecycle.root_driver import require_root_absent
     from cli.commands.lifecycle.service_stop import require_no_terminals
-    from shared.release_operation import require_configuration_write_authorized
+    from shared.deploy.release.operation import require_configuration_write_authorized
 
     if home != ava_home().resolve():
         raise CutoverRefusedError(
@@ -777,7 +777,7 @@ def main(argv: list[str] | None = None) -> int:
             _run(home, execute=False, plan=plan)
             print("[dry-run] no changes made.")
             return 0
-        from shared.home_lifecycle_locks import resource_lock
+        from shared.deploy.lifecycle.home_lifecycle_locks import resource_lock
         from shared.native_process.os_platform import file_lock
 
         # The same home lock order as `ava start`: start intent, then resources.

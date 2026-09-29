@@ -102,8 +102,8 @@ single-box hosts collapse to the local receiver even when their secret is set.
 - OTel SDK (`opentelemetry-*`) — imported lazily inside `_build_providers` /
   `_emit_log`, so flag-off processes never pay for it.
 - `shared/config/observability.py` — the producer-local `telemetry_otlp_*`
-  settings plus gateway-local backend read/write URLs.
-- `shared/collector_artifact.py` — pinned downloader shared by release prep and
+  settings plus gateway-local backend URLs.
+- `shared/deploy/release/collector_artifact.py` — pinned downloader for release prep and
   `cli/commands/observability/otel_collector.py` converge. Converge and
   `deploy/otel-collector/otel-collector.yaml` implement cluster filtering and
   the credential-free (peer, monitoring role) Postgres receiver. Root health: `ops/spec.py`

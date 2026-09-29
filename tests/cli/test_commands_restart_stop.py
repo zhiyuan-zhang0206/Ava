@@ -14,7 +14,7 @@ import cli.commands.lifecycle.root_driver as _root_driver_commands
 import cli.commands.lifecycle.start as _start_commands
 import cli.commands.lifecycle.stop as _stop_commands
 from cli.commands.lifecycle.stop import _force_stop
-from shared.start_serving import RootBirth
+from shared.deploy.lifecycle.start_serving import RootBirth
 from tests.cli._commands_helpers import (
     _FakeResponse,
     _FakeResult,
@@ -101,7 +101,7 @@ def test_cmd_restart_finishes_the_journal_only_when_it_owns_it(
 ) -> None:
     """An outer operation's still-running journal is never closed by the nested
     restart — the owns_journal guard _temporary_stop keeps (task #2898)."""
-    from shared import lifecycle_status
+    from shared.deploy.lifecycle import status_journal
 
     monkeypatch.setattr(_repo_commands, "_preflight_probes", lambda: 0)
     monkeypatch.setattr(
@@ -113,13 +113,13 @@ def test_cmd_restart_finishes_the_journal_only_when_it_owns_it(
     monkeypatch.setattr(_start_commands, "_cmd_start_body", lambda **_kwargs: 0)  # pyright: ignore[reportUnknownArgumentType]
     finished: list[int] = []
     monkeypatch.setattr(
-        lifecycle_status,
+        status_journal,
         "finish",
         lambda rc, **_kwargs: finished.append(rc),  # pyright: ignore[reportUnknownArgumentType]
     )
 
     monkeypatch.setattr(
-        lifecycle_status,
+        status_journal,
         "begin",
         lambda _operation, **_kwargs: False,  # pyright: ignore[reportUnknownArgumentType]
     )
@@ -127,7 +127,7 @@ def test_cmd_restart_finishes_the_journal_only_when_it_owns_it(
     assert finished == []  # the outer operation still owns the journal
 
     monkeypatch.setattr(
-        lifecycle_status,
+        status_journal,
         "begin",
         lambda _operation, **_kwargs: True,  # pyright: ignore[reportUnknownArgumentType]
     )
@@ -248,7 +248,7 @@ def test_stop_proceeds_on_yes(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_stop_revokes_serving_before_stopping_root(
     serving_root: RootBirth, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    from shared import start_serving
+    from shared.deploy.lifecycle import start_serving
 
     monkeypatch.setattr(start_serving, "state_path", lambda: tmp_path / "start-serving.json")
     generation = start_serving.begin_start()

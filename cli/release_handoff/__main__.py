@@ -19,7 +19,7 @@ from shared.api_contracts.release_handoff import (
     ReleaseImageEntry,
     read_envelope,
 )
-from shared.verified_file import regular_bytes
+from shared.deploy.release.verified_file import regular_bytes
 
 
 def _code_root() -> Path:

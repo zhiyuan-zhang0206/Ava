@@ -18,7 +18,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from shared.atomic_io import write_text_atomic
+from shared.host.atomic_io import write_text_atomic
 
 __all__ = ["cmd_grafana_render"]
 

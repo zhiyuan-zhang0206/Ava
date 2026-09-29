@@ -19,7 +19,7 @@ This is the structural enforcement the orchestrator asked for — the consumptio
 matrix is the true source of ownership.
 
 On 2026-09-06, four failures on ``refs/pull/1871/merge`` correctly caught
-``shared/timing.py`` entering the gateway closure through a schedule-manager
+``shared/deploy/timing.py`` entering the gateway closure through a schedule-manager
 import before the PR's in-branch fix landed. That episode was a real guard
 finding, not a flake; do not weaken the scan to make such failures disappear.
 """

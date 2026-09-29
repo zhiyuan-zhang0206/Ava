@@ -113,8 +113,8 @@ def cmd_cluster_destroy(*, path: str, drop_db: bool = False) -> int:
 
     from cli.start_identity import retire_checkout_binding
     from services.permissions_helper.launchd_job import unregister_helper
+    from shared.host.private_storage import write_private_bytes
     from shared.native_process.os_platform import file_lock
-    from shared.private_storage import write_private_bytes
 
     # Publish a terminal intent before stopping. Concurrent/internal starts must
     # refuse it even while this home still owns its reservation.
@@ -169,10 +169,10 @@ def _unregister_scheduled_jobs(home: Path) -> None:
     Every job must be retired before the registry slot can be freed. An
     unavailable scheduler is ambiguous custody, so failures are raised.
     """
-    from shared.os_autostart import unregister_autostart
-    from shared.os_cron import unregister_os_cron
-    from shared.os_logs_job import unregister_logs_job
-    from shared.os_packages import unregister_packages_job
+    from shared.host.system.autostart import unregister_autostart
+    from shared.host.system.cron import unregister_os_cron
+    from shared.host.system.logs_job import unregister_logs_job
+    from shared.host.system.packages_job import unregister_packages_job
 
     jobs: list[tuple[str, Callable[[], None]]] = [
         ("health probe", lambda: unregister_os_cron(home)),

@@ -42,7 +42,7 @@ from typing import cast
 
 import psutil
 
-from shared.atomic_io import write_text_atomic
+from shared.host.atomic_io import write_text_atomic
 from shared.native_process import native_boot_id
 from shared.native_process.exec_domain import ExecProcessDomain
 from shared.native_process.group_closure import confirm_closure

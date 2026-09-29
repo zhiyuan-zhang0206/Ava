@@ -31,7 +31,7 @@ from cli.release_transition.journal import (
 )
 from cli.release_transition.local import LocalTransition
 from cli.release_transition.request import ReleaseRef
-from shared.maintenance_state import MaintenanceHold
+from shared.deploy.maintenance.state import MaintenanceHold
 from tests.lifecycle.release_fleet.fakes import Clock, FakeLease, OffDutyGateway, drive
 from tests.lifecycle.transition.phases import advance_to, journal_fence, journal_issue
 
@@ -590,8 +590,8 @@ def test_quiescing_rechecks_predecessor_after_readonly_preflights_before_any_dis
 ) -> None:
     from cli.release_transition import root_service
     from ops import agent_pause
-    from shared import maintenance
-    from shared.runtime_release import VerifiedRelease
+    from shared.deploy.maintenance import admission
+    from shared.deploy.release.runtime_release import VerifiedRelease
 
     create(request_record)
     home = Path(request_record.home)
@@ -631,7 +631,7 @@ def test_quiescing_rechecks_predecessor_after_readonly_preflights_before_any_dis
     monkeypatch.setattr(root_service, "preflight", preflight)
     monkeypatch.setattr(agent_pause, "prepare", effect("prepare"))
     monkeypatch.setattr(agent_pause, "drain", effect("drain"))
-    monkeypatch.setattr(maintenance, "require_operation", lambda *_args: drained)
+    monkeypatch.setattr(admission, "require_operation", lambda *_args: drained)
     monkeypatch.setattr(transition, "stop", stop)
     monkeypatch.setattr(transition, "restore", lambda _journal: effects.append("restore"))
     with exclusive(request_record.path) as handle:
@@ -667,9 +667,10 @@ def test_resuming_reobserves_selected_root_before_admission_or_completion(
 ) -> None:
     from cli.commands.lifecycle import maintenance as maintenance_commands
     from cli.release_transition import root_service
-    from shared import maintenance, pause_owner, start_serving
-    from shared.runtime_release import VerifiedRelease
-    from shared.start_inputs import configuration_digest
+    from shared.deploy.lifecycle import start_serving
+    from shared.deploy.maintenance import admission, pause_owner
+    from shared.deploy.release.runtime_release import VerifiedRelease
+    from shared.deploy.release.start_inputs import configuration_digest
 
     home = Path(request_record.home)
     request = request_record.model_copy(update={"configuration_digest": configuration_digest(home)})
@@ -705,7 +706,7 @@ def test_resuming_reobserves_selected_root_before_admission_or_completion(
     monkeypatch.setattr(transition, "observe_root", lambda op: observe(op, transition.image(op)))
     monkeypatch.setattr(root_service, "observe", observe)
     monkeypatch.setattr(pause_owner, "read", read_pause)
-    monkeypatch.setattr(maintenance, "require_operation", require_holder)
+    monkeypatch.setattr(admission, "require_operation", require_holder)
     monkeypatch.setattr(maintenance_commands, "resume", resume)
     # Deliberately leave a stale marker: it cannot substitute for observation.
     monkeypatch.setattr(start_serving, "is_serving", lambda: True)

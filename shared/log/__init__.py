@@ -161,7 +161,7 @@ logger.configure(extra={"agent_id": TURN_SCOPED_AGENT_ID})
 # User ruling 2026-08-04 (task #731): a cluster rollout is an *announced*
 # operation, so its predictable side effects must not alarm at WARNING in the
 # event stream. While the deploy lease is held (rollout executing, or a settle
-# hold waiting for stragglers — `shared.cluster_lock`), these categories are
+# hold waiting for stragglers — `shared.deploy.state.cluster_lock`), these categories are
 # downgraded WARNING/ERROR → INFO in the emitted event; the JSONL file sink
 # keeps the true level for forensics, and outside a rollout window they keep
 # their original level unchanged.
@@ -207,12 +207,12 @@ _deploy_refresh_lock = threading.Lock()
 def _read_deploy_lease() -> bool:
     """One lease read: True while a cluster deploy holds the update lease.
 
-    Runs on the cache-refresh thread. Deferred import: `shared.cluster_lock`
+    Runs on the cache-refresh thread. Deferred import: `shared.deploy.state.cluster_lock`
     imports `shared.db` imports this module at module scope, so a top-level
     import here is a hard circular-import failure (same shape as
     `add_postgres_sink`'s deferred `import shared.db`).
     """
-    from shared.cluster_lock import read_update_lease
+    from shared.deploy.state.cluster_lock import read_update_lease
 
     return read_update_lease() is not None
 

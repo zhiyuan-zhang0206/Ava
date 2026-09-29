@@ -139,7 +139,7 @@ def test_converge_installs_source_and_loads_changed_job(
     calls: list[tuple[str, ...]] = []
 
     monkeypatch.setattr(bridge, "_plist_path", lambda: plist)
-    monkeypatch.setattr("shared.os_cron.os_jobs_enabled", lambda: True)
+    monkeypatch.setattr("shared.host.system.cron.os_jobs_enabled", lambda: True)
 
     def _launchctl(*args: str) -> object:
         calls.append(args)
@@ -173,7 +173,7 @@ def test_unchanged_loaded_job_is_not_restarted(
     calls: list[tuple[str, ...]] = []
 
     monkeypatch.setattr(bridge, "_plist_path", lambda: plist)
-    monkeypatch.setattr("shared.os_cron.os_jobs_enabled", lambda: True)
+    monkeypatch.setattr("shared.host.system.cron.os_jobs_enabled", lambda: True)
 
     def _launchctl(*args: str) -> object:
         calls.append(args)

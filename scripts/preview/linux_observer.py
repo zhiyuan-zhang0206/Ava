@@ -82,7 +82,7 @@ def _command(argv: list[str]) -> subprocess.CompletedProcess[str]:
 def _base_observations(run: Path, result: Report) -> dict[str, int]:
     from shared.cluster import load_registry
     from shared.cluster.port_preflight import strict_listeners_on
-    from shared.os_boot_unit import unit_name, unit_path
+    from shared.host.system.boot_unit import unit_name, unit_path
 
     home, source = run / "home", run / "source"
     config = json.loads((run / "config.json").read_text())
@@ -172,7 +172,7 @@ def _data_births(home: Path, ports: dict[str, int]) -> Births:
 def _require_outside_executors(births: dict[str, OwnedProcess]) -> None:
     """No data-plane birth lives in a finite release executor's cgroup, where it
     would die with the executor (the r6 pooler did)."""
-    from shared.os_boot_unit import process_cgroup
+    from shared.host.system.boot_unit import process_cgroup
 
     for name, owner in births.items():
         cgroup = process_cgroup(owner.pid)
@@ -313,7 +313,7 @@ def _observe_app_ownership(records: Births, ports: dict[str, int], result: Repor
 def _observe_running(
     run: Path, mode: Mode, ports: dict[str, int], result: Report, runtime: ExpectedRuntime
 ) -> None:
-    from shared.os_boot_unit import unit_name, unit_path
+    from shared.host.system.boot_unit import unit_name, unit_path
 
     home = run / "home"
     response = RootClient(home / "run/ava-root/ava-root.sock", timeout=5).status()

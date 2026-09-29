@@ -597,7 +597,7 @@ def test_codex_refusal_never_falls_back_to_pending(
     from unittest.mock import Mock
 
     queued = Mock(return_value=subprocess.CompletedProcess([], 0))
-    monkeypatch.setattr("shared.proc.run_bounded", queued)
+    monkeypatch.setattr("shared.host.proc.run_bounded", queued)
 
     def refuse(_thread_id: str, _message: str, *, endpoint: str) -> str:
         return failure

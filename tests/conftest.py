@@ -61,7 +61,7 @@ def suite_is_not_inside_an_exec_domain(monkeypatch: pytest.MonkeyPatch) -> None:
     """Normalize the ambient session to the CI shape (issue #2331).
 
     A suite launched from a fleet agent's `execute_code` runs inside the call's
-    exec-domain session, so `shared.proc.hosting_exec_domain` reports it and any
+    exec-domain session, so `shared.host.proc.hosting_exec_domain` reports it and any
     unrelated test that reaches an in-process lifecycle leg (`ava restart`,
     pause/stop) would refuse — red on an agent box, green
     in CI. A pty-session or login-shell run (the fleet's test convention) never
@@ -69,7 +69,7 @@ def suite_is_not_inside_an_exec_domain(monkeypatch: pytest.MonkeyPatch) -> None:
     child processes (`tests/shared/test_proc.py`), whose sessions are built for
     the case; a lifecycle test that wants the refusal patches this back.
     """
-    monkeypatch.setattr("shared.proc.hosting_exec_domain", lambda: None)
+    monkeypatch.setattr("shared.host.proc.hosting_exec_domain", lambda: None)
 
 
 from fastapi.testclient import TestClient
@@ -219,7 +219,7 @@ os.environ.setdefault("AVA_CONFIG_BOOT", "eager")
 # monkeypatch that was meant to stop it never reached the child. Nine
 # `com.ava.ava_e2e_home_*.health-probe` LaunchAgents survived on a dev box,
 # firing `--auto-rollback` every 300s against whatever `ava` PATH resolved to.
-# `shared.os_cron.os_jobs_enabled` gates all four registrars on this; the
+# `shared.host.system.cron.os_jobs_enabled` gates all four registrars on this; the
 # unregister paths stay live so cleanup still works.
 os.environ["AVA_OS_JOBS_ENABLED"] = "false"
 
@@ -1190,7 +1190,7 @@ def _fail_on_leaked_os_jobs(session: pytest.Session) -> None:
         f"{len(leaked)} job(s) on the host:\n  "
         + "\n  ".join(leaked)
         + "\nThe suite runs with AVA_OS_JOBS_ENABLED=false (see "
-        "shared.os_cron.os_jobs_enabled), and the helper native-effect guard is on. "
+        "shared.host.system.cron.os_jobs_enabled), and the helper native-effect guard is on. "
         "A new test-owned job means a test bypassed one of these boundaries. "
         "Jobs under this suite's own homes were removed; any others were left "
         "for you to check.",
@@ -1825,7 +1825,7 @@ def _no_stdlib_telemetry_bridge() -> Iterator[None]:
     root.handlers = saved
 
 
-from shared.start_serving import RootBirth
+from shared.deploy.lifecycle.start_serving import RootBirth
 
 
 @pytest.fixture
@@ -1835,9 +1835,9 @@ def serving_root(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> RootBirth:
     Maintenance/readiness unit tests retain the actual marker and locking code.
     Native IPC and loaded-origin contracts have independent real socket tests.
     """
-    from shared import start_serving
+    from shared.deploy.lifecycle import start_serving
+    from shared.deploy.release.runtime_interpreter import LoadedRuntimeIdentity
     from shared.native_process.evidence import ExpectedProcess
-    from shared.runtime_interpreter import LoadedRuntimeIdentity
 
     runtime = LoadedRuntimeIdentity(
         kind="source",

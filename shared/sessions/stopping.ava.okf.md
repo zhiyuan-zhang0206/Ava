@@ -1,7 +1,7 @@
 ---
 type: doc
 title: "Stopping a process — the kill contract and the non-session trio"
-description: "How Ava stops what it started: `kill_session`'s (ok, mode) contract and its graceful/forced escalation for named sessions, `shared/proc.py`'s `process_alive` / `request_stop` / `force_kill` trio for the processes that are not sessions (pooler, port orphans, the gate daemon) — including why the obvious POSIX spellings do not survive the crossing to Windows — how a stop converges a service tree whose leader already died (recorded process group, retry path), and what the deadline report names when convergence fails (per-process identity, stage, durable journal payload)."
+description: "How Ava stops what it started: `kill_session`'s (ok, mode) contract and its graceful/forced escalation for named sessions, `shared/host/proc.py`'s `process_alive` / `request_stop` / `force_kill` trio for the processes that are not sessions (pooler, port orphans, the gate daemon) — including why the obvious POSIX spellings do not survive the crossing to Windows — how a stop converges a service tree whose leader already died (recorded process group, retry path), and what the deadline report names when convergence fails (per-process identity, stage, durable journal payload)."
 tags:
 - shared
 - process
@@ -21,7 +21,7 @@ exception: a stop, a release or a PITR activation HUPs/TERMs each shell's
 captured session and SIGKILLs what outlives a bounded grace
 ([[shared/sessions/pty/session-kill.ava.okf.md|session kill]];
 decisions/2026-09-28-stop-escalates-to-sigkill.md). Explicit force may use a
-backend's `kill_session`; non-session processes use `shared/proc.py` primitives.
+backend's `kill_session`; non-session processes use `shared/host/proc.py` primitives.
 The lower-level escalating APIs below retain their own explicit contracts.
 
 ## Core responsibilities
@@ -91,14 +91,14 @@ it back.
 
 ### Stops that do not go through a session
 
-Not every process Ava stops is a named session: the pooler, an orphan holding a unit port, the gate daemon. Those go through `shared/proc.py`'s trio — `process_alive` (probe) / `request_stop` (ask) / `force_kill` (force) — and **must**, because two of the obvious spellings do not survive the crossing to Windows: `os.kill(pid, 0)` *terminates* the target there rather than probing it, and `signal.SIGKILL` is undefined. `cli/commands/data_plane/pgbouncer.py:stop_pgbouncer` captures the exact pooler owner and delegates to its native custodian; an incomplete stop retains custody and fails. Normal pause/stop instead use the non-escalating data-plane boundary in `cli/commands/data_plane/maintenance_stop.py`. A pid this user may not signal is handled the same way on all three legs: alive, undeliverable, reported as a survivor — never an exception out of the middle of a stop. Same file: `kill_process_tree` (parent + descendants, enumerated before the kill) and `run_bounded` (a timeout that bounds the work, not just the wrapper).
+Not every process Ava stops is a named session: the pooler, an orphan holding a unit port, the gate daemon. Those go through `shared/host/proc.py`'s trio — `process_alive` (probe) / `request_stop` (ask) / `force_kill` (force) — and **must**, because two of the obvious spellings do not survive the crossing to Windows: `os.kill(pid, 0)` *terminates* the target there rather than probing it, and `signal.SIGKILL` is undefined. `cli/commands/data_plane/pgbouncer.py:stop_pgbouncer` captures the exact pooler owner and delegates to its native custodian; an incomplete stop retains custody and fails. Normal pause/stop instead use the non-escalating data-plane boundary in `cli/commands/data_plane/maintenance_stop.py`. A pid this user may not signal is handled the same way on all three legs: alive, undeliverable, reported as a survivor — never an exception out of the middle of a stop. Same file: `kill_process_tree` (parent + descendants, enumerated before the kill) and `run_bounded` (a timeout that bounds the work, not just the wrapper).
 
 ## Entry points
 
 - `cli/commands/lifecycle/_maintenance_stop_report.py` — the deadline survivor report (raise, render, journal payload)
 - `shared/sessions/backend.py:SessionBackend.kill_session` — the session stop, per backend
-- `shared/proc.py:process_alive` / `request_stop` / `force_kill` — the non-session trio
-- `shared/proc.py:kill_process_tree` / `run_bounded` — tree teardown and a bounded run
+- `shared/host/proc.py:process_alive` / `request_stop` / `force_kill` — the non-session trio
+- `shared/host/proc.py:kill_process_tree` / `run_bounded` — tree teardown and a bounded run
 - `cli/commands/data_plane/pgbouncer.py:stop_pgbouncer` — exact pooler custody and bounded stop
 
 ## Notes

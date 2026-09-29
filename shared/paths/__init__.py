@@ -14,7 +14,7 @@ from pathlib import Path
 
 from shared.config import settings
 from shared.host.env.dotenv_boot import checkout_anchored
-from shared.private_storage import ensure_private_dir
+from shared.host.private_storage import ensure_private_dir
 
 
 def ava_home() -> Path:
@@ -173,8 +173,8 @@ def otel_collector_dir() -> Path:
 
 def otel_collector_binary() -> Path:
     """Path of the pinned otelcol-contrib binary (platform-appropriate name)."""
+    from shared.deploy.release.runtime_interpreter import WHEEL_RUNTIME, runtime_otel_binary
     from shared.native_process.os_platform import IS_WINDOWS
-    from shared.runtime_interpreter import WHEEL_RUNTIME, runtime_otel_binary
 
     if WHEEL_RUNTIME:
         return runtime_otel_binary()
@@ -317,7 +317,7 @@ def launch_failures_path() -> Path:
     Written by every `ava start` (an empty failure set unlinks it), so a read is
     never stale; taken — read then unlinked — by whoever consumes it.
 
-    Returns the path only; ``shared.launch_failures`` owns read/write.
+    Returns the path only; ``shared.deploy.lifecycle.launch_failures`` owns read/write.
     """
     return ava_home() / "last_launch_failures"
 
@@ -332,7 +332,7 @@ def running_sha_path() -> Path:
     against the running commit, not the current HEAD). Absent file = first-ever
     start or uninitialised; the reader falls back to HEAD.
 
-    Returns the path only; ``shared.running_sha`` owns read/write.
+    Returns the path only; ``shared.deploy.git.running_sha`` owns read/write.
     """
     return ava_home() / "running_sha"
 

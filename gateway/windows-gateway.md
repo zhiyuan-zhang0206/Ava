@@ -51,7 +51,7 @@ unconditionally in the Windows start roster and fails every time.
 
 `cli/commands/data_plane/pgbouncer.py` signals with `os.kill(pid, SIGHUP)` /
 `os.kill(pid, 0)`. On Windows `os.kill(pid, 0)` **terminates** the target — the
-hazard `shared/proc.py` documents and routes around. PgBouncer is enabled by
+hazard `shared/host/proc.py` documents and routes around. PgBouncer is enabled by
 default (`shared/config/data_plane.py`) and is part of `ensure_cluster_instance`.
 
 ## Also missing
@@ -63,7 +63,7 @@ default (`shared/config/data_plane.py`) and is part of `ensure_cluster_instance`
   Windows Postgres supports none of it.
 - **`_pg_bin()`** has no Windows branch and yields the Linux path;
   `PG_BIN_WINDOWS` exists in `shared/pg_tools.py` but is only reachable through
-  `platform_backend.pg_binary_path`, which `cluster_instance` never calls.
+  `shared.host.system.backend`'s `pg_binary_path`, which `cluster_instance` never calls.
 - **`memory-indexer`** registers a `SIGTERM` handler for graceful shutdown that
   never fires on Windows, and cold-starts against milvus.
 - **Teardown symmetry.** `stop_cluster_instance()` calls `pg_ctl` / `redis-cli`
@@ -83,7 +83,7 @@ names and ignored the registry-allocated ports, so two co-located clusters would
 adopt each other's containers.
 
 `ava-windows-scheduling` contributed the `schtasks` work, which is on main in a
-**better** form: main's `os_schtasks.task_name`/`delete_task` take an explicit
+**better** form: main's `shared.host.system.schtasks.task_name`/`delete_task` take an explicit
 slug, where the branch fell back to the calling process's own slug — the bug
 that made a `cluster destroy` deregister prod's jobs.
 

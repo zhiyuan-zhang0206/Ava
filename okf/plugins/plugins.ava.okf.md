@@ -55,7 +55,7 @@ keyed by the same triple: [[activation-telemetry.ava.okf.md]].
 
 ## Key Dependencies
 - [[agent/graph/graph.ava.okf.md]] — hook container nodes call `make_hook_runner` at graph build time
-- [[state.ava.okf.md]] — state field registration
+- [[agent/state.ava.okf.md]] — state field registration
 - [[system-prompt.ava.okf.md]] — prompt injection
 - [[db.ava.okf.md]] — state persisted to Postgres checkpoint
 - [[agents-contract.ava.okf.md]] — `PluginContext` ContextVar ensures registration isolation

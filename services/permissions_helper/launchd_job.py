@@ -32,8 +32,8 @@ from typing import cast
 
 import psutil
 
+from shared.host.proc import run_bounded
 from shared.native_process.ownership import OwnedProcess, capture_tree, leader_owns_pids
-from shared.proc import run_bounded
 
 HELPER_BUNDLE_ID = "com.ava.permissions-helper"
 """Fixed across clusters so one TCC grant covers all (the grant keys on this)."""

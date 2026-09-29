@@ -26,23 +26,23 @@ from cli.release_prepare.models import (
     PreparationReceipt,
     encode,
 )
-from shared.release_identity import ApplicationIdentity, read_application_identity
-from shared.runtime_abi import current_abi
-from shared.runtime_prepare import (
+from shared.deploy.release.identity import ApplicationIdentity, read_application_identity
+from shared.deploy.release.runtime_prepare import (
     CollectorInput,
     FrontendInput,
     PluginInput,
     PrepareInputs,
     prepare_release,
 )
-from shared.runtime_release import (
+from shared.deploy.release.runtime_release import (
     ReleaseRejectedError,
     VerifiedRelease,
     file_sha256,
     release_abi,
     verify_release,
 )
-from shared.verified_file import regular_bytes
+from shared.deploy.release.verified_file import regular_bytes
+from shared.runtime_abi import current_abi
 
 
 class _BuildReceipt(ApplicationIdentity):

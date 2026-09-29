@@ -17,8 +17,12 @@ from cli.release_prepare.acquisition_process import Commands
 from cli.release_prepare.inputs import require_directory
 from cli.release_prepare.models import FileInput, TreeInput
 from cli.release_prepare.source_distributions import validate_distributions
-from shared.runtime_prepare import inventory_digest, python_input_inventory, tree_inventory
-from shared.runtime_release import ReleaseRejectedError, file_sha256
+from shared.deploy.release.runtime_prepare import (
+    inventory_digest,
+    python_input_inventory,
+    tree_inventory,
+)
+from shared.deploy.release.runtime_release import ReleaseRejectedError, file_sha256
 
 
 def file_input(path: Path) -> FileInput:

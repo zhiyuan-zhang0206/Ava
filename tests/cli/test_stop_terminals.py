@@ -46,7 +46,7 @@ from cli.commands.lifecycle import stop as entry
 from cli.commands.lifecycle._maintenance_stop_report import StopIncompleteError
 from cli.commands.lifecycle.service_stop import OwnedProcess
 from ops import pty_close_notices
-from shared import maintenance
+from shared.deploy.maintenance import admission
 from shared.sessions.backend import PtySessionBackend
 from shared.sessions.pty import session_tree
 from tests.cli.conftest import PtyReaper
@@ -554,7 +554,7 @@ def test_incomplete_stop_still_records_the_sessions_it_closed(
     with pytest.MonkeyPatch.context() as patch:
         patch.setattr(session_tree, "kill_session_tree", kill)
         assert entry.cmd_stop(require_confirmation=False, keep_infra=True, timeout=12) == 1
-    assert maintenance.held(), "the hold must survive an incomplete stop"
+    assert admission.held(), "the hold must survive an incomplete stop"
     assert stuck in capsys.readouterr().err
     assert _notice_names(home) == [closed], "the closed session's notice was lost"
     assert "survivors" not in _notices(home)[0], "nothing of the closed session survived"
@@ -723,7 +723,7 @@ def test_stop_keeps_hold_when_a_process_outlives_the_kill(
     with pytest.MonkeyPatch.context() as patch:
         patch.setattr(session_tree, "kill_session_tree", _denied_but_the_shell)
         assert entry.cmd_stop(require_confirmation=False, keep_infra=True, timeout=12) == 1
-    assert maintenance.held(), "the hold must survive an incomplete stop"
+    assert admission.held(), "the hold must survive an incomplete stop"
     assert psutil.pid_exists(jobs[0].pid)
     err = capsys.readouterr().err
     assert "terminals" in err, "the failure must name the phase"

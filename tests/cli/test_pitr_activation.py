@@ -30,13 +30,14 @@ from services.pitr.stores.checksums import ObjectChecksum
 from services.pitr.stores.object_store import RemoteObjectAck
 from services.pitr.wal.uploader import ack_manifest_from_raw
 from shared.config import FIELD_INFOS, field_alias, field_domain, settings
-from tests._pitr_fixtures import baidu_credential_evidence
+from shared.deploy.release import operation
+from tests._pitr_fixtures import baidu_credential_evidence, stub_update_lock
 
 
 @pytest.fixture(autouse=True)
 def business_authority(monkeypatch: pytest.MonkeyPatch) -> None:
     """Keep business tests independent of home executor setup; authority is tested separately."""
-    monkeypatch.setattr("shared.release_operation.require_pitr_authorized", lambda _home: None)
+    monkeypatch.setattr(operation, "require_pitr_authorized", lambda _home: None)
 
 
 def _credentials() -> dict[str, str]:
@@ -307,8 +308,7 @@ def test_activate_persists_snapshot_before_wal_pending(
     monkeypatch.setattr(activation, "read_pg_state", lambda: pg)
     monkeypatch.setattr(activation, "_validate_secrets", lambda: credentials)
     monkeypatch.setattr(activation, "_validate_snapshot", lambda _record: None)
-    monkeypatch.setattr("shared.cluster_lock.acquire_update_lock", lambda *_a, **_kw: True)
-    monkeypatch.setattr("shared.cluster_lock.release_update_lock", lambda *_a, **_kw: None)
+    stub_update_lock(monkeypatch)
     _mock_activation_mutation(monkeypatch)
 
     record = replace(
@@ -349,8 +349,7 @@ def test_activate_resume_never_repeats_snapshot(
         "_validate_secrets",
         lambda: dict(_wal_config_pending_record().pre_activation_credential_evidence or {}),
     )
-    monkeypatch.setattr("shared.cluster_lock.acquire_update_lock", lambda *_a, **_kw: True)
-    monkeypatch.setattr("shared.cluster_lock.release_update_lock", lambda *_a, **_kw: None)
+    stub_update_lock(monkeypatch)
     monkeypatch.setattr(
         _snapshot,
         "create_pre_activation_snapshot",
@@ -506,8 +505,7 @@ def test_rollback_preserves_snapshot_and_is_idempotent(
     record = _wal_config_pending_record()
     write_record(tmp_path, record)
     monkeypatch.setattr(activation, "ava_home", lambda: tmp_path)
-    monkeypatch.setattr("shared.cluster_lock.acquire_update_lock", lambda *_a, **_kw: True)
-    monkeypatch.setattr("shared.cluster_lock.release_update_lock", lambda *_a, **_kw: None)
+    stub_update_lock(monkeypatch)
 
     record = activation.rollback_record(tmp_path, record)
     activation.rollback_record(tmp_path, record)
@@ -621,8 +619,7 @@ def test_rollback_leaves_config_owned_env_untouched(
         "AVA_PITR_RETENTION_PLANNER_ENABLED=false\n"
     )
     monkeypatch.setattr(activation, "ava_home", lambda: tmp_path)
-    monkeypatch.setattr("shared.cluster_lock.acquire_update_lock", lambda *_a, **_kw: True)
-    monkeypatch.setattr("shared.cluster_lock.release_update_lock", lambda *_a, **_kw: None)
+    stub_update_lock(monkeypatch)
     monkeypatch.setattr(
         activation_config,
         "_persistent_archive_settings",
@@ -981,8 +978,7 @@ def test_shadow_drift_fails_before_snapshot(
         "_shadow_readiness",
         lambda: (_ for _ in ()).throw(RuntimeError("archive_mode is already on")),
     )
-    monkeypatch.setattr("shared.cluster_lock.acquire_update_lock", lambda *_a, **_kw: True)
-    monkeypatch.setattr("shared.cluster_lock.release_update_lock", lambda *_a, **_kw: None)
+    stub_update_lock(monkeypatch)
     called = False
 
     def snapshot(**_kwargs: object) -> Path:
@@ -1031,8 +1027,7 @@ def test_credential_evidence_changes_fail_independently_of_pg_state(
         "_validate_secrets",
         lambda: {**_credentials(), "viewer_identity": "new@example.test"},
     )
-    monkeypatch.setattr("shared.cluster_lock.acquire_update_lock", lambda *_a, **_kw: True)
-    monkeypatch.setattr("shared.cluster_lock.release_update_lock", lambda *_a, **_kw: None)
+    stub_update_lock(monkeypatch)
 
     with pytest.raises(RuntimeError, match="credential"):
         activation.advance_activation(tmp_path, record, "test", stop_at_restart=True)

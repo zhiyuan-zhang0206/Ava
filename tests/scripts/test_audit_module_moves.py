@@ -66,7 +66,11 @@ def test_is_excluded_covers_frozen_axes_and_fixed_base_artifacts() -> None:
     assert gate._is_excluded("scripts/legacy_lkg/compatibility.patch") is True
     # Runs inside the reconstructed base install: its refs keep the base's paths.
     assert gate._is_excluded("scripts/legacy_lkg/cold_boot.py") is True
-    assert gate._is_excluded("scripts/legacy_lkg/prepare.py") is False
+    # Imports its helpers from the checkout pinned at preparation_tools_sha.
+    assert gate._is_excluded("scripts/legacy_lkg/prepare.py") is True
+    # Byte-frozen: its sha256 is the retained image's schema digest.
+    assert gate._is_excluded("db/schema.sql") is True
+    assert gate._is_excluded("scripts/legacy_lkg/legacy-lkg.ava.okf.md") is False
     assert gate._is_excluded("shared/docs/notes.py") is False
 
 

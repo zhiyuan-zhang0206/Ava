@@ -34,7 +34,7 @@ from contextlib import suppress
 from dataclasses import dataclass
 from typing import Protocol, cast
 
-from shared.proc import child_state
+from shared.host.proc import child_state
 
 _log = logging.getLogger(__name__)
 

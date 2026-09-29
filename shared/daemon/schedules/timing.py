@@ -6,12 +6,12 @@ must outlive a legitimate cluster rollout's no-progress window: otherwise an
 ordinary stop-the-world rollout would produce a schedule-stalled alert before
 the updater itself is judged stuck.
 
-Registered in `shared/timing.py::CLOCKS` with the
+Registered in `shared/deploy/timing.py::CLOCKS` with the
 `NO_PROGRESS_TIMEOUT_S < SCHEDULE_STALL_ALERT_AFTER_S` constraint;
 `scripts/lint/clock_lattice.py` treats this module as a family module, so
 lattice vocabulary may live here and only here.
 
-Deliberately separate from `shared/timing.py`: the schedule manager runs under
+Deliberately separate from `shared/deploy/timing.py`: the schedule manager runs under
 the gateway process profile, and importing the lattice module would drag its
 agent/sandbox-domain settings reads into the gateway closure
 (tests/shared/test_gateway_consumer_guard.py enforces the matrix).

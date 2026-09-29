@@ -1110,7 +1110,7 @@ sides derive the CDP port + socket path from `settings.browser_cdp_port`
   can actually run.
 - **Capability-gated at two layers, observably**: (1) `_services_for_roles`, the
   watchdog's `_checks_for_capability`, and `agent/warmup.py` all gate on
-  `browser_incapability()` (`shared/platform_probes.py`) — the single source of
+  `browser_incapability()` (`shared/host/system/probes.py`) — the single source of
   the display + Chrome-binary + npx check, returning the reason a prong is missing
   (or None when capable). A host missing any of the three never starts the browser
   session or its healthcheck, and warmup never polls a CDP port that will not
@@ -1428,11 +1428,11 @@ tree. Failed closure retains custody; systemd cannot prove orphan closure after
 abrupt root death. There is no convergence shell script or duplicate proxy probe.
 
 **OS-scheduled jobs.** The platform scheduler runs the health probe
-(`shared/os_cron.py`), boot autostart (`shared/os_autostart.py`),
-daily rotate-then-retain log maintenance (`shared/os_logs_job.py`), and the
-per-machine content-refresh pass (`shared/os_packages.py`)
+(`shared/host/system/cron.py`), boot autostart (`shared/host/system/autostart.py`),
+daily rotate-then-retain log maintenance (`shared/host/system/logs_job.py`), and the
+per-machine content-refresh pass (`shared/host/system/packages_job.py`)
 — as launchd LaunchAgents on macOS, systemd boot plus scheduled maintenance on
-Linux, and `\Ava\<home-slug>\` tasks on Windows (`shared/os_schtasks.py`). Linux
+Linux, and `\Ava\<home-slug>\` tasks on Windows (`shared/host/system/schtasks.py`). Linux
 automatic startup requires systemd. Converge registers and enables the native
 home unit without starting a recursive caller; ordinary interactive start may
 launch root directly. The unit carries the exact home, checkout and registry.
@@ -1782,7 +1782,7 @@ newly emitted rows, since indexed-era data from before the rollout is immutable.
 
 **One time-series store.** Prometheus holds the host history; nothing else
 retains one. `ava status` and the status page carry a single LIVE psutil
-reading per machine (`shared/resource_sample.py`) — the degraded answer for a
+reading per machine (`shared/host/resource_sample.py`) — the degraded answer for a
 deployment whose LGTM backend is down or was never deployed — and link to the
 Grafana host dashboard for the trend. The retired `shared/resource_monitor.py`
 kept a 300-sample ring buffer per process; two samplers meant two answers to

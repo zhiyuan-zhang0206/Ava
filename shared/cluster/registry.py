@@ -84,7 +84,7 @@ def _dump_registry(reg: dict[str, ClusterRecord], *, path: Path | None = None) -
     p = path if path is not None else cluster.registry_path()
     p.parent.mkdir(parents=True, exist_ok=True)
     data = json.dumps(_registry_disk_form(reg), indent=2)
-    from shared.atomic_io import write_text_atomic
+    from shared.host.atomic_io import write_text_atomic
 
     write_text_atomic(p, data, mode=0o600, sync_parent=True)
 

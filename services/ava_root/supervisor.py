@@ -39,6 +39,7 @@ from services.ava_root.manifest import (
     UnknownUnitError,
 )
 from services.ava_root.windows.process import ApplicationProcess
+from shared.deploy.release.runtime_interpreter import LoadedRuntimeIdentity
 from shared.host.env.registry import (
     MANIFEST_CERTIFICATION_FINALIZER_ENV,
     MANIFEST_CERTIFICATION_SECRET_ENV,
@@ -55,7 +56,6 @@ from shared.native_process.root_control.ipc import (
     error_response,
     ok_response,
 )
-from shared.runtime_interpreter import LoadedRuntimeIdentity
 
 _log = logging.getLogger(__name__)
 

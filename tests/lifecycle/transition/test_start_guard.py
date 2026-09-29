@@ -13,14 +13,14 @@ import pytest
 from cli.release_fleet.request import FleetRequest
 from cli.release_transition.journal import create
 from cli.release_transition.request import ReleaseRef
-from shared.deploy_timing import EXECUTOR_HEARTBEAT_TTL_S
-from shared.release_operation import (
+from shared.deploy.progress_timeout import EXECUTOR_HEARTBEAT_TTL_S
+from shared.deploy.release.operation import (
     authorized_start,
     operation_in_flight,
     require_start_authorized,
 )
-from shared.runtime_release import ReleaseRejectedError
-from shared.start_inputs import configuration_digest
+from shared.deploy.release.runtime_release import ReleaseRejectedError
+from shared.deploy.release.start_inputs import configuration_digest
 
 
 def _operation(home: Path) -> Path:
@@ -310,7 +310,8 @@ def test_operation_start_preserves_exact_hold_after_service_result(
     operation_path: Path, monkeypatch: pytest.MonkeyPatch, result: int
 ) -> None:
     from cli.commands.lifecycle._pause_resume import resume_after_start
-    from shared import maintenance, start_serving
+    from shared.deploy.lifecycle import start_serving
+    from shared.deploy.maintenance import admission
 
     _set_state(operation_path, phase="starting")
     _hold(operation_path, monkeypatch)
@@ -320,19 +321,19 @@ def test_operation_start_preserves_exact_hold_after_service_result(
 
     @resume_after_start
     def start() -> int:
-        assert maintenance.start_authorized()
+        assert admission.start_authorized()
         calls.append("start")
         return result
 
     with authorized_start(operation_path):
         assert start() == result
     assert calls == ["start"]
-    assert maintenance.held() and not maintenance.start_authorized()
+    assert admission.held() and not admission.start_authorized()
 
 
 def _hold(path: Path, monkeypatch: pytest.MonkeyPatch, *, kind: str = "exact") -> None:
     from shared import paths
-    from shared.maintenance_state import MaintenanceHold
+    from shared.deploy.maintenance.state import MaintenanceHold
 
     home = _home(path)
     (home / "run").mkdir(exist_ok=True)
@@ -360,11 +361,11 @@ def test_operation_start_cannot_bypass_missing_changed_or_unsettled_hold(
     operation_path: Path, monkeypatch: pytest.MonkeyPatch, kind: str, ambient_authority: bool
 ) -> None:
     from cli.commands.lifecycle._pause_resume import resume_after_start
-    from shared import maintenance
+    from shared.deploy.maintenance import admission
 
     _set_state(operation_path, phase="starting")
     _hold(operation_path, monkeypatch, kind=kind)
-    monkeypatch.setattr(maintenance, "start_authorized", lambda: ambient_authority)
+    monkeypatch.setattr(admission, "start_authorized", lambda: ambient_authority)
     calls: list[str] = []
     start = resume_after_start(lambda: calls.append("started") or 0)
     with authorized_start(operation_path), pytest.raises(RuntimeError):

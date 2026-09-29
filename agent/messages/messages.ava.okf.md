@@ -27,7 +27,7 @@ Ava-style message constructors — builds standard LangChain `HumanMessage` / `T
 
 ## Key Dependencies
 
-- [[state.ava.okf.md]] — messages stored in BaseAgentState.messages
+- [[agent/state.ava.okf.md]] — messages stored in BaseAgentState.messages
 - [[graph.ava.okf.md]] — messages passed as history in LLM nodes
 - [[message-format.ava.okf.md]] — the message types these helpers build
 

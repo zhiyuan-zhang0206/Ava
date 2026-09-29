@@ -43,7 +43,7 @@ from agent.graph.exec.protocol import (
     read_result,
     write_request,
 )
-from shared import editable_install
+from shared.deploy.release import editable_install
 from shared.host.env.registry import (
     AGENT_BIRTH_CONFIG_ENV,
     AGENT_CONFIG_OVERLAY_ENV,

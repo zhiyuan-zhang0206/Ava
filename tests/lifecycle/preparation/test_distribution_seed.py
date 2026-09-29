@@ -19,7 +19,7 @@ from cli.release_prepare.acquisition_dependencies import (
 )
 from cli.release_prepare.acquisition_models import Acquisition
 from cli.release_prepare.source_distributions import export_distributions, validate_distributions
-from shared.runtime_release import ReleaseRejectedError
+from shared.deploy.release.runtime_release import ReleaseRejectedError
 from tests.lifecycle.preparation.test_acquisition import PackageTools
 from tests.lifecycle.preparation.test_acquisition import acquisition as acquisition
 from tests.lifecycle.preparation.test_acquisition import tools as tools

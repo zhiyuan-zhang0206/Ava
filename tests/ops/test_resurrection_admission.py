@@ -20,16 +20,16 @@ from ops.agents.resurrection_retry import ResurrectSettlementDeferredError
 from ops.agents.spawn import create_agent_row
 from ops.cluster_rpc import ClusterOpFailed, ClusterOpUnreachable
 from ops.lifecycle import termination
-from shared import maintenance_cohort, pause_owner
 from shared.agents import AgentStatus, ResurrectError, ResurrectRefused
 from shared.cluster.machine import machine_name
 from shared.config import settings
 from shared.db import PG_KEEPALIVE_KWARGS, insert_inbound_message
+from shared.deploy.maintenance import cohort, pause_owner
+from shared.deploy.maintenance.straggler_reap import settle_stranded_reaps
 from shared.incarnation_resources import IncarnationResources, ResourceBirth, decode_resources
 from shared.native_process.runtime_incarnation import RuntimeIncarnation
 from shared.native_process.turn_identity import bind_turn_identity
 from shared.predecessor_closure import ClosureEvidence, close_retired_predecessor
-from shared.straggler_reap import settle_stranded_reaps
 from tests.shared.test_predecessor_closure import _retired
 
 
@@ -554,7 +554,7 @@ async def test_maintenance_parks_a_resurrected_unowned_row_and_ignores_its_recei
     holder = "ops:test:unowned"
     pause_owner.begin_maintenance(holder, when)
 
-    hold = maintenance_cohort.prepare(
+    hold = cohort.prepare(
         db_conn, machine=machine_name(), host_owner=None, holder=holder, acquired_at=when
     )
 

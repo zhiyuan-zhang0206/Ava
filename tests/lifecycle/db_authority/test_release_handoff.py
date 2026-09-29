@@ -55,10 +55,10 @@ from shared import cluster, db_connections
 from shared.cluster import authority
 from shared.cluster.authority import delivery
 from shared.config import settings
+from shared.deploy.release.runtime_release import VerifiedRelease, current_pointer
+from shared.deploy.release.start_inputs import configuration_digest
 from shared.host.env import dotenv_boot
 from shared.log import logger
-from shared.runtime_release import VerifiedRelease, current_pointer
-from shared.start_inputs import configuration_digest
 from tests.lifecycle.db_authority.test_fleet_of_one import (
     _AGENT,
     _MACHINE,

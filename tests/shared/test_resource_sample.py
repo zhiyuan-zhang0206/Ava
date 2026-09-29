@@ -1,4 +1,4 @@
-"""Unit tests for shared.resource_sample — the one-shot degraded reading.
+"""Unit tests for shared.host.resource_sample — the one-shot degraded reading.
 
 The point of the module after issue #46 is that it keeps NOTHING: Prometheus
 holds the host time series, so a second retained history here would be a second
@@ -11,7 +11,7 @@ from __future__ import annotations
 import psutil
 import pytest
 
-from shared.resource_sample import (
+from shared.host.resource_sample import (
     _CPU_INTERVAL_S,
     ResourceSample,
     _battery_sample,
@@ -130,7 +130,7 @@ class TestBatterySample:
         assert _parse_battery(self.PMSET_DESKTOP) == {}
 
     def test_off_macos_reports_nothing(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        import shared.resource_sample as module
+        import shared.host.resource_sample as module
 
         monkeypatch.setattr(module.sys, "platform", "linux")
         assert _battery_sample() == {}
@@ -138,7 +138,7 @@ class TestBatterySample:
     def test_read_failure_degrades_to_no_fields(self, monkeypatch: pytest.MonkeyPatch) -> None:
         import subprocess
 
-        import shared.resource_sample as module
+        import shared.host.resource_sample as module
 
         def _raise_timeout(*_a: object, **_k: object) -> object:
             raise subprocess.TimeoutExpired("pmset", 2)
@@ -147,7 +147,7 @@ class TestBatterySample:
         assert _battery_sample() == {}
 
     def test_sample_carries_battery_fields(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        import shared.resource_sample as module
+        import shared.host.resource_sample as module
 
         monkeypatch.setattr(module, "_battery_sample", lambda: _parse_battery(self.PMSET_CHARGING))
         s = resource_sample()

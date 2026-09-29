@@ -428,7 +428,7 @@ def test_running_redis_persists_the_authenticated_password_to_its_config(
 def test_redis_config_keeps_previous_complete_value_when_replace_fails(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    from shared import private_storage
+    from shared.host import private_storage
 
     conf = tmp_path / "redis.conf"
     conf.write_text('requirepass "old-complete"\n')

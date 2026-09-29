@@ -318,7 +318,7 @@ def current_of(evidence: Any) -> Any:
 
 def publication_problem(evidence: Any) -> str | None:
     """Why admission cannot read `evidence`; None when it can (SQL NULL is protocol zero)."""
-    from shared.managed_writer_publication import WriterPublication
+    from shared.deploy.writers.publication import WriterPublication
 
     if evidence is None:
         return None

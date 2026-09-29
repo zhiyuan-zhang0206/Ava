@@ -11,6 +11,7 @@ import pytest
 
 from agent.turn import progress
 from services.agent_host import daemon as host_daemon
+from shared.deploy.maintenance import admission as maintenance_admission
 
 
 class _FakeAdmission:
@@ -170,7 +171,6 @@ async def test_beat_skips_ownership_renewal_while_quiesced(
     beat after resume refreshes every row this host still owns — a tracked
     decision of the 2026-09-12 fix batch.
     """
-    from shared import maintenance
 
     calls: list[str] = []
     state = {"quiesced": True}
@@ -191,7 +191,7 @@ async def test_beat_skips_ownership_renewal_while_quiesced(
     async def _record_publish(_machine: str, _agents: frozenset[int]) -> None:
         calls.append("publish")
 
-    monkeypatch.setattr(maintenance, "quiesced", lambda: state["quiesced"])
+    monkeypatch.setattr(maintenance_admission, "quiesced", lambda: state["quiesced"])
     monkeypatch.setattr(host_daemon, "_publish_turn_progress_heartbeat", _record_publish)
     monkeypatch.setattr(host_daemon, "_LIVENESS_BEAT_STEP_S", 0.01)
 

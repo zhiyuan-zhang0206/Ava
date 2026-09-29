@@ -290,7 +290,7 @@ def test_browser_mcp_gated_out_without_af_unix(monkeypatch: pytest.MonkeyPatch) 
     Before the split gate both services shared `browser_incapability()`, so
     browser-mcp was unconditionally in a Windows runner's roster, failed every
     launch, and `ava status` showed no skip annotation to say why."""
-    monkeypatch.setattr("shared.platform_probes.unix_sockets_available", lambda: False)
+    monkeypatch.setattr("shared.host.system.probes.unix_sockets_available", lambda: False)
     monkeypatch.setattr("ops.spec.browser_incapability", lambda: None)
     annotated = _agent_runner_annotated(monkeypatch)
     assert annotated["browser"] is None
@@ -304,8 +304,8 @@ def test_browser_mcp_gated_out_without_af_unix(monkeypatch: pytest.MonkeyPatch) 
 def test_browser_mcp_ungated_with_af_unix(monkeypatch: pytest.MonkeyPatch) -> None:
     """On a capable POSIX host both services start — the AF_UNIX prong is the
     only thing the two gates differ by."""
-    monkeypatch.setattr("shared.platform_probes.unix_sockets_available", lambda: True)
-    monkeypatch.setattr("shared.platform_probes.browser_incapability", lambda: None)
+    monkeypatch.setattr("shared.host.system.probes.unix_sockets_available", lambda: True)
+    monkeypatch.setattr("shared.host.system.probes.browser_incapability", lambda: None)
     monkeypatch.setattr("ops.spec.browser_incapability", lambda: None)
     annotated = _agent_runner_annotated(monkeypatch)
     assert annotated["browser"] is None
@@ -315,9 +315,9 @@ def test_browser_mcp_ungated_with_af_unix(monkeypatch: pytest.MonkeyPatch) -> No
 def test_browser_mcp_gated_out_when_browser_is(monkeypatch: pytest.MonkeyPatch) -> None:
     """browser-mcp's gate is a SUPERSET: an incapable browser host also drops
     browser-mcp, with the browser reason (not the AF_UNIX one)."""
-    monkeypatch.setattr("shared.platform_probes.unix_sockets_available", lambda: True)
+    monkeypatch.setattr("shared.host.system.probes.unix_sockets_available", lambda: True)
     monkeypatch.setattr(
-        "shared.platform_probes.browser_incapability", lambda: "no display (headless)"
+        "shared.host.system.probes.browser_incapability", lambda: "no display (headless)"
     )
     monkeypatch.setattr("ops.spec.browser_incapability", lambda: "no display (headless)")
     annotated = _agent_runner_annotated(monkeypatch)

@@ -57,7 +57,7 @@ def test_installed_image_diagnosis_does_not_read_git_or_cluster_pin(
     monkeypatch.setattr(migration_layout, "_migrations_dir", lambda: tmp_path)
     monkeypatch.setattr(migration_layout, "installed_migration_paths", installed)
     monkeypatch.setattr(migration_layout, "_git_probe", _unexpected)
-    monkeypatch.setattr("shared.cluster_pin.get_cluster_target_sha", _unexpected)
+    monkeypatch.setattr("shared.deploy.state.cluster_pin.get_cluster_target_sha", _unexpected)
     monkeypatch.setattr(schema_mismatch, "applied_migration_names", applied)
     mismatch = schema_mismatch.detect(conn=cast(psycopg.Connection, object()))
     assert mismatch is not None

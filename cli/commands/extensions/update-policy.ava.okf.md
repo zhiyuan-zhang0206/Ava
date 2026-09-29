@@ -56,7 +56,7 @@ their sources (design §5.3; plugin/MCP applies land in P2):
   check on demand; job runs honor each package's due cadence and backoff.
 - The pass **never restarts anything** and **never writes the checkout**; a
   landed skill activates at the next skill scan. One OS job per machine runs
-  `ava packages refresh --from-job` (`shared/os_packages.py`, 15-minute base
+  `ava packages refresh --from-job` (`shared/host/system/packages_job.py`, 15-minute base
   tick; per-package cadence is registry data).
 
 ## `ava packages rollback <name> [--force]`

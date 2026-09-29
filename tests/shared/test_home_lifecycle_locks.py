@@ -7,7 +7,7 @@ import json
 
 import pytest
 
-from shared import home_lifecycle_locks as state
+from shared.deploy.lifecycle import home_lifecycle_locks as state
 from shared.native_process.os_platform import LockTimeoutError
 
 

@@ -71,7 +71,6 @@ from pydantic import (
     model_validator,
 )
 
-from shared.atomic_io import fsync_parent
 from shared.cluster.authority.api import API_TOKEN_ENV, telemetry_token, token_digest
 from shared.cluster.authority.delivery import (
     GENERATION_ENV,
@@ -86,9 +85,10 @@ from shared.cluster.authority.ledger import (
     read_secret,
 )
 from shared.cluster.authority.model import AuthorityRefusedError, Digest, RoleName
-from shared.deploy_timing import UNIT_BUNDLE_MAX_TTL_S
+from shared.deploy.progress_timeout import UNIT_BUNDLE_MAX_TTL_S
+from shared.host.atomic_io import fsync_parent
 from shared.host.net.url_secret import url_with_userinfo
-from shared.private_storage import write_private_bytes
+from shared.host.private_storage import write_private_bytes
 
 # The operator supplies the transport key through this environment variable
 # (from a non-echoing prompt); `ava start` pops it before anything is forwarded.

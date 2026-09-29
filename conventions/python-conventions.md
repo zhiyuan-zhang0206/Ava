@@ -267,11 +267,11 @@ a `TypeAdapter`) is the template. Not lint-enforced — see
 the git log (typed-boundaries design record)
 for why pyright's `reportUnknown*` family can't substitute for this.
 
-## A subprocess timeout means `shared.proc.run_bounded`
+## A subprocess timeout means `shared.host.proc.run_bounded`
 
 `subprocess.run(..., timeout=T)` bounds the process Python spawned, not the work
 it started: on expiry Python kills that one process and every descendant keeps
-running. Use `shared.proc.run_bounded(argv, timeout=...)` instead — same shape,
+running. Use `shared.host.proc.run_bounded(argv, timeout=...)` instead — same shape,
 but it kills the whole tree (descendants enumerated *before* the parent dies)
 and still raises `TimeoutExpired`, so caller control flow is unchanged.
 
@@ -328,7 +328,7 @@ does **not** rescue you — and every `shared.…` above that line then raises
 import shared.paths          # module scope — irrelevant to the function below
 
 def pause_local_cluster():
-    state = shared.host_deploy_state.read()     # UnboundLocalError
+    state = shared.deploy.state.host_deploy_state.read()     # UnboundLocalError
     import shared.db                            # <- makes `shared` local for the whole body
 ```
 

@@ -2,7 +2,7 @@
 
 The other commit signals are **disk** state: ``head_sha`` is what the
 checkout is at right now, ``running_sha`` what ``ava start`` last started on
-(`shared.running_sha`). Neither answers "what is this daemon executing?" — a
+(`shared.deploy.git.running_sha`). Neither answers "what is this daemon executing?" — a
 bookmark can be rewritten while an already-live process keeps its old code, so
 a daemon can sit on code from days ago while every bookmark reads as current.
 That is not hypothetical: on 2026-07-26 a Windows unit's ops daemon served a

@@ -24,11 +24,11 @@ from agent.ownership.hosted import admit_hosted_runtime, settle_hosted_runtime
 from agent.startup import wrap_saver_writes_with_nstep_interval
 from services.agent_host.host import AgentHost
 from services.agent_host.runtime import TurnOutcome
-from shared import maintenance, maintenance_cohort, pause_owner
 from shared.agents.history.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
 from shared.cluster.machine import machine_name
 from shared.context import AvaContext
 from shared.db import create_agent, insert_inbound_message
+from shared.deploy.maintenance import admission, cohort, pause_owner
 
 WHEN = datetime(2026, 9, 6, tzinfo=UTC)
 
@@ -92,12 +92,12 @@ async def test_original_idle_cohort_preserves_pending_messages_and_rejects_succe
     assert await settle_hosted_runtime(aops_pool, incarnation)
     message = insert_inbound_message(db_conn, agent, "pending work", "user")
     pause_owner.begin_maintenance("move", WHEN)
-    hold = maintenance_cohort.prepare(
+    hold = cohort.prepare(
         db_conn, machine=machine_name(), host_owner=owner, holder="move", acquired_at=WHEN
     )
     assert set(hold.commands) == {agent}
     assert (
-        maintenance_cohort.prepare(
+        cohort.prepare(
             db_conn, machine=machine_name(), host_owner=owner, holder="move", acquired_at=WHEN
         )
         == hold
@@ -164,7 +164,7 @@ async def test_idle_hosted_cohort_consumes_restart_under_rollout_phase(
     db_conn.commit()
     try:
         pause_owner.begin_maintenance("move", WHEN)
-        hold = maintenance_cohort.prepare(
+        hold = cohort.prepare(
             db_conn, machine=machine_name(), host_owner=host._owner, holder="move", acquired_at=WHEN
         )
         assert set(hold.commands) == {agent}
@@ -173,10 +173,10 @@ async def test_idle_hosted_cohort_consumes_restart_under_rollout_phase(
         assert [wake.agent_id for wake in wakes] == [agent]
         await asyncio.wait_for(host.run_turn(agent), 20)
 
-        current = maintenance.require_operation("move", WHEN)
+        current = admission.require_operation("move", WHEN)
         assert current.maintenance is not None
         assert current.maintenance.drained == (agent,)
-        maintenance_cohort.verify_drained(db_conn, current.maintenance)
+        cohort.verify_drained(db_conn, current.maintenance)
         assert db_conn.execute(
             "SELECT status, applied_at IS NOT NULL FROM inbound_messages WHERE id=%s",
             (hold.commands[agent],),
@@ -277,16 +277,16 @@ async def test_admitted_model_finishes_real_exec_and_after_exec_before_drain_rec
     try:
         await asyncio.wait_for(entered.wait(), 5)
         pause_owner.begin_maintenance("move", WHEN)
-        hold = maintenance_cohort.prepare(
+        hold = cohort.prepare(
             db_conn, machine=machine_name(), host_owner=host._owner, holder="move", acquired_at=WHEN
         )
         assert not hold.drained
         finish.set()
         await asyncio.wait_for(work, 15)
-        current = maintenance.require_operation("move", WHEN)
+        current = admission.require_operation("move", WHEN)
         assert current.maintenance is not None
         assert current.maintenance.drained == (agent,)
-        maintenance_cohort.verify_drained(db_conn, current.maintenance)
+        cohort.verify_drained(db_conn, current.maintenance)
         reader = AsyncPostgresSaver(aops_pool)
         wrap_saver_reads_with_delta_reconstruction(reader)
         cold = await reader.aget_tuple(config)
@@ -304,7 +304,7 @@ async def test_admitted_model_finishes_real_exec_and_after_exec_before_drain_rec
         # durable restart pointer and real cold checkpoint after explicit release.
         assert current.maintenance is not None
         from cli.commands.lifecycle._pause_resume import resume_after_start
-        from shared import start_serving
+        from shared.deploy.lifecycle import start_serving
 
         monkeypatch.setattr("ops.cluster_pause._unpause_local_cluster", MagicMock())
         monkeypatch.setattr("ops.agent_pause._wake", MagicMock())
@@ -312,11 +312,11 @@ async def test_admitted_model_finishes_real_exec_and_after_exec_before_drain_rec
 
         @resume_after_start
         def ready_start() -> int:
-            maintenance.require_start_allowed()
+            admission.require_start_allowed()
             return 0
 
         assert ready_start() == 0
-        assert not maintenance.held()
+        assert not admission.held()
         successor = AgentHost(
             pool=aops_pool,
             checkpointer=AsyncPostgresSaver(aops_pool),

@@ -32,9 +32,9 @@ from shared.api_contracts.release_handoff import (
     entry_environment,
     read_envelope,
 )
+from shared.deploy.release.runtime_release import VerifiedRelease
+from shared.deploy.release.verified_file import regular_bytes
 from shared.runtime_abi import current_abi
-from shared.runtime_release import VerifiedRelease
-from shared.verified_file import regular_bytes
 
 
 def _require_own_home(envelope: Envelope) -> None:

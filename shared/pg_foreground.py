@@ -39,7 +39,7 @@ from uuid import uuid4
 import psutil
 import psycopg
 
-from shared.atomic_io import write_text_atomic
+from shared.host.atomic_io import write_text_atomic
 from shared.native_process import native_boot_id
 from shared.native_process.ownership import OwnedProcess, capture_tree, retain_processes
 

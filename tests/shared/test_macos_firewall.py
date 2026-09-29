@@ -32,7 +32,7 @@ from pathlib import Path
 
 import pytest
 
-import shared.macos_firewall as fw
+import shared.host.macos_firewall as fw
 
 # Real `--listapps` output from the macmini running macOS 15.3.1, trimmed to four
 # entries with a Block state substituted into one. The exact two-line-per-rule

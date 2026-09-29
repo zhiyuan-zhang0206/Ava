@@ -19,7 +19,9 @@ from gateway.app import app
 from gateway.auth.cors import cors_allowed_origins
 from gateway.lgtm import loki_events
 from ops import cluster_pause, cluster_status
-from shared.start_serving import RootBirth
+from shared.deploy.git import cluster_drift
+from shared.deploy.lifecycle.start_serving import RootBirth
+from shared.deploy.maintenance import admission, pause_owner
 
 
 @pytest.fixture
@@ -239,8 +241,6 @@ def pause_backend(monkeypatch: pytest.MonkeyPatch) -> _FakeSessionBackend:
 class TestPauseLocalCluster:
     @pytest.fixture(autouse=True)
     def _private_pause_owner(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-        from shared import pause_owner
-
         monkeypatch.setattr(pause_owner, "state_path", lambda: tmp_path / "pause.json")
         monkeypatch.setattr(pause_owner, "lock_path", lambda: tmp_path / "pause.lock")
 
@@ -248,13 +248,11 @@ class TestPauseLocalCluster:
         self, pause_backend: _FakeSessionBackend
     ) -> None:
         """Phase A may finish while a peer still needs this gateway's SDK API."""
-        from shared import maintenance
-
         pause_backend.alive_answer = True
 
         cluster_pause.pause_local_cluster()
 
-        current = maintenance.snapshot()
+        current = admission.snapshot()
         assert current is not None and current.maintenance is not None
         assert current.maintenance.phase == "drained"
         with TestClient(app) as client:
@@ -265,8 +263,6 @@ class TestPauseLocalCluster:
 
     def test_idempotent_when_session_missing(self, pause_backend: _FakeSessionBackend) -> None:
         """Repeated Phase A reuses the same drain without starting services."""
-        from shared import pause_owner
-
         cluster_pause.pause_local_cluster()
         first = pause_owner.read()
         cluster_pause.pause_local_cluster()
@@ -280,16 +276,13 @@ class TestPauseLocalCluster:
 class TestUnpauseLocalCluster:
     @pytest.fixture(autouse=True)
     def _private_pause_owner(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-        from shared import pause_owner
-
         monkeypatch.setattr(pause_owner, "state_path", lambda: tmp_path / "pause.json")
         monkeypatch.setattr(pause_owner, "lock_path", lambda: tmp_path / "pause.lock")
 
     def test_unpause_restores_posture_and_releases_admission(
         self, pause_backend: _FakeSessionBackend
     ) -> None:
-        from shared import maintenance
-        from shared.host_deploy_state import set_posture
+        from shared.deploy.state.host_deploy_state import set_posture
 
         cluster_pause.pause_local_cluster()
         set_posture("paused")
@@ -298,7 +291,7 @@ class TestUnpauseLocalCluster:
         cluster_pause.unpause_local_cluster()
 
         assert not cluster_pause.is_paused()
-        assert not maintenance.held()
+        assert not admission.held()
         assert pause_backend.spawned == pause_backend.killed == []
 
     def test_missing_pause_and_repeated_resume_do_not_start_services(
@@ -325,7 +318,7 @@ class TestUnpauseLocalCluster:
 class TestLockHolderLiveness:
     """`_lock_holder_is_live` parses `<machine>:pid<N>` and probes the pid locally.
 
-    The probe itself lives in `shared.cluster_lock.holder_process_gone` (the
+    The probe itself lives in `shared.deploy.state.cluster_lock.holder_process_gone` (the
     manual recovery and the automatic reclaim share one verdict), so the death
     evidence is stubbed at the shared seam — and the two "treated live" cases
     below patch the same machine-name seam, or they would pass vacuously on a
@@ -336,14 +329,14 @@ class TestLockHolderLiveness:
         from ops import cluster as ops_mod
 
         monkeypatch.setattr("shared.cluster.machine.machine_name", lambda: "mc")
-        monkeypatch.setattr("shared.proc.process_alive", lambda _pid: False)  # pyright: ignore[reportUnknownArgumentType]
+        monkeypatch.setattr("shared.host.proc.process_alive", lambda _pid: False)  # pyright: ignore[reportUnknownArgumentType]
         assert ops_mod._lock_holder_is_live("mc:pid123") is False
 
     def test_this_machine_alive_pid_is_live(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from ops import cluster as ops_mod
 
         monkeypatch.setattr("shared.cluster.machine.machine_name", lambda: "mc")
-        monkeypatch.setattr("shared.proc.process_alive", lambda _pid: True)  # pyright: ignore[reportUnknownArgumentType]
+        monkeypatch.setattr("shared.host.proc.process_alive", lambda _pid: True)  # pyright: ignore[reportUnknownArgumentType]
         assert ops_mod._lock_holder_is_live("mc:pid123") is True
 
     def test_foreign_machine_holder_is_treated_live(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -395,7 +388,8 @@ class TestStatusSnapshot:
         set_machine_identity,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        from shared import host_deploy_state, start_serving
+        from shared.deploy.lifecycle import start_serving
+        from shared.deploy.state import host_deploy_state
 
         monkeypatch.setattr(start_serving, "run_dir", lambda: fake_flag.parent)
         set_machine_identity(role="agent-runner", name="wsl")
@@ -420,7 +414,7 @@ class TestStatusSnapshot:
         """status_snapshot threads the prod-source HEAD so the roster can compare
         it against the cluster pin."""
         set_machine_identity(role="agent-runner", name="wsl")
-        monkeypatch.setattr("shared.cluster_drift.prod_source_head_sha", lambda: "abc1234")
+        monkeypatch.setattr(cluster_drift, "prod_source_head_sha", lambda: "abc1234")
         assert cluster_status.status_snapshot().head_sha == "abc1234"
 
     def test_snapshot_includes_running_sha(
@@ -454,8 +448,8 @@ class TestStatusSnapshot:
         advance and the divergence every drift renderer keys on is there."""
         set_machine_identity(role="agent-runner", name="wsl")
         monkeypatch.setattr("shared.native_process.loaded_commit.get", lambda: "0ld0ld0aaaa")
-        monkeypatch.setattr("shared.running_sha.get", lambda: "n3wn3w0bbbb")
-        monkeypatch.setattr("shared.cluster_drift.prod_source_head_sha", lambda: "n3wn3w0bbbb")
+        monkeypatch.setattr("shared.deploy.git.running_sha.get", lambda: "n3wn3w0bbbb")
+        monkeypatch.setattr(cluster_drift, "prod_source_head_sha", lambda: "n3wn3w0bbbb")
 
         snap = cluster_status.status_snapshot()
 

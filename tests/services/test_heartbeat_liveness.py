@@ -519,7 +519,7 @@ class TestMachineAlertEdges:
         _register_machine(db_conn)
         _set_machine_probe(db_conn, _MACHINE, online=False, failures=2)
         _age_transition(db_conn, _MACHINE, seconds=601)
-        monkeypatch.setattr("shared.cluster_lock.read_update_lease", object)
+        monkeypatch.setattr("shared.deploy.state.cluster_lock.read_update_lease", object)
         notified: list[str] = []
         self._mock_notify(monkeypatch, lambda text: notified.append(text) or True)
 
@@ -528,7 +528,7 @@ class TestMachineAlertEdges:
         asyncio.run(self._run(pool, FakeProbe({_MACHINE: False})))
         assert self._alerts(db_conn) == []
 
-        monkeypatch.setattr("shared.cluster_lock.read_update_lease", lambda: None)
+        monkeypatch.setattr("shared.deploy.state.cluster_lock.read_update_lease", lambda: None)
         asyncio.run(self._run(pool, FakeProbe({_MACHINE: False})))
         assert self._alerts(db_conn)[0][1] == "error"
         assert len(notified) == 1
@@ -539,9 +539,9 @@ class TestMachineAlertEdges:
         _register_machine(db_conn)
         _set_machine_probe(db_conn, _MACHINE, online=False, failures=2)
         _age_transition(db_conn, _MACHINE, seconds=601)
-        monkeypatch.setattr("shared.cluster_lock.read_update_lease", lambda: None)
+        monkeypatch.setattr("shared.deploy.state.cluster_lock.read_update_lease", lambda: None)
         monkeypatch.setattr(
-            "shared.host_deploy_state.read_all",
+            "shared.deploy.state.host_deploy_state.read_all",
             lambda: {_MACHINE: SimpleNamespace(updater_live=True)},
         )
 
@@ -557,7 +557,7 @@ class TestMachineAlertEdges:
         _set_machine_probe(db_conn, _MACHINE, online=False, failures=2)
         _age_transition(db_conn, _MACHINE, seconds=601)
         monkeypatch.setattr(
-            "shared.cluster_lock.read_update_lease",
+            "shared.deploy.state.cluster_lock.read_update_lease",
             lambda: (_ for _ in ()).throw(RuntimeError("unreadable")),
         )
 

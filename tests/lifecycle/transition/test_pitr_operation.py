@@ -18,15 +18,15 @@ from cli.release_transition.pitr.evidence import PitrSeal
 from cli.release_transition.pitr.inputs import read_record, require_inputs
 from cli.release_transition.request import PitrRequest, ReleaseRef
 from services.pitr.activation.state import ActivationRecord, record_path, write_record
-from shared.native_process.evidence import ExpectedProcess
-from shared.release_operation import (
+from shared.deploy.release.operation import (
     authorized_pitr,
     authorized_start,
     require_configuration_write_authorized,
     require_pitr_authorized,
     require_start_authorized,
 )
-from shared.start_inputs import configuration_files, files_digest
+from shared.deploy.release.start_inputs import configuration_files, files_digest
+from shared.native_process.evidence import ExpectedProcess
 from tests.lifecycle.transition.phases import at_phase
 from tests.lifecycle.transition.test_launcher_linux import _constant
 
@@ -284,7 +284,7 @@ def test_rollback_submission_preserves_held_generation_or_renews_after_resume(
 ) -> None:
     from cli.release_transition import launcher_linux
     from cli.release_transition.pitr import submission
-    from shared import pause_owner
+    from shared.deploy.maintenance import pause_owner
 
     journal.create(pitr_request)
     home = Path(pitr_request.home)

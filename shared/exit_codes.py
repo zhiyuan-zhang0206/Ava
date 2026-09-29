@@ -22,7 +22,7 @@ RESTART_DECLINED_EXIT_CODE = 3
 
 # `ava start` / `ava restart` ran every step successfully and launched this host's
 # services, but at least one of them never passed its liveness probe within
-# `shared.deploy_timing.SERVICE_READY_TIMEOUT_S`. The status snapshot printed just
+# `shared.deploy.progress_timeout.SERVICE_READY_TIMEOUT_S`. The status snapshot printed just
 # before the exit names which (`cli.commands._probe`).
 #
 # Its own code rather than 1, because the two ask a program to do different things.

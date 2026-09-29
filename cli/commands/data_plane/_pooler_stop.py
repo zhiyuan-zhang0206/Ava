@@ -17,9 +17,9 @@ from typing import cast
 import psutil
 
 from shared.cluster import ownership
+from shared.host.private_storage import write_private_bytes
 from shared.native_process.os_platform import LockTimeoutError, file_lock
 from shared.native_process.ownership import OwnedProcess
-from shared.private_storage import write_private_bytes
 
 
 def _native_birth(identity: OwnedProcess) -> dict[str, int | float | None]:

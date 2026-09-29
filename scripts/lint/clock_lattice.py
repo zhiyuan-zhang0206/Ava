@@ -7,7 +7,7 @@ via pre-commit hook.
 
 ## Why
 
-The clock lattice (`shared/timing.py`) is the single authority for every timing
+The clock lattice (`shared/deploy/timing.py`) is the single authority for every timing
 constant that must hold an ORDER relative to its neighbours — boot stall < launch
 confirm < boot budget < reap grace, NO_PROGRESS < LOCK_TTL, the lease TTLs, the
 controller scan cadence, the wedged derivation. The orderings are load-bearing:
@@ -26,13 +26,13 @@ A module-level constant whose name contains lattice vocabulary (`STALL`, `GRACE`
 `SETTLE_TTL`, `LAUNCH_CONFIRM`, `LEASE_TTL`, `LEASE_RENEW`, `SCAN_INTERVAL`,
 `REAP_INTERVAL`) must be one of:
 
-1. **Defined in a lattice family module** — `shared/timing.py`,
-   `shared/deploy_timing.py`, `shared/stop_timing.py`,
-   `shared/daemon/schedules/timing.py`, `shared/cluster_lock.py`.
+1. **Defined in a lattice family module** — `shared/deploy/timing.py`,
+   `shared/deploy/progress_timeout.py`, `shared/deploy/stop_timing.py`,
+   `shared/daemon/schedules/timing.py`, `shared/deploy/state/cluster_lock.py`.
    These are the lattice's homes; registering a
    new clock there and in `CLOCKS` is the correct way to add one.
 2. **An alias of a registered clock** — the assignment's value is a bare
-   reference to a clock registered in `shared.timing.CLOCKS`
+   reference to a clock registered in `shared.deploy.timing.CLOCKS`
    (e.g. `_ROLLOUT_STALL_TIMEOUT_S: float = NO_PROGRESS_TIMEOUT_S`). The value is
    still defined once; the alias is just a local name.
 3. **Explicitly exempt** in `_INDEPENDENT_CLOCKS` below — the constant is either
@@ -48,7 +48,7 @@ pre-approve whatever next takes that name.
 Scope: non-test code only (tests monkeypatch clocks smaller on purpose).
 Settings fields are class-body definitions in `shared/config/` and are the
 operator-overridable configuration authority, not module constants — they are not
-scanned, and `shared/timing.py` registers them by reference.
+scanned, and `shared/deploy/timing.py` registers them by reference.
 
 Error format `file:line: <reason>` + non-zero exit.
 """
@@ -100,25 +100,25 @@ _LATTICE_TERMS = (
 )
 
 # The lattice family modules: lattice vocabulary may be DEFINED here (and only
-# here). `shared/cluster_lock.py` holds the deploy-lease clocks.
+# here). `shared/deploy/state/cluster_lock.py` holds the deploy-lease clocks.
 _FAMILY_MODULES = (
-    "shared/timing.py",
-    "shared/deploy_timing.py",
-    "shared/stop_timing.py",
+    "shared/deploy/timing.py",
+    "shared/deploy/progress_timeout.py",
+    "shared/deploy/stop_timing.py",
     "shared/daemon/schedules/timing.py",
-    "shared/cluster_lock.py",
+    "shared/deploy/state/cluster_lock.py",
 )
 
 _CONST_NAME = re.compile(r"^_?[A-Z][A-Z0-9_]*$")
 
 
 # Registered clock names, for the alias rule (rule 2): the assignment's value must
-# be a bare reference to one of these. Read from `shared/timing.py` once, at
+# be a bare reference to one of these. Read from `shared/deploy/timing.py` once, at
 # import, with a pure AST parse (no import of the app's settings stack), so the
 # lint runs anywhere the source tree is present — the same zero-dependency shape
 # as every other scripts/ lint.
 def _parse_registered_clocks() -> frozenset[str]:
-    tree = ast.parse((_REPO_ROOT / "shared" / "timing.py").read_text(encoding="utf-8"))
+    tree = ast.parse((_REPO_ROOT / "shared" / "deploy" / "timing.py").read_text(encoding="utf-8"))
     names: set[str] = set()
     for node in tree.body:
         if not isinstance(node, (ast.Assign, ast.AnnAssign)):
@@ -148,11 +148,11 @@ def _registered_clock_names() -> frozenset[str]:
 # lattice neighbour. Every entry states which.
 _INDEPENDENT_CLOCKS: dict[tuple[str, str], str] = {
     (
-        "shared/straggler_reap.py",
+        "shared/deploy/maintenance/straggler_reap.py",
         "REAP_LIFECYCLE_OUTCOME",
     ): "the honest lifecycle_result outcome value for a reaped command, not a clock",
     (
-        "shared/straggler_reap.py",
+        "shared/deploy/maintenance/straggler_reap.py",
         "REAP_LIFECYCLE_REASON",
     ): "the lifecycle_result reason value for the update straggler reap, not a clock",
     (
@@ -164,20 +164,20 @@ _INDEPENDENT_CLOCKS: dict[tuple[str, str], str] = {
         "KILL_GRACE_S",
     ): "independent: SIGINT/SIGTERM -> SIGKILL grace ladder for the exec child, no lattice neighbour",
     (
-        "shared/proc.py",
+        "shared/host/proc.py",
         "_TERMINATE_GRACE_S",
     ): "independent: TERM->KILL ladder wait in the terminate step, no lattice neighbour",
     (
         "cli/release_transition/pitr/transition.py",
         "_TERMINAL_GRACE_S",
     ): "independent: HUP/TERM->KILL ladder wait for PITR terminal closure — same class as "
-    "shared/proc.py's TERM->KILL ladder wait, no lattice neighbour",
+    "shared/host/proc.py's TERM->KILL ladder wait, no lattice neighbour",
     (
         "services/pitr/operation/custody.py",
         "TERMINATE_GRACE_S",
     ): "independent: the SIGTERM courtesy window for one backup/PITR operation worker to "
     "unwind its own private cleanup (key files, decrypted scratch) before the controller's "
-    "confirmed group closure; the same class as shared/proc.py's TERM->KILL ladder wait, "
+    "confirmed group closure; the same class as shared/host/proc.py's TERM->KILL ladder wait, "
     "no lattice neighbour",
     (
         "services/pitr/restore/operation_runtime.py",
@@ -186,7 +186,7 @@ _INDEPENDENT_CLOCKS: dict[tuple[str, str], str] = {
     "for its bounded sandbox stop, residue scan and evidence write; an operator command "
     "outside every daemon stop budget, no lattice neighbour",
     (
-        "shared/proc.py",
+        "shared/host/proc.py",
         "_REAP_TIMEOUT_S",
     ): "independent: single wait_procs bound when reaping a process tree, no lattice neighbour",
     (
@@ -276,7 +276,7 @@ def _scan_file(path: Path) -> list[str]:
                 continue
             errors.append(
                 f"{path}:{node.lineno}: {name} — lattice-vocabulary clock outside "
-                "the lattice family modules; define it in shared/timing.py (and "
+                "the lattice family modules; define it in shared/deploy/timing.py (and "
                 "register it in CLOCKS) or make it an alias of a registered clock"
             )
     return errors

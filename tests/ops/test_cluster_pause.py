@@ -18,17 +18,17 @@ from psycopg_pool import ConnectionPool
 
 from ops import agent_pause, cluster_pause
 from ops.cluster_pause import unpause_local_cluster as _real_unpause_local_cluster
-from shared import maintenance, pause_owner
 from shared.cluster.machine import machine_name
 from shared.db import create_agent, insert_inbound_message
-from shared.host_deploy_state import HostDeployState
+from shared.deploy.maintenance import admission, pause_owner
+from shared.deploy.state.host_deploy_state import HostDeployState
 
 
 @pytest.fixture
 def posture(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     """Record every `set_posture` call so the pairing is observable without a DB."""
     calls: list[str] = []
-    monkeypatch.setattr("shared.host_deploy_state.set_posture", calls.append)
+    monkeypatch.setattr("shared.deploy.state.host_deploy_state.set_posture", calls.append)
     return calls
 
 
@@ -82,7 +82,7 @@ def test_is_paused_judges_a_pre_read_state_without_another_db_read(
     def _unexpected_read() -> HostDeployState | None:
         raise AssertionError("is_paused re-read host deploy state")
 
-    monkeypatch.setattr("shared.host_deploy_state.read", _unexpected_read)
+    monkeypatch.setattr("shared.deploy.state.host_deploy_state.read", _unexpected_read)
 
     assert cluster_pause.is_paused(_state("paused")) is True
     assert cluster_pause.is_paused(_state("idle")) is False
@@ -99,7 +99,7 @@ def test_is_paused_without_an_argument_still_reads_fresh(
         reads += 1
         return _state("paused")
 
-    monkeypatch.setattr("shared.host_deploy_state.read", _read)
+    monkeypatch.setattr("shared.deploy.state.host_deploy_state.read", _read)
 
     assert cluster_pause.is_paused() is True
     assert reads == 1
@@ -109,7 +109,7 @@ def test_pause_holds_admission_without_closing_dependencies(
     posture: list[str], local_runtime: _StubBackend
 ) -> None:
     cluster_pause.pause_local_cluster()
-    current = maintenance.snapshot()
+    current = admission.snapshot()
     assert current is not None and current.maintenance is not None
     assert current.maintenance.phase == "drained"
     assert posture == [], "in-flight SDK requests still need the gateway"
@@ -122,7 +122,7 @@ def test_unpause_writes_idle_posture(posture: list[str]) -> None:
     cluster_pause.unpause_local_cluster()
 
     assert posture == ["idle"]
-    assert not maintenance.held()
+    assert not admission.held()
 
 
 def test_unpause_without_pause_is_a_noop(posture: list[str]) -> None:
@@ -141,7 +141,7 @@ def test_pause_twice_then_unpause_once_clears(posture: list[str]) -> None:
     assert pause_owner.read() == first
     cluster_pause.unpause_local_cluster()
     assert posture == ["idle"]
-    assert not maintenance.held()
+    assert not admission.held()
 
 
 def test_pause_preserves_unclaimed_work_and_terminated_intent(
@@ -157,7 +157,7 @@ def test_pause_preserves_unclaimed_work_and_terminated_intent(
 
     cluster_pause.pause_local_cluster()
 
-    current = maintenance.snapshot()
+    current = admission.snapshot()
     assert current is not None and current.maintenance is not None
     assert current.maintenance.parked == (agent,)
     assert current.maintenance.commands == {}
@@ -196,7 +196,7 @@ def test_drain_timeout_retains_hold_and_action_dependencies(
     with pytest.raises(TimeoutError, match="without force") as raised:
         cluster_pause.pause_local_cluster()
 
-    current = maintenance.snapshot()
+    current = admission.snapshot()
     assert current is not None and current.maintenance is not None
     assert current.maintenance.phase == "draining"
     assert current.maintenance.drained == ()
@@ -227,7 +227,7 @@ def test_stall_report_names_the_predecessor_owner_fence(
     """
     from ops.agent_pause import _stall_report
     from ops.agent_pause.probe import HostIdentity
-    from shared.maintenance_state import MaintenanceHold
+    from shared.deploy.maintenance.state import MaintenanceHold
 
     agent = create_agent(db_conn)
     predecessor, successor, generation = uuid4(), uuid4(), uuid4()
@@ -263,12 +263,12 @@ def test_unpause_refuses_a_held_unit_whose_services_stopped(
     monkeypatch: pytest.MonkeyPatch, posture: list[str]
 ) -> None:
     """A held unit whose services stopped resumes only after `ava start` passes readiness."""
-    from shared.maintenance_state import MaintenanceHold
+    from shared.deploy.maintenance.state import MaintenanceHold
 
     when = datetime(2026, 9, 10, tzinfo=UTC)
     pause_owner.begin_maintenance("wsl:pid1", when)
     pause_owner.change_maintenance("wsl:pid1", when, MaintenanceHold(), MaintenanceHold("stopping"))
-    monkeypatch.setattr("shared.start_serving.is_serving", lambda: False)
+    monkeypatch.setattr("shared.deploy.lifecycle.start_serving.is_serving", lambda: False)
 
     with pytest.raises(RuntimeError) as raised:
         cluster_pause.unpause_local_cluster()

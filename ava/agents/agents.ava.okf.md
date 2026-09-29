@@ -44,7 +44,7 @@ tags:
 - `OpenTasksHint`: count of open tasks, up to five `tasks` newest first (id, title, status, updated_at), and `more` — how many beyond those five remain.
 
 ## Key Dependencies
-- [[state.ava.okf.md]] — agent state storage
+- [[agent/state.ava.okf.md]] — agent state storage
 - [[lifecycle.ava.okf.md]] — process lifecycle
 - [[gateway-cli.ava.okf.md]] — gateway is the actual entry point for agent spawn
 

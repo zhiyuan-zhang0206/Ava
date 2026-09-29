@@ -129,8 +129,8 @@ from cli.release_transition.journal import Operation
 from cli.release_fleet.request import FleetRequest
 from cli.release_transition.request import ReleaseRef
 from shared import cluster
-from shared.maintenance_state import MaintenanceHold
-from shared.start_inputs import configuration_digest
+from shared.deploy.maintenance.state import MaintenanceHold
+from shared.deploy.release.start_inputs import configuration_digest
 from tests.lifecycle._start_identity import prepare_start_identity
 
 home = Path(os.environ["AVA_HOME"])
@@ -163,8 +163,8 @@ pause.write_text(json.dumps({"state":"paused", "holder":str(request.id),
 
 # Only native-manager placement and installed-image bytes are fixtures.
 # Stage, boot, identity preparation, config boot, and pause authorization are real.
-from shared import os_boot_unit
-os_boot_unit.in_boot_unit = lambda value: value == home
+from shared.host.system import boot_unit
+boot_unit.in_boot_unit = lambda value: value == home
 ReleaseRef.verify = lambda self, *args: self
 start_runtime.admit_release = lambda *args, **kwargs: start_runtime.StartRuntime.development(checkout)
 prepare = start_intent._prepare_start_locked
@@ -179,13 +179,14 @@ sys.modules["cli.commands.lifecycle.start"] = commands
 calls = []
 def effects(**kwargs):
     from cli.commands.lifecycle._pause_resume import resume_after_start
-    from shared import maintenance, start_serving
+    from shared.deploy.lifecycle import start_serving
+    from shared.deploy.maintenance import admission
     from shared.config import get_field
     from dotenv import dotenv_values
     expected = dotenv_values(home / ".env")
     @resume_after_start
     def start():
-        assert maintenance.start_authorized()
+        assert admission.start_authorized()
         assert get_field("machine_serve_gateway") is True
         assert get_field("machine_serve_agent_runner") is True
         assert get_field("machine_serve_observability_station") is False
@@ -676,7 +677,7 @@ sys.modules["cli.commands.lifecycle.start"] = types.SimpleNamespace(cmd_start=st
 sys.modules["cli.commands.lifecycle.root_driver"] = types.SimpleNamespace(
     complete_boot_start=lambda: calls.append("boot-complete")
 )
-sys.modules["shared.start_serving"] = types.SimpleNamespace(
+sys.modules["shared.deploy.lifecycle.start_serving"] = types.SimpleNamespace(
     clear_serving=lambda: calls.append("clear-serving")
 )
 assert main.main(["start", "--worktree"]) == 0

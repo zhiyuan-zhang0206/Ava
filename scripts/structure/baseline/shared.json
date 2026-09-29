@@ -2,34 +2,18 @@
   "complexity": {
     "shared/config_registry.py::_build_registry": 19,
     "shared/db.py::insert_inbound_message": 21,
-    "shared/editable_install.py::editable_import_gate": 15,
     "shared/exec_owner_recovery.py::recover_local_resources": 27,
     "shared/host_process_evidence.py::local_host_evidence": 15,
-    "shared/lifecycle_status.py::read": 17,
-    "shared/maintenance.py::record_drained": 19,
-    "shared/maintenance_cohort.py::_classify": 24,
-    "shared/maintenance_cohort.py::_refuse_inflight_lifecycle": 18,
-    "shared/maintenance_cold.py::require_no_consumers": 18,
-    "shared/maintenance_cold.py::require_persisted_end": 17,
-    "shared/maintenance_state.py::MaintenanceHold.decode": 18,
-    "shared/managed_writer_publication.py::WriterPublication.unique_units": 21,
-    "shared/memory_repo.py::init": 15,
     "shared/migrations.py::apply_pending_migrations": 15,
-    "shared/native_job_observation.py::observe_crontab": 15,
     "shared/plugin_manifest.py::_validate_contributions": 17,
     "shared/plugins_config.py::update_all_disk_images": 16,
     "shared/pyproject_mirror.py::_parse_py_spec": 18,
     "shared/pyproject_mirror.py::_pick_bound": 16,
     "shared/pyproject_mirror.py::pyproject_dependency_specs": 15,
     "shared/runtime_migration.py::ReleaseMigrationContext.validate": 15,
-    "shared/runtime_plugins.py::verify_plugin_dependencies": 15,
-    "shared/runtime_prepare.py::prepare_release": 31,
-    "shared/runtime_publication_input.py::resolve_runtime_publication_input": 16,
-    "shared/runtime_release.py::verify_release": 29,
-    "shared/updater_handoff.py::_read_unlocked": 16,
-    "shared/updater_recovery.py::NormalReleaseRecoveryJournal.coherent_phase": 16
+    "shared/runtime_plugins.py::verify_plugin_dependencies": 15
   },
   "directories": {
-    "shared": 189
+    "shared": 162
   }
 }

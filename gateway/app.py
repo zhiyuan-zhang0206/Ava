@@ -169,8 +169,8 @@ from shared.agents import AvaAgentError
 from shared.cluster.auth import cookie_name
 from shared.config import settings
 from shared.context import AvaContext
+from shared.host.system.cron import register_os_cron
 from shared.lm.plugin_providers import ensure_provider_plugins_loaded
-from shared.os_cron import register_os_cron
 
 _log = logging.getLogger(__name__)
 
@@ -321,7 +321,7 @@ app = FastAPI(
 
 async def _cluster_is_paused(_request: Request) -> bool:
     """Read this home's durable admission state without a stale posture cache."""
-    from shared.maintenance import business_paused
+    from shared.deploy.maintenance.admission import business_paused
 
     return await asyncio.to_thread(business_paused)
 

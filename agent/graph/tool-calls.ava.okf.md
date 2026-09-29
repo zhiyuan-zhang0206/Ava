@@ -29,7 +29,7 @@ Ava agent's tool invocation and code execution layer—including normalization o
 ## Key Dependencies
 
 - [[llm.ava.okf.md]] — LLM-generated tool_calls as input
-- [[state.ava.okf.md]] — Execution results written as ToolMessage into state
+- [[agent/state.ava.okf.md]] — Execution results written as ToolMessage into state
 - [[sse.ava.okf.md]] — Redis streaming output push
 
 ## Entry Points

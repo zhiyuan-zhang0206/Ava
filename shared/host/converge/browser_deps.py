@@ -2,7 +2,7 @@
 
 This is the settings-free half of the browser-deps contract, used by converge's
 browser step. It imports only the standard library plus settings-free probes
-from ``shared.platform_probes``; it must never import ``shared.config`` or a
+from ``shared.host.system.probes``; it must never import ``shared.config`` or a
 ``cli`` module.
 """
 
@@ -13,7 +13,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from shared.platform_probes import NPX_INCAPABILITY_REASON, browser_deps_incapability
+from shared.host.system.probes import NPX_INCAPABILITY_REASON, browser_deps_incapability
 
 
 def node_install_command() -> str:

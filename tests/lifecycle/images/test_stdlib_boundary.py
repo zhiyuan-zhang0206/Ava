@@ -27,7 +27,7 @@ class StdlibOnly(importlib.abc.MetaPathFinder):
 sys.meta_path.insert(0, StdlibOnly())
 sys.path.insert(0, sys.argv[1])
 # runtime_plugins is imported lazily by preparation's plugin inventory.
-import shared.runtime_abi, shared.runtime_plugins, shared.runtime_prepare, shared.runtime_release
+import shared.runtime_abi, shared.runtime_plugins, shared.deploy.release.runtime_prepare, shared.deploy.release.runtime_release
 """
 
 # A preparation tool whose child forks a grandchild only after the tool (the
@@ -41,8 +41,8 @@ print(os.getpgrp() == os.getpid())
 _LATE = "import os, time; time.sleep(0.2); os.fork(); time.sleep({linger})"
 _RUN = """
 import os, pathlib
-from shared.runtime_prepare import _run
-from shared.runtime_release import ReleaseRejectedError
+from shared.deploy.release.runtime_prepare import _run
+from shared.deploy.release.runtime_release import ReleaseRejectedError
 
 work = pathlib.Path(sys.argv[2])
 tool = [sys.executable, "-I", str(work / "tool.py")]

@@ -6,7 +6,7 @@ of serving binaries per capability, and reporting rather than raising.
 
 **Nothing here mutates a real firewall.** The step attempts an unprivileged
 mutation first and falls back to `sudo -n`, but every test stubs the mutation seam
-(`shared.macos_firewall._sudo_mutate` / `run_bounded`), so what is asserted is
+(`shared.host.macos_firewall._sudo_mutate` / `run_bounded`), so what is asserted is
 output and decision-making, never ALF state.
 """
 
@@ -20,8 +20,8 @@ import pytest
 import cli.commands.converge.firewall as cfw
 import cli.commands.converge.firewall_command as firewall_cmd
 import cli.commands.converge.host as cv
-from shared import macos_firewall as fw
-from shared.macos_firewall import FirewallAudit, FirewallVerdict
+from shared.host import macos_firewall as fw
+from shared.host.macos_firewall import FirewallAudit, FirewallVerdict
 
 
 def _ctx(home: Path, roles: frozenset[str] | None) -> cv.ConvergeCtx:

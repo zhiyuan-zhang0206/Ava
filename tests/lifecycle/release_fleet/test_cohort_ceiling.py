@@ -16,7 +16,7 @@ from cli.release_fleet.gateway import Samples
 from cli.release_fleet.policy import MAX_COHORT_AGENTS, Cohort
 from cli.release_fleet.request import FleetRequest
 from cli.release_transition.journal import Operation, create, exclusive, read_operation
-from shared.maintenance_state import MaintenanceHold
+from shared.deploy.maintenance.state import MaintenanceHold
 from tests.lifecycle.release_fleet.fakes import drive
 from tests.lifecycle.release_fleet.test_coordinator import Effects
 from tests.lifecycle.release_fleet.test_coordinator import request_record as request_record

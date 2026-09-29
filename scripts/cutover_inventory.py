@@ -196,7 +196,7 @@ def read_journal(home: Path) -> dict[str, Any] | None:
     completed `intent` step no longer has its start intent: a rollback (R0, R1)
     undid that adoption, and a retry must not read the home as adopted."""
     from cli.start_identity import INTENT_NAME
-    from shared.verified_file import regular_bytes
+    from shared.deploy.release.verified_file import regular_bytes
 
     path = home / ADOPTION_JOURNAL
     try:

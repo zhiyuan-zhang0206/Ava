@@ -16,7 +16,7 @@ from cli.release_transition.pitr import submission
 from cli.release_transition.pitr.inputs import require_inputs
 from cli.release_transition.request import PitrRequest
 from services.pitr.activation.state import mark_pre_mutation_rolled_back, record_path, write_record
-from shared.release_operation import authorized_pitr
+from shared.deploy.release.operation import authorized_pitr
 from tests.lifecycle.transition.phases import at_phase
 from tests.lifecycle.transition.test_launcher_linux import _constant
 from tests.lifecycle.transition.test_pitr_operation import (  # noqa: F401 — fixture
@@ -71,7 +71,7 @@ def test_repeated_rollback_joins_exact_completed_business_receipt(
     active = _release(pitr_request) if later_release else completed
     home = Path(pitr_request.home)
     monkeypatch.setattr("shared.paths.ava_home", lambda: home)
-    monkeypatch.setattr("shared.os_boot_unit.systemd_running", lambda: True)
+    monkeypatch.setattr("shared.host.system.boot_unit.systemd_running", lambda: True)
     monkeypatch.setattr(submission, "_active", _constant(active))
     before = {path: path.read_bytes() for path in home.rglob("*") if path.is_file()}
     request = submission.prepare_request("rollback", origin="operator")

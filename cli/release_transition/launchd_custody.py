@@ -24,9 +24,9 @@ from pydantic import Field, JsonValue, ValidationError, model_validator
 from cli.release_transition.native import DARWIN
 from cli.release_transition.request import Record
 from services.permissions_helper.finite_artifact import HelperArtifact
+from shared.deploy.release.runtime_release import ReleaseRejectedError
+from shared.deploy.release.verified_file import regular_bytes
 from shared.native_process.ownership import OwnedProcess
-from shared.runtime_release import ReleaseRejectedError
-from shared.verified_file import regular_bytes
 
 _CLOSURE_WAIT_S = 5.0
 _KILL_WAIT_S = 5.0

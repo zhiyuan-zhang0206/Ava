@@ -23,7 +23,7 @@ from shared.telemetry.station_endpoint import StationTarget
 
 
 def brew_pins() -> DaemonProbe:
-    from shared import brew_pin, proc
+    from shared.host import brew_pin, proc
 
     observed: list[set[str]] = []
     for option in ("--pinned", "--formula"):

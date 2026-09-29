@@ -26,7 +26,7 @@ REQUIRED = (
     "shared/host/env/dotenv_boot.py",
     "cli/main.py",
     "cli/python_install.py",
-    "shared/python_lock.py",
+    "shared/deploy/release/python_lock.py",
     "ava_builtins/plugins/ava_code/plugin.py",
     "ava_builtins/plugins/ava_code/ava_code.ava.okf.md",
     "db/schema.sql",

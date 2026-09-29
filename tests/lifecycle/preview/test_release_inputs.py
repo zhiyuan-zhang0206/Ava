@@ -17,8 +17,8 @@ from cli.release_prepare.acquisition_models import Acquisition, AcquisitionRecei
 from cli.release_prepare.models import BuildEvidence, ImageEvidence, encode
 from scripts.preview import release_inputs
 from scripts.preview.release_fixture import FixtureWheel
+from shared.deploy.release.runtime_release import ReleaseRejectedError, file_sha256
 from shared.runtime_abi import current_abi
-from shared.runtime_release import ReleaseRejectedError, file_sha256
 from tests.lifecycle.preparation.test_acquisition import acquisition as acquisition
 from tests.lifecycle.preparation.test_acquisition import tools as tools
 

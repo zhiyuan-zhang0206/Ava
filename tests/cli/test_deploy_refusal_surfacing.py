@@ -28,7 +28,7 @@ def test_recover_clears_a_dead_holders_lock(
     expires — up to 30 minutes on the strength of a dead process."""
     import ops.cluster as _ops
     from cli.commands.cluster import recover
-    from shared.cluster_lock import (
+    from shared.deploy.state.cluster_lock import (
         acquire_update_lock,
         update_lock_holder,
     )
@@ -60,7 +60,7 @@ def test_recover_refuses_while_the_holder_is_alive(
     that would reintroduce the collision the deploy window exists to prevent."""
     import ops.cluster as _ops
     from cli.commands.cluster import recover
-    from shared.cluster_lock import (
+    from shared.deploy.state.cluster_lock import (
         acquire_update_lock,
         update_lock_holder,
     )

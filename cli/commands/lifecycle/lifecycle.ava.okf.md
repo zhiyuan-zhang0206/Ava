@@ -60,9 +60,9 @@ one exit, `scripts/cutover_adopt_home.py --resume`.
 
 `cli/parsers/maintenance.py` retains explicit intermediate steps through
 `maintenance.py`, which reads its generation's hold through the maintenance
-journal's own door (`shared.maintenance.require_operation`) and the agent-host
+journal's own door (`shared.deploy.maintenance.admission.require_operation`) and the agent-host
 probes from `ops.agent_pause.probe`. They reuse the
-[durable maintenance journal](../../../shared/maintenance/maintenance.ava.okf.md).
+[durable maintenance journal](../../../shared/deploy/maintenance/maintenance.ava.okf.md).
 See [the coordinated operator procedure](../../../conventions/graceful-maintenance.md).
 
 ## Start

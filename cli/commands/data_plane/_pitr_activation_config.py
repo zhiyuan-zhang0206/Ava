@@ -166,7 +166,7 @@ def restore_archive_settings(
     home: Path, record: ActivationRecord, baseline: dict[str, str]
 ) -> ActivationRecord:
     """Restore persisted settings through exact SQL pre/postimage receipts."""
-    from shared.release_operation import require_pitr_authorized
+    from shared.deploy.release.operation import require_pitr_authorized
 
     require_pitr_authorized(home)
     for name, desired in baseline.items():
@@ -212,7 +212,7 @@ def _env_payload(home: Path) -> bytes:
 def apply_wal_config(
     home: Path, record: ActivationRecord, desired: dict[str, str]
 ) -> ActivationRecord:
-    from shared.release_operation import require_pitr_authorized
+    from shared.deploy.release.operation import require_pitr_authorized
 
     require_pitr_authorized(home)
     record = _apply_archive_settings(home, record, desired)

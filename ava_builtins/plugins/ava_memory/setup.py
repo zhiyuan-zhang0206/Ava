@@ -76,7 +76,7 @@ def _arm_hooks(pool: Path) -> bool:
 
 def _ensure_memory_repo() -> None:
     """Run init() if the memory pool is not a git repo. If already init'd but on the wrong branch, fail loud."""
-    from shared.memory_repo import branch_name, init, is_initialized
+    from shared.deploy.git.memory_repo import branch_name, init, is_initialized
     from shared.paths import memory_dir
 
     if is_initialized():
@@ -103,7 +103,7 @@ def _ensure_gateway_memory_repo() -> None:
     the same path as the agent-runner checkout (memory_dir()).
     """
     from shared.cluster.machine import is_gateway
-    from shared.memory_repo import gateway_is_initialized, init_gateway
+    from shared.deploy.git.memory_repo import gateway_is_initialized, init_gateway
     from shared.paths import gateway_memory_dir
 
     if not is_gateway():

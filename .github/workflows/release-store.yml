@@ -3,8 +3,8 @@ on:
   pull_request:
     paths:
       - 'shared/runtime_abi.py'
-      - 'shared/runtime_release.py'
-      - 'shared/runtime_prepare.py'
+      - 'shared/deploy/release/runtime_release.py'
+      - 'shared/deploy/release/runtime_prepare.py'
       - 'shared/native_process/group_closure.py'
       - 'shared/native_process/os_platform.py'
       - 'tests/lifecycle/images/**'

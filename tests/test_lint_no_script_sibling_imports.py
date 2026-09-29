@@ -214,7 +214,7 @@ def test_bare_import_of_sibling_file_is_flagged_even_when_stdlib_shadows(scan_tm
     """`import platform` with a sibling platform.py resolves to the sibling in
     script mode — the conservative direction is to flag it."""
     _write(scan_tmp, "shared/platform.py", "VALUE = 1\n")
-    errs = _errors(scan_tmp, "shared/macos_firewall.py", _script("import platform"))
+    errs = _errors(scan_tmp, "shared/host/macos_firewall.py", _script("import platform"))
     assert len(errs) == 1
 
 

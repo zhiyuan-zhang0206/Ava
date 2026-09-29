@@ -206,7 +206,7 @@ def test_host_wiring_leaves_existing_editable_install_unchanged(
     scripts.mkdir()
     files = {pointer: pointer.read_bytes()}
     modes = {path: stat.S_IMODE(path.stat().st_mode) for path in (site, scripts, pointer)}
-    monkeypatch.setattr("shared.cluster_drift.prod_source_dir", lambda: source)
+    monkeypatch.setattr("shared.deploy.git.cluster_drift.prod_source_dir", lambda: source)
 
     def default_home(_home: Path) -> bool:
         return True
@@ -259,7 +259,7 @@ def _capable_helper_ctx(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     ava_home.mkdir()
     (ava_home / ".env").write_text("")
     monkeypatch.setattr(converge_host.sys, "platform", "darwin")
-    monkeypatch.setattr("shared.platform_probes.permissions_helper_incapability", lambda: None)
+    monkeypatch.setattr("shared.host.system.probes.permissions_helper_incapability", lambda: None)
     monkeypatch.setattr(settings.services, "permissions_helper_enabled", True)
     return _ctx(tmp_path, ava_home)
 
@@ -569,7 +569,7 @@ def _screen_capture_env(
     monkeypatch.setattr("shared.host.converge.screen_capture.ava_home", lambda: tmp_path)
     monkeypatch.setattr(settings.services, "permissions_helper_enabled", enabled)
     monkeypatch.setattr(
-        "shared.platform_probes.permissions_helper_incapability", lambda: incapability
+        "shared.host.system.probes.permissions_helper_incapability", lambda: incapability
     )
 
 
@@ -658,7 +658,7 @@ def _accessibility_env(
     monkeypatch.setattr("shared.host.converge.accessibility.ava_home", lambda: tmp_path)
     monkeypatch.setattr(settings.services, "permissions_helper_enabled", enabled)
     monkeypatch.setattr(
-        "shared.platform_probes.permissions_helper_incapability", lambda: incapability
+        "shared.host.system.probes.permissions_helper_incapability", lambda: incapability
     )
 
 

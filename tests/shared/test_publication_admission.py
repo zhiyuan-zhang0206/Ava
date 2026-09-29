@@ -8,8 +8,8 @@ import pytest
 from psycopg import sql
 from pydantic import ValidationError
 
-from shared.managed_writer_barrier import ManagedWriterBarrierError
-from shared.managed_writer_publication import (
+from shared.deploy.writers.barrier import ManagedWriterBarrierError
+from shared.deploy.writers.publication import (
     CurrentAdmission,
     DeferredAdmission,
     LegacyProtocolZero,
@@ -17,7 +17,7 @@ from shared.managed_writer_publication import (
     publication_admission,
     publication_admission_async,
 )
-from tests.shared.test_managed_writer_publication import pending, seed_current, unit
+from tests.shared.test_publication import pending, seed_current, unit
 
 
 @pytest.mark.parametrize(

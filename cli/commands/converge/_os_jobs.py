@@ -28,11 +28,11 @@ from cli.commands.converge.spec import ConvergeCtx
 def ensure_health_probe_cron(_ctx: ConvergeCtx) -> None:
     """Register the OS cron job for the cluster health probe.
 
-    Only runs on gateway hosts (roles gated). Delegates to `shared.os_cron`.
+    Only runs on gateway hosts (roles gated). Delegates to `shared.host.system.cron`.
     The primary registration path is now in the gateway lifespan
     (`gateway/app.py`); this converge step is a belt-and-suspenders fallback
     that runs before the gateway process starts. Idempotent."""
-    from shared.os_cron import register_os_cron
+    from shared.host.system.cron import register_os_cron
 
     register_os_cron()
     # On failure the exception propagates so converge fails fast on POSIX (the
@@ -43,7 +43,7 @@ def ensure_health_probe_cron(_ctx: ConvergeCtx) -> None:
 
 def ensure_logs_maintenance(_ctx: ConvergeCtx) -> None:
     """Register daily rotation followed by retention."""
-    from shared.os_logs_job import register_logs_job
+    from shared.host.system.logs_job import register_logs_job
 
     register_logs_job()
 
@@ -52,11 +52,11 @@ def ensure_packages_refresh_job(_ctx: ConvergeCtx) -> None:
     """Register the recurring content-refresh pass (design §5.6; task #3267).
 
     Every serving unit runs it: skills are per-machine state, so each home owns
-    its own pass. Delegates to `shared.os_packages`, which no-ops when
+    its own pass. Delegates to `shared.host.system.packages_job`, which no-ops when
     `AVA_OS_JOBS_ENABLED` is off and skips registration when the refresh channel
     itself is disabled (`AVA_PACKAGES_REFRESH_ENABLED`); the registered command
     re-checks both at run time. Idempotent."""
-    from shared.os_packages import register_packages_job
+    from shared.host.system.packages_job import register_packages_job
 
     register_packages_job()
     # POSIX: a registration failure propagates so converge fails fast (without
@@ -67,12 +67,12 @@ def ensure_packages_refresh_job(_ctx: ConvergeCtx) -> None:
 def ensure_pr_flow_job(_ctx: ConvergeCtx) -> None:
     """Register the daily PR-flow sampler job (task #2139).
 
-    The gate lives in `shared.os_pr_flow.register_pr_flow_job`: the job is
+    The gate lives in `shared.host.system.pr_flow_job.register_pr_flow_job`: the job is
     registered only on a production home whose machine holds the sampler's
     credentials (`gh` on PATH + a Trunk API token) — in the fleet, macmini.
     Every other unit skips with the reason logged, so converge output explains
     the absence. Idempotent."""
-    from shared.os_pr_flow import register_pr_flow_job
+    from shared.host.system.pr_flow_job import register_pr_flow_job
 
     register_pr_flow_job()
 
@@ -84,8 +84,8 @@ def ensure_cluster_autostart(_ctx: ConvergeCtx) -> None:
 
     host_global-gated to the prod install, so a dev worktree cluster never
     registers autostart (its plist would dangle once the worktree is removed).
-    Delegates to `shared.os_autostart`. Idempotent."""
-    from shared.os_autostart import register_autostart
+    Delegates to `shared.host.system.autostart`. Idempotent."""
+    from shared.host.system.autostart import register_autostart
 
     register_autostart()
     # On failure the exception propagates so converge fails fast on POSIX (the

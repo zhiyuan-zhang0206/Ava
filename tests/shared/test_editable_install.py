@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from shared import editable_install
+from shared.deploy.release import editable_install
 
 
 def _write_pth(source_root: Path, target: Path) -> Path:
@@ -612,7 +612,7 @@ def test_uv_native_editable_records_are_legal_and_exec_guard_accepts_them(tmp_pa
             sys.executable,
             "-c",
             "from pathlib import Path\n"
-            "from shared.editable_install import guard_editable_install\n"
+            "from shared.deploy.release.editable_install import guard_editable_install\n"
             f"raise SystemExit(bool(guard_editable_install(Path({str(uv_built_venv_root)!r}), "
             f"allowed_roots=(Path({str(checkout)!r}),))))\n",
         ],

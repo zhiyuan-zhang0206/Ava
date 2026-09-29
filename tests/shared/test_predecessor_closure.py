@@ -15,17 +15,17 @@ from agent.db import claim_inbound_batch
 from agent.ownership.hosted import admit_hosted_runtime, apply_hosted_lifecycle
 from ops.agents.spawn import create_agent_row
 from services.agent_host.maintenance import record_drained
-from shared import maintenance
 from shared.cluster.machine import machine_name
 from shared.db import insert_inbound_message
+from shared.deploy.maintenance import admission
+from shared.deploy.maintenance.cohort import _applied_capture, verify_drained
+from shared.deploy.maintenance.state import MaintenanceHold
 from shared.incarnation_resources import (
     IncarnationResources,
     ResourceEvidenceError,
     ResourceShapeError,
     decode_resources,
 )
-from shared.maintenance_cohort import _applied_capture, verify_drained
-from shared.maintenance_state import MaintenanceHold
 from shared.native_process.runtime_incarnation import RuntimeIncarnation
 from shared.native_process.turn_identity import bind_turn_identity
 from shared.predecessor_closure import ClosureEvidence, close_retired_predecessor
@@ -414,8 +414,8 @@ async def test_admitted_successor_drains_with_its_complete_recorded_set(
     def record(agent: int, cmd: int) -> None:
         recorded.append((agent, cmd))
 
-    monkeypatch.setattr(maintenance, "pending_command", pending)
-    monkeypatch.setattr(maintenance, "record_drained", record)
+    monkeypatch.setattr(admission, "pending_command", pending)
+    monkeypatch.setattr(admission, "record_drained", record)
     await record_drained(aops_pool, incarnation.owner, aid)
     assert recorded == [(aid, command)]
     hold = MaintenanceHold("drained", {aid: command}, drained=(aid,))

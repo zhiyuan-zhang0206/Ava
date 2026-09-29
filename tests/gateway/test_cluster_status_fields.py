@@ -641,7 +641,7 @@ def test_gather_stamps_the_lease_sentence_on_every_row(monkeypatch: pytest.Monke
     """The live lease is cluster-global: its sentence (settle note included) is
     stamped on ALL rows. No per-host settle verdict rides the wire — nothing
     records a settle hold's waiting set any more."""
-    from shared.cluster_lock import DeployLease, settle_note
+    from shared.deploy.state.cluster_lock import DeployLease, settle_note
 
     monkeypatch.setattr(status_mod, "cluster_is_paused", lambda: False)
     monkeypatch.setattr(status_mod, "prod_source_head_sha", lambda: "abc123")
@@ -664,7 +664,7 @@ def test_gather_stamps_the_lease_sentence_on_every_row(monkeypatch: pytest.Monke
 def test_gather_stamps_hold_for_an_executing_lease(monkeypatch: pytest.MonkeyPatch):
     """A lease with no settle fact (for example PITR provisioning) is stamped so the
     roster can explain a refused acquire."""
-    from shared.cluster_lock import DeployLease
+    from shared.deploy.state.cluster_lock import DeployLease
 
     monkeypatch.setattr(status_mod, "cluster_is_paused", lambda: False)
     monkeypatch.setattr(status_mod, "prod_source_head_sha", lambda: "abc123")
@@ -693,7 +693,7 @@ def test_read_deploy_lease_degrades_on_operational_error(monkeypatch: pytest.Mon
     def _boom() -> None:
         raise psycopg.OperationalError("connection refused")
 
-    monkeypatch.setattr("shared.cluster_lock.read_update_lease", _boom)
+    monkeypatch.setattr("shared.deploy.state.cluster_lock.read_update_lease", _boom)
     assert status_mod._read_deploy_lease() is None
 
 

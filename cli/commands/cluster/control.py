@@ -345,9 +345,9 @@ def _gateway_authority_home(verb: str) -> Path | None:
     operation may be incomplete: it captured the units it releases.
     """
     from shared.config import settings
+    from shared.deploy.release.operation import require_configuration_write_authorized
     from shared.host.env.bootstrap import config_source_is_local
     from shared.paths import ava_home
-    from shared.release_operation import require_configuration_write_authorized
 
     if not config_source_is_local() or settings.data_plane.is_remote:
         print(

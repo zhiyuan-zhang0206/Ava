@@ -860,7 +860,7 @@ def test_refresh_gateway_checkout_fast_forwards(
         ["git", "-C", str(tmp_path), "rev-parse", "HEAD"], text=True
     ).strip()
 
-    from shared import memory_repo
+    from shared.deploy.git import memory_repo
 
     monkeypatch.setattr(memory_repo, "gateway_memory_dir", lambda: tmp_path)
     monkeypatch.setattr(memory_repo, "pull_main", lambda: "abc1234")
@@ -878,7 +878,7 @@ def test_refresh_gateway_checkout_failure_logs_and_does_not_raise(
     retries next cycle instead of letting the daemon die."""
     import logging
 
-    from shared import memory_repo
+    from shared.deploy.git import memory_repo
 
     monkeypatch.setattr(memory_repo, "gateway_memory_dir", lambda: tmp_path)
 

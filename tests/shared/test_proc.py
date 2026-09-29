@@ -1,4 +1,4 @@
-"""shared.proc — the liveness probe and `run_bounded`'s tree-bounded timeout.
+"""shared.host.proc — the liveness probe and `run_bounded`'s tree-bounded timeout.
 
 The `run_bounded` cases spawn REAL process trees (parent + grandchild), because
 the defect being fixed lives entirely in who survives a kill: a mocked
@@ -20,20 +20,20 @@ from types import SimpleNamespace
 import psutil
 import pytest
 
-from shared.native_process import ownership, pid_starttime_ticks
-from shared.native_process.os_platform import IS_LINUX, IS_WINDOWS
-from shared.native_process.ownership import OwnedProcess
-from shared.paths import run_dir
-from shared.proc import (
+from shared.host.proc import (
     child_state,
     hosting_supervised_session,
     kill_process_tree,
     process_alive,
     run_bounded,
 )
-from shared.proc import (
+from shared.host.proc import (
     timeout_stderr_tail as proc_timeout_stderr_tail,
 )
+from shared.native_process import ownership, pid_starttime_ticks
+from shared.native_process.os_platform import IS_LINUX, IS_WINDOWS
+from shared.native_process.ownership import OwnedProcess
+from shared.paths import run_dir
 from shared.sessions.record import SessionRecord
 
 
@@ -98,7 +98,9 @@ def test_hosting_supervised_session_uses_starttime_despite_wall_clock_drift(
 # exec runtime creates for every exec domain. A same-process call cannot join a
 # synthetic session, and the suite's ambient session must not decide these.
 
-_PREDICATE_SRC = "from shared.proc import hosting_exec_domain\nprint(repr(hosting_exec_domain()))\n"
+_PREDICATE_SRC = (
+    "from shared.host.proc import hosting_exec_domain\nprint(repr(hosting_exec_domain()))\n"
+)
 
 
 def _predicate_in_new_session(*argv_tail: str) -> str:
@@ -144,7 +146,7 @@ def test_hosting_exec_domain_follows_the_session_through_a_broken_parent_chain(
         "inner = (\n"
         "    'import os, sys, time\\n'\n"
         "    'import psutil\\n'\n"
-        "    'from shared.proc import hosting_exec_domain\\n'\n"
+        "    'from shared.host.proc import hosting_exec_domain\\n'\n"
         "    'time.sleep(1.0)\\n'\n"
         "    'ancestors = {p.pid for p in psutil.Process().parents()}\\n'\n"
         "    'print(hosting_exec_domain(), os.getsid(0), int(sys.argv[1]) in ancestors)\\n'\n"
@@ -298,7 +300,7 @@ def test_kill_process_tree_on_an_absent_pid_is_a_noop() -> None:
 
 
 def test_unreadable_tree_cannot_report_completed_cleanup(monkeypatch: pytest.MonkeyPatch) -> None:
-    from shared import proc
+    from shared.host import proc
 
     def unreadable(_parent: OwnedProcess) -> set[OwnedProcess]:
         raise psutil.AccessDenied(5252)
@@ -351,7 +353,7 @@ def test_kill_process_tree_skips_changed_identity(
     monkeypatch: pytest.MonkeyPatch, changed_before: str
 ) -> None:
     """A PID with different birth evidence is spared at either signal boundary."""
-    from shared import proc
+    from shared.host import proc
 
     parent, child = OwnedProcess(100, 1.0, 100), OwnedProcess(200, 1.0, 200)
     ticks = {100: 100, 200: 201 if changed_before == "terminate" else 200}
@@ -515,7 +517,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 # because it looks exactly like a correct bound.
 _GIT_DRIVING_MODULES = (
     "ops/cluster.py",
-    "shared/cluster_drift.py",
+    "shared/deploy/git/cluster_drift.py",
 )
 
 
@@ -531,7 +533,7 @@ def test_git_driving_modules_do_not_bound_with_subprocess_run(rel: str) -> None:
         and ast.unparse(node.func) == "subprocess.run"
         and any(kw.arg == "timeout" for kw in node.keywords)
     ]
-    assert not offenders, f"{rel}: use shared.proc.run_bounded at line(s) {offenders}"
+    assert not offenders, f"{rel}: use shared.host.proc.run_bounded at line(s) {offenders}"
 
 
 # -- child_state: the tree self-check's chain probe ----------------------------

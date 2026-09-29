@@ -777,7 +777,7 @@ def test_stall_verdict_closes_run_row(
     run_id = sr._record_run_start(sid)
     exited: list[int] = []
     monkeypatch.setattr(sr.os, "_exit", exited.append)
-    monkeypatch.setattr(sr.shared.proc, "kill_process_tree", Mock())
+    monkeypatch.setattr(sr.shared.host.proc, "kill_process_tree", Mock())
 
     sr._stall_action(sid, "stalled in foo", run_id)
 

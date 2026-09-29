@@ -9,7 +9,7 @@ from typing import Annotated, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from shared.release_identity import ApplicationIdentity
+from shared.deploy.release.identity import ApplicationIdentity
 from shared.runtime_abi import parse_abi_tag
 
 Digest = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]

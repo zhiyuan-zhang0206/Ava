@@ -14,7 +14,7 @@ import pytest
 from agent.graph.exec import _subprocess
 from agent.graph.exec._result import ExecChildError, _ExecCrashed, _ExecDone
 from agent.graph.exec._subprocess import _run_in_subprocess
-from shared import editable_install
+from shared.deploy.release import editable_install
 
 _AGENT_ID = 424242
 

@@ -235,8 +235,9 @@ def test_finalize_writes_override_a_read_only_default(
     transactions before DML, so a read-only default (the rollout-finalizer
     failure's posture) cannot fail them.
     """
-    from shared import config, host_deploy_state
-    from shared.cluster_lock import release_update_lock
+    from shared import config
+    from shared.deploy.state import host_deploy_state
+    from shared.deploy.state.cluster_lock import release_update_lock
 
     with postgres() as pg_url, _read_only_default_pooler(pg_url, pool_size=1) as pooled:
         monkeypatch.setattr(config.settings.data_plane, "db_url", pooled)
@@ -249,7 +250,7 @@ def test_recovery_claim_overrides_a_read_only_default(
 ) -> None:
     """Recovery can lock a lease in a session that defaults to read-only."""
     from shared import config
-    from shared.cluster_lock import claim_recovery_lock
+    from shared.deploy.state.cluster_lock import claim_recovery_lock
 
     with postgres() as pg_url, _read_only_default_pooler(pg_url) as pooled:
         monkeypatch.setattr(config.settings.data_plane, "db_url", pooled)
@@ -274,10 +275,10 @@ def _insert_agent(pg_url: str) -> int:
 def test_write_transaction_overrides_a_read_only_default_on_connect(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Rule A writes (`shared.cluster_lock`'s update-lock acquire/release)
+    """Rule A writes (`shared.deploy.state.cluster_lock`'s update-lock acquire/release)
     land in sessions that default to read-only."""
     from shared import config
-    from shared.cluster_lock import acquire_update_lock, release_update_lock
+    from shared.deploy.state.cluster_lock import acquire_update_lock, release_update_lock
 
     with postgres() as pg_url, _read_only_default_pooler(pg_url) as pooled:
         monkeypatch.setattr(config.settings.data_plane, "db_url", pooled)

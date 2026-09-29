@@ -24,11 +24,11 @@ from services.agent_host import host as host_module
 from services.agent_host import runtime as runtime_module
 from services.agent_host.dispatcher import InboundWakeDispatcher, TurnScheduler
 from services.agent_host.host import AgentHost
-from shared import pause_owner
 from shared.context import AvaContext
+from shared.deploy.maintenance import pause_owner
+from shared.deploy.maintenance.cohort import _classify, _RuntimeRow
+from shared.deploy.maintenance.state import MaintenanceHold
 from shared.incarnation_resources import IncarnationResources, ResourceProcess, decode_resources
-from shared.maintenance_cohort import _classify, _RuntimeRow
-from shared.maintenance_state import MaintenanceHold
 from shared.native_process.runtime_incarnation import RuntimeIncarnation
 from tests.agent.test_hosted_db_recovery import _admit
 from tests.shared.poll_until import poll_until_async

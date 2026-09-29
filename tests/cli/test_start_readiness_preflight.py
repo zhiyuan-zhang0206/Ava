@@ -30,7 +30,7 @@ class _Backend:
 
 @pytest.fixture(autouse=True)
 def fake_backend(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("shared.platform_backend.get_backend", _Backend)
+    monkeypatch.setattr("shared.host.system.backend.get_backend", _Backend)
 
 
 @pytest.fixture

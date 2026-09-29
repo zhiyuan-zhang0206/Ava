@@ -35,10 +35,10 @@ from shared.cluster.machine import (
     is_observability_station,
     machine_name,
 )
-from shared.cluster_drift import prod_source_head_sha
-from shared.cluster_lock import DeployLease
 from shared.config import settings
 from shared.db_transaction import write_transaction
+from shared.deploy.git.cluster_drift import prod_source_head_sha
+from shared.deploy.state.cluster_lock import DeployLease
 
 router = APIRouter()
 _log = logging.getLogger(__name__)

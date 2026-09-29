@@ -9,7 +9,7 @@ import pytest
 
 import cli.commands.converge._brew_pin as cbp
 import cli.commands.converge.host as cv
-from shared import brew_pin
+from shared.host import brew_pin
 
 EXPECTED_PINNED_FORMULAE = frozenset(
     {

@@ -14,8 +14,8 @@ from dotenv import dotenv_values
 
 from cli.start_identity import read_intent
 from scripts import cutover_adopt_home as adopt
-from shared import pause_owner
 from shared.cluster import home_slug
+from shared.deploy.maintenance import pause_owner
 from tests.lifecycle.cutover.conftest import (
     CANARY,
     MACHINE_KEY,
@@ -163,8 +163,8 @@ def _assert_gateway_jobs(legacy: LegacyHome) -> None:
 def test_gateway_adoption_completes_the_port_block_and_translates_selection(
     make_legacy: Make, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from shared import service_selection
     from shared.config import settings
+    from shared.deploy.lifecycle import service_selection
 
     legacy = make_legacy(roles=("gateway", "agent-runner"), platform="linux")
     records = legacy.registry_records()
@@ -196,16 +196,16 @@ def test_the_cutover_hold_is_a_standing_maintenance_hold(
 ) -> None:
     legacy = make_legacy()
     assert _run(legacy, "--execute", "--cutover-id", "c2") == 0
-    from shared import maintenance
     from shared.config import settings
+    from shared.deploy.maintenance import admission
 
     monkeypatch.setattr(settings.general, "ava_home", str(legacy.home))
     hold = _journal(legacy)["hold"]
-    current = maintenance.require_operation(
+    current = admission.require_operation(
         hold["holder"], datetime.fromisoformat(hold["acquired_at"])
     )
     assert current.maintenance is not None and current.maintenance.phase == "stopped"
-    assert maintenance.held() and maintenance.business_paused() and maintenance.in_stop_leg()
+    assert admission.held() and admission.business_paused() and admission.in_stop_leg()
 
 
 def test_repeat_is_a_verified_no_op(make_legacy: Make) -> None:
@@ -282,8 +282,8 @@ def test_a_remote_units_held_start_installs_its_capability_bundle(
     make_legacy: Make, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     import cli.start_intent
-    from shared import start_serving
     from shared.config import settings
+    from shared.deploy.lifecycle import start_serving
 
     legacy = make_legacy()
     assert _run(legacy, "--execute") == 0
@@ -621,8 +621,9 @@ def test_held_start_runs_start_inside_the_hold_and_leaves_it_closed(
     make_legacy: Make, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     import cli.start_intent
-    from shared import maintenance, start_serving
     from shared.config import settings
+    from shared.deploy.lifecycle import start_serving
+    from shared.deploy.maintenance import admission
 
     legacy = make_legacy(roles=("gateway", "agent-runner"))
     argv = ["--home", str(legacy.home), "--start"]
@@ -634,9 +635,9 @@ def test_held_start_runs_start_inside_the_hold_and_leaves_it_closed(
     seen: list[tuple[bool, str]] = []
 
     def fake_start(_args: object) -> int:
-        snapshot = maintenance.snapshot()
+        snapshot = admission.snapshot()
         assert snapshot is not None and snapshot.maintenance is not None
-        seen.append((maintenance.start_authorized(), snapshot.maintenance.phase))
+        seen.append((admission.start_authorized(), snapshot.maintenance.phase))
         return 0
 
     monkeypatch.setattr(cli.start_intent, "run_start", fake_start)
@@ -646,7 +647,7 @@ def test_held_start_runs_start_inside_the_hold_and_leaves_it_closed(
     assert seen == [(True, "starting")]
     hold = _hold(legacy)
     assert hold.status == "paused" and hold.maintenance is not None
-    assert hold.maintenance.phase == "ready" and maintenance.business_paused()
+    assert hold.maintenance.phase == "ready" and admission.business_paused()
     assert f"cutover_adopt_home.py --home {legacy.home} --resume" in capsys.readouterr().out
     assert _journal(legacy)["hold"]["holder"] == "cutover:c3"
     assert adopt.main(argv, checkout=legacy.checkout) == 0  # already ready: no second start
@@ -678,8 +679,9 @@ def test_a_completed_legacy_stop_hold_becomes_the_cutover_hold(
     make_legacy: Make, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     import cli.start_intent
-    from shared import maintenance, start_serving
     from shared.config import settings
+    from shared.deploy.lifecycle import start_serving
+    from shared.deploy.maintenance import admission
 
     legacy = make_legacy()
     doc = _legacy_stop_hold(legacy)
@@ -708,6 +710,6 @@ def test_a_completed_legacy_stop_hold_becomes_the_cutover_hold(
     capsys.readouterr()
     assert adopt.main(["--home", str(legacy.home), "--start"], checkout=legacy.checkout) == 0
     assert f"cutover_adopt_home.py --home {legacy.home} --resume" in capsys.readouterr().out
-    current = maintenance.snapshot()
+    current = admission.snapshot()
     assert current is not None and current.maintenance is not None
     assert (current.maintenance.phase, current.maintenance.commands) == ("ready", {7: 11})

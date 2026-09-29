@@ -99,12 +99,12 @@ from services.agent_host.runtime import (
 from services.agent_host.settlement import close_hosted_turn
 from services.agent_host.stall_guard import run_invocation_with_stall_guard
 from services.agent_host.truncation import reap_truncation_outcome, reap_truncation_stop
-from shared import maintenance
 from shared.agents.history.delta_read_compat import recovery_reconstruction_scope
 from shared.cluster.machine import machine_name
 from shared.config import settings
 from shared.config.turn_view import bind_agent_config, resolve_agent_config_pins
 from shared.context import AvaContext
+from shared.deploy.maintenance import admission
 from shared.event_publisher import AgentEventPublisher
 from shared.live_announce import publish_agent_updated
 from shared.log import logger
@@ -348,7 +348,7 @@ class AgentHost:
                     status=stored.status,
                 )
                 return
-            if maintenance.held():
+            if admission.held():
                 # Admission may have waited for prepare's real row lock.
                 # Its only permitted continuation now is the owned control;
                 # do not build a new runtime or run initialization hooks.

@@ -154,8 +154,9 @@ def test_the_held_first_start_passes_the_receipt_gate_after_the_settlement(
     """Unsettled, the start refuses exactly as FC-10's did: "start cannot
     release failed continuation/flush receipts; hold retained"."""
     import cli.start_intent
-    from shared import maintenance, start_serving
     from shared.config import settings
+    from shared.deploy.lifecycle import start_serving
+    from shared.deploy.maintenance import admission as maintenance
 
     legacy = make_legacy()
     _legacy_commit(legacy, monkeypatch, proven=True)

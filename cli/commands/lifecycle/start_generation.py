@@ -12,9 +12,9 @@ import json
 from pathlib import Path
 
 from cli.start_runtime import StartRuntime
-from shared import start_inputs
+from shared.deploy.release import start_inputs
+from shared.deploy.release.runtime_interpreter import source_digest
 from shared.host.env.registry import launch_input_keys
-from shared.runtime_interpreter import source_digest
 
 
 def _write_generation(home: Path) -> dict[str, object] | None:

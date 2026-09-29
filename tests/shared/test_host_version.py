@@ -1,4 +1,4 @@
-"""shared.host_version — the derived host version and its fallback chain.
+"""shared.deploy.git.host_version — the derived host version and its fallback chain.
 
 The derivation reads the checkout HEAD commit's date (`YYYY.M.D`, no zero
 padding — the gate-comparable form) and the short SHA for the display form; a
@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from shared import host_version as hv
+from shared.deploy.git import host_version as hv
 
 _COMMIT_DATE = "2026-03-05T12:00:00+00:00"
 

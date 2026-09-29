@@ -35,7 +35,6 @@ from ops.rpc_schemas import (
     ShellKillResult,
     ShellProbeResult,
 )
-from shared import home_lifecycle_locks, pause_owner, updater_handoff
 from shared.agents.history.checkpoint_serde import STATIC_CHECKPOINT_MSGPACK_TYPES
 from shared.api_contracts.release_handoff import (
     HandoffRefusedError,
@@ -49,16 +48,19 @@ from shared.api_contracts.release_handoff import (
 )
 from shared.cluster.machine import machine_name
 from shared.cluster.machines import mark_stopping
-from shared.cluster_lock import (
+from shared.config.turn_view import resolve_agent_config_pins
+from shared.deploy.lifecycle import home_lifecycle_locks
+from shared.deploy.maintenance import pause_owner
+from shared.deploy.state.cluster_lock import (
     claim_recovery_lock,
     read_update_lease,
     release_update_lock,
 )
-from shared.config.turn_view import resolve_agent_config_pins
-from shared.host_deploy_state import updater_lease_live
+from shared.deploy.state.host_deploy_state import updater_lease_live
+from shared.deploy.updater import handoff
+from shared.host.proc import run_bounded
 from shared.log import logger
 from shared.paths import ava_home
-from shared.proc import run_bounded
 from shared.runtime_abi import current_abi
 
 
@@ -71,7 +73,7 @@ def _lock_holder_is_live(holder: str, *, held_for_s: float | None = None) -> boo
     the deploy lease) names a process that is
     still running on THIS host.
 
-    The negation of `shared.cluster_lock.holder_process_gone` supplies local-owner
+    The negation of `shared.deploy.state.cluster_lock.holder_process_gone` supplies local-owner
     proof, including the pid-recycling slack. A holder on a different machine, an
     unparseable holder, and an unreadable process identity are all treated as live
     (refuse rather than risk clobbering a real run). `held_for_s` (the lease's
@@ -81,7 +83,7 @@ def _lock_holder_is_live(holder: str, *, held_for_s: float | None = None) -> boo
     recover's timescale: a 30-minute TTL is exactly the window in which a busy
     host recycles the dead orchestration's pid.
     """
-    from shared.cluster_lock import holder_process_gone
+    from shared.deploy.state.cluster_lock import holder_process_gone
 
     return not holder_process_gone(holder, held_for_s=held_for_s)
 
@@ -116,22 +118,22 @@ def cluster_recover_op() -> dict[str, object]:
         home_lifecycle_locks.resource_lock(purpose="ops.cluster_recover"),
         home_lifecycle_locks.lifecycle_lock(),
     ):
-        handoff = updater_handoff.read()
-        if handoff.status == "invalid":
+        updater_snapshot = handoff.read()
+        if updater_snapshot.status == "invalid":
             raise ClusterUpdateInProgress(
                 "an updater spawn handoff is still active or unreadable — recovery "
                 "refused until its child publishes the DB lease or its safety bound expires"
             )
-        if handoff.status == "pending" and not handoff.expired:
+        if updater_snapshot.status == "pending" and not updater_snapshot.expired:
             raise ClusterUpdateInProgress(
                 "an updater child is still inside its protected startup window — "
                 "recovery refused until that pending handoff expires"
             )
-        if handoff.status == "running" and updater_handoff.owner_is_live(handoff):
+        if updater_snapshot.status == "running" and handoff.owner_is_live(updater_snapshot):
             raise ClusterUpdateInProgress(
                 "an updater process still owns this host pause — recovery refused"
             )
-        if not updater_handoff.allows_generic_recovery(handoff):
+        if not handoff.allows_generic_recovery(updater_snapshot):
             raise ClusterUpdateInProgress(
                 "retained updater compensation requires an explicit checked recovery — "
                 "generic unpause refused"
@@ -160,8 +162,8 @@ def cluster_recover_op() -> dict[str, object]:
             )
         try:
             unpause_local_cluster()
-            if handoff.generation is not None:
-                updater_handoff.clear(handoff.generation)
+            if updater_snapshot.generation is not None:
+                handoff.clear(updater_snapshot.generation)
             if pause_snapshot.holder is not None and pause_snapshot.acquired_at is not None:
                 pause_owner.clear(
                     pause_snapshot.holder,
@@ -401,7 +403,7 @@ def run_release_entry(
         # run_bounded, not subprocess.run(timeout=...): a plain timeout only
         # kills the direct child, which can leave the real entry process
         # (or a launcher-stub descendant on Windows) running past the bound
-        # (shared/proc.py).
+        # (shared/host/proc.py).
         completed = run_bounded(
             entry_argv(verified, entry, "-"),
             input=request,

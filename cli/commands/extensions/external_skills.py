@@ -42,8 +42,8 @@ from cli.commands.extensions._external_skill_ledger import (
     _stage_manifest,
     _write_ledger,
 )
+from shared.host.private_storage import ensure_private_dir
 from shared.native_process.os_platform import LockTimeoutError, file_lock
-from shared.private_storage import ensure_private_dir
 
 _SKILL_NAME = "operating-ava-cluster"
 _MARKER_NAME = ".ava-managed.json"

@@ -40,14 +40,15 @@ from pathlib import Path
 from loguru import logger
 
 from cli.commands.extensions.skills_sync import _Source, iter_sources
-from shared import host_version, install_registry, paths, plugin_manifest
+from shared import install_registry, paths, plugin_manifest
 from shared.config import settings
+from shared.deploy.git import host_version
 from shared.deploy.git.gitenv import git_env
+from shared.host.proc import run_bounded
+from shared.host.system.cron import os_jobs_enabled
 from shared.native_process.os_platform import LockTimeoutError, file_lock
-from shared.os_cron import os_jobs_enabled
 from shared.packages.skills import skill_scan
 from shared.packages.skills.skill_names import match_key
-from shared.proc import run_bounded
 
 # Backoff: failures double the effective interval, capped after this many
 # doublings (so a repeatedly failing package still re-checks about weekly).
@@ -753,7 +754,7 @@ def _skip(reason: str) -> RefreshReport:
 def _update_in_flight() -> bool:
     """Whether a live cluster deploy lease is held (a refresh skips then)."""
     with suppress(Exception):
-        from shared.cluster_lock import update_lock_holder
+        from shared.deploy.state.cluster_lock import update_lock_holder
 
         return update_lock_holder() is not None
     return False

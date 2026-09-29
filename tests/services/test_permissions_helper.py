@@ -521,7 +521,7 @@ def test_gui_ops_wire_requests(fake_helper) -> None:
 def test_incapability_branch_ordering(monkeypatch: pytest.MonkeyPatch) -> None:
     # Probe ordering only ever reaches the first branch on Linux CI; drive the
     # macOS branches explicitly so a reordered or dropped prong is caught.
-    from shared import platform_probes as pp
+    from shared.host.system import probes as pp
 
     def reason() -> str:
         r = pp.permissions_helper_incapability()
@@ -552,7 +552,7 @@ def test_incapability_branch_ordering(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_incapability_windows_branch(monkeypatch: pytest.MonkeyPatch) -> None:
     """Windows is capable when csc.exe (the .NET Framework compiler) is present,
     and names the fix when it is not."""
-    from shared import platform_probes as pp
+    from shared.host.system import probes as pp
 
     monkeypatch.setattr(sys, "platform", "win32")
     monkeypatch.setattr(

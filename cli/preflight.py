@@ -133,8 +133,8 @@ def require_anchored_home(verb: str) -> int | None:
 
 def unit_already_stopped() -> bool:
     """Allow an idempotent cold stop without fetching the offline gateway."""
+    from shared.deploy.maintenance.pause_owner import read_for_home
     from shared.host.env.dotenv_boot import resolve_ava_home
-    from shared.pause_owner import read_for_home
 
     home, anchored = resolve_ava_home()
     if not anchored:

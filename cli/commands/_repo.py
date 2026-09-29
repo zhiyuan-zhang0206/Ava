@@ -38,8 +38,8 @@ from ops.roster.service_spec import profile_marker as profile_marker
 from shared.cluster import session_name as session_name
 from shared.cluster.machine import MachineRoles
 from shared.config import settings
-from shared.deploy_timing import GATEWAY_PREFLIGHT_BUDGET_S
-from shared.platform_backend import get_backend
+from shared.deploy.progress_timeout import GATEWAY_PREFLIGHT_BUDGET_S
+from shared.host.system.backend import get_backend
 from shared.sessions.env_forwarding import frontend_toolchain_env
 
 _services_for_roles = _spec.services_for_capabilities
@@ -253,7 +253,7 @@ def _probe_gateway_or_die(gateway_url: str, *, budget_s: float = GATEWAY_PREFLIG
     The budget buys nothing on the healthy path: a reachable gateway answers on the
     first dial and returns immediately. A gateway that is genuinely down still fails —
     `budget_s` is deliberately too short to outlast a real death, which needs the
-    watchdog's own round to fix (`shared.deploy_timing.GATEWAY_PREFLIGHT_BUDGET_S`).
+    watchdog's own round to fix (`shared.deploy.progress_timeout.GATEWAY_PREFLIGHT_BUDGET_S`).
 
     A non-200 the gateway *chose* to send (401/403/404) is terminal on the first dial
     as before: a credential or route mismatch is not a timing problem.

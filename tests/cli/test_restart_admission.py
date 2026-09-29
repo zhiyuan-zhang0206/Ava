@@ -12,8 +12,9 @@ import cli.commands.lifecycle.start as _start_commands
 import cli.commands.lifecycle.stop as _stop_commands
 from cli.commands.lifecycle import _start_readiness_preflight, stop
 from cli.start_runtime import StartRuntime, admit_loaded_release
-from shared import lifecycle_status, release_operation, runtime_interpreter
-from shared.runtime_release import ReleaseRejectedError, VerifiedRelease
+from shared.deploy.lifecycle import status_journal
+from shared.deploy.release import operation, runtime_interpreter
+from shared.deploy.release.runtime_release import ReleaseRejectedError, VerifiedRelease
 from tests.cli.test_start_runtime import image as image
 
 
@@ -64,9 +65,9 @@ def test_restart_refuses_before_journal_preflight_or_stop(
         def held(_home: Path) -> None:
             raise RuntimeError("home operation holds startup")
 
-        monkeypatch.setattr(release_operation, "require_start_authorized", held)
+        monkeypatch.setattr(operation, "require_start_authorized", held)
         expected = "holds startup"
-    monkeypatch.setattr(lifecycle_status, "begin", _forbidden)
+    monkeypatch.setattr(status_journal, "begin", _forbidden)
     monkeypatch.setattr(_repo_commands, "_preflight_probes", _forbidden)
     monkeypatch.setattr(_stop_commands, "_do_stop", _forbidden)
     monkeypatch.setattr(stop, "_release_self_heal_pause", _forbidden)
@@ -80,8 +81,8 @@ def test_installed_restart_carries_identical_admitted_runtime(
     home = image.root.parent.parent
     monkeypatch.setattr("shared.paths.ava_home", lambda: home)
     monkeypatch.setattr(runtime_interpreter, "WHEEL_RUNTIME", True)
-    monkeypatch.setattr("shared.proc.hosting_exec_domain", lambda: None)
-    monkeypatch.setattr("shared.proc.hosting_supervised_session", lambda: None)
+    monkeypatch.setattr("shared.host.proc.hosting_exec_domain", lambda: None)
+    monkeypatch.setattr("shared.host.proc.hosting_supervised_session", lambda: None)
     monkeypatch.setattr(_repo_commands, "_preflight_probes", lambda: 0)
     calls: list[str] = []
     captured: list[StartRuntime] = []

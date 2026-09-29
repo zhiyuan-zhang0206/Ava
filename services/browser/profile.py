@@ -27,8 +27,8 @@ import time
 from pathlib import Path
 
 from shared.config import settings
-from shared.platform_probes import default_chrome_user_data_dir
-from shared.proc import process_alive
+from shared.host.proc import process_alive
+from shared.host.system.probes import default_chrome_user_data_dir
 
 # Names never worth copying out of a Chrome user-data dir. `Singleton*` are the
 # live lock/socket/cookie files Chrome holds while running — copying them would

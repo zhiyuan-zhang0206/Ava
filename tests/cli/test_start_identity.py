@@ -690,7 +690,7 @@ def test_failed_boot_publication_clears_serving_and_refuses_success(
 ) -> None:
 
     from cli.commands.lifecycle import root_driver
-    from shared import start_serving
+    from shared.deploy.lifecycle import start_serving
 
     monkeypatch.setattr(start_intent, "_checkout", lambda: inputs.checkout)
     monkeypatch.setenv("AVA_HOME", str(inputs.home))

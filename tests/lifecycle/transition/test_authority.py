@@ -44,7 +44,7 @@ from shared.cluster.authority import (
     require_ledger,
 )
 from shared.cluster.authority.ledger import begin_mint, begin_revoke, mark_closed, record_drops
-from shared.runtime_release import current_pointer
+from shared.deploy.release.runtime_release import current_pointer
 from tests.lifecycle.release_fleet.fakes import OffDutyGateway, drive
 from tests.lifecycle.transition.phases import (
     advance_to,
@@ -620,7 +620,9 @@ def test_the_executor_adopts_its_administrator_authority_before_any_phase(
     events: list[str] = []
     # execute() exports the captured home to its own process environment.
     monkeypatch.setattr(execute, "os", SimpleNamespace(environ={}, getpid=lambda: 1))
-    monkeypatch.setattr("shared.runtime_interpreter.verify_loaded_image", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        "shared.deploy.release.runtime_interpreter.verify_loaded_image", lambda *_a, **_k: None
+    )
     monkeypatch.setattr(ReleaseRef, "verify", lambda _self, _home: None)
     monkeypatch.setattr(execute, "_executor_receipt", lambda _launch: {"pid": 1})
     monkeypatch.setattr(

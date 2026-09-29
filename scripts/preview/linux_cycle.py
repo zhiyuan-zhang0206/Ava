@@ -148,14 +148,14 @@ class LinuxCycle:
         preview = self.preview
         preview.command(
             "manager-install",
-            [self.python, "-c", "from shared.os_boot_unit import install; install()"],
+            [self.python, "-c", "from shared.host.system.boot_unit import install; install()"],
         )
         preview.command(
             "manager-name",
             [
                 self.python,
                 "-c",
-                "from shared.os_boot_unit import unit_name; from shared.paths import ava_home; print(unit_name(ava_home()))",
+                "from shared.host.system.boot_unit import unit_name; from shared.paths import ava_home; print(unit_name(ava_home()))",
             ],
         )
         unit = Path(preview.data["steps"][-1]["log"]).read_text().strip().splitlines()[-1]

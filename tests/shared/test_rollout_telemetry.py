@@ -8,7 +8,7 @@ import json
 
 import pytest
 
-from shared import rollout_telemetry as rt
+from shared.deploy import rollout_telemetry as rt
 
 
 def test_settle_ended_prints_one_parseable_json_line(

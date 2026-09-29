@@ -9,7 +9,7 @@ Update-family drains additionally reap their stragglers (`reap=True`, task
 was issued is CAS-marked 'restarting' — the durable truncation signal — and
 released with the honest `reaped` outcome, never a fabricated flush receipt.
 Its mark is settled at the successor boot or local resume
-(`shared/straggler_reap.py`), which restores the row to runnable and lets the
+(`shared/deploy/maintenance/straggler_reap.py`), which restores the row to runnable and lets the
 ordinary reconcile re-deliver its claimed work on the new code.
 
 The `probe` submodule reads the running local host's maintenance capability
@@ -25,11 +25,11 @@ from typing import NamedTuple
 from uuid import UUID, uuid4
 
 from ops.agent_pause.probe import HostIdentity, host_identity, host_running
-from shared import maintenance, maintenance_cohort, pause_owner
 from shared.cluster.machine import machine_name, machine_role
 from shared.db import connect, publish_inbound_wake
-from shared.hold_driver import HoldDriver
-from shared.maintenance_state import MaintenanceHold
+from shared.deploy.maintenance import admission, cohort, pause_owner
+from shared.deploy.maintenance.hold_driver import HoldDriver
+from shared.deploy.maintenance.state import MaintenanceHold
 from shared.resource_admission import DRAINED_RESOURCES
 
 _log = logging.getLogger(__name__)
@@ -47,7 +47,7 @@ _LIFECYCLE_WAIT_POLL_SECONDS = 5.0
 
 
 def _hold(holder: str, at: datetime) -> MaintenanceHold:
-    current = maintenance.require_operation(holder, at)
+    current = admission.require_operation(holder, at)
     assert current.maintenance is not None  # noqa: S101
     return current.maintenance
 
@@ -136,7 +136,7 @@ def _prepare_cohort(
     while True:
         try:
             with connect() as conn:
-                hold = maintenance_cohort.prepare(
+                hold = cohort.prepare(
                     conn,
                     machine=machine_name(),
                     host_owner=identity.owner if identity is not None else None,
@@ -145,7 +145,7 @@ def _prepare_cohort(
                     host_absent=identity is None,
                     driver=driver,
                 )
-        except maintenance_cohort.LifecycleCollisionError as collision:
+        except cohort.LifecycleCollisionError as collision:
             if started is None:
                 started = time.monotonic()
             waited_on = collision.agent_ids
@@ -306,7 +306,7 @@ def _reap_agents(
                 "hold retained"
             )
     for agent in marked:
-        maintenance.record_reaped(agent, "update_straggler_reap")
+        admission.record_reaped(agent, "update_straggler_reap")
     if marked:
         from shared import telemetry
 
@@ -347,7 +347,7 @@ def drain(holder: str, at: datetime, timeout: float, *, reap: bool = False) -> N
             )
         if set(hold.drained) | set(hold.reaped) == set(hold.commands):
             with connect() as conn:
-                maintenance_cohort.verify_drained(conn, hold)
+                cohort.verify_drained(conn, hold)
             # Wait out the host's still-registering turns — except the reaped
             # members: their mark already released them, and the wave must not
             # stall on a truncated turn unwinding (a C-blocked one would hold
@@ -363,7 +363,7 @@ def drain(holder: str, at: datetime, timeout: float, *, reap: bool = False) -> N
                 time.sleep(min(0.05, budget))
                 continue
             if hold.phase == "draining":
-                maintenance.set_phase(holder, at, "drained")
+                admission.set_phase(holder, at, "drained")
             if time.monotonic() > deadline:
                 raise TimeoutError("drain verification exceeded its deadline; hold retained")
             return
@@ -517,7 +517,7 @@ def pause_agents(
 
 def resume_agents() -> None:
     """Release the current local admission hold after start or an aborted drain."""
-    current = maintenance.snapshot()
+    current = admission.snapshot()
     if current is None:
         return
     assert current.maintenance is not None  # noqa: S101

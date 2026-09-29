@@ -25,7 +25,7 @@ from pydantic import BaseModel
 
 import shared.cluster
 import shared.db
-import shared.host_deploy_state
+import shared.deploy.state.host_deploy_state
 from ops import cluster_pause
 from ops.cluster_status.schema_mismatch import status as schema_mismatch_status
 from ops.rpc_schemas import AgentSessionGroup, SessionInfo, ShellInfo
@@ -37,8 +37,8 @@ from shared.cluster.machine import (
     machine_name,
 )
 from shared.config import cluster_tz
-from shared.proc import process_alive
-from shared.resource_sample import ResourceSample
+from shared.host.proc import process_alive
+from shared.host.resource_sample import ResourceSample
 from shared.sessions.page_session import is_page_label
 
 _log = logging.getLogger(__name__)
@@ -407,7 +407,7 @@ def _collect_sessions() -> tuple[list[SessionInfo], int, int]:
 def _read_deploy_snapshot(
     pool: Any | None,
 ) -> tuple[
-    shared.host_deploy_state.HostDeployState | None,
+    shared.deploy.state.host_deploy_state.HostDeployState | None,
     int,
     SchemaMismatchStatus | None,
 ]:
@@ -419,7 +419,7 @@ def _read_deploy_snapshot(
             else pool.connection(timeout=_POOL_BORROW_TIMEOUT_S)
         )
         with connection as conn:
-            state = shared.host_deploy_state.read(conn=conn)
+            state = shared.deploy.state.host_deploy_state.read(conn=conn)
             agent_count = _count_local_agents(conn) if is_agent_runner() else 0
             schema_status = schema_mismatch_status(conn=conn)
         return state, agent_count, schema_status
@@ -442,7 +442,7 @@ def _read_deploy_snapshot(
 def _read_resource_sample() -> ResourceSample | None:
     """One live resource sample, degraded to None on any psutil failure."""
     try:
-        from shared.resource_sample import resource_sample
+        from shared.host.resource_sample import resource_sample
 
         return resource_sample()
     except Exception:  # fail-fast-ok: psutil may not be installed; degrade gracefully
@@ -450,7 +450,9 @@ def _read_resource_sample() -> ResourceSample | None:
         return None
 
 
-def _paused_reason(state: shared.host_deploy_state.HostDeployState | None) -> PausedReason | None:
+def _paused_reason(
+    state: shared.deploy.state.host_deploy_state.HostDeployState | None,
+) -> PausedReason | None:
     """The first true clause of the `paused` verdict, in its own clause order.
 
     `no_state` (the deploy state was unreadable or absent), then a deliberate
@@ -460,13 +462,14 @@ def _paused_reason(state: shared.host_deploy_state.HostDeployState | None) -> Pa
     clause fired. `state` is the snapshot's already-read row, so this adds no
     central-DB dial of its own.
     """
-    from shared import maintenance, start_serving
+    from shared.deploy.lifecycle import start_serving
+    from shared.deploy.maintenance import admission
 
     if state is None:
         return "no_state"
     if cluster_pause.is_paused(state):
         return "business_pause"
-    if maintenance.held():
+    if admission.held():
         return "maintenance"
     if not start_serving.is_serving():
         return "startup"
@@ -491,8 +494,8 @@ def status_snapshot(pool: Any | None = None) -> ClusterStatus:
     through and FastAPI surfaces as default 500 (admin endpoint, not
     consumed by SDK).
     """
-    from shared.cluster_drift import prod_source_head_sha
     from shared.config import settings
+    from shared.deploy.git.cluster_drift import prod_source_head_sha
     from shared.native_process import loaded_commit as _process_sha
 
     agent_host_alive = (

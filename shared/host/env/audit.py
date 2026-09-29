@@ -24,9 +24,9 @@ from typing import cast
 import psutil
 
 from shared.host.env.dotenv_file import ENV_LOCK_TIMEOUT_S, env_line_key, env_lock_path
+from shared.host.private_storage import write_private_bytes
 from shared.log import logger
 from shared.native_process.os_platform import file_lock
-from shared.private_storage import write_private_bytes
 
 _AUDIT_TAIL_BYTES = 64 * 1024
 

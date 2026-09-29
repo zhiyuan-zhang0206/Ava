@@ -13,7 +13,7 @@ from pathlib import Path
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(_REPO_ROOT))
 
-from shared.python_lock import violations  # noqa: E402 — standalone dependency-free entry point
+from shared.deploy.release.python_lock import violations  # noqa: E402 — dependency-free entry
 
 
 def main() -> int:
