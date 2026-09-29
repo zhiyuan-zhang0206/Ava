@@ -14,22 +14,22 @@ from typing import Any, cast
 import pytest
 from google.api_core.exceptions import DeadlineExceeded, Forbidden, NotFound, PreconditionFailed
 
-from services.pitr.checksums import MD5
-from services.pitr.object_store import PermanentObjectStoreError, TransientObjectStoreError
-from services.pitr.retention_delete import DeleteOutcome, GCSRetentionDeleteStore
-from services.pitr.retention_executor import (
+from services.pitr.retention.executor import (
     RetentionExecutionLimits,
     RetentionExecutionSummary,
     execute_retention_plan,
 )
-from services.pitr.retention_journal import RetentionJournal
-from services.pitr.retention_manifest import (
+from services.pitr.retention.journal import RetentionJournal
+from services.pitr.retention.manifest import (
     PLAN_SCHEMA_VERSION,
     RetentionDecision,
     RetentionObject,
     RetentionPlan,
     RetentionSidecar,
 )
+from services.pitr.stores.checksums import MD5
+from services.pitr.stores.object_store import PermanentObjectStoreError, TransientObjectStoreError
+from services.pitr.stores.retention_delete import DeleteOutcome, GCSRetentionDeleteStore
 from tests.services.oss_test_support import (
     PREFIX,
     FakeOssBucket,

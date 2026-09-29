@@ -195,7 +195,7 @@ def test_failed_pitr_start_keeps_action_without_automatic_release_recovery(
 def test_preparation_lease_failure_cannot_mutate_business_state(
     pitr_request: PitrRequest, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from services.pitr.activation_state import load_record
+    from services.pitr.activation.state import load_record
     from shared import cluster_lock
     from shared.release_operation import authorized_pitr
 
@@ -263,7 +263,7 @@ def test_sealed_reentry_executes_only_retained_argv_and_environment(
 def test_failed_online_lease_keeps_business_diagnostics_and_operation_authority(
     pitr_request: PitrRequest, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from services.pitr.activation_state import load_record
+    from services.pitr.activation.state import load_record
     from shared import cluster_lock
     from shared.release_operation import authorized_pitr
 

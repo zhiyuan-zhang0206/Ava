@@ -10,13 +10,13 @@ from typing import Any
 import httpx
 import pytest
 
-from services.pitr.baidu_inventory import BaiduRetentionInventoryReader
-from services.pitr.baidu_publish_store import BaiduProtectedManifestPublisher
-from services.pitr.baidu_token import BaiduCredentials, BaiduTokenError, BaiduTokenManager
-from services.pitr.checksums import MD5, ObjectChecksum
-from services.pitr.object_store import PermanentObjectStoreError
-from services.pitr.restore_manifest import RestoreObject
-from services.pitr.token_manager import read_token_state
+from services.pitr.restore.manifest import RestoreObject
+from services.pitr.stores.baidu.inventory import BaiduRetentionInventoryReader
+from services.pitr.stores.baidu.publish_store import BaiduProtectedManifestPublisher
+from services.pitr.stores.baidu.token import BaiduCredentials, BaiduTokenError, BaiduTokenManager
+from services.pitr.stores.checksums import MD5, ObjectChecksum
+from services.pitr.stores.object_store import PermanentObjectStoreError
+from services.pitr.stores.token_manager import read_token_state
 from tests.services.baidu_test_support import (
     APP_ROOT,
     OBJECT,

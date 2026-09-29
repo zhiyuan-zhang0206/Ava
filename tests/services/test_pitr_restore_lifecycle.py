@@ -14,13 +14,16 @@ import psutil
 import pytest
 from pytest import MonkeyPatch
 
-from services.pitr import restore_manifest, restore_postgres, restore_proof
-from services.pitr.base_manifest import SCHEMA_VERSION, BaseObject, CandidateManifest, WalRange
-from services.pitr.checksums import CRC32C, ObjectChecksum
-from services.pitr.object_store import RemoteObjectAck
-from services.pitr.operation_custody import NativeProcess
-from services.pitr.restore_manifest import RestoreObject
-from services.pitr.restore_postgres import (
+from services.pitr.base_backup.manifest import (
+    SCHEMA_VERSION,
+    BaseObject,
+    CandidateManifest,
+    WalRange,
+)
+from services.pitr.operation.custody import NativeProcess
+from services.pitr.restore import manifest, postgres, proof
+from services.pitr.restore.manifest import RestoreObject
+from services.pitr.restore.postgres import (
     IsolatedPostgresRestoreExecutor,
     SandboxPostgresIdentity,
     _append_recovery_config,
@@ -30,7 +33,7 @@ from services.pitr.restore_postgres import (
     _wait_for_sandbox_identity,
     _write_sandbox_config,
 )
-from services.pitr.restore_proof import (
+from services.pitr.restore.proof import (
     DrillResult,
     LivePostgresIdentity,
     RestoreProofError,
@@ -39,6 +42,8 @@ from services.pitr.restore_proof import (
     publish_candidate_proof,
     verify_candidate_proof,
 )
+from services.pitr.stores.checksums import CRC32C, ObjectChecksum
+from services.pitr.stores.object_store import RemoteObjectAck
 from shared import pg_tools
 from shared.native_process import native_boot_id
 from shared.native_process.ownership import OwnedProcess
@@ -113,11 +118,11 @@ def test_reconcile_retains_interrupted_postmaster_evidence_after_owner_dies(
     def no_group(_pgid: int) -> list[psutil.Process]:
         return []
 
-    monkeypatch.setattr(restore_proof, "_matching_process", no_process)
+    monkeypatch.setattr(proof, "_matching_process", no_process)
 
     original = owner.read_bytes()
     with pytest.raises(RestoreProofError, match="native operation retirement"):
-        restore_proof.reconcile_restore_runtime(tmp_path)
+        proof.reconcile_restore_runtime(tmp_path)
     assert partial.exists()
     assert owner.read_bytes() == original
 
@@ -223,13 +228,13 @@ def test_prove_candidate_publishes_only_after_restore_and_live_identity_match(
         pgdata.mkdir(parents=True)
         return pgdata
 
-    monkeypatch.setattr(restore_proof, "required_archive_names", no_archives)
-    monkeypatch.setattr(restore_manifest, "required_archive_names", no_archives)
-    monkeypatch.setattr(restore_proof, "authenticate_base_ciphertext", authenticate)
-    monkeypatch.setattr(restore_proof, "extract_authenticated_base", extract)
-    monkeypatch.setattr(restore_proof.psutil, "Process", lambda: process)
+    monkeypatch.setattr(proof, "required_archive_names", no_archives)
+    monkeypatch.setattr(manifest, "required_archive_names", no_archives)
+    monkeypatch.setattr(proof, "authenticate_base_ciphertext", authenticate)
+    monkeypatch.setattr(proof, "extract_authenticated_base", extract)
+    monkeypatch.setattr(proof.psutil, "Process", lambda: process)
     monkeypatch.setattr(NativeProcess, "capture", classmethod(capture_owner))
-    monkeypatch.setattr(restore_proof.os, "getpgrp", lambda: 1234)
+    monkeypatch.setattr(proof.os, "getpgrp", lambda: 1234)
 
     pending = prove_candidate(
         candidate=candidate,
@@ -374,11 +379,11 @@ def test_restore_run_token_fits_the_socket_path_budget() -> None:
         "20260901T040728Z",
     )
     for chain_id in chain_ids:
-        token = restore_proof._restore_run_token(chain_id, now)
-        assert len(token) <= restore_proof._MAX_RUN_DIR_NAME_LEN - len(".partial") - 1
-        assert len(f".{token}.partial") <= restore_proof._MAX_RUN_DIR_NAME_LEN
+        token = proof._restore_run_token(chain_id, now)
+        assert len(token) <= proof._MAX_RUN_DIR_NAME_LEN - len(".partial") - 1
+        assert len(f".{token}.partial") <= proof._MAX_RUN_DIR_NAME_LEN
         # Deterministic and chain-distinguishable.
-        assert restore_proof._restore_run_token(chain_id, now) == token
+        assert proof._restore_run_token(chain_id, now) == token
         assert now.strftime("%Y%m%dT%H%M%SZ") in token
         assert token.split("-")[-1] == chain_id.rsplit("-", 1)[-1][:6]
 
@@ -427,7 +432,7 @@ def test_spawn_sandbox_postgres_inherits_the_operation_group(
         captured["kwargs"] = kwargs
         return object(), object()
 
-    monkeypatch.setattr(restore_postgres.subprocess, "Popen", fake_launch)
+    monkeypatch.setattr(postgres.subprocess, "Popen", fake_launch)
     log_path = tmp_path / "sandbox-postgres.log"
 
     _spawn_sandbox_postgres(
@@ -445,7 +450,7 @@ def test_spawn_sandbox_postgres_inherits_the_operation_group(
         f"config_file={tmp_path / 'sandbox-postgresql.conf'}",
     ]
     kwargs = captured["kwargs"]
-    assert kwargs["stdin"] is restore_postgres.subprocess.DEVNULL
+    assert kwargs["stdin"] is postgres.subprocess.DEVNULL
     assert "process_group" not in kwargs
     assert "start_new_session" not in kwargs
     assert isinstance(kwargs["stdout"], int)
@@ -466,7 +471,7 @@ def test_spawn_sandbox_postgres_carries_the_start_env_fallback(
         captured["env"] = kwargs.get("env")
         return object(), object()
 
-    monkeypatch.setattr(restore_postgres.subprocess, "Popen", fake_launch)
+    monkeypatch.setattr(postgres.subprocess, "Popen", fake_launch)
     monkeypatch.setattr(pg_tools, "is_macos", lambda: True)
     monkeypatch.delenv("LC_ALL", raising=False)
     monkeypatch.delenv("LANG", raising=False)
@@ -509,7 +514,7 @@ def test_wait_for_sandbox_identity_returns_once_pid_file_exists(
     def fake_identity(_pgdata: Path) -> SandboxPostgresIdentity:
         return identity
 
-    monkeypatch.setattr(restore_postgres, "_sandbox_identity", fake_identity)
+    monkeypatch.setattr(postgres, "_sandbox_identity", fake_identity)
     (tmp_path / "data").mkdir()
     (tmp_path / "data" / "postmaster.pid").write_text("123\n")
 
@@ -603,7 +608,7 @@ def test_executor_reaps_sandbox_only_after_proven_closure(  # noqa: PLR0915
     pgdata = run_root / "sandbox" / "data"
     pgdata.mkdir(parents=True)
     owner = tmp_path / "owner.json"
-    restore_proof._atomic_owner(
+    proof._atomic_owner(
         owner,
         {
             "schema_version": 1,
@@ -669,9 +674,9 @@ def test_executor_reaps_sandbox_only_after_proven_closure(  # noqa: PLR0915
             raise RestoreProofError("sandbox closure unresolved")
         child.wait(timeout=5)
 
-    monkeypatch.setattr(restore_postgres, "_run", fake_verify)
-    monkeypatch.setattr(restore_postgres, "_spawn_sandbox_postgres", fake_spawn)
-    monkeypatch.setattr(restore_postgres, "_wait_for_sandbox_identity", fake_wait_identity)
+    monkeypatch.setattr(postgres, "_run", fake_verify)
+    monkeypatch.setattr(postgres, "_spawn_sandbox_postgres", fake_spawn)
+    monkeypatch.setattr(postgres, "_wait_for_sandbox_identity", fake_wait_identity)
     monkeypatch.setattr(executor, "live_identity", LiveProbe)
     monkeypatch.setattr(executor, "_wait_for_promotion", fake_wait_promotion)
     monkeypatch.setattr(executor, "_smoke", fake_smoke)
@@ -681,7 +686,7 @@ def test_executor_reaps_sandbox_only_after_proven_closure(  # noqa: PLR0915
         def denied(_process: subprocess.Popen[str], _data: Path) -> SandboxPostgresIdentity:
             raise psutil.AccessDenied(child.pid)
 
-        monkeypatch.setattr(restore_postgres, "_capture_sandbox", denied)
+        monkeypatch.setattr(postgres, "_capture_sandbox", denied)
     try:
         error_type = psutil.AccessDenied if failure == "capture" else RestoreProofError
         with pytest.raises(error_type) as caught:
@@ -778,7 +783,7 @@ def test_smoke_probe_accepts_a_bigint_identifier_and_a_dropped_anchor_table() ->
         assert fingerprint == IsolatedPostgresRestoreExecutor._smoke(socket_dir, port, candidate)
 
         with psycopg.connect(url) as conn, conn.cursor() as cur:
-            samples = restore_postgres._smoke_samples(cur)
+            samples = postgres._smoke_samples(cur)
     assert "agents_meta" in samples
     assert "checkpoints" in samples
     assert "absent:events" in samples

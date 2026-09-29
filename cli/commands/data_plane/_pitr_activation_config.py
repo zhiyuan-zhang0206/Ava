@@ -14,13 +14,13 @@ from typing import Any
 import psycopg
 from psycopg import sql
 
-from services.pitr.activation_runtime import (
+from services.pitr.activation.runtime import (
     PITR_ENV_FIELDS,
     file_evidence,
     pitr_env_absent,
     pitr_env_is_desired,
 )
-from services.pitr.activation_state import ActivationRecord, load_record, write_record_cas
+from services.pitr.activation.state import ActivationRecord, load_record, write_record_cas
 from shared import pg_admin
 from shared.cluster import get_record, record_postgres_port
 from shared.config import settings

@@ -88,7 +88,7 @@ def test_operations_verbs_parse() -> None:
 
 def _drill_cli(monkeypatch: pytest.MonkeyPatch, captured: dict[str, Any]) -> None:
     from cli.commands.data_plane import pitr as commands
-    from services.pitr import base_operation_runtime as runtime
+    from services.pitr.restore import operation_runtime as runtime
     from tests.services.test_pitr_base_scheduler import _candidate
 
     def resolve(_chain: object, _candidate_path: object) -> object:
@@ -155,7 +155,7 @@ def test_operations_retire_previews_then_releases_a_proven_kind(
     import psutil
 
     from cli.commands.data_plane import pitr as commands
-    from services.pitr import operation_custody as custody
+    from services.pitr.operation import custody
     from shared.native_process import native_boot_id
 
     kind = custody.OperationKind("test", tmp_path / "controls", tmp_path / "quarantine")

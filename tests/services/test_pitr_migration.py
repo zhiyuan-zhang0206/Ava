@@ -20,8 +20,8 @@ from typing import Any
 
 import pytest
 
-from services.pitr.checksums import MD5, ObjectChecksum
-from services.pitr.object_store import RemoteObjectAck
+from services.pitr.stores.checksums import MD5, ObjectChecksum
+from services.pitr.stores.object_store import RemoteObjectAck
 
 _MOD_PATH = Path(__file__).resolve().parents[2] / "scripts" / "pitr_migrate_gcs_to_baidu.py"
 _MOD_NAME = "pitr_migrate_under_test"
@@ -143,7 +143,7 @@ def test_rewrite_candidate_legacy_shape() -> None:
     assert raw["native_manifest_container_pin_token"] == "100:basemd5"  # noqa: S105
     assert "native_manifest_container_generation" not in raw
     # the rewritten candidate parses in the new shape
-    from services.pitr.base_manifest import CandidateManifest
+    from services.pitr.base_backup.manifest import CandidateManifest
 
     parsed = CandidateManifest.from_json(json.dumps(raw, sort_keys=True, separators=(",", ":")))
     assert parsed.base_object.pin_token == "100:basemd5"  # noqa: S105
@@ -272,7 +272,7 @@ def test_rewrite_protected_reparses_as_a_protected_manifest() -> None:
     """QA #1155: the rewritten manifest must load through the very parser the
     post-cut Baidu drill uses — the candidate digest is recomputed over the
     rewritten canonical bytes, so ProtectedManifest.from_json accepts it."""
-    from services.pitr.restore_manifest import ProtectedManifest, candidate_sha256
+    from services.pitr.restore.manifest import ProtectedManifest, candidate_sha256
 
     mapping = {
         **_mapping(),

@@ -13,17 +13,17 @@ from typing import Any
 
 import pytest
 
-from services.pitr.base_manifest import CandidateManifest
-from services.pitr.checksums import MD5, ObjectChecksum
-from services.pitr.object_store import (
+from services.pitr.base_backup.manifest import CandidateManifest
+from services.pitr.restore.manifest import RestoreObject, required_archive_names
+from services.pitr.stores.checksums import MD5, ObjectChecksum
+from services.pitr.stores.factory import get_group_constructor_named
+from services.pitr.stores.object_store import (
     PermanentObjectStoreError,
     RemoteObjectAck,
     TransientObjectStoreError,
 )
-from services.pitr.oss_store import OSSObjectStore
-from services.pitr.restore_manifest import RestoreObject, required_archive_names
-from services.pitr.store_factory import get_group_constructor_named
-from services.pitr.uploader import ack_manifest_from_raw
+from services.pitr.stores.oss.store import OSSObjectStore
+from services.pitr.wal.uploader import ack_manifest_from_raw
 from tests.services.oss_test_support import (
     PREFIX,
     WA_OBJECT,
@@ -106,7 +106,7 @@ def test_put_wal_ciphertext_rejects_different_content_under_same_name(
 def test_put_base_if_absent_streams_multipart_and_writes_sidecar(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr("services.pitr.oss_store.PART_SIZE", 1024)
+    monkeypatch.setattr("services.pitr.stores.oss.store.PART_SIZE", 1024)
     fake = FakeOssBucket()
     store = make_store(fake)
     source = ChunkSource([BASE_BYTES[i : i + 900] for i in range(0, len(BASE_BYTES), 900)])
@@ -136,7 +136,7 @@ def test_put_base_adopts_after_complete_crash_resume(
     """A retry whose complete hit FileAlreadyExists adopts the object exactly
     when its ETag matches our own part chain (the crash window between
     complete and sidecar publication)."""
-    monkeypatch.setattr("services.pitr.oss_store.PART_SIZE", 1024)
+    monkeypatch.setattr("services.pitr.stores.oss.store.PART_SIZE", 1024)
     store = make_store(FakeOssBucket())
     metadata = base_ack_metadata(BASE_BYTES)
     first = store.put_base_if_absent(
@@ -156,7 +156,7 @@ def test_put_base_adopts_after_complete_crash_resume(
 def test_put_base_rejects_different_content_under_same_name(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr("services.pitr.oss_store.PART_SIZE", 1024)
+    monkeypatch.setattr("services.pitr.stores.oss.store.PART_SIZE", 1024)
     fake = FakeOssBucket()
     store = make_store(fake)
     metadata = base_ack_metadata(BASE_BYTES)
@@ -185,7 +185,7 @@ def test_put_base_surfaces_cancellation_before_publication() -> None:
 def test_stat_resolves_multipart_base_identity_through_sidecar(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr("services.pitr.oss_store.PART_SIZE", 1024)
+    monkeypatch.setattr("services.pitr.stores.oss.store.PART_SIZE", 1024)
     store = make_store(FakeOssBucket())
     metadata = base_ack_metadata(BASE_BYTES)
     ack = store.put_base_if_absent(
@@ -249,7 +249,7 @@ def test_download_exact_rejects_mismatched_pin_token(tmp_path: Path) -> None:
 
 
 def test_download_exact_rejects_foreign_checksum_algo(tmp_path: Path) -> None:
-    from services.pitr.checksums import CRC32C
+    from services.pitr.stores.checksums import CRC32C
 
     fake = FakeOssBucket()
     fake.seed(WA_OBJECT, data=WAL_SOURCE, metadata=wal_ack_metadata())
@@ -339,7 +339,7 @@ def test_publish_manifest_rejects_different_existing_bytes() -> None:
 
 
 def test_part_etag_mismatch_fails_closed(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("services.pitr.oss_store.PART_SIZE", 1024)
+    monkeypatch.setattr("services.pitr.stores.oss.store.PART_SIZE", 1024)
     fake = FakeOssBucket()
     fake.corrupt_part_etags = True
     store = make_store(fake)
@@ -352,7 +352,7 @@ def test_part_etag_mismatch_fails_closed(monkeypatch: pytest.MonkeyPatch) -> Non
 
 
 def test_complete_etag_chain_mismatch_fails_closed(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("services.pitr.oss_store.PART_SIZE", 1024)
+    monkeypatch.setattr("services.pitr.stores.oss.store.PART_SIZE", 1024)
     fake = FakeOssBucket()
     fake.corrupt_complete_etag = True
     store = make_store(fake)
@@ -411,7 +411,7 @@ def test_read_sidecar_rejects_tampered_bytes() -> None:
 def test_restore_worker_input_builds_oss_store_args(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from services.pitr import base_operation_runtime as restore_runtime
+    from services.pitr.restore import operation_runtime as restore_runtime
     from shared.config import settings
 
     monkeypatch.setattr(settings.physical_backup, "pitr_store_backend", "oss")
@@ -442,7 +442,7 @@ def test_restore_worker_input_builds_oss_store_args(
 
 
 def _oss_candidate() -> CandidateManifest:
-    from services.pitr.base_manifest import BaseObject, WalRange
+    from services.pitr.base_backup.manifest import BaseObject, WalRange
 
     return CandidateManifest(
         schema_version=1,
@@ -520,7 +520,7 @@ def _oss_ack_raw() -> dict[str, Any]:
 
 
 def test_oss_ack_normalizes_through_ack_and_restore_objects(tmp_path: Path) -> None:
-    from services.pitr.restore_manifest import wal_objects_from_acks
+    from services.pitr.restore.manifest import wal_objects_from_acks
 
     ack_dir = tmp_path / "ack"
     ack_dir.mkdir()
@@ -538,9 +538,9 @@ def test_oss_ack_normalizes_through_ack_and_restore_objects(tmp_path: Path) -> N
 
 
 def test_oss_protected_manifest_round_trips_stable() -> None:
-    from services.pitr.base_manifest import BaseObject, CandidateManifest, WalRange
-    from services.pitr.restore_manifest import ProtectedManifest, candidate_sha256
-    from services.pitr.restore_manifest import RestoreProof as _Proof
+    from services.pitr.base_backup.manifest import BaseObject, CandidateManifest, WalRange
+    from services.pitr.restore.manifest import ProtectedManifest, candidate_sha256
+    from services.pitr.restore.manifest import RestoreProof as _Proof
 
     candidate = CandidateManifest(
         schema_version=1,

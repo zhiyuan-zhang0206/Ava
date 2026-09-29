@@ -15,7 +15,8 @@ from typing import Any
 
 import httpx
 
-from services.pitr.cos_client import CosClient, CosCredentials, _signature_v4
+from services.pitr.stores.cos import client
+from services.pitr.stores.cos.client import CosClient, CosCredentials
 
 BUCKET = "ava-pitr-test-1250000000"
 REGION = "ap-guangzhou"
@@ -102,7 +103,7 @@ class FakeCos:
         headers = {
             name: request.headers.get(name, "") for name in signed_headers.group(1).split(";")
         }
-        expected = _signature_v4(
+        expected = client._signature_v4(
             method=request.method,
             url_path=request.url.path,
             query=dict(request.url.params),

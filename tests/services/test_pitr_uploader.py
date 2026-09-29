@@ -11,10 +11,10 @@ from typing import ClassVar, cast
 import pytest
 from cryptography.exceptions import InvalidTag
 
-from services.pitr.checksums import CRC32C, ObjectChecksum
-from services.pitr.crypto import create_plan, decrypt_archive, encrypt_archive, open_encrypted
-from services.pitr.object_store import ObjectStore, RemoteObjectAck
-from services.pitr.uploader import (
+from services.pitr.stores.checksums import CRC32C, ObjectChecksum
+from services.pitr.stores.object_store import ObjectStore, RemoteObjectAck
+from services.pitr.wal.crypto import create_plan, decrypt_archive, encrypt_archive, open_encrypted
+from services.pitr.wal.uploader import (
     AckCorruptionError,
     AckManifest,
     PitrUploader,
@@ -371,9 +371,9 @@ def test_filename_adapter_uses_seekable_16mib_ciphertext(
     streamed upload fails here with UnsupportedOperation (the SDK's resumable
     transport cannot tell() a BufferedReader) even though FakeStore-based
     tests stay green."""
-    from services.pitr import gcs_store as gcs_store_module
-    from services.pitr.gcs_store import GCSObjectStore
-    from services.pitr.uploader import PitrUploader
+    from services.pitr.stores import gcs_store as gcs_store_module
+    from services.pitr.stores.gcs_store import GCSObjectStore
+    from services.pitr.wal.uploader import PitrUploader
 
     client = _ResumableFakeClient()
     monkeypatch.setattr(
@@ -433,7 +433,7 @@ def test_real_sdk_resumable_transport_retries_16mib_upload(tmp_path: Path) -> No
     from google.auth.credentials import AnonymousCredentials
     from google.cloud import storage
 
-    from services.pitr.gcs_store import BucketClient, GCSObjectStore
+    from services.pitr.stores.gcs_store import BucketClient, GCSObjectStore
 
     class ResumableHandler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
@@ -630,7 +630,7 @@ def test_upload_loop_oserror_permission_backs_off_critically(
 
 
 def test_unacked_age_drives_health_component(tmp_path: Path) -> None:
-    """The oldest un-ACKed spool entry's age feeds state.py's model against
+    """The oldest un-ACKed spool entry's age feeds wal/state.py's model against
     AVA_PITR_UNACKED_WARN/CRITICAL_SECONDS — dead configuration otherwise
     (QA #4681 block 3)."""
     import time

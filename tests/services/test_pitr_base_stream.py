@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from services.pitr.base_object_store import RestartableEncryptedSource
-from services.pitr.base_stream import load_or_create_source
+from services.pitr.base_backup.stream import load_or_create_source
+from services.pitr.stores.base_object_store import RestartableEncryptedSource
 
 
 def _bytes(source: RestartableEncryptedSource) -> bytes:

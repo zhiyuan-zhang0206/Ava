@@ -7,9 +7,9 @@ from pathlib import Path
 
 import pytest
 
-from services.pitr.checksums import MD5, ObjectChecksum
-from services.pitr.cos_store import CosObjectStore
-from services.pitr.object_store import (
+from services.pitr.stores.checksums import MD5, ObjectChecksum
+from services.pitr.stores.cos.store import CosObjectStore
+from services.pitr.stores.object_store import (
     PermanentObjectStoreError,
     TransientObjectStoreError,
 )
@@ -238,13 +238,13 @@ def test_cos_ack_normalizes_into_candidate_and_protected_manifests(
     import hashlib
     import json
 
-    from services.pitr.base_manifest import CandidateManifest, base_object_from_ack
-    from services.pitr.restore_manifest import (
+    from services.pitr.base_backup.manifest import CandidateManifest, base_object_from_ack
+    from services.pitr.restore.manifest import (
         ProtectedManifest,
         RestoreObject,
         required_archive_names,
     )
-    from services.pitr.uploader import AckManifest, ack_manifest_from_raw
+    from services.pitr.wal.uploader import AckManifest, ack_manifest_from_raw
     from tests.services.test_pitr_store_contract import (
         _LEGACY_CANDIDATE_JSON,
         RestoreProofFixture,

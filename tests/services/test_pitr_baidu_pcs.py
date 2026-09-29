@@ -10,8 +10,8 @@ from pathlib import Path
 import httpx
 import pytest
 
-import services.pitr.baidu_store as baidu_store_module
-from services.pitr.baidu_pcs import (
+import services.pitr.stores.baidu.store as baidu_store_module
+from services.pitr.stores.baidu.pcs import (
     _PERMANENT_ERRNOS,
     _TRANSIENT_ERRNOS,
     PcsClient,
@@ -21,9 +21,9 @@ from services.pitr.baidu_pcs import (
     RemoteFile,
     _check_errno,
 )
-from services.pitr.baidu_store import SVIP_SINGLE_FILE_LIMIT_BYTES
-from services.pitr.checksums import MD5, ObjectChecksum
-from services.pitr.object_store import (
+from services.pitr.stores.baidu.store import SVIP_SINGLE_FILE_LIMIT_BYTES
+from services.pitr.stores.checksums import MD5, ObjectChecksum
+from services.pitr.stores.object_store import (
     PermanentObjectStoreError,
     RemoteObjectAck,
     TransientObjectStoreError,
@@ -674,7 +674,7 @@ def test_opaque_pin_flows_from_upload_into_wal_evidence_validation(
     """QA #1201 P0/P2-1: the live-shaped opaque pin must survive the whole
     chain — the store upload produces it and the WAL remote evidence
     validator accepts it without any cross-check against the content md5."""
-    from services.pitr.activation_evidence import validate_wal_remote_evidence
+    from services.pitr.activation.evidence import validate_wal_remote_evidence
 
     fake = FakePcs()
     store = make_store(fake, monkeypatch)

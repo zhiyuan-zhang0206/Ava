@@ -502,7 +502,7 @@ def test_editable_import_gate_requires_the_checkout_editable_import(
         check=True,
         capture_output=True,
     )
-    interpreter = editable_install._venv_python(source_root)
+    interpreter = editable_install.venv_python(source_root)
     assert interpreter is not None
     site_packages = Path(
         subprocess.check_output(  # noqa: S603 — test-owned interpreter and venv path

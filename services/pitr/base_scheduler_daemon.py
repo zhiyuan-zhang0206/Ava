@@ -13,28 +13,28 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from services.pidfile import acquire_pidfile, remove_pidfile
-from services.pitr.activation_state import load_record as load_activation_record
-from services.pitr.activation_state import lock_path as activation_lock_path
-from services.pitr.base_candidate import reconcile_committed_cleanup
-from services.pitr.base_manifest import CandidateManifest
-from services.pitr.base_operation_runtime import (
+from services.pitr.activation.state import load_record as load_activation_record
+from services.pitr.activation.state import lock_path as activation_lock_path
+from services.pitr.base_backup.candidate import reconcile_committed_cleanup
+from services.pitr.base_backup.manifest import CandidateManifest
+from services.pitr.base_backup.scheduler_health import components as _components
+from services.pitr.base_worker import run_candidate
+from services.pitr.operation.custody import OperationBusyError, OperationDeferred
+from services.pitr.restore.manifest import ProtectedManifest
+from services.pitr.restore.operation_runtime import (
     RestoreWorkerInput,
     input_for,
     publish,
     run_restore_input,
 )
-from services.pitr.base_scheduler_health import components as _components
-from services.pitr.base_worker import run_candidate
-from services.pitr.operation_custody import OperationBusyError, OperationDeferred
-from services.pitr.restore_manifest import ProtectedManifest
-from services.pitr.restore_proof import reconcile_restore_pending
-from services.pitr.retention_scheduler import (
+from services.pitr.restore.proof import reconcile_restore_pending
+from services.pitr.retention.scheduler import (
     RetentionDryRunState,
 )
-from services.pitr.retention_scheduler import (
+from services.pitr.retention.scheduler import (
     delete_tick as retention_delete_tick,
 )
-from services.pitr.retention_scheduler import (
+from services.pitr.retention.scheduler import (
     refresh as refresh_retention_plan,
 )
 from shared import telemetry

@@ -313,11 +313,11 @@ DECISIONS: dict[str, Decision] = {
             ),
             # shared.db_connections resolves a home (shared.dotenv_boot) and imports
             # settings at load; the modules below run where neither may happen.
-            "services/pitr/restore_drill.py": (
+            "services/pitr/restore/drill.py": (
                 "restore-drill dials inside the restricted restore worker, which runs "
                 "without a home or settings and holds only its sealed live_db_url"
             ),
-            "services/pitr/restore_postgres.py": (
+            "services/pitr/restore/postgres.py": (
                 "restore-sandbox and live-identity dials inside the restricted restore "
                 "worker, which runs without a home or settings"
             ),

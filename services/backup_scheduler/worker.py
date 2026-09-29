@@ -19,9 +19,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import Literal
 
-from services.pitr.logical_dump_names import DUMP_NAME_RE
-from services.pitr.operation_custody import OperationKind, OperationWorker, publish_result
-from services.pitr.worker_process import CompletedOperation, run_operation, worker_request
+from services.pitr.operation.custody import OperationKind, OperationWorker, publish_result
+from services.pitr.operation.worker_process import CompletedOperation, run_operation, worker_request
+from services.pitr.stores.logical_dump_names import DUMP_NAME_RE
 from shared.paths import ava_home
 from shared.process_env import inherited_process_env
 

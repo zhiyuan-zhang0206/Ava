@@ -60,7 +60,7 @@ def test_missing_python_does_not_spawn_a_diagnostic(monkeypatch: pytest.MonkeyPa
     def _no_python(_source_root: Path) -> Path | None:
         return None
 
-    monkeypatch.setattr(hc.editable_install, "_venv_python", _no_python)
+    monkeypatch.setattr(hc.editable_install, "venv_python", _no_python)
     run = Mock(side_effect=AssertionError("must not spawn"))
     monkeypatch.setattr(hc.proc, "run_bounded", run)
     assert "venv python missing" in hc.venv_violations()[0]

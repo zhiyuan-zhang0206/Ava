@@ -117,9 +117,9 @@ _HEALTH_PORT_OVERRIDES: dict[str, str] = {
     svc: f"{svc}_health_port" for svc in health_port_env_aliases()
 }
 
-# Cap single request body size — 64 KB is enough for search query /
-# RPC calls and blocks malicious large POSTs.
-_MAX_BODY_BYTES = 64 * 1024
+# The most a probe reads of a health response body: a healthz payload is a small
+# JSON dump, and a foreign responder on the port cannot make a probe buffer more.
+MAX_BODY_BYTES = 64 * 1024
 
 
 # Daemons already warned about the shared-default fallback in THIS process.
@@ -435,7 +435,7 @@ class DaemonProbe:
 
 # The probe's own HTTP timeout. Healthz is a loopback JSON dump; anything slower
 # than this is a wedged process, which is "dead" for watchdog purposes.
-_PROBE_TIMEOUT_S = 5.0
+PROBE_TIMEOUT_S = 5.0
 
 
 def _recorded_pid(pidfile: Path) -> int | None:
@@ -467,11 +467,11 @@ def _health_payload(url: str, timeout_s: float) -> dict[str, object] | DaemonPro
         with urllib.request.urlopen(url, timeout=timeout_s) as resp:  # noqa: S310 — loopback URL from settings
             if not (200 <= resp.status < 300):
                 return DaemonProbe.down(f"healthz returned HTTP {resp.status}")
-            body = resp.read(_MAX_BODY_BYTES)
+            body = resp.read(MAX_BODY_BYTES)
     except urllib.error.HTTPError as exc:
         detail = f"healthz returned HTTP {exc.code}"
         try:
-            parsed = json.loads(exc.read(_MAX_BODY_BYTES))
+            parsed = json.loads(exc.read(MAX_BODY_BYTES))
         except json.JSONDecodeError:
             return DaemonProbe.down(detail)
         if isinstance(parsed, dict):
@@ -498,7 +498,7 @@ def _health_payload(url: str, timeout_s: float) -> dict[str, object] | DaemonPro
     return cast("dict[str, object]", parsed)
 
 
-def probe_home(url: str, *, timeout_s: float = _PROBE_TIMEOUT_S) -> DaemonProbe:
+def probe_home(url: str, *, timeout_s: float = PROBE_TIMEOUT_S) -> DaemonProbe:
     """Probe a health endpoint that carries ``home`` but no ``name``/``pid``,
     ALWAYS returning a verdict.
 
@@ -514,7 +514,7 @@ def probe_home(url: str, *, timeout_s: float = _PROBE_TIMEOUT_S) -> DaemonProbe:
         return DaemonProbe.down(f"probe raised {type(exc).__name__}: {exc}")
 
 
-def _probe_home(url: str, *, timeout_s: float = _PROBE_TIMEOUT_S) -> DaemonProbe:
+def _probe_home(url: str, *, timeout_s: float = PROBE_TIMEOUT_S) -> DaemonProbe:
     """2xx from ``url`` AND a ``home`` matching this unit's ``$AVA_HOME``.
 
     The same failure mode ``probe_daemon`` exists for — a 200 only proves
@@ -556,7 +556,7 @@ def _probe_home(url: str, *, timeout_s: float = _PROBE_TIMEOUT_S) -> DaemonProbe
 
 
 def read_health_payload(
-    name: str, *, timeout_s: float = _PROBE_TIMEOUT_S
+    name: str, *, timeout_s: float = PROBE_TIMEOUT_S
 ) -> dict[str, object] | None:
     """The parsed `/healthz` body of THIS unit's daemon ``name``, or None.
 
@@ -574,7 +574,7 @@ def read_health_payload(
 
 
 def probe_daemon(
-    name: str, url: str, *, pidfile: Path, timeout_s: float = _PROBE_TIMEOUT_S
+    name: str, url: str, *, pidfile: Path, timeout_s: float = PROBE_TIMEOUT_S
 ) -> DaemonProbe:
     """Probe a daemon's ``/healthz`` and verify the answering process is ours,
     ALWAYS returning a verdict.
@@ -603,7 +603,7 @@ def probe_daemon(
 
 
 def _probe_daemon(
-    name: str, url: str, *, pidfile: Path, timeout_s: float = _PROBE_TIMEOUT_S
+    name: str, url: str, *, pidfile: Path, timeout_s: float = PROBE_TIMEOUT_S
 ) -> DaemonProbe:
     """Probe a daemon's ``/healthz`` AND verify the answering process is ours.
 

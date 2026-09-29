@@ -92,8 +92,8 @@ def test_subdomain_floor_aggregates_over_prefix(
     files = _files(
         {
             **_core_classes(),
-            "services/pitr/uploader.py": (8, 10),
-            "services/pitr/state.py": (4, 10),
+            "services/pitr/wal/uploader.py": (8, 10),
+            "services/pitr/wal/state.py": (4, 10),
             "services/backup.py": (9, 10),
         }
     )

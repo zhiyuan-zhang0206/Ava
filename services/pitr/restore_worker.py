@@ -7,17 +7,17 @@ import sys
 from pathlib import Path
 from typing import Any, cast
 
-from services.pitr.base_manifest import CandidateManifest
-from services.pitr.operation_custody import publish_result
-from services.pitr.restore_object_store import GenerationPinnedObjectReader
-from services.pitr.restore_postgres import IsolatedPostgresRestoreExecutor
-from services.pitr.restore_proof import (
+from services.pitr.base_backup.manifest import CandidateManifest
+from services.pitr.operation.custody import publish_result
+from services.pitr.operation.worker_process import worker_request, worker_secrets
+from services.pitr.restore.postgres import IsolatedPostgresRestoreExecutor
+from services.pitr.restore.proof import (
     RestoreProofDeferredError,
     RestoreSpaceBudget,
     prove_candidate,
 )
-from services.pitr.store_factory import construct_store_group
-from services.pitr.worker_process import worker_request, worker_secrets
+from services.pitr.stores.factory import construct_store_group
+from services.pitr.stores.restore_object_store import GenerationPinnedObjectReader
 from shared.log import init_restricted_process
 
 
@@ -101,7 +101,7 @@ def _run_drill(
     reader: GenerationPinnedObjectReader,
     output: Path,
 ) -> None:
-    from services.pitr.restore_drill import DrillRequest, parse_target_wall, run_restore_drill
+    from services.pitr.restore.drill import DrillRequest, parse_target_wall, run_restore_drill
 
     drill = _object(raw["drill"])
     if set(drill) != {"scratch", "target_lsn", "target_wall", "timeout_seconds"}:

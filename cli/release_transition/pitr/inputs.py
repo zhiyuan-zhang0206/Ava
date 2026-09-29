@@ -7,7 +7,7 @@ from pathlib import Path
 
 from cli.release_transition.journal import Operation
 from cli.release_transition.request import PitrRequest
-from services.pitr.activation_state import ActivationRecord, record_path
+from services.pitr.activation.state import ActivationRecord, record_path
 from shared.runtime_release import current_pointer
 from shared.start_inputs import configuration_files
 from shared.verified_file import regular_bytes

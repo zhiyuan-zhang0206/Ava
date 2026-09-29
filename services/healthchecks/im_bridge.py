@@ -23,11 +23,11 @@ def _holder_payload() -> dict[str, object] | None:
     try:
         try:
             with urllib.request.urlopen(  # noqa: S310 — loopback URL from settings
-                _HEALTH_URL, timeout=shared.daemon_health._PROBE_TIMEOUT_S
+                _HEALTH_URL, timeout=shared.daemon_health.PROBE_TIMEOUT_S
             ) as response:
-                body = response.read(shared.daemon_health._MAX_BODY_BYTES)
+                body = response.read(shared.daemon_health.MAX_BODY_BYTES)
         except urllib.error.HTTPError as exc:
-            body = exc.read(shared.daemon_health._MAX_BODY_BYTES)
+            body = exc.read(shared.daemon_health.MAX_BODY_BYTES)
         parsed: object = json.loads(body)
     except Exception:
         return None

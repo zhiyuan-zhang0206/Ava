@@ -73,7 +73,7 @@ def _block(root: Path, mode: str) -> None:
 def _backup_patches(root: Path, mode: str) -> contextlib.ExitStack:
     """Run the real scheduled preparation with one blocking pipeline stage."""
     from services import backup
-    from services.pitr import store_factory
+    from services.pitr.stores import factory
 
     def run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[bytes]:
         size_path = kwargs["size_path"]
@@ -101,7 +101,7 @@ def _backup_patches(root: Path, mode: str) -> contextlib.ExitStack:
         patch.object(backup, "_db_size_breakdown", return_value="test"),
         patch.object(backup, "_run_with_progress", run),
         patch.object(backup, "_key_file", key),
-        patch.object(store_factory, "get_store_group", return_value=group),
+        patch.object(factory, "get_store_group", return_value=group),
     ):
         stack.enter_context(patcher)
     return stack

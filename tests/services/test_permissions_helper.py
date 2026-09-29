@@ -1939,7 +1939,7 @@ def test_unrelated_cluster_plists_are_left_alone(
 # --- Windows named-pipe transport -----------------------------------------
 # The pipe path is unreachable on Linux CI, so it is pinned with fakes: a
 # stubbed _connect_pipe/_pipe_read and os.name forced to "nt". The shared
-# _parse_reply contract is exercised by both transports' tests.
+# parse_reply contract is exercised by both transports' tests.
 
 
 def test_pipe_transport_roundtrip(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1985,7 +1985,7 @@ def test_win_pipe_full_path_has_single_backslashes() -> None:
 
 
 def test_pipe_transport_uses_shared_reply_contract(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Empty / truncated / error replies raise through the same _parse_reply the
+    """Empty / truncated / error replies raise through the same parse_reply the
     socket path uses — the two transports cannot drift apart."""
     from services.permissions_helper import client
 
@@ -1995,7 +1995,7 @@ def test_pipe_transport_uses_shared_reply_contract(monkeypatch: pytest.MonkeyPat
         (b'{"id":1,"ok":false,"error":"nope"}\n', "nope"),
     ]:
         try:
-            client._parse_reply(buf, "ping")
+            client.parse_reply(buf, "ping")
             raise AssertionError(f"reply {buf!r} must raise")
         except client.PermissionsHelperError as e:
             assert expect in str(e)

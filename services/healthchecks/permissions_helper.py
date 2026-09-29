@@ -75,7 +75,7 @@ def _parent_still_live(root: OwnedProcess, parent: OwnedProcess, reply_pid: int)
 
 def _ping() -> bool:
     """Ping the real helper protocol with a watchdog-sized response timeout."""
-    sock = client._connect(str(permissions_helper_socket()))
+    sock = client.connect(str(permissions_helper_socket()))
     try:
         sock.settimeout(_PING_TIMEOUT_S)
         root, parent = _helper_parent(sock)
@@ -93,7 +93,7 @@ def _ping() -> bool:
     finally:
         sock.close()
 
-    result: client.PingResult = client._parse_reply(bytes(reply), "ping")
+    result: client.PingResult = client.parse_reply(bytes(reply), "ping")
     if "pid" not in result or not _parent_still_live(root, parent, result["pid"]):
         raise _ParentEvidenceError("helper reply lost captured parent identity")
     return result["pong"] is True

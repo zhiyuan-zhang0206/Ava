@@ -3,17 +3,17 @@ from __future__ import annotations
 from dataclasses import replace
 from pathlib import Path
 
-from services.pitr.base_manifest import BaseObject, CandidateManifest, WalRange
-from services.pitr.restore_manifest import (
+from services.pitr.base_backup.manifest import BaseObject, CandidateManifest, WalRange
+from services.pitr.restore.manifest import (
     ProtectedManifest,
     RestoreObject,
     RestoreProof,
     candidate_sha256,
     required_archive_names,
 )
-from services.pitr.retention_manifest import RetentionObject, RetentionPlan
-from services.pitr.retention_planner import build_local_evidence
-from services.pitr.retention_policy import RetentionEvidence, plan_retention
+from services.pitr.retention.manifest import RetentionObject, RetentionPlan
+from services.pitr.retention.planner import build_local_evidence
+from services.pitr.retention.policy import RetentionEvidence, plan_retention
 
 SEGMENT = 16 * 1024 * 1024
 
@@ -484,9 +484,7 @@ def test_duplicate_chain_manifests_block_even_when_contents_match(tmp_path: Path
 
 
 def test_retention_modules_expose_no_delete_surface() -> None:
-    import services.pitr.retention_manifest as manifest
-    import services.pitr.retention_planner as planner
-    import services.pitr.retention_policy as policy
+    from services.pitr.retention import manifest, planner, policy
 
     names = set(dir(manifest)) | set(dir(planner)) | set(dir(policy))
     assert not any("delete" in name.lower() for name in names)

@@ -142,7 +142,7 @@ def test_ping_uses_short_timeout_and_helper_wire_protocol(
         return pid == 42
 
     socket_path = tmp_path / "helper.sock"
-    monkeypatch.setattr(client, "_connect", connect)
+    monkeypatch.setattr(client, "connect", connect)
     monkeypatch.setattr(hc, "permissions_helper_socket", lambda: socket_path)
     monkeypatch.setattr(hc, "_helper_parent", _fake_helper_parent)
     monkeypatch.setattr(hc, "_parent_still_live", _fake_parent_still_live)

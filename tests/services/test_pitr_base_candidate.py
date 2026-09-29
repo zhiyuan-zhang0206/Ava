@@ -20,8 +20,8 @@ from pathlib import Path
 import psycopg
 import pytest
 
-from services.pitr import base_candidate
-from services.pitr.base_candidate import (
+from services.pitr.base_backup import candidate as candidate_module
+from services.pitr.base_backup.candidate import (
     BaseCandidateError,
     _output_suffix,
     _rule_name_set,
@@ -44,9 +44,9 @@ def _reconcile_case(
     import json
     from dataclasses import asdict
 
-    from services.pitr.base_candidate import CandidateFacts
-    from services.pitr.base_manifest import BaseObject, CandidateManifest, WalRange
-    from services.pitr.base_stream import BaseEncryptionPlan
+    from services.pitr.base_backup.candidate import CandidateFacts
+    from services.pitr.base_backup.manifest import BaseObject, CandidateManifest, WalRange
+    from services.pitr.base_backup.stream import BaseEncryptionPlan
 
     chain_id = "chain-1"
     root = tmp_path / "root"
@@ -66,9 +66,9 @@ def _reconcile_case(
     def snapshot(_ready: Path) -> tuple[list[object], str]:
         return ([], "sha")
 
-    monkeypatch.setattr(base_candidate, "_load_facts", load_facts)
-    monkeypatch.setattr(base_candidate, "parse_native_manifest", parse_manifest)
-    monkeypatch.setattr(base_candidate, "snapshot_candidate", snapshot)
+    monkeypatch.setattr(candidate_module, "_load_facts", load_facts)
+    monkeypatch.setattr(candidate_module, "parse_native_manifest", parse_manifest)
+    monkeypatch.setattr(candidate_module, "snapshot_candidate", snapshot)
 
     candidate = CandidateManifest(
         schema_version=1,
@@ -105,7 +105,7 @@ def _reconcile_case(
     def load_source(*_a: object, **_k: object) -> tuple[Source, BaseEncryptionPlan]:
         return (Source(), plan)
 
-    monkeypatch.setattr(base_candidate, "load_or_create_source", load_source)
+    monkeypatch.setattr(candidate_module, "load_or_create_source", load_source)
 
     return root, ready
 
@@ -119,7 +119,7 @@ def test_reconcile_accepts_non_crc32c_ack_with_matching_local_crc32c(
     root, ready = _reconcile_case(
         tmp_path, monkeypatch, checksum_algo="md5", checksum_value="md5v", crc32c="crc-plan"
     )
-    base_candidate.reconcile_completed_candidates(root, key=b"k" * 32, key_id="key")
+    candidate_module.reconcile_completed_candidates(root, key=b"k" * 32, key_id="key")
     assert not ready.exists()
 
 
@@ -130,7 +130,7 @@ def test_reconcile_rejects_mismatched_local_crc32c_for_non_crc32c_ack(
         tmp_path, monkeypatch, checksum_algo="md5", checksum_value="md5v", crc32c="other"
     )
     with pytest.raises(BaseCandidateError, match="evidence does not match"):
-        base_candidate.reconcile_completed_candidates(root, key=b"k" * 32, key_id="key")
+        candidate_module.reconcile_completed_candidates(root, key=b"k" * 32, key_id="key")
     assert ready.exists()
 
 
@@ -141,7 +141,7 @@ def test_reconcile_rejects_crc32c_ack_differing_from_the_plan(
         tmp_path, monkeypatch, checksum_algo="crc32c", checksum_value="other", crc32c="crc-plan"
     )
     with pytest.raises(BaseCandidateError, match="evidence does not match"):
-        base_candidate.reconcile_completed_candidates(root, key=b"k" * 32, key_id="key")
+        candidate_module.reconcile_completed_candidates(root, key=b"k" * 32, key_id="key")
     assert ready.exists()
 
 
@@ -166,7 +166,7 @@ def test_run_capture_failure_carries_the_child_output(tmp_path: Path) -> None:
     ]
     with pytest.raises(BaseCandidateError) as caught:
         (tmp_path / "owner.json").write_text("{}")
-        base_candidate._run_tool(
+        candidate_module._run_tool(
             command,
             env={"PGPASSWORD": "x"},
             stop=threading.Event(),
@@ -189,9 +189,9 @@ def test_verify_candidate_failure_carries_the_child_output(
     def fake_pg_tool(_name: str) -> Path:
         return fake
 
-    monkeypatch.setattr(base_candidate, "pg_tool", fake_pg_tool)
+    monkeypatch.setattr(candidate_module, "pg_tool", fake_pg_tool)
     with pytest.raises(BaseCandidateError) as caught:
-        base_candidate._verify_candidate(tmp_path / "backup", threading.Event())
+        candidate_module._verify_candidate(tmp_path / "backup", threading.Event())
     message = str(caught.value)
     assert "exited 2" in message
     assert "verify-out" in message
@@ -261,7 +261,7 @@ def test_validate_replication_hba_requires_a_rule_covering_the_role(
     def _session() -> _FakeConn:
         return _FakeConn(rules)
 
-    monkeypatch.setattr("services.pitr.activation_runtime.pitr_admin_session", _session)
+    monkeypatch.setattr("services.pitr.activation.runtime.pitr_admin_session", _session)
     replication = {"user": "ava_pitr_repl", "host": "127.0.0.1", "port": "5433"}
     if covers:
         _validate_replication_hba(replication)
@@ -276,7 +276,7 @@ def test_validate_replication_hba_wraps_probe_failure(
     def boom() -> _FakeConn:
         raise RuntimeError("registry missing")
 
-    monkeypatch.setattr("services.pitr.activation_runtime.pitr_admin_session", boom)
+    monkeypatch.setattr("services.pitr.activation.runtime.pitr_admin_session", boom)
     with pytest.raises(BaseCandidateError, match="cannot verify the replication pg_hba"):
         _validate_replication_hba({"user": "ava_pitr_repl", "host": "127.0.0.1"})
 
@@ -366,7 +366,7 @@ def test_validate_replication_contract_fails_closed_without_replication_row(
         # The scratch server has no home receipt: its session stands in for the
         # custody-checked admin session.
         monkeypatch.setattr(
-            "services.pitr.activation_runtime.pitr_admin_session",
+            "services.pitr.activation.runtime.pitr_admin_session",
             lambda: psycopg.connect(admin, autocommit=True),
         )
         with pytest.raises(BaseCandidateError, match="physical-replication rule"):
@@ -429,7 +429,7 @@ def _prepared(tmp_path: Path, chain_id: str = "20260926T000000Z"):
     import json
     from dataclasses import replace
 
-    from services.pitr.base_stream import snapshot_candidate
+    from services.pitr.base_backup.stream import snapshot_candidate
     from tests.services.test_pitr_base_scheduler import _candidate
 
     root = tmp_path / "root"
@@ -455,13 +455,13 @@ def _prepared(tmp_path: Path, chain_id: str = "20260926T000000Z"):
 def test_commit_accepts_only_the_recorded_worker_then_retires_staging(tmp_path: Path) -> None:
     import psutil
 
-    from services.pitr.base_manifest import CandidateManifest
-    from services.pitr.operation_custody import NativeProcess
+    from services.pitr.base_backup.manifest import CandidateManifest
+    from services.pitr.operation.custody import NativeProcess
 
     root, ready, candidate = _prepared(tmp_path)
-    base_candidate._record_owner(root, candidate.chain_id)
+    candidate_module._record_owner(root, candidate.chain_id)
     worker = NativeProcess.capture(psutil.Process())
-    base_candidate.commit_base_candidate(root, candidate, worker)
+    candidate_module.commit_base_candidate(root, candidate, worker)
     manifest = root / "base-manifests" / f"{candidate.chain_id}.candidate.json"
     assert CandidateManifest.from_json(manifest.read_text()) == candidate
     assert not ready.exists()
@@ -476,10 +476,10 @@ def test_commit_refusal_after_closure_retains_every_staged_file(
 
     import psutil
 
-    from services.pitr.operation_custody import NativeProcess
+    from services.pitr.operation.custody import NativeProcess
 
     root, ready, candidate = _prepared(tmp_path)
-    base_candidate._record_owner(root, candidate.chain_id)
+    candidate_module._record_owner(root, candidate.chain_id)
     worker = NativeProcess.capture(psutil.Process())
     if change == "owner":
         worker = replace(worker, process=replace(worker.process, pid=1))
@@ -487,7 +487,7 @@ def test_commit_refusal_after_closure_retains_every_staged_file(
         (ready / "PG_VERSION").write_bytes(b"16\n")
     before = sorted(path.relative_to(root) for path in root.rglob("*"))
     with pytest.raises(BaseCandidateError):
-        base_candidate.commit_base_candidate(root, candidate, worker)
+        candidate_module.commit_base_candidate(root, candidate, worker)
     assert sorted(path.relative_to(root) for path in root.rglob("*")) == before
     assert not (root / "base-manifests").exists()
 
@@ -499,8 +499,8 @@ def test_resumed_candidate_records_its_worker_before_verification(
     import json
     import os
 
-    from services.pitr.base_candidate import CandidateFacts
-    from services.pitr.space_budget import CandidateSpaceBudget
+    from services.pitr.base_backup.candidate import CandidateFacts
+    from services.pitr.base_backup.space_budget import CandidateSpaceBudget
 
     root, _ready, candidate = _prepared(tmp_path)
     owner = root / "base-facts" / f"{candidate.chain_id}.owner.json"
@@ -519,11 +519,11 @@ def test_resumed_candidate_records_its_worker_before_verification(
     def load_facts(_root: Path, _chain: str) -> CandidateFacts:
         return facts
 
-    monkeypatch.setattr(base_candidate, "reconcile_runtime_state", no_reconcile)
-    monkeypatch.setattr(base_candidate, "_load_facts", load_facts)
-    monkeypatch.setattr(base_candidate, "_verify_candidate", verify)
+    monkeypatch.setattr(candidate_module, "reconcile_runtime_state", no_reconcile)
+    monkeypatch.setattr(candidate_module, "_load_facts", load_facts)
+    monkeypatch.setattr(candidate_module, "_verify_candidate", verify)
     with pytest.raises(_StoppedError):
-        base_candidate.prepare_base_candidate(
+        candidate_module.prepare_base_candidate(
             root=root,
             prefix="pitr",
             key=b"k" * 32,
@@ -546,9 +546,9 @@ def test_a_capture_that_fails_its_own_verification_is_rejected_not_resumed(
 
     import psutil
 
-    from services.pitr.base_candidate import CandidateFacts
-    from services.pitr.operation_custody import NativeProcess, OperationWorker
-    from services.pitr.space_budget import CandidateSpaceBudget
+    from services.pitr.base_backup.candidate import CandidateFacts
+    from services.pitr.base_backup.space_budget import CandidateSpaceBudget
+    from services.pitr.operation.custody import NativeProcess, OperationWorker
 
     root, ready, candidate = _prepared(tmp_path)
     owner = root / "base-facts" / f"{candidate.chain_id}.owner.json"
@@ -567,11 +567,11 @@ def test_a_capture_that_fails_its_own_verification_is_rejected_not_resumed(
     def load_facts(_root: Path, _chain: str) -> CandidateFacts:
         return CandidateFacts(17, "1", 16 << 20, 1, "migrations", "ava")
 
-    monkeypatch.setattr(base_candidate, "reconcile_runtime_state", no_reconcile)
-    monkeypatch.setattr(base_candidate, "_load_facts", load_facts)
-    monkeypatch.setattr(base_candidate, "_verify_candidate", verify)
+    monkeypatch.setattr(candidate_module, "reconcile_runtime_state", no_reconcile)
+    monkeypatch.setattr(candidate_module, "_load_facts", load_facts)
+    monkeypatch.setattr(candidate_module, "_verify_candidate", verify)
     with pytest.raises(type(raised)):
-        base_candidate.prepare_base_candidate(
+        candidate_module.prepare_base_candidate(
             root=root,
             prefix="pitr",
             key=b"k" * 32,
@@ -585,7 +585,7 @@ def test_a_capture_that_fails_its_own_verification_is_rejected_not_resumed(
     work = tmp_path / "work"
     work.mkdir()
     worker = OperationWorker(os.getpid(), NativeProcess.capture(psutil.Process()))
-    base_candidate.quarantine_candidate_staging(root, work, worker)
+    candidate_module.quarantine_candidate_staging(root, work, worker)
     assert ready.exists() is (outcome == "stop")
     assert (root / "base-facts" / f"{candidate.chain_id}.json").exists() is (outcome == "stop")
 

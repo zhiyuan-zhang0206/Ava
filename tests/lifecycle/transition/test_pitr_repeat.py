@@ -15,7 +15,7 @@ from cli.release_transition import journal, submit
 from cli.release_transition.pitr import submission
 from cli.release_transition.pitr.inputs import require_inputs
 from cli.release_transition.request import PitrRequest
-from services.pitr.activation_state import mark_pre_mutation_rolled_back, record_path, write_record
+from services.pitr.activation.state import mark_pre_mutation_rolled_back, record_path, write_record
 from shared.release_operation import authorized_pitr
 from tests.lifecycle.transition.phases import at_phase
 from tests.lifecycle.transition.test_launcher_linux import _constant

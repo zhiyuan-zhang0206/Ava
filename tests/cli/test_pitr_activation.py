@@ -15,20 +15,20 @@ from psycopg.conninfo import conninfo_to_dict
 from cli.commands.data_plane import _pitr_activation_config as activation_config
 from cli.commands.data_plane import pitr_activation as activation
 from services.gateway_side.backup import snapshot as _snapshot
-from services.pitr import activation_runtime
-from services.pitr.activation_observability import refusal_message, save_error
-from services.pitr.activation_runtime import (
+from services.pitr.activation import runtime
+from services.pitr.activation.observability import refusal_message, save_error
+from services.pitr.activation.runtime import (
     archiver_reached_target,
     pitr_env_is_desired,
     restore_exact_file,
     rollback_effect_state,
     wal_metadata,
 )
-from services.pitr.activation_state import ActivationRecord, load_record, write_record
-from services.pitr.base_candidate import BaseCandidateError
-from services.pitr.checksums import ObjectChecksum
-from services.pitr.object_store import RemoteObjectAck
-from services.pitr.uploader import ack_manifest_from_raw
+from services.pitr.activation.state import ActivationRecord, load_record, write_record
+from services.pitr.base_backup.candidate import BaseCandidateError
+from services.pitr.stores.checksums import ObjectChecksum
+from services.pitr.stores.object_store import RemoteObjectAck
+from services.pitr.wal.uploader import ack_manifest_from_raw
 from shared.config import FIELD_INFOS, field_alias, field_domain, settings
 from tests._pitr_fixtures import baidu_credential_evidence
 
@@ -686,7 +686,7 @@ def test_pitr_env_desired_requires_all_four_owned_aliases() -> None:
 
 
 def test_pitr_env_absent_detects_all_four_missing() -> None:
-    from services.pitr.activation_runtime import pitr_env_absent
+    from services.pitr.activation.runtime import pitr_env_absent
 
     assert pitr_env_absent(b"OTHER=kept\n")
     assert pitr_env_absent(b"")
@@ -1297,12 +1297,12 @@ def test_switch_wal_runs_on_pitr_admin_connection(
             return _FakeRow()
 
     monkeypatch.setattr(
-        activation_runtime,
+        runtime,
         "pitr_admin_url",
         lambda: "postgresql://super@/postgres?host=/sock&port=5433",
     )
     monkeypatch.setattr(
-        "services.pitr.activation_runtime.psycopg.connect",
+        "services.pitr.activation.runtime.psycopg.connect",
         lambda conninfo, **_kw: (events.append(("dial", conninfo)), _FakeConn())[1],
     )
 
@@ -1313,13 +1313,13 @@ def test_switch_wal_runs_on_pitr_admin_connection(
     assert activation._switch_wal() == "00000001000000A20000008D"
     assert [kind for kind, _ in events] == ["dial", "custody", "execute"]
     assert events[0][1] == "postgresql://super@/postgres?host=/sock&port=5433"
-    assert events[1][1] == activation_runtime.ava_home() / "pg"
+    assert events[1][1] == runtime.ava_home() / "pg"
 
 
 def test_probe_switch_privilege_fails_closed(monkeypatch: pytest.MonkeyPatch) -> None:
     """A connection that cannot EXECUTE pg_switch_wal must refuse the shadow
     gate BEFORE any config mutation — not crash the activation mid-flight."""
-    monkeypatch.setattr(activation_runtime, "pitr_admin_url", lambda: "admin-url")
+    monkeypatch.setattr(runtime, "pitr_admin_url", lambda: "admin-url")
     called: list[str] = []
 
     class _FakeRow:
@@ -1343,7 +1343,7 @@ def test_probe_switch_privilege_fails_closed(monkeypatch: pytest.MonkeyPatch) ->
         return _FakeConn()
 
     monkeypatch.setattr(
-        "services.pitr.activation_runtime.psycopg.connect",
+        "services.pitr.activation.runtime.psycopg.connect",
         fake_connect,
     )
 
@@ -1352,7 +1352,7 @@ def test_probe_switch_privilege_fails_closed(monkeypatch: pytest.MonkeyPatch) ->
 
     monkeypatch.setattr("shared.cluster.ownership.require_postgres_connection", custody)
     with pytest.raises(RuntimeError, match="pg_switch_wal"):
-        activation_runtime.probe_switch_privilege()
+        runtime.probe_switch_privilege()
     assert "has_function_privilege" in called[0]
 
 
@@ -1459,22 +1459,22 @@ def test_probe_switch_privilege_against_real_pg(
         # the custody-checked admin session.
         admin_url = f"postgresql://ava@/postgres?host={sock}&port={port}"
         monkeypatch.setattr(
-            activation_runtime,
+            runtime,
             "pitr_admin_session",
             lambda: psycopg.connect(admin_url, autocommit=True),
         )
-        activation_runtime.probe_switch_privilege()  # superuser: passes
+        runtime.probe_switch_privilege()  # superuser: passes
         # A role without the grant: the probe must refuse (the prod failure shape).
         with psycopg.connect(admin_url, autocommit=True) as conn:
             conn.execute("CREATE ROLE limited LOGIN")
         limited_url = f"postgresql://limited@/postgres?host={sock}&port={port}"
         monkeypatch.setattr(
-            activation_runtime,
+            runtime,
             "pitr_admin_session",
             lambda: psycopg.connect(limited_url, autocommit=True),
         )
         with pytest.raises(RuntimeError, match="pg_switch_wal"):
-            activation_runtime.probe_switch_privilege()
+            runtime.probe_switch_privilege()
     finally:
         subprocess.run(  # noqa: S603
             [pg_tool("pg_ctl"), "-D", str(data), "-m", "immediate", "stop"],
@@ -1572,8 +1572,8 @@ def _wire_proof_world(
         monkeypatch.setattr(config, "pitr_baidu_app_root", "/apps/ava/ava-pitr")
 
     stem = ack_file_stem or str(ack_raw["archive_name"])
-    monkeypatch.setattr(activation_runtime, "ava_home", lambda: tmp_path)
-    monkeypatch.setattr(activation_runtime, "pitr_admin_session", lambda: _ArchiverConn(stem))
+    monkeypatch.setattr(runtime, "ava_home", lambda: tmp_path)
+    monkeypatch.setattr(runtime, "pitr_admin_session", lambda: _ArchiverConn(stem))
     if observed is None:
         ack = ack_manifest_from_raw(ack_raw)
         observed = RemoteObjectAck(
@@ -1587,7 +1587,7 @@ def _wire_proof_world(
             created=True,
         )
     monkeypatch.setattr(
-        "services.pitr.store_factory.get_store_group", lambda: _ViewerStoreGroup(observed)
+        "services.pitr.stores.factory.get_store_group", lambda: _ViewerStoreGroup(observed)
     )
     ack_dir = tmp_path / "physical-backup" / "ack"
     ack_dir.mkdir(parents=True)
@@ -1622,7 +1622,7 @@ def test_remote_wal_proof_transfers_gcs_evidence_end_to_end(
     ack_raw = _durable_ack_raw(backend="gcs")
     _wire_proof_world(monkeypatch, tmp_path, backend="gcs", ack_raw=ack_raw)
 
-    ack_evidence, viewer_evidence = activation_runtime.remote_wal_proof(record)
+    ack_evidence, viewer_evidence = runtime.remote_wal_proof(record)
 
     assert ack_evidence["bucket_name"] == "bucket"
     assert ack_evidence["generation"] == "123"
@@ -1649,7 +1649,7 @@ def test_remote_wal_proof_transfers_baidu_evidence_end_to_end(
     ack_raw = _durable_ack_raw(backend="baidu")
     _wire_proof_world(monkeypatch, tmp_path, backend="baidu", ack_raw=ack_raw)
 
-    ack_evidence, viewer_evidence = activation_runtime.remote_wal_proof(record)
+    ack_evidence, viewer_evidence = runtime.remote_wal_proof(record)
 
     assert ack_evidence["bucket_name"] == "/apps/ava/ava-pitr"
     assert ack_evidence["generation"] == "123456789:" + "b" * 32
@@ -1681,7 +1681,7 @@ def test_remote_wal_proof_refuses_viewer_evidence_drift(
     )
     _wire_proof_world(monkeypatch, tmp_path, backend="gcs", ack_raw=ack_raw, observed=drifted)
     with pytest.raises(RuntimeError, match="viewer observed WAL differs"):
-        activation_runtime.remote_wal_proof(record)
+        runtime.remote_wal_proof(record)
 
 
 def test_remote_wal_proof_refuses_viewer_metadata_drift(
@@ -1708,7 +1708,7 @@ def test_remote_wal_proof_refuses_viewer_metadata_drift(
     )
     _wire_proof_world(monkeypatch, tmp_path, backend="gcs", ack_raw=ack_raw, observed=drifted)
     with pytest.raises(RuntimeError, match="metadata differs"):
-        activation_runtime.remote_wal_proof(record)
+        runtime.remote_wal_proof(record)
 
 
 def test_remote_wal_proof_refuses_an_ack_for_a_different_archive(
@@ -1730,7 +1730,7 @@ def test_remote_wal_proof_refuses_an_ack_for_a_different_archive(
         ack_file_stem="00000001000000A20000008C",
     )
     with pytest.raises(RuntimeError, match="targets a different archive"):
-        activation_runtime.remote_wal_proof(record)
+        runtime.remote_wal_proof(record)
 
 
 def test_remote_wal_proof_refuses_after_the_deadline_passed(
@@ -1745,7 +1745,7 @@ def test_remote_wal_proof_refuses_after_the_deadline_passed(
     ack_raw = _durable_ack_raw(backend="gcs")
     _wire_proof_world(monkeypatch, tmp_path, backend="gcs", ack_raw=ack_raw)
     with pytest.raises(RuntimeError, match="deadline expired"):
-        activation_runtime.remote_wal_proof(record)
+        runtime.remote_wal_proof(record)
 
 
 def test_refusal_message_shows_the_tail_of_a_long_detail() -> None:

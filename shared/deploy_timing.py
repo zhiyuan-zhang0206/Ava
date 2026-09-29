@@ -19,7 +19,7 @@ It is held two ways, and the split matters:
 
 1. **While an operation is executing**, the process running it renews the lease
    on a timer (`LEASE_RENEW_INTERVAL_S`; `shared.cluster_lock.renew_update_lock`,
-   driven by `services.pitr.activation_lease`). So `LOCK_TTL_S` is not a ceiling
+   driven by `services.pitr.activation.lease`). So `LOCK_TTL_S` is not a ceiling
    on how long a deploy may take; it is purely the crash-reclaim bound, and an
    operation whose process dies still releases within one TTL because renewal
    dies with it.
