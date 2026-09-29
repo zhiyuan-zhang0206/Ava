@@ -58,15 +58,21 @@ repos:
         pass_filenames: false
 
       - id: pyright
-        name: pyright (strict mode)
+        name: pyright (strict mode, branch-changed files only)
         # Use the pyright from the uv venv — deps are complete, no need to
         # reinstall langgraph / psycopg / redis etc. in an isolated hook env.
-        # Equivalent to running `.venv/bin/pyright` on a dev machine.
-        entry: bash scripts/prepush-guard.sh pyright -- .venv/bin/pyright
+        # Local runs check only the branch's own changed .py files (user
+        # ruling 2026-09-22: no full-repo/full-suite runs locally) — the
+        # wrapper computes merge-base(origin/main, HEAD)..HEAD itself and
+        # passes just those paths to pyright; a full-repo strict pyright
+        # stays CI-only (`uv run pyright` in backend-static). always_run
+        # because the scoping is internal to the script, not pre-commit's
+        # own (differently-computed) push-time file selection.
+        entry: bash scripts/prepush-pyright-files.sh
         stages: [pre-push]
         verbose: true  # Successful skips must stay visible.
         language: system
-        types: [python]
+        always_run: true
         pass_filenames: false
 
       # No sync blocking calls in async bodies (gateway + ops event-loop surfaces).
