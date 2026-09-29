@@ -857,7 +857,7 @@ _TEST_CERT_SHA1 = "0123456789ABCDEF0123456789ABCDEF01234567"
 
 
 def _stage_bundle(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, exe_present: bool) -> Path:
-    from services.permissions_helper import lifecycle
+    from services.permissions_helper import launchd_job, lifecycle
 
     src = tmp_path / "main.swift"
     src.write_text("// swift")
@@ -869,6 +869,7 @@ def _stage_bundle(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, exe_presen
         exe = app / "Contents" / "MacOS" / "AvaPermissionsHelper"
         exe.parent.mkdir(parents=True)
         exe.write_bytes(b"\x00")  # written last, so its mtime is at least the sources'
+        monkeypatch.setattr(launchd_job, "helper_job_loaded", lambda: True)  # its home runs it
     locales = tmp_path / "locales"
     en_lproj = locales / "en.lproj"
     en_lproj.mkdir(parents=True)
@@ -1176,7 +1177,7 @@ def test_source_content_change_forces_rebuild(
     lifecycle._SOURCE.write_text("// changed swift")
 
     before = (app / "Contents/MacOS/AvaPermissionsHelper").read_bytes()
-    with pytest.raises(lifecycle.PermissionsHelperBuildError, match="immutable"):
+    with pytest.raises(RuntimeError, match="still in use"):
         lifecycle.build_and_sign()
     assert (app / "Contents/MacOS/AvaPermissionsHelper").read_bytes() == before
     assert not any(c[0] == "swiftc" for c in _argvs(recorded))
@@ -1194,7 +1195,7 @@ def test_locale_content_change_forces_rebuild(
     locale_file.write_text('"panel.title" = "Changed";')
 
     before = (app / "Contents/MacOS/AvaPermissionsHelper").read_bytes()
-    with pytest.raises(lifecycle.PermissionsHelperBuildError, match="immutable"):
+    with pytest.raises(RuntimeError, match="still in use"):
         lifecycle.build_and_sign()
     assert (app / "Contents/MacOS/AvaPermissionsHelper").read_bytes() == before
     assert not any(c[0] == "swiftc" for c in _argvs(recorded))
@@ -1225,7 +1226,7 @@ def test_missing_build_state_forces_rebuild(
     recorded = _fake_tools(monkeypatch, authority=lifecycle._CERT_CN)
 
     before = (app / "Contents/MacOS/AvaPermissionsHelper").read_bytes()
-    with pytest.raises(lifecycle.PermissionsHelperBuildError, match="immutable"):
+    with pytest.raises(RuntimeError, match="still in use"):
         lifecycle.build_and_sign()
     assert (app / "Contents/MacOS/AvaPermissionsHelper").read_bytes() == before
     assert not any(c[0] == "swiftc" for c in _argvs(recorded))
@@ -1293,7 +1294,7 @@ def test_identity_change_warns_and_rebuilds(
     _write_current_build_state(app, "hash-for-previous-identity", dr='identifier "old"')
 
     before = (app / "Contents/MacOS/AvaPermissionsHelper").read_bytes()
-    with pytest.raises(lifecycle.PermissionsHelperBuildError, match="immutable"):
+    with pytest.raises(RuntimeError, match="still in use"):
         lifecycle.build_and_sign()
     assert (app / "Contents/MacOS/AvaPermissionsHelper").read_bytes() == before
     assert not any(c[0] == "swiftc" for c in _argvs(recorded))
@@ -1315,7 +1316,7 @@ def test_ad_hoc_signed_bundle_is_rebuilt_onto_the_stable_certificate(
     recorded = _fake_tools(monkeypatch, authority=None)
 
     before = (app / "Contents/MacOS/AvaPermissionsHelper").read_bytes()
-    with pytest.raises(lifecycle.PermissionsHelperBuildError, match="immutable"):
+    with pytest.raises(RuntimeError, match="still in use"):
         lifecycle.build_and_sign()
     assert (app / "Contents/MacOS/AvaPermissionsHelper").read_bytes() == before
     assert not any(c[0] == "codesign" and "--force" in c for c in _argvs(recorded))
@@ -1635,7 +1636,6 @@ def test_hung_helper_job_is_unknown_while_build_probes_report_failure(
 
     monkeypatch.setattr(lifecycle, "run_bounded", hang)
     monkeypatch.setattr(launchd_job, "run_bounded", hang)
-    monkeypatch.setattr(lifecycle, "_domain", lambda: "gui/501")
     monkeypatch.setattr("shared.paths.ava_home", lambda: Path("/x/.ava-demo"))
 
     with pytest.raises(subprocess.TimeoutExpired):

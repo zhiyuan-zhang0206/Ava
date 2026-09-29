@@ -2180,7 +2180,12 @@ The supervisor name does not imply UID 0. The macOS helper carries the stable
 signing identity used for permissions. Normal start observes an unchanged loaded
 helper; it never reloads a live ancestor or silently falls back to direct launch.
 A new helper artifact can be built at `AVA_PERMISSIONS_HELPER_ARTIFACT_DIR`.
-Replacing a loaded artifact requires external stop and exact-home retirement.
+A loaded helper is never replaced. When the helper sources change, `ava stop`
+retires the exact-home job, and the next `ava start` rebuilds the stale
+`$AVA_HOME/helper` artifact in place under the same designated requirement
+(TCC grants carry over); it still refuses while the job is loaded, its plist
+remains, or a live process runs the old executable. Rebuilding needs the login
+keychain, so a host that cannot sign keeps the old artifact and fails the start.
 
 Root records native process birth and outstanding custody before spawning.
 Uncertain leftover ownership blocks a second generation. Service readiness checks
