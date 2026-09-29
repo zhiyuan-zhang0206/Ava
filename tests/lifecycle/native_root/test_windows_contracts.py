@@ -2,8 +2,10 @@
 
 import asyncio
 import contextlib
+import ctypes
 import json
 import subprocess
+from pathlib import Path
 from types import SimpleNamespace
 from typing import cast
 
@@ -198,3 +200,131 @@ async def test_job_zero_count_still_waits_for_every_observed_native_exit(tmp_pat
     assert json.loads(custody.path.read_text())["processes"] == [
         {"pid": 100, "birth": 42.0, "starttime": None}
     ]
+
+
+def _membership_api(monkeypatch, snapshots: list[tuple[int, list[int]]]) -> list[int]:
+    """Serve (assigned, listed PIDs) snapshots; the last one repeats."""
+    queries: list[int] = []
+
+    def query(_handle, info_class, buffer, _length, _returned):
+        assert info_class == 3
+        assigned, pids = snapshots[min(len(queries), len(snapshots) - 1)]
+        queries.append(assigned)
+        header = (ctypes.c_uint32 * 2)(assigned, len(pids))
+        ctypes.memmove(buffer, header, ctypes.sizeof(header))
+        listed = (winjob._SIZE_T * len(pids))(*pids)
+        ctypes.memmove(ctypes.addressof(buffer) + 8, listed, ctypes.sizeof(listed))
+        return 1
+
+    monkeypatch.setattr(
+        winjob, "_kernel32", lambda: SimpleNamespace(QueryInformationJobObject=query)
+    )
+    return queries
+
+
+def test_job_membership_requeries_a_member_in_transition(monkeypatch):
+    # Native CI observed the kernel counting one more assigned process than it
+    # listed while a member was being torn down; the next query agreed.
+    queries = _membership_api(monkeypatch, [(3, [11, 12]), (2, [11, 12])])
+    assert winjob.WindowsJob(7).member_pids() == {11, 12}
+    assert queries == [3, 2]
+
+
+def test_job_membership_that_never_settles_is_refused_not_guessed(monkeypatch):
+    monkeypatch.setattr(winjob, "_MEMBERSHIP_SETTLE_S", 0.05)
+    queries = _membership_api(monkeypatch, [(3, [11, 12])])
+    with pytest.raises(RuntimeError, match="3 assigned, 2 listed"):
+        winjob.WindowsJob(7).member_pids()
+    assert len(queries) > 1
+
+
+def _move_api(monkeypatch, transient: list[int], lasting: int | None = None) -> list[int]:
+    """MoveFileExW fails with each transient Win32 code, then with ``lasting`` or renames."""
+    from shared.root_control.windows import storage
+
+    attempts: list[int] = []
+    error = [0]
+
+    def move(source, target, flags):
+        attempts.append(flags)
+        if transient or lasting is not None:
+            error[0] = transient.pop(0) if transient else cast(int, lasting)
+            return 0
+        Path(source).replace(target)
+        return 1
+
+    monkeypatch.setattr(storage, "_kernel32", lambda: SimpleNamespace(MoveFileExW=move))
+    monkeypatch.setattr(storage, "_get_last_error", lambda: error[0])
+    return attempts
+
+
+def test_custody_publication_rides_out_a_reader_holding_the_record(tmp_path, monkeypatch):
+    from shared.root_control.windows import storage
+
+    # Native CI: a root readiness poll holding the record open made the owner's
+    # replacing rename fail with ERROR_ACCESS_DENIED, and the owner died.
+    attempts = _move_api(monkeypatch, [5, 32])
+    target = tmp_path / "record.json"
+    target.write_text("old")
+    storage.publish(target, "new")
+    assert target.read_text() == "new"
+    assert attempts == [9, 9, 9]  # write-through | replace-existing, every attempt
+    assert list(tmp_path.iterdir()) == [target]
+
+
+@pytest.mark.parametrize("code,retried", [(2, False), (183, False), (5, True)])
+def test_custody_publication_refuses_other_errors_and_a_lasting_conflict(
+    tmp_path, monkeypatch, code, retried
+):
+    from shared.root_control.windows import storage
+
+    monkeypatch.setattr(storage, "_SHARING_WAIT_S", 0.05)
+    attempts = _move_api(monkeypatch, [], lasting=code)
+    target = tmp_path / "record.json"
+    target.write_text("old")
+    with pytest.raises(OSError, match=f"Win32 error {code}"):
+        storage.publish(target, "new")
+    assert target.read_text() == "old"
+    assert (len(attempts) > 1) is retried
+    assert list(tmp_path.iterdir()) == [target]
+
+
+def test_record_read_rides_out_a_replacement_in_progress(tmp_path, monkeypatch):
+    from shared.root_control.windows import storage
+
+    # Native CI: the root read the record while the owner replaced it and the
+    # terminal.start handler failed with PermissionError ("internal error").
+    record = tmp_path / "record.json"
+    record.write_bytes(b"current")
+    denials = [PermissionError(13, "Access is denied")]
+    read_bytes = Path.read_bytes
+
+    def contended(path: Path) -> bytes:
+        if denials:
+            raise denials.pop()
+        return read_bytes(path)
+
+    monkeypatch.setattr(Path, "read_bytes", contended)
+    assert storage.read_published(record) == b"current"
+    assert not denials
+
+
+def test_record_read_propagates_absence_links_and_a_lasting_denial(tmp_path, monkeypatch):
+    from shared.root_control.windows import storage
+
+    monkeypatch.setattr(storage, "_SHARING_WAIT_S", 0.05)
+    with pytest.raises(FileNotFoundError):
+        storage.read_published(tmp_path / "absent.json")
+    record = tmp_path / "record.json"
+    record.write_bytes(b"current")
+    link = tmp_path / "link.json"
+    link.symlink_to(record)
+    with pytest.raises(RuntimeError, match="must not be a link"):
+        storage.read_published(link)
+
+    def denied(_path: Path) -> bytes:
+        raise PermissionError(13, "Access is denied")
+
+    monkeypatch.setattr(Path, "read_bytes", denied)
+    with pytest.raises(PermissionError):
+        storage.read_published(record)

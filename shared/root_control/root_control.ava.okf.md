@@ -23,7 +23,10 @@ service ([[services/ava_root/ava_root.ava.okf.md]] is the server).
 - `windows/transport.py` — the owner-only local named pipe, both ends. The root
   control server and each Windows terminal owner serve on it.
 - `windows/storage.py` — the exclusive singleton lock handle and write-through
-  custody publication used by root custody and terminal records.
+  custody publication used by root custody and terminal records. The root,
+  a terminal owner and backend callers read one terminal record while its owner
+  replaces it, so a momentary sharing denial on either the replacing rename or
+  the read is re-attempted within a short bound; any other failure propagates.
 - `windows/native.py` — current-user security descriptors and native command
   line parsing.
 

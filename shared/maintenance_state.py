@@ -8,6 +8,9 @@ MaintenancePhase = Literal[
     "preparing", "draining", "drained", "stopping", "stopped", "starting", "ready"
 ]
 _PHASES = ("preparing", "draining", "drained", "stopping", "stopped", "starting", "ready")
+# From `drained` on the drain is certified: that transition required every
+# member drained or reaped with no unsettled failure (shared.maintenance.set_phase).
+_CERTIFIED_PHASES = frozenset({"drained", "stopping", "stopped", "starting", "ready"})
 
 _REPAIR_RECORD_KEYS = ("at", "by", "user", "uid", "pid", "parent", "machine")
 
@@ -54,6 +57,39 @@ class MaintenanceHold:
         """
         return {
             agent: reason for agent, reason in self.failures.items() if agent not in self.reaped
+        }
+
+    def outside_cohort(self, agent_id: int) -> bool:
+        """Whether `agent_id` provably has no continuation in this hold.
+
+        Preparation captures every non-terminated agent of this machine under
+        row locks, each as a restart command or parked. An agent outside that
+        set is another machine's (every runner sees every wake), or one this
+        hold never drains; no receipt of it gates the hold. A hold the cutover
+        created has an empty cohort, so no agent has a continuation there.
+        Before the capture (phase `preparing`, empty cohort) nothing is proven.
+        """
+        captured = self.phase != "preparing" or bool(self.commands or self.parked)
+        return captured and agent_id not in self.commands and agent_id not in self.parked
+
+    def settled_after_drain(self, agent_id: int) -> bool:
+        """Whether the drain is certified and `agent_id` is a member with nothing
+        left to continue: it drained, or it is parked (never drains).
+
+        A wake of either under the hold claims nothing (no restart command is
+        pending), so no receipt of it gates the hold. Until `drained` their
+        failures still record.
+        """
+        return self.phase in _CERTIFIED_PHASES and (
+            agent_id in self.drained or agent_id in self.parked
+        )
+
+    def receipts_outside_cohort(self) -> dict[int, str]:
+        """The unsettled failures of agents with no continuation in this hold."""
+        return {
+            agent: reason
+            for agent, reason in self.unsettled_failures().items()
+            if self.outside_cohort(agent)
         }
 
     def encode(self) -> dict[str, object]:

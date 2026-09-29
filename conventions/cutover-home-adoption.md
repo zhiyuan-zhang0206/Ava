@@ -70,6 +70,34 @@ business.
    the probe is registered. Found at the adoption, it means the old gateway
    started after its attestation, so that attestation and the W3 row export
    no longer describe the home: roll back (R1) and repeat W1 to W3.
+
+   W2 stops the runners **one at a time**, never in parallel: start a
+   runner's old `ava stop --yes` only after the previous runner's returned,
+   then read that runner's old `ava maintenance status` and classify any
+   failure receipt ([below](#a-legacy-stop-hold-with-failure-receipts))
+   before the next one. Every old drain publishes a wake for each agent of
+   its cohort on the cluster-wide wake channel, and every other runner's agent
+   host starts a turn for each. A runner whose stop terminates its agent host
+   while another runner drains cancels those turns before their row read can
+   say "not ours", and the old host latches each one as a failure receipt of
+   its own hold (FC-10 F20). In sequence, no drain's wakes reach another
+   runner's stop. The rest of the fleet's wakes stay: until W3 the gateway and
+   its own agents publish them (heartbeat check-ins, the delivery watchdog
+   re-waking queued messages, schedules, IM), and the old code cannot silence
+   them short of stopping the gateway, which must come last. So no check can
+   prove a runner's stop free of wakes. On a `stopped` hold the adoption
+   settles every receipt they leave, given the legacy rules; the sequence
+   stays as defence in depth. Budget the drains in sequence.
+
+   Once a runner is stopped in the window, never run a start of the old code
+   on it: no `ava start`, no `ava cluster update`, no stranded-hold recovery
+   (the `[hold-recover]` entry the old pause controller and hold watchdog
+   spawn). A start that succeeds releases the hold and reopens business on
+   the old code inside the window; one that meets a latched receipt refuses
+   and leaves the hold in `starting` (FC-10: the LX hold), which the adoption
+   never keeps, since it keeps only a `stopped` hold. The released unit needs
+   a second drain, and the W3 row export must follow it; the stuck one can
+   only be excluded (W6 `--exclude-unit`) or the window rolled back (R1).
 3. Gateway (W5): `--execute`, then the data-plane authority cutover
    (`scripts/cutover_db_authority.py`, see
    [convert an existing home](data-plane-secret-split.md#convert-an-existing-home)),
@@ -173,7 +201,7 @@ acts and `done` after:
 | Step | Effect |
 |---|---|
 | `jobs` | Retires this home's legacy OS jobs: crontab lines first (they carry the watchdogs; the auto-rollback health probe must already be gone, see the refusals), then launchd labels in disarm order (health probe, watchdog probes, hold watchdog, autostart, Gate, LGTM, logs, packages, PR flow), then Linux units (`ava-boot.<slug>.service` through `sudo -n`, Gate and LGTM user units). The permissions helper is kept; the new converge rebuilds and reloads it. |
-| `hold` | Adopts the maintenance hold a completed legacy `ava stop` left (phase `stopped`) as the cutover hold, so the final resume wakes exactly the agents that stop drained. Without one, it archives an inert resumed pause-owner journal and creates a fresh cutover hold in phase `stopped`. |
+| `hold` | Adopts the maintenance hold a completed legacy `ava stop` left (phase `stopped`) as the cutover hold, so the final resume wakes exactly the agents that stop drained. Its failure receipts, which carry no lost work, are recorded by class and settled ([below](#a-legacy-stop-hold-with-failure-receipts)). Without one, it archives an inert resumed pause-owner journal and creates a fresh cutover hold in phase `stopped`. |
 | `files` | Moves inert legacy files aside: `installed_sha`, `deploy-state.json`, `cluster_paused`, probe counters, updater locks and flags, session records, the hold-watchdog attempt, stale `run/*.pid`, the legacy boot script. |
 | `selection` | Translates a non-empty `disabled_services` into `service-selection.json` (`except` mode) and moves the legacy file aside. |
 | `env` | Records `AVA_SERVICE_PATH` exactly as supplied (never from the caller's PATH) and removes dead keys, the legacy keys no setting reads any more (`DEAD_KEYS` in `scripts/cutover_inventory.py`). On a remote unit it removes the gateway-only keys (owner, admin and runner passwords, data-plane URLs, `AVA_PITR_*`) and the human bearer `AVA_CLUSTER_SECRET` (the gateway's cutover rotates it; a remote unit authenticates with its capability's API token and a runner home still holding it refuses to start). Other keys, including model API keys, are untouched. |
@@ -230,7 +258,8 @@ journal re-verifies and changes nothing. A different `--service-path`,
 Refusals, all before the first effect: a live Ava process of the home (the
 kept helper excepted), a pidfile naming one, a bound data-plane port, a destroy
 intent, a start intent this adoption did not write, a pause that is not a
-completed stop's maintenance hold, a registered legacy health probe (before
+completed stop's maintenance hold (a `stopped` one with a receipt it cannot
+settle included), a registered legacy health probe (before
 the `jobs` step), crontab lines nobody can attribute, an
 unreadable crontab, a missing or unnormalized `AVA_SERVICE_PATH` or one that
 differs from the declared value, a home without a persisted machine name
@@ -316,11 +345,47 @@ which booted the new code out first and hands the hold back to the old code.
 
 ## A legacy stop hold with failure receipts
 
-Adoption keeps only a completed legacy stop's hold: phase `stopped` with no
-unsettled failure receipt. Any other paused journal refuses ("holds a pause
-that is not a completed stop's maintenance hold"). Settle it with the old code,
-before the host's code switch; read the receipts with the old
+Adoption keeps only a completed legacy stop's hold: phase `stopped`, with
+every unsettled receipt one it can settle. Any other paused journal refuses
+("holds a pause that is not a completed stop's maintenance hold", naming the
+receipts it cannot settle and why). Read the receipts with the old
 `ava maintenance status`.
+
+**On a `stopped` hold no receipt is lost work.** Every runner receives every
+wake, and the old host's stop cancelled wakes before their row read, latching
+each as a `CancelledError` receipt of its own hold (FC-10 F20). Two rules of
+the old code place every unsettled receipt of a `stopped` hold after its
+certified drain: `shared/maintenance.py::set_phase` enters `drained` only with
+no unsettled failure, and nothing else moves a hold past `draining`;
+`shared/maintenance.py::record_drained` refuses a drained receipt once the
+agent has a failure. From then on a wake of a drained or parked member claims
+nothing (its inbound messages stay pending for the resume), and an agent
+outside the cohort (`commands` and `parked`, every non-terminated agent of
+the machine) has no continuation in the hold at all. The adoption's `hold`
+step classifies the receipts and settles:
+
+- **foreign** ones (outside the cohort): always;
+- **drained** and **parked** members' ones: only when the home's legacy code
+  carries those rules, which hold from `cc5c5e2098` (#1872) on. The home's
+  `installed_sha` must name a descendant of it (`git merge-base
+  --is-ancestor` in the owning checkout; the inventory reports the check as
+  `pause_owner.legacy_rules`). Without that proof (no readable
+  `installed_sha`, an unrelated commit, no repository) only foreign ones
+  settle, and the refusal names the rest with the reason;
+- a member neither drained nor reaped (`other`) contradicts a certified drain
+  and refuses.
+
+It records them in its journal as one `hold-disregard-receipts` effect: the
+hold identity, `cohort`, `parked`, `drained`, the receipts by class, and the
+evidence (for drained and parked ones the legacy commit, the rules commit and
+both rules with their file and function). Then it moves exactly those
+receipts into the hold's `repaired` with a `repair_record` naming the
+adoption, refusing if they changed since the plan or a repair record already
+stands. Copy the effect into the cutover record. The held first start and
+`--resume` then see no unsettled receipt.
+
+A hold with receipts that is not `stopped` has no adoption exit. Handle it
+with the old code, before the host's code switch:
 
 - The drain failed (phase `preparing`, `draining` or `drained`; the old
   `ava stop` printed "continuations failed; hold retained"). Fix the named
@@ -342,14 +407,18 @@ before the host's code switch; read the receipts with the old
   ([database records](cutover-db-records.md)) only after that unit's last
   drain completed, since the rows must be final; and record the reopening
   and the new holder in the cutover record.
-- **Known gap:** the hold reached `stopped` with a receipt latched after its
-  drain (a turn failing while services stopped). Neither code base has a
-  sanctioned exit: `repair` and `resume --cancel` refuse a started stop, and
-  start and resume refuse unsettled receipts. Never edit the journal by hand.
-  Until an exit exists, record the hold and its receipts, then exclude that
+- **Known gap:** a hold past `drained` but not `stopped`, with a receipt: an
+  old-code start ran after the stop and refused (phase `starting`, FC-10's LX
+  hold; the W2 window rule forbids that start), or the stop never finished
+  (phase `stopping`). The old code has no sanctioned exit: `repair` and
+  `resume --cancel` refuse a started stop, and start and resume refuse
+  unsettled receipts; the adoption keeps only a `stopped` hold. Never edit
+  the journal by hand. Record the hold and its receipts, then exclude that
   runner from the window (it stays on the old code, stopped, and
   `--exclude-unit` at W6 keeps it fenced), or treat it as a no-go on the
-  gateway (R1).
+  gateway (R1). The new code latches none of these receipts once its drain is
+  certified ([receipts need a live
+  continuation](../shared/maintenance/cohort-receipts.ava.okf.md)).
 
 ## Operator follow-up
 

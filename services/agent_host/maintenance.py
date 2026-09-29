@@ -10,6 +10,7 @@ from psycopg_pool import AsyncConnectionPool, PoolTimeout
 
 from services.agent_host.dispatcher import PendingInboundWake
 from shared import maintenance
+from shared.log import logger
 from shared.resource_admission import DRAINED_RESOURCES
 
 FailureFences = dict[int, tuple[str | None, datetime | None]]
@@ -47,6 +48,25 @@ async def record_failure(agent_id: int, exc: BaseException, fences: FailureFence
         fences.pop(agent_id, None)
         return
     category = type(exc).__name__
+    hold = current.maintenance
+    assert hold is not None  # noqa: S101 — snapshot() returns only holds
+    if hold.outside_cohort(agent_id) or hold.settled_after_drain(agent_id):
+        # Every runner sees every wake (the dispatcher's subscription is
+        # cluster-wide), and a stop's shutdown cancels every task. A wake
+        # outside the captured cohort (FC-10 F20: a stopping host latched
+        # other machines' woken agents), or of a drained or parked member once
+        # the drain is certified, runs no continuation: it is no receipt.
+        # Both facts are read from the journal, without the database. An
+        # uncaptured cohort and an uncertified drain still record.
+        fences.pop(agent_id, None)
+        logger.debug(
+            "wake failure for agent {agent_id} not recorded: no continuation in "
+            "this hold (phase {phase}, {category})",
+            agent_id=agent_id,
+            phase=hold.phase,
+            category=category,
+        )
+        return
     if isinstance(exc, CRASH_EQUIVALENT_FAILURES):
         # The receipt channel broke, not the continuation: the left-behind
         # state is crash-equivalent and durable. Record it for audit WITHOUT

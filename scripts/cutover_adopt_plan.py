@@ -9,8 +9,9 @@ Steps run in this order; each one's effects are idempotent:
 
 1. `jobs` retires the legacy OS jobs (disarm first).
 2. `hold` adopts the maintenance hold a completed legacy `ava stop` left
-   (phase `stopped`) as the cutover hold; without one, it archives an inert
-   legacy pause-owner journal and creates the cutover hold in phase `stopped`.
+   (phase `stopped`) as the cutover hold, settling its failure receipts that
+   carry no lost work; without one, it archives an inert legacy pause-owner
+   journal and creates the cutover hold in phase `stopped`.
 3. `files` moves inert legacy files aside.
 4. `selection` translates `disabled_services` into `service-selection.json`.
 5. `env` records `AVA_SERVICE_PATH`, removes dead keys and, on a remote unit,
@@ -31,6 +32,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from typing import Any
 
+from cli.cutover_hold import SETTLED_CLASSES
 from scripts.cutover_inventory import (
     DISABLED_SERVICES,
     NO_MACHINE_NAME,
@@ -122,15 +124,46 @@ def _jobs(facts: Facts) -> tuple[dict[str, Any], ...]:
     )
 
 
+def _settle_receipts(owner: dict[str, Any]) -> tuple[dict[str, Any], ...]:
+    """Record, by class and with their evidence, and settle the kept hold's receipts.
+
+    Foreign receipts name agents outside the cohort the legacy stop captured
+    (every non-terminated agent of this machine). Drained and parked ones
+    postdate the certified drain under the legacy rules, whose commit and
+    ancestry `legacy_rules` records. None is a lost continuation; settling
+    moves exactly these into the hold's `repaired`.
+    """
+    if not owner["settle"]:
+        return ()
+    keys = ("holder", "acquired_at", "cohort", "parked", "drained")
+    receipts = {
+        name: dict(owner["receipts"][name])
+        for name in SETTLED_CLASSES
+        if owner["receipts"][name].keys() <= owner["settle"].keys()
+    }
+    return (
+        {
+            "op": "hold-disregard-receipts",
+            **{key: owner[key] for key in keys},
+            "receipts": receipts,
+            "evidence": {
+                "foreign": "outside the cohort the legacy preparation captured",
+                "post_drain": owner["legacy_rules"],
+            },
+        },
+    )
+
+
 def _hold(facts: Facts) -> tuple[dict[str, Any], ...]:
     owner = facts.pause_owner
     if _ours(facts):
-        return ()
+        return _settle_receipts(owner)
     if owner["adoptable"] and facts.journal is None:
         # The legacy stop's own hold becomes the cutover hold: its cohort is
         # exactly the agents that stop drained, which the final resume wakes.
         return (
             {"op": "hold-adopt", "holder": owner["holder"], "acquired_at": owner["acquired_at"]},
+            *_settle_receipts(owner),
         )
     effects: list[dict[str, Any]] = []
     if facts.pause_owner["status"] == "resumed":
@@ -252,6 +285,14 @@ def _mode_refusals(facts: Facts) -> list[str]:
     return []
 
 
+def _unsettleable(owner: dict[str, Any]) -> str:
+    if not owner["unsettleable"]:
+        return ""
+    rules = owner["legacy_rules"]
+    why = f"; legacy rules unproven: {rules['reason']}" if rules and not rules["hold"] else ""
+    return f", failure receipts the adoption cannot settle {owner['unsettleable']}{why}"
+
+
 def _state_refusals(facts: Facts) -> list[str]:
     reasons: list[str] = []
     if facts.intent_phase is not None and step_state(facts, "intent") is None:
@@ -265,7 +306,7 @@ def _state_refusals(facts: Facts) -> list[str]:
     if owner["status"] == "paused" and not _ours(facts) and not adoptable:
         reasons.append(
             f"{PAUSE_OWNER} holds a pause that is not a completed stop's maintenance hold "
-            f"({owner['holder']}, phase {owner['maintenance_phase']})"
+            f"({owner['holder']}, phase {owner['maintenance_phase']}{_unsettleable(owner)})"
         )
     selection = facts.home / SELECTION
     if (

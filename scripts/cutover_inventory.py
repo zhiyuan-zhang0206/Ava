@@ -65,7 +65,7 @@ import psutil
 from dotenv import dotenv_values
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, ValidationError, model_validator
 
-from cli.cutover_hold import ADOPTION_JOURNAL
+from cli.cutover_hold import ADOPTION_JOURNAL, legacy_hold_facts
 from scripts.cutover_legacy_jobs import Host, Jobs, discover
 from shared import cluster
 from shared.port_block import LEGACY_AVA_PORTS, PORT_OFFSETS
@@ -308,25 +308,6 @@ def _pidfiles(facts: Facts) -> None:
             facts.problems.append(f"{path.name} names live home process {pid}")
 
 
-def _pause_owner(facts: Facts) -> None:
-    from shared import pause_owner
-
-    snapshot = pause_owner.read_for_home(facts.home)
-    hold = snapshot.maintenance
-    facts.pause_owner = {
-        "status": snapshot.status,
-        "holder": snapshot.holder,
-        "acquired_at": snapshot.acquired_at.isoformat() if snapshot.acquired_at else None,
-        "maintenance_phase": hold.phase if hold else None,
-        "cohort": sorted(hold.commands) if hold else [],
-        # The completed legacy `ava stop` leaves exactly this hold; adoption keeps it.
-        "adoptable": snapshot.status == "paused"
-        and hold is not None
-        and hold.phase == "stopped"
-        and not hold.unsettled_failures(),
-    }
-
-
 def _selection(facts: Facts) -> None:
     path = facts.home / DISABLED_SERVICES
     if path.exists():
@@ -542,7 +523,7 @@ def gather(
         facts.problems.append(f"start intent: {exc}")
     _roles(facts)
     _registry(facts)
-    _pause_owner(facts)
+    facts.pause_owner = legacy_hold_facts(facts.home, facts.checkout)
     facts.legacy_files = sorted(
         set(_existing(home, LEGACY_FILES)) | set(_relative_matches(home, LEGACY_GLOBS))
     )

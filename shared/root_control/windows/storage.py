@@ -2,7 +2,9 @@
 
 The original non-inheritable file handle is the singleton. Custody is flushed
 before process creation; completed custody moves out atomically before deletion.
-Failed native operations propagate and never authorize a new generation.
+Failed native operations propagate and never authorize a new generation; only a
+momentary sharing conflict with another process's open handle is re-attempted,
+within a short bound.
 """
 
 from __future__ import annotations
@@ -11,12 +13,18 @@ import ctypes
 import os
 import sys
 import tempfile
+import time
 import uuid
 from ctypes import wintypes
 from pathlib import Path
 
 from shared.root_control.windows.native import DWORD, private_security
 from shared.winjob import _get_last_error, _kernel32, last_error
+
+# ERROR_ACCESS_DENIED / ERROR_SHARING_VIOLATION while another process (root,
+# terminal owner, backend caller) momentarily holds the same record open.
+_SHARING_CONFLICTS = frozenset({5, 32})
+_SHARING_WAIT_S = 2.0
 
 
 def acquire_lock(path: Path) -> int:
@@ -52,10 +60,40 @@ def acquire_lock(path: Path) -> int:
 
 
 def _move(source: Path, target: Path, *, replace: bool) -> None:
+    """Rename write-through; ride out another process's momentary open handle.
+
+    A reader holding the target open without delete sharing makes the rename
+    fail with ERROR_ACCESS_DENIED or ERROR_SHARING_VIOLATION for as long as that
+    handle lives. Such a conflict is re-attempted within ``_SHARING_WAIT_S``;
+    every other failure, or a conflict that outlasts the bound, propagates.
+    """
     kernel = _kernel32()
     kernel.MoveFileExW.argtypes = [wintypes.LPCWSTR, wintypes.LPCWSTR, DWORD]
-    if not kernel.MoveFileExW(str(source), str(target), 8 | int(replace)):
-        raise last_error("publish custody with MoveFileExW")
+    deadline = time.monotonic() + _SHARING_WAIT_S
+    while not kernel.MoveFileExW(str(source), str(target), 8 | int(replace)):
+        code = _get_last_error()
+        if code not in _SHARING_CONFLICTS or time.monotonic() >= deadline:
+            raise last_error("publish custody with MoveFileExW", code)
+        time.sleep(0.01)
+
+
+def read_published(path: Path) -> bytes:
+    """Read a file that ``publish`` may be replacing at this very moment.
+
+    Opening a name whose previous file is being superseded fails with a sharing
+    or access denial instead of returning either version. Retry that within
+    ``_SHARING_WAIT_S``; absence, a link, or a lasting denial propagates.
+    """
+    deadline = time.monotonic() + _SHARING_WAIT_S
+    while True:
+        try:
+            if path.is_symlink() or path.is_junction():
+                raise RuntimeError(f"custody must not be a link: {path}")
+            return path.read_bytes()
+        except PermissionError:
+            if time.monotonic() >= deadline:
+                raise
+        time.sleep(0.01)
 
 
 def publish(path: Path, text: str, *, exclusive: bool = False) -> None:

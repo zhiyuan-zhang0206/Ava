@@ -76,11 +76,11 @@ def endpoint(record: TerminalRecord) -> Path:
 
 
 def read(name: str) -> TerminalRecord | None:
-    path = record_path(name)
-    if path.is_symlink() or path.is_junction():
-        raise RuntimeError("terminal custody must not be a link")
+    """Root, owner and backend callers read while the owner may be replacing it."""
+    from shared.root_control.windows.storage import read_published
+
     try:
-        record = TerminalRecord.model_validate_json(path.read_bytes())
+        record = TerminalRecord.model_validate_json(read_published(record_path(name)))
     except FileNotFoundError:
         return None
     if record.name != name:

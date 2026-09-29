@@ -61,7 +61,10 @@ an immutable running release or seal ignored dependency directories.
 - Windows: `caller -> ava-root -> application Jobs`. A current-user-only local
   named pipe carries control, an exclusive native file handle owns the singleton,
   and custody publication uses flushed bytes plus write-through rename. Every
-  application is created atomically in a retained, non-breakaway Job. Normal
+  application is created atomically in a retained, non-breakaway Job. A Job
+  membership snapshot counts only when the kernel's assigned count equals its
+  listed PIDs; the brief disagreement while a member is born or torn down is
+  re-queried within a bound, then refused. Normal
   stop sends Ctrl-Break only to consoles whose complete membership matches the
   captured Job births. A native no-console observation on one member permits
   checking the remaining consoles; it never proves delivery or closure. Stop

@@ -34,6 +34,7 @@ _JOB_OBJECT_EXTENDED_LIMIT_INFORMATION = 9
 _JOB_OBJECT_BASIC_ACCOUNTING_INFORMATION = 1
 _JOB_OBJECT_LIMIT_BREAKAWAY_OK = 0x00000800
 _JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x00002000
+_MEMBERSHIP_SETTLE_S = 1.0
 
 _DWORD = ctypes.c_uint32
 _BOOL = ctypes.c_int32
@@ -208,21 +209,35 @@ class WindowsJob:
         return int(accounting.ActiveProcesses)
 
     def member_pids(self) -> set[int]:
-        """Bounded native membership snapshot, including orphaned descendants."""
+        """Bounded native membership snapshot, including orphaned descendants.
+
+        Only a snapshot whose assigned count equals its listed PIDs is accepted.
+        While a member is being created or torn down, the kernel can count one
+        more assigned process than it lists; that disagreement is re-queried
+        within ``_MEMBERSHIP_SETTLE_S`` and then refused, never completed.
+        """
         capacity = 4096
-        buffer = ctypes.create_string_buffer(8 + capacity * ctypes.sizeof(_SIZE_T))
-        if not _kernel32().QueryInformationJobObject(
-            wintypes.HANDLE(self.handle),
-            3,
-            buffer,
-            len(buffer),
-            None,
-        ):
-            raise last_error("QueryInformationJobObject members")
-        assigned, returned = (_DWORD * 2).from_buffer(buffer)
-        if assigned > capacity or returned > capacity or assigned != returned:
-            raise RuntimeError("Job membership exceeded its bound or changed during inspection")
-        return set((_SIZE_T * returned).from_buffer(buffer, 8))
+        deadline = time.monotonic() + _MEMBERSHIP_SETTLE_S
+        while True:
+            buffer = ctypes.create_string_buffer(8 + capacity * ctypes.sizeof(_SIZE_T))
+            if not _kernel32().QueryInformationJobObject(
+                wintypes.HANDLE(self.handle),
+                3,
+                buffer,
+                len(buffer),
+                None,
+            ):
+                raise last_error("QueryInformationJobObject members")
+            assigned, returned = (_DWORD * 2).from_buffer(buffer)
+            if assigned > capacity or returned > capacity:
+                raise RuntimeError("Job membership exceeded its bound")
+            if assigned == returned:
+                return set((_SIZE_T * returned).from_buffer(buffer, 8))
+            if time.monotonic() >= deadline:
+                raise RuntimeError(
+                    f"Job membership did not settle: {assigned} assigned, {returned} listed"
+                )
+            time.sleep(0.005)
 
     def terminate(self) -> None:
         """Explicitly force the original Job; the caller must still observe closure."""
