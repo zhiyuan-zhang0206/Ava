@@ -162,6 +162,18 @@ Consequently the completed-work A/B/A proof cannot certify in-flight execution,
 managed resource admission, or fleet writer closure. Do not enable protocol one
 merely because local root evidence is available.
 
+No activation path exists: every admission is protocol zero. The retired
+updater's activation chain (the pending journal's migration receipt, selector
+change, normal-service readbacks and the `current` commit recording the verified
+activation) bound per-service session readbacks and a version-2 selector that
+the release path does not produce; it is not a dormant implementation to
+reconnect. Rebuild protocol one on the release/fleet path, over its write
+generations. The publication storage helpers left without a production caller
+(`begin_pending_publication`, `adopt_pending_collection`,
+`require_current_publication`, the barrier's `record_collection`, and the
+synchronous `RuntimeAdmission.decide`) retire with the old publication journal
+below.
+
 The replacement must preserve one transaction for runtime ownership and resource
 admission. A fresh metadata INSERT may stamp `ResourceBirth`; an existing agent
 requires explicit predecessor and allocation closure. Maintenance drain must

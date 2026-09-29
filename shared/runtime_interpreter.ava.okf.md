@@ -49,8 +49,7 @@ ordinary startup readiness succeeds. Every serving read compares the receipt
 with the live root. POSIX root status authenticates the response against the
 kernel Unix-socket peer and exact native birth (Linux start ticks, otherwise
 exact stable birth). Missing Linux ticks refuse even when both timestamps match.
-A JSON PID, stale marker, missing identity or unreadable peer cannot grant serving. `require_born_runtime()` also checks this caller's
-loaded code against that local birth. It does not consult a moving selector.
+A JSON PID, stale marker, missing identity or unreadable peer cannot grant serving.
 Full loaded-image verification belongs at process admission, not heartbeat or
 inbox-claim frequency; ordinary serving/recovery checks only read the marker
 and authenticate current native root status.

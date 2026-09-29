@@ -25,7 +25,7 @@ from shared.native_process.ownership import OwnedProcess
 from shared.paths import ava_home, run_dir
 from shared.platform import file_lock
 from shared.process_evidence import Digest, EvidenceModel, ExpectedProcess
-from shared.runtime_interpreter import LoadedRuntimeIdentity, capture_loaded_runtime
+from shared.runtime_interpreter import LoadedRuntimeIdentity
 from shared.verified_file import regular_bytes
 
 _log = logging.getLogger("shared.start_serving")
@@ -130,17 +130,6 @@ def born_identity() -> ServingState | None:
     except (OSError, psutil.Error, ValueError, RuntimeError) as exc:
         _log.warning("[start-serving] cannot observe serving root: %s", exc)
         return None
-
-
-def require_born_runtime() -> ServingState:
-    """Bind this caller's code to a live start generation, with no DB grant."""
-    state = born_identity()
-    if state is None or state.birth is None:
-        raise RuntimeError("loaded runtime has no matching live serving root")
-    birth = state.birth
-    if capture_loaded_runtime(Path(birth.home)) != birth.runtime or born_identity() != state:
-        raise RuntimeError("loaded runtime has no matching live serving root")
-    return state
 
 
 def _fsync_parent(path: Path) -> None:

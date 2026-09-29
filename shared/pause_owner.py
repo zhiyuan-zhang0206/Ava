@@ -1,10 +1,12 @@
 """Host-local capability journal for generation-scoped pause/resume.
 
-The gateway's deploy lease proves who may pause a runner, but a compensating
-resume must still work while the gateway database is down. The stop op copies
-the exact ``(holder, acquired_at)`` capability into this atomic local journal
-before pausing. Resume matches only that journal; a delayed generation A resume
-can therefore never unpause generation B.
+A maintenance hold (`begin_maintenance`) records its exact ``(holder,
+acquired_at)`` capability in this atomic local journal, so a compensating
+resume still works while the gateway database is down. Every transition
+matches only that journal; a delayed generation A resume can therefore never
+unpause generation B. A ``paused`` or ``resumed`` record without a maintenance
+hold is what the retired updater's stop op left: readers keep honoring it and
+recovery removes it (`clear` / `force_clear`).
 """
 
 from __future__ import annotations
@@ -145,51 +147,6 @@ def _write_atomic(path: Path, payload: dict[str, object]) -> None:
         _fsync_parent(path)
     except OSError:
         _log.warning("[pause-owner] directory fsync failed after commit", exc_info=True)
-
-
-def mark_paused(holder: str, acquired_at: dt.datetime) -> PauseOwnerSnapshot:
-    """Publish the DB-validated capability immediately before local pause."""
-    if not holder or acquired_at.tzinfo is None:
-        raise ValueError("holder and timezone-aware acquired_at are required")
-    path = state_path()
-    with file_lock(lock_path(), timeout_s=_LOCK_TIMEOUT_S):
-        current = _read_unlocked(path)
-        if current.status == "paused" and current.matches(holder, acquired_at):
-            return current
-        _refuse_maintenance(current)
-        _write_atomic(
-            path,
-            {
-                "state": "paused",
-                "holder": holder,
-                "acquired_at": acquired_at.astimezone(dt.UTC).isoformat(),
-            },
-        )
-        return _read_unlocked(path)
-
-
-def mark_resumed(holder: str, acquired_at: dt.datetime) -> bool:
-    """CAS-record completion of exactly the generation that was unpaused."""
-    path = state_path()
-    with file_lock(lock_path(), timeout_s=_LOCK_TIMEOUT_S):
-        current = _read_unlocked(path)
-        if not current.matches(holder, acquired_at):
-            return False
-        if current.status == "resumed":
-            return True
-        if current.maintenance is not None:
-            return False
-        if current.status != "paused":
-            return False
-        _write_atomic(
-            path,
-            {
-                "state": "resumed",
-                "holder": holder,
-                "acquired_at": acquired_at.astimezone(dt.UTC).isoformat(),
-            },
-        )
-        return True
 
 
 def clear(holder: str, acquired_at: dt.datetime) -> bool:

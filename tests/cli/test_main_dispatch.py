@@ -131,13 +131,14 @@ from cli.release_transition.request import ReleaseRef
 from shared import cluster
 from shared.maintenance_state import MaintenanceHold
 from shared.start_inputs import configuration_digest
+from tests.lifecycle._start_identity import prepare_start_identity
 
 home = Path(os.environ["AVA_HOME"])
 checkout = home.parent / "checkout"
 checkout.mkdir()
 start_intent._checkout = lambda: checkout
 cluster.port_free = lambda _port: True
-start_intent.prepare_start(build_parser().parse_args(["start", "--worktree"]))
+prepare_start_identity(build_parser().parse_args(["start", "--worktree"]))
 before = (home / ".env").read_bytes()
 reference = ReleaseRef(artifact_digest="a"*64, manifest_digest="b"*64,
     schema_digest="c"*64, source_commit="d"*40)

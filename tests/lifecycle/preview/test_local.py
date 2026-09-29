@@ -178,7 +178,7 @@ def test_timeout_reaps_foreground_descendant(tmp_path: Path) -> None:
 
 @pytest.fixture
 def start_process_environment() -> Iterator[None]:
-    """`prepare_start` pops the derived and identity keys from this process's
+    """`prepare_start_identity` pops the derived and identity keys from this process's
     environment so the start pipeline boots from the home's `.env`; that
     process-local effect ends with the test instead of leaking into later ones."""
     with patch.dict(os.environ):
@@ -194,6 +194,7 @@ def test_profile_survives_bare_start_without_controller_environment(
     from cli import start_intent
     from cli.parsers import build_parser
     from shared import cluster
+    from tests.lifecycle._start_identity import prepare_start_identity
 
     preview = local.create(repo, "HEAD", tmp_path / "runs")
     git(repo, "worktree", "add", "--detach", str(preview.source), preview.data["commit"])
@@ -221,7 +222,7 @@ def test_profile_survives_bare_start_without_controller_environment(
     def initialize(name: str, args: list[str]) -> None:
         assert name == "start"
         assert args[args.index("--config-file") + 1] == str(preview.run / "profile.env")
-        start_intent.prepare_start(build_parser().parse_args(args))
+        prepare_start_identity(build_parser().parse_args(args))
         raise PreparedError
 
     monkeypatch.setattr(preview, "cli", initialize)
@@ -239,7 +240,7 @@ def test_profile_survives_bare_start_without_controller_environment(
     assert persisted["AVA_APP_PORT"] == str(cluster.record_app_port(record))
     assert "AVA_GATEWAY_CORS_ALLOWED_ORIGINS" not in persisted
     monkeypatch.setenv("PATH", str(tmp_path / "manager-tools"))
-    start_intent.prepare_start(build_parser().parse_args(["start"]))
+    prepare_start_identity(build_parser().parse_args(["start"]))
     assert env_path.read_bytes() == before
 
 

@@ -14,7 +14,6 @@ from uuid import UUID
 from pydantic import AwareDatetime, Field, field_validator, model_validator
 
 from shared.managed_writer_barrier import RolloutIdentity
-from shared.managed_writer_closure import LauncherTerminal
 from shared.managed_writer_observation import ExpectedUnitWriters, ObservationChallenge
 from shared.managed_writer_publication import PublishedUnit, UnitActivationReadback
 from shared.process_evidence import Digest, EvidenceModel
@@ -150,6 +149,28 @@ class LaunchdRecovery(EvidenceModel):
     mode: Literal[384, 420]  # Owner-write-only 0600 or 0644 definitions.
 
 
+class LauncherTerminal(EvidenceModel):
+    """One prepared launcher's terminal record in the retired updater's hop ledger.
+
+    ``label`` is the prepared launcher's name (``ExpectedLauncher.name``: the
+    launchd label, or the crontab definition digest). ``removed`` records that
+    the launcher definition was removed; ``rebound`` records that it was
+    rewritten to exactly ``new_digest``.
+    """
+
+    label: str = Field(min_length=1, max_length=256, pattern=r"^[^\x00-\x1f]+$")
+    kind: Literal["removed", "rebound"]
+    new_digest: Digest | None = None
+
+    @model_validator(mode="after")
+    def coherent_digest(self) -> Self:
+        if self.kind == "rebound" and self.new_digest is None:
+            raise ValueError("rebound terminal requires its new definition digest")
+        if self.kind == "removed" and self.new_digest is not None:
+            raise ValueError("removed terminal carries no new digest")
+        return self
+
+
 class BootstrapRecoveryJournal(EvidenceModel):
     request: str = Field(min_length=1, max_length=4096)
     request_digest: Digest
@@ -164,7 +185,7 @@ class BootstrapRecoveryJournal(EvidenceModel):
     # The hop ledger's launcher facts: one terminal per prepared launcher,
     # written once at the proven native quiesce and carried
     # unchanged afterwards; empty before that write and in journals written
-    # before this field existed. The collector consumes these directly.
+    # before this field existed.
     launcher_terminals: tuple[LauncherTerminal, ...] = ()
     normal_release: NormalReleaseRecoveryJournal | None = None
 

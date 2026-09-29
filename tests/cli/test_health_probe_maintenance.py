@@ -98,7 +98,14 @@ def test_unexpected_low_population_stays_unhealthy_without_release_mutation(
     if intent == "other-service":
         _select_excluded({"frontend"})
     elif intent == "legacy-pause":
-        pause_owner.mark_paused(holder, acquired_at)
+        # The plain record (no maintenance hold) the retired updater's stop op wrote.
+        marker = pause_owner.state_path()
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.write_text(
+            json.dumps(
+                {"state": "paused", "holder": holder, "acquired_at": acquired_at.isoformat()}
+            )
+        )
     elif intent == "resumed":
         current = pause_owner.begin_maintenance(holder, acquired_at).snapshot
         assert current.maintenance is not None

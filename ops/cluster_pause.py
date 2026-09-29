@@ -134,8 +134,7 @@ def _settle_stranded_reaps() -> None:
 
 def _hold_refusal(current: PauseOwnerSnapshot) -> str | None:
     """The refusal `unpause_local_cluster` raises for a held unit, or None when its
-    resume may proceed. One source for both the pre-check a caller runs before
-    attempting and the text the attempt itself raises, so they cannot disagree."""
+    resume may proceed."""
     assert current.holder is not None and current.acquired_at is not None  # noqa: S101
     if current.maintenance is not None and current.maintenance.unsettled_failures():
         return (
@@ -152,27 +151,6 @@ def _hold_refusal(current: PauseOwnerSnapshot) -> str | None:
     ):
         return "services have stopped; ava start must pass readiness before resume"
     return None
-
-
-def local_resume_refusal() -> str | None:
-    """Why this unit's local unpause cannot succeed right now, or None when it may.
-
-    Read-only and local (pause-owner journal + start-serving marker), so it answers
-    with every service down — exactly the state a caller most needs it in. A refusal
-    is durable state no compensation attempt can clear; asking first turns the
-    compensating unpause's two doomed attempts (issue #2162: `rc=1`, then an
-    unreadable `RuntimeError`) into the one recovery command that fits.
-    """
-    from shared import maintenance
-
-    try:
-        current = maintenance.snapshot()
-    except RuntimeError as exc:
-        # An unreadable owner refuses new work; that refusal is the answer.
-        return str(exc)
-    if current is None:
-        return None
-    return _hold_refusal(current)
 
 
 def _unpause_local_cluster() -> None:

@@ -422,15 +422,6 @@ def _prepare_start_locked(
     os.environ["AVA_CLUSTER_REGISTRY"] = str(inputs.registry)
 
 
-def prepare_start(args: argparse.Namespace) -> Path:
-    home = _home(worktree=args.worktree)
-    StartRuntime.development(_checkout()).validate(home)
-    ensure_private_dir(home)
-    with file_lock(home / "start-intent.lock", timeout_s=30):
-        _prepare_start_locked(args, home)
-    return home
-
-
 def run_start(args: argparse.Namespace, *, runtime: StartRuntime | None = None) -> int:
     try:
         if runtime is None:

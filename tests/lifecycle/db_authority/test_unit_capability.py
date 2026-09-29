@@ -42,6 +42,7 @@ from shared.config import settings
 from shared.config.service_read import served_db_endpoint
 from shared.db_connections import NoDatabaseAuthorityError, _guard_db_url
 from shared.deploy_timing import UNIT_BUNDLE_MAX_TTL_S
+from tests.lifecycle._start_identity import prepare_start_identity
 from tests.lifecycle.db_authority import test_single_box as _single_box
 from tests.lifecycle.db_authority.test_single_box import Born, _refused
 
@@ -450,7 +451,7 @@ def test_issued_bundle_starts_a_runner_that_connects_as_the_generation_login(
         os.environ["AVA_HOME"] = str(runner)
         os.environ["AVA_CLUSTER_REGISTRY"] = str(tmp_path / "runner-registry.json")
         os.environ[unit.CAPABILITY_KEY_ENV] = match.group(1)
-        start_intent.prepare_start(_runner_args(bundle))
+        prepare_start_identity(_runner_args(bundle))
         assert unit.CAPABILITY_KEY_ENV not in os.environ
     assert not bundle.exists()
     env = dotenv_values(runner / ".env")

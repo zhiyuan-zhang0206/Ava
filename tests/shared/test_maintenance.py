@@ -1,3 +1,4 @@
+import json
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -19,12 +20,9 @@ def isolate(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
 def test_maintenance_survives_old_timestamp_and_every_ordinary_resume() -> None:
     pause_owner.begin_maintenance("migration", WHEN - timedelta(days=10))
     assert maintenance.held()
-    assert not pause_owner.mark_resumed("migration", WHEN - timedelta(days=10))
     assert not pause_owner.clear("migration", WHEN - timedelta(days=10))
     with pytest.raises(RuntimeError, match="explicit resume"):
         pause_owner.force_clear()
-    with pytest.raises(RuntimeError, match="explicit resume"):
-        pause_owner.mark_paused("new-rollout", WHEN)
     assert maintenance.held()
 
 
@@ -148,16 +146,21 @@ def test_business_gate_tracks_the_journal_without_posture_or_time() -> None:
         pause_owner.begin_maintenance("migration", WHEN)
 
 
+def _retired_updater_record(state: str, holder: str) -> None:
+    """The plain record (no maintenance hold) the retired updater's stop op wrote."""
+    record = {"state": state, "holder": holder, "acquired_at": WHEN.isoformat()}
+    pause_owner.state_path().write_text(json.dumps(record))
+
+
 def test_business_gate_refuses_incomplete_and_invalid_pause_records() -> None:
-    pause_owner.mark_paused("incomplete", WHEN)
+    _retired_updater_record("paused", "incomplete")
     assert maintenance.business_paused()
     pause_owner.state_path().write_text("invalid")
     assert maintenance.business_paused()
 
 
 def test_resumed_tombstone_cannot_reopen_without_a_new_generation() -> None:
-    pause_owner.mark_paused("completed", WHEN)
-    assert pause_owner.mark_resumed("completed", WHEN)
+    _retired_updater_record("resumed", "completed")
     with pytest.raises(RuntimeError, match="already resumed"):
         pause_owner.begin_maintenance("completed", WHEN)
     assert pause_owner.read().status == "resumed"

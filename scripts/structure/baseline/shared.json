@@ -16,8 +16,6 @@
     "shared/maintenance_cold.py::require_no_consumers": 18,
     "shared/maintenance_cold.py::require_persisted_end": 17,
     "shared/maintenance_state.py::MaintenanceHold.decode": 18,
-    "shared/managed_writer_activation.py::_validate_unit_readback": 15,
-    "shared/managed_writer_closure.py::assemble_unit_closure": 20,
     "shared/managed_writer_publication.py::WriterPublication.unique_units": 21,
     "shared/memory_repo.py::init": 15,
     "shared/migrations.py::apply_pending_migrations": 15,
@@ -42,7 +40,7 @@
     "shared/winproc.py::graceful_signal": 16
   },
   "directories": {
-    "shared": 228
+    "shared": 226
   },
   "nesting": {
     "shared/daemon_http.py::start_daemon_http.<locals>.handle": 6

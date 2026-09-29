@@ -18,22 +18,6 @@ def _when(second: int = 0) -> dt.datetime:
     return dt.datetime(2026, 8, 25, 1, 2, second, tzinfo=dt.UTC)
 
 
-def test_pause_resume_is_an_exact_idempotent_capability() -> None:
-    pause_owner.mark_paused("gateway:pid1", _when())
-    assert not pause_owner.mark_resumed("gateway:pid1", _when(1))
-    assert pause_owner.mark_resumed("gateway:pid1", _when())
-    assert pause_owner.mark_resumed("gateway:pid1", _when())
-    assert pause_owner.read().status == "resumed"
-
-
-def test_new_stop_replaces_resumed_owner_and_late_resume_cannot_touch_it() -> None:
-    pause_owner.mark_paused("A", _when())
-    assert pause_owner.mark_resumed("A", _when())
-    pause_owner.mark_paused("B", _when(1))
-    assert not pause_owner.mark_resumed("A", _when())
-    assert pause_owner.read().matches("B", _when(1))
-
-
 def test_naive_or_malformed_identity_is_invalid() -> None:
     pause_owner.state_path().write_text(
         '{"state":"paused","holder":"A","acquired_at":"2026-08-25T01:02:00"}'

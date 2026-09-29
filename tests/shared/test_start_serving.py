@@ -7,7 +7,6 @@ from threading import Event, Thread
 
 import pytest
 
-from shared.runtime_interpreter import LoadedRuntimeIdentity
 from shared.start_serving import RootBirth
 
 
@@ -127,8 +126,6 @@ def test_old_birth_cannot_grant_after_observed_generation_changes(
     assert not start_serving.is_serving()
     with start_serving.recovery_permitted() as permitted:
         assert not permitted
-    with pytest.raises(RuntimeError, match="no matching live"):
-        start_serving.require_born_runtime()
     assert state_path.read_bytes() == original
 
 
@@ -142,29 +139,6 @@ def test_marker_rejects_a_different_loaded_runtime(
     with pytest.raises(RuntimeError, match="admitted loaded runtime"):
         start_serving.mark_serving(generation, runtime=other)
     assert not start_serving.is_serving()
-
-
-def test_born_runtime_revalidates_this_callers_loaded_code(
-    serving_root: RootBirth, state_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    from shared import start_serving
-
-    generation = start_serving.begin_start()
-    assert start_serving.mark_serving(generation, runtime=serving_root.runtime)
-
-    def original(_home: Path) -> LoadedRuntimeIdentity:
-        return serving_root.runtime
-
-    monkeypatch.setattr(start_serving, "capture_loaded_runtime", original)
-    assert start_serving.require_born_runtime().birth == serving_root
-    changed = serving_root.runtime.model_copy(update={"source_digest": "d" * 64})
-
-    def different(_home: Path) -> LoadedRuntimeIdentity:
-        return changed
-
-    monkeypatch.setattr(start_serving, "capture_loaded_runtime", different)
-    with pytest.raises(RuntimeError, match="no matching live"):
-        start_serving.require_born_runtime()
 
 
 @pytest.mark.parametrize(

@@ -19,7 +19,7 @@
     "tests/shared/test_winproc_launch.py::test_new_session_spawns_a_control_steward_bound_to_the_record_identity": 21
   },
   "directories": {
-    "tests/shared": 266
+    "tests/shared": 265
   },
   "files": {
     "tests/shared/pty/test_pty_sessions_cli.py": 1436,
@@ -37,7 +37,6 @@
   "nesting": {
     "tests/shared/test_gateway_consumer_guard.py::_kind_closure": 6,
     "tests/shared/test_managed_writer_publication.py::test_pending_waits_for_admission_transaction": 6,
-    "tests/shared/test_managed_writer_publication.py::test_start_waiter_rechecks_lease_after_unchanged_row_lock": 6,
     "tests/shared/test_publication_admission.py::test_sync_async_decisions_and_lock_interoperate": 6,
     "tests/shared/test_telemetry_otlp_exit_delivery.py::_sent_pairs": 6
   }

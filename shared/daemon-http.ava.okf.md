@@ -69,17 +69,14 @@ overrides and loaded-image identity remain unknown: Apple documents
 `launchctl print` output as diagnostic, not an API, and `list -x` is unsupported.
 Linux `enabled` means an exact non-commented cron registration exists, not that
 the cron daemon is live; cron facts never carry a loaded verdict (no separate
-scheduler state exists), and the closure fence treats the double-read table
-fact as complete for removals while refusing crontab rebound claims. Every
-observation names its scheduler family (`kind`, filled by the producing
-observer itself); the fence branches on it and refuses cross-family shapes.
+scheduler state exists). Every observation names its scheduler family (`kind`,
+filled by the producing observer itself).
 Missing/unsupported/unreadable/drifting evidence remains unknown; Windows is
 unsupported. Empty input never proves fleet closure.
 
 CI separately exercises real read-only `crontab -l` and launchctl queries on native
 runners. Parser fixtures do not prove effective scheduler state. The observer
 still emits `closure=unknown`, and that is permanent semantics rather than a
-placeholder: a positive `old_writers_absent_relaunchers_fenced` literal is
-derived where these observed facts meet the hop ledger (`shared.managed_writer_closure`,
-an inert tested seat), never by the observer itself; updater/adoption activation is
-not implemented.
+placeholder: neither the observer nor any other code derives a positive
+`old_writers_absent_relaunchers_fenced` literal from these facts.
+Updater/adoption activation is not implemented.

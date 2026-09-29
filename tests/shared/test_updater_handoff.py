@@ -363,6 +363,13 @@ def test_legacy_bootstrap_journal_without_terminals_still_reads() -> None:
     assert not handoff.bootstrap_state_path().exists()
 
 
+def test_launcher_terminal_digest_coherence() -> None:
+    with pytest.raises(ValueError, match="new definition digest"):
+        recovery.LauncherTerminal(label="com.ava.test", kind="rebound")
+    with pytest.raises(ValueError, match="no new digest"):
+        recovery.LauncherTerminal(label="com.ava.test", kind="removed", new_digest="c" * 64)
+
+
 def test_generic_recovery_requires_the_exact_inspected_snapshot() -> None:
     _write_handoff("old")
     inspected = handoff.read()

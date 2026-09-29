@@ -21,6 +21,7 @@ from cli import start_identity as identity
 from cli import start_intent
 from shared import cluster
 from shared.platform import file_lock
+from tests.lifecycle._start_identity import prepare_start_identity
 
 
 @pytest.fixture(autouse=True)
@@ -331,7 +332,7 @@ def test_worktree_start_uses_explicit_home_not_ambient_projection(
     monkeypatch.setenv("AVA_CLUSTER_REGISTRY", str(inputs.registry))
     monkeypatch.setenv("AVA_DB_URL", "postgresql://foreign@foreign.invalid/production")
     monkeypatch.setenv("AVA_CLUSTER_SECRET", "foreign-secret")
-    start_intent.prepare_start(_args("--worktree"))
+    prepare_start_identity(_args("--worktree"))
     env = dotenv_values(inputs.home / ".env")
     db_url = env["AVA_DB_URL"]
     assert db_url is not None and "foreign" not in db_url
@@ -362,13 +363,13 @@ def test_interrupted_start_keeps_admitted_tool_path(
 
     monkeypatch.setattr(cluster, "save_record_locked", crash)
     with pytest.raises(OSError, match="power loss"):
-        start_intent.prepare_start(_args("--worktree"))
+        prepare_start_identity(_args("--worktree"))
     pending = identity.read_intent(inputs.home)
     assert pending is not None and pending["phase"] == "claiming"
     assert pending["env"]["AVA_SERVICE_PATH"] == tools
     monkeypatch.setattr(cluster, "save_record_locked", save)
     monkeypatch.setenv("PATH", str(inputs.checkout.parent / "different-tools"))
-    start_intent.prepare_start(_args("--worktree"))
+    prepare_start_identity(_args("--worktree"))
     assert dotenv_values(inputs.home / ".env")["AVA_SERVICE_PATH"] == tools
 
 
@@ -390,7 +391,7 @@ def test_lossy_tool_path_is_rejected_before_identity_publication(
     monkeypatch.delenv("AVA_SERVICE_PATH", raising=False)
     monkeypatch.setenv("PATH", str(inputs.checkout.parent / "tools #1"))
     with pytest.raises(ValueError, match="round-trip literally"):
-        start_intent.prepare_start(_args("--worktree"))
+        prepare_start_identity(_args("--worktree"))
     assert identity.read_intent(inputs.home) is None
     assert not inputs.registry.exists()
 
@@ -453,7 +454,7 @@ def test_runner_without_a_capability_refuses_before_persisting(
 
     args = _runner_start(inputs, monkeypatch)
     with pytest.raises(ValueError, match="holds no database capability"):
-        start_intent.prepare_start(args)
+        prepare_start_identity(args)
     assert not (inputs.home / ".env").exists()
     # An installed capability (a bundle the operator carried earlier) admits it.
     gateway = tmp_path / "gateway"
@@ -475,7 +476,7 @@ def test_runner_without_a_capability_refuses_before_persisting(
         probe=lambda _dsn: None,
     )
     _FETCH_BEARERS.clear()
-    start_intent.prepare_start(args)
+    prepare_start_identity(args)
     env = dotenv_values(inputs.home / ".env")
     assert env["AVA_MACHINE_HOST"] == "runner.invalid"
     assert "AVA_DB_URL" not in env and "AVA_REDIS_URL" not in env
@@ -494,7 +495,7 @@ def test_capability_bundle_needs_its_transport_key(
     monkeypatch.delenv("AVA_DB_CAPABILITY_KEY", raising=False)
     args = _runner_start(inputs, monkeypatch, "--db-capability", str(bundle))
     with pytest.raises(ValueError, match="AVA_DB_CAPABILITY_KEY"):
-        start_intent.prepare_start(args)
+        prepare_start_identity(args)
     assert bundle.exists()
     assert not (inputs.home / ".env").exists()
 
@@ -506,7 +507,7 @@ def test_gateway_start_refuses_a_capability_bundle(
     monkeypatch.setenv("AVA_HOME", str(inputs.home))
     monkeypatch.setenv("AVA_CLUSTER_REGISTRY", str(inputs.registry))
     with pytest.raises(ValueError, match="agent-runner units"):
-        start_intent.prepare_start(
+        prepare_start_identity(
             _args("--worktree", "--db-capability", str(tmp_path / "unit.bundle"))
         )
     assert identity.read_intent(inputs.home) is None
@@ -559,13 +560,13 @@ def test_config_retry_keeps_first_snapshot_and_rejects_changed_input(
     config = inputs.home.parent / "config.env"
     config.write_text("AVA_LLM_OVERRIDE=fixture:model\n")
     args = _args("--worktree", "--config-file", str(config))
-    start_intent.prepare_start(args)
+    prepare_start_identity(args)
     first = (inputs.home / ".env").read_bytes()
-    start_intent.prepare_start(args)
+    prepare_start_identity(args)
     assert (inputs.home / ".env").read_bytes() == first
     config.write_text("AVA_LLM_OVERRIDE=other:model\n")
     with pytest.raises(ValueError, match="differs"):
-        start_intent.prepare_start(args)
+        prepare_start_identity(args)
     assert (inputs.home / ".env").read_bytes() == first
 
 
@@ -602,7 +603,7 @@ def test_remote_start_preserves_provider_urls_and_runner_credential(
     inputs: identity.IdentityInput, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     args = _remote_config(inputs, monkeypatch)
-    start_intent.prepare_start(args)
+    prepare_start_identity(args)
     env = dotenv_values(inputs.home / ".env")
     assert env["AVA_DB_URL"] == "postgresql://owner:provider@db.invalid:6543/app"
     assert env["AVA_REDIS_URL"] == "rediss://acl:provider@redis.invalid:6381/0"
@@ -610,7 +611,7 @@ def test_remote_start_preserves_provider_urls_and_runner_credential(
     assert "AVA_DB_ADMIN_PASSWORD" not in env
     assert "AVA_REDIS_ADMIN_PASSWORD" not in env
     before = (inputs.home / ".env").read_bytes()
-    start_intent.prepare_start(args)
+    prepare_start_identity(args)
     assert (inputs.home / ".env").read_bytes() == before
 
 
@@ -620,7 +621,7 @@ def test_remote_input_refuses_local_or_mixed_ownership(
 ) -> None:
     args = _remote_config(inputs, monkeypatch, host=host)
     with pytest.raises(ValueError, match="foreign"):
-        start_intent.prepare_start(args)
+        prepare_start_identity(args)
     assert not inputs.registry.exists()
 
 
@@ -630,7 +631,7 @@ def test_remote_input_cannot_redirect_libpq_identity(
 ) -> None:
     args = _remote_config(inputs, monkeypatch, query=query)
     with pytest.raises(ValueError, match="redirect"):
-        start_intent.prepare_start(args)
+        prepare_start_identity(args)
     assert not inputs.registry.exists()
 
 

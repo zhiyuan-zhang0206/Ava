@@ -1,8 +1,9 @@
 """Current release publication and pending rollout share one evidence field.
 
-Only the existing rollout's verified producers may supply closure/readback facts.
-These storage contracts do not authenticate caller-created Python values, attest
-unregistered credential holders, or activate caller protocol support by themselves.
+Runtime admission reads it (`publication_admission`); no production producer
+writes it, so admission stays protocol zero. These storage contracts do not
+authenticate caller-created Python values, attest unregistered credential
+holders, or activate caller protocol support by themselves.
 """
 
 from __future__ import annotations
@@ -189,14 +190,13 @@ class PendingPublication(EvidenceModel):
     unit_readbacks: tuple[UnitActivationReadback, ...] = ()
     # The begin execution's durable registration (task #4129 I4, F1): V -- the
     # observation window `begin_valid_until` sealed into the plan -- and the
-    # sealed plan's digest, written by the seat that opens the journal
-    # (`open_pending_publication`). Both optional: a journal written before the
-    # registration existed parses with them unset, and a replacement opened by
-    # checked recovery carries none -- its premise is its fresh closure, not a
-    # sealed-plan execution. The plan digest is audit evidence (the collection
-    # reports it; nothing validates against it), and a same-operation retry
-    # never replaces either value: the registered window cannot slide under a
-    # later execution (design N3).
+    # sealed plan's digest, written when the journal is opened. Both optional:
+    # a journal written before the registration existed parses with them
+    # unset, and a replacement opened by checked recovery carries none -- its
+    # premise is its fresh closure, not a sealed-plan execution. The plan
+    # digest is audit evidence (the collection reports it; nothing validates
+    # against it), and a same-operation retry never replaces either value: the
+    # registered window cannot slide under a later execution (design N3).
     valid_until: AwareDatetime | None = None
     plan_digest: Digest | None = None
 

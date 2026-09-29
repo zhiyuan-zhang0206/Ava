@@ -124,9 +124,9 @@ def observe_launcher(
     """One launcher's read-only facts; unreadable states are a full unknown.
 
     A positively absent definition passes through as ``definition="absent"``
-    (the removed-relauncher fact the fence derivation needs), never collapsed
-    to unknown. Native command failure and unreadable/odd definitions are still
-    unknown: launchctl errors do not prove absence.
+    (the removed-relauncher fact), never collapsed to unknown. Native command
+    failure and unreadable/odd definitions are still unknown: launchctl errors
+    do not prove absence.
     """
     try:
         match expected.kind:
@@ -196,7 +196,7 @@ class UnitObserver:
             # Platform producer/observer integration is mandatory; never treat
             # an unimplemented job lookup or empty input as complete closure.
             # This field is permanent semantics, not a placeholder: the observer
-            # reports facts only — the positive `old_writers_absent_relaunchers_fenced`
-            # literal is derived where those facts meet the hop ledger, never here.
+            # reports facts only and never derives the positive
+            # `old_writers_absent_relaunchers_fenced` literal.
             "closure": "unknown",
         }
