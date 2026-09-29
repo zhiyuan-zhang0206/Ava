@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from ava_builtins.skill_support.self_evolution import audit as _audit_mod
+from tests.skills import load_skill_script
+
+_audit_mod = load_skill_script("ava-self-evolution", "scripts", "audit.py")
 
 
 def _audit_module():

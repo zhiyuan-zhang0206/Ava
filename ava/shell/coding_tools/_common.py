@@ -48,13 +48,13 @@ def init_file(path: Path, initial: str) -> None:
     path.write_text(initial, encoding="utf-8")
 
 
-def impersonator_guide(reference_dir: Path) -> Path:
-    """The takeover executor's manual, from the calling skill's reference directory.
+def impersonator_guide(skill_dir: Path) -> Path:
+    """The takeover executor's manual, from the calling skill's own directory.
 
-    The skill lives at ``<repo>/ava_builtins/skills/<skill>/reference``; the
-    guide is the repository's own ``impersonator-guide`` skill.
+    The skill lives at ``<repo>/ava_builtins/skills/<skill>``; the guide is
+    the repository's own ``impersonator-guide`` skill.
     """
-    return reference_dir.parents[3] / ".agents" / "skills" / "impersonator-guide" / "SKILL.md"
+    return skill_dir.parents[2] / ".agents" / "skills" / "impersonator-guide" / "SKILL.md"
 
 
 def worker_bootstrap(

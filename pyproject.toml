@@ -373,20 +373,6 @@ ignore = [
 "schedules/*" = ["ANN", "RUF003", "S", "PTH", "TID", "I", "UP", "ERA", "Q", "RET", "ARG", "PLR2004", "T201"]
 # FBT: a boolean positional in a test is the value-under-test (e.g.
 # `validate("browser_enabled", True)`), not a real boolean-trap call site.
-# Skill reference snippets are agent-facing examples the agent reads and adapts;
-# a commented-out alternative (e.g. a fallback implementation) is intentional
-# documentation, not dead code (ERA001). Some reference scripts are runnable
-# CLIs the agent invokes via bash and that print their JSON result to stdout —
-# print() is their output contract (T20). Reference modules are historical /
-# example code (e.g. low-level ctypes + subprocess probes) the agent reads and
-# adapts, not the maintained live path, so the subprocess/security heuristics,
-# bugbear, pylint-refactor, naming, annotation (ANN201), naive-datetime
-# (DTZ005) and pathlib-idiom (PTH123) nits are noise here.
-"ava_builtins/skills/*/reference/*.py" = ["ERA001", "T20", "B904", "F841", "RUF059", "PLW1510", "S110", "S112", "S603", "C401", "PLR0915", "N806", "ANN201", "DTZ005", "PTH123"]
-# ava_builtins/skill_support/** holds code relocated out of ava_builtins/skills/*/
-# reference/*.py (path_imports fix, Rule 6): a pure relocation, so it keeps the
-# exact same relaxations its content had at its old reference/ path.
-"ava_builtins/skill_support/**/*.py" = ["ERA001", "T20", "B904", "F841", "RUF059", "PLW1510", "S110", "S112", "S603", "C401", "PLR0915", "N806", "ANN201", "DTZ005", "PTH123"]
 # .agents/skills (the kernel-contributor project skills) carry the same kind of
 # runnable reference CLIs (e.g. ava-self-development's changelog generator).
 ".agents/skills/*/reference/*.py" = ["ERA001", "T20", "B904", "F841", "RUF059", "PLW1510", "S110", "S112", "S603", "C401", "PLR0915", "N806"]
@@ -396,6 +382,21 @@ ignore = [
 # the subprocess/temp-file security lints are noise (S603, S108); boolean flags
 # and best-effort subprocess.run are fine here (FBT, PLW1510, PTH, ANN).
 "ava_builtins/skills/*/scripts/*.py" = ["ERA001", "T20", "S603", "S108", "FBT", "PLW1510", "PTH", "ANN"]
+# These three skills' scripts/ moved out of a former reference/*.py or
+# skill_support/** path (path_imports fix, Rule 6) unchanged: same relaxation
+# their content had there, so the move itself does not force an unrelated
+# style/complexity cleanup onto code nobody otherwise touched. Additive to the
+# base scripts/*.py entry above, not a replacement.
+"ava_builtins/skills/ava-dynamic-workflow/scripts/*.py" = ["DTZ005", "N806"]
+"ava_builtins/skills/ava-self-evolution/scripts/*.py" = ["S112", "RUF059", "PLR0915", "PLW0603"]
+"ava_builtins/skills/ava-use-other-agents/scripts/*.py" = ["PLR0915"]
+# A skill's references/ holds genuine reference material — mostly prose, but
+# occasionally a Python snippet the agent reads and adapts rather than runs in
+# place (e.g. ava-dynamic-workflow's orchestrator templates, string-patched
+# and launched through an API, not executed as a file). Not the maintained
+# live path, so the same broad relaxation as .agents/skills/*/reference/*.py
+# above applies.
+"ava_builtins/skills/*/references/*.py" = ["ERA001", "T20", "B904", "F841", "RUF059", "PLW1510", "S110", "S112", "S603", "C401", "PLR0915", "N806", "ANN201", "DTZ005", "PTH123"]
 # Project skills under .agents/skills/ ship the same kind of runnable CLI
 # scripts — same exemptions apply.
 ".agents/skills/*/scripts/*.py" = ["ERA001", "T20", "S603", "S108", "S310", "FBT", "PLW1510", "PTH", "ANN"]
@@ -510,12 +511,8 @@ omit = [
     "*/__main__.py",
     "*/__init__.py",
     "*/tests/*",
-    # ava_builtins/skill_support/** is a pure relocation of code that lived at
-    # ava_builtins/skills/*/reference/* (path_imports fix, Rule 6) — same
-    # omission its content had there.
-    "ava_builtins/skill_support/**",
-    "ava_builtins/skills/*/reference/*",
     "ava_builtins/skills/*/scripts/*",
+    "ava_builtins/skills/*/references/*",
 ]
 
 [tool.coverage.report]
@@ -579,16 +576,13 @@ exclude = [
     "**/.venv",
     # `.claude/worktrees` is the actual location of the current worktree.
     ".claude/worktrees",
-    # Skill reference snippets are agent-facing examples the agent reads and
+    # A skill's references/ holds agent-facing examples the agent reads and
     # adapts, not importable code — they cite plugin-provided `ava.*` surface
     # (e.g. `ava.self.log`) absent from a bare `import ava`. Mirrors the ruff
-    # per-file-ignores for the same paths.
-    "ava_builtins/skills/*/reference",
+    # per-file-ignores for the same paths. scripts/ is NOT excluded: it holds
+    # the skill's real, maintained CLI entry points, and those are checked.
+    "ava_builtins/skills/*/references",
     "ava_builtins/plugins/*/skills/**/reference",
-    # ava_builtins/skill_support/** is a pure relocation of code that lived at
-    # ava_builtins/skills/*/reference/*.py (path_imports fix, Rule 6) — it
-    # keeps the same exclusion its content had there.
-    "ava_builtins/skill_support/**",
 ]
 # Libraries with incomplete third-party stubs — temporarily lenient.
 reportMissingTypeStubs = false
@@ -729,6 +723,21 @@ reportUnknownArgumentType = "error"
 root = "agent"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
+
+# A sub-skill's script reaches its parent skill's scripts/ only through the
+# runtime `__file__`-derived sys.path guard (Structure Rule 6) — pyright does
+# not execute that guard, so it needs the same directory named explicitly to
+# resolve the sibling import statically. Each skill's own scripts/ resolves
+# its OWN same-directory siblings without help (a file's containing directory
+# is always on pyright's implicit search path); only the parent-reaching case
+# needs extraPaths.
+[[tool.pyright.executionEnvironments]]
+root = "ava_builtins/skills/web-ai"
+extraPaths = ["ava_builtins/skills/web-ai/scripts"]
+
+[[tool.pyright.executionEnvironments]]
+root = "ava_builtins/skills/web-sources"
+extraPaths = ["ava_builtins/skills/web-sources/scripts"]
 
 [tool.mutmut]
 # Mutation testing exploratory config (mutmut).

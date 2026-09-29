@@ -20,12 +20,15 @@ import psycopg
 import pytest
 from langchain_core.messages import HumanMessage
 
-from ava_builtins.skill_support.self_evolution import collect as collect_module
+from tests.skills import load_skill_script
+
+collect_module = load_skill_script("ava-self-evolution", "scripts", "collect.py")
 
 
 @pytest.fixture(scope="module")
 def collect_mod() -> Any:
-    """The collection logic module (a real package now — no path loading)."""
+    """The collection logic module, loaded by path (ava_builtins/skills/ dir
+    names are kebab-case, so this is never an importable Python package)."""
     return collect_module
 
 

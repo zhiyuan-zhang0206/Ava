@@ -86,7 +86,14 @@ section covers fixing a violation and maintaining its baseline.
   by file path (`spec_from_file_location`, `SourceFileLoader`,
   `runpy.run_path`); `scripts/structure/path_imports.py` finds them. Shared
   code moves into a governed package the script imports normally, and a
-  script that needs it runs on the checkout's venv python. The
+  script that needs it runs on the checkout's venv python. One narrow
+  exception: a script under `ava_builtins/skills/<skill>/` may run a
+  one-line `sys.path.insert(0, ...)` / `.append(...)` guard whose argument
+  is derived from `__file__` and resolves inside that same `<skill>/` tree
+  (its own `scripts/`, or a sibling sub-skill's) — recognized by AST, so it
+  is not counted as a site at all. A guard reaching outside the skill (another
+  skill, `ava_builtins/skills/` itself, or `ava_builtins/plugins/`), or any
+  file-loader call regardless of its argument, is still a violation. The
   `path_imports` baseline section is empty; unlike Rules 4 and 5 it has no
   pairing, so any new key is refused.
 - **Rule 5 — single decision owners.** `scripts/structure/locality.py:DECISIONS`

@@ -1,4 +1,4 @@
-"""Hermetic unit tests for the web-sources:rss skill (ava_builtins/skills/web-sources/rss/reference/feed.py).
+"""Hermetic unit tests for the web-sources:rss skill (ava_builtins/skills/web-sources/rss/scripts/feed.py).
 
 The skill's live behavior (curl against real feed hosts + feedparser) was
 verified by hand during the build; these lock the *pure* logic — feed parse +
@@ -26,7 +26,7 @@ _PATH = (
     / "skills"
     / "web-sources"
     / "rss"
-    / "reference"
+    / "scripts"
     / "feed.py"
 )
 _spec = importlib.util.spec_from_file_location("rss_feed_under_test", _PATH)

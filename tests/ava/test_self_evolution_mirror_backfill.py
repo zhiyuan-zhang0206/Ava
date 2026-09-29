@@ -19,7 +19,9 @@ from typing import Any
 
 import pytest
 
-from ava_builtins.skill_support.self_evolution import mirror_backfill as backfill_module
+from tests.skills import load_skill_script
+
+backfill_module = load_skill_script("ava-self-evolution", "scripts", "mirror_backfill.py")
 
 
 @pytest.fixture(scope="module")

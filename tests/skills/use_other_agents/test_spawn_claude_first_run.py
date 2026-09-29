@@ -12,9 +12,7 @@ import pytest
 
 from ava.shell.coding_tools import _claude_checks, _first_run, claude
 
-_REFERENCE = (
-    Path(__file__).parents[3] / "ava_builtins" / "skills" / "ava-use-other-agents" / "reference"
-)
+_SKILL_DIR = Path(__file__).parents[3] / "ava_builtins" / "skills" / "ava-use-other-agents"
 
 
 def test_claude_command_uses_home_fallback_when_session_path_has_no_claude(
@@ -289,7 +287,7 @@ def test_supervised_launch_does_not_send_contract_to_a_shell(
             tmp_path / "work.md",
             3600,
             None,
-            _REFERENCE / "collaboration_protocol.md",
+            _SKILL_DIR / "references" / "collaboration_protocol.md",
             "11111111-2222-3333-4444-555555555555",
             resume=False,
         )

@@ -14,11 +14,11 @@ It spends no API credits — it uses the user's flat-rate web subscriptions.
 
 ```bash
 # ChatGPT or Gemini. Returns {state:"done", path, src, dir}.
-$AVA_HOME/source/.venv/bin/python $AVA_HOME/skills/web-ai/media/reference/generate.py image \
+$AVA_HOME/source/.venv/bin/python $AVA_HOME/skills/web-ai/media/scripts/generate.py image \
     --site gemini --prompt "a photorealistic red panda on a skateboard, golden hour"
 
 # Send the prompt exactly as written (no "Generate an image:" prefix):
-$AVA_HOME/source/.venv/bin/python $AVA_HOME/skills/web-ai/media/reference/generate.py image --site chatgpt --raw --prompt "..."
+$AVA_HOME/source/.venv/bin/python $AVA_HOME/skills/web-ai/media/scripts/generate.py image --site chatgpt --raw --prompt "..."
 ```
 
 Images usually render in ~10-60s, so `image` fetches in one call. If it returns
@@ -32,14 +32,14 @@ don't block a turn on it:
 
 ```bash
 # Submit; returns {state:"submitted", url}. Remember the url.
-$AVA_HOME/source/.venv/bin/python $AVA_HOME/skills/web-ai/media/reference/generate.py video --site gemini --prompt "..."
+$AVA_HOME/source/.venv/bin/python $AVA_HOME/skills/web-ai/media/scripts/generate.py video --site gemini --prompt "..."
 ```
 
 Then poll like deep-research — schedule yourself with `ava.watcher.at(+Nmin)`,
 idle, and on wake run `check`:
 
 ```bash
-$AVA_HOME/source/.venv/bin/python $AVA_HOME/skills/web-ai/media/reference/generate.py check --site gemini --kind video --url "<url>"
+$AVA_HOME/source/.venv/bin/python $AVA_HOME/skills/web-ai/media/scripts/generate.py check --site gemini --kind video --url "<url>"
 # {state:"running"} -> reschedule + idle ; {state:"done", path|note} -> deliver
 ```
 
