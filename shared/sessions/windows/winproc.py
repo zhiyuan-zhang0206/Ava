@@ -125,7 +125,7 @@ def _new_steward_nonce() -> str:
 
 
 def _steward_script() -> Path:
-    return Path(__file__).resolve().with_name("windows_session_steward.py")
+    return Path(__file__).resolve().with_name("steward.py")
 
 
 def _record_path(name: str) -> Path:
@@ -449,7 +449,7 @@ def graceful_signal(
         )
     if target_session != caller_session:
         return _steward_deliver(name, rec, deadline)
-    helper = Path(__file__).resolve().with_name("windows_console_signal.py")
+    helper = Path(__file__).resolve().with_name("console_signal.py")
     result = run_job_process(
         [
             sys.executable,

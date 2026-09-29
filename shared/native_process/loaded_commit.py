@@ -27,7 +27,7 @@ from pathlib import Path
 
 from shared.native_process.os_platform import CREATE_NO_WINDOW
 
-_SOURCE_ROOT = Path(__file__).resolve().parent.parent
+_SOURCE_ROOT = Path(__file__).resolve().parents[2]
 _GIT_TIMEOUT_S = 10
 
 _frozen: str | None = None

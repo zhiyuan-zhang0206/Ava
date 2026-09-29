@@ -121,7 +121,7 @@ named-PTY rule covers `<name>.{out,host}.log` without traversing any subtree.
 
 ## Consumers
 
-`shared/session_backend.PtySessionBackend` (`get_shell_backend()` on POSIX)
+`shared/sessions/backend.PtySessionBackend` (`get_shell_backend()` on POSIX)
 — mutating ops via CLI subprocess, enumeration via the in-process record
 scan. Above it: `ava.shell.sessions`, `ava.watcher`, the gateway
 ScheduleManager, the page-server daemon, `ops.cluster_status` capture/kill, and

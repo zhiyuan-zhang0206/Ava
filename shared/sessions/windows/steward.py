@@ -39,7 +39,7 @@ from pathlib import Path
 
 import psutil
 
-_HELPER = Path(__file__).resolve().with_name("windows_console_signal.py")
+_HELPER = Path(__file__).resolve().with_name("console_signal.py")
 _HELPER_DEADLINE_S = 10.0
 _HELPER_TIMEOUT_S = 15.0
 _POLL_S = 3.0
