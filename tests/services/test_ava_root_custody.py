@@ -95,7 +95,7 @@ def _stale_installed_helper(
     state = {"source_hash": "old", "dr": dr, "signed_at": "2026-09-29T00:00:00+00:00"}
     (installed / "build-state.json").write_text(json.dumps(state))
     (tmp_path / "agents").mkdir()
-    monkeypatch.setattr("shared.paths.ava_home", lambda: tmp_path / "home")
+    monkeypatch.setattr("base.paths.ava_home", lambda: tmp_path / "home")
     monkeypatch.setattr(jobs, "helper_job_agents_dir", lambda: tmp_path / "agents")
     monkeypatch.setattr(lifecycle, "_BUILD_DIR", installed)
     monkeypatch.setattr(lifecycle, "_source_content_hash", lambda: "new")
