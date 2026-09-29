@@ -46,7 +46,7 @@ def test_allocated_block_includes_pg_redis(monkeypatch: pytest.MonkeyPatch):
     """A freshly allocated (non-main) block gives pg/redis their own ports inside
     the block, distinct from every other service and from each other."""
     monkeypatch.setattr(cluster, "port_free", lambda _: True)  # pyright: ignore[reportUnknownArgumentType]
-    ports = cluster.allocate_ports(existing_bases=set())
+    ports = cluster.allocate_ports()
     assert ports["postgres"] == 18011
     assert ports["redis"] == 18012
     assert len(set(ports.values())) == len(ports)
@@ -54,7 +54,7 @@ def test_allocated_block_includes_pg_redis(monkeypatch: pytest.MonkeyPatch):
 
 def test_allocate_ports_first_block(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(cluster, "port_free", lambda _: True)  # pyright: ignore[reportUnknownArgumentType]
-    ports = cluster.allocate_ports(existing_bases=set())
+    ports = cluster.allocate_ports()
     assert ports["gateway"] == 18000
     assert ports["milvus"] == 18008
     assert ports.get("memory_search") == 18024
@@ -63,16 +63,15 @@ def test_allocate_ports_first_block(monkeypatch: pytest.MonkeyPatch):
     assert cluster.LEGACY_AVA_PORTS["coordinator"] == 8121
 
 
-def test_allocate_ports_skips_used_base(monkeypatch: pytest.MonkeyPatch):
-    """An existing record's exact base is skipped; with BLOCK_SIZE=27 the next
-    candidate is 18027 (the two capability watchdog health listeners extended
-    the block after the R3 page_server, hosted-runner, and backup additions;
-    the release coordinator reuses the vacated offset 20; overlap-aware
-    skipping lives in test_cluster_env).
+def test_allocate_ports_skips_a_block_with_a_bound_port(monkeypatch: pytest.MonkeyPatch):
+    """Allocation only probes this host: a block with any port bound right now is
+    skipped, and with BLOCK_SIZE=27 the next candidate is 18027 (the two
+    capability watchdog health listeners extended the block after the R3
+    page_server, hosted-runner, and backup additions; the release coordinator
+    reuses the vacated offset 20). No other cluster's block is consulted.
 
-    Concrete on purpose, like its sibling in test_cluster_env: a block growth
-    must force someone to re-check allocation rather than slide past a
-    derived assertion."""
-    monkeypatch.setattr(cluster, "port_free", lambda _: True)  # pyright: ignore[reportUnknownArgumentType]
-    ports = cluster.allocate_ports(existing_bases={18000})
+    Concrete on purpose: a block growth must force someone to re-check
+    allocation rather than slide past a derived assertion."""
+    monkeypatch.setattr(cluster, "port_free", lambda port: port != 18005)  # pyright: ignore[reportUnknownArgumentType]
+    ports = cluster.allocate_ports()
     assert ports["gateway"] == 18027

@@ -89,7 +89,7 @@ First image selection for a source-run home that has never selected a
 release before: `activate_release(expected_current=None)` plus
 `cli.release_transition.root_service.install_steady` — the same sequence
 `scripts/preview/release_cycle_runtime.py::initial` already performs for the
-preview's own captured bundle, generalized to a real home/registry and a
+preview's own captured bundle, generalized to a real home and a
 real `PreparationReceipt` file. Requires a stopped root
 (`cli.commands.lifecycle.root_driver.require_root_absent`) and refuses if another
 release is already selected (that is `request` + `ava cluster update`'s job).

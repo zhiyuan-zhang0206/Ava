@@ -231,7 +231,7 @@ def _config_values(args: argparse.Namespace, home: Path) -> tuple[dict[str, str]
         | {
             "AVA_HOME",
             "AVA_HOME_OVERRIDE",
-            "AVA_CLUSTER_REGISTRY",
+            "AVA_HOST_STATE_DIR",
             "AVA_REDIS_ADMIN_PASSWORD",
         }
     ) - remote_keys
@@ -334,22 +334,13 @@ def _inputs(
             "--db-capability is for agent-runner units; a gateway unit keeps its own "
             "write-generation ledger"
         )
-    registry = (
-        Path(
-            os.environ.get("AVA_CLUSTER_REGISTRY")
-            or stored.get("AVA_CLUSTER_REGISTRY")
-            or str(Path.home() / ".ava" / "clusters.json")
-        )
-        .expanduser()
-        .resolve()
-    )
     checkout = _checkout()
     if runtime is not None and runtime.release is not None:
         intent = read_intent(home)
         if intent is None:
             raise ValueError("release start has no existing home identity")
         checkout = Path(intent["checkout"])
-    return IdentityInput(home, registry, checkout, args.worktree, roles, values, digest, runtime)
+    return IdentityInput(home, checkout, args.worktree, roles, values, digest, runtime)
 
 
 def _service_path(values: dict[str, str], home: Path) -> str:
@@ -418,7 +409,6 @@ def _prepare_start_locked(
     for key in derived_env_keys() | env_identity_keys():
         os.environ.pop(key, None)
     os.environ["AVA_HOME"] = str(home)
-    os.environ["AVA_CLUSTER_REGISTRY"] = str(inputs.registry)
 
 
 def run_start(args: argparse.Namespace, *, runtime: StartRuntime | None = None) -> int:

@@ -24,7 +24,6 @@ def execute(path: Path) -> None:
     operation = read_operation(path)
     request = operation.request
     os.environ["AVA_HOME"] = request.home
-    os.environ["AVA_CLUSTER_REGISTRY"] = request.registry
     from base.deploy.release.runtime_interpreter import verify_loaded_image
 
     image = request.executor.verify(Path(request.home))

@@ -69,7 +69,6 @@ class Unit:
         fields: dict[str, Any] = {
             "id": uuid4(),
             "home": str(self.home),
-            "registry": str(self.home.parent / "clusters.json"),
             "created_at": datetime.now(UTC),
             "machine": _MACHINE,
             "configuration_digest": configuration_digest(self.home),
@@ -86,7 +85,6 @@ class Unit:
 
 @pytest.fixture
 def unit(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Unit:
-    import base.cluster
     import base.cluster.machine
     import base.host.system.boot_unit
 
@@ -94,7 +92,6 @@ def unit(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Unit:
     home.mkdir(mode=0o700)
     monkeypatch.setattr(base.cluster.machine, "machine_name", lambda: _MACHINE)
     monkeypatch.setattr(base.cluster.machine, "machine_role", lambda: frozenset({"agent-runner"}))
-    monkeypatch.setattr(base.cluster, "registry_path", lambda: home.parent / "clusters.json")
     monkeypatch.setattr(base.host.system.boot_unit, "systemd_running", lambda: True)
     return Unit(home)
 

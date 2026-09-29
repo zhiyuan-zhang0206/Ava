@@ -33,7 +33,6 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-from base.config import settings
 from base.host.net.resilience import Policy, retry
 from base.log import logger
 
@@ -71,9 +70,11 @@ def _platform_key() -> str:
 
 
 def runtime_root() -> Path:
-    """Host-level binaries root, beside the cluster registry (independent of any one
+    """Host-level binaries root in the host state dir (independent of any one
     `$AVA_HOME`), so a single download serves every cluster + checkout on the box."""
-    return Path(settings.general.cluster_registry).expanduser().parent / "runtime"
+    from base.paths import host_state_dir
+
+    return host_state_dir() / "runtime"
 
 
 def vendored_pg_dir() -> Path:

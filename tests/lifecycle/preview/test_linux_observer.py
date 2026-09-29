@@ -153,7 +153,7 @@ def test_destroy_observation_rejects_a_dangling_checkout_binding(
     result: observer.Report = {
         "owned_processes": [],
         "listeners": {},
-        "registry_contains_home": False,
+        "home_detached": True,
         "unit_exists": False,
         "manager": {"LoadState": "not-found"},
     }

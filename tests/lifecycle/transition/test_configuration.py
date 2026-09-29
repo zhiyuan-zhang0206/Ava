@@ -38,7 +38,6 @@ def request_fixture(tmp_path: Path) -> FleetRequest:
     return FleetRequest(
         id=uuid4(),
         home=str(home),
-        registry=str(home.parent / "clusters.json"),
         created_at=datetime.now(UTC),
         machine="original",
         previous=previous,

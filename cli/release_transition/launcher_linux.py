@@ -60,7 +60,7 @@ class LinuxLaunch(Record):
     operation: str
     attempt: int = Field(ge=0)
     home: str
-    registry: str
+    host_state_dir: str
     unit: str
     boot_id: str
     artifact_digest: str
@@ -138,15 +138,15 @@ def plan_launch(operation: Path, runtime: VerifiedRelease) -> dict[str, JsonValu
         or not runtime.cwd.is_relative_to(runtime.root)
     ):
         raise ValueError("executor runtime differs from captured release request")
-    registry = Path(request.registry)
-    if registry.resolve(strict=True) != registry:
-        raise ValueError("release launch registry must be canonical")
+    from base.paths import host_state_dir
+
+    state_dir = host_state_dir()
     account = pwd.getpwuid(os.getuid())
     launch = LinuxLaunch(
         operation=str(operation),
         attempt=current.attempt,
         home=str(home),
-        registry=str(registry),
+        host_state_dir=str(state_dir),
         unit=(
             f"ava-update.{hashlib.sha256(str(operation).encode()).hexdigest()[:32]}"
             f".a{current.attempt}.service"
@@ -165,7 +165,7 @@ def plan_launch(operation: Path, runtime: VerifiedRelease) -> dict[str, JsonValu
         environment={
             "HOME": account.pw_dir,
             "AVA_HOME": str(home),
-            "AVA_CLUSTER_REGISTRY": str(registry),
+            "AVA_HOST_STATE_DIR": str(state_dir),
             "PATH": f"{runtime.interpreter.parent}:/usr/local/bin:/usr/bin:/bin",
         },
     )

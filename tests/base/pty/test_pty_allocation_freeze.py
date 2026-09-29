@@ -13,9 +13,9 @@ from base.sessions.pty import cli as pty_cli
 
 @pytest.fixture(autouse=True)
 def _isolated_host_registry(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    registry = tmp_path / "host" / "clusters.json"
-    monkeypatch.setattr(settings.general, "cluster_registry", registry)
-    return registry
+    host_dir = tmp_path / "host"
+    monkeypatch.setattr(settings.general, "host_state_dir", host_dir)
+    return host_dir
 
 
 def test_freeze_is_host_wide_and_records_operator_generation(
@@ -30,7 +30,7 @@ def test_freeze_is_host_wide_and_records_operator_generation(
     frozen = allocation_freeze.freeze(holder="operator-1818", reason="bounded cleanup")
 
     assert allocation_freeze.state_path() == first_state_path
-    assert first_state_path.parent == _isolated_host_registry.parent
+    assert first_state_path.parent == _isolated_host_registry
     assert frozen.status == "frozen"
     assert frozen.generation
     assert frozen.holder == "operator-1818"

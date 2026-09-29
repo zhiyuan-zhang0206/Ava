@@ -144,8 +144,7 @@ prepare_start_identity(build_parser().parse_args(["start", "--worktree"]))
 before = (home / ".env").read_bytes()
 reference = ReleaseRef(artifact_digest="a"*64, manifest_digest="b"*64,
     schema_digest="c"*64, source_commit="d"*40)
-request = FleetRequest(id=uuid4(), home=str(home),
-    registry=os.environ["AVA_CLUSTER_REGISTRY"], created_at=datetime.now(UTC),
+request = FleetRequest(id=uuid4(), home=str(home), created_at=datetime.now(UTC),
     machine="test",
     previous=reference.model_copy(update={"artifact_digest":"e"*64, "source_commit":"c"*40}),
     candidate=reference, executor=reference,
@@ -209,7 +208,7 @@ assert (home / ".env").read_bytes() == before
     env.update(
         AVA_HOME=str(tmp_path.resolve() / "home"),
         AVA_HOME_OVERRIDE="1",
-        AVA_CLUSTER_REGISTRY=str(tmp_path.resolve() / "clusters.json"),
+        AVA_HOST_STATE_DIR=str(tmp_path.resolve()),
         AVA_DB_URL="postgresql://foreign.invalid/forbidden",
         AVA_GATEWAY_URL="http://foreign.invalid",
         AVA_MACHINE_SERVE_GATEWAY="false",
@@ -665,7 +664,7 @@ calls = []
 def configured():
     assert (home / "start-intent.json").is_file()
     assert (home / ".env").is_file()
-    assert Path(os.environ["AVA_CLUSTER_REGISTRY"]).is_file()
+    assert not (home.parent / "clusters.json").exists()
 def log(args):
     assert args == ["start"]
     configured()
@@ -690,7 +689,7 @@ assert "base.config" not in sys.modules
     env.update(
         AVA_HOME=str(tmp_path / "home"),
         AVA_HOME_OVERRIDE="1",
-        AVA_CLUSTER_REGISTRY=str(tmp_path / "clusters.json"),
+        AVA_HOST_STATE_DIR=str(tmp_path),
         AVA_DB_URL="postgresql://foreign.invalid/forbidden",
         AVA_GATEWAY_URL="http://foreign.invalid",
     )

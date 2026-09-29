@@ -158,9 +158,9 @@ def _run_start_action(operation: Operation, image: VerifiedRelease) -> None:
 
     request = operation.request
     account = pwd.getpwuid(os.getuid())
-    environment = stage_environment(
-        Path(request.home), Path(request.registry), Path(account.pw_dir)
-    )
+    from base.paths import host_state_dir
+
+    environment = stage_environment(Path(request.home), host_state_dir(), Path(account.pw_dir))
     argv = image.module_argv("cli.release_transition.stage", "--operation", str(request.path))
     try:
         result = run_bounded(

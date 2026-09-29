@@ -66,7 +66,6 @@ def _request(home: Path, *, created_at: datetime) -> FleetRequest:
     request = FleetRequest(
         id=uuid4(),
         home=str(home),
-        registry=str(home.parent / "clusters.json"),
         created_at=created_at,
         machine="test-unit",
         previous=previous,

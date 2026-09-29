@@ -62,7 +62,7 @@ def adopt_executor_authority(home: Path) -> None:
     ledger = require_ledger(home)
     record = get_record(home)
     if record is None:
-        raise RuntimeError(f"no registry record for home {home}; cannot dial its Postgres")
+        raise RuntimeError(f"no cluster record for home {home}; cannot dial its Postgres")
     query = "&".join(
         (
             f"host={quote(str(pg_socket_dir(home=home)), safe='')}",

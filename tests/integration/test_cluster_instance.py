@@ -106,12 +106,12 @@ def _free_port() -> int:
 
 @pytest.fixture()
 def isolated_cluster(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[tuple[int, int]]:
-    """A temp $AVA_HOME + registry + cluster identity, yielding (pg_port,
+    """A temp $AVA_HOME + host state dir + cluster identity, yielding (pg_port,
     redis_port). Tears the instance down on exit."""
     home = tmp_path / "home"
     home.mkdir()
     monkeypatch.setattr(settings.general, "ava_home", str(home))
-    monkeypatch.setattr(settings.general, "cluster_registry", str(tmp_path / "clusters.json"))
+    monkeypatch.setattr(settings.general, "host_state_dir", tmp_path)
     monkeypatch.setattr(settings.data_plane, "cluster_secret", _BEARER)
     monkeypatch.setattr(settings.data_plane, "redis_admin_password", _REDIS_ADMIN)
     monkeypatch.setattr(settings.data_plane, "events_channel", "ava:tinst:events")
@@ -285,7 +285,6 @@ def test_fresh_single_box_redis_refuses_unauthenticated_connections(
         record,
         IdentityInput(
             home,
-            tmp_path / "clusters.json",
             tmp_path,
             False,
             frozenset({"gateway", "agent-runner"}),

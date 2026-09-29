@@ -46,7 +46,7 @@ class ExpectedRuntime:
         host_path = normalize_service_path(declared, excluded=(bindir,))
         return {
             "AVA_HOME": str(run / "home"),
-            "AVA_CLUSTER_REGISTRY": str(run / "clusters.json"),
+            "AVA_HOST_STATE_DIR": str(run),
             "VIRTUAL_ENV": str(bindir.parent),
             "AVA_SERVICE_PATH": host_path,
             "PATH": normalize_service_path(

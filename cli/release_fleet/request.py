@@ -74,7 +74,6 @@ class UnitSpec(Record):
     """One included remote unit: its receipt's images and its current facts."""
 
     unit: UnitKey
-    registry: str = Field(min_length=1, max_length=4096)
     roles: tuple[UnitRole, ...] = Field(min_length=1)
     adapter: AdapterKind
     previous: ReleaseRef
@@ -107,7 +106,6 @@ class UnitReceipt(Record):
 
     machine: str = Field(min_length=1, max_length=128)
     home: str = Field(min_length=1, max_length=4096)
-    registry: str = Field(min_length=1, max_length=4096)
     roles: tuple[str, ...]
     abi: dict[str, str | None]
     platform: str = Field(max_length=256)
@@ -133,7 +131,6 @@ class UnitReceipt(Record):
         return UnitSpec.model_validate(
             {
                 "unit": UnitKey(machine=self.machine, home=self.home),
-                "registry": self.registry,
                 "roles": tuple(sorted(self.roles)),
                 "adapter": self.adapter,
                 "previous": self.previous,
@@ -207,7 +204,6 @@ class FleetRequest(Request):
         return UnitRequest(
             id=self.id,
             home=spec.unit.home,
-            registry=spec.registry,
             created_at=self.created_at,
             machine=spec.unit.machine,
             configuration_digest=spec.configuration_digest,

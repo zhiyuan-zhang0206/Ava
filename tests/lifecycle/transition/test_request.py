@@ -100,7 +100,6 @@ def _request(home: Path, previous: ReleaseRef, candidate: ReleaseRef) -> FleetRe
     return FleetRequest(
         id=uuid4(),
         home=str(home),
-        registry=str(home.parent / "clusters.json"),
         created_at=datetime.now(UTC),
         machine="test-unit",
         previous=previous,
@@ -179,7 +178,6 @@ def test_boot_checks_the_booting_host_before_admission(
     from cli.release_transition import boot
 
     image = _image(home, "candidate")
-    registry = home.parent / "clusters.json"
     admitted: list[str] = []
 
     def admit(_home: Path, verified: VerifiedRelease, **_facts: str) -> None:
@@ -194,11 +192,11 @@ def test_boot_checks_the_booting_host_before_admission(
         request_module, "current_abi", lambda: dataclasses.replace(host, arch="riscv64")
     )
     with pytest.raises(ReleaseRejectedError, match="incompatible with this host"):
-        boot.start_image(home, registry, image)
+        boot.start_image(home, image)
     assert admitted == []
     monkeypatch.setattr(request_module, "current_abi", lambda: _patched(host))
     with pytest.raises(_AdmittedError):
-        boot.start_image(home, registry, image)
+        boot.start_image(home, image)
     assert admitted == [image.artifact_digest]
 
 
@@ -304,7 +302,7 @@ def test_request_cannot_substitute_its_executor_or_reactivate_same_image(
         FleetRequest.model_validate(request.model_dump() | updates)
 
 
-@pytest.mark.parametrize("field", ["home", "registry"])
+@pytest.mark.parametrize("field", ["home"])
 @pytest.mark.parametrize(
     "value", ["relative/path", "/rejected/../other", "/rejected/trailing/", "/rejected/new\nline"]
 )

@@ -99,7 +99,6 @@ def request_fixture(tmp_path: Path) -> Preparation:
     store.mkdir(parents=True, mode=0o700)
     (store / "current-release").write_text("unreadable selector sentinel\n")
     (store.parent / ".env").write_text("unusable settings sentinel\n")
-    (root / "clusters.json").write_text('{"untouched":true}\n')
     return Preparation(
         repo=repo,
         commit=commit,
@@ -159,7 +158,6 @@ def _protected(request: Preparation) -> dict[Path, bytes]:
     paths = [
         request.store / "current-release",
         request.store.parent / ".env",
-        request.work.parent / "clusters.json",
     ]
     paths.extend(
         p

@@ -61,7 +61,6 @@ def request_record(tmp_path: Path) -> FleetRequest:
     return FleetRequest(
         id=uuid4(),
         home=str(home),
-        registry=str(home.parent / "registry.json"),
         created_at=_WHEN,
         machine="test",
         previous=previous,
@@ -476,9 +475,7 @@ def test_crash_after_every_durable_fleet_boundary_converges_on_one_outcome(
         (home / "releases/current-release").write_bytes(
             (Path(request_record.home) / "releases/current-release").read_bytes()
         )
-        request = request_record.model_copy(
-            update={"id": uuid4(), "home": str(home), "registry": str(home.parent / "r.json")}
-        )
+        request = request_record.model_copy(update={"id": uuid4(), "home": str(home)})
         monkeypatch.setattr(journal_module, "_write", _unpatched_write)
         create(request)
         effects = Effects(request, fail=fail)

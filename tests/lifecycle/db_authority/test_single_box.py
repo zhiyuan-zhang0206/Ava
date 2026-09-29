@@ -120,7 +120,7 @@ def _configure(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Born:
     home = (tmp_path / "home").resolve()
     home.mkdir(mode=0o700)
     monkeypatch.setattr(settings.general, "ava_home", str(home))
-    monkeypatch.setattr(settings.general, "cluster_registry", str(tmp_path / "clusters.json"))
+    monkeypatch.setattr(settings.general, "host_state_dir", tmp_path)
     ports = dict(cluster.LEGACY_AVA_PORTS)
     ports.update(postgres=_free_port(), redis=_free_port(), pgbouncer=_free_port())
     record = cluster.ClusterRecord(
@@ -130,7 +130,6 @@ def _configure(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Born:
         record,
         IdentityInput(
             home,
-            tmp_path / "clusters.json",
             _REPO,
             False,
             frozenset({"gateway", "agent-runner"}),
@@ -553,13 +552,9 @@ def test_direct_exemption_dials_postgres_as_the_delivered_login(
     born: Born, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """With pooling on, the admin-plane `direct=True` dial swaps only the port to
-    the real Postgres (the registry record) and keeps the delivered login."""
+    the real Postgres (this home's own record) and keeps the delivered login."""
     import base.db
 
-    def _registry() -> dict[str, cluster.ClusterRecord]:
-        return {str(born.home): born.record}
-
-    monkeypatch.setattr(cluster, "load_registry", _registry)
     direct = base.db.direct_db_url()
     assert direct == url_with_userinfo(
         born.endpoint().replace(str(born.pooler_port), str(born.pg_port)), *born.login("gateway")

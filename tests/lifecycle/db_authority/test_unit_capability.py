@@ -447,7 +447,7 @@ def test_issued_bundle_starts_a_runner_that_connects_as_the_generation_login(
         # The unit joins without the human secret: its bundle authenticates it.
         os.environ.pop("AVA_CLUSTER_SECRET", None)
         os.environ["AVA_HOME"] = str(runner)
-        os.environ["AVA_CLUSTER_REGISTRY"] = str(tmp_path / "runner-registry.json")
+        os.environ["AVA_HOST_STATE_DIR"] = str(tmp_path / "runner-host-state")
         os.environ[unit.CAPABILITY_KEY_ENV] = match.group(1)
         prepare_start_identity(_runner_args(bundle))
         assert unit.CAPABILITY_KEY_ENV not in os.environ

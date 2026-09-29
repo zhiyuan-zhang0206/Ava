@@ -192,7 +192,7 @@ def read_pg_state() -> dict[str, str]:
     from .cluster_instance import pg_admin_url
 
     if (record := get_record(ava_home())) is None:
-        raise RuntimeError("cluster registry record is missing")
+        raise RuntimeError("cluster record is missing")
     expected_db = db_identity()
     owner = ownership.require_postgres(ava_home() / "pg", record_postgres_port(record))
     if owner is None:
@@ -244,7 +244,7 @@ def read_pg_state() -> dict[str, str]:
     if Path(current["data_directory"]).resolve(strict=True) != expected_data:
         raise RuntimeError("live PostgreSQL data_directory differs from this AVA_HOME")
     if int(current["port"]) != record_postgres_port(record):
-        raise RuntimeError("live PostgreSQL port differs from the cluster registry")
+        raise RuntimeError("live PostgreSQL port differs from the cluster record")
     current_owner = ownership.postgres(expected_data)
     if current_owner is None or not owner.same_birth(current_owner) or not owner.live():
         raise RuntimeError("PostgreSQL native birth changed during PITR observation")

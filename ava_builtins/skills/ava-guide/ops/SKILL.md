@@ -83,11 +83,10 @@ gateway is up has nowhere to land.
 ### Cluster sub-commands
 
 ```bash
-ava cluster ls                        # list all registered clusters (label = home basename)
 ava cluster status                    # full multi-machine roster
-ava cluster down --path <home>        # stop the cluster at a home path, keep its slot + data
-ava cluster destroy --path <home>     # stop + free registry slot + deregister its OS-scheduled
-                                      # jobs (refused for ~/.ava, the prod home)
+ava cluster down --path <home>        # stop the cluster at a home path, keep its data
+ava cluster destroy --path <home>     # stop + deregister its OS-scheduled jobs + mark the
+                                      # home detached (refused for ~/.ava, the prod home)
                                       # add --drop-db to also remove its pg/redis data dirs
 ```
 

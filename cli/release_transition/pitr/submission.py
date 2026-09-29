@@ -163,7 +163,6 @@ def _new_request(
     origin: str,
     record: ActivationRecord | None,
 ) -> PitrRequest:
-    from base.cluster import registry_path
     from base.cluster.machine import machine_name
 
     encoded = None if record is None else regular_bytes(record_path(home))
@@ -176,7 +175,6 @@ def _new_request(
     return PitrRequest(
         id=uuid4(),
         home=str(home),
-        registry=str(registry_path().resolve(strict=True)),
         created_at=datetime.now(UTC),
         machine=machine_name(),
         image=selected_image(home),

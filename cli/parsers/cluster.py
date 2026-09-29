@@ -1,7 +1,7 @@
 """`ava cluster` — whole-cluster verbs: argparse builder + its `_h_*` handlers.
 
 Every verb here operates on the cluster as a whole (roster, prepared release
-submission, recovery, health probes, registry lifecycle) rather than a single host — the
+submission, recovery, health probes, home lifecycle) rather than a single host — the
 host-level set lives in ``cli.parsers.host``. Handlers lazy-import their
 `cmd_*` implementation from ``cli.commands`` so parser building never loads
 Settings (see ``cli.main`` module docstring)."""
@@ -68,20 +68,14 @@ def _h_cluster_pitr_rollback(_args: argparse.Namespace) -> int:
     return cmd_pitr_rollback()
 
 
-def _h_cluster_ls(_args: argparse.Namespace) -> int:
-    from cli.commands.cluster.registry import cmd_cluster_ls
-
-    return cmd_cluster_ls()
-
-
 def _h_cluster_down(args: argparse.Namespace) -> int:
-    from cli.commands.cluster.registry import cmd_cluster_down
+    from cli.commands.cluster.home import cmd_cluster_down
 
     return cmd_cluster_down(path=args.path)
 
 
 def _h_cluster_destroy(args: argparse.Namespace) -> int:
-    from cli.commands.cluster.registry import cmd_cluster_destroy
+    from cli.commands.cluster.home import cmd_cluster_destroy
 
     return cmd_cluster_destroy(path=args.path, drop_db=args.drop_db)
 
@@ -461,13 +455,10 @@ def _add_cluster_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]
     )
     cluster_recover_p.set_defaults(func=_h_cluster_recover)
 
-    cluster_ls_p = cluster_sub.add_parser("ls", help="[cluster] list all registered clusters")
-    cluster_ls_p.set_defaults(func=_h_cluster_ls)
-
     cluster_down_p = cluster_sub.add_parser(
         "down",
         help="[cluster] stop the cluster at a home path (its services + its own pg/redis; "
-        "keeps the registry entry + data dirs — the safe way to stop a dev "
+        "keeps the home's record + data dirs — the safe way to stop a dev "
         "worktree cluster from another checkout)",
     )
     cluster_down_p.add_argument(
@@ -477,8 +468,8 @@ def _add_cluster_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]
 
     cluster_destroy_p = cluster_sub.add_parser(
         "destroy",
-        help="[cluster] stop the cluster at a home path and remove its registry entry (frees "
-        "its port block); refused for the default home (~/.ava, prod)",
+        help="[cluster] stop the cluster at a home path, retire its OS jobs and mark the home "
+        "detached; refused for the default home (~/.ava, prod)",
     )
     cluster_destroy_p.add_argument(
         "--path", required=True, help="the cluster's home path (e.g. ~/.ava-mytask)"

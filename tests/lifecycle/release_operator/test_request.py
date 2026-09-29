@@ -17,7 +17,6 @@ from uuid import UUID
 
 import pytest
 
-import base.cluster as cluster_pkg
 from base import paths as base_paths
 from base.cluster import machine as base_machine
 from base.deploy.release.runtime_release import activate_release
@@ -47,7 +46,6 @@ def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, rows: dict[str, set[An
     path.mkdir()
     rows["units"].add(("test-unit", str(path)))
     monkeypatch.setattr(base_paths, "ava_home", lambda: path)
-    monkeypatch.setattr(cluster_pkg, "registry_path", lambda: tmp_path / "clusters.json")
     monkeypatch.setattr(base_machine, "machine_name", lambda: "test-unit")
     monkeypatch.setattr(
         request_module,
@@ -323,7 +321,6 @@ def test_happy_path_writes_a_request_ava_cluster_update_can_consume(
     assert out.stat().st_mode & 0o777 == 0o600
     request = FleetRequest.model_validate_json(out.read_bytes())
     assert request.home == str(home)
-    assert request.registry == str(cluster_pkg.registry_path())
     assert request.machine == "test-unit"
     assert request.previous == previous
     assert request.candidate == candidate

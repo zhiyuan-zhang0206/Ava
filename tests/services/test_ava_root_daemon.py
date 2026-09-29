@@ -516,7 +516,7 @@ def _systemd_starter(
         "from base.native_process.ownership import OwnedProcess\n"
         "from dataclasses import asdict\n"
         f"receipt = Path({str(receipt)!r})\n"
-        f"assert os.environ['AVA_CLUSTER_REGISTRY'] == {str(home.parent / 'registry.json')!r}\n"
+        f"assert os.environ['AVA_HOST_STATE_DIR'] == {str(home.parent / 'host-state')!r}\n"
         f"data = subprocess.Popen({_SLEEPER!r}, start_new_session=True)\n"
         f"hint = root_pid_path(Path({str(home)!r}))\n"
         "hint.parent.mkdir(parents=True, exist_ok=True)\n"
@@ -585,7 +585,7 @@ def _systemd_test_context(home: Path) -> BootUnitContext:
         entry.pw_name,
         grp.getgrgid(entry.pw_gid).gr_name,
         Path(entry.pw_dir),
-        home.parent / "registry.json",
+        home.parent / "host-state",
     )
 
 

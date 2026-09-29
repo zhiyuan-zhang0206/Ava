@@ -24,8 +24,10 @@ from cli.release_fleet.inventory import (
 )
 from cli.release_fleet.policy import UnitKey
 from cli.release_fleet.request import CoordinatorEndpoint, Exclusion, FleetRequest
+from cli.start_identity import mark_phase
 from tests.lifecycle.release_fleet.test_models import _request, _spec
-from tests.lifecycle.transition.test_identity import prepared as prepared
+from tests.lifecycle.transition.test_identity import _request as _identity_request
+from tests.lifecycle.transition.test_identity import home as home
 
 _RUNNER = UnitKey(machine="macbook-air", home="/Users/zzy/.ava")
 _ENDPOINT = CoordinatorEndpoint(host="10.0.0.5", port=8121)
@@ -52,9 +54,15 @@ def test_every_registered_unit_is_the_gateway_included_or_excluded() -> None:
 
 
 @pytest.fixture
+def prepared(home: Path) -> FleetRequest:
+    """A born, provisioned gateway home and its captured fleet request."""
+    mark_phase(home, "provisioned")
+    return _identity_request(home)
+
+
+@pytest.fixture
 def lone_gateway(prepared: FleetRequest, monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     """The loaded identity of a single box, and the rows its database holds."""
-    import base.cluster
     import base.cluster.machine
     import base.paths
     from base.config import settings
@@ -68,7 +76,6 @@ def lone_gateway(prepared: FleetRequest, monkeypatch: pytest.MonkeyPatch) -> dic
     monkeypatch.setattr(base.paths, "ava_home", lambda: Path(prepared.home))
     monkeypatch.setattr(base.cluster.machine, "machine_name", lambda: "unit")
     monkeypatch.setattr(base.cluster.machine, "machine_role", lambda: frozenset({"gateway"}))
-    monkeypatch.setattr(base.cluster, "registry_path", lambda: Path(prepared.registry))
     monkeypatch.setattr(type(settings.data_plane), "is_remote", property(lambda _self: False))
     monkeypatch.setattr(settings.data_plane, "cluster_secret", "")
     monkeypatch.setattr(settings.data_plane, "data_plane_host", "")
@@ -164,7 +171,6 @@ def test_pitr_admits_only_its_reserved_gateway_home_as_a_fleet_of_one(
     driver = object.__new__(transition.PitrTransition)
     driver.request = SimpleNamespace(  # type: ignore[assignment]
         home=prepared.home,
-        registry=prepared.registry,
         machine=prepared.machine,
         require_configuration=lambda: None,
         image=SimpleNamespace(selector="selected"),

@@ -24,7 +24,6 @@ from uuid import uuid4
 
 import pytest
 
-from base import cluster
 from base.cluster import authority
 from base.deploy.maintenance.state import MaintenanceHold
 from base.deploy.release.start_inputs import configuration_digest
@@ -142,8 +141,6 @@ def fleet(born: Born, executor: str, monkeypatch: pytest.MonkeyPatch) -> Iterato
 
     del executor
     home = born.home
-    registry = Path(cluster.registry_path())
-    cluster.save_record_locked(born.record, path=registry)
     mark_phase(home, "provisioned")
     mark_phase(home, "ready")
     monkeypatch.setattr(base.cluster.machine, "machine_name", lambda: _MACHINE)
@@ -168,7 +165,6 @@ def fleet(born: Born, executor: str, monkeypatch: pytest.MonkeyPatch) -> Iterato
     yield FleetRequest(
         id=uuid4(),
         home=str(home),
-        registry=str(registry),
         created_at=datetime.now(UTC),
         machine=_MACHINE,
         previous=_PREVIOUS,

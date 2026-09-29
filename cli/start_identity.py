@@ -1,8 +1,10 @@
 """Durable unit identity for the single start lifecycle; no runtime settings or effects.
 
-The private intent precedes registry/env publication. Only its claiming phase may
-complete a missing reservation; a configured home whose reservation disappears
-requires explicit reattachment. No failure frees a reservation behind live effects.
+The private intent precedes `.env` publication and is the home's record of itself:
+a gateway unit's port block and data-plane host live in its `record`
+(`base.cluster.record`), and no other file on the host lists this cluster. A
+home without an intent that already holds a data plane cannot be born again
+over it; explicit reattachment is required.
 """
 
 from __future__ import annotations
@@ -25,7 +27,7 @@ from base.host.private_storage import ensure_private_dir, ensure_private_file
 from base.native_process.os_platform import file_lock
 from cli.start_runtime import StartRuntime
 
-INTENT_NAME = "start-intent.json"
+INTENT_NAME = cluster.INTENT_NAME
 _CAPS = ("gateway", "agent-runner", "observability-station")
 _PHASES = ("claiming", "configured", "provisioned", "ready")
 
@@ -33,7 +35,6 @@ _PHASES = ("claiming", "configured", "provisioned", "ready")
 @dataclass(frozen=True)
 class IdentityInput:
     home: Path
-    registry: Path
     checkout: Path
     worktree: bool
     roles: frozenset[str]
@@ -184,20 +185,13 @@ def needs_provision(home: Path) -> bool:
     return data is not None and data["phase"] == "configured"
 
 
-def _new_record(
-    inputs: IdentityInput, records: dict[str, cluster.ClusterRecord]
-) -> cluster.ClusterRecord:
+def _new_record(inputs: IdentityInput) -> cluster.ClusterRecord:
     if cluster.is_default_home(inputs.home):
         ports = cast("cluster.ClusterPorts", cluster.LEGACY_AVA_PORTS.copy())
-        wanted = set(cast("dict[str, int]", ports).values())
-        if any(wanted.intersection(other.ports.values()) for other in records.values()) or not all(
-            cluster.port_free(p) for p in wanted
-        ):
-            raise RuntimeError("default home's ports are already reserved or occupied")
+        if not all(cluster.port_free(p) for p in cast("dict[str, int]", ports).values()):
+            raise RuntimeError("default home's ports are already occupied")
     else:
-        ports = cluster.allocate_ports(
-            {min(cast("dict[str, int]", r.ports).values()) for r in records.values()}
-        )
+        ports = cluster.allocate_ports()
     return cluster.ClusterRecord(
         ports=ports,
         gateway_home=str(inputs.home),
@@ -246,7 +240,8 @@ def _validate_existing(
     if "gateway" in inputs.roles:
         if rec is None or not env.get("AVA_DB_URL") or not env.get("AVA_REDIS_URL"):
             raise RuntimeError(
-                "unregistered or incomplete existing home; explicit reattachment is required"
+                "existing home has no recorded identity (start-intent.json) or is incomplete; "
+                "explicit reattachment is required"
             )
         from cli.preflight import _port_block_conflicts
 
@@ -259,24 +254,7 @@ def _validate_existing(
         raise RuntimeError("existing remote unit has no gateway identity")
 
 
-def _publish_claim(
-    inputs: IdentityInput, data: dict[str, Any], records: dict[str, cluster.ClusterRecord]
-) -> None:
-    rec_data = data["record"]
-    if rec_data is not None:
-        rec = cluster.ClusterRecord(**rec_data)
-        existing = records.get(str(inputs.home))
-        if existing is not None and asdict(existing) != rec_data:
-            raise RuntimeError("start intent and registry disagree")
-        if existing is None:
-            if data["phase"] != "claiming":
-                raise RuntimeError(
-                    "configured home lost its registry reservation; explicit reattachment required"
-                )
-            wanted = set(rec.ports.values())
-            if any(wanted.intersection(other.ports.values()) for other in records.values()):
-                raise RuntimeError("interrupted start reservation is now owned by another home")
-            cluster.save_record_locked(rec, path=inputs.registry)
+def _publish_claim(inputs: IdentityInput, data: dict[str, Any]) -> None:
     if data["phase"] == "claiming":
         if data["record"] is not None:
             # A gateway's logical backups are encrypted under a passphrase minted
@@ -307,10 +285,9 @@ def _validate_repeat(inputs: IdentityInput, data: dict[str, Any]) -> None:
 def prepare_identity(inputs: IdentityInput) -> None:
     """Persist one complete identity before any process or database effect.
 
-    Lock order is home, checkout binding, registry. The checkout lock also
-    serializes homes using independent registries, including pointer retirement.
+    Lock order is home, then checkout binding. The checkout lock also serializes
+    pointer retirement.
     """
-    _require_distinct_registry_paths(inputs)
     ensure_private_dir(inputs.home)
     if (inputs.home / "destroy-intent.json").exists():
         raise RuntimeError("home is being destroyed or detached; explicit reattachment required")
@@ -328,17 +305,6 @@ def prepare_identity(inputs: IdentityInput) -> None:
         _prepare_reserved_identity(inputs, data)
 
 
-def _require_distinct_registry_paths(inputs: IdentityInput) -> None:
-    reserved = {
-        inputs.home / name
-        for name in (".env", INTENT_NAME, "destroy-intent.json", "start-intent.lock")
-    } | {inputs.checkout / ".ava_home", inputs.checkout / ".ava_home.lock"}
-    registry = inputs.registry.resolve()
-    lock = inputs.registry.with_suffix(".lock").resolve()
-    if registry == lock or {registry, lock}.intersection(path.resolve() for path in reserved):
-        raise ValueError("cluster registry and its lock must not alias lifecycle state or locks")
-
-
 def _require_checkout_binding(checkout: Path, home: Path) -> None:
     pointer = checkout / ".ava_home"
     try:
@@ -350,51 +316,46 @@ def _require_checkout_binding(checkout: Path, home: Path) -> None:
 
 
 def _prepare_reserved_identity(inputs: IdentityInput, data: dict[str, Any] | None) -> None:
-    with cluster.registry_lock(path=inputs.registry):
-        records = cluster.load_registry(path=inputs.registry)
-        if data is not None:
-            _publish_claim(inputs, data, records)
-            _validate_existing(
-                inputs,
-                dotenv_values(inputs.home / ".env"),
-                records.get(str(inputs.home))
-                or (cluster.ClusterRecord(**data["record"]) if data["record"] else None),
-            )
-            return
-        env = dotenv_values(inputs.home / ".env")
-        rec = records.get(str(inputs.home))
-        if rec is not None or env.get("AVA_DB_URL") or env.get("AVA_GATEWAY_URL"):
-            _validate_existing(inputs, env, rec)
-            return
-        if any(
-            (inputs.home / name).exists()
-            for name in (
-                "pg",
-                "redis",
-                "pgbouncer",
-                "deploy-state.json",
-                "run/deploy-pause-owner.json",
-            )
-        ):
-            raise RuntimeError(
-                "existing resource state has no initialization authority; refusing fresh start"
-            )
-        _create_claim(inputs, records)
+    if data is not None:
+        _publish_claim(inputs, data)
+        _validate_existing(
+            inputs,
+            dotenv_values(inputs.home / ".env"),
+            cluster.ClusterRecord(**data["record"]) if data["record"] else None,
+        )
+        return
+    env = dotenv_values(inputs.home / ".env")
+    if env.get("AVA_DB_URL") or env.get("AVA_GATEWAY_URL"):
+        _validate_existing(inputs, env, None)
+        return
+    if any(
+        (inputs.home / name).exists()
+        for name in (
+            "pg",
+            "redis",
+            "pgbouncer",
+            "deploy-state.json",
+            "run/deploy-pause-owner.json",
+        )
+    ):
+        raise RuntimeError(
+            "existing resource state has no initialization authority; refusing fresh start"
+        )
+    _create_claim(inputs)
 
 
-def _create_claim(inputs: IdentityInput, records: dict[str, cluster.ClusterRecord]) -> None:
+def _create_claim(inputs: IdentityInput) -> None:
     values = dict(inputs.values)
     for cap in _CAPS:
         values["AVA_MACHINE_SERVE_" + cap.upper().replace("-", "_")] = str(
             cap in inputs.roles
         ).lower()
-    rec = _new_record(inputs, records) if "gateway" in inputs.roles else None
+    rec = _new_record(inputs) if "gateway" in inputs.roles else None
     if rec is not None:
         values = _gateway_values(
             rec,
             IdentityInput(
                 inputs.home,
-                inputs.registry,
                 inputs.checkout,
                 inputs.worktree,
                 inputs.roles,
@@ -413,4 +374,4 @@ def _create_claim(inputs: IdentityInput, records: dict[str, cluster.ClusterRecor
         "env": values,
     }
     _write(inputs.home / INTENT_NAME, data)
-    _publish_claim(inputs, data, records)
+    _publish_claim(inputs, data)

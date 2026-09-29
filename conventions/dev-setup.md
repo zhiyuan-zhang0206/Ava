@@ -84,7 +84,8 @@ First start selects `~/.ava-<worktree-dir>` by default, records the checkout's
 `.ava_home` pointer, and durably binds identity, credentials, and a private port
 block before resource effects. It defaults to gateway plus runner, creates
 private native storage, and waits for the selected root tree to be ready. Port
-allocation checks both registry reservations and live host listeners. No
+allocation probes live host listeners only (no host file lists clusters); a
+stopped cluster's block can be reused, and start refuses the collision. No
 production secrets or agent data are copied. Explicit `AVA_HOME` remains subject
 to the checkout identity and override rules described in the runbook.
 
