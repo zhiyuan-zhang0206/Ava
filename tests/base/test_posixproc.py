@@ -24,7 +24,12 @@ from base.native_process.os_platform import IS_LINUX, IS_WINDOWS
 from base.sessions import posixproc
 from base.sessions.record import SessionRecord
 from tests.base.poll_until import poll_until
-from tests.base.process_evidence import detach_evidence, detached_to_known_reaper
+from tests.base.process_evidence import (
+    detach_evidence,
+    detached_to_known_reaper,
+    no_new_direct_children,
+    no_zombie_children,
+)
 
 pytestmark = pytest.mark.skipif(IS_WINDOWS, reason="posixproc is the POSIX supervisor")
 
@@ -42,37 +47,6 @@ def _pid(name: str) -> int:
     rec = posixproc._read_record(name)
     assert rec is not None
     return rec.pid
-
-
-def _no_new_direct_children(
-    spawner: psutil.Process, before: set[psutil.Process]
-) -> tuple[bool, object]:
-    """(ok, state) when `spawner` has no direct child beyond the pre-spawn snapshot."""
-    try:
-        lingering = set(spawner.children()) - before
-    except psutil.NoSuchProcess:
-        return True, "spawner gone"
-    return not lingering, [c.pid for c in lingering]
-
-
-def _no_zombie_children(spawner: psutil.Process) -> tuple[bool, object]:
-    """(ok, state) when none of `spawner`'s recursive children is a zombie.
-
-    Children that exit between the snapshot and the status read are skipped —
-    a reaped child is exactly what the no-zombie assertion wants.
-    """
-    try:
-        children = spawner.children(recursive=True)
-    except psutil.NoSuchProcess:
-        return True, "spawner gone"
-    zombies: list[int] = []
-    for child in children:
-        try:
-            if child.status() == psutil.STATUS_ZOMBIE:
-                zombies.append(child.pid)
-        except (psutil.NoSuchProcess, psutil.AccessDenied):
-            continue
-    return not zombies, zombies
 
 
 def _pid_gone_or_zombie(pid: int) -> bool:
@@ -138,6 +112,7 @@ def test_new_session_reparents_to_init_no_zombie(
     name = "ava-test-agent-1"
     spawner = psutil.Process()
     before_children = set(spawner.children())
+    before_descendants = set(spawner.children(recursive=True))
     ancestor_births = {(parent.pid, parent.create_time()) for parent in spawner.parents()}
     caller_sid = os.getsid(0)
 
@@ -187,15 +162,33 @@ def test_new_session_reparents_to_init_no_zombie(
         # the internal subprocess wait), and no zombie. Same bounded-poll
         # treatment — the success conditions themselves are unchanged.
         poll_until(
-            lambda: _no_new_direct_children(spawner, before_children),
+            lambda: no_new_direct_children(spawner, before_children),
             what="spawner has no lingering direct child",
         )
         poll_until(
-            lambda: _no_zombie_children(spawner),
+            lambda: no_zombie_children(spawner, before_descendants),
             what="spawner has no zombie descendants",
         )
     finally:
         posixproc.kill_session(name, graceful=False)
+
+
+def test_zombie_check_ignores_a_zombie_an_earlier_test_left() -> None:
+    """The pytest worker is shared: a zombie born before the snapshot is not the
+    spawn-under-test's, and must not fail its no-zombie assertion."""
+    spawner = psutil.Process()
+    leftover = subprocess.Popen([sys.executable, "-c", "pass"])
+    try:
+        poll_until(
+            lambda: (psutil.Process(leftover.pid).status() == psutil.STATUS_ZOMBIE, leftover.pid),
+            what="leftover child becomes a zombie",
+        )
+        before = set(spawner.children(recursive=True))
+
+        assert no_zombie_children(spawner, before)[0] is True
+        assert no_zombie_children(spawner, set())[0] is False
+    finally:
+        leftover.wait()
 
 
 def test_graceful_signal_terminates(unit_home) -> None:
