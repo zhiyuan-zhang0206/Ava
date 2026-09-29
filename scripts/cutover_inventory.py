@@ -65,7 +65,7 @@ import psutil
 from dotenv import dotenv_values
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, ValidationError, model_validator
 
-from cli.cutover_hold import ADOPTION_JOURNAL, legacy_hold_facts
+from cli.cutover_hold import ADOPTION_JOURNAL, CUTOVER_JOURNAL_MAX_BYTES, legacy_hold_facts
 from scripts.cutover_legacy_jobs import Host, Jobs, discover
 from shared import cluster
 from shared.port_block import LEGACY_AVA_PORTS, PORT_OFFSETS
@@ -191,17 +191,33 @@ def registry_path(home: Path, explicit: str | None) -> Path:
     return Path(declared).expanduser() if declared else Path.home() / ".ava" / "clusters.json"
 
 
+def read_cutover_journal(path: Path) -> object:
+    """A cutover journal's JSON document, None when absent. One over
+    `CUTOVER_JOURNAL_MAX_BYTES` refuses with its size: no re-run shrinks it."""
+    from shared.verified_file import regular_bytes
+
+    try:
+        size = path.lstat().st_size
+        if size > CUTOVER_JOURNAL_MAX_BYTES:
+            raise RefusedError(
+                f"{path} is {size} bytes, over the {CUTOVER_JOURNAL_MAX_BYTES}-byte read ceiling "
+                "of a cutover journal (CUTOVER_JOURNAL_MAX_BYTES, cli/cutover_hold.py); a re-run "
+                "does not change it. Inspect the file: if it is this cutover's own journal, "
+                "raise the ceiling in a reviewed change"
+            )
+        return json.loads(regular_bytes(path, max_bytes=CUTOVER_JOURNAL_MAX_BYTES))
+    except FileNotFoundError:
+        return None
+
+
 def read_journal(home: Path) -> dict[str, Any] | None:
     """The adoption journal; None before the first `--execute`. Refuses one whose
     completed `intent` step no longer has its start intent: a rollback (R0, R1)
     undid that adoption, and a retry must not read the home as adopted."""
     from cli.start_identity import INTENT_NAME
-    from shared.verified_file import regular_bytes
 
     path = home / ADOPTION_JOURNAL
-    try:
-        data: object = json.loads(regular_bytes(path))
-    except FileNotFoundError:
+    if (data := read_cutover_journal(path)) is None:
         return None
     journal = cast("dict[str, Any]", data) if isinstance(data, dict) else {}
     if (

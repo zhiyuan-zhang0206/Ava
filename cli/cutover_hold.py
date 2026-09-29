@@ -35,6 +35,13 @@ from typing import Any
 from shared.maintenance_state import MaintenanceHold
 
 ADOPTION_JOURNAL = "cutover-rollback/adopt-home.json"
+# The read ceiling of the journals under `cutover-rollback/`: this adoption journal
+# and the database-records one (`scripts/cutover_db_records.py`), the large one. It keeps
+# the before image of each identity-less row it mints, about 670 bytes as written:
+# FC-10 pass B wrote 3,624,220 bytes for 5,407 rows, and production holds 5,433,
+# about 3.7 MB. 32 MiB is about 9x that (some 50,000 rows) and still bounds what a
+# damaged or foreign file makes a reader load.
+CUTOVER_JOURNAL_MAX_BYTES = 32 * 1024 * 1024
 # The holder of a hold the cutover creates (`cutover:<id>`); no other hold takes it.
 CUTOVER_HOLDER_PREFIX = "cutover:"
 
@@ -227,7 +234,7 @@ def recorded_hold(home: Path) -> CutoverHold | None:
 
     path = home / ADOPTION_JOURNAL
     try:
-        journal = json.loads(regular_bytes(path))
+        journal = json.loads(regular_bytes(path, max_bytes=CUTOVER_JOURNAL_MAX_BYTES))
         named = Path(journal["home"])
         hold = CutoverHold(
             journal["hold"]["holder"], datetime.fromisoformat(journal["hold"]["acquired_at"])

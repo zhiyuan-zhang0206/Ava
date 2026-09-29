@@ -81,6 +81,7 @@ from scripts.cutover_inventory import (
     canonical_home,
     load_attestation,
     own_checkout,
+    read_cutover_journal,
     registry_path,
 )
 from scripts.cutover_inventory import read_journal as read_adoption
@@ -441,12 +442,8 @@ def adoption(home: Path) -> dict[str, str] | None:
 
 def read_journal(home: Path) -> dict[str, Any] | None:
     """The journal; refuses one whose last run belongs to another adoption of the home."""
-    from shared.verified_file import regular_bytes
-
     path = home / JOURNAL
-    try:
-        data: object = json.loads(regular_bytes(path))
-    except FileNotFoundError:
+    if (data := read_cutover_journal(path)) is None:
         return None
     journal = cast("dict[str, Any]", data) if isinstance(data, dict) else {}
     if set(journal) != {"version", "home", "runs"} or journal["version"] != VERSION:

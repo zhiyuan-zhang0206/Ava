@@ -303,6 +303,13 @@ crashed run continues only with the same inputs; the same inputs as a
 completed run change nothing; new inputs (a late attestation) append a run.
 Refusals are all decided before the first write of a run.
 
+The `identities` rows make this journal large: about 670 bytes per minted row,
+3.6 MB for the 5,407 rows of the FC-10 rehearsal. Every reader of a cutover
+journal (this one and the adoption journal) bounds it at
+`CUTOVER_JOURNAL_MAX_BYTES` (32 MiB, `cli/cutover_hold.py`), about 9x the
+production scale; a larger file refuses with its path, size and the ceiling,
+and a re-run does not change it.
+
 Each run also names the adoption it belongs to: the `cutover_id` and
 `created_at` of the home's adoption journal. Rollback after the repair (R2)
 restores the cold data-directory copy taken at W3, which predates every W7
