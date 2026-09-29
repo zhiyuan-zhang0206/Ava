@@ -66,9 +66,7 @@ def hf(wave: int, role: str) -> Path:
 
 
 def spawn(prompt: str, label: str, wave: int, role: str) -> int:
-    """`label` is this orchestrator's own bookkeeping key (registry / logs) —
-    `ava.agents.spawn` itself has no such parameter."""
-    wid = ava.agents.spawn(prompt=prompt)
+    wid = ava.agents.spawn(prompt=prompt, label=label)
     registry[wid] = {"wave": wave, "role": role, "label": label}
     return wid
 
