@@ -197,6 +197,19 @@ def test_every_static_event_kind_is_registered() -> None:
     )
 
 
+def test_production_scan_excludes_only_the_top_level_deploy_directory(tmp_path: Path) -> None:
+    """`deploy/` at the root is service configuration; `shared/deploy/` is a
+    package, and skipping it by name would hide every producer inside it."""
+    (tmp_path / "deploy").mkdir()
+    (tmp_path / "deploy" / "render.py").write_text("")
+    (tmp_path / "shared" / "deploy").mkdir(parents=True)
+    (tmp_path / "shared" / "deploy" / "emit.py").write_text("")
+
+    scanned = [rel for rel, _ in scan_kinds.iter_production_py(tmp_path)]
+
+    assert scanned == ["shared/deploy/emit.py"]
+
+
 def test_registered_telemetry_events_have_producers() -> None:
     """Reverse drift guard: every EVENTS entry must have a code producer — an
     `event=` literal, a `label=` fallback, an `event_type=` literal, or a

@@ -58,11 +58,14 @@ EXCLUDE_DIRS = {
     ".mypy_cache",
     ".pyright",
     "demos",
-    "deploy",
     "web",
     "desktop",
     "dashboards",
 }
+
+# Top-level directories only: `deploy/` holds service configuration, while
+# `shared/deploy/` is a production package whose emissions must be scanned.
+_ROOT_EXCLUDE_DIRS = {"deploy"}
 
 EVENT_RE = re.compile(r"""\bevent\s*=\s*["']([^"']+)["']""")
 LABEL_RE = re.compile(r"""\blabel\s*=\s*["']([^"']+)["']""")
@@ -73,7 +76,8 @@ SSE_ROLE_RE = re.compile(r'role: Literal\["([^"]+)"\]')
 def iter_production_py(repo: Path) -> Iterator[tuple[str, Path]]:
     """Yield (relative_path, path) for every production .py file."""
     for dirpath, dirnames, filenames in os.walk(repo):
-        dirnames[:] = [d for d in dirnames if d not in EXCLUDE_DIRS]
+        excluded = EXCLUDE_DIRS | _ROOT_EXCLUDE_DIRS if Path(dirpath) == repo else EXCLUDE_DIRS
+        dirnames[:] = [d for d in dirnames if d not in excluded]
         for fn in filenames:
             if not fn.endswith(".py"):
                 continue
@@ -106,15 +110,11 @@ def scan_code(repo: Path) -> tuple[Counter[str], Counter[str], Counter[str], Cou
             event_kinds.update(m.group(1) for m in EVENT_RE.finditer(line))
             label_kinds.update(m.group(1) for m in LABEL_RE.finditer(line))
             event_type_kinds.update(m.group(1) for m in EVENT_TYPE_RE.finditer(line))
-    # PR-D renamed shared/events.py -> shared/events/live/projection.py; keep both names so
-    # the scanner works on pre-rename checkouts too (batch lands A -> ... -> E).
-    events_path = repo / "shared" / "live_events.py"
-    if not events_path.exists():
-        events_path = repo / "shared" / "events.py"
-    if events_path.exists():
-        with events_path.open(encoding="utf-8", errors="replace") as f:
-            for line in f:
-                sse_roles.update(m.group(1) for m in SSE_ROLE_RE.finditer(line))
+    # The live-event projection declares the SSE roles; a missing file is a moved
+    # module this scanner must follow, not an empty role set.
+    with (repo / "shared" / "events" / "live" / "projection.py").open(encoding="utf-8") as f:
+        for line in f:
+            sse_roles.update(m.group(1) for m in SSE_ROLE_RE.finditer(line))
     return event_kinds, label_kinds, event_type_kinds, sse_roles
 
 

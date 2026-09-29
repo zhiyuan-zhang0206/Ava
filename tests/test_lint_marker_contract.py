@@ -32,7 +32,7 @@ from pathlib import Path
 import pytest
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
-_MESSAGE_KWARGS = _REPO_ROOT / "shared" / "message_kwargs.py"
+_MESSAGE_KWARGS = _REPO_ROOT / "shared" / "agents" / "messages" / "kwargs.py"
 _MARKERS_TS = _REPO_ROOT / "ui" / "web" / "src" / "components" / "timeline" / "markers.tsx"
 _SYSTEM_NOTE_WRITER_DIRS = ("agent", "ava_builtins", "demos")
 
