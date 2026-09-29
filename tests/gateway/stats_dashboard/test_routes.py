@@ -24,10 +24,11 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
-from gateway import loki_events, loki_query_budget
 from gateway.app import app
-from gateway.routers import _stats_dashboard, status
-from gateway.schemas import StatsDashboard, StatsWindowHours, window_delta
+from gateway.cluster import _stats_dashboard, status
+from gateway.cluster.schemas import StatsDashboard
+from gateway.lgtm import loki_events, loki_query_budget
+from gateway.schemas.stats import StatsWindowHours, window_delta
 from shared import plugin_stats, telemetry
 from shared.cluster import home_label
 from shared.config import settings

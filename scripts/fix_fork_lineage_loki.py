@@ -36,7 +36,7 @@ from typing import Any
 
 import httpx
 
-from gateway import loki_events
+from gateway.lgtm import loki_events
 from shared.config import settings
 from shared.loki_index_labels import ARCHIVE_FREEZE_AT
 

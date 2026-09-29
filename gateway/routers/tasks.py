@@ -15,15 +15,10 @@ from typing import Any, Literal, LiteralString, cast, overload
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from psycopg_pool import ConnectionPool
 
-from gateway.routers._eval_guard import deny_isolated_result_read
-from gateway.routers.agents_state import post_agent_system_note
-from gateway.schemas import (
-    SystemNoteIn,
-    TaskListResponse,
-    TaskRow,
-    TaskSummaryRow,
-    TaskUpdateRequest,
-)
+from gateway.agents.eval_guard import deny_isolated_result_read
+from gateway.agents.schemas import SystemNoteIn
+from gateway.agents.state import post_agent_system_note
+from gateway.schemas.tasks import TaskListResponse, TaskRow, TaskSummaryRow, TaskUpdateRequest
 from shared.db_transaction import write_transaction
 from shared.tasks.task_owner_notifications import TaskOwnerNotification, owner_change_notifications
 from shared.tasks.task_reparent import resolve_reparent

@@ -14,12 +14,10 @@ from opentelemetry import metrics
 from psycopg import Error as DatabaseError
 from psycopg_pool import ConnectionPool, PoolTimeout
 
-from gateway import loki_query_budget
-from gateway._backend_failure import raise_backend_unavailable
 from gateway.inspect import _metrics, _plugin_metrics, _plugin_widgets, neighbors
 from gateway.inspect._cache import InspectCacheFullError, InspectQueryCache
 from gateway.inspect._live import db_rows_blocking, notice_blocking, project_heartbeat
-from gateway.schemas import (
+from gateway.inspect.schemas import (
     AgentInspectLive,
     AgentInspectStatistics,
     HeartbeatLastPause,
@@ -27,8 +25,10 @@ from gateway.schemas import (
     NeighborRow,
     NeighborsResponse,
     PluginMetricResult,
-    StatsWindowHours,
 )
+from gateway.lgtm import loki_query_budget
+from gateway.lgtm.backend_failure import raise_backend_unavailable
+from gateway.schemas.stats import StatsWindowHours
 from ops import cluster_rpc as _cluster_rpc
 from ops.rpc_schemas import ShellInfo
 from shared.agents import AgentNotFound

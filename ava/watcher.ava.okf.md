@@ -44,7 +44,7 @@ None of these ever re-spawns the watcher. Decide whether to re-create it yoursel
 nothing to a watcher it left running — it is a session, not part of the
 agent's process. The watcher's next fire delivers its wake as an ordinary
 chat inbound (`source="watcher:<id>"`), and chat delivery auto-resurrects a
-terminated agent (`gateway/routers/delivery.py` ->
+terminated agent (`gateway/agents/delivery.py` ->
 `ops.resurrect_if_terminated`) — nothing reaps a terminated owner's watcher
 early any more, so a standing cron keeps re-waking it at every fire for as
 long as it lives. This is intended: the LLM decides each time. An agent that

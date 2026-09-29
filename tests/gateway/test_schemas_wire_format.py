@@ -1,4 +1,4 @@
-"""Freeze the HTTP wire format of `gateway/schemas.py`.
+"""Freeze the HTTP wire format of the gateway wire schemas.
 
 Analogous to `test_events_wire_format.py`: the Python schema and the hand-written TS
 mirror (`ui/web/src/lib/types.ts`) must stay in sync on fields; a rename like
@@ -13,7 +13,7 @@ import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from gateway.schemas import (
+from gateway.agents.schemas import (
     AgentRow,
     CompactEnqueued,
     MessageEnqueued,

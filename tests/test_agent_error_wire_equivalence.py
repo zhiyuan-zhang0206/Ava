@@ -24,7 +24,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from ava._gateway_transport import raise_from_response
-from gateway.app import _ava_agent_error_handler
+from gateway.middleware.error_handlers import ava_agent_error_handler
 from shared.agents import EXCEPTION_BY_REASON, AgentLaunchFailed, AvaAgentError
 
 
@@ -40,7 +40,7 @@ def test_handler_emits_expected_wire(reason, cls):
     # (Exception input); our handler input is an AvaAgentError subtype — pyright
     # considers it invariant-narrowed and disallows it. Runtime dispatch uses the registered
     # exception type, so it's actually safe.
-    app.add_exception_handler(AvaAgentError, _ava_agent_error_handler)  # type: ignore[arg-type]
+    app.add_exception_handler(AvaAgentError, ava_agent_error_handler)  # type: ignore[arg-type]
 
     @app.get("/_raise")
     def _raise():

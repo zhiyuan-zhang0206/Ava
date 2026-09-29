@@ -31,8 +31,8 @@ def _assert_failed_birth_visible(client: TestClient, body: dict[str, Any], agent
 def test_failed_plain_launch_persists_prompt_and_retry_reuses_identity(
     monkeypatch: pytest.MonkeyPatch, db_conn: psycopg.Connection
 ) -> None:
-    from gateway.routers import agents as route
-    from gateway.routers.agents_forward import LaunchForwardError
+    from gateway.agents import router as route
+    from gateway.agents.forward import LaunchForwardError
     from ops.rpc_schemas import LaunchAgentRequest, SpawnedAgent
     from shared.agent_observation import AvailabilityReason
 
@@ -110,8 +110,8 @@ def test_retry_launch_returns_404_for_missing_agent(db_conn: psycopg.Connection)
 def test_failed_launch_state_write_outage_keeps_committed_id_retriable(
     monkeypatch: pytest.MonkeyPatch, db_conn: psycopg.Connection
 ) -> None:
-    from gateway.routers import agents as route
-    from gateway.routers.agents_forward import LaunchForwardError
+    from gateway.agents import router as route
+    from gateway.agents.forward import LaunchForwardError
     from ops.rpc_schemas import LaunchAgentRequest, SpawnedAgent
     from shared.agent_observation import AvailabilityReason
 
@@ -141,8 +141,8 @@ def test_failed_launch_state_write_outage_keeps_committed_id_retriable(
 def test_failed_fork_launch_keeps_marker_and_prompt_in_one_birth(
     monkeypatch: pytest.MonkeyPatch, db_conn: psycopg.Connection
 ) -> None:
-    from gateway.routers import agents as route
-    from gateway.routers.agents_forward import LaunchForwardError
+    from gateway.agents import router as route
+    from gateway.agents.forward import LaunchForwardError
     from ops.rpc_schemas import LaunchAgentRequest, SpawnedAgent
     from shared.agent_observation import AvailabilityReason
 
@@ -175,8 +175,8 @@ def test_failed_fork_launch_keeps_marker_and_prompt_in_one_birth(
 def test_admission_winning_dispatch_failure_returns_accepted_receipt(
     monkeypatch: pytest.MonkeyPatch, db_conn: psycopg.Connection
 ) -> None:
-    from gateway.routers import agents as route
-    from gateway.routers.agents_forward import LaunchForwardError
+    from gateway.agents import router as route
+    from gateway.agents.forward import LaunchForwardError
     from ops.rpc_schemas import LaunchAgentRequest, SpawnedAgent
     from shared.agent_observation import AvailabilityReason
 

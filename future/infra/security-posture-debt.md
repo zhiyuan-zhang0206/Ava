@@ -45,7 +45,7 @@ every other role by scram.
 
 - Login rate limiting resolved (2026-09-01): `POST /api/auth/login` uses the
   per-IP `LoginRateLimiter` in [`shared/rate_limit.py`](../../shared/rate_limit.py);
-  [`gateway/routers/auth.py`](../../gateway/routers/auth.py) returns 429 with
+  [`gateway/auth/router.py`](../../gateway/auth/router.py) returns 429 with
   `Retry-After` during lockout, and
   [`tests/gateway/test_login_endpoint.py`](../../tests/gateway/test_login_endpoint.py)
   pins the threshold, reset, expiry, and IP-isolation contract.

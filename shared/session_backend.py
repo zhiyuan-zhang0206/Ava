@@ -165,7 +165,7 @@ class SessionBackend(abc.ABC):
 
         Asked by anything that reads a long-running session's output from where
         the backend wrote it — currently the schedule log reader
-        (``gateway.routers.schedules``). A backend that keeps no file
+        (``gateway.schedules.router``). A backend that keeps no file
         (the base default — a pane-shaped backend keeps no file) answers None; the
         native supervisors own their redirect and answer with it. A consumer that
         only knew about the tee'd file would have no liveness evidence at all on a

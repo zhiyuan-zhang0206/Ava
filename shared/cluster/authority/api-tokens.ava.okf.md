@@ -14,8 +14,8 @@ stays on the gateway.
 
 | Surface | Admits |
 |---|---|
-| gateway middleware, `/api/bootstrap`, alert/work-failed webhooks | the human secret, or the ACTIVE generation's gateway or runner token (`acceptance`, cached per ledger identity; `gateway.request_principal.cluster_credential` records `cluster_bearer` or `machine_token:<class>`) |
-| `/api/auth/login` | the human secret, or the active runner token (the managed browser's cookie); the session is bound to that credential and ends when it is revoked or rotated (`gateway.request_principal.session_mints`) |
+| gateway middleware, `/api/bootstrap`, alert/work-failed webhooks | the human secret, or the ACTIVE generation's gateway or runner token (`acceptance`, cached per ledger identity; `gateway.auth.request_principal.cluster_credential` records `cluster_bearer` or `machine_token:<class>`) |
+| `/api/auth/login` | the human secret, or the active runner token (the managed browser's cookie); the session is bound to that credential and ends when it is revoked or rotated (`gateway.auth.request_principal.session_mints`) |
 | a unit's `/ops` (`services/agent_ops/_boot._ops_acceptance`) | digests of its generation's gateway and runner tokens: a remote unit's capability carries the gateway digest, never the gateway token |
 
 A revoked generation's token never authenticates again. The gateway re-reads

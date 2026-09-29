@@ -36,8 +36,8 @@ from fastapi import HTTPException
 from psycopg import Connection, Cursor
 from psycopg_pool import ConnectionPool
 
-from gateway import loki_events, loki_query_budget
-from gateway.schemas import MetricPoint, PluginMetricResult
+from gateway.inspect.schemas import MetricPoint, PluginMetricResult
+from gateway.lgtm import loki_events, loki_query_budget
 from shared.metrics.core import core_metrics
 from shared.metrics.metrics_logql import validate_logql
 from shared.plugin_context import PluginContext

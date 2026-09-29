@@ -15,9 +15,9 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
-from gateway import loki_events
-from gateway._cors import cors_allowed_origins
 from gateway.app import app
+from gateway.auth.cors import cors_allowed_origins
+from gateway.lgtm import loki_events
 from ops import cluster_pause, cluster_status
 from shared.start_serving import RootBirth
 
@@ -43,8 +43,8 @@ def fake_flag(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
         return flag.exists()
 
     monkeypatch.setattr("gateway.app._cluster_is_paused", _paused)
-    monkeypatch.setattr("gateway.routers.cluster.cluster_is_paused", flag.exists)
-    monkeypatch.setattr("gateway.routers.status.cluster_is_paused", flag.exists)
+    monkeypatch.setattr("gateway.cluster.router.cluster_is_paused", flag.exists)
+    monkeypatch.setattr("gateway.cluster.status.cluster_is_paused", flag.exists)
     monkeypatch.setattr("ops.cluster_pause.is_paused", _snapshot_paused)
     return flag
 
@@ -794,8 +794,8 @@ class TestAgentMachineList:
         server answered but could not provide a determinate status."""
         from datetime import UTC, datetime
 
-        from gateway.routers import cluster as cluster_router
-        from gateway.schemas import MachineStatus
+        from gateway.cluster import router as cluster_router
+        from shared.api_contracts.status import MachineStatus
 
         set_machine_identity(role="gateway", name="cloud-test")
         with db_conn.cursor() as cur:  # pyright: ignore[reportUnknownMemberType]
@@ -848,8 +848,8 @@ class TestAgentMachineList:
         before reaching the stub."""
         from datetime import UTC, datetime
 
-        from gateway.routers import cluster as cluster_router
-        from gateway.schemas import MachineStatus
+        from gateway.cluster import router as cluster_router
+        from shared.api_contracts.status import MachineStatus
 
         with db_conn.cursor() as cur:  # pyright: ignore[reportUnknownMemberType]
             cur.execute("TRUNCATE machines")  # pyright: ignore[reportUnknownMemberType]
@@ -1109,7 +1109,7 @@ class TestMachinePauseResume:
         """A machine whose ops server cannot take the graceful terminate (already
         unreachable) gets its agent rows force-marked terminated in the shared
         DB — pause must not leave agents 'running' on a machine that is leaving."""
-        from gateway.routers import agents_forward as _fwd
+        from gateway.agents import forward as _fwd
 
         set_machine_identity(role="agent-runner", name="test-host")
         _seed_away_machine(db_conn)
@@ -1121,7 +1121,7 @@ class TestMachinePauseResume:
         async def _unreachable(target: str, path: str, json_body: dict) -> dict:
             raise RuntimeError("ops server unreachable")
 
-        monkeypatch.setattr(_fwd, "_enqueue_lifecycle", _unreachable)  # pyright: ignore[reportUnknownArgumentType]
+        monkeypatch.setattr(_fwd, "enqueue_lifecycle", _unreachable)  # pyright: ignore[reportUnknownArgumentType]
         with TestClient(app) as client:
             r = client.post("/api/cluster/machines/away/pause", json={})
         assert r.status_code == 200

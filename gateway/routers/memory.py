@@ -28,8 +28,8 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Response
 
-from gateway.routers._eval_guard import deny_isolated_result_read
-from gateway.schemas import (
+from gateway.agents.eval_guard import deny_isolated_result_read
+from gateway.schemas.memory import (
     MemoryGraphEdge,
     MemoryGraphNode,
     MemoryGraphResponse,

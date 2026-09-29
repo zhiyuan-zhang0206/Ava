@@ -1,5 +1,5 @@
 """Context-breakdown: pure bucketing/section-split/normalization functions
-(`gateway/context_breakdown.py`) + the `GET /api/agents/{id}/context-breakdown`
+(`gateway/agents/context_breakdown.py`) + the `GET /api/agents/{id}/context-breakdown`
 endpoint contract.
 """
 
@@ -16,13 +16,12 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, Tool
 # Load agent.graph before agent.hooks.compact to resolve the latent graph<->compact
 # import cycle (compact.py imports agent.hooks; claim._decide imports back from
 # compact). Needed only because this test uses the write-side helper below —
-# gateway.context_breakdown itself must NOT need it (see
+# gateway.agents.context_breakdown itself must NOT need it (see
 # test_bucket_messages_works_without_agent_graph).
 import agent.graph  # noqa: F401  # pyright: ignore[reportUnusedImport]
 from agent.hooks.compact import compose_summary_message
 from agent.messages import NoteTag, inbound_message, system_note_message
-from gateway.app import app
-from gateway.context_breakdown import (
+from gateway.agents.context_breakdown import (
     SECTION_SPLIT_THRESHOLD_TOKENS,
     SectionNode,
     bucket_messages,
@@ -30,6 +29,7 @@ from gateway.context_breakdown import (
     normalize,
     section_breakdown,
 )
+from gateway.app import app
 from shared.db import create_agent
 
 
@@ -283,7 +283,7 @@ def test_bucket_messages_works_without_agent_graph() -> None:
     code = (
         "import sys\n"
         "from langchain_core.messages import HumanMessage\n"
-        "from gateway.context_breakdown import bucket_messages\n"
+        "from gateway.agents.context_breakdown import bucket_messages\n"
         "from agent.messages import COMPACT_SUMMARY_HEADER\n"
         "buckets, _ = bucket_messages("
         "[HumanMessage(content=f'{COMPACT_SUMMARY_HEADER}\\n\\nbody')])\n"

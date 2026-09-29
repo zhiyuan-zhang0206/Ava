@@ -23,7 +23,7 @@ import redis as sync_redis
 from fastapi.testclient import TestClient
 
 from gateway.app import app
-from gateway.sse import (
+from gateway.events.sse import (
     _decode_frames_for_test,
     _sse_batch_frame,
     _sse_frame,
@@ -204,7 +204,7 @@ def test_sse_endpoint_response_headers(
     async def fake_stream(*_args: object, **_kwargs: object) -> AsyncIterator[bytes]:
         yield b": stream open\n\n"
 
-    from gateway.routers import agent_events as agent_events_router
+    from gateway.events import agent_events as agent_events_router
 
     monkeypatch.setattr(agent_events_router, "event_stream", fake_stream)
 
@@ -352,7 +352,7 @@ def test_sse_system_endpoint_response_headers(
     async def fake_stream(*_args: object, **_kwargs: object) -> AsyncIterator[bytes]:
         yield b": stream open\n\n"
 
-    from gateway.routers import system as system_router
+    from gateway.events import system as system_router
 
     monkeypatch.setattr(system_router, "event_stream", fake_stream)
 
@@ -373,7 +373,7 @@ def test_sse_emits_heartbeat_data_event_when_idle(
     data frame (the `: hb` comment is invisible to EventSource.onmessage), so this
     pins that one actually reaches the client. _HEARTBEAT_SECONDS=0 fires it on the
     first idle tick instead of waiting the real 15s."""
-    from gateway import sse as sse_mod
+    from gateway.events import sse as sse_mod
 
     monkeypatch.setattr(sse_mod, "_HEARTBEAT_SECONDS", 0.0)
     tid = create_agent(db_conn)
@@ -644,7 +644,7 @@ def test_throttled_endpoint_response_headers(
     async def fake_stream(*_args: object, **_kwargs: object) -> AsyncIterator[bytes]:
         yield b": stream open\n\n"
 
-    from gateway.routers import system as system_router
+    from gateway.events import system as system_router
 
     monkeypatch.setattr(system_router, "throttled_event_stream", fake_stream)
 
@@ -667,7 +667,7 @@ def test_throttled_agent_filter_endpoint_query(
         captured_kwargs.update(kwargs)
         yield b": stream open\n\n"
 
-    from gateway.routers import system as system_router
+    from gateway.events import system as system_router
 
     monkeypatch.setattr(system_router, "throttled_event_stream", fake_stream)
 

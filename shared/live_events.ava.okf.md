@@ -94,4 +94,4 @@ segments stay globally distinct.
 ## Key Dependencies
 
 - [[agents-contract.ava.okf.md]] — the sibling agent ↔ gateway contract; lifecycle hints carry only `agent_id` and `role`, while authoritative state comes from roster/directory/detail reads.
-- [[gateway/routers/sse.ava.okf.md]] — the gateway leg that fans this channel out to browsers over SSE
+- [[gateway/events/sse.ava.okf.md]] — the gateway leg that fans this channel out to browsers over SSE

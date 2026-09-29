@@ -334,7 +334,7 @@ def test_write_transaction_overrides_a_read_only_default_on_pool_borrow(
 
 def test_session_touch_overrides_a_read_only_default() -> None:
     """R3 Rule B session writes declare a raw pool borrow read-write first."""
-    from gateway.session_store import touch_session
+    from gateway.auth.session_store import touch_session
 
     with postgres() as pg_url, _read_only_default_pooler(pg_url) as pooled:
         with _direct_writer(pg_url) as setup:
@@ -606,7 +606,7 @@ def test_message_insert_and_schedule_stop_survive_a_poisoned_backend(
     write helpers through the sanctioned pool path against a poisoned
     single-backend pooler."""
     import shared.db as shared_db
-    from gateway.routers.schedules import _update_blocking
+    from gateway.schedules.router import _update_blocking
     from shared import config
     from shared.agents.messages.chat_delivery import insert_chat_inbound_once
 

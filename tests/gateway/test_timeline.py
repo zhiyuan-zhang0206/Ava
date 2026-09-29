@@ -27,8 +27,8 @@ import pytest
 from fastapi.testclient import TestClient
 from langchain_core.messages import BaseMessage, HumanMessage
 
+from gateway.agents.timeline import _window_before
 from gateway.app import app
-from gateway.routers.timeline import _window_before
 from shared.agents.history.timeline import (
     TimelineItem,
     _ai_message_items,
@@ -1105,7 +1105,7 @@ class TestTimelineDispatch:
 def test_item_sort_key_is_numeric_not_lexical() -> None:
     """item_id ordering is numeric (msg_idx, block_idx), so "10.0" follows "2.0"
     and "3.10" follows "3.2" — a lexical sort would get both backwards."""
-    from gateway.routers.timeline import _item_sort_key
+    from gateway.agents.timeline import _item_sort_key
 
     assert _item_sort_key("2.0") < _item_sort_key("10.0")
     assert _item_sort_key("3.2") < _item_sort_key("3.10")
@@ -2215,7 +2215,7 @@ class TestTimelineCompactHistory:
     ) -> None:
         from langchain_core.messages import AIMessage
 
-        import gateway.routers.timeline as timeline_router
+        import gateway.agents.timeline as timeline_router
         from shared.config import settings
 
         tid = create_agent(db_conn)
@@ -2312,7 +2312,7 @@ class TestTimelineCompactHistory:
     ) -> None:
         from langchain_core.messages import AIMessage
 
-        import gateway.routers.timeline as timeline_router
+        import gateway.agents.timeline as timeline_router
         from shared.config import settings
 
         tid = create_agent(db_conn)
@@ -2382,7 +2382,7 @@ class TestTimelineCompactHistory:
     ) -> None:
         from langchain_core.messages import AIMessage
 
-        import gateway.routers.timeline as timeline_router
+        import gateway.agents.timeline as timeline_router
         from shared.config import settings
 
         tid = create_agent(db_conn)
@@ -2464,7 +2464,7 @@ class TestTimelineCompactHistory:
     ) -> None:
         from langchain_core.messages import AIMessage
 
-        import gateway.routers.timeline as timeline_router
+        import gateway.agents.timeline as timeline_router
         from shared.agents.history.checkpoint import CheckpointReadError
         from shared.config import settings
 

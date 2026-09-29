@@ -25,8 +25,8 @@ from fastapi.responses import StreamingResponse
 from fastapi.testclient import TestClient
 from starlette.requests import Request
 
-from gateway import _idempotency
 from gateway.app import app
+from gateway.middleware import idempotency
 from ops.rpc_schemas import ContentBlock
 from shared.agents import AgentStatus
 from shared.api_contracts.contracts import Idempotency
@@ -336,17 +336,17 @@ def test_non_2xx_releases_the_key(
     """A non-2xx outcome deletes the row, so a retry executes afresh."""
     # Simulate an owner that failed: claim the key, store nothing, release.
     pool = app.state.db_pool
-    assert _idempotency._claim(pool, "key-fail", "POST", f"/api/agents/{agent_id}/messages")
+    assert idempotency._claim(pool, "key-fail", "POST", f"/api/agents/{agent_id}/messages")
     assert (
-        _idempotency._fetch(pool, "key-fail", "POST", f"/api/agents/{agent_id}/messages") is None
+        idempotency._fetch(pool, "key-fail", "POST", f"/api/agents/{agent_id}/messages") is None
     )  # still executing
-    _idempotency._release(pool, "key-fail")
-    assert _idempotency._claim(pool, "key-fail", "POST", f"/api/agents/{agent_id}/messages"), (
+    idempotency._release(pool, "key-fail")
+    assert idempotency._claim(pool, "key-fail", "POST", f"/api/agents/{agent_id}/messages"), (
         "released key must be claimable again"
     )
     # Clear the placeholder again — the claim above is only the unit
     # assertion; a real request must find the key free and execute.
-    _idempotency._release(pool, "key-fail")
+    idempotency._release(pool, "key-fail")
     # And a real request with that key now executes (201 + row).
     resp = client.post(
         f"/api/agents/{agent_id}/messages",
@@ -361,14 +361,14 @@ def test_store_and_replay_roundtrip(client: TestClient, agent_id: int) -> None:
     """_store + _fetch round-trip: a completed row replays as a response."""
     pool = app.state.db_pool
     key = "key-roundtrip"
-    assert _idempotency._claim(pool, key, "POST", f"/api/agents/{agent_id}/messages")
-    _idempotency._store(pool, key, 201, {"detail": "stored"}, {"content-type": "application/json"})
-    done = _idempotency._fetch(pool, key, "POST", f"/api/agents/{agent_id}/messages")
+    assert idempotency._claim(pool, key, "POST", f"/api/agents/{agent_id}/messages")
+    idempotency._store(pool, key, 201, {"detail": "stored"}, {"content-type": "application/json"})
+    done = idempotency._fetch(pool, key, "POST", f"/api/agents/{agent_id}/messages")
     assert done is not None
     status, body, _headers = done
     assert status == 201
     assert body == {"detail": "stored"}
-    resp = _idempotency._replay(done)
+    resp = idempotency._replay(done)
     assert resp.status_code == 201
     assert json.loads(bytes(resp.body)) == {"detail": "stored"}
 
@@ -396,13 +396,13 @@ def test_stale_placeholder_never_bricks_key(
     pool = app.state.db_pool
     key = "key-stale"
     path = f"/api/agents/{agent_id}/messages"
-    assert _idempotency._claim(pool, key, "POST", path)
-    _age_placeholder(db_conn, key, _idempotency._RETENTION_DAYS + 1)
+    assert idempotency._claim(pool, key, "POST", path)
+    _age_placeholder(db_conn, key, idempotency._RETENTION_DAYS + 1)
     # A retry re-claims the dead owner's placeholder...
-    assert _idempotency._claim(pool, key, "POST", path), (
+    assert idempotency._claim(pool, key, "POST", path), (
         "a placeholder past the retention window must be stealable"
     )
-    _idempotency._release(pool, key)  # clear the unit claim; a real request owns it
+    idempotency._release(pool, key)  # clear the unit claim; a real request owns it
     # ...and the HTTP request executes instead of polling into a 503 timeout.
     resp = client.post(
         path,
@@ -438,9 +438,9 @@ def test_fresh_response_cache_placeholder_cannot_hide_committed_inbound(
         committed = cur.fetchone()
     db_conn.commit()
     assert committed is not None
-    assert _idempotency._claim(app.state.db_pool, key, "POST", path)
+    assert idempotency._claim(app.state.db_pool, key, "POST", path)
     # Keep a regression from taking the middleware's full 15-second wait.
-    monkeypatch.setattr(_idempotency, "_MAX_WAIT_SECONDS", 0.01)
+    monkeypatch.setattr(idempotency, "_MAX_WAIT_SECONDS", 0.01)
 
     response = client.post(
         path,
@@ -478,7 +478,7 @@ def test_reconcile_does_not_repeat_mutable_multimodal_validation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A receipt survives model/upload changes after the original commit."""
-    from gateway.routers import agents_state
+    from gateway.agents import state
 
     body = {
         "content": [
@@ -489,7 +489,7 @@ def test_reconcile_does_not_repeat_mutable_multimodal_validation(
         ],
         "source": "user",
     }
-    original_normalize = agents_state._normalize_message_content
+    original_normalize = state._normalize_message_content
 
     def _normalize_without_mutable_gates(
         _request: Request,
@@ -499,7 +499,7 @@ def test_reconcile_does_not_repeat_mutable_multimodal_validation(
         return original_normalize(content)
 
     monkeypatch.setattr(
-        agents_state,
+        state,
         "_prepare_message_content",
         _normalize_without_mutable_gates,
     )
@@ -513,7 +513,7 @@ def test_reconcile_does_not_repeat_mutable_multimodal_validation(
     def _mutable_gate_must_not_run(*_args: object, **_kwargs: object) -> None:
         raise AssertionError("same-key receipt lookup re-ran current model/upload validation")
 
-    monkeypatch.setattr(agents_state, "_prepare_message_content", _mutable_gate_must_not_run)
+    monkeypatch.setattr(state, "_prepare_message_content", _mutable_gate_must_not_run)
     retried = client.post(
         f"/api/agents/{agent_id}/messages",
         json=body,
@@ -538,7 +538,7 @@ def test_reconcile_heals_crash_after_commit_before_resurrect(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A lost first response heals one pending chat and its terminated owner."""
-    from gateway.routers import delivery
+    from gateway.agents import delivery
 
     with db_conn.cursor() as cur:
         cur.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (agent_id,))
@@ -604,15 +604,15 @@ def test_prune_removes_stale_placeholder(
     pool = app.state.db_pool
     key = "key-prune"
     path = f"/api/agents/{agent_id}/messages"
-    assert _idempotency._claim(pool, key, "POST", path)
-    _age_placeholder(db_conn, key, _idempotency._RETENTION_DAYS + 1)
+    assert idempotency._claim(pool, key, "POST", path)
+    _age_placeholder(db_conn, key, idempotency._RETENTION_DAYS + 1)
     # Any claim triggers the prune sweep.
-    assert _idempotency._claim(pool, "key-prune-other", "POST", path)
-    assert _idempotency._fetch(pool, key, "POST", path) is None, (
+    assert idempotency._claim(pool, "key-prune-other", "POST", path)
+    assert idempotency._fetch(pool, key, "POST", path) is None, (
         "a stale placeholder must be pruned like a completed row"
     )
-    assert _idempotency._claim(pool, key, "POST", path), "a pruned key must be claimable again"
-    _idempotency._release(pool, key)
+    assert idempotency._claim(pool, key, "POST", path), "a pruned key must be claimable again"
+    idempotency._release(pool, key)
 
 
 def test_key_scoped_to_method_path(
@@ -625,20 +625,20 @@ def test_key_scoped_to_method_path(
     key = "key-cross"
     path = f"/api/agents/{agent_id}/messages"
     other = f"/api/agents/{agent_id}/notices"
-    assert _idempotency._claim(pool, key, "POST", path)
-    assert not _idempotency._claim(pool, key, "POST", path), (
+    assert idempotency._claim(pool, key, "POST", path)
+    assert not idempotency._claim(pool, key, "POST", path), (
         "a live placeholder on the same route is owned — poll, don't steal"
     )
-    assert _idempotency._claim(pool, key, "POST", other), (
+    assert idempotency._claim(pool, key, "POST", other), (
         "a live placeholder on ANOTHER route is not this request's business"
     )
-    _idempotency._store(pool, key, 201, {"ok": True}, {"content-type": "application/json"})
-    done = _idempotency._fetch(pool, key, "POST", other)
+    idempotency._store(pool, key, 201, {"ok": True}, {"content-type": "application/json"})
+    done = idempotency._fetch(pool, key, "POST", other)
     assert done is not None and done[1] == {"ok": True}
-    assert _idempotency._fetch(pool, key, "POST", path) is None, (
+    assert idempotency._fetch(pool, key, "POST", path) is None, (
         "a completed row must only replay on its own route"
     )
-    _idempotency._release(pool, key)
+    idempotency._release(pool, key)
 
 
 def test_completed_row_not_stolen(
@@ -648,12 +648,12 @@ def test_completed_row_not_stolen(
     pool = app.state.db_pool
     key = "key-done"
     path = f"/api/agents/{agent_id}/messages"
-    assert _idempotency._claim(pool, key, "POST", path)
-    _idempotency._store(pool, key, 201, {"ok": True}, {"content-type": "application/json"})
-    assert not _idempotency._claim(pool, key, "POST", path), (
+    assert idempotency._claim(pool, key, "POST", path)
+    idempotency._store(pool, key, 201, {"ok": True}, {"content-type": "application/json"})
+    assert not idempotency._claim(pool, key, "POST", path), (
         "a completed same-route row is a replay, not a new claim"
     )
-    _idempotency._release(pool, key)
+    idempotency._release(pool, key)
 
 
 class _FakeAlwkContract:
@@ -697,7 +697,7 @@ def _run_middleware_once(
     }
 
     async def _run() -> Response:
-        return await _idempotency.idempotency_middleware(Request(scope), call_next)
+        return await idempotency.idempotency_middleware(Request(scope), call_next)
 
     return asyncio.run(_run())
 
@@ -706,7 +706,7 @@ def test_in_flight_key_timeout_uses_typed_retriable_envelope(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A live owner timeout remains retriable without exposing a detail-only body."""
-    monkeypatch.setattr(_idempotency.contracts, "contract_for", _fake_contract_for)
+    monkeypatch.setattr(idempotency.contracts, "contract_for", _fake_contract_for)
     monkeypatch.setattr(app.state, "db_pool", object(), raising=False)
 
     def claim_false(*_args: object) -> bool:
@@ -715,10 +715,10 @@ def test_in_flight_key_timeout_uses_typed_retriable_envelope(
     def fetch_none(*_args: object) -> None:
         return None
 
-    monkeypatch.setattr(_idempotency, "_claim", claim_false)
-    monkeypatch.setattr(_idempotency, "_fetch", fetch_none)
-    monotonic_values = iter((0.0, _idempotency._MAX_WAIT_SECONDS))
-    monkeypatch.setattr(_idempotency, "_monotonic", lambda: next(monotonic_values))
+    monkeypatch.setattr(idempotency, "_claim", claim_false)
+    monkeypatch.setattr(idempotency, "_fetch", fetch_none)
+    monotonic_values = iter((0.0, idempotency._MAX_WAIT_SECONDS))
+    monkeypatch.setattr(idempotency, "_monotonic", lambda: next(monotonic_values))
 
     async def call_next(_request: Request) -> Response:
         raise AssertionError("an in-flight request must not execute again")
@@ -744,11 +744,11 @@ def test_follower_polling_uses_capped_exponential_backoff(
     def fetch(*_args: object) -> None:
         return None
 
-    monkeypatch.setattr(_idempotency.contracts, "contract_for", _fake_contract_for)
+    monkeypatch.setattr(idempotency.contracts, "contract_for", _fake_contract_for)
     monkeypatch.setattr(app.state, "db_pool", object(), raising=False)
-    monkeypatch.setattr(_idempotency, "_claim", claim)
-    monkeypatch.setattr(_idempotency, "_fetch", fetch)
-    monkeypatch.setattr(_idempotency, "_monotonic", lambda: 0.0)
+    monkeypatch.setattr(idempotency, "_claim", claim)
+    monkeypatch.setattr(idempotency, "_fetch", fetch)
+    monkeypatch.setattr(idempotency, "_monotonic", lambda: 0.0)
 
     async def sleep(delay: float) -> None:
         sleeps.append(delay)
@@ -759,8 +759,8 @@ def test_follower_polling_uses_capped_exponential_backoff(
     async def call_next(_request: Request) -> Response:
         return Response(content=b"{}", media_type="application/json")
 
-    monkeypatch.setattr(_idempotency.asyncio, "sleep", sleep)
-    monkeypatch.setattr(_idempotency, "_drain_and_store", drain)
+    monkeypatch.setattr(idempotency.asyncio, "sleep", sleep)
+    monkeypatch.setattr(idempotency, "_drain_and_store", drain)
     _run_middleware_once("key-backoff", "/api/test-keyed", call_next)
 
     assert sleeps == [0.1, 0.1 * 1.75]
@@ -779,7 +779,7 @@ def test_owner_drain_failure_releases_key(
     pool = app.state.db_pool
     key = "key-drain"
     path = f"/api/agents/{agent_id}/messages"
-    monkeypatch.setattr(_idempotency.contracts, "contract_for", _fake_contract_for)
+    monkeypatch.setattr(idempotency.contracts, "contract_for", _fake_contract_for)
 
     async def _boom() -> AsyncGenerator[bytes, None]:
         yield b"partial"
@@ -790,11 +790,11 @@ def test_owner_drain_failure_releases_key(
 
     with pytest.raises(RuntimeError, match="upstream died mid-body"):
         _run_middleware_once(key, path, call_next)
-    assert _idempotency._fetch(pool, key, "POST", path) is None, (
+    assert idempotency._fetch(pool, key, "POST", path) is None, (
         "a drained-body failure must release the row"
     )
-    assert _idempotency._claim(pool, key, "POST", path), "the key must be claimable again"
-    _idempotency._release(pool, key)
+    assert idempotency._claim(pool, key, "POST", path), "the key must be claimable again"
+    idempotency._release(pool, key)
 
 
 def test_only_transactional_route_bypasses_generic_response_cache(
@@ -817,20 +817,20 @@ def test_only_transactional_route_bypasses_generic_response_cache(
         return StreamingResponse(_body(), media_type="application/json")
 
     monkeypatch.setattr(
-        _idempotency.contracts,
+        idempotency.contracts,
         "contract_for",
         _fake_transactional_contract_for,
     )
     _run_middleware_once(key, path, call_next)
     _run_middleware_once(key, path, call_next)
     assert executions == 2
-    assert _idempotency._fetch(app.state.db_pool, key, "POST", path) is None
+    assert idempotency._fetch(app.state.db_pool, key, "POST", path) is None
 
-    monkeypatch.setattr(_idempotency.contracts, "contract_for", _fake_contract_for)
+    monkeypatch.setattr(idempotency.contracts, "contract_for", _fake_contract_for)
     _run_middleware_once(key, path, call_next)
     _run_middleware_once(key, path, call_next)
     assert executions == 3, "ordinary ALWK second call must replay without executing"
-    _idempotency._release(app.state.db_pool, key)
+    idempotency._release(app.state.db_pool, key)
 
 
 def test_owner_non_streaming_response_releases_key(
@@ -845,15 +845,15 @@ def test_owner_non_streaming_response_releases_key(
     pool = app.state.db_pool
     key = "key-typeerror"
     path = f"/api/agents/{agent_id}/messages"
-    monkeypatch.setattr(_idempotency.contracts, "contract_for", _fake_contract_for)
+    monkeypatch.setattr(idempotency.contracts, "contract_for", _fake_contract_for)
 
     async def call_next(_request: Request) -> Response:
         return Response(status_code=200, content=b"{}")
 
     with pytest.raises(TypeError, match="non-streaming"):
         _run_middleware_once(key, path, call_next)
-    assert _idempotency._fetch(pool, key, "POST", path) is None, (
+    assert idempotency._fetch(pool, key, "POST", path) is None, (
         "a non-streaming-response TypeError must release the row"
     )
-    assert _idempotency._claim(pool, key, "POST", path), "the key must be claimable again"
-    _idempotency._release(pool, key)
+    assert idempotency._claim(pool, key, "POST", path), "the key must be claimable again"
+    idempotency._release(pool, key)

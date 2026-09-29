@@ -27,7 +27,7 @@ explicit hour windows whitelisted by `StatsWindowHours` (0/1/6/24/72/168); it
 has no since-compact window (a window over compact boundaries would first need
 an authoritative completed-compact stamp — a separate execution-contract
 decision). The `/inspect/live` half remains
-window-independent — see [[gateway/routers/ops-surfaces.ava.okf.md]].
+window-independent — see [[gateway/cluster/ops-surfaces.ava.okf.md]].
 
 Shell deadlines in `/inspect/live` and the shell monitor come only from
 `agent_shell_ttls`. Row-less page and schedule sessions render no shell TTL;

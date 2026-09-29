@@ -319,7 +319,7 @@ def test_timeline_pages_inside_a_session_using_existing_numeric_cursors(
     db_conn: psycopg.Connection[Any], owner: RuntimeIncarnation
 ) -> None:
     from agent.impersonation_handoff import start_marker
-    from gateway.routers.timeline import _window_before
+    from gateway.agents.timeline import _window_before
     from shared.agents.history.timeline import build_timeline_items
     from shared.agents.impersonation.impersonation_timeline import hydrate
 

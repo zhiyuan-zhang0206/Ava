@@ -15,7 +15,7 @@ import pytest
 from fastapi.testclient import TestClient
 from psycopg import sql
 
-from gateway.routers import alerts as alerts_router
+from gateway.alerts import router as alerts_router
 from shared.agents import impersonation as leases
 from shared.agents.impersonation import impersonation_history as history
 from shared.agents.impersonation.impersonation_events import _validate_event

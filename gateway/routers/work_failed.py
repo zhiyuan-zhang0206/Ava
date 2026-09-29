@@ -9,8 +9,8 @@ from typing import Any, NamedTuple, cast
 from fastapi import APIRouter, HTTPException, Request
 from psycopg_pool import ConnectionPool
 
-from gateway.routers._webhook_auth import authenticate_webhook
-from gateway.routers.delivery import deliver_chat_inbound
+from gateway.agents.delivery import deliver_chat_inbound
+from gateway.auth.webhook import authenticate_webhook
 from gateway.schemas.work_failed import FailureDeliveryKind, WorkFailedIn, WorkFailedResult
 from shared.agents import AgentStatus
 from shared.agents.messages.inbound_provenance import InboundProvenance

@@ -8,7 +8,7 @@ dispatches on, and `read_ava_kwargs` is the single convergence point that gives
 a message's kwargs the typed view.
 
 Writers live in `agent/messages/__init__.py` (+ `agent/graph/claim/node.py`, `agent/graph/llm/node.py`);
-readers in `shared/agents/history/timeline.py`, `gateway/context_breakdown.py`,
+readers in `shared/agents/history/timeline.py`, `gateway/agents/context_breakdown.py`,
 `agent/graph/memory_recall.py`. It sits in `shared/` (leaf) so both the agent
 and the gateway import it without an agent <-> gateway package cycle.
 

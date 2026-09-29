@@ -295,7 +295,7 @@ def _machine_row(**overrides: object) -> dict[str, object]:
     """
     from datetime import UTC, datetime
 
-    from gateway.schemas import MachineStatus
+    from shared.api_contracts.status import MachineStatus
 
     base = MachineStatus(
         name="test-host",

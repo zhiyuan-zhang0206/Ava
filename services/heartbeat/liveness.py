@@ -70,7 +70,7 @@ _log = logging.getLogger("services.heartbeat.liveness")
 
 # Per-machine status_probe timeout — `settings.gateway.status_probe_timeout_seconds`
 # (default 8s), the SAME setting the roster's probe reads
-# (gateway/routers/status.py), so the two probes stay aligned by construction
+# (gateway/cluster/status.py), so the two probes stay aligned by construction
 # (task #1200: a 3.0s hardcode here and in the roster flipped a slow-but-healthy
 # WSL runner offline — its status_snapshot measured 3.07-3.27s — while a
 # genuinely offline host still refuses fast, so the wider budget costs only the

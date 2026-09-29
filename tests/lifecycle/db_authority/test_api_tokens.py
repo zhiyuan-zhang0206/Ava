@@ -27,9 +27,9 @@ from fastapi.testclient import TestClient
 from starlette.requests import Request
 
 from cli.commands.data_plane import bringup
-from gateway import request_principal
-from gateway.request_principal import cluster_credential
-from gateway.routers._webhook_auth import authenticate_webhook
+from gateway.auth import request_principal
+from gateway.auth.request_principal import cluster_credential
+from gateway.auth.webhook import authenticate_webhook
 from ops.roster.service_spec import ServiceSpec, api_access
 from services.agent_ops import _boot as ops_boot
 from shared.cluster import authority
@@ -270,7 +270,7 @@ def test_the_sessions_list_shows_only_sessions_that_authenticate(gateway: Path) 
     """`/api/auth/sessions` lists what the session check would still admit: a
     runner-minted session leaves the list when the fence revokes its generation,
     and an id without a mint (the pre-mint format) never appears."""
-    from gateway.session_store import create_session
+    from gateway.auth.session_store import create_session
     from shared.cluster_auth import new_session_id
 
     runner = _tokens(gateway).api.runner
@@ -339,7 +339,7 @@ def test_only_a_human_credential_manages_mcp_clients(gateway: Path) -> None:
     A generation-bound admission (either machine token, or a session a runner
     token minted) must not mint one that outlives it, nor list or revoke them;
     the human secret and the sessions it minted manage them."""
-    from gateway import mcp_clients
+    from gateway.mcp_server import clients
 
     tokens = _tokens(gateway).api
     with TestClient(config_app()) as client:
@@ -360,7 +360,7 @@ def test_only_a_human_credential_manages_mcp_clients(gateway: Path) -> None:
             assert minted.status_code == 403, minted.text
             assert client.get("/api/mcp/clients", headers=headers).status_code == 403
             assert client.post("/api/mcp/clients/1/revoke", headers=headers).status_code == 403
-        assert mcp_clients.list_clients(pool) == []
+        assert clients.list_clients(pool) == []
 
         human = (
             bearer_header(_HUMAN),

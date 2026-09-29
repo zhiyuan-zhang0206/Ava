@@ -176,8 +176,8 @@ def test_unexpected_programming_failure_is_not_silently_graded(
 def test_gateway_probe_preserves_degraded_schema_status(
     monkeypatch: pytest.MonkeyPatch, kind: SchemaMismatchKind
 ) -> None:
-    from gateway.routers import _roster_probe
-    from gateway.routers import status as status_route
+    from gateway.cluster import roster_probe
+    from gateway.cluster import status as status_route
 
     diagnosis = SchemaMismatchStatus(kind=kind, machine="gateway", detail="schema evidence failed")
     response = ClusterStatus(
@@ -194,10 +194,10 @@ def test_gateway_probe_preserves_degraded_schema_status(
     def reachable(_name: str) -> None:
         pass
 
-    monkeypatch.setattr(_roster_probe, "_probe_failures", {})
-    monkeypatch.setattr(_roster_probe, "dispatch_status_probe", probe)
-    monkeypatch.setattr(_roster_probe, "_note_probe_reachable", reachable)
-    monkeypatch.setattr(_roster_probe, "note_identity_match", reachable)
+    monkeypatch.setattr(roster_probe, "_probe_failures", {})
+    monkeypatch.setattr(roster_probe, "dispatch_status_probe", probe)
+    monkeypatch.setattr(roster_probe, "note_probe_reachable", reachable)
+    monkeypatch.setattr(roster_probe, "note_identity_match", reachable)
     row = asyncio.run(
         status_route._probe_agent_runner(
             "gateway", ["gateway"], "http://inert.invalid", datetime.now(UTC), None, None

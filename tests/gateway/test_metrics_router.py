@@ -5,7 +5,7 @@ The per-unit aggregation math is unit-tested in tests/shared/test_metrics.py
 contract*: the windowed Loki fetch wires `attributes.X` keys to the real emit
 field names, the `{meta, metrics}` envelope shape holds, and the `days` / `agent`
 query params behave. The Loki backend is the in-memory `FakeLoki`
-(monkeypatched onto `gateway.loki_events`); the `agents` table stays real SQL
+(monkeypatched onto `gateway.lgtm.loki_events`); the `agents` table stays real SQL
 (`/api/metrics/agents` reads labels from it).
 """
 
@@ -31,10 +31,12 @@ _UNITS = {
 @pytest.fixture
 def loki_fake(monkeypatch: pytest.MonkeyPatch) -> FakeLoki:
     fake = FakeLoki()
-    monkeypatch.setattr("gateway.loki_events.count_events", fake.count_events)
-    monkeypatch.setattr("gateway.loki_events.count_grouped", fake.count_grouped)
-    monkeypatch.setattr("gateway.loki_events.query_events", fake.query_events)
-    monkeypatch.setattr("gateway.loki_events.query_projected_lines", fake.query_projected_lines)
+    monkeypatch.setattr("gateway.lgtm.loki_events.count_events", fake.count_events)
+    monkeypatch.setattr("gateway.lgtm.loki_events.count_grouped", fake.count_grouped)
+    monkeypatch.setattr("gateway.lgtm.loki_events.query_events", fake.query_events)
+    monkeypatch.setattr(
+        "gateway.lgtm.loki_events.query_projected_lines", fake.query_projected_lines
+    )
     return fake
 
 

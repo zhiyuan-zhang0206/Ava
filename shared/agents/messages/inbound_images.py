@@ -12,7 +12,7 @@ def inbound_image_urls(agent_id: int, payload: dict[str, Any] | None) -> list[st
 
     The stored `content_blocks` mirror the POST body; a block counts as a
     renderable image only when it passes the same gate `_validate_image_ref`
-    (gateway/routers/agents_state.py) applied at write time — one of this
+    (gateway/agents/state.py) applied at write time — one of this
     agent's upload urls carrying a recognized image suffix. That keeps the
     strip's thumbnails on the exact url contract the timeline uses
     (`ava_image_urls`), never a path the browser cannot load. Malformed

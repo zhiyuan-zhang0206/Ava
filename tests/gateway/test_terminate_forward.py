@@ -1,4 +1,4 @@
-"""Cross-machine terminate forward (`gateway/routers/agents_lifecycle.py:post_agent_terminate`) unit tests —
+"""Cross-machine terminate forward (`gateway/agents/lifecycle.py:post_agent_terminate`) unit tests —
 
 Both graceful and force requests route to the home runner. It owns the hosted
 turn and local execution resources; gateway placement must not choose a local
@@ -17,9 +17,9 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
+from gateway.agents import forward as forward_module
+from gateway.agents import lifecycle as lifecycle_module
 from gateway.app import app
-from gateway.routers import agents_forward as forward_module
-from gateway.routers import agents_lifecycle as lifecycle_module
 from shared.agents import CrossMachineGatewayUnavailable, MachineNotRegistered
 
 
@@ -188,7 +188,7 @@ def test_remote_home_machine_is_forwarded(
     with TestClient(app) as client:
         agent_id = client.post("/api/agents", json={}).json()["id"]
         _set_agent_machine(db_conn, agent_id, "stale-wsl")
-        monkeypatch.setattr(forward_module, "_enqueue_lifecycle", _capture_enqueue)  # pyright: ignore[reportUnknownArgumentType]
+        monkeypatch.setattr(forward_module, "enqueue_lifecycle", _capture_enqueue)  # pyright: ignore[reportUnknownArgumentType]
         resp = client.post(f"/api/agents/{agent_id}/terminate")
     assert resp.status_code == 200
     assert resp.json() == {"status": "enqueued", "open_tasks": None, "shell_sessions": None}

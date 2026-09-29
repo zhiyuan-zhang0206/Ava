@@ -18,8 +18,8 @@ from typing import Any
 
 import pytest
 
-from gateway import _pause_policy
 from gateway.app import app
+from gateway.middleware import pause_policy
 from shared.api_contracts import contracts
 from shared.api_contracts.contracts import Idempotency, PauseSemantics
 
@@ -102,7 +102,7 @@ def test_pause_exempt_surface_is_audited() -> None:
     exemption must be a deliberate edit to this test + the contract, never
     an invisible middleware string.
     """
-    assert _pause_policy.control_plane_surface() == _EXPECTED_CONTROL_PLANE
+    assert pause_policy.control_plane_surface() == _EXPECTED_CONTROL_PLANE
 
 
 def test_should_bypass_pause_agrees_with_surface() -> None:
@@ -127,9 +127,9 @@ def test_should_bypass_pause_agrees_with_surface() -> None:
         ("GET", "/pages/5-report/a/b"),
     ]
     for method, path in exempt:
-        assert _pause_policy.should_bypass_pause(method, path), f"expected exempt: {method} {path}"
+        assert pause_policy.should_bypass_pause(method, path), f"expected exempt: {method} {path}"
     for method, path in blocked:
-        assert not _pause_policy.should_bypass_pause(method, path), (
+        assert not pause_policy.should_bypass_pause(method, path), (
             f"expected blocked: {method} {path}"
         )
 

@@ -12,7 +12,7 @@ from psycopg.types.json import Jsonb
 from pydantic import SecretStr
 
 import shared.db
-from gateway.alert_reconciliation import (
+from gateway.alerts.reconciliation import (
     _grafana_active_alert_keys,
     _reconcile_once,
     reconcile_open_grafana_alerts,

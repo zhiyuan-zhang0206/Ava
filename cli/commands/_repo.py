@@ -185,7 +185,7 @@ def _assert_schema_current_or_die() -> int:
 
 # The one endpoint that answers "can a host use the gateway?". Authenticated, and
 # deliberately **exempt from the paused-host 503 middleware**
-# (`gateway/routers/cluster.py`), so a 200 here means the gateway is *serving* — not
+# (`gateway/cluster/router.py`), so a 200 here means the gateway is *serving* — not
 # that the cluster is unpaused. It is also served only after `gateway.app.main`'s
 # `assert_schema_current` has passed, so serving implies migrated: the two are not
 # separate instants a caller has to wait for in turn.

@@ -17,23 +17,25 @@ from fastapi.testclient import TestClient
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import Response
 
-import gateway._auth401_log as auth401_log
-from gateway import loki_events, loki_query_budget, prom_metrics
-from gateway._backend_failure import raise_backend_unavailable
-from gateway._cors import cors_allowed_origins
 from gateway.app import (
-    _ava_agent_error_handler,
     _cluster_auth_middleware,
     _cluster_pause_middleware,
-    _http_exception_handler,
-    _loki_query_budget_error_handler,
-    _observability_read_unavailable_handler,
-    _prom_query_budget_error_handler,
-    _request_validation_error_handler,
-    _unhandled_exception_handler,
 )
-from gateway.error_envelope import request_trace_middleware
-from gateway.schemas import ErrorEnvelope
+from gateway.auth import rejection_log
+from gateway.auth.cors import cors_allowed_origins
+from gateway.lgtm import loki_events, loki_query_budget, prom_metrics
+from gateway.lgtm.backend_failure import raise_backend_unavailable
+from gateway.middleware.error_envelope import request_trace_middleware
+from gateway.middleware.error_handlers import (
+    ava_agent_error_handler,
+    http_exception_handler,
+    loki_query_budget_error_handler,
+    observability_read_unavailable_handler,
+    prom_query_budget_error_handler,
+    request_validation_error_handler,
+    unhandled_exception_handler,
+)
+from gateway.schemas.errors import ErrorEnvelope
 from shared import config
 from shared.agents import AgentNotFound, AvaAgentError, ErrorReason
 
@@ -84,22 +86,22 @@ def handler_client() -> Iterator[TestClient]:
         allow_headers=["*"],
     )
     app.middleware("http")(request_trace_middleware)
-    app.add_exception_handler(AvaAgentError, _ava_agent_error_handler)  # type: ignore[arg-type]
+    app.add_exception_handler(AvaAgentError, ava_agent_error_handler)  # type: ignore[arg-type]
     app.add_exception_handler(
         loki_query_budget.LokiQueryBudgetError,
-        _loki_query_budget_error_handler,  # type: ignore[arg-type]
+        loki_query_budget_error_handler,  # type: ignore[arg-type]
     )
     app.add_exception_handler(
         loki_events.ObservabilityReadUnavailable,
-        _observability_read_unavailable_handler,  # type: ignore[arg-type]
+        observability_read_unavailable_handler,  # type: ignore[arg-type]
     )
     app.add_exception_handler(
         prom_metrics.PromQueryBudgetError,
-        _prom_query_budget_error_handler,  # type: ignore[arg-type]
+        prom_query_budget_error_handler,  # type: ignore[arg-type]
     )
-    app.add_exception_handler(StarletteHTTPException, _http_exception_handler)  # type: ignore[arg-type]
-    app.add_exception_handler(RequestValidationError, _request_validation_error_handler)  # type: ignore[arg-type]
-    app.add_exception_handler(Exception, _unhandled_exception_handler)
+    app.add_exception_handler(StarletteHTTPException, http_exception_handler)  # type: ignore[arg-type]
+    app.add_exception_handler(RequestValidationError, request_validation_error_handler)  # type: ignore[arg-type]
+    app.add_exception_handler(Exception, unhandled_exception_handler)
 
     @app.get("/agent")
     def agent_error() -> None:
@@ -182,7 +184,7 @@ def test_active_otel_trace_id_wins_over_request_fallback(
     handler_client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Envelope correlation uses the active OTel trace when one exists."""
-    from gateway import error_envelope
+    from gateway.middleware import error_envelope
 
     monkeypatch.setattr(error_envelope.telemetry, "capture_trace_ids", lambda: ("a" * 32, None))
     response = handler_client.get("/agent")
@@ -223,13 +225,13 @@ def _request(
 def _clear_auth401_throttle_state() -> Iterator[None]:
     """Keep process-local auth-401 throttle + aggregate-count state from
     coupling tests."""
-    auth401_log._auth401_last_warn.clear()
-    auth401_log._auth401_suppressed.clear()
-    auth401_log._auth401_total = 0
+    rejection_log._auth401_last_warn.clear()
+    rejection_log._auth401_suppressed.clear()
+    rejection_log._auth401_total = 0
     yield
-    auth401_log._auth401_last_warn.clear()
-    auth401_log._auth401_suppressed.clear()
-    auth401_log._auth401_total = 0
+    rejection_log._auth401_last_warn.clear()
+    rejection_log._auth401_suppressed.clear()
+    rejection_log._auth401_total = 0
 
 
 def _enable_cluster_auth(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -248,7 +250,8 @@ def _auth401_records(caplog: pytest.LogCaptureFixture) -> list[logging.LogRecord
     return [
         record
         for record in caplog.records
-        if record.name == "gateway._auth401_log" and record.getMessage().startswith("auth 401:")
+        if record.name == "gateway.auth.rejection_log"
+        and record.getMessage().startswith("auth 401:")
     ]
 
 
@@ -334,7 +337,7 @@ def test_auth_middleware_logs_sse_poll_401_at_debug(
 ) -> None:
     """Stale EventSource reconnects stay forensic-only without changing the response."""
     _enable_cluster_auth(monkeypatch)
-    caplog.set_level(logging.DEBUG, logger="gateway._auth401_log")
+    caplog.set_level(logging.DEBUG, logger="gateway.auth.rejection_log")
 
     response = _unauthorized_auth_response(
         _request(path=path, headers=[(b"user-agent", b"stale-browser")])
@@ -352,7 +355,7 @@ def test_auth_middleware_warns_on_first_non_stream_401(
 ) -> None:
     """A new client/path source remains visible once at WARNING."""
     _enable_cluster_auth(monkeypatch)
-    caplog.set_level(logging.DEBUG, logger="gateway._auth401_log")
+    caplog.set_level(logging.DEBUG, logger="gateway.auth.rejection_log")
 
     response = _unauthorized_auth_response(_request(headers=[(b"user-agent", b"curl/8.1")]))
     _assert_envelope(response, status=401, code="authentication_required", retryable=False)
@@ -368,7 +371,7 @@ def test_auth_middleware_suppresses_immediate_non_stream_401_repeat(
 ) -> None:
     """A repeated client/path key is downgraded and counted during cooldown."""
     _enable_cluster_auth(monkeypatch)
-    caplog.set_level(logging.DEBUG, logger="gateway._auth401_log")
+    caplog.set_level(logging.DEBUG, logger="gateway.auth.rejection_log")
     request = _request()
 
     _unauthorized_auth_response(request)
@@ -379,7 +382,7 @@ def test_auth_middleware_suppresses_immediate_non_stream_401_repeat(
     records = _auth401_records(caplog)
     assert [record.levelno for record in records] == [logging.DEBUG]
     assert "suppressed" in records[0].getMessage()
-    assert auth401_log._auth401_suppressed[("127.0.0.1", "/api/agents")] == 1
+    assert rejection_log._auth401_suppressed[("127.0.0.1", "/api/agents")] == 1
 
 
 def test_auth_middleware_warns_after_cooldown_with_suppressed_count(
@@ -388,8 +391,8 @@ def test_auth_middleware_warns_after_cooldown_with_suppressed_count(
     """The next warning reports repeats hidden during the elapsed cooldown."""
     _enable_cluster_auth(monkeypatch)
     now = [100.0]
-    monkeypatch.setattr(auth401_log.time, "monotonic", lambda: now[0])
-    caplog.set_level(logging.DEBUG, logger="gateway._auth401_log")
+    monkeypatch.setattr(rejection_log.time, "monotonic", lambda: now[0])
+    caplog.set_level(logging.DEBUG, logger="gateway.auth.rejection_log")
     request = _request()
 
     _unauthorized_auth_response(request)
@@ -410,7 +413,7 @@ def test_auth_middleware_prunes_idle_401_throttle_keys(
     """A client/path key idle for two windows stops consuming throttle state."""
     _enable_cluster_auth(monkeypatch)
     now = [100.0]
-    monkeypatch.setattr(auth401_log.time, "monotonic", lambda: now[0])
+    monkeypatch.setattr(rejection_log.time, "monotonic", lambda: now[0])
     stale_key = ("127.0.0.1", "/api/agents")
 
     _unauthorized_auth_response(_request())
@@ -419,8 +422,8 @@ def test_auth_middleware_prunes_idle_401_throttle_keys(
     response = _unauthorized_auth_response(_request(path="/api/alerts"))
 
     _assert_envelope(response, status=401, code="authentication_required", retryable=False)
-    assert stale_key not in auth401_log._auth401_last_warn
-    assert stale_key not in auth401_log._auth401_suppressed
+    assert stale_key not in rejection_log._auth401_last_warn
+    assert stale_key not in rejection_log._auth401_suppressed
 
 
 def test_auth_middleware_throttles_non_stream_401s_per_client_and_path(
@@ -428,7 +431,7 @@ def test_auth_middleware_throttles_non_stream_401s_per_client_and_path(
 ) -> None:
     """A warning for one client/path key does not hide either neighboring key."""
     _enable_cluster_auth(monkeypatch)
-    caplog.set_level(logging.DEBUG, logger="gateway._auth401_log")
+    caplog.set_level(logging.DEBUG, logger="gateway.auth.rejection_log")
     _unauthorized_auth_response(_request())
     caplog.clear()
 
@@ -456,14 +459,14 @@ def test_auth401_aggregate_counts_every_rejection(monkeypatch: pytest.MonkeyPatc
     SSE flood paths and throttled repeats included (the log severity is
     throttled, the count must not be; task #1712)."""
     _enable_cluster_auth(monkeypatch)
-    assert auth401_log._auth401_total == 0
+    assert rejection_log._auth401_total == 0
 
     _unauthorized_auth_response(_request(path="/api/events/stream"))
     _unauthorized_auth_response(_request(path="/api/events/stream"))
     _unauthorized_auth_response(_request(path="/api/agents"))
     _unauthorized_auth_response(_request(path="/api/agents"))
 
-    assert auth401_log._auth401_total == 4
+    assert rejection_log._auth401_total == 4
 
 
 def test_auth401_drain_returns_count_once_and_resets(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -473,10 +476,10 @@ def test_auth401_drain_returns_count_once_and_resets(monkeypatch: pytest.MonkeyP
     _unauthorized_auth_response(_request())
     _unauthorized_auth_response(_request())
 
-    assert auth401_log.drain_auth401_count() == 2
-    assert auth401_log.drain_auth401_count() == 0
+    assert rejection_log.drain_auth401_count() == 2
+    assert rejection_log.drain_auth401_count() == 0
     _unauthorized_auth_response(_request())
-    assert auth401_log.drain_auth401_count() == 1
+    assert rejection_log.drain_auth401_count() == 1
 
 
 def test_auth401_emit_aggregate_event(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -489,12 +492,12 @@ def test_auth401_emit_aggregate_event(monkeypatch: pytest.MonkeyPatch) -> None:
     ) -> None:
         emitted.append((category, event_name, attributes or {}))
 
-    monkeypatch.setattr(auth401_log.telemetry, "emit", _fake_emit)
+    monkeypatch.setattr(rejection_log.telemetry, "emit", _fake_emit)
 
-    auth401_log.emit_auth401_count(0)
+    rejection_log.emit_auth401_count(0)
     assert emitted == []
 
-    auth401_log.emit_auth401_count(17)
+    rejection_log.emit_auth401_count(17)
     assert emitted == [("telemetry", "auth401_rejected", {"count": 17})]
 
 

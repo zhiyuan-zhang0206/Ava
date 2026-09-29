@@ -289,7 +289,7 @@ composer/plugin extension point.
   is colors, and re-valuing the radius is a layout change in a theme's
   clothes.
 - **U2 — themes end-to-end** — **shipped**: `GET /api/ui/contributions`
-  (`gateway/routers/ui_contributions.py` — the enabled plugins' manifests,
+  (`gateway/extensions/ui_contributions.py` — the enabled plugins' manifests,
   merged and plugin-attributed; themes today, the other two arrays land with
   their slices, which is additive) + the Display-settings picker + the
   `display.theme_pack` `user_settings` key + `ui/web/src/components/theme-pack-tokens.tsx`,
@@ -331,7 +331,7 @@ composer/plugin extension point.
   the user meets the fact before choosing it rather than after wondering why
   the mode toggle stopped working.
 - **U3 — plugin page mount + nav** — **shipped, static backend only**:
-  `/api/plugin-ui/<plugin>/…` (`gateway/routers/plugin_ui.py`) serves an
+  `/api/plugin-ui/<plugin>/…` (`gateway/extensions/plugin_ui.py`) serves an
   ENABLED plugin's own `ui/` directory — the converge-synced static backend,
   which needs no process because converge already materializes the plugin
   image.

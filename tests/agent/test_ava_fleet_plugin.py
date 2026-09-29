@@ -565,7 +565,7 @@ def test_response_notice_content_edits_publish_refreshed_snapshot(
     NoticePosted refreshes the Inbox queue; AgentUpdated requests current
     detail so the inspector can read the edited response-required notice.
     """
-    from gateway.routers import notices as notices_router
+    from gateway.agents import notices as notices_router
 
     published_agent_ids: list[int] = []
 
@@ -710,7 +710,7 @@ def test_dismissing_response_notice_refreshes_inspector_snapshot(
     monkeypatch: pytest.MonkeyPatch,
 ):
     """Removing the dismiss snapshot refresh leaves the inspector stale."""
-    from gateway.routers import notices as notices_router
+    from gateway.agents import notices as notices_router
 
     published_awaiting: list[list[str]] = []
 
@@ -743,7 +743,7 @@ def test_cross_type_supersede_refreshes_inbox_and_inspector_projections(
     monkeypatch: pytest.MonkeyPatch,
 ):
     """Each cross-type replacement announces both consumers' new state."""
-    from gateway.routers import notices as notices_router
+    from gateway.agents import notices as notices_router
 
     published_awaiting: list[list[str]] = []
     posted: list[int] = []

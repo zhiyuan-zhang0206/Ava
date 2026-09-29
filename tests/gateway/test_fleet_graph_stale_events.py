@@ -21,8 +21,8 @@ import pytest
 from fastapi.testclient import TestClient
 from psycopg import errors as pg_errors
 
-from gateway import loki_query_budget, prom_metrics, telemetry_staleness
 from gateway.app import app
+from gateway.lgtm import loki_query_budget, prom_metrics, telemetry_staleness
 from shared import telemetry
 
 _STALE_EVENT = "fleet_graph_stale"

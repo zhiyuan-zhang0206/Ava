@@ -146,7 +146,7 @@ limits_config:
   # max_query_length (30d1h) would reject any whole-span parity/read query.
   max_query_length: 2160h
   # Kill a query that runs longer than this server-side. Deliberately just
-  # under the gateway's 60s httpx timeout (gateway/loki_events.py): a hung
+  # under the gateway's 60s httpx timeout (gateway/lgtm/loki_events.py): a hung
   # query then dies here with a clean error the gateway maps to a 503
   # (plus a loki_query_failed event with the query shape) instead of
   # holding a querier slot until the client abandons it — the failure mode
@@ -156,7 +156,7 @@ limits_config:
   query_timeout: 50s
   # Output series cap per query. The default (500) forced the gateway's
   # aggregations to defensively topk(500) their results (see the
-  # _bucketed_distribution_logql note in gateway/loki_events.py) — the
+  # _bucketed_distribution_logql note in gateway/lgtm/loki_events.py) — the
   # events stream's aggregation shapes legitimately exceed 500 series.
   # 20000 is sized for the events-maintenance rollup's merged daily
   # turn-duration histogram (`sum by (agent_id, bucket)`: 3061 series on the
@@ -177,7 +177,7 @@ limits_config:
   # horizontally scaled querier fleet; here they turned one 30d instant
   # aggregation into ~128 hourly subqueries, 2026-08-18 incident). BOTH split
   # keys matter: the gateway's aggregations (count_events / count_grouped /
-  # attribute_aggregate in gateway/loki_events.py) are INSTANT queries
+  # attribute_aggregate in gateway/lgtm/loki_events.py) are INSTANT queries
   # governed only by the instant key; range queries (query_events,
   # count_events_series, metric_range) follow the other.
   split_queries_by_interval: 24h

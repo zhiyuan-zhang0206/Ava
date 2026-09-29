@@ -150,8 +150,8 @@ def model_supports_vision(model: str) -> bool:
 def vision_capable_provider_names() -> list[str]:
     """Display names of every vision-capable binding — core + plugin.
 
-    Feeds the message endpoint's 422 error text (gateway/routers/
-    agents_state.py), so the "switch to a vision-capable model" hint stops
+    Feeds the message endpoint's 422 error text (gateway/agents/
+    state.py), so the "switch to a vision-capable model" hint stops
     being a hardcoded list that a new provider must remember to edit.
     """
     ensure_provider_plugins_loaded()

@@ -11,9 +11,9 @@ _MAX_WORKERS = 4
 
 
 class LokiBackend(Protocol):
-    """The slice of `gateway.loki_events` `fetch_aggregate` needs — injected
+    """The slice of `gateway.lgtm.loki_events` `fetch_aggregate` needs — injected
     (shared code must not import gateway; tests pass a fake). Signatures
-    mirror `gateway.loki_events` 1:1 so the module satisfies the protocol
+    mirror `gateway.lgtm.loki_events` 1:1 so the module satisfies the protocol
     structurally (pyright checks call compatibility both ways)."""
 
     def count_events(
@@ -72,7 +72,7 @@ class LokiBackend(Protocol):
         attribute_filters: dict[str, str] | None = None,
         from_: datetime | None = None,
         to: datetime | None = None,
-        # Mirrors gateway._loki_event_rows.query_events 1:1 (the structural-
+        # Mirrors gateway.lgtm._loki_event_rows.query_events 1:1 (the structural-
         # protocol contract above) — task #3696 exception inventory.
         limit: int = 100,
         offset: int = 0,
@@ -97,7 +97,7 @@ class LokiBackend(Protocol):
         attribute_filters: dict[str, str] | None = None,
         from_: datetime | None = None,
         to: datetime | None = None,
-        # Mirrors gateway._loki_event_rows.query_projected_lines 1:1
+        # Mirrors gateway.lgtm._loki_event_rows.query_projected_lines 1:1
         # (task #3696 exception inventory).
         limit_per_slice: int = 5000,
     ) -> list[tuple[int, int | None, str]]: ...

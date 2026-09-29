@@ -384,7 +384,7 @@ def test_metrics_logql_timeseries_via_loki(
     fixed 24h window, 1h steps) instead of Postgres, and the series folds
     into the same PluginMetricResult shape."""
 
-    from gateway import loki_events
+    from gateway.lgtm import loki_events
 
     aid = _insert_agent(db_conn)
     _patch_loader(monkeypatch, _logql_metric())
@@ -422,7 +422,7 @@ def test_metrics_logql_stat_via_loki(
     db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A stat-shaped logql metric returns the last bucket as `value`."""
-    from gateway import loki_events
+    from gateway.lgtm import loki_events
 
     aid = _insert_agent(db_conn)
     _patch_loader(
@@ -456,7 +456,7 @@ def test_metrics_logql_loki_failure_is_per_metric(
 ) -> None:
     """A Loki error lands in the metric's `error` field; sibling SQL metrics
     still render."""
-    from gateway import loki_events
+    from gateway.lgtm import loki_events
 
     aid = _insert_agent(db_conn)
     _patch_loader(
@@ -490,7 +490,7 @@ def test_metrics_logql_local_budget_rejection_is_503(
     reason: Literal["queue_full", "acquire_timeout"],
 ) -> None:
     """A local budget refusal is endpoint saturation, not a per-metric Loki error."""
-    from gateway import loki_events, loki_query_budget
+    from gateway.lgtm import loki_events, loki_query_budget
 
     aid = _insert_agent(db_conn)
     _patch_loader(monkeypatch, _logql_metric())
@@ -511,7 +511,7 @@ def test_metrics_logql_releases_db_connection_before_waiting_for_loki(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A queued Loki query must not consume a scarce Postgres pool slot."""
-    from gateway import loki_events
+    from gateway.lgtm import loki_events
 
     class TrackingCursor:
         def execute(self, query: str, params: tuple[int] | None = None) -> None:

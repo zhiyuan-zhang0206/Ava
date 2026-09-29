@@ -31,7 +31,7 @@ def spawn_calls(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
         calls["spawner"] = body.spawner
         return SpawnedAgent(id=901)
 
-    monkeypatch.setattr("gateway.routers.packages.create_and_launch_agent", _fake_create_launch)
+    monkeypatch.setattr("gateway.extensions.packages.create_and_launch_agent", _fake_create_launch)
     return calls
 
 

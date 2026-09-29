@@ -1349,7 +1349,7 @@
     "/api/agents/{agent_id}/context-breakdown": {
       "get": {
         "summary": "Get Context Breakdown",
-        "description": "How the agent's context window is spent, for the composer's breakdown\npanel (lazy-loaded on expand).\n\nBuckets the checkpoint messages by kind + splits the system prompt into its\ntop-level sections, each a chars/4 estimate proportionally normalized to the\nlast LLM call's real `input_tokens` (so the categories sum to the truth). Pure\ngateway-side view logic (`gateway/context_breakdown.py`) — one checkpoint read,\nno kernel/agent involvement. A checkpoint read failure / no checkpoint yields\nan empty breakdown with zeroed totals (same tolerance as token-usage: the\npanel re-opens fine later).",
+        "description": "How the agent's context window is spent, for the composer's breakdown\npanel (lazy-loaded on expand).\n\nBuckets the checkpoint messages by kind + splits the system prompt into its\ntop-level sections, each a chars/4 estimate proportionally normalized to the\nlast LLM call's real `input_tokens` (so the categories sum to the truth). Pure\ngateway-side view logic (`gateway/agents/context_breakdown.py`) — one checkpoint read,\nno kernel/agent involvement. A checkpoint read failure / no checkpoint yields\nan empty breakdown with zeroed totals (same tolerance as token-usage: the\npanel re-opens fine later).",
         "operationId": "get_context_breakdown_api_agents__agent_id__context_breakdown_get",
         "parameters": [
           {

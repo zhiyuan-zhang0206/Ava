@@ -1257,7 +1257,7 @@ def test_supersede_publishes_global_notice_id(
     Regression: both used the local id, so the frontend could not drop the
     superseded notice from the open feed until the next snapshot refresh.
     """
-    from gateway.routers import notices as notices_router
+    from gateway.agents import notices as notices_router
 
     agent_id = _seed_agent(db_conn)
     # Skew the per-agent LOCAL sequence clear of the GLOBAL one (a resolved

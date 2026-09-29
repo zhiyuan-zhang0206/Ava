@@ -22,7 +22,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Request
 
-from gateway.schemas import DefaultModelView, DefaultModelWrite
+from gateway.schemas.models import DefaultModelView, DefaultModelWrite
 from shared.birth_config import cluster_default_model, set_cluster_default_model
 from shared.config import settings
 

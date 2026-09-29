@@ -280,9 +280,11 @@ def test_node_npm_and_codegen_share_one_condition() -> None:
 
 def test_every_codegen_input_family_selects_freshness() -> None:
     paths = (
-        "gateway/schemas/agents.py",
+        "gateway/schemas/tasks.py",
+        "gateway/agents/schemas.py",
         "gateway/app.py",
-        "gateway/routers/agents.py",
+        "gateway/routers/tasks.py",
+        "gateway/agents/router.py",
         "shared/agents/contract.py",
         "shared/api_contracts/contracts.py",
         "shared/tasks/priority.py",

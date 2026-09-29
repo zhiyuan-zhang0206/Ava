@@ -8,8 +8,8 @@ from pathlib import Path
 
 import pytest
 
-import gateway.routers._roster_probe as roster_probe
-import gateway.routers.status as status_mod
+import gateway.cluster.status as status_mod
+from gateway.cluster import roster_probe
 from ops import cluster_status
 from ops.cluster_status import _check_pidfile, _count_agent_shells, agent_shell_sessions
 from ops.rpc_schemas import SessionInfo
@@ -521,17 +521,17 @@ def test_identity_mismatch_logs_once_per_episode(
     rows: list[tuple[str, str | None, list[str], datetime, str | None, datetime | None, bool]] = [
         ("air", "http://localhost:8106", ["agent-runner"], datetime.now(UTC), None, None, False)
     ]
-    caplog.set_level(logging.DEBUG, logger="gateway.routers._roster_probe")
+    caplog.set_level(logging.DEBUG, logger="gateway.cluster.roster_probe")
 
     machines = asyncio.run(status_mod.gather_cluster_status(rows, "gateway-host"))
     assert machines[0].identity_mismatch is True
-    first = [r for r in caplog.records if r.name == "gateway.routers._roster_probe"]
+    first = [r for r in caplog.records if r.name == "gateway.cluster.roster_probe"]
     assert [r.levelno for r in first] == [logging.ERROR]
 
     # A second poll of the same mismatch is silent.
     caplog.clear()
     asyncio.run(status_mod.gather_cluster_status(rows, "gateway-host"))
-    assert [r for r in caplog.records if r.name == "gateway.routers._roster_probe"] == []
+    assert [r for r in caplog.records if r.name == "gateway.cluster.roster_probe"] == []
 
     # The identity echoes correctly -> the episode ends...
     caplog.clear()
@@ -545,7 +545,7 @@ def test_identity_mismatch_logs_once_per_episode(
     again = [
         r
         for r in caplog.records
-        if r.name == "gateway.routers._roster_probe" and r.levelno == logging.ERROR
+        if r.name == "gateway.cluster.roster_probe" and r.levelno == logging.ERROR
     ]
     assert len(again) == 1
 
@@ -582,13 +582,13 @@ def test_identity_mismatch_on_stopped_machine_is_info_once(
     rows: list[tuple[str, str | None, list[str], datetime, str | None, datetime | None, bool]] = [
         ("air", "http://localhost:8106", ["agent-runner"], stopped, None, stopped, False)
     ]
-    caplog.set_level(logging.DEBUG, logger="gateway.routers._roster_probe")
+    caplog.set_level(logging.DEBUG, logger="gateway.cluster.roster_probe")
 
     machines = asyncio.run(status_mod.gather_cluster_status(rows, "gateway-host"))
     asyncio.run(status_mod.gather_cluster_status(rows, "gateway-host"))
 
     assert machines[0].identity_mismatch is True
-    records = [r for r in caplog.records if r.name == "gateway.routers._roster_probe"]
+    records = [r for r in caplog.records if r.name == "gateway.cluster.roster_probe"]
     assert [r.levelno for r in records] == [logging.INFO]
     assert "stopped machine" in records[0].getMessage()
 
@@ -738,7 +738,7 @@ def test_gather_cluster_status_carries_probe_paused_reason(monkeypatch: pytest.M
 
 
 def test_status_schemas_omit_retired_updater_projections() -> None:
-    from gateway.schemas.status import ClusterPanel
+    from gateway.cluster.schemas import ClusterPanel
     from shared.api_contracts.status import MachineStatus
 
     retired = {"current_orchestration", "last_updater_outcome", "last_update"}

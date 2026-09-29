@@ -31,7 +31,7 @@ from fastapi.responses import RedirectResponse, StreamingResponse
 from psycopg_pool import ConnectionPool
 from starlette.background import BackgroundTask
 
-from gateway.schemas import PageRegisterRequest
+from gateway.schemas.pages import PageRegisterRequest
 from ops.pages import (
     PagePortConflictError,
     assert_port_free,

@@ -7,7 +7,7 @@ from typing import Any
 
 import pytest
 
-from gateway import telemetry_staleness
+from gateway.lgtm import telemetry_staleness
 from shared import telemetry
 
 

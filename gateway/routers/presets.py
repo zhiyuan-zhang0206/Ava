@@ -4,7 +4,7 @@ A preset is a named, reusable bundle of per-agent config fields (the same flat
 overlay a spawn already accepts: `llm_model`, plugin `per_agent` fields, ...).
 Selecting a preset at spawn time seeds the new agent's config from it; an
 explicit config passed alongside wins per-key (explicit beats template). The
-merge happens in the spawn handler (routers/agents.py), not here.
+merge happens in the spawn handler (`gateway/agents/router.py`), not here.
 
 `config` is stored and returned as an opaque JSONB object for plugin fields: the
 gateway process does not load the plugin registry, so it cannot resolve plugin

@@ -41,8 +41,8 @@ import threading
 from datetime import UTC, datetime
 from typing import Any
 
-from gateway import loki_events
-from gateway._edge_stream import EDGE_EVENT_NAMES, LINEAGE_EVENT_NAMES, LOKI_EDGE_LIMIT
+from gateway.lgtm import loki_events
+from gateway.lgtm.edge_stream import EDGE_EVENT_NAMES, LINEAGE_EVENT_NAMES, LOKI_EDGE_LIMIT
 from shared import telemetry
 from shared.log import logger
 from shared.loki_index_labels import ARCHIVE_FLOOR_AT, ARCHIVE_FREEZE_AT

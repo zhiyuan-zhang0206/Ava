@@ -33,9 +33,9 @@ Like `skills`/`commands` there is no `register_*` call behind the key, so
 `agent/extensions/catalog.py:DECLARATION_ONLY_KEYS` carries it and the
 declared-vs-registered diff has no registered side to compare against. The
 console reads the declarations itself, through
-`GET /api/ui/contributions` (`gateway/routers/ui_contributions.py`), which
+`GET /api/ui/contributions` (`gateway/extensions/ui_contributions.py`), which
 merges the ENABLED plugins' manifests and attributes every entry to the plugin
 that declared it. Themes and nav entries are served and rendered today, and a plugin's own
 pages are mounted read-only at `/api/plugin-ui/<plugin>/…` from its `ui/`
-directory (`gateway/routers/plugin_ui.py`). The inspect-section renderers are
+directory (`gateway/extensions/plugin_ui.py`). The inspect-section renderers are
 [future/frontend-plugin-contributions.md](../../future/frontend-plugin-contributions.md).

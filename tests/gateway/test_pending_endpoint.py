@@ -89,7 +89,7 @@ def test_list_pending_inbounds_helper_scopes_by_agent(db_conn: psycopg.Connectio
 
 def _multimodal_payload(urls: list[str]) -> dict[str, object]:
     """The JSONB shape POST /messages stores for a multimodal message
-    (gateway/routers/agents_state.py:_normalize_message_content): the text
+    (gateway/agents/state.py:_normalize_message_content): the text
     part first, then one image_url block per attached image."""
     return {
         "content_blocks": [

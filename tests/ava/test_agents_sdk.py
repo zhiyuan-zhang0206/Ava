@@ -25,7 +25,7 @@ from fastapi.testclient import TestClient
 
 import ava
 from ava.agents import AgentNotFound, AgentStatus, ForkSourceEmpty, TerminateResult
-from gateway import loki_events
+from gateway.lgtm import loki_events
 from tests.gateway.loki_fake import FakeLoki
 
 
@@ -48,9 +48,9 @@ def _sdk_via_inprocess_gateway(monkeypatch: pytest.MonkeyPatch):
        httpx client — SDK calls go through ASGI directly into gateway endpoint, real DB real logic,
        not bound to TCP port
     """
+    from gateway.agents import forward as _agents_forward_router
+    from gateway.agents import router as _agents_router
     from gateway.app import app
-    from gateway.routers import agents as _agents_router
-    from gateway.routers import agents_forward as _agents_forward_router
     from ops.lifecycle import launch_agent_op, lifecycle_op
     from ops.rpc_schemas import LaunchAgentRequest, SpawnedAgent
     from shared import machines as _machines
@@ -112,7 +112,7 @@ def _sdk_via_inprocess_gateway(monkeypatch: pytest.MonkeyPatch):
     with TestClient(app, base_url="http://test-gateway") as tc:
         monkeypatch.setattr("ava._gateway_transport._client", tc)
         monkeypatch.setattr(_agents_router, "_forward_spawn_to_remote", _in_process_forward)
-        monkeypatch.setattr(_agents_forward_router, "_enqueue_lifecycle", _in_process_lifecycle)
+        monkeypatch.setattr(_agents_forward_router, "enqueue_lifecycle", _in_process_lifecycle)
         monkeypatch.setattr(_machines, "lookup_role", _lookup_role)
         monkeypatch.setattr(_machines, "is_paused", _is_paused)
         yield

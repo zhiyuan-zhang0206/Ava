@@ -679,7 +679,7 @@ core_metrics.register_core_metric(
 
 
 # ── gateway latency (Task #1091) ─────────────────────────────────────────
-# Producer: gateway/_latency.py — one `gateway_latency` event per (route, 60s
+# Producer: gateway/middleware/latency.py — one `gateway_latency` event per (route, 60s
 # bucket) carrying p50/p95/p99/max/count. The panels below read the aggregates;
 # the first is the cluster-wide overview, the second the per-route p95/p99.
 

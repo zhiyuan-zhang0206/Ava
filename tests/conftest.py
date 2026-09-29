@@ -1504,9 +1504,9 @@ def _guard_schedule_manager(monkeypatch: pytest.MonkeyPatch) -> None:
     async def _noop_capture(self: object, schedule_id: int, lines: int) -> None:
         return None
 
-    monkeypatch.setattr("gateway.schedule_manager.ScheduleManager.start", _noop_start)
-    monkeypatch.setattr("gateway.schedule_manager.ScheduleManager.sync", _noop_sync)
-    monkeypatch.setattr("gateway.schedule_manager.ScheduleManager.capture", _noop_capture)
+    monkeypatch.setattr("gateway.schedules.manager.ScheduleManager.start", _noop_start)
+    monkeypatch.setattr("gateway.schedules.manager.ScheduleManager.sync", _noop_sync)
+    monkeypatch.setattr("gateway.schedules.manager.ScheduleManager.capture", _noop_capture)
 
 
 @pytest.fixture(autouse=True)

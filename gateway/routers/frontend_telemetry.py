@@ -33,7 +33,7 @@ from typing import Any
 
 from fastapi import APIRouter, Request, Response
 
-from gateway.error_envelope import error_response
+from gateway.middleware.error_envelope import error_response
 from gateway.schemas.frontend_telemetry import FrontendInteractionIn, FrontendTelemetryBatch
 from shared import telemetry
 
