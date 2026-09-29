@@ -13,9 +13,9 @@ from pathlib import Path
 
 import pytest
 
-from services.pitr.activation_evidence import validate_wal_remote_evidence
-from services.pitr.activation_runtime import wal_evidence_common, wal_metadata
-from services.pitr.uploader import AckManifest
+from services.pitr.activation.evidence import validate_wal_remote_evidence
+from services.pitr.activation.runtime import wal_evidence_common, wal_metadata
+from services.pitr.wal.uploader import AckManifest
 from shared.config import settings
 from tests._pitr_fixtures import baidu_credential_evidence, oss_credential_evidence
 
@@ -249,7 +249,7 @@ def test_wal_metadata_uses_the_local_crc32c_not_the_backend_checksum() -> None:
 def test_require_store_config_refuses_each_missing_target(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from services.pitr.activation_credentials import require_store_config
+    from services.pitr.activation.credentials import require_store_config
 
     config = settings.physical_backup
     monkeypatch.setattr(config, "pitr_gcs_prefix", "pitr")
@@ -328,7 +328,7 @@ def test_wal_evidence_common_uses_the_oss_bucket_as_store_target(
 def test_require_store_config_refuses_a_missing_oss_bucket(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from services.pitr.activation_credentials import require_store_config
+    from services.pitr.activation.credentials import require_store_config
 
     config = settings.physical_backup
     monkeypatch.setattr(config, "pitr_gcs_prefix", "pitr")
@@ -342,7 +342,7 @@ def test_require_store_config_refuses_a_missing_oss_bucket(
 
 def test_oss_credential_identity_reads_the_access_key_id(tmp_path: Path) -> None:
     """OSS evidence identity = the AK id (opaque, like the COS SecretId)."""
-    from services.pitr.activation_credentials import oss_credential_identity
+    from services.pitr.activation.credentials import oss_credential_identity
 
     creds = tmp_path / "oss-uploader.json"
     creds.write_text('{"access_key_id": "ak-upload", "access_key_secret": "secret"}')

@@ -19,7 +19,7 @@ from cli.commands.data_plane._pitr_activation_config import (
     require_inactive_gate_posture,
     restore_archive_settings,
 )
-from services.pitr.activation_credentials import (
+from services.pitr.activation.credentials import (
     credential_app_key,
     credential_identity,
     oss_credential_identity,
@@ -28,11 +28,11 @@ from services.pitr.activation_credentials import (
     probe_oss_read_access,
     require_store_config,
 )
-from services.pitr.activation_lease import run_while_renewing
-from services.pitr.activation_runtime import (
+from services.pitr.activation.lease import run_while_renewing
+from services.pitr.activation.runtime import (
     PITR_ENV_FIELDS as PITR_ENV_FIELDS,
 )
-from services.pitr.activation_runtime import (
+from services.pitr.activation.runtime import (
     archive_settings,
     capture_pitr_env_baseline,
     desired_archive_settings,
@@ -42,22 +42,22 @@ from services.pitr.activation_runtime import (
     settings_digest,
     shadow_pg_gate,
 )
-from services.pitr.activation_runtime import (
+from services.pitr.activation.runtime import (
     forced_candidate as _forced_candidate,
 )
-from services.pitr.activation_runtime import (
+from services.pitr.activation.runtime import (
     prepare_wal_switch as _prepare_wal_switch,
 )
-from services.pitr.activation_runtime import (
+from services.pitr.activation.runtime import (
     remote_wal_proof as _remote_wal_proof,
 )
-from services.pitr.activation_runtime import (
+from services.pitr.activation.runtime import (
     restore_candidate as _restore_candidate,
 )
-from services.pitr.activation_runtime import (
+from services.pitr.activation.runtime import (
     switch_wal as _switch_wal,
 )
-from services.pitr.activation_state import (
+from services.pitr.activation.state import (
     ActivationPhase,
     ActivationRecord,
     load_record,
@@ -65,7 +65,7 @@ from services.pitr.activation_state import (
     write_record,
     write_record_cas,
 )
-from services.pitr.cos_client import credential_evidence as _cos_credential_evidence
+from services.pitr.stores.cos.client import credential_evidence as _cos_credential_evidence
 from shared.config import settings
 from shared.paths import ava_home
 from shared.pg_tools import pg_tool

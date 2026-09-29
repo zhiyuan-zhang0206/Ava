@@ -13,10 +13,10 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from services.pidfile import acquire_pidfile, remove_pidfile
-from services.pitr.object_store import PermanentObjectStoreError, TransientObjectStoreError
-from services.pitr.state import ArchiveHealth, health_state
-from services.pitr.store_factory import get_store_group
-from services.pitr.uploader import (
+from services.pitr.stores.factory import get_store_group
+from services.pitr.stores.object_store import PermanentObjectStoreError, TransientObjectStoreError
+from services.pitr.wal.state import ArchiveHealth, health_state
+from services.pitr.wal.uploader import (
     AckCorruptionError,
     PitrUploader,
     RemoteCollisionError,
@@ -103,7 +103,7 @@ def _disk_components(
 
 
 def _unacked_health(uploader: PitrUploader, upload_errors_total: int) -> ArchiveHealth:
-    """Project local spool vs remote ACK through state.py's health model.
+    """Project local spool vs remote ACK through wal/state.py's health model.
 
     QA #4681 block 3 / #4696: AVA_PITR_UNACKED_* are live health inputs, not
     dead configuration — the oldest un-ACKed spool entry's age is compared

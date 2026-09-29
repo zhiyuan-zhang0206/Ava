@@ -2,7 +2,7 @@
 
 Runs against the REAL PCS API with a real OAuth pair, so it needs the
 operator's credential file and an already-refreshed token state file
-(see services/pitr/baidu_token.py). It exercises the three-phase upload
+(see services/pitr/stores/baidu/token.py). It exercises the three-phase upload
 of a synthetic file, the create-on-existing re-upload path, and a
 verified download — reporting wall-clock throughput for each phase.
 
@@ -25,10 +25,10 @@ import time
 from datetime import UTC, datetime
 from pathlib import Path
 
-from services.pitr.baidu_restore_store import BaiduGenerationPinnedObjectReader
-from services.pitr.baidu_store import BaiduObjectStore
-from services.pitr.baidu_token import BaiduCredentials, BaiduTokenManager
-from services.pitr.restore_manifest import RestoreObject
+from services.pitr.restore.manifest import RestoreObject
+from services.pitr.stores.baidu.restore_store import BaiduGenerationPinnedObjectReader
+from services.pitr.stores.baidu.store import BaiduObjectStore
+from services.pitr.stores.baidu.token import BaiduCredentials, BaiduTokenManager
 
 
 def _measure(label: str, size_bytes: int, start: float) -> None:

@@ -17,11 +17,11 @@ from typing import Any
 import httpx
 import pytest
 
-from services.pitr.baidu_inventory import BaiduRetentionInventoryReader
-from services.pitr.checksums import CRC32C, MD5
-from services.pitr.cos_inventory import CosRetentionInventoryReader
-from services.pitr.logical_dump_names import REMOTE_ROOT
-from services.pitr.retention_inventory import (
+from services.pitr.stores.baidu.inventory import BaiduRetentionInventoryReader
+from services.pitr.stores.checksums import CRC32C, MD5
+from services.pitr.stores.cos.inventory import CosRetentionInventoryReader
+from services.pitr.stores.logical_dump_names import REMOTE_ROOT
+from services.pitr.stores.retention_inventory import (
     LOGICAL_NAMESPACE,
     GCSRetentionInventoryReader,
 )

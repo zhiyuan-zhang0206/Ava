@@ -26,7 +26,7 @@ from services.backup_scheduler.recovery_drill import (
 )
 from services.backup_scheduler.worker import run_job
 from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
-from services.pitr.operation_custody import OperationBusyError
+from services.pitr.operation.custody import OperationBusyError
 from shared import telemetry
 from shared.config import settings
 from shared.daemon_health import health_port, start_health_server, stop_health_server

@@ -16,11 +16,11 @@ from typing import Any
 import httpx
 import pytest
 
-from services.pitr.baidu_pcs import PcsClient
-from services.pitr.baidu_restore_store import BaiduGenerationPinnedObjectReader
-from services.pitr.baidu_store import BaiduObjectStore
-from services.pitr.object_store import RemoteObjectAck
-from services.pitr.token_manager import TokenHealth
+from services.pitr.stores.baidu.pcs import PcsClient
+from services.pitr.stores.baidu.restore_store import BaiduGenerationPinnedObjectReader
+from services.pitr.stores.baidu.store import BaiduObjectStore
+from services.pitr.stores.object_store import RemoteObjectAck
+from services.pitr.stores.token_manager import TokenHealth
 
 APP_ROOT = "/apps/ava-pitr"
 OBJECT = "ava-pitr/wal/00000001/000000010000000000000001.enc"

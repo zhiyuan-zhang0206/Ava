@@ -8,9 +8,9 @@ from typing import BinaryIO, cast
 import google_crc32c
 import pytest
 
-from services.pitr.object_store import PermanentObjectStoreError
-from services.pitr.restore_manifest import RestoreObject
-from services.pitr.restore_object_store import (
+from services.pitr.restore.manifest import RestoreObject
+from services.pitr.stores.object_store import PermanentObjectStoreError
+from services.pitr.stores.restore_object_store import (
     GCSGenerationPinnedObjectReader,
     _ReadableBucket,
 )

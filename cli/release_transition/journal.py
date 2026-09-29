@@ -264,7 +264,7 @@ def _initial_operation(request: FleetRequest | UnitRequest | PitrRequest) -> Ope
     if current_pointer(Path(request.home) / "releases") != reference.selector:
         raise ValueError("prepared predecessor is not the selected release")
     if isinstance(request, PitrRequest):
-        from services.pitr.activation_state import record_path
+        from services.pitr.activation.state import record_path
 
         try:
             digest = hashlib.sha256(regular_bytes(record_path(Path(request.home)))).hexdigest()

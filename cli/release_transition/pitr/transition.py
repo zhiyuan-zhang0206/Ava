@@ -24,7 +24,7 @@ from cli.release_transition.journal import Journal, Operation, read_operation
 from cli.release_transition.pitr.evidence import PitrSeal
 from cli.release_transition.pitr.inputs import read_record, require_inputs
 from cli.release_transition.request import PitrRequest
-from services.pitr.activation_state import ActivationRecord, record_path, write_record
+from services.pitr.activation.state import ActivationRecord, record_path, write_record
 from shared.native_process.ownership import OwnedProcess
 from shared.process_evidence import ExpectedProcess
 from shared.verified_file import regular_bytes
@@ -62,7 +62,7 @@ def _require_pg_cluster(before: dict[str, str], after: dict[str, str]) -> None:
 def observe_postgres(operation: Operation) -> None:
     """Require actual new native birth and owned archive settings after restart."""
     from cli.commands.data_plane import pitr_activation as activation
-    from services.pitr.activation_runtime import archive_settings, settings_digest
+    from services.pitr.activation.runtime import archive_settings, settings_digest
 
     progress = operation.pitr
     if progress is None or progress.seal is None:
@@ -85,7 +85,7 @@ def observe_postgres(operation: Operation) -> None:
 
 def persist_failure(operation: Operation, failure: BaseException) -> None:
     """Business diagnostics remain in the activation journal under the same writer."""
-    from services.pitr.activation_observability import save_error
+    from services.pitr.activation.observability import save_error
 
     if operation.phase not in {"provisioning", "proving"}:
         return
@@ -155,7 +155,7 @@ class PitrTransition:
     def provision(self, journal: Journal) -> bool:
         """Return true only when a fresh interpreter must enter the sealed phase."""
         from cli.commands.data_plane import pitr_activation as activation
-        from services.pitr.activation_state import lock_path
+        from services.pitr.activation.state import lock_path
         from shared.cluster_lock import acquire_update_lock, release_update_lock
         from shared.platform import file_lock
 
@@ -201,7 +201,7 @@ class PitrTransition:
     def _offline_rollback(self, journal: Journal, record: ActivationRecord) -> ActivationRecord:
         from cli.commands.data_plane.maintenance_stop import stop_captured
         from cli.commands.root_driver import require_root_absent
-        from services.pitr.activation_runtime import restore_exact_file, settings_digest
+        from services.pitr.activation.runtime import restore_exact_file, settings_digest
         from shared import maintenance
 
         progress = journal.operation.pitr
@@ -267,7 +267,7 @@ class PitrTransition:
 
     def _seal(self, journal: Journal, record: ActivationRecord, *, data_stopped: bool) -> None:
         from cli.commands.data_plane import pitr_activation as activation
-        from services.pitr.activation_runtime import archive_settings, settings_digest
+        from services.pitr.activation.runtime import archive_settings, settings_digest
         from shared.start_inputs import configuration_digest
 
         require_inputs(journal.operation)
@@ -429,7 +429,7 @@ class PitrTransition:
 
     def prove(self, journal: Journal) -> None:
         from cli.commands.data_plane import pitr_activation as activation
-        from services.pitr.activation_state import lock_path
+        from services.pitr.activation.state import lock_path
         from shared.cluster_lock import acquire_update_lock, release_update_lock
         from shared.platform import file_lock
 

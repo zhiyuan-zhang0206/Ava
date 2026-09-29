@@ -24,10 +24,10 @@ from typing import Any, cast
 import oss2
 from oss2.models import MultipartUploadInfo, PartInfo
 
-from services.pitr.oss_inventory import OSSRetentionInventoryReader
-from services.pitr.oss_publish_store import OSSProtectedManifestPublisher
-from services.pitr.oss_restore_store import OSSGenerationPinnedObjectReader
-from services.pitr.oss_store import OSSObjectStore, OSSRetentionDeleteStore
+from services.pitr.stores.oss.inventory import OSSRetentionInventoryReader
+from services.pitr.stores.oss.publish_store import OSSProtectedManifestPublisher
+from services.pitr.stores.oss.restore_store import OSSGenerationPinnedObjectReader
+from services.pitr.stores.oss.store import OSSObjectStore, OSSRetentionDeleteStore
 
 PREFIX = "ava-pitr"
 WA_OBJECT = f"{PREFIX}/wal/00000001/000000010000000000000001.enc"

@@ -9,21 +9,24 @@ from contextlib import suppress
 from functools import partial
 from pathlib import Path
 
-from services.pitr.base_candidate import (
+from services.pitr.base_backup.candidate import (
     commit_base_candidate,
     prepare_base_candidate,
     quarantine_candidate_staging,
 )
-from services.pitr.base_manifest import CandidateManifest
-from services.pitr.operation_custody import OperationDeferred, OperationKind, publish_result
-from services.pitr.space_budget import CandidateSpaceBudget, InsufficientCandidateSpaceError
-from services.pitr.store_factory import get_store_group
-from services.pitr.worker_process import (
+from services.pitr.base_backup.manifest import CandidateManifest
+from services.pitr.base_backup.space_budget import (
+    CandidateSpaceBudget,
+    InsufficientCandidateSpaceError,
+)
+from services.pitr.operation.custody import OperationDeferred, OperationKind, publish_result
+from services.pitr.operation.worker_process import (
     CompletedOperation,
     StopSignal,
     run_operation,
     worker_request,
 )
+from services.pitr.stores.factory import get_store_group
 from shared.config import settings
 from shared.log import init_cli_process
 from shared.paths import ava_home

@@ -203,8 +203,8 @@ def test_the_postmaster_environment_runs_both_pitr_commands(
     (`pg_start_env`). That is enough for the commands it runs: the archive shim
     finds `python3` through PATH, and the restore drill's command names its
     interpreter by absolute path. Both take everything else on argv."""
-    from services.pitr.activation_runtime import desired_archive_settings
-    from services.pitr.restore_postgres import _append_recovery_config
+    from services.pitr.activation.runtime import desired_archive_settings
+    from services.pitr.restore.postgres import _append_recovery_config
 
     # The raw process environment a spawned child would inherit (Settings is
     # not involved): what the `ava start` that spawns the postmaster may hold.

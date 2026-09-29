@@ -14,7 +14,7 @@ from psycopg import sql
 
 from cli.commands.data_plane import _pitr_activation_config as config
 from cli.commands.data_plane import pitr_activation as activation
-from services.pitr.activation_state import ActivationRecord, load_record, record_path, write_record
+from services.pitr.activation.state import ActivationRecord, load_record, record_path, write_record
 from shared.config import settings
 from tests.cli.test_pitr_activation import _env_apply_fixture
 

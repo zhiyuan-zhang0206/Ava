@@ -13,7 +13,7 @@ from uuid import UUID, uuid4
 from cli.release_transition.journal import Operation, exclusive, read_operation
 from cli.release_transition.request import PitrRequest, ReleaseRef
 from cli.release_transition.submit import submit_request
-from services.pitr.activation_state import ActivationRecord, load_record, record_path
+from services.pitr.activation.state import ActivationRecord, load_record, record_path
 from shared.runtime_abi import current_abi
 from shared.runtime_release import current_pointer, verify_release
 from shared.start_inputs import configuration_files, files_digest

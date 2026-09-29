@@ -19,7 +19,7 @@ from typing import Any
 
 import pytest
 
-from services.pitr.checksums import (
+from services.pitr.stores.checksums import (
     CRC32C,
     KNOWN_CHECKSUM_ALGOS,
     MD5,
@@ -27,19 +27,19 @@ from services.pitr.checksums import (
     digest_bytes,
     matches,
 )
-from services.pitr.object_store import RemoteObjectAck
-from services.pitr.store_factory import (
+from services.pitr.stores.factory import (
     PitrStoreGroup,
     get_group_constructor_named,
     get_store_group,
 )
-from services.pitr.token_manager import (
+from services.pitr.stores.object_store import RemoteObjectAck
+from services.pitr.stores.token_manager import (
     TokenHealth,
     TokenState,
     read_token_state,
     write_token_state,
 )
-from services.pitr.uploader import AckManifest, ack_manifest_from_raw
+from services.pitr.wal.uploader import AckManifest, ack_manifest_from_raw
 
 
 def _ack(value: bytes = b"ciphertext") -> RemoteObjectAck:
@@ -117,7 +117,7 @@ def test_legacy_candidate_manifest_normalizes_to_the_new_shape() -> None:
     parse, and its renamed fields must land where the new code reads them
     (QA #1131 P1 — a deploy that rejects this file crash-loops the
     base-candidate daemon at boot)."""
-    from services.pitr.base_manifest import CandidateManifest
+    from services.pitr.base_backup.manifest import CandidateManifest
 
     candidate = CandidateManifest.from_json(_LEGACY_CANDIDATE_JSON)
     assert candidate.base_object.pin_token == "1788085003231815"  # noqa: S105 — fixture
@@ -130,8 +130,8 @@ def test_legacy_candidate_manifest_normalizes_to_the_new_shape() -> None:
 
 
 def test_legacy_protected_manifest_normalizes_restore_objects() -> None:
-    from services.pitr.base_manifest import CandidateManifest
-    from services.pitr.restore_manifest import (
+    from services.pitr.base_backup.manifest import CandidateManifest
+    from services.pitr.restore.manifest import (
         ProtectedManifest,
         _restore_object,
         required_archive_names,
@@ -195,9 +195,9 @@ def test_resume_protected_publish_accepts_the_legacy_bytes_digest(tmp_path: Path
     canonical equality, never a re-hash of a digest string."""
     import hashlib
 
-    from services.pitr.base_manifest import CandidateManifest
-    from services.pitr.restore_manifest import required_archive_names
-    from services.pitr.restore_proof import _resume_protected_publish
+    from services.pitr.base_backup.manifest import CandidateManifest
+    from services.pitr.restore.manifest import required_archive_names
+    from services.pitr.restore.proof import _resume_protected_publish
 
     legacy_digest = hashlib.sha256(_LEGACY_CANDIDATE_JSON.encode()).hexdigest()
     # The full live-tree legacy-bytes digest, pinned verbatim (QA #1131 nit).
@@ -262,9 +262,9 @@ def test_resume_protected_publish_rejects_same_chain_different_candidate(
     what it embedded."""
     import dataclasses
 
-    from services.pitr.base_manifest import CandidateManifest
-    from services.pitr.restore_manifest import required_archive_names
-    from services.pitr.restore_proof import RestoreProofError, _resume_protected_publish
+    from services.pitr.base_backup.manifest import CandidateManifest
+    from services.pitr.restore.manifest import required_archive_names
+    from services.pitr.restore.proof import RestoreProofError, _resume_protected_publish
 
     candidate = CandidateManifest.from_json(_LEGACY_CANDIDATE_JSON)
     tampered = dataclasses.replace(candidate, system_identifier="7656686487711429999")
@@ -318,7 +318,7 @@ def test_resume_protected_publish_rejects_same_chain_different_candidate(
 
 
 def test_legacy_retention_plan_normalizes_retention_objects() -> None:
-    from services.pitr.retention_manifest import RetentionPlan
+    from services.pitr.retention.manifest import RetentionPlan
 
     legacy_plan = {
         "schema_version": 1,
@@ -375,7 +375,7 @@ class RestoreProofFixture:
 def candidate_sha256_of(candidate: object) -> str:
     import hashlib
 
-    from services.pitr.base_manifest import CandidateManifest
+    from services.pitr.base_backup.manifest import CandidateManifest
 
     return hashlib.sha256(
         CandidateManifest.to_json(candidate).encode()  # type: ignore[arg-type]
@@ -618,7 +618,7 @@ def test_factory_reads_the_configured_backend(
 
 
 def test_get_store_group_passes_the_delete_credential(monkeypatch: pytest.MonkeyPatch) -> None:
-    import services.pitr.store_factory as store_factory_module
+    from services.pitr.stores import factory
     from shared.config import settings
 
     config = settings.physical_backup
@@ -634,8 +634,8 @@ def test_get_store_group_passes_the_delete_credential(monkeypatch: pytest.Monkey
     monkeypatch.setattr(config, "pitr_oss_credentials_file", uploader)
     monkeypatch.setattr(config, "pitr_oss_viewer_credentials_file", None)
     monkeypatch.setattr(config, "pitr_oss_delete_credentials_file", delete)
-    monkeypatch.setattr(store_factory_module, "oss_pitr_store_group", fake_oss)
-    store_factory_module.get_store_group()
+    monkeypatch.setattr(factory, "oss_pitr_store_group", fake_oss)
+    factory.get_store_group()
     assert captured["delete_credentials_file"] == delete
 
     captured.clear()
@@ -646,8 +646,8 @@ def test_get_store_group_passes_the_delete_credential(monkeypatch: pytest.Monkey
 
     monkeypatch.setattr(config, "pitr_store_backend", "gcs")
     monkeypatch.setattr(config, "pitr_gcs_delete_credentials_file", delete)
-    monkeypatch.setattr(store_factory_module, "gcs_pitr_store_group", fake_gcs)
-    store_factory_module.get_store_group()
+    monkeypatch.setattr(factory, "gcs_pitr_store_group", fake_gcs)
+    factory.get_store_group()
     assert captured["delete_credentials"] == delete
 
 

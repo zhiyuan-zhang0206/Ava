@@ -8,10 +8,8 @@ from pathlib import Path
 
 import pytest
 
-from services.pitr.checksums import CRC32C, ObjectChecksum, digest_bytes
-from services.pitr.object_store import RemoteObjectAck
-from services.pitr.restore_manifest import RestoreObject
-from services.pitr.rollback_snapshot_archive import (
+from services.pitr.restore.manifest import RestoreObject
+from services.pitr.restore.rollback_snapshot_archive import (
     RollbackSnapshotArchive,
     SnapshotArchiveNotArchivedError,
     SnapshotArchiveNotVerifiedError,
@@ -19,6 +17,8 @@ from services.pitr.rollback_snapshot_archive import (
     retire_rollback_snapshot,
     verify_rollback_snapshot,
 )
+from services.pitr.stores.checksums import CRC32C, ObjectChecksum, digest_bytes
+from services.pitr.stores.object_store import RemoteObjectAck
 
 _FAKE_PIN_TOKEN = str(42)
 _REOBSERVED_PIN_TOKEN = str(43)

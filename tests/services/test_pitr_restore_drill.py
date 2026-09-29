@@ -12,10 +12,10 @@ from typing import Any, cast
 
 import pytest
 
-from services.pitr import restore_drill
-from services.pitr.base_manifest import BaseObject, CandidateManifest, WalRange
-from services.pitr.operation_custody import NativeProcess
-from services.pitr.restore_drill import (
+from services.pitr.base_backup.manifest import BaseObject, CandidateManifest, WalRange
+from services.pitr.operation.custody import NativeProcess
+from services.pitr.restore import drill
+from services.pitr.restore.drill import (
     DRILL_TABLES,
     DrillError,
     DrillEvidence,
@@ -23,9 +23,9 @@ from services.pitr.restore_drill import (
     parse_target_wall,
     run_restore_drill,
 )
-from services.pitr.restore_manifest import RestoreObject
-from services.pitr.restore_postgres import SandboxPostgresIdentity
-from services.pitr.restore_proof import LivePostgresIdentity
+from services.pitr.restore.manifest import RestoreObject
+from services.pitr.restore.postgres import SandboxPostgresIdentity
+from services.pitr.restore.proof import LivePostgresIdentity
 from shared.native_process import native_boot_id
 from shared.native_process.ownership import OwnedProcess
 
@@ -185,14 +185,14 @@ def test_drill_tables_are_real_schema_tables() -> None:
 def test_target_lsn_bounds() -> None:
     candidate = _candidate()
     with pytest.raises(DrillError, match="precedes the chain start"):
-        restore_drill._require_target_lsn(candidate, "0/0")
+        drill._require_target_lsn(candidate, "0/0")
     with pytest.raises(DrillError, match="invalid PostgreSQL LSN"):
-        restore_drill._require_target_lsn(candidate, "nonsense")
-    restore_drill._require_target_lsn(candidate, "0/1000000")
+        drill._require_target_lsn(candidate, "nonsense")
+    drill._require_target_lsn(candidate, "0/1000000")
     # A target beyond the candidate's recorded end LSN stays valid: the chain
     # keeps archiving, and the ACK evidence is the upper bound (the 2026-09-13
     # drill ran at 26/A03520B0 with a recorded end LSN of 26/51007328).
-    restore_drill._require_target_lsn(candidate, "26/A03520B0")
+    drill._require_target_lsn(candidate, "26/A03520B0")
 
 
 def test_fresh_scratch_is_required(tmp_path: Path) -> None:
@@ -200,12 +200,12 @@ def test_fresh_scratch_is_required(tmp_path: Path) -> None:
     occupied.mkdir()
     (occupied / "leftover").write_text("x")
     with pytest.raises(DrillError, match="not fresh"):
-        restore_drill._require_fresh_scratch(occupied)
+        drill._require_fresh_scratch(occupied)
     empty = tmp_path / "empty"
     empty.mkdir()
-    restore_drill._require_fresh_scratch(empty)
+    drill._require_fresh_scratch(empty)
     fresh = tmp_path / "fresh"
-    restore_drill._require_fresh_scratch(fresh)
+    drill._require_fresh_scratch(fresh)
     assert fresh.is_dir()
 
 
@@ -214,7 +214,7 @@ async def test_operator_input_mistakes_are_refused_before_any_operation(
 ) -> None:
     """A typo'd scratch or target never becomes a failed operation: the
     controller refuses it before launch, so nothing needs retirement."""
-    from services.pitr import base_operation_runtime
+    from services.pitr.restore import operation_runtime
     from tests.services.test_pitr_operation_owner import _restore_inputs
 
     used = tmp_path / "used"
@@ -226,7 +226,7 @@ async def test_operator_input_mistakes_are_refused_before_any_operation(
         (tmp_path / "fresh", "0/0", "precedes the chain start"),
     ):
         with pytest.raises(DrillError, match=message):
-            await base_operation_runtime.run_drill_input(
+            await operation_runtime.run_drill_input(
                 _restore_inputs(tmp_path),
                 scratch=scratch,
                 target_lsn=lsn,
@@ -242,7 +242,7 @@ def test_prepare_pgdata_uses_the_extraction_return_value(
     """Driver bug B1: verifybackup ran against `<scratch>/sandbox` (the parent)
     instead of the extracted pgdata the extractor returned."""
     request = _request(tmp_path)
-    restore_drill._require_fresh_scratch(request.scratch)
+    drill._require_fresh_scratch(request.scratch)
     evidence = _evidence(request)
     extracted = request.scratch / "sandbox" / "data"
     seen: dict[str, Any] = {}
@@ -269,14 +269,14 @@ def test_prepare_pgdata_uses_the_extraction_return_value(
     def fake_verify(command: list[str], *, timeout: float) -> None:
         seen["verify"] = [str(part) for part in command]
 
-    monkeypatch.setattr(restore_drill, "_base_restore_object", fake_restore_object)
-    monkeypatch.setattr(restore_drill, "authenticate_base_ciphertext", fake_authenticate)
-    monkeypatch.setattr(restore_drill, "extract_authenticated_base", fake_extract)
-    monkeypatch.setattr(restore_drill, "wal_objects_from_acks", fake_wal_objects)
-    monkeypatch.setattr(restore_drill, "_download_wal", fake_download_wal)
-    monkeypatch.setattr(restore_drill, "_run", fake_verify)
+    monkeypatch.setattr(drill, "_base_restore_object", fake_restore_object)
+    monkeypatch.setattr(drill, "authenticate_base_ciphertext", fake_authenticate)
+    monkeypatch.setattr(drill, "extract_authenticated_base", fake_extract)
+    monkeypatch.setattr(drill, "wal_objects_from_acks", fake_wal_objects)
+    monkeypatch.setattr(drill, "_download_wal", fake_download_wal)
+    monkeypatch.setattr(drill, "_run", fake_verify)
 
-    pgdata = restore_drill._prepare_pgdata(request, evidence, _discard)
+    pgdata = drill._prepare_pgdata(request, evidence, _discard)
     assert pgdata == extracted
     assert seen["verify"][-1] == str(extracted)
     assert seen["verify"][-1] != str(request.scratch / "sandbox")
@@ -313,19 +313,19 @@ def test_run_sandbox_tears_down_when_criteria_fail(
     def fake_residue(scratch: Path, port: int, pgdata_arg: Path) -> dict[str, object]:
         return {"processes": [], "port_listening": False, "pid_file_present": False}
 
-    monkeypatch.setattr(restore_drill, "_free_port", fake_free_port)
-    monkeypatch.setattr(restore_drill, "_append_recovery_config", _noop)
-    monkeypatch.setattr(restore_drill, "_write_sandbox_config", fake_write_config)
-    monkeypatch.setattr(restore_drill, "_spawn_sandbox_postgres", fake_spawn)
-    monkeypatch.setattr(restore_drill, "_capture_sandbox", fake_wait_identity)
-    monkeypatch.setattr(restore_drill, "_wait_for_sandbox_identity", fake_wait_identity)
-    monkeypatch.setattr(restore_drill, "_wait_for_promotion", _noop)
-    monkeypatch.setattr(restore_drill, "_collect_criteria", blow_up)
-    monkeypatch.setattr(restore_drill, "_stop_sandbox", fake_stop)
-    monkeypatch.setattr(restore_drill, "_residue_scan", fake_residue)
+    monkeypatch.setattr(drill, "_free_port", fake_free_port)
+    monkeypatch.setattr(drill, "_append_recovery_config", _noop)
+    monkeypatch.setattr(drill, "_write_sandbox_config", fake_write_config)
+    monkeypatch.setattr(drill, "_spawn_sandbox_postgres", fake_spawn)
+    monkeypatch.setattr(drill, "_capture_sandbox", fake_wait_identity)
+    monkeypatch.setattr(drill, "_wait_for_sandbox_identity", fake_wait_identity)
+    monkeypatch.setattr(drill, "_wait_for_promotion", _noop)
+    monkeypatch.setattr(drill, "_collect_criteria", blow_up)
+    monkeypatch.setattr(drill, "_stop_sandbox", fake_stop)
+    monkeypatch.setattr(drill, "_residue_scan", fake_residue)
 
     with pytest.raises(DrillError, match="criteria blew up"):
-        restore_drill._run_sandbox(request, evidence, pgdata, _live_identity(), _discard)
+        drill._run_sandbox(request, evidence, pgdata, _live_identity(), _discard)
     assert len(stopped) == 1
     assert stopped[0].data_directory == str(pgdata.resolve())
     assert evidence.criteria["teardown"]["stopped"] is True
@@ -340,9 +340,9 @@ def test_run_restore_drill_writes_failure_evidence_and_keeps_scratch(
     def explode(*args: object, **kwargs: object) -> Path:
         raise DrillError("download exploded")
 
-    monkeypatch.setattr(restore_drill, "_require_group_leader", _no_leader_check)
-    monkeypatch.setattr(restore_drill, "_live_identity", _stub_live_identity)
-    monkeypatch.setattr(restore_drill, "_prepare_pgdata", explode)
+    monkeypatch.setattr(drill, "_require_group_leader", _no_leader_check)
+    monkeypatch.setattr(drill, "_live_identity", _stub_live_identity)
+    monkeypatch.setattr(drill, "_prepare_pgdata", explode)
 
     with pytest.raises(DrillError, match="download exploded"):
         run_restore_drill(request)
@@ -372,10 +372,10 @@ def test_run_restore_drill_passes_when_every_check_holds(
     ) -> None:
         evidence.criteria.update(_passing_criteria())
 
-    monkeypatch.setattr(restore_drill, "_require_group_leader", _no_leader_check)
-    monkeypatch.setattr(restore_drill, "_live_identity", _stub_live_identity)
-    monkeypatch.setattr(restore_drill, "_prepare_pgdata", fake_prepare)
-    monkeypatch.setattr(restore_drill, "_run_sandbox", fake_sandbox)
+    monkeypatch.setattr(drill, "_require_group_leader", _no_leader_check)
+    monkeypatch.setattr(drill, "_live_identity", _stub_live_identity)
+    monkeypatch.setattr(drill, "_prepare_pgdata", fake_prepare)
+    monkeypatch.setattr(drill, "_run_sandbox", fake_sandbox)
 
     evidence = run_restore_drill(request)
     assert evidence.outcome == "pass"
@@ -415,8 +415,8 @@ def test_residue_scan_ignores_its_own_invocation(
     def fake_process_iter(*args: object, **kwargs: object) -> Iterator[_FakeScanProcess]:
         return iter(rows)
 
-    monkeypatch.setattr(restore_drill.psutil, "process_iter", fake_process_iter)
-    result = restore_drill._residue_scan(scratch, 1, pgdata)
+    monkeypatch.setattr(drill.psutil, "process_iter", fake_process_iter)
+    result = drill._residue_scan(scratch, 1, pgdata)
 
     assert result["processes"] == [f"/usr/lib/postgresql/17/bin/postgres -D {scratch}/sandbox/data"]
     assert result["port_listening"] is False
@@ -445,15 +445,15 @@ def test_residue_scan_matches_a_symlinked_scratch_path(
     def fake_process_iter(*args: object, **kwargs: object) -> Iterator[_FakeScanProcess]:
         return iter(rows)
 
-    monkeypatch.setattr(restore_drill.psutil, "process_iter", fake_process_iter)
-    result = restore_drill._residue_scan(scratch, 1, pgdata)
+    monkeypatch.setattr(drill.psutil, "process_iter", fake_process_iter)
+    result = drill._residue_scan(scratch, 1, pgdata)
 
     assert result["processes"] == [f"/usr/lib/postgresql/17/bin/postgres -D {pgdata}"]
 
 
 def test_acceptance_failures_cover_the_criteria_set(tmp_path: Path) -> None:
     request = _request(tmp_path)
-    failures = restore_drill._acceptance_failures(_evidence(request))
+    failures = drill._acceptance_failures(_evidence(request))
     assert any("identity" in failure for failure in failures)
     assert any("double-face" in failure for failure in failures)
     assert any("live PostgreSQL" in failure for failure in failures)
@@ -470,7 +470,7 @@ def test_acceptance_failures_flag_a_surviving_sandbox(tmp_path: Path) -> None:
         "port_listening": True,
         "pid_file_present": True,
     }
-    failures = restore_drill._acceptance_failures(evidence)
+    failures = drill._acceptance_failures(evidence)
     assert any("teardown did not complete" in failure for failure in failures)
     assert any("port still accepts" in failure for failure in failures)
     assert any("pid file remains" in failure for failure in failures)

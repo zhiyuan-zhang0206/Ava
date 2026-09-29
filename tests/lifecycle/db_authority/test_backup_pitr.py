@@ -33,7 +33,7 @@ from psycopg.conninfo import conninfo_to_dict
 from cli.commands.data_plane import cluster_instance as ci
 from cli.commands.data_plane import pgbouncer as pooler
 from services import backup
-from services.pitr import store_factory
+from services.pitr.stores import factory
 from shared import cluster
 from shared.cluster import authority
 from shared.config import settings
@@ -72,7 +72,7 @@ def maintenance(born: Born, monkeypatch: pytest.MonkeyPatch) -> Born:
         return {str(born.home): born.record}
 
     monkeypatch.setattr(cluster, "load_registry", _registry)
-    monkeypatch.setattr(store_factory, "get_store_group", _no_store)
+    monkeypatch.setattr(factory, "get_store_group", _no_store)
     return born
 
 
@@ -164,7 +164,7 @@ def test_pre_activation_snapshot_dumps_the_frozen_owner_target(maintenance: Born
 def test_rollback_snapshot_exports_and_retires_as_the_owner(
     maintenance: Born, tmp_path: Path
 ) -> None:
-    from services.pitr.rollback_snapshot_archive import (
+    from services.pitr.restore.rollback_snapshot_archive import (
         drop_rollback_snapshot_table,
         export_rollback_snapshot_table,
     )
@@ -216,14 +216,16 @@ def test_pitr_probes_dial_the_home_authority(
     maintenance: Born, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from cli.commands.data_plane import _pitr_activation_config as activation_config
-    from services.pitr import activation_runtime, base_candidate, base_operation_runtime
-    from services.pitr.base_candidate import BaseCandidateError
-    from services.pitr.restore_postgres import _live_identity
+    from services.pitr.activation import runtime
+    from services.pitr.base_backup import candidate
+    from services.pitr.base_backup.candidate import BaseCandidateError
+    from services.pitr.restore import operation_runtime
+    from services.pitr.restore.postgres import _live_identity
 
     # The restore/drill controller: the worker's dial and the live PGDATA.
-    conninfo = base_operation_runtime.live_probe_conninfo()
+    conninfo = operation_runtime.live_probe_conninfo()
     _assert_owner_dial(conninfo)
-    data_directory = base_operation_runtime.live_data_directory()
+    data_directory = operation_runtime.live_data_directory()
     assert Path(data_directory).resolve() == (maintenance.home / "pg").resolve()
     probe = subprocess.run(  # noqa: S603 — this interpreter + a fixed probe script
         [sys.executable, "-c", _WORKER_PROBE],
@@ -241,18 +243,18 @@ def test_pitr_probes_dial_the_home_authority(
 
     # The base candidate's capture-time facts, read as the owner.
     with local_owner_authority().session() as conn:
-        major, system_id, _segment, timeline, database = base_candidate._server_facts(conn)
-        migration_set = base_candidate._migration_set_sha256(conn)
+        major, system_id, _segment, timeline, database = candidate._server_facts(conn)
+        migration_set = candidate._migration_set_sha256(conn)
     assert (major, system_id, timeline, database) == (17, observed["system"], 1, "ava")
     assert len(migration_set) == 64
     # The replication preflight reaches pg_hba on the admin session: no PITR
     # replication row exists on this home, so it refuses on the rule itself.
     with pytest.raises(BaseCandidateError, match="physical-replication rule"):
-        base_candidate._validate_replication_hba({"user": "ava_pitr_repl", "host": "127.0.0.1"})
+        candidate._validate_replication_hba({"user": "ava_pitr_repl", "host": "127.0.0.1"})
 
     # Activation: the privilege probe, the WAL-switch capture and the config reader.
-    activation_runtime.probe_switch_privilege()
-    evidence = activation_runtime.prepare_wal_switch()
+    runtime.probe_switch_privilege()
+    evidence = runtime.prepare_wal_switch()
     assert evidence["timeline"] == "1" and len(evidence["segment"]) == 24
 
     def _record(_home: Path) -> cluster.ClusterRecord:
@@ -266,6 +268,6 @@ def test_pitr_probes_dial_the_home_authority(
     # another home's server refuses before any statement.
     foreign = tmp_path / "foreign-home"
     (foreign / "pg").mkdir(parents=True)
-    monkeypatch.setattr(activation_runtime, "ava_home", lambda: foreign)
+    monkeypatch.setattr(runtime, "ava_home", lambda: foreign)
     with pytest.raises(RuntimeError, match="postmaster is absent"):
-        activation_runtime.probe_switch_privilege()
+        runtime.probe_switch_privilege()

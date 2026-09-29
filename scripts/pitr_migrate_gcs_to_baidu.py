@@ -37,12 +37,12 @@ import google_crc32c
 from google.cloud import storage
 from google.oauth2 import service_account
 
-from services.pitr.baidu_store import BaiduObjectStore
-from services.pitr.baidu_token import BaiduCredentials, BaiduTokenManager
-from services.pitr.base_manifest import CandidateManifest
-from services.pitr.checksums import MD5
-from services.pitr.restore_manifest import ProtectedManifest, candidate_sha256
-from services.pitr.uploader import ack_manifest_from_raw
+from services.pitr.base_backup.manifest import CandidateManifest
+from services.pitr.restore.manifest import ProtectedManifest, candidate_sha256
+from services.pitr.stores.baidu.store import BaiduObjectStore
+from services.pitr.stores.baidu.token import BaiduCredentials, BaiduTokenManager
+from services.pitr.stores.checksums import MD5
+from services.pitr.wal.uploader import ack_manifest_from_raw
 
 _RECORD_DIRS = ("base-manifests", "protected-manifests", "protected-pending", "ack")
 _TERMINAL_PHASES = {"protected", "rolled_back"}

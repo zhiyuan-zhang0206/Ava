@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 import zstandard
 
-from services.pitr.base_restore_crypto import (
+from services.pitr.base_backup.restore_crypto import (
     BaseRestoreError,
     _decompressed_chunks,
 )

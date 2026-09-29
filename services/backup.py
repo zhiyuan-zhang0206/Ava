@@ -16,7 +16,7 @@ UTC timestamps. Retention orders those timestamps independently of host DST.
 Local dumps guard against bad migrations / accidental deletes / DB
 corruption. `run_backup` is `dump -> encrypt -> optional off-site publish ->
 prune`. The best-effort off-site leg publishes the encrypted artifact iff
-absent through the shared backup store contract (`services.pitr.store_factory`,
+absent through the shared backup store contract (`services.pitr.stores.factory`,
 the physical PITR plane's backend switch); a failed store keeps the local
 artifact. Remote objects are append-only except policy-owned, armed retention
 deletions (see `future/infra/pg-backup.md`). The dump uses PostgreSQL's
@@ -60,7 +60,7 @@ from psycopg.conninfo import conninfo_to_dict, make_conninfo
 
 from services.gateway_side.backup import passphrase as backup_passphrase
 from services.gateway_side.backup.intermediates import sweep_closed_partials
-from services.pitr.logical_dump_names import (
+from services.pitr.stores.logical_dump_names import (
     ACTIVATION_MARKER,
     DUMP_NAME_RE,
     PRE_UPDATE_MARKER,
@@ -80,7 +80,7 @@ _log = logging.getLogger(__name__)
 # Newest activation snapshots kept in their own prune slot: the current PITR
 # activation's logical floor plus the one before it; an unresolved activation's
 # snapshot is pinned on top (task #3696 exception inventory). The managed name
-# grammar lives in `services.pitr.logical_dump_names`, shared with retention.
+# grammar lives in `services.pitr.stores.logical_dump_names`, shared with retention.
 ACTIVATION_KEEP = 2
 # Headroom against a stall, not an expected runtime: a full dump with
 # checkpoint history takes about 6.3 min.
@@ -115,7 +115,7 @@ def _parse_stamp(stamp: str) -> datetime:
     """A managed dump's filename stamp as an aware UTC instant.
 
     The reading rules (UTC by construction; legacy stamps read in cluster
-    time) live in `services.pitr.logical_dump_names.stamp_utc`.
+    time) live in `services.pitr.stores.logical_dump_names.stamp_utc`.
     """
     return stamp_utc(stamp, _cluster_tz())
 
@@ -192,7 +192,7 @@ def _is_activation(path: Path) -> bool:
 def _active_activation_pin(directory: Path) -> Path | None:
     if directory.resolve() != backup_dir().resolve():
         return None
-    from services.pitr.activation_state import load_record
+    from services.pitr.activation.state import load_record
     from shared.paths import ava_home
 
     record = load_record(ava_home())
@@ -385,7 +385,7 @@ class _EncryptedFileSource:
     @property
     def ciphertext_crc32c(self) -> str:
         if self._crc32c is None:
-            from services.pitr.checksums import CRC32C, digest_file
+            from services.pitr.stores.checksums import CRC32C, digest_file
 
             self._crc32c = digest_file(CRC32C, str(self._path))
         return self._crc32c
@@ -405,7 +405,7 @@ def _publish_offsite(artifact: Path) -> str | None:
     local artifact — the off-site leg stays optional, exactly as the Drive
     copy it replaces.
     """
-    from services.pitr.store_factory import get_store_group
+    from services.pitr.stores.factory import get_store_group
 
     try:
         store = get_store_group().restartable_streaming_object_store()

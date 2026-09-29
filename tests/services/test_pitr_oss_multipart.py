@@ -13,9 +13,9 @@ from typing import Any, cast
 import pytest
 from oss2.models import PartInfo
 
-from services.pitr import oss_multipart
-from services.pitr.object_store import PermanentObjectStoreError, TransientObjectStoreError
-from services.pitr.oss_multipart import AbortOutcome, IncompleteUpload, OSSMultipartUploads
+from services.pitr.stores.object_store import PermanentObjectStoreError, TransientObjectStoreError
+from services.pitr.stores.oss import multipart
+from services.pitr.stores.oss.multipart import AbortOutcome, IncompleteUpload, OSSMultipartUploads
 from tests.services.oss_test_support import FakeOssBucket
 
 
@@ -72,8 +72,8 @@ def test_inventory_prefix_filters_uploads() -> None:
 
 
 def test_inventory_pages_through_uploads_and_parts(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(oss_multipart, "_UPLOAD_PAGE_SIZE", 1)
-    monkeypatch.setattr(oss_multipart, "_PARTS_PAGE_SIZE", 1)
+    monkeypatch.setattr(multipart, "_UPLOAD_PAGE_SIZE", 1)
+    monkeypatch.setattr(multipart, "_PARTS_PAGE_SIZE", 1)
     fake = FakeOssBucket()
     surface = make_surface(fake)
     first = seed_upload(fake, "k1", parts=[b"a", b"bb"], initiated=10)

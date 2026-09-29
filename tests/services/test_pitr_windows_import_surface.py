@@ -3,14 +3,14 @@
 CI has no Windows runner — the root cause of the 2026-08-29 outage where a
 module-level ``import fcntl`` in services/pitr/archive_shim crashed every CLI
 command on Windows units (fixed by lazy-import in 311b40c62; the shim is
-imported by the CLI through services/pitr/retention_planner). These tests
+imported by the CLI through services/pitr/retention/planner). These tests
 simulate Windows's missing fcntl in a fresh interpreter and assert that every
 module in the tree still imports, without replacing modules used by other tests.
 
 Trade-off vs a real Windows runner: only the fcntl absence is simulated, not
 msvcrt or other platform quirks — but the ImportError mechanism is exactly
 what broke Windows boot, and the module set is enumerated from the package
-directory so a newly added module is covered automatically.
+tree (subpackages included) so a newly added module is covered automatically.
 """
 
 from __future__ import annotations
@@ -26,10 +26,11 @@ import pytest
 
 import services.pitr
 
+_PITR_ROOT = Path(services.pitr.__file__).resolve().parent
 PITR_MODULES = sorted(
-    path.stem
-    for path in Path(services.pitr.__file__).resolve().parent.glob("*.py")
-    if path.stem != "__init__"
+    ".".join(path.relative_to(_PITR_ROOT).with_suffix("").parts)
+    for path in _PITR_ROOT.rglob("*.py")
+    if path.name != "__init__.py"
 )
 
 

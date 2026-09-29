@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 from cli.commands.data_plane import _pitr_activation_config as activation_config
-from services.pitr.activation_state import ActivationRecord
+from services.pitr.activation.state import ActivationRecord
 from shared import runtime_config
 
 
