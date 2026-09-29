@@ -1124,7 +1124,7 @@ class TestAdmissionWaitExemption:
     async def test_a_queued_turn_is_exempt_from_the_turn_level_scan(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from agent import turn_progress as progress
+        from agent.turn import progress
 
         scheduler = _ScanScheduler({23})
         monkeypatch.setattr(dispatcher, "turn_progress_age_s", _stale_age)
@@ -1147,7 +1147,7 @@ class TestAdmissionWaitExemption:
     async def test_a_queued_stale_candidate_is_not_cancelled_before_its_wake(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from agent import turn_progress as progress
+        from agent.turn import progress
 
         scheduler = _ScanScheduler({17})
         monkeypatch.setattr(dispatcher, "turn_progress_age_s", _stale_age)

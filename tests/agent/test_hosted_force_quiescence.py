@@ -20,8 +20,8 @@ import pytest
 from psycopg_pool import AsyncConnectionPool, ConnectionPool
 
 from agent.db import has_pending_interrupt
-from agent.graph._exec_stream import StreamingTextIO
-from agent.hosted_ownership import admit_hosted_runtime
+from agent.graph.exec._stream import StreamingTextIO
+from agent.ownership.hosted import admit_hosted_runtime
 from ops.agent_wake import resurrect_agent
 from ops.ops_exit import _force_terminate_transaction
 from ops.resurrection_retry import ResurrectSettlementDeferredError
@@ -83,16 +83,16 @@ def _observed_host(
 def _configure_late_reader(kind: str, patch: pytest.MonkeyPatch, release: threading.Event) -> None:
     if kind != "reader":
         return
-    from agent.graph import _exec_subprocess
+    from agent.graph.exec import _subprocess
 
-    original = _exec_subprocess._drain_output
+    original = _subprocess._drain_output
 
     def delayed(proc: subprocess.Popen[bytes], stream: StreamingTextIO) -> None:
         original(proc, stream)
         assert release.wait(20), "test must release real output reader"
 
-    patch.setattr(_exec_subprocess, "_drain_output", delayed)
-    patch.setattr("agent.graph._exec_process._READER_JOIN_TIMEOUT_S", 0.01)
+    patch.setattr(_subprocess, "_drain_output", delayed)
+    patch.setattr("agent.graph.exec._process._READER_JOIN_TIMEOUT_S", 0.01)
 
 
 async def _assert_pending_force(
@@ -174,7 +174,7 @@ async def test_force_waits_for_real_work_and_delayed_cancel_cannot_hit_successor
         elif work_kind == "thread":
             await asyncio.to_thread(_blocking_work, entered, release)
         else:
-            from agent.graph._exec_subprocess import _run_in_subprocess
+            from agent.graph.exec._subprocess import _run_in_subprocess
 
             await _run_in_subprocess(
                 "from pathlib import Path\nimport time\n"
@@ -615,10 +615,10 @@ async def test_formatted_exec_cleanup_failure_retains_actual_resource_evidence(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    from agent.graph._exec_process import ExecProcessDomain
-    from agent.graph._exec_result import _ExecCrashed
-    from agent.graph._exec_subprocess import _run_in_subprocess
-    from agent.hosted_ownership import apply_hosted_lifecycle, settle_hosted_runtime
+    from agent.graph.exec._process import ExecProcessDomain
+    from agent.graph.exec._result import _ExecCrashed
+    from agent.graph.exec._subprocess import _run_in_subprocess
+    from agent.ownership.hosted import apply_hosted_lifecycle, settle_hosted_runtime
     from shared.turn_identity import HostedTurnResources, bind_hosted_resources
     from tests.agent.test_inbound_ownership import _admit
 
@@ -655,11 +655,11 @@ async def test_formatted_exec_cleanup_failure_retains_actual_resource_evidence(
 async def test_real_missing_executable_is_not_an_unresolved_child(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    from agent.graph._exec_result import _ExecCrashed
-    from agent.graph._exec_subprocess import _run_in_subprocess
+    from agent.graph.exec._result import _ExecCrashed
+    from agent.graph.exec._subprocess import _run_in_subprocess
     from shared.turn_identity import HostedTurnResources, bind_hosted_resources
 
-    monkeypatch.setattr("agent.graph._exec_subprocess.sys.executable", str(tmp_path / "absent"))
+    monkeypatch.setattr("agent.graph.exec._subprocess.sys.executable", str(tmp_path / "absent"))
     scope = HostedTurnResources()
     with bind_hosted_resources(scope):
         outcome, _ = await _run_in_subprocess(

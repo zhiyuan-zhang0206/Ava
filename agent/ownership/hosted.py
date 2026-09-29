@@ -569,7 +569,7 @@ async def admit_hosted_runtime(
                     predecessor=str(legacy_adoption.owner),
                     silence=round(legacy_adoption.silence_s, 1),
                 )
-            from agent.lifecycle_observe import observe_hosted_admission
+            from agent.ownership.lifecycle_intent import observe_hosted_admission
 
             await observe_hosted_admission(conn, RuntimeIncarnation(agent_id, row[0], owner))
             await align_accepting_binding(

@@ -11,7 +11,7 @@ tags:
 # Exec output previews
 
 `wrap_code_output` preserves the output envelope and timeout/cancel markers.
-Before its hard character limit, `_exec_crop.py` can replace long multiline
+Before its hard character limit, `_crop.py` can replace long multiline
 output with its first and last lines plus a real recovery path. It does not
 change tool execution, automatically rerun code, or call a model.
 
@@ -85,6 +85,6 @@ they never call an already incomplete archive the full output.
 
 ## Dependencies
 
-- [[agent/graph/tool-exec/tool-exec.ava.okf.md]] — native exec lifecycle and result dispatch
+- [[agent/graph/exec/exec.ava.okf.md]] — native exec lifecycle and result dispatch
 - `shared/config/sandbox.py` — validated configuration surface
 - `tests/agent/test_exec_output_crop.py` — previews, real file recovery and bounded retention

@@ -9,7 +9,7 @@ from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
 
 from agent.db import claim_inbound_batch
-from agent.hosted_ownership import admit_hosted_runtime, apply_hosted_lifecycle
+from agent.ownership.hosted import admit_hosted_runtime, apply_hosted_lifecycle
 from ops.agent_spawn import create_agent_row
 from ops.agent_wake import resurrect_agent
 from shared.db import insert_inbound_message

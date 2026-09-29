@@ -65,7 +65,7 @@ def test_every_reaper_write_preserves_the_crash_marker() -> None:
             )
             checked.append(rel)
     assert checked, "no reaper write sites found — did the literal change?"
-    assert "agent/corpse_reap.py" in checked  # the corpse reaper itself
+    assert "agent/ownership/corpse_reap.py" in checked  # the corpse reaper itself
 
 
 def test_marker_clear_sites_are_enumerated() -> None:
@@ -86,7 +86,7 @@ def test_marker_stamp_sites_are_enumerated() -> None:
         for path in _python_files()
         if _MARKER_STAMP.search(path.read_text(encoding="utf-8"))
     }
-    assert stampers == {"agent/hosted_ownership.py"}
+    assert stampers == {"agent/ownership/hosted.py"}
 
 
 def test_relaxed_guard_consumers_embed_the_shared_predicates() -> None:

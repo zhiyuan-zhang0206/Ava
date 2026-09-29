@@ -373,7 +373,7 @@ def test_postgres_dial_forms_are_flagged(source: str) -> None:
 
 
 def test_governed_subclass_construction_is_a_dial() -> None:
-    """This repo's own pool subclasses (e.g. agent/db.py's LoggingConnectionPool)
+    """This repo's own pool subclasses (e.g. agent/db/__init__.py's LoggingConnectionPool)
     are governed reach-ins too, not just the psycopg_pool names themselves."""
     source = "from agent.db import LoggingConnectionPool\nLoggingConnectionPool[int]('dsn')\n"
 

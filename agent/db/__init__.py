@@ -165,7 +165,7 @@ class ClaimedInbound(NamedTuple):
 
 
 _MAX_SPAWNER_ANCESTOR_DEPTH = 32
-_FATAL_PROVIDER_REPORT_LOCATION = "agent.runloop._handle_fatal_llm_error"
+_FATAL_PROVIDER_REPORT_LOCATION = "agent.turn.runloop._handle_fatal_llm_error"
 
 
 async def enqueue_fatal_provider_report_to_nearest_alive_ancestor(

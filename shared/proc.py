@@ -120,7 +120,7 @@ def hosting_supervised_session() -> str | None:
 # The entry modules an agent exec-domain session leader runs. Both exec spawn
 # shapes make their root the session leader (`start_new_session`): the
 # protocol-zero spawn runs `agent.exec_child` directly
-# (`agent/graph/_exec_subprocess.py::_spawn`), and the owned protocol spawns
+# (`agent/graph/exec/_subprocess.py::_spawn`), and the owned protocol spawns
 # `agent.exec_owner_child` as the root (`agent/exec_domain_owner.py`), which
 # runs the same payload via `runpy` in-process. Compared as whole argv
 # elements: the token is one exact argument, never a substring.

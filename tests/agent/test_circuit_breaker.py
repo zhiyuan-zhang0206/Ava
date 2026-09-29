@@ -34,8 +34,8 @@ from agent.hooks.compact import (
     compose_summary_message,
     emergency_compact_summary,
 )
-from agent.runloop import _handle_fatal_llm_error
 from agent.state import AgentState, CircuitState
+from agent.turn.runloop import _handle_fatal_llm_error
 from shared.config import settings
 from shared.context import AvaContext
 from shared.event_publisher import AgentEventPublisher
@@ -237,7 +237,7 @@ async def test_permanent_provider_error_reports_metadata_to_nearest_alive_ancest
             f"{child_id} is blocked after a permanent provider rejection. "
             "error_class=permanent vendor=deepseek provider=anthropic status=400 reason=bad_request "
             "timestamp=2026-09-03T08:00:00+00:00 "
-            "where=agent.runloop._handle_fatal_llm_error",
+            "where=agent.turn.runloop._handle_fatal_llm_error",
             "system_note",
             "system",
             {"note_tag": "agent_reply"},

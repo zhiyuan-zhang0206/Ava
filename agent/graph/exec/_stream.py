@@ -53,7 +53,7 @@ class StreamCap:
     """Record that the accumulation budget dropped the middle of an exec's output.
 
     Travels with the text through the `_ExecResult` sum type into
-    `exec_output.wrap_code_output`, which needs both numbers to stay honest:
+    `output.wrap_code_output`, which needs both numbers to stay honest:
     `produced_chars` is the TRUE pre-truncation length the instrumentation log
     line reports, and the overflow archive can no longer claim to hold the full
     output — the middle is gone before the archive is ever written.

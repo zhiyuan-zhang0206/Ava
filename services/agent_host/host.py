@@ -47,17 +47,9 @@ from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.graph.state import CompiledStateGraph
 from psycopg_pool import AsyncConnectionPool, PoolTimeout
 
-from agent.corpse_reap import reap_crash_corpses
 from agent.graph.llm_errors import FatalLLMStreamError, FatalProviderError
 from agent.graph.node_log import flush_node_exit_aggregate
 from agent.hooks.compact import CompactionFailedError
-from agent.hosted_ownership import (
-    admit_hosted_runtime,
-    apply_hosted_lifecycle,
-    release_hosted_owner,
-    renew_hosted_owner,
-    settle_hosted_runtime,
-)
 from agent.impersonation import (
     active_lease,
     drop_relay_supervision,
@@ -66,15 +58,28 @@ from agent.impersonation import (
     settle_checkpoint,
     supervise_relay,
 )
+from agent.ownership.corpse_reap import reap_crash_corpses
+from agent.ownership.hosted import (
+    admit_hosted_runtime,
+    apply_hosted_lifecycle,
+    release_hosted_owner,
+    renew_hosted_owner,
+    settle_hosted_runtime,
+)
 from agent.process_boot import boot_agent_scope
-from agent.runloop import PendingTurnFailure, emit_error_event, graph_config, settle_turn_failure
 from agent.startup import (
     reconcile_claimed_inbounds_at_startup,
     repair_dangling_tool_use_at_startup,
 )
 from agent.state import BaseAgentState
-from agent.trace_checkpoint import attach_trace_checkpoint_ref
-from agent.turn_progress import reset_turn_progress
+from agent.turn.progress import reset_turn_progress
+from agent.turn.runloop import (
+    PendingTurnFailure,
+    emit_error_event,
+    graph_config,
+    settle_turn_failure,
+)
+from agent.turn.trace_checkpoint import attach_trace_checkpoint_ref
 from services.agent_host import maintenance as maintenance_receipts
 from services.agent_host.admission import TurnAdmission
 from services.agent_host.crash_recovery import recover_reaped_corpses

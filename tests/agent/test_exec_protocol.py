@@ -1,5 +1,5 @@
 """Envelope + typed-blob protocol tests for the exec subprocess
-(`agent/graph/exec_protocol.py`).
+(`agent/graph/exec/protocol.py`).
 
 The load-bearing assertions are the exact round-trips: the typed blob must
 reconstruct langchain messages field-for-field (AIMessage `usage_metadata`
@@ -21,7 +21,7 @@ from typing import Any
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
-from agent.graph.exec_protocol import (
+from agent.graph.exec.protocol import (
     MAX_ENVELOPE_BYTES,
     REQUEST_VERSION,
     RESULT_VERSION,
@@ -301,7 +301,7 @@ def test_failed_envelope_write_leaves_nothing_at_the_destination(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A write failing before the rename never materializes at `path` (D-3)."""
-    import agent.graph.exec_protocol as protocol
+    from agent.graph.exec import protocol
 
     path = make_request_path(tmp_path, agent_id=7)
 
@@ -332,7 +332,7 @@ def test_writer_killed_before_commit_leaves_no_envelope_at_all(
     script = (
         "import os, sys\n"
         "from pathlib import Path\n"
-        "import agent.graph.exec_protocol as protocol\n"
+        "import agent.graph.exec.protocol as protocol\n"
         "def die(*_args, **_kwargs):\n"
         "    os._exit(9)\n"
         f"{kill_point} = die\n"

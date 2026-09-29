@@ -14,7 +14,7 @@ from agent.db import (
     reconcile_claimed_inbounds,
 )
 from agent.graph.claim._batch import _defer_chats_to_pending
-from agent.hosted_ownership import admit_hosted_runtime
+from agent.ownership.hosted import admit_hosted_runtime
 from agent.ownership.inbound import RuntimeOwnershipLostError, lock_inbound_owner
 from shared.db import create_agent
 from shared.db_transaction import async_write_transaction

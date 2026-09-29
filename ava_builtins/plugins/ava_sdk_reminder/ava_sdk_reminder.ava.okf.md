@@ -63,7 +63,7 @@ register_before_llm(sdk_reminder_agent_reply_before_llm)
 ## Key Dependencies
 
 - [[agent/hooks/hooks.ava.okf.md]] — after_exec + before_llm hook
-- [[tool-exec.ava.okf.md]] — code execution sandbox (after_exec hook runs here)
+- [[agent/graph/exec/exec.ava.okf.md]] — code execution sandbox (after_exec hook runs here)
 - [[sdk-surface.ava.okf.md]] — the SDK surface being reminded about
 
 ## Configuration

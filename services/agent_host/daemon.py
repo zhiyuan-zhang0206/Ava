@@ -56,8 +56,8 @@ from psycopg.rows import DictRow
 from psycopg_pool import AsyncConnectionPool
 
 import shared.redis_client
-from agent.hosted_ownership import settle_stale_running_rows
-from agent.turn_progress import turn_progress_age_s, turn_progress_snapshot
+from agent.ownership.hosted import settle_stale_running_rows
+from agent.turn.progress import turn_progress_age_s, turn_progress_snapshot
 from services.agent_host import boot_defer
 from services.agent_host.dispatcher import InboundWakeDispatcher, TurnScheduler
 from services.agent_host.host import AgentHost, kill_terminating_agent_shells

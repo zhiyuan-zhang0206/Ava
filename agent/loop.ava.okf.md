@@ -96,6 +96,6 @@ turn; they do not change wake, claim, or recovery behavior.
 ## Related contracts
 
 - [[startup/startup.ava.okf.md]] — host and per-agent initialization
-- [[lease.ava.okf.md]] — incarnation ownership
+- [[agent/ownership/ownership.ava.okf.md]] — incarnation ownership
 - [[lifecycle.ava.okf.md]] — native control and checkpoint ordering
 - [[sessions.ava.okf.md]] — persistent shells

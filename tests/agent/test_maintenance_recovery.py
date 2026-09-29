@@ -9,7 +9,7 @@ import pytest
 from psycopg_pool import AsyncConnectionPool
 
 from agent.db import claim_inbound_batch
-from agent.hosted_ownership import admit_hosted_runtime, apply_hosted_lifecycle
+from agent.ownership.hosted import admit_hosted_runtime, apply_hosted_lifecycle
 from services.agent_host.host import AgentHost
 from services.agent_host.runtime import TurnOutcome
 from shared import maintenance, maintenance_cohort, pause_owner

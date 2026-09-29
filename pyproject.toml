@@ -221,12 +221,12 @@ forbidden_modules = ["agent"]
 # direction, and its diff is the review signal.
 ignore_imports = [
     "services.agent_host.* -> agent.process_boot",
-    # agent/turn_progress.py is a dependency-free leaf: the hosted runner's
+    # agent/turn/progress.py is a dependency-free leaf: the hosted runner's
     # stall guard (host.py) and its scan (dispatcher.py) both read the same
     # per-agent monotonic clock, and the graph kernel marks it (the same
     # one-way direction: agent -> nothing).
-    "services.agent_host.* -> agent.turn_progress",
-    "services.agent_host.* -> agent.runloop",
+    "services.agent_host.* -> agent.turn.progress",
+    "services.agent_host.* -> agent.turn.runloop",
     "services.agent_host.* -> agent.db",
     "services.agent_host.* -> agent.graph",
     # The host catches native fatal errors to persist the halted/circuit state
@@ -235,7 +235,7 @@ ignore_imports = [
     # Compaction exhaustion is another expected native turn abort, handled by the host.
     "services.agent_host.host -> agent.hooks.compact",
     # The host owns the final durable checkpoint/trace link and the node-log tail.
-    "services.agent_host.host -> agent.trace_checkpoint",
+    "services.agent_host.host -> agent.turn.trace_checkpoint",
     "services.agent_host.host -> agent.graph.node_log",
     # Database recovery retains and repairs the original fenced continuation.
     "services.agent_host.db_recovery -> agent.impersonation",
@@ -244,12 +244,12 @@ ignore_imports = [
     # settled abort, so a replaced runtime makes the reconcile pass a logged
     # no-op instead of a second turn failure.
     "services.agent_host.settlement -> agent.ownership.inbound",
-    "services.agent_host.* -> agent.hosted_ownership",
+    "services.agent_host.* -> agent.ownership.hosted",
     # The corpse reaper is the other half of the hosted ownership machinery
-    # (split out of agent.hosted_ownership at its 800-line budget ceiling):
+    # (split out of agent.ownership.hosted at its 800-line budget ceiling):
     # the host's beat runs the grace reap, and the settlement boundary runs
     # the prompt reap of a corpse that re-crashed under its own mark.
-    "services.agent_host.* -> agent.corpse_reap",
+    "services.agent_host.* -> agent.ownership.corpse_reap",
     # The hosted invocation driver shares the native takeover boundary: it
     # gates active leases and settles external state only after graph flush.
     "services.agent_host.host -> agent.impersonation",

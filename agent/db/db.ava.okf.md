@@ -9,7 +9,7 @@ tags: []
 
 ## What it is
 
-`agent/db.py` implements kernel SQL for inbound claims and checkpoint
+`agent/db/__init__.py` implements kernel SQL for inbound claims and checkpoint
 reconciliation. The agent host owns the workload and control pools; the
 LangGraph saver shares the workload pool. Idle agents do not own connections
 or a blocked graph invocation.
@@ -40,9 +40,9 @@ or a blocked graph invocation.
 
 ## Entry Points
 
-- `agent/db.py:claim_inbound_batch` — acquires the pool and row locks with bounded
+- `agent/db/__init__.py:claim_inbound_batch` — acquires the pool and row locks with bounded
   waits. Timeout rolls back; a later host wake or scan retries pending work.
-- `agent/db.py:has_pending_interrupt` — read-only interrupt detection.
+- `agent/db/__init__.py:has_pending_interrupt` — read-only interrupt detection.
 - `services/agent_host/daemon.py` — shared pool, checkpointer and wake lifecycle.
 - `services/agent_host/host.py` — per-agent admission and checkpoint settlement.
 
@@ -50,7 +50,7 @@ or a blocked graph invocation.
 
 - [[graph.ava.okf.md]] — claim dispatch and graph execution
 - [[agent/db/lifecycle-recovery.ava.okf.md]] — completion evidence
-- [[lease.ava.okf.md]] — incarnation ownership
+- [[agent/ownership/ownership.ava.okf.md]] — incarnation ownership
 
 ## Notes
 

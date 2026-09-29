@@ -31,7 +31,7 @@ import psycopg
 import pytest
 from psycopg_pool import AsyncConnectionPool
 
-from agent.hosted_ownership import admit_hosted_runtime
+from agent.ownership.hosted import admit_hosted_runtime
 from shared.db import create_agent
 from shared.host_process_evidence import LocalHostEvidence, local_host_evidence
 from shared.managed_writer_publication import AdmissionDecision, LegacyProtocolZero
@@ -179,7 +179,7 @@ async def test_legacy_null_row_admits_over_dead_local_host_without_full_ttl(
         del agent_id, source
         events.append((event_type, payload or {}))
 
-    monkeypatch.setattr("agent.hosted_ownership.insert_event_log_async", _event)
+    monkeypatch.setattr("agent.ownership.hosted.insert_event_log_async", _event)
     agent_id, prior = _seed(db_conn, lease_s=300.0)
     successor = await _admit(aops_pool, agent_id, uuid4())
     assert successor is not None
@@ -212,7 +212,7 @@ async def test_legacy_null_row_still_waits_while_the_lease_looks_beaten(
     async def _event(*, event_type: str, **_kw: object) -> None:
         events.append(event_type)
 
-    monkeypatch.setattr("agent.hosted_ownership.insert_event_log_async", _event)
+    monkeypatch.setattr("agent.ownership.hosted.insert_event_log_async", _event)
     agent_id, prior = _seed(db_conn, lease_s=590.0)  # 10s of silence
     assert await _admit(aops_pool, agent_id, uuid4()) is None
     assert _row(db_conn, agent_id) == (prior, None, "idling", True)
@@ -343,7 +343,7 @@ async def test_stale_proposal_cannot_adopt_a_row_that_moved_on(
     the evidence scan and the row lock must defeat the proposal: the pin is
     (owner, generation, lease), re-checked inside the transaction.
     """
-    from agent.hosted_ownership import _legacy_dead_host_adoption
+    from agent.ownership.hosted import _legacy_dead_host_adoption
 
     agent_id, prior = _seed(db_conn)
     proposal = await _legacy_dead_host_adoption(aops_pool, agent_id, "host-test", uuid4())
@@ -359,7 +359,7 @@ async def test_stale_proposal_cannot_adopt_a_row_that_moved_on(
     async def _stale(*_args: object, **_kw: object):
         return proposal
 
-    monkeypatch.setattr("agent.hosted_ownership._legacy_dead_host_adoption", _stale)
+    monkeypatch.setattr("agent.ownership.hosted._legacy_dead_host_adoption", _stale)
     assert await _admit(aops_pool, agent_id, uuid4()) is None
     stored_owner, _resources, status, _fresh = _row(db_conn, agent_id)
     assert stored_owner == prior and status == "idling"

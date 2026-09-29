@@ -9,7 +9,7 @@ tags:
 # Plugin Module Loading
 
 ## One loader contract, three production call sites
-`agent/extensions.py:load_extensions()` imports every enabled plugin's
+`agent/extensions/__init__.py:load_extensions()` imports every enabled plugin's
 `plugin.py` (plus its optional `agent_runtime.py` face on the full form) by
 path, and `ava.sdk_surface.plugin_loader.scan_and_load()` does the same for the external
 plugins at host boot (`agent/process_boot.py:load_process_extensions`). The

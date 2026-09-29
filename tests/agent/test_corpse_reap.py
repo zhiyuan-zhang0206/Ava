@@ -1,4 +1,4 @@
-"""The hosted corpse reaper's recrash trigger against real rows — `agent/corpse_reap.py`.
+"""The hosted corpse reaper's recrash trigger against real rows — `agent/ownership/corpse_reap.py`.
 
 The beat reaper terminates marked idling corpses once the grace window
 elapses; the prompt reap (task #3616) terminates the row this incarnation just
@@ -22,13 +22,13 @@ import psycopg
 import pytest
 from psycopg_pool import AsyncConnectionPool
 
-from agent.corpse_reap import (
+from agent.ownership.corpse_reap import (
     CRASH_RECOVERY_WAKE_TEXT,
     RECRASH_CONFIRMED_CRASHES,
     reap_crash_corpses,
     reap_recrashed_corpse,
 )
-from agent.hosted_ownership import admit_hosted_runtime, settle_hosted_runtime
+from agent.ownership.hosted import admit_hosted_runtime, settle_hosted_runtime
 from ops import agent_wake
 from shared.config import settings
 from shared.db import create_agent
@@ -97,8 +97,8 @@ def reap_spies(monkeypatch: pytest.MonkeyPatch) -> tuple[list[dict[str, object]]
     async def _publish(agent_id: int) -> None:
         published.append(agent_id)
 
-    monkeypatch.setattr("agent.corpse_reap.insert_event_log_async", _event)
-    monkeypatch.setattr("agent.corpse_reap.publish_agent_updated", _publish)
+    monkeypatch.setattr("agent.ownership.corpse_reap.insert_event_log_async", _event)
+    monkeypatch.setattr("agent.ownership.corpse_reap.publish_agent_updated", _publish)
     return events, published
 
 

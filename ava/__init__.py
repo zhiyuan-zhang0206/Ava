@@ -48,7 +48,7 @@ from .sdk_surface.plugins import register_sdk_expand as register_sdk_expand
 # module attributes — all state read/write goes through
 # `agent.state.PluginStateHandle` (the typed handle returned by
 # `register_plugin_state(Cls)`)**. These two attributes exist because the
-# framework itself (primarily `agent/graph/_exec.py:_exec_node_impl`) and
+# framework itself (primarily `agent/graph/exec/node.py:_exec_node_impl`) and
 # the handle internals rely on them to pass the working copy + delta dict;
 # a module-level slot is simpler than ContextVar — the slot lives in the
 # exec child, which rebuilds it from the request envelope before agent code
@@ -130,7 +130,7 @@ def ensure_plugins_loaded(*, surface: bool = True) -> None:
     launched subprocess still self-loads its plugins.
 
     Containment: the loader's own plugin-import loop is fail-soft (see
-    `agent/extensions.py`); anything still escaping it is an inventory/config
+    `agent/extensions/__init__.py`); anything still escaping it is an inventory/config
     failure — a duplicate plugin name, a malformed `plugins_config.json`, a
     plugin-config schema drift. None of those may kill an agent-launched
     process at `import ava` the way the 2026-08-28 ava_ledger crash did (every
@@ -270,7 +270,7 @@ def __getattr__(name: str) -> Any:
 # `ava.sdk_surface.wraps` and `ava.sdk_surface.plugin_loader` are public names
 # (agent visibility is the `__all_for_ava__` whitelist below, not the
 # underscore) reached across the `ava` package boundary by the agent kernel
-# (`agent/state.py`, `agent/process_boot.py`, `agent/extensions.py`).
+# (`agent/state.py`, `agent/process_boot.py`, `agent/extensions/__init__.py`).
 # `wraps`' curated plugin-author surface is assembled as `ava.extend` further
 # down.
 # ruff: noqa: E402 — submodule imports must come after DB/REDIS slot injection

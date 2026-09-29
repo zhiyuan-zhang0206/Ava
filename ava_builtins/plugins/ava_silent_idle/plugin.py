@@ -44,4 +44,4 @@ __description__ = "Inject a Continue nudge after a silent-idle turn (model reaso
 # registrations: everything this plugin does is agent-runtime behavior
 # (a before_llm hook), so children do not need any of it. The registrations live
 # in `agent_runtime.py`, imported only on the full path (see
-# `agent/extensions.py`; task #3633).
+# `agent/extensions/__init__.py`; task #3633).

@@ -22,7 +22,7 @@ ops layer); every attempt a refusal, a race, or a process death drops is
 retried by the delivery watchdog's terminated-owner resurrection retry
 until the chat's stale age gate dead-letters it.
 
-Split out of `agent.hosted_ownership` when the recrash reap pushed that
+Split out of `agent.ownership.hosted` when the recrash reap pushed that
 module at the 800-line budget ceiling.
 """
 

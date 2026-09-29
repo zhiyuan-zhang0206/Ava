@@ -7,7 +7,7 @@ centralizes helpers used by both ends (`config` / `db` / `events` /
 
 This module contains **pure SQL, no business semantics, used by both
 ends** helpers. Kernel-only (inbound claim, wait/mark/revert) is in
-`agent/db.py`. Connection policy and pool construction live in
+`agent/db/__init__.py`. Connection policy and pool construction live in
 `shared/db_connections.py` and remain re-exported here.
 """
 

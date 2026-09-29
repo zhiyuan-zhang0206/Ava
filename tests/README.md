@@ -42,7 +42,7 @@ tests/
 
 | Source | Test |
 |------|------|
-| `agent/graph/_exec.py` | `tests/agent/test_exec_output.py` |
+| `agent/graph/exec/node.py` | `tests/agent/test_exec_output.py` |
 | `gateway/timeline.py` | `tests/gateway/test_timeline.py` |
 | `ava/shell.py` | `tests/ava/test_shell.py` |
 

@@ -17,7 +17,7 @@ leftovers when pytest crashes / SIGKILL without running sessionfinish. 1h thresh
 Sync vs async fixtures:
 - `db_conn`  (sync `psycopg.Connection`) — for root `db.py` shared helpers and
   UI related tests
-- `adb_conn` (async `psycopg.AsyncConnection`) — for kernel `agent/db.py`
+- `adb_conn` (async `psycopg.AsyncConnection`) — for kernel `agent/db/__init__.py`
 """
 
 # ruff: noqa: E402 — this file's project imports deliberately sit BELOW the env
@@ -1317,7 +1317,7 @@ def db_conn() -> Iterator[psycopg.Connection]:
 
 @pytest_asyncio.fixture
 async def adb_conn() -> AsyncIterator[psycopg.AsyncConnection]:
-    """async counterpart of db_conn (the kernel's agent/db.py uses async). Cleanup
+    """async counterpart of db_conn (the kernel's agent/db/__init__.py uses async). Cleanup
     is the autouse `_clean_state`; this fixture only opens the AsyncConnection."""
     aconn = await psycopg.AsyncConnection.connect(settings.data_plane.db_url)
     try:

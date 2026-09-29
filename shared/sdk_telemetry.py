@@ -183,7 +183,7 @@ def sdk_calls_by_tool_call_id(
 ) -> dict[str, list[SdkCall]]:
     """Map each exec_output ToolMessage's ``tool_call_id`` to its block's SDK calls.
 
-    The counts are the runtime tally ``agent/graph/_exec.py`` wrote to the message's
+    The counts are the runtime tally ``agent/graph/exec/node.py`` wrote to the message's
     ``additional_kwargs["sdk_calls"]`` — what the code really executed, never a scan
     of its text. Only ``messages[start:]`` is scanned (the rendered span): a tool
     call's metadata rides the ToolMessage that follows it, so nothing outside the

@@ -1,7 +1,7 @@
 """Per-cluster PgBouncer transaction pooler.
 
 The pooled front door consumers dial past ~50 agents (each agent holds 2
-Postgres connections; see `agent/db.py`).
+Postgres connections; see `agent/db/__init__.py`).
 PgBouncer is the third per-cluster data-plane process — a peer of this cluster's
 own Postgres and Redis (`cluster_instance.py`) — brought up on the cluster's own
 `pgbouncer` port (a registry-record fact; the port is no longer materialized in

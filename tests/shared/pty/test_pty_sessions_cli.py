@@ -1180,7 +1180,7 @@ def test_child_env_does_not_inherit_spawner_process_profile(sessions: Path) -> N
     a service-context caller) must not leak the marker into session children.
 
     A leaked service marker is fatal for watcher children: the watcher
-    bootstrap `import ava` -> plugin load -> agent.graph._build -> agent/db.py
+    bootstrap `import ava` -> plugin load -> agent.graph._build -> agent/db/__init__.py
     reads `settings.agent.*`, and the runner profile does not construct the
     agent config domain (Task #856 fail-fast) -> every watcher dies at boot.
     The pty child pops the marker BEFORE the envfile overlay, so a marker the

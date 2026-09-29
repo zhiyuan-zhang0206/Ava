@@ -432,7 +432,7 @@ _EVENTS_RUNTIME: dict[str, EventSpec] = {
     "host_turn_stall_timeout": _telemetry(
         "host_turn_stall_timeout",
         "the hosted stall guard aborted a graph.ainvoke whose turn clock "
-        "(agent/turn_progress.py: node enters + completed LLM steps) was "
+        "(agent/turn/progress.py: node enters + completed LLM steps) was "
         "silent past AVA_HOST_TURN_NO_PROGRESS_TIMEOUT_SECONDS (turn activity = "
         "node enter, completed LLM step, streamed chunk) — the turn-level "
         "injection guard of task #2417. The invocation was cancelled and "
@@ -593,7 +593,7 @@ _EVENTS_RUNTIME: dict[str, EventSpec] = {
     "host_turn_stall_detected": _telemetry(
         "host_turn_stall_detected",
         "the hosted dispatcher's durable scan found an in-flight turn whose "
-        "turn-progress clock (agent/turn_progress.py: node enters, completed "
+        "turn-progress clock (agent/turn/progress.py: node enters, completed "
         "LLM steps, streamed LLM chunks) has been silent past the wedged "
         "budget while NO pending "
         "inbound exists — the turn-level fake-alive shape (process alive, turn "

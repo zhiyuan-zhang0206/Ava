@@ -30,7 +30,7 @@ renders through and cannot ship a selector or a rule. Token values are
 `oklch(...)` or hex literals only.
 
 Like `skills`/`commands` there is no `register_*` call behind the key, so
-`agent/plugin_catalog.py:DECLARATION_ONLY_KEYS` carries it and the
+`agent/extensions/catalog.py:DECLARATION_ONLY_KEYS` carries it and the
 declared-vs-registered diff has no registered side to compare against. The
 console reads the declarations itself, through
 `GET /api/ui/contributions` (`gateway/routers/ui_contributions.py`), which

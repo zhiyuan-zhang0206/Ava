@@ -47,7 +47,7 @@ in-flight turn is normal — the claim's turn-end SELECT picks it up. Boot state
    running/restarting owners remain untouched. The same cadence completes the
    stale pending `terminate` / `system_note` / `restart_completed` rows of
    terminated owners (no consumer), and the reconcile-side cutoff
-   (`agent/db.py::reconcile_claimed_inbounds`) still closes the resurrect race at boot.
+   (`agent/db/__init__.py::reconcile_claimed_inbounds`) still closes the resurrect race at boot.
 5. **Hosted-turn liveness recovery** — on the same watchdog tick, select hosted
    running rows whose DB activity is older than the 2400s wedged-agent budget,
    then confirm them against the agent-host's 15s Redis progress heartbeat
@@ -496,7 +496,7 @@ _DEDUP_GC_EVERY_TICKS = 120
 # tick-gated) so its real period is independent of the tick interval. 30s is
 # plenty — the hazard is a resurrect re-delivering ancient rows, and a
 # resurrect takes seconds to boot, so the sweep is virtually always ahead of
-# it; the reconcile-side cutoff (agent/db.py) closes the residual race.
+# it; the reconcile-side cutoff (agent/db/__init__.py) closes the residual race.
 _CLAIMED_SWEEP_INTERVAL_S = 30.0
 
 

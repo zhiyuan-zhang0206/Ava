@@ -1,17 +1,17 @@
 """Code execution output envelope: format / truncate / overflow-to-file.
 
-The exec node (`_exec.py`) runs agent code and collects its merged stdout+stderr
+The exec node (`node.py`) runs agent code and collects its merged stdout+stderr
 stream; this module turns that raw stream into the "Code execution output:"
-envelope fed back to the LLM. Split out from `_exec.py` to keep that file's line
+envelope fed back to the LLM. Split out from `node.py` to keep that file's line
 budget — this is a self-contained formatting layer with one public entry,
 `wrap_code_output`, called by the exec node's result dispatch.
 
 Long multiline output can first use a configurable line preview backed by a
-full archive protected while the current context references it (`_exec_crop`).
+full archive protected while the current context references it (`_crop`).
 The existing hard inline cap uses a separate 20-file ring under `.exec_output/`
 in the agent's workspace. Neither archive lives in the OS temporary directory.
 
-The hard inline limit is the SECOND of two hard caps. The first (`_exec_stream.StreamingTextIO`)
+The hard inline limit is the SECOND of two hard caps. The first (`_stream.StreamingTextIO`)
 bounds accumulation while the code is still running; when it fired, its
 `StreamCap` travels here so this layer reports the true produced length and
 stops promising the archive holds the full text — the middle was dropped before
@@ -36,8 +36,8 @@ from shared.config import now_timestamp, settings
 from shared.log import logger
 from shared.paths import workspace_dir
 
-from ._exec_crop import crop_output
-from ._exec_stream import StreamCap
+from ._crop import crop_output
+from ._stream import StreamCap
 
 # The default marker is the user Stop action. Maintenance and other external
 # system interruptions retain their observed attribution in the same envelope.

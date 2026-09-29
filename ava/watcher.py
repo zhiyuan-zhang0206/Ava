@@ -231,7 +231,7 @@ def _build_boot(script_path: _pl.Path, watchdog_secs: float | None, agent_id: in
         # AVA_PROCESS_PROFILE from the creating process's env,
         # but the watcher is an agent subprocess and needs the agent profile
         # to import ava without hitting the per-process config guard
-        # (agent/db.py reads settings.agent at module level, and the runner
+        # (agent/db/__init__.py reads settings.agent at module level, and the runner
         # profile does not construct the agent domain — Task #856 fail-fast).
         f'os.environ["AVA_PROCESS_PROFILE"] = "agent"\n'
         "\n"

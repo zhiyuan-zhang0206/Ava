@@ -276,7 +276,7 @@ def report_dangling(exc: DanglingPlugin) -> None:
     """Report dangling config entries through the one canonical fail-soft reporter.
 
     Both dangling-handling load sites — the runtime wrapper below and the
-    agent-boot loader (`agent/extensions.py`) — drop the entries (treated as
+    agent-boot loader (`agent/extensions/__init__.py`) — drop the entries (treated as
     disabled) and report each name through `shared.plugin_load_report`, so a
     plugin that is enabled in the machine config but absent from disk is as
     visible as every other contained plugin failure: loguru ERROR plus the

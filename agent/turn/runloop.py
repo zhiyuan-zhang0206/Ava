@@ -8,16 +8,10 @@ from datetime import UTC, datetime
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph.state import CompiledStateGraph
 
+from agent.graph.llm_errors import FatalLLMStreamError, FatalProviderError
 from agent.hooks.compact import CompactionFailedError
 from agent.state import BaseAgentState
-from shared.audit_events import insert_event_log_async
-from shared.config.turn_view import turn_settings
-from shared.context import AvaContext
-from shared.live_events import Error
-from shared.log import logger
-
-from .graph.llm_errors import FatalLLMStreamError, FatalProviderError
-from .state_channels import (
+from agent.state_channels import (
     CIRCUIT_REASON_AUTH,
     CIRCUIT_REASON_BAD_REQUEST,
     CIRCUIT_REASON_BILLING,
@@ -28,6 +22,11 @@ from .state_channels import (
     CIRCUIT_REASON_SCHEMA,
     CircuitState,
 )
+from shared.audit_events import insert_event_log_async
+from shared.config.turn_view import turn_settings
+from shared.context import AvaContext
+from shared.live_events import Error
+from shared.log import logger
 
 # LangGraph recursion_limit defaults to 25 — far too low for this graph even
 # per-turn: one invocation is one TURN, and a turn is a whole work bout (the

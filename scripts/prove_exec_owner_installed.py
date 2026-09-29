@@ -15,7 +15,7 @@ from uuid import uuid4
 import psutil
 
 import agent.exec_domain_owner
-from agent.graph.exec_protocol import write_request
+from agent.graph.exec.protocol import write_request
 from shared.exec_owner_protocol import (
     OwnerClosed,
     OwnerContext,

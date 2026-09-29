@@ -7,11 +7,11 @@ on:
       - 'tests/agent/test_incarnation_resources*.py'
       - 'migrations/*incarnation-resources*'
       - '.github/workflows/exec-domain-owner.yml'
-      - 'agent/graph/_exec_process.py'
+      - 'agent/graph/exec/_process.py'
       - 'shared/winjob.py'
       - 'tests/agent/test_exec_domain_confirmation.py'
       - 'agent/exec*owner*.py'
-      - 'agent/graph/_exec_owned_run.py'
+      - 'agent/graph/exec/_owned_run.py'
       - 'shared/exec_owner*.py'
       - 'shared/resource_admission.py'
       - 'shared/winjob_pipes.py'
@@ -43,7 +43,7 @@ jobs:
         run: |
           mkdir -p proof
           git rev-parse HEAD > proof/head-sha.txt
-          uv run pyright shared/incarnation_resources.py shared/resource_admission.py shared/exec_owner_protocol.py shared/exec_owner_recovery.py agent/graph/_exec_owned_run.py agent/exec_domain_owner.py agent/exec_owner_child.py tests/agent/test_incarnation_resources.py tests/ava/test_migration_baseline.py tests/agent/test_resource_admission.py
+          uv run pyright shared/incarnation_resources.py shared/resource_admission.py shared/exec_owner_protocol.py shared/exec_owner_recovery.py agent/graph/exec/_owned_run.py agent/exec_domain_owner.py agent/exec_owner_child.py tests/agent/test_incarnation_resources.py tests/ava/test_migration_baseline.py tests/agent/test_resource_admission.py
 
           uv run pyright shared/runtime_admission.py tests/agent/test_publication_runtime_admission.py
           timeout 240 uv run pytest tests/agent/test_incarnation_resources.py tests/ava/test_migration_baseline.py tests/agent/test_resource_admission.py tests/agent/test_publication_runtime_admission.py -q --junitxml=proof/resource-fences.xml
@@ -79,7 +79,7 @@ jobs:
           # The existing cross-platform domain uses IS_WINDOWS, which pyright
           # cannot narrow; type its POSIX API surface explicitly, and check the
           # native Job implementation against Windows separately on every lane.
-          uv run pyright --pythonplatform Linux shared/winjob.py shared/exec_process_domain.py agent/graph/_exec_process.py tests/agent/test_exec_domain_confirmation.py
+          uv run pyright --pythonplatform Linux shared/winjob.py shared/exec_process_domain.py agent/graph/exec/_process.py tests/agent/test_exec_domain_confirmation.py
           uv run pyright --pythonplatform Windows shared/winjob.py shared/winjob_pipes.py shared/exec_owner_protocol.py
           uv run pytest --confcutdir=tests/agent tests/agent/test_exec_domain_confirmation.py tests/agent/test_exec_owner_entry.py -q --junitxml=proof/native-domain.xml
       - name: Original buffered-control regression must fail on Linux

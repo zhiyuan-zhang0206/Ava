@@ -19,7 +19,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command, interrupt
 from psycopg_pool import AsyncConnectionPool
 
-from agent.hosted_ownership import admit_hosted_runtime, settle_hosted_runtime
+from agent.ownership.hosted import admit_hosted_runtime, settle_hosted_runtime
 from ops.agent_pause import resume_agents
 from shared import exec_request_evidence, maintenance_cohort, pause_owner
 from shared.db import insert_inbound_message

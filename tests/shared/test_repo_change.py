@@ -31,7 +31,7 @@ def test_is_doc_path_leaves_nested_code_docs_to_their_directory(path: str) -> No
     ("paths", "expected"),
     [
         (["ui/web/app/page.tsx", "ui/web/src/lib/api.ts"], (True, False)),
-        (["agent/graph/_exec.py"], (False, True)),
+        (["agent/graph/exec/node.py"], (False, True)),
         (
             [
                 "decisions/foo.md",
@@ -48,7 +48,7 @@ def test_is_doc_path_leaves_nested_code_docs_to_their_directory(path: str) -> No
         (["ui/web/CLAUDE.md"], (True, False)),
         (["gateway/README.md"], (False, True)),
         ([], (False, False)),
-        (["ui/web/app/page.tsx", "agent/graph/_exec.py"], (True, True)),
+        (["ui/web/app/page.tsx", "agent/graph/exec/node.py"], (True, True)),
     ],
 )
 def test_classify_change(paths: list[str], expected: tuple[bool, bool]) -> None:

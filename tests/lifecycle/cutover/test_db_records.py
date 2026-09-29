@@ -21,7 +21,7 @@ import pytest
 from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
 
-from agent.hosted_ownership import admit_hosted_runtime
+from agent.ownership.hosted import admit_hosted_runtime
 from ops.agent_spawn import create_agent_row
 from scripts import cutover_db_records as records
 from scripts import cutover_db_survey as survey_module

@@ -9,7 +9,7 @@ tags: []
 
 ## What it is
 
-Ava agent's core execution engine—a **8-Node self-looping directed graph** based on LangGraph, entirely routed via `Command(goto=)` for explicit routing. The graph compiles into a `CompiledStateGraph`; **one invocation = one turn**: the runloop (`agent/runloop.py`) invokes the graph once per turn, and claim ends the invocation at the turn boundary (goto END with `exit_requested=False` — nothing left to do but wait) so the per-turn root span/trace closes; the runloop re-invokes on the same checkpointer thread and the fresh invocation's claim does the long wait. `exit_requested=True` (terminate/restart winner, lost lifecycle CAS) is what makes the runloop return and the process exit.
+Ava agent's core execution engine—a **8-Node self-looping directed graph** based on LangGraph, entirely routed via `Command(goto=)` for explicit routing. The graph compiles into a `CompiledStateGraph`; **one invocation = one turn**: the runloop (`agent/turn/runloop.py`) invokes the graph once per turn, and claim ends the invocation at the turn boundary (goto END with `exit_requested=False` — nothing left to do but wait) so the per-turn root span/trace closes; the runloop re-invokes on the same checkpointer thread and the fresh invocation's claim does the long wait. `exit_requested=True` (terminate/restart winner, lost lifecycle CAS) is what makes the runloop return and the process exit.
 
 ```
 after_init → init_context → claim → before_llm → llm → before_exec → exec → after_exec
@@ -31,7 +31,7 @@ For multiple tool calls, `exec` loops to itself until each original ID has a res
 - **before_llm** (hook container): Runs all registered `register_before_llm` hooks—plugins can modify state or inject extra context
 - **llm** (`llm/node.py`): Owns automatic compaction and normal streaming inference. Both model operations race the durable interrupt. Interrupted compaction discards its result without replacing history or advancing the compact version; completed compaction routes `init_context → claim`. A tagged summary with no later AIMessage gets one ordinary generation before the threshold re-arms; this survives cancellation, new input, and checkpoint recovery. Actual provider overflow still uses circuit-breaker rescue. Normal streaming cancellation discards the partial generation. Streaming-first with one non-streaming fallback; fatal provider errors fail-fast to idle.
 - **before_exec** (hook container): Runs `register_before_exec` hooks—final checkpoint before tool invocation
-- **exec** (`_exec.py`): Executes one pending tool call per graph step in one disposable fault-isolation subprocess. Its state delta commits through LangGraph before `exec -> exec` runs the next call; the final result routes to `after_exec`. Progress comes from existing tool-call/result IDs, with no separate execution cursor or state accumulator; cancel/timeout crosses an owned-tree stop → direct-child reap → bounded output-reader join barrier
+- **exec** (`exec/node.py`): Executes one pending tool call per graph step in one disposable fault-isolation subprocess. Its state delta commits through LangGraph before `exec -> exec` runs the next call; the final result routes to `after_exec`. Progress comes from existing tool-call/result IDs, with no separate execution cursor or state accumulator; cancel/timeout crosses an owned-tree stop → direct-child reap → bounded output-reader join barrier
 - **after_exec** (hook container): Runs `register_after_exec` hooks—cleanup/recording after execution
 
 ## Interrupting a turn: cancel and terminate

@@ -10,7 +10,7 @@ Two responsibilities merged in the same wrapper:
 
    All outcomes log at INFO (user ruling 2026-08-04: node transitions are
    normal lifecycle flow, never WARNING — fatal turns surface through
-   `agent/runloop.py`'s ERROR crash line + Error events instead). The `exception:X` path
+   `agent/turn/runloop.py`'s ERROR crash line + Error events instead). The `exception:X` path
    uses `logger.opt(exception=True).info` in the except block to emit while the
    active exception is still in sys.exc_info() → events.payload automatically
    carries traceback / exception_type / exception_value (`shared.log._postgres_sink`
@@ -62,7 +62,7 @@ from langchain_core.messages import BaseMessage
 from psycopg_pool import AsyncConnectionPool
 
 from agent.db import list_chat_inbound_anchors
-from agent.turn_progress import mark_turn_progress
+from agent.turn.progress import mark_turn_progress
 from shared.agents.history.timeline import (
     build_timeline_items,
     needs_chat_anchors,

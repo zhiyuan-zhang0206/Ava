@@ -21,8 +21,8 @@ from agent.graph.claim.node import claim_node
 from agent.graph.llm_errors import FatalProviderError
 from agent.hooks.compact import COMPACT_MAX_ATTEMPTS
 from agent.impersonation import flush_checkpoint
-from agent.runloop import PendingTurnFailure, settle_turn_failure
 from agent.startup import wrap_saver_writes_with_nstep_interval
+from agent.turn.runloop import PendingTurnFailure, settle_turn_failure
 from services.agent_host.host import AgentHost
 from shared.agents.history.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
 from shared.config import settings

@@ -17,14 +17,14 @@ _AUDIT_HELPERS = frozenset(
 )
 _DIRECT_AUDIT_EMITTERS = frozenset({"emit", "prepare_event"})
 _INVENTORY: dict[str, str] = {
-    "agent/runloop.py::_record_permanent_reject_outcome": "ineligible",
-    "agent/runloop.py::_handle_fatal_llm_error": "ineligible",
-    "agent/corpse_reap.py::reap_crash_corpses": "ineligible",
-    "agent/corpse_reap.py::reap_recrashed_corpse": "ineligible",
+    "agent/turn/runloop.py::_record_permanent_reject_outcome": "ineligible",
+    "agent/turn/runloop.py::_handle_fatal_llm_error": "ineligible",
+    "agent/ownership/corpse_reap.py::reap_crash_corpses": "ineligible",
+    "agent/ownership/corpse_reap.py::reap_recrashed_corpse": "ineligible",
     "agent/hooks/compact.py::auto_compact_for_llm": "ineligible",
-    "agent/hosted_ownership.py::admit_hosted_runtime": "ineligible",
-    "agent/hosted_ownership.py::admit_hosted_runtime#2": "ineligible",
-    "agent/hosted_ownership.py::settle_hosted_runtime": "ineligible",
+    "agent/ownership/hosted.py::admit_hosted_runtime": "ineligible",
+    "agent/ownership/hosted.py::admit_hosted_runtime#2": "ineligible",
+    "agent/ownership/hosted.py::settle_hosted_runtime": "ineligible",
     "ava/self.py::compact": "local",
     "ava/skills.py::_insert_skill_events": "local",
     "ava_builtins/plugins/ava_fleet/_task_update.py::_log_task_update": "local",

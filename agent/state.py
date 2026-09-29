@@ -191,7 +191,7 @@ _EXTRA_FIELDS: dict[str, _StateFieldSpec] = {}
 _PLUGIN_NAMESPACE_FIELDS: dict[str, set[str]] = {}
 
 # Core keys a plugin may declare/write: only `messages` (its add_messages
-# reducer defines the merge contract; _exec_notes.merge_exec_notes combines a
+# reducer defines the merge contract; exec._notes.merge_exec_notes combines a
 # plugin's messages delta with the exec ToolMessage — tool result first,
 # notes after, per the Anthropic-compat adjacency constraint). Every other
 # BaseAgentState field is framework-managed per turn (halted / turn_active /

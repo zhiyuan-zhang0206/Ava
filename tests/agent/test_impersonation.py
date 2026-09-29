@@ -20,8 +20,8 @@ from psycopg_pool import AsyncConnectionPool
 from pydantic import BaseModel, Field
 
 from agent import impersonation
-from agent.graph._exec_result import lifecycle_exception_from_name
-from agent.graph.exec_protocol import read_request, write_request
+from agent.graph.exec._result import lifecycle_exception_from_name
+from agent.graph.exec.protocol import read_request, write_request
 from agent.state import BaseAgentState
 from shared.context import AvaContext
 from shared.lifecycle import AgentImpersonation
@@ -213,7 +213,7 @@ async def test_control_claim_records_superseded_accepted_intent(
 ) -> None:
 
     from agent.db import claim_inbound_batch
-    from agent.hosted_ownership import admit_hosted_runtime
+    from agent.ownership.hosted import admit_hosted_runtime
     from shared.machine import machine_name
     from tests.conftest import spawn_agent
 
@@ -828,7 +828,7 @@ async def test_successor_admission_aligns_active_lease_binding_before_release(
     the admission transaction, so the restore trigger's write-back is already
     a no-op when the controller releases before any held wake.
     """
-    from agent.hosted_ownership import admit_hosted_runtime
+    from agent.ownership.hosted import admit_hosted_runtime
     from shared.agents import impersonation as leases
     from shared.caller_identity import CallerIdentity
     from shared.machine import machine_name
@@ -882,7 +882,7 @@ async def test_successor_admission_resets_a_stale_accepted_binding(
     """Issue #2052: an accepted (not yet active) lease whose accepting
     incarnation died restarts at 'requested' under the successor admission —
     the same crash-before-ACK semantics as the lazy native_status path."""
-    from agent.hosted_ownership import admit_hosted_runtime
+    from agent.ownership.hosted import admit_hosted_runtime
     from shared.agents import impersonation as leases
     from shared.caller_identity import CallerIdentity
     from shared.machine import machine_name

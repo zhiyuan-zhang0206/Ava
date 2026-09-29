@@ -3,8 +3,8 @@ on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
     paths:
-      - 'agent/db.py'
-      - 'agent/hosted_ownership.py'
+      - 'agent/db/__init__.py'
+      - 'agent/ownership/hosted.py'
       - 'agent/graph/_chat_inbound.py'
       - 'services/agent_host/**'
       - 'gateway/mcp_endpoint.py'

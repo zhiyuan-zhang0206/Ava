@@ -18,7 +18,7 @@ import psycopg
 import pytest
 from psycopg_pool import AsyncConnectionPool
 
-from agent.hosted_ownership import admit_hosted_runtime, settle_hosted_runtime
+from agent.ownership.hosted import admit_hosted_runtime, settle_hosted_runtime
 from ops import agent_pause
 from ops.agent_pause_probe import HostIdentity
 from shared import maintenance, maintenance_cohort, pause_owner, telemetry

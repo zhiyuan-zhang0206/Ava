@@ -138,7 +138,7 @@ export interface TurnSummary {
   //   `codeElapsedMs` (the frozen frontend clock — set when code writing
   //   finishes, before the snapshot commits the backend value).
   // - execMs: sum of each `code_output` item's committed `exec_ms` — the real
-  //   wall-clock the code ran (agent/graph/_exec.py).
+  //   wall-clock the code ran (agent/graph/exec/node.py).
   readonly thinkingMs: number;
   readonly codeMs: number;
   readonly execMs: number;

@@ -8,9 +8,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from agent.graph._exec import _run_agent_code
-from agent.graph._exec_result import _ExecDone
-from agent.graph._exec_stream import ExecOutputChunkPublisher
+from agent.graph.exec._result import _ExecDone
+from agent.graph.exec._stream import ExecOutputChunkPublisher
+from agent.graph.exec.node import _run_agent_code
 from agent.state import AgentState
 from shared.config import settings
 from shared.config.turn_view import bind_agent_config, resolve_agent_config_pins

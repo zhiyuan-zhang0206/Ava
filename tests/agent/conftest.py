@@ -1,6 +1,6 @@
 """Shared fixtures for tests/agent/.
 
-`fake_cancel_event` replaces llm._cancel / _exec's `subscribe_interrupt` — lets tests
+`fake_cancel_event` replaces llm._cancel / exec.node's `subscribe_interrupt` — lets tests
 trigger the cancel race directly via `event.set()`, avoiding a real DB inbound
 watcher (slow + flaky). The production path always goes through RAII subscribe
 (inbound Redis pub/sub); this fixture only affects name bindings in the import
@@ -40,7 +40,7 @@ def fake_cancel_event(monkeypatch: pytest.MonkeyPatch) -> InterruptEvent:
         yield event
 
     monkeypatch.setattr("agent.graph.llm._cancel.subscribe_interrupt", fake_subscribe)
-    monkeypatch.setattr("agent.graph._exec.subscribe_interrupt", fake_subscribe)
+    monkeypatch.setattr("agent.graph.exec.node.subscribe_interrupt", fake_subscribe)
     monkeypatch.setattr("agent.hooks.compact.subscribe_interrupt", fake_subscribe)
     return event
 
@@ -79,7 +79,7 @@ def runner_exec_env(db_conn: psycopg.Connection[Any], monkeypatch: pytest.Monkey
     runner_url = grant_runner_login(
         url, owner="ava_citest", login="ava_g0_runner", password=password
     )
-    # The real exec child builds its environment from the live os.environ (agent/graph/_exec_subprocess.py),
+    # The real exec child builds its environment from the live os.environ (agent/graph/exec/_subprocess.py),
     # not from the Settings singleton, so the raw-env seam (not monkeypatch.setenv) is the one that reaches it.
     monkeypatch.setitem(os.environ, "AVA_DB_URL", runner_url)
     assert db_conn.info.user != "ava_g0_runner"

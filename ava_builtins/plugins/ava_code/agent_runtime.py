@@ -96,7 +96,7 @@ class AvaCodeState(BaseModel):
     # channel during the exec turn. The annotation must match BaseAgentState
     # exactly (incl. the add_messages reducer) — register_plugin_state
     # enforces it — and the exec node merges the plugin's messages delta with
-    # its own ToolMessage delta (agent/graph/_exec.py), so the notes ride in
+    # its own ToolMessage delta (agent/graph/exec/node.py), so the notes ride in
     # the same in-memory state update instead of a side-channel file.
     messages: Annotated[list[AnyMessage], add_messages] = Field(default_factory=list)
     injected_paths: set[str] = Field(default_factory=set)

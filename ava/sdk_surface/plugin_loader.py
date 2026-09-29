@@ -2,7 +2,7 @@
 `plugins/` directory scan.
 
 This is framework API for the agent kernel, not the agent SDK: it carries a
-public name — reached across the `ava` package boundary by `agent/extensions.py`
+public name — reached across the `ava` package boundary by `agent/extensions/__init__.py`
 and `agent/process_boot.py` — but stays out of the agent's `ava.help()` view
 because it is absent from `ava.__all_for_ava__`.
 
