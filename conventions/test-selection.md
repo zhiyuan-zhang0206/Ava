@@ -9,7 +9,7 @@ is in enforce mode (the default), a direct-import-selected subset in its place.
 The merge queue therefore continues to verify the combined tree with its full
 regression net; test selection does not change broken-main risk.
 
-The selector is [scripts/test_selector.py](../scripts/test_selector.py). It is
+The selector is [scripts/ci/test_selector.py](../scripts/ci/test_selector.py). It is
 stdlib-only and builds a direct static import reverse map for the checked-out
 tree. It does not execute tests, import application code, modify the checkout,
 or infer dynamic imports.
@@ -39,7 +39,7 @@ SELECTED replaces the backend pytest fan-out, and only in enforce mode.
 
 Tree-scan tests join the candidate subset before rules 8-10 run: every
 `test_lint_*.py` under `tests/` (any depth, non-e2e) and the repo-level
-CI/governance checks pinned in `scripts/test_selector.py`
+CI/governance checks pinned in `scripts/ci/test_selector.py`
 (`_TREE_SCAN_TESTS`). The direct-import map cannot reach a repo-wide scan
 test from a changed source file, and a green subset must not miss a
 tree-wide gate (task #4183: PR #3020's subset passed while the full

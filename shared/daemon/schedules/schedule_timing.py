@@ -8,7 +8,7 @@ the updater itself is judged stuck.
 
 Registered in `shared/timing.py::CLOCKS` with the
 `NO_PROGRESS_TIMEOUT_S < SCHEDULE_STALL_ALERT_AFTER_S` constraint;
-`scripts/lint_clock_lattice.py` treats this module as a family module, so
+`scripts/lint/clock_lattice.py` treats this module as a family module, so
 lattice vocabulary may live here and only here.
 
 Deliberately separate from `shared/timing.py`: the schedule manager runs under

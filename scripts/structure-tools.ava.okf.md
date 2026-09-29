@@ -11,7 +11,7 @@ tags:
 
 `scripts/structure/{quality_budget,locality,path_imports}.py` are the
 pre-commit `lint-code-structure` gate's own scanner modules — see
-[[scripts/lint-scripts.ava.okf.md]]. `scripts/structure/cochange.py` is a
+[[scripts/lint/lint.ava.okf.md]]. `scripts/structure/cochange.py` is a
 sibling module in the same package that is never called from the gate: its
 two metrics need a rolling window of git history and judgement to turn a
 signal into a fix, which is sweeper territory under

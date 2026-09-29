@@ -25,7 +25,7 @@ Only genuinely malformed input fails: no `---` fence, invalid YAML, or a missing
 
 Two Ava-side notes for authors:
 - The standard's bundled directories carry no SKILL.md, so they stay plain files the agent reads. A **nested** SKILL.md is how Ava gets sub-skills — a superset of the standard, which other readers simply see as a folder.
-- Ava's own repo-shipped skills are additionally held to an 80-unit `description` ceiling by `scripts/lint_skill_descriptions.py`. That is a house prompt-budget rule at merge time, not a load-time constraint on installed skills (the standard's cap is 1024 characters).
+- Ava's own repo-shipped skills are additionally held to an 80-unit `description` ceiling by `scripts/content_lint/lint_skill_descriptions.py`. That is a house prompt-budget rule at merge time, not a load-time constraint on installed skills (the standard's cap is 1024 characters).
 
 ## Install Layouts
 `ava skill install <git-url-or-path> [--path SUBDIR] [--ref REF]` reads three source shapes (`cli/commands/extensions/skill_package.py`), tried in order:

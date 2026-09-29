@@ -313,7 +313,7 @@ def load() -> Registry:
         raise DuplicatePackageName(
             f"{path} has rows that fold to the same package key: {names} — "
             "dash and underscore are one name; merge them (see "
-            "scripts/migrate_skill_identity.py)"
+            "scripts/data_repair/migrate_skill_identity.py)"
         )
     return registry
 
@@ -371,7 +371,7 @@ def registry_lock(registry_path: Path | None = None) -> Generator[None]:
 
     `mutate` is the normal way in and takes this for you. It is exposed
     separately for the one writer that cannot use `mutate` — the out-of-band
-    `scripts/migrate_skill_identity.py --apply`, which rewrites the registry
+    `scripts/data_repair/migrate_skill_identity.py --apply`, which rewrites the registry
     under an arbitrary `--ava-home`, hence the explicit `registry_path`
     (defaulting to this unit's). Both must name the same lock file and share one
     bound, so both live here rather than being restated at the call site.
@@ -389,7 +389,7 @@ def mutate() -> Generator[Registry]:
     `save` is a full replace, so every change is a read-modify-write, and the
     writers are separate PROCESSES: `ava skill install` in an agent's shell,
     `ava converge` on a restart, the gateway's skills-toggle handler, and
-    `scripts/migrate_skill_identity.py --apply`. Two of them racing lose one
+    `scripts/data_repair/migrate_skill_identity.py --apply`. Two of them racing lose one
     side's rows outright — whoever saves last wins with a registry it read
     before the others' rows existed. The package stops being tracked while its
     directory is still on disk, which is the state the skill scanner refuses to

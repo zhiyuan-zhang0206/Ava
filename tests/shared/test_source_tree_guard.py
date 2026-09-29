@@ -94,15 +94,15 @@ def test_gitignored_paths_are_not_violations(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Gitignored runtime paths need no whitelist entry: the detector never
-    sees them (the documented contract — e.g. the ci_accounting ledger at
-    ``scripts/ci_usage/``)."""
+    sees them (the documented contract — e.g. the accounting ledger at
+    ``scripts/ci/ci_usage/``)."""
     monkeypatch.setattr("shared.paths.ava_home", lambda: tmp_path / "no-home")
     repo = _init_source(tmp_path / "source")
-    (repo / ".gitignore").write_text("scripts/ci_usage/\n")
+    (repo / ".gitignore").write_text("scripts/ci/ci_usage/\n")
     _git(repo, "add", ".gitignore")
     _git(repo, "commit", "-m", "ignore ci usage ledger")
-    (repo / "scripts" / "ci_usage").mkdir(parents=True)
-    (repo / "scripts" / "ci_usage" / "ledger.jsonl").write_text("{}\n")
+    (repo / "scripts" / "ci" / "ci_usage").mkdir(parents=True)
+    (repo / "scripts" / "ci" / "ci_usage" / "ledger.jsonl").write_text("{}\n")
 
     assert stg.source_tree_violations(repo) == ()
 

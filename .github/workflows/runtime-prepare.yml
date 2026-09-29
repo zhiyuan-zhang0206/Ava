@@ -14,18 +14,18 @@ on:
       - 'cli/release_build.py'
       - 'cli/release_prepare/build-tools.txt'
       - 'tests/integration/test_release_build.py'
-      - 'scripts/prove_runtime_publication_input.py'
-      - 'scripts/prove_exec_owner_installed.py'
+      - 'scripts/release_proofs/prove_runtime_publication_input.py'
+      - 'scripts/release_proofs/prove_exec_owner_installed.py'
       - 'scripts/runtime-node-version'
       - 'shared/dotenv_boot.py'
       - 'shared/platform_backend.py'
       - 'shared/session_env.py'
       - 'ops/spec.py'
       - 'agent/graph/exec/_subprocess.py'
-      - 'scripts/prove_runtime_consumer.py'
-      - 'scripts/prove_runtime_prepare.py'
+      - 'scripts/release_proofs/prove_runtime_consumer.py'
+      - 'scripts/release_proofs/prove_runtime_prepare.py'
       - 'scripts/prepare_otel_release.py'
-      - 'scripts/prove_runtime_otel.py'
+      - 'scripts/release_proofs/prove_runtime_otel.py'
       - 'cli/commands/observability/otel_collector.py'
       - 'shared/paths.py'
       - 'shared/runtime_plugins.py'
@@ -33,10 +33,10 @@ on:
       - 'shared/plugins_config.py'
       - 'ava/sdk_surface/wraps.py'
       - 'ava/sdk_surface/plugin_loader.py'
-      - 'scripts/prove_runtime_plugins.py'
-      - 'scripts/prove_release_inventory.py'
+      - 'scripts/release_proofs/prove_runtime_plugins.py'
+      - 'scripts/release_proofs/prove_release_inventory.py'
       - 'cli/commands/release_inventory.py'
-      - 'scripts/prepare_plugin_fixture.py'
+      - 'scripts/release_proofs/prepare_plugin_fixture.py'
       - 'shared/updater_handoff.py'
       - 'services/agent_ops/daemon.py'
       - 'shared/updater_recovery.py'
@@ -44,9 +44,9 @@ on:
       - 'shared/managed_writer_barrier.py'
       - 'shared/managed_writer_observation.py'
       - 'shared/native_job_observation.py'
-      - 'scripts/prove_runtime_migration.py'
+      - 'scripts/release_proofs/prove_runtime_migration.py'
       - 'shared/runtime_migration.py'
-      - 'scripts/verify_runtime_wheel.py'
+      - 'scripts/ci/verify_runtime_wheel.py'
       - 'pyproject.toml'
       - 'uv.lock'
       - '.python-version'
@@ -162,9 +162,9 @@ jobs:
           PY
       - name: Type-check retained collector integration
         shell: bash
-        run: uv run --locked pyright scripts/prepare_otel_release.py scripts/prove_runtime_otel.py scripts/prove_runtime_plugins.py scripts/prove_release_inventory.py scripts/prepare_plugin_fixture.py shared/runtime_plugins.py shared/runtime_prepare.py shared/runtime_interpreter.py shared/paths.py shared/updater_handoff.py cli/commands/observability/otel_collector.py cli/commands/release_inventory.py
+        run: uv run --locked pyright scripts/prepare_otel_release.py scripts/release_proofs/prove_runtime_otel.py scripts/release_proofs/prove_runtime_plugins.py scripts/release_proofs/prove_release_inventory.py scripts/release_proofs/prepare_plugin_fixture.py shared/runtime_plugins.py shared/runtime_prepare.py shared/runtime_interpreter.py shared/paths.py shared/updater_handoff.py cli/commands/observability/otel_collector.py cli/commands/release_inventory.py
       - name: Type-check publication input reader
-        run: uv run --locked pyright shared/runtime_publication_input.py shared/verified_file.py scripts/prove_runtime_publication_input.py
+        run: uv run --locked pyright shared/runtime_publication_input.py shared/verified_file.py scripts/release_proofs/prove_runtime_publication_input.py
       - name: Publication selector compatibility
         if: runner.os == 'Linux'
         run: uv run --locked pytest tests/shared/test_runtime_publication_input.py -q
@@ -177,8 +177,8 @@ jobs:
           # The proof retires the checkout, including .venv. Resolve its base
           # interpreter outside that tree, using the same Python as validation.
           proof_python=$(uv run --locked --no-dev python -c 'import pathlib, sys; p = pathlib.Path(sys.executable).resolve(strict=True); assert not p.is_relative_to(pathlib.Path.cwd()); print(p)')
-          "$proof_python" scripts/prepare_plugin_fixture.py "$RUNNER_TEMP/prepare/plugin-input"
-          "$proof_python" scripts/prove_runtime_prepare.py --root "$RUNNER_TEMP/prepare" --python "$proof_python" --uv "$(command -v uv)" --otel-input-digest "$COLLECTOR_INPUT_DIGEST"
+          "$proof_python" scripts/release_proofs/prepare_plugin_fixture.py "$RUNNER_TEMP/prepare/plugin-input"
+          "$proof_python" scripts/release_proofs/prove_runtime_prepare.py --root "$RUNNER_TEMP/prepare" --python "$proof_python" --uv "$(command -v uv)" --otel-input-digest "$COLLECTOR_INPUT_DIGEST"
           test -s "$RUNNER_TEMP/prepare/proof.json"
           if [[ "$RUNNER_OS" == Linux ]]; then test -s "$RUNNER_TEMP/prepare/inventory-proof.json"; fi
       - name: Verify committed source identity survived runtime preparation

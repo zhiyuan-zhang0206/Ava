@@ -29,7 +29,7 @@ description: Runs the Ava repo's Python, frontend, and end-to-end checks and dia
   checkout that uses that venv
   ([rationale](../../../conventions/dev-setup.md#per-worktree-cluster-dev-flow)).
   No venv yet? Build the worktree's own (`env -u VIRTUAL_ENV python
-  scripts/guard_editable_venv.py . && env -u VIRTUAL_ENV uv sync`),
+  scripts/host_ops/guard_editable_venv.py . && env -u VIRTUAL_ENV uv sync`),
   or for a test-only run reuse another worktree's real venv:
   `PYTHONPATH=<this-worktree> <other-worktree>/.venv/bin/python -m pytest ...`
   (PYTHONPATH outranks that venv's `.pth`, so the tests run against this
@@ -64,10 +64,10 @@ description: Runs the Ava repo's Python, frontend, and end-to-end checks and dia
   rather than actually permissive.
 - **The reverse is not symmetric, deliberately.** A few CI steps have no local
   hook because they need a toolchain a dev machine may not have:
-  `scripts/migration_smoke.py` boots a throwaway Postgres and shells out to
+  `scripts/ci/migration_smoke.py` boots a throwaway Postgres and shells out to
   `psql`. A hook that fails for reasons unrelated to your commit is what breeds
   the `--no-verify` habit, so it stays CI-only. The cheap half of the migration
-  gate (`scripts/lint_migrations.py` — filename format, up/down pairing,
+  gate (`scripts/content_lint/lint_migrations.py` — filename format, up/down pairing,
   baseline seed) *is* a local hook, gated on `migrations/` + `db/schema.sql`.
 - **Positional test paths run grouped by directory, whatever order you pass.**
   pytest 9 hides a conftest's fixtures (autouse ones included) from any directory

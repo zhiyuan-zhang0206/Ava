@@ -30,7 +30,7 @@ shipped off) gates both the enqueue and the tick.
   worker only follows new compactions (backfill is on-demand, P2c).
 - **The first build is the full retention window** (one-time and bounded),
   with the trigger-time tail sealed — the same semantics as the manual first
-  run (`scripts/build_hierarchy_once.py`). Every later compact-driven pass
+  run (`scripts/codegen/build_hierarchy_once.py`). Every later compact-driven pass
   seals no tail and leaves it pending for the next compact.
 - **The tail seal** (task #3981 C, opt-in via `hierarchy_tail_seal_enabled`):
   an agent whose newest checkpoint has been quiet for

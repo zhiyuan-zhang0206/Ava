@@ -130,5 +130,5 @@ deciding:
    before/after cc for the touched functions in the PR description.
 
 Use this report to choose refactoring work. Run the enforced structure gate
-with `.venv/bin/python scripts/lint_code_structure.py` to verify the resulting
+with `.venv/bin/python scripts/lint/code_structure.py` to verify the resulting
 CC, nesting, file and directory budgets against the frozen baseline.

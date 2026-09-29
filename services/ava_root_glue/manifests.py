@@ -228,7 +228,7 @@ def build_manifest(
 
     The capability set is an explicit input: this module must not read the
     local machine role (the gateway is the single routing point; role calls
-    are allowlisted by scripts/lint_code_structure.py). The wiring slice
+    are allowlisted by scripts/lint/code_structure.py). The wiring slice
     supplies the target's set. `repo_root=None` resolves this checkout.
     """
     resolved_repo = _REPO_ROOT if repo_root is None else repo_root

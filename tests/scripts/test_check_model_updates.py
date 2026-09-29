@@ -13,7 +13,7 @@ from typing import Any
 import pytest
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-_SCRIPT = _REPO_ROOT / "scripts" / "check_model_updates.py"
+_SCRIPT = _REPO_ROOT / "scripts" / "model_registry" / "check_model_updates.py"
 
 
 def _load_script() -> Any:

@@ -2,7 +2,7 @@
 render that data into the self-contained D3 visualization page.
 
 Two consumers share this module:
-  - `scripts/build_okf_data.py` — CLI, writes `graph_data.json` to disk (the
+  - `scripts/codegen/build_okf_data.py` — CLI, writes `graph_data.json` to disk (the
     manually-refreshed convention described in `index.ava.okf.md`, used for
     reviewing doc-bundle changes as a diff).
   - `gateway/routers/okf_graph.py` — serves the rendered page live over

@@ -7,7 +7,7 @@ import sys
 
 import pytest
 
-from scripts import memory_search_reconcile as reconcile
+from scripts.data_repair import memory_search_reconcile as reconcile
 
 
 class _FakeProvider:

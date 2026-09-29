@@ -90,7 +90,7 @@ loaded module, must not be editable, and changed or undeclared SQL is rejected.
 This RECORD check is package integrity for read-only comparison, not deployment
 authority: an ordinary unanchored wheel still cannot migrate the database.
 
-`scripts/prove_runtime_migration.py` consumes a verified installed image and calls
+`scripts/release_proofs/prove_runtime_migration.py` consumes a verified installed image and calls
 `shared.migrations.apply_pending_migrations` directly with its typed context and
 native Postgres connection. It checks wrong home, unit, operation, target,
 manifest and SQL refusal, unchanged history, and a current-schema no-op. The

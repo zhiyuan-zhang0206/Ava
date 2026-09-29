@@ -299,7 +299,7 @@ class DataPlaneSettings(EnvSettings):
             "logins delivered by the launcher, and Redis requires its generated "
             "passwords. Read-only to the config API and CLI: an authenticated caller "
             "(a machine token included) never chooses the human bearer; rotate it "
-            "with scripts/rotate_cluster_secret.py."
+            "with scripts/data_plane_ops/rotate_cluster_secret.py."
         ),
         json_schema_extra={
             "restart_required": "all",

@@ -1,4 +1,4 @@
-"""Record-rewrite tests for scripts/pitr_migrate_gcs_to_baidu.py.
+"""Record-rewrite tests for scripts/data_plane_ops/pitr_migrate_gcs_to_baidu.py.
 
 The GCS -> Baidu migration rewrites local identity records field-level:
 ACKs, candidate manifests, and protected manifests must swap their GCS
@@ -23,7 +23,12 @@ import pytest
 from services.pitr.stores.checksums import MD5, ObjectChecksum
 from services.pitr.stores.object_store import RemoteObjectAck
 
-_MOD_PATH = Path(__file__).resolve().parents[2] / "scripts" / "pitr_migrate_gcs_to_baidu.py"
+_MOD_PATH = (
+    Path(__file__).resolve().parents[2]
+    / "scripts"
+    / "data_plane_ops"
+    / "pitr_migrate_gcs_to_baidu.py"
+)
 _MOD_NAME = "pitr_migrate_under_test"
 _spec = importlib.util.spec_from_file_location(_MOD_NAME, _MOD_PATH)
 assert _spec and _spec.loader

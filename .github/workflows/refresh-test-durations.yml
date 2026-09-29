@@ -91,7 +91,7 @@ jobs:
 
       - name: Measure backend shard
         run: >
-          uv run python scripts/refresh_test_durations.py measure backend
+          uv run python scripts/ci/refresh_test_durations.py measure backend
           --group ${{ matrix.group }}
           --output "$RUNNER_TEMP/durations/backend-${{ matrix.group }}.json"
 
@@ -156,7 +156,7 @@ jobs:
 
       - name: Measure e2e shard
         run: >
-          uv run python scripts/refresh_test_durations.py measure e2e
+          uv run python scripts/ci/refresh_test_durations.py measure e2e
           --group ${{ matrix.group }}
           --output "$RUNNER_TEMP/durations/e2e-${{ matrix.group }}.json"
 
@@ -198,7 +198,7 @@ jobs:
 
       - name: Merge complete shard measurements
         run: >
-          uv run python scripts/refresh_test_durations.py merge
+          uv run python scripts/ci/refresh_test_durations.py merge
           --durations-dir "$RUNNER_TEMP/durations"
 
       - name: Detect a change

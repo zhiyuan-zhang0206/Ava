@@ -401,7 +401,7 @@ ignore = [
 # (a plugin can ship its own skill tree under ava_builtins/plugins/<name>/skills/...).
 "ava_builtins/plugins/*/skills/**/reference/*.py" = ["ERA001", "T20", "B904", "F841", "RUF059", "PLW1510", "S110", "S112", "S603", "C401", "PLR0915", "N806"]
 "ava_builtins/plugins/*/skills/**/scripts/*.py" = ["ERA001", "T20", "S603", "S108", "FBT", "PLW1510", "PTH", "ANN"]
-"scripts/*" = ["ANN", "T20"]
+"scripts/**" = ["ANN", "T20"]
 # T20 exemptions — print() is legitimate here: cli/ writes to the user's
 # terminal; ava/ and plugins/ print() is agent-facing dump (help() / context
 # injection), the SDK's documented output channel.
@@ -416,7 +416,7 @@ ignore = [
 # and carries Chinese notes from data analysis of real error corpora.
 "ava_builtins/plugins/ava_syntax_fix/*" = ["RUF001", "RUF002", "RUF003"]
 # CJK regex explanation comment — legitimate.
-"scripts/lint_agent_docstrings.py" = ["RUF003"]
+"scripts/lint/agent_docstrings.py" = ["RUF003"]
 
 # contextvar mechanism owners — the only files allowed to import contextvars
 # (allowlist lock, user ruling 2026-08-27, audit #3607). New use points must be
@@ -491,7 +491,7 @@ filterwarnings = [
 # (tech audit P1 — measured 82% standalone with tests/cli).
 # ops/services/ava_builtins joined 2026-08-29 (tech audit 2026-08-24 finding
 # #10 follow-up, Task #1570): measured into the same coverage data, but gated
-# separately by scripts/coverage_gates.py's per-risk-domain minimum line
+# separately by scripts/ci/coverage_gates.py's per-risk-domain minimum line
 # floors instead of the 85% combined gate — their standalone coverage (ops 48%
 # via tests/ops; services and ava_builtins lower) would take the combined
 # line-rate below threshold even though their test suites DO run in every CI

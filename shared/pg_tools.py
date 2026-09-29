@@ -6,7 +6,7 @@ onto PATH, so the full keg path is required); Linux runs the apt
 `postgresql-17` layout; Windows uses the EDB installer path. Shared by the
 per-cluster data-plane bring-up (`cli/commands/data_plane/cluster_instance.py`), the local
 backup path (`services/backup.py`), and the throwaway clusters the test suite
-(`tests/_containers.py`), migration smoke (`scripts/migration_smoke.py`), and eval
+(`tests/_containers.py`), migration smoke (`scripts/ci/migration_smoke.py`), and eval
 fixtures spin up.
 
 Throwaway clusters are also **self-limiting when their owner is killed** — see

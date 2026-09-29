@@ -25,7 +25,7 @@ from typing import Any
 import pytest
 from dotenv import dotenv_values
 
-from scripts import rotate_cluster_secret as rotate
+from scripts.data_plane_ops import rotate_cluster_secret as rotate
 from services import backup
 from services.gateway_side.backup import passphrase
 from shared.config import settings

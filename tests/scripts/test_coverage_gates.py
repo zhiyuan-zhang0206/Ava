@@ -1,4 +1,4 @@
-"""Unit tests for scripts/coverage_gates.py — the backend CI coverage gates.
+"""Unit tests for scripts/ci/coverage_gates.py — the backend CI coverage gates.
 
 The script parses coverage.json (coverage.py's JSON report) and enforces two
 tiers: the combined core-domain line-rate gate and per-risk-domain minimum
@@ -17,7 +17,7 @@ from typing import Any
 import pytest
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-_SCRIPT = _REPO_ROOT / "scripts" / "coverage_gates.py"
+_SCRIPT = _REPO_ROOT / "scripts" / "ci" / "coverage_gates.py"
 
 
 def _load_script() -> Any:

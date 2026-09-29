@@ -62,7 +62,7 @@ invokes `.venv/bin/ava` directly.
 Package acquisition and Git hooks are separate from starting a cluster.
 
 Before a manual worktree dependency operation, clear inherited `VIRTUAL_ENV`
-and run `scripts/guard_editable_venv.py`. `scripts/setup-worktree.sh` runs this
+and run `scripts/host_ops/guard_editable_venv.py`. `scripts/setup-worktree.sh` runs this
 guard and prepares development dependencies without creating a cluster.
 
 ```bash

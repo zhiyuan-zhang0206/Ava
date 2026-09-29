@@ -10,7 +10,7 @@ import subprocess
 
 import pytest
 
-from scripts import lint_code_structure as lcs
+from scripts.lint import code_structure as lcs
 from scripts.structure import baseline_shards
 
 

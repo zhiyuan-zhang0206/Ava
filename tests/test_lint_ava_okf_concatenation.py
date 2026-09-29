@@ -1,4 +1,4 @@
-"""`scripts/lint_ava_okf.py` — concatenation defects (rules 12 + 13).
+"""`scripts/content_lint/lint_ava_okf.py` — concatenation defects (rules 12 + 13).
 
 The W010 okf-split campaign replaced sections with "summary sentence +
 [[wikilink]]", and repeatedly dropped the blank line that should have
@@ -24,7 +24,7 @@ from pathlib import Path
 # The linter imports build_okf_data as a top-level module — running it by path
 # puts scripts/ on sys.path[0], so importing it here has to do the same.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
-_lint = importlib.import_module("scripts.lint_ava_okf")
+_lint = importlib.import_module("scripts.content_lint.lint_ava_okf")
 
 
 def _node(tmp_path: Path, rel: str, body: str = "") -> Path:

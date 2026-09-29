@@ -42,7 +42,7 @@ frozen copy is redundant and a third-party library that reads os.environ
 directly would only ever see the stale one.
 
 This module reads os.environ by nature (it forwards the live env), so it is on
-lint_no_os_environ's allowlist.
+no_os_environ's allowlist.
 """
 
 from __future__ import annotations

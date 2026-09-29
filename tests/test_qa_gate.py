@@ -1,4 +1,4 @@
-"""Tests for scripts/qa_gate.py — the exact-head QA status publisher."""
+"""Tests for scripts/ci/qa_gate.py — the exact-head QA status publisher."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from typing import Any
 import pytest
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
-_SCRIPT = _REPO_ROOT / "scripts" / "qa_gate.py"
+_SCRIPT = _REPO_ROOT / "scripts" / "ci" / "qa_gate.py"
 _spec = importlib.util.spec_from_file_location("qa_gate_under_test", _SCRIPT)
 assert _spec and _spec.loader
 qa_gate = importlib.util.module_from_spec(_spec)
@@ -19,7 +19,7 @@ sys.modules[_spec.name] = qa_gate
 _spec.loader.exec_module(qa_gate)
 
 sys.path.insert(0, str(_REPO_ROOT))
-from scripts import qa_receipt  # noqa: E402
+from scripts.ci import qa_receipt  # noqa: E402
 
 SHA = "d" * 40
 

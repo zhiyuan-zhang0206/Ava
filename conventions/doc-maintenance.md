@@ -64,7 +64,7 @@ into anything anyone reads twice. A postmortem whose lesson generalizes and does
 not appear on that page is only half filed.
 
 Like `decisions/`, `postmortems/` is skipped entirely by
-`scripts/check_doc_references.py` — naming the flag or file that existed at
+`scripts/content_lint/check_doc_references.py` — naming the flag or file that existed at
 incident time is the record working as intended. Nothing checks those links, so
 mark what a reader cannot open; commits and PR numbers predating the 2026-08-18
 public-repo cutover are not reachable from public `main` and are labelled
@@ -115,7 +115,7 @@ that basename, so an untouched link starts failing on someone else's commit.
 `W011` (non-blocking) reports a target whose directory component played no part
 in its resolution, while it is still only a wrong path.
 
-Format is enforced by `scripts/lint_ava_okf.py`: YAML frontmatter with
+Format is enforced by `scripts/content_lint/lint_ava_okf.py`: YAML frontmatter with
 `type` / `title` / `description`, a line + character size ceiling (which forces
 hierarchy instead of long files), and `[[wikilink]]` targets that must resolve.
 The three thresholds are `MAX_LINES` / `MAX_CHARS` / `WARN_MARGIN` in that

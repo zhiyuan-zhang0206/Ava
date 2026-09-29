@@ -109,7 +109,7 @@ application root and persistent terminals. The steps run in order:
   encrypted under so far, so every earlier logical backup keeps decrypting (an
   existing pin is kept; an empty secret pins a minted one, and its earlier
   artifacts restore only with
-  `scripts/restore_drill.py --legacy-empty-secret-passphrase`). A single box
+  `scripts/data_plane_ops/restore_drill.py --legacy-empty-secret-passphrase`). A single box
   keeps its secret. On a networked home every runner holds a copy of
   `AVA_CLUSTER_SECRET` and from now on authenticates with its generation's API
   token, so the secret rotates once (`scripts/rotate_cluster_secret.advance`,
@@ -160,7 +160,7 @@ tickets, or put passwords in command arguments.
 
 PostgreSQL has nothing to rotate by hand: the owner never logs in, and
 application logins rotate as write generations with each release transition.
-`scripts/rotate_data_plane_secrets.py` rotates the Redis credentials only; they
+`scripts/data_plane_ops/rotate_data_plane_secrets.py` rotates the Redis credentials only; they
 do not rotate per rollout
 ([decision](../decisions/2026-09-27-write-generation-rollout-choices.md)).
 
@@ -169,9 +169,9 @@ process context (not an agent shell). It defaults to dry-run and has no
 `--home` flag.
 
 ```bash
-.venv/bin/python scripts/rotate_data_plane_secrets.py
-.venv/bin/python scripts/rotate_data_plane_secrets.py --scope admin --execute
-.venv/bin/python scripts/rotate_data_plane_secrets.py --scope runner --execute
+.venv/bin/python scripts/data_plane_ops/rotate_data_plane_secrets.py
+.venv/bin/python scripts/data_plane_ops/rotate_data_plane_secrets.py --scope admin --execute
+.venv/bin/python scripts/data_plane_ops/rotate_data_plane_secrets.py --scope runner --execute
 ```
 
 `--scope admin` rotates the Redis `default` password (`requirepass`);
@@ -187,8 +187,8 @@ reloads its Redis URL. Each execute writes a 0600 recovery file beneath
 never hold it. Rotate it only for a confirmed leak:
 
 ```bash
-.venv/bin/python scripts/rotate_cluster_secret.py              # dry run
-.venv/bin/python scripts/rotate_cluster_secret.py --execute
+.venv/bin/python scripts/data_plane_ops/rotate_cluster_secret.py              # dry run
+.venv/bin/python scripts/data_plane_ops/rotate_cluster_secret.py --execute
 ```
 
 The script stages the next secret (`backups/secret-rotation/bearer.pending`),

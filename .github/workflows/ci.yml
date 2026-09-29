@@ -6,7 +6,7 @@
 # fans out over pytest-split shards (LPT duration-balanced via the committed
 # .test_durations and least_duration — slow tests only, >=0.2s, 87% of total runtime; tests
 # absent from it are costed at this run's average. Refreshed nightly by
-# scripts/refresh_test_durations.py via .github/workflows/refresh-test-durations.yml).
+# scripts/ci/refresh_test_durations.py via .github/workflows/refresh-test-durations.yml).
 # There is no self-hosted fleet and no runner provisioner: a hosted runner
 # starts bare, so each job installs its own toolchain inline — uv, Node 22,
 # Postgres 17 + Redis server binaries on PATH (the suite self-provisions
@@ -178,7 +178,7 @@ jobs:
           # (if / continue-on-error) cannot read env, only needs, and an empty
           # mode degrades to the full-suite path.
           echo "mode=$TEST_SELECTION_MODE" >> "$GITHUB_OUTPUT"
-          python3 scripts/test_selector.py \
+          python3 scripts/ci/test_selector.py \
             --changed-files /tmp/changed.txt \
             --head-ref "$HEAD_REF" \
             --event "$EVENT" \
@@ -218,16 +218,16 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Scan for raw CJK (i18n locale files exempt)
-        run: python3 scripts/lint_no_cjk.py
+        run: python3 scripts/content_lint/lint_no_cjk.py
 
       - name: Scan for tailnet IP literals (CIDR range notation exempt)
-        run: python3 scripts/lint_no_tailnet.py
+        run: python3 scripts/content_lint/lint_no_tailnet.py
 
       - name: Scan the root supervisor for permission-domain symbols
-        run: python3 scripts/lint_ava_root_scope.py
+        run: python3 scripts/lint/ava_root_scope.py
 
       - name: Check canonical Python lock sources (stdlib only)
-        run: python3 scripts/lint_python_lock.py
+        run: python3 scripts/lint/python_lock.py
 
   core-content-manifests:
     # The content-channel gate (tasks #2915/#3267): core manifests' declared
@@ -257,7 +257,7 @@ jobs:
         uses: ./.github/actions/uv-sync
 
       - name: Lint core-content manifests
-        run: uv run python scripts/lint_core_content_manifests.py
+        run: uv run python scripts/content_lint/lint_core_content_manifests.py
 
   doc-lints:
     # The doc-lint family must fire on EVERY PR — including docs-only diffs,
@@ -416,11 +416,11 @@ jobs:
       - name: Run ruff format check
         run: uv run ruff format --check
       - name: Lint migrations
-        run: uv run python scripts/lint_migrations.py
+        run: uv run python scripts/content_lint/lint_migrations.py
       - name: Lint clock lattice
-        run: uv run python scripts/lint_clock_lattice.py
+        run: uv run python scripts/lint/clock_lattice.py
       - name: Apply migrations to fresh DB + trigger smoke
-        run: uv run python scripts/migration_smoke.py
+        run: uv run python scripts/ci/migration_smoke.py
       - name: Run pyright
         run: uv run pyright
 
@@ -1162,7 +1162,7 @@ jobs:
         uses: ./.github/actions/uv-sync
 
       - name: Vendored PG + injected pgvector smoke (CREATE EXTENSION + query)
-        run: uv run python scripts/pgvector_runtime_smoke.py
+        run: uv run python scripts/ci/pgvector_runtime_smoke.py
 
   helper-signing-smoke:
     name: permissions helper signing smoke (macOS)
@@ -1314,7 +1314,7 @@ jobs:
           # service custody is unresolved). The F11 tccd-attribution phase is
           # skipped here because hosted runners restrict `log show`; run the
           # script without --skip-attribution on a dev host for that phase.
-          uv run python scripts/two_section_chain_smoke.py --skip-attribution
+          uv run python scripts/ci/two_section_chain_smoke.py --skip-attribution
 
       - name: Tear down helper launchd job
         if: ${{ always() }}
@@ -1437,7 +1437,7 @@ jobs:
           # 100% — line coverage is not quality; this gate only sees shard data
           # that reached the combine step (including coverage-data-serial).
           #
-          # Two tiers, enforced by scripts/coverage_gates.py:
+          # Two tiers, enforced by scripts/ci/coverage_gates.py:
           # - the combined 85% gate over the core domains
           #   agent/ava/cli/gateway/shared/ui (cli joined 2026-08-25, tech
           #   audit P1 — measured 82% standalone);
@@ -1450,7 +1450,7 @@ jobs:
           #   threshold even though their tests run in every shard.
           uv run coverage combine coverage-data-*
           uv run coverage json -o coverage.json
-          uv run python scripts/coverage_gates.py coverage.json
+          uv run python scripts/ci/coverage_gates.py coverage.json
 
   test-selection-shadow-report:
     # The shadow-mode measurement point. It only exists while the mode is

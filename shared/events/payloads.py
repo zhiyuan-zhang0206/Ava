@@ -518,7 +518,7 @@ class CiUsageDaily(TypedDict):
     workflow's runs and ceil-billed minutes for the window, split by
     attribution (PR-title [Ava-<id>] convention) and OS. `est_usd` is the
     private-repo overage equivalent at the GitHub-hosted rates — the repo is
-    currently public, so minutes are the billing fact (scripts/ci_accounting.py).
+    currently public, so minutes are the billing fact (scripts/ci/accounting.py).
     Per-agent detail lives in the attribution ledger, not here.
     """
 
@@ -586,7 +586,7 @@ class PrFlowRun(TypedDict):
 
 
 class CiRunsDaily(TypedDict):
-    """`ci_runs_daily` payload — scripts/ci_runs_export.py.
+    """`ci_runs_daily` payload — scripts/ci/runs_export.py.
 
     One absolute-state sample per complete cluster-time day and repository.
     The collector re-emits its trailing window, so every number is an OTLP
@@ -627,7 +627,7 @@ class CiRunsDaily(TypedDict):
 
 
 class CiWorkflowWindow(TypedDict):
-    """`ci_workflow_window` payload — scripts/ci_runs_export.py.
+    """`ci_workflow_window` payload — scripts/ci/runs_export.py.
 
     Trailing-window absolute workflow state, keyed by repository and workflow
     name, emitted with the same daily sampler. Execution percentiles omit
@@ -652,7 +652,7 @@ class CiWorkflowWindow(TypedDict):
 
 
 class CiRunsRun(TypedDict):
-    """`ci_runs_run` payload — scripts/ci_runs_export.py.
+    """`ci_runs_run` payload — scripts/ci/runs_export.py.
 
     One sampler breadcrumb per repository: the fixed window's population and
     this run's GitHub-read budget. These are current observations, so all

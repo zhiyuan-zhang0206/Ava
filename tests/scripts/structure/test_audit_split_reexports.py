@@ -1,6 +1,6 @@
 """Split-reexport audits accept the submodule fallback for lean package inits."""
 
-from scripts import audit_split_reexports as gate
+from scripts.audit import split_reexports as gate
 
 
 def test_missing_accepts_submodule_fallback() -> None:

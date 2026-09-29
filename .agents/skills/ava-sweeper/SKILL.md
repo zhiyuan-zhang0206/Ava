@@ -53,7 +53,7 @@ comments. False positives in config-defaults and external boundaries are
 expected — flag candidates, the human decides.
 
 `except ...: pass` silent swallows are now enforced mechanically by
-`scripts/lint_fail_fast.py` in pre-commit — do not re-flag them here.
+`scripts/lint/fail_fast.py` in pre-commit — do not re-flag them here.
 
 ### 4. inline-marker (whole-repo)
 
@@ -103,7 +103,7 @@ universal rather than scoped to a chosen few. One skill's slack is paid by every
 agent on the cluster, on every turn. Length is measured in *units* (one CJK char
 = 1, one non-CJK word = 1; a flat char count is unfair across languages). The
 hard ceiling (80 units) is enforced mechanically by
-`scripts/lint_skill_descriptions.py` in pre-commit; this class covers the
+`scripts/content_lint/lint_skill_descriptions.py` in pre-commit; this class covers the
 **soft zone (50-80 units)**: descriptions that pass the gate but should be
 tightened. Reuse the lint's own scope + helpers (so this audit never drifts from
 what the gate scans — `ava_builtins/skills/`, `ava_builtins/plugins/*/skills/`,
@@ -111,7 +111,7 @@ and `.agents/skills/`):
 
 ```
 python - <<'PY'
-from scripts.lint_skill_descriptions import length_units, _skill_entries
+from scripts.content_lint.lint_skill_descriptions import length_units, _skill_entries
 for entry in _skill_entries():
     d = entry.description
     if d and 50 < length_units(d) <= 80:
@@ -153,7 +153,7 @@ targets in `ava_builtins/plugins/*/plugin.py`):
 python - <<'PY'
 import ast
 from pathlib import Path
-from scripts.lint_agent_docstrings import (
+from scripts.lint.agent_docstrings import (
     _discover_agent_surface_modules, _discover_plugin_namespace_modules, _is_in_scope,
     _agent_visible_names, _wrap_targets, _is_visible,
 )

@@ -16,9 +16,12 @@ from typing import cast
 import pytest
 from playwright.sync_api import Page
 
-from scripts import post_deploy_visual_matrix as matrix
-from scripts.post_deploy_visual_matrix import measure_structure, structural_minimum_counts
-from scripts.post_deploy_visual_policy import STRUCTURAL_SPECS
+from scripts.post_deploy_visual import matrix as matrix
+from scripts.post_deploy_visual.matrix import (
+    measure_structure,
+    structural_minimum_counts,
+)
+from scripts.post_deploy_visual.policy import STRUCTURAL_SPECS
 from tests.e2e._layout_assertions import (
     structural_failures,
     wait_for_minimum_visible_counts,

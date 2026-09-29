@@ -12,7 +12,7 @@ Small core, minimal by design. One tool (`execute_code`), one namespace (`ava.*`
 5. **Approved stable** — Python 3.12, Postgres 17, Redis 8.2; upgrades require manual approval; no beta/nightly.
 6. **English only — no raw CJK** — docs, comments, prompts, error messages
    in English; the only exemption is frontend i18n locale files (user ruling
-   2026-08-27, enforced repo-wide by `scripts/lint_no_cjk.py`).
+   2026-08-27, enforced repo-wide by `scripts/content_lint/lint_no_cjk.py`).
 
 Full elaboration: [`conventions/philosophy.md`](conventions/philosophy.md)
 
@@ -61,7 +61,7 @@ Windows unit carries `agent-runner` only
 
 **Auth follows the authority boundary.** `AVA_CLUSTER_SECRET` is the gateway's human bearer (API,
 frontend login); it stays on the gateway and rotates only explicitly
-(`scripts/rotate_cluster_secret.py`; backups use a birth-pinned passphrase). An EMPTY secret
+(`scripts/data_plane_ops/rotate_cluster_secret.py`; backups use a birth-pinned passphrase). An EMPTY secret
 (single-box default) leaves the API, `/ops` and frontend unauthenticated and binds every data-plane
 listener to loopback; a set secret adds this host's reachable address for Postgres and its pooler
 (Redis stays loopback, off-box inbound via the relay bridge). The internal data plane always
@@ -167,7 +167,7 @@ dev-host inventory + secret paths: [`conventions/dev-setup.md`](conventions/dev-
 **Migrations:** `migrations/YYYYMMDDTHHMMSS_<kebab-name>.sql` (second-precision UTC),
 tracked as an applied SET keyed by name; `db/schema.sql` is the squashed baseline.
 Every migration ships a paired `.down.sql`, and lossy operations go
-**expand-contract** so any one upgrade stays reversible (`scripts/lint_migrations.py`
+**expand-contract** so any one upgrade stays reversible (`scripts/content_lint/lint_migrations.py`
 enforces format + pairing). **Adding a migration:** `.agents/skills/add-a-migration/SKILL.md`.
 
 ## Agent instruction files

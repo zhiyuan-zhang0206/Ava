@@ -72,7 +72,7 @@ env-authority pass DELETES it from `os.environ` at import unless this unit's own
 reading `settings.lm.dashscope_api_key` is therefore permanently False. The
 opt-in variable is deliberately NOT a Settings alias so it survives both, and the
 fixture injects it with `monkeypatch.setattr`, which is the pattern
-`scripts/lint_no_os_environ.py` Rule 2 prescribes for exactly this reason.
+`scripts/lint/no_os_environ.py` Rule 2 prescribes for exactly this reason.
 """
 
 from __future__ import annotations
@@ -114,7 +114,7 @@ def _live_provider(monkeypatch: pytest.MonkeyPatch) -> None:
 
     `setattr` on the settings singleton rather than `setenv`: the env is read
     once at import, so a late `setenv` would silently no-op (the trap
-    `lint_no_os_environ.py` Rule 2 exists to catch). The override is also pinned
+    `no_os_environ.py` Rule 2 exists to catch). The override is also pinned
     empty — a stray `AVA_LLM_OVERRIDE` in the operator's shell would otherwise
     route this to a fake model and the test would "pass" without calling
     DashScope at all.

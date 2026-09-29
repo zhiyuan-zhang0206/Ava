@@ -1,4 +1,4 @@
-"""scripts/lint_core_content_manifests.py — the core-content manifest gate.
+"""scripts/content_lint/lint_core_content_manifests.py — the core-content manifest gate.
 
 Hard checks (red): a core manifest that fails validation, whose `engines.ava`
 excludes the repo's derived host version, or whose `requires_commit` is not an
@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from scripts import lint_core_content_manifests as lint
+from scripts.content_lint import lint_core_content_manifests as lint
 
 _COMMIT_DATE = "2026-01-02T12:00:00+00:00"
 

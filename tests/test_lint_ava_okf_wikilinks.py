@@ -1,4 +1,4 @@
-"""`scripts/lint_ava_okf.py` — wikilink resolution diagnostics (rules 8 + 11).
+"""`scripts/content_lint/lint_ava_okf.py` — wikilink resolution diagnostics (rules 8 + 11).
 
 A `[[wikilink]]` is the node-graph edge syntax, so its universe is the
 `.ava.okf.md` files and nothing else: a link to a `decisions/` record can
@@ -27,7 +27,7 @@ import pytest
 # The linter imports build_okf_data as a top-level module — running it by path
 # puts scripts/ on sys.path[0], so importing it here has to do the same.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
-_lint = importlib.import_module("scripts.lint_ava_okf")
+_lint = importlib.import_module("scripts.content_lint.lint_ava_okf")
 
 
 def _node(tmp_path: Path, rel: str, body: str = "") -> Path:

@@ -1,7 +1,7 @@
 """Preview data must satisfy the browser's current read contracts."""
 
-from scripts.post_deploy_visual_fixtures import AGENT, AGENT_CARD
-from scripts.post_deploy_visual_matrix import fixture_for
+from scripts.post_deploy_visual.fixtures import AGENT, AGENT_CARD
+from scripts.post_deploy_visual.matrix import fixture_for
 from shared.agent_roster import AgentCard, AgentDirectoryPage, AgentRoster
 from shared.agent_snapshot import AgentSnapshot
 

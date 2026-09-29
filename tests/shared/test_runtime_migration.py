@@ -89,7 +89,7 @@ def test_verified_inventory_applies_without_git_and_rolls_back(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Real PG transaction; synthetic image exercises authority, not launch closure."""
-    from scripts import prove_runtime_migration
+    from scripts.release_proofs import prove_runtime_migration
     from shared.migrations import apply_pending_migrations
 
     home = tmp_path.resolve()

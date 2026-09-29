@@ -95,7 +95,7 @@ def _assert_clean(argv: list[str], *, label: str) -> None:
 @pytest.fixture
 def secret_env(monkeypatch: pytest.MonkeyPatch) -> None:
     """The live env a daemon launcher forwards. Replaced wholesale — the
-    forwarders read `os.environ` by nature (see lint_no_os_environ's allowlist)."""
+    forwarders read `os.environ` by nature (see no_os_environ's allowlist)."""
     monkeypatch.setattr(os, "environ", dict(_SECRET_ENV))
 
 

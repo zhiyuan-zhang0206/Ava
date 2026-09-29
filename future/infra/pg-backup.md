@@ -103,7 +103,7 @@ remains mandatory and is never pruned by physical-backup retention.
    in-flight activation pin), with objects that carry no verifiable sidecar
    binding labeled weak-evidence in the plan — see the storage-abstraction
    effort's retention planner.
-2. **Restore drill — delivered.** `scripts/restore_drill.py` decrypts the
+2. **Restore drill — delivered.** `scripts/data_plane_ops/restore_drill.py` decrypts the
    latest managed artifact (or a supplied path), restores it into scratch
    Postgres, and validates schema, agent rows, checkpoint rows, a checkpoint
    reader sample, and a service smoke.

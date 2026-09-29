@@ -1,0 +1,5 @@
+{
+  "complexity": {
+    "scripts/data_repair/migrate_skill_identity.py::main": 24
+  }
+}

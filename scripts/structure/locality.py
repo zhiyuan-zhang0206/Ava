@@ -3,7 +3,7 @@
 Both rules measure `path::target -> [line, ...]` sites per module; the frozen
 counts live in the `private_imports` / `owner_bypasses` sections of
 scripts/structure/baseline/*.json shards, and the rules themselves are documented in the
-scripts/lint_code_structure.py header (Rules 4 and 5).
+scripts/lint/code_structure.py header (Rules 4 and 5).
 """
 
 from __future__ import annotations
@@ -323,7 +323,7 @@ DECISIONS: dict[str, Decision] = {
             ),
             "shared/pg_tools.py": (
                 "provisions the throwaway Postgres it just started; imported by the "
-                "restricted restore worker and run config-free by scripts/migration_smoke.py"
+                "restricted restore worker and run config-free by scripts/ci/migration_smoke.py"
             ),
             "shared/pg_stall_watchdog.py": (
                 "probes the throwaway Postgres shared/pg_tools.py started, under the same "

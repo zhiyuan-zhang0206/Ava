@@ -27,7 +27,7 @@ pre-reset backup or fix forward when recovery would cross this boundary.
 
 The baseline is the **rollback floor**, so everything above it must be
 reversible: every post-baseline migration ships a paired `.down.sql`.
-`scripts/lint_migrations.py` statically enforces the filename format, name
+`scripts/content_lint/lint_migrations.py` statically enforces the filename format, name
 uniqueness, up/down pairing, and that `db/schema.sql` stamps the sentinel. There
 is deliberately **no** continuity / next-number / cross-branch-collision check —
 timestamp names make those checks meaningless.

@@ -31,7 +31,7 @@ reading a broken local `.env` or fetching runner configuration.
 The boot-path index is generated: `shared/config_lite_table.json` (read by the
 hand-written `shared/config_lite_table.py`, outside this package because
 `shared/env_registry.py` consumes its surfaces before Settings exists) is
-produced from the live registry by `scripts/gen_config_lite_table.py` and
+produced from the live registry by `scripts/codegen/gen_config_lite_table.py` and
 byte-compared by the `config-lite-table-fresh` gate. A field a process never
 touches is no longer validated at import (the accepted semantic change of task
 #3621): local-source units keep their import-time required-field check, a

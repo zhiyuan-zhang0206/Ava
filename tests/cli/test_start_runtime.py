@@ -124,7 +124,7 @@ def test_migration_proof_uses_real_start_admission_before_setup(
     image: VerifiedRelease, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Source fixture tests the refusal boundary; the installed-wheel proof runs in CI."""
-    from scripts.prove_runtime_migration import prove_start_barrier
+    from scripts.release_proofs.prove_runtime_migration import prove_start_barrier
 
     runtime = _admit(image)
     home = image.root.parent.parent

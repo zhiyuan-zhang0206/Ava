@@ -1,4 +1,4 @@
-"""Dated release-tag parsing + selection for `scripts/release_cut.py`.
+"""Dated release-tag parsing + selection for `scripts/ci/release_cut.py`.
 
 A release tag is `v<major>.<minor>.<patch>-<YYYYMMDD>[HHMM]` — the date suffix
 makes every tag self-dating, so a day with no release simply has no tag. The

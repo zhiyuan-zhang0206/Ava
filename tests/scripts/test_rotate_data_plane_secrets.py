@@ -16,7 +16,7 @@ from urllib.parse import urlsplit
 
 import pytest
 
-from scripts import rotate_data_plane_secrets as rotate
+from scripts.data_plane_ops import rotate_data_plane_secrets as rotate
 from shared import cluster
 from shared.config import settings
 

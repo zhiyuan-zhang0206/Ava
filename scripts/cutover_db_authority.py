@@ -533,7 +533,7 @@ def convert_db(home: Path, record: ClusterRecord, *, execute: bool) -> str:
 def convert_api(home: Path, record: ClusterRecord, *, execute: bool) -> str:
     """Rotate the human bearer once on a networked home (step `api`)."""
     from cli.commands.data_plane import cluster_instance as instance
-    from scripts import rotate_cluster_secret as bearer
+    from scripts.data_plane_ops import rotate_cluster_secret as bearer
     from shared.cluster import record_postgres_port
 
     state, raw = read_journal(home).get("api"), _journal(home).get("api")

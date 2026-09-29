@@ -16,7 +16,7 @@ from time import perf_counter
 
 import pytest
 
-from scripts import test_selector
+from scripts.ci import test_selector
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -291,7 +291,7 @@ def test_selector_mode_is_audit_metadata_from_the_workflow_env(
 def test_duration_estimates_are_identical_across_python_hash_seeds() -> None:
     """Hash-randomized set iteration must not change the audit JSON."""
     snippet = """\
-from scripts.test_selector import _estimate_seconds
+from scripts.ci.test_selector import _estimate_seconds
 
 print(repr(_estimate_seconds(
     {\"tests/a.py\", \"tests/b.py\", \"tests/c.py\"},
@@ -323,7 +323,7 @@ def test_real_repository_map_is_fast_and_has_broad_static_coverage() -> None:
     """The production checkout must keep the selector map usable in CI."""
     started = perf_counter()
 
-    result = test_selector.select_tests(["scripts/test_selector.py"], repo_root=_REPO_ROOT)
+    result = test_selector.select_tests(["scripts/ci/test_selector.py"], repo_root=_REPO_ROOT)
 
     assert result.map_source_count > 500
     assert result.full_est_seconds > 0

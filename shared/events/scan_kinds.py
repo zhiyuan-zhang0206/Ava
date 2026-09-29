@@ -20,7 +20,7 @@ Usage:
 
 Stdlib-only. Output is a
 de-duplicated event-name inventory grouped by mechanism. shared/events/registry.md
-is generated from the EVENTS registry (scripts/gen_event_registry.py), not from
+is generated from the EVENTS registry (scripts/codegen/gen_event_registry.py), not from
 this output; this tool remains useful to audit the event= literal distribution
 across the codebase.
 """

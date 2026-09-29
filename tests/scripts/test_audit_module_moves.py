@@ -2,7 +2,7 @@
 
 import pytest
 
-from scripts import audit_module_moves as gate
+from scripts.audit import module_moves as gate
 
 
 def test_old_references_reports_dotted_parent_import_and_slash_lines() -> None:
