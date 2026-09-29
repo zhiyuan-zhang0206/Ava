@@ -440,13 +440,20 @@ def test_milvus_gated_out_unless_milvus_backend(monkeypatch: pytest.MonkeyPatch)
     the start roster (2026-09-02 numpy-default ruling, task #2347)."""
     from shared.config import settings
 
+    def milvus_reason() -> str | None:
+        annotated = {
+            s.session: reason
+            for s, reason in spec.services_for_capabilities_annotated(frozenset({"gateway"}))
+        }
+        return annotated["milvus"]
+
     monkeypatch.setattr(settings.services, "memory_search_backend", "numpy")
-    reason = spec.gate_reason_for_session("milvus")
+    reason = milvus_reason()
     assert reason is not None
     assert "milvus not needed" in reason
 
     monkeypatch.setattr(settings.services, "memory_search_backend", "milvus")
-    assert spec.gate_reason_for_session("milvus") is None
+    assert milvus_reason() is None
 
 
 # ── AVA_PROCESS_PROFILE marker derivation (task #1230) ──
@@ -518,14 +525,3 @@ def test_runner_daemons_keep_the_runner_marker() -> None:
     by_session = {s.session: s for s in roster.build_services()}
     for sess in ("ops", "page-server"):
         assert service_spec.profile_marker(by_session[sess]) == "runner", sess
-
-
-def test_gate_reason_for_session_matches_the_start_roster_decision() -> None:
-    """The single-service gate agrees with the roster and refuses retired services."""
-    assert spec.gate_reason_for_session("agent-host") is None
-    assert "agent-host" in {
-        s.session for s in spec.services_for_capabilities(frozenset({"agent-runner"}))
-    }
-    assert "restarter" not in {s.session for s in spec.build_services()}
-    assert spec.gate_reason_for_session("restarter") is not None
-    assert spec.gate_reason_for_session("no-such-service") is not None
