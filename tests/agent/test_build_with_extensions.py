@@ -134,14 +134,14 @@ def test_external_plugin_also_loaded(monkeypatch: pytest.MonkeyPatch):
     assert not any("compact" in n for n in loaded)
 
 
-def test_load_extensions_installs_sdk_metering(monkeypatch: pytest.MonkeyPatch):
+def test_load_extensions_installs_metering(monkeypatch: pytest.MonkeyPatch):
     """load_extensions must install the SDK-usage recorder over the final ava.*
     surface (after plugins load), so every agent's SDK calls get metered."""
     from agent.graph import _build
-    from ava import sdk_metering
+    from ava.sdk_surface import metering
 
     installed: list[bool] = []
-    monkeypatch.setattr(sdk_metering, "install", lambda: installed.append(True))
+    monkeypatch.setattr(metering, "install", lambda: installed.append(True))
 
     _build.load_extensions()
 

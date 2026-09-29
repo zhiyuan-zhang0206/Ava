@@ -59,8 +59,9 @@ def plugin_registrations_present() -> bool:
 
 def drop_plugin_registrations() -> None:
     """Uninstall metering, then reset every plugin registration together."""
-    metering = sys.modules.get("ava.sdk_metering")
-    if metering is not None:
+    if "ava" in sys.modules:
+        from ava.sdk_surface import metering
+
         metering.uninstall()
     importlib.import_module("agent.state").clear_plugin_registrations()
 

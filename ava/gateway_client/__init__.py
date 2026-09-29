@@ -1,5 +1,10 @@
 """SDK ↔ Gateway HTTP client.
 
+The package door is the client — typed gateway operations the SDK namespaces
+call. `transport` is the HTTP layer under it: the process-wide httpx client,
+retry/backoff, and wire-error translation. Other `ava` modules that read a raw
+gateway route (`ava.impersonation.replay`) use `transport` directly.
+
 The agent process's `ava.agents.*` no longer directly connects to the DB —
 three gateway ops (spawn / send_message / get_last_message)
 all go through this module calling gateway HTTP routes. See the
@@ -60,19 +65,19 @@ from typing import Any, NamedTuple
 
 import ava
 import ava.agent_identity
-from ava._gateway_transport import (
+from ava.gateway_client.transport import (
     _MEMORY_SEARCH_MAX_RETRIES,
     _TRANSIENT_HTTP_STATUSES,
     _delete,
-    _get,
     _memory_search_timeout,
+    get,
     post,
     raise_from_response,
 )
-from ava._gateway_transport import (
+from ava.gateway_client.transport import (
     _MEMORY_SEARCH_TIMEOUT_MARGIN_S as _MEMORY_SEARCH_TIMEOUT_MARGIN_S,
 )
-from ava._gateway_transport import (
+from ava.gateway_client.transport import (
     patch as patch,
 )
 from shared.agents import GatewayUnavailable as GatewayUnavailable
@@ -322,7 +327,7 @@ def send_system_note(
 
 def get_last_message(agent_id: int, caller: str) -> str | None:
     """GET /api/agents/{id}/last-message → the agent's most recent AI turn text."""
-    resp = _get(f"/api/agents/{agent_id}/last-message", params={"caller": caller})
+    resp = get(f"/api/agents/{agent_id}/last-message", params={"caller": caller})
     raise_from_response(resp)
     return resp.json()["text"]
 
@@ -333,7 +338,7 @@ def get_neighbors(agent_id: int, *, depth: int, limit: int) -> list[dict]:
     Each dict has id / label / status / depth / score, strongest first
     (order preserved from the gateway).
     """
-    resp = _get(f"/api/agents/{agent_id}/neighbors", params={"depth": depth, "limit": limit})
+    resp = get(f"/api/agents/{agent_id}/neighbors", params={"depth": depth, "limit": limit})
     raise_from_response(resp)
     return resp.json()["neighbors"]
 
@@ -343,7 +348,7 @@ def get_ancestors(agent_id: int) -> list[dict]:
     chain above `agent_id`, nearest ancestor first (the gateway walks to the
     top, so the neighbors `depth`/`limit` params do not apply). Same dict
     shape as get_neighbors."""
-    resp = _get(f"/api/agents/{agent_id}/neighbors", params={"depth": 1, "limit": 20})
+    resp = get(f"/api/agents/{agent_id}/neighbors", params={"depth": 1, "limit": 20})
     raise_from_response(resp)
     return resp.json()["ancestors"]
 
@@ -368,7 +373,7 @@ def get_born_chain(agent_id: int) -> list[dict]:
     `_BORN_CHAIN_TIMEOUT_S`); callers degrade on `GatewayUnavailable`."""
     import httpx
 
-    resp = _get(
+    resp = get(
         f"/api/agents/{agent_id}/born-chain",
         timeout=httpx.Timeout(_BORN_CHAIN_TIMEOUT_S),
         max_retries=1,
@@ -388,14 +393,14 @@ def list_agents(
     params: dict[str, str | int] = {"scope": scope, "query": query, "limit": limit}
     if before_id is not None:
         params["before_id"] = before_id
-    resp = _get("/api/agents", params=params)
+    resp = get("/api/agents", params=params)
     raise_from_response(resp)
     return resp.json()
 
 
 def get_agent(agent_id: int) -> dict[str, Any]:
     """Read an agent directly, independently of directory scope or pagination."""
-    resp = _get(f"/api/agents/{agent_id}")
+    resp = get(f"/api/agents/{agent_id}")
     raise_from_response(resp)
     return resp.json()
 
@@ -517,21 +522,21 @@ def close_page(agent_id: int, name: str) -> None:
 
 def list_open_pages(agent_id: int) -> list[dict]:
     """GET /api/agents/{id}/pages → the agent's open PageRow dicts."""
-    resp = _get(f"/api/agents/{agent_id}/pages")
+    resp = get(f"/api/agents/{agent_id}/pages")
     raise_from_response(resp)
     return list(resp.json())
 
 
 def list_machines() -> list[dict]:
     """GET /api/cluster/machines → list of {name, description, live} dicts."""
-    resp = _get("/api/cluster/machines")
+    resp = get("/api/cluster/machines")
     raise_from_response(resp)
     return list(resp.json())
 
 
 def list_presets() -> list[dict]:
     """GET /api/presets → list of preset dicts, ordered by name."""
-    resp = _get("/api/presets")
+    resp = get("/api/presets")
     raise_from_response(resp)
     return list(resp.json())
 

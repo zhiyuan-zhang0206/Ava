@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field
 import ava
 from agent import state as state_module
 from ava import agent_identity, external
-from ava.external_state import decode_plugin_delta, load_snapshot
+from ava.external.state import decode_plugin_delta, load_snapshot
 from shared.agents import impersonation as leases
 from shared.agents.impersonation import impersonation_history as history
 from shared.caller_identity import CallerIdentity
@@ -128,7 +128,7 @@ def test_borrowed_sender_reaches_peer_through_gateway_and_returns_real_provenanc
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     owner, _ = native_checkpoint
-    monkeypatch.setattr("ava._gateway_transport._client", gateway_unit)
+    monkeypatch.setattr("ava.gateway_client.transport._client", gateway_unit)
     monkeypatch.setenv(
         "AVA_CALLER_IDENTITY", '{"kind":"external_agent","subject":"codex","instance":"test"}'
     )
@@ -186,7 +186,7 @@ def test_v1_attachment_send_message_certifies_from_the_central_receipt(
     """Attachment-owned ``ava.agents.send_message`` completes only on exact replay."""
     import httpx
 
-    from ava import impersonation_replay as reader
+    from ava.impersonation import replay as reader
     from services.agent_host.impersonation_events import reconcile_one
 
     owner, _ = native_checkpoint
@@ -196,7 +196,7 @@ def test_v1_attachment_send_message_certifies_from_the_central_receipt(
         "impersonation_event_manifest_certification_secret",
         "attachment-manifest-certification-secret-000001",
     )
-    monkeypatch.setattr("ava._gateway_transport._client", gateway_unit)
+    monkeypatch.setattr("ava.gateway_client.transport._client", gateway_unit)
     peer_id = create_agent(db_conn)
     db_conn.execute(
         "INSERT INTO agents_meta(id,status,machine,lease_expires_at) "
@@ -261,7 +261,7 @@ def test_v1_attachment_send_message_certifies_from_the_central_receipt(
             json={"items": items, "meta": {"has_more": False}},
         )
 
-    monkeypatch.setattr(reader, "_get", get)
+    monkeypatch.setattr(reader, "get", get)
     reconcile_one()
     certified = history.resolve(owner.agent_id, 0)
     assert certified["events_completed_at"] is not None

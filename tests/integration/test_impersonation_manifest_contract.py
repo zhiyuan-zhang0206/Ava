@@ -438,7 +438,7 @@ def test_extra_before_final_read_refuses_and_late_extra_alerts_without_demoting(
     v1_lease: dict[str, Any],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from ava import impersonation_replay as reader
+    from ava.impersonation import replay as reader
     from services.agent_host.impersonation_events import _watch_completed_manifest_integrity
 
     leases.release(str(v1_lease["id"]), attested_caller(v1_lease), "No expected events")
@@ -462,7 +462,7 @@ def test_extra_before_final_read_refuses_and_late_extra_alerts_without_demoting(
             json={"items": rows, "meta": {"has_more": False}},
         )
 
-    monkeypatch.setattr(reader, "_get", get)
+    monkeypatch.setattr(reader, "get", get)
     assert not reader._indexed_manifest_matches(lease)
     assert history.resolve(owner.agent_id, 0)["events_completed_at"] is None
 
@@ -615,7 +615,7 @@ def test_cli_impersonate_send_outbox_retry_certifies_exactly_once(
 
     import httpx
 
-    from ava import impersonation_replay as reader
+    from ava.impersonation import replay as reader
     from cli.commands.agents.impersonation import _send
     from services.agent_host.impersonation_events import reconcile_one
     from shared.agents.messages import delivery_outbox as outbox
@@ -715,6 +715,6 @@ def test_cli_impersonate_send_outbox_retry_certifies_exactly_once(
             json={"items": items, "meta": {"has_more": False}},
         )
 
-    monkeypatch.setattr(reader, "_get", get)
+    monkeypatch.setattr(reader, "get", get)
     reconcile_one()
     assert history.resolve(owner.agent_id, 0)["events_completed_at"] is not None

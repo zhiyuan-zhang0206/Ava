@@ -17,7 +17,7 @@ registers one or more tools that agents call through `ava.mcps.<server>.<tool>()
 
 ## How MCP Works
 MCP servers run as child processes managed by the shared per-machine MCP
-daemon (`ava/_mcps_daemon.py`, ops roster session "mcp-daemon"). Tool
+daemon (`ava/mcps/_daemon.py`, ops roster session "mcp-daemon"). Tool
 discovery is **lazy, not at startup**: config reloads on every call
 (`_load_config`), and tool lists load on first access (daemon → 24h disk
 cache → local connection) — `servers()`/`help()` prioritize the cache so

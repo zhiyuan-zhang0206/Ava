@@ -22,7 +22,7 @@ from agent.graph.exec.node import exec_node
 from agent.impersonation import flush_checkpoint, protect_native_hooks, settle_checkpoint
 from agent.ownership.hosted import admit_hosted_runtime
 from agent.startup import wrap_saver_writes_with_nstep_interval
-from ava.external_state import encode_plugin_delta
+from ava.external.state import encode_plugin_delta
 from shared.agents import impersonation as leases
 from shared.agents.history.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
 from shared.caller_identity import CallerIdentity
@@ -517,7 +517,7 @@ async def test_handoff_leaves_replay_pending_until_runner_reconcile_completes(
     import httpx
 
     from agent.impersonation_handoff import deliver_handoff
-    from ava import impersonation_replay as recorded
+    from ava.impersonation import replay as recorded
     from services.agent_host.impersonation_events import reconcile_one
     from shared.agents.impersonation import impersonation_history as history
     from shared.config import settings
@@ -567,7 +567,7 @@ async def test_handoff_leaves_replay_pending_until_runner_reconcile_completes(
             json={"items": [], "meta": {"has_more": False}},
         )
 
-    monkeypatch.setattr(recorded, "_get", get)
+    monkeypatch.setattr(recorded, "get", get)
     reconcile_one()
     after = history.resolve(owner.agent_id, 0)
     assert after["events_completed_at"] is not None

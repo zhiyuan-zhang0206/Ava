@@ -10,7 +10,7 @@ from typing import Any
 
 import pytest
 
-from ava.impersonation_launch import bootstrap_message
+from ava.impersonation.launch import bootstrap_message
 from ava.shell.coding_tools import codex
 from shared import coding_session_owner
 

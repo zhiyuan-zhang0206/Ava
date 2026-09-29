@@ -149,7 +149,7 @@ class GenParams:
 
 
 # One batch's parallel fan-out. Mirrors the SDK batch ceiling
-# (`ava/_batch.DEFAULT_BATCH_MAX_CONCURRENT` — "must not turn one action into
+# (`ava.sdk_surface.batch.DEFAULT_BATCH_MAX_CONCURRENT` — "must not turn one action into
 # an account-wide request burst"); callers may raise or lower it per capacity.
 DEFAULT_MAX_CONCURRENT = 12
 

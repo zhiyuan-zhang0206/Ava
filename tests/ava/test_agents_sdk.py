@@ -110,7 +110,7 @@ def _sdk_via_inprocess_gateway(monkeypatch: pytest.MonkeyPatch):
         monkeypatch.setattr(_settings.lm, _attr, SecretStr("sk-test"))
 
     with TestClient(app, base_url="http://test-gateway") as tc:
-        monkeypatch.setattr("ava._gateway_transport._client", tc)
+        monkeypatch.setattr("ava.gateway_client.transport._client", tc)
         monkeypatch.setattr(_agents_router, "_forward_spawn_to_remote", _in_process_forward)
         monkeypatch.setattr(_agents_forward_router, "enqueue_lifecycle", _in_process_lifecycle)
         monkeypatch.setattr(_machines, "lookup_role", _lookup_role)
@@ -849,7 +849,7 @@ class TestListAgents:
         def fake_raise(_response: object) -> None:
             return None
 
-        monkeypatch.setattr(gateway_client, "_get", fake_get)
+        monkeypatch.setattr(gateway_client, "get", fake_get)
         monkeypatch.setattr(gateway_client, "raise_from_response", fake_raise)
 
         assert (
@@ -948,7 +948,7 @@ class TestListAgents:
         def fake_raise(_response: object) -> None:
             return None
 
-        monkeypatch.setattr(ava.agents._client, "_get", fake_get)
+        monkeypatch.setattr(ava.agents._client, "get", fake_get)
         monkeypatch.setattr(ava.agents._client, "raise_from_response", fake_raise)
         assert ava.agents.get_status(1) == AgentStatus.TERMINATED
         assert calls == ["/api/agents/1"]

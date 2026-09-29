@@ -414,7 +414,7 @@ def build_services() -> tuple[ServiceSpec, ...]:
         # — the same story as browser-mcp, keeping it out of a Windows roster.
         ServiceSpec(
             session="mcp-daemon",
-            cmd=".venv/bin/python -m ava._mcps_daemon",
+            cmd=".venv/bin/python -m ava.mcps._daemon",
             capabilities=_AGENT_RUNNER,
             # Config is local files (mcp.json); no DB at boot or runtime.
             requires_db=False,

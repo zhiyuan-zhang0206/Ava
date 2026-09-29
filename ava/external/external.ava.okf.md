@@ -33,7 +33,7 @@ external caller profile so peer operations carry `agent:N`, then restores the
 ordinary profile when closed.
 
 Plugins load through the existing extension loader. Framework and plugin config
-views bind the agent's stored configuration, while `external_state.load_snapshot`
+views bind the agent's stored configuration, while `ava.external.state.load_snapshot`
 reads its checkpoint without writing it. Pending journal entries are replayed
 through their registered reducers after the checkpoint's applied receipt.
 
@@ -60,4 +60,4 @@ Peer messages carry the same borrowed identity: `ava impersonate send
 `agent:<agent_id>` (task #4102).
 
 The usage procedure and CLI commands live in
-[External agent impersonation](../conventions/agent-impersonation.md).
+[External agent impersonation](../../conventions/agent-impersonation.md).

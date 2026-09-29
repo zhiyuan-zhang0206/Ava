@@ -43,7 +43,7 @@ Wire protocol (JSON line per request, mirrors `services/browser/protocol`):
             {"id": 2, "ok": false, "error": "message"}
 
 The per-agent bridge (`services/computer/mcp_wrapper.py`) and the MCP daemon's
-direct dial (`ava/_mcp_computer.py`) speak this protocol; `agent_id` is stamped
+direct dial (`ava/mcps/_computer.py`) speak this protocol; `agent_id` is stamped
 by the bridge from the calling agent's identity and rides into the audit
 stream, where it is likewise self-reported by the agent's own process.
 

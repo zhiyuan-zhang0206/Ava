@@ -12,7 +12,7 @@ import psycopg
 import pytest
 from psycopg import sql
 
-import ava.impersonation_replay as reader
+import ava.impersonation.replay as reader
 import shared.agents.impersonation_manifest as manifest
 from shared.agents import impersonation as leases
 from shared.agents.impersonation import impersonation_history as history
@@ -298,7 +298,7 @@ def test_runner_expiry_replay_freezes_and_certifies_after_seal(
             json={"items": items, "meta": {"has_more": False}},
         )
 
-    monkeypatch.setattr(reader, "_get", get)
+    monkeypatch.setattr(reader, "get", get)
     if seal_before_expiry:
         seal_local_participant(participant)
     # A sealed receipt on an active lease must not freeze admission early.
@@ -371,7 +371,7 @@ def test_runner_replay_after_abort_or_termination_certifies(
             json={"items": [], "meta": {"has_more": False}},
         )
 
-    monkeypatch.setattr(reader, "_get", get)
+    monkeypatch.setattr(reader, "get", get)
     if ending == "abort":
         assert leases.abort_lease(participant.lease_id, owner, "the executor process is gone")
     else:

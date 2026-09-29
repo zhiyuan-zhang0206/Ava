@@ -36,7 +36,7 @@ def _endpoint(path: Path) -> str:
 def short_socket() -> Iterator[Path]:
     """A bind path short enough for macOS's 104-char AF_UNIX limit.
 
-    pytest's ``tmp_path`` is too deep on macOS (test__mcps_daemon precedent:
+    pytest's ``tmp_path`` is too deep on macOS (tests/ava/mcps/test_daemon.py precedent:
     the limit bites during bind, not connect); a short /tmp directory keeps
     every bind path legal on both platforms. Self-managed and removed on
     teardown.

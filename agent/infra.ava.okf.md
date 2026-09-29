@@ -29,7 +29,7 @@ Ava's infrastructure layer—provides underlying capabilities for agent runtime 
 
 ## Entry Points
 
-- `ava/_mcps_daemon.py` — shared per-machine MCP service
+- `ava/mcps/_daemon.py` — shared per-machine MCP service
 - `services/agent_host/daemon.py` — Agent host entry
 - `services/ava_root_glue/glue.py` — service readiness, root recovery, and diagnostic wiring
 

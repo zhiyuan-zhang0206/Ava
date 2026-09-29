@@ -19,7 +19,7 @@ no separate probe), a **wrap** whose wrapper calls `inner` anything other than
 exactly once (a short-circuit or a retry — a transparent pass-through always
 runs once installed, so counting it would measure the installation), and a
 **system prompt section** that renders non-empty text at build time (spawn /
-compact only). `sdkNamespaces` is deliberately excluded: `agent/sdk_metering.py`
+compact only). `sdkNamespaces` is deliberately excluded: `ava/sdk_surface/metering.py`
 already meters it as `sdk_call`.
 
 Framework registrations record nothing — they happen outside a `PluginContext`,

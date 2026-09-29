@@ -16,7 +16,7 @@ from unittest.mock import MagicMock
 import pytest
 from pydantic import SecretStr
 
-from ava._batch import DEFAULT_BATCH_MAX_CONCURRENT
+from ava.sdk_surface.batch import DEFAULT_BATCH_MAX_CONCURRENT
 from shared.config import settings
 
 understand_mod = cast(Any, importlib.import_module("ava.understand"))
@@ -651,7 +651,7 @@ def test_batch_default_concurrency_uses_the_shared_ceiling(mock_deepseek: dict[s
     import threading
     import time
 
-    from ava._batch import DEFAULT_BATCH_MAX_CONCURRENT
+    from ava.sdk_surface.batch import DEFAULT_BATCH_MAX_CONCURRENT
 
     n = DEFAULT_BATCH_MAX_CONCURRENT + 2
     lock = threading.Lock()

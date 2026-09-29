@@ -1,4 +1,4 @@
-"""Unit tests for ava._mcp_browser — in-daemon client for the browser-mcp service.
+"""Unit tests for ava.mcps._browser — in-daemon client for the browser-mcp service.
 
 No real browser daemon: the line protocol is exercised with an in-memory
 asyncio pair (StreamReader/StreamWriter), and the socket path is patched for
@@ -19,7 +19,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-import ava._mcp_browser as browser_mod
+import ava.mcps._browser as browser_mod
 from shared import resilience
 
 

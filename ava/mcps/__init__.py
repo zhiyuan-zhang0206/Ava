@@ -1,6 +1,20 @@
 """Tools exposed by external MCP servers. Call `ava.mcps.<server>.<tool>(...)`
 with the tool's named arguments."""
 
+# Package door. This `__init__` IS the agent-facing `ava.mcps` namespace — its
+# docstring above is what `ava.help()` shows, so the package notes live in this
+# comment. The `_`-private submodules are the MCP plumbing behind it:
+#   _remote     client of the per-machine MCP daemon socket (the call path here)
+#   _oauth      OAuth 2.1 client + token storage for remote (`url`) servers
+#   _daemon     the shared per-machine daemon process
+#               (`python -m ava.mcps._daemon`, ops roster session "mcp-daemon")
+#   _browser    the daemon's in-process line client for the browser-mcp service
+#   _computer   the daemon's in-process line client for the computer-mcp service
+# Every submodule is private on purpose: `ava.mcps.<name>` resolves to an MCP
+# server proxy, so a public submodule would shadow the server of the same name.
+# For the same reason the server configuration (`ava.mcp_config`, imported by
+# cli/ and ops/) stays outside this package.
+
 from __future__ import annotations
 
 import asyncio
@@ -15,31 +29,7 @@ from contextlib import AsyncExitStack, suppress
 from pathlib import Path
 from typing import Any
 
-from ava.sdk_validation import coerce_str
-from ava.security import scan_content
-from shared.config import settings
-
-from ._mcp_oauth import _OAUTH_FLOW_TIMEOUT_S
-from ._mcp_remote import (
-    _current_agent_id as _current_agent_id,
-)
-from ._mcp_remote import (
-    _daemon_socket_path as _daemon_socket_path,
-)
-from ._mcp_remote import (
-    _get_remote_client as _get_remote_client,
-)
-
-# MCP daemon socket client, moved to ._mcp_remote (2026-08-13 #1229);
-# re-exported here as its historical home. `_get_remote_client` is what
-# `_list_tools` / `_call_raw` consult; the rest keeps tests and help() stable.
-from ._mcp_remote import (
-    _RemoteMCPClient as _RemoteMCPClient,
-)
-from ._mcp_remote import (
-    _socket_path_for as _socket_path_for,
-)
-from .mcp_config import (
+from ava.mcp_config import (
     MCPCallError,
     MCPConnectError,
     MCPError,
@@ -52,6 +42,30 @@ from .mcp_config import (
     resolve_command,
     server_cwd,
     server_url,
+)
+from ava.sdk_surface.validation import coerce_str
+from ava.security import scan_content
+from shared.config import settings
+
+from ._oauth import _OAUTH_FLOW_TIMEOUT_S
+from ._remote import (
+    _current_agent_id as _current_agent_id,
+)
+from ._remote import (
+    _daemon_socket_path as _daemon_socket_path,
+)
+from ._remote import (
+    _get_remote_client as _get_remote_client,
+)
+
+# The MCP daemon socket client lives in `._remote` (#1229). `_get_remote_client`
+# is what `_list_tools` / `_call_raw` consult; the rest are re-exported so tests
+# and help() keep reaching them here.
+from ._remote import (
+    _RemoteMCPClient as _RemoteMCPClient,
+)
+from ._remote import (
+    _socket_path_for as _socket_path_for,
 )
 
 # Disk cache TTL
@@ -309,7 +323,7 @@ async def _connect_http(
     timeout = _OAUTH_FLOW_TIMEOUT_S if oauth else settings.sandbox.mcp_connect_timeout_seconds
     try:
         if oauth:
-            from ._mcp_oauth import oauth_http_client
+            from ._oauth import oauth_http_client
 
             http_client = await oauth_http_client(url, server)
         else:

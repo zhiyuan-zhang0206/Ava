@@ -290,7 +290,7 @@ def _core_gate_reason(session: str) -> str | None:
         return _browser_family_gate_reason(session)
     if session == "mcp-daemon" and not unix_sockets_available():
         # Same transport story as browser-mcp: the daemon binds a Unix socket
-        # (ava/_mcps_daemon.py) and its healthcheck dials it, so without AF_UNIX
+        # (ava/mcps/_daemon.py) and its healthcheck dials it, so without AF_UNIX
         # the service can never start and the watchdog would judge it dead every
         # 60s and log a restart failure — a Windows agent-runner, exactly.
         return "no AF_UNIX sockets (mcp-daemon's transport is POSIX-only)"

@@ -17,8 +17,8 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 import ava
-import ava._mcp_remote as remote_mod
 import ava.mcps as mcps_mod
+import ava.mcps._remote as remote_mod
 from shared.config import settings
 
 # ─── _load_config / servers() ────────────────────────────────────────────

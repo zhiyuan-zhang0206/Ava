@@ -11,7 +11,7 @@ import httpx
 import psycopg
 import pytest
 
-from ava import impersonation_replay as recorded
+from ava.impersonation import replay as recorded
 from shared import telemetry
 from shared.agents import impersonation as leases
 from shared.agents.impersonation import impersonation_history as history
@@ -147,7 +147,7 @@ def test_event_reader_consumes_outgoing_peer_operations(
             },
         )
 
-    monkeypatch.setattr(recorded, "_get", get)
+    monkeypatch.setattr(recorded, "get", get)
     recorded.consume_recorded_events(history.resolve(session["agent_id"], session["session_id"]))
     consumed = {
         row["payload"]["id"]
@@ -193,7 +193,7 @@ def test_deliver_handoff_leaves_foreground_replay_to_the_runner(
     without touching the replay path, leaving truthful pending semantics.
     """
     from agent import impersonation_handoff as handoff
-    from ava import impersonation_replay as recorded
+    from ava.impersonation import replay as recorded
 
     leases.release(str(session["id"]), attested_caller(session), "Completed external work")
     lease = history.resolve(session["agent_id"], session["session_id"])

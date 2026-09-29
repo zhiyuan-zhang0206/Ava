@@ -32,7 +32,7 @@ The three systems are decoupled — plugins don't need skills, skills don't depe
 - `agent/state.py:register_plugin_state()` — state field registration
 - `agent/extensions/catalog.py:SURFACES` — the enumeration of every plugin injection surface, with each entry point's live signature; `ava plugins inspect` renders it beside what each installed plugin actually registered ([[okf/plugins/plugins.ava.okf.md|Plugin System]])
 - `ava/skills.py` — skill loading and help() rendering
-- `ava/mcps.py` — MCP client interface
+- `ava/mcps/__init__.py` — MCP client interface
 
 ## Notes
 - Plugins and MCPs can be enabled/disabled per machine (`~/.ava/plugins_config.json` / `~/.ava/mcp_enabled.json`)

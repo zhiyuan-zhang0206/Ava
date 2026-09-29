@@ -145,7 +145,7 @@ async def connect_computer_direct(
 ) -> tuple[ComputerLineSession, AsyncExitStack]:
     """Dial the per-machine computer-mcp service; return (session, stack).
 
-    Mirrors `ava._mcp_browser.connect_browser_direct`: the returned stack is
+    Mirrors `ava.mcps._browser.connect_browser_direct`: the returned stack is
     empty (the socket is the whole connection; nothing to close beyond the
     session's own writer), kept for interface parity with the stdio path."""
     if sock is None:

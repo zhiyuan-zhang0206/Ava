@@ -21,7 +21,7 @@ Server subprocess sharing: a server entry may declare `"shared"` in its
 - `"shared": true` — one daemon-wide stdio child serves every connection
   (serialized per server), for stateless servers like x.
 
-Launch: python -m ava._mcps_daemon [socket_path]
+Launch: python -m ava.mcps._daemon [socket_path]
 """
 
 from __future__ import annotations
@@ -37,11 +37,11 @@ from typing import Any
 
 from loguru import logger
 
+from ava.mcp_config import assert_requirements, is_transport_error, load_mcp_config, server_url
 from shared.config import settings
 from shared.log_sinks import add_sink
 
-from ._mcp_oauth import _OAUTH_FLOW_TIMEOUT_S
-from .mcp_config import assert_requirements, is_transport_error, load_mcp_config, server_url
+from ._oauth import _OAUTH_FLOW_TIMEOUT_S
 
 
 def _load_config() -> dict[str, dict[str, Any]]:
@@ -166,8 +166,9 @@ async def _connect_server(server: str) -> Any:
     from mcp import ClientSession, StdioServerParameters
     from mcp.client.stdio import stdio_client
 
-    from ._mcp_browser import connect_browser_direct
-    from .mcp_config import resolve_command, server_cwd
+    from ava.mcp_config import resolve_command, server_cwd
+
+    from ._browser import connect_browser_direct
 
     cfg = _load_config()
     spec = cfg[server]
@@ -181,7 +182,7 @@ async def _connect_server(server: str) -> Any:
     if shared == "browser":
         return await connect_browser_direct()
     if shared == "computer_use":
-        from ._mcp_computer import connect_computer_direct
+        from ._computer import connect_computer_direct
 
         return await connect_computer_direct()
     if shared not in (None, False, True):
@@ -230,7 +231,7 @@ async def _connect_http(
     one endpoint serves every agent connection with no session state on either
     side. Static auth (API keys) goes in `headers` via the SDK's own client
     factory; `oauth=True` builds an OAuth 2.1 provider instead (authorization
-    code + PKCE, browser flow — see `ava/_mcp_oauth.py`). On failure the local
+    code + PKCE, browser flow — see `ava/mcps/_oauth.py`). On failure the local
     stack is closed so no HTTP client leaks. The caller owns the returned stack.
     """
     from mcp import ClientSession
@@ -245,7 +246,7 @@ async def _connect_http(
     timeout = _OAUTH_FLOW_TIMEOUT_S if oauth else settings.sandbox.mcp_connect_timeout_seconds
     try:
         if oauth:
-            from ._mcp_oauth import oauth_http_client
+            from ._oauth import oauth_http_client
 
             http_client = await oauth_http_client(url, server)
         else:
@@ -311,7 +312,7 @@ async def _handle_call_tool(
     result = await session.call_tool(tool, args)
     content = []
     for c in result.content or []:
-        # Same fail-fast as ava/mcps.py:_dump_content: the MCP
+        # Same fail-fast as ava/mcps/__init__.py:_dump_content: the MCP
         # SDK contract requires ContentBlock to be a pydantic
         # model; absence of model_dump means the SDK type
         # changed or we missed a new type — silently turning
@@ -529,14 +530,23 @@ def _socket_is_live(socket_path: str) -> bool:
         sock.close()
 
 
-_DAEMON_MODULE = "ava._mcps_daemon"
+_DAEMON_MODULE = "ava.mcps._daemon"
+# Expand-contract for the module rename (`ava._mcps_daemon` -> `ava.mcps._daemon`):
+# a daemon a pre-rename release launched keeps its old argv, and a crashed one left
+# behind with a dead socket must still be recognized (and reaped) as a ghost of this
+# unit. Delete this constant — and the matching `pgrep` alternative in
+# .agents/skills/operating-ava-cluster/SKILL.md — once every host runs the renamed
+# module and a process census shows no `-m ava._mcps_daemon` left.
+_LEGACY_DAEMON_MODULE = "ava._mcps_daemon"
+_DAEMON_MODULES = frozenset({_DAEMON_MODULE, _LEGACY_DAEMON_MODULE})
 
 
 def _is_daemon_cmdline(cmdline: list[str]) -> bool:
-    """True when *cmdline* is an actual ``python -m ava._mcps_daemon`` launch.
+    """True when *cmdline* is an actual ``python -m ava.mcps._daemon`` launch
+    (or the pre-rename ``python -m ava._mcps_daemon``, see `_LEGACY_DAEMON_MODULE`).
 
     Substring matching is NOT enough: the session backend wraps the launch in
-    ``bash -lc 'cd <root> && ... .venv/bin/python -m ava._mcps_daemon'``, so the
+    ``bash -lc 'cd <root> && ... .venv/bin/python -m ava.mcps._daemon'``, so the
     wrapper's single argv element is the whole shell command — it CONTAINS the
     module name but is no daemon. Killing that wrapper orphans the real daemon
     and reaps the session record (has_session → False, `ava stop` loses the
@@ -546,17 +556,18 @@ def _is_daemon_cmdline(cmdline: list[str]) -> bool:
     image IS the daemon, argv unchanged).
     """
     for i, part in enumerate(cmdline):
-        if part == _DAEMON_MODULE and i > 0 and cmdline[i - 1] == "-m":
+        if part in _DAEMON_MODULES and i > 0 and cmdline[i - 1] == "-m":
             return True
     return False
 
 
 def _reap_stale_daemons(project_root: Path | None) -> None:
-    """Kill every OTHER `_mcps_daemon` process belonging to this unit.
+    """Kill every OTHER mcp-daemon process belonging to this unit.
 
     A fresh bind must be the only listener; ghosts from earlier respawn storms
     are reaped first. Only processes whose argv IS the daemon launch
-    (``-m ava._mcps_daemon``) qualify — the session backend's ``bash -lc``
+    (``-m ava.mcps._daemon``, or a pre-rename ``-m ava._mcps_daemon`` ghost)
+    qualify — the session backend's ``bash -lc``
     wrapper carries the module name in its command string but is never reaped
     (killing it would orphan the live daemon and fake a dead session, #1199).
     Ownership = cwd under this unit's project root OR the process
@@ -568,9 +579,7 @@ def _reap_stale_daemons(project_root: Path | None) -> None:
     me = os.getpid()
     home = str(settings.general.ava_home)
     root = (
-        str(project_root)
-        if project_root is not None
-        else str(Path(__file__).resolve().parent.parent)
+        str(project_root) if project_root is not None else str(Path(__file__).resolve().parents[2])
     )
     reaped = 0
     for proc in psutil.process_iter(["pid", "cmdline"]):
@@ -679,14 +688,14 @@ shared_locks: dict[str, asyncio.Lock] = {}
 
 
 def main() -> None:
-    """Entry point: python -m ava._mcps_daemon [socket_path]
+    """Entry point: python -m ava.mcps._daemon [socket_path]
 
     No argument: bind the shared per-machine socket (normal operation, run as
     the "mcp-daemon" ops service). One argument: bind that path (tests /
     migration). Two or more: fail fast.
     """
     if len(sys.argv) > 2:
-        logger.error("Usage: python -m ava._mcps_daemon [socket_path]")
+        logger.error("Usage: python -m ava.mcps._daemon [socket_path]")
         sys.exit(1)
     if len(sys.argv) == 2:
         socket_path = sys.argv[1]
