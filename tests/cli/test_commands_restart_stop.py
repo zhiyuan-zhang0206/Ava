@@ -9,12 +9,12 @@ from unittest.mock import MagicMock
 import pytest
 
 import cli.commands._repo as _repo_commands
-import cli.commands._start_readiness_preflight as _start_readiness_preflight_commands
-import cli.commands.root_driver as _root_driver_commands
-import cli.commands.start as _start_commands
-import cli.commands.stop as _stop_commands
-from cli.commands.stop import _force_stop
-from shared.start_serving import RootBirth
+import cli.commands.lifecycle._start_readiness_preflight as _start_readiness_preflight_commands
+import cli.commands.lifecycle.root_driver as _root_driver_commands
+import cli.commands.lifecycle.start as _start_commands
+import cli.commands.lifecycle.stop as _stop_commands
+from base.deploy.lifecycle.start_serving import RootBirth
+from cli.commands.lifecycle.stop import _force_stop
 from tests.cli._commands_helpers import (
     _FakeResponse,
     _FakeResult,
@@ -33,7 +33,7 @@ def _root_stop_boundary(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(_root_driver_commands, "_root_tree_plan", lambda _preserve: [])  # pyright: ignore[reportUnknownArgumentType] — untyped test double
     monkeypatch.setattr(_root_driver_commands, "_stop_root_service_tree", lambda **_kwargs: 0)  # pyright: ignore[reportUnknownArgumentType] — untyped test double
     monkeypatch.setattr(_stop_commands, "_reap_cluster_chrome", lambda: None)
-    monkeypatch.setattr("cli.commands.stop._stop_terminals_force", lambda: None)
+    monkeypatch.setattr("cli.commands.lifecycle.stop._stop_terminals_force", lambda: None)
 
 
 # ─── restart ─────────────────────────────────────────────────────────────────
@@ -51,7 +51,7 @@ def test_cmd_restart_succeeds_non_interactively(monkeypatch: pytest.MonkeyPatch)
         _git_aware(lambda *_a, **_kw: _FakeResult(returncode=0)),  # pyright: ignore[reportUnknownArgumentType]
     )
     monkeypatch.setattr(_stop_commands, "_do_stop", MagicMock(return_value=0))
-    monkeypatch.setattr("cli.commands.start.cmd_migrations_apply", list[str])
+    monkeypatch.setattr("cli.commands.lifecycle.start.cmd_migrations_apply", list[str])
     monkeypatch.setattr(
         _start_readiness_preflight_commands,
         "preflight_start_readiness",
@@ -101,7 +101,7 @@ def test_cmd_restart_finishes_the_journal_only_when_it_owns_it(
 ) -> None:
     """An outer operation's still-running journal is never closed by the nested
     restart — the owns_journal guard _temporary_stop keeps (task #2898)."""
-    from shared import lifecycle_status
+    from base.deploy.lifecycle import status_journal
 
     monkeypatch.setattr(_repo_commands, "_preflight_probes", lambda: 0)
     monkeypatch.setattr(
@@ -113,13 +113,13 @@ def test_cmd_restart_finishes_the_journal_only_when_it_owns_it(
     monkeypatch.setattr(_start_commands, "_cmd_start_body", lambda **_kwargs: 0)  # pyright: ignore[reportUnknownArgumentType]
     finished: list[int] = []
     monkeypatch.setattr(
-        lifecycle_status,
+        status_journal,
         "finish",
         lambda rc, **_kwargs: finished.append(rc),  # pyright: ignore[reportUnknownArgumentType]
     )
 
     monkeypatch.setattr(
-        lifecycle_status,
+        status_journal,
         "begin",
         lambda _operation, **_kwargs: False,  # pyright: ignore[reportUnknownArgumentType]
     )
@@ -127,7 +127,7 @@ def test_cmd_restart_finishes_the_journal_only_when_it_owns_it(
     assert finished == []  # the outer operation still owns the journal
 
     monkeypatch.setattr(
-        lifecycle_status,
+        status_journal,
         "begin",
         lambda _operation, **_kwargs: True,  # pyright: ignore[reportUnknownArgumentType]
     )
@@ -155,7 +155,7 @@ def test_cmd_restart_aborts_when_preflight_fails(monkeypatch: pytest.MonkeyPatch
     """When preflight probes fail, cmd_restart aborts without stopping — and says so
     with its OWN exit code, since "nothing was stopped, host still serving" is what
     the detached updater must not run `ava start` over."""
-    from shared.exit_codes import RESTART_DECLINED_EXIT_CODE
+    from base.agents.exit_codes import RESTART_DECLINED_EXIT_CODE
 
     stopped: list[bool] = []
     start_called: list[bool] = []
@@ -181,7 +181,7 @@ def test_cmd_restart_aborts_when_start_readiness_fails(monkeypatch: pytest.Monke
     probes gate, with stop and start neither run. The gate is called with
     `check_launcher=False`: this start is in-process and never execs
     `.venv/bin/ava`."""
-    from shared.exit_codes import RESTART_DECLINED_EXIT_CODE
+    from base.agents.exit_codes import RESTART_DECLINED_EXIT_CODE
 
     stopped: list[bool] = []
     start_called: list[bool] = []
@@ -248,7 +248,7 @@ def test_stop_proceeds_on_yes(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_stop_revokes_serving_before_stopping_root(
     serving_root: RootBirth, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    from shared import start_serving
+    from base.deploy.lifecycle import start_serving
 
     monkeypatch.setattr(start_serving, "state_path", lambda: tmp_path / "start-serving.json")
     generation = start_serving.begin_start()
@@ -339,7 +339,7 @@ def test_cmd_stop_stop_browser_flag_threads_through(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """`cmd_stop(stop_browser=...)` maps to `_do_stop(keep_browser=not stop_browser)`."""
-    from cli.commands import stop as _stop_mod
+    from cli.commands.lifecycle import stop as _stop_mod
 
     seen: dict[str, object] = {}
 
@@ -362,7 +362,7 @@ def _patch_stop_teardown(monkeypatch: pytest.MonkeyPatch, events: list[str]) -> 
     monkeypatch.setattr(
         _repo_commands, "_roles_or_none", lambda: frozenset({"gateway", "agent-runner"})
     )
-    monkeypatch.setattr("cli.commands.stop._repo_root", lambda: Path("/repo"))
+    monkeypatch.setattr("cli.commands.lifecycle.stop._repo_root", lambda: Path("/repo"))
     monkeypatch.setattr(
         "cli.commands.data_plane.cluster_instance.stop_cluster_instance",
         lambda: events.append("infra") or 0,
@@ -376,10 +376,10 @@ def test_cmd_stop_announces_stopping_after_confirm_before_teardown(
     /api/cluster/stopping?machine=<self>&home=<self-home> before the local
     teardown (so the cluster view shows 'stopped', not 'offline'). `home`
     identifies THIS unit so a co-located peer keeps its caps."""
-    from shared.paths import ava_home
+    from base.paths import ava_home
 
     _patch_gateway_http(monkeypatch)
-    monkeypatch.setattr("shared.machine.machine_name", lambda: "test-host")
+    monkeypatch.setattr("base.cluster.machine.machine_name", lambda: "test-host")
     events: list[str] = []
     calls: list[tuple[str, dict]] = []
 
@@ -405,7 +405,7 @@ def test_cmd_stop_aborted_confirm_does_not_announce(
     announce stamps `machines.stopped_at`, and only the next `ava start` clears
     it — an announce fired before the gate would mark a running host 'stopped'."""
     _patch_gateway_http(monkeypatch)
-    monkeypatch.setattr("shared.machine.machine_name", lambda: "test-host")
+    monkeypatch.setattr("base.cluster.machine.machine_name", lambda: "test-host")
     monkeypatch.setattr("builtins.input", lambda _prompt: "n")  # pyright: ignore[reportUnknownArgumentType]
     events: list[str] = []
     monkeypatch.setattr("httpx.post", lambda *_a, **_kw: events.append("announce"))  # pyright: ignore[reportUnknownArgumentType]
@@ -423,7 +423,7 @@ def test_cmd_stop_proceeds_when_announce_fails(
     """If the stopping announce can't reach the gateway, `ava stop` logs and still
     tears down — the announce is best-effort, never a blocker."""
     _patch_gateway_http(monkeypatch)
-    monkeypatch.setattr("shared.machine.machine_name", lambda: "wsl")
+    monkeypatch.setattr("base.cluster.machine.machine_name", lambda: "wsl")
 
     def _boom(*_a, **_kw):
         raise RuntimeError("connection refused")

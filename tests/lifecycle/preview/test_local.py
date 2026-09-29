@@ -191,9 +191,9 @@ def test_profile_survives_bare_start_without_controller_environment(
 ) -> None:
     from dotenv import dotenv_values
 
+    from base import cluster
     from cli import start_intent
     from cli.parsers import build_parser
-    from shared import cluster
     from tests.lifecycle._start_identity import prepare_start_identity
 
     preview = local.create(repo, "HEAD", tmp_path / "runs")

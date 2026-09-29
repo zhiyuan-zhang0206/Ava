@@ -69,7 +69,7 @@ def memory_search_uri(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]
 
 @pytest.fixture
 def backend(memory_search_uri: str, monkeypatch: pytest.MonkeyPatch) -> Iterator[NumPyBackend]:
-    from shared.config import settings
+    from base.config import settings
 
     monkeypatch.setattr(settings.services, "memory_search_uri", memory_search_uri)
     b = NumPyBackend()
@@ -134,7 +134,7 @@ def test_upsert_many_uses_one_request_with_batch_timeout() -> None:
 def test_readonly_upsert_many_connects_but_refuses_write(
     memory_search_uri: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from shared.config import settings
+    from base.config import settings
 
     monkeypatch.setattr(settings.services, "memory_search_uri", memory_search_uri)
     backend = NumPyBackend(readonly=True)
@@ -156,7 +156,7 @@ def test_search_topk_async_matches_sync(backend: NumPyBackend) -> None:
 
 
 def test_connect_fails_fast_when_service_down(monkeypatch: pytest.MonkeyPatch) -> None:
-    from shared.config import settings
+    from base.config import settings
 
     monkeypatch.setattr(settings.services, "memory_search_uri", f"http://127.0.0.1:{_free_port()}")
     backend = NumPyBackend()
@@ -175,7 +175,7 @@ def test_requires_connect_before_use() -> None:
 
 
 def test_probe_numpy_healthy(memory_search_uri: str, monkeypatch: pytest.MonkeyPatch) -> None:
-    from shared.config import settings
+    from base.config import settings
 
     monkeypatch.setattr(settings.services, "memory_search_uri", memory_search_uri)
     assert probe.probe_backend("numpy").message is None
@@ -184,7 +184,7 @@ def test_probe_numpy_healthy(memory_search_uri: str, monkeypatch: pytest.MonkeyP
 def test_probe_numpy_unreachable_is_actionable(monkeypatch: pytest.MonkeyPatch) -> None:
     """A down service is transient (may be booting) but the message must name
     the fix and the switch action."""
-    from shared.config import settings
+    from base.config import settings
 
     monkeypatch.setattr(settings.services, "memory_search_uri", f"http://127.0.0.1:{_free_port()}")
     result = probe.probe_backend("numpy")
@@ -194,7 +194,7 @@ def test_probe_numpy_unreachable_is_actionable(monkeypatch: pytest.MonkeyPatch) 
 
 
 def test_probe_milvus_unreachable_is_actionable(monkeypatch: pytest.MonkeyPatch) -> None:
-    from shared.config import settings
+    from base.config import settings
 
     monkeypatch.setattr(settings.services, "milvus_uri", f"http://127.0.0.1:{_free_port()}")
     result = probe.probe_backend("milvus")

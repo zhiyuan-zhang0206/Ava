@@ -23,7 +23,7 @@ install, register, start, stop, or update anything.
    limit, battery restriction, or idle-only condition. It does not wake a sleeping
    Windows host.
 2. **Linux:** ordinary start convergence registers and enables the home-scoped
-   systemd unit `ava-boot.<home-slug>.service` (`shared/os_boot_unit.py`). It runs
+   systemd unit `ava-boot.<home-slug>.service` (`base/host/system/boot_unit.py`). It runs
    ordinary start directly with the exact home, checkout and registry. Systemd
    supplies retry (`Restart=on-failure`, `RestartSec=60`, no attempt cap), and
    `TimeoutStartSec=900` bounds initial readiness. The successful start publishes
@@ -64,7 +64,7 @@ $distribution = 'Ubuntu-24.04'
 $linuxUser = 'linux-owner'
 $windowsUser = [Security.Principal.WindowsIdentity]::GetCurrent().Name
 $wslExecutable = Join-Path $env:SystemRoot 'System32\wsl.exe'
-$xml = (python scripts/render_wsl_boot_task.py `
+$xml = (python scripts/host_ops/render_wsl_boot_task.py `
     --distribution $distribution --linux-user $linuxUser `
     --windows-user $windowsUser --wsl-executable $wslExecutable | Out-String)
 if ($LASTEXITCODE -ne 0) { throw 'WSL task rendering failed' }

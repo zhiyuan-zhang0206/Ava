@@ -16,8 +16,8 @@ from unittest.mock import Mock
 import pytest
 from loguru import logger
 
+from base.agents.incarnation.exec_request_evidence import RequestEvidence, Verdict
 from services.agent_host import boot_defer, daemon
-from shared.exec_request_evidence import RequestEvidence, Verdict
 
 _AGENT = 4242
 

@@ -14,20 +14,20 @@ from dataclasses import replace
 import httpx
 import pytest
 
-from services.pitr.baidu_inventory import BaiduRetentionInventoryReader
-from services.pitr.baidu_store import BaiduRetentionDeleteStore
-from services.pitr.base_manifest import CandidateManifest
-from services.pitr.checksums import MD5
-from services.pitr.cos_store import COSRetentionDeleteStore
-from services.pitr.object_store import PermanentObjectStoreError, TransientObjectStoreError
-from services.pitr.retention_delete import DeleteOutcome
-from services.pitr.retention_manifest import (
+from services.pitr.base_backup.manifest import CandidateManifest
+from services.pitr.retention.manifest import (
     OrphanSidecar,
     RetentionObject,
     RetentionSidecar,
     SidecarPair,
 )
-from services.pitr.retention_policy import RetentionEvidence, plan_retention
+from services.pitr.retention.policy import RetentionEvidence, plan_retention
+from services.pitr.stores.baidu.inventory import BaiduRetentionInventoryReader
+from services.pitr.stores.baidu.store import BaiduRetentionDeleteStore
+from services.pitr.stores.checksums import MD5
+from services.pitr.stores.cos.store import COSRetentionDeleteStore
+from services.pitr.stores.object_store import PermanentObjectStoreError, TransientObjectStoreError
+from services.pitr.stores.retention_delete import DeleteOutcome
 from tests.services.baidu_test_support import (
     APP_ROOT,
     FakePcs,

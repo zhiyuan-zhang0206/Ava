@@ -6,9 +6,9 @@ import logging
 
 from psycopg_pool import ConnectionPool
 
-from shared import telemetry
-from shared.config import settings
-from shared.db_transaction import write_transaction
+from base import telemetry
+from base.config import settings
+from base.db.transaction import write_transaction
 
 _log = logging.getLogger("services.delivery_watchdog.resurrect_guard")
 

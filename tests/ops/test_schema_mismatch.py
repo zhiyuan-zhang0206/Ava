@@ -10,13 +10,12 @@ from typing import NoReturn, cast
 import psycopg
 import pytest
 
+from base.api_contracts.status import MachineStatus, SchemaMismatchKind, SchemaMismatchStatus
+from base.deploy.schema import migration_layout
+from base.deploy.schema.migration_errors import MigrationLayoutError
+from base.deploy.schema.migrations import applied_migration_names
 from cli.commands.cluster.control import _schema_mismatch_banner
-from ops import schema_mismatch
-from ops.cluster_status import ClusterStatus
-from shared import migration_layout
-from shared.api_contracts.status import MachineStatus, SchemaMismatchKind, SchemaMismatchStatus
-from shared.migration_errors import MigrationLayoutError
-from shared.migrations import applied_migration_names
+from ops.cluster_status import ClusterStatus, schema_mismatch
 
 
 def _unexpected(*_args: object, **_kwargs: object) -> NoReturn:
@@ -58,7 +57,7 @@ def test_installed_image_diagnosis_does_not_read_git_or_cluster_pin(
     monkeypatch.setattr(migration_layout, "_migrations_dir", lambda: tmp_path)
     monkeypatch.setattr(migration_layout, "installed_migration_paths", installed)
     monkeypatch.setattr(migration_layout, "_git_probe", _unexpected)
-    monkeypatch.setattr("shared.cluster_pin.get_cluster_target_sha", _unexpected)
+    monkeypatch.setattr("base.deploy.state.cluster_pin.get_cluster_target_sha", _unexpected)
     monkeypatch.setattr(schema_mismatch, "applied_migration_names", applied)
     mismatch = schema_mismatch.detect(conn=cast(psycopg.Connection, object()))
     assert mismatch is not None
@@ -177,8 +176,8 @@ def test_unexpected_programming_failure_is_not_silently_graded(
 def test_gateway_probe_preserves_degraded_schema_status(
     monkeypatch: pytest.MonkeyPatch, kind: SchemaMismatchKind
 ) -> None:
-    from gateway.routers import _roster_probe
-    from gateway.routers import status as status_route
+    from gateway.cluster import roster_probe
+    from gateway.cluster import status as status_route
 
     diagnosis = SchemaMismatchStatus(kind=kind, machine="gateway", detail="schema evidence failed")
     response = ClusterStatus(
@@ -195,10 +194,10 @@ def test_gateway_probe_preserves_degraded_schema_status(
     def reachable(_name: str) -> None:
         pass
 
-    monkeypatch.setattr(_roster_probe, "_probe_failures", {})
-    monkeypatch.setattr(_roster_probe, "dispatch_status_probe", probe)
-    monkeypatch.setattr(_roster_probe, "_note_probe_reachable", reachable)
-    monkeypatch.setattr(_roster_probe, "note_identity_match", reachable)
+    monkeypatch.setattr(roster_probe, "_probe_failures", {})
+    monkeypatch.setattr(roster_probe, "dispatch_status_probe", probe)
+    monkeypatch.setattr(roster_probe, "note_probe_reachable", reachable)
+    monkeypatch.setattr(roster_probe, "note_identity_match", reachable)
     row = asyncio.run(
         status_route._probe_agent_runner(
             "gateway", ["gateway"], "http://inert.invalid", datetime.now(UTC), None, None

@@ -4,7 +4,7 @@ A preset is a named, reusable bundle of per-agent config fields (the same flat
 overlay a spawn already accepts: `llm_model`, plugin `per_agent` fields, ...).
 Selecting a preset at spawn time seeds the new agent's config from it; an
 explicit config passed alongside wins per-key (explicit beats template). The
-merge happens in the spawn handler (routers/agents.py), not here.
+merge happens in the spawn handler (`gateway/agents/router.py`), not here.
 
 `config` is stored and returned as an opaque JSONB object for plugin fields: the
 gateway process does not load the plugin registry, so it cannot resolve plugin
@@ -33,7 +33,7 @@ from fastapi import APIRouter, HTTPException, Request
 from psycopg_pool import ConnectionPool
 from pydantic import BaseModel, Field
 
-from shared.db_transaction import write_transaction
+from base.db.transaction import write_transaction
 
 router = APIRouter()
 
@@ -73,7 +73,7 @@ def _validate_config_keys(config: dict[str, object]) -> None:
     Unknown names remain valid here because they may belong to a plugin, whose
     schema only the agent process loads.
     """
-    from shared.config import field_names, per_agent_field_names
+    from base.config import field_names, per_agent_field_names
 
     framework_fields = field_names()
     per_agent_fields = per_agent_field_names()
@@ -84,7 +84,7 @@ def _validate_config_keys(config: dict[str, object]) -> None:
                 detail=(
                     f"preset config key {key!r} is a framework Settings field but is not "
                     "per_agent=True; cluster-consistent fields cannot be overridden per agent "
-                    "— see shared/plugin_config_registry.py"
+                    "— see base/packages/plugins/config_registration.py"
                 ),
             )
 

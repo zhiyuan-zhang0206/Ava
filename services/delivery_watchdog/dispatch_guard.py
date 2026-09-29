@@ -18,9 +18,9 @@ from typing import NamedTuple
 from psycopg import sql
 from psycopg_pool import ConnectionPool
 
-import shared.db
-from shared import telemetry
-from shared.db_transaction import write_transaction
+import base.db
+from base import telemetry
+from base.db.transaction import write_transaction
 
 _log = logging.getLogger("services.delivery_watchdog.dispatch_guard")
 
@@ -48,7 +48,7 @@ def select_pending_for_dispatch(
     automatic-wake suppression window, and owners halted by the recovery
     circuit breaker (`RECOVERY_BREAKER_CLEAR`) are never selected.
     """
-    from shared.recovery_breaker import RECOVERY_BREAKER_CLEAR
+    from base.agents.recovery_breaker import RECOVERY_BREAKER_CLEAR
 
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(
@@ -92,7 +92,7 @@ def dispatch_wakes(
         # publish_inbound_wake never raises; it reports delivery through its
         # return value. Only a wake that actually reached Redis advances the
         # counter — a Redis outage must not burn a row's dispatch budget.
-        if shared.db.publish_inbound_wake(agent_id, str(inbound_id)):
+        if base.db.publish_inbound_wake(agent_id, str(inbound_id)):
             dispatched_ids.append(inbound_id)
 
     if dispatched_ids:

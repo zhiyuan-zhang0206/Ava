@@ -1,16 +1,16 @@
 """Loki-aggregate metrics path — golden output lock (task #1197 A3).
 
-`shared.metrics.metrics_aggregate.fetch_aggregate` + `build_report_from_aggregate` +
+`base.telemetry.metrics.aggregate.fetch_aggregate` + `build_report_from_aggregate` +
 `agent_rollups_from_aggregate` are the ONLY metrics path after the /api/metrics
 RSS fix (the per-row reference implementation was retired with the SQL
 aggregation — single-day materialization outgrew 430K+ rows). These tests lock
 the aggregate path's output over deterministic scenarios against the in-memory
-`FakeLoki` backend (same filter/window semantics as `gateway.loki_events`):
+`FakeLoki` backend (same filter/window semantics as `gateway.lgtm.loki_events`):
 the text digest, the JSON `data` dict, and the per-agent rollups must stay
 exactly as pinned, so a regression in the Loki aggregation (counts, pctiles,
 position thirds, tie order, cost sums, since-compact cutoffs) fails here.
 
-The render math is locked by the pure unit tests in tests/shared/test_metrics.py;
+The render math is locked by the pure unit tests in tests/base/test_metrics.py;
 keep both green together.
 """
 
@@ -19,7 +19,7 @@ from __future__ import annotations
 import random
 from typing import Any
 
-from shared.metrics.metrics_aggregate import (
+from base.telemetry.metrics.aggregate import (
     agent_rollups_from_aggregate,
     build_report_from_aggregate,
     fetch_aggregate,

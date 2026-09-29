@@ -40,15 +40,15 @@ from typing import Any
 import psutil
 import pytest
 
-from cli.commands import _temporary_stop as command
-from cli.commands import service_stop as strict
-from cli.commands import stop as entry
-from cli.commands._maintenance_stop_report import StopIncompleteError
-from cli.commands.service_stop import OwnedProcess
+from base.deploy.maintenance import admission
+from base.sessions.backend import PtySessionBackend
+from base.sessions.pty import session_tree
+from cli.commands.lifecycle import _temporary_stop as command
+from cli.commands.lifecycle import service_stop as strict
+from cli.commands.lifecycle import stop as entry
+from cli.commands.lifecycle._maintenance_stop_report import StopIncompleteError
+from cli.commands.lifecycle.service_stop import OwnedProcess
 from ops import pty_close_notices
-from shared import maintenance
-from shared.session_backend import PtySessionBackend
-from shared.sessions.pty import session_tree
 from tests.cli.conftest import PtyReaper
 from tests.cli.test_pause_stop import dependencies
 from tests.cli.test_pause_stop import home as home
@@ -181,7 +181,7 @@ def _stop_env(monkeypatch: pytest.MonkeyPatch, home: Path, terminal: PtySessionB
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.setattr(strict, "get_shell_backend", lambda: terminal)
     for name in ("stop_permissions_helper",):
-        monkeypatch.setattr(f"cli.commands._stop_extras.{name}", lambda **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
+        monkeypatch.setattr(f"cli.commands.lifecycle._stop_extras.{name}", lambda **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(entry, "_announce_stopping", lambda: None)
 
 
@@ -266,8 +266,8 @@ def test_fork_shell_child_resets_term_and_hup_dispositions(
     field state). The suite guards os.execvp in-process, so the probe is a
     fake exec that snapshots the dispositions the real exec would carry.
     """
-    import shared.sessions.pty.host as host_mod
-    from shared.sessions.pty.launch import _fork_shell
+    import base.sessions.pty.host as host_mod
+    from base.sessions.pty.launch import _fork_shell
 
     probe_file = tmp_path / "dispositions.txt"
 
@@ -554,7 +554,7 @@ def test_incomplete_stop_still_records_the_sessions_it_closed(
     with pytest.MonkeyPatch.context() as patch:
         patch.setattr(session_tree, "kill_session_tree", kill)
         assert entry.cmd_stop(require_confirmation=False, keep_infra=True, timeout=12) == 1
-    assert maintenance.held(), "the hold must survive an incomplete stop"
+    assert admission.held(), "the hold must survive an incomplete stop"
     assert stuck in capsys.readouterr().err
     assert _notice_names(home) == [closed], "the closed session's notice was lost"
     assert "survivors" not in _notices(home)[0], "nothing of the closed session survived"
@@ -723,7 +723,7 @@ def test_stop_keeps_hold_when_a_process_outlives_the_kill(
     with pytest.MonkeyPatch.context() as patch:
         patch.setattr(session_tree, "kill_session_tree", _denied_but_the_shell)
         assert entry.cmd_stop(require_confirmation=False, keep_infra=True, timeout=12) == 1
-    assert maintenance.held(), "the hold must survive an incomplete stop"
+    assert admission.held(), "the hold must survive an incomplete stop"
     assert psutil.pid_exists(jobs[0].pid)
     err = capsys.readouterr().err
     assert "terminals" in err, "the failure must name the phase"

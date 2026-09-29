@@ -11,8 +11,8 @@ import psycopg
 import pytest
 
 import ava
-from ops.agent_spawn import create_agent_row
-from shared.machine import machine_name
+from base.cluster.machine import machine_name
+from ops.agents.spawn import create_agent_row
 from tests.e2e.fakes.scenarios import lifecycle_restart
 
 

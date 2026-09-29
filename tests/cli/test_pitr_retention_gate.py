@@ -19,6 +19,8 @@ from typing import Any, cast
 
 import pytest
 
+from base.config.physical_backup import PhysicalBackupSettings
+from base.host.env import runtime_config
 from cli.commands.data_plane import pitr as pitr_commands
 from cli.commands.data_plane.pitr import (
     cmd_pitr_retention_arm,
@@ -26,17 +28,15 @@ from cli.commands.data_plane.pitr import (
     cmd_pitr_retention_run_once,
     cmd_pitr_retention_status,
 )
-from services.pitr import retention_gate, retention_scheduler
-from services.pitr.retention_executor import RetentionExecutionSummary
-from services.pitr.retention_manifest import (
+from services.pitr.retention import gate, scheduler
+from services.pitr.retention.executor import RetentionExecutionSummary
+from services.pitr.retention.manifest import (
     PLAN_SCHEMA_VERSION,
     RetentionDecision,
     RetentionObject,
     RetentionPlan,
 )
-from services.pitr.retention_planner import DryRunResult
-from shared import runtime_config
-from shared.config.physical_backup import PhysicalBackupSettings
+from services.pitr.retention.planner import DryRunResult
 
 _PIN_TOKEN = "av-test-pin"  # noqa: S105 — opaque test fixture pin, not a secret
 
@@ -95,7 +95,7 @@ def _plan(*, blocked: tuple[str, ...] = (), with_logical: bool = False) -> Reten
 def gate_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """Redirect the home every layer reads: the CLI, the gate, and the `.env` writer."""
     monkeypatch.setattr(runtime_config, "env_file_path", lambda: tmp_path / ".env")
-    monkeypatch.setattr(retention_gate, "ava_home", lambda: tmp_path)
+    monkeypatch.setattr(gate, "ava_home", lambda: tmp_path)
     monkeypatch.setattr(pitr_commands, "ava_home", lambda: tmp_path)
     (tmp_path / "physical-backup" / "retention-plans").mkdir(parents=True)
     return tmp_path
@@ -156,7 +156,7 @@ def test_arm_writes_carriers_and_journals_both_phases(gate_env: Path) -> None:
     assert "AVA_PITR_RETENTION_DELETE_ARMED='true'" in env_text
     assert f"AVA_PITR_RETENTION_DELETE_APPROVED_DIGEST='{digest}'" in env_text
 
-    carriers = retention_gate.CarrierState.read()
+    carriers = gate.CarrierState.read()
     assert carriers.armed is True
     assert carriers.approved_digest == digest
 
@@ -175,7 +175,7 @@ def test_disable_clears_carriers_and_journals(gate_env: Path) -> None:
     assert cmd_pitr_retention_arm(digest=digest, confirm=True) == 0
     assert cmd_pitr_retention_disable(confirm=True) == 0
 
-    carriers = retention_gate.CarrierState.read()
+    carriers = gate.CarrierState.read()
     assert carriers.armed is None
     assert carriers.approved_digest is None
     assert "AVA_PITR_RETENTION_DELETE_ARMED" not in _env_text(gate_env)
@@ -197,7 +197,7 @@ def test_disable_preview_writes_nothing(gate_env: Path) -> None:
 def test_status_degrades_without_daemon(
     gate_env: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    monkeypatch.setattr(retention_gate, "read_daemon_record", lambda: None)
+    monkeypatch.setattr(gate, "read_daemon_record", lambda: None)
     digest = _write_plan(gate_env, _plan())
     assert cmd_pitr_retention_status() == 0
     out = capsys.readouterr().out
@@ -209,7 +209,7 @@ def test_status_degrades_without_daemon(
 def test_status_shows_the_logical_surface(
     gate_env: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    monkeypatch.setattr(retention_gate, "read_daemon_record", lambda: None)
+    monkeypatch.setattr(gate, "read_daemon_record", lambda: None)
     _write_plan(gate_env, _plan(with_logical=True))
     assert cmd_pitr_retention_status() == 0
     out = capsys.readouterr().out
@@ -293,7 +293,7 @@ def _recheck(digest: str) -> DryRunResult:
 
 def test_run_operator_once_refuses_unarmed(gate_env: Path) -> None:
     with pytest.raises(ValueError, match="not armed"):
-        retention_scheduler.run_operator_once(_fake_config())
+        scheduler.run_operator_once(_fake_config())
     assert _journal_records(gate_env) == []
 
 
@@ -302,15 +302,15 @@ def test_run_operator_once_refuses_changed_digest(
 ) -> None:
     digest = _write_plan(gate_env, _plan())
     assert cmd_pitr_retention_arm(digest=digest, confirm=True) == 0
-    monkeypatch.setattr(retention_scheduler, "get_store_group", _FakeGroup)
-    monkeypatch.setattr(retention_scheduler, "_logical_retention", _logical_policy_stub)
+    monkeypatch.setattr(scheduler, "get_store_group", _FakeGroup)
+    monkeypatch.setattr(scheduler, "_logical_retention", _logical_policy_stub)
     monkeypatch.setattr(
-        retention_scheduler,
+        scheduler,
         "write_dry_run_plan",
         lambda _root, **_kw: _recheck("some-other-digest"),
     )
     with pytest.raises(ValueError, match="differs from the approved digest"):
-        retention_scheduler.run_operator_once(_fake_config())
+        scheduler.run_operator_once(_fake_config())
     assert _journal_records(gate_env)[-1]["phase"] == "refused"
 
 
@@ -319,12 +319,10 @@ def test_run_operator_once_executes_through_the_executor(
 ) -> None:
     digest = _write_plan(gate_env, _plan())
     assert cmd_pitr_retention_arm(digest=digest, confirm=True) == 0
-    monkeypatch.setattr(retention_scheduler, "get_store_group", _FakeGroup)
-    monkeypatch.setattr(retention_scheduler, "_logical_retention", _logical_policy_stub)
-    monkeypatch.setattr(
-        retention_scheduler, "write_dry_run_plan", lambda _root, **_kw: _recheck(digest)
-    )
-    monkeypatch.setattr(retention_scheduler, "inspect_dry_run_plan", lambda _root: object())
+    monkeypatch.setattr(scheduler, "get_store_group", _FakeGroup)
+    monkeypatch.setattr(scheduler, "_logical_retention", _logical_policy_stub)
+    monkeypatch.setattr(scheduler, "write_dry_run_plan", lambda _root, **_kw: _recheck(digest))
+    monkeypatch.setattr(scheduler, "inspect_dry_run_plan", lambda _root: object())
     captured: dict[str, Any] = {}
 
     def fake_execute(plan: object, **kwargs: Any) -> RetentionExecutionSummary:
@@ -341,8 +339,8 @@ def test_run_operator_once_executes_through_the_executor(
             skipped=0,
         )
 
-    monkeypatch.setattr(retention_scheduler, "execute_retention_plan", fake_execute)
-    summary = retention_scheduler.run_operator_once(_fake_config())
+    monkeypatch.setattr(scheduler, "execute_retention_plan", fake_execute)
+    summary = scheduler.run_operator_once(_fake_config())
     assert summary.deleted == 1
     assert captured["expected_digest"] == digest
     assert captured["remote_total_bytes"] == 100
@@ -370,7 +368,7 @@ def test_run_once_command_reports_executor_counts(
             skipped=1,
         )
 
-    monkeypatch.setattr(retention_scheduler, "run_operator_once", fake_run)
+    monkeypatch.setattr(scheduler, "run_operator_once", fake_run)
     assert cmd_pitr_retention_run_once(confirm=True) == 0
     out = capsys.readouterr().out
     assert "deleted=2" in out

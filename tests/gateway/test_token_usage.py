@@ -17,8 +17,8 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
+from base.db import create_agent
 from gateway.app import app
-from shared.db import create_agent
 
 
 @pytest.fixture
@@ -37,7 +37,7 @@ def _put_checkpoint(agent_id: int, messages: list) -> None:
     from langgraph.checkpoint.base import empty_checkpoint
     from langgraph.checkpoint.postgres import PostgresSaver
 
-    from shared.config import settings
+    from base.config import settings
 
     ckpt = empty_checkpoint()
     ckpt["channel_values"] = {"messages": messages}
@@ -62,14 +62,14 @@ def test_reverse_scan_finds_most_recent_usage(
     'reasoning_tokens' (OpenAI)."""
     from langchain_core.messages import AIMessage
 
-    from shared.config import settings
+    from base.config import settings
 
     # Through resolve_context_budget, not by re-deriving fraction * window here:
     # the threshold formula is that module's contract (covered numerically in
-    # tests/shared/test_context_budget.py). What this test owns is that the
+    # tests/base/test_context_budget.py). What this test owns is that the
     # endpoint SERVES the resolved budget, which a local re-derivation would
     # stop checking the moment the two drifted.
-    from shared.lm.context_budget import resolve_context_budget
+    from base.lm.context_budget import resolve_context_budget
 
     _budget = resolve_context_budget(settings.lm.llm_model)
     expected_max = _budget.max_context_tokens
@@ -107,14 +107,14 @@ def test_reverse_scan_finds_most_recent_usage(
 def test_new_agent_returns_zero(db_conn: psycopg.Connection, test_client: TestClient) -> None:
     """No checkpoint -> 0/0 for token counts. max_input_tokens reflects the
     cluster default model's context window (falls back from config_overlay)."""
-    from shared.config import settings
+    from base.config import settings
 
     # Through resolve_context_budget, not by re-deriving fraction * window here:
     # the threshold formula is that module's contract (covered numerically in
-    # tests/shared/test_context_budget.py). What this test owns is that the
+    # tests/base/test_context_budget.py). What this test owns is that the
     # endpoint SERVES the resolved budget, which a local re-derivation would
     # stop checking the moment the two drifted.
-    from shared.lm.context_budget import resolve_context_budget
+    from base.lm.context_budget import resolve_context_budget
 
     _budget = resolve_context_budget(settings.lm.llm_model)
     expected_max = _budget.max_context_tokens
@@ -175,14 +175,14 @@ def test_checkpoint_read_failure_returns_zero(
 
     import langgraph.checkpoint.postgres as ckpt_mod
 
-    from shared.config import settings
+    from base.config import settings
 
     # Through resolve_context_budget, not by re-deriving fraction * window here:
     # the threshold formula is that module's contract (covered numerically in
-    # tests/shared/test_context_budget.py). What this test owns is that the
+    # tests/base/test_context_budget.py). What this test owns is that the
     # endpoint SERVES the resolved budget, which a local re-derivation would
     # stop checking the moment the two drifted.
-    from shared.lm.context_budget import resolve_context_budget
+    from base.lm.context_budget import resolve_context_budget
 
     _budget = resolve_context_budget(settings.lm.llm_model)
     expected_max = _budget.max_context_tokens

@@ -29,7 +29,7 @@ import time
 import redis
 
 import ava
-from shared.config import settings
+from base.config import settings
 
 # Substitute before launching: the id of the agent you want to watch.
 TARGET_AGENT_ID = 0

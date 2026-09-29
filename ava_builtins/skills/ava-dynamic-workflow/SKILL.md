@@ -99,7 +99,7 @@ message brings it back with full context) only when a follow-up is needed.
 
 ```python
 import ava
-from shared.paths import workspace_dir
+from base.paths import workspace_dir
 
 handoff = workspace_dir(ava.self.AGENT_ID) / "task_handoff"
 handoff.mkdir(parents=True, exist_ok=True)
@@ -232,7 +232,7 @@ the next wave.  Progress is tracked in `orchestrator_state.json`.
 #   python scripts/deep_research_lite.py
 # (bare `python` — the session's PATH already resolves it to this checkout's
 # own venv interpreter on prod home, a dev worktree cluster, or Windows alike;
-# see shared/session_env.py::forward_env_dict)
+# see base/sessions/env_forwarding.py::forward_env_dict)
 # Each invocation executes one wave, then idles. Repeat until "ALL DONE".
 ```
 

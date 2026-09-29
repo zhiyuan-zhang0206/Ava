@@ -282,7 +282,7 @@ def _scripts(root: Path, mode: str) -> tuple[Path, Path]:
     coordinator.write_text(
         "import os,sys\nfrom pathlib import Path\n"
         f"sys.path.insert(0,{str(Path(__file__).resolve().parents[3])!r})\n"
-        "from shared.posix_command import run_owned_command\n"
+        "from base.native_process.posix_command import run_owned_command\n"
         f"run_owned_command([sys.executable,'-I','-B',{str(leaf)!r}],cwd=Path({str(root)!r}),env={{'PATH':os.defpath}},timeout=20)\n"
     )
     return receipt, coordinator

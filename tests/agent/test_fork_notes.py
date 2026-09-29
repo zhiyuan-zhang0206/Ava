@@ -50,8 +50,8 @@ def memory_plugin() -> Any:
     tests/plugins/test_ava_memory_notes.py) so the memory-note registrations
     exist regardless of what earlier modules cleared."""
     from agent.state import clear_plugin_registrations
-    from shared.plugin_config_registry import bind_from_disk
-    from shared.plugin_context import PluginContext
+    from base.packages.plugins.config_registration import bind_from_disk
+    from base.packages.plugins.context import PluginContext
 
     clear_plugin_registrations()
     for name in list(sys.modules):
@@ -303,7 +303,9 @@ async def test_fork_tail_grafts_delta_skills_from_inbound_payload(
         d = skills_mod._skills_dir()
         return {p.name for p in d.iterdir() if p.is_dir()} if d.is_dir() else set()
 
-    monkeypatch.setattr("shared.install_registry.loadable_skill_names", _all_enabled)
+    monkeypatch.setattr(
+        "base.packages.extensions.install_registry.loadable_skill_names", _all_enabled
+    )
 
     tid = spawn_agent()
     with db_conn.cursor() as cur:

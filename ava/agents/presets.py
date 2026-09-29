@@ -8,7 +8,7 @@ from datetime import datetime
 from typing import Any
 
 from ava import gateway_client
-from ava.sdk_validation import coerce_str
+from ava.sdk_surface.validation import coerce_str
 
 
 @dataclass

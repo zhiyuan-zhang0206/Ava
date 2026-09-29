@@ -22,11 +22,11 @@ from typing import Any, cast
 import psutil
 import pytest
 
-from services.pitr import operation_custody as custody
-from services.pitr import worker_process as workers
-from services.pitr.operation_custody import OperationKind
-from shared.exec_process_domain import ExecProcessDomain
-from shared.native_process.ownership import OwnedProcess
+from base.native_process.exec_domain import ExecProcessDomain
+from base.native_process.ownership import OwnedProcess
+from services.pitr.operation import custody
+from services.pitr.operation import worker_process as workers
+from services.pitr.operation.custody import OperationKind
 
 pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="PITR is POSIX-only")
 
@@ -227,7 +227,7 @@ async def test_birth_capture_failure_closes_the_unowned_launch(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The worker never runs its job unowned: its pinned group is closed at once."""
-    from shared.exec_process_domain import ExecDomainBirthError
+    from base.native_process.exec_domain import ExecDomainBirthError
 
     marker = tmp_path / "descendant"
     _worker(
@@ -496,7 +496,7 @@ async def test_worker_capture_failure_after_birth_closes_group_and_quarantines(
 
 _COOPERATIVE = (
     "import signal\n"
-    "from services.pitr.worker_process import worker_request\n"
+    "from services.pitr.operation.worker_process import worker_request\n"
     "request, output = worker_request(sys.argv)\n"
     "{ignore}"
     "try:\n"
@@ -613,8 +613,8 @@ def _operation_dirs(root: Path) -> list[Path]:
 async def test_deferred_base_candidate_retires_clean_controls(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    from base.native_process.os_platform import LockTimeoutError
     from services.pitr import base_worker
-    from shared.platform import LockTimeoutError
 
     monkeypatch.setattr(base_worker, "ava_home", lambda: tmp_path)
     _result_worker(tmp_path, monkeypatch, {"deferred": "backup_lock", "detail": "busy"})
@@ -627,12 +627,12 @@ async def test_deferred_base_candidate_retires_clean_controls(
 async def test_space_deferral_is_clean_and_never_quarantined(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from services.pitr import base_operation_runtime
+    from services.pitr.restore import operation_runtime
 
     detail = "restore proof deferred: requires 9 bytes but only 1 are free"
     _result_worker(tmp_path, monkeypatch, {"deferred": "space", "detail": detail})
     with pytest.raises(custody.OperationDeferred) as caught:
-        await base_operation_runtime.run_restore_input(_restore_inputs(tmp_path))
+        await operation_runtime.run_restore_input(_restore_inputs(tmp_path))
     assert (caught.value.reason, caught.value.detail) == ("space", detail)
     assert not _operation_dirs(tmp_path / "restore-control")
     assert not _entries(tmp_path, "restore-proof")
@@ -667,8 +667,8 @@ def _other_worker() -> dict[str, object]:
 
 
 def _restore_inputs(tmp_path: Path):
-    from services.pitr.base_operation_runtime import RestoreWorkerInput
-    from services.pitr.restore_proof import RestoreSpaceBudget
+    from services.pitr.restore.operation_runtime import RestoreWorkerInput
+    from services.pitr.restore.proof import RestoreSpaceBudget
     from tests.services.test_pitr_base_scheduler import _candidate
 
     return RestoreWorkerInput(
@@ -689,12 +689,12 @@ def _restore_inputs(tmp_path: Path):
 async def test_restore_retirement_failure_after_closure_quarantines_controls(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from services.pitr import base_operation_runtime
+    from services.pitr.restore import operation_runtime
 
     outcome = {"chain_id": "20260926T000000Z", "candidate_sha256": "c", "pending_sha256": "p"}
     _result_worker(tmp_path, monkeypatch, outcome)
     with pytest.raises(FileNotFoundError):  # the pending proof it names does not exist
-        await base_operation_runtime.run_restore_input(_restore_inputs(tmp_path))
+        await operation_runtime.run_restore_input(_restore_inputs(tmp_path))
     assert not _operation_dirs(tmp_path / "restore-control")
     (entry,) = _entries(tmp_path, "restore-proof")
     assert json.loads((entry / "result.json").read_text()) == outcome
@@ -705,7 +705,7 @@ async def test_restore_retirement_failure_after_closure_quarantines_controls(
 async def test_drill_accepts_only_passing_evidence_for_the_candidate(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, outcome: str
 ) -> None:
-    from services.pitr import base_operation_runtime
+    from services.pitr.restore import operation_runtime
 
     scratch = tmp_path / "scratch"
     evidence = {"outcome": outcome, "chain_id": "20260926T000000Z"}
@@ -720,7 +720,7 @@ async def test_drill_accepts_only_passing_evidence_for_the_candidate(
         "digest=hashlib.sha256(payload).hexdigest()\n"
         "Path(sys.argv[2]).write_text(json.dumps({'evidence_sha256':digest}))\n",
     )
-    run = base_operation_runtime.run_drill_input(
+    run = operation_runtime.run_drill_input(
         _restore_inputs(tmp_path),
         scratch=scratch,
         target_lsn="0/180",

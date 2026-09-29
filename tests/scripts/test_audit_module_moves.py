@@ -2,7 +2,7 @@
 
 import pytest
 
-from scripts import audit_module_moves as gate
+from scripts.audit import module_moves as gate
 
 
 def test_old_references_reports_dotted_parent_import_and_slash_lines() -> None:
@@ -16,10 +16,10 @@ def test_old_references_reports_dotted_parent_import_and_slash_lines() -> None:
 
 
 def test_mask_history_reads_blanks_quoted_and_bare_operands() -> None:
-    old_path = "shared/" + "pty_sessions"
+    old_path = "base/" + "pty_sessions"
     text = (
-        f'git show "$SHA:{old_path}/cli.py" > shared/sessions/pty/cli.py\n'
-        f"git show bd6b15ed0:{old_path}/host.py > shared/sessions/pty/host.py\n"
+        f'git show "$SHA:{old_path}/cli.py" > base/sessions/pty/cli.py\n'
+        f"git show bd6b15ed0:{old_path}/host.py > base/sessions/pty/host.py\n"
     )
 
     masked = gate._mask_history_reads(text)
@@ -27,14 +27,14 @@ def test_mask_history_reads_blanks_quoted_and_bare_operands() -> None:
     assert len(masked) == len(text)
     assert masked.count("\n") == text.count("\n")
     assert old_path not in masked
-    assert masked.count(" > shared/sessions/pty/") == 2
+    assert masked.count(" > base/sessions/pty/") == 2
 
 
 def test_old_references_ignores_git_show_history_reads_but_reports_old_destination() -> None:
-    old_path = "shared/" + "pty_sessions/cli.py"
-    old_module = "shared." + "pty_sessions.cli"
-    quoted = f'git show "abc:{old_path}" > shared/sessions/pty/cli.py'
-    bare = f"git show bd6b15ed0:{old_path} > shared/sessions/pty/cli.py"
+    old_path = "base/" + "pty_sessions/cli.py"
+    old_module = "base." + "pty_sessions.cli"
+    quoted = f'git show "abc:{old_path}" > base/sessions/pty/cli.py'
+    bare = f"git show bd6b15ed0:{old_path} > base/sessions/pty/cli.py"
     old_destination = f'git show "abc:{old_path}" > {old_path}'
 
     assert gate._old_references(old_module, quoted) == []
@@ -66,15 +66,19 @@ def test_is_excluded_covers_frozen_axes_and_fixed_base_artifacts() -> None:
     assert gate._is_excluded("scripts/legacy_lkg/compatibility.patch") is True
     # Runs inside the reconstructed base install: its refs keep the base's paths.
     assert gate._is_excluded("scripts/legacy_lkg/cold_boot.py") is True
-    assert gate._is_excluded("scripts/legacy_lkg/prepare.py") is False
-    assert gate._is_excluded("shared/docs/notes.py") is False
+    # Imports its helpers from the checkout pinned at preparation_tools_sha.
+    assert gate._is_excluded("scripts/legacy_lkg/prepare.py") is True
+    # Byte-frozen: its sha256 is the retained image's schema digest.
+    assert gate._is_excluded("db/schema.sql") is True
+    assert gate._is_excluded("scripts/legacy_lkg/legacy-lkg.ava.okf.md") is False
+    assert gate._is_excluded("base/packages/docs/notes.py") is False
 
 
 def test_missing_accepts_submodule_fallback() -> None:
     """`from pkg import sub` resolves for a lean package __init__ (no re-exports)."""
-    assert gate._missing("shared.agents", {"history"}) == []
-    assert gate._missing("shared.agents.history", {"timeline"}) == []
+    assert gate._missing("base.agents", {"history"}) == []
+    assert gate._missing("base.agents.history", {"timeline"}) == []
 
 
 def test_missing_reports_unknown_names() -> None:
-    assert gate._missing("shared.agents", {"no_such_name_xyz"}) == ["no_such_name_xyz"]
+    assert gate._missing("base.agents", {"no_such_name_xyz"}) == ["no_such_name_xyz"]

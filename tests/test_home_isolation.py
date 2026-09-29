@@ -1,7 +1,7 @@
 """The test process must never hold the operator's real home or credentials.
 
 `tests/conftest.py` redirects AVA_HOME to a tmpfs dir *before* the first project
-import, because `shared.dotenv_boot` binds `AVA_ENV_PATH` once at import time and
+import, because `base.host.env.dotenv_boot` binds `AVA_ENV_PATH` once at import time and
 `_enforce_cluster_env_authority()` then force-assigns every `derived_env_keys()`
 entry from whatever `.env` that path resolved to. Get the ordering wrong and the
 suite silently runs against `~/.ava` — production cluster secret, db/redis URLs
@@ -42,7 +42,7 @@ import os
 from collections.abc import Mapping
 from pathlib import Path
 
-import shared.dotenv_boot
+import base.host.env.dotenv_boot
 
 _E2E_CONFTEST = Path(__file__).parent / "e2e" / "conftest.py"
 
@@ -80,9 +80,9 @@ def test_env_path_is_not_the_operators_real_dotenv() -> None:
     writers land beside it, so if it points at the real home a test can read or
     rewrite the operator's live cluster config.
     """
-    bound = Path(shared.dotenv_boot.AVA_ENV_PATH)
+    bound = Path(base.host.env.dotenv_boot.AVA_ENV_PATH)
     assert bound != _real_home_env(), (
-        f"shared.dotenv_boot.AVA_ENV_PATH is the operator's real .env ({bound}). "
+        f"base.host.env.dotenv_boot.AVA_ENV_PATH is the operator's real .env ({bound}). "
         "AVA_HOME was set too late — see the env block at the top of tests/conftest.py."
     )
     assert bound.parent == Path(os.environ["AVA_HOME"])
@@ -192,7 +192,7 @@ def test_the_e2e_fixture_restores_every_env_key_it_assigns() -> None:
     drifted once. Setup assignments only — the writes after the `yield` are the
     restore itself.
     """
-    lint = importlib.import_module("scripts.lint_fixture_scope")
+    lint = importlib.import_module("scripts.lint.fixture_scope")
     assigned, dynamic = lint.setup_env_keys(
         _E2E_CONFTEST.read_text(encoding="utf-8"), "_e2e_process_env"
     )
@@ -238,5 +238,5 @@ def test_no_e2e_value_for_a_restored_key_survives_into_this_file(
             "session started with. Something with a scope broader than the directory it "
             "was written for assigned it and did not put it back before pytest got here "
             "— see tests/e2e/conftest.py:_e2e_process_env for the shape, and "
-            "scripts/lint_fixture_scope.py for the lint that is supposed to prevent it."
+            "scripts/lint/fixture_scope.py for the lint that is supposed to prevent it."
         )

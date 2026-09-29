@@ -14,8 +14,8 @@ from __future__ import annotations
 import pytest
 
 from agent.graph.context_notes import RANK_CLUSTER_MEMORY, RANK_TIMEZONE, timezone_note
-from shared.config import settings
-from shared.message_kwargs import NoteTag
+from base.agents.messages.kwargs import NoteTag
+from base.config import settings
 
 
 @pytest.fixture(autouse=True)
@@ -52,7 +52,7 @@ def test_offset_is_rendered_from_the_setting(monkeypatch: pytest.MonkeyPatch) ->
 
 def test_carries_the_timezone_note_tag(monkeypatch: pytest.MonkeyPatch) -> None:
     """The tag drives the UI chip; an unmapped one renders as a loud alarm
-    (`scripts/lint_note_tags.py` enforces the frontend half)."""
+    (`scripts/lint/note_tags.py` enforces the frontend half)."""
     monkeypatch.setattr(settings.general, "timezone", "Asia/Shanghai")
     note = timezone_note()
     assert note is not None
@@ -81,7 +81,7 @@ def test_renders_under_a_hosted_turn_identity(monkeypatch: pytest.MonkeyPatch) -
     no process-wide id — the turn contextvar is the identity. The note must
     resolve through it, not the process slot (task #3939: reading the slot
     directly silently dropped this note from every hosted head)."""
-    from shared.turn_identity import bind_turn_identity
+    from base.native_process.turn_identity import bind_turn_identity
 
     monkeypatch.setattr("ava.agent_identity._agent_id", None)
     monkeypatch.delenv("AVA_AGENT_ID", raising=False)

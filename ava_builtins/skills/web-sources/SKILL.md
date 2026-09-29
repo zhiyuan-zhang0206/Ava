@@ -48,7 +48,7 @@ Do not hardcode any specific source names into this skill repository.
 > the one-shot `ava.shell.run`): its PATH already resolves bare `python` to
 > this checkout's own venv interpreter — prod home, a dev worktree cluster, or
 > Windows all work the same way, no `.venv/bin/` / `Scripts\` prefix needed
-> (`shared/session_env.py::forward_env_dict`). `$AVA_HOME` is set in agent
+> (`base/sessions/env_forwarding.py::forward_env_dict`). `$AVA_HOME` is set in agent
 > processes.
 ```bash
 # Most adapters' CLI is in scripts/feed.py:

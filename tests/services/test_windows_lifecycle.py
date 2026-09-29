@@ -93,10 +93,10 @@ def test_build_fails_without_csc(monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 
 def _interactive_session(monkeypatch: pytest.MonkeyPatch, session: int | None) -> None:
     """register_and_launch imports this at call time from the shared module."""
-    import shared.windows_session
+    import base.sessions.windows.logon_session
 
     monkeypatch.setattr(
-        shared.windows_session,
+        base.sessions.windows.logon_session,
         "active_console_session_id",
         lambda: session,  # pyright: ignore[reportUnknownArgumentType]
     )

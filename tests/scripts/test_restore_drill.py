@@ -16,11 +16,11 @@ from langchain_core.messages import HumanMessage
 from langgraph.checkpoint.base import empty_checkpoint
 from langgraph.checkpoint.postgres import PostgresSaver
 
+from base.config import settings
+from base.paths import ava_home
 from services.gateway_side.backup import passphrase
-from shared.config import settings
-from shared.paths import ava_home
 
-_SCRIPT = Path(__file__).parents[2] / "scripts" / "restore_drill.py"
+_SCRIPT = Path(__file__).parents[2] / "scripts" / "data_plane_ops" / "restore_drill.py"
 _SPEC = importlib.util.spec_from_file_location("restore_drill", _SCRIPT)
 assert _SPEC is not None and _SPEC.loader is not None
 restore_drill = importlib.util.module_from_spec(_SPEC)

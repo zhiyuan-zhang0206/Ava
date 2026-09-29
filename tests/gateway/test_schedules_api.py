@@ -1,4 +1,4 @@
-"""Tests for gateway/routers/schedules.py — the /api/schedules HTTP surface.
+"""Tests for gateway/schedules/router.py — the /api/schedules HTTP surface.
 
 Driven through TestClient(app) against the real test DB. The manager's session
 control paths (sync/capture) are neutralized by the autouse
@@ -12,8 +12,8 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
+from base.daemon.schedules.builtin_schedules import load_manifest
 from gateway.app import app
-from shared.daemon.schedules.builtin_schedules import load_manifest
 
 BUILTIN_MANIFEST_NAMES = [s.name for s in load_manifest()]
 
@@ -105,7 +105,7 @@ class TestReadUpdateDelete:
         self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """The CLI's update --disable surface shares stop's immediate reap path."""
-        from gateway.schedule_manager import ScheduleManager
+        from gateway.schedules.manager import ScheduleManager
 
         synced: list[int] = []
 
@@ -125,7 +125,7 @@ class TestReadUpdateDelete:
         self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """A no-op --enable must not interrupt an already-live schedule."""
-        from gateway.schedule_manager import ScheduleManager
+        from gateway.schedules.manager import ScheduleManager
 
         synced: list[int] = []
 
@@ -158,7 +158,7 @@ class TestControl:
     def test_start_stop_toggle_enabled_and_sync_the_session(
         self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from gateway.schedule_manager import ScheduleManager
+        from gateway.schedules.manager import ScheduleManager
 
         synced: list[int] = []
 
@@ -204,7 +204,7 @@ class TestLogsRunsDraft:
         """The live capture pads the screen to the terminal height — trailing
         blank rows are stripped so `logs --lines N` shows the content tail
         (the runner's output sits above blank display rows once scrolled)."""
-        from gateway.schedule_manager import ScheduleManager
+        from gateway.schedules.manager import ScheduleManager
 
         async def _fake_capture(self: object, schedule_id: int, lines: int) -> str:
             return "line one\nline two\n\n\n\n"
@@ -222,7 +222,7 @@ class TestLogsRunsDraft:
         """A `--lines N` smaller than the terminal height must still show the
         runner's output: the capture window widens to cover the display
         padding, blank rows are stripped, then the tail is trimmed to N."""
-        from gateway.schedule_manager import ScheduleManager
+        from gateway.schedules.manager import ScheduleManager
 
         seen: list[int] = []
 
@@ -249,8 +249,8 @@ class TestLogsRunsDraft:
         """No live session -> the schedule session's PTY transcript file
         supplies the output: a finished/crashed runner's output survives the
         session being reaped, where scrollback was lost."""
-        from shared.cluster import session_name
-        from shared.session_backend import get_shell_backend
+        from base.cluster import session_name
+        from base.sessions.backend import get_shell_backend
 
         with TestClient(app) as client:
             sid = _create(client, name="l").json()["id"]
@@ -273,7 +273,7 @@ class TestLogsRunsDraft:
         """The implicit page is ``settings.display.schedules_runs_default_limit``
         (``AVA_SCHEDULES_RUNS_DEFAULT_LIMIT``); the literal 50 is only that
         field's default, not a hard-coded page size."""
-        from shared.config import settings
+        from base.config import settings
 
         monkeypatch.setattr(settings.display, "schedules_runs_default_limit", 1)
         with TestClient(app) as client:
@@ -344,9 +344,7 @@ class TestLogsRunsDraft:
             calls["target"] = target
             return SpawnedAgent(id=4242)
 
-        monkeypatch.setattr(
-            "gateway.routers.schedules.create_and_launch_agent", _fake_create_launch
-        )
+        monkeypatch.setattr("gateway.schedules.router.create_and_launch_agent", _fake_create_launch)
         with TestClient(app) as client:
             r = client.post("/api/schedules/draft", json={"nl": "consolidate memory nightly"})
         assert r.status_code == 200

@@ -57,16 +57,16 @@ def test_schema_health_db_flake_is_healthy(monkeypatch: pytest.MonkeyPatch) -> N
         def __init__(self, *a: object, **kw: object) -> None:
             raise ConnectionError("pgbouncer blip")
 
-    import shared.db
+    import base.db
 
-    monkeypatch.setattr(shared.db, "connect", _FlakyConnect)
+    monkeypatch.setattr(base.db, "connect", _FlakyConnect)
     assert cluster_health._schema_health() is True
 
 
 def test_schema_health_real_skew_is_unhealthy(monkeypatch: pytest.MonkeyPatch) -> None:
     """A genuine code/DB migration-set disagreement still fails the check."""
-    import shared.db
-    from shared.migrations import CodeBehindSchema
+    import base.db
+    from base.deploy.schema.migrations import CodeBehindSchema
 
     class _AheadConnect:
         def __init__(self, *a: object, **kw: object) -> None:
@@ -91,18 +91,18 @@ def test_schema_health_real_skew_is_unhealthy(monkeypatch: pytest.MonkeyPatch) -
         def execute(self, *a: object) -> None:
             raise CodeBehindSchema("DB has migrations this checkout lacks")
 
-    monkeypatch.setattr(shared.db, "connect", _AheadConnect)
+    monkeypatch.setattr(base.db, "connect", _AheadConnect)
     assert cluster_health._schema_health() is False
 
 
 def test_agent_population_db_error_is_environment_class(monkeypatch: pytest.MonkeyPatch) -> None:
     """A failed population query is not evidence that the running code regressed."""
-    import shared.db
+    import base.db
 
     def _down(**_kwargs: object) -> object:
         raise ConnectionError("pgbouncer unavailable")
 
-    monkeypatch.setattr(shared.db, "connect", _down)
+    monkeypatch.setattr(base.db, "connect", _down)
     assert cluster_health._agent_population_failure_class(1) == "environment"
 
 
@@ -209,18 +209,18 @@ def _provider_guard_healthy(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.fixture
 def _home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    # run_health_probe resolves the alert state home via shared.paths.ava_home.
-    import shared.paths
+    # run_health_probe resolves the alert state home via base.paths.ava_home.
+    import base.paths
 
-    monkeypatch.setattr(shared.paths, "ava_home", lambda: tmp_path)
+    monkeypatch.setattr(base.paths, "ava_home", lambda: tmp_path)
     # Check 8 (source tree) derives its checkout from ava_home() and, on a
     # runner with no prod tree, resolves it to a non-git path — the guard
     # (correctly) reports that as "guard skipped" and fails the probe. Unit
     # tests have no prod tree by construction, so stub the lookup itself;
     # check 8's own behavior is pinned by the dedicated tests below.
-    import shared.cluster_drift
+    from base.deploy.git import cluster_drift
 
-    monkeypatch.setattr(shared.cluster_drift, "prod_source_dir", lambda: None)
+    monkeypatch.setattr(cluster_drift, "prod_source_dir", lambda: None)
     return tmp_path
 
 
@@ -432,14 +432,13 @@ def test_source_tree_guard_skipped_is_a_distinct_alert(
     """A blind guard must not look like a clean tree: when
     ``source_tree_violations`` reports the guard as skipped, the probe names
     the failure 'guard skipped' (with the reason), never 'tampered'."""
-    import shared.cluster_drift
-    import shared.source_tree_guard
+    from base.deploy.git import cluster_drift, source_tree_guard
 
     def _violations_skipped(_repo: Path) -> tuple[str, ...]:
         return ("guard skipped: git unavailable",)
 
-    monkeypatch.setattr(shared.cluster_drift, "prod_source_dir", lambda: Path("/nonexistent"))
-    monkeypatch.setattr(shared.source_tree_guard, "source_tree_violations", _violations_skipped)
+    monkeypatch.setattr(cluster_drift, "prod_source_dir", lambda: Path("/nonexistent"))
+    monkeypatch.setattr(source_tree_guard, "source_tree_violations", _violations_skipped)
 
     failure = cluster_health._source_tree_failure(tmp_path)
 
@@ -456,14 +455,13 @@ def test_source_tree_check_skips_a_home_that_runs_a_selected_image(
 ) -> None:
     """A home with a selected release image executes verified image bytes, so a
     leftover checkout cannot reach running code: its state is not an alert."""
-    import shared.cluster_drift
-    import shared.source_tree_guard
+    from base.deploy.git import cluster_drift, source_tree_guard
 
     def _tampered(_repo: Path) -> tuple[str, ...]:
         return ("tracked change: M tracked.txt",)
 
-    monkeypatch.setattr(shared.cluster_drift, "prod_source_dir", lambda: Path("/nonexistent"))
-    monkeypatch.setattr(shared.source_tree_guard, "source_tree_violations", _tampered)
+    monkeypatch.setattr(cluster_drift, "prod_source_dir", lambda: Path("/nonexistent"))
+    monkeypatch.setattr(source_tree_guard, "source_tree_violations", _tampered)
     _select_release(
         tmp_path, '{"artifact_digest":"' + "a" * 64 + '","manifest_digest":"' + "b" * 64 + '"}'
     )
@@ -475,12 +473,12 @@ def test_source_tree_check_reports_an_unreadable_release_selector(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """An unreadable selector leaves the executing code unknown — never healthy."""
-    import shared.source_tree_guard
+    from base.deploy.git import source_tree_guard
 
     def _unexpected(_repo: Path) -> tuple[str, ...]:
         raise AssertionError("an unknown runtime origin must not be judged as a checkout")
 
-    monkeypatch.setattr(shared.source_tree_guard, "source_tree_violations", _unexpected)
+    monkeypatch.setattr(source_tree_guard, "source_tree_violations", _unexpected)
     _select_release(tmp_path, "not json")
 
     failure = cluster_health._source_tree_failure(tmp_path)
@@ -545,7 +543,7 @@ def test_service_probes_skips_gated_but_rejects_unknown_specs(
     """Every intended service needs positive evidence; disabled services do not."""
     import cli.commands._probe as _probe_commands
     import cli.commands._repo as _repo_commands
-    from ops.service_spec import (
+    from ops.roster.service_spec import (
         _GATEWAY,  # typed frozenset[MachineRole]; value irrelevant (roster stubbed)
         ServiceSpec,
     )
@@ -585,7 +583,7 @@ def test_service_probes_skips_gated_otel_collector_on_non_lgtm_gateway(
 ) -> None:
     import cli.commands._probe as _probe_commands
     import cli.commands._repo as _repo_commands
-    import ops.service_spec as _service_spec
+    import ops.roster.service_spec as _service_spec
 
     tmp_home = tmp_path / "gateway"
     tmp_home.mkdir()
@@ -610,7 +608,7 @@ def test_service_probes_checks_otel_collector_on_non_lgtm_gateway_with_explicit_
 ) -> None:
     import cli.commands._probe as _probe_commands
     import cli.commands._repo as _repo_commands
-    import ops.service_spec as _service_spec
+    import ops.roster.service_spec as _service_spec
 
     tmp_home = tmp_path / "gateway"
     tmp_home.mkdir()
@@ -635,7 +633,7 @@ def test_service_probes_checks_otel_collector_on_lgtm_gateway(
 ) -> None:
     import cli.commands._probe as _probe_commands
     import cli.commands._repo as _repo_commands
-    import ops.service_spec as _service_spec
+    import ops.roster.service_spec as _service_spec
 
     tmp_home = tmp_path / "gateway"
     tmp_home.mkdir()
@@ -662,7 +660,7 @@ def test_service_probes_carry_the_failing_fact(monkeypatch: pytest.MonkeyPatch) 
     no amount of waiting fixes."""
     import cli.commands._probe as _probe_commands
     import cli.commands._repo as _repo_commands
-    from ops.service_spec import _GATEWAY, ServiceSpec
+    from ops.roster.service_spec import _GATEWAY, ServiceSpec
 
     spec = ServiceSpec(session="ops", cmd="x", capabilities=_GATEWAY, requires_db=True)
     monkeypatch.setattr(_repo_commands, "_roles_or_none", lambda: frozenset({"gateway"}))
@@ -696,8 +694,8 @@ def test_service_probes_respect_durable_service_intent(
 ) -> None:
     import cli.commands._probe as _probe_commands
     import cli.commands._repo as _repo_commands
-    import ops.service_spec as _service_spec
-    from shared import service_selection
+    import ops.roster.service_spec as _service_spec
+    from base.deploy.lifecycle import service_selection
 
     wanted = _service_spec.ServiceSpec("gateway", "unused", frozenset({"gateway"}), True)
     excluded = _service_spec.ServiceSpec("frontend", "unused", frozenset({"gateway"}), False)
@@ -727,7 +725,7 @@ def test_service_probes_unreadable_selection_is_unhealthy(monkeypatch: pytest.Mo
         raise ValueError("corrupt selection")
 
     monkeypatch.setattr(_repo_commands, "_roles_or_none", lambda: frozenset({"gateway"}))
-    monkeypatch.setattr("shared.service_selection.read_selection", unreadable)
+    monkeypatch.setattr("base.deploy.lifecycle.service_selection.read_selection", unreadable)
     assert cluster_health._service_probes() == ["service selection unavailable (corrupt selection)"]
 
 
@@ -749,14 +747,14 @@ def test_notify_owner_stamps_home_label(
 
     import httpx
 
-    import shared.cluster
-    from shared.config import settings
-    from shared.daemon_health import health_port
+    import base.cluster
+    from base.config import settings
+    from base.daemon.health import health_port
 
     monkeypatch.setattr(settings.alerts, "im_notify_enabled", True)
     monkeypatch.setattr(settings.data_plane, "cluster_secret", "test-secret")
-    monkeypatch.setattr(shared.cluster, "home_label", lambda _home: ".ava-preview-42")  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr("shared.paths.ava_home", lambda: tmp_path / ".ava-preview-42")
+    monkeypatch.setattr(base.cluster, "home_label", lambda _home: ".ava-preview-42")  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("base.paths.ava_home", lambda: tmp_path / ".ava-preview-42")
 
     sent: list[tuple[str, dict[str, str], dict[str, str]]] = []
 
@@ -793,14 +791,14 @@ def test_notify_owner_failed_send_does_not_leak_secret(
 
     import httpx
 
-    import shared.cluster
-    from shared.config import settings
+    import base.cluster
+    from base.config import settings
 
     secret = "SUPERSECRET"  # noqa: S105 — test fixture
     monkeypatch.setattr(settings.alerts, "im_notify_enabled", True)
     monkeypatch.setattr(settings.data_plane, "cluster_secret", secret)
-    monkeypatch.setattr(shared.cluster, "home_label", lambda _home: ".ava-main")  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr("shared.paths.ava_home", lambda: tmp_path / ".ava-main")
+    monkeypatch.setattr(base.cluster, "home_label", lambda _home: ".ava-main")  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("base.paths.ava_home", lambda: tmp_path / ".ava-main")
 
     # A 401 from the daemon — raise_for_status() raises httpx.HTTPStatusError,
     # the path most likely to leak.
@@ -826,13 +824,13 @@ def test_notify_owner_im_bridge_down_does_not_raise(
 
     import httpx
 
-    import shared.cluster
-    from shared.config import settings
+    import base.cluster
+    from base.config import settings
 
     monkeypatch.setattr(settings.alerts, "im_notify_enabled", True)
     monkeypatch.setattr(settings.data_plane, "cluster_secret", "test-secret")
-    monkeypatch.setattr(shared.cluster, "home_label", lambda _home: ".ava-main")  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr("shared.paths.ava_home", lambda: tmp_path / ".ava-main")
+    monkeypatch.setattr(base.cluster, "home_label", lambda _home: ".ava-main")  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("base.paths.ava_home", lambda: tmp_path / ".ava-main")
 
     def _post(*_a: object, **_k: object) -> None:
         raise httpx.ConnectError("connection refused")
@@ -855,12 +853,12 @@ def test_notify_owner_skips_when_im_notify_disabled(
 
     import httpx
 
-    import shared.cluster
-    from shared.config import settings
+    import base.cluster
+    from base.config import settings
 
     monkeypatch.setattr(settings.alerts, "im_notify_enabled", False)
-    monkeypatch.setattr(shared.cluster, "home_label", lambda _home: ".ava-main")  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr("shared.paths.ava_home", lambda: tmp_path / ".ava-main")
+    monkeypatch.setattr(base.cluster, "home_label", lambda _home: ".ava-main")  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("base.paths.ava_home", lambda: tmp_path / ".ava-main")
 
     called = False
 
@@ -885,14 +883,14 @@ def test_notify_owner_honours_im_bridge_health_url_override(
 
     import httpx
 
-    import shared.cluster
-    from shared.config import settings
+    import base.cluster
+    from base.config import settings
 
     monkeypatch.setattr(settings.alerts, "im_notify_enabled", True)
     monkeypatch.setattr(settings.data_plane, "cluster_secret", "test-secret")
     monkeypatch.setattr(settings.services, "im_bridge_health_url", "http://10.0.0.5:9111/")
-    monkeypatch.setattr(shared.cluster, "home_label", lambda _home: ".ava-main")  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr("shared.paths.ava_home", lambda: tmp_path / ".ava-main")
+    monkeypatch.setattr(base.cluster, "home_label", lambda _home: ".ava-main")  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("base.paths.ava_home", lambda: tmp_path / ".ava-main")
 
     sent: list[str] = []
 
@@ -1024,7 +1022,7 @@ def test_crash_loop_merges_disjoint_cutover_eras(monkeypatch: pytest.MonkeyPatch
     promoted boundary row through both selectors."""
     import httpx
 
-    from shared.loki_index_labels import LokiReadEra, LokiReadSlice
+    from base.telemetry.loki_index_labels import LokiReadEra, LokiReadSlice
 
     start = datetime(2026, 8, 10, tzinfo=UTC)
     cutover = start.replace(hour=1)
@@ -1060,7 +1058,7 @@ def test_crash_loop_queries_the_current_window(monkeypatch: pytest.MonkeyPatch) 
     """The instant query evaluates at now, covering exactly (now-window, now]."""
     import httpx
 
-    from shared.loki_index_labels import LokiReadEra, LokiReadSlice
+    from base.telemetry.loki_index_labels import LokiReadEra, LokiReadSlice
 
     fixed_now = datetime(2026, 8, 24, 12, 0, tzinfo=UTC)
     captured_windows: list[tuple[datetime, datetime]] = []
@@ -1101,10 +1099,10 @@ def test_alert_summary_stamps_cluster_and_edge(
 ) -> None:
     """Every health alert carries the cluster label + the edge wording, so a
     preview cluster's alert never reads like a prod incident."""
-    import shared.cluster
+    import base.cluster
 
-    monkeypatch.setattr(shared.cluster, "home_label", lambda _h: ".ava-preview-42")  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr("shared.paths.ava_home", lambda: tmp_path / ".ava-preview-42")
+    monkeypatch.setattr(base.cluster, "home_label", lambda _h: ".ava-preview-42")  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("base.paths.ava_home", lambda: tmp_path / ".ava-preview-42")
     assert cluster_health._alert_summary(recovered=False, message="FAIL: x") == (
         "[.ava-preview-42] [health-probe] cluster unhealthy: FAIL: x"
     )
@@ -1118,12 +1116,12 @@ def test_ingest_alert_posts_health_probe_payload(monkeypatch: pytest.MonkeyPatch
     gateway ingest with the graded severity and stable instance identity."""
     import httpx
 
-    import shared.machine
-    from shared.alerts import fingerprint
-    from shared.config import settings
+    import base.cluster.machine
+    from base.config import settings
+    from base.telemetry.alerts import fingerprint
 
     monkeypatch.setattr(settings.data_plane, "cluster_secret", "test-secret")
-    monkeypatch.setattr(shared.machine, "gateway_api_base", lambda: "http://127.0.0.1:8123")
+    monkeypatch.setattr(base.cluster.machine, "gateway_api_base", lambda: "http://127.0.0.1:8123")
     monkeypatch.setattr(health_alerts, "_alert_summary", lambda **_: "SUMMARY")  # pyright: ignore[reportUnknownArgumentType]
 
     sent: list[tuple[str, dict[str, Any], dict[str, str]]] = []
@@ -1174,11 +1172,11 @@ def test_ingest_alert_unreachable_gateway_falls_back(
     a transport failure routes to the local ingest fallback, never raises."""
     import httpx
 
-    import shared.machine
-    from shared.config import settings
+    import base.cluster.machine
+    from base.config import settings
 
     monkeypatch.setattr(settings.data_plane, "cluster_secret", "s")
-    monkeypatch.setattr(shared.machine, "gateway_api_base", lambda: "http://127.0.0.1:8123")
+    monkeypatch.setattr(base.cluster.machine, "gateway_api_base", lambda: "http://127.0.0.1:8123")
     monkeypatch.setattr(health_alerts, "_alert_summary", lambda **_: "SUMMARY")  # pyright: ignore[reportUnknownArgumentType]
 
     def _post(*_a: object, **_k: object) -> None:
@@ -1218,12 +1216,12 @@ def test_ingest_alert_http_error_falls_back_without_leaking_secret(
     status code + body are logged, never the exception or the secret."""
     import httpx
 
-    import shared.machine
-    from shared.config import settings
+    import base.cluster.machine
+    from base.config import settings
 
     secret = "SUPERSECRET"  # noqa: S105 — test fixture
     monkeypatch.setattr(settings.data_plane, "cluster_secret", secret)
-    monkeypatch.setattr(shared.machine, "gateway_api_base", lambda: "http://127.0.0.1:8123")
+    monkeypatch.setattr(base.cluster.machine, "gateway_api_base", lambda: "http://127.0.0.1:8123")
     monkeypatch.setattr(health_alerts, "_alert_summary", lambda **_: "SUMMARY")  # pyright: ignore[reportUnknownArgumentType]
 
     req = httpx.Request("POST", "http://127.0.0.1:8123/api/alerts")
@@ -1277,23 +1275,23 @@ class _FakeConn:
 def test_ingest_alert_fallback_persists_and_notifies(monkeypatch: pytest.MonkeyPatch) -> None:
     """Gateway down but DB up: the fallback upserts the row and sends the IM
     itself (same ingest code), stamps notified_at, commits."""
-    import shared.db
+    import base.db
 
     conn = _FakeConn(notified_row=None)
-    monkeypatch.setattr(shared.db, "connect", lambda **_: conn)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(base.db, "connect", lambda **_: conn)  # pyright: ignore[reportUnknownArgumentType]
     key = ("health-probe", datetime(2026, 8, 5, 0, 10, tzinfo=UTC))
     upserted: list[tuple[Any, str]] = []
     notified: list[str] = []
     stamped: list[object] = []
     monkeypatch.setattr(
-        "shared.alerts.upsert_alert",
+        "base.telemetry.alerts.upsert_alert",
         lambda _c, a, source="grafana": (
             upserted.append((a, source))  # pyright: ignore[reportUnknownArgumentType]
             or (key, True, True, {"notified_at": None})
         ),
     )
-    monkeypatch.setattr("shared.alerts.notify_im", lambda t: notified.append(t) or True)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr("shared.alerts.stamp_notified", lambda _c, keys: stamped.append(keys))  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("base.telemetry.alerts.notify_im", lambda t: notified.append(t) or True)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("base.telemetry.alerts.stamp_notified", lambda _c, k: stamped.append(k))  # pyright: ignore[reportUnknownArgumentType]
 
     cluster_health._ingest_alert_fallback(
         status="firing",
@@ -1321,19 +1319,19 @@ def test_ingest_alert_fallback_skips_im_when_already_notified(
 ) -> None:
     """A gateway that processed the POST but lost the response must not cause
     a second IM: the row's notified_at is set -> the fallback stays silent."""
-    import shared.db
+    import base.db
 
     conn = _FakeConn(notified_row=None)
-    monkeypatch.setattr(shared.db, "connect", lambda **_: conn)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(base.db, "connect", lambda **_: conn)  # pyright: ignore[reportUnknownArgumentType]
     key = ("health-probe", datetime(2026, 8, 5, 0, 10, tzinfo=UTC))
     monkeypatch.setattr(
-        "shared.alerts.upsert_alert",
+        "base.telemetry.alerts.upsert_alert",
         lambda *_a, **_k: (key, False, False, {"notified_at": datetime(2026, 8, 5, tzinfo=UTC)}),  # pyright: ignore[reportUnknownArgumentType]
     )
     notified: list[str] = []
     stamped: list[object] = []
-    monkeypatch.setattr("shared.alerts.notify_im", lambda t: notified.append(t) or True)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr("shared.alerts.stamp_notified", lambda _c, keys: stamped.append(keys))  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("base.telemetry.alerts.notify_im", lambda t: notified.append(t) or True)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("base.telemetry.alerts.stamp_notified", lambda _c, k: stamped.append(k))  # pyright: ignore[reportUnknownArgumentType]
 
     cluster_health._ingest_alert_fallback(status="firing", message="FAIL: x", starts_at=key[1])
     assert notified == []
@@ -1346,12 +1344,12 @@ def test_ingest_alert_fallback_direct_im_when_db_down(
 ) -> None:
     """Gateway AND DB down: the fallback degrades to the legacy direct-IM path —
     the owner still hears, even though no row can be persisted."""
-    import shared.db
+    import base.db
 
     def _boom(**_: object) -> None:
         raise ConnectionError("pg down")
 
-    monkeypatch.setattr(shared.db, "connect", _boom)
+    monkeypatch.setattr(base.db, "connect", _boom)
     direct: list[str] = []
     monkeypatch.setattr(health_alerts, "notify_owner", direct.append)
 
@@ -1366,7 +1364,7 @@ def test_ingest_alert_fallback_direct_im_when_db_down(
 def test_alert_failure_tracks_unfired_episode_in_three_line_state(
     _home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from shared.config import settings
+    from base.config import settings
 
     started_at = datetime(2026, 8, 26, tzinfo=UTC)
     _freeze_alert_clock(monkeypatch, started_at)
@@ -1388,7 +1386,7 @@ def test_alert_failure_tracks_unfired_episode_in_three_line_state(
 def test_alert_failure_warns_then_escalates_once(
     _home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from shared.config import settings
+    from base.config import settings
 
     started_at = datetime(2026, 8, 26, tzinfo=UTC)
     clock = _freeze_alert_clock(monkeypatch, started_at)
@@ -1454,7 +1452,7 @@ def test_fired_episode_recovery_replays_open_row_fingerprint(
     _home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Recovery finds pre-convention rows by identity and replays their key."""
-    import shared.db
+    import base.db
 
     marker_start = datetime(2026, 8, 26, tzinfo=UTC)
     row_start = datetime(2026, 8, 5, tzinfo=UTC)
@@ -1486,7 +1484,7 @@ def test_fired_episode_recovery_replays_open_row_fingerprint(
         def cursor(self) -> _Cursor:
             return _Cursor()
 
-    monkeypatch.setattr(shared.db, "connect", _Connection)
+    monkeypatch.setattr(base.db, "connect", _Connection)
     edges: list[dict[str, object]] = []
     monkeypatch.setattr(health_alerts, "_ingest_alert", lambda **kw: edges.append(kw))  # pyright: ignore[reportUnknownArgumentType]
 
@@ -1509,7 +1507,7 @@ def test_legacy_two_line_recovery_replays_open_row_fingerprint(
     _home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A pre-upgrade marker still closes its severity-in-fingerprint row."""
-    import shared.db
+    import base.db
 
     marker_start = datetime(2026, 8, 26, tzinfo=UTC)
     row_start = datetime(2026, 8, 5, tzinfo=UTC)
@@ -1541,7 +1539,7 @@ def test_legacy_two_line_recovery_replays_open_row_fingerprint(
         def cursor(self) -> _Cursor:
             return _Cursor()
 
-    monkeypatch.setattr(shared.db, "connect", _Connection)
+    monkeypatch.setattr(base.db, "connect", _Connection)
     edges: list[dict[str, object]] = []
     monkeypatch.setattr(health_alerts, "_ingest_alert", lambda **kw: edges.append(kw))  # pyright: ignore[reportUnknownArgumentType]
 
@@ -1563,7 +1561,7 @@ def test_legacy_two_line_recovery_replays_open_row_fingerprint(
 def test_deploy_explanation_preserves_episode_start_for_later_grade(
     _home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from shared.config import settings
+    from base.config import settings
 
     started_at = datetime(2026, 8, 26, tzinfo=UTC)
     clock = _freeze_alert_clock(monkeypatch, started_at)
@@ -1671,11 +1669,11 @@ def test_ingest_recovery_self_heals_when_instance_never_persisted(
     alert that will never resolve in the panel."""
     import httpx
 
-    import shared.machine
-    from shared.config import settings
+    import base.cluster.machine
+    from base.config import settings
 
     monkeypatch.setattr(settings.data_plane, "cluster_secret", "s")
-    monkeypatch.setattr(shared.machine, "gateway_api_base", lambda: "http://127.0.0.1:8123")
+    monkeypatch.setattr(base.cluster.machine, "gateway_api_base", lambda: "http://127.0.0.1:8123")
     monkeypatch.setattr(health_alerts, "_alert_summary", lambda **_: "SUMMARY")  # pyright: ignore[reportUnknownArgumentType]
     direct: list[str] = []
     monkeypatch.setattr(health_alerts, "notify_owner", direct.append)
@@ -1721,9 +1719,9 @@ def test_run_health_probe_refused_from_worktree_checkout(
     """The 2026-08-07 accident: a probe launched from a worktree checkout
     (prod home) misjudged schema health against prod data and auto-rolled-back
     the cluster. The probe now refuses with exit 2 and never runs a check."""
-    monkeypatch.setattr("shared.paths.ava_home", lambda: Path("~/.ava").expanduser())
+    monkeypatch.setattr("base.paths.ava_home", lambda: Path("~/.ava").expanduser())
     monkeypatch.setattr(
-        "shared.paths.repo_root",
+        "base.paths.repo_root",
         lambda: Path("~/Ava/.worktrees/ava-2890-r4").expanduser(),
     )
 
@@ -1739,9 +1737,9 @@ def test_run_health_probe_allowed_from_prod_checkout(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The prod anchored checkout runs the probe normally (exit 0 healthy)."""
-    monkeypatch.setattr("shared.paths.ava_home", lambda: Path("~/.ava").expanduser())
+    monkeypatch.setattr("base.paths.ava_home", lambda: Path("~/.ava").expanduser())
     monkeypatch.setattr(
-        "shared.paths.repo_root",
+        "base.paths.repo_root",
         lambda: Path("~/.ava/source").expanduser(),
     )
 
@@ -1783,8 +1781,8 @@ def test_agent_min_defaults_to_settings_when_unset(
         seen.append(minimum)
         return True
 
+    from base.config import settings
     from cli.commands.cluster import health as cluster_health
-    from shared.config import settings
 
     monkeypatch.setattr(cluster_health, "_agent_population", _fake_population)
     monkeypatch.setattr(settings.daemon, "health_probe_agent_min", 0)
@@ -1803,8 +1801,8 @@ def test_agent_min_explicit_overrides_settings(
         seen.append(minimum)
         return True
 
+    from base.config import settings
     from cli.commands.cluster import health as cluster_health
-    from shared.config import settings
 
     monkeypatch.setattr(cluster_health, "_agent_population", _fake_population)
     monkeypatch.setattr(settings.daemon, "health_probe_agent_min", 0)
@@ -1820,11 +1818,11 @@ def test_agent_min_explicit_overrides_settings(
 @pytest.fixture
 def _prod_source(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """Point the probe at a throwaway prod checkout, never the real venv."""
-    import shared.cluster_drift
+    from base.deploy.git import cluster_drift
 
     source_root = tmp_path / "prod" / "source"
     source_root.mkdir(parents=True)
-    monkeypatch.setattr(shared.cluster_drift, "prod_source_dir", lambda: source_root)
+    monkeypatch.setattr(cluster_drift, "prod_source_dir", lambda: source_root)
     return source_root
 
 
@@ -1880,9 +1878,9 @@ def test_editable_install_no_prod_source_is_silent(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """No installed prod checkout → nothing to probe (runner-only hosts)."""
-    import shared.cluster_drift
+    from base.deploy.git import cluster_drift
 
-    monkeypatch.setattr(shared.cluster_drift, "prod_source_dir", lambda: None)
+    monkeypatch.setattr(cluster_drift, "prod_source_dir", lambda: None)
     assert cluster_health._editable_install_failure() is None
 
 

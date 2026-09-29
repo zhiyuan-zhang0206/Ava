@@ -10,13 +10,13 @@ selects services whose capabilities intersect the host's roles. A service also
 declares ``requires_db`` so database-dependent readiness remains explicit.
 
 Plugins expose ``services() -> tuple[ServiceSpec, ...]`` from their services
-module. ``_plugin_services()`` discovers code-present plugins and appends them
+module. ``plugin_services()`` discovers code-present plugins and appends them
 to the roster: plugin declares, ops discovers. Each plugin service's
 own ``ServiceSpec.gate`` keeps cluster-level enablement out of ``_gate_reason``.
 The fleet task daemon follows this path; see
 ``decisions/2026-07-19-plugin-registered-services.md``.
 
-Layer: the ``ops`` module family imports ``shared``, plus lazy function-local
+Layer: the ``ops`` module family imports ``base``, plus lazy function-local
 reaches into the shared-tier browser identity probe and gate app-port source.
 Nothing reaches up into cli/gateway, so start, root monitoring, and ``ava status``
 share one roster.
@@ -28,7 +28,7 @@ live in the root diagnostic roster; they never acquire service ownership.
 ``cli.commands._repo`` re-exports ``ServiceSpec`` / ``build_services`` /
 ``services_for_capabilities`` under their historical names as a cli-facing façade
 (so existing `from cli.commands._repo import ...` call sites keep working), but the
-definitions live in ``service_spec.py``, ``roster.py``, and ``spec.py``.
+definitions live in ``ops.roster.service_spec``, ``ops.roster``, and ``ops.spec``.
 """
 
 from __future__ import annotations
@@ -40,23 +40,25 @@ from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from ops.service_spec import ServiceSpec as ServiceSpec  # re-export: generated plugin fixtures
-from shared.config import settings
-from shared.log import logger
-from shared.machine import MachineRoles
-from shared.observability import collector_allowed_for_home, gateway_observability_home
-from shared.platform import IS_WINDOWS
-from shared.platform_probes import (
+from base.cluster.machine import MachineRoles
+from base.config import settings
+from base.host.system.probes import (
     browser_incapability,
     browser_mcp_incapability,
     permissions_helper_incapability,
     unix_sockets_available,
 )
+from base.log import logger
+from base.native_process.os_platform import IS_WINDOWS
+from base.telemetry.observability import collector_allowed_for_home, gateway_observability_home
+from ops.roster.service_spec import (
+    ServiceSpec as ServiceSpec,  # re-export: generated plugin fixtures
+)
 
 
 def _bind_runtime_command(spec: ServiceSpec) -> ServiceSpec:
     """Bind Python services to the loaded runtime without changing their gates."""
-    from shared.runtime_interpreter import WHEEL_RUNTIME, runtime_python
+    from base.deploy.release.runtime_interpreter import WHEEL_RUNTIME, runtime_python
 
     prefix = ".venv/bin/python "
     if not WHEEL_RUNTIME or not spec.cmd.startswith(prefix):
@@ -66,10 +68,10 @@ def _bind_runtime_command(spec: ServiceSpec) -> ServiceSpec:
     )
 
 
-def _plugin_services() -> tuple[ServiceSpec, ...]:
+def plugin_services() -> tuple[ServiceSpec, ...]:
     """The services contributed by the plugins PRESENT on this machine.
 
-    Discovery, not import-of-known-plugins: `shared.plugins_config` enumerates the
+    Discovery, not import-of-known-plugins: `base.packages.plugins.enable_config` enumerates the
     plugins installed on THIS machine (builtin + external), and each that ships a
     ``services.py`` exposing ``services() -> tuple[ServiceSpec, ...]`` gets folded
     into the roster. This keeps the direction "plugin declares, ops discovers" — no
@@ -85,22 +87,22 @@ def _plugin_services() -> tuple[ServiceSpec, ...]:
     follow, since they derive from `build_services()`.
 
     The ``services.py`` module is loaded by FILE PATH (like
-    `shared.plugins_config.update_all_disk_images` loads `default_config.py`) so an
+    `base.packages.plugins.enable_config.update_all_disk_images` loads `default_config.py`) so an
     external plugin under ``~/.ava/plugins/`` — off the ``plugins.`` package path —
-    can register too; it must import only light deps (ops / shared), never its
+    can register too; it must import only light deps (ops / base), never its
     own `plugin.py`, so this load does not drag the agent kernel into the ops
     process.
 
     Fail-soft per plugin (user ruling 2026-09-11): a ``services.py`` that fails
     to load, a file without a ``services()`` function, or a ``services()`` call
     that raises is skipped with a loud report
-    (``shared.plugin_load_report``) — one broken plugin must not block
+    (``base.packages.plugins.load_report``) — one broken plugin must not block
     `ava start` / the watchdog roster for every other plugin. The session-name
     collision guard stays fail-closed: no rule can pick a winner between two
     owners of one session name.
     """
-    from shared import plugin_load_report
-    from shared.plugins_config import installed_plugin_dirs
+    from base.packages.plugins import load_report
+    from base.packages.plugins.enable_config import installed_plugin_dirs
 
     specs: list[ServiceSpec] = []
     for name, plugin_dir in sorted(installed_plugin_dirs().items()):
@@ -112,11 +114,11 @@ def _plugin_services() -> tuple[ServiceSpec, ...]:
         except (KeyboardInterrupt, SystemExit):
             raise
         except BaseException as exc:
-            plugin_load_report.report_plugin_load_failure(name, exc)
+            load_report.report_plugin_load_failure(name, exc)
             continue
         declare = getattr(module, "services", None)
         if declare is None:
-            plugin_load_report.report_plugin_load_failure(
+            load_report.report_plugin_load_failure(
                 name,
                 PluginServiceError(
                     f"plugin {name!r} ships a services.py but it defines no `services()` function"
@@ -128,7 +130,7 @@ def _plugin_services() -> tuple[ServiceSpec, ...]:
         except (KeyboardInterrupt, SystemExit):
             raise
         except BaseException as exc:
-            plugin_load_report.report_plugin_load_failure(name, exc)
+            load_report.report_plugin_load_failure(name, exc)
     return tuple(specs)
 
 
@@ -288,7 +290,7 @@ def _core_gate_reason(session: str) -> str | None:
         return _browser_family_gate_reason(session)
     if session == "mcp-daemon" and not unix_sockets_available():
         # Same transport story as browser-mcp: the daemon binds a Unix socket
-        # (ava/_mcps_daemon.py) and its healthcheck dials it, so without AF_UNIX
+        # (ava/mcps/_daemon.py) and its healthcheck dials it, so without AF_UNIX
         # the service can never start and the watchdog would judge it dead every
         # 60s and log a restart failure — a Windows agent-runner, exactly.
         return "no AF_UNIX sockets (mcp-daemon's transport is POSIX-only)"
@@ -390,10 +392,10 @@ class Spec:
 
 
 # Compatibility re-export: legacy importers (`from ops.spec import
-# build_services`, scripts/prepare_plugin_fixture.py's generated
+# build_services`, scripts/release_proofs/prepare_plugin_fixture.py's generated
 # `services.py` template, tests) take the canonical roster from this module.
 # Placed at the BOTTOM deliberately: roster's build_services calls back into
-# this module's helpers (_bind_runtime_command / _plugin_services /
+# this module's helpers (_bind_runtime_command / plugin_services /
 # _assert_unique_sessions) lazily, so this edge must not run while this module
 # is partially initialized (spec → roster at the top would be a load-time
 # edge in the opposite direction of the call-time edge — keep both lazy).

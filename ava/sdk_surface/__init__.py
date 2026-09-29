@@ -1,4 +1,5 @@
-"""Implementation of the `ava` SDK entry surface — what the agent sees and how.
+"""Implementation of the `ava` SDK entry surface — what the agent sees and how —
+plus the per-call plumbing every SDK namespace shares.
 
 Each module holds one cohesive slice of the entry-point machinery:
 
@@ -14,7 +15,19 @@ Each module holds one cohesive slice of the entry-point machinery:
   (`ava/__init__.py` builds the curated `ava.extend` surface from it);
 - `plugin_loader` — the plugin-by-path loader (`load_plugin_module`,
   `safe_load_plugin_module`, `scan_and_load`) the agent kernel drives at host
-  boot and graph build.
+  boot and graph build;
+- `skill_sources` — the plugin-contributed skill-root registry behind
+  `ava.skills.register_skill_source`, kept off the `ava.skills` namespace so the
+  kernel can clear it even when `AVA_SDK_DISABLE` stubs that namespace out.
+
+The per-call plumbing the namespaces (`ava.files`, `ava.web`, ...) share:
+
+- `validation` — argument coercion (`coerce_str` / `coerce_typed`) at every SDK
+  entry point, plugin namespaces included;
+- `batch` — the bounded concurrent executor behind the SDK batch APIs
+  (`ava.web.search` / `ava.web.fetch` / `ava.understand`);
+- `metering` — the transparent per-call recorder that emits one `sdk_call`
+  event per top-level `ava.*` call.
 
 `ava/__init__.py` re-exports the plugin-author entry points (`ava.help`,
 `ava.register_namespace`, ...). The agent kernel drives rendering through the

@@ -143,7 +143,7 @@ def seed_active(home: Path, number: int) -> GenerationRef:
     Settings-free and database-free: for code that only compares the journal
     with the ledger. The catalog side is proven in tests/lifecycle/db_authority/.
     """
-    from shared.cluster.authority import (
+    from base.cluster.authority import (
         GATEWAY_GROUP,
         RUNNER_GROUP,
         BirthAuthority,
@@ -154,7 +154,7 @@ def seed_active(home: Path, number: int) -> GenerationRef:
         activate,
         create_ledger,
     )
-    from shared.cluster.authority.ledger import begin_mint, begin_revoke, mark_closed
+    from base.cluster.authority.ledger import begin_mint, begin_revoke, mark_closed
 
     def encrypt(name: str, _password: str) -> str:
         return f"SCRAM-SHA-256$4096:c2VlZA==${name}"

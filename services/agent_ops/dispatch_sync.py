@@ -15,7 +15,8 @@ from typing import Any
 
 from psycopg_pool import ConnectionPool
 
-from ops import ops_cluster, ops_config, ops_inventory, ops_uploads
+from base.api_contracts.release_handoff import ReleaseImageExecPayload
+from ops import cluster, host_config, inventory, uploads
 from ops.rpc_schemas import (
     AgentSkillViewPayload,
     ConfigAuditReadPayload,
@@ -26,7 +27,6 @@ from ops.rpc_schemas import (
     ShellProbePayload,
     UploadReceivePayload,
 )
-from shared.api_contracts.release_handoff import ReleaseImageExecPayload
 
 # The read-modify-write arms are serialized against each other: `config_write` and `inventory_write` both
 # READ their on-disk state, modify it and write it back, so an interleave lands the
@@ -54,34 +54,34 @@ def dispatch_sync(
     """
     match kind:
         case "status_probe":
-            return "completed", ops_cluster.cluster_status_op(pool).model_dump(mode="json")
+            return "completed", cluster.cluster_status_op(pool).model_dump(mode="json")
         case "config_read":
-            return "completed", ops_config.config_read_op().model_dump(mode="json")
+            return "completed", host_config.config_read_op().model_dump(mode="json")
         case "config_audit_read":
             ca = ConfigAuditReadPayload.model_validate(payload)
-            return "completed", ops_config.config_audit_read_op(ca.last).model_dump(mode="json")
+            return "completed", host_config.config_audit_read_op(ca.last).model_dump(mode="json")
         case "config_write":
             cw = ConfigWritePayload.model_validate(payload)
             with _state_write_lock:
-                return "completed", ops_config.config_write_op(
+                return "completed", host_config.config_write_op(
                     cw.overrides, local=cw.local, actor=cw.actor, trace_id=cw.trace_id
                 ).model_dump(mode="json")
         case "inventory_read":
-            return "completed", ops_inventory.inventory_read_op().model_dump(mode="json")
+            return "completed", inventory.inventory_read_op().model_dump(mode="json")
         case "inventory_write":
             iw = InventoryWritePayload.model_validate(payload)
             with _state_write_lock:
-                return "completed", ops_inventory.inventory_write_op(
+                return "completed", inventory.inventory_write_op(
                     iw.plugins, iw.mcp_servers
                 ).model_dump(mode="json")
         case "shell_probe" | "shell_kill" | "shell_capture" | "agent_skill_view":
             return "completed", _agent_arm(kind, payload, pool)
         case "upload_receive":
             ur = UploadReceivePayload.model_validate(payload)
-            return "completed", ops_uploads.upload_receive_op(ur).model_dump(mode="json")
+            return "completed", uploads.upload_receive_op(ur).model_dump(mode="json")
         case "release_image_exec":
             rie = ReleaseImageExecPayload.model_validate(payload)
-            return "completed", ops_cluster.release_image_exec_op(rie).model_dump(mode="json")
+            return "completed", cluster.release_image_exec_op(rie).model_dump(mode="json")
         case _:
             return "failed", {"error": f"unknown kind: {kind!r}"}
 
@@ -93,16 +93,16 @@ def _agent_arm(
     match kind:
         case "shell_probe":
             sp = ShellProbePayload.model_validate(payload)
-            return ops_cluster.shell_probe_op(sp.agent_id).model_dump(mode="json")
+            return cluster.shell_probe_op(sp.agent_id).model_dump(mode="json")
         case "shell_kill":
             sk = ShellKillPayload.model_validate(payload)
-            return ops_cluster.shell_kill_op(sk.agent_id, sk.session_id).model_dump(mode="json")
+            return cluster.shell_kill_op(sk.agent_id, sk.session_id).model_dump(mode="json")
         case "agent_skill_view":
             asv = AgentSkillViewPayload.model_validate(payload)
-            return ops_cluster.agent_skill_view_op(asv.agent_id, pool).model_dump(mode="json")
+            return cluster.agent_skill_view_op(asv.agent_id, pool).model_dump(mode="json")
         case "shell_capture":
             sc = ShellCapturePayload.model_validate(payload)
-            return ops_cluster.shell_capture_op(sc.agent_id, sc.session_id, sc.lines).model_dump(
+            return cluster.shell_capture_op(sc.agent_id, sc.session_id, sc.lines).model_dump(
                 mode="json"
             )
         case _:

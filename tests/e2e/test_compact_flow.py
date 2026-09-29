@@ -27,8 +27,9 @@ import httpx
 import psycopg
 import pytest
 
-from shared.agents import AgentStatus
-from shared.config import settings
+from base.agents import AgentStatus
+from base.config import settings
+from tests.base.poll_until import poll_until
 from tests.e2e._db import wait_for_status
 from tests.e2e._env import E2EEnv
 from tests.e2e._settings import pin_expand_runs_all
@@ -38,7 +39,6 @@ from tests.e2e.fakes.scenarios.compact_flow import (
     POST_COMPACT_REPLY,
     SUMMARY_TEXT,
 )
-from tests.shared.poll_until import poll_until
 
 _UNRECOGNIZED_RE = re.compile(
     "Unrecognized system_marker|\u65e0\u6cd5\u8bc6\u522b\u7684 system_marker"

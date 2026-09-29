@@ -1,6 +1,6 @@
-"""Tests for the session_name() composer in shared.cluster."""
+"""Tests for the session_name() composer in base.cluster."""
 
-from shared import cluster
+from base import cluster
 
 
 def test_session_name_has_ava_prefix_and_no_cluster_or_machine():

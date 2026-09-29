@@ -11,6 +11,9 @@ from typing import Any, NoReturn
 
 import pytest
 
+from base.deploy.release.runtime_release import VerifiedRelease
+from base.host.system.boot_unit import BootStartAction, BootUnitContext
+from base.native_process.ownership import OwnedProcess
 from cli.release_fleet.request import FleetRequest
 from cli.release_transition import root_service
 from cli.release_transition.journal import Operation, Retirement
@@ -20,9 +23,6 @@ from cli.release_transition.request import ReleaseRef
 from scripts.preview import release_cycle_runtime as runtime
 from scripts.preview import release_cycle_state as state
 from scripts.preview import release_generation
-from shared.native_process.ownership import OwnedProcess
-from shared.os_boot_unit import BootStartAction, BootUnitContext
-from shared.runtime_release import VerifiedRelease
 from tests.lifecycle.transition.phases import at_phase
 from tests.lifecycle.transition.test_journal import request_record as request_record
 
@@ -204,7 +204,7 @@ def test_termination_acceptance_never_substitutes_for_native_closure(
 ) -> None:
     import httpx
 
-    from cli.commands import service_stop
+    from cli.commands.lifecycle import service_stop
 
     (tmp_path / "smoke-release-a.json").write_text('{"agent": 5}')
     (tmp_path / "config.json").write_text(
@@ -297,8 +297,8 @@ def test_retained_state_is_read_as_the_administrator_never_the_source_login(
     import psycopg
     from psycopg.conninfo import conninfo_to_dict
 
-    from shared import pg_admin
-    from shared.config import settings
+    from base.config import settings
+    from base.db import pg_admin
 
     run = tmp_path.resolve()
     (run / "home").mkdir()
@@ -699,8 +699,8 @@ def test_the_cycle_admits_only_distinct_commits_over_one_schema_before_any_stop(
         else {"schema_digest": "0" * 64}
     )
     refs = {"previous": request_record.previous, "candidate": b}
-    monkeypatch.setattr("shared.os_boot_unit.systemd_running", lambda: True)
-    monkeypatch.setattr("shared.os_boot_unit.unit_name", lambda _home: "ava-home.service")
+    monkeypatch.setattr("base.host.system.boot_unit.systemd_running", lambda: True)
+    monkeypatch.setattr("base.host.system.boot_unit.unit_name", lambda _home: "ava-home.service")
     monkeypatch.setattr(runtime, "dotenv_values", lambda *_a, **_k: dict(runtime.local.PROFILE))
     monkeypatch.setattr(
         runtime, "captured", lambda _run, receipt, *_bind: (refs[receipt.name], receipt, {})

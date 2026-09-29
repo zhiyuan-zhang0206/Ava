@@ -8,7 +8,7 @@ description: Adds, changes, and rolls back Ava database migrations safely. Use w
 The model itself — baseline vs post-baseline deltas, the applied **set** keyed by
 migration name, the mandatory `.down.sql` pairing, expand-contract for lossy
 operations, and the bidirectional `assert_schema_current` check — is in
-`shared/migrations/migrations.ava.okf.md`. What follows is how you operate it.
+`base/deploy/schema/migrations.ava.okf.md`. What follows is how you operate it.
 
 ## Applying migrations
 
@@ -40,14 +40,14 @@ the way up.
 
 ## Pre-commit lint
 
-In CI, `scripts/lint_migrations.py` statically checks the timestamp filename format
+In CI, `scripts/content_lint/lint_migrations.py` statically checks the timestamp filename format
 (`YYYYMMDDTHHMMSS_<kebab-name>.sql`, a real datetime), name uniqueness, up/down pairing, that
 `db/schema.sql` stamps the baseline sentinel and no longer carries a `generate_series` seed,
 and that a migration whose strict (non-idempotent) DDL is already folded into the baseline
 is stamped in the seed — an unstamped strict delta dies on the first fresh-DB bootstrap, so
 lint fails it early. It also refuses `SET ROLE` / `RESET ROLE` / session-authorization
 changes: migrations run as the OS-user administrator acting as the schema owner, so every
-object stays owner-owned and only the owner's privileges apply. Local pre-check: `.venv/bin/python scripts/lint_migrations.py`. There is no
+object stays owner-owned and only the owner's privileges apply. Local pre-check: `.venv/bin/python scripts/content_lint/lint_migrations.py`. There is no
 continuity / next-number / cross-branch-collision check — timestamp names are collision-free by
 construction.
 

@@ -19,8 +19,8 @@ from unittest.mock import Mock
 import psutil
 import pytest
 
+from base.config import settings
 from cli.commands.data_plane import pgbouncer as pgb
-from shared.config import settings
 
 _SECRET = "pgbouncerstopisolationtestsecret"  # noqa: S105 — test fixture, not a real credential
 
@@ -129,7 +129,7 @@ def test_stop_signals_this_homes_own_pooler(
         _fake_psutil_process({4242: _pooler_proc(home / "pgbouncer", platform=platform)}),
     )
 
-    from shared.native_process.ownership import OwnedProcess
+    from base.native_process.ownership import OwnedProcess
 
     monkeypatch.setattr(pgb.ownership, "pooler", Mock(return_value=OwnedProcess(4242, 1.0, None)))
     (home / "pgbouncer" / "pgbouncer.ini").write_text("[pgbouncer]\nlisten_port=16433\n")

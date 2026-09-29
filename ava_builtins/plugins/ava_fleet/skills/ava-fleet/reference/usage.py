@@ -47,12 +47,12 @@ import time
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from gateway import loki_events
-from shared.db import connect
-from shared.loki_index_labels import ledger_gap_plan, retention_floor
+from base.db import connect
+from base.telemetry.loki_index_labels import ledger_gap_plan, retention_floor
+from gateway.lgtm import loki_events
 
 # The token/cost payload fields summed per (agent, model) — the llm_usage
-# payload keys (shared/events/contract.py LLM_USAGE_KEYS).
+# payload keys (base/events/contract.py LLM_USAGE_KEYS).
 _SUM_FIELDS = ("in_total", "out_total", "cache_read", "reasoning", "cost_usd")
 
 # llm_usage category filter — telemetry since the 2026-08-05 convention, plus

@@ -3,7 +3,7 @@
 memory_indexer moved from pidfile to HTTP /healthz (#254 pattern) so the watchdog
 does not misjudge death during a tens-of-seconds cold-start embed and fall into a
 spawn race. The probe itself (identity verification) is covered in
-`tests/shared/test_daemon_health.py`; here we pin that this healthcheck asks for
+`tests/base/test_health.py`; here we pin that this healthcheck asks for
 the right daemon name and pidfile, and that the restart path reports the probe's
 verdict rather than the spawn's.
 """
@@ -12,9 +12,9 @@ from __future__ import annotations
 
 import pytest
 
+from base.config import settings
+from base.daemon.health import DaemonProbe
 from services.healthchecks import memory_indexer as hc
-from shared.config import settings
-from shared.daemon_health import DaemonProbe
 
 
 def test_probe_asks_for_this_daemons_identity(monkeypatch: pytest.MonkeyPatch) -> None:

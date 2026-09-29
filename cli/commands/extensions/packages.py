@@ -18,7 +18,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import cast
 
-from shared.install_registry import InstalledPackage
+from base.packages.extensions.install_registry import InstalledPackage
 
 # Column width for the text table's LAST RESULT cell (JSON is untruncated).
 _RESULT_W = 40
@@ -47,7 +47,7 @@ class _Row:
 
 def _package_root(pkg: InstalledPackage) -> Path | None:
     """The package's LIVE directory on this machine (None when absent)."""
-    from shared import paths
+    from base import paths
 
     root = {
         "skill": paths.skills_dir() / pkg.name,
@@ -68,14 +68,14 @@ def _read_declared_range(pkg: InstalledPackage) -> tuple[dict[str, object] | Non
     fails validation is reported as an error value instead of raising — status
     must never fail on the state it reports.
     """
-    from shared import plugin_manifest
+    from base.packages.plugins import manifest as manifest_module
 
     root = _package_root(pkg)
     if root is None:
         return None, None
     try:
-        manifest = plugin_manifest.load_manifest(root)
-    except plugin_manifest.ManifestError as e:
+        manifest = manifest_module.load_manifest(root)
+    except manifest_module.ManifestError as e:
         return None, str(e)
     if manifest is None:
         return None, None
@@ -135,8 +135,9 @@ def cmd_packages_status(*, json_output: bool = False) -> int:
     channel/policy/applied-rev/last-result/declared-range. Read-only."""
     import json
 
-    from shared import host_version as host_version_mod
-    from shared import install_registry, paths
+    from base import paths
+    from base.deploy.git import host_version as host_version_mod
+    from base.packages.extensions import install_registry
 
     registry = install_registry.load()
     try:
@@ -355,8 +356,9 @@ def cmd_packages_rollback(name: str, *, force: bool = False) -> int:
     the current one. `--force` overrides the local-edit guard. The channel
     watermark (`applied_rev`) is left where it was: a later refresh applies only
     what changed after the revoked rev."""
-    from shared import install_registry, paths
-    from shared.packages.skills.skill_names import match_key
+    from base import paths
+    from base.packages.extensions import install_registry
+    from base.packages.skills.names import match_key
 
     try:
         registry = install_registry.load()
@@ -418,9 +420,9 @@ def cmd_packages_policy(
     [--check-every 24h]` — record an explicit policy decision on the row; explicit
     values survive every refresh pass (only None fields are resolved from
     settings)."""
+    from base.packages.extensions import install_registry
+    from base.packages.skills.names import match_key
     from cli.commands.extensions.packages_refresh import parse_duration
-    from shared import install_registry
-    from shared.packages.skills.skill_names import match_key
 
     if update_mode is None and check_every is None:
         print("[ava packages policy] pass --update-mode and/or --check-every", file=sys.stderr)

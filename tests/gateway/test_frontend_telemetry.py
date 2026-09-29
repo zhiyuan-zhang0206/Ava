@@ -19,9 +19,9 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
+from base import telemetry
 from gateway.app import app
 from gateway.routers import frontend_telemetry as ft_router
-from shared import telemetry
 
 # One valid interaction as the browser sends it.
 PAGE = "fleet"
@@ -46,7 +46,7 @@ def _rows(session: str) -> list[tuple]:  # type: ignore[no-untyped-def]
     import json
     from datetime import UTC, datetime
 
-    from shared.paths import logs_dir
+    from base.paths import logs_dir
 
     telemetry.sync()
     day = datetime.now(UTC).strftime("%Y%m%d")

@@ -24,13 +24,14 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
+from base.cluster.machine import machine_name
+from base.config import settings
+from base.host import config_validators
+from base.host.env import audit, runtime_config
 from gateway.app import app
 from gateway.routers import config as config_router
 from ops import cluster_rpc as _cluster_rpc
 from ops.rpc_schemas import ConfigAuditReadResult, ConfigWriteOpResult, FieldWriteResult
-from shared import host_config_validators, runtime_config
-from shared.config import settings
-from shared.machine import machine_name
 
 
 def test_get_config_serializes_required_fields():
@@ -58,7 +59,7 @@ def test_get_config_serializes_required_fields():
 def test_redis_url_masked_does_not_leak_cluster_secret(monkeypatch: pytest.MonkeyPatch) -> None:
     """redis_url carries the runtime ACL password as userinfo, so GET /api/config
     must mask it like db_url — the credential must never appear in the response."""
-    from ops.ops_config import SENSITIVE_MASK
+    from ops.host_config import SENSITIVE_MASK
 
     monkeypatch.setattr(settings.data_plane, "redis_url", "redis://:supersecret@10.0.0.1:6379/0")
     with TestClient(app) as client:
@@ -102,7 +103,7 @@ def test_get_config_exposes_target_machine_capabilities() -> None:
     """GET self carries the gateway's own capability set (machine_role()) so the
     panel can pick which capability sections a remote view renders. Only valid
     capability tokens; the self view is a gateway, so it carries at least that."""
-    from shared.machine import machine_role
+    from base.cluster.machine import machine_role
 
     with TestClient(app) as client:
         resp = client.get("/api/config")
@@ -135,10 +136,9 @@ def _stub_browser_capability(monkeypatch: pytest.MonkeyPatch) -> None:
     """Force the browser_enabled read-time capability to a deterministic verdict:
     the aggregate browser_capable() gate reports capable -> can_enable True.
 
-    Patches the predicate as bound in `host_config_validators` so the test does
-    not depend on the machine actually having a display / Chrome / npx.
+    Patches the predicate as bound in `config_validators`: no real display / Chrome / npx.
     """
-    monkeypatch.setattr(host_config_validators, "browser_capable", lambda: True)
+    monkeypatch.setattr(config_validators, "browser_capable", lambda: True)
 
 
 def test_get_self_host_fields_carry_capability_hint(_stub_browser_capability: None) -> None:
@@ -165,8 +165,8 @@ def test_get_self_host_fields_carry_capability_hint(_stub_browser_capability: No
 
 def test_get_self_browser_disabled_when_no_display(monkeypatch: pytest.MonkeyPatch) -> None:
     """GET self with no display: browser_enabled.can_enable is False + a reason."""
-    monkeypatch.setattr(host_config_validators, "browser_capable", lambda: False)
-    monkeypatch.setattr(host_config_validators, "display_available", lambda: False)
+    monkeypatch.setattr(config_validators, "browser_capable", lambda: False)
+    monkeypatch.setattr(config_validators, "display_available", lambda: False)
     with TestClient(app) as client:
         resp = client.get("/api/config")
     assert resp.status_code == 200, resp.text
@@ -260,7 +260,7 @@ def _full_host_fields_for_remote(overrides: dict[str, Any]) -> dict[str, Any]:
     """Build a full host_fields dict for every host-scope meta, taking explicit
     overrides where given and a neutral stub otherwise — so the GET composer can
     index every host field without a real remote runner."""
-    from shared.config import get_config_metadata
+    from base.config import get_config_metadata
 
     out: dict[str, Any] = {}
     for meta in get_config_metadata():
@@ -430,7 +430,7 @@ def test_put_rejects_invalid_enum_value(_clean_overrides: Path) -> None:
 def test_get_self_sensitive_raw_override_is_sentinel(_clean_overrides: Path) -> None:
     """A sensitive cluster field set in .env appears in raw_overrides as the
     unchanged-sentinel, never its cleartext (no secret on the wire)."""
-    from shared.config import CONFIG_UNCHANGED_SENTINEL
+    from base.config import CONFIG_UNCHANGED_SENTINEL
 
     runtime_config.write_fields({"deepseek_api_key": "sk-REAL-SECRET"}, set())
     with TestClient(app) as client:
@@ -443,7 +443,7 @@ def test_get_self_sensitive_raw_override_is_sentinel(_clean_overrides: Path) -> 
 def test_put_sentinel_preserves_secret(_clean_overrides: Path) -> None:
     """Round-tripping the sentinel for an untouched secret keeps its .env value;
     a real edit to another field still lands."""
-    from shared.config import CONFIG_UNCHANGED_SENTINEL
+    from base.config import CONFIG_UNCHANGED_SENTINEL
 
     runtime_config.write_fields({"deepseek_api_key": "sk-REAL-SECRET"}, set())
     with TestClient(app) as client:
@@ -485,7 +485,7 @@ def test_put_replaces_one_secret_leaves_others(_clean_overrides: Path) -> None:
     Locks the isolation guarantee behind the Control page's write-only API-key
     replace: a new DEEPSEEK value lands while OPENAI (sentinel) and a non-secret
     field are preserved."""
-    from shared.config import CONFIG_UNCHANGED_SENTINEL
+    from base.config import CONFIG_UNCHANGED_SENTINEL
 
     runtime_config.write_fields(
         {
@@ -540,7 +540,7 @@ def test_put_host_failure_leaves_cluster_unwritten(_clean_overrides: Path) -> No
 def test_put_rejects_bad_scalar(_clean_overrides: Path) -> None:
     """A non-numeric value for a cluster int/float field 400s before any write,
     rather than landing in .env and crashing Settings at the next restart."""
-    from shared.config import get_config_metadata
+    from base.config import get_config_metadata
 
     scalar = next(
         m
@@ -557,7 +557,7 @@ def test_put_rejects_bad_scalar(_clean_overrides: Path) -> None:
 def test_put_rejects_bool_for_int_field(_clean_overrides: Path) -> None:
     """A JSON bool for an int field is rejected (it would otherwise pass int() and
     persist as 'true', breaking Settings at the next restart)."""
-    from shared.config import get_config_metadata
+    from base.config import get_config_metadata
 
     scalar = next(
         m
@@ -573,7 +573,7 @@ def test_put_rejects_bool_for_int_field(_clean_overrides: Path) -> None:
 def test_put_nonsensitive_field_can_hold_literal_sentinel(_clean_overrides: Path) -> None:
     """The sentinel-skip is gated on `sensitive`, so a non-sensitive field can be
     set to the literal sentinel string (no silent drop)."""
-    from shared.config import CONFIG_UNCHANGED_SENTINEL
+    from base.config import CONFIG_UNCHANGED_SENTINEL
 
     with TestClient(app) as client:
         resp = client.put("/api/config", json={"llm_model": CONFIG_UNCHANGED_SENTINEL})
@@ -588,9 +588,9 @@ def test_put_self_edits_writable_host_capability_field(
     remote_writable) is editable on the self/Cluster view — the local write honors
     `writable`."""
     monkeypatch.setattr(
-        host_config_validators,
+        config_validators,
         "validate",
-        lambda _f, _v: host_config_validators.ValidationResult(ok=True),  # pyright: ignore[reportUnknownArgumentType]
+        lambda _f, _v: config_validators.ValidationResult(ok=True),  # pyright: ignore[reportUnknownArgumentType]
     )
     with TestClient(app) as client:
         resp = client.put("/api/config", json={"cross_machine_transfer_backend": "none"})
@@ -669,9 +669,9 @@ def test_put_explicit_self_edits_remote_writable_host_toggle(
     the two used to collapse because both resolve target to machine_name(), leaving
     heartbeat_enabled / task_maintenance_enabled uneditable on a single box."""
     monkeypatch.setattr(
-        host_config_validators,
+        config_validators,
         "validate",
-        lambda _f, _v: host_config_validators.ValidationResult(ok=True),  # pyright: ignore[reportUnknownArgumentType]
+        lambda _f, _v: config_validators.ValidationResult(ok=True),  # pyright: ignore[reportUnknownArgumentType]
     )
     with TestClient(app) as client:
         # Cluster view (machine omitted): writable=False -> rejected read-only.
@@ -898,8 +898,7 @@ def test_get_config_audit_default_last_comes_from_display_config(
     """Omitted `last` is ``settings.display.config_audit_default_last``
     (``AVA_CONFIG_AUDIT_DEFAULT_LAST``); the literal 20 is only that field's
     default, not a hard-coded cap."""
-    from shared import env_audit, runtime_config
-    from shared.agents import MachineNotRegistered
+    from base.agents import MachineNotRegistered
 
     def _known(_target: str) -> None:
         return None
@@ -909,18 +908,18 @@ def test_get_config_audit_default_last_comes_from_display_config(
     def _unregistered(_name: str) -> list[str]:
         raise MachineNotRegistered(_name)
 
-    monkeypatch.setattr("shared.machines.lookup_role", _unregistered)
+    monkeypatch.setattr("base.cluster.machines.lookup_role", _unregistered)
 
     env_path = runtime_config.env_file_path()
     env_path.write_text("AVA_MODEL=audit-one\n")
-    env_audit.record_env_write(
+    audit.record_env_write(
         env_path,
         {"AVA_MODEL"},
         set(),
         site="test-one",
         changes=[{"alias": "AVA_MODEL", "old": "old", "new": "audit-one"}],
     )
-    env_audit.record_env_write(
+    audit.record_env_write(
         env_path,
         {"AVA_MODEL"},
         set(),
@@ -939,8 +938,7 @@ def test_get_config_audit_reads_own_records(
     _clean_overrides: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A self audit read returns this box's newest records, tagged with its machine."""
-    from shared import env_audit, runtime_config
-    from shared.agents import MachineNotRegistered
+    from base.agents import MachineNotRegistered
 
     def _known(_target: str) -> None:
         return None
@@ -950,10 +948,10 @@ def test_get_config_audit_reads_own_records(
     def _unregistered(_name: str) -> list[str]:
         raise MachineNotRegistered(_name)
 
-    monkeypatch.setattr("shared.machines.lookup_role", _unregistered)
+    monkeypatch.setattr("base.cluster.machines.lookup_role", _unregistered)
     env_path = runtime_config.env_file_path()
     env_path.write_text("AVA_MODEL=audit-self\n")
-    env_audit.record_env_write(
+    audit.record_env_write(
         env_path,
         {"AVA_MODEL"},
         set(),
@@ -993,7 +991,7 @@ async def test_get_config_audit_all_merges_runners_newest_first(
     def _runners() -> list[tuple[str, str | None]]:
         return [("m1", None), ("m2", None)]
 
-    monkeypatch.setattr("shared.machines.list_agent_runners", _runners)
+    monkeypatch.setattr("base.cluster.machines.list_agent_runners", _runners)
 
     with TestClient(app) as client:
         resp = client.get("/api/config/audit?machine=all&last=2")

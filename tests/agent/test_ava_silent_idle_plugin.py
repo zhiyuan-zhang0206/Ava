@@ -26,7 +26,7 @@ from langgraph.runtime import Runtime
 
 from agent.messages import NoteTag
 from agent.state import build_agent_state, clear_plugin_registrations
-from shared.context import AvaContext
+from base.agents.context import AvaContext
 
 
 @pytest.fixture
@@ -34,7 +34,7 @@ def _loaded():
     """Load plugins.ava_silent_idle via the real plugin-registration path;
     teardown clears registrations + unloads the module so its before_llm hook
     does not leak into other tests."""
-    from shared.plugin_context import PluginContext
+    from base.packages.plugins.context import PluginContext
 
     clear_plugin_registrations()
     for name in list(sys.modules):
@@ -115,7 +115,7 @@ async def test_defers_when_auto_compact_would_fire(
     'silent-idle' label is not an event and would raise in the emitter)."""
     # Pin the force-compact ceiling to 1 token (regardless of model) so any
     # non-empty history triggers it; occupancy here is the chars/4 fallback.
-    from shared.lm.context_budget import ContextBudget
+    from base.lm.context_budget import ContextBudget
 
     budget = ContextBudget(
         max_context_tokens=1_000_000, soft_compact_tokens=600_000, hard_compact_tokens=1

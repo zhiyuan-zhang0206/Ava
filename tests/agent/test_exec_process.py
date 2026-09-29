@@ -17,8 +17,8 @@ from unittest.mock import MagicMock
 import psutil
 import pytest
 
-from agent.graph import _exec_subprocess
-from agent.graph._exec_process import (
+from agent.graph.exec import _subprocess
+from agent.graph.exec._process import (
     _READER_JOIN_TIMEOUT_S,
     DomainCloseOwner,
     ExecProcessDomain,
@@ -34,12 +34,12 @@ from agent.graph._exec_process import (
     start_root_exit_observer,
     wait_with_grace,
 )
-from agent.graph._exec_result import _ExecCrashed
-from agent.graph._exec_stream import StreamingTextIO
-from agent.graph._exec_subprocess import _collect_child, _spawn
-from shared.native_process.ownership import OwnedProcess
-from shared.posixproc import _group_empty
-from shared.turn_identity import HostedTurnResources, bind_hosted_resources
+from agent.graph.exec._result import _ExecCrashed
+from agent.graph.exec._stream import StreamingTextIO
+from agent.graph.exec._subprocess import _collect_child, _spawn
+from base.native_process.ownership import OwnedProcess
+from base.native_process.turn_identity import HostedTurnResources, bind_hosted_resources
+from base.sessions.posixproc import _group_empty
 from tests.e2e._proc import kill_group_or_prove_already_gone
 
 _AGENT_ID = 424242
@@ -75,7 +75,7 @@ async def _assert_group_gone(pgid: int, timeout_s: float = 5.0) -> None:
     ``killpg(pgid, 0)`` keeps succeeding while any member — including a
     zombie awaiting its reaper — remains in the group table, so a one-shot
     ``ProcessLookupError`` expectation races the OS reaper; poll instead.
-    ``_group_empty`` is the same production check ``shared.posixproc`` uses:
+    ``_group_empty`` is the same production check ``base.sessions.posixproc`` uses:
     macOS answers a zombie-only group's ``killpg(pgid, 0)`` with EPERM, not
     ESRCH, so a raw ``except ProcessLookupError`` here would leave that EPERM
     uncaught instead of falling through to its psutil member scan.
@@ -307,8 +307,8 @@ async def test_dead_status_is_a_terminal_non_reaping_observation(
     def _identity_for_pid(_pid: int) -> MagicMock:
         return identity
 
-    monkeypatch.setattr("agent.graph._exec_process.IS_WINDOWS", False)
-    monkeypatch.setattr("agent.graph._exec_process.psutil.Process", _identity_for_pid)
+    monkeypatch.setattr("agent.graph.exec._process.IS_WINDOWS", False)
+    monkeypatch.setattr("agent.graph.exec._process.psutil.Process", _identity_for_pid)
 
     await asyncio.wait_for(start_root_exit_observer(proc), timeout=1.0)
 
@@ -322,9 +322,9 @@ async def test_missing_process_is_a_terminal_non_reaping_observation(
     identity.status.side_effect = psutil.NoSuchProcess(pid=556)
     proc = MagicMock(pid=556)
 
-    monkeypatch.setattr("agent.graph._exec_process.IS_WINDOWS", False)
+    monkeypatch.setattr("agent.graph.exec._process.IS_WINDOWS", False)
     monkeypatch.setattr(
-        "agent.graph._exec_process.psutil.Process", MagicMock(return_value=identity)
+        "agent.graph.exec._process.psutil.Process", MagicMock(return_value=identity)
     )
 
     await asyncio.wait_for(start_root_exit_observer(proc), timeout=1.0)
@@ -450,7 +450,7 @@ async def test_runner_cancelled_owners_leave_no_exec_process_group(
         # The emergency path must not enqueue new default-executor work: that
         # executor is exactly what Runner is trying to shut down in production.
         monkeypatch.setattr(
-            "agent.graph._exec_process.asyncio.to_thread",
+            "agent.graph.exec._process.asyncio.to_thread",
             MagicMock(side_effect=AssertionError("default executor re-entered")),
         )
         started = time.monotonic()
@@ -483,7 +483,7 @@ async def test_windows_stop_closes_the_owned_job_once(
 
     domain.close_confirmed.side_effect = close_job
     domain_close = DomainCloseOwner(domain, root_exit_task)
-    monkeypatch.setattr("agent.graph._exec_process.IS_WINDOWS", True)
+    monkeypatch.setattr("agent.graph.exec._process.IS_WINDOWS", True)
 
     signal_child(proc, signal.SIGTERM, domain_close)
     await domain_close.wait()
@@ -542,9 +542,9 @@ def test_windows_job_attach_failure_kills_reaps_and_closes_pipe(
         popen_env.update(kwargs["env"])  # type: ignore[arg-type]
         return proc
 
-    monkeypatch.setattr("agent.graph._exec_subprocess.IS_WINDOWS", True)
-    monkeypatch.setattr("agent.graph._exec_subprocess.WindowsJob.create", lambda: job)
-    monkeypatch.setattr("agent.graph._exec_subprocess.subprocess.Popen", _fake_popen)
+    monkeypatch.setattr("agent.graph.exec._subprocess.IS_WINDOWS", True)
+    monkeypatch.setattr("agent.graph.exec._subprocess.WindowsJob.create", lambda: job)
+    monkeypatch.setattr("agent.graph.exec._subprocess.subprocess.Popen", _fake_popen)
     gate = tmp_path / "attach.job-ready"
 
     with pytest.raises(OSError, match="attach failed") as caught:
@@ -571,7 +571,7 @@ def test_windows_popen_failure_preserves_primary_when_job_close_fails(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """Job cleanup diagnostics cannot replace the original Popen failure."""
-    from agent.graph._exec_subprocess import _ExecNeverStartedError
+    from agent.graph.exec._subprocess import _ExecNeverStartedError
 
     class _FailingJob:
         def close(self) -> None:
@@ -581,9 +581,9 @@ def test_windows_popen_failure_preserves_primary_when_job_close_fails(
         raise OSError("spawn failed")
 
     job = _FailingJob()
-    monkeypatch.setattr("agent.graph._exec_subprocess.IS_WINDOWS", True)
-    monkeypatch.setattr("agent.graph._exec_subprocess.WindowsJob.create", lambda: job)
-    monkeypatch.setattr("agent.graph._exec_subprocess.subprocess.Popen", _failing_popen)
+    monkeypatch.setattr("agent.graph.exec._subprocess.IS_WINDOWS", True)
+    monkeypatch.setattr("agent.graph.exec._subprocess.WindowsJob.create", lambda: job)
+    monkeypatch.setattr("agent.graph.exec._subprocess.subprocess.Popen", _failing_popen)
 
     with pytest.raises(OSError, match="spawn failed") as caught:
         _spawn(
@@ -606,7 +606,7 @@ async def test_live_signal_refusal_returns_unresolved_without_reap(
 ) -> None:
     import errno
 
-    from shared.native_process.ownership import OwnedProcess
+    from base.native_process.ownership import OwnedProcess
 
     proc, domain = ExecProcessDomain.launch_posix(
         [sys.executable, "-I", "-c", "import time;time.sleep(60)"],
@@ -623,7 +623,7 @@ async def test_live_signal_refusal_returns_unresolved_without_reap(
         assert pgid == proc.pid
         raise PermissionError(errno.EPERM, "private live group signal refusal")
 
-    monkeypatch.setattr("shared.exec_process_domain.os.killpg", denied)
+    monkeypatch.setattr("base.native_process.exec_domain.os.killpg", denied)
     try:
         failures = await asyncio.wait_for(
             settle_resources(root_exit, reap, closer, None, request_stop=True),
@@ -635,7 +635,7 @@ async def test_live_signal_refusal_returns_unresolved_without_reap(
         assert closer.task.done() and reap.done() and root_exit.cancelled()
         assert proc.returncode is None and native.live()
     finally:
-        monkeypatch.setattr("shared.exec_process_domain.os.killpg", original_signal)
+        monkeypatch.setattr("base.native_process.exec_domain.os.killpg", original_signal)
         domain.close_confirmed(time.monotonic() + 5)
         proc.wait(timeout=5)
         root_exit.cancel()
@@ -673,7 +673,7 @@ def test_cancelled_late_reader_does_not_block_runner_shutdown(
 
     async def run() -> None:
         with bind_hosted_resources(scope):
-            outcome, _ = await _exec_subprocess._run_legacy_subprocess(
+            outcome, _ = await _subprocess._run_legacy_subprocess(
                 "private reader fixture", None, asyncio.Event(), 20, exec_dir=tmp_path / "exec"
             )
         assert isinstance(outcome, _ExecCrashed)
@@ -694,7 +694,7 @@ def test_cancelled_late_reader_does_not_block_runner_shutdown(
         finally:
             runner_done.set()
 
-    monkeypatch.setattr(_exec_subprocess, "_spawn", private_spawn)
+    monkeypatch.setattr(_subprocess, "_spawn", private_spawn)
     runner = threading.Thread(target=run_in_thread, daemon=True)
     runner.start()
     try:

@@ -13,12 +13,12 @@ from uuid import uuid4
 
 import pytest
 
+from base.deploy.release.runtime_release import ReleaseRejectedError
+from base.deploy.release.start_inputs import configuration_digest
 from cli.release_fleet.request import FleetRequest
 from cli.release_transition import local, stage
 from cli.release_transition.journal import Phase
 from cli.release_transition.request import ReleaseRef
-from shared.runtime_release import ReleaseRejectedError
-from shared.start_inputs import configuration_digest
 from tests.lifecycle.transition.phases import at_phase
 
 
@@ -57,12 +57,12 @@ def _forbid_runtime_imports(monkeypatch: pytest.MonkeyPatch) -> None:
 
     def guarded(name: str, *args: Any, **kwargs: Any) -> Any:
         if name in {
-            "shared.config",
+            "base.config",
             "cli.start_runtime",
-            "shared.os_boot_unit",
-            "shared",
-            "cli.commands.maintenance",
-            "cli.commands.service_stop",
+            "base.host.system.boot_unit",
+            "base",
+            "cli.commands.lifecycle.maintenance",
+            "cli.commands.lifecycle.service_stop",
             "cli.release_transition.root_service",
         }:
             raise AssertionError(f"changed configuration reached runtime import: {name}")
@@ -138,14 +138,14 @@ from pathlib import Path
 sys.path.insert(0, sys.argv[1])
 original = builtins.__import__
 def guarded(name, *args, **kwargs):
-    if name == "shared.config" or name.startswith("shared.config.") or name.startswith("cli.commands"):
+    if name == "base.config" or name.startswith("base.config.") or name.startswith("cli.commands"):
         raise AssertionError("configuration admission imported runtime settings: " + name)
     return original(name, *args, **kwargs)
 builtins.__import__ = guarded
-from shared.start_inputs import configuration_digest
+from base.deploy.release.start_inputs import configuration_digest
 from cli.release_fleet.request import FleetRequest
 assert configuration_digest(Path(sys.argv[2])) == sys.argv[3]
-assert "shared.config" not in sys.modules
+assert "base.config" not in sys.modules
 """
     result = subprocess.run(  # noqa: S603 — isolated child reads this test's temporary home only
         [

@@ -59,4 +59,4 @@ __description__ = "Surface matching ava SDK primitives, explain cross-cell NameE
 # registrations: everything this plugin does is agent-runtime behavior (state
 # fields, after_exec / before_llm hooks), so children do not need any of it.
 # The registrations live in `agent_runtime.py`, imported only on the full path
-# (see `agent/extensions.py`; task #3633).
+# (see `agent/extensions/__init__.py`; task #3633).

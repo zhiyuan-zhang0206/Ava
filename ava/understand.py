@@ -16,11 +16,11 @@ from typing import Any, cast, overload
 from zoneinfo import ZoneInfo
 
 from ava import files as _files
-from ava._batch import DEFAULT_BATCH_MAX_CONCURRENT, run_batch, validate_max_concurrent
-from ava.sdk_validation import coerce_str
-from shared.config import settings
-from shared.lm.attach_constants import ATTACH_MEDIA_MIME
-from shared.lm.effort import (
+from ava.sdk_surface.batch import DEFAULT_BATCH_MAX_CONCURRENT, run_batch, validate_max_concurrent
+from ava.sdk_surface.validation import coerce_str
+from base.config import settings
+from base.lm.attach_constants import ATTACH_MEDIA_MIME
+from base.lm.effort import (
     ReasoningEffort,
     clamp_effort,
     coerce_effort,
@@ -29,7 +29,7 @@ from shared.lm.effort import (
 # Provider split by modality is config-driven: settings.lm.understand_text_model
 # (default deepseek-flash) handles literal strings / text files;
 # settings.lm.understand_media_model (default gemini-3.5-flash) handles binary
-# media. The default IDs live in shared/lm/factory.py:SUPPORTED_MODELS. The media
+# media. The default IDs live in base/lm/factory.py:SUPPORTED_MODELS. The media
 # model goes through the SAME provider factory as every other LLM path
 # (`build_chat_model`); the Gemini client is the default media provider.
 
@@ -66,7 +66,7 @@ def _save_understand_output(prompt: str, result: str, *, source: str) -> Path | 
         agent_id = agent_identity.require_agent_id()
     except RuntimeError:
         return None
-    from shared.paths import workspace_dir
+    from base.paths import workspace_dir
 
     d = workspace_dir(agent_id) / _OVERFLOW_DIRNAME
     d.mkdir(parents=True, exist_ok=True)
@@ -312,11 +312,11 @@ def _call_text(content: list[Any], *, effort: str | ReasoningEffort) -> str:
 
     `effort` (validated by the public function) rides
     `build_chat_model(reasoning_effort=...)`; the cross-provider clamp in
-    `shared/lm/effort.py` maps it onto what the model's provider accepts
+    `base/lm/effort.py` maps it onto what the model's provider accepts
     (`max` → deepseek's max, `none` → reasoning off via the thinking switch).
     """
-    from shared.lm.call import invoke_text
-    from shared.lm.factory import build_chat_model, provider_key_of_model
+    from base.lm.call import invoke_text
+    from base.lm.factory import build_chat_model, provider_key_of_model
 
     model = settings.lm.understand_text_model
     try:
@@ -361,9 +361,9 @@ def _call_media(content: list[Any], *, mime: str, effort: str | ReasoningEffort)
     default calls behave exactly as before. (The path is Gemini-only for now —
     see the module docstring — so the knob always applies.)
     """
-    from shared.lm import provider_api
-    from shared.lm.call import invoke_text
-    from shared.lm.factory import build_chat_model, provider_key_of_model
+    from base.lm import provider_api
+    from base.lm.call import invoke_text
+    from base.lm.factory import build_chat_model, provider_key_of_model
 
     model = settings.lm.understand_media_model
     # The media part shape is Gemini-specific (see the module docstring); only

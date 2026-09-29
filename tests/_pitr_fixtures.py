@@ -1,6 +1,16 @@
-"""Shared PITR test fixtures (backend credential evidence shapes)."""
+"""Shared PITR test fixtures (backend credential evidence shapes, the deploy-lease stub)."""
 
 from __future__ import annotations
+
+import pytest
+
+from base.deploy.state import cluster_lock
+
+
+def stub_update_lock(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Let an activation take and release the cluster deploy lease without a database."""
+    monkeypatch.setattr(cluster_lock, "acquire_update_lock", lambda *_a, **_kw: True)
+    monkeypatch.setattr(cluster_lock, "release_update_lock", lambda *_a, **_kw: None)
 
 
 def baidu_credential_evidence() -> dict[str, str]:

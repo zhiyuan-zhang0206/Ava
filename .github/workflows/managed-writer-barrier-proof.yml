@@ -3,11 +3,11 @@ on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
     paths:
-      - 'shared/managed_writer_barrier.py'
-      - 'shared/managed_writer_publication.py'
-      - 'tests/shared/test_managed_writer_barrier.py'
-      - 'tests/shared/test_managed_writer_publication.py'
-      - 'tests/shared/test_publication_admission.py'
+      - 'base/deploy/writers/barrier.py'
+      - 'base/deploy/writers/publication.py'
+      - 'tests/base/test_barrier.py'
+      - 'tests/base/test_publication.py'
+      - 'tests/base/test_publication_admission.py'
       - '.github/workflows/managed-writer-barrier-proof.yml'
 permissions:
   contents: read
@@ -27,5 +27,5 @@ jobs:
           version: 0.10.2
       - uses: ./.github/actions/install-pg-redis
       - run: uv sync --frozen
-      - run: uv run pytest tests/shared/test_managed_writer_barrier.py tests/shared/test_managed_writer_publication.py tests/shared/test_publication_admission.py -q
-      - run: uv run pyright shared/managed_writer_barrier.py shared/managed_writer_publication.py tests/shared/test_managed_writer_barrier.py tests/shared/test_managed_writer_publication.py tests/shared/test_publication_admission.py
+      - run: uv run pytest tests/base/test_barrier.py tests/base/test_publication.py tests/base/test_publication_admission.py -q
+      - run: uv run pyright base/deploy/writers/barrier.py base/deploy/writers/publication.py tests/base/test_barrier.py tests/base/test_publication.py tests/base/test_publication_admission.py

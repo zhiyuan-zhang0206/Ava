@@ -12,7 +12,7 @@ the first signal anyone acted on was the owner waking up.
    pre-arrears signal.
 10. **Blocked agents** — fails while at least N agents are halted by
     permanent provider rejections (`agents_meta.permanent_reject_streak >= 2`,
-    the durable recovery-breaker halt in `shared/recovery_breaker.py`). The
+    the durable recovery-breaker halt in `base/agents/recovery_breaker.py`). The
     Grafana rule covers billing rejections as events and resolves 15 minutes
     after the last one; this check covers every permanent class (auth /
     forbidden / model-not-found included) as a *state* — it fires while the
@@ -45,8 +45,8 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, cast
 
-from shared.config import settings
-from shared.recovery_breaker import HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS
+from base.agents.recovery_breaker import HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS
+from base.config import settings
 
 
 class BalanceReadError(RuntimeError):
@@ -216,10 +216,10 @@ def _halted_agents_count(window_hours: float) -> int | None:
     pair stays coherent. None when the query cannot run — the caller reports
     "cannot judge" and passes, never a guessed healthy verdict.
     """
-    import shared.db
+    import base.db
 
     try:
-        with shared.db.connect() as conn, conn.cursor() as cur:
+        with base.db.connect() as conn, conn.cursor() as cur:
             cur.execute(
                 "SELECT count(*) FROM agents_meta"
                 " WHERE permanent_reject_streak >= %s"

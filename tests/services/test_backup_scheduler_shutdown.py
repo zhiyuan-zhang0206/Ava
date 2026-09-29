@@ -32,10 +32,10 @@ from unittest.mock import AsyncMock, patch
 import psutil
 import pytest
 
+from base.config import settings
+from base.native_process.exec_domain import ExecProcessDomain
 from ops.agent_pause import PAUSE_TIMEOUT_SECONDS
 from services.backup_scheduler import daemon, worker
-from shared.config import settings
-from shared.exec_process_domain import ExecProcessDomain
 from tests.services.daemon_shutdown_test_support import (
     EXIT_BOUND_S,
     KILL_SLACK_S,
@@ -73,7 +73,7 @@ def _block(root: Path, mode: str) -> None:
 def _backup_patches(root: Path, mode: str) -> contextlib.ExitStack:
     """Run the real scheduled preparation with one blocking pipeline stage."""
     from services import backup
-    from services.pitr import store_factory
+    from services.pitr.stores import factory
 
     def run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[bytes]:
         size_path = kwargs["size_path"]
@@ -101,14 +101,14 @@ def _backup_patches(root: Path, mode: str) -> contextlib.ExitStack:
         patch.object(backup, "_db_size_breakdown", return_value="test"),
         patch.object(backup, "_run_with_progress", run),
         patch.object(backup, "_key_file", key),
-        patch.object(store_factory, "get_store_group", return_value=group),
+        patch.object(factory, "get_store_group", return_value=group),
     ):
         stack.enter_context(patcher)
     return stack
 
 
 def _restore(root: Path, mode: str, postgres_base: Path) -> None:
-    from shared.pg_tools import throwaway_postgres
+    from base.cluster.dataplane.pg_tools import throwaway_postgres
 
     with throwaway_postgres(base=postgres_base, foreground=True) as url:
         import psycopg
@@ -127,7 +127,7 @@ def _restore(root: Path, mode: str, postgres_base: Path) -> None:
 
 def _exercise_job(root: Path, mode: str, postgres_base: Path) -> None:
     """The operation worker's real entry, with only its external effects patched."""
-    from scripts import restore_drill
+    from scripts.data_plane_ops import restore_drill
 
     def restore(*, foreground: bool, scratch_root: Path) -> None:
         assert foreground
@@ -331,7 +331,7 @@ async def test_restore_job_accepts_clean_foreground_postgres_exit(
 
 def _exercise_close_stop(root: Path) -> None:
     """The daemon loop, with its stop request landing inside the group close."""
-    from shared.daemon_shutdown import cancel_and_drain
+    from base.daemon.shutdown import cancel_and_drain
 
     close = ExecProcessDomain.close_confirmed
     launch = ExecProcessDomain.launch_posix

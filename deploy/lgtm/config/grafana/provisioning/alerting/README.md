@@ -20,7 +20,7 @@ dashboards).
 
 ### LogQL migration (task #1467, complete)
 
-- Since the 2026-08-23 index-label cutover (shared/loki_index_labels.py) the
+- Since the 2026-08-23 index-label cutover (base/telemetry/loki_index_labels.py) the
   collector promotes `event_name` / `agent_id` to stream labels; event-scoped
   rules match them INSIDE the stream selector
   (`{service_name="unknown_service", event_name=...}`) and keep `| json` only
@@ -185,7 +185,7 @@ R17's fast-route thresholds are calibrated against seven days of route data,
 R19 gives slow-by-design routes separate 5s/10s thresholds calibrated against
 24 hours of route data, and R18 catches fleet-wide slowdown (p95 vs the 24h
 baseline ×2) rather than single long turns. The emitter's single
-route-classification source is `gateway/_latency.py`. All five carry
+route-classification source is `gateway/middleware/latency.py`. All five carry
 `notify_im: "false"` — the PM slow-request convention is warning-first and no
 IM fan-out (alert-fatigue ruling 2026-08-22); the gateway honors the label once
 the IM gating PR (#3219) lands, until then they reach IM like the rest.
@@ -201,7 +201,7 @@ R13 (llm-billing-quota) is the one rule with no threshold and no `for`
 window: an out-of-credit API key fails every turn in the fleet and only a
 human spending money clears it, so the first rejection is already the whole
 incident. Its discriminator is the `billing` field the emitter writes from
-`shared/lm/errors.py`'s cross-provider predicate (HTTP 402 plus a per-vendor
+`base/lm/errors.py`'s cross-provider predicate (HTTP 402 plus a per-vendor
 vocabulary matched against the response body's `error.type` AND `error.code`) —
 a new provider is covered by adding its string there, with no edit to
 `rules.yml`.

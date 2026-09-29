@@ -32,7 +32,7 @@ import importlib.abc
 import sys
 class Deny(importlib.abc.MetaPathFinder):
     def find_spec(self, fullname, path=None, target=None):
-        if fullname in {'shared.config', 'cli.commands'}:
+        if fullname in {'base.config', 'cli.commands'}:
             raise AssertionError('forbidden import before the handoff: ' + fullname)
 sys.meta_path.insert(0, Deny())
 from cli.main import main
@@ -141,7 +141,7 @@ def test_the_handoff_refuses_before_any_exec(
     change: str,
     reason: str,
 ) -> None:
-    monkeypatch.setattr("shared.dotenv_boot.resolve_ava_home", lambda: (store.home, True))
+    monkeypatch.setattr("base.host.env.dotenv_boot.resolve_ava_home", lambda: (store.home, True))
     document: bytes | None = store.request()
     if change == "missing":
         document = None
@@ -172,7 +172,7 @@ def test_an_unanchored_cli_refuses_the_handoff(
 ) -> None:
     """A checkout that owns no home cannot tell whose request this is."""
     monkeypatch.setattr(
-        "shared.dotenv_boot.resolve_ava_home", lambda: (Path.home() / ".ava", False)
+        "base.host.env.dotenv_boot.resolve_ava_home", lambda: (Path.home() / ".ava", False)
     )
     err = _refusal(store, tmp_path, monkeypatch, capsys, store.request())
     assert "owns no home" in err

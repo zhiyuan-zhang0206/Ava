@@ -23,7 +23,7 @@ automatic rollback boundary. Every executor (coordinator, follower, PITR)
 treats any `Exception` as a failure and journals it before routing it
 (`failure.py`); only a process-ending `BaseException` passes undecided.
 
-The executor's `main` opens its log sinks first (`shared.log.init_cli_process`,
+The executor's `main` opens its log sinks first (`base.log.init_cli_process`,
 name `release-executor`): stderr, kept by the native adapter (the transient
 unit's systemd journal; launchd's `updates/<id>/executor/a<N>/stderr.log`),
 `$AVA_HOME/logs/release-executor.log`, and the event pipeline (never the
@@ -31,7 +31,7 @@ database). A routed failure's traceback lands there.
 
 While it runs, the executor stamps `updates/<id>/executor-heartbeat` from a
 thread every `LEASE_RENEW_INTERVAL_S` and removes it when it leaves
-(`shared/release_operation.py::executor_heartbeat`). The health probe lets an
+(`base/deploy/release/operation.py::executor_heartbeat`). The health probe lets an
 incomplete operation explain an outage only while that stamp is at most
 `EXECUTOR_HEARTBEAT_TTL_S` old; before the first beat, the stamp the
 submission and each native dispatch leave (`open_launch_grace`). Past it the
@@ -47,8 +47,8 @@ a release ([decision](../../decisions/2026-09-27-fleet-release-and-cutover-polic
 item 2). While root still serves them, the phase waits the captured policy's
 `close_s` for their jobs to finish, signalling nothing. It then stops root, keeping
 terminals, so no reconciler re-arms a session. `close_release_terminals`
-(`cli/commands/service_stop.py`) captures every recorded shell, every other
-member of its session (`shared/sessions/pty/session_tree.py`: descendants and
+(`cli/commands/lifecycle/service_stop.py`) captures every recorded shell, every other
+member of its session (`base/sessions/pty/session_tree.py`: descendants and
 POSIX session, a double-forked job included) and each PTY host birth, records
 the `ava stop` closure notice for each busy session's owner (naming the
 release, before any signal), HUPs shells and TERMs jobs, and after the
@@ -77,7 +77,7 @@ receipt. A durable serving marker is not a substitute for a live observation.
 `stage.py` admits the captured image and uses ordinary `run_start`. Release
 startup does not mutate an editable checkout, install dependencies, migrate, or
 silently prepare external assets. After observation, `boot.py` becomes the
-steady pinned-image boot action on Linux; on macOS the keeper's pinned seed is. `shared/release_operation.py` blocks unrelated
+steady pinned-image boot action on Linux; on macOS the keeper's pinned seed is. `base/deploy/release/operation.py` blocks unrelated
 ordinary startup while an operation remains incomplete. Only the exact current
 starting journal revision grants the in-process start capability; child
 processes do not inherit it.

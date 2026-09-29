@@ -1,0 +1,646 @@
+"""`base.deploy.state.cluster_lock` — the cluster-wide "a deploy owns this cluster" lease.
+
+Real-DB tests (the lease IS a Postgres compare-and-set; mocking it would test
+nothing). Verifies a second live holder is blocked, release frees it, release is
+holder-scoped (no clobber), and an expired TTL is reclaimable — the lease serializes
+gateway update orchestrations so two can't run at once (the 2026-06-01 collision).
+
+The second half covers the lease as a *readable state* rather than only a gate: the
+`DeployLease` read every "a deploy started by X is in progress" refusal is built
+from, and the settle hold that keeps the cluster guarded after an orchestration
+exits with agent-runners still converging (the 2026-07-29 incident)."""
+
+from __future__ import annotations
+
+import os
+from collections.abc import Iterator
+from typing import Any
+
+import psycopg
+import pytest
+from psycopg.types.json import Jsonb
+
+from base.config import settings
+from base.db import transaction
+from base.deploy.state.cluster_lock import (
+    SETTLE_TTL_S,
+    DeployLease,
+    acquire_update_lock,
+    claim_recovery_lock,
+    holder_process_gone,
+    read_update_lease,
+    release_settle_hold,
+    release_update_lock,
+    renew_update_lock,
+    self_holder,
+    settle_note,
+    update_lock_holder,
+)
+
+
+def _seed_settle_hold(
+    db_conn: psycopg.Connection, holder: str, hosts: list[str], *, ttl_s: float = SETTLE_TTL_S
+) -> None:
+    """Land a settle hold directly, mirroring the write the retired
+    `settle_update_lock` (no production caller — removed as dead code) used to
+    perform, so tests of the still-live read side (`release_settle_hold`,
+    `DeployLease.is_settle_hold`/`awaits`, `renew_update_lock`'s settle-hold
+    refusal) do not need that production function to exist."""
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "UPDATE deployment_state "
+            "SET expires_at = now() + make_interval(secs => %s), "
+            "    settle_note = %s, settle_hosts = %s, settle_started_at = now(), phase = 'settling' "
+            "WHERE id = 1 AND holder = %s",
+            (ttl_s, settle_note(hosts), sorted(hosts), holder),
+        )
+    db_conn.commit()
+
+
+@pytest.fixture(autouse=True)
+def _free_lock(db_conn: psycopg.Connection) -> Iterator[None]:
+    """Reset the singleton lock to free before + after each test — deployment_state
+    is not in the conftest TRUNCATE list (it is infra, not business data), so this
+    module self-manages it the way tests/ava/test_migrations.py reseeds schema_migrations.
+    Durable publication evidence is reset with it: a leaked `pending` record would
+    refuse ordinary acquisition for every later test."""
+
+    def _free() -> None:
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "UPDATE deployment_state SET holder=NULL, acquired_at=NULL, expires_at=NULL, "
+                "settle_hosts=NULL, settle_note=NULL, settle_started_at=NULL, "
+                "phase='stable', kind=NULL, target_sha=NULL, managed_writer_evidence=NULL "
+                "WHERE id=1"
+            )
+        db_conn.commit()
+
+    _free()
+    yield
+    _free()
+
+
+def test_second_live_holder_is_blocked() -> None:
+    assert acquire_update_lock("A") is True
+    assert acquire_update_lock("B") is False  # A holds it
+    assert update_lock_holder() == "A"
+
+
+def test_read_lease_uses_the_callers_connection(
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A bundled snapshot can read the lease without opening or owning another connection."""
+    assert acquire_update_lock("A", kind="rollout") is True
+
+    def _fresh_connect(**_kwargs: object) -> object:
+        raise AssertionError("read_update_lease opened a fresh connection")
+
+    monkeypatch.setattr("base.db.connect", _fresh_connect)
+
+    lease = read_update_lease(conn=db_conn)
+
+    assert lease is not None
+    assert lease.holder == "A"
+    assert lease.kind == "rollout"
+
+
+def test_release_frees_for_next_holder() -> None:
+    assert acquire_update_lock("A") is True
+    release_update_lock("A")
+    assert update_lock_holder() is None
+    assert acquire_update_lock("B") is True  # now free
+
+
+def test_release_is_holder_scoped(loguru_records: list[dict[str, Any]]) -> None:
+    """A release by a non-holder is a no-op — so a slow release after a TTL reclaim
+    can't clobber the new owner's lock; the WARNING names the reclaim, never the
+    pending-publication refusal (task #2683)."""
+    assert acquire_update_lock("A") is True
+    release_update_lock("B")  # B never held it
+    assert update_lock_holder() == "A"  # A still holds
+    assert any(
+        "not held by B at release" in r["message"] and "reclaimed past TTL" in r["message"]
+        for r in loguru_records
+    )
+
+
+def test_expired_lock_is_reclaimable() -> None:
+    """A crashed holder's lock (TTL in the past) reports no live holder and is
+    reclaimable — no permanent deadlock."""
+    assert acquire_update_lock("A", ttl_s=-1.0) is True  # already expired
+    assert update_lock_holder() is None  # expired -> not a live holder
+    assert acquire_update_lock("B") is True  # reclaimed
+
+
+def test_expired_lock_with_pending_publication_requires_publication_recovery(
+    db_conn: psycopg.Connection, loguru_records: list[dict[str, Any]]
+) -> None:
+    """A durable pending publication outlives its lease.
+
+    Ordinary rollout acquisition and generic cluster recovery cannot replace the
+    expired holder while the publication protocol still requires an exact
+    predecessor CAS and fresh writer closure.
+    """
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "UPDATE deployment_state SET holder='gateway:pid123', "
+            "acquired_at=now()-interval '2 minutes', expires_at=now()-interval '1 minute', "
+            "phase='updating', managed_writer_evidence="
+            '\'{"version":2,"current":null,"pending":{"request":"retained"}}\'::jsonb '
+            "WHERE id=1"
+        )
+    db_conn.commit()
+
+    try:
+        assert read_update_lease() is None
+        assert acquire_update_lock("ordinary-rollout") is False
+        assert claim_recovery_lock("ordinary-recovery", observed=None).acquired is False
+        release_update_lock("gateway:pid123")
+        row = db_conn.execute(
+            "SELECT holder, phase, settle_hosts FROM deployment_state WHERE id=1"
+        ).fetchone()
+        assert row == ("gateway:pid123", "updating", None)
+
+        # The refusal must name the pending publication — the warning must not
+        # assert the reclaim story for this designed refusal (task #2683).
+        refusals = [
+            r["message"]
+            for r in loguru_records
+            if "not held by gateway:pid123 at release" in r["message"]
+        ]
+        assert len(refusals) == 1
+        assert all("durable pending publication refuses the transition" in m for m in refusals)
+        assert not any("reclaimed past TTL" in m for m in refusals)
+
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "UPDATE deployment_state SET phase='settling', "
+                "settle_note='waiting for runner', settle_hosts=ARRAY['runner'], "
+                "settle_started_at=now() WHERE id=1"
+            )
+        db_conn.commit()
+        before = db_conn.execute(
+            "SELECT holder, phase, settle_note, settle_hosts, "
+            "settle_started_at IS NOT NULL, managed_writer_evidence->'pending' "
+            "FROM deployment_state WHERE id=1"
+        ).fetchone()
+        assert before is not None
+        assert before[:4] == (
+            "gateway:pid123",
+            "settling",
+            "waiting for runner",
+            ["runner"],
+        )
+        assert before[4] is True
+        assert release_settle_hold("gateway:pid123") is False
+        after = db_conn.execute(
+            "SELECT holder, phase, settle_note, settle_hosts, "
+            "settle_started_at IS NOT NULL, managed_writer_evidence->'pending' "
+            "FROM deployment_state WHERE id=1"
+        ).fetchone()
+        assert after == before
+    finally:
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "UPDATE deployment_state SET holder=NULL, acquired_at=NULL, expires_at=NULL, "
+                "phase='stable', kind=NULL, managed_writer_evidence=NULL WHERE id=1"
+            )
+        db_conn.commit()
+
+
+def test_recovery_claim_loses_if_a_new_rollout_acquires_after_its_free_read() -> None:
+    observed = read_update_lease()
+    assert observed is None
+    assert acquire_update_lock("winner", kind="rollout") is True
+
+    claim = claim_recovery_lock("recovery", observed)
+
+    assert claim.acquired is False
+    assert update_lock_holder() == "winner"
+
+
+def test_recovery_claim_replaces_only_the_exact_dead_lease_identity() -> None:
+    assert acquire_update_lock("dead-holder", kind="rollout") is True
+    observed = read_update_lease()
+    assert observed is not None and observed.acquired_at is not None
+
+    claim = claim_recovery_lock("recovery", observed)
+
+    assert claim.acquired is True
+    assert claim.previous_holder == "dead-holder"
+    assert update_lock_holder() == "recovery"
+
+
+def test_stale_recovery_snapshot_cannot_replace_a_reclaimed_lease() -> None:
+    assert acquire_update_lock("old", kind="rollout") is True
+    observed = read_update_lease()
+    assert observed is not None
+    release_update_lock("old")
+    assert acquire_update_lock("new", kind="restart") is True
+
+    claim = claim_recovery_lock("recovery", observed)
+
+    assert claim.acquired is False
+    assert update_lock_holder() == "new"
+
+
+# ─── the pending-publication refusal detail (task #4093, slice 1a) ─
+
+
+def _pending_operation(
+    *, holder: str = "gateway:pid123", target_sha: str = "e" * 40
+) -> dict[str, str]:
+    """One durable pending publication's operation subdocument, as stored in JSONB."""
+    return {
+        "holder": holder,
+        "acquired_at": "2026-09-19T12:00:00+00:00",
+        "target_sha": target_sha,
+    }
+
+
+def _seed_pending_rollout(
+    db_conn: psycopg.Connection,
+    operation: dict[str, str],
+    *,
+    phase: str = "updating",
+    kind: str | None = "rollout",
+    settle_hosts: list[str] | None = None,
+    expired: bool = True,
+) -> None:
+    """An executing-rollout row carrying `operation` as its durable pending publication."""
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "UPDATE deployment_state SET phase=%s, kind=%s, holder=%s, settle_hosts=%s, "
+            "acquired_at=clock_timestamp() - interval '2 minutes', "
+            "expires_at=clock_timestamp() + make_interval(secs => %s), "
+            "target_sha=%s, managed_writer_evidence=%s WHERE id=1",
+            (
+                phase,
+                kind,
+                operation["holder"],
+                settle_hosts,
+                -60.0 if expired else 600.0,
+                operation["target_sha"],
+                Jsonb({"version": 2, "current": None, "pending": {"operation": operation}}),
+            ),
+        )
+    db_conn.commit()
+
+
+def _acquire_refusals(loguru_records: list[dict[str, Any]], holder: str) -> list[str]:
+    return [
+        r["message"]
+        for r in loguru_records
+        if f"[cluster-lock] acquire by {holder} REFUSED" in r["message"]
+    ]
+
+
+def test_acquire_refusal_names_the_pending_publication_and_its_owner(
+    db_conn: psycopg.Connection, loguru_records: list[dict[str, Any]]
+) -> None:
+    """The acquire warning must tell the pending story — not send the operator
+    hunting for a live holder that does not exist, nor to a recovery verb that no
+    longer exists. It names the durable fact and its owner: no command clears it;
+    resolving it is a manual cutover repair."""
+    _seed_pending_rollout(db_conn, _pending_operation())
+
+    assert acquire_update_lock("next-rollout") is False
+
+    refusals = _acquire_refusals(loguru_records, "next-rollout")
+    assert len(refusals) == 1
+    assert "managed_writer_evidence->'pending'" in refusals[0]
+    assert "no command clears it" in refusals[0]
+    assert "cutover repair" in refusals[0]
+    assert "recover-pending" not in refusals[0]
+    assert "a live holder exists" not in refusals[0]
+
+
+def test_acquire_refusal_names_the_live_holder(
+    db_conn: psycopg.Connection, loguru_records: list[dict[str, Any]]
+) -> None:
+    assert acquire_update_lock("gateway-host:pid81319") is True
+    assert acquire_update_lock("second-rollout") is False
+
+    refusals = _acquire_refusals(loguru_records, "second-rollout")
+    assert len(refusals) == 1
+    assert "a live holder exists (gateway-host:pid81319)" in refusals[0]
+
+
+def test_acquire_refusal_leads_with_the_live_holder_when_pending_coexists(
+    db_conn: psycopg.Connection, loguru_records: list[dict[str, Any]]
+) -> None:
+    """A holder that already opened its journal is normally still running.
+
+    The live holder leads — a wait — and the durable pending publication is the
+    follow-up fact for the case that holder never completes, never the headline.
+    """
+    _seed_pending_rollout(db_conn, _pending_operation(), expired=False)
+
+    assert acquire_update_lock("next-rollout") is False
+
+    refusals = _acquire_refusals(loguru_records, "next-rollout")
+    assert len(refusals) == 1
+    assert "a live holder exists" in refusals[0]
+    assert "recover-pending" not in refusals[0]
+    assert refusals[0].index("a live holder exists") < refusals[0].index("managed_writer_evidence")
+
+
+# ─── the lease as a readable state, and the settle hold ──────────────────────
+
+
+def test_lease_describes_a_live_holder() -> None:
+    """`read_update_lease` is the richer read the "a deploy started by X is in
+    progress" refusal is built from — holder, age, and time to expiry, all measured
+    server-side so a cross-host clock skew can't distort them."""
+    assert acquire_update_lock("gateway-host:pid81319", ttl_s=1800.0) is True
+    lease = read_update_lease()
+    assert lease is not None
+    assert lease.holder == "gateway-host:pid81319"
+    assert 0 <= lease.held_for_s < 60  # just taken
+    assert 1700 < lease.expires_in_s <= 1800
+    assert lease.settle_hosts is None  # an ordinary in-flight rollout carries no settle fact
+    assert "gateway-host:pid81319" in lease.describe()
+
+
+def test_expired_lease_reads_as_free() -> None:
+    """Same TTL semantics as update_lock_holder: an expired holder is not a live
+    lease, which is what bounds the health probe's suppression window."""
+    assert acquire_update_lock("A", ttl_s=-1.0) is True
+    assert read_update_lease() is None
+
+
+def test_settle_hold_keeps_the_lease_past_the_holders_exit(db_conn: psycopg.Connection) -> None:
+    """A settle hold (its writer had no remaining caller and was removed as dead
+    code — `_seed_settle_hold` reproduces its write here) keeps the cluster held on
+    a shorter TTL instead of releasing — the 2026-07-29 gap a second `ava cluster
+    update` walked into. The reason rides in the structured settle fields, and the
+    lease stays un-acquirable."""
+    assert acquire_update_lock("gateway-host:pid81319", ttl_s=1800.0) is True
+    _seed_settle_hold(db_conn, "gateway-host:pid81319", ["wsl"], ttl_s=900.0)
+
+    lease = read_update_lease()
+    assert lease is not None
+    assert lease.holder == "gateway-host:pid81319"  # holder untouched — see below
+    # The `settle_hosts` array is the machine-readable record of WHICH hosts the
+    # hold waits for — the release path re-probes exactly that set.
+    assert lease.settle_hosts == ["wsl"]
+    assert lease.expires_in_s <= 900  # TTL shortened to the settle window
+    assert "wsl" in lease.describe()  # the human still sees which host it waits for
+    # The settle start is recorded server-side (C3, task #2189): the hold outlives
+    # the orchestration process, so its duration is only computable from this
+    # column — the telemetry the release path prints.
+    assert lease.settle_started_at is not None
+    assert lease.settle_elapsed_s is not None and 0 <= lease.settle_elapsed_s < 900
+    assert acquire_update_lock("gateway-host:pid99999") is False  # still guards the cluster
+
+
+def test_a_settle_hold_is_read_as_awaiting_exactly_the_hosts_it_names(
+    db_conn: psycopg.Connection,
+) -> None:
+    """`DeployLease.awaits` is the discrimination a healer needs and the lease alone
+    could not give it: an *executing* rollout means stand back, a settle hold naming
+    this host means this host's convergence is the remaining work (issue #1020).
+
+    Scoped three ways, all asserted here — a lease carrying no settle fact is never
+    permitted however the caller asks; a hold names only the hosts it names; and a hold
+    whose recorded set is empty yields no permission at all: a hold that names nobody
+    must never read as permission."""
+    assert acquire_update_lock("gateway-host:pid81319") is True
+    executing = read_update_lease()
+    assert executing is not None
+    assert executing.settle_hosts is None
+    assert executing.awaits("wsl") is False, "a rollout executing right now permits nobody"
+
+    _seed_settle_hold(db_conn, "gateway-host:pid81319", ["wsl", "laptop-host"])
+    hold = read_update_lease()
+    assert hold is not None
+    assert hold.awaits("laptop-host") is True
+    assert hold.awaits("wsl") is True
+    assert hold.awaits("win") is False, "the permission does not generalise to other hosts"
+
+    empty = DeployLease(
+        holder="gateway-host:pid1", held_for_s=1.0, expires_in_s=1.0, settle_hosts=[]
+    )
+    assert empty.awaits("laptop-host") is False
+
+
+def test_acquire_clears_a_previous_settle_fact(db_conn: psycopg.Connection) -> None:
+    """A fresh deploy must not inherit the last one's settle fact."""
+    assert acquire_update_lock("A", ttl_s=-1.0) is True
+    _seed_settle_hold(db_conn, "A", ["wsl"], ttl_s=-1.0)  # expired settle hold
+    assert acquire_update_lock("B") is True  # reclaims the lapsed lease
+    lease = read_update_lease()
+    assert (
+        lease is not None
+        and lease.holder == "B"
+        and lease.settle_hosts is None
+        and lease.settle_note is None
+    )
+
+
+def test_release_clears_the_settle_fact(db_conn: psycopg.Connection) -> None:
+    assert acquire_update_lock("A") is True
+    _seed_settle_hold(db_conn, "A", ["wsl"])
+    release_update_lock("A")
+    assert read_update_lease() is None
+    assert acquire_update_lock("B") is True
+    lease = read_update_lease()
+    assert lease is not None and lease.settle_hosts is None and lease.settle_note is None
+
+
+def test_holder_persists_across_connections() -> None:
+    """acquire/holder use independent short connections (as the multi-process rollout
+    does) — the lock state is the committed row, visible to a fresh connection."""
+    assert acquire_update_lock("A") is True
+    with psycopg.connect(settings.data_plane.db_url, autocommit=True) as conn, conn.cursor() as cur:
+        cur.execute("SELECT holder FROM deployment_state WHERE id=1 AND expires_at > now()")
+        assert cur.fetchone()[0] == "A"  # type: ignore[index]
+
+
+# ─── renewal: the lease outlives the operation, not the reverse ───────────────
+
+
+def test_renewal_extends_a_lease_that_would_otherwise_lapse() -> None:
+    """The invariant: the lock must not expire before the operation it protects can
+    finish. A rollout takes the lease on a TTL and renews while it runs, so how long a
+    deploy is *allowed* to take stops being LOCK_TTL_S minus the sum of every phase's
+    timeout — a quantity nobody re-audits when a slower host joins the fleet."""
+    assert acquire_update_lock("A", ttl_s=0.5) is True
+    assert renew_update_lock("A", ttl_s=600.0) is True
+    lease = read_update_lease()
+    assert lease is not None and lease.holder == "A"
+    assert lease.expires_in_s > 500.0
+
+
+def test_renewal_by_a_non_holder_is_refused() -> None:
+    """A lease already reclaimed past its TTL by a new owner must not be re-armed under
+    the old holder's name."""
+    assert acquire_update_lock("A") is True
+    assert renew_update_lock("B") is False
+    assert update_lock_holder() == "A"
+
+
+def test_renewal_never_re_arms_a_settle_hold(db_conn: psycopg.Connection) -> None:
+    """`settle_hosts IS NOT NULL` is the stronger guard. A settle hold's whole value is that it
+    ENDS — on convergence or on SETTLE_TTL_S — so a stray renewal from a straggler
+    would convert a stated waiting period into an unbounded hold on the cluster."""
+    assert acquire_update_lock("A") is True
+    _seed_settle_hold(db_conn, "A", ["win"])
+    assert renew_update_lock("A", ttl_s=99999.0) is False
+    lease = read_update_lease()
+    assert lease is not None and lease.settle_hosts is not None
+    assert lease.expires_in_s < SETTLE_TTL_S + 1.0  # the settle window, not the renewal
+
+
+def test_renewal_re_arms_a_lease_that_had_already_lapsed() -> None:
+    """Leaving a live rollout unprotected is worse than a late re-arm, so a renewal
+    that finds the row lapsed still takes it back (it cannot steal from anyone — a new
+    owner would no longer match the holder). The WARNING it logs is the signal that a
+    renewal round was missed."""
+    assert acquire_update_lock("A", ttl_s=-1.0) is True  # already expired
+    assert read_update_lease() is None
+    assert renew_update_lock("A", ttl_s=600.0) is True
+    lease = read_update_lease()
+    assert lease is not None and lease.holder == "A"
+
+
+def test_self_holder_is_the_format_the_liveness_probe_parses() -> None:
+    """One builder, because `ops.cluster._lock_holder_is_live` parses it to decide
+    whether `ava cluster recover` may break a hold. It is also how the Phase-B poll
+    re-finds its own lease without the holder being threaded down four frames."""
+    from base.cluster.machine import machine_name
+
+    holder = self_holder()
+    machine, sep, pid_str = holder.partition(":pid")
+    assert sep == ":pid"
+    assert machine == machine_name()
+    assert pid_str == str(os.getpid())
+
+
+def test_holder_process_gone_only_on_positive_local_death() -> None:
+    """The reclaim-side probe errs the other way from the signalling probe: only a
+    parseable THIS-machine holder with an absent pid reads as gone; a foreign
+    holder, an operator-chosen (unparseable) name, and a live process all read as
+    live — a caller that destroys state on this reading may only ever destroy a
+    claim whose owner is definitively gone."""
+    from base.cluster.machine import machine_name
+
+    assert holder_process_gone("elsewhere:pid1") is False
+    assert holder_process_gone("operator-chosen-campaign") is False
+    assert holder_process_gone(f"{machine_name()}:pid999999999") is True
+    assert holder_process_gone(f"{machine_name()}:pid{os.getpid()}") is False
+
+
+def test_holder_process_gone_reads_a_recycled_pid_as_gone() -> None:
+    """An alive pid is not enough: with the lease's age, a process that started
+    after the acquire cannot be the holder (the recycled-pid bound is shared with
+    `ops.cluster._lock_holder_is_live`, so manual and automatic recovery can
+    never disagree)."""
+    from base.cluster.machine import machine_name
+
+    holder = f"{machine_name()}:pid{os.getpid()}"
+    assert holder_process_gone(holder, held_for_s=10**9) is True
+    assert holder_process_gone(holder, held_for_s=0.0) is False
+
+
+# ─── the explicit-model row: phase + kind (R1 wave, Task #1021) ──────────────
+
+
+def test_acquire_enters_updating_and_records_kind() -> None:
+    """The deployment_state row answers "is a deploy running, of what kind" — the
+    explicit replacement for the flag-file / session-probe conjunction."""
+    assert acquire_update_lock("A", kind="rollout") is True
+    with psycopg.connect(settings.data_plane.db_url, autocommit=True) as conn, conn.cursor() as cur:
+        cur.execute("SELECT phase, kind FROM deployment_state WHERE id=1")
+        phase, kind = cur.fetchone()  # type: ignore[misc]
+        assert phase == "updating"
+        assert kind == "rollout"
+
+
+def test_acquire_without_kind_leaves_kind_null() -> None:
+    """A rollback takes the lease but has no kind in the enumeration — the row still
+    reads as "a deploy is in progress" (phase updating, holder set)."""
+    assert acquire_update_lock("A") is True
+    with psycopg.connect(settings.data_plane.db_url, autocommit=True) as conn, conn.cursor() as cur:
+        cur.execute("SELECT phase, kind FROM deployment_state WHERE id=1")
+        phase, kind = cur.fetchone()  # type: ignore[misc]
+        assert phase == "updating"
+        assert kind is None
+
+
+def test_release_returns_to_stable_and_clears_kind() -> None:
+    assert acquire_update_lock("A", kind="restart") is True
+    release_update_lock("A")
+    with psycopg.connect(settings.data_plane.db_url, autocommit=True) as conn, conn.cursor() as cur:
+        cur.execute("SELECT phase, kind, holder FROM deployment_state WHERE id=1")
+        phase, kind, holder = cur.fetchone()  # type: ignore[misc]
+        assert phase == "stable"
+        assert kind is None
+        assert holder is None
+
+
+def test_release_settle_hold_returns_to_stable(db_conn: psycopg.Connection) -> None:
+    assert acquire_update_lock("A") is True
+    _seed_settle_hold(db_conn, "A", ["wsl"])
+    assert release_settle_hold("A") is True
+    with psycopg.connect(settings.data_plane.db_url, autocommit=True) as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT phase, settle_hosts, settle_started_at FROM deployment_state WHERE id=1"
+        )
+        phase, hosts, settle_started_at = cur.fetchone()  # type: ignore[misc]
+        assert phase == "stable"
+        assert hosts is None
+        assert settle_started_at is None  # the telemetry anchor clears with the hold
+
+
+def test_release_settle_hold_refuses_a_plain_executing_lease() -> None:
+    """Behavioral pin for the `settle_hosts IS NOT NULL` scope (the 6479 battery's
+    C1 mutant — the source-substring guard in tests/cli/test_deploy_mutex.py cannot
+    bite a predicate change). A plain lease is an orchestration actively executing:
+    the early release must not unlock it, and the row must stay as acquired."""
+    assert acquire_update_lock("A", kind="rollout") is True
+
+    assert release_settle_hold("A") is False
+
+    lease = read_update_lease()
+    assert lease is not None
+    assert lease.holder == "A"
+    assert lease.kind == "rollout"
+    assert lease.settle_hosts is None
+    assert update_lock_holder() == "A"
+
+
+def test_read_lease_carries_kind(db_conn: psycopg.Connection) -> None:
+    """DeployLease exposes kind so consumers can say WHAT is running, not just that
+    something is."""
+    assert acquire_update_lock("A", kind="rollout") is True
+    lease = read_update_lease()
+    assert lease is not None and lease.kind == "rollout"
+    _seed_settle_hold(db_conn, "A", ["wsl"])
+    lease2 = read_update_lease()
+    assert lease2 is not None and lease2.kind == "rollout"  # kind survives a settle
+
+
+def test_release_lands_when_the_pooler_is_down(
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The rollout tail must not depend on the pooler a data-plane stop has just
+    taken down (issue #2307): with the pooled URL dead — the half-shut-pooler
+    shape — release still lands through the direct dial."""
+    import base.db.connections
+    from tests._containers import _free_port
+
+    direct_url = settings.data_plane.db_url
+    assert acquire_update_lock("A") is True
+    # The data-plane stop lands: the pooler's listeners are closed, Postgres stays up.
+    monkeypatch.setattr(
+        settings.data_plane, "db_url", f"postgresql://ava@127.0.0.1:{_free_port()}/ava"
+    )
+    monkeypatch.setattr(base.db.connections, "direct_db_url", lambda: direct_url)
+
+    with pytest.raises(psycopg.OperationalError), transaction.write_transaction():
+        pass
+
+    release_update_lock("A")
+    row = db_conn.execute("SELECT holder FROM deployment_state WHERE id=1").fetchone()
+    assert row == (None,)

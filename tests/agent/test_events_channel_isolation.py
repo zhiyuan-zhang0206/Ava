@@ -12,7 +12,7 @@ channel with a test prefix", so any conftest that accidentally drops the mutatio
 red immediately.
 """
 
-from shared.config import settings
+from base.config import settings
 
 
 def test_events_channel_is_test_isolated() -> None:

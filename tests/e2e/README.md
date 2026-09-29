@@ -30,7 +30,7 @@ On failure, full tracebacks are in `tmp/e2e-logs/{gateway,frontend}.log` and
 
 1. In `fakes/scenarios/`, add a module, define `SCRIPT: tuple[AIMessage, ...]`
    and `def build(model: str) -> ScriptedFakeChatModel`. The `build` signature must
-   match the `shared/lm/factory.py:_LLMFactory` Protocol (takes model name → returns
+   match the `base/lm/factory.py:_LLMFactory` Protocol (takes model name → returns
    BaseChatModel); the `isinstance(BaseChatModel)` at the end of `_resolve_override`
    catches bad factories immediately at build time.
 2. The test function uses `@pytest.mark.scenario("tests.e2e.fakes.scenarios.<name>:build")`.
@@ -114,7 +114,7 @@ restarter / `resurrect_agent` INSERT of these rows is the only definitive marker
   mobile) against `tests/e2e/__snapshots__/test_visual_regression/`, compared
   with the browser-native pixel diff (0.1% ratio, channel delta 16).
 - `test_preview_visual_gate.py` — the five-surface post-deploy matrix (same
-  shared engine as the deployment gate: `scripts/post_deploy_visual_matrix.py`)
+  shared engine as the deployment gate: `scripts/post_deploy_visual/matrix.py`)
   against the committed goldens under
   `tests/e2e/__snapshots__/preview-gate/`. Blocking on every PR. Goldens are
   minted and refreshed only on the ubuntu CI runner via the

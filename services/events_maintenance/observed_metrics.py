@@ -20,9 +20,10 @@ from typing import Any
 
 from psycopg import Connection
 
-from services.events_maintenance.rollup import _query_budget
-from shared.config import settings
-from shared.loki_index_labels import (
+from base.config import settings
+from base.paths import logs_dir
+from base.telemetry import event_id
+from base.telemetry.loki_index_labels import (
     ARCHIVE_FLOOR_AT,
     ARCHIVE_FREEZE_AT,
     archive_stream_selector,
@@ -31,10 +32,13 @@ from shared.loki_index_labels import (
     retention_floor,
     split_index_label_window,
 )
-from shared.metrics.observed_metrics import MetricObservation, observe_row, write_observations
-from shared.observability import cluster_label
-from shared.paths import logs_dir
-from shared.telemetry import event_id
+from base.telemetry.metrics.observed_metrics import (
+    MetricObservation,
+    observe_row,
+    write_observations,
+)
+from base.telemetry.observability import cluster_label
+from services.events_maintenance.rollup import _query_budget
 
 _EVENTS = ["llm_usage", "turn_end", "exec", "exec_.+", "exec\\(.*", "node_exit"]
 _PAGE_LIMIT = 5000
@@ -304,7 +308,7 @@ def recover_observations(conn: Connection[Any], *, now: datetime | None = None) 
 
 def main() -> None:
     """Operator-controlled recovery; this command never changes retained sources."""
-    from shared.db import connect
+    from base.db import connect
 
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--jsonl", type=Path, action="append", default=[])

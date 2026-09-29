@@ -15,11 +15,13 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
-from gateway import loki_events
-from gateway._cors import cors_allowed_origins
+from base.deploy.git import cluster_drift
+from base.deploy.lifecycle.start_serving import RootBirth
+from base.deploy.maintenance import admission, pause_owner
 from gateway.app import app
+from gateway.auth.cors import cors_allowed_origins
+from gateway.lgtm import loki_events
 from ops import cluster_pause, cluster_status
-from shared.start_serving import RootBirth
 
 
 @pytest.fixture
@@ -43,8 +45,8 @@ def fake_flag(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
         return flag.exists()
 
     monkeypatch.setattr("gateway.app._cluster_is_paused", _paused)
-    monkeypatch.setattr("gateway.routers.cluster.cluster_is_paused", flag.exists)
-    monkeypatch.setattr("gateway.routers.status.cluster_is_paused", flag.exists)
+    monkeypatch.setattr("gateway.cluster.router.cluster_is_paused", flag.exists)
+    monkeypatch.setattr("gateway.cluster.status.cluster_is_paused", flag.exists)
     monkeypatch.setattr("ops.cluster_pause.is_paused", _snapshot_paused)
     return flag
 
@@ -58,13 +60,13 @@ def _pin_session_names(monkeypatch: pytest.MonkeyPatch) -> None:
     + ``status_snapshot()`` and assert the injected value).
     Produces names like ``ava-test-agent-host``.
 
-    ``session_name`` is patched at its source (``shared.cluster``) because the
+    ``session_name`` is patched at its source (``base.cluster``) because the
     naming scheme is one fact for the whole process — the ``ops`` cluster modules
     reach it through that module precisely so one setattr pins it for all of them.
-    The pause tests patch ``shared.session_backend.get_backend`` to a recording
+    The pause tests patch ``base.sessions.backend.get_backend`` to a recording
     fake, so the composed names are what the assertions read.
     """
-    monkeypatch.setattr("shared.cluster.session_name", lambda svc: f"ava-test-{svc}")  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("base.cluster.session_name", lambda svc: f"ava-test-{svc}")  # pyright: ignore[reportUnknownArgumentType]
 
 
 # ─── middleware 503 mode ──────────────────────────────────────────────────────
@@ -231,7 +233,7 @@ def pause_backend(monkeypatch: pytest.MonkeyPatch) -> _FakeSessionBackend:
     from ops import agent_pause
 
     backend = _FakeSessionBackend()
-    monkeypatch.setattr("shared.session_backend.get_backend", lambda: backend)
+    monkeypatch.setattr("base.sessions.backend.get_backend", lambda: backend)
     monkeypatch.setattr(agent_pause, "host_running", lambda: False)
     return backend
 
@@ -239,8 +241,6 @@ def pause_backend(monkeypatch: pytest.MonkeyPatch) -> _FakeSessionBackend:
 class TestPauseLocalCluster:
     @pytest.fixture(autouse=True)
     def _private_pause_owner(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-        from shared import pause_owner
-
         monkeypatch.setattr(pause_owner, "state_path", lambda: tmp_path / "pause.json")
         monkeypatch.setattr(pause_owner, "lock_path", lambda: tmp_path / "pause.lock")
 
@@ -248,13 +248,11 @@ class TestPauseLocalCluster:
         self, pause_backend: _FakeSessionBackend
     ) -> None:
         """Phase A may finish while a peer still needs this gateway's SDK API."""
-        from shared import maintenance
-
         pause_backend.alive_answer = True
 
         cluster_pause.pause_local_cluster()
 
-        current = maintenance.snapshot()
+        current = admission.snapshot()
         assert current is not None and current.maintenance is not None
         assert current.maintenance.phase == "drained"
         with TestClient(app) as client:
@@ -265,8 +263,6 @@ class TestPauseLocalCluster:
 
     def test_idempotent_when_session_missing(self, pause_backend: _FakeSessionBackend) -> None:
         """Repeated Phase A reuses the same drain without starting services."""
-        from shared import pause_owner
-
         cluster_pause.pause_local_cluster()
         first = pause_owner.read()
         cluster_pause.pause_local_cluster()
@@ -280,16 +276,13 @@ class TestPauseLocalCluster:
 class TestUnpauseLocalCluster:
     @pytest.fixture(autouse=True)
     def _private_pause_owner(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-        from shared import pause_owner
-
         monkeypatch.setattr(pause_owner, "state_path", lambda: tmp_path / "pause.json")
         monkeypatch.setattr(pause_owner, "lock_path", lambda: tmp_path / "pause.lock")
 
     def test_unpause_restores_posture_and_releases_admission(
         self, pause_backend: _FakeSessionBackend
     ) -> None:
-        from shared import maintenance
-        from shared.host_deploy_state import set_posture
+        from base.deploy.state.host_deploy_state import set_posture
 
         cluster_pause.pause_local_cluster()
         set_posture("paused")
@@ -298,7 +291,7 @@ class TestUnpauseLocalCluster:
         cluster_pause.unpause_local_cluster()
 
         assert not cluster_pause.is_paused()
-        assert not maintenance.held()
+        assert not admission.held()
         assert pause_backend.spawned == pause_backend.killed == []
 
     def test_missing_pause_and_repeated_resume_do_not_start_services(
@@ -325,7 +318,7 @@ class TestUnpauseLocalCluster:
 class TestLockHolderLiveness:
     """`_lock_holder_is_live` parses `<machine>:pid<N>` and probes the pid locally.
 
-    The probe itself lives in `shared.cluster_lock.holder_process_gone` (the
+    The probe itself lives in `base.deploy.state.cluster_lock.holder_process_gone` (the
     manual recovery and the automatic reclaim share one verdict), so the death
     evidence is stubbed at the shared seam — and the two "treated live" cases
     below patch the same machine-name seam, or they would pass vacuously on a
@@ -333,30 +326,30 @@ class TestLockHolderLiveness:
     """
 
     def test_this_machine_dead_pid_is_not_live(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        from ops import ops_cluster as ops_mod
+        from ops import cluster as ops_mod
 
-        monkeypatch.setattr("shared.machine.machine_name", lambda: "mc")
-        monkeypatch.setattr("shared.proc.process_alive", lambda _pid: False)  # pyright: ignore[reportUnknownArgumentType]
+        monkeypatch.setattr("base.cluster.machine.machine_name", lambda: "mc")
+        monkeypatch.setattr("base.host.proc.process_alive", lambda _pid: False)  # pyright: ignore[reportUnknownArgumentType]
         assert ops_mod._lock_holder_is_live("mc:pid123") is False
 
     def test_this_machine_alive_pid_is_live(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        from ops import ops_cluster as ops_mod
+        from ops import cluster as ops_mod
 
-        monkeypatch.setattr("shared.machine.machine_name", lambda: "mc")
-        monkeypatch.setattr("shared.proc.process_alive", lambda _pid: True)  # pyright: ignore[reportUnknownArgumentType]
+        monkeypatch.setattr("base.cluster.machine.machine_name", lambda: "mc")
+        monkeypatch.setattr("base.host.proc.process_alive", lambda _pid: True)  # pyright: ignore[reportUnknownArgumentType]
         assert ops_mod._lock_holder_is_live("mc:pid123") is True
 
     def test_foreign_machine_holder_is_treated_live(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        from ops import ops_cluster as ops_mod
+        from ops import cluster as ops_mod
 
         # Can't probe a remote pid — must not clobber another gateway's lock.
-        monkeypatch.setattr("shared.machine.machine_name", lambda: "mc")
+        monkeypatch.setattr("base.cluster.machine.machine_name", lambda: "mc")
         assert ops_mod._lock_holder_is_live("other:pid5") is True
 
     def test_unparseable_holder_is_treated_live(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        from ops import ops_cluster as ops_mod
+        from ops import cluster as ops_mod
 
-        monkeypatch.setattr("shared.machine.machine_name", lambda: "mc")
+        monkeypatch.setattr("base.cluster.machine.machine_name", lambda: "mc")
         assert ops_mod._lock_holder_is_live("garbage") is True
 
 
@@ -375,7 +368,7 @@ class TestRetiredDeploymentEndpoints:
         self, monkeypatch: pytest.MonkeyPatch, method: str, path: str
     ) -> None:
         """Stranded-host recovery is the host-local `ava cluster recover` verb only."""
-        from ops import ops_cluster as ops_mod
+        from ops import cluster as ops_mod
 
         def forbidden(*_args: object, **_kwargs: object) -> None:
             pytest.fail("retired HTTP ingress reached the old updater")
@@ -395,7 +388,8 @@ class TestStatusSnapshot:
         set_machine_identity,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        from shared import host_deploy_state, start_serving
+        from base.deploy.lifecycle import start_serving
+        from base.deploy.state import host_deploy_state
 
         monkeypatch.setattr(start_serving, "run_dir", lambda: fake_flag.parent)
         set_machine_identity(role="agent-runner", name="wsl")
@@ -420,7 +414,7 @@ class TestStatusSnapshot:
         """status_snapshot threads the prod-source HEAD so the roster can compare
         it against the cluster pin."""
         set_machine_identity(role="agent-runner", name="wsl")
-        monkeypatch.setattr("shared.cluster_drift.prod_source_head_sha", lambda: "abc1234")
+        monkeypatch.setattr(cluster_drift, "prod_source_head_sha", lambda: "abc1234")
         assert cluster_status.status_snapshot().head_sha == "abc1234"
 
     def test_snapshot_includes_running_sha(
@@ -433,7 +427,7 @@ class TestStatusSnapshot:
         so the roster can expose a node running stale code even when its checkout
         reads on-pin."""
         set_machine_identity(role="agent-runner", name="wsl")
-        monkeypatch.setattr("shared.process_sha.get", lambda: "def5678")
+        monkeypatch.setattr("base.native_process.loaded_commit.get", lambda: "def5678")
         assert cluster_status.status_snapshot().running_sha == "def5678"
 
     def test_snapshot_ignores_the_start_bookmark(
@@ -453,9 +447,9 @@ class TestStatusSnapshot:
         answers from the process, so the stale commit survives the bookmark's
         advance and the divergence every drift renderer keys on is there."""
         set_machine_identity(role="agent-runner", name="wsl")
-        monkeypatch.setattr("shared.process_sha.get", lambda: "0ld0ld0aaaa")
-        monkeypatch.setattr("shared.running_sha.get", lambda: "n3wn3w0bbbb")
-        monkeypatch.setattr("shared.cluster_drift.prod_source_head_sha", lambda: "n3wn3w0bbbb")
+        monkeypatch.setattr("base.native_process.loaded_commit.get", lambda: "0ld0ld0aaaa")
+        monkeypatch.setattr("base.deploy.git.running_sha.get", lambda: "n3wn3w0bbbb")
+        monkeypatch.setattr(cluster_drift, "prod_source_head_sha", lambda: "n3wn3w0bbbb")
 
         snap = cluster_status.status_snapshot()
 
@@ -495,7 +489,7 @@ class TestClusterEndpoints:
     def test_post_stopping_marks_machine(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """POST /api/cluster/stopping?machine=<name>&home=<home> retracts that unit."""
         marked: list[tuple[str, str]] = []
-        from ops import ops_cluster as ops_mod
+        from ops import cluster as ops_mod
 
         monkeypatch.setattr(
             ops_mod,
@@ -661,7 +655,7 @@ class TestAdminEvents:
         """The implicit page is ``settings.display.cluster_events_default_limit``
         (``AVA_CLUSTER_EVENTS_DEFAULT_LIMIT``); the literal 200 is only that
         field's default, not a hard-coded page size."""
-        from shared.config import settings
+        from base.config import settings
 
         monkeypatch.setattr(settings.display, "cluster_events_default_limit", 7)
         with TestClient(app) as client:
@@ -794,8 +788,8 @@ class TestAgentMachineList:
         server answered but could not provide a determinate status."""
         from datetime import UTC, datetime
 
-        from gateway.routers import cluster as cluster_router
-        from gateway.schemas import MachineStatus
+        from base.api_contracts.status import MachineStatus
+        from gateway.cluster import router as cluster_router
 
         set_machine_identity(role="gateway", name="cloud-test")
         with db_conn.cursor() as cur:  # pyright: ignore[reportUnknownMemberType]
@@ -848,8 +842,8 @@ class TestAgentMachineList:
         before reaching the stub."""
         from datetime import UTC, datetime
 
-        from gateway.routers import cluster as cluster_router
-        from gateway.schemas import MachineStatus
+        from base.api_contracts.status import MachineStatus
+        from gateway.cluster import router as cluster_router
 
         with db_conn.cursor() as cur:  # pyright: ignore[reportUnknownMemberType]
             cur.execute("TRUNCATE machines")  # pyright: ignore[reportUnknownMemberType]
@@ -1109,19 +1103,19 @@ class TestMachinePauseResume:
         """A machine whose ops server cannot take the graceful terminate (already
         unreachable) gets its agent rows force-marked terminated in the shared
         DB — pause must not leave agents 'running' on a machine that is leaving."""
-        from gateway.routers import agents_forward as _fwd
+        from gateway.agents import forward as _fwd
 
         set_machine_identity(role="agent-runner", name="test-host")
         _seed_away_machine(db_conn)
         aid = _seed_agent_on_machine(db_conn, "away")
-        from shared.db import insert_inbound_message
+        from base.db import insert_inbound_message
 
         old_chat_id = insert_inbound_message(db_conn, aid, "queued before pause", source="user")
 
         async def _unreachable(target: str, path: str, json_body: dict) -> dict:
             raise RuntimeError("ops server unreachable")
 
-        monkeypatch.setattr(_fwd, "_enqueue_lifecycle", _unreachable)  # pyright: ignore[reportUnknownArgumentType]
+        monkeypatch.setattr(_fwd, "enqueue_lifecycle", _unreachable)  # pyright: ignore[reportUnknownArgumentType]
         with TestClient(app) as client:
             r = client.post("/api/cluster/machines/away/pause", json={})
         assert r.status_code == 200
@@ -1150,8 +1144,8 @@ class TestMachinePauseResume:
 
         from psycopg_pool import ConnectionPool
 
+        from base.config import settings
         from services.delivery_watchdog.daemon import select_terminated_owners_with_pending
-        from shared.config import settings
 
         with ConnectionPool(settings.data_plane.db_url, min_size=1, max_size=2) as pool:
             assert select_terminated_owners_with_pending(cast(ConnectionPool, pool), 86400.0) == []

@@ -23,10 +23,10 @@ from uuid import uuid4
 
 import pytest
 
+from base.deploy.release.runtime_release import MANIFEST_VERSION, VerifiedRelease
+from base.runtime_abi import current_abi
 from cli.release_fleet.request import FleetRequest
 from cli.release_transition.request import ReleaseRef
-from shared.runtime_abi import current_abi
-from shared.runtime_release import MANIFEST_VERSION, VerifiedRelease
 
 _SITE = "venv/lib/python3.12/site-packages"
 _SCHEMA = b"CREATE TABLE example (id bigint);\n"

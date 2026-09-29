@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from services.pitr import activation_lease
-from services.pitr.activation_state import (
+from services.pitr.activation import lease
+from services.pitr.activation.state import (
     ActivationRecord,
     load_record,
     record_path,
@@ -32,7 +32,7 @@ def test_activation_lease_refuses_long_step_when_initial_ownership_is_lost(
     def lose_lease(_holder: str) -> bool:
         return False
 
-    monkeypatch.setattr(activation_lease, "renew_update_lock", lose_lease)
+    monkeypatch.setattr(lease, "renew_update_lock", lose_lease)
     called = False
 
     def action(_stop: object) -> None:
@@ -40,7 +40,7 @@ def test_activation_lease_refuses_long_step_when_initial_ownership_is_lost(
         called = True
 
     with pytest.raises(RuntimeError, match="lost its deployment lease"):
-        activation_lease.run_while_renewing("pitr:op", action)
+        lease.run_while_renewing("pitr:op", action)
     assert not called
 
 
@@ -48,20 +48,20 @@ def test_activation_lease_cancels_child_and_never_returns_after_renewal_race(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     renewals = iter((True, False))
-    monkeypatch.setattr(activation_lease, "LEASE_RENEW_INTERVAL_S", 0.001)
+    monkeypatch.setattr(lease, "LEASE_RENEW_INTERVAL_S", 0.001)
 
     def renew_then_lose(_holder: str) -> bool:
         return next(renewals, False)
 
-    monkeypatch.setattr(activation_lease, "renew_update_lock", renew_then_lose)
+    monkeypatch.setattr(lease, "renew_update_lock", renew_then_lose)
 
     def action(stop: object) -> str:
-        assert isinstance(stop, activation_lease.threading.Event)
+        assert isinstance(stop, lease.threading.Event)
         assert stop.wait(1)
         return "must not advance"
 
     with pytest.raises(RuntimeError, match="lost its deployment lease"):
-        activation_lease.run_while_renewing("pitr:op", action)
+        lease.run_while_renewing("pitr:op", action)
 
 
 def test_activation_record_keeps_original_started_at_across_resume(tmp_path: Path) -> None:
@@ -325,7 +325,7 @@ def test_restore_pending_accepts_legacy_candidate_manifest_and_digest(
     import hashlib
     from dataclasses import asdict
 
-    from services.pitr.base_manifest import CandidateManifest
+    from services.pitr.base_backup.manifest import CandidateManifest
 
     legacy_candidate = (
         '{"base_object":{"ciphertext_crc32c":"viqqbw==","ciphertext_size":4101269456,'
@@ -418,7 +418,7 @@ def test_restore_pending_accepts_legacy_candidate_manifest_and_digest(
     assert loaded is not None
     assert loaded.phase == "restore_pending"
     # The digest recorded over the legacy bytes still validates.
-    from services.pitr.activation_evidence import stored_digest_matches
+    from services.pitr.activation.evidence import stored_digest_matches
 
     assert stored_digest_matches(
         raw=legacy_candidate, canonical=loaded_protected_canonical(loaded), expected=legacy_digest
@@ -519,7 +519,7 @@ def test_baidu_wal_remote_proof_loads_through_the_record_validator(
 
 
 def loaded_protected_canonical(loaded: ActivationRecord) -> str:
-    from services.pitr.base_manifest import CandidateManifest
+    from services.pitr.base_backup.manifest import CandidateManifest
 
     assert loaded.protected_manifest is not None
     return CandidateManifest.from_json(loaded.protected_manifest).to_json()

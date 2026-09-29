@@ -22,8 +22,8 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
+from base.db import create_agent
 from gateway.app import app
-from shared.db import create_agent
 
 
 @pytest.fixture
@@ -42,7 +42,7 @@ def _put_checkpoint(agent_id: int, messages: list) -> None:
     from langgraph.checkpoint.base import empty_checkpoint
     from langgraph.checkpoint.postgres import PostgresSaver
 
-    from shared.config import settings
+    from base.config import settings
 
     ckpt = empty_checkpoint()
     ckpt["channel_values"] = {"messages": messages}
@@ -146,7 +146,7 @@ def test_default_window_comes_from_display_config(
     default, not a hard-coded page size."""
     from langchain_core.messages import HumanMessage
 
-    from shared.config import settings
+    from base.config import settings
 
     monkeypatch.setattr(settings.display, "messages_default_limit", 2)
 

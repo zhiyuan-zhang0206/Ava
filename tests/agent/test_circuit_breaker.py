@@ -34,11 +34,11 @@ from agent.hooks.compact import (
     compose_summary_message,
     emergency_compact_summary,
 )
-from agent.runloop import _handle_fatal_llm_error
 from agent.state import AgentState, CircuitState
-from shared.config import settings
-from shared.context import AvaContext
-from shared.event_publisher import AgentEventPublisher
+from agent.turn.runloop import _handle_fatal_llm_error
+from base.agents.context import AvaContext
+from base.config import settings
+from base.events.live.publisher import AgentEventPublisher
 from tests.agent.test_claim import (
     _compact_tail,
     _config,
@@ -237,7 +237,7 @@ async def test_permanent_provider_error_reports_metadata_to_nearest_alive_ancest
             f"{child_id} is blocked after a permanent provider rejection. "
             "error_class=permanent vendor=deepseek provider=anthropic status=400 reason=bad_request "
             "timestamp=2026-09-03T08:00:00+00:00 "
-            "where=agent.runloop._handle_fatal_llm_error",
+            "where=agent.turn.runloop._handle_fatal_llm_error",
             "system_note",
             "system",
             {"note_tag": "agent_reply"},
@@ -675,8 +675,8 @@ async def test_host_persists_provider_failure_before_releasing_turn(
     from langgraph.graph import END, START, StateGraph
 
     from agent.startup import wrap_saver_writes_with_nstep_interval
+    from base.config import settings
     from services.agent_host.host import AgentHost
-    from shared.config import settings
 
     agent_id = spawn_agent()
     calls = 0

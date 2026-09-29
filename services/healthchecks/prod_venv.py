@@ -9,7 +9,10 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from shared import cluster_drift, editable_install, proc, process_env
+from base.deploy.git import cluster_drift
+from base.deploy.release import editable_install
+from base.host import proc
+from base.native_process import child_env
 
 _log = logging.getLogger("services.healthchecks.prod_venv")
 
@@ -61,11 +64,11 @@ def venv_violations(*, source_root: Path | None = None) -> tuple[str, ...]:
         source_root = cluster_drift.prod_source_dir()
     if source_root is None:
         return ()
-    interpreter = editable_install._venv_python(source_root)
+    interpreter = editable_install.venv_python(source_root)
     if interpreter is None:
         return (f"{source_root}: venv python missing",)
 
-    env = process_env.inherited_process_env()
+    env = child_env.inherited_process_env()
     env.pop("VIRTUAL_ENV", None)
     env.pop("PYTHONPATH", None)
     violations: list[str] = []

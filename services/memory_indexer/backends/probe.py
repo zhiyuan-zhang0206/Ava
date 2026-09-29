@@ -29,7 +29,7 @@ from dataclasses import dataclass
 
 import httpx
 
-from shared.config import settings
+from base.config import settings
 
 _PROBE_TIMEOUT_S = 3.0
 
@@ -101,7 +101,7 @@ def _probe_pgvector() -> ProbeResult:
     the backends that work today. Postgres unreachable = transient (the
     retry loop owns the wait, like milvus / numpy booting). Read-only —
     `pg_available_extensions`, never CREATE EXTENSION (a probe must not
-    mutate). Dial bound (QA nit #1012, 2026-08-30): `shared.db.connect()`
+    mutate). Dial bound (QA nit #1012, 2026-08-30): `base.db.connect()`
     is the sanctioned single entry point for DB dials and carries its own
     resilience kwargs — the connect is bounded by
     `PG_KEEPALIVE_KWARGS["connect_timeout"]` (5s) and the catalog query by
@@ -113,10 +113,10 @@ def _probe_pgvector() -> ProbeResult:
     added for a 2s difference in a one-shot boot check."""
     import psycopg
 
-    import shared.db
+    import base.db
 
     try:
-        with shared.db.connect() as conn:
+        with base.db.connect() as conn:
             row = conn.execute(
                 "SELECT count(*) FROM pg_available_extensions WHERE name = 'vector'"
             ).fetchone()

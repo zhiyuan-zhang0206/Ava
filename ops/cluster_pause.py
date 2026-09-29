@@ -10,10 +10,13 @@ from __future__ import annotations
 import logging
 from typing import cast
 
-import shared.host_deploy_state
-from shared import http_dial
-from shared.daemon_health import health_port
-from shared.pause_owner import PauseOwnerSnapshot
+import psycopg
+from psycopg_pool import ConnectionPool
+
+import base.deploy.state.host_deploy_state
+from base.daemon.health import health_port
+from base.deploy.maintenance.pause_owner import PauseOwnerSnapshot
+from base.host.net import http_dial
 
 _log = logging.getLogger(__name__)
 _UNSET = object()
@@ -25,7 +28,7 @@ _POOL_RELEASE_TIMEOUT_S = 5.0
 
 
 def is_paused(
-    state: shared.host_deploy_state.HostDeployState | object | None = _UNSET,
+    state: base.deploy.state.host_deploy_state.HostDeployState | object | None = _UNSET,
 ) -> bool:
     """Whether this host is paused — the `host_deploy_state.posture` row written
     by the gateway's pause fan-out (R1, Task #1021).
@@ -37,7 +40,7 @@ def is_paused(
     """
     if state is _UNSET:
         try:
-            resolved_state = shared.host_deploy_state.read()
+            resolved_state = base.deploy.state.host_deploy_state.read()
         except Exception:
             _log.warning(
                 "[cluster] is_paused: host_deploy_state read failed; reading as not paused",
@@ -45,7 +48,7 @@ def is_paused(
             )
             return False
     else:
-        resolved_state = cast(shared.host_deploy_state.HostDeployState | None, state)
+        resolved_state = cast(base.deploy.state.host_deploy_state.HostDeployState | None, state)
     return resolved_state is not None and resolved_state.posture == "paused"
 
 
@@ -63,8 +66,8 @@ def pause_local_cluster() -> None:
     replaced by the fleet release transition; it stays until its straggler-reap
     tests move to the release drain (recorded debt).
     """
+    from base.config import settings
     from ops.agent_pause import pause_agents
-    from shared.config import settings
 
     pause_agents(settings.gateway.update_quiesce_timeout_seconds, reap=True)
 
@@ -76,10 +79,10 @@ def unpause_local_cluster() -> None:
     (task #4016): the compensating resume of an aborted wave runs while this
     host stayed up, so the marker rows would otherwise outlive their drain.
     """
+    from base.deploy.maintenance import admission
     from ops.agent_pause import resume_agents
-    from shared import maintenance
 
-    current = maintenance.snapshot()
+    current = admission.snapshot()
     if current is None:
         _unpause_local_cluster()
         _settle_stranded_reaps()
@@ -93,7 +96,7 @@ def unpause_local_cluster() -> None:
             "cold admission re-drives their continuations: %s",
             sorted(current.maintenance.undelivered),
         )
-    with maintenance.authorized_start(current.holder, current.acquired_at):
+    with admission.authorized_start(current.holder, current.acquired_at):
         _unpause_local_cluster()
     resume_agents()
     _settle_stranded_reaps()
@@ -108,9 +111,9 @@ def _settle_stranded_reaps() -> None:
     admission run the existing inbound reconcile and re-deliver the work the
     reap truncated (task #4016).
     """
-    from shared.db import connect
-    from shared.machine import machine_name
-    from shared.straggler_reap import (
+    from base.cluster.machine import machine_name
+    from base.db import connect
+    from base.deploy.maintenance.straggler_reap import (
         announce_settled,
         publish_settled_wakes,
         settle_stranded_reaps,
@@ -142,7 +145,7 @@ def _hold_refusal(current: PauseOwnerSnapshot) -> str | None:
             f"then ava maintenance repair --operation {current.holder} "
             f"--acquired-at {current.acquired_at.isoformat()}"
         )
-    from shared import start_serving
+    from base.deploy.lifecycle import start_serving
 
     if (
         current.maintenance is not None
@@ -155,20 +158,23 @@ def _hold_refusal(current: PauseOwnerSnapshot) -> str | None:
 
 def _unpause_local_cluster() -> None:
     """Restore this unit's HTTP posture without launching any agent or service."""
-    from shared import maintenance
-    from shared.host_deploy_state import set_posture
+    from base.deploy.maintenance import admission
+    from base.deploy.state.host_deploy_state import set_posture
 
-    maintenance.require_start_allowed()
+    admission.require_start_allowed()
     set_posture("idle")
     _log.info("[cluster] unpaused: posture -> idle")
 
 
-def release_local_db_pools() -> dict[str, object]:
+def release_local_db_pools(
+    ops_pool: ConnectionPool[psycopg.Connection] | None,
+) -> dict[str, object]:
     """Release this unit's idle DB-pool connections; never fail the stop.
 
     Two client pools survive the agent drain: the local host daemon's shared /
-    control pools (dialed over its loopback health port) and this ops daemon's
-    own dispatch pool. Left open, they hold PgBouncer server connections
+    control pools (dialed over its loopback health port) and the ops daemon's
+    own dispatch pool, which that daemon passes in as `ops_pool` (None before
+    its pool opens). Left open, they hold PgBouncer server connections
     through the data-plane window the stop is about to close. Both releases are
     best-effort — a failure leaves the stop correct but leaks idle client
     connections into the downtime — so it logs loudly and reports in the
@@ -188,13 +194,10 @@ def release_local_db_pools() -> dict[str, object]:
         released["host_error"] = str(exc)
 
     try:
-        from services.agent_ops import daemon as ops_daemon
+        if ops_pool is not None:
+            from base.db.pool_release import release_idle_sync
 
-        pool = ops_daemon._db_pool
-        if pool is not None:
-            from shared.pool_release import release_idle_sync
-
-            released["ops"] = release_idle_sync(pool)
+            released["ops"] = release_idle_sync(ops_pool)
     except Exception as exc:
         _log.warning("[cluster] ops pool release failed (continuing the stop): %s", exc)
         released["ops_error"] = str(exc)

@@ -9,9 +9,9 @@ from psycopg_pool import AsyncConnectionPool
 
 from agent.db import claim_inbound_batch
 from agent.graph._chat_inbound import build_chat_inbound
+from base.config import settings
+from base.native_process.turn_identity import bind_turn_identity
 from gateway.app import app
-from shared.config import settings
-from shared.turn_identity import bind_turn_identity
 from tests.gateway.test_caller_protocol_path import _admit, _after_proven_old_writer_barrier
 from tests.gateway.test_mcp_endpoint import _ACCEPT, _initialize, _tool_call
 

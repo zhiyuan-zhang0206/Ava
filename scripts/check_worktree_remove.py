@@ -6,7 +6,7 @@ Usage: python scripts/check_worktree_remove.py <worktree-path>
 
 Exits 0 when nothing live is anchored under the path, 1 when there is (the
 caller should abort the removal), 2 on usage errors. See
-shared/deploy/git/worktree_guard.py for the scan.
+base/deploy/git/worktree_guard.py for the scan.
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from shared.deploy.git.worktree_guard import find_live_anchors
+from base.deploy.git.worktree_guard import find_live_anchors
 
 
 def main() -> int:

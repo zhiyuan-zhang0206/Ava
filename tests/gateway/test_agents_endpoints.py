@@ -19,10 +19,10 @@ import pytest
 from fastapi.testclient import TestClient
 from psycopg_pool import ConnectionPool
 
-from gateway._cors import cors_allowed_origins
+from base.lm.plugin_providers import ensure_provider_plugins_loaded
+from base.lm.registry import MODELS
 from gateway.app import app
-from shared.lm.plugin_providers import ensure_provider_plugins_loaded
-from shared.lm.registry import MODELS
+from gateway.auth.cors import cors_allowed_origins
 
 
 @pytest.fixture
@@ -102,7 +102,7 @@ def test_get_models_returns_grouped_supported_models() -> None:
         "cache_read": 0.4,
         "output": 20.0,
     }
-    from shared.config import settings
+    from base.config import settings
 
     assert body["default"] == settings.lm.llm_model
 
@@ -113,7 +113,7 @@ def test_get_models_surfaces_superseded_by(monkeypatch: pytest.MonkeyPatch) -> N
     and an un-superseded model carries null."""
     from dataclasses import replace
 
-    from shared.lm.registry import MODELS
+    from base.lm.registry import MODELS
 
     monkeypatch.setitem(MODELS, "glm-5.2", replace(MODELS["glm-5.2"], superseded_by="kimi-k3"))
     with TestClient(app) as client:
@@ -145,8 +145,8 @@ def test_get_models_reasoning_effort_options_match_factory_tables() -> None:
     providers must mirror their plugin binding's clamp vocabularies — a drift
     would silently offer the spawn UI a value build_chat_model then clamps
     away, or hide a value the provider actually accepts."""
-    from shared.lm import provider_api
-    from shared.lm.registry import MODELS
+    from base.lm import provider_api
+    from base.lm.registry import MODELS
 
     with TestClient(app) as client:
         resp = client.get("/api/models")
@@ -215,8 +215,8 @@ def test_get_models_reasoning_effort_default_is_the_per_model_tuning_value(
     NOT leak into the published default: the picker shows the model's own
     default, while the pin is operator policy (visible in the config panel's
     per-model view)."""
-    from shared.config import settings
-    from shared.lm.registry import MODELS
+    from base.config import settings
+    from base.lm.registry import MODELS
 
     with TestClient(app) as client:
         resp = client.get("/api/models")
@@ -388,7 +388,7 @@ def test_post_commit_unknown_launch_failure_carries_id_and_cors_headers(
     """An unexpected post-commit error retains the identity and CORS headers."""
     # The autouse conftest fixture stubs _forward_spawn_to_remote in-process;
     # this test's monkeypatch runs later and wins, making the route itself blow up.
-    import gateway.routers.agents as _agents_router
+    import gateway.agents.router as _agents_router
     from ops.rpc_schemas import LaunchAgentRequest, SpawnedAgent
 
     async def _explode(target: str, body: LaunchAgentRequest) -> SpawnedAgent:
@@ -695,8 +695,8 @@ class TestSystemNote:
         self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """A reassignment cannot land after validation but before task-note enqueueing."""
-        from gateway.routers import agents_state
-        from shared.db import connect, pool
+        from base.db import connect, pool
+        from gateway.agents import state
 
         enqueue_entered, release_enqueue, reassign_started, reassign_finished = (
             threading.Event(),
@@ -731,11 +731,11 @@ class TestSystemNote:
             )
             task_id = _returned_id(cur)
         db_conn.commit()
-        monkeypatch.setattr(agents_state, "insert_inbound_message", pause_enqueue)
+        monkeypatch.setattr(state, "insert_inbound_message", pause_enqueue)
 
         def enqueue(note_pool: ConnectionPool) -> None:
             try:
-                agents_state._system_note_blocking(
+                state._system_note_blocking(
                     note_pool,
                     owner_id,
                     "x",
@@ -1113,7 +1113,7 @@ class TestList:
 class TestGetLastMessage:
     def test_any_agent_can_query_unrelated_agent(self, db_conn: psycopg.Connection) -> None:
         """Any agent in the cluster can query — not just spawn-chain ancestors."""
-        from shared.db import create_agent
+        from base.db import create_agent
 
         # Create two unrelated agents (no spawn chain).
         # create_agent inserts into agents (LangGraph thread); agents_meta
@@ -1146,7 +1146,7 @@ class TestGetLastMessage:
         self, db_conn: psycopg.Connection, isolation_column: str
     ) -> None:
         """The gateway denies the result read even if an eval agent bypasses its SDK."""
-        from shared.db import create_agent
+        from base.db import create_agent
 
         target_id = create_agent(db_conn)
         caller_id = create_agent(db_conn)
@@ -1181,7 +1181,7 @@ class TestGetLastMessage:
 
     def test_none_for_agent_without_ai_message(self, db_conn: psycopg.Connection) -> None:
         """Returns text=None when the agent has no AI message yet."""
-        from shared.db import create_agent
+        from base.db import create_agent
 
         agent_id = create_agent(db_conn)
         with db_conn.cursor() as cur:
@@ -1201,7 +1201,7 @@ class TestGetLastMessage:
 
     def test_returns_last_message_text_from_column(self, db_conn: psycopg.Connection) -> None:
         """When last_message_text is set, return it — no checkpoint needed."""
-        from shared.db import create_agent
+        from base.db import create_agent
 
         agent_id = create_agent(db_conn)
         with db_conn.cursor() as cur:
@@ -1224,7 +1224,7 @@ class TestGetLastMessage:
         self, db_conn: psycopg.Connection
     ) -> None:
         """After compact wipes the checkpoint, last_message_text still returns the last AI text."""
-        from shared.db import create_agent
+        from base.db import create_agent
 
         agent_id = create_agent(db_conn)
         with db_conn.cursor() as cur:
@@ -1247,7 +1247,7 @@ class TestGetLastMessage:
 
     def test_empty_text_reads_as_none(self, db_conn: psycopg.Connection) -> None:
         """An empty-string column value reads as None — no empty message."""
-        from shared.db import create_agent
+        from base.db import create_agent
 
         agent_id = create_agent(db_conn)
         with db_conn.cursor() as cur:
@@ -1300,9 +1300,9 @@ def _result_read(client: TestClient, method: str, path: str, *, caller: str | No
 
 def _stub_result_read_backends(monkeypatch: pytest.MonkeyPatch) -> None:
     """Make non-blocked artifact reads deterministic without external services."""
-    import gateway.routers.agent_events as agent_events_router
+    import gateway.events.agent_events as agent_events_router
     import gateway.routers.memory as memory_router
-    from gateway import loki_events
+    from gateway.lgtm import loki_events
     from services.memory_indexer.embeddings import factory as _embedding_factory
 
     def _query(**_kwargs: object) -> tuple[list[dict[str, object]], bool]:
@@ -1336,7 +1336,7 @@ def test_eval_isolated_callers_cannot_read_result_surfaces(
     db_conn: psycopg.Connection, method: str, path_template: str
 ) -> None:
     """Every artifact-read endpoint blocks the SDK-bypassing eval caller."""
-    from shared.db import create_agent
+    from base.db import create_agent
 
     target_id = create_agent(db_conn)
     caller_id = create_agent(db_conn)
@@ -1376,7 +1376,7 @@ def test_result_surfaces_allow_non_isolated_and_unmarked_callers(
     path_template: str,
 ) -> None:
     """The guard leaves ordinary reads intact and preserves last-message validation."""
-    from shared.db import create_agent
+    from base.db import create_agent
 
     _stub_result_read_backends(monkeypatch)
     target_id = create_agent(db_conn)

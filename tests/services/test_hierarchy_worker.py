@@ -25,13 +25,13 @@ from pathlib import Path
 import psycopg
 import pytest
 
+from base.agents.history.hierarchy.pipeline import MaterializedTree
+from base.config import settings
+from base.paths import logs_dir
 from services.hierarchy_worker import execute as execute_module
 from services.hierarchy_worker import job as job_module
 from services.hierarchy_worker import runner
 from services.hierarchy_worker.scan import scan
-from shared.agents.history.hierarchy.pipeline import MaterializedTree
-from shared.config import settings
-from shared.paths import logs_dir
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -514,7 +514,7 @@ def test_job_main_inits_the_child_process_sinks(
 ) -> None:
     """`job.main` boots the child's process sinks before executing.
 
-    `shared/log.py` drops loguru's default handler at import, so without the
+    `base/log/__init__.py` drops loguru's default handler at import, so without the
     seam every record the child produces — the `llm_usage` rows that are the
     worker's metering ledger included — is silently discarded (task #3868)."""
     order: list[str] = []
@@ -579,7 +579,7 @@ def test_prepare_inits_the_host_process_sinks(
         order.append("schema")
 
     monkeypatch.setattr(runner, "init_gateway_process", fake_init)
-    monkeypatch.setattr("shared.migrations.assert_schema_current", fake_schema)
+    monkeypatch.setattr("base.deploy.schema.migrations.assert_schema_current", fake_schema)
 
     runner.prepare()
     assert order == ["init:schedule-hierarchy-worker", "schema"]

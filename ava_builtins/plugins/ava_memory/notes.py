@@ -30,10 +30,10 @@ from pathlib import Path
 from langchain_core.messages import HumanMessage
 
 from agent.messages import NoteTag, system_note_message
-from shared.config import settings
-from shared.config.turn_view import turn_settings
-from shared.log import logger
-from shared.paths import memory_dir, workspace_dir
+from base.config import settings
+from base.config.turn_view import turn_settings
+from base.log import logger
+from base.paths import memory_dir, workspace_dir
 
 _MEMORY_INDEX_FILE = "MEMORY.md"
 

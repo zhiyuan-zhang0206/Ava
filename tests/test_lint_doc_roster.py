@@ -23,7 +23,7 @@ def _roster_table(*services: str) -> str:
 def _load_lint(monkeypatch, registered, runbook_text, tmp_path):
     """Load the lint module with build_services() faked to `registered` and the
     runbook pointed at a temp file containing `runbook_text`."""
-    lint = importlib.import_module("scripts.lint_doc_roster")
+    lint = importlib.import_module("scripts.content_lint.lint_doc_roster")
 
     class _FakeSpec:
         def __init__(self, session: str) -> None:
@@ -72,13 +72,13 @@ def test_missing_sentinel_errors(monkeypatch, tmp_path):
 
 
 def test_parse_roster_raises_without_sentinel():
-    lint = importlib.import_module("scripts.lint_doc_roster")
+    lint = importlib.import_module("scripts.content_lint.lint_doc_roster")
     with pytest.raises(lint.RosterSentinelMissingError):
         lint.parse_roster("no sentinel here\n| `gateway` | x | y |\n")
 
 
 def test_parse_roster_extracts_first_column_only():
-    lint = importlib.import_module("scripts.lint_doc_roster")
+    lint = importlib.import_module("scripts.content_lint.lint_doc_roster")
     text = _roster_table("gateway", "labeler")
     parsed = lint.parse_roster(text)
     # First column only: code spans in later columns must not leak in.
@@ -121,7 +121,7 @@ def _load_healthcheck_lint(
 ):
     """Load the lint with all three healthcheck-roster sources faked and the
     roster doc pointed at a temp file."""
-    lint = importlib.import_module("scripts.lint_doc_roster")
+    lint = importlib.import_module("scripts.content_lint.lint_doc_roster")
 
     def fake_services():
         return tuple(
@@ -203,13 +203,13 @@ def test_healthcheck_roster_sentinel_missing_fails(monkeypatch, tmp_path):
 
 
 def test_parse_healthcheck_roster_strips_py_suffix():
-    lint = importlib.import_module("scripts.lint_doc_roster")
+    lint = importlib.import_module("scripts.content_lint.lint_doc_roster")
     parsed = lint.parse_healthcheck_roster(_healthcheck_table("gateway", "lgtm"))
     assert parsed == {"gateway", "lgtm"}
 
 
 def test_diagnostic_imports_include_nested_and_aliased_modules(monkeypatch, tmp_path):
-    from scripts import lint_doc_roster as lint
+    from scripts.content_lint import lint_doc_roster as lint
 
     source = tmp_path / "probes.py"
     source.write_text(
@@ -220,6 +220,6 @@ def test_diagnostic_imports_include_nested_and_aliased_modules(monkeypatch, tmp_
 
 
 def test_real_healthcheck_documentation_matches_current_sources():
-    from scripts import lint_doc_roster as lint
+    from scripts.content_lint import lint_doc_roster as lint
 
     assert lint.check_healthcheck_roster() == 0

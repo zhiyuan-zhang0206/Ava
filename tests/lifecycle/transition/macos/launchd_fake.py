@@ -17,6 +17,8 @@ from uuid import uuid4
 import pytest
 from pydantic import JsonValue
 
+from base.deploy.release.runtime_release import VerifiedRelease
+from base.native_process.ownership import OwnedProcess
 from cli.release_fleet.request import FleetRequest
 from cli.release_transition import journal, launchd_custody
 from cli.release_transition import launcher_macos as macos
@@ -24,8 +26,6 @@ from cli.release_transition.launchd_print import _DARWIN_STRSIGNAL
 from cli.release_transition.request import ReleaseRef
 from services.permissions_helper import finite_artifact
 from services.permissions_helper.finite_artifact import HelperArtifact
-from shared.native_process.ownership import OwnedProcess
-from shared.runtime_release import VerifiedRelease
 
 HELPER = HelperArtifact(
     app="/fixture/AvaPermissionsHelper.app",

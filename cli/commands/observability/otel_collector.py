@@ -34,13 +34,13 @@ from pathlib import Path
 from string import Template
 from urllib.parse import unquote, urlsplit
 
-from cli.commands._rendered_file import write_rendered_guarded
+from base.cluster.machine import MachineRoles
+from base.deploy.release import collector_artifact
+from base.host.atomic_io import write_text_atomic
+from base.telemetry.observability import collector_allowed_for_home
+from cli.commands.converge.rendered_file import write_rendered_guarded
 from cli.commands.converge.spec import ConvergeCtx
 from cli.commands.observability._otel_collector_exporters import BACKEND_EXPORTERS, RELAY_EXPORTERS
-from shared import collector_artifact
-from shared.atomic_io import write_text_atomic
-from shared.machine import MachineRoles
-from shared.observability import collector_allowed_for_home
 
 
 def _otlp_ingress_port() -> int:
@@ -50,7 +50,7 @@ def _otlp_ingress_port() -> int:
     receiver, and the pure-runner relay endpoint; the roster gate and the
     sidecar healthcheck probe the same port. Never a second literal here.
     """
-    from shared.config import settings
+    from base.config import settings
 
     return settings.observability.telemetry_otlp_port
 
@@ -145,9 +145,9 @@ def _postgres_receiver_block(ava_home: Path) -> str:
     Everything comes from the home's registry record and identity; nothing is
     read from a database URL, so no credential can reach the rendered file.
     """
-    from shared.cluster import db_identity, get_record, record_postgres_port
-    from shared.cluster.authority import MONITOR_ROLE
-    from shared.pg_admin import pg_socket_path
+    from base.cluster import db_identity, get_record, record_postgres_port
+    from base.cluster.authority import MONITOR_ROLE
+    from base.db.pg_admin import pg_socket_path
 
     record = get_record(ava_home)
     if record is None:
@@ -177,13 +177,13 @@ def _data_plane_receivers(roles: MachineRoles | None, ava_home: Path) -> tuple[s
     """
     if roles is None or "gateway" not in roles:
         return "", ""
-    from shared.config import settings
-    from shared.dotenv_boot import UNANCHORED_DB_SENTINEL
+    from base.config import settings
+    from base.host.env.dotenv_boot import UNANCHORED_DB_SENTINEL
 
     if settings.data_plane.db_url == UNANCHORED_DB_SENTINEL:
         return "", ""
     redis_url = settings.data_plane.redis_url
-    from shared.cluster import redis_admin_url
+    from base.cluster import redis_admin_url
 
     redis_admin = redis_admin_url()
     blocks: list[str] = []
@@ -212,7 +212,7 @@ def gateway_otlp_endpoint_problem(endpoint: str) -> str | None:
     completion attempt — a gateway that has not published the ingress yet must
     not burn the attempt.
     """
-    from shared.netutil import is_loopback_host
+    from base.host.net.predicates import is_loopback_host
 
     parts = urlsplit(endpoint.strip())
     host = parts.hostname or ""
@@ -237,7 +237,7 @@ def gateway_otlp_endpoint_problem(endpoint: str) -> str | None:
 
 def gateway_otel_ingress_endpoint() -> str:
     """The authenticated gateway ingress published by bootstrap, independent of local ports."""
-    from shared.config import settings
+    from base.config import settings
 
     endpoint = settings.observability.gateway_otlp_endpoint.strip()
     if gateway_otlp_endpoint_problem(endpoint) is not None:
@@ -251,7 +251,7 @@ def gateway_otel_ingress_endpoint() -> str:
 
 def station_otel_ingress_endpoint() -> str:
     """The selected station's ingress, independent of this unit's listen port."""
-    from shared.config import settings
+    from base.config import settings
 
     from .observatory_urls import validated_observability_base
 
@@ -261,7 +261,7 @@ def station_otel_ingress_endpoint() -> str:
             "cannot build the remote-station OTLP relay without a valid "
             "AVA_OBSERVABILITY_URL (scheme://host, no port, no path)"
         )
-    from shared.station_endpoint import resolve_station_target
+    from base.telemetry.station_endpoint import resolve_station_target
 
     return resolve_station_target(base).url
 
@@ -273,9 +273,9 @@ def telemetry_bearer() -> str | None:
     gateway derives it from its human secret; a remote unit reads it from its
     installed capability and never holds the secret. None = an open cluster.
     """
-    from shared.cluster.authority.unit import telemetry_bearer as resolve
-    from shared.config import settings
-    from shared.paths import ava_home
+    from base.cluster.authority.unit import telemetry_bearer as resolve
+    from base.config import settings
+    from base.paths import ava_home
 
     return resolve(ava_home().resolve(), settings.data_plane.cluster_secret)
 
@@ -301,7 +301,7 @@ def _remote_receiver_fragments(roles: MachineRoles | None) -> dict[str, str]:
     telemetry token (an open cluster: the zero-config single-box posture) and a loopback
     reachable host (co-located posture) both mean NO remote peers, so no
     receiver is rendered — the same "legal when nothing remote dials it" rule
-    as the registration loopback guard (shared.machines._reject_loopback_dial_url,
+    as the registration loopback guard (base.cluster.machines._reject_loopback_dial_url,
     conventions rule 2). A wildcard reachable host is a configuration error
     either way and fails closed. Any gateway- or station-capable host with a
     telemetry token and a non-loopback address may serve remote peers —
@@ -318,8 +318,8 @@ def _remote_receiver_fragments(roles: MachineRoles | None) -> dict[str, str]:
     if roles is None or not (roles & {"gateway", "observability-station"}):
         return no_remote
 
-    from shared.machine import reachable_host
-    from shared.netutil import is_loopback_host
+    from base.cluster.machine import reachable_host
+    from base.host.net.predicates import is_loopback_host
 
     token = telemetry_bearer()
     host = reachable_host()
@@ -380,7 +380,7 @@ def _otlp_exporters(roles: MachineRoles | None) -> str:
     - everything else fans out to its local backends (loopback by default,
       or the per-service settings URLs).
     """
-    from shared.config import settings
+    from base.config import settings
 
     if roles == frozenset({"agent-runner"}):
         return RELAY_EXPORTERS.format(
@@ -403,9 +403,9 @@ def _otlp_exporters(roles: MachineRoles | None) -> str:
 
 def generate_config(repo: Path, ava_home: Path, roles: MachineRoles | None) -> str:
     """Render the sidecar config from the repo template + this unit's settings."""
-    from shared.cluster import home_label
-    from shared.config import settings
-    from shared.machine import machine_name
+    from base.cluster import home_label
+    from base.cluster.machine import machine_name
+    from base.config import settings
 
     obs = settings.observability
     loki_base, prom_base = _lgtm_fanout_bases(remote=roles != frozenset({"agent-runner"}))
@@ -439,7 +439,7 @@ def _lgtm_fanout_bases(*, remote: bool = True) -> tuple[str, str]:
     (base URL + the service's own port). The runner relay path is unaffected —
     it always relays to the gateway collector.
     """
-    from shared.config import settings
+    from base.config import settings
 
     from .observatory_urls import validated_observability_base
 
@@ -497,7 +497,7 @@ def ensure_otel_collector(repo: Path, ava_home: Path, roles: MachineRoles | None
     and skip — the sidecar session will not start and the agent preflight
     disables OTLP export with a reported warning.
     """
-    from shared.runtime_interpreter import WHEEL_RUNTIME, runtime_otel_binary
+    from base.deploy.release.runtime_interpreter import WHEEL_RUNTIME, runtime_otel_binary
 
     if WHEEL_RUNTIME:
         binary = runtime_otel_binary()

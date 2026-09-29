@@ -43,7 +43,7 @@ OpenAI single upload ≤25MB. Process: first use ffmpeg to convert to **mono 16k
 
 - `ffmpeg` (transcoding + segmentation) and `ffprobe` (duration measurement) on PATH.
 - `yt-dlp` (only when source is a URL/video id to extract audio).
-- `OPENAI_API_KEY` in `~/.ava/.env`, read via `shared.config.settings`.
+- `OPENAI_API_KEY` in `~/.ava/.env`, read via `base.config.settings`.
 
 ## What it does NOT do
 

@@ -23,12 +23,12 @@ from uuid import uuid4
 import psycopg
 import pytest
 
+from base.cluster.machine import machine_name
+from base.db import create_agent, insert_inbound_message
+from base.deploy.maintenance import admission, cohort, pause_owner
+from base.deploy.maintenance.state import MaintenanceHold, MaintenancePhase
 from ops import agent_pause, cluster_pause
-from ops.agent_pause_probe import HostIdentity, host_identity_or_none
-from shared import maintenance, maintenance_cohort, pause_owner
-from shared.db import create_agent, insert_inbound_message
-from shared.machine import machine_name
-from shared.maintenance_state import MaintenanceHold, MaintenancePhase
+from ops.agent_pause.probe import HostIdentity, host_identity_or_none
 
 WHEN = datetime(2026, 9, 20, 3, 0, tzinfo=UTC)
 HOLDER = "ops:test:4150"
@@ -52,7 +52,7 @@ def _publish(hold: MaintenanceHold) -> None:
 
 
 def _current() -> MaintenanceHold:
-    current = maintenance.snapshot()
+    current = admission.snapshot()
     assert current is not None and current.maintenance is not None
     return current.maintenance
 
@@ -121,7 +121,7 @@ def test_prepare_retry_uses_only_unsettled_failures(
     conn = MagicMock()
 
     def retry() -> MaintenanceHold:
-        return maintenance_cohort.prepare(
+        return cohort.prepare(
             conn, machine="test", host_owner=None, holder=HOLDER, acquired_at=WHEN
         )
 
@@ -140,7 +140,7 @@ def test_verify_drained_settles_a_failure_recorded_around_the_reap(
     """Incident shape 1 (drained): the certifying read no longer sees the reaped failure."""
     hold = _incident_hold(_reaped_member(db_conn), _landed_member(db_conn), phase="drained")
 
-    maintenance_cohort.verify_drained(db_conn, hold)  # must not raise
+    cohort.verify_drained(db_conn, hold)  # must not raise
 
 
 def test_verify_drained_still_refuses_an_unreaped_failure(
@@ -157,7 +157,7 @@ def test_verify_drained_still_refuses_an_unreaped_failure(
     )
 
     with pytest.raises(RuntimeError, match="unfinished or failed"):
-        maintenance_cohort.verify_drained(db_conn, hold)
+        cohort.verify_drained(db_conn, hold)
 
 
 def test_set_phase_reaches_drained_with_settled_failures() -> None:
@@ -171,7 +171,7 @@ def test_set_phase_reaches_drained_with_settled_failures() -> None:
         )
     )
 
-    maintenance.set_phase(HOLDER, WHEN, "drained")
+    admission.set_phase(HOLDER, WHEN, "drained")
 
     assert _current().phase == "drained"
 
@@ -182,7 +182,7 @@ def test_set_phase_still_refuses_an_unreaped_failure() -> None:
     )
 
     with pytest.raises(RuntimeError, match="has not fully drained"):
-        maintenance.set_phase(HOLDER, WHEN, "drained")
+        admission.set_phase(HOLDER, WHEN, "drained")
 
 
 def test_unpause_releases_a_hold_whose_failures_were_reaped(
@@ -191,7 +191,7 @@ def test_unpause_releases_a_hold_whose_failures_were_reaped(
     _publish(
         MaintenanceHold("draining", {1: 11}, reaped={1: REAP}, failures={1: "ImpersonationError"})
     )
-    monkeypatch.setattr("shared.host_deploy_state.set_posture", MagicMock())
+    monkeypatch.setattr("base.deploy.state.host_deploy_state.set_posture", MagicMock())
     monkeypatch.setattr(agent_pause, "publish_inbound_wake", MagicMock())
 
     cluster_pause.unpause_local_cluster()
@@ -241,7 +241,7 @@ def test_resume_agents_releases_with_settled_failures(monkeypatch: pytest.Monkey
     agent_pause.resume_agents()
 
     assert pause_owner.read().status == "resumed"
-    maintenance.require_released("cluster update")  # the update gate is free again
+    admission.require_released("cluster update")  # the update gate is free again
 
 
 def test_resume_agents_still_refuses_unreaped_failures(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -256,13 +256,13 @@ def test_start_path_reaches_unpause_with_settled_failures(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """`ava start` no longer refuses the incident journal."""
-    from cli.commands._pause_resume import resume_after_start
+    from cli.commands.lifecycle._pause_resume import resume_after_start
 
     _publish(
         MaintenanceHold("draining", {1: 11}, reaped={1: REAP}, failures={1: "ImpersonationError"})
     )
     steps: list[str] = []
-    monkeypatch.setattr("shared.start_serving.is_serving", lambda: True)
+    monkeypatch.setattr("base.deploy.lifecycle.start_serving.is_serving", lambda: True)
     monkeypatch.setattr("ops.cluster_pause.unpause_local_cluster", lambda: steps.append("unpause"))
 
     @resume_after_start
@@ -275,7 +275,7 @@ def test_start_path_reaches_unpause_with_settled_failures(
 
 
 def test_start_path_still_refuses_unreaped_failures() -> None:
-    from cli.commands._pause_resume import resume_after_start
+    from cli.commands.lifecycle._pause_resume import resume_after_start
 
     _publish(MaintenanceHold("draining", {1: 11}, failures={1: "RuntimeError"}))
 
@@ -291,12 +291,12 @@ def test_reap_receipt_supersedes_a_racing_failure() -> None:
     """The same committed reap is accepted in either receipt arrival order."""
     _publish(MaintenanceHold("draining", {1: 11, 2: 22}, reaped={1: REAP}))
 
-    maintenance.record_failure(1, "ImpersonationError")
-    maintenance.record_failure(2, "ImpersonationError")
+    admission.record_failure(1, "ImpersonationError")
+    admission.record_failure(2, "ImpersonationError")
     assert _current().unsettled_failures() == {2: "ImpersonationError"}
 
-    maintenance.record_reaped(1, REAP)
-    maintenance.record_reaped(2, REAP)
+    admission.record_reaped(1, REAP)
+    admission.record_reaped(2, REAP)
 
     assert _current().reaped == {1: REAP, 2: REAP}
     assert _current().failures == {2: "ImpersonationError"}
@@ -307,12 +307,12 @@ def test_host_identity_or_none_requires_independent_absence(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     identity = MagicMock(side_effect=URLError(ConnectionRefusedError(111, "Connection refused")))
-    monkeypatch.setattr("ops.agent_pause_probe.host_identity", identity)
-    monkeypatch.setattr("ops.agent_pause_probe.host_running", lambda: False)
+    monkeypatch.setattr("ops.agent_pause.probe.host_identity", identity)
+    monkeypatch.setattr("ops.agent_pause.probe.host_running", lambda: False)
     assert host_identity_or_none() is None
     identity.assert_not_called()
 
-    monkeypatch.setattr("ops.agent_pause_probe.host_running", lambda: True)
+    monkeypatch.setattr("ops.agent_pause.probe.host_running", lambda: True)
     with pytest.raises(URLError):
         host_identity_or_none()
 
@@ -330,8 +330,8 @@ def test_unknown_host_process_evidence_still_refuses(monkeypatch: pytest.MonkeyP
         raise RuntimeError("cannot identify an unrecorded agent-host home")
 
     identity = MagicMock()
-    monkeypatch.setattr("ops.agent_pause_probe.host_running", unknown)
-    monkeypatch.setattr("ops.agent_pause_probe.host_identity", identity)
+    monkeypatch.setattr("ops.agent_pause.probe.host_running", unknown)
+    monkeypatch.setattr("ops.agent_pause.probe.host_identity", identity)
     with pytest.raises(RuntimeError, match="cannot identify"):
         host_identity_or_none()
     identity.assert_not_called()

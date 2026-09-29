@@ -4,7 +4,7 @@ The agent-facing render must keep only the agent's own ``<agent_code>`` frames a
 never leak the exec harness, SDK, plugin, or stdlib frames. The full render is the
 unfiltered counterpart for the server logs. Exceptions are produced by genuinely
 compiling/exec'ing source under the ``<agent_code>`` filename so the frame
-filenames match what `_exec.py` produces at runtime; this test module's own frame
+filenames match what `exec/node.py` produces at runtime; this test module's own frame
 (the `exec` call site) stands in for the exec harness frame and must be dropped.
 """
 

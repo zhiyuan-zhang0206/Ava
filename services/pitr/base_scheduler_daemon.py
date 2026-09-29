@@ -12,40 +12,40 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+from base import telemetry
+from base.config import settings
+from base.daemon.health import health_port, start_health_server, stop_health_server
+from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
+from base.daemon.shutdown import hard_exit as _hard_exit
+from base.host.private_storage import ensure_private_dir
+from base.log import init_gateway_process
+from base.native_process.os_platform import LockTimeoutError, file_lock
+from base.paths import ava_home
 from services.pidfile import acquire_pidfile, remove_pidfile
-from services.pitr.activation_state import load_record as load_activation_record
-from services.pitr.activation_state import lock_path as activation_lock_path
-from services.pitr.base_candidate import reconcile_committed_cleanup
-from services.pitr.base_manifest import CandidateManifest
-from services.pitr.base_operation_runtime import (
+from services.pitr.activation.state import load_record as load_activation_record
+from services.pitr.activation.state import lock_path as activation_lock_path
+from services.pitr.base_backup.candidate import reconcile_committed_cleanup
+from services.pitr.base_backup.manifest import CandidateManifest
+from services.pitr.base_backup.scheduler_health import components as _components
+from services.pitr.base_worker import run_candidate
+from services.pitr.operation.custody import OperationBusyError, OperationDeferred
+from services.pitr.restore.manifest import ProtectedManifest
+from services.pitr.restore.operation_runtime import (
     RestoreWorkerInput,
     input_for,
     publish,
     run_restore_input,
 )
-from services.pitr.base_scheduler_health import components as _components
-from services.pitr.base_worker import run_candidate
-from services.pitr.operation_custody import OperationBusyError, OperationDeferred
-from services.pitr.restore_manifest import ProtectedManifest
-from services.pitr.restore_proof import reconcile_restore_pending
-from services.pitr.retention_scheduler import (
+from services.pitr.restore.proof import reconcile_restore_pending
+from services.pitr.retention.scheduler import (
     RetentionDryRunState,
 )
-from services.pitr.retention_scheduler import (
+from services.pitr.retention.scheduler import (
     delete_tick as retention_delete_tick,
 )
-from services.pitr.retention_scheduler import (
+from services.pitr.retention.scheduler import (
     refresh as refresh_retention_plan,
 )
-from shared import telemetry
-from shared.config import settings
-from shared.daemon_health import health_port, start_health_server, stop_health_server
-from shared.daemon_shutdown import cancel_and_drain, install_graceful_shutdown
-from shared.daemon_shutdown import hard_exit as _hard_exit
-from shared.log import init_gateway_process
-from shared.paths import ava_home
-from shared.platform import LockTimeoutError, file_lock
-from shared.private_storage import ensure_private_dir
 
 _log = logging.getLogger("services.pitr.base_scheduler_daemon")
 

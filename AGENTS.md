@@ -12,7 +12,7 @@ Small core, minimal by design. One tool (`execute_code`), one namespace (`ava.*`
 5. **Approved stable** — Python 3.12, Postgres 17, Redis 8.2; upgrades require manual approval; no beta/nightly.
 6. **English only — no raw CJK** — docs, comments, prompts, error messages
    in English; the only exemption is frontend i18n locale files (user ruling
-   2026-08-27, enforced repo-wide by `scripts/lint_no_cjk.py`).
+   2026-08-27, enforced repo-wide by `scripts/content_lint/lint_no_cjk.py`).
 
 Full elaboration: [`conventions/philosophy.md`](conventions/philosophy.md)
 
@@ -61,7 +61,7 @@ Windows unit carries `agent-runner` only
 
 **Auth follows the authority boundary.** `AVA_CLUSTER_SECRET` is the gateway's human bearer (API,
 frontend login); it stays on the gateway and rotates only explicitly
-(`scripts/rotate_cluster_secret.py`; backups use a birth-pinned passphrase). An EMPTY secret
+(`scripts/data_plane_ops/rotate_cluster_secret.py`; backups use a birth-pinned passphrase). An EMPTY secret
 (single-box default) leaves the API, `/ops` and frontend unauthenticated and binds every data-plane
 listener to loopback; a set secret adds this host's reachable address for Postgres and its pooler
 (Redis stays loopback, off-box inbound via the relay bridge). The internal data plane always
@@ -167,7 +167,7 @@ dev-host inventory + secret paths: [`conventions/dev-setup.md`](conventions/dev-
 **Migrations:** `migrations/YYYYMMDDTHHMMSS_<kebab-name>.sql` (second-precision UTC),
 tracked as an applied SET keyed by name; `db/schema.sql` is the squashed baseline.
 Every migration ships a paired `.down.sql`, and lossy operations go
-**expand-contract** so any one upgrade stays reversible (`scripts/lint_migrations.py`
+**expand-contract** so any one upgrade stays reversible (`scripts/content_lint/lint_migrations.py`
 enforces format + pairing). **Adding a migration:** `.agents/skills/add-a-migration/SKILL.md`.
 
 ## Agent instruction files
@@ -222,7 +222,7 @@ and the `ava.skills.ava-code:testing` discipline; rule 4's ask-first loop is [wo
 - **PR description** — must have file-tree diff with ★ critical paths + prose data flow. [Spec →](.agents/skills/write-a-pr-description/SKILL.md)
 - **Tech-debt sweeps** — follow `.agents/skills/ava-sweeper/` (debt classes + tracker; boundary vs. lint in [`conventions/lint-vs-sweeper.md`](conventions/lint-vs-sweeper.md)).
 - **Complexity analysis** — McCabe cyclomatic complexity + maintainability index via radon, ranked for refactoring. [Skill →](.agents/skills/measure-complexity/SKILL.md)
-- **Local tests before push** — run only targeted pytest/vitest tests and relevant eslint/tsc checks before pushing. Full test suites run in CI only; never launch a local repository-wide or full-backend test run, including for `shared/` changes (user ruling 2026-09-22). [How to →](.agents/skills/run-local-tests/SKILL.md)
+- **Local tests before push** — run only targeted pytest/vitest tests and relevant eslint/tsc checks before pushing. Full test suites run in CI only; never launch a local repository-wide or full-backend test run, including for `base/` changes (user ruling 2026-09-22). [How to →](.agents/skills/run-local-tests/SKILL.md)
 - **Git hooks** — install both stages from the main clone's stable `.venv`; heavy static checks run at pre-push. [Install and guardrails →](conventions/runbook.md#git-hooks-pre-commit--pre-push)
 - **CI to green, then enqueue, then clean up** — poll `.venv/bin/python scripts/ci_utils.py <PR#>` until all-green (fix red immediately; `NO_WORKFLOW_RUNS` = the suite never ran = not green), then submit with `--wait --merge` (submits to the Trunk merge queue; the queue verifies the combined tree that actually lands — a PR with conflicts still needs a manual `git rebase origin/main` first; PRs awaiting user review are never enqueued). After merge: remove the local worktree and delete the remote branch. [Detail →](.agents/skills/ship-a-change/SKILL.md)
 - **Commit = code + docs stable** — docs go in same PR. Structure changes reconcile the co-located `*.ava.okf.md`; scan `conventions/` + `future/` for stale refs.
@@ -230,10 +230,10 @@ and the `ava.skills.ava-code:testing` discipline; rule 4's ask-first loop is [wo
 ## Python conventions (quick reference)
 
 - No `if TYPE_CHECKING:` (lint-enforced). Exceptions in `_TYPE_CHECKING_ALLOWED`.
-- Structure budgets: ≤800 lines per `.py`; ≤20 direct Python files/subdirectories per directory; function cc <15 (10–14 warn), nesting ≤5; packages + tests/scripts, frozen shrink-only baseline. Locality: no `_`-private import from outside its owning package; single-owner decisions (Postgres dial → `shared/db_connections.py`); no path imports (`sys.path` edits, file loaders) under `ava_builtins/`, except a one-line `__file__`-derived `sys.path` guard that stays inside a skill's own directory — skill scripts stay thin over a package — all frozen in the same baseline.
-- No `print()` in framework code (use `shared.log.logger`).
+- Structure budgets: ≤800 lines per `.py`; ≤20 direct Python files/subdirectories per directory; function cc <15 (10–14 warn), nesting ≤5; packages + tests/scripts, frozen shrink-only baseline. Locality: no `_`-private import from outside its owning package; single-owner decisions (Postgres dial → `base/db/connections.py`); no path imports (`sys.path` edits, file loaders) under `ava_builtins/`, except a one-line `__file__`-derived `sys.path` guard that stays inside a skill's own directory — skill scripts stay thin over a package — all frozen in the same baseline.
+- No `print()` in framework code (use `base.log.logger`).
 - No decorative emoji in core Python.
-- Import layering: `shared < ava < agent < gateway < cli`.
+- Import layering: `base < ava < agent < gateway < cli`.
 [Full conventions →](conventions/python-conventions.md)
 
 ## Communicating with the user

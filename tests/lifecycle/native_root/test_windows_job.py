@@ -75,7 +75,7 @@ time.sleep(120)
 
 
 def test_exited_process_is_dead_while_its_original_handle_remains_open(tmp_path, native_env):
-    from shared.native_process.ownership import OwnedProcess
+    from base.native_process.ownership import OwnedProcess
 
     release = tmp_path / "release"
     code = f"""import os,pathlib,time

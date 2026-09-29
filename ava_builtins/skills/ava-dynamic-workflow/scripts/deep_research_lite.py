@@ -17,7 +17,7 @@ from datetime import datetime
 from pathlib import Path
 
 import ava
-from shared.paths import workspace_dir
+from base.paths import workspace_dir
 
 ORCH = ava.self.AGENT_ID
 HD = workspace_dir(ORCH) / "deep_research_lite"

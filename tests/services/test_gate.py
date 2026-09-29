@@ -206,7 +206,7 @@ def servers(tmp_path: Path) -> Iterator[_Servers]:
 def probe_events() -> Iterator[list[dict[str, object]]]:
     """Capture `gate_auth_probe_failed` records the gate emits through the
     loguru logger — the structured half of the fail-closed verdict (audit
-    #1736). The daemon's module-level `logger` is the shared.log singleton,
+    #1736). The daemon's module-level `logger` is the base.log singleton,
     so a sink on `loguru.logger` sees the records."""
     from loguru import logger
 
@@ -581,7 +581,7 @@ def test_a_leftover_update_marker_never_owns_the_entry(
     Gate with the rest of root. A marker file left by the retired updater in the
     home must not pin the entry on "System updating": Gate answers from the live
     gateway/app."""
-    monkeypatch.setattr("shared.paths.ava_home", lambda: servers["flag"].parent)
+    monkeypatch.setattr("base.paths.ava_home", lambda: servers["flag"].parent)
     _write_v2(servers["flag"])
     _FakeGateway.authenticated = True
     _FakeGateway.down = True
@@ -668,13 +668,13 @@ def test_gateway_base_uses_reachable_host(monkeypatch: pytest.MonkeyPatch) -> No
     monkeypatch.setattr(
         daemon, "settings", types.SimpleNamespace(gateway=types.SimpleNamespace(gateway_port=8123))
     )
-    monkeypatch.setattr("shared.machine.reachable_host", lambda: "10.0.0.2")
+    monkeypatch.setattr("base.cluster.machine.reachable_host", lambda: "10.0.0.2")
     assert daemon._gateway_base() == "http://10.0.0.2:8123"
 
     # Single box: the localhost fallback keeps local browsers working verbatim.
-    monkeypatch.setattr("shared.machine.reachable_host", lambda: "localhost")
+    monkeypatch.setattr("base.cluster.machine.reachable_host", lambda: "localhost")
     assert daemon._gateway_base() == "http://localhost:8123"
 
     # IPv6 literals need brackets in a netloc.
-    monkeypatch.setattr("shared.machine.reachable_host", lambda: "fd00::1")
+    monkeypatch.setattr("base.cluster.machine.reachable_host", lambda: "fd00::1")
     assert daemon._gateway_base() == "http://[fd00::1]:8123"

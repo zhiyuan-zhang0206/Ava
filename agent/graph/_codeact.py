@@ -5,7 +5,7 @@ Owned as its own module (like `capabilities.py`) because the section list in
 registers the section explicitly so the render order stays its reading order.
 """
 
-from shared.config.turn_view import turn_settings
+from base.config.turn_view import turn_settings
 
 
 def _codeact_section() -> str:

@@ -3,8 +3,8 @@
 `ava pitr drill` restores one protected physical backup chain to an
 operator-chosen target LSN in an isolated sandbox. It is the first-class
 version of the 2026-09-13 WSL D4 drill: the same source modules
-(`restore_drill` composes `restore_proof` download helpers,
-`base_restore_crypto`, `restore_manifest` and `restore_postgres`), the same
+(`restore.drill` composes `restore.proof` download helpers,
+`base_backup.restore_crypto`, `restore.manifest` and `restore.postgres`), the same
 acceptance criteria, no ad-hoc driver.
 
 ## When to run it
@@ -125,7 +125,7 @@ relative `--scratch` is resolved against the invoking shell's directory.
 ## What it does not prove
 
 - It does not replace the scheduled activation restore proof
-  (`restore_proof.prove_candidate`), which restores to the recorded end LSN
+  (`restore.proof.prove_candidate`), which restores to the recorded end LSN
   and carries publication authority.
 - It publishes nothing. Outside the scratch tree it leaves only its operation
   record: retired on success, quarantined on failure. The operator owns the

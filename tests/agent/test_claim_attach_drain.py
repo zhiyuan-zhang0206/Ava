@@ -17,8 +17,8 @@ from agent.graph._attach_drain import build_attach_drain
 from agent.graph.claim.node import _claim_node_impl
 from agent.nodes import CLAIM
 from agent.state import AttachEntry, AttachState, BaseAgentState
-from shared.context import AvaContext
-from shared.message_kwargs import AvaMsgType
+from base.agents.context import AvaContext
+from base.agents.messages.kwargs import AvaMsgType
 
 
 def _write_png(path: Path) -> None:

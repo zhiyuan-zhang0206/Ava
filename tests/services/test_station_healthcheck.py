@@ -16,10 +16,10 @@ from datetime import UTC, datetime
 
 import pytest
 
-import shared.db
+import base.db
+from base.cluster.authority.api import telemetry_token
+from base.config import settings
 from services.heartbeat import station_probe as hc
-from shared.cluster.authority.api import telemetry_token
-from shared.config import settings
 
 
 @pytest.fixture(autouse=True)
@@ -28,7 +28,7 @@ def _clean_state() -> None:
     process-global, same as the watchdog would hold it)."""
     hc._state["failures"] = 0
     hc._state["transition_since"] = None
-    with shared.db.connect() as conn, conn.cursor() as cur:
+    with base.db.connect() as conn, conn.cursor() as cur:
         cur.execute("DELETE FROM alerts WHERE labels->>'alertname' = %s", (hc._ALERTNAME,))
         cur.execute("DELETE FROM machine_units WHERE machine_name LIKE 'station-test%'")
         conn.commit()
@@ -43,7 +43,7 @@ def _no_remote_observatory(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def _insert_station_unit(name: str = "station-test-a", url: str = "http://10.0.0.9:4318") -> None:
-    with shared.db.connect() as conn, conn.cursor() as cur:
+    with base.db.connect() as conn, conn.cursor() as cur:
         cur.execute(
             "INSERT INTO machine_units "
             "(machine_name, home, serve_gateway, serve_agent_runner, "
@@ -102,7 +102,7 @@ def test_resolve_target_skips_hybrid_gateway_station_units(
     capability set identifies an ingress advertisement qualify."""
     monkeypatch.setattr(settings.observability, "observability_url", "http://10.0.0.46")
     _insert_station_unit(url="http://10.0.0.46:4318")
-    with shared.db.connect() as conn, conn.cursor() as cur:
+    with base.db.connect() as conn, conn.cursor() as cur:
         cur.execute(
             "UPDATE machine_units SET serve_gateway = true WHERE machine_name = 'station-test-a'"
         )
@@ -182,13 +182,13 @@ def test_alert_fires_after_two_consecutive_failures_and_resolves(
     resolves every open row for the alertname (the machine-offline pattern)."""
     monkeypatch.setattr(hc.settings.alerts, "transition_warning_seconds", 0)
     monkeypatch.setattr(hc.settings.alerts, "transition_error_seconds", 3600)
-    monkeypatch.setattr("shared.alerts.notify_im", lambda _text: True)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("base.telemetry.alerts.notify_im", lambda _text: True)  # pyright: ignore[reportUnknownArgumentType]
     target = hc._StationTarget(url="http://10.0.0.9:4318", advertised=True, name="station-test-a")
     now = datetime.now(UTC)
 
     # first failure: below the consecutive-failure threshold — no alert yet
     hc._alert_edges(target, ok=False, now=now)
-    with shared.db.connect() as conn, conn.cursor() as cur:
+    with base.db.connect() as conn, conn.cursor() as cur:
         cur.execute(
             "SELECT count(*) FROM alerts WHERE labels->>'alertname' = %s",
             (hc._ALERTNAME,),
@@ -198,7 +198,7 @@ def test_alert_fires_after_two_consecutive_failures_and_resolves(
 
     # second consecutive failure: fires
     hc._alert_edges(target, ok=False, now=now)
-    with shared.db.connect() as conn, conn.cursor() as cur:
+    with base.db.connect() as conn, conn.cursor() as cur:
         cur.execute(
             "SELECT status, labels->>'severity' FROM alerts WHERE labels->>'alertname' = %s",
             (hc._ALERTNAME,),
@@ -209,7 +209,7 @@ def test_alert_fires_after_two_consecutive_failures_and_resolves(
     assert row is not None and row[0] == "unresolved" and row[1] == "warning"
 
     hc._alert_edges(target, ok=True, now=now)
-    with shared.db.connect() as conn, conn.cursor() as cur:
+    with base.db.connect() as conn, conn.cursor() as cur:
         cur.execute(
             "SELECT status FROM alerts WHERE labels->>'alertname' = %s",
             (hc._ALERTNAME,),
@@ -227,7 +227,7 @@ def test_main_probes_advertised_station_and_does_not_raise(
     _insert_station_unit()
     monkeypatch.setattr(hc, "_station_answers", lambda _url: True)  # pyright: ignore[reportUnknownArgumentType]
     hc.main()  # must not raise
-    with shared.db.connect() as conn, conn.cursor() as cur:
+    with base.db.connect() as conn, conn.cursor() as cur:
         cur.execute(
             "SELECT count(*) FROM alerts WHERE labels->>'alertname' = %s",
             (hc._ALERTNAME,),

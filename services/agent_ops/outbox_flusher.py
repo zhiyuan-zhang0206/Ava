@@ -1,7 +1,7 @@
 """Resident retrier for the deferred-delivery outbox (task #3757).
 
 The recording half of the outbox runs in whatever process saw its send fail
-(`shared.agents.messages.delivery_outbox.record_failed_send`); this half is the dead hand: a
+(`base.agents.messages.delivery_outbox.record_failed_send`); this half is the dead hand: a
 daemon-lifetime task in the machine's ops server that keeps redelivering due
 records — through the canonical chat-inbound path — until they land or their
 budget is spent. It outlives every sender process by construction, which is
@@ -21,8 +21,8 @@ import logging
 
 from psycopg_pool import ConnectionPool
 
-from shared import maintenance
-from shared.agents.messages import delivery_outbox
+from base.agents.messages import delivery_outbox
+from base.deploy.maintenance import admission
 
 _log = logging.getLogger("services.agent_ops.outbox_flusher")
 
@@ -50,7 +50,7 @@ def stop() -> None:
 
 async def _run(pool: ConnectionPool, interval: float) -> None:
     while True:
-        if not maintenance.quiesced():
+        if not admission.quiesced():
             try:
                 report = await asyncio.to_thread(delivery_outbox.flush, pool)
             except Exception:

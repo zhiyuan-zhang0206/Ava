@@ -29,7 +29,7 @@ from typing import Any
 import httpx
 import websockets
 
-from shared.cluster_auth import MANAGED_BROWSER_USER_AGENT, cookie_name
+from base.cluster.auth import MANAGED_BROWSER_USER_AGENT, cookie_name
 
 # CDP endpoint timeouts: Chrome is local, so these only bound a wedged browser.
 _HTTP_TIMEOUT_S = 5.0

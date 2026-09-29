@@ -19,13 +19,13 @@ from types import SimpleNamespace
 import psutil
 import pytest
 
-from cli.commands import _maintenance_stop_report as report
-from cli.commands import _temporary_stop as command
-from cli.commands import service_stop as stop
-from shared import lifecycle_status
-from shared.native_process import ownership
-from shared.native_process.ownership import OwnedProcess
-from shared.session_record import SessionRecord
+from base.deploy.lifecycle import status_journal
+from base.native_process import ownership
+from base.native_process.ownership import OwnedProcess
+from base.sessions.record import SessionRecord
+from cli.commands.lifecycle import _maintenance_stop_report as report
+from cli.commands.lifecycle import _temporary_stop as command
+from cli.commands.lifecycle import service_stop as stop
 from tests.agent.test_maintenance import WHEN
 from tests.cli.test_maintenance_stop import Launcher
 from tests.cli.test_maintenance_stop import home as home
@@ -63,7 +63,7 @@ def test_terminal_survivor_names_itself_and_persists_exact_inventory(
     )
     identity = _terminal(home, process, monkeypatch)
     _unkillable(monkeypatch)
-    assert lifecycle_status.begin("stop")
+    assert status_journal.begin("stop")
     with pytest.raises(report.StopIncompleteError) as caught:
         stop.close_terminals(time.monotonic() + 0.25, "private-stop", WHEN)
     failure = caught.value

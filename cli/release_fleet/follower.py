@@ -27,6 +27,8 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Protocol
 
+from base.deploy.maintenance.state import MaintenanceHold
+from base.log import logger
 from cli.release_fleet.client import (
     CoordinatorAwayError,
     CoordinatorClient,
@@ -37,8 +39,6 @@ from cli.release_fleet.progress import Instruction, Report, ReportState, UnitPro
 from cli.release_fleet.request import UnitRequest
 from cli.release_transition.failure import OperationFailure, failure_detail
 from cli.release_transition.journal import Journal, Operation
-from shared.log import logger
-from shared.maintenance_state import MaintenanceHold
 
 Clock = Callable[[], datetime]
 POLL_S = 5.0
@@ -97,7 +97,7 @@ class DeferredExchange:
         self._client = client
 
     def installed(self, home: Path) -> int | None:
-        from shared.cluster.authority.unit import load_unit_capability
+        from base.cluster.authority.unit import load_unit_capability
 
         capability = load_unit_capability(home)
         return None if capability is None else capability.generation.number
@@ -308,8 +308,8 @@ class Follower:
 
 def run_follower(journal: Journal) -> None:
     """The finite executor's entry for a remote unit's operation."""
+    from base.cluster.authority.unit import load_unit_enrollment
     from cli.release_transition.local import LocalTransition
-    from shared.cluster.authority.unit import load_unit_enrollment
 
     request = journal.operation.request
     if not isinstance(request, UnitRequest):

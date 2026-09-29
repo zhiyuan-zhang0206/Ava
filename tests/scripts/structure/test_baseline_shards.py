@@ -39,7 +39,7 @@ def _git(root: pathlib.Path, *args: str) -> None:
     "kind,key,expected",
     [
         # directories: the key itself is the directory.
-        ("directories", "shared", "shared"),
+        ("directories", "base", "base"),
         ("directories", "cli/commands", "cli.commands"),
         # A plain file path: its parent directory decides.
         ("files", "scripts/lint_x.py", "scripts"),
@@ -47,7 +47,7 @@ def _git(root: pathlib.Path, *args: str) -> None:
         # `path::target` (complexity/nesting/private_imports/owner_bypasses/
         # path_imports): the path half's parent directory decides.
         ("complexity", "agent/graph/x.py::f", "agent.graph"),
-        ("private_imports", "agent/graph/x.py::shared._priv", "agent.graph"),
+        ("private_imports", "agent/graph/x.py::base._priv", "agent.graph"),
         ("owner_bypasses", "gateway/db.py::postgres-dial", "gateway"),
     ],
 )
@@ -67,11 +67,11 @@ def test_split_render_merge_round_trips() -> None:
     each entry filed under its own directory's shard and empty sections
     omitted from a shard that has no entries in them."""
     baseline = {
-        "directories": {"shared": 25, "cli/commands": 30},
+        "directories": {"base": 25, "cli/commands": 30},
         "files": {"scripts/lint_x.py": 900, "agent/graph/x.py": 850},
         "complexity": {"agent/graph/x.py::f": 16},
         "nesting": {},
-        "private_imports": {"agent/graph/x.py::shared._priv": 1},
+        "private_imports": {"agent/graph/x.py::base._priv": 1},
         "owner_bypasses": {"gateway/db.py::postgres-dial": 1},
         "path_imports": {},
     }
@@ -79,13 +79,13 @@ def test_split_render_merge_round_trips() -> None:
     shards = baseline_shards.split(baseline)
 
     assert shards == {
-        "shared": {"directories": {"shared": 25}},
+        "base": {"directories": {"base": 25}},
         "cli.commands": {"directories": {"cli/commands": 30}},
         "scripts": {"files": {"scripts/lint_x.py": 900}},
         "agent.graph": {
             "files": {"agent/graph/x.py": 850},
             "complexity": {"agent/graph/x.py::f": 16},
-            "private_imports": {"agent/graph/x.py::shared._priv": 1},
+            "private_imports": {"agent/graph/x.py::base._priv": 1},
         },
         "gateway": {"owner_bypasses": {"gateway/db.py::postgres-dial": 1}},
     }
@@ -114,14 +114,14 @@ def test_render_is_canonical_sorted_json() -> None:
 
 def test_merge_rejects_an_entry_filed_under_the_wrong_shard() -> None:
     """A `files` entry for agent/graph/x.py belongs in the agent.graph shard, not
-    in shared.json — merge() must name the shard it actually belongs in."""
-    texts = {"shared": json.dumps({"files": {"agent/graph/x.py": 900}})}
+    in base.json — merge() must name the shard it actually belongs in."""
+    texts = {"base": json.dumps({"files": {"agent/graph/x.py": 900}})}
 
     with pytest.raises(ValueError) as exc_info:
         baseline_shards.merge(texts, ("files",))
 
     message = str(exc_info.value)
-    assert "shared.json" in message
+    assert "base.json" in message
     assert "agent/graph/x.py" in message
     assert "belongs in agent.graph.json" in message
 
@@ -134,8 +134,8 @@ def test_merge_rejects_an_unknown_section() -> None:
 
 
 def test_merge_rejects_a_non_object_shard() -> None:
-    with pytest.raises(ValueError, match=r"shared\.json must be an object"):
-        baseline_shards.merge({"shared": "[]"}, ("files",))
+    with pytest.raises(ValueError, match=r"base\.json must be an object"):
+        baseline_shards.merge({"base": "[]"}, ("files",))
 
 
 def test_merge_rejects_a_non_object_section() -> None:

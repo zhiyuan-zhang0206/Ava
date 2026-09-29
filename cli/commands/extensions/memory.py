@@ -17,9 +17,9 @@ from typing import TypedDict, cast
 
 import httpx
 
-from shared.http_dial import post as dial_post
-from shared.machine import gateway_api_base, gateway_auth_headers
-from shared.memory_repo import MemoryBranchMismatch
+from base.cluster.machine import gateway_api_base, gateway_auth_headers
+from base.deploy.git.memory_repo import MemoryBranchMismatch
+from base.host.net.http_dial import post as dial_post
 
 _TIMEOUT_S = 30.0
 
@@ -105,8 +105,8 @@ def cmd_memory_search(query: str, *, limit: int, json_output: bool) -> int:
     """Search gateway memory while keeping paths relative to its memory root."""
     import json
 
-    from shared.http_dial import post as dial_post
-    from shared.machine import gateway_api_base, gateway_auth_headers
+    from base.cluster.machine import gateway_api_base, gateway_auth_headers
+    from base.host.net.http_dial import post as dial_post
 
     url = f"{gateway_api_base()}/api/memory/search"
     resp = dial_post(

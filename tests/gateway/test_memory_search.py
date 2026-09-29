@@ -968,7 +968,7 @@ def _stub_search_backend(
     import gateway.routers.memory as _gw_memory
     import services.memory_indexer.backends.factory as _factory
     import services.memory_indexer.embeddings.factory as _embedding_factory
-    from shared.config import settings
+    from base.config import settings
 
     monkeypatch.setattr(_gw_memory, "gateway_memory_dir", lambda: tmp_path)
     (tmp_path / "a.md").write_text("---\ntype: Memory\n---\nx\n", encoding="utf-8")
@@ -1178,7 +1178,7 @@ class TestAcquireFastFail:
     ) -> None:
         """One permit held by a wedged search; the next request 503s on the
         acquire budget, well before the search deadline."""
-        from shared.config import settings
+        from base.config import settings
 
         sem = _stub_search_backend(monkeypatch, tmp_path, search=_never_returns, permits=1)
         # A tiny acquire budget so the failure is provably the fast-fail, and a
@@ -1254,7 +1254,7 @@ def test_semaphore_sized_from_setting(monkeypatch: pytest.MonkeyPatch) -> None:
     """The query-embed concurrency gate reads `memory_search_max_concurrency`
     (env AVA_MEMORY_SEARCH_MAX_CONCURRENCY) — a knob, not a hardcoded constant."""
     import gateway.routers.memory as _gw_memory
-    from shared.config import settings
+    from base.config import settings
 
     monkeypatch.setattr(settings.services, "memory_search_max_concurrency", 7)
     _gw_memory._search_semaphore.cache_clear()

@@ -45,9 +45,8 @@ from typing import Any, override
 import httpx
 import numpy as np
 
-from services.memory_indexer.embeddings.base import EmbeddingAPIError
-from shared.config import settings
-from shared.resilience import (
+from base.config import settings
+from base.host.net.resilience import (
     MAX_RETRY_AFTER_RESPECT_S,
     ExponentialBackoff,
     Policy,
@@ -55,6 +54,7 @@ from shared.resilience import (
     http_classifier,
     retry,
 )
+from services.memory_indexer.embeddings.base import EmbeddingAPIError
 
 _MODEL_ID = "gemini-embedding-2"
 DIM = 3072
@@ -165,7 +165,7 @@ def _emit_billing(body: dict[str, Any]) -> None:
     failures are swallowed — they can never break the embed call.
     """
     try:
-        from shared.lm.usage import log_usage_fields
+        from base.lm.usage import log_usage_fields
 
         usage: dict[str, Any] = body.get("usageMetadata") or {}
         tok_in = int(usage.get("promptTokenCount") or 0)

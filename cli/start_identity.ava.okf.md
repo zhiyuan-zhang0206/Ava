@@ -50,7 +50,7 @@ Admitted directories must be absolute and survive literal `.env` round-trip;
 comment-sensitive names and interpolation expressions fail before intent creation.
 
 The native ordering is storage, owned database and checkpoints, migrations and
-runner grants, then PgBouncer. `cli/commands/start.py` converges host prerequisites,
+runner grants, then PgBouncer. `cli/commands/lifecycle/start.py` converges host prerequisites,
 launches the selected root tree and records serving only after complete readiness.
 Bare repeated start retains the desired service selection in `service-selection.json`.
 A live root is admitted before preparation: changed source, environment, or roster
@@ -78,7 +78,7 @@ home. Both check the durable home operation gate before effects, recheck before
 stop, and pass the identical captured runtime into startup.
 
 The retained operation also binds the authoritative configuration through the
-Settings-free `shared/start_inputs.py` digest. Start, preflight, observation and
+Settings-free `base/deploy/release/start_inputs.py` digest. Start, preflight, observation and
 resume refuse changed inputs; stage checks precede Settings loading and repeat
 after startup or readiness. The explicit startup capability rechecks this digest
 before ordinary release start prepares identity or loads Settings. These checks

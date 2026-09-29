@@ -1,4 +1,4 @@
-"""`scripts/lint_ava_okf.py` — a typo'd explicit target must fail the gate.
+"""`scripts/content_lint/lint_ava_okf.py` — a typo'd explicit target must fail the gate.
 
 An explicit path argument that does not exist used to print
 "No .ava.okf.md files found." and exit 0; it must now report the missing
@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from scripts import lint_ava_okf as gate
+from scripts.content_lint import lint_ava_okf as gate
 
 
 def test_explicit_missing_target_is_an_error(

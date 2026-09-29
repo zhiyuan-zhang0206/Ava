@@ -13,8 +13,9 @@ import pytest
 from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
 
-from shared.exec_owner_protocol import OwnerClosed, OwnerContext, OwnerReady
-from shared.incarnation_resources import (
+from base.agents.incarnation.exec_owner_protocol import OwnerClosed, OwnerContext, OwnerReady
+from base.agents.incarnation.resource_admission import admit_resources
+from base.agents.incarnation.resources import (
     IncarnationResources,
     ResourceEvidenceError,
     ResourceProcess,
@@ -23,11 +24,10 @@ from shared.incarnation_resources import (
     decode_resources,
     register_exec,
 )
-from shared.managed_writer_publication import AdmissionDecision, CurrentAdmission
-from shared.resource_admission import admit_resources
-from shared.runtime_admission import RuntimeAdmission
-from shared.runtime_incarnation import RuntimeIncarnation
-from tests.agent.test_incarnation_resources import _admitted, _entry, _force, _process
+from base.deploy.writers.publication import AdmissionDecision, CurrentAdmission
+from base.deploy.writers.runtime_admission import RuntimeAdmission
+from base.native_process.runtime_incarnation import RuntimeIncarnation
+from tests.agent.test_resources import _admitted, _entry, _force, _process
 
 
 class _CurrentRuntimeAdmission(RuntimeAdmission):
@@ -39,16 +39,16 @@ class _CurrentRuntimeAdmission(RuntimeAdmission):
 async def test_real_exec_dispatch_uses_owner_and_discharges_exact_map(
     db_conn: psycopg.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from agent.graph import _exec_owned_run
-    from agent.graph._exec_result import _ExecDone
-    from agent.graph._exec_subprocess import _run_in_subprocess
+    from agent.graph.exec import _owned_run
+    from agent.graph.exec._result import _ExecDone
+    from agent.graph.exec._subprocess import _run_in_subprocess
 
     target = _admitted(db_conn)
 
     def admitted(_agent_id: int) -> RuntimeIncarnation:
         return target
 
-    monkeypatch.setattr(_exec_owned_run, "current_incarnation", admitted)
+    monkeypatch.setattr(_owned_run, "current_incarnation", admitted)
     result, payload = await _run_in_subprocess(
         "print('owned-runtime-proof')", target.agent_id, asyncio.Event(), 30, exec_dir=tmp_path
     )
@@ -69,11 +69,11 @@ async def test_force_at_owner_ready_leaves_no_resurrection_blocker(  # noqa: PLR
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Force before native attachment cannot freeze an unattached reservation."""
-    from agent.graph import _exec_owned_run
-    from agent.graph._exec_result import _ExecCrashed
-    from agent.graph._exec_subprocess import _run_in_subprocess
-    from agent.hosted_ownership import admit_hosted_runtime
-    from shared.hosted_force import original_host_force
+    from agent.graph.exec import _owned_run
+    from agent.graph.exec._result import _ExecCrashed
+    from agent.graph.exec._subprocess import _run_in_subprocess
+    from agent.ownership.hosted import admit_hosted_runtime
+    from base.agents.incarnation.hosted_force import original_host_force
 
     target = _admitted(db_conn)
     marker = tmp_path / "must-not-run"
@@ -81,8 +81,8 @@ async def test_force_at_owner_ready_leaves_no_resurrection_blocker(  # noqa: PLR
     def admitted(_agent_id: int) -> RuntimeIncarnation:
         return target
 
-    monkeypatch.setattr(_exec_owned_run, "current_incarnation", admitted)
-    original_validate = _exec_owned_run.validate_native_ready
+    monkeypatch.setattr(_owned_run, "current_incarnation", admitted)
+    original_validate = _owned_run.validate_native_ready
     ready = threading.Event()
     force_done = threading.Event()
     failures: list[BaseException] = []
@@ -113,7 +113,7 @@ async def test_force_at_owner_ready_leaves_no_resurrection_blocker(  # noqa: PLR
         ready.set()
         assert force_done.wait(10)
 
-    monkeypatch.setattr(_exec_owned_run, "validate_native_ready", validate_then_wait)
+    monkeypatch.setattr(_owned_run, "validate_native_ready", validate_then_wait)
     thread = threading.Thread(target=force_after_ready)
     thread.start()
     result, _ = await _run_in_subprocess(
@@ -163,17 +163,17 @@ async def test_force_at_owner_ready_leaves_no_resurrection_blocker(  # noqa: PLR
 async def test_managed_exec_streams_output_and_keepalive_before_completion(
     db_conn: psycopg.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from agent.graph import _exec_owned_run
-    from agent.graph._exec_result import _ExecDone
-    from agent.graph._exec_stream import ExecOutputChunkPublisher
-    from agent.graph._exec_subprocess import _run_in_subprocess
+    from agent.graph.exec import _owned_run
+    from agent.graph.exec._result import _ExecDone
+    from agent.graph.exec._stream import ExecOutputChunkPublisher
+    from agent.graph.exec._subprocess import _run_in_subprocess
 
     target = _admitted(db_conn)
 
     def admitted(_agent_id: int) -> RuntimeIncarnation:
         return target
 
-    monkeypatch.setattr(_exec_owned_run, "current_incarnation", admitted)
+    monkeypatch.setattr(_owned_run, "current_incarnation", admitted)
     output_seen = asyncio.Event()
     keepalive_seen = asyncio.Event()
     events: list[dict[str, object]] = []
@@ -219,15 +219,15 @@ async def test_execution_domain_cancellation_consumes_exact_owner_receipt(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Cancellation returns only after the attached allocation is discharged."""
-    from agent.graph import _exec_owned_run
-    from agent.graph._exec_subprocess import _run_in_subprocess
+    from agent.graph.exec import _owned_run
+    from agent.graph.exec._subprocess import _run_in_subprocess
 
     target = _admitted(db_conn)
 
     def admitted(_agent_id: int) -> RuntimeIncarnation:
         return target
 
-    monkeypatch.setattr(_exec_owned_run, "current_incarnation", admitted)
+    monkeypatch.setattr(_owned_run, "current_incarnation", admitted)
     task = asyncio.create_task(
         _run_in_subprocess(
             "import time; print('managed-started', flush=True); time.sleep(60)",
@@ -277,16 +277,16 @@ async def test_execution_domain_cancellation_waits_for_inflight_registration(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A cancelled to_thread caller cannot orphan a later registration commit."""
-    from agent.graph import _exec_owned_run
-    from agent.graph._exec_subprocess import _run_in_subprocess
+    from agent.graph.exec import _owned_run
+    from agent.graph.exec._subprocess import _run_in_subprocess
 
     target = _admitted(db_conn)
 
     def admitted(_agent_id: int) -> RuntimeIncarnation:
         return target
 
-    monkeypatch.setattr(_exec_owned_run, "current_incarnation", admitted)
-    original_register = _exec_owned_run._register_attached
+    monkeypatch.setattr(_owned_run, "current_incarnation", admitted)
+    original_register = _owned_run._register_attached
     entered = threading.Event()
     release = threading.Event()
 
@@ -295,7 +295,7 @@ async def test_execution_domain_cancellation_waits_for_inflight_registration(
         assert release.wait(10)
         original_register(context, ready)
 
-    monkeypatch.setattr(_exec_owned_run, "_register_attached", delayed_register)
+    monkeypatch.setattr(_owned_run, "_register_attached", delayed_register)
     task = asyncio.create_task(
         _run_in_subprocess(
             "raise AssertionError('host cancellation must win before user code')",
@@ -384,7 +384,7 @@ def test_malformed_never_downgrades_to_legacy(db_conn: psycopg.Connection) -> No
 def test_actual_owner_receipt_recovers_only_exact_persisted_allocation(
     db_conn: psycopg.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from shared import exec_owner_recovery
+    from base.agents.incarnation import exec_owner_recovery
     from tests.agent.test_exec_owner_entry import _context, _ready, _start
 
     target = _admitted(db_conn)

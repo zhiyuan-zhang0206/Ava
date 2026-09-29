@@ -19,8 +19,8 @@ import logging
 import os
 from pathlib import Path
 
-from shared import paths
-from shared.log import logger
+from base import paths
+from base.log import logger
 
 # Same logger name as `daemon.py` uses: splitting the code out must not change
 # log attribution or routing.

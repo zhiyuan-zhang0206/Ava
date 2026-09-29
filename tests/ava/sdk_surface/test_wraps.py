@@ -28,8 +28,8 @@ import pytest
 import ava
 from ava.sdk_surface import wraps
 from ava.sdk_surface.wraps import wrap
-from shared import plugin_activation
-from shared.plugin_context import PluginContext
+from base.packages.plugins import activation
+from base.packages.plugins.context import PluginContext
 
 
 @pytest.fixture
@@ -202,7 +202,7 @@ def activations(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, str, str, st
         if plugin is not None:
             recorded.append((plugin, surface, identifier, detail))
 
-    monkeypatch.setattr(plugin_activation, "record", spy)
+    monkeypatch.setattr(activation, "record", spy)
     return recorded
 
 
@@ -288,7 +288,7 @@ def test_activation_recording_never_perturbs_the_call(
     def boom(*_a: Any, **_k: Any) -> None:
         raise RuntimeError("sink down")
 
-    monkeypatch.setattr(plugin_activation, "emit", boom)
+    monkeypatch.setattr(activation, "emit", boom)
     with PluginContext("myplugin"):
         wrap("probe.fn", lambda _inner, *_a, **_k: "blocked")  # pyright: ignore[reportUnknownArgumentType]
 
@@ -314,10 +314,10 @@ def test_wrap_captures_the_base_callable_below_a_metering_recorder(
     plugins load) is not a wrap layer. A wrap captures and chains over the base
     callable below it — so clear_wraps restores the base, and no stale recorder
     stays alive inside the wrap chain."""
-    from ava import sdk_metering
+    from ava.sdk_surface import metering
 
     ns, fn = probe
-    ns.fn = sdk_metering._make_recorder(fn, "probe.fn")
+    ns.fn = metering._make_recorder(fn, "probe.fn")
 
     with PluginContext("myplugin"):
         wrap("probe.fn", lambda inner, *a, **kw: inner(*a, **kw))  # pyright: ignore[reportUnknownArgumentType]

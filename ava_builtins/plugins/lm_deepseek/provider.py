@@ -10,8 +10,8 @@ if TYPE_CHECKING:
     # `_TYPE_CHECKING_ALLOWED`).
     from langchain_core.language_models.chat_models import BaseChatModel
 
-from shared.lm.effort import clamp_effort
-from shared.lm.provider_api import (
+from base.lm.effort import clamp_effort
+from base.lm.provider_api import (
     AttachPolicy,
     BuildContext,
     PricePeriod,
@@ -22,7 +22,7 @@ from shared.lm.provider_api import (
     register,
     require_key,
 )
-from shared.lm.registry import MODELS, ModelSpec, ModelTuning
+from base.lm.registry import MODELS, ModelSpec, ModelTuning
 
 # DeepSeek's anthropic-compatible endpoint. Also the single source of truth
 # for model name → endpoint resolution; not written twice — to change the
@@ -51,7 +51,7 @@ def build(ctx: BuildContext) -> BaseChatModel:
     `output_config.effort` via extra_body; `none` maps onto thinking
     disabled (the endpoint's effort vocabulary has no off level).
     """
-    from shared.lm.compat.anthropic_thinking import ThinkingTokensChatAnthropic
+    from base.lm.compat.anthropic_thinking import ThinkingTokensChatAnthropic
 
     # Use DeepSeek's anthropic-compatible endpoint via ChatAnthropic client.
     # Not langchain-deepseek (1.0.1 reasoning_content roundtrip bug).
@@ -79,7 +79,7 @@ def build(ctx: BuildContext) -> BaseChatModel:
         )
         raise ValueError(
             f"Unknown deepseek model {ctx.model!r} — register it (with "
-            f"max_output_tokens) in `shared/lm/registry.py:MODELS`. "
+            f"max_output_tokens) in `base/lm/registry.py:MODELS`. "
             f"Known deepseek models: {known_models}"
         )
     max_tokens = ctx.spec.max_output_tokens
@@ -187,14 +187,14 @@ register(
         ),
         # Removed 2026-09-23: deepseek-v4-pro, deepseek-v4-flash, and
         # deepseek-v4-flash-vision-exp cannot be selected. Their complete price
-        # histories remain in shared/lm/pricing_catalog_archive.json; configs
+        # histories remain in base/lm/pricing_catalog_archive.json; configs
         # naming them fail validation as unknown models.
         # deepseek-v4.1-flash-expires-on-0910 (internal beta, announced 2026-09-08,
         # expired 2026-09-10) was removed from the registry on 2026-09-11: it is not
         # callable anymore, no live config pinned it (cluster sweep at removal), and a
         # tombstone would keep a zombie entry plus hand-pinned prices for a model no
         # request can serve. Its price ledger entry stays in
-        # shared/lm/pricing_catalog_archive.json; a stale config naming it now fails
+        # base/lm/pricing_catalog_archive.json; a stale config naming it now fails
         # spawn validation (unknown model) instead of silently running something else.
     },
     pricing={

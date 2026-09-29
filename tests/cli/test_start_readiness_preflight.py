@@ -17,7 +17,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from cli.commands import _start_readiness_preflight as preflight
+from cli.commands.lifecycle import _start_readiness_preflight as preflight
 
 
 class _Backend:
@@ -30,7 +30,7 @@ class _Backend:
 
 @pytest.fixture(autouse=True)
 def fake_backend(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("shared.platform_backend.get_backend", _Backend)
+    monkeypatch.setattr("base.host.system.backend.get_backend", _Backend)
 
 
 @pytest.fixture
@@ -40,14 +40,17 @@ def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     home = tmp_path / "home"
     for name in ("logs", "workspaces", "memory"):
         (home / name).mkdir(parents=True)
-    monkeypatch.setattr("shared.paths.ava_home", lambda: home)
+    monkeypatch.setattr("base.paths.ava_home", lambda: home)
     monkeypatch.setattr("cli.commands._repo._roles_or_none", lambda: frozenset({"agent-runner"}))
-    monkeypatch.setattr("cli.commands.root_driver._root_tree_roster", lambda *_a, **_k: ())  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(
-        "cli.commands._port_preflight.collect_port_conflicts",
+        "cli.commands.lifecycle.root_driver._root_tree_roster",
+        lambda *_a, **_k: (),  # pyright: ignore[reportUnknownArgumentType]
+    )
+    monkeypatch.setattr(
+        "cli.commands.converge.port_preflight.collect_port_conflicts",
         lambda _ctx: [],  # pyright: ignore[reportUnknownArgumentType]
     )
-    monkeypatch.setattr("shared.migrations.unreadable_migration_files", list)
+    monkeypatch.setattr("base.deploy.schema.migrations.unreadable_migration_files", list)
     return home
 
 
@@ -106,7 +109,7 @@ def test_prod_checkout_violation_is_fatal(
     """`ava start` refuses a prod home launched from a dev checkout; that refusal
     must be reachable before the stop."""
     monkeypatch.setattr(
-        "shared.paths.prod_service_checkout_error",
+        "base.paths.prod_service_checkout_error",
         lambda _repo: "prod home launched from a disposable checkout",  # pyright: ignore[reportUnknownArgumentType]
     )
 
@@ -202,7 +205,7 @@ def test_migration_readability_is_fatal(
     """The apply-side vet: a tracked migration the applier cannot open would fail
     `ava start`'s apply on the stopped host."""
     monkeypatch.setattr(
-        "shared.migrations.unreadable_migration_files",
+        "base.deploy.schema.migrations.unreadable_migration_files",
         lambda: [("20260912T010000_x", "Permission denied: 'x.sql'")],
     )
 
@@ -217,12 +220,12 @@ def test_migration_enumeration_failure_is_fatal(
 ) -> None:
     """An enumeration the loader itself refuses (not a git worktree) also fails
     the apply; it must refuse here, not surprise the stopped host."""
-    from shared.migrations import MigrationLayoutError
+    from base.deploy.schema.migrations import MigrationLayoutError
 
     def _raise() -> list[tuple[str, str]]:
         raise MigrationLayoutError("migrations dir does not exist: /x/migrations")
 
-    monkeypatch.setattr("shared.migrations.unreadable_migration_files", _raise)
+    monkeypatch.setattr("base.deploy.schema.migrations.unreadable_migration_files", _raise)
 
     assert _run(repo) == 1
     assert "cannot be enumerated" in capsys.readouterr().err
@@ -310,7 +313,7 @@ def test_all_fatal_findings_are_reported_together(
 ) -> None:
     """One refusal lists every reason, so the operator fixes the set in one pass."""
     monkeypatch.setattr(
-        "shared.paths.prod_service_checkout_error",
+        "base.paths.prod_service_checkout_error",
         lambda _repo: "checkout problem",  # pyright: ignore[reportUnknownArgumentType]
     )
     (home / "memory").rmdir()

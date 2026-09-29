@@ -154,9 +154,9 @@ def test_destroy_observer_rejects_retained_checkout_binding(
 def test_readiness_observer_does_not_wait_for_a_late_service(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    from base.daemon.health import DaemonProbe
     from ops import roster
-    from ops.service_spec import ServiceSpec
-    from shared.daemon_health import DaemonProbe
+    from ops.roster.service_spec import ServiceSpec
 
     (tmp_path / "config.json").write_text(json.dumps({"frontend_url": "http://unused"}))
     sampled: list[str] = []

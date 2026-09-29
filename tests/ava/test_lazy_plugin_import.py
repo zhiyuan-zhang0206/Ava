@@ -1,7 +1,7 @@
 """Fleet-plugin autoload must not load the redis / psycopg / otel stacks (task #3816).
 
 Every exec child autoloads the `ava_builtins.plugins.ava_fleet` surface. Its
-module-level edges used to pull `shared.live_announce` (-> live-events +
+module-level edges used to pull `base.events.live.announce` (-> live-events +
 redis-client) and `psycopg` (via `task_registry` / `_task_update`); those are
 function-scoped now (task #3816 M4a), so importing the plugin family in a clean
 process must leave none of these families in `sys.modules` — the trivial

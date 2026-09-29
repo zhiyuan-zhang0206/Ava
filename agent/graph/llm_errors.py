@@ -2,7 +2,7 @@
 
 Owns every fail-fast exception the llm node raises (the ``LLMStreamError``
 hierarchy, ``FatalLLMStreamError``, ``FatalProviderError``), the provider-error
-classification helpers (``shared.lm.errors.classify_error`` → structured log →
+classification helpers (``base.lm.errors.classify_error`` → structured log →
 optional ``FatalProviderError``), the per-process consecutive-error tracker
 that bounds deterministic retry loops, and the stall-pair streak that bounds
 the delayed retry schedule for two-adjacent-stall terminations.
@@ -16,9 +16,9 @@ from __future__ import annotations
 
 from typing import Any, cast
 
-from shared.config import settings
-from shared.config.turn_view import turn_settings
-from shared.lm.errors import ErrorClass, classify_error, emit_provider_error
+from base.config import settings
+from base.config.turn_view import turn_settings
+from base.lm.errors import ErrorClass, classify_error, emit_provider_error
 
 
 class LLMStreamError(Exception):
@@ -107,7 +107,7 @@ class LLMStreamStallPairExhaustedError(FatalLLMStreamError):
 
 
 class FatalProviderError(Exception):
-    """Provider permanently rejected the request — a `shared.lm.errors.classify_error`
+    """Provider permanently rejected the request — a `base.lm.errors.classify_error`
     `PERMANENT` class (HTTP 400 bad request / context length / schema, 401 auth,
     402 billing, 403 forbidden, 404 unknown model, 422 schema) or a configured
     fatal error type (e.g. `engine_overloaded_error`). Retrying within the turn
@@ -223,7 +223,7 @@ def _classify_and_log_provider_error(exc: Exception) -> FatalProviderError | Non
     emit_provider_error(exc, model=model, fatal=fatal, classification=classification)
     if not fatal:
         return None
-    from shared.lm.factory import provider_key_of_model
+    from base.lm.factory import provider_key_of_model
 
     vendor = provider_key_of_model(model)
     if classification.billing:

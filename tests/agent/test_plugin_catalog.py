@@ -10,10 +10,11 @@ from pathlib import Path
 
 import pytest
 
-from agent import plugin_catalog
-from shared import paths, plugin_contributions
-from shared.config import settings
-from shared.plugins_config import write_local
+from agent.extensions import catalog as catalog_mod
+from base import paths
+from base.config import settings
+from base.packages.plugins import contributions
+from base.packages.plugins.enable_config import write_local
 
 
 @pytest.fixture(autouse=True)
@@ -87,10 +88,10 @@ def test_every_surface_entry_point_resolves():
     """`SURFACES` is hand-written; its entry points are not. Each one must
     resolve to a live callable — a moved `register_*` breaks the catalog here
     rather than in front of an agent reading a signature that no longer exists."""
-    for surface in plugin_catalog.SURFACES:
+    for surface in catalog_mod.SURFACES:
         assert surface.entry_points, f"{surface.id} lists no entry point"
         for entry_point in surface.entry_points:
-            rendered = plugin_catalog.entry_point_signature(entry_point)
+            rendered = catalog_mod.entry_point_signature(entry_point)
             assert rendered.startswith(entry_point.replace(":", "."))
             assert "(" in rendered
 
@@ -101,7 +102,7 @@ def test_registrations_are_attributed_to_the_importing_plugin():
     _write_plugin("demo", _DEMO_PLUGIN)
     _enable(demo=True)
 
-    catalog = plugin_catalog.build_catalog()
+    catalog = catalog_mod.build_catalog()
     view = catalog.plugin("demo")
 
     assert view.enabled is True
@@ -126,7 +127,7 @@ def test_a_disabled_plugin_reports_no_registrations():
     _write_plugin("demo", _DEMO_PLUGIN)
     _enable(demo=False)
 
-    view = plugin_catalog.build_catalog().plugin("demo")
+    view = catalog_mod.build_catalog().plugin("demo")
 
     assert view.enabled is False
     assert view.contributions == ()
@@ -138,8 +139,8 @@ def test_a_reload_does_not_accumulate_contributions():
     _write_plugin("demo", _DEMO_PLUGIN)
     _enable(demo=True)
 
-    first = plugin_catalog.build_catalog().plugin("demo").contributions
-    second = plugin_catalog.build_catalog().plugin("demo").contributions
+    first = catalog_mod.build_catalog().plugin("demo").contributions
+    second = catalog_mod.build_catalog().plugin("demo").contributions
 
     assert len(first) == len(second)
 
@@ -155,10 +156,10 @@ def test_framework_registrations_are_not_recorded():
         async def __call__(self, state, runtime, config, /):
             return None
 
-    before = len(plugin_contributions.contributions())
+    before = len(contributions.contributions())
     register_before_llm(_FrameworkHook())
 
-    assert len(plugin_contributions.contributions()) == before
+    assert len(contributions.contributions()) == before
 
 
 _MANIFEST = """{
@@ -208,10 +209,10 @@ def test_declared_vs_registered_reports_both_directions():
     _write_plugin("declared", _DECLARED_PLUGIN, manifest=_MANIFEST)
     _enable(declared=True)
 
-    view = plugin_catalog.build_catalog().plugin("declared")
+    view = catalog_mod.build_catalog().plugin("declared")
     assert view.manifest is not None
     statuses = {
-        (e.surface, e.identifier): e.status for e in plugin_catalog.declared_vs_registered(view)
+        (e.surface, e.identifier): e.status for e in catalog_mod.declared_vs_registered(view)
     }
 
     assert statuses[("hooks", "before_llm")] == "ok"
@@ -226,10 +227,10 @@ def test_a_plugin_without_a_manifest_has_no_diff():
     _write_plugin("demo", _DEMO_PLUGIN)
     _enable(demo=True)
 
-    view = plugin_catalog.build_catalog().plugin("demo")
+    view = catalog_mod.build_catalog().plugin("demo")
 
     assert view.manifest is None
-    assert plugin_catalog.declared_vs_registered(view) == ()
+    assert catalog_mod.declared_vs_registered(view) == ()
 
 
 def test_install_time_manifest_keys_have_no_runtime_registry():
@@ -243,15 +244,15 @@ def test_install_time_manifest_keys_have_no_runtime_registry():
         "mcpServers",
         "opsServices",
         "ui",
-    } == plugin_catalog.DECLARATION_ONLY_KEYS
+    } == catalog_mod.DECLARATION_ONLY_KEYS
 
 
 def test_unknown_plugin_fails_fast_and_names_the_installed_ones():
     _write_plugin("demo", _DEMO_PLUGIN)
     _enable(demo=True)
-    catalog = plugin_catalog.build_catalog()
+    catalog = catalog_mod.build_catalog()
 
-    with pytest.raises(plugin_catalog.UnknownPlugin, match="demo"):
+    with pytest.raises(catalog_mod.UnknownPlugin, match="demo"):
         catalog.plugin("nope")
 
 
@@ -261,4 +262,4 @@ def test_a_dashed_name_resolves_to_the_plugin_directory():
     _write_plugin("demo_plugin", _DEMO_PLUGIN)
     _enable(demo_plugin=True)
 
-    assert plugin_catalog.build_catalog().plugin("demo-plugin").name == "demo_plugin"
+    assert catalog_mod.build_catalog().plugin("demo-plugin").name == "demo_plugin"

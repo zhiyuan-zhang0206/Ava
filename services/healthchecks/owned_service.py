@@ -9,9 +9,9 @@ from pathlib import Path
 
 import psutil
 
-from shared.daemon_health import DaemonProbe
-from shared.native_process.ownership import OwnedProcess, capture_tree
-from shared.root_control.client import RootClientError, owned_process, peer_pid
+from base.daemon.health import DaemonProbe
+from base.native_process.ownership import OwnedProcess, capture_tree
+from base.native_process.root_control.client import RootClientError, owned_process, peer_pid
 
 
 def _owned_ping(resolve_owner: Callable[[], OwnedProcess | None], path: Path | str) -> DaemonProbe:
@@ -114,8 +114,8 @@ def probe_endpoint(
 
 
 def _observe(service: str) -> DaemonProbe:
-    from shared.config import settings
-    from shared.paths import chrome_mcp_socket, computer_mcp_socket, mcp_daemon_shared_socket
+    from base.config import settings
+    from base.paths import chrome_mcp_socket, computer_mcp_socket, mcp_daemon_shared_socket
 
     sockets = {
         "browser-mcp": chrome_mcp_socket,

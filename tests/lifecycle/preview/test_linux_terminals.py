@@ -45,7 +45,7 @@ def receipt(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, term
             return [
                 "python",
                 "-m",
-                "shared.sessions.pty.host",
+                "base.sessions.pty.host",
                 "fixture",
                 str(tmp_path),
                 "/unused-env",

@@ -12,11 +12,11 @@ from pathlib import Path
 import psutil
 import pytest
 
-from agent.graph import _exec_process
-from shared import process_group_closure
-from shared.platform import IS_WINDOWS
-from shared.winjob import WindowsJob, _kernel32
-from shared.winjob_pipes import PipedJobChild, start_piped_job_process
+from agent.graph.exec import _process
+from base.native_process import group_closure
+from base.native_process.os_platform import IS_WINDOWS
+from base.native_process.winjob import WindowsJob, _kernel32
+from base.native_process.winjob_pipes import PipedJobChild, start_piped_job_process
 
 
 def _belongs_to_job(job: WindowsJob, pid: int) -> bool:
@@ -81,9 +81,9 @@ def _spawn_fixture(
     job: WindowsJob | None,
     *,
     late_attach: bool,
-) -> tuple[subprocess.Popen[bytes] | PipedJobChild, _exec_process.ExecProcessDomain]:
+) -> tuple[subprocess.Popen[bytes] | PipedJobChild, _process.ExecProcessDomain]:
     if not IS_WINDOWS:
-        root, domain = _exec_process.ExecProcessDomain.launch_posix(
+        root, domain = _process.ExecProcessDomain.launch_posix(
             argv,
             new_session=True,
             stdin=subprocess.DEVNULL,
@@ -98,7 +98,7 @@ def _spawn_fixture(
                 argv, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
             )
         )
-        domain = _exec_process.ExecProcessDomain(root, job)
+        domain = _process.ExecProcessDomain(root, job)
     return root, domain
 
 
@@ -166,7 +166,7 @@ os._exit(0)
 
 @pytest.mark.skipif(IS_WINDOWS, reason="POSIX group observation contract")
 def test_live_group_after_signal_is_not_closed(monkeypatch: pytest.MonkeyPatch) -> None:
-    process, domain = _exec_process.ExecProcessDomain.launch_posix(
+    process, domain = _process.ExecProcessDomain.launch_posix(
         [sys.executable, "-I", "-c", "import time;time.sleep(60)"]
     )
     original_signal = os.killpg
@@ -187,9 +187,7 @@ def test_live_group_after_signal_is_not_closed(monkeypatch: pytest.MonkeyPatch) 
 @pytest.mark.skipif(IS_WINDOWS, reason="POSIX retained child authority")
 def test_fast_exit_owner_closes_before_reap() -> None:
     for _ in range(8):
-        root, domain = _exec_process.ExecProcessDomain.launch_posix(
-            [sys.executable, "-I", "-c", "pass"]
-        )
+        root, domain = _process.ExecProcessDomain.launch_posix([sys.executable, "-I", "-c", "pass"])
         try:
             deadline = time.monotonic() + 5
             while not _ended(psutil.Process(root.pid)) and time.monotonic() < deadline:
@@ -206,9 +204,7 @@ def test_fast_exit_owner_closes_before_reap() -> None:
 
 @pytest.mark.skipif(IS_WINDOWS, reason="POSIX retained child authority")
 def test_reaped_owner_cannot_signal_a_reused_group(monkeypatch: pytest.MonkeyPatch) -> None:
-    root, domain = _exec_process.ExecProcessDomain.launch_posix(
-        [sys.executable, "-I", "-c", "pass"]
-    )
+    root, domain = _process.ExecProcessDomain.launch_posix([sys.executable, "-I", "-c", "pass"])
     root.wait(timeout=5)
     signals: list[int] = []
 
@@ -220,17 +216,17 @@ def test_reaped_owner_cannot_signal_a_reused_group(monkeypatch: pytest.MonkeyPat
         domain.close_confirmed(time.monotonic() + 1)
     assert signals == []
     with pytest.raises(RuntimeError, match="launch boundary"):
-        _exec_process.ExecProcessDomain(root, None)
+        _process.ExecProcessDomain(root, None)
 
 
 @pytest.mark.skipif(IS_WINDOWS, reason="POSIX retained child authority")
 def test_group_signal_precedes_any_absence_sample(monkeypatch: pytest.MonkeyPatch) -> None:
-    root, domain = _exec_process.ExecProcessDomain.launch_posix(
+    root, domain = _process.ExecProcessDomain.launch_posix(
         [sys.executable, "-I", "-c", "import time;time.sleep(60)"]
     )
     events: list[str] = []
     original = os.killpg
-    listing = process_group_closure.group_members
+    listing = group_closure.group_members
 
     def signal_group(pid: int, sig: int) -> None:
         events.append("signal")
@@ -241,7 +237,7 @@ def test_group_signal_precedes_any_absence_sample(monkeypatch: pytest.MonkeyPatc
         return listing(pgid)
 
     monkeypatch.setattr(os, "killpg", signal_group)
-    monkeypatch.setattr(process_group_closure, "group_members", sample)
+    monkeypatch.setattr(group_closure, "group_members", sample)
     try:
         domain.close_confirmed(time.monotonic() + 5)
         assert events == ["signal", "sample"]
@@ -259,7 +255,7 @@ def test_signal_failure_retains_unreaped_owner(
 ) -> None:
     import errno
 
-    from shared.native_process.ownership import OwnedProcess
+    from base.native_process.ownership import OwnedProcess
 
     receipt = tmp_path / "child"
     code = (
@@ -267,7 +263,7 @@ def test_signal_failure_retains_unreaped_owner(
         "p=subprocess.Popen([sys.executable,'-I','-c','import time;time.sleep(60)']); "
         "pathlib.Path(sys.argv[1]).write_text(str(p.pid))"
     )
-    root, domain = _exec_process.ExecProcessDomain.launch_posix(
+    root, domain = _process.ExecProcessDomain.launch_posix(
         [sys.executable, "-I", "-c", code, str(receipt)]
     )
     child: OwnedProcess | None = None
@@ -300,15 +296,15 @@ def test_signal_failure_retains_unreaped_owner(
 
 @pytest.mark.skipif(IS_WINDOWS, reason="POSIX retained child authority")
 def test_native_capture_failure_retains_launched_handle(monkeypatch: pytest.MonkeyPatch) -> None:
-    from shared.exec_process_domain import ExecDomainBirthError
-    from shared.native_process.ownership import OwnedProcess
+    from base.native_process.exec_domain import ExecDomainBirthError
+    from base.native_process.ownership import OwnedProcess
 
     def denied(_process: psutil.Process) -> OwnedProcess:
         raise psutil.AccessDenied(_process.pid)
 
     monkeypatch.setattr(OwnedProcess, "capture", denied)
     with pytest.raises(ExecDomainBirthError) as caught:
-        _exec_process.ExecProcessDomain.launch_posix(
+        _process.ExecProcessDomain.launch_posix(
             [sys.executable, "-I", "-c", "import time;time.sleep(60)"]
         )
     root = caught.value.proc
@@ -325,7 +321,7 @@ def test_native_capture_failure_retains_launched_handle(monkeypatch: pytest.Monk
 def test_signal_holds_native_pin_against_concurrent_wait(monkeypatch: pytest.MonkeyPatch) -> None:
     import threading
 
-    root, domain = _exec_process.ExecProcessDomain.launch_posix(
+    root, domain = _process.ExecProcessDomain.launch_posix(
         [sys.executable, "-I", "-c", "import time;time.sleep(60)"]
     )
     entered, release, reaped = threading.Event(), threading.Event(), threading.Event()
@@ -367,17 +363,15 @@ def test_signal_holds_native_pin_against_concurrent_wait(monkeypatch: pytest.Mon
 def test_confirmed_domain_does_not_reobserve_reused_numeric_group(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    root, domain = _exec_process.ExecProcessDomain.launch_posix(
-        [sys.executable, "-I", "-c", "pass"]
-    )
+    root, domain = _process.ExecProcessDomain.launch_posix([sys.executable, "-I", "-c", "pass"])
     domain.close_confirmed(time.monotonic() + 5)
     root.wait(timeout=5)
 
     def unknown(_pid: int) -> bool:
         raise AssertionError("terminal domain cannot inspect a new numeric group")
 
-    monkeypatch.setattr("shared.exec_process_domain._process_group_has_live_member", unknown)
-    monkeypatch.setattr(process_group_closure, "group_members", unknown)
+    monkeypatch.setattr("base.native_process.exec_domain._process_group_has_live_member", unknown)
+    monkeypatch.setattr(group_closure, "group_members", unknown)
     domain.close_confirmed(time.monotonic() + 5)
 
 
@@ -389,7 +383,7 @@ def test_group_listing_names_exited_leader_and_live_members(tmp_path: Path) -> N
         "p=subprocess.Popen([sys.executable,'-I','-c','import time;time.sleep(60)']); "
         "pathlib.Path(sys.argv[1]).write_text(str(p.pid))"
     )
-    root, domain = _exec_process.ExecProcessDomain.launch_posix(
+    root, domain = _process.ExecProcessDomain.launch_posix(
         [sys.executable, "-I", "-c", code, str(receipt)]
     )
     try:
@@ -399,9 +393,9 @@ def test_group_listing_names_exited_leader_and_live_members(tmp_path: Path) -> N
             time.sleep(0.01)
         child = int(receipt.read_text())
         # The unreaped leader stays listed after exit, alongside its live member.
-        assert process_group_closure.group_members(root.pid) == sorted([root.pid, child])
+        assert group_closure.group_members(root.pid) == sorted([root.pid, child])
         domain.close_confirmed(time.monotonic() + 5)
-        assert process_group_closure.group_members(root.pid) == [root.pid]
+        assert group_closure.group_members(root.pid) == [root.pid]
     finally:
         with contextlib.suppress(ProcessLookupError, PermissionError):
             os.killpg(root.pid, 9)
@@ -410,12 +404,12 @@ def test_group_listing_names_exited_leader_and_live_members(tmp_path: Path) -> N
 
 def _late_listing_domain(
     monkeypatch: pytest.MonkeyPatch, late_rounds: int | None
-) -> tuple[subprocess.Popen[bytes], _exec_process.ExecProcessDomain, list[str]]:
+) -> tuple[subprocess.Popen[bytes], _process.ExecProcessDomain, list[str]]:
     """An empty live sample whose kernel listing names a late member for some rounds.
 
     `late_rounds=None` keeps listing the late member in every round.
     """
-    root, domain = _exec_process.ExecProcessDomain.launch_posix(
+    root, domain = _process.ExecProcessDomain.launch_posix(
         [sys.executable, "-I", "-c", "import time;time.sleep(60)"]
     )
     events: list[str] = []
@@ -437,8 +431,8 @@ def _late_listing_domain(
         return [root.pid, 0x7FFFFFFF] if late else [root.pid]
 
     monkeypatch.setattr(os, "killpg", signal_group)
-    monkeypatch.setattr("shared.exec_process_domain._process_group_has_live_member", empty)
-    monkeypatch.setattr(process_group_closure, "group_members", listing)
+    monkeypatch.setattr("base.native_process.exec_domain._process_group_has_live_member", empty)
+    monkeypatch.setattr(group_closure, "group_members", listing)
     return root, domain, events
 
 

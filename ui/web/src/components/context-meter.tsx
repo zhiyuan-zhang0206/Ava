@@ -61,7 +61,7 @@ export interface ContextMeterProps {
  * soft (wind-down) threshold and red past the hard (force-compact) ceiling, with
  * tick marks at both, plus a numeric summary. The soft/hard values are the
  * agent model's own — a fraction of its context window (see
- * `shared/lm/context_budget.py`), so a 200K-window model shows smaller marks
+ * `base/lm/context_budget.py`), so a 200K-window model shows smaller marks
  * than a 1M-window one.
  *
  * The caller only mounts this once `contextTokens > 0` (an agent that has run at

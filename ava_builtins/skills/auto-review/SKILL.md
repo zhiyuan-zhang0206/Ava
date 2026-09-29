@@ -42,7 +42,7 @@ The highest-value check — `AGENTS.md` is natural language, unmechanizable.
   design decisions, never a diary).
 - **Destructive-command discipline** and other named conventions.
 - New Python follows the project's Python coding conventions (no
-  `if TYPE_CHECKING:`, import direction `shared < ava < agent < gateway`, etc. —
+  `if TYPE_CHECKING:`, import direction `base < ava < agent < gateway`, etc. —
   but only flag what the lint does NOT already enforce).
 
 ### 2. PR description quality
@@ -82,7 +82,7 @@ Not the coverage percentage (CI gates that already) — the judgment:
 - Are the PR's "NOT tested" claims reasonable, or do they hide real risk?
 
 ### 6. Architecture consistency
-- Is new code in the correct layer (`shared < ava < agent < gateway`)?
+- Is new code in the correct layer (`base < ava < agent < gateway`)?
 - Any reverse-direction layer dependency that shouldn't exist?
 - Structure budgets (800 lines/file, 20 entries/directory; shrink-only baseline)
   — flag only what the structure lint does not already block.

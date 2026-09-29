@@ -36,13 +36,13 @@ import redis.asyncio as aredis
 from langchain_core.messages import AIMessage
 
 import services.labeler.labeler as labeler_module
+from base.config import settings
+from base.db import create_agent
 from services.labeler.labeler import (
     _rejection_reason,
     _system_prompt,
     generate_label_async,
 )
-from shared.config import settings
-from shared.db import create_agent
 
 # The nine outputs #178 recorded from real runs: three observed landing in
 # `agents.label` on the preview cluster, six from replaying the stored prompts

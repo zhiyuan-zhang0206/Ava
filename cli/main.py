@@ -26,13 +26,18 @@ import sys
 
 from pydantic import ValidationError
 
+from base.host.env.bootstrap import BootstrapFetchError
+from base.native_process.os_platform import (
+    LockTimeoutError,
+    ensure_line_buffered_stdio,
+    ensure_utf8_stdio,
+)
+
 # The parser tree and every `_h_*` handler live in cli/parsers/ (settings-free — they
 # import cli.commands only inside handler bodies). Only the builder entry point is
 # imported here; dispatch after parsing is `args.func(args)`, resolved by the
 # `set_defaults(func=...)` bindings the builders made against their own module globals.
 from cli.parsers import build_parser as _build_parser
-from shared.bootstrap import BootstrapFetchError
-from shared.platform import LockTimeoutError, ensure_line_buffered_stdio, ensure_utf8_stdio
 
 # Force UTF-8 stdio on Windows before any status glyph is printed (a cp1252
 # console raises UnicodeEncodeError on ✓/✗/→). No-op on POSIX. Also seeds
@@ -46,7 +51,7 @@ ensure_line_buffered_stdio()
 
 
 # The verbs that bring this unit up (every in-process `cmd_start`) open the
-# loguru sinks a service process has, under these names. Importing `shared.log`
+# loguru sinks a service process has, under these names. Importing `base.log`
 # drops loguru's default handler, so without them every record the start path
 # writes only through loguru is discarded: a skipped pgvector pre-create,
 # untracked migration files that will not be applied. `init_cli_process` adds
@@ -72,7 +77,7 @@ def _init_cli_logging(args_in: list[str]) -> None:
     """
     name = _CLI_LOG_NAMES.get(tuple(args_in[:1])) or _CLI_LOG_NAMES.get(tuple(args_in[:2]))
     if name is not None:
-        from shared.log import init_cli_process
+        from base.log import init_cli_process
 
         init_cli_process(name=name)
 
@@ -81,7 +86,7 @@ def _init_cli_logging(args_in: list[str]) -> None:
 # (stop and status must remain available for recovery inspection), so
 # `cli.main` opts them out of the gateway config fetch that every other process
 # performs at Settings build. The fetch decision itself is role-derived
-# (shared.bootstrap.config_source_is_local; AVA_CONFIG_SOURCE is gone).
+# (base.host.env.bootstrap.config_source_is_local; AVA_CONFIG_SOURCE is gone).
 _LITE_VERBS = frozenset(
     {
         "stop",
@@ -158,9 +163,9 @@ def _print_settings_load_failure(e: ValidationError) -> int:
     return 1
 
 
-# Where the recorded launcher profile lives; shared/dotenv_boot.py reads the
+# Where the recorded launcher profile lives; base/host/env/dotenv_boot.py reads the
 # same key back (`LAUNCHER_PROFILE_ENV_KEY`). It stays a literal here:
-# importing shared.dotenv_boot at CLI entry is not safe — it resolves the
+# importing base.host.env.dotenv_boot at CLI entry is not safe — it resolves the
 # process home at import (resolve_ava_home raises for an installed wheel
 # without an explicit absolute AVA_HOME, and on an env/checkout home
 # contradiction), while first start must run exactly on hosts where those
@@ -173,14 +178,14 @@ def _normalize_process_profile() -> None:
 
     The CLI is a settings-full process and must never inherit a launcher-set
     process profile: with no marker, profiles.py constructs every domain as
-    before. Importing shared.config.profiles initializes shared.config first,
+    before. Importing base.config.profiles initializes base.config first,
     so that constant cannot be used before this cleanup without constructing
     Settings. First start resolves and persists unit identity before importing
     cli.commands; parser construction remains settings-free.
 
     The popped value is recorded, not discarded: an agent-launched tree keeps
     the launcher's injected runner DB / Redis projections through the authority
-    pass only under a live-or-recorded agent profile (shared/dotenv_boot.py
+    pass only under a live-or-recorded agent profile (base/host/env/dotenv_boot.py
     `_enforce_cluster_env_authority`), so popping without recording made that
     exemption unreachable on every CLI path — `ava cluster health-probe` run
     from an agent child on a pure agent-runner fell back to the sentinel
@@ -205,7 +210,7 @@ def main(argv: list[str] | None = None) -> int:
     # cannot retry a failed job for us (Linux cron `@reboot`, Windows ONLOGON):
     # `ava start` re-run while the machine is still coming up. Dispatched here,
     # before the settings-gated import, so it can retry a start that failed for
-    # ANY reason — a settings error included. See shared/boot_policy.py.
+    # ANY reason — a settings error included. See base/host/system/boot_policy.py.
     if args_in and args_in[0] == "boot":
         from cli.boot_retry import run_boot
 
@@ -220,7 +225,7 @@ def main(argv: list[str] | None = None) -> int:
     # gateway down such a stop now fails at the fetch with the actionable
     # BootstrapFetchError — the same contract `restart` took above. Every other
     # verb — start, converge, update, trace-ship — and every daemon/agent process
-    # fetches per its own role at Settings build. shared.session_env does not
+    # fetches per its own role at Settings build. base.sessions.env_forwarding does not
     # forward this var, so processes a lite verb spawns never inherit the opt-out.
     from cli.preflight import unit_already_stopped
 

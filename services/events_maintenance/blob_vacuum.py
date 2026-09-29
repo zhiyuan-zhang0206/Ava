@@ -31,10 +31,10 @@ from zoneinfo import ZoneInfo
 
 import psycopg
 
-import shared.db
-from shared import telemetry
-from shared.config import settings
-from shared.log import logger
+import base.db
+from base import telemetry
+from base.config import settings
+from base.log import logger
 
 _WINDOW_START_HOUR = 5
 _WINDOW_END_HOUR = 8  # exclusive
@@ -185,7 +185,7 @@ def vacuum_checkpoint_tables(conn: Any) -> VacuumResult:
     WARNING (missing privilege) raises `VacuumSkippedError` instead of
     reporting a reclamation that never ran.
     """
-    from shared.cluster.authority import vacuum_or_fail
+    from base.cluster.authority import vacuum_or_fail
 
     with conn.cursor() as cur:
         before, _ = _checkpoint_state(cur)
@@ -216,7 +216,7 @@ def run_blob_vacuum(*, force: bool = False) -> VacuumResult:
     if not force and not in_low_traffic_window():
         return VacuumResult(ran=False, total_bytes=0, dead_tuples=0)
     try:
-        with shared.db.connect(direct=True, autocommit=True) as conn:
+        with base.db.connect(direct=True, autocommit=True) as conn:
             return vacuum_checkpoint_tables(conn)
     except psycopg.errors.UndefinedTable:
         logger.info(

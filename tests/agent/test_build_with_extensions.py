@@ -13,9 +13,9 @@ from pathlib import Path
 
 import pytest
 
-from shared import paths
-from shared.config import settings
-from shared.plugins_config import write_local
+from base import paths
+from base.config import settings
+from base.packages.plugins.enable_config import write_local
 
 # Every dotted name `load_extensions` can register a plugin module under.
 _PLUGIN_MODULE_PREFIXES = ("ava_builtins.plugins.", "plugins.")
@@ -134,14 +134,14 @@ def test_external_plugin_also_loaded(monkeypatch: pytest.MonkeyPatch):
     assert not any("compact" in n for n in loaded)
 
 
-def test_load_extensions_installs_sdk_metering(monkeypatch: pytest.MonkeyPatch):
+def test_load_extensions_installs_metering(monkeypatch: pytest.MonkeyPatch):
     """load_extensions must install the SDK-usage recorder over the final ava.*
     surface (after plugins load), so every agent's SDK calls get metered."""
     from agent.graph import _build
-    from ava import sdk_metering
+    from ava.sdk_surface import metering
 
     installed: list[bool] = []
-    monkeypatch.setattr(sdk_metering, "install", lambda: installed.append(True))
+    monkeypatch.setattr(metering, "install", lambda: installed.append(True))
 
     _build.load_extensions()
 
@@ -164,7 +164,7 @@ def test_a_repeat_load_reuses_the_module_object_so_a_patch_still_lands(
     xdist worker, and passed in isolation.
 
     Repeated in-process loads are a production path too, not only a test
-    fixture: `agent/plugin_catalog.py:build_catalog()` loads in the calling
+    fixture: `agent/extensions/catalog.py:build_catalog()` loads in the calling
     process, and the runner-hosted executor sketched in
     `future/infra/extension-ownership.md` would reload as the activated union
     changes rather than once at process boot.
@@ -226,7 +226,7 @@ def test_a_different_file_under_the_same_name_gets_a_fresh_module(
 
 def test_duplicate_plugin_name_raises(monkeypatch: pytest.MonkeyPatch):
     """Same-named plugin in two locations -> discover_plugins raises DuplicatePlugin."""
-    from shared.plugins_config import DuplicatePlugin, discover_plugins
+    from base.packages.plugins.enable_config import DuplicatePlugin, discover_plugins
 
     _make_plugin("dup")
     _make_external_plugin("dup")
@@ -280,8 +280,8 @@ def _make_external_plugin_with(name: str, body: str) -> None:
 def _capture_plugin_load_events(
     monkeypatch: pytest.MonkeyPatch,
 ) -> list[tuple[str, dict[str, object]]]:
-    """Route shared.telemetry.emit into a list of (event_name, attributes)."""
-    import shared.telemetry
+    """Route base.telemetry.emit into a list of (event_name, attributes)."""
+    import base.telemetry
 
     events: list[tuple[str, dict[str, object]]] = []
 
@@ -295,7 +295,7 @@ def _capture_plugin_load_events(
     ) -> None:
         events.append((event_name, attributes or {}))
 
-    monkeypatch.setattr(shared.telemetry, "emit", fake_emit)
+    monkeypatch.setattr(base.telemetry, "emit", fake_emit)
     return events
 
 
@@ -397,9 +397,9 @@ def test_dangling_config_entry_reported_and_skipped(
     disabled, the rest of the config intact. The reporter's once-per-process
     memo is reset so this test does not depend on interpreter run order.
     """
-    from shared import plugins_config
+    from base.packages.plugins import enable_config
 
-    monkeypatch.setattr(plugins_config, "_dangling_reported", set[str]())
+    monkeypatch.setattr(enable_config, "_dangling_reported", set[str]())
     _make_external_plugin("audit")
     write_local({"plugins": {"audit": {"enabled": True}, "vanished": {"enabled": True}}})
 
@@ -419,7 +419,7 @@ def test_dot_prefixed_dirs_are_not_discovered(monkeypatch: pytest.MonkeyPatch) -
     """Atomic-install residue (.name.staging / .name.backup-<pid>) must never
     surface as ghost plugins — a hard kill between rename steps would
     otherwise have the loader import a half-installed tree as a plugin."""
-    from shared.plugins_config import discover_plugins
+    from base.packages.plugins.enable_config import discover_plugins
 
     _make_plugin("real")
     _make_external_plugin("ext")

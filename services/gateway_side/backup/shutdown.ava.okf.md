@@ -9,7 +9,7 @@ tags: []
 
 `services/backup_scheduler/daemon.py` passes scheduled dumps and logical restore
 drills to `services/backup_scheduler/worker.py:run_job`. It launches one fixed
-worker module through `services/pitr/worker_process.py:run_operation`: a fresh
+worker module through `services/pitr/operation/worker_process.py:run_operation`: a fresh
 interpreter in a new session whose unreaped direct child the controller keeps.
 Its request is complete before launch. Dump, encryption, off-site upload and
 restore tools are ordinary children in that group, so blocking work stays out
@@ -36,7 +36,7 @@ kind and alerts until `ava pitr operations retire` re-proves closure; a killed
 scheduler leaves the same block.
 
 Scheduled restore drills opt into `throwaway_postgres(foreground=True)`.
-`shared/pg_foreground.py` starts Postgres directly in the worker group,
+`base/cluster/dataplane/pg_foreground.py` starts Postgres directly in the worker group,
 receipts it in the operation's controls and verifies its data directory before
 readiness. The caller owns its handle before readiness checks can fail. Every
 postmaster child calls `setsid`, so the group close alone never reaches them:

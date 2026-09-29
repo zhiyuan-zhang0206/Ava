@@ -3,8 +3,8 @@ from pathlib import Path
 import pytest
 from langchain_core.messages import AIMessage
 
-from shared.lm.plugin_providers import ensure_provider_plugins_loaded
-from shared.lm.stop import StopCategory, classify_stop
+from base.lm.plugin_providers import ensure_provider_plugins_loaded
+from base.lm.stop import StopCategory, classify_stop
 
 ensure_provider_plugins_loaded()
 
@@ -91,7 +91,7 @@ def test_anthropic_ignores_openai_responses_status():
 
 
 def test_core_stop_classifier_has_no_openai_provider_branch():
-    source = (Path(__file__).resolve().parents[2] / "shared/lm/stop.py").read_text()
+    source = (Path(__file__).resolve().parents[2] / "base/lm/stop.py").read_text()
     assert 'provider == "openai"' not in source
 
 

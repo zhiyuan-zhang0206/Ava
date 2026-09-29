@@ -22,7 +22,7 @@ YYYYMMDDTHHMMSS_<kebab-name>.down.sql   -- reverse (mandatory)
   a value-destroying down may be deliberately best-effort or refused.
 - **`.down.sql` is mandatory** for every file here — the baseline is the
   rollback floor, so everything above it must be reversible (enforced by
-  `scripts/lint_migrations.py`).
+  `scripts/content_lint/lint_migrations.py`).
 - The current full schema lives in **`db/schema.sql`** (the squashed baseline a
   fresh DB bootstraps from); a new migration must also reflect its change there.
 
@@ -33,7 +33,7 @@ The 101 deltas through `20260921T211400_watcher-agent-notify` are folded into
 `20260923T031516_schema-baseline`; the retired history's seed rows are absent.
 Subsequent deltas remain paired and must also be reflected in the current schema.
 
-`shared/migration_history.py` keeps the exact frozen inventories for this reset
+`base/deploy/schema/migration_history.py` keeps the exact frozen inventories for this reset
 and the 2026-08-14 reset (59 names). The earlier inventory remains necessary
 because restores before 2026-08-14 have not been ruled out. Before deleting any
 tracking rows, the runner refuses partial generations. A database without the

@@ -8,7 +8,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from shared.runtime_prepare import (
+from base.deploy.release.runtime_prepare import (
     _copy_verified_python,
     _create_private_venv,
     python_input_inventory,

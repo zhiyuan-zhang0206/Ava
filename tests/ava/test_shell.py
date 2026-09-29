@@ -23,7 +23,7 @@ import pytest
 import ava
 import ava.agent_identity
 from ava import shell
-from shared.platform import IS_WINDOWS
+from base.native_process.os_platform import IS_WINDOWS
 
 pytestmark = [
     pytest.mark.skipif(IS_WINDOWS, reason="PTY sessions are POSIX-only"),
@@ -159,7 +159,7 @@ def test_run_explicit_cwd_overrides_default(tmp_path: Path) -> None:
 
 def test_run_default_cwd_is_workspace(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """No cwd → runs in agent workspace (consistent with ava.files relative path base)."""
-    from shared.config import settings
+    from base.config import settings
 
     monkeypatch.setattr(settings.general, "ava_home", tmp_path)
     out = ava.shell.run("pwd")
@@ -419,7 +419,7 @@ def test_new_default_cwd_is_agent_workspace(_agent_row: int) -> None:
     """A session created without an explicit cwd starts in the agent's
     workspace — the same base ava.shell.run uses (the PTY host needs a real
     directory; the workspace is created on demand)."""
-    from shared.paths import workspace_dir
+    from base.paths import workspace_dir
 
     sid = shell.new("test-cwd", ttl=120)
     try:
@@ -434,9 +434,9 @@ def test_new_session_bare_python_resolves_into_venv(
     _agent_row: int, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A persistent session is a login+interactive shell (`bash -l -i`,
-    PtySessionBackend, `shared/sessions/pty/launch.py::_fork_shell`), so it
+    PtySessionBackend, `base/sessions/pty/launch.py::_fork_shell`), so it
     sources the user's shell profile — which could in principle put something
-    ahead of the venv bin dir `forward_env_dict` (`shared/session_env.py`)
+    ahead of the venv bin dir `forward_env_dict` (`base/sessions/env_forwarding.py`)
     forwards on PATH. QA for #3590 verified by hand that bare `python` still
     resolves into this checkout's venv inside such a session; this pins that
     down as a regression test.
@@ -446,7 +446,7 @@ def test_new_session_bare_python_resolves_into_venv(
     customization (pyenv/conda/nvm rewriting PATH) — only on the mechanism
     this repo actually ships.
     """
-    from shared.runtime_interpreter import runtime_python
+    from base.deploy.release.runtime_interpreter import runtime_python
 
     fake_home = tmp_path / "home"
     fake_home.mkdir()
@@ -475,7 +475,7 @@ def test_kill_reaps_session_and_foreground_child(_agent_row: int) -> None:
     import psutil
 
     from ava.shell import sessions as _sessions
-    from shared.paths import run_dir
+    from base.paths import run_dir
 
     sid = shell.new("test-tree", ttl=120)
     try:

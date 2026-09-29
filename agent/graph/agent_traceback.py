@@ -1,7 +1,7 @@
 """Render exec tracebacks for two audiences with two different cuts.
 
 Agent-written code runs under the pseudo-filename ``<agent_code>`` (the name
-``compile()`` stamps in `_exec.py`). When that code raises, the raw traceback
+``compile()`` stamps in `exec/node.py`). When that code raises, the raw traceback
 threads through the exec harness above it and the SDK / plugin / standard-library
 frames below it. Those frames are useless to the agent (it did not write them and
 cannot fix them) and they leak framework internals into the model's context.

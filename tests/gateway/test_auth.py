@@ -26,14 +26,15 @@ from fastapi.testclient import TestClient
 from starlette.middleware import Middleware
 
 import gateway.app as gateway_app
-from gateway._cors import cors_allowed_origins
-from gateway.app import _cors_headers, app
-from shared import config
-from shared.cluster_auth import (
+from base import config
+from base.cluster.auth import (
     bearer_header,
     cookie_name,
 )
-from shared.config.gateway import GatewaySettings
+from base.config.gateway import GatewaySettings
+from gateway.app import app
+from gateway.auth.cors import cors_allowed_origins
+from gateway.middleware.error_handlers import cors_headers
 
 _SECRET = "test-cluster-secret"  # noqa: S105 — test fixture
 
@@ -760,8 +761,7 @@ def test_cookie_authenticated_post_allows_gateway_frontend_origin(
             },
         )
 
-    # 422 (malformed batch) not 403 — the frontend-port origin passed the
-    # exact-origin check.
+    # 422 (malformed batch) not 403 — the frontend-port origin passed the exact-origin check.
     assert resp.status_code == 422
     assert resp.json()["code"] == "invalid_telemetry_batch"
 
@@ -802,7 +802,7 @@ def test_cors_headers_reflect_allowed_origin(monkeypatch: pytest.MonkeyPatch) ->
         ["https://allowed.example"],
     )
 
-    assert _cors_headers(_request_with_origin("https://allowed.example")) == {
+    assert cors_headers(_request_with_origin("https://allowed.example")) == {
         "Access-Control-Allow-Origin": "https://allowed.example",
         "Vary": "Origin",
         "Access-Control-Allow-Credentials": "true",
@@ -816,7 +816,7 @@ def test_cors_headers_omit_disallowed_origin(monkeypatch: pytest.MonkeyPatch) ->
         ["https://allowed.example"],
     )
 
-    assert _cors_headers(_request_with_origin("https://disallowed.example")) == {}
+    assert cors_headers(_request_with_origin("https://disallowed.example")) == {}
 
 
 # ── Bearer token works ────────────────────────────────────────────────
@@ -1144,7 +1144,7 @@ def test_login_succeeds_without_secret_and_bypasses_limiter(
     """A no-secret cluster accepts login as a no-op success. The rate limiter
     is bypassed entirely — there is no credential to guess, and no-secret
     requests must never count into its failure records."""
-    from shared.rate_limit import login_limiter
+    from base.cluster.rate_limit import login_limiter
 
     monkeypatch.setattr(config.settings.data_plane, "cluster_secret", "")
     monkeypatch.setattr(config.settings.gateway, "auth_middleware_enabled", True)

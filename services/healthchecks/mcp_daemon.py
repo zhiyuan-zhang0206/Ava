@@ -4,8 +4,8 @@ import json
 import logging
 import socket
 
-from shared.paths import mcp_daemon_shared_socket
-from shared.platform_probes import unix_sockets_available
+from base.host.system.probes import unix_sockets_available
+from base.paths import mcp_daemon_shared_socket
 
 _log = logging.getLogger("services.healthchecks.mcp_daemon")
 

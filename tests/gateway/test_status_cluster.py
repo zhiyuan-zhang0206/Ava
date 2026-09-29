@@ -17,8 +17,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 from gateway.app import app
-from gateway.routers import _roster_probe
-from gateway.routers import status as status_router
+from gateway.cluster import roster_probe
+from gateway.cluster import status as status_router
 
 _OPS_URL = "http://wsl:18121"
 
@@ -47,13 +47,13 @@ def _truncate_machines(db_conn: psycopg.Connection) -> None:
 
 @pytest.fixture(autouse=True)
 def _reset_probe_backoff() -> None:
-    """The per-machine probe backoff (`gateway.routers._roster_probe`) is
+    """The per-machine probe backoff (`gateway.cluster.roster_probe`) is
     module-level mutable state; clear it before each test so a failure recorded
     by one test cannot defer a probe in the next (e.g. the offline/online cases
     both use name 'wsl'). The detached dial's in-flight registry is cleared the
     same way."""
-    _roster_probe._probe_failures.clear()
-    _roster_probe._recovery_inflight.clear()
+    roster_probe._probe_failures.clear()
+    roster_probe._recovery_inflight.clear()
 
 
 @pytest.fixture
@@ -63,7 +63,7 @@ def fake_flag(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     name is shimmed to the file's existence so this suite keeps simulating the
     pause with a file."""
     flag = tmp_path / "cluster_paused"
-    monkeypatch.setattr("gateway.routers.status.cluster_is_paused", flag.exists)
+    monkeypatch.setattr("gateway.cluster.status.cluster_is_paused", flag.exists)
     return flag
 
 
@@ -86,7 +86,7 @@ def stub_remote_probe(
     """
     from datetime import datetime
 
-    from gateway.schemas import MachineStatus
+    from base.api_contracts.status import MachineStatus
 
     results = _RemoteProbeResults()
 
@@ -379,7 +379,7 @@ class TestProbeAgentRunner:
         it offline while /healthz answered in ~15ms)."""
         from datetime import UTC, datetime
 
-        from shared.config import settings
+        from base.config import settings
 
         monkeypatch.setattr(settings.gateway, "status_probe_timeout_seconds", 11.0)
         seen: dict[str, object] = {}
@@ -424,7 +424,7 @@ class TestProbeAgentRunner:
 
         assert row.online is False
         assert called is False
-        assert _roster_probe._probe_failures["wsl"][0] == 1
+        assert roster_probe._probe_failures["wsl"][0] == 1
 
     @pytest.mark.asyncio
     async def test_blackhole_stays_inside_single_total_budget(
@@ -435,7 +435,7 @@ class TestProbeAgentRunner:
         timeout window."""
         from datetime import UTC, datetime
 
-        from shared.config import settings
+        from base.config import settings
 
         monkeypatch.setattr(settings.gateway, "status_probe_timeout_seconds", 0.01)
         cancelled = asyncio.Event()
@@ -463,7 +463,7 @@ class TestProbeAgentRunner:
 
         assert row.online is False
         assert cancelled.is_set()
-        assert _roster_probe._probe_failures["wsl"][0] == 1
+        assert roster_probe._probe_failures["wsl"][0] == 1
 
     @pytest.mark.asyncio
     async def test_timeout_returns_offline(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -515,7 +515,7 @@ class TestProbeAgentRunner:
         assert r.online is True
         assert r.paused is True
         assert r.description == "voice IO + browser"
-        assert "wsl" not in _roster_probe._probe_failures  # a clean first contact records nothing
+        assert "wsl" not in roster_probe._probe_failures  # a clean first contact records nothing
 
     @pytest.mark.asyncio
     async def test_success_threads_head_sha(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -566,67 +566,67 @@ class TestProbeBackoff:
     #3507) instead of on every ~5s panel poll."""
 
     def test_no_record_not_in_backoff(self) -> None:
-        assert _roster_probe._probe_in_backoff("wsl") is False
+        assert roster_probe.probe_in_backoff("wsl") is False
 
     def test_note_unreachable_increments_failures(self) -> None:
-        _roster_probe._note_probe_unreachable("wsl")
-        assert _roster_probe._probe_failures["wsl"][0] == 1
-        _roster_probe._note_probe_unreachable("wsl")
-        assert _roster_probe._probe_failures["wsl"][0] == 2
+        roster_probe.note_probe_unreachable("wsl")
+        assert roster_probe._probe_failures["wsl"][0] == 1
+        roster_probe.note_probe_unreachable("wsl")
+        assert roster_probe._probe_failures["wsl"][0] == 2
 
     def test_reachable_clears_backoff(self) -> None:
-        _roster_probe._probe_failures["wsl"] = (3, 0.0)
-        _roster_probe._note_probe_reachable("wsl")
-        assert "wsl" not in _roster_probe._probe_failures
+        roster_probe._probe_failures["wsl"] = (3, 0.0)
+        roster_probe.note_probe_reachable("wsl")
+        assert "wsl" not in roster_probe._probe_failures
 
     def test_within_window_defers_past_window_reprobes(self) -> None:
-        now = _roster_probe.time.monotonic()
+        now = roster_probe.time.monotonic()
         # 1 failure -> 10s window
-        _roster_probe._probe_failures["wsl"] = (1, now - 5.0)
-        assert _roster_probe._probe_in_backoff("wsl") is True
-        _roster_probe._probe_failures["wsl"] = (1, now - 11.0)
-        assert _roster_probe._probe_in_backoff("wsl") is False
+        roster_probe._probe_failures["wsl"] = (1, now - 5.0)
+        assert roster_probe.probe_in_backoff("wsl") is True
+        roster_probe._probe_failures["wsl"] = (1, now - 11.0)
+        assert roster_probe.probe_in_backoff("wsl") is False
 
     def test_window_escalates_with_consecutive_failures(self) -> None:
-        now = _roster_probe.time.monotonic()
+        now = roster_probe.time.monotonic()
         # 2 failures -> 20s window (was 10s at 1 failure)
-        _roster_probe._probe_failures["wsl"] = (2, now - 19.0)
-        assert _roster_probe._probe_in_backoff("wsl") is True
-        _roster_probe._probe_failures["wsl"] = (2, now - 21.0)
-        assert _roster_probe._probe_in_backoff("wsl") is False
+        roster_probe._probe_failures["wsl"] = (2, now - 19.0)
+        assert roster_probe.probe_in_backoff("wsl") is True
+        roster_probe._probe_failures["wsl"] = (2, now - 21.0)
+        assert roster_probe.probe_in_backoff("wsl") is False
 
     def test_window_capped_at_300(self) -> None:
-        now = _roster_probe.time.monotonic()
+        now = roster_probe.time.monotonic()
         # A large failure count would compute a huge window; it is clamped to 300s.
-        _roster_probe._probe_failures["wsl"] = (100, now - 299.0)
-        assert _roster_probe._probe_in_backoff("wsl") is True
-        _roster_probe._probe_failures["wsl"] = (100, now - 301.0)
-        assert _roster_probe._probe_in_backoff("wsl") is False
+        roster_probe._probe_failures["wsl"] = (100, now - 299.0)
+        assert roster_probe.probe_in_backoff("wsl") is True
+        roster_probe._probe_failures["wsl"] = (100, now - 301.0)
+        assert roster_probe.probe_in_backoff("wsl") is False
 
     def test_window_base_is_config(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """The first re-probe gap follows the configured base (task #3507 lifted
         the schedule literals into config)."""
-        from shared.config import settings
+        from base.config import settings
 
         monkeypatch.setattr(settings.gateway, "status_probe_backoff_base_seconds", 2.0)
-        now = _roster_probe.time.monotonic()
+        now = roster_probe.time.monotonic()
         # 1 failure -> 2 * 2**1 = 4s window
-        _roster_probe._probe_failures["wsl"] = (1, now - 3.9)
-        assert _roster_probe._probe_in_backoff("wsl") is True
-        _roster_probe._probe_failures["wsl"] = (1, now - 4.1)
-        assert _roster_probe._probe_in_backoff("wsl") is False
+        roster_probe._probe_failures["wsl"] = (1, now - 3.9)
+        assert roster_probe.probe_in_backoff("wsl") is True
+        roster_probe._probe_failures["wsl"] = (1, now - 4.1)
+        assert roster_probe.probe_in_backoff("wsl") is False
 
     def test_window_cap_is_config(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """The window ceiling follows the configured cap (task #3507 lifted the
         schedule literals into config)."""
-        from shared.config import settings
+        from base.config import settings
 
         monkeypatch.setattr(settings.gateway, "status_probe_backoff_cap_seconds", 10.0)
-        now = _roster_probe.time.monotonic()
-        _roster_probe._probe_failures["wsl"] = (100, now - 9.0)
-        assert _roster_probe._probe_in_backoff("wsl") is True
-        _roster_probe._probe_failures["wsl"] = (100, now - 11.0)
-        assert _roster_probe._probe_in_backoff("wsl") is False
+        now = roster_probe.time.monotonic()
+        roster_probe._probe_failures["wsl"] = (100, now - 9.0)
+        assert roster_probe.probe_in_backoff("wsl") is True
+        roster_probe._probe_failures["wsl"] = (100, now - 11.0)
+        assert roster_probe.probe_in_backoff("wsl") is False
 
     @pytest.mark.asyncio
     async def test_probe_skips_dispatch_while_in_backoff(
@@ -678,7 +678,7 @@ class TestProbeBackoff:
         )
         assert first.online is True
         assert first.paused is None
-        assert "wsl" not in _roster_probe._probe_failures
+        assert "wsl" not in roster_probe._probe_failures
         second = await status_router._probe_agent_runner(
             "wsl", ["agent-runner"], _OPS_URL, last, None, None
         )
@@ -694,15 +694,15 @@ class TestFastFailBudget:
     the full anti-false-offline budget."""
 
     def test_budget_selection_is_state_driven(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        from shared.config import settings
+        from base.config import settings
 
         monkeypatch.setattr(settings.gateway, "status_probe_timeout_seconds", 11.0)
         monkeypatch.setattr(settings.gateway, "status_probe_fastfail_timeout_seconds", 2.0)
-        assert _roster_probe._probe_budget_s("wsl") == 11.0
-        _roster_probe._probe_failures["wsl"] = (1, 0.0)
-        assert _roster_probe._probe_budget_s("wsl") == 2.0
-        _roster_probe._note_probe_reachable("wsl")
-        assert _roster_probe._probe_budget_s("wsl") == 11.0
+        assert roster_probe.probe_budget_s("wsl") == 11.0
+        roster_probe._probe_failures["wsl"] = (1, 0.0)
+        assert roster_probe.probe_budget_s("wsl") == 2.0
+        roster_probe.note_probe_reachable("wsl")
+        assert roster_probe.probe_budget_s("wsl") == 11.0
 
     @pytest.mark.asyncio
     async def test_first_contact_uses_full_budget(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -710,7 +710,7 @@ class TestFastFailBudget:
         anti-jitter margin, task #1200)."""
         from datetime import UTC, datetime
 
-        from shared.config import settings
+        from base.config import settings
 
         monkeypatch.setattr(settings.gateway, "status_probe_timeout_seconds", 11.0)
         monkeypatch.setattr(settings.gateway, "status_probe_fastfail_timeout_seconds", 2.0)
@@ -740,7 +740,7 @@ class TestFastFailBudget:
         fast-fail one — the anti-false-offline margin survives the change."""
         from datetime import UTC, datetime
 
-        from shared.config import settings
+        from base.config import settings
 
         monkeypatch.setattr(settings.gateway, "status_probe_timeout_seconds", 0.05)
         monkeypatch.setattr(settings.gateway, "status_probe_fastfail_timeout_seconds", 0.005)
@@ -759,7 +759,7 @@ class TestFastFailBudget:
         )
         assert r.online is False
         assert time.monotonic() - started >= 0.03  # the full budget, not the fast-fail one
-        assert _roster_probe._probe_failures["wsl"][0] == 1
+        assert roster_probe._probe_failures["wsl"][0] == 1
 
 
 class TestDetachedRecoveryDial:
@@ -775,7 +775,7 @@ class TestDetachedRecoveryDial:
         def fake_start(name: str, ops_url: str) -> None:
             spawned.append(name)
 
-        monkeypatch.setattr(_roster_probe, "_start_recovery_thread", fake_start)
+        monkeypatch.setattr(roster_probe, "_start_recovery_thread", fake_start)
         return spawned
 
     @pytest.mark.asyncio
@@ -793,7 +793,7 @@ class TestDetachedRecoveryDial:
             raise AssertionError("a known-down host must not be dialed inline")
 
         monkeypatch.setattr(status_router._cluster_rpc, "dispatch_to_machine", must_not_dispatch)
-        _roster_probe._probe_failures["wsl"] = (1, time.monotonic())  # fresh failure
+        roster_probe._probe_failures["wsl"] = (1, time.monotonic())  # fresh failure
 
         started = time.monotonic()
         row = await status_router._probe_agent_runner(
@@ -818,7 +818,7 @@ class TestDetachedRecoveryDial:
             raise AssertionError("a known-down host must not be dialed inline")
 
         monkeypatch.setattr(status_router._cluster_rpc, "dispatch_to_machine", must_not_dispatch)
-        _roster_probe._probe_failures["wsl"] = (1, 0.0)  # window long elapsed
+        roster_probe._probe_failures["wsl"] = (1, 0.0)  # window long elapsed
 
         started = time.monotonic()
         for _ in range(5):
@@ -828,7 +828,7 @@ class TestDetachedRecoveryDial:
             assert row.online is False
         assert time.monotonic() - started < 1.0  # no read waited on any dial
         assert spawned == ["wsl"]
-        assert _roster_probe._recovery_inflight == {"wsl"}
+        assert roster_probe._recovery_inflight == {"wsl"}
 
     def test_detached_success_clears_and_the_next_read_dials_first_contact(
         self, monkeypatch: pytest.MonkeyPatch
@@ -837,7 +837,7 @@ class TestDetachedRecoveryDial:
         next read dials fresh as a first contact — full budget, and online."""
         from datetime import UTC, datetime
 
-        from shared.config import settings
+        from base.config import settings
 
         monkeypatch.setattr(settings.gateway, "status_probe_timeout_seconds", 7.0)
         monkeypatch.setattr(settings.gateway, "status_probe_fastfail_timeout_seconds", 0.5)
@@ -850,14 +850,14 @@ class TestDetachedRecoveryDial:
                 "paused": False,
             }
 
-        monkeypatch.setattr(_roster_probe, "dispatch_status_probe", reachable)
-        _roster_probe._probe_failures["wsl"] = (1, 0.0)
-        _roster_probe._recovery_inflight.add("wsl")
+        monkeypatch.setattr(roster_probe, "dispatch_status_probe", reachable)
+        roster_probe._probe_failures["wsl"] = (1, 0.0)
+        roster_probe._recovery_inflight.add("wsl")
 
-        _roster_probe._run_recovery_dial("wsl", _OPS_URL)  # the detached dial lands
+        roster_probe._run_recovery_dial("wsl", _OPS_URL)  # the detached dial lands
 
-        assert "wsl" not in _roster_probe._probe_failures
-        assert _roster_probe._recovery_inflight == set()
+        assert "wsl" not in roster_probe._probe_failures
+        assert roster_probe._recovery_inflight == set()
 
         seen: dict[str, object] = {}
 
@@ -867,7 +867,7 @@ class TestDetachedRecoveryDial:
             seen["timeout_s"] = timeout_s
             return await reachable()
 
-        monkeypatch.setattr(_roster_probe, "dispatch_status_probe", inline)
+        monkeypatch.setattr(roster_probe, "dispatch_status_probe", inline)
         row = asyncio.run(
             status_router._probe_agent_runner(
                 "wsl", ["agent-runner"], _OPS_URL, datetime(2026, 5, 24, tzinfo=UTC), None, None
@@ -886,25 +886,25 @@ class TestDetachedRecoveryDial:
         async def unreachable(*_a: object, **_kw: object) -> dict[str, object]:
             raise rpc.ClusterOpUnreachable("blackholed")
 
-        monkeypatch.setattr(_roster_probe, "dispatch_status_probe", unreachable)
-        _roster_probe._probe_failures["wsl"] = (1, 0.0)
-        _roster_probe._recovery_inflight.add("wsl")
+        monkeypatch.setattr(roster_probe, "dispatch_status_probe", unreachable)
+        roster_probe._probe_failures["wsl"] = (1, 0.0)
+        roster_probe._recovery_inflight.add("wsl")
 
-        _roster_probe._run_recovery_dial("wsl", _OPS_URL)
+        roster_probe._run_recovery_dial("wsl", _OPS_URL)
 
-        failures, _last_attempt = _roster_probe._probe_failures["wsl"]
+        failures, _last_attempt = roster_probe._probe_failures["wsl"]
         assert failures == 2
-        assert _roster_probe._recovery_inflight == set()
+        assert roster_probe._recovery_inflight == set()
         # Freshly stamped: the 20s window (5 * 2**2) defers the next dial...
-        assert _roster_probe._probe_in_backoff("wsl") is True
+        assert roster_probe.probe_in_backoff("wsl") is True
         # ...until it elapses.
-        _roster_probe._probe_failures["wsl"] = (2, time.monotonic() - 21.0)
-        assert _roster_probe._probe_in_backoff("wsl") is False
+        roster_probe._probe_failures["wsl"] = (2, time.monotonic() - 21.0)
+        assert roster_probe.probe_in_backoff("wsl") is False
         # The schedule keeps doubling up to the 300s cap: min(5 * 2**6, 300) = 300.
-        _roster_probe._probe_failures["wsl"] = (6, time.monotonic() - 299.0)
-        assert _roster_probe._probe_in_backoff("wsl") is True
-        _roster_probe._probe_failures["wsl"] = (6, time.monotonic() - 301.0)
-        assert _roster_probe._probe_in_backoff("wsl") is False
+        roster_probe._probe_failures["wsl"] = (6, time.monotonic() - 299.0)
+        assert roster_probe.probe_in_backoff("wsl") is True
+        roster_probe._probe_failures["wsl"] = (6, time.monotonic() - 301.0)
+        assert roster_probe.probe_in_backoff("wsl") is False
 
     def test_detached_unexpected_failure_leaves_state_for_the_next_window(
         self, monkeypatch: pytest.MonkeyPatch
@@ -916,14 +916,14 @@ class TestDetachedRecoveryDial:
         async def boom(*_a: object, **_kw: object) -> dict[str, object]:
             raise ValueError("not a transport outcome")
 
-        monkeypatch.setattr(_roster_probe, "dispatch_status_probe", boom)
-        _roster_probe._probe_failures["wsl"] = (1, 0.0)
-        _roster_probe._recovery_inflight.add("wsl")
+        monkeypatch.setattr(roster_probe, "dispatch_status_probe", boom)
+        roster_probe._probe_failures["wsl"] = (1, 0.0)
+        roster_probe._recovery_inflight.add("wsl")
 
-        _roster_probe._run_recovery_dial("wsl", _OPS_URL)
+        roster_probe._run_recovery_dial("wsl", _OPS_URL)
 
-        assert _roster_probe._probe_failures["wsl"][0] == 1  # untouched
-        assert _roster_probe._recovery_inflight == set()  # slot always released
+        assert roster_probe._probe_failures["wsl"][0] == 1  # untouched
+        assert roster_probe._recovery_inflight == set()  # slot always released
 
     def test_transition_window_simulation(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Simulated mba-transition window (tasks #3506/#3507): one host
@@ -934,8 +934,8 @@ class TestDetachedRecoveryDial:
         (d) a landed failure renews the window per min(5 * 2**n, cap)."""
         from datetime import UTC, datetime
 
+        from base.config import settings
         from ops import cluster_rpc as rpc
-        from shared.config import settings
 
         monkeypatch.setattr(settings.gateway, "status_probe_timeout_seconds", 0.05)
         monkeypatch.setattr(settings.gateway, "status_probe_fastfail_timeout_seconds", 0.05)
@@ -947,7 +947,7 @@ class TestDetachedRecoveryDial:
             def monotonic() -> float:
                 return clock["now"]
 
-        monkeypatch.setattr(_roster_probe, "time", _Clock)
+        monkeypatch.setattr(roster_probe, "time", _Clock)
         spawned = self._record_spawns(monkeypatch)
 
         blackholed = {"on": True}
@@ -966,7 +966,7 @@ class TestDetachedRecoveryDial:
                 "paused": False,
             }
 
-        monkeypatch.setattr(_roster_probe, "dispatch_status_probe", probe)
+        monkeypatch.setattr(roster_probe, "dispatch_status_probe", probe)
 
         last = datetime(2026, 5, 24, tzinfo=UTC)
         rows: list[
@@ -984,7 +984,7 @@ class TestDetachedRecoveryDial:
         assert by_name["mba"].online is False
         assert by_name["wsl"].online is True
         assert calls == [("mba", 0.05), ("wsl", 0.05)]
-        assert _roster_probe._probe_failures["mba"][0] == 1
+        assert roster_probe._probe_failures["mba"][0] == 1
 
         # (a) Any number of reads inside the 10s window: not a single mba dial.
         clock["now"] += 3.0
@@ -1000,25 +1000,25 @@ class TestDetachedRecoveryDial:
             asyncio.run(status_router.gather_cluster_status(rows, "cloud-test"))
         assert [c for c in calls if c[0] == "mba"] == [("mba", 0.05)]
         assert spawned == ["mba"]
-        assert _roster_probe._recovery_inflight == {"mba"}
+        assert roster_probe._recovery_inflight == {"mba"}
 
         # (d) The landed dial fails (still down): window(2) = 20s is renewed and
         # the next kick is deferred until it elapses.
-        _roster_probe._run_recovery_dial("mba", _OPS_URL)
-        assert _roster_probe._probe_failures["mba"][0] == 2
+        roster_probe._run_recovery_dial("mba", _OPS_URL)
+        assert roster_probe._probe_failures["mba"][0] == 2
         clock["now"] += 19.0
         asyncio.run(status_router.gather_cluster_status(rows, "cloud-test"))
         assert spawned == ["mba"]  # deferred inside the window
         clock["now"] += 2.0  # 21s past the failure now
         asyncio.run(status_router.gather_cluster_status(rows, "cloud-test"))
         assert spawned == ["mba", "mba"]
-        assert _roster_probe._recovery_inflight == {"mba"}
+        assert roster_probe._recovery_inflight == {"mba"}
 
         # (c) The host comes back: the landed dial clears the record and the
         # next read dials it fresh — first contact, full budget, online.
         blackholed["on"] = False
-        _roster_probe._run_recovery_dial("mba", _OPS_URL)
-        assert "mba" not in _roster_probe._probe_failures
+        roster_probe._run_recovery_dial("mba", _OPS_URL)
+        assert "mba" not in roster_probe._probe_failures
         calls.clear()
         by_name = {
             m.name: m for m in asyncio.run(status_router.gather_cluster_status(rows, "cloud-test"))
@@ -1036,7 +1036,7 @@ class TestDetachedRecoveryDial:
         fast-fail budget inline."""
         from datetime import UTC, datetime
 
-        from shared.config import settings
+        from base.config import settings
 
         monkeypatch.setattr(settings.gateway, "status_probe_timeout_seconds", 1.0)
         monkeypatch.setattr(settings.gateway, "status_probe_fastfail_timeout_seconds", 0.4)
@@ -1046,7 +1046,7 @@ class TestDetachedRecoveryDial:
             raise AssertionError("unreachable")
 
         monkeypatch.setattr(status_router._cluster_rpc, "dispatch_to_machine", blackhole)
-        _roster_probe._probe_failures["wsl"] = (1, 0.0)  # window long elapsed
+        roster_probe._probe_failures["wsl"] = (1, 0.0)  # window long elapsed
 
         started = time.monotonic()
         row = await status_router._probe_agent_runner(
@@ -1058,9 +1058,9 @@ class TestDetachedRecoveryDial:
         # The detached dial lands on its own; wait it out so it cannot leak into
         # the next test's module state.
         deadline = time.monotonic() + 5.0
-        while time.monotonic() < deadline and _roster_probe._recovery_inflight:
+        while time.monotonic() < deadline and roster_probe._recovery_inflight:
             await asyncio.sleep(0.01)
-        assert _roster_probe._recovery_inflight == set()
+        assert roster_probe._recovery_inflight == set()
 
     def test_spawn_failure_never_fails_the_read_and_never_leaks_the_slot(
         self, monkeypatch: pytest.MonkeyPatch
@@ -1073,8 +1073,8 @@ class TestDetachedRecoveryDial:
         def broken_start(name: str, ops_url: str) -> None:
             raise RuntimeError("can't start new thread")
 
-        monkeypatch.setattr(_roster_probe, "_start_recovery_thread", broken_start)
-        _roster_probe._probe_failures["wsl"] = (1, 0.0)  # window long elapsed
+        monkeypatch.setattr(roster_probe, "_start_recovery_thread", broken_start)
+        roster_probe._probe_failures["wsl"] = (1, 0.0)  # window long elapsed
 
         row = asyncio.run(
             status_router._probe_agent_runner(
@@ -1082,14 +1082,14 @@ class TestDetachedRecoveryDial:
             )
         )
         assert row.online is False  # the read survived the spawn refusal
-        assert _roster_probe._recovery_inflight == set()  # no leaked slot
+        assert roster_probe._recovery_inflight == set()  # no leaked slot
 
         spawned: list[str] = []
 
         def working_start(name: str, ops_url: str) -> None:
             spawned.append(name)
 
-        monkeypatch.setattr(_roster_probe, "_start_recovery_thread", working_start)
+        monkeypatch.setattr(roster_probe, "_start_recovery_thread", working_start)
         row = asyncio.run(
             status_router._probe_agent_runner(
                 "wsl", ["agent-runner"], _OPS_URL, datetime(2026, 5, 24, tzinfo=UTC), None, None
@@ -1118,22 +1118,22 @@ class TestDetachedRecoveryDial:
                 "paused": False,
             }
 
-        monkeypatch.setattr(_roster_probe, "dispatch_status_probe", probe)
-        _roster_probe._probe_failures["wsl"] = (1, 0.0)
+        monkeypatch.setattr(roster_probe, "dispatch_status_probe", probe)
+        roster_probe._probe_failures["wsl"] = (1, 0.0)
 
-        _roster_probe._maybe_kick_recovery_dial("wsl", _OPS_URL)
+        roster_probe._maybe_kick_recovery_dial("wsl", _OPS_URL)
         deadline = time.monotonic() + 5.0
         while time.monotonic() < deadline and not calls:
             time.sleep(0.01)
         assert calls == ["wsl"]
-        _roster_probe._maybe_kick_recovery_dial("wsl", _OPS_URL)  # in flight -> refused
+        roster_probe._maybe_kick_recovery_dial("wsl", _OPS_URL)  # in flight -> refused
         assert calls == ["wsl"]
         while time.monotonic() < deadline and (
-            "wsl" in _roster_probe._probe_failures or _roster_probe._recovery_inflight
+            "wsl" in roster_probe._probe_failures or roster_probe._recovery_inflight
         ):
             time.sleep(0.01)
-        assert "wsl" not in _roster_probe._probe_failures
-        assert _roster_probe._recovery_inflight == set()
+        assert "wsl" not in roster_probe._probe_failures
+        assert roster_probe._recovery_inflight == set()
 
 
 class TestPanelCarriesNoFrozenPin:
@@ -1153,7 +1153,7 @@ class TestPanelCarriesNoFrozenPin:
         def _forbidden(**_kw: object) -> str:
             raise AssertionError("the status panel must not read the retired pin")
 
-        monkeypatch.setattr("shared.cluster_pin.get_cluster_target_sha", _forbidden)
+        monkeypatch.setattr("base.deploy.state.cluster_pin.get_cluster_target_sha", _forbidden)
         monkeypatch.setattr(status_router, "prod_source_head_sha", lambda: "abc1234")
         with db_conn.cursor() as cur:
             panel = status_router._get_cluster_status(cur)

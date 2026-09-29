@@ -11,23 +11,29 @@ import psycopg
 import pytest
 from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool, ConnectionPool
+from tests.shared.test_predecessor_closure import _closed_form, _retired
 
 from agent.db import claim_inbound_batch
-from agent.hosted_ownership import admit_hosted_runtime, apply_hosted_lifecycle
-from ops import agent_wake, ops_exit, ops_lifecycle
-from ops.agent_spawn import create_agent_row
+from agent.ownership.hosted import admit_hosted_runtime, apply_hosted_lifecycle
+from base.agents import AgentStatus, ResurrectError, ResurrectRefused
+from base.agents.incarnation.resources import (
+    IncarnationResources,
+    ResourceBirth,
+    decode_resources,
+)
+from base.cluster.machine import machine_name
+from base.config import settings
+from base.db import PG_KEEPALIVE_KWARGS, insert_inbound_message
+from base.deploy.maintenance import cohort, pause_owner
+from base.deploy.maintenance.straggler_reap import settle_stranded_reaps
+from base.native_process.runtime_incarnation import RuntimeIncarnation
+from base.native_process.turn_identity import bind_turn_identity
+from ops import lifecycle
+from ops.agents import wake
+from ops.agents.resurrection_retry import ResurrectSettlementDeferredError
+from ops.agents.spawn import create_agent_row
 from ops.cluster_rpc import ClusterOpFailed, ClusterOpUnreachable
-from ops.resurrection_retry import ResurrectSettlementDeferredError
-from shared import maintenance_cohort, pause_owner
-from shared.agents import AgentStatus, ResurrectError, ResurrectRefused
-from shared.config import settings
-from shared.db import PG_KEEPALIVE_KWARGS, insert_inbound_message
-from shared.incarnation_resources import IncarnationResources, ResourceBirth, decode_resources
-from shared.machine import machine_name
-from shared.runtime_incarnation import RuntimeIncarnation
-from shared.straggler_reap import settle_stranded_reaps
-from shared.turn_identity import bind_turn_identity
-from tests.shared.test_predecessor_closure import _closed_form, _retired
+from ops.lifecycle import termination
 
 
 @pytest.fixture(autouse=True)
@@ -37,7 +43,7 @@ def wakes(monkeypatch: pytest.MonkeyPatch) -> Iterator[list[tuple[int, str]]]:
     def _record(agent_id: int, payload: str) -> None:
         captured.append((agent_id, payload))
 
-    monkeypatch.setattr(agent_wake, "publish_inbound_wake", _record)
+    monkeypatch.setattr(wake, "publish_inbound_wake", _record)
     yield captured
 
 
@@ -80,7 +86,7 @@ async def test_never_admitted_birth_resurrects_as_a_fresh_hosted_birth(
     trigger = insert_inbound_message(db_conn, aid, "continue", "user") if guarded else None
     db_conn.commit()
 
-    agent_wake.resurrect_agent(
+    wake.resurrect_agent(
         aid,
         resurrected_by="system" if guarded else "user",
         trigger_inbound_id=trigger,
@@ -118,7 +124,7 @@ def test_fresh_birth_transition_reproves_its_evidence_under_the_row_lock(
     chat = insert_inbound_message(db_conn, aid, "continue", "user") if trigger else None
     db_conn.commit()
     with db_conn.cursor() as cur, pytest.raises(ResurrectError, match="0 rows"):
-        agent_wake._transition_terminated_to_unclaimed_idling(
+        wake._transition_terminated_to_unclaimed_idling(
             cur,
             aid,
             None,
@@ -144,7 +150,7 @@ def test_retired_resources_require_cutover_before_resurrection(
     db_conn.commit()
 
     with pytest.raises(ResurrectRefused, match="runtime_cutover_required"):
-        agent_wake.resurrect_agent(aid, resurrected_by="user")
+        wake.resurrect_agent(aid, resurrected_by="user")
     assert _status(db_conn, aid) == ("terminated", "hosted")
     assert _resources(db_conn, aid) == before
     assert wakes == []
@@ -171,7 +177,7 @@ async def test_closed_form_terminated_row_resurrects_through_its_terminate_recei
     db_conn.commit()
     _closed_form(db_conn, aid, before)
 
-    agent_wake.resurrect_agent(aid, resurrected_by="user")
+    wake.resurrect_agent(aid, resurrected_by="user")
     successor = await admit_hosted_runtime(
         aops_pool, aid, machine_name(), uuid4(), expected_from="idling"
     )
@@ -191,7 +197,7 @@ def _refused_locally(monkeypatch: pytest.MonkeyPatch, db: psycopg.Connection) ->
     async def _unreachable(*_a: object, **_kw: object) -> dict[str, Any]:
         raise ClusterOpUnreachable("local ops server not reachable")
 
-    monkeypatch.setattr(ops_lifecycle._cluster_rpc, "dispatch_to_machine", _unreachable)
+    monkeypatch.setattr(lifecycle._cluster_rpc, "dispatch_to_machine", _unreachable)
     return aid, trigger
 
 
@@ -203,7 +209,7 @@ def _refused_remotely(monkeypatch: pytest.MonkeyPatch, db: psycopg.Connection) -
     async def _failed(*_a: object, **_kw: object) -> dict[str, Any]:
         raise ClusterOpFailed({"error": "ResurrectRefused: runtime_cutover_required"})
 
-    monkeypatch.setattr(ops_lifecycle._cluster_rpc, "dispatch_to_machine", _failed)
+    monkeypatch.setattr(lifecycle._cluster_rpc, "dispatch_to_machine", _failed)
     return aid, trigger
 
 
@@ -215,7 +221,7 @@ async def test_auto_resurrect_refusal_is_a_warning_naming_the_reason(
     arrange: Any,
 ) -> None:
     aid, trigger = arrange(monkeypatch, db_conn)
-    status = await ops_lifecycle.resurrect_if_terminated(
+    status = await lifecycle.resurrect_if_terminated(
         aid, trigger_inbound_id=trigger, trigger_inbound_kind="chat"
     )
     assert status is AgentStatus.TERMINATED
@@ -242,8 +248,8 @@ async def test_other_auto_resurrect_failures_stay_informational(
     async def _failed(*_a: object, **_kw: object) -> dict[str, Any]:
         raise ClusterOpFailed({"error": "launch failed on the home machine"})
 
-    monkeypatch.setattr(ops_lifecycle._cluster_rpc, "dispatch_to_machine", _failed)
-    await ops_lifecycle.resurrect_if_terminated(
+    monkeypatch.setattr(lifecycle._cluster_rpc, "dispatch_to_machine", _failed)
+    await lifecycle.resurrect_if_terminated(
         aid, trigger_inbound_id=trigger, trigger_inbound_kind="chat"
     )
     events = [r["extra"].get("event") for r in loguru_records if r["level"].name == "WARNING"]
@@ -263,7 +269,7 @@ def _force(aid: int) -> int:
     with ConnectionPool[psycopg.Connection](
         settings.data_plane.db_url, min_size=1, max_size=1, kwargs=PG_KEEPALIVE_KWARGS
     ) as pool:
-        _, _, _, force = ops_exit._force_terminate_transaction(aid, pool, source="user")
+        _, _, _, force = termination._force_terminate_transaction(aid, pool, source="user")
     return force
 
 
@@ -314,7 +320,7 @@ async def _resurrected(db: psycopg.Connection, pool: AsyncConnectionPool) -> int
         (aid,),
     )
     db.commit()
-    agent_wake.resurrect_agent(aid, resurrected_by="user")
+    wake.resurrect_agent(aid, resurrected_by="user")
     return aid
 
 
@@ -374,7 +380,7 @@ async def test_a_row_this_runtime_left_and_ended_unowned_resurrects(
     db_conn.commit()
     wakes.clear()
 
-    agent_wake.resurrect_agent(
+    wake.resurrect_agent(
         aid,
         resurrected_by="system" if guarded else "user",
         trigger_inbound_id=trigger,
@@ -407,10 +413,10 @@ async def test_a_managed_row_ended_unowned_keeps_its_predecessor_receipt(
         (generation, owner, aid),
     )
     db_conn.commit()
-    agent_wake.resurrect_agent(aid, resurrected_by="user")
+    wake.resurrect_agent(aid, resurrected_by="user")
     assert _unowned_receipt(db_conn, _force(aid))
 
-    agent_wake.resurrect_agent(aid, resurrected_by="user")
+    wake.resurrect_agent(aid, resurrected_by="user")
 
     successor = await _admitted(aops_pool, aid)
     admitted = decode_resources(_resources(db_conn, aid))
@@ -432,7 +438,7 @@ def _legacy_forced_beside_a_marked_neighbour(db: psycopg.Connection) -> int:
     other, _, _, _ = create_agent_row(spawner="user", machine=machine_name())
     db.commit()
     assert _unowned_receipt(db, _force(other))
-    agent_wake.resurrect_agent(other, resurrected_by="user")
+    wake.resurrect_agent(other, resurrected_by="user")
     released = db.execute(
         "SELECT count(*) FROM inbound_messages WHERE agent_id=%s AND kind='resurrect' "
         "AND payload->'lifecycle_release' = 'true'::jsonb",
@@ -465,7 +471,7 @@ def _earlier_life_receipt(db: psycopg.Connection) -> int:
     """A receipt ended an earlier life; this life ended without one."""
     aid, _, _, _ = create_agent_row(spawner="user", machine=machine_name())
     _force(aid)
-    agent_wake.resurrect_agent(aid, resurrected_by="user")
+    wake.resurrect_agent(aid, resurrected_by="user")
     db.execute(
         "UPDATE agents_meta SET status='terminated',termination_source='user' WHERE id=%s",
         (aid,),
@@ -501,7 +507,7 @@ def test_an_unowned_end_without_this_lifes_receipt_still_refuses(
     wakes.clear()
 
     with pytest.raises(ResurrectRefused, match="runtime_cutover_required"):
-        agent_wake.resurrect_agent(aid, resurrected_by="user")
+        wake.resurrect_agent(aid, resurrected_by="user")
 
     assert _status(db_conn, aid)[0] == "terminated"
     assert wakes == []
@@ -522,7 +528,7 @@ async def test_a_force_on_a_live_incarnation_records_no_unowned_receipt(
 
     assert not _unowned_receipt(db_conn, force)
     with pytest.raises(ResurrectSettlementDeferredError):
-        agent_wake.resurrect_agent(aid, resurrected_by="user")
+        wake.resurrect_agent(aid, resurrected_by="user")
     assert _status(db_conn, aid) == ("terminated", "hosted")
 
 
@@ -538,14 +544,14 @@ async def test_maintenance_parks_a_resurrected_unowned_row_and_ignores_its_recei
     monkeypatch.setattr(pause_owner, "lock_path", lambda: tmp_path / "pause.lock")
     resurrected = await _restarted(db_conn, aops_pool)
     _force(resurrected)
-    agent_wake.resurrect_agent(resurrected, resurrected_by="user")
+    wake.resurrect_agent(resurrected, resurrected_by="user")
     ended, _, _, _ = create_agent_row(spawner="user", machine=machine_name())
     assert _unowned_receipt(db_conn, _force(ended))
     when = datetime(2026, 9, 29, 3, 0, tzinfo=UTC)
     holder = "ops:test:unowned"
     pause_owner.begin_maintenance(holder, when)
 
-    hold = maintenance_cohort.prepare(
+    hold = cohort.prepare(
         db_conn, machine=machine_name(), host_owner=None, holder=holder, acquired_at=when
     )
 

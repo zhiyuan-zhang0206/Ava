@@ -315,7 +315,7 @@ def test_mutated_custody_is_never_overwritten_or_cleared(tmp_path: Path) -> None
 
 @pytest.mark.parametrize("birth", [float("nan"), float("inf"), -1, True])
 def test_native_status_refuses_invalid_birth(birth: object) -> None:
-    from shared.root_control.client import RootClientError, native_identity
+    from base.native_process.root_control.client import RootClientError, native_identity
 
     with pytest.raises(RootClientError, match="captured native birth"):
         native_identity({"pid": 101, "create_time": birth, "starttime": None})
@@ -325,8 +325,8 @@ def test_native_status_refuses_invalid_birth(birth: object) -> None:
 def test_exact_home_helper_retirement_keeps_neighbor_and_waits_for_native_exit(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, waiting: bytes
 ) -> None:
+    from base.native_process.ownership import OwnedProcess
     from services.permissions_helper import launchd_job as jobs
-    from shared.native_process.ownership import OwnedProcess
 
     home = tmp_path.resolve() / "home"
     agents = tmp_path / "agents"
@@ -379,11 +379,11 @@ def test_exact_home_helper_retirement_keeps_neighbor_and_waits_for_native_exit(
 
     monkeypatch.setattr(jobs, "_retirement_command", command)
     # Ordinary stop, then the shared destroy boundary, then a cleanup retry.
-    from cli.commands._stop_extras import stop_permissions_helper
-    from shared.config import settings
+    from base.config import settings
+    from cli.commands.lifecycle._stop_extras import stop_permissions_helper
 
-    monkeypatch.setattr("shared.platform.IS_MACOS", True)
-    monkeypatch.setattr("shared.paths.ava_home", lambda: home)
+    monkeypatch.setattr("base.native_process.os_platform.IS_MACOS", True)
+    monkeypatch.setattr("base.paths.ava_home", lambda: home)
     monkeypatch.setattr(settings.services, "permissions_helper_port", 23456)
     stop_permissions_helper()
     jobs.unregister_helper(home, helper_port=23456)
@@ -548,8 +548,8 @@ def test_helper_socket_inspection_error_retains_definition(
 def test_helper_native_shutdown_wait_never_signals_unresponsive_owner(tmp_path: Path) -> None:
     import psutil
 
+    from base.native_process.ownership import OwnedProcess
     from services.permissions_helper import launchd_job as jobs
-    from shared.native_process.ownership import OwnedProcess
 
     ready = tmp_path / "ready"
     code = (
@@ -579,8 +579,8 @@ def test_helper_native_shutdown_wait_never_signals_unresponsive_owner(tmp_path: 
 def test_helper_force_signal_refuses_reused_native_birth(monkeypatch: pytest.MonkeyPatch) -> None:
     import psutil
 
+    from base.native_process.ownership import OwnedProcess
     from services.permissions_helper import launchd_job as jobs
-    from shared.native_process.ownership import OwnedProcess
 
     original = OwnedProcess(12345, 100.0, None)
     replacement = OwnedProcess(12345, 100.01, None)
@@ -652,9 +652,9 @@ def test_idle_shutdown_retry_requires_native_success_and_retained_intent(
 def test_unproven_shutdown_never_boots_out_native_job(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str
 ) -> None:
+    from base.native_process.ownership import OwnedProcess
     from services.permissions_helper import client
     from services.permissions_helper import launchd_job as jobs
-    from shared.native_process.ownership import OwnedProcess
 
     home = tmp_path.resolve()
     monkeypatch.setattr(jobs.sys, "platform", "darwin")

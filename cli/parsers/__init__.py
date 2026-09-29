@@ -1,7 +1,7 @@
 """`ava` CLI argparse surface — per-domain parser builders + their `_h_*` handlers.
 
 `cli.main` imports this package at module level (settings-free: nothing here
-imports ``cli.commands`` / ``shared.config``, so ``ava --help`` builds the tree
+imports ``cli.commands`` / ``base.config``, so ``ava --help`` builds the tree
 on a host with no .env) and calls :func:`build_parser` from ``main()``. Each
 builder binds its own module's handler directly (``set_defaults(func=_h_x)``);
 a test that fakes a handler patches the parser module that defines it, before

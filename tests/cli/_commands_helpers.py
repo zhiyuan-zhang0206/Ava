@@ -11,8 +11,8 @@ import cli.commands._probe as _probe_commands
 import cli.commands._repo as _repo_commands
 import cli.commands._setup as _setup_commands
 import cli.commands.converge.host as converge_host
-import cli.commands.root_driver as _root_driver_commands
-from shared.start_serving import RootBirth
+import cli.commands.lifecycle.root_driver as _root_driver_commands
+from base.deploy.lifecycle.start_serving import RootBirth
 
 # Explicit shared surface: every name the split test modules import from here.
 __all__ = [
@@ -51,7 +51,7 @@ class _FakeResult:
 
 # Captured before any monkeypatch: the start-path tests stub subprocess.run to
 # intercept session / docker / probe commands, but `ava start`'s migration step
-# consults git (`shared.migrations._tracked_migration_paths`, Task #998) — a
+# consults git (`base.deploy.schema.migrations._tracked_migration_paths`, Task #998) — a
 # blank fake result would trip the git-tracking gate's fail-closed path and
 # abort cmd_start. `git` invocations therefore reach the real binary (read-only
 # rev-parse / ls-files, milliseconds).
@@ -139,7 +139,7 @@ def _fake_session_backends(
     real supervisor in unit tests (a real launch would fork a daemon, a real
     kill could touch the dev host's sessions). Returns (service, shell).
     """
-    import shared.session_backend as _sb
+    import base.sessions.backend as _sb
 
     service = _FakeSessionBackend()
     shell = _FakeSessionBackend()
@@ -152,12 +152,12 @@ def _fake_session_backends(
 def _noop_start_prechecks(serving_root: RootBirth, monkeypatch: pytest.MonkeyPatch) -> None:
     """cmd_start's multi-machine setup collection + converge_host + register_self
     are all noop in an importing module — here we test session / docker / stop / status call shapes,
-    orthogonal to setup. Setup behavior itself is left to shared/test_machine.py + the setup-ergonomics tests in `test_commands_start.py`.
+    orthogonal to setup. Setup behavior itself is left to base/test_machine.py + the setup-ergonomics tests in `test_commands_start.py`.
 
     Default role="gateway" (full service set). To test secondary, explicitly override:
         monkeypatch.setattr(_cli, "_roles_or_none", lambda: frozenset({"agent-runner"}))
         monkeypatch.setattr(_cli, "_collect_setup_values", lambda _a: (..., []))"""
-    from shared.runtime_interpreter import LoadedRuntimeIdentity
+    from base.deploy.release.runtime_interpreter import LoadedRuntimeIdentity
 
     def fixture_runtime(_self: object, _home: Path) -> LoadedRuntimeIdentity:
         return serving_root.runtime
@@ -179,7 +179,7 @@ def _noop_start_prechecks(serving_root: RootBirth, monkeypatch: pytest.MonkeyPat
     # native instance under $AVA_HOME. These tests assert session/stop/status call
     # shapes, not infra, so stub it to a noop — keeping them hermetic regardless of
     # the dev host's pg/redis.
-    from cli.commands import start as _start_mod
+    from cli.commands.lifecycle import start as _start_mod
 
     monkeypatch.setattr(_start_mod, "_ensure_gateway_data_plane", lambda: 0)
     monkeypatch.setattr("cli.commands.data_plane.bringup.prepare_gateway_schema", lambda: None)
@@ -187,7 +187,7 @@ def _noop_start_prechecks(serving_root: RootBirth, monkeypatch: pytest.MonkeyPat
         "cli.commands.data_plane.bringup.complete_gateway_data_plane",
         lambda **_kw: None,  # pyright: ignore[reportUnknownArgumentType] — untyped test double
     )
-    from cli.commands.root_driver import LaunchOutcome
+    from cli.commands.lifecycle.root_driver import LaunchOutcome
 
     monkeypatch.setattr(
         _root_driver_commands,
@@ -206,7 +206,7 @@ def _noop_start_prechecks(serving_root: RootBirth, monkeypatch: pytest.MonkeyPat
     # full-service gateway box, deterministic regardless of the dev host's
     # machine_serve_* files. Agent-runner tests override machine_role explicitly.
     monkeypatch.setattr(_repo_commands, "_roles_or_none", lambda: frozenset({"gateway"}))
-    monkeypatch.setattr("shared.machine.machine_role", lambda: frozenset({"gateway"}))
+    monkeypatch.setattr("base.cluster.machine.machine_role", lambda: frozenset({"gateway"}))
     # register_self goes to central DB UPSERT; test does not need real writes. cmd_start goes
     # through _register_machine_or_die which internally imports register_self, directly patch the helper to return 0.
     monkeypatch.setattr(_repo_commands, "_register_machine_or_die", lambda _resolved, _role: 0)  # pyright: ignore[reportUnknownArgumentType]
@@ -216,7 +216,8 @@ def _noop_start_prechecks(serving_root: RootBirth, monkeypatch: pytest.MonkeyPat
     # _assert_schema_current_or_die truly calls DB; tests don't need real schema query, directly patch.
     monkeypatch.setattr(_repo_commands, "_assert_schema_current_or_die", lambda: 0)
     # Root service preparation must not install frontend dependencies in unit tests.
-    from cli.commands import _repo, root_driver
+    from cli.commands import _repo
+    from cli.commands.lifecycle import root_driver
 
     monkeypatch.setattr(_repo, "_ensure_frontend_deps", lambda _repo: None)  # pyright: ignore[reportUnknownArgumentType]
 
@@ -240,12 +241,12 @@ def _hermetic_gateway_base(monkeypatch: pytest.MonkeyPatch) -> None:
     on a renamed field. Resolve it to an unreachable stub by default: tests that
     assert on the response mock httpx on top; the rest take the graceful
     'unreachable' path deterministically, matching CI where no gateway is up."""
-    monkeypatch.setattr("shared.machine.gateway_api_base", lambda: "http://gw:8000")
+    monkeypatch.setattr("base.cluster.machine.gateway_api_base", lambda: "http://gw:8000")
 
 
 def _spec(service: str):
     from cli.commands._repo import ServiceSpec
-    from ops.service_spec import (
+    from ops.roster.service_spec import (
         _GATEWAY,  # typed frozenset[MachineRole]; capability irrelevant to probe tests
     )
 
@@ -277,4 +278,4 @@ class _FakeResponse:
 
 def _patch_gateway_http(monkeypatch: pytest.MonkeyPatch) -> None:
     """Stub gateway URL/headers resolution so the HTTP helpers don't hit settings."""
-    monkeypatch.setattr("shared.machine.gateway_api_base", lambda: "http://gw:8000")
+    monkeypatch.setattr("base.cluster.machine.gateway_api_base", lambda: "http://gw:8000")

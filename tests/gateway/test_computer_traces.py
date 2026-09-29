@@ -1,7 +1,7 @@
 """`GET /api/computer/traces?task_id=N` — one task's desktop-action trail.
 
 Loki-backed via the `FakeLoki` stand-in (monkeypatched onto
-`gateway.loki_events`), same filter/window semantics as the real module.
+`gateway.lgtm.loki_events`), same filter/window semantics as the real module.
 """
 
 from __future__ import annotations
@@ -12,15 +12,15 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from gateway import loki_events
 from gateway.app import app
+from gateway.lgtm import loki_events
 from tests.gateway.loki_fake import FakeLoki
 
 
 @pytest.fixture
 def loki_fake(monkeypatch: pytest.MonkeyPatch) -> FakeLoki:
     fake = FakeLoki()
-    monkeypatch.setattr("gateway.loki_events.query_events", fake.query_events)
+    monkeypatch.setattr("gateway.lgtm.loki_events.query_events", fake.query_events)
     return fake
 
 

@@ -8,7 +8,7 @@ tags: [cluster-lifecycle, release]
 # Release write generations
 
 Every direction runs on a fresh database write generation
-([[shared/cluster/authority/authority.ava.okf.md|write-generation authority]]);
+([[base/cluster/authority/authority.ava.okf.md|write-generation authority]]);
 `authority.py` orchestrates it and `cli/commands/data_plane/write_generation.py`
 performs the data-plane effects. The home ledger is the authority; the journal
 (`authority_evidence.py`) carries one `Fence` and one `Issue` per direction:

@@ -16,7 +16,7 @@ UTC timestamps. Retention orders those timestamps independently of host DST.
 Local dumps guard against bad migrations / accidental deletes / DB
 corruption. `run_backup` is `dump -> encrypt -> optional off-site publish ->
 prune`. The best-effort off-site leg publishes the encrypted artifact iff
-absent through the shared backup store contract (`services.pitr.store_factory`,
+absent through the shared backup store contract (`services.pitr.stores.factory`,
 the physical PITR plane's backend switch); a failed store keeps the local
 artifact. Remote objects are append-only except policy-owned, armed retention
 deletions (see `future/infra/pg-backup.md`). The dump uses PostgreSQL's
@@ -55,12 +55,17 @@ from typing import cast
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
-import psycopg
 from psycopg.conninfo import conninfo_to_dict, make_conninfo
 
+from base.cluster.dataplane.pg_tools import pg_tool
+from base.config import settings
+from base.db import connect, connect_url, direct_db_url
+from base.db.pg_admin import local_owner_authority
+from base.host.private_storage import ensure_private_dir, ensure_private_file
+from base.native_process.os_platform import LockTimeoutError, file_lock
 from services.gateway_side.backup import passphrase as backup_passphrase
 from services.gateway_side.backup.intermediates import sweep_closed_partials
-from services.pitr.logical_dump_names import (
+from services.pitr.stores.logical_dump_names import (
     ACTIVATION_MARKER,
     DUMP_NAME_RE,
     PRE_UPDATE_MARKER,
@@ -68,19 +73,13 @@ from services.pitr.logical_dump_names import (
     TS_FORMAT,
     stamp_utc,
 )
-from shared.config import settings
-from shared.db import connect, direct_db_url
-from shared.pg_admin import local_owner_authority
-from shared.pg_tools import pg_tool
-from shared.platform import LockTimeoutError, file_lock
-from shared.private_storage import ensure_private_dir, ensure_private_file
 
 _log = logging.getLogger(__name__)
 
 # Newest activation snapshots kept in their own prune slot: the current PITR
 # activation's logical floor plus the one before it; an unresolved activation's
 # snapshot is pinned on top (task #3696 exception inventory). The managed name
-# grammar lives in `services.pitr.logical_dump_names`, shared with retention.
+# grammar lives in `services.pitr.stores.logical_dump_names`, shared with retention.
 ACTIVATION_KEEP = 2
 # Headroom against a stall, not an expected runtime: a full dump with
 # checkpoint history takes about 6.3 min.
@@ -115,7 +114,7 @@ def _parse_stamp(stamp: str) -> datetime:
     """A managed dump's filename stamp as an aware UTC instant.
 
     The reading rules (UTC by construction; legacy stamps read in cluster
-    time) live in `services.pitr.logical_dump_names.stamp_utc`.
+    time) live in `services.pitr.stores.logical_dump_names.stamp_utc`.
     """
     return stamp_utc(stamp, _cluster_tz())
 
@@ -192,8 +191,8 @@ def _is_activation(path: Path) -> bool:
 def _active_activation_pin(directory: Path) -> Path | None:
     if directory.resolve() != backup_dir().resolve():
         return None
-    from services.pitr.activation_state import load_record
-    from shared.paths import ava_home
+    from base.paths import ava_home
+    from services.pitr.activation.state import load_record
 
     record = load_record(ava_home())
     if record is None or record.phase in {"protected", "rolled_back"}:
@@ -258,7 +257,7 @@ def dump_source() -> str:
     """The dial `pg_dump` reads this cluster's whole database through.
 
     A locally owned plane dumps as the administrator acting as the schema owner
-    over the home's owner-only socket (`shared.pg_admin`): password-free,
+    over the home's owner-only socket (`base.db.pg_admin`): password-free,
     custody-checked against this home's postmaster, and independent of the
     write generations a rollout revokes, so a dump never needs, and never dies
     with, a delivered login. A remote-managed plane's provider URL
@@ -385,7 +384,7 @@ class _EncryptedFileSource:
     @property
     def ciphertext_crc32c(self) -> str:
         if self._crc32c is None:
-            from services.pitr.checksums import CRC32C, digest_file
+            from services.pitr.stores.checksums import CRC32C, digest_file
 
             self._crc32c = digest_file(CRC32C, str(self._path))
         return self._crc32c
@@ -405,7 +404,7 @@ def _publish_offsite(artifact: Path) -> str | None:
     local artifact — the off-site leg stays optional, exactly as the Drive
     copy it replaces.
     """
-    from services.pitr.store_factory import get_store_group
+    from services.pitr.stores.factory import get_store_group
 
     try:
         store = get_store_group().restartable_streaming_object_store()
@@ -615,7 +614,7 @@ def _db_size_breakdown(db_url: str | None = None) -> str:
     """
     try:
         with (
-            psycopg.connect(db_url, autocommit=True, connect_timeout=_BREAKDOWN_CONNECT_TIMEOUT_S)
+            connect_url(db_url, autocommit=True, connect_timeout=_BREAKDOWN_CONNECT_TIMEOUT_S)
             if db_url is not None
             else connect(direct=True, autocommit=True)
         ) as conn:

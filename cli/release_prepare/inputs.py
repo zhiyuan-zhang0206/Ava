@@ -7,10 +7,14 @@ import shutil
 import zipfile
 from pathlib import Path
 
+from base.deploy.release.runtime_prepare import (
+    inventory_digest,
+    python_input_inventory,
+    tree_inventory,
+)
+from base.deploy.release.runtime_release import ReleaseRejectedError, file_sha256
+from base.runtime_plugins import declared_plugins
 from cli.release_prepare.models import LocalInputs, Preparation
-from shared.runtime_plugins import declared_plugins
-from shared.runtime_prepare import inventory_digest, python_input_inventory, tree_inventory
-from shared.runtime_release import ReleaseRejectedError, file_sha256
 
 
 def require_directory(path: Path) -> None:

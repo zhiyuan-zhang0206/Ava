@@ -5,7 +5,7 @@ database every other gateway table lives in), schema aligned with the chunk
 rows the milvus backend keeps:
 
 - `pk` VARCHAR(2048) PK — the same folded `{path}\x1f{kind}\x1f{chunk_idx}`
-  key (`shared.pk_of`), so reconciliation tooling can compare rows across
+  key (`base.pk_of`), so reconciliation tooling can compare rows across
   backends 1:1
 - `path` VARCHAR(1024), `kind` VARCHAR(16), `chunk_idx` BIGINT,
   `mtime` DOUBLE PRECISION, `content_hash` VARCHAR(128)
@@ -44,9 +44,9 @@ import psycopg
 from psycopg import sql as pgsql
 from psycopg_pool import ConnectionPool
 
-import shared.db
+import base.db
+from base.db.transaction import write_transaction
 from services.memory_indexer.backends.base import KIND_BODY, pk_of
-from shared.db_transaction import write_transaction
 
 _log = logging.getLogger("services.memory_indexer.backends.pgvector")
 
@@ -277,7 +277,7 @@ class PGVectorBackend:
                 yield conn
                 conn.commit()
         else:
-            with shared.db.connect() as conn:
+            with base.db.connect() as conn:
                 yield conn
                 conn.commit()
 
@@ -297,9 +297,9 @@ class PGVectorBackend:
         """Open the connection pool + validate the table at this dim.
 
         The pool exists so the indexer daemon's batched upserts do not pay a
-        dial per batch; `shared.db.pool()` is the only sanctioned pool
+        dial per batch; `base.db.pool()` is the only sanctioned pool
         constructor (keepalives + statement ceiling)."""
-        self._pool = shared.db.pool()
+        self._pool = base.db.pool()
         try:
             with self._pool.connection() as conn:
                 _validate_schema(conn, self._dim)

@@ -1,0 +1,5 @@
+{
+  "complexity": {
+    "base/db/__init__.py::insert_inbound_message": 21
+  }
+}

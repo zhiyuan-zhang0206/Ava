@@ -9,12 +9,12 @@ from typing import Any
 
 import pytest
 
+from base.deploy.release.runtime_release import ReleaseRejectedError, VerifiedRelease
+from base.sessions.env_forwarding import normalize_service_path
 from cli.release_prepare import Preparation
 from cli.release_prepare import prepare as preparation
 from scripts.preview import linux_observer as observer
 from scripts.preview import linux_runtime as runtime
-from shared.runtime_release import ReleaseRejectedError, VerifiedRelease
-from shared.session_env import normalize_service_path
 from tests.lifecycle.preparation.test_preparation import _assemble
 from tests.lifecycle.preparation.test_preparation import request_fixture as request_fixture
 

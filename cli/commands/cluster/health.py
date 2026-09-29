@@ -22,6 +22,12 @@ import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+from base.telemetry.loki_index_labels import (
+    LokiReadEra,
+    event_stream_selector,
+    split_index_label_window,
+)
+
 # Outage episodes and edge alerts live in
 # `health_alerts` (split out 2026-08-07 to stay under the 800-line ceiling).
 # The probe runner uses the pieces below; the rest are re-exported so tests
@@ -38,7 +44,6 @@ from cli.commands.cluster.health_alerts import (
     executor_lost,
     notify_owner,  # noqa: F401  # pyright: ignore[reportUnusedImport]  # re-export (tests access via health)
 )
-from shared.loki_index_labels import LokiReadEra, event_stream_selector, split_index_label_window
 
 # Default thresholds. Overridable via CLI flags; the cron wrapper's
 # defaults are set at registration time.
@@ -68,8 +73,8 @@ def _gateway_liveness() -> bool:
     Uses the gateway's own `/api/health` (or equivalent). On a single-box
     host, this is `http://localhost:<port>/api/health`; the URL is resolved
     from Settings."""
-    from shared.http_dial import get as dial_get
-    from shared.machine import gateway_api_base
+    from base.cluster.machine import gateway_api_base
+    from base.host.net.http_dial import get as dial_get
 
     base = gateway_api_base()
     url = f"{base}/api/health"
@@ -92,11 +97,11 @@ def _gateway_liveness_with_retry() -> bool:
 
 def _data_plane_abnormal() -> bool:
     """True when either dependency behind the gateway is currently unreachable."""
-    import shared.db
-    from shared.redis_client import sync_redis
+    from base import db
+    from base.events.live.redis_client import sync_redis
 
     try:
-        with shared.db.connect(autocommit=True):
+        with db.connect(autocommit=True):
             pass
     except Exception:
         return True
@@ -116,10 +121,10 @@ def _agent_population(min_agents: int) -> bool:
 
     Queries the central DB directly — the probe runs on the gateway machine
     and has DB access. A cluster with zero live agents is effectively dead."""
-    import shared.db
+    from base import db
 
     try:
-        with shared.db.connect(autocommit=True) as conn, conn.cursor() as cur:
+        with db.connect(autocommit=True) as conn, conn.cursor() as cur:
             cur.execute(
                 "SELECT COUNT(*) FROM agents_meta WHERE status IN ('running', 'idling') "
                 "AND lease_expires_at > now()"
@@ -138,11 +143,12 @@ def _agent_population(min_agents: int) -> bool:
 
 def _agent_population_failure_class(min_agents: int) -> str | None:
     """Classify observed low population against DB availability and local intent."""
-    import shared.db
-    from shared import pause_owner, service_selection
+    from base import db
+    from base.deploy.lifecycle import service_selection
+    from base.deploy.maintenance import pause_owner
 
     try:
-        with shared.db.connect(autocommit=True) as conn, conn.cursor() as cur:
+        with db.connect(autocommit=True) as conn, conn.cursor() as cur:
             cur.execute(
                 "SELECT COUNT(*) FROM agents_meta WHERE status IN ('running', 'idling') "
                 "AND lease_expires_at > now()"
@@ -196,7 +202,7 @@ def _crash_loop_detection(max_restarts: int, window_minutes: int) -> bool:
     instant LogQL query."""
     import httpx
 
-    from shared.config import settings
+    from base.config import settings
 
     end = datetime.now(UTC)
     start = end - timedelta(minutes=window_minutes)
@@ -249,13 +255,17 @@ def _schema_health() -> bool:
     must not fire a false schema alert while code and DB are actually in sync
     (2026-08-03: probe alerted "applied version behind required" on a
     connection error during a pgbouncer flake)."""
-    from shared.migrations import CodeBehindSchema, SchemaVersionMismatch, check_schema_version
+    from base.deploy.schema.migrations import (
+        CodeBehindSchema,
+        SchemaVersionMismatch,
+        check_schema_version,
+    )
 
     try:
         # check_schema_version expects a connection; connect+check inline
-        import shared.db
+        from base import db
 
-        with shared.db.connect(autocommit=True) as conn:
+        with db.connect(autocommit=True) as conn:
             check_schema_version(conn)
         return True
     except (CodeBehindSchema, SchemaVersionMismatch):
@@ -284,7 +294,7 @@ def _service_probes() -> list[str]:
     means another unit holds this unit's port and no amount of waiting fixes it."""
     import cli.commands._probe as _probe_commands
     import cli.commands._repo as _repo_commands
-    from shared.service_selection import read_selection
+    from base.deploy.lifecycle.service_selection import read_selection
 
     roles = _repo_commands._roles_or_none()
     if roles is None:
@@ -337,7 +347,7 @@ def _disk_usage_fraction() -> float | None:
     """Used fraction of the data volume, statvfs-family, or None when unmeasurable.
 
     Uses ``shutil.disk_usage`` — the same measurement the trace disk-watermark
-    guard (``AVA_TRACE_DISK_WATERMARK``, ``shared/trace_mirror.py``) and the
+    guard (``AVA_TRACE_DISK_WATERMARK``, ``base/telemetry/trace_mirror.py``) and the
     macmini resource watcher make, so the probe fires at the line the owner is
     already told about. df(1) was the original measure, but its offset to the
     statvfs family is unstable in both directions (2026-08-24: ~0.8 points
@@ -385,10 +395,10 @@ def _editable_install_failure() -> str | None:
     The shared inspection helper applies exact-root allowlisting (production
     source plus the stable ~/Ava clone), never an arbitrary descendant.
     """
-    import shared.cluster_drift
-    import shared.editable_install as ei
+    import base.deploy.release.editable_install as ei
+    from base.deploy.git import cluster_drift
 
-    source_root = shared.cluster_drift.prod_source_dir()
+    source_root = cluster_drift.prod_source_dir()
     if source_root is None:
         return None
     violations = list(
@@ -412,16 +422,16 @@ def _source_tree_failure(home: Path) -> str | None:
     unknown, never healthy. This alert-only check cannot authorize rollback:
     selecting a release does not repair arbitrary edits.
     """
-    import shared.cluster_drift
-    import shared.source_tree_guard as stg
-    from shared.runtime_release import current_pointer
+    import base.deploy.git.source_tree_guard as stg
+    from base.deploy.git import cluster_drift
+    from base.deploy.release.runtime_release import current_pointer
 
     try:
         if current_pointer(home / "releases") is not None:
             return None
     except (OSError, ValueError) as exc:
         return f"prod source tree guard skipped: release selector unreadable ({exc})"
-    source_root = shared.cluster_drift.prod_source_dir()
+    source_root = cluster_drift.prod_source_dir()
     if source_root is None:
         return None
     violations = stg.source_tree_violations(source_root)
@@ -459,7 +469,7 @@ def run_health_probe(
     Observations feed graded owner alerts. Release selection, rollback, and
     known-good publication belong to the release operation.
     """
-    from shared.paths import ava_home, prod_service_checkout_error, repo_root
+    from base.paths import ava_home, prod_service_checkout_error, repo_root
 
     home = ava_home()
     refusal = prod_service_checkout_error(repo_root())
@@ -515,7 +525,7 @@ def _observe_cluster_health(
     # 1): a test/QA cluster with no resident agents sets it to 0 or the check
     # otherwise reports a permanent population outage.
     if agent_min is None:
-        from shared.config import settings
+        from base.config import settings
 
         agent_min = settings.daemon.health_probe_agent_min
     if not _agent_population(agent_min):

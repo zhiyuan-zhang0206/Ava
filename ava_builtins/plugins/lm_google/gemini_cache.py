@@ -67,7 +67,7 @@ from typing import Any
 from langchain_core.language_models.chat_models import BaseChatModel
 from loguru import logger
 
-from shared.config.turn_view import turn_settings
+from base.config.turn_view import turn_settings
 
 # Cache lifetime. 3600s is also the API default; stated explicitly so the
 # refresh arithmetic has one source. Storage bills per token-hour, so a

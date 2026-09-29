@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
+from base.cluster.machine import MachineRoles
+from base.telemetry.lgtm_local import BACKENDS
 from cli.commands.converge.spec import ConvergeCtx
 from services.healthchecks.lgtm import is_lgtm_host, lgtm_host_marker, probe_backend
-from shared.lgtm_local import BACKENDS
-from shared.machine import MachineRoles
 
 
 def roles_declare_station(roles: MachineRoles | None) -> bool:
@@ -18,8 +18,8 @@ def is_station_ctx(ctx: ConvergeCtx) -> bool:
 
 def _reconcile(*, enabled: bool) -> int:
     """Change only backend intent; use the same lifecycle as every service."""
-    from cli.commands.start import cmd_start
-    from shared.service_selection import read_selection
+    from base.deploy.lifecycle.service_selection import read_selection
+    from cli.commands.lifecycle.start import cmd_start
 
     selection = read_selection()
     names = set(selection.names)

@@ -28,7 +28,7 @@ The two are complementary: injection gives the agent a "memory directory", while
 
 ## Mechanism Details
 
-- **Trigger condition**: `passive_memory_recall_enabled` (default **on**; a cluster opts out by pinning `AVA_PASSIVE_MEMORY_RECALL=false` in its `.env` — `cluster-pinned` scope, so it applies cluster-wide), and memory index available. This node owns the recall settings' documented defaults; the authority they track is `shared/config/agent.py`
+- **Trigger condition**: `passive_memory_recall_enabled` (default **on**; a cluster opts out by pinning `AVA_PASSIVE_MEMORY_RECALL=false` in its `.env` — `cluster-pinned` scope, so it applies cluster-wide), and memory index available. This node owns the recall settings' documented defaults; the authority they track is `base/config/agent.py`
 - **Query construction**: Takes the last 6 "real dialogue" messages (agent replies + inbound chats), excludes system heartbeats/lifecycle markers/previous recall injections
 - **Trigger gate**: fires on inbound from a real source — user chat, a peer agent (`agent:`), a scheduled turn (`schedule:`), or a system notice — and skips machine-originated wake-ups (`watcher:` / `shell:` prefixes; `tail_has_recallable_inbound` in `agent/messages/__init__.py`)
 - **Search**: retrieves `memory_recall_retrieve_k` (100) candidates — wide top-100 so the filter has real candidates to judge; injection stays capped at `memory_recall_inject_k`
@@ -49,6 +49,6 @@ These point into your note pool at ava.memory.PATH -- read a path in full when i
 
 - [[ava_builtins/plugins/ava_memory/memory-api.ava.okf.md]] — Memory pool SDK
 - [[services/gateway_side/memory_indexer/memory-indexer.ava.okf.md]] — Vector index service
-- [[shared/lm/lm.ava.okf.md]] — Embedding model for semantic search
+- [[base/lm/lm.ava.okf.md]] — Embedding model for semantic search
 - [[agent/graph/context-notes/context-notes.ava.okf.md]] — the standing head recall notes are injected beside
 - [[agent/graph/context-window.ava.okf.md]] — injection is constrained by context window capacity

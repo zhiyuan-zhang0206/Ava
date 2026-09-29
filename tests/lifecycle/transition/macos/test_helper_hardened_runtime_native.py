@@ -33,8 +33,8 @@ from uuid import uuid4
 import psutil
 import pytest
 
+from base.native_process.ownership import OwnedProcess
 from services.permissions_helper import client, finite_artifact, hardened_runtime, lifecycle
-from shared.native_process.ownership import OwnedProcess
 from tests.lifecycle.transition.macos import native_fixture
 
 pytestmark = [

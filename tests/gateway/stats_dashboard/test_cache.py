@@ -14,13 +14,14 @@ import pytest
 from fastapi import HTTPException, Request
 from fastapi.testclient import TestClient
 
-from gateway import _loki_transport, loki_query_budget
+from base import telemetry
+from base.config import settings
+from base.config.display import DisplaySettings
 from gateway.app import app
-from gateway.routers import _stats_dashboard, status
-from gateway.schemas import StatsDashboard, StatsTokens, StatsWindowHours
-from shared import telemetry
-from shared.config import settings
-from shared.config.display import DisplaySettings
+from gateway.cluster import _stats_dashboard, status
+from gateway.cluster.schemas import StatsDashboard, StatsTokens
+from gateway.lgtm import _loki_transport, loki_query_budget
+from gateway.schemas.stats import StatsWindowHours
 from tests.gateway.stats_dashboard.test_routes import _CacheClock
 
 

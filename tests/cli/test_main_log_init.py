@@ -1,11 +1,11 @@
 """The verbs that bring a unit up keep their loguru records.
 
-Importing `shared.log` drops loguru's default handler, so a CLI process that
+Importing `base.log` drops loguru's default handler, so a CLI process that
 opens no sink discards every record it writes through loguru. On the start
 path some warnings exist only there: a skipped pgvector pre-create, untracked
 migration files that will not be applied. `ava start`, `ava restart`,
 `ava maintenance start` and `ava lgtm on|off` (every in-process `cmd_start`)
-open the sinks `shared.log.init_cli_process` gives: stderr, the unit's
+open the sinks `base.log.init_cli_process` gives: stderr, the unit's
 `logs/cli-<verb>.log` and the event pipeline, without a `service_started`
 row. Other verbs print to the caller's terminal and open none.
 """
@@ -37,20 +37,20 @@ import types
 from pathlib import Path
 sys.path.insert(0, sys.argv[1])
 from cli import main, start_intent
-from shared import cluster
+from base import cluster
 home = Path(os.environ["AVA_HOME"])
 checkout = home.parent / "checkout"
 checkout.mkdir()
 start_intent._checkout = lambda: checkout
 cluster.port_free = lambda _port: True
 def start(**kwargs):
-    from shared.cluster import ensure_pgvector_extension
+    from base.cluster import ensure_pgvector_extension
     ensure_pgvector_extension(
         "ava", base_admin_url="postgresql://probe@127.0.0.1:1/postgres?connect_timeout=5"
     )
     return 0
-sys.modules["cli.commands.start"] = types.SimpleNamespace(cmd_start=start)
-sys.modules["cli.commands.root_driver"] = types.SimpleNamespace(complete_boot_start=lambda: None)
+sys.modules["cli.commands.lifecycle.start"] = types.SimpleNamespace(cmd_start=start)
+sys.modules["cli.commands.lifecycle.root_driver"] = types.SimpleNamespace(complete_boot_start=lambda: None)
 raise SystemExit(main.main(["start", "--worktree"]))
 """
 
@@ -132,14 +132,14 @@ def test_a_settings_failure_while_opening_sinks_keeps_its_actionable_message(
 ) -> None:
     """Opening the sinks builds Settings; a runner whose gateway is unreachable
     fails there with the same message the command itself would print."""
-    import shared.log
-    from shared.bootstrap import BootstrapFetchError
+    import base.log
+    from base.host.env.bootstrap import BootstrapFetchError
 
     def unreachable(*, name: str) -> None:
         raise BootstrapFetchError(f"could not fetch cluster config ({name})")
 
     dispatched: list[str] = []
-    monkeypatch.setattr(shared.log, "init_cli_process", unreachable)
+    monkeypatch.setattr(base.log, "init_cli_process", unreachable)
     monkeypatch.setattr(_main, "_build_parser", lambda: _dispatching(dispatched))
     monkeypatch.setattr("cli.preflight.require_anchored_home", _anchored)
 

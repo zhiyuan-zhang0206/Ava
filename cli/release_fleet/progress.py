@@ -22,13 +22,13 @@ from uuid import UUID
 
 from pydantic import AwareDatetime, Field, JsonValue, model_validator
 
+from base.cluster.authority.model import Direction
 from cli.release_fleet.alerting import FleetAlert, deliveries
 from cli.release_fleet.policy import AlertRoute, Cohort, UnitCohort, UnitKey
 from cli.release_fleet.request import FleetRequest, UnitRequest
 from cli.release_fleet.workload import Verdict, WindowFact
 from cli.release_transition.authority_evidence import GenerationRef
 from cli.release_transition.request import Digest, Record
-from shared.cluster.authority.model import Direction
 
 _FLEET_CANDIDATE = (
     "prepared",

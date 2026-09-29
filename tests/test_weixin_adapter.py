@@ -22,13 +22,13 @@ from typing import Any
 import httpx
 import pytest
 
+from base.config import settings
 from services.im_bridge.adapters import weixin
 from services.im_bridge.adapters.weixin import (
     InboundMessage,
     WeixinAdapter,
     qr_login,
 )
-from shared.config import settings
 
 
 class FakeCore:

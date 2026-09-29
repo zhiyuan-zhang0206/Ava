@@ -20,12 +20,18 @@ from pathlib import Path
 import psutil
 from pydantic import BaseModel, ConfigDict
 
+from base.native_process.os_platform import CREATE_NO_WINDOW
+from base.native_process.ownership import OwnedProcess
+from base.sessions.pty.allocation_freeze import locked_freeze_state
+from base.sessions.windows.terminal.backend import query
+from base.sessions.windows.terminal.record import (
+    NativeBirth,
+    TerminalRecord,
+    publish,
+    read,
+    record_path,
+)
 from services.ava_root.wiring import WiringContext
-from shared.native_process.ownership import OwnedProcess
-from shared.platform import CREATE_NO_WINDOW
-from shared.sessions.pty.allocation_freeze import locked_freeze_state
-from shared.windows_terminal.backend import query
-from shared.windows_terminal.record import NativeBirth, TerminalRecord, publish, read, record_path
 
 
 class StartRequest(BaseModel):
@@ -94,7 +100,7 @@ def start_terminal(request: StartRequest) -> TerminalRecord:
 
 
 def _launch_owner(record: TerminalRecord, environment: dict[str, str]) -> TerminalRecord:
-    from shared.paths import logs_dir
+    from base.paths import logs_dir
 
     log_dir = logs_dir()
     log_dir.mkdir(parents=True, exist_ok=True)

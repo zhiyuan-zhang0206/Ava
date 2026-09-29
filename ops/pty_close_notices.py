@@ -20,7 +20,7 @@ released its maintenance hold (`services/agent_ops/close_notices.py`): a
 notice for a live owner becomes a system inbound message, one for a
 terminated/restarting owner is dropped without delivery (a closure notice
 must never resurrect a dead agent — the TTL reaper's boundary,
-gateway/ttl_reaper.py:83).
+gateway/ttl_reaper/__init__.py:83).
 
 One file per (machine, agent_id, session_id, shell-birth) dedup key: a stop
 retry or a CLI re-entry overwrites the same record instead of stacking a
@@ -43,14 +43,14 @@ from typing import cast
 
 from psycopg_pool import ConnectionPool
 
-from ops.cluster_status import _AGENT_SHELL_RE
-from shared.agents.messages.inbound_provenance import InboundProvenance
-from shared.atomic_io import write_text_atomic
-from shared.db import insert_inbound_message, publish_inbound_wake
-from shared.db_transaction import write_transaction
-from shared.log import logger
-from shared.native_process.ownership import shown_name
-from shared.paths import ava_home
+from base.agents.messages.inbound_provenance import InboundProvenance
+from base.db import insert_inbound_message, publish_inbound_wake
+from base.db.transaction import write_transaction
+from base.host.atomic_io import write_text_atomic
+from base.log import logger
+from base.native_process.ownership import shown_name
+from base.paths import ava_home
+from ops.cluster_status import AGENT_SHELL_RE
 
 # The reaper's notifiable boundary: only these statuses receive a closure
 # notice; anything else (terminated / restarting / missing) drops the record.
@@ -133,7 +133,7 @@ def record_close(
     path, or None when the session name is not an agent-owned shell (the
     canonical ``-agent-<id>-shell-<sid>`` shape).
     """
-    match = _AGENT_SHELL_RE.search(name)
+    match = AGENT_SHELL_RE.search(name)
     if match is None:
         return None
     notice = ClosureNotice(

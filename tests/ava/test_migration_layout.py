@@ -6,7 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from shared.migrations import (
+from base.deploy.schema.migrations import (
+    MIGRATIONS_DIR,
     MigrationLayoutError,
     _list_migration_files,
     validate_migration_layout,
@@ -23,9 +24,18 @@ from tests.ava.migration_support import (
 )
 
 
+def test_migrations_dir_resolves_beside_the_checkout_root() -> None:
+    """`MIGRATIONS_DIR` is re-anchored from `base/deploy/schema/migrations.py`
+    (four levels below the checkout root, not two) — a regression here would
+    make every unmocked migration lookup silently see an empty/missing dir."""
+    repo_root = Path(__file__).resolve().parents[2]
+    assert repo_root / "migrations" == MIGRATIONS_DIR
+    assert MIGRATIONS_DIR.is_dir()
+
+
 class TestLayoutValidation:
     def test_dir_missing_raises(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr("shared.migrations.MIGRATIONS_DIR", tmp_path / "nope")
+        monkeypatch.setattr("base.deploy.schema.migrations.MIGRATIONS_DIR", tmp_path / "nope")
         with pytest.raises(MigrationLayoutError, match="does not exist"):
             _list_migration_files()
 
@@ -33,7 +43,7 @@ class TestLayoutValidation:
         (tmp_path / f"{_SYN}.sql").write_text("-- noop")
         (tmp_path / "0001_legacy.sql").write_text("-- noop")  # old integer format
         _init_repo(tmp_path)  # tracked: layout validation applies to git-tracked files
-        monkeypatch.setattr("shared.migrations.MIGRATIONS_DIR", tmp_path)
+        monkeypatch.setattr("base.deploy.schema.migrations.MIGRATIONS_DIR", tmp_path)
         with pytest.raises(MigrationLayoutError, match="does not match"):
             _list_migration_files()
 
@@ -45,7 +55,7 @@ class TestLayoutValidation:
         (tmp_path / "README.md").write_text("docs")
         (tmp_path / ".DS_Store").write_text("junk")
         _init_repo(tmp_path)
-        monkeypatch.setattr("shared.migrations.MIGRATIONS_DIR", tmp_path)
+        monkeypatch.setattr("base.deploy.schema.migrations.MIGRATIONS_DIR", tmp_path)
         assert [n for n, _ in _list_migration_files()] == [_SYN]
 
 

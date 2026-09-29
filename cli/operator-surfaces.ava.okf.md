@@ -16,7 +16,7 @@ tags:
   for the existing host and uses Steer semantics. Missing endpoints fail before
   a CLI request acquires control; delivery failures stop the relay without a
   Pending-mode queue fallback. Unacknowledged messages remain for normal handoff
-  ([[shared/agents/impersonation/impersonation.ava.okf.md|impersonation]]).
+  ([[base/agents/impersonation/impersonation.ava.okf.md|impersonation]]).
 
 - `ava agents ls/send/cancel/restart/resurrect/terminate/kill`: `ls` renders the
   authenticated agent summary projection as stable `id / status / machine /
@@ -52,7 +52,7 @@ tags:
   without `--confirm`; it can never touch a completed object).
 - `ava mcp ...`: isolated environments at `$AVA_HOME/mcps/`. `ava mcp serve`
   runs the other direction and exposes the cluster control plane as an MCP
-  server ([[ava/mcps.ava.okf.md|MCP]]).
+  server ([[ava/mcps/mcps.ava.okf.md|MCP]]).
 - `ava plugins ...`
 - `ava skill install/update/upgrade/enable/disable/register/scan/trust`
 - `ava presets ls/get/create/update/delete`

@@ -7,7 +7,7 @@ depends on where the suite runs.
 import sys
 import unittest
 
-from shared.runtime_abi import (
+from base.runtime_abi import (
     AbiTag,
     AbiTagError,
     abi_from_facts,

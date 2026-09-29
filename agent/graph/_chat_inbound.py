@@ -16,10 +16,10 @@ from agent.db import ClaimedInbound
 from agent.messages import inbound_message
 from ava.composer_commands import expand_command
 from ava.security import scan_inbound_content
-from shared.agents.messages.envelope import wrap_inbound
-from shared.config import settings
-from shared.log import logger
-from shared.uploads import fetch_upload_b64, parse_upload_url
+from base.agents.messages.envelope import wrap_inbound
+from base.agents.uploads import fetch_upload_b64, parse_upload_url
+from base.config import settings
+from base.log import logger
 
 
 def build_chat_inbound(item: ClaimedInbound) -> HumanMessage:

@@ -24,11 +24,11 @@ from typing import NamedTuple
 
 import pytest
 
+from base.config import settings
+from base.host.converge.accessibility import AccessibilityState
+from base.host.converge.screen_capture import ScreenCaptureState
 from services.permissions_helper import client
 from services.permissions_helper.client import PermissionsHelperError
-from shared.config import settings
-from shared.host.converge.accessibility import AccessibilityState
-from shared.host.converge.screen_capture import ScreenCaptureState
 
 
 def _read_line(conn: socket.socket) -> bytes:
@@ -135,7 +135,7 @@ def test_unreachable_socket_raises() -> None:
 
 
 def test_socket_path_keyed_on_port(monkeypatch: pytest.MonkeyPatch) -> None:
-    from shared import paths
+    from base import paths
 
     monkeypatch.setattr(paths.settings.services, "permissions_helper_port", 9999)
     assert paths.permissions_helper_socket().name == "permissions-helper.9999.sock"
@@ -144,7 +144,7 @@ def test_socket_path_keyed_on_port(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_permissions_helper_app_dir_is_stable_under_ava_home(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    from shared import paths
+    from base import paths
 
     monkeypatch.setattr(paths.settings.general, "ava_home", str(tmp_path / "home"))
     assert paths.permissions_helper_app_dir() == tmp_path / "home" / "helper"
@@ -521,7 +521,7 @@ def test_gui_ops_wire_requests(fake_helper) -> None:
 def test_incapability_branch_ordering(monkeypatch: pytest.MonkeyPatch) -> None:
     # Probe ordering only ever reaches the first branch on Linux CI; drive the
     # macOS branches explicitly so a reordered or dropped prong is caught.
-    from shared import platform_probes as pp
+    from base.host.system import probes as pp
 
     def reason() -> str:
         r = pp.permissions_helper_incapability()
@@ -552,7 +552,7 @@ def test_incapability_branch_ordering(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_incapability_windows_branch(monkeypatch: pytest.MonkeyPatch) -> None:
     """Windows is capable when csc.exe (the .NET Framework compiler) is present,
     and names the fix when it is not."""
-    from shared import platform_probes as pp
+    from base.host.system import probes as pp
 
     monkeypatch.setattr(sys, "platform", "win32")
     monkeypatch.setattr(
@@ -648,10 +648,10 @@ def test_connect_retries_then_succeeds(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_label_is_per_cluster(monkeypatch: pytest.MonkeyPatch) -> None:
     from pathlib import Path
 
+    from base.cluster import home_slug
     from services.permissions_helper import lifecycle
-    from shared.cluster import home_slug
 
-    monkeypatch.setattr("shared.paths.ava_home", lambda: Path("/x/.ava-demo"))
+    monkeypatch.setattr("base.paths.ava_home", lambda: Path("/x/.ava-demo"))
     assert lifecycle._label() == f"com.ava.permissions-helper.{home_slug(Path('/x/.ava-demo'))}"
 
 
@@ -1636,7 +1636,7 @@ def test_hung_helper_job_is_unknown_while_build_probes_report_failure(
 
     monkeypatch.setattr(lifecycle, "run_bounded", hang)
     monkeypatch.setattr(launchd_job, "run_bounded", hang)
-    monkeypatch.setattr("shared.paths.ava_home", lambda: Path("/x/.ava-demo"))
+    monkeypatch.setattr("base.paths.ava_home", lambda: Path("/x/.ava-demo"))
 
     with pytest.raises(subprocess.TimeoutExpired):
         lifecycle._is_loaded()
@@ -1668,7 +1668,7 @@ def _install_env(
     plist_path = agents / "com.ava.permissions-helper.test.plist"
     log = tmp_path / "logs" / "permissions-helper.log"
     socket_path = tmp_path / "run" / "permissions-helper.sock"
-    monkeypatch.setattr(lifecycle.shared.paths, "ava_home", lambda: tmp_path)
+    monkeypatch.setattr(lifecycle.base.paths, "ava_home", lambda: tmp_path)
     monkeypatch.setattr(lifecycle, "_refuse_stale_jobs", lambda: None)
     monkeypatch.setattr(lifecycle, "_label", lambda: "com.ava.permissions-helper.test")
     monkeypatch.setattr(lifecycle, "_domain", lambda: "gui/501")
@@ -1698,7 +1698,7 @@ def _install_env(
                     "EnvironmentVariables": {
                         "AVA_PERMISSIONS_HELPER_SOCKET": str(socket_path),
                         "AVA_PERMISSIONS_HELPER_ROOT_SEED": str(
-                            lifecycle.shared.paths.root_run_dir() / "seed.json"
+                            lifecycle.base.paths.root_run_dir() / "seed.json"
                         ),
                     },
                     "RunAtLoad": True,
@@ -1939,7 +1939,7 @@ def test_unrelated_cluster_plists_are_left_alone(
 # --- Windows named-pipe transport -----------------------------------------
 # The pipe path is unreachable on Linux CI, so it is pinned with fakes: a
 # stubbed _connect_pipe/_pipe_read and os.name forced to "nt". The shared
-# _parse_reply contract is exercised by both transports' tests.
+# parse_reply contract is exercised by both transports' tests.
 
 
 def test_pipe_transport_roundtrip(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1985,7 +1985,7 @@ def test_win_pipe_full_path_has_single_backslashes() -> None:
 
 
 def test_pipe_transport_uses_shared_reply_contract(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Empty / truncated / error replies raise through the same _parse_reply the
+    """Empty / truncated / error replies raise through the same parse_reply the
     socket path uses — the two transports cannot drift apart."""
     from services.permissions_helper import client
 
@@ -1995,7 +1995,7 @@ def test_pipe_transport_uses_shared_reply_contract(monkeypatch: pytest.MonkeyPat
         (b'{"id":1,"ok":false,"error":"nope"}\n', "nope"),
     ]:
         try:
-            client._parse_reply(buf, "ping")
+            client.parse_reply(buf, "ping")
             raise AssertionError(f"reply {buf!r} must raise")
         except client.PermissionsHelperError as e:
             assert expect in str(e)

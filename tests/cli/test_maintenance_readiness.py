@@ -4,9 +4,11 @@ import pytest
 from fastapi.testclient import TestClient
 
 import cli.commands._probe as _probe_commands
-import cli.commands.start as _start_commands
+import cli.commands.lifecycle.start as _start_commands
+from base.deploy.lifecycle import start_serving
+from base.deploy.maintenance import admission
+from base.deploy.state import host_deploy_state
 from gateway.app import app
-from shared import host_deploy_state, maintenance, start_serving
 from tests.agent.test_maintenance import isolate as isolate
 from tests.cli.test_start_readiness_gate import _hermetic_start as _hermetic_start
 from tests.cli.test_start_readiness_gate import _roster
@@ -25,7 +27,7 @@ def test_start_measures_real_health_then_resumes_without_early_business_admissio
     with TestClient(app) as client:
 
         def probe(_spec: object) -> _probe_commands.ServiceProbe:
-            assert maintenance.held()
+            assert admission.held()
             assert not start_serving.is_serving()
             assert client.get("/api/agents").status_code == 503
             response = client.get("/api/health")
@@ -42,6 +44,6 @@ def test_start_measures_real_health_then_resumes_without_early_business_admissio
         assert resumed.status_code == 200, resumed.text
     assert measurements and set(measurements) == {200}
     assert start_serving.is_serving()
-    assert not maintenance.held()
+    assert not admission.held()
     posture = host_deploy_state.read()
     assert posture is not None and posture.posture == "idle"

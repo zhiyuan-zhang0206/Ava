@@ -18,7 +18,7 @@ from typing import Literal
 
 import psutil
 
-from shared.exec_owner_protocol import (
+from base.agents.incarnation.exec_owner_protocol import (
     MAX_OWNER_MESSAGE,
     OwnerClosed,
     OwnerControl,
@@ -27,11 +27,11 @@ from shared.exec_owner_protocol import (
     read_owner_bytes,
     read_owner_context,
 )
-from shared.exec_process_domain import KILL_GRACE_S, ExecProcessDomain
-from shared.incarnation_resources import ResourceProcess
-from shared.platform import IS_WINDOWS
-from shared.winjob import WindowsJob
-from shared.winjob_pipes import PipedJobChild, start_piped_job_process
+from base.agents.incarnation.resources import ResourceProcess
+from base.native_process.exec_domain import KILL_GRACE_S, ExecProcessDomain
+from base.native_process.os_platform import IS_WINDOWS
+from base.native_process.winjob import WindowsJob
+from base.native_process.winjob_pipes import PipedJobChild, start_piped_job_process
 
 
 def _ended(identity: psutil.Process) -> bool:

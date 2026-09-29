@@ -25,8 +25,8 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
+from base.config import settings
 from services.memory_indexer.backends.base import MemorySearchBackend
-from shared.config import settings
 
 
 def _milvus_backend(dim: int, fingerprint: str, *, readonly: bool = False) -> MemorySearchBackend:

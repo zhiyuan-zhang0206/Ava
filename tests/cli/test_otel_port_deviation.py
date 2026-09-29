@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import pytest
 
-import shared.db
+from base import db
+from base.config import settings
 from cli.commands.observability import otel_collector as oc
 from services.heartbeat import station_probe
-from shared.config import settings
 from tests.cli.test_converge_otel_collector import _render_real_template
 
 
@@ -17,7 +17,7 @@ def test_remote_station_advertisement_drives_render_and_probe(
 ) -> None:
     monkeypatch.setattr(settings.observability, "telemetry_otlp_port", 4319)
     monkeypatch.setattr(settings.observability, "otel_collector_metrics_port", 8889)
-    with shared.db.connect() as conn, conn.cursor() as cur:
+    with db.connect() as conn, conn.cursor() as cur:
         cur.execute(
             "INSERT INTO machine_units "
             "(machine_name, home, serve_gateway, serve_agent_runner, serve_observability_station, url) "
@@ -37,7 +37,7 @@ def test_remote_station_advertisement_drives_render_and_probe(
         target = station_probe.resolve_target()
         assert target is not None and target.advertised and target.url == endpoint
     finally:
-        with shared.db.connect() as conn, conn.cursor() as cur:
+        with db.connect() as conn, conn.cursor() as cur:
             cur.execute("DELETE FROM machine_units WHERE machine_name = 'station-deviation'")
             conn.commit()
 
@@ -56,7 +56,7 @@ def test_runner_does_not_discover_station(monkeypatch: pytest.MonkeyPatch) -> No
     def fail_discovery(base: str) -> None:
         pytest.fail("pure runners must use their published gateway relay")
 
-    monkeypatch.setattr("shared.station_endpoint.resolve_station_target", fail_discovery)
+    monkeypatch.setattr("base.telemetry.station_endpoint.resolve_station_target", fail_discovery)
     cfg = _render_real_template(
         monkeypatch, frozenset({"agent-runner"}), observability_url="http://10.0.0.46"
     )

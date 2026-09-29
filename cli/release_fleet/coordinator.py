@@ -26,6 +26,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import Literal
 
+from base.log import logger
 from cli.release_fleet.alerting import (
     FleetAlert,
     drain_alerts,
@@ -50,7 +51,6 @@ from cli.release_fleet.workload import (
 )
 from cli.release_transition.failure import OperationFailure, failure_detail
 from cli.release_transition.journal import Journal, Operation
-from shared.log import logger
 
 Clock = Callable[[], datetime]
 # Cadence of watch-window samples; the last sample always follows the window end.

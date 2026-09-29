@@ -22,10 +22,10 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
-from gateway import loki_events
+from base.telemetry.loki_index_labels import ARCHIVE_FREEZE_AT
 from gateway.app import app
 from gateway.inspect import neighbors
-from shared.loki_index_labels import ARCHIVE_FREEZE_AT
+from gateway.lgtm import loki_events
 from tests.gateway.loki_fake import FakeLoki
 
 
@@ -280,7 +280,7 @@ def test_defaults_come_from_display_config(
     (``AVA_NEIGHBORS_DEFAULT_DEPTH`` / ``AVA_NEIGHBORS_DEFAULT_LIMIT``); the
     literals 1/20 are only the fields' defaults, not hard-coded query
     parameters."""
-    from shared.config import settings
+    from base.config import settings
 
     a = _seed_agent(db_conn)
     for _ in range(3):

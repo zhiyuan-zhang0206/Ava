@@ -11,15 +11,15 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from shared import runtime_interpreter
-from shared.runtime_abi import current_abi
-from shared.runtime_interpreter import LoadedRuntimeIdentity
-from shared.runtime_release import (
+from base.deploy.release import runtime_interpreter
+from base.deploy.release.runtime_interpreter import LoadedRuntimeIdentity
+from base.deploy.release.runtime_release import (
     ReleaseRejectedError,
     VerifiedRelease,
     current_pointer,
     verify_release,
 )
+from base.runtime_abi import current_abi
 
 
 @dataclass(frozen=True)
@@ -34,7 +34,7 @@ class StartRuntime:
 
     @classmethod
     def development(cls, checkout: Path) -> StartRuntime:
-        from shared.runtime_interpreter import WHEEL_RUNTIME
+        from base.deploy.release.runtime_interpreter import WHEEL_RUNTIME
 
         if WHEEL_RUNTIME:
             raise ReleaseRejectedError(
@@ -124,8 +124,8 @@ def admit_loaded_release(home: Path) -> StartRuntime:
     the selected manifest digest authenticates those bytes. This cannot switch
     an installed caller to a different selected image or authorize migration.
     """
-    from shared.release_identity import ApplicationIdentity
-    from shared.verified_file import regular_bytes
+    from base.deploy.release.identity import IDENTITY_MEMBER, ApplicationIdentity
+    from base.deploy.release.verified_file import regular_bytes
 
     selected = current_pointer(home / "releases")
     if selected is None:
@@ -134,9 +134,7 @@ def admit_loaded_release(home: Path) -> StartRuntime:
     prefix, _executable, package, _isolated = runtime_interpreter.loaded_runtime()
     if prefix != home / "releases" / digest / "venv" or not package.is_relative_to(prefix):
         raise ReleaseRejectedError("installed restart differs from the selected loaded image")
-    identity = ApplicationIdentity.model_validate_json(
-        regular_bytes(package / "shared" / "release-build.json")
-    )
+    identity = ApplicationIdentity.model_validate_json(regular_bytes(package / IDENTITY_MEMBER))
     image = verify_release(
         home / "releases",
         digest,

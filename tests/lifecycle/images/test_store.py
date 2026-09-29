@@ -9,8 +9,7 @@ import zipfile
 from pathlib import Path
 from unittest.mock import patch
 
-from shared.runtime_abi import AbiTag
-from shared.runtime_release import (
+from base.deploy.release.runtime_release import (
     MANIFEST_VERSION,
     ReleaseRejectedError,
     activate_release,
@@ -19,6 +18,7 @@ from shared.runtime_release import (
     release_abi,
     verify_release,
 )
+from base.runtime_abi import AbiTag
 
 # A simulated host: the store contract runs on Linux, macOS and Windows alike.
 _PY = ("cpython-312", "")
@@ -246,7 +246,7 @@ class ReleaseStoreTests(unittest.TestCase):
         self.activate(first)
         with (
             patch(
-                "shared.runtime_release.Path.replace",
+                "base.deploy.release.runtime_release.Path.replace",
                 side_effect=PermissionError("locked Windows pointer"),
             ),
             self.assertRaises(PermissionError),

@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from base.telemetry.alerts import fingerprint, parse_ts
 from cli.release_fleet.alerting import (
     AgentNotice,
     AlertRow,
@@ -21,7 +22,6 @@ from cli.release_fleet.alerting import (
 from cli.release_fleet.delivery import webhook_url
 from cli.release_fleet.policy import AlertRoute
 from cli.release_fleet.workload import Evidence, UnitReport, judge_start, judge_watch
-from shared.alerts import fingerprint, parse_ts
 from tests.lifecycle.release_fleet.conftest import (
     GATEWAY,
     OPERATION,

@@ -1,0 +1,5 @@
+{
+  "complexity": {
+    "ava/impersonation/replay.py::consume_recorded_events": 16
+  }
+}

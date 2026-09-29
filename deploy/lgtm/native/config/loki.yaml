@@ -102,7 +102,7 @@ distributor:
 # Retention: the viewer ingests Ava session stdout (~20MB/day new + ~130MB
 # one-time backfill of the existing logs dir) plus the OTLP event stream.
 # Without a cap the filesystem store grows linearly forever. The 84h global
-# window is pinned to the query and rollup floor in shared/loki_index_labels.py.
+# window is pinned to the query and rollup floor in base/telemetry/loki_index_labels.py.
 #
 # Task #1281 (PG events archive import): the archived events (8.7M rows,
 # 05-23 -> 08-12) land under the stream label stream="archive" and get a
@@ -146,7 +146,7 @@ limits_config:
   # max_query_length (30d1h) would reject any whole-span parity/read query.
   max_query_length: 2160h
   # Kill a query that runs longer than this server-side. Deliberately just
-  # under the gateway's 60s httpx timeout (gateway/loki_events.py): a hung
+  # under the gateway's 60s httpx timeout (gateway/lgtm/loki_events.py): a hung
   # query then dies here with a clean error the gateway maps to a 503
   # (plus a loki_query_failed event with the query shape) instead of
   # holding a querier slot until the client abandons it — the failure mode
@@ -156,13 +156,13 @@ limits_config:
   query_timeout: 50s
   # Output series cap per query. The default (500) forced the gateway's
   # aggregations to defensively topk(500) their results (see the
-  # _bucketed_distribution_logql note in gateway/loki_events.py) — the
+  # _bucketed_distribution_logql note in gateway/lgtm/loki_events.py) — the
   # events stream's aggregation shapes legitimately exceed 500 series.
   # 20000 is sized for the events-maintenance rollup's merged daily
   # turn-duration histogram (`sum by (agent_id, bucket)`: 3061 series on the
   # busiest measured day, 2026-08-24), which the previous 2000 rejected and
   # took the whole hourly rollup pass down with it. Pinned by
-  # shared/loki_index_labels.py validate_loki_deploy_config.
+  # base/telemetry/loki_index_labels.py validate_loki_deploy_config.
   max_query_series: 20000
   # Line cap per query. The default (5000) truncates the raw-line range
   # queries the 100MiB gRPC cap (server.grpc_server_max_recv_msg_size) was
@@ -177,7 +177,7 @@ limits_config:
   # horizontally scaled querier fleet; here they turned one 30d instant
   # aggregation into ~128 hourly subqueries, 2026-08-18 incident). BOTH split
   # keys matter: the gateway's aggregations (count_events / count_grouped /
-  # attribute_aggregate in gateway/loki_events.py) are INSTANT queries
+  # attribute_aggregate in gateway/lgtm/loki_events.py) are INSTANT queries
   # governed only by the instant key; range queries (query_events,
   # count_events_series, metric_range) follow the other.
   split_queries_by_interval: 24h

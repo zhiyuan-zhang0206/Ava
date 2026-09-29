@@ -1,0 +1,5 @@
+{
+  "complexity": {
+    "ops/agent_pause/__init__.py::drain": 21
+  }
+}

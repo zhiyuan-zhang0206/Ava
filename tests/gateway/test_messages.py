@@ -10,8 +10,8 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
+from base.cluster.machine import machine_name
 from gateway.app import app
-from shared.machine import machine_name
 
 
 def _seed_agent(db_conn: psycopg.Connection, status: str = "idling") -> int:
@@ -380,8 +380,8 @@ class TestMultimodalMessage:
         from dataclasses import replace
         from pathlib import Path
 
-        from shared.lm.plugin_providers import ensure_provider_plugins_loaded
-        from shared.lm.registry import MODELS
+        from base.lm.plugin_providers import ensure_provider_plugins_loaded
+        from base.lm.registry import MODELS
 
         ensure_provider_plugins_loaded()
         model = "deepseek-vision-fixture"

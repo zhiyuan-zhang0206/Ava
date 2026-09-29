@@ -19,11 +19,12 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command, interrupt
 from psycopg_pool import AsyncConnectionPool
 
-from agent.hosted_ownership import admit_hosted_runtime, settle_hosted_runtime
+from agent.ownership.hosted import admit_hosted_runtime, settle_hosted_runtime
+from base.agents.incarnation import exec_request_evidence
+from base.cluster.machine import machine_name
+from base.db import insert_inbound_message
+from base.deploy.maintenance import cohort, pause_owner
 from ops.agent_pause import resume_agents
-from shared import exec_request_evidence, maintenance_cohort, pause_owner
-from shared.db import insert_inbound_message
-from shared.machine import machine_name
 from tests.agent.test_maintenance import WHEN, _agent
 from tests.agent.test_maintenance import isolate as isolate
 
@@ -119,7 +120,7 @@ def test_completed_retired_consumer_parks_without_inventing_receipts(
     ).fetchall()
     db_conn.commit()
     pause_owner.begin_maintenance("cold", WHEN)
-    hold = maintenance_cohort.prepare(
+    hold = cohort.prepare(
         db_conn,
         machine=machine_name(),
         host_owner=None,
@@ -129,7 +130,7 @@ def test_completed_retired_consumer_parks_without_inventing_receipts(
     )
     assert hold.parked == (agent,)  # time-bomb-ok: WHEN is hold identity; this compares agent IDs.
     assert not hold.commands and not hold.drained
-    maintenance_cohort.verify_drained(db_conn, hold)
+    cohort.verify_drained(db_conn, hold)
     assert db_conn.execute("SELECT status FROM agents_meta WHERE id=%s", (agent,)).fetchone() == (
         "idling",
     )
@@ -157,7 +158,7 @@ def test_completed_retired_consumer_parks_without_inventing_receipts(
 
 def _prepare(conn: psycopg.Connection[Any]) -> None:
     pause_owner.begin_maintenance("cold", WHEN)
-    maintenance_cohort.prepare(
+    cohort.prepare(
         conn,
         machine=machine_name(),
         host_owner=None,
@@ -279,15 +280,20 @@ def _no_process_iteration(*_args: Any, **_kwargs: Any) -> Iterator[Any]:
 
 def _hide_machine_processes(monkeypatch: pytest.MonkeyPatch) -> None:
     """This box runs other agents' exec children; isolate the test's own legs."""
-    monkeypatch.setattr("shared.exec_request_evidence.psutil.process_iter", _no_process_iteration)
+    monkeypatch.setattr(
+        "base.agents.incarnation.exec_request_evidence.psutil.process_iter", _no_process_iteration
+    )
 
 
 def _exec_request_dirs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, Path]:
     exec_dir = tmp_path / "exec"
     quarantine = tmp_path / "quarantined-exec-requests"
-    monkeypatch.setattr("shared.exec_request_evidence.exec_run_dir", lambda: exec_dir)
     monkeypatch.setattr(
-        "shared.exec_request_evidence.quarantined_exec_requests_dir", lambda: quarantine
+        "base.agents.incarnation.exec_request_evidence.exec_run_dir", lambda: exec_dir
+    )
+    monkeypatch.setattr(
+        "base.agents.incarnation.exec_request_evidence.quarantined_exec_requests_dir",
+        lambda: quarantine,
     )
     return exec_dir, quarantine
 
@@ -327,7 +333,9 @@ def test_unattributable_exec_envelope_refuses_cold_prepare_with_disposition(
 
     message = str(excinfo.value)
     assert request.name in message
-    assert f"--agent {agent}" in message and "shared.exec_request_evidence" in message
+    assert (
+        f"--agent {agent}" in message and "base.agents.incarnation.exec_request_evidence" in message
+    )
     assert request.exists() and not quarantine.exists()
     assert db_conn.execute("SELECT status FROM agents_meta WHERE id=%s", (agent,)).fetchone() == (
         "restarting",
@@ -398,10 +406,10 @@ def test_failed_current_lifecycle_cannot_be_parked(db_conn: psycopg.Connection[A
 def test_checkpoint_replaced_by_real_second_connection_refuses_normalization(
     db_conn: psycopg.Connection[Any], monkeypatch: pytest.MonkeyPatch, restart: bool
 ) -> None:
-    from shared import maintenance_cold
+    from base.deploy.maintenance import cold
 
     agent = _retired(db_conn, restart=restart)
-    original = maintenance_cold.require_persisted_end
+    original = cold.require_persisted_end
 
     def replace(conn: psycopg.Connection[Any], agent_id: int, *, restarting: bool) -> str:
         checkpoint = original(conn, agent_id, restarting=restarting)
@@ -409,7 +417,7 @@ def test_checkpoint_replaced_by_real_second_connection_refuses_normalization(
             _persist_end(writer, agent_id, restart=restart)
         return checkpoint
 
-    monkeypatch.setattr(maintenance_cold, "require_persisted_end", replace)
+    monkeypatch.setattr(cold, "require_persisted_end", replace)
     with pytest.raises(RuntimeError, match="checkpoint changed"):
         _prepare(db_conn)
     assert db_conn.execute("SELECT status FROM agents_meta WHERE id=%s", (agent,)).fetchone() == (
@@ -430,7 +438,7 @@ async def test_resume_admits_a_successor_without_rewriting_legacy_history(
     _prepare(db_conn)
     current = pause_owner.read()
     assert current.maintenance is not None
-    maintenance_cohort.verify_drained(db_conn, current.maintenance)
+    cohort.verify_drained(db_conn, current.maintenance)
     db_conn.commit()
     owner = uuid4()
     assert (

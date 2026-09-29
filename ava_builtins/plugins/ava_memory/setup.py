@@ -2,7 +2,7 @@
 
 Kept apart from `plugin.py` on purpose: that module imports the agent runtime
 (hooks, graph, the SDK namespace), none of which exists in the `ava` CLI
-process. This one depends on `shared` alone, so `ava memory init` can load it
+process. This one depends on `base` alone, so `ava memory init` can load it
 without dragging an agent into a CLI command.
 
 What it owns is the template laid down inside the pool checkout: the index every
@@ -27,7 +27,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from shared.log import logger
+from base.log import logger
 
 _TEMPLATE_DIR = Path(__file__).parent / "template"
 
@@ -76,8 +76,8 @@ def _arm_hooks(pool: Path) -> bool:
 
 def _ensure_memory_repo() -> None:
     """Run init() if the memory pool is not a git repo. If already init'd but on the wrong branch, fail loud."""
-    from shared.memory_repo import branch_name, init, is_initialized
-    from shared.paths import memory_dir
+    from base.deploy.git.memory_repo import branch_name, init, is_initialized
+    from base.paths import memory_dir
 
     if is_initialized():
         # init() validates branch on re-call (raises on mismatch); call it once to trigger the check.
@@ -102,9 +102,9 @@ def _ensure_gateway_memory_repo() -> None:
     $AVA_HOME/gateway/memory checkout; on a gateway-only unit it initializes
     the same path as the agent-runner checkout (memory_dir()).
     """
-    from shared.machine import is_gateway
-    from shared.memory_repo import gateway_is_initialized, init_gateway
-    from shared.paths import gateway_memory_dir
+    from base.cluster.machine import is_gateway
+    from base.deploy.git.memory_repo import gateway_is_initialized, init_gateway
+    from base.paths import gateway_memory_dir
 
     if not is_gateway():
         return
@@ -163,7 +163,7 @@ def scaffold() -> None:
     and no checkout is created, no template is laid down, and no memory note
     reaches an agent's context.
     """
-    from shared.paths import memory_dir
+    from base.paths import memory_dir
 
     _ensure_memory_repo()
     _ensure_gateway_memory_repo()

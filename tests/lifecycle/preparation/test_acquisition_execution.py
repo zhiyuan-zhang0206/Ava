@@ -12,10 +12,10 @@ from pathlib import Path
 import psutil
 import pytest
 
+from base.deploy.release.runtime_prepare import _run, tree_inventory
+from base.native_process import posix_command
+from base.native_process.exec_domain import ExecProcessDomain
 from cli.release_prepare.acquisition_process import Commands
-from shared import posix_command
-from shared.exec_process_domain import ExecProcessDomain
-from shared.runtime_prepare import _run, tree_inventory
 
 pytestmark = pytest.mark.skipif(
     sys.platform not in {"darwin", "linux"}, reason="POSIX acquisition execution domain"

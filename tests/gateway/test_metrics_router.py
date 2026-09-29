@@ -1,11 +1,11 @@
 """GET /api/metrics HTTP integration tests.
 
-The per-unit aggregation math is unit-tested in tests/shared/test_metrics.py
+The per-unit aggregation math is unit-tested in tests/base/test_metrics.py
 (pure functions over hand-built EventRow). This file locks the *endpoint
 contract*: the windowed Loki fetch wires `attributes.X` keys to the real emit
 field names, the `{meta, metrics}` envelope shape holds, and the `days` / `agent`
 query params behave. The Loki backend is the in-memory `FakeLoki`
-(monkeypatched onto `gateway.loki_events`); the `agents` table stays real SQL
+(monkeypatched onto `gateway.lgtm.loki_events`); the `agents` table stays real SQL
 (`/api/metrics/agents` reads labels from it).
 """
 
@@ -31,10 +31,12 @@ _UNITS = {
 @pytest.fixture
 def loki_fake(monkeypatch: pytest.MonkeyPatch) -> FakeLoki:
     fake = FakeLoki()
-    monkeypatch.setattr("gateway.loki_events.count_events", fake.count_events)
-    monkeypatch.setattr("gateway.loki_events.count_grouped", fake.count_grouped)
-    monkeypatch.setattr("gateway.loki_events.query_events", fake.query_events)
-    monkeypatch.setattr("gateway.loki_events.query_projected_lines", fake.query_projected_lines)
+    monkeypatch.setattr("gateway.lgtm.loki_events.count_events", fake.count_events)
+    monkeypatch.setattr("gateway.lgtm.loki_events.count_grouped", fake.count_grouped)
+    monkeypatch.setattr("gateway.lgtm.loki_events.query_events", fake.query_events)
+    monkeypatch.setattr(
+        "gateway.lgtm.loki_events.query_projected_lines", fake.query_projected_lines
+    )
     return fake
 
 
@@ -180,7 +182,7 @@ def test_metrics_default_window_comes_from_display_config(
     """Omitted `days` is settings.display.metrics_default_window_days
     (``AVA_METRICS_DEFAULT_WINDOW_DAYS``); the literal 1 is only that field's
     default, not a hard-coded window. Both metrics endpoints resolve it."""
-    from shared.config import settings
+    from base.config import settings
 
     db_conn.commit()
     monkeypatch.setattr(settings.display, "metrics_default_window_days", 3)

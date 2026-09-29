@@ -47,7 +47,7 @@ in-flight turn is normal — the claim's turn-end SELECT picks it up. Boot state
    running/restarting owners remain untouched. The same cadence completes the
    stale pending `terminate` / `system_note` / `restart_completed` rows of
    terminated owners (no consumer), and the reconcile-side cutoff
-   (`agent/db.py::reconcile_claimed_inbounds`) still closes the resurrect race at boot.
+   (`agent/db/__init__.py::reconcile_claimed_inbounds`) still closes the resurrect race at boot.
 5. **Hosted-turn liveness recovery** — on the same watchdog tick, select hosted
    running rows whose DB activity is older than the 2400s wedged-agent budget,
    then confirm them against the agent-host's 15s Redis progress heartbeat
@@ -77,7 +77,16 @@ import psycopg
 from psycopg import sql
 from psycopg_pool import ConnectionPool
 
-import shared.db
+import base.db
+from base import telemetry
+from base.agents import AgentStatus
+from base.config import settings
+from base.config.service_read import current_field_values
+from base.daemon.health import Liveness, health_port, start_health_server, stop_health_server
+from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
+from base.daemon.shutdown import hard_exit as _hard_exit
+from base.db.transaction import write_transaction
+from base.log import init_gateway_process
 from services.delivery_watchdog import (
     dispatch_guard,
     resurrect_guard,
@@ -97,15 +106,6 @@ from services.delivery_watchdog.dead_letter import (
     dead_letter_stale_pending_terminated as dead_letter_stale_pending_terminated,
 )
 from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
-from shared import telemetry
-from shared.agents import AgentStatus
-from shared.config import settings
-from shared.config.service_read import current_field_values
-from shared.daemon_health import Liveness, health_port, start_health_server, stop_health_server
-from shared.daemon_shutdown import cancel_and_drain, install_graceful_shutdown
-from shared.daemon_shutdown import hard_exit as _hard_exit
-from shared.db_transaction import write_transaction
-from shared.log import init_gateway_process
 
 _log = logging.getLogger("services.delivery_watchdog.daemon")
 
@@ -196,12 +196,12 @@ def select_terminated_owners_with_pending(
     `dead_letter_stale_pending_chats` closes — and with it the trigger, so no
     unbounded retry can resurrect-suicide the agent forever.
     """
-    from shared.lifecycle_acceptance import (
+    from base.agents.incarnation.lifecycle_acceptance import (
         FAILED_RESTART_FOR_CURRENT_TARGET,
         SYSTEM_NOTICE_SOURCE,
         SYSTEM_REAPED_CRASH_ROW,
     )
-    from shared.recovery_breaker import RECOVERY_BREAKER_CLEAR
+    from base.agents.recovery_breaker import RECOVERY_BREAKER_CLEAR
 
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(
@@ -400,7 +400,7 @@ async def _resurrect_one(pool: ConnectionPool, agent_id: int, trigger_inbound_id
     """Run `resurrect_if_terminated` for one agent, bounded by the concurrency
     semaphore; classify the returned status and escalate consecutive failures
     into a durable wake-suppression window."""
-    from ops.ops_lifecycle import resurrect_if_terminated
+    from ops.lifecycle import resurrect_if_terminated
 
     async with _resurrect_semaphore:
         try:
@@ -496,7 +496,7 @@ _DEDUP_GC_EVERY_TICKS = 120
 # tick-gated) so its real period is independent of the tick interval. 30s is
 # plenty — the hazard is a resurrect re-delivering ancient rows, and a
 # resurrect takes seconds to boot, so the sweep is virtually always ahead of
-# it; the reconcile-side cutoff (agent/db.py) closes the residual race.
+# it; the reconcile-side cutoff (agent/db/__init__.py) closes the residual race.
 _CLAIMED_SWEEP_INTERVAL_S = 30.0
 
 
@@ -675,7 +675,7 @@ async def run() -> None:
     health = await start_health_server("delivery_watchdog", liveness=liveness)
     _log.info("[delivery] healthz listening on :%s", health_port("delivery_watchdog"))
 
-    pool = shared.db.pool()
+    pool = base.db.pool()
     try:
         await _scan_loop(pool, liveness)
     finally:
@@ -687,7 +687,7 @@ async def run() -> None:
 
 def main() -> None:
     """Entry point: init logger + run asyncio loop."""
-    from shared.migrations import assert_schema_current
+    from base.deploy.schema.migrations import assert_schema_current
 
     # Pre-startup sanity: schema version must match code; raises SchemaVersionMismatch if not.
     assert_schema_current(settings.data_plane.db_url)

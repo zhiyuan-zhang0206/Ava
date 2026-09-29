@@ -18,9 +18,9 @@ import pytest
 from dotenv import dotenv_values
 from psycopg.conninfo import conninfo_to_dict
 
+from base import cluster
+from base.config import settings
 from cli.commands.observability import lgtm_native, observatory_urls
-from shared import cluster
-from shared.config import settings
 
 
 def _render(tmp_path: Path) -> dict[str, str | None]:
@@ -112,7 +112,7 @@ def test_webhook_uses_local_bind_or_reachable_gateway(
     monkeypatch.setattr(settings.observability, "observability_url", observatory)
     monkeypatch.setattr(settings.gateway, "gateway_url", gateway_url)
     monkeypatch.setattr(settings.gateway, "gateway_port", port)
-    monkeypatch.setattr("shared.machine.reachable_host", lambda: "10.0.0.10")
+    monkeypatch.setattr("base.cluster.machine.reachable_host", lambda: "10.0.0.10")
     assert observatory_urls._alerts_webhook_url() == expected
 
 

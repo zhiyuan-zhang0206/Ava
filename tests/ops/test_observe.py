@@ -6,9 +6,9 @@ from collections.abc import Callable
 
 import pytest
 
-from ops import observe
-from ops.service_spec import ServiceSpec
-from shared.daemon_health import DaemonProbe
+from base.daemon.health import DaemonProbe
+from ops.roster import observe
+from ops.roster.service_spec import ServiceSpec
 
 
 def test_probe_set_gateway_classifies_signal_types() -> None:

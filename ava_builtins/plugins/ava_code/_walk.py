@@ -3,8 +3,8 @@
 import subprocess
 from pathlib import Path
 
-from shared.log import logger
-from shared.platform import CREATE_NO_WINDOW
+from base.log import logger
+from base.native_process.os_platform import CREATE_NO_WINDOW
 
 # Cache only *successful* git-root resolutions, keyed by resolved dir path. A
 # dir's repo root is stable once the repo exists, so caching it avoids repeated

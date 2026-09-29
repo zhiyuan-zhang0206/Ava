@@ -2,9 +2,9 @@
 
 from pathlib import Path
 
+from base import cluster
 from cli.release_transition.request import HomeRequest
 from cli.start_identity import read_intent
-from shared import cluster
 
 
 def require_reservation(request: HomeRequest, *, active_registry: Path) -> None:

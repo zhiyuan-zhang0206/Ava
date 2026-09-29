@@ -7,7 +7,7 @@ pre-commit hook.
 
 ## Why
 
-`shared.log.logger` is loguru, and loguru formats a message with
+`base.log.logger` is loguru, and loguru formats a message with
 `str.format(*args, **kwargs)`. A stdlib-style call
 
     logger.warning("gate for %s raised (failing open): %s", spec.session, exc)
@@ -31,7 +31,7 @@ string literal (or an f-string, checked on its literal parts) and either:
 - the call passes positional format arguments but the message has no `{`
   field at all, so every one of them is dropped.
 
-A loguru logger is a name bound by `from shared.log import logger` or
+A loguru logger is a name bound by `from base.log import logger` or
 `from loguru import logger` (any alias), `loguru.logger` after `import loguru`,
 or a name assigned from one of those through `.bind(...)` / `.opt(...)` /
 `.patch(...)`; calls through a `.bind/.opt/.patch` chain are checked too. A
@@ -61,7 +61,7 @@ from scripts.structure import lint_common  # noqa: E402 - standalone script
 
 _SCAN_DIRS = (*lint_common.FRAMEWORK_DIRS, "scripts")
 
-_LOGURU_MODULES = frozenset({"shared.log", "loguru"})
+_LOGURU_MODULES = frozenset({"base.log", "loguru"})
 _LEVEL_METHODS = frozenset(
     {"trace", "debug", "info", "success", "warning", "error", "critical", "exception"}
 )

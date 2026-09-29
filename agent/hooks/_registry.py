@@ -33,7 +33,7 @@ instances, so a hook that needs a threshold, a counter, or a handle keeps it on
 `self` rather than in a module global.
 
 `config` is used to get agent_id via
-`shared.context.agent_id_from_config(config)` — hooks that need agent
+`base.agents.context.agent_id_from_config(config)` — hooks that need agent
 identity for things like INSERT inbound / marking agent-scoped events use
 this. Hooks that don't need agent_id (such as pure state-watching
 auto_compact) also take config but don't read; signature unified to keep
@@ -42,7 +42,7 @@ the protocol simple.
 No priority, no timeout, no try-except isolation — hooks that raise blow up (fail-fast).
 
 State type hint key design (`state: _state.AgentState` + `from __future__ import
-annotations`): see `agent/graph/_exec.py` module docstring last paragraph —
+annotations`): see `agent/graph/exec/node.py` module docstring last paragraph —
 the `run` returned by `make_hook_runner` is a LangGraph-registered node;
 like claim/llm/exec, it relies on the first-param type hint to determine
 what state schema LangGraph passes the hook. Directly importing `AgentState`
@@ -65,10 +65,10 @@ from langgraph.types import Command
 
 from agent import state as _state
 from agent.nodes import NodeName
-from shared import plugin_activation, plugin_contributions
-from shared.context import AvaContext, agent_id_from_config
-from shared.log import logger
-from shared.plugin_context import current_plugin_name
+from base.agents.context import AvaContext, agent_id_from_config
+from base.log import logger
+from base.packages.plugins import activation, contributions
+from base.packages.plugins.context import current_plugin_name
 
 HookName = Literal["before_llm", "before_exec", "after_exec", "after_init"]
 
@@ -140,7 +140,7 @@ def _register(hook_name: HookName, hook: Hook) -> None:
     own hooks) — `HOOKS` holds bare instances, so `ava plugins inspect` reads the
     attribution off the ledger and the runner reads it off `_HOOK_PLUGIN`."""
     HOOKS[hook_name].append(hook)
-    plugin_contributions.record(
+    contributions.record(
         "hooks", hook_name, detail=f"{type(hook).__module__}.{type(hook).__qualname__}"
     )
     plugin = current_plugin_name()
@@ -207,7 +207,7 @@ def make_hook_runner(
     - Each hook returning None → skip
     - A **plugin** hook returning a non-empty dict also emits one
       `plugin_activation` event naming the keys it wrote
-      (`shared.plugin_activation`) — a pure side channel, and silent for
+      (`base.packages.plugins.activation`) — a pure side channel, and silent for
       framework hooks and for `None` returns.
     - Final return Command(update=update_minus_goto, goto=next_node)
     """
@@ -260,7 +260,7 @@ def make_hook_runner(
                 # which keys it touched. A None / {} return is pure observation
                 # and stays free. Plugin state-field writes travel through this
                 # dict, so the `state` surface needs no separate probe.
-                plugin_activation.record(
+                activation.record(
                     _HOOK_PLUGIN.get(hook),
                     "hooks",
                     hook_name,

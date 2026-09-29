@@ -5,7 +5,7 @@ from __future__ import annotations
 from psycopg_pool import AsyncConnectionPool
 
 from agent.ownership.inbound import lock_inbound_owner
-from shared.db_transaction import async_write_transaction
+from base.db.transaction import async_write_transaction
 
 
 async def _defer_chats_to_pending(

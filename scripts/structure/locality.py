@@ -3,7 +3,7 @@
 Both rules measure `path::target -> [line, ...]` sites per module; the frozen
 counts live in the `private_imports` / `owner_bypasses` sections of
 scripts/structure/baseline/*.json shards, and the rules themselves are documented in the
-scripts/lint_code_structure.py header (Rules 4 and 5).
+scripts/lint/code_structure.py header (Rules 4 and 5).
 """
 
 from __future__ import annotations
@@ -288,25 +288,50 @@ class Decision:
 
 DECISIONS: dict[str, Decision] = {
     "postgres-dial": Decision(
-        owners=frozenset({"shared/db_connections.py"}),
+        owners=frozenset({"base/db/connections.py"}),
         find=_postgres_dials,
         fix=(
-            "dial through shared.db.connect() / shared.db.pool(), which own the transport "
-            "posture (prepare_threshold=None, keepalives, statement ceiling, sslmode, "
-            "pooled-session scrub)"
+            "dial through base.db.connect() / base.db.pool() (the cluster's own URL) "
+            "or base.db.connect_url() (an explicit target the caller names), which own "
+            "the transport posture (prepare_threshold=None, keepalives, statement ceiling "
+            "or unbounded, sslmode, pooled-session scrub)"
         ),
         allowed={
-            "shared/pg_admin.py": (
-                "the OS-user administrator's peer-socket dial (roles, grants, schema DDL); "
-                "shared.db only dials the cluster's application login URL"
+            "base/db/pg_admin.py": (
+                "the OS-user administrator's peer-socket authority (roles, grants, schema "
+                "DDL, owner sessions) behind its own postmaster custody check; the FC-10 "
+                "cutover scripts dial through it, so its transport stays as rehearsed until "
+                "the cutover lands"
             ),
-            "shared/cluster/authority/unit.py": (
+            "base/cluster/authority/unit.py": (
                 "probes an installed unit capability's own runner login at the served "
                 "endpoint, the credential under test"
             ),
             "cli/commands/data_plane/cluster_instance.py": (
                 "proves the running postmaster demands a password by dialing a role "
                 "that cannot exist, with no credential"
+            ),
+            # base.db.connections resolves a home (base.host.env.dotenv_boot) and imports
+            # settings at load; the modules below run where neither may happen.
+            "services/pitr/restore/drill.py": (
+                "restore-drill dials inside the restricted restore worker, which runs "
+                "without a home or settings and holds only its sealed live_db_url"
+            ),
+            "services/pitr/restore/postgres.py": (
+                "restore-sandbox and live-identity dials inside the restricted restore "
+                "worker, which runs without a home or settings"
+            ),
+            "base/cluster/dataplane/pg_tools.py": (
+                "provisions the throwaway Postgres it just started; imported by the "
+                "restricted restore worker and run config-free by scripts/ci/migration_smoke.py"
+            ),
+            "base/cluster/dataplane/pg_stall_watchdog.py": (
+                "probes the throwaway Postgres base/cluster/dataplane/pg_tools.py started, under the same "
+                "home-free constraint"
+            ),
+            "base/cluster/dataplane/pg_foreground.py": (
+                "readiness probe of the foreground throwaway postmaster base/cluster/dataplane/pg_tools.py "
+                "started, under the same home-free constraint"
             ),
         },
     ),

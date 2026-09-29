@@ -14,7 +14,7 @@ import json
 from pathlib import Path
 
 import ava
-from shared.paths import workspace_dir
+from base.paths import workspace_dir
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # 1. EXPLORE — understand the task and define sub-tasks

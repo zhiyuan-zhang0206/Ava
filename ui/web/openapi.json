@@ -8,7 +8,7 @@
     "/api/auth/login": {
       "post": {
         "summary": "Login",
-        "description": "Authenticate with the cluster secret and receive a session cookie.\n\nRequest body: ``{\"password\": \"<cluster-secret>\"}``. An agent-runner's\nmanaged browser presents the active generation's runner API token instead.\nThe session is bound to the credential that minted it (`login_mint`): it\nstops authenticating when that generation is revoked or the human secret\nrotates, whatever its remaining lifetime.\n\nOn success, returns ``{\"ok\": true}`` and sets an HTTP-only session\ncookie whose lifetime is controlled by ``session_ttl_seconds``.\n\nOn failure, returns a typed 401 error envelope with detail ``\"invalid password\"``.\n\nA no-secret cluster (single-box no-auth posture) has no credential: login\nis a no-op 200 success, deliberately BEFORE the rate limiter — there is\nnothing to guess, and no-secret requests must never count into the\nlimiter's failure records.\n\nBrute-force guard: an IP that fails ``gateway.login_max_failures`` times in\na row is locked for ``gateway.login_lockout_seconds`` (policy + rationale on\nthose config fields; enforcement in shared/rate_limit.py).\nWhile locked, the endpoint returns 429 + ``Retry-After`` instead of 401 —\n401 would read as \"wrong password\" and invite exactly the retry loop the\nlockout exists to stop. A successful login resets the IP's counter.",
+        "description": "Authenticate with the cluster secret and receive a session cookie.\n\nRequest body: ``{\"password\": \"<cluster-secret>\"}``. An agent-runner's\nmanaged browser presents the active generation's runner API token instead.\nThe session is bound to the credential that minted it (`login_mint`): it\nstops authenticating when that generation is revoked or the human secret\nrotates, whatever its remaining lifetime.\n\nOn success, returns ``{\"ok\": true}`` and sets an HTTP-only session\ncookie whose lifetime is controlled by ``session_ttl_seconds``.\n\nOn failure, returns a typed 401 error envelope with detail ``\"invalid password\"``.\n\nA no-secret cluster (single-box no-auth posture) has no credential: login\nis a no-op 200 success, deliberately BEFORE the rate limiter — there is\nnothing to guess, and no-secret requests must never count into the\nlimiter's failure records.\n\nBrute-force guard: an IP that fails ``gateway.login_max_failures`` times in\na row is locked for ``gateway.login_lockout_seconds`` (policy + rationale on\nthose config fields; enforcement in base/cluster/rate_limit.py).\nWhile locked, the endpoint returns 429 + ``Retry-After`` instead of 401 —\n401 would read as \"wrong password\" and invite exactly the retry loop the\nlockout exists to stop. A successful login resets the IP's counter.",
         "operationId": "login_api_auth_login_post",
         "requestBody": {
           "content": {
@@ -141,7 +141,7 @@
     "/api/bootstrap": {
       "get": {
         "summary": "Get Bootstrap",
-        "description": "Return cluster-common config ({ENV_ALIAS: value}, unmasked) for an\nagent-runner to load into its environment.\n\n`AVA_DB_URL` is the credential-free endpoint; no database credential is\nserved. The admin credentials remain gateway-local (see\nshared.config.bootstrap_config_values).\n\nRaises:\n    HTTPException: 401 when the request carries neither the active write\n        generation's machine API token nor the cluster secret as its bearer\n        (a no-secret cluster serves without auth — there is no credential\n        to require); 400 when the gateway configuration has no database\n        endpoint.",
+        "description": "Return cluster-common config ({ENV_ALIAS: value}, unmasked) for an\nagent-runner to load into its environment.\n\n`AVA_DB_URL` is the credential-free endpoint; no database credential is\nserved. The admin credentials remain gateway-local (see\nbase.config.bootstrap_config_values).\n\nRaises:\n    HTTPException: 401 when the request carries neither the active write\n        generation's machine API token nor the cluster secret as its bearer\n        (a no-secret cluster serves without auth — there is no credential\n        to require); 400 when the gateway configuration has no database\n        endpoint.",
         "operationId": "get_bootstrap_api_bootstrap_get",
         "parameters": [
           {
@@ -1349,7 +1349,7 @@
     "/api/agents/{agent_id}/context-breakdown": {
       "get": {
         "summary": "Get Context Breakdown",
-        "description": "How the agent's context window is spent, for the composer's breakdown\npanel (lazy-loaded on expand).\n\nBuckets the checkpoint messages by kind + splits the system prompt into its\ntop-level sections, each a chars/4 estimate proportionally normalized to the\nlast LLM call's real `input_tokens` (so the categories sum to the truth). Pure\ngateway-side view logic (`gateway/context_breakdown.py`) — one checkpoint read,\nno kernel/agent involvement. A checkpoint read failure / no checkpoint yields\nan empty breakdown with zeroed totals (same tolerance as token-usage: the\npanel re-opens fine later).",
+        "description": "How the agent's context window is spent, for the composer's breakdown\npanel (lazy-loaded on expand).\n\nBuckets the checkpoint messages by kind + splits the system prompt into its\ntop-level sections, each a chars/4 estimate proportionally normalized to the\nlast LLM call's real `input_tokens` (so the categories sum to the truth). Pure\ngateway-side view logic (`gateway/agents/context_breakdown.py`) — one checkpoint read,\nno kernel/agent involvement. A checkpoint read failure / no checkpoint yields\nan empty breakdown with zeroed totals (same tolerance as token-usage: the\npanel re-opens fine later).",
         "operationId": "get_context_breakdown_api_agents__agent_id__context_breakdown_get",
         "parameters": [
           {
@@ -1784,7 +1784,7 @@
     "/api/agents/{agent_id}/inspect/metrics": {
       "get": {
         "summary": "Get Agent Plugin Metrics",
-        "description": "The agent's plugin metrics for the inspector panel — the W13b inspector\nsurface of the plugin metric system (see `shared/plugin_metrics.py`).\n\nBuilds the metric registry in process (task #180 PR D — shipped\nplugin `metrics.py` modules + core definitions), keeps the metrics whose\n`output` includes \"inspector\", renders each template for this agent\n({{agent_id}} -> ``agent_id = <n>``), re-validates the rendered query,\nsubstitutes the Grafana time macros with a fixed recent window (24h in 1h\nbuckets), and executes each query — LogQL against Loki, SQL read-only\nagainst the cluster's Postgres.\n\nResponse: one `PluginMetricResult` per registered inspector metric, in\nregistration order. `timeseries` / `barchart` metrics carry `series`\n(bucket ts + value, chronological); `stat` metrics carry `value`. A\nmetric whose query fails at runtime carries `error` (the others still\nrender); registry-level problems are HTTP errors instead — a template\nfailing the safety re-validation -> 500 with the reason, {{agent_id}}\ntemplate without an agent id -> 400 (unreachable here — the id is a path\nparam). 404 when the agent does not exist. The frontend panel polls this\nevery 5s like the parent /inspect. Implementation in\n``gateway/inspect/_plugin_metrics.py``.",
+        "description": "The agent's plugin metrics for the inspector panel — the W13b inspector\nsurface of the plugin metric system (see `base/telemetry/metrics/plugin_metrics.py`).\n\nBuilds the metric registry in process (task #180 PR D — shipped\nplugin `metrics.py` modules + core definitions), keeps the metrics whose\n`output` includes \"inspector\", renders each template for this agent\n({{agent_id}} -> ``agent_id = <n>``), re-validates the rendered query,\nsubstitutes the Grafana time macros with a fixed recent window (24h in 1h\nbuckets), and executes each query — LogQL against Loki, SQL read-only\nagainst the cluster's Postgres.\n\nResponse: one `PluginMetricResult` per registered inspector metric, in\nregistration order. `timeseries` / `barchart` metrics carry `series`\n(bucket ts + value, chronological); `stat` metrics carry `value`. A\nmetric whose query fails at runtime carries `error` (the others still\nrender); registry-level problems are HTTP errors instead — a template\nfailing the safety re-validation -> 500 with the reason, {{agent_id}}\ntemplate without an agent id -> 400 (unreachable here — the id is a path\nparam). 404 when the agent does not exist. The frontend panel polls this\nevery 5s like the parent /inspect. Implementation in\n``gateway/inspect/_plugin_metrics.py``.",
         "operationId": "get_agent_plugin_metrics_api_agents__agent_id__inspect_metrics_get",
         "parameters": [
           {
@@ -1828,7 +1828,7 @@
     "/api/agents/{agent_id}/inspect/widgets": {
       "get": {
         "summary": "Get Agent Inspect Widgets",
-        "description": "The agent's plugin widgets for the inspector panel — the extension\nsurface where enabled plugins embed widgets (see `shared/plugin_inspector.py`;\nregistration mirrors the plugin-metric system).\n\nBuilds the widget registry in process (shipped builtin plugins'\n``inspector.py`` modules imported under their plugin context, restricted\nto the plugins currently enabled), resolves the closed target vocabulary\nfor this agent — the open notice and the queue's task-ownership rule —\nand projects each widget, dropping a button whose target did not resolve\nand a widget left without buttons. Unknown agents return 404 like the\nrest of the /inspect family. Implementation in\n``gateway/inspect/_plugin_widgets.py``.",
+        "description": "The agent's plugin widgets for the inspector panel — the extension\nsurface where enabled plugins embed widgets (see `base/packages/plugins/inspector.py`;\nregistration mirrors the plugin-metric system).\n\nBuilds the widget registry in process (shipped builtin plugins'\n``inspector.py`` modules imported under their plugin context, restricted\nto the plugins currently enabled), resolves the closed target vocabulary\nfor this agent — the open notice and the queue's task-ownership rule —\nand projects each widget, dropping a button whose target did not resolve\nand a widget left without buttons. Unknown agents return 404 like the\nrest of the /inspect family. Implementation in\n``gateway/inspect/_plugin_widgets.py``.",
         "operationId": "get_agent_inspect_widgets_api_agents__agent_id__inspect_widgets_get",
         "parameters": [
           {
@@ -1939,7 +1939,7 @@
     "/api/agents/{agent_id}/timeline": {
       "get": {
         "summary": "Get Timeline",
-        "description": "Timeline = raw view of LangGraph state.messages, one window at a time.\n\nDefault (no `before`) returns the newest `limit` items; an omitted\n`limit` resolves to the configured `display.timeline_default_limit`\n(50 by default). Pass\n`before=<oldest item_id you hold>` to fetch the previous window for\nscroll-up history loading. `has_more` reports whether older items exist\nbefore the returned window.\n\nOne checkpoint segment is built at a time; windowing trims the payload +\nthe frontend render. A checkpoint read failure renders an empty view + 200\n(cold-load tolerance, see `shared.agents.history.checkpoint`).",
+        "description": "Timeline = raw view of LangGraph state.messages, one window at a time.\n\nDefault (no `before`) returns the newest `limit` items; an omitted\n`limit` resolves to the configured `display.timeline_default_limit`\n(50 by default). Pass\n`before=<oldest item_id you hold>` to fetch the previous window for\nscroll-up history loading. `has_more` reports whether older items exist\nbefore the returned window.\n\nOne checkpoint segment is built at a time; windowing trims the payload +\nthe frontend render. A checkpoint read failure renders an empty view + 200\n(cold-load tolerance, see `base.agents.history.checkpoint`).",
         "operationId": "get_timeline_api_agents__agent_id__timeline_get",
         "parameters": [
           {
@@ -3156,7 +3156,7 @@
     "/api/cluster/machines/{name}/staging": {
       "post": {
         "summary": "Set Machine Staging",
-        "description": "Set or clear a machine's operator staging flag (`is_staging`).\n\nThe staging latch is what keeps a registered staging host out of the\nagent-runner target set — `ava start` on it clears its `stopped_at` like any\nhost, and this flag is the exclusion (`shared.machines.list_agent_runners`\nskips is_staging rows). Backed by `shared.machines.set_staging`; the CLI\nverbs `ava cluster mark-staging` / `unmark-staging` call this endpoint.",
+        "description": "Set or clear a machine's operator staging flag (`is_staging`).\n\nThe staging latch is what keeps a registered staging host out of the\nagent-runner target set — `ava start` on it clears its `stopped_at` like any\nhost, and this flag is the exclusion (`base.cluster.machines.list_agent_runners`\nskips is_staging rows). Backed by `base.cluster.machines.set_staging`; the CLI\nverbs `ava cluster mark-staging` / `unmark-staging` call this endpoint.",
         "operationId": "set_machine_staging_api_cluster_machines__name__staging_post",
         "parameters": [
           {
@@ -3491,7 +3491,7 @@
     "/api/config/audit": {
       "get": {
         "summary": "Get Config Audit",
-        "description": "Return the `.env` write audit trail, newest first.\n\n`machine` selects the source: omitted = this gateway's own box; `all` = every\nagent-runner machine plus the gateway's own box, merged (fail-fast — an\nunreachable machine 503s the whole read); a machine name = that machine.\nOmitted `last` returns the configured default count\n(``display.config_audit_default_last`` - 20 out of the box); an explicit\n`last` stays capped at 200. Records are the raw\naudit-JSONL entries (`shared/env_audit.py`), each tagged with its `machine`;\nvalues were redacted at write time (non-sensitive fields only), and records\nfrom before record v2 lack `actor` / `trace_id` / `changed`.",
+        "description": "Return the `.env` write audit trail, newest first.\n\n`machine` selects the source: omitted = this gateway's own box; `all` = every\nagent-runner machine plus the gateway's own box, merged (fail-fast — an\nunreachable machine 503s the whole read); a machine name = that machine.\nOmitted `last` returns the configured default count\n(``display.config_audit_default_last`` - 20 out of the box); an explicit\n`last` stays capped at 200. Records are the raw\naudit-JSONL entries (`base/host/env/audit.py`), each tagged with its `machine`;\nvalues were redacted at write time (non-sensitive fields only), and records\nfrom before record v2 lack `actor` / `trace_id` / `changed`.",
         "operationId": "get_config_audit_api_config_audit_get",
         "parameters": [
           {
@@ -3556,7 +3556,7 @@
     "/api/config/resolved": {
       "get": {
         "summary": "Get Resolved Config",
-        "description": "Resolve every per-model-defaultable setting for one model — read-only.\n\nAnswers \"what will an agent on this model actually run with, and which layer\ndecided that\": shared default < per-model default (both code, in\n`shared/lm/registry.py`) < explicit `.env` value. `explain_setting` does the\nlayering — the same function the runtime resolves through, so this view\ncannot drift from the value an agent gets.\n\nThe explicit layer is each field's `current_value` from the config metadata,\ni.e. read fresh from `.env` rather than the gateway's boot-time settings —\nmatching what the config panel shows and what the next agent process boots\nwith (every tunable here is `restart_required=\"agent\"`).\n\nMachine-independent by construction: every tunable is cluster-scope, so\nthere is no `?machine=` here. The per-agent overlay — the one layer above\nexplicit — is per process and invisible from the cluster; `per_agent` marks\nwhich fields a spawn/restart overlay may still override.",
+        "description": "Resolve every per-model-defaultable setting for one model — read-only.\n\nAnswers \"what will an agent on this model actually run with, and which layer\ndecided that\": shared default < per-model default (both code, in\n`base/lm/registry.py`) < explicit `.env` value. `explain_setting` does the\nlayering — the same function the runtime resolves through, so this view\ncannot drift from the value an agent gets.\n\nThe explicit layer is each field's `current_value` from the config metadata,\ni.e. read fresh from `.env` rather than the gateway's boot-time settings —\nmatching what the config panel shows and what the next agent process boots\nwith (every tunable here is `restart_required=\"agent\"`).\n\nMachine-independent by construction: every tunable is cluster-scope, so\nthere is no `?machine=` here. The per-agent overlay — the one layer above\nexplicit — is per process and invisible from the cluster; `per_agent` marks\nwhich fields a spawn/restart overlay may still override.",
         "operationId": "get_resolved_config_api_config_resolved_get",
         "parameters": [
           {
@@ -3660,7 +3660,7 @@
       },
       "put": {
         "summary": "Put Default Model",
-        "description": "Set the cluster's default model.\n\n400 when the id is not a spawnable model in `shared/lm/registry.py:MODELS`.\nTakes effect for agents born after the write; every existing agent keeps the\nmodel stamped on its own row.",
+        "description": "Set the cluster's default model.\n\n400 when the id is not a spawnable model in `base/lm/registry.py:MODELS`.\nTakes effect for agents born after the write; every existing agent keeps the\nmodel stamped on its own row.",
         "operationId": "put_default_model_api_config_default_model_put",
         "requestBody": {
           "content": {
@@ -5616,7 +5616,7 @@
     "/api/health": {
       "get": {
         "summary": "Get Health",
-        "description": "Liveness probe over the private network (the gateway is unauthenticated). DB ping\nincluded — a gateway that can serve HTTP but cannot reach Postgres is not\n\"healthy\" enough for the watchdog to leave alone.\n\nThe identity fields answer the questions a 200 alone cannot: `name` is\nwhich *service* answered, `home` this gateway's `$AVA_HOME` (its cluster\nidentity), `machine` its host, `started_at` this process's birth, and `sha`\nthe code frozen at boot. A 200 on this port only proves *something* listens\nthere, so the watchdog verifies the stable identity too rather than the status\ncode alone — see `services/healthchecks/gateway.py`. The start and code facts\nalso let read-only post-deploy checks detect a new serving generation without\nconsulting disk state. Each field was additive to the `{\"status\": \"ok\"}` contract.\n\nLiveness must fail faster than the resource it protects: this uses the\ncontrol-plane pool and a 1-2 second database budget rather than waiting up\nto 30 seconds for the data-plane pool. A 503 therefore means the process is\nalive but Postgres is degraded; the watchdog's consecutive-failure policy\ndecides whether that merits a respawn.\n\n`name` is a constant naming the service this route belongs to — the point being\nthat an impostor answering here reports its own name, or none. No probe reads it\nyet; `shared.daemon_health._probe_home` gains the `name` arm only once every\ndeployed gateway emits the field, and that ordering is load-bearing (#1038).",
+        "description": "Liveness probe over the private network (the gateway is unauthenticated). DB ping\nincluded — a gateway that can serve HTTP but cannot reach Postgres is not\n\"healthy\" enough for the watchdog to leave alone.\n\nThe identity fields answer the questions a 200 alone cannot: `name` is\nwhich *service* answered, `home` this gateway's `$AVA_HOME` (its cluster\nidentity), `machine` its host, `started_at` this process's birth, and `sha`\nthe code frozen at boot. A 200 on this port only proves *something* listens\nthere, so the watchdog verifies the stable identity too rather than the status\ncode alone — see `services/healthchecks/gateway.py`. The start and code facts\nalso let read-only post-deploy checks detect a new serving generation without\nconsulting disk state. Each field was additive to the `{\"status\": \"ok\"}` contract.\n\nLiveness must fail faster than the resource it protects: this uses the\ncontrol-plane pool and a 1-2 second database budget rather than waiting up\nto 30 seconds for the data-plane pool. A 503 therefore means the process is\nalive but Postgres is degraded; the watchdog's consecutive-failure policy\ndecides whether that merits a respawn.\n\n`name` is a constant naming the service this route belongs to — the point being\nthat an impostor answering here reports its own name, or none. No probe reads it\nyet; `base.daemon.health._probe_home` gains the `name` arm only once every\ndeployed gateway emits the field, and that ordering is load-bearing (#1038).",
         "operationId": "get_health_api_health_get",
         "responses": {
           "200": {
@@ -7438,7 +7438,7 @@
           "source"
         ],
         "title": "AgentMessageIn",
-        "description": "POST /api/agents/{id}/messages request body — for SDK send_message and\nthe `ava agents send` CLI (which the generated background-run / watcher\ncompletion notices invoke).\n\nPure INSERT + return — the caller does not inspect status.\nAuto-resurrect on the gateway side ensures delivery to any agent,\nterminated or not.\n\n`source` is required — the SDK passes f\"agent:{my_id}\", the generated\nnotices pass shell:N / watcher:N; there is no default to prevent callers\nfrom forgetting and having inbounds silently tagged as \"user\", muddying\nenvelope labels. The valid set is in `shared/agents/messages/envelope.py:validate_source`\n(system / agent:N / user / ui:page:<name> / watcher:N / shell:N /\nschedule:N); an illegal source is intercepted by 422 at the HTTP layer —\notherwise it would land in inbound_messages and the agent claim node\nwould hit ValueError and kill the process."
+        "description": "POST /api/agents/{id}/messages request body — for SDK send_message and\nthe `ava agents send` CLI (which the generated background-run / watcher\ncompletion notices invoke).\n\nPure INSERT + return — the caller does not inspect status.\nAuto-resurrect on the gateway side ensures delivery to any agent,\nterminated or not.\n\n`source` is required — the SDK passes f\"agent:{my_id}\", the generated\nnotices pass shell:N / watcher:N; there is no default to prevent callers\nfrom forgetting and having inbounds silently tagged as \"user\", muddying\nenvelope labels. The valid set is in `base/agents/messages/envelope.py:validate_source`\n(system / agent:N / user / ui:page:<name> / watcher:N / shell:N /\nschedule:N); an illegal source is intercepted by 422 at the HTTP layer —\notherwise it would land in inbound_messages and the agent claim node\nwould hit ValueError and kill the process."
       },
       "AgentMessagesResponse": {
         "properties": {
@@ -7564,7 +7564,7 @@
           "exec_failed"
         ],
         "title": "AgentMetricsItem",
-        "description": "One agent's row in the fleet metrics breakdown — headline counters\naggregated over its events within the report window. `label` is the\nagent's display name (None = unset; frontend falls back to \"#id\").\n`cost_usd` prices each call via `shared.lm.pricing.cost_usd`; calls on an\nunpriced model contribute 0. `cache_hit_pct` = cached / in * 100 (in=0\ndegrades to 0). `exec_failed` is every exec outcome other than plain\n`exec` — same exec-ok/exec-failed split as the metrics report."
+        "description": "One agent's row in the fleet metrics breakdown — headline counters\naggregated over its events within the report window. `label` is the\nagent's display name (None = unset; frontend falls back to \"#id\").\n`cost_usd` prices each call via `base.lm.pricing.cost_usd`; calls on an\nunpriced model contribute 0. `cache_hit_pct` = cached / in * 100 (in=0\ndegrades to 0). `exec_failed` is every exec outcome other than plain\n`exec` — same exec-ok/exec-failed split as the metrics report."
       },
       "AgentMetricsReport": {
         "properties": {
@@ -7872,7 +7872,7 @@
           "heartbeat_paused_until"
         ],
         "title": "AgentRow",
-        "description": "GET /api/agents/{id} detail, including response-required notice bodies.\n\nThe directory and live roster use bounded cards from shared.agent_roster.\nlast_active_at is the real-activity clock; last_inbound_at is the latest\ninbound message clock."
+        "description": "GET /api/agents/{id} detail, including response-required notice bodies.\n\nThe directory and live roster use bounded cards from base.agents.observation.roster.\nlast_active_at is the real-activity clock; last_inbound_at is the latest\ninbound message clock."
       },
       "AgentStats": {
         "properties": {
@@ -8895,7 +8895,7 @@
           "records"
         ],
         "title": "ConfigAuditView",
-        "description": "GET /api/config/audit response — merged `.env`-write audit records, newest first.\n\nEach record is the raw audit-JSONL entry (`shared/env_audit.py`, record v2:\nts / site / pid / process / cmdline / actor / trace_id / keys_written /\nkeys_removed / digest_after / changed), tagged with its `machine`. Values were\nredacted when the record was written (non-sensitive fields only); records from\nbefore record v2 lack `actor` / `trace_id` / `changed`."
+        "description": "GET /api/config/audit response — merged `.env`-write audit records, newest first.\n\nEach record is the raw audit-JSONL entry (`base/host/env/audit.py`, record v2:\nts / site / pid / process / cmdline / actor / trace_id / keys_written /\nkeys_removed / digest_after / changed), tagged with its `machine`. Values were\nredacted when the record was written (non-sensitive fields only); records from\nbefore record v2 lack `actor` / `trace_id` / `changed`."
       },
       "ConfigFieldView": {
         "properties": {
@@ -9684,7 +9684,7 @@
           "attributes"
         ],
         "title": "EventRow",
-        "description": "One row of the unified event stream.\n\nEvery signal shares this shape (event-system design doc §1): audit\n(legacy `event_log`), telemetry and log (formerly `agent_events`) all land\nin it, written through the unified emitter (`shared/telemetry/emitter.py`).\n`trace_id` is the correlation key — one turn = one trace id, every event\ninside it carries the same value. `agent_id` is None for service-level\nevents (gateway / daemons); `machine` is the host dimension. `level` is\nLOWERCASE (`debug`/`info`/`warning`/`error`/`critical`) — the retired\n`agent_events` mirror stored loguru's uppercase; the W9 read-path switch\nflipped API consumers to lowercase."
+        "description": "One row of the unified event stream.\n\nEvery signal shares this shape (event-system design doc §1): audit\n(legacy `event_log`), telemetry and log (formerly `agent_events`) all land\nin it, written through the unified emitter (`base/telemetry/emitter.py`).\n`trace_id` is the correlation key — one turn = one trace id, every event\ninside it carries the same value. `agent_id` is None for service-level\nevents (gateway / daemons); `machine` is the host dimension. `level` is\nLOWERCASE (`debug`/`info`/`warning`/`error`/`critical`) — the retired\n`agent_events` mirror stored loguru's uppercase; the W9 read-path switch\nflipped API consumers to lowercase."
       },
       "EventsMeta": {
         "properties": {
@@ -10357,7 +10357,7 @@
           "order"
         ],
         "title": "InspectWidgetResult",
-        "description": "One plugin widget rendered for the inspector panel — an element of\nGET /api/agents/{id}/inspect/widgets.\n\nThe resolved twin of a registered `InspectWidgetSpec`\n(`shared/plugin_inspector.py`): `plugin` + `id` name the registration,\n`kind` selects the console renderer (a closed set; an unknown kind is\nskipped by the console), and the payload field the kind reads (`tasks`)\ncarries the kernel-resolved rows. A widget with an empty payload is\ndropped from the response entirely (the panel's empty-section rule)."
+        "description": "One plugin widget rendered for the inspector panel — an element of\nGET /api/agents/{id}/inspect/widgets.\n\nThe resolved twin of a registered `InspectWidgetSpec`\n(`base/packages/plugins/inspector.py`): `plugin` + `id` name the registration,\n`kind` selects the console renderer (a closed set; an unknown kind is\nskipped by the console), and the payload field the kind reads (`tasks`)\ncarries the kernel-resolved rows. A widget with an empty payload is\ndropped from the response entirely (the panel's empty-section rule)."
       },
       "InspectWidgetTask": {
         "properties": {
@@ -11581,7 +11581,7 @@
           "body"
         ],
         "title": "MemoryNoteResponse",
-        "description": "GET /api/memory/note response — one parsed memory note.\n\nMirrors MemoryGraphNode plus the parsed markdown body. The body is the\nmarkdown with the YAML frontmatter removed (shared.parse_note's body), so\nthe frontend renders the note itself rather than re-parsing frontmatter\n(frontmatter values arrive as structured fields: title / description /\ntags / timestamp / ava_agent / ava_machine)."
+        "description": "GET /api/memory/note response — one parsed memory note.\n\nMirrors MemoryGraphNode plus the parsed markdown body. The body is the\nmarkdown with the YAML frontmatter removed (base.parse_note's body), so\nthe frontend renders the note itself rather than re-parsing frontmatter\n(frontmatter values arrive as structured fields: title / description /\ntags / timestamp / ava_agent / ava_machine)."
       },
       "MemoryRefreshResponse": {
         "properties": {
@@ -12820,7 +12820,7 @@
           "panel"
         ],
         "title": "PluginMetricResult",
-        "description": "One plugin metric rendered for the inspector surface — an element of\nGET /api/agents/{id}/inspect/metrics.\n\nMirrors the registered MetricSpec (see `shared/plugin_metrics.py`):\n`panel` selects the payload — `timeseries` / `barchart` / `table` metrics\ncarry `series` (a bounded recent window, 24h in 1h buckets by default, so\nat most a couple of dozen points), `stat` metrics carry `value` (the\nsingle aggregate); a `logs` metric (a Grafana streaming surface) folds as\n`series` here. `error` is set (with `series`/`value` empty) when the metric's\nquery failed at execution time — the panel shows the rest of the metrics\nand surfaces the failure inline instead of 500ing the whole request;\nregistry-level problems (missing/malformed/tampered file, a template that\nfails the safety re-validation) are HTTP errors instead."
+        "description": "One plugin metric rendered for the inspector surface — an element of\nGET /api/agents/{id}/inspect/metrics.\n\nMirrors the registered MetricSpec (see `base/telemetry/metrics/plugin_metrics.py`):\n`panel` selects the payload — `timeseries` / `barchart` / `table` metrics\ncarry `series` (a bounded recent window, 24h in 1h buckets by default, so\nat most a couple of dozen points), `stat` metrics carry `value` (the\nsingle aggregate); a `logs` metric (a Grafana streaming surface) folds as\n`series` here. `error` is set (with `series`/`value` empty) when the metric's\nquery failed at execution time — the panel shows the rest of the metrics\nand surfaces the failure inline instead of 500ing the whole request;\nregistry-level problems (missing/malformed/tampered file, a template that\nfails the safety re-validation) are HTTP errors instead."
       },
       "PluginStat": {
         "properties": {
@@ -13184,7 +13184,7 @@
           "restart_required"
         ],
         "title": "ResolvedFieldView",
-        "description": "One per-model-defaultable setting resolved for a specific model.\n\nThe read-only mirror of `shared/lm/registry.py:explain_setting`: the value an\nagent on this model boots with, plus every candidate layer and the name of\nthe one that won. There is no write path here — an explicit value is edited\nas the normal config field of the same `name`, so the panel links back to\nthat row rather than growing a second store."
+        "description": "One per-model-defaultable setting resolved for a specific model.\n\nThe read-only mirror of `base/lm/registry.py:explain_setting`: the value an\nagent on this model boots with, plus every candidate layer and the name of\nthe one that won. There is no write path here — an explicit value is edited\nas the normal config field of the same `name`, so the panel links back to\nthat row rather than growing a second store."
       },
       "ResourceSample": {
         "properties": {
@@ -13434,7 +13434,7 @@
         },
         "type": "object",
         "title": "ResurrectAgentRequest",
-        "description": "Resurrect agent request body.\n\nThe public `POST /api/agents/{id}/resurrect` endpoint uses this for an\nexplicit lifecycle wake with no work guard. The internal versioned\npending-work path also carries it alongside the exact chat or compact\nrequest id and kind; controller recovery calls the lower lifecycle helper\nwith its own exact death claim.\n\n`resurrected_by` default \"user\" — frontend resurrect button does not\nneed to pass it; SDK paths pass f\"agent:{my_id}\"; pending-work and\ncontroller auto-resurrect pass \"system\". Written into the\nlifecycle 'resurrect' inbound's source; the claim-side dispatch\ncomposes it into the marker `[system ts] You have been resurrected\nby {resurrected_by}` so the agent knows who resurrected it.\n\nThe value must pass `shared.agents.messages.envelope.validate_source` (same check as\n`AgentMessageIn.source`): the same value becomes the prompt chat\ninbound's source, and the claim node's envelope wrap raises on\nanything outside the whitelist — killing the freshly resurrected\nprocess on its first claim. Validating here turns that process-fatal\nvalue into a 422 at the HTTP boundary (the agent-240 incident).\n\n`prompt` is **optional at this HTTP boundary**. The frontend resurrect\nbutton is a pure lifecycle event — there is no message to deliver, so it\nsends no prompt and the agent just gets the \"you have been resurrected\"\nmarker. Peer agents no longer have a dedicated resurrect API — they send\na chat message (`ava.agents.send_message`) and auto-resurrect handles the\nrest. When a prompt is given it is INSERTed as a chat inbound in **the same\ntransaction** as the lifecycle 'resurrect' inbound. The session may be\ncreated before commit, but its child blocks on the agent row and cannot\nclaim or process either inbound until both are committed."
+        "description": "Resurrect agent request body.\n\nThe public `POST /api/agents/{id}/resurrect` endpoint uses this for an\nexplicit lifecycle wake with no work guard. The internal versioned\npending-work path also carries it alongside the exact chat or compact\nrequest id and kind; controller recovery calls the lower lifecycle helper\nwith its own exact death claim.\n\n`resurrected_by` default \"user\" — frontend resurrect button does not\nneed to pass it; SDK paths pass f\"agent:{my_id}\"; pending-work and\ncontroller auto-resurrect pass \"system\". Written into the\nlifecycle 'resurrect' inbound's source; the claim-side dispatch\ncomposes it into the marker `[system ts] You have been resurrected\nby {resurrected_by}` so the agent knows who resurrected it.\n\nThe value must pass `base.agents.messages.envelope.validate_source` (same check as\n`AgentMessageIn.source`): the same value becomes the prompt chat\ninbound's source, and the claim node's envelope wrap raises on\nanything outside the whitelist — killing the freshly resurrected\nprocess on its first claim. Validating here turns that process-fatal\nvalue into a 422 at the HTTP boundary (the agent-240 incident).\n\n`prompt` is **optional at this HTTP boundary**. The frontend resurrect\nbutton is a pure lifecycle event — there is no message to deliver, so it\nsends no prompt and the agent just gets the \"you have been resurrected\"\nmarker. Peer agents no longer have a dedicated resurrect API — they send\na chat message (`ava.agents.send_message`) and auto-resurrect handles the\nrest. When a prompt is given it is INSERTed as a chat inbound in **the same\ntransaction** as the lifecycle 'resurrect' inbound. The session may be\ncreated before commit, but its child blocks on the agent row and cannot\nclaim or process either inbound until both are committed."
       },
       "ResurrectAgentResponse": {
         "properties": {

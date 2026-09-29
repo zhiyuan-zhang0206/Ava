@@ -16,7 +16,7 @@ from time import perf_counter
 
 import pytest
 
-from scripts import test_selector
+from scripts.ci import test_selector
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -52,7 +52,7 @@ def _selector_repo(tmp_path: Path) -> Path:
         "cli/commands.py": "",
         "ops/worker.py": "",
         "scripts/only_helper.py": "",
-        "shared/lm/__init__.py": "",
+        "base/lm/__init__.py": "",
         "tests/unit/conftest.py": "import cli.commands\n",
         "tests/unit/helper.py": "from scripts import only_helper\n",
         "tests/unit/test_changed.py": "def test_changed(): pass\n",
@@ -64,7 +64,7 @@ def _selector_repo(tmp_path: Path) -> Path:
             "\n"
             "def lazy_imports():\n"
             "    from agent import exec_child\n"
-            "    from shared import lm\n"
+            "    from base import lm\n"
         ),
         "tests/unit/test_other.py": "def test_other(): pass\n",
         "tests/e2e/test_browser.py": "import cli.commands\n",
@@ -96,7 +96,7 @@ def test_builds_a_direct_import_reverse_map_from_every_test_scope(tmp_path: Path
     assert reverse_map["agent/exec_child.py"] == expected_importer
     assert reverse_map["cli/commands.py"] == expected_importer
     assert reverse_map["ops/worker.py"] == expected_importer
-    assert reverse_map["shared/lm/__init__.py"] == expected_importer
+    assert reverse_map["base/lm/__init__.py"] == expected_importer
     assert "scripts/only_helper.py" not in reverse_map
 
 
@@ -159,7 +159,7 @@ def test_tree_scan_pins_cover_the_real_repo_lint_family_and_are_never_stale() ->
 @pytest.mark.parametrize(
     ("changed_path", "reason"),
     [
-        ("shared/deploy/git/repo_change.py", "forced-root:shared/"),
+        ("base/deploy/git/repo_change.py", "forced-root:base/"),
         ("pyproject.toml", "test-configuration"),
         (".test_durations", "test-configuration"),
         ("tests/e2e/test_browser.py", "e2e"),
@@ -291,7 +291,7 @@ def test_selector_mode_is_audit_metadata_from_the_workflow_env(
 def test_duration_estimates_are_identical_across_python_hash_seeds() -> None:
     """Hash-randomized set iteration must not change the audit JSON."""
     snippet = """\
-from scripts.test_selector import _estimate_seconds
+from scripts.ci.test_selector import _estimate_seconds
 
 print(repr(_estimate_seconds(
     {\"tests/a.py\", \"tests/b.py\", \"tests/c.py\"},
@@ -323,7 +323,7 @@ def test_real_repository_map_is_fast_and_has_broad_static_coverage() -> None:
     """The production checkout must keep the selector map usable in CI."""
     started = perf_counter()
 
-    result = test_selector.select_tests(["scripts/test_selector.py"], repo_root=_REPO_ROOT)
+    result = test_selector.select_tests(["scripts/ci/test_selector.py"], repo_root=_REPO_ROOT)
 
     assert result.map_source_count > 500
     assert result.full_est_seconds > 0

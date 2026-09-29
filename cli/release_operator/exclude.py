@@ -50,7 +50,7 @@ def exclude_unit(journal: Journal, unit: UnitKey, reason: str) -> UnitStatus:
 
 
 def cmd_release_exclude(*, operation: str, unit: str, reason: str) -> int:
-    from shared.paths import ava_home
+    from base.paths import ava_home
 
     try:
         target = parse_unit(unit)

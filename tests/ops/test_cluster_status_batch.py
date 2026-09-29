@@ -12,11 +12,12 @@ from pathlib import Path
 import psycopg
 import pytest
 
-from ops import cluster_status, schema_mismatch
+from base.deploy.state.cluster_lock import DeployLease
+from base.deploy.state.host_deploy_state import HostDeployState
+from base.host.resource_sample import ResourceSample
+from ops import cluster_status
+from ops.cluster_status import schema_mismatch
 from ops.rpc_schemas import SessionInfo
-from shared.cluster_lock import DeployLease
-from shared.host_deploy_state import HostDeployState
-from shared.resource_sample import ResourceSample
 
 _RESOURCE = ResourceSample(
     ts=1.0,
@@ -97,8 +98,8 @@ def snapshot_dependencies(
     monkeypatch.setattr(cluster_status, "is_gateway", lambda: False)
     monkeypatch.setattr(cluster_status, "is_agent_runner", lambda: True)
     monkeypatch.setattr(cluster_status, "is_observability_station", lambda: False)
-    monkeypatch.setattr("shared.cluster_drift.prod_source_head_sha", lambda: None)
-    monkeypatch.setattr("shared.process_sha.get", lambda: None)
+    monkeypatch.setattr("base.deploy.git.cluster_drift.prod_source_head_sha", lambda: None)
+    monkeypatch.setattr("base.native_process.loaded_commit.get", lambda: None)
     return state, lease
 
 
@@ -122,8 +123,8 @@ def test_collect_sessions_batches_timestamp_reads(monkeypatch: pytest.MonkeyPatc
     """Each backend receives one timestamp batch, never one read per session."""
     service = _BatchOnlyBackend("ava-main-agent-host")
     shell = _BatchOnlyBackend("ava-main-agent-7-shell-0")
-    monkeypatch.setattr("shared.session_backend.get_backend", lambda: service)
-    monkeypatch.setattr("shared.session_backend.get_shell_backend", lambda: shell)
+    monkeypatch.setattr("base.sessions.backend.get_backend", lambda: service)
+    monkeypatch.setattr("base.sessions.backend.get_shell_backend", lambda: shell)
 
     sessions, _, _ = cluster_status._collect_sessions()
 
@@ -141,10 +142,10 @@ def test_collect_sessions_stamps_cluster_zone(monkeypatch: pytest.MonkeyPatch) -
     from zoneinfo import ZoneInfo
 
     service = _BatchOnlyBackend("ava-main-agent-host")
-    monkeypatch.setattr("shared.session_backend.get_backend", lambda: service)
-    monkeypatch.setattr("shared.session_backend.get_shell_backend", lambda: _BatchOnlyBackend("x"))
-    from shared.config import settings
-    from shared.config.general import GeneralSettings
+    monkeypatch.setattr("base.sessions.backend.get_backend", lambda: service)
+    monkeypatch.setattr("base.sessions.backend.get_shell_backend", lambda: _BatchOnlyBackend("x"))
+    from base.config import settings
+    from base.config.general import GeneralSettings
 
     monkeypatch.setattr(
         settings, "general", GeneralSettings.model_construct(timezone="Asia/Shanghai")
@@ -205,10 +206,10 @@ def test_status_snapshot_uses_one_connection_while_sampling_resources(
     monkeypatch.setattr(schema_mismatch, "applied_migration_names", _applied)
     monkeypatch.setattr(schema_mismatch, "required_migration_set", lambda: {"baseline"})
 
-    monkeypatch.setattr("shared.db.connect", _connect)
-    monkeypatch.setattr("shared.host_deploy_state.read", _read_state)
-    monkeypatch.setattr("shared.cluster_lock.read_update_lease", _read_lease)
-    monkeypatch.setattr("shared.resource_sample.resource_sample", _sample)
+    monkeypatch.setattr("base.db.connect", _connect)
+    monkeypatch.setattr("base.deploy.state.host_deploy_state.read", _read_state)
+    monkeypatch.setattr("base.deploy.state.cluster_lock.read_update_lease", _read_lease)
+    monkeypatch.setattr("base.host.resource_sample.resource_sample", _sample)
 
     snapshot = cluster_status.status_snapshot()
 
@@ -243,10 +244,10 @@ def test_status_snapshot_borrows_pool_once_with_a_bounded_timeout(
     def _fresh_connect(**_kwargs: object) -> object:
         raise AssertionError("pool-backed snapshot opened a fresh DB connection")
 
-    monkeypatch.setattr("shared.db.connect", _fresh_connect)
-    monkeypatch.setattr("shared.host_deploy_state.read", _read_state)
-    monkeypatch.setattr("shared.cluster_lock.read_update_lease", _read_lease)
-    monkeypatch.setattr("shared.resource_sample.resource_sample", lambda: _RESOURCE)
+    monkeypatch.setattr("base.db.connect", _fresh_connect)
+    monkeypatch.setattr("base.deploy.state.host_deploy_state.read", _read_state)
+    monkeypatch.setattr("base.deploy.state.cluster_lock.read_update_lease", _read_lease)
+    monkeypatch.setattr("base.host.resource_sample.resource_sample", lambda: _RESOURCE)
 
     snapshot = cluster_status.status_snapshot(pool=pool)
 
@@ -284,9 +285,9 @@ def test_two_status_snapshots_do_not_cache_db_or_resource_reads(
         sample_reads += 1
         return _RESOURCE
 
-    monkeypatch.setattr("shared.host_deploy_state.read", _read_state)
-    monkeypatch.setattr("shared.cluster_lock.read_update_lease", _read_lease)
-    monkeypatch.setattr("shared.resource_sample.resource_sample", _sample)
+    monkeypatch.setattr("base.deploy.state.host_deploy_state.read", _read_state)
+    monkeypatch.setattr("base.deploy.state.cluster_lock.read_update_lease", _read_lease)
+    monkeypatch.setattr("base.host.resource_sample.resource_sample", _sample)
 
     cluster_status.status_snapshot(pool=pool)
     cluster_status.status_snapshot(pool=pool)
@@ -306,7 +307,7 @@ def test_status_snapshot_degrades_when_the_pool_cannot_reach_db(
     """DB-down is valid even if the unreachable row says the host was paused."""
     del snapshot_dependencies
     pool = _Pool(object(), error=RuntimeError(f"DB down with {stored_posture} row"))
-    monkeypatch.setattr("shared.resource_sample.resource_sample", lambda: _RESOURCE)
+    monkeypatch.setattr("base.host.resource_sample.resource_sample", lambda: _RESOURCE)
 
     snapshot = cluster_status.status_snapshot(pool=pool)
 
@@ -324,7 +325,7 @@ def test_status_snapshot_preserves_invalid_real_catalog_diagnosis(
     monkeypatch: pytest.MonkeyPatch,
     snapshot_dependencies: tuple[HostDeployState, DeployLease],
 ) -> None:
-    from shared.migrations import applied_migration_names
+    from base.deploy.schema.migrations import applied_migration_names
 
     state, lease = snapshot_dependencies
     pool = _Pool(db_conn)
@@ -337,9 +338,9 @@ def test_status_snapshot_preserves_invalid_real_catalog_diagnosis(
         assert conn is db_conn
         return lease
 
-    monkeypatch.setattr("shared.host_deploy_state.read", _state)
-    monkeypatch.setattr("shared.cluster_lock.read_update_lease", _lease)
-    monkeypatch.setattr("shared.resource_sample.resource_sample", lambda: _RESOURCE)
+    monkeypatch.setattr("base.deploy.state.host_deploy_state.read", _state)
+    monkeypatch.setattr("base.deploy.state.cluster_lock.read_update_lease", _lease)
+    monkeypatch.setattr("base.host.resource_sample.resource_sample", lambda: _RESOURCE)
     monkeypatch.setattr(schema_mismatch, "applied_migration_names", applied_migration_names)
     with db_conn.transaction(force_rollback=True):
         db_conn.execute("ALTER TABLE schema_migrations RENAME COLUMN name TO unexpected_name")
@@ -367,13 +368,13 @@ def test_resource_sample_failure_still_degrades_to_none_from_worker(
         del conn
         return lease
 
-    monkeypatch.setattr("shared.host_deploy_state.read", _read_state)
-    monkeypatch.setattr("shared.cluster_lock.read_update_lease", _read_lease)
+    monkeypatch.setattr("base.deploy.state.host_deploy_state.read", _read_state)
+    monkeypatch.setattr("base.deploy.state.cluster_lock.read_update_lease", _read_lease)
 
     def _sample_failure() -> ResourceSample:
         raise RuntimeError("psutil unavailable")
 
-    monkeypatch.setattr("shared.resource_sample.resource_sample", _sample_failure)
+    monkeypatch.setattr("base.host.resource_sample.resource_sample", _sample_failure)
 
     snapshot = cluster_status.status_snapshot(pool=pool)
 
@@ -383,7 +384,7 @@ def test_resource_sample_failure_still_degrades_to_none_from_worker(
 def test_agent_count_reads_local_retained_identities_without_processes(
     db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from shared.db import create_agent
+    from base.db import create_agent
 
     monkeypatch.setattr(cluster_status, "machine_name", lambda: "count-host")
     for machine, status in (
@@ -423,8 +424,8 @@ def test_agent_count_uses_the_same_borrow_and_reaches_the_snapshot(
         return lease
 
     monkeypatch.setattr(cluster_status, "_count_local_agents", count)
-    monkeypatch.setattr("shared.host_deploy_state.read", read_state)
-    monkeypatch.setattr("shared.cluster_lock.read_update_lease", read_lease)
+    monkeypatch.setattr("base.deploy.state.host_deploy_state.read", read_state)
+    monkeypatch.setattr("base.deploy.state.cluster_lock.read_update_lease", read_lease)
     monkeypatch.setattr(cluster_status, "_read_resource_sample", lambda: None)
     snapshot = cluster_status.status_snapshot(pool=pool)
     assert snapshot.agent_count == 7
@@ -438,7 +439,7 @@ def test_agent_host_liveness_is_probed_only_on_a_runner(
     snapshot_dependencies: tuple[HostDeployState, DeployLease],
     runner: bool,
 ) -> None:
-    from shared.config import settings
+    from base.config import settings
 
     probes: list[str] = []
 
@@ -512,11 +513,11 @@ def test_status_snapshot_paused_reason_names_the_first_true_clause(
     def _read_lease(*, conn: object | None = None) -> None:
         del conn
 
-    monkeypatch.setattr("shared.host_deploy_state.read", _read_state)
-    monkeypatch.setattr("shared.cluster_lock.read_update_lease", _read_lease)
-    monkeypatch.setattr("shared.maintenance.held", lambda: held_flag)
-    monkeypatch.setattr("shared.start_serving.is_serving", lambda: serving)
-    monkeypatch.setattr("shared.resource_sample.resource_sample", lambda: _RESOURCE)
+    monkeypatch.setattr("base.deploy.state.host_deploy_state.read", _read_state)
+    monkeypatch.setattr("base.deploy.state.cluster_lock.read_update_lease", _read_lease)
+    monkeypatch.setattr("base.deploy.maintenance.admission.held", lambda: held_flag)
+    monkeypatch.setattr("base.deploy.lifecycle.start_serving.is_serving", lambda: serving)
+    monkeypatch.setattr("base.host.resource_sample.resource_sample", lambda: _RESOURCE)
 
     snapshot = cluster_status.status_snapshot(pool=pool)
 

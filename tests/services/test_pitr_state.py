@@ -1,6 +1,6 @@
 import pytest
 
-from services.pitr.state import health_state
+from services.pitr.wal.state import health_state
 
 
 def test_local_archive_never_counts_as_remote_ack() -> None:

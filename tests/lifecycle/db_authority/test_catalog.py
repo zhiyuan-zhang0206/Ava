@@ -8,7 +8,7 @@ import psycopg
 import pytest
 from psycopg import sql
 
-from shared.cluster.authority import (
+from base.cluster.authority import (
     BirthAuthority,
     CatalogRefusedError,
     VacuumSkippedError,

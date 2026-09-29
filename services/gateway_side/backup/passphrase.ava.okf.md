@@ -21,9 +21,9 @@ key, so a home without the file refuses to back up or restore
   `sha256(secret)`, pinned once at their conversion. An empty secret's
   derivation is the public `LEGACY_EMPTY_SECRET_PASSPHRASE`, so such a home
   carries a minted passphrase; its artifacts from before the pin restore only
-  with the explicit `scripts/restore_drill.py --legacy-empty-secret-passphrase`,
+  with the explicit `scripts/data_plane_ops/restore_drill.py --legacy-empty-secret-passphrase`,
   which is never tried as a fallback. A failed decryption names that option.
-- **Secret rotation** (`scripts/rotate_cluster_secret.py`) never touches it.
+- **Secret rotation** (`scripts/data_plane_ops/rotate_cluster_secret.py`) never touches it.
 
 ## Escrow
 

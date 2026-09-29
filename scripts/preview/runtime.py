@@ -33,8 +33,8 @@ def require_success(response: httpx.Response) -> None:
 
 
 def describe(run: Path, home: Path) -> None:
+    from base.cluster import get_record, record_app_port
     from ops.roster import build_services
-    from shared.cluster import get_record, record_app_port
 
     record = get_record(home)
     if record is None:
@@ -203,7 +203,7 @@ def main() -> None:
     if action == "verify-stopped":
         verify_stopped(run, home)
         return
-    from shared.paths import ava_home
+    from base.paths import ava_home
 
     if ava_home().resolve() != home:
         raise RuntimeError("Target interpreter resolved a different home")

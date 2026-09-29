@@ -12,12 +12,12 @@ from typing import Any
 
 import uvicorn
 
-from shared.config import settings
-from shared.log import init_gateway_process
-from shared.machine import is_gateway
-from shared.migrations import assert_schema_current
-from shared.platform import raise_fd_limit
-from shared.transport_encryption import verify_transport_encryption
+from base.cluster.machine import is_gateway
+from base.cluster.transport_encryption import verify_transport_encryption
+from base.config import settings
+from base.deploy.schema.migrations import assert_schema_current
+from base.log import init_gateway_process
+from base.native_process.os_platform import raise_fd_limit
 
 _log = logging.getLogger(__name__)
 _GATEWAY_UVICORN_WORKERS = 1
@@ -120,7 +120,7 @@ def serve_kwargs(*, host: str, app: str = "gateway.app:app") -> dict[str, Any]:
         "host": host,
         "port": settings.gateway.gateway_port,
         "reload": reload,
-        "reload_dirs": ["gateway", "shared", "ava", "agent"] if reload else None,
+        "reload_dirs": ["gateway", "base", "ava", "agent"] if reload else None,
         # log_config=None: uvicorn's default LOGGING_CONFIG dictConfig would
         # clobber the root-handler install (`_StdlibInterceptHandler`) that
         # init_gateway_process set up above, sending uvicorn's own records

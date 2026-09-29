@@ -11,10 +11,10 @@ from __future__ import annotations
 
 import pytest
 
-from cli.commands import start as start_mod
+from base.config import settings
 from cli.commands.data_plane import bringup as dp
 from cli.commands.data_plane import cluster_instance as ci
-from shared.config import settings
+from cli.commands.lifecycle import start as start_mod
 
 _FOREIGN_DB = "postgresql://ava:pw@10.9.8.7:5432/ava"
 _FOREIGN_REDIS = "rediss://ava:pw@10.9.8.7:6380/0"
@@ -30,7 +30,7 @@ def _remote_urls(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.fixture
 def _fake_record(monkeypatch: pytest.MonkeyPatch) -> None:
-    from shared import cluster
+    from base import cluster
 
     def _record(_home: object) -> cluster.ClusterRecord | None:
         from typing import cast
@@ -175,7 +175,7 @@ def test_stop_remote_warns_about_orphaned_local_instance(
     manual-teardown hint instead of silently leaving it (QA P2)."""
     from typing import cast
 
-    from shared import cluster
+    from base import cluster
 
     rec = cluster.ClusterRecord(
         ports=cast(

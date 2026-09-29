@@ -16,11 +16,11 @@ from typing import Any
 import httpx
 import pytest
 
+from base.config import settings
 from services.im_bridge import copy, push_watchdog
 from services.im_bridge import state as state_mod
 from services.im_bridge.core import IMBridgeCore
 from services.im_bridge.types import ChatState, IMAdapter, InboundMessage, Reply
-from shared.config import settings
 
 
 def _row(

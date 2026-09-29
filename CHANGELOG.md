@@ -3,11 +3,16 @@
 Notable changes, newest first. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Ava is pre-1.0; the
 per-release PR-level detail lives in the annotated release tags (`git tag -n99`)
-and the matching GitHub Releases, cut by `scripts/release_cut.py`.
+and the matching GitHub Releases, cut by `scripts/ci/release_cut.py`.
 
 ## [Unreleased]
 
 ### Changed
+- The bottom-layer package `shared` is now `base` (`base < ava < agent <
+  gateway < cli`), with no compatibility aliases: external plugins, schedules
+  and skills that import `shared.*` must import `base.*`. A three-file
+  `shared/` release-probe shell remains only so release preparation can cross
+  the rename (see `shared/__init__.py` for its retirement condition).
 - The internal database plane always authenticates, whatever
   `AVA_CLUSTER_SECRET` says: `pg_hba` admits only the OS-user administrator by
   peer on the owner-only socket and SCRAM application logins; PgBouncer always
@@ -18,7 +23,7 @@ and the matching GitHub Releases, cut by `scripts/release_cut.py`.
   mints write generation 0 (`ava_g0_gateway` / `ava_g0_runner`, inheriting the
   NOLOGIN groups `ava_gateway` / `ava_runner`); the root launcher delivers each
   service its class login. A home born earlier (no ledger) is refused, and no
-  conversion exists; `scripts/rotate_data_plane_secrets.py` now rotates Redis
+  conversion exists; `scripts/data_plane_ops/rotate_data_plane_secrets.py` now rotates Redis
   credentials only.
 
 ### Added

@@ -8,25 +8,25 @@ Naming: <SURFACE>_<WHAT>. Values are plain strings; f-string composition
 happens at the call site with copy constants as the template.
 """
 
-from shared.alerts_copy import (
+from base.telemetry.alerts_copy import (
     ALERT_HEAD as ALERT_HEAD,
 )
-from shared.alerts_copy import (
+from base.telemetry.alerts_copy import (
     ALERT_JUMP_LINK as ALERT_JUMP_LINK,
 )
-from shared.alerts_copy import (
+from base.telemetry.alerts_copy import (
     ALERT_LANGUAGE_DEFAULT as ALERT_LANGUAGE_DEFAULT,
 )
-from shared.alerts_copy import (
+from base.telemetry.alerts_copy import (
     ALERT_LANGUAGES as ALERT_LANGUAGES,
 )
-from shared.alerts_copy import (
+from base.telemetry.alerts_copy import (
     ALERT_TRIGGERED_AT as ALERT_TRIGGERED_AT,
 )
 
-# -- alert push (shared/alerts.py notifies through the IM bridge) -------------
-# The alert templates live in shared/alerts_copy.py (tech-audit P1, 2026-08-25:
-# shared.alerts must not import up into services) and are re-exported above so
+# -- alert push (base/telemetry/alerts.py notifies through the IM bridge) -------------
+# The alert templates live in base/telemetry/alerts_copy.py (tech-audit P1, 2026-08-25:
+# base.telemetry.alerts must not import up into services) and are re-exported above so
 # the IM bridge and its consumers keep one import path — the definitions are
 # never duplicated. `X as X` is the repo's re-export idiom: pyright treats the
 # alias form as a deliberate re-export (no unused-import finding).

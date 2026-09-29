@@ -3,7 +3,7 @@
 Three hard rules: all English, no impl-detail leak, no Markdown wrapping. This
 doc is the full spec: coverage scope, what counts as an impl-detail leak, the
 `help()` rendering model, and the per-section writing rules. Enforced by
-`scripts/lint_agent_docstrings.py` in pre-commit.
+`scripts/lint/agent_docstrings.py` in pre-commit.
 
 **Scope in one sentence**: any text the agent can see falls under this section.
 What the agent can't see, write however you want.
@@ -68,7 +68,7 @@ not in the docstring.
 
 Writing rules alone doesn't work; rely on mechanism:
 
-- `scripts/lint_agent_docstrings.py` runs in pre-commit — scans
+- `scripts/lint/agent_docstrings.py` runs in pre-commit — scans
   `ava/*.py` and `plugins/*/*.py` for module / public function /
   `register_namespace`-bound module / `register_system_prompt_section`-
   return-string-producer; matching CJK characters (`[\u4e00-\u9fff]`) or known impl-detail
@@ -123,7 +123,7 @@ Python surfaces, so they keep heading form rather than stub form).
    the mental model shared across children, the relationship with other modules (e.g. memory vs files
    division). **One line if one line suffices** — any extra sentence is noise.
    The zero-false-positive core (a child's name inside a backtick span) is
-   enforced by `lint_agent_docstrings`; prose use of a child's name as a plain
+   enforced by `agent_docstrings`; prose use of a child's name as a plain
    English word is fine.
 2. **Args / Returns / Raises sections are all optional** —
    - **Don't write types in the docstring** — the renderer injects from type hints into the signature;
@@ -169,6 +169,6 @@ Python surfaces, so they keep heading form rather than stub form).
      ("Raises must be written").
 7. **No SDK<->skill coupling** — an SDK docstring never references a skill;
    skill discovery belongs to the skills index section. `ava/skills.py` is the
-   one exempt module (enforced by `lint_agent_docstrings`).
+   one exempt module (enforced by `agent_docstrings`).
 
 Every other `ava/` module — framework code such as `ava/sdk_surface/wraps.py` or `ava/sdk_surface/plugin_loader.py`, whatever its name — is out of scope (audience is the framework or plugin authors, not the agent) and may keep the dev perspective.

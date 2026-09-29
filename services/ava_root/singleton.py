@@ -40,7 +40,7 @@ def acquire_instance_lock(run_dir: Path) -> int:
     run_dir.mkdir(parents=True, exist_ok=True)
     lock_path = run_dir / _LOCK_NAME
     if os.name == "nt":
-        from shared.root_control.windows.storage import acquire_lock
+        from base.native_process.root_control.windows.storage import acquire_lock
 
         try:
             return acquire_lock(lock_path)

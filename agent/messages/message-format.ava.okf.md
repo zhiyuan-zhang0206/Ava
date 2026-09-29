@@ -14,14 +14,14 @@ Message formats exchanged between agent, LLM, users, and other agents. `agent/me
 ## Message Types
 
 ### Inbound Messages (`inbound_message`)
-- `inbound_message(*, content, source, inbound_id, created_at=, image_urls=)` — envelope wrapper (product of `shared/agents/messages/envelope.py:wrap_inbound`)
+- `inbound_message(*, content, source, inbound_id, created_at=, image_urls=)` — envelope wrapper (product of `base/agents/messages/envelope.py:wrap_inbound`)
 - `source` is the original source string (`"system"` / `"agent:N"` / `"user"`), `ava_inbound_id` records the source row id for startup reconcile
 - `content` plain text or multimodal block list
 
 ### NoteTag Enum
 - Marks the source and nature of the message
 - Used by agent to distinguish user messages vs agent messages vs system notifications
-- canonical definition + `ava_msg_type` discriminator (`AvaMsgType`) + typed reading `read_ava_kwargs()` all in `shared/message_kwargs.py` (see [[messages.ava.okf.md]])
+- canonical definition + `ava_msg_type` discriminator (`AvaMsgType`) + typed reading `read_ava_kwargs()` all in `base/agents/messages/kwargs.py` (see [[messages.ava.okf.md]])
 
 ### System Messages (`system_note_message`)
 - Builds system notification messages such as heartbeats, watcher wake-up calls

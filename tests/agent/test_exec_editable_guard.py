@@ -11,10 +11,10 @@ from pathlib import Path
 
 import pytest
 
-from agent.graph import _exec_subprocess
-from agent.graph._exec_result import ExecChildError, _ExecCrashed, _ExecDone
-from agent.graph._exec_subprocess import _run_in_subprocess
-from shared import editable_install
+from agent.graph.exec import _subprocess
+from agent.graph.exec._result import ExecChildError, _ExecCrashed, _ExecDone
+from agent.graph.exec._subprocess import _run_in_subprocess
+from base.deploy.release import editable_install
 
 _AGENT_ID = 424242
 
@@ -127,23 +127,23 @@ def test_child_env_drops_foreign_virtual_env_but_preserves_its_own(
     monkeypatch.setattr(editable_install, "current_interpreter_source_root", lambda: source_root)
 
     monkeypatch.chdir(outside)
-    foreign_env = _exec_subprocess._build_child_env(None, tmp_path / "request", tmp_path / "result")
+    foreign_env = _subprocess._build_child_env(None, tmp_path / "request", tmp_path / "result")
 
     monkeypatch.chdir(inside)
-    own_env = _exec_subprocess._build_child_env(None, tmp_path / "request", tmp_path / "result")
+    own_env = _subprocess._build_child_env(None, tmp_path / "request", tmp_path / "result")
 
     monkeypatch.chdir(sibling_worktree)
-    sibling_env = _exec_subprocess._build_child_env(None, tmp_path / "request", tmp_path / "result")
+    sibling_env = _subprocess._build_child_env(None, tmp_path / "request", tmp_path / "result")
 
     monkeypatch.chdir(claude_sibling_worktree)
-    claude_sibling_env = _exec_subprocess._build_child_env(
+    claude_sibling_env = _subprocess._build_child_env(
         None,
         tmp_path / "request",
         tmp_path / "result",
     )
 
     monkeypatch.setattr(editable_install, "current_interpreter_source_root", lambda: None)
-    no_root_env = _exec_subprocess._build_child_env(None, tmp_path / "request", tmp_path / "result")
+    no_root_env = _subprocess._build_child_env(None, tmp_path / "request", tmp_path / "result")
 
     assert "VIRTUAL_ENV" not in foreign_env
     assert own_env["VIRTUAL_ENV"] == "/source/.venv"
@@ -156,10 +156,10 @@ def test_execute_code_child_cannot_read_manifest_certification_proof(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """Probe the exact env passed to model-executed Python, not a policy copy."""
-    from shared.env_registry import MANIFEST_CERTIFICATION_SECRET_ENV
+    from base.host.env.registry import MANIFEST_CERTIFICATION_SECRET_ENV
 
     monkeypatch.setenv(MANIFEST_CERTIFICATION_SECRET_ENV, "host-finalizer-proof")
-    env = _exec_subprocess._build_child_env(None, tmp_path / "request", tmp_path / "result")
+    env = _subprocess._build_child_env(None, tmp_path / "request", tmp_path / "result")
     assert MANIFEST_CERTIFICATION_SECRET_ENV not in env
 
 
@@ -167,7 +167,7 @@ def test_execute_code_child_boot_cannot_rematerialize_manifest_certification_pro
     tmp_path: Path,
 ) -> None:
     """A proof-free exec env stays proof-free after its real config boot reads `.env`."""
-    from shared.env_registry import MANIFEST_CERTIFICATION_SECRET_ENV
+    from base.host.env.registry import MANIFEST_CERTIFICATION_SECRET_ENV
 
     home = tmp_path / "home"
     home.mkdir()
@@ -176,7 +176,7 @@ def test_execute_code_child_boot_cannot_rematerialize_manifest_certification_pro
         f"{MANIFEST_CERTIFICATION_SECRET_ENV}={proof}\n",
         encoding="utf-8",
     )
-    env = _exec_subprocess._build_child_env(None, tmp_path / "request", tmp_path / "result")
+    env = _subprocess._build_child_env(None, tmp_path / "request", tmp_path / "result")
     env.update(
         {
             "AVA_HOME": str(home),
@@ -188,7 +188,7 @@ def test_execute_code_child_boot_cannot_rematerialize_manifest_certification_pro
         [
             sys.executable,
             "-c",
-            "import os; from shared.config import settings; "
+            "import os; from base.config import settings; "
             "settings.general.impersonation_event_manifest_certification_secret; "
             f"print(os.environ.get({MANIFEST_CERTIFICATION_SECRET_ENV!r}, ''))",
         ],

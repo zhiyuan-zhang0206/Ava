@@ -14,7 +14,7 @@ from datetime import datetime
 from pathlib import Path
 
 import ava
-from shared.paths import workspace_dir
+from base.paths import workspace_dir
 
 ORCH = ava.self.AGENT_ID
 HD = workspace_dir(ORCH) / "codebase_sweep_lite"
@@ -81,7 +81,7 @@ def launch_checkpoint(
 # ══════════════════════════════════════════════════════════════════
 
 W1_TARGETS = [
-    ("scout-shared", "shared/", "shared utilities, config, db layer"),
+    ("scout-base", "base/", "base library: utilities, config, db layer"),
     ("scout-ava", "ava/", "SDK namespace, agent runtime"),
     ("scout-agent", "agent/", "agent loop, graph, execution"),
 ]
@@ -261,7 +261,7 @@ def wave4():
         ),
         (
             "adversarial-missed",
-            "Scan shared/config.py and agent/loop.py to see what the scouts missed",
+            "Scan base/config.py and agent/loop.py to see what the scouts missed",
         ),
     ]:
         fname = f"w4_{role}.json"

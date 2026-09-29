@@ -1,4 +1,4 @@
-"""`scripts/lint_migrations.py` — timestamp-id + applied-set layout lint.
+"""`scripts/content_lint/lint_migrations.py` — timestamp-id + applied-set layout lint.
 
 Drives the on-disk checks against a tmp migrations/ + a stub db/schema.sql, so
 no test touches the real repo tree.
@@ -16,7 +16,7 @@ _BASELINE_INSERT = "INSERT INTO schema_migrations (name) VALUES ('00000000T00000
 def _lint(monkeypatch, tmp_path, *, schema_body: str = _BASELINE_INSERT):
     """Point the lint module at a tmp migrations/ + db/schema.sql; return
     (lint_module, migrations_dir)."""
-    lint = importlib.import_module("scripts.lint_migrations")
+    lint = importlib.import_module("scripts.content_lint.lint_migrations")
     migrations_dir = tmp_path / "migrations"
     migrations_dir.mkdir()
     monkeypatch.setattr(lint, "MIGRATIONS_DIR", migrations_dir)

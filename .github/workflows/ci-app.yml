@@ -11,7 +11,7 @@ on:
       - 'ui/app/**'
       - 'tests/ui/**'
       - 'tests/scripts/test_build_app_update_manifest.py'
-      - 'scripts/build_app_update_manifest.py'
+      - 'scripts/codegen/build_app_update_manifest.py'
       - '.github/workflows/ci-app.yml'
       - '.github/workflows/release-app.yml'
   pull_request:
@@ -19,7 +19,7 @@ on:
       - 'ui/app/**'
       - 'tests/ui/**'
       - 'tests/scripts/test_build_app_update_manifest.py'
-      - 'scripts/build_app_update_manifest.py'
+      - 'scripts/codegen/build_app_update_manifest.py'
       - '.github/workflows/ci-app.yml'
       - '.github/workflows/release-app.yml'
   workflow_dispatch:

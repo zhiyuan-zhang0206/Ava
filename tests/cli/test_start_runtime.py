@@ -17,20 +17,20 @@ from uuid import uuid4
 
 import pytest
 
-from cli import start_runtime
-from cli.commands import root_driver, start_generation
-from ops.service_spec import ServiceSpec
-from services.ava_root_glue import manifests
-from shared import runtime_interpreter
-from shared.runtime_abi import current_abi
-from shared.runtime_release import (
+from base.deploy.release import runtime_interpreter
+from base.deploy.release.runtime_release import (
     MANIFEST_VERSION,
     ReleaseRejectedError,
     VerifiedRelease,
     file_sha256,
     verify_release,
 )
-from shared.start_inputs import configuration_digest, require_configuration
+from base.deploy.release.start_inputs import configuration_digest, require_configuration
+from base.runtime_abi import current_abi
+from cli import start_runtime
+from cli.commands.lifecycle import root_driver, start_generation
+from ops.roster.service_spec import ServiceSpec
+from services.ava_root_glue import manifests
 
 
 @pytest.fixture
@@ -124,13 +124,13 @@ def test_migration_proof_uses_real_start_admission_before_setup(
     image: VerifiedRelease, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Source fixture tests the refusal boundary; the installed-wheel proof runs in CI."""
-    from scripts.prove_runtime_migration import prove_start_barrier
+    from scripts.release_proofs.prove_runtime_migration import prove_start_barrier
 
     runtime = _admit(image)
     home = image.root.parent.parent
     (home / "releases/current-release").unlink()
     (home / "start-intent.json").unlink()
-    monkeypatch.setattr("shared.paths.ava_home", lambda: home)
+    monkeypatch.setattr("base.paths.ava_home", lambda: home)
     prove_start_barrier(runtime)
 
 
@@ -159,6 +159,11 @@ def test_release_root_and_services_use_captured_isolated_direct_argv(
     )[0]
     assert unit["exec"] == list(image.module_argv("gateway"))
     assert runtime.cwd == image.cwd
+
+
+def test_loaded_runtime_package_is_the_checkout_it_was_imported_from() -> None:
+    """The import root is anchored on runtime_interpreter's own path inside the tree."""
+    assert runtime_interpreter.loaded_runtime()[2] == Path(__file__).resolve().parents[2]
 
 
 @pytest.mark.parametrize("mismatch", ["executable", "prefix", "package", "isolation"])
@@ -219,7 +224,7 @@ def test_development_cannot_bypass_a_dangling_release_selector(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from shared import runtime_interpreter
+    from base.deploy.release import runtime_interpreter
 
     monkeypatch.setattr(runtime_interpreter, "WHEEL_RUNTIME", False)
     (tmp_path / "releases").mkdir()
@@ -314,7 +319,7 @@ def test_release_cold_start_uses_same_storage_readiness_without_source_or_schema
     from cli.commands.data_plane import bringup
     from cli.commands.extensions import materialize
 
-    start = importlib.import_module("cli.commands.start")
+    start = importlib.import_module("cli.commands.lifecycle.start")
     runtime = _admit(image)
     calls: list[str] = []
 
@@ -395,11 +400,11 @@ def test_operation_preflight_checks_actual_roster_without_selection_or_effects(
     monkeypatch: pytest.MonkeyPatch,
     foreign_executable: bool,
 ) -> None:
+    from base.cluster import machine
     from cli.commands import _repo
     from cli.commands.data_plane import bringup
     from cli.release_transition import stage
     from ops import spec as ops_spec
-    from shared import machine
 
     home = image.root.parent.parent
     (image.root.parent / "current-release").unlink()
@@ -470,13 +475,14 @@ def test_operation_observation_requires_every_selected_service_ready(
     monkeypatch: pytest.MonkeyPatch,
     failed: str | None,
 ) -> None:
+    from base.cluster import machine
+    from base.cluster.machine import MachineRole
+    from base.host.system import boot_unit
+    from base.native_process.ownership import OwnedProcess
+    from base.native_process.root_control import client
     from cli.commands import _repo
     from cli.release_transition import authority, stage
     from ops import spec as ops_spec
-    from shared import machine, os_boot_unit
-    from shared.machine import MachineRole
-    from shared.native_process.ownership import OwnedProcess
-    from shared.root_control import client
 
     home = image.root.parent.parent
     # Same raw-env seam as above: stage.preflight_operation writes these directly to
@@ -492,7 +498,7 @@ def test_operation_observation_requires_every_selected_service_ready(
         for name in ("gateway", "delivery-watchdog")
     )
     root = OwnedProcess(1234, 5678.0, 90)
-    cgroup = f"/system.slice/{os_boot_unit.unit_name(home)}"
+    cgroup = f"/system.slice/{boot_unit.unit_name(home)}"
     observed: list[str] = []
 
     def operation(_path: Path) -> SimpleNamespace:
@@ -539,8 +545,8 @@ def test_operation_observation_requires_every_selected_service_ready(
     monkeypatch.setattr(root_driver, "admit_live_start", admitted)
     monkeypatch.setattr(root_driver, "wait_for_service_tree", readiness)
     monkeypatch.setattr(client, "root_process", lambda: root)
-    monkeypatch.setattr(os_boot_unit, "manager_properties", native_properties)
-    monkeypatch.setattr(os_boot_unit, "process_cgroup", process_group)
+    monkeypatch.setattr(boot_unit, "manager_properties", native_properties)
+    monkeypatch.setattr(boot_unit, "process_cgroup", process_group)
     # The write-generation check runs on real PostgreSQL in
     # tests/lifecycle/db_authority/test_release_fence.py; here only its place.
     monkeypatch.setattr(authority, "verify_active", _observing_generation(observed))
@@ -564,11 +570,11 @@ def test_release_run_start_checks_configuration_before_identity_and_settings(
     capsys: pytest.CaptureFixture[str],
     change_at: str,
 ) -> None:
+    from base.deploy.release.operation import authorized_start
     from cli import main, start_intent
     from cli.release_fleet.request import FleetRequest
     from cli.release_transition.journal import create
     from cli.release_transition.request import ReleaseRef
-    from shared.release_operation import authorized_start
 
     home = image.root.parent.parent
     runtime = _admit(image)

@@ -31,9 +31,9 @@ from typing import Any
 
 import psycopg
 
+from base.config import settings
+from base.db import fetch_one
 from ops.rpc_schemas import PageRow
-from shared.config import settings
-from shared.db import fetch_one
 
 _SELECT_COLUMNS = (
     "id, agent_id, name, port, host, title, serve_dir, created_at, closed_at, "

@@ -12,7 +12,7 @@ def make_fake_ops_pool() -> AsyncMock:
 
     Supports the SQL the graph nodes touch without a real DB — claim's
     pre-SELECT inbound batch + mark_agent_status, and node_lifecycle's
-    chat-anchor read (`agent/db.py:list_chat_inbound_anchors`). Tests that
+    chat-anchor read (`agent/db/__init__.py:list_chat_inbound_anchors`). Tests that
     need real rows back use the `aops_pool` fixture (real pool) instead.
     """
     cur = AsyncMock()

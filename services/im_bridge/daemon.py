@@ -20,13 +20,13 @@ import sys
 from contextlib import suppress
 from typing import Any
 
+from base.cluster.authority.api import token_digest
+from base.config import settings
+from base.daemon.health import Liveness, health_port, start_health_server, stop_health_server
+from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
+from base.daemon.shutdown import hard_exit as _hard_exit
+from base.log import init_gateway_process
 from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
-from shared.cluster.authority.api import token_digest
-from shared.config import settings
-from shared.daemon_health import Liveness, health_port, start_health_server, stop_health_server
-from shared.daemon_shutdown import cancel_and_drain, install_graceful_shutdown
-from shared.daemon_shutdown import hard_exit as _hard_exit
-from shared.log import init_gateway_process
 
 _log = logging.getLogger("services.im_bridge.daemon")
 
@@ -133,7 +133,7 @@ async def _handle_send(core: Any) -> Any:
     as Bearer (the health server's ``auth_digests``). Returns per-channel
     results; a channel that failed to send is reported, not fatal. When
     EVERY channel failed (or none is loaded) the route answers 502 instead
-    of 200 — the caller (shared/alerts.py) keys ``notified_at`` off the status
+    of 200 — the caller (base/telemetry/alerts.py) keys ``notified_at`` off the status
     code, and a fake 200 would stamp a message that never reached the user.
     """
 
@@ -149,7 +149,7 @@ async def _handle_send(core: Any) -> Any:
         delivered = any(v == "ok" for v in results.values())
         if not delivered:
             # Nothing reached the user — report failure so the caller does not
-            # treat the fan-out as delivered (shared/alerts.py keeps notified_at NULL
+            # treat the fan-out as delivered (base/telemetry/alerts.py keeps notified_at NULL
             # and retries on the next Grafana re-send).
             return 502, json.dumps({"results": results}).encode(), "application/json"
         return 200, json.dumps({"results": results}).encode(), "application/json"
@@ -169,7 +169,7 @@ async def run() -> None:
     # The notice bridge reads agent_notices directly (R3 door ④ — decoupled
     # from gateway availability, so a paused cluster cannot stall notice
     # delivery); the pool is created here and owned by the daemon.
-    import shared.db as _db
+    import base.db as _db
     from services.im_bridge.core import IMBridgeCore
 
     db_pool = _db.pool()

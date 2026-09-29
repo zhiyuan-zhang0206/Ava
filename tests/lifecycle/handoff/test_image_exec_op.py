@@ -18,14 +18,14 @@ import psutil
 import pytest
 from pydantic import ValidationError
 
-from ops import ops_cluster
-from ops.rpc_schemas import is_op_kind
-from services.agent_ops.dispatch_sync import dispatch_sync
-from shared.api_contracts.release_handoff import (
+from base.api_contracts.release_handoff import (
     HandoffRefusedError,
     ReleaseImageExecPayload,
     ReleaseImageRef,
 )
+from ops import cluster
+from ops.rpc_schemas import is_op_kind
+from services.agent_ops.dispatch_sync import dispatch_sync
 from tests.lifecycle.handoff.conftest import Store, entry_argv_tail
 
 pytestmark = pytest.mark.skipif(os.name == "nt", reason="the recording interpreter is POSIX")
@@ -34,8 +34,8 @@ pytestmark = pytest.mark.skipif(os.name == "nt", reason="the recording interpret
 @pytest.fixture
 def unit(store: Store, monkeypatch: pytest.MonkeyPatch) -> Store:
     """The ops daemon's view of this unit: its home and its machine name."""
-    monkeypatch.setattr(ops_cluster, "ava_home", lambda: store.home)
-    monkeypatch.setattr(ops_cluster, "machine_name", lambda: "unit-a")
+    monkeypatch.setattr(cluster, "ava_home", lambda: store.home)
+    monkeypatch.setattr(cluster, "machine_name", lambda: "unit-a")
     return store
 
 
@@ -82,7 +82,7 @@ def _run(store: Store, request: bytes, **kwargs: Any) -> dict[str, Any]:
         "image": ReleaseImageRef(**store.executor.model_dump()),
         "request": request,
     }
-    return ops_cluster.run_release_entry(**(arguments | kwargs))
+    return cluster.run_release_entry(**(arguments | kwargs))
 
 
 @pytest.mark.parametrize(

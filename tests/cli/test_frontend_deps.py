@@ -15,8 +15,8 @@ from pathlib import Path
 
 import pytest
 
+from base.native_process.os_platform import IS_WINDOWS
 from cli.commands import _repo
-from shared.platform import IS_WINDOWS
 
 
 def _make_repo(tmp_path: Path, lock_body: str, pkg_body: str = "{}") -> Path:
@@ -67,7 +67,7 @@ def test_npm_ci_injects_toolchain_path_from_a_minimal_non_login_shell(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """`ava start` must find npm without a shell profile adding Homebrew's bin."""
-    from shared import session_env
+    from base.sessions import env_forwarding
 
     repo = _make_repo(tmp_path, '{"lock": 1}')
     captured: dict[str, str] = {}
@@ -85,7 +85,7 @@ def test_npm_ci_injects_toolchain_path_from_a_minimal_non_login_shell(
         captured.update(env)
         (Path(cwd) / "node_modules").mkdir(exist_ok=True)
 
-    monkeypatch.setattr(session_env.os, "environ", {"PATH": "/usr/bin:/bin"})
+    monkeypatch.setattr(env_forwarding.os, "environ", {"PATH": "/usr/bin:/bin"})
     monkeypatch.setattr(_repo.subprocess, "run", _run)  # pyright: ignore[reportUnknownArgumentType]
 
     _repo._ensure_frontend_deps(repo)

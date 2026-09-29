@@ -16,7 +16,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from scripts import refresh_test_durations as refresh
+from scripts.ci import refresh_test_durations as refresh
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 

@@ -19,14 +19,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from base.deploy.maintenance.state import MaintenanceHold
+from base.deploy.release.runtime_release import VerifiedRelease, activate_release, current_pointer
+from base.runtime_abi import current_abi
 from cli.release_fleet.request import FleetRequest, UnitRequest
 from cli.release_transition.authority_evidence import GenerationRef
 from cli.release_transition.journal import Journal, Operation
 from cli.release_transition.native import helper_root
 from cli.release_transition.request import verify_pair
-from shared.maintenance_state import MaintenanceHold
-from shared.runtime_abi import current_abi
-from shared.runtime_release import VerifiedRelease, activate_release, current_pointer
 
 # Whatever is live after the cancel grace gets SIGKILL over its captured birth;
 # this bounds only the kernel observation of that kill.
@@ -50,9 +50,9 @@ class LocalTransition:
 
     def quiesce(self, operation: Operation) -> MaintenanceHold:
         """Drain local agents under the operation's hold; the drained hold is the cohort."""
+        from base.deploy.maintenance import admission
         from cli.release_transition.root_service import preflight
         from ops import agent_pause
-        from shared import maintenance
 
         self.preflight()
         preflight(operation, self.previous, previous=True)
@@ -68,23 +68,23 @@ class LocalTransition:
         holder, at = str(self.request.id), operation.maintenance_at
         agent_pause.prepare(holder, at)
         agent_pause.drain(holder, at, self.request.policy.drain_s, reap=True)
-        current = maintenance.require_operation(holder, at).maintenance
+        current = admission.require_operation(holder, at).maintenance
         if current is None:
             raise RuntimeError("release drain lost its maintenance cohort")
         return current
 
     def stop(self, operation: Operation) -> None:
-        from cli.commands import maintenance as maintenance_commands
-        from cli.commands import service_stop
-        from cli.commands.root_driver import require_root_absent
+        from base.deploy.maintenance import admission, pause_owner
+        from cli.commands.lifecycle import maintenance as maintenance_commands
+        from cli.commands.lifecycle import service_stop
+        from cli.commands.lifecycle.root_driver import require_root_absent
         from cli.release_transition import root_macos
         from ops import pty_close_notices
-        from shared import maintenance, pause_owner
 
         self.preflight()
         policy = self.request.policy
         holder, at = str(self.request.id), operation.maintenance_at
-        current = maintenance.require_operation(holder, at)
+        current = admission.require_operation(holder, at)
         hold = current.maintenance
         if hold is None:
             raise RuntimeError("release stop lost its maintenance cohort")
@@ -127,7 +127,7 @@ class LocalTransition:
 
     def fence(self, journal: Journal) -> None:
         """Revoke the direction's write generation once its root is gone."""
-        from cli.commands.root_driver import require_root_absent
+        from cli.commands.lifecycle.root_driver import require_root_absent
         from cli.release_transition import authority
 
         self.request.require_configuration()
@@ -136,7 +136,7 @@ class LocalTransition:
 
     def authorize(self, journal: Journal) -> None:
         """Admit a new write generation for the selected image before it starts."""
-        from cli.commands.root_driver import require_root_absent
+        from cli.commands.lifecycle.root_driver import require_root_absent
         from cli.release_transition import authority
 
         self.request.require_configuration()
@@ -151,8 +151,8 @@ class LocalTransition:
         return self.candidate if operation.reference == self.request.candidate else self.previous
 
     def select(self, operation: Operation) -> None:
-        from cli.commands.root_driver import require_root_absent
-        from cli.commands.service_stop import live_terminals
+        from cli.commands.lifecycle.root_driver import require_root_absent
+        from cli.commands.lifecycle.service_stop import live_terminals
 
         self.preflight()
         require_root_absent()
@@ -181,15 +181,15 @@ class LocalTransition:
     def start(self, journal: Journal) -> None:
         """Journal access lets the macOS owner record helper custody around its effect."""
         self.request.require_configuration()
-        from shared import maintenance
+        from base.deploy.maintenance import admission
 
         operation = journal.operation
         holder, at = str(self.request.id), operation.maintenance_at
-        current = maintenance.require_operation(holder, at)
+        current = admission.require_operation(holder, at)
         if current.maintenance is None:
             raise RuntimeError("release start lost its maintenance cohort")
         if current.maintenance.phase == "stopped":
-            maintenance.set_phase(holder, at, "starting")
+            admission.set_phase(holder, at, "starting")
         elif current.maintenance.phase not in {"starting", "ready"}:
             raise RuntimeError("release start requires completed writer closure")
         if helper_root(operation.launch):
@@ -210,14 +210,14 @@ class LocalTransition:
 
     def observe(self, operation: Operation) -> None:
         self.request.require_configuration()
-        from shared import maintenance
+        from base.deploy.maintenance import admission
 
         self.observe_root(operation)
         self.request.require_configuration()
         holder, at = str(self.request.id), operation.maintenance_at
-        current = maintenance.require_operation(holder, at)
+        current = admission.require_operation(holder, at)
         if current.maintenance is not None and current.maintenance.phase == "starting":
-            maintenance.set_phase(holder, at, "ready")
+            admission.set_phase(holder, at, "ready")
         if helper_root(operation.launch):
             from cli.release_transition.root_macos import restore_boot
         else:
@@ -226,8 +226,9 @@ class LocalTransition:
 
     def resume(self, operation: Operation) -> None:
         self.request.require_configuration()
-        from cli.commands import maintenance as maintenance_commands
-        from shared import maintenance, pause_owner, start_serving
+        from base.deploy.lifecycle import start_serving
+        from base.deploy.maintenance import admission, pause_owner
+        from cli.commands.lifecycle import maintenance as maintenance_commands
 
         # An executor may have died after recording this phase. A durable
         # serving marker or an earlier observation cannot admit work now.
@@ -242,7 +243,7 @@ class LocalTransition:
             and start_serving.is_serving()
         ):
             return
-        maintenance.require_operation(holder, at)
+        admission.require_operation(holder, at)
         maintenance_commands.resume(holder, at, cancel=False)
 
     def restore(self, journal: Journal) -> None:
@@ -252,8 +253,8 @@ class LocalTransition:
         cancelled; otherwise the stop completes, the previous root starts,
         is observed and resumes, all under the same hold.
         """
-        from cli.commands import maintenance as maintenance_commands
-        from shared import pause_owner
+        from base.deploy.maintenance import pause_owner
+        from cli.commands.lifecycle import maintenance as maintenance_commands
 
         operation = journal.operation
         holder, at = str(self.request.id), operation.maintenance_at

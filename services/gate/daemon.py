@@ -42,9 +42,9 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from shared.config import settings
-from shared.log import logger
-from shared.paths import ava_home
+from base.config import settings
+from base.log import logger
+from base.paths import ava_home
 
 _log = logging.getLogger("services.gate")
 
@@ -353,7 +353,7 @@ def _gateway_base() -> str:
     own reachable address is equivalent to loopback and keeps one origin
     everywhere, mirroring how remote agent-runners dial the gateway.
     """
-    from shared.machine import reachable_host
+    from base.cluster.machine import reachable_host
 
     host = reachable_host()
     if ":" in host and not host.startswith("["):
@@ -367,8 +367,8 @@ def main() -> None:
     parser.add_argument("--static-dir", type=Path, default=None, help="static pages directory")
     args = parser.parse_args()
 
-    from shared.daemon_shutdown import install_graceful_shutdown
-    from shared.log import init_gateway_process
+    from base.daemon.shutdown import install_graceful_shutdown
+    from base.log import init_gateway_process
 
     init_gateway_process("gate")
     # Root sends SIGTERM and waits for this captured process tree to exit.

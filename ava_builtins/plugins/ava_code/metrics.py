@@ -1,6 +1,6 @@
 """ava_code Grafana metrics — registered at import time.
 
-``shared/metrics/grafana_dashboard_supply`` imports this module (inside a
+``base/telemetry/metrics/grafana_dashboard_supply`` imports this module (inside a
 PluginContext) to collect the registrations below for the rendered Ava Ops
 dashboard (``ava lgtm render``, task #3697); the plugin name comes from the
 context. Query templates target the unified event stream in Loki
@@ -19,7 +19,7 @@ unaggregated count_over_time hits Loki's per-query series cap.
 
 Data provenance: ``syntax_fix`` events carry a ``fixes`` attribute (comma
 list, e.g. ``"ruff_format"``) and are written with ``category='telemetry'`` —
-``syntax_fix`` is in ``shared/telemetry/emitter.py``'s telemetry event set
+``syntax_fix`` is in ``base/telemetry/emitter.py``'s telemetry event set
 (event_name-category final convention, 2026-08-05, tracker #762), so
 ``category_for_kind`` maps it to ``telemetry`` (90d retention). The category
 predicate keeps the ``|log`` alternative for pre-convention rows (the core
@@ -27,8 +27,8 @@ panels' pattern); the pre-convention PG rows were backfilled by the
 accompanying migration, Loki rows keep their emit-time category.
 """
 
-from shared.metrics.metrics_logql import CATEGORY_WITH_LEGACY_LOG, event_count
-from shared.plugin_metrics import MetricSpec, register_metric
+from base.telemetry.metrics.logql import CATEGORY_WITH_LEGACY_LOG, event_count
+from base.telemetry.metrics.plugin_metrics import MetricSpec, register_metric
 
 register_metric(
     MetricSpec(

@@ -18,9 +18,9 @@ from psycopg_pool import AsyncConnectionPool
 
 from agent.db import has_pending_interrupt, pending_interrupt_reason
 from agent.graph.interrupt import subscribe_interrupt
-from shared.agents.messages.inbound import InterruptReason
-from shared.db import create_agent
-from shared.machine import machine_name
+from base.agents.messages.inbound import InterruptReason
+from base.cluster.machine import machine_name
+from base.db import create_agent
 
 # The watcher polls on a 2s cadence; the initial SELECT is immediate. Generous
 # windows vs flake; the poll-interval tests are serial (flaky-marked) because
@@ -464,8 +464,8 @@ async def test_auto_compaction_cancels_at_llm_node_without_replacing_context(
 
     from agent.graph.llm.node import llm_node
     from agent.state import AgentState, CompactState
-    from shared.context import AvaContext
-    from shared.lm.context_budget import ContextBudget
+    from base.agents.context import AvaContext
+    from base.lm.context_budget import ContextBudget
 
     tid = create_agent(db_conn)
     monkeypatch.setattr("agent.graph.interrupt._INTERRUPT_POLL_S", 0.01)
@@ -568,8 +568,8 @@ async def test_compaction_returns_through_claim_then_generates_before_compacting
     from agent.graph.llm.node import llm_node
     from agent.hooks.compact import _compact_reminder, auto_compact_will_fire
     from agent.state import AgentState, checkpoint_msgpack_allowlist
-    from shared.context import AvaContext
-    from shared.lm.context_budget import ContextBudget
+    from base.agents.context import AvaContext
+    from base.lm.context_budget import ContextBudget
     from tests.conftest import spawn_agent
 
     def small_budget(_model: str) -> ContextBudget:

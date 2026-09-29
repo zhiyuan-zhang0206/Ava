@@ -16,9 +16,9 @@ from typing import Any
 import httpx
 import pytest
 
+from base.config import settings
 from services.im_bridge.adapters import weixin
 from services.im_bridge.adapters.weixin import WeixinAdapter, _outbound_message
-from shared.config import settings
 
 _ACCOUNT = {
     "account_id": "acct-1",

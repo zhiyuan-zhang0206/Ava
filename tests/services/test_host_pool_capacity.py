@@ -17,8 +17,8 @@ from psycopg.conninfo import conninfo_to_dict
 from psycopg.rows import DictRow, dict_row
 from psycopg_pool import AsyncConnectionPool
 
+from base.config import settings
 from services.agent_host.pools import build_control_pool, build_shared_pool
-from shared.config import settings
 from tests._containers import postgres
 from tests.cli.test_pgbouncer_wire import (
     _admin_console_url,

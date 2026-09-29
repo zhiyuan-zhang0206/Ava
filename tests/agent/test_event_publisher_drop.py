@@ -13,7 +13,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from shared.event_publisher import AgentEventPublisher
+from base.events.live.publisher import AgentEventPublisher
 
 
 def _publisher(maxsize: int = 2) -> AgentEventPublisher:
@@ -30,7 +30,7 @@ def test_queue_full_emit_reports_sse_drop_event(monkeypatch: pytest.MonkeyPatch)
     warns: list[dict] = []
     fake_logger = MagicMock()
     fake_logger.warning.side_effect = lambda _msg, **kw: warns.append(kw)  # pyright: ignore[reportUnknownMemberType]
-    monkeypatch.setattr("shared.event_publisher.logger", fake_logger)
+    monkeypatch.setattr("base.events.live.publisher.logger", fake_logger)
 
     pub = _publisher(maxsize=2)
     pub.emit("one")
@@ -62,7 +62,7 @@ def test_publish_error_emit_reports_sse_drop_event(monkeypatch: pytest.MonkeyPat
     warns: list[dict] = []
     fake_logger = MagicMock()
     fake_logger.warning.side_effect = lambda _msg, **kw: warns.append(kw)  # pyright: ignore[reportUnknownMemberType]
-    monkeypatch.setattr("shared.event_publisher.logger", fake_logger)
+    monkeypatch.setattr("base.events.live.publisher.logger", fake_logger)
 
     pub = _publisher()
     pub._note_drop("publish_error", detail="ConnectionError('boom')")

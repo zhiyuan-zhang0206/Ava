@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
+from base.cluster import port_preflight
 from cli.commands.data_plane import pgbouncer as pgbouncer
-from shared import port_preflight
 
 _SECRET = "s3cr3t"  # noqa: S105 — test fixture, not a real credential
 

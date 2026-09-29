@@ -15,9 +15,9 @@ import json
 import sys
 from pathlib import Path
 
-from shared.metrics.core import core_metrics
-from shared.plugin_context import PluginContext
-from shared.plugin_metrics import (
+from base.packages.plugins.context import PluginContext
+from base.telemetry.metrics.core import catalog
+from base.telemetry.metrics.plugin_metrics import (
     MetricSpec,
     clear_registry,
     registered_metrics,
@@ -47,10 +47,10 @@ def _load_all() -> None:
 
 def _load_core() -> list[MetricSpec]:
     """Register the complete core metric set from fresh definition modules."""
-    core_metrics.clear_core_registry()
-    for module_name in core_metrics._CORE_DEFINITION_MODULES:
+    catalog.clear_core_registry()
+    for module_name in catalog._CORE_DEFINITION_MODULES:
         sys.modules.pop(module_name, None)
-    return core_metrics.collect_core_metrics()
+    return catalog.collect_core_metrics()
 
 
 def test_shipped_plugin_metrics_are_logql() -> None:
@@ -230,7 +230,7 @@ def test_unresolved_gauge_names_match_the_otlp_contract() -> None:
     net trio (task #1935): each gauge is registered, dispositioned, and
     wired into the dashboard JSON with the same name."""
 
-    from shared.telemetry.otlp.telemetry_otlp import _METRIC_DISPOSITION, _strip_unit_suffix
+    from base.telemetry.otlp.telemetry_otlp import _METRIC_DISPOSITION, _strip_unit_suffix
 
     specs = {spec.name: spec for spec in _load_core()}
     for field, name in (
@@ -253,7 +253,7 @@ def test_agent_max_id_gauge_names_match_the_otlp_contract() -> None:
     appends — the dashboard must query that exact name, and the growth-rate
     panel derives from it (``deriv(...[1h]) * 86400``, agents per day)."""
 
-    from shared.telemetry.otlp.telemetry_otlp import _METRIC_DISPOSITION, _strip_unit_suffix
+    from base.telemetry.otlp.telemetry_otlp import _METRIC_DISPOSITION, _strip_unit_suffix
 
     specs = {spec.name: spec for spec in _load_core()}
     assert _METRIC_DISPOSITION[("agent_registry", "max_id")] == "gauge"
@@ -282,7 +282,7 @@ def test_pr_flow_panels_match_the_otlp_contract() -> None:
     carries the joinByField transformation.
     """
 
-    from shared.telemetry.otlp.telemetry_otlp import _METRIC_DISPOSITION, _strip_unit_suffix
+    from base.telemetry.otlp.telemetry_otlp import _METRIC_DISPOSITION, _strip_unit_suffix
 
     specs = {spec.name: spec for spec in _load_core()}
     path = _REPO_ROOT / "deploy/lgtm/config/grafana/provisioning/dashboards/ava-ops-main.json"
