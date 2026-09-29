@@ -334,7 +334,7 @@ class PluginMetricResult(BaseModel):
     """One plugin metric rendered for the inspector surface — an element of
     GET /api/agents/{id}/inspect/metrics.
 
-    Mirrors the registered MetricSpec (see `shared/plugin_metrics.py`):
+    Mirrors the registered MetricSpec (see `shared/telemetry/metrics/plugin_metrics.py`):
     `panel` selects the payload — `timeseries` / `barchart` / `table` metrics
     carry `series` (a bounded recent window, 24h in 1h buckets by default, so
     at most a couple of dozen points), `stat` metrics carry `value` (the

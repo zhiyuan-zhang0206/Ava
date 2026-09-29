@@ -21,9 +21,9 @@ from psycopg_pool import ConnectionPool
 from gateway.agents import forward
 from gateway.cluster.schemas import MachinePauseRequest, MachinePauseResponse, MachineResumeResponse
 from ops.lifecycle import _force_mark_terminated
-from shared import machines
+from shared.cluster import machines
+from shared.cluster.machine import machine_name
 from shared.db_transaction import write_transaction
-from shared.machine import machine_name
 from shared.tasks.task_notes import task_note_line
 
 router = APIRouter()
@@ -122,7 +122,7 @@ def _resolve_machine_alerts_blocking(pool: ConnectionPool, name: str) -> None:
     the whole pause window. Mirrors the liveness pass's recovery edge
     (`services.heartbeat.liveness._machine_alert_edges`) so each persisted
     instance keeps its original fingerprint convention."""
-    from shared.alerts import AlertKey, stamp_notified, upsert_alert
+    from shared.telemetry.alerts import AlertKey, stamp_notified, upsert_alert
 
     identity_labels = {"alertname": "machine offline", "machine": name}
     with pool.connection() as conn:

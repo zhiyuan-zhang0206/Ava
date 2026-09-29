@@ -39,7 +39,7 @@ from services.ava_root.manifest import (
     UnknownUnitError,
 )
 from services.ava_root.windows.process import ApplicationProcess
-from shared.env_registry import (
+from shared.host.env.registry import (
     MANIFEST_CERTIFICATION_FINALIZER_ENV,
     MANIFEST_CERTIFICATION_SECRET_ENV,
     manifest_certification_secret_env,

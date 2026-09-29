@@ -11,7 +11,7 @@ tags:
 # Process Supervision
 
 `shared/posixproc.py`, `shared/winproc.py`, `shared/session_backend.py`,
-`shared/daemon_shutdown.py`, `shared/daemon_health.py`,
+`shared/daemon/shutdown.py`, `shared/daemon/health.py`,
 `shared/start_serving.py`: services, orchestration sessions and agent
 processes are **native** sessions; agent shells run on per-session **PTY
 hosts** ([[shared/sessions/pty/pty_sessions.ava.okf.md]]); Windows uses

@@ -50,7 +50,7 @@ from ops.rpc_schemas import (
     BillingResurrectAgentResponse,
     BillingResurrectResponse,
 )
-from shared.machine import machine_name
+from shared.cluster.machine import machine_name
 
 _log = logging.getLogger(__name__)
 
@@ -173,7 +173,7 @@ def _provider_key() -> str | None:
     ``tests/shared/test_gateway_consumer_guard.py::_FALLBACK_CONSUMED_READS``.
     """
     from shared.config import field_alias, settings
-    from shared.runtime_config import read_env_aliases
+    from shared.host.env.runtime_config import read_env_aliases
 
     key = settings.lm.deepseek_api_key
     if key is not None:
@@ -190,8 +190,8 @@ def fetch_provider_balance() -> BillingBalanceReport:
     keys). Any transport, HTTP, or payload surprise returns ``ok=False`` with
     the reason; the run refuses rather than acting on an unverified account.
     """
-    from shared import http_dial
     from shared.config import settings
+    from shared.host.net import http_dial
 
     threshold = float(settings.daemon.billing_recovery_min_balance)
     url = settings.daemon.billing_recovery_balance_url
@@ -404,7 +404,7 @@ def _record_run_event(
     balance: BillingBalanceReport, outcomes: list[BillingResurrectAgentOutcome]
 ) -> None:
     from shared import telemetry
-    from shared.audit_events import insert_event_log
+    from shared.telemetry.audit_events import insert_event_log
 
     resurrected = [o.agent_id for o in outcomes if o.status == "resurrected"]
     refused = [o.agent_id for o in outcomes if o.status == "refused"]

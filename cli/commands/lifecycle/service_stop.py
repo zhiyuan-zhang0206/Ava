@@ -39,7 +39,7 @@ from cli.commands.lifecycle._maintenance_stop_report import (
     occupied_groups,
 )
 from ops import pty_close_notices
-from shared.machine import machine_name
+from shared.cluster.machine import machine_name
 from shared.native_process.ownership import OwnedProcess, capture_tree, retain_processes
 from shared.paths import run_dir
 from shared.session_backend import get_shell_backend

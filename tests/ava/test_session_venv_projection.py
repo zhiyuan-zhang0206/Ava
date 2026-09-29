@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 from ava.shell import sessions
-from shared import bootstrap, dotenv_boot
+from shared.host.env import bootstrap, dotenv_boot
 
 
 class _CapturingBackend:

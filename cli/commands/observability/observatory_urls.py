@@ -129,7 +129,7 @@ def _alerts_webhook_url() -> str:
     from the gateway host can hit VPN hairpin filtering (pgbouncer probe incident), which is
     exactly why the loopback form is kept when no remote observatory is set.
     """
-    from shared.machine import reachable_host
+    from shared.cluster.machine import reachable_host
 
     port = settings.gateway.gateway_port
     if settings.observability.observability_url:

@@ -10,7 +10,7 @@ import pytest
 
 from services.ava_root_glue.diagnostic_probes import pgbouncer
 from shared.cluster.registry import ClusterRecord
-from shared.daemon_health import DaemonProbe
+from shared.daemon.health import DaemonProbe
 
 
 @pytest.mark.parametrize(

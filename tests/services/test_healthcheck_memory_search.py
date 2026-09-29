@@ -15,7 +15,7 @@ from __future__ import annotations
 import pytest
 
 from services.healthchecks import memory_search as hc
-from shared.daemon_health import DaemonProbe
+from shared.daemon.health import DaemonProbe
 
 
 def test_probe_up_when_search_answers_with_paths(monkeypatch: pytest.MonkeyPatch) -> None:

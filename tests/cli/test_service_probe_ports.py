@@ -11,7 +11,7 @@ import pytest
 
 import cli.commands._repo as repo
 import ops.roster as spec_mod  # build_services + health_port live here; repo re-exports the roster
-import shared.daemon_health as dh
+import shared.daemon.health as dh
 
 
 def _spec_by_session(specs, session: str):

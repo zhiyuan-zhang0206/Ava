@@ -13,7 +13,7 @@ from pathlib import Path
 
 from cli.start_runtime import StartRuntime
 from shared import start_inputs
-from shared.env_registry import launch_input_keys
+from shared.host.env.registry import launch_input_keys
 from shared.runtime_interpreter import source_digest
 
 

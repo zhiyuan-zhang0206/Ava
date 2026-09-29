@@ -40,10 +40,10 @@ from services.memory_indexer.backends.milvus import (
 )
 from services.memory_indexer.embeddings import factory, gemini
 from services.memory_indexer.embeddings.base import EmbeddingAPIError
-from shared import daemon_health
 from shared.config import settings
-from shared.daemon_health import Liveness
-from shared.resilience import MAX_RETRY_AFTER_RESPECT_S, ExponentialBackoff
+from shared.daemon import health
+from shared.daemon.health import Liveness
+from shared.host.net.resilience import MAX_RETRY_AFTER_RESPECT_S, ExponentialBackoff
 
 _DIM = 8
 _FP = "test:gemini:dim=8"
@@ -606,7 +606,7 @@ def test_process_paths_beats_per_embed_batch(
 ) -> None:
     """Every batch gets its own beat, even when their total exceeds the ceiling."""
     now = 0.0
-    monkeypatch.setattr(daemon_health, "time", SimpleNamespace(monotonic=lambda: now))
+    monkeypatch.setattr(health, "time", SimpleNamespace(monotonic=lambda: now))
     liveness = Liveness(daemon._liveness_timeout_s())
     batch_duration = 100.0
     monkeypatch.setattr(daemon, "_BATCH_SIZE", 2)
@@ -640,7 +640,7 @@ def test_process_paths_beats_during_commit(
 ) -> None:
     """The final embed, cleanup and upsert cannot share a beat-free interval."""
     now = 0.0
-    monkeypatch.setattr(daemon_health, "time", SimpleNamespace(monotonic=lambda: now))
+    monkeypatch.setattr(health, "time", SimpleNamespace(monotonic=lambda: now))
     liveness = Liveness(daemon._liveness_timeout_s())
     durations = {"delete_stale_rows": 5.0, "upsert_many": 300.0}
 
@@ -678,7 +678,7 @@ def test_process_paths_beats_during_commit(
 def test_process_paths_beats_per_delete(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """A delete-only drain batch may exceed the ceiling while each delete is timely."""
     now = 0.0
-    monkeypatch.setattr(daemon_health, "time", SimpleNamespace(monotonic=lambda: now))
+    monkeypatch.setattr(health, "time", SimpleNamespace(monotonic=lambda: now))
     liveness = Liveness(daemon._liveness_timeout_s())
 
     def spend(op: str) -> None:
@@ -1385,10 +1385,10 @@ async def test_run_unknown_provider_fails_before_health_server(
 ) -> None:
     from unittest.mock import AsyncMock
 
-    health = AsyncMock()
+    start_health_server = AsyncMock()
     monkeypatch.setattr(daemon, "_is_running", lambda: False)
     monkeypatch.setattr(daemon, "_write_pidfile", lambda: None)
-    monkeypatch.setattr(daemon, "start_health_server", health)
+    monkeypatch.setattr(daemon, "start_health_server", start_health_server)
     monkeypatch.setattr(settings.services, "embedding_backend", "unknown-provider")
 
     with pytest.raises(SystemExit) as exc:
@@ -1396,7 +1396,7 @@ async def test_run_unknown_provider_fails_before_health_server(
 
     assert exc.value.code == 1
     assert "FATAL: unknown embedding provider 'unknown-provider'" in capsys.readouterr().err
-    health.assert_not_awaited()
+    start_health_server.assert_not_awaited()
 
 
 async def test_run_arms_retry_when_startup_reconcile_incomplete(

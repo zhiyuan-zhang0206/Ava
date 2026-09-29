@@ -8,7 +8,7 @@ from typing import NamedTuple
 from starlette.requests import Request
 
 from gateway.auth.request_principal import cluster_credential
-from shared.cluster_auth import verify_bearer
+from shared.cluster.auth import verify_bearer
 from shared.config import settings
 
 

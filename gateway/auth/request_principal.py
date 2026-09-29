@@ -47,8 +47,8 @@ def cluster_credential(authorization: str | None, secret: str) -> str | None:
     authenticate the one cluster administrator; the fact only records which
     credential did. A blank `secret` never verifies as the human bearer.
     """
+    from shared.cluster.auth import verify_bearer
     from shared.cluster.authority.api import acceptance, bearer_class
-    from shared.cluster_auth import verify_bearer
     from shared.paths import ava_home
 
     if verify_bearer(authorization, secret):

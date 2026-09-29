@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import cast
 from urllib.parse import urlsplit
 
-from shared.port_block import LEGACY_AVA_PORTS
+from shared.host.env.port_block import LEGACY_AVA_PORTS
 
 
 def _env_port_block(env_vals: dict[str, str | None]) -> dict[str, int]:
@@ -33,7 +33,7 @@ def _env_port_block(env_vals: dict[str, str | None]) -> dict[str, int]:
         if not url:
             continue
         try:
-            from shared.netutil import is_loopback_host
+            from shared.host.net.predicates import is_loopback_host
 
             parts = urlsplit(url)
             host = parts.hostname or ""
@@ -113,7 +113,7 @@ def require_anchored_home(verb: str) -> int | None:
     port validation; stop must remain available to finish exact cleanup after
     a failed initialization or a recorded destroy intent.
     """
-    from shared.dotenv_boot import resolve_ava_home
+    from shared.host.env.dotenv_boot import resolve_ava_home
 
     home, anchored = resolve_ava_home()
     if anchored:
@@ -133,7 +133,7 @@ def require_anchored_home(verb: str) -> int | None:
 
 def unit_already_stopped() -> bool:
     """Allow an idempotent cold stop without fetching the offline gateway."""
-    from shared.dotenv_boot import resolve_ava_home
+    from shared.host.env.dotenv_boot import resolve_ava_home
     from shared.pause_owner import read_for_home
 
     home, anchored = resolve_ava_home()

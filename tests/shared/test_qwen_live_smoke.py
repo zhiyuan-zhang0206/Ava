@@ -65,7 +65,7 @@ reachable from the public default endpoint, so point the run at it with
 
 **Why not gate on `DASHSCOPE_API_KEY` itself** — the obvious design, and it is a
 trap that yields a test nobody can ever run. Two independent mechanisms close it:
-`DASHSCOPE_API_KEY` is a cluster-scope alias, so `shared/dotenv_boot.py`'s
+`DASHSCOPE_API_KEY` is a cluster-scope alias, so `shared/host/env/dotenv_boot.py`'s
 env-authority pass DELETES it from `os.environ` at import unless this unit's own
 `.env` declares it; and the suite runs under a throwaway `$AVA_HOME` with no
 `.env` at all, so no provider key ever reaches `settings.lm.*` in tests. A gate

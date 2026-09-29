@@ -13,8 +13,8 @@ from typing import Any
 import psycopg
 import pytest
 
-from shared import observability, telemetry
-from shared.telemetry import Event
+from shared import telemetry
+from shared.telemetry import Event, observability
 from shared.telemetry.otlp import telemetry_otlp
 
 _AGENT = 8902
@@ -605,7 +605,7 @@ def test_production_identity_requires_registered_machine_and_production_cluster(
     cluster: str,
     expected: bool,
 ) -> None:
-    from shared import machine
+    from shared.cluster import machine
 
     if machine_registered:
         monkeypatch.setattr(machine, "machine_name", lambda: "registered-runner")
@@ -649,8 +649,8 @@ def test_gateway_export_gate_requires_lgtm_marker_or_explicit_endpoint(
     home.mkdir()
     if marker:
         (home / "lgtm-host").touch()
-    monkeypatch.setattr("shared.machine.machine_role", lambda: frozenset({"gateway"}))
-    monkeypatch.setattr("shared.machine.machine_name", lambda: "macmini")
+    monkeypatch.setattr("shared.cluster.machine.machine_role", lambda: frozenset({"gateway"}))
+    monkeypatch.setattr("shared.cluster.machine.machine_name", lambda: "macmini")
     monkeypatch.setattr("shared.paths.ava_home", lambda: home)
     monkeypatch.setattr("shared.config.settings.observability.telemetry_otlp_enabled", True)
     if endpoint_override:
@@ -676,8 +676,8 @@ def test_registered_production_identity_with_lgtm_marker_enables_export(
     home = tmp_path / ".ava"
     home.mkdir()
     (home / "lgtm-host").touch()
-    monkeypatch.setattr("shared.machine.machine_name", lambda: "macmini")
-    monkeypatch.setattr("shared.machine.machine_role", lambda: frozenset({"gateway"}))
+    monkeypatch.setattr("shared.cluster.machine.machine_name", lambda: "macmini")
+    monkeypatch.setattr("shared.cluster.machine.machine_role", lambda: frozenset({"gateway"}))
     monkeypatch.setattr("shared.paths.ava_home", lambda: home)
     monkeypatch.setattr(telemetry_otlp, "production_identity", observability.production_identity)
     monkeypatch.delitem(os.environ, "AVA_TELEMETRY_OTLP_ENDPOINT", raising=False)
@@ -701,8 +701,8 @@ def test_pure_runner_export_relay_is_not_gated(
 ) -> None:
     home = tmp_path / ".ava"
     home.mkdir()
-    monkeypatch.setattr("shared.machine.machine_role", lambda: frozenset({"agent-runner"}))
-    monkeypatch.setattr("shared.machine.machine_name", lambda: "macmini")
+    monkeypatch.setattr("shared.cluster.machine.machine_role", lambda: frozenset({"agent-runner"}))
+    monkeypatch.setattr("shared.cluster.machine.machine_name", lambda: "macmini")
     monkeypatch.setattr("shared.paths.ava_home", lambda: home)
     monkeypatch.delitem(os.environ, "AVA_TELEMETRY_OTLP_ENDPOINT", raising=False)
     monkeypatch.setattr("shared.config.settings.observability.telemetry_otlp_enabled", True)
@@ -715,7 +715,7 @@ def test_pure_runner_export_relay_is_not_gated(
 def test_unconfigured_machine_role_does_not_disable_export(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, exception_name: str
 ) -> None:
-    from shared import machine
+    from shared.cluster import machine
 
     exception_type = getattr(machine, exception_name)
 

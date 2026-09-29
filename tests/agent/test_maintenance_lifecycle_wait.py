@@ -22,9 +22,9 @@ from agent.ownership.hosted import admit_hosted_runtime, settle_hosted_runtime
 from ops import agent_pause
 from ops.agent_pause.probe import HostIdentity
 from shared import maintenance, maintenance_cohort, pause_owner, telemetry
+from shared.cluster.machine import machine_name
 from shared.config import settings
 from shared.db import insert_inbound_message
-from shared.machine import machine_name
 from shared.maintenance_state import MaintenanceHold
 from tests.agent.test_maintenance import WHEN, _agent
 from tests.agent.test_maintenance import isolate as isolate

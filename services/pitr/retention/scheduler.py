@@ -43,7 +43,7 @@ from services.pitr.retention.policy import LogicalRetention
 from services.pitr.stores.factory import get_store_group
 from shared import telemetry
 from shared.config.physical_backup import PhysicalBackupSettings
-from shared.health_schema import DEGRADED, OK, component
+from shared.daemon.health_schema import DEGRADED, OK, component
 from shared.paths import ava_home
 
 _log = logging.getLogger("services.pitr.retention.scheduler")
@@ -121,7 +121,7 @@ def _logical_retention() -> LogicalRetention:
 
 def _read_carrier(alias: str) -> str | None:
     """Fresh raw value of one carrier key from the unit `.env`, or None."""
-    from shared import runtime_config
+    from shared.host.env import runtime_config
 
     return runtime_config.read_env_aliases().get(alias)
 

@@ -309,7 +309,7 @@ def test_ws_connect_kwargs_defer_to_the_machine_proxy(
     import websockets
 
     from services.im_bridge.adapters import feishu_ws_proxy
-    from shared.env_registry import NETWORK_PROXY_KEYS
+    from shared.host.env.registry import NETWORK_PROXY_KEYS
 
     for key in NETWORK_PROXY_KEYS:
         monkeypatch.delenv(key, raising=False)

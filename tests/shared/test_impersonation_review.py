@@ -17,8 +17,8 @@ from shared.agents import impersonation as leases
 from shared.agents.impersonation import impersonation_history as history
 from shared.agents.impersonation import impersonation_sessions as sessions
 from shared.agents.messages.chat_delivery import insert_chat_inbound_once
+from shared.cluster.machine import machine_name
 from shared.db import create_agent
-from shared.machine import machine_name
 from shared.runtime_incarnation import RuntimeIncarnation
 from tests.impersonation_support import attested_caller, recorded_tree
 
@@ -95,7 +95,7 @@ def peer_events(
                 }
             )
 
-    monkeypatch.setattr("shared.audit_events.telemetry.emit_prepared", capture)
+    monkeypatch.setattr("shared.telemetry.audit_events.telemetry.emit_prepared", capture)
     recipient = create_agent(db_conn)
     incoming_sender = create_agent(db_conn)
     db_conn.commit()

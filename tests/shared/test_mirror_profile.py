@@ -2,7 +2,7 @@
 
 An operator exports `scripts/mirrors/NAME.env` into the shell that acquires
 dependencies; a unit's existing `$AVA_HOME/mirror.env` is what
-`shared.dotenv_boot.load_ava_env` loads after `.env`. These tests pin two things
+`shared.host.env.dotenv_boot.load_ava_env` loads after `.env`. These tests pin two things
 the design leans on: the `cn` profile carries the
 package-manager index/registry vars, and a mirror var loaded from the file never
 overrides one already in the real environment (precedence: env > .env > mirror.env).
@@ -65,7 +65,7 @@ def test_unit_boot_preserves_single_index_precedence_across_aliases(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, source_layer: str, higher_key: str
 ) -> None:
     from cli._python_index import python_index
-    from shared import dotenv_boot
+    from shared.host.env import dotenv_boot
 
     lower_key = "UV_DEFAULT_INDEX" if higher_key == "UV_INDEX_URL" else "UV_INDEX_URL"
     unit = tmp_path / ".env"

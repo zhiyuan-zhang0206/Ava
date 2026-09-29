@@ -32,7 +32,6 @@ import shared.db
 from shared import telemetry
 from shared.agents import ForkCheckpointNotFound
 from shared.agents.impersonation_manifest import stage_central_expected_event
-from shared.audit_events import prepare_event_log
 from shared.birth_config import resolve_birth_config
 from shared.db import announce_spawn_prompt, fetch_one, insert_spawn_prompt_in_transaction
 from shared.db_transaction import write_transaction
@@ -40,6 +39,7 @@ from shared.labels import spawn_prompt_with_label
 from shared.live_announce import publish_agent_spawned_sync
 from shared.lm.registry import normalize_overlay_llm_model
 from shared.log import logger
+from shared.telemetry.audit_events import prepare_event_log
 
 
 def latest_checkpoint_id(cur: psycopg.Cursor, agent_id: int) -> str | None:

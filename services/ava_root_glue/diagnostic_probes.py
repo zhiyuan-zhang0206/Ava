@@ -16,10 +16,10 @@ from urllib.parse import urlsplit
 
 from services.ava_root_glue.diagnostics import Diagnostic
 from shared.config import settings
-from shared.daemon_health import DaemonProbe
+from shared.daemon.health import DaemonProbe
 from shared.native_process.ownership import OwnedProcess
 from shared.platform import IS_MACOS, IS_WINDOWS
-from shared.station_endpoint import StationTarget
+from shared.telemetry.station_endpoint import StationTarget
 
 
 def brew_pins() -> DaemonProbe:
@@ -191,7 +191,7 @@ class StationProbe:
 
 def lgtm_write_path() -> DaemonProbe:
     from services.healthchecks import lgtm, owned_service
-    from shared.lgtm_local import backend_urls
+    from shared.telemetry.lgtm_local import backend_urls
 
     port = urlsplit(backend_urls()["loki"]).port
     if port is None:
@@ -248,7 +248,7 @@ def helper_report(result: DaemonProbe) -> None:
 
 def build_diagnostics(requested: set[str]) -> list[Diagnostic]:
     """Host policy is explicit; absent capabilities do not create fake samples."""
-    from shared.machine import is_gateway
+    from shared.cluster.machine import is_gateway
 
     checks: list[Diagnostic] = []
     if IS_MACOS:

@@ -14,7 +14,7 @@ import pytest
 from ops.roster.service_spec import _AGENT_RUNNER, _BOTH, _GATEWAY, ServiceSpec
 from services.ava_root.manifest import ManifestError, load_manifests
 from services.ava_root_glue import manifests as gen
-from shared.machine import MachineRole
+from shared.cluster.machine import MachineRole
 
 _REPO = Path("/checkout/repo")
 
@@ -23,7 +23,7 @@ _REPO = Path("/checkout/repo")
 def _declared_configuration(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Give the real roster private configuration, without a native backend install."""
     from ops import roster
-    from shared.lgtm_local import BACKENDS, service_input_paths
+    from shared.telemetry.lgtm_local import BACKENDS, service_input_paths
 
     monkeypatch.setattr(roster, "ava_home", lambda: tmp_path)
     collector = tmp_path / "collector.yaml"

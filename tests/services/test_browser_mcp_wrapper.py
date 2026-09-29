@@ -14,8 +14,8 @@ import pytest
 
 from services.browser.mcp_socket_bridge import NotDeliveredError
 from services.browser.mcp_wrapper import _Link, _ReconnectingLink
-from shared import resilience
 from shared.config import settings
+from shared.host.net import resilience
 
 # ---------------------------------------------------------------------------
 # Fake stream helpers

@@ -203,7 +203,7 @@ def test_macos_bootstrap_failure_and_repeated_unregister(
 
 
 def _passing_credentials(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    monkeypatch.setattr("shared.observability.production_identity", lambda: True)
+    monkeypatch.setattr("shared.telemetry.observability.production_identity", lambda: True)
     monkeypatch.setattr(job.shutil, "which", _which_gh)
     token = tmp_path / ".trunk" / "api-token"
     token.parent.mkdir(parents=True, exist_ok=True)
@@ -213,10 +213,10 @@ def _passing_credentials(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Non
 def test_credential_blocker_names_each_missing_piece(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    monkeypatch.setattr("shared.observability.production_identity", lambda: False)
+    monkeypatch.setattr("shared.telemetry.observability.production_identity", lambda: False)
     assert job.credential_blocker() == "not the registered production home"
 
-    monkeypatch.setattr("shared.observability.production_identity", lambda: True)
+    monkeypatch.setattr("shared.telemetry.observability.production_identity", lambda: True)
     monkeypatch.setattr(job.shutil, "which", _which_missing)
     assert job.credential_blocker() == "gh CLI not on PATH"
 
@@ -249,7 +249,7 @@ def test_register_skips_without_credentials(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     monkeypatch.setattr(os_cron, "os_jobs_enabled", lambda: True)
-    monkeypatch.setattr("shared.observability.production_identity", lambda: True)
+    monkeypatch.setattr("shared.telemetry.observability.production_identity", lambda: True)
     monkeypatch.setattr(job.shutil, "which", _which_missing)  # no gh
 
     def no_backend():

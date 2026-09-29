@@ -14,7 +14,7 @@ the current os.environ exactly as the pre-profile singleton did.
 Lives in its own module (not shared/config/__init__.py) for the repo's
 line-budget discipline; it imports the config package lazily because
 `shared.config` builds on top of this module's primitives — the same lazy
-pattern as `shared/runtime_config.py`.
+pattern as `shared/host/env/runtime_config.py`.
 """
 
 from __future__ import annotations
@@ -88,8 +88,8 @@ def _serve_reachable_data_plane_hosts(out: dict[str, str]) -> None:
     # Resolved through the config module (not data_plane directly) so tests
     # can monkeypatch shared.config._self_machine_host, as they always have.
     from shared.config import _self_machine_host
-    from shared.netutil import is_loopback_host
-    from shared.url_secret import url_with_host
+    from shared.host.net.predicates import is_loopback_host
+    from shared.host.net.url_secret import url_with_host
 
     reachable = _self_machine_host()
     if is_loopback_host(reachable):
@@ -139,8 +139,8 @@ def current_field_values() -> dict[str, Any]:
     signals which process that is.
     """
 
-    from shared import runtime_config
     from shared.config import _FIELDS, field_alias
+    from shared.host.env import runtime_config
 
     aliases = runtime_config.read_env_aliases()
     out: dict[str, Any] = {}
@@ -295,8 +295,8 @@ def bootstrap_config_values() -> dict[str, str]:
     """
     from pydantic import SecretStr
 
-    from shared import runtime_config
     from shared.config import BOOTSTRAP_FIELDS, field_alias
+    from shared.host.env import runtime_config
 
     aliases = runtime_config.read_env_aliases()
     out: dict[str, str] = {}
@@ -334,8 +334,8 @@ def served_db_endpoint(aliases: dict[str, str] | None = None) -> str:
     A local plane's `.env` already holds the credential-free endpoint; a
     remote-managed plane's provider URL loses its password here. Raises when
     the gateway's fresh config snapshot has no `AVA_DB_URL`."""
-    from shared import runtime_config
     from shared.cluster.authority.unit import credential_free
+    from shared.host.env import runtime_config
 
     if aliases is None:
         aliases = runtime_config.read_env_aliases()
@@ -350,7 +350,7 @@ def served_db_endpoint(aliases: dict[str, str] | None = None) -> str:
 def _gateway_otlp_projection(aliases: dict[str, str]) -> str:
     """Publish this gateway's ingress without distributing its local listener settings."""
     from shared.config import _self_machine_host
-    from shared.url_secret import url_with_host
+    from shared.host.net.url_secret import url_with_host
 
     port = int(
         aliases.get("AVA_TELEMETRY_OTLP_PORT", str(_service_field_value("telemetry_otlp_port")))

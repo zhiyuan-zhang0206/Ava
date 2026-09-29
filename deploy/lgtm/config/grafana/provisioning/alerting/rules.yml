@@ -46,7 +46,7 @@
 # operator's SRE loop".
 #
 # Index-label selectors (task #1467): since the 2026-08-23 cutover
-# (shared/loki_index_labels.py, INDEX_LABEL_CUTOVER_AT) the collector promotes
+# (shared/telemetry/loki_index_labels.py, INDEX_LABEL_CUTOVER_AT) the collector promotes
 # event_name/agent_id to stream labels, so event-scoped rules match them
 # inside the stream selector (`{service_name="unknown_service", event_name=...}`)
 # and keep `| json` only for the level/category/attributes filters (those
@@ -2777,7 +2777,7 @@ groups:
       # so it stays true for 15m after the last failure and then resolves. One
       # episode = one firing IM + one resolved IM, the same dedup semantics the
       # siblings get from their `for` window (alerts are deduped on
-      # fingerprint x starts_at by shared/alerts.py, not on `for`).
+      # fingerprint x starts_at by shared/telemetry/alerts.py, not on `for`).
       #
       # `billing` is emitted by shared/lm/errors.py from its cross-provider
       # predicate (HTTP 402, plus a

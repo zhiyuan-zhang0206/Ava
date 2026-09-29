@@ -18,7 +18,7 @@ from services.permissions_helper.launchd_job import (
     parse_job_state,
     read_helper_job,
 )
-from shared.daemon_health import DaemonProbe
+from shared.daemon.health import DaemonProbe
 from shared.native_process.ownership import OwnedProcess
 from shared.paths import permissions_helper_socket
 from shared.platform import IS_MACOS

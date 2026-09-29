@@ -26,10 +26,10 @@ from services.browser.session import (
     inject_session_cookie,
     last_injected_cookie,
 )
-from shared.cluster_auth import client_bearer
+from shared.cluster.auth import client_bearer
+from shared.cluster.machine import gateway_api_base
 from shared.config import settings
 from shared.log import logger
-from shared.machine import gateway_api_base
 
 # Gateway session cookie refresh: the default server-side lifetime is 24h;
 # refreshing every 6h leaves a comfortable margin and self-heals a lost,

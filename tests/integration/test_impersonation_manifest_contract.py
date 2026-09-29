@@ -33,13 +33,13 @@ from shared.agents.impersonation_manifest import (
     stage_central_expected_event,
     unbind_local_participant,
 )
-from shared.audit_events import prepare_event_log
 from shared.caller_identity import CallerIdentity
+from shared.cluster.machine import machine_name
 from shared.config import settings
 from shared.db import create_agent
-from shared.machine import machine_name
 from shared.runtime_incarnation import RuntimeIncarnation
 from shared.telemetry import Event
+from shared.telemetry.audit_events import prepare_event_log
 from tests.impersonation_support import attested_caller, recorded_tree
 from tests.shared import test_impersonation_history as history_cases
 
@@ -650,7 +650,7 @@ def test_cli_impersonate_send_outbox_retry_certifies_exactly_once(
     def gateway_down(*_args: Any, **_kwargs: Any) -> Any:
         raise httpx.ConnectError("gateway unavailable")
 
-    monkeypatch.setattr("shared.http_dial.post", gateway_down)
+    monkeypatch.setattr("shared.host.net.http_dial.post", gateway_down)
     args = argparse.Namespace(
         agent_id=owner.agent_id,
         session_id=0,

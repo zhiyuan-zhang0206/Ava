@@ -99,7 +99,7 @@ def _commands_enabled() -> bool:
     """
     if settings.has_domain("agent"):
         return settings.agent.commands_enabled
-    from shared.runtime_config import read_env_aliases
+    from shared.host.env.runtime_config import read_env_aliases
 
     value = read_env_aliases().get("AVA_COMMANDS_ENABLED")
     if value is None:

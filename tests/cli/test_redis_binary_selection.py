@@ -154,7 +154,7 @@ def test_local_config_write_only_changes_target_home(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     from cli.commands.management import config as config_cli
-    from shared import runtime_config
+    from shared.host.env import runtime_config
 
     selected = _tools(tmp_path / "bin", "selected-8")
     target = _home(tmp_path / "gateway", None)

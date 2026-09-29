@@ -199,7 +199,7 @@ def test_ping_alive_short_circuits_to_healthy() -> None:
 
 
 def test_reporting_is_episode_gated_without_repair(recorder: _Recorder) -> None:
-    from shared.daemon_health import DaemonProbe
+    from shared.daemon.health import DaemonProbe
 
     bad = DaemonProbe.down("lwcr-stuck; needs LWCR update")
     hc.report(bad)

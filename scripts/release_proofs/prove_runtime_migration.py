@@ -21,8 +21,8 @@ import psycopg
 from cli.commands.lifecycle.start import cmd_start
 from cli.start_runtime import StartRuntime
 from shared import home_lifecycle_locks
+from shared.cluster.machine import machine_name
 from shared.config import settings
-from shared.machine import machine_name
 from shared.migrations import (
     MIGRATIONS_DIR,
     MigrationAuthorityMismatch,

@@ -3,7 +3,7 @@
 The single place the registry is BUILT: walking the per-domain sub-model
 classes (class metadata only — no Settings instantiation, so `dotenv_boot`,
 which runs before Settings exists, can consume the registry's projections
-through `shared/env_registry.py` without a timing dependency).
+through `shared/host/env/registry.py` without a timing dependency).
 
 It lives OUTSIDE the `shared.config` package on purpose: importing any
 `shared.config.*` submodule executes `shared/config/__init__.py`, which normally
@@ -11,7 +11,7 @@ constructs the Settings singleton (reads env / fetches from the gateway). The
 settings-lite `AVA_CONFIG_FETCH=skip` mode defers that construction, and the
 registry must stay importable before either path has a current value. The
 sub-model class imports are therefore deferred into the build (first use), so
-importing this module or `shared/env_registry.py` never touches the package —
+importing this module or `shared/host/env/registry.py` never touches the package —
 the build completes against a partially-initialized `shared.config` when one is
 already in flight (for example, the standalone `load_ava_env()` boot path), and
 the double build that results is idempotent.
@@ -21,17 +21,17 @@ declared exactly once —
 
 - a Settings field: declare the field + its `json_schema_extra` metadata on the
   owning sub-model (`shared/config/<domain>.py`); the build picks it up and
-  every projection in `shared/env_registry.py` updates automatically (the "env
+  every projection in `shared/host/env/registry.py` updates automatically (the "env
   allowlist six-gap" class becomes structurally impossible — a new
   cluster-scoped field is force/dropped by the env-authority pass, forwarded to
   sessions, and distributed via /api/bootstrap without a single hand-written
   set edit);
 - a non-Settings key (DISPLAY, Windows system keys, the overlay/birth JSON
-  carriers, ...): add one passthrough row in `shared/env_registry.py`.
+  carriers, ...): add one passthrough row in `shared/host/env/registry.py`.
 
 The authority for which projection a key lands in is the **consumption matrix**
 (which process kind actually reads the key — declared per projection in
-`shared/env_registry.py`); `capability` / `scope` metadata is validation, not
+`shared/host/env/registry.py`); `capability` / `scope` metadata is validation, not
 the derivation axis (deriving process env sets from capability was the
 2026-08-06 #1570 P0).
 
@@ -63,7 +63,7 @@ class _FieldInfoLike(Protocol):
 
 # The capability a config field configures — the top-level config-panel section.
 # `gateway` / `agent-runner` mirror the `MachineRole` capability tokens
-# (`shared.machine`); `common` is the third bucket for config owned by neither
+# (`shared.cluster.machine`); `common` is the third bucket for config owned by neither
 # single capability (cluster-wide policy, or the host/carrier identity both
 # capabilities on a box share). DISPLAY grouping only — orthogonal to `scope`,
 # which alone drives distribution + write routing.

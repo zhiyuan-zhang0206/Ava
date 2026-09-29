@@ -1,4 +1,4 @@
-"""Tests for shared/bootstrap.py: fetch config from the gateway (unauthenticated)."""
+"""Tests for shared/host/env/bootstrap.py: fetch config from the gateway (unauthenticated)."""
 
 import os
 from pathlib import Path
@@ -10,7 +10,9 @@ import pytest
 from fastapi.testclient import TestClient
 
 from gateway.app import app
-from shared import bootstrap, config, resilience
+from shared import config
+from shared.host.env import bootstrap
+from shared.host.net import resilience
 
 
 def test_fetch_bootstrap_config_against_live_endpoint(
@@ -20,14 +22,14 @@ def test_fetch_bootstrap_config_against_live_endpoint(
 ) -> None:
     # An authenticated gateway: the runner presents its delivered machine API
     # token (the active generation's runner token), never the human secret.
-    from shared import runtime_config as rt
+    from shared.host.env import runtime_config as rt
 
     monkeypatch.setattr(config.settings.data_plane, "cluster_secret", "live-secret")
     monkeypatch.setattr("shared.paths.ava_home", rt._ava_home)
     monkeypatch.setitem(os.environ, "AVA_API_TOKEN", served_gateway_home.api.runner)
     monkeypatch.delitem(os.environ, "AVA_CLUSTER_SECRET")
 
-    # Route shared.bootstrap's dial_get (shared.http_dial.get) through the
+    # Route shared.host.env.bootstrap's dial_get (shared.host.net.http_dial.get) through the
     # in-process ASGI app.
     def fake_get(url, **kw):
         with TestClient(app) as c:
@@ -69,7 +71,7 @@ def test_fetch_bootstrap_config_against_live_endpoint(
     assert "test-cluster-secret" not in "".join(values.values())
 
 
-# NOTE: shared/bootstrap.py reads os.environ directly (it must run BEFORE
+# NOTE: shared/host/env/bootstrap.py reads os.environ directly (it must run BEFORE
 # Settings is built — Settings imports require these values to be present).
 # So tests against it use monkeypatch.setitem(os.environ, ...) — equivalent to
 # setenv, but bypasses the no_os_environ Rule 2 ban on monkeypatch.setenv

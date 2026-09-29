@@ -197,7 +197,7 @@ value is validated as a CSS color literal.
 
 ### Already automatic — completed by this design, not new machinery
 
-- **Metrics**: `shared/plugin_metrics.py` already defines the two-tier
+- **Metrics**: `shared/telemetry/metrics/plugin_metrics.py` already defines the two-tier
   core/plugin metric architecture with an `inspector` output surface reserved
   for per-agent panels under `/api/agents/{id}/inspect/metrics`
   (`get_agent_plugin_metrics` exists). Finishing that reserved surface is part
@@ -358,7 +358,7 @@ composer/plugin extension point.
   the trigger to design that field.
 - **U4 — agent-inspect sections**: generic markdown/kv/table renderers over
   proxied `source` endpoints + the `page` variant; plus finishing the reserved
-  `inspector` surface of `shared/plugin_metrics.py`.
+  `inspector` surface of `shared/telemetry/metrics/plugin_metrics.py`.
 
   **U4a — inspector widgets (shipped, task #2909)** — the one inspector
   surface a declaration cannot carry: per-agent interactive targets. A plugin

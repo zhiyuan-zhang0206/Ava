@@ -26,7 +26,7 @@ def _subprocess_env(*, gateway_home: Path) -> dict[str, str]:
     - `env_identity_keys()` (serve flags / name / gateway-url /
       memory-remote) — else the child inherits this host's identity.
     """
-    from shared.env_registry import derived_env_keys, env_identity_keys
+    from shared.host.env.registry import derived_env_keys, env_identity_keys
 
     stripped = derived_env_keys() | env_identity_keys()
     env = {k: v for k, v in os.environ.items() if k not in stripped}

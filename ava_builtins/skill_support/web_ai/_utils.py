@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from ava_builtins.skill_support.web_ai._sites import site
-from shared.dotenv_boot import resolve_ava_home
+from shared.host.env.dotenv_boot import resolve_ava_home
 
 
 def _new_idle_state() -> dict[str, Any]:
@@ -80,7 +80,7 @@ def _cluster() -> str:
     stripped (path-only identity; `~/.ava` -> 'ava', `~/.ava-t1' -> 'ava-t1'),
     resolved without importing settings (no DB touch).
 
-    Resolves `$AVA_HOME` via `shared.dotenv_boot.resolve_ava_home` — the same
+    Resolves `$AVA_HOME` via `shared.host.env.dotenv_boot.resolve_ava_home` — the same
     checkout-anchored resolution every other Ava process uses, still without
     touching `Settings` — rather than guessing `~/.ava` when the env var is
     unset (2026-09-28, PR #3550's P2 follow-up)."""

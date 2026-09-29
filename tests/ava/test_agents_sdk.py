@@ -34,7 +34,7 @@ def _spawn_agent() -> int:
     row is created by create_agent_row; nothing launches, these tests only need
     the row to exist)."""
     from ops.agents.spawn import create_agent_row
-    from shared.machine import machine_name
+    from shared.cluster.machine import machine_name
 
     agent_id, _, _prompt_id, _attempt_id = create_agent_row(machine=machine_name())
     return agent_id
@@ -53,8 +53,8 @@ def _sdk_via_inprocess_gateway(monkeypatch: pytest.MonkeyPatch):
     from gateway.app import app
     from ops.lifecycle import launch_agent_op, lifecycle_op
     from ops.rpc_schemas import LaunchAgentRequest, SpawnedAgent
-    from shared import machines as _machines
-    from shared.machine import machine_name
+    from shared.cluster import machines as _machines
+    from shared.cluster.machine import machine_name
 
     # POST /api/agents always forwards the launch to a runner's ops server over
     # HTTP, even for the co-located box. There is no live ops server in-process,
@@ -160,7 +160,7 @@ class TestSpawn:
 
     def test_spawn_defaults_machine_to_local(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """When machine omitted, SDK defaults to local machine (ava.self.MACHINE_SPEC), gateway receives explicit target, no longer falls back to gateway's own machine."""
-        from shared.machine import machine_name
+        from shared.cluster.machine import machine_name
 
         captured: dict[str, Any] = {}
 

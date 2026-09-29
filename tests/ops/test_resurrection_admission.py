@@ -22,10 +22,10 @@ from ops.cluster_rpc import ClusterOpFailed, ClusterOpUnreachable
 from ops.lifecycle import termination
 from shared import maintenance_cohort, pause_owner
 from shared.agents import AgentStatus, ResurrectError, ResurrectRefused
+from shared.cluster.machine import machine_name
 from shared.config import settings
 from shared.db import PG_KEEPALIVE_KWARGS, insert_inbound_message
 from shared.incarnation_resources import IncarnationResources, ResourceBirth, decode_resources
-from shared.machine import machine_name
 from shared.predecessor_closure import ClosureEvidence, close_retired_predecessor
 from shared.runtime_incarnation import RuntimeIncarnation
 from shared.straggler_reap import settle_stranded_reaps

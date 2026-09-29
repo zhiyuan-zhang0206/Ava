@@ -43,10 +43,9 @@ from pathlib import Path
 from ops.roster.service_spec import (
     ServiceSpec as ServiceSpec,  # re-export: generated plugin fixtures
 )
+from shared.cluster.machine import MachineRoles
 from shared.config import settings
 from shared.log import logger
-from shared.machine import MachineRoles
-from shared.observability import collector_allowed_for_home, gateway_observability_home
 from shared.platform import IS_WINDOWS
 from shared.platform_probes import (
     browser_incapability,
@@ -54,6 +53,7 @@ from shared.platform_probes import (
     permissions_helper_incapability,
     unix_sockets_available,
 )
+from shared.telemetry.observability import collector_allowed_for_home, gateway_observability_home
 
 
 def _bind_runtime_command(spec: ServiceSpec) -> ServiceSpec:

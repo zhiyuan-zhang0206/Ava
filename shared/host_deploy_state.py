@@ -24,7 +24,7 @@ this module's row.
 
 Layering: `shared` must not import `cli`/`gateway`, and this module is read by
 the gateway middleware, maintenance and the deploy-window signal — the machine
-identity comes from `shared.machine`, the DB from `shared.db`.
+identity comes from `shared.cluster.machine`, the DB from `shared.db`.
 """
 
 from __future__ import annotations
@@ -35,8 +35,8 @@ from dataclasses import dataclass
 from typing import Any
 
 import shared.db
+from shared.cluster.machine import machine_name
 from shared.db_transaction import write_transaction
-from shared.machine import machine_name
 
 POSTURE_IDLE = "idle"
 POSTURE_PAUSED = "paused"

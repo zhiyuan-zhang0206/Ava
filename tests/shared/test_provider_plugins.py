@@ -605,12 +605,12 @@ def test_plugin_model_validation_and_key_check(
     provider_plugin()
     ensure_provider_plugins_loaded()
 
-    monkeypatch.setattr("shared.runtime_config.read_env_aliases", dict)
+    monkeypatch.setattr("shared.host.env.runtime_config.read_env_aliases", dict)
     with pytest.raises(ValueError, match="TESTP_API_KEY"):
         validate_model_config(model="testp-1")
 
     monkeypatch.setattr(
-        "shared.runtime_config.read_env_aliases",
+        "shared.host.env.runtime_config.read_env_aliases",
         lambda: {"TESTP_API_KEY": "sk-test"},
     )
     assert validate_model_config(model="testp-1") == "testp-1"

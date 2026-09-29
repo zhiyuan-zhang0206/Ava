@@ -112,7 +112,7 @@ def test_webhook_uses_local_bind_or_reachable_gateway(
     monkeypatch.setattr(settings.observability, "observability_url", observatory)
     monkeypatch.setattr(settings.gateway, "gateway_url", gateway_url)
     monkeypatch.setattr(settings.gateway, "gateway_port", port)
-    monkeypatch.setattr("shared.machine.reachable_host", lambda: "10.0.0.10")
+    monkeypatch.setattr("shared.cluster.machine.reachable_host", lambda: "10.0.0.10")
     assert observatory_urls._alerts_webhook_url() == expected
 
 

@@ -18,9 +18,9 @@ from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 from pydantic import BaseModel
 
+from shared.cluster.machine import machine_name
 from shared.db import connect
 from shared.db_transaction import write_transaction
-from shared.machine import machine_name
 from shared.paths import workspace_dir
 from shared.private_storage import write_private_bytes
 

@@ -710,7 +710,7 @@ def _insert_skill_events(agent: int, skills: list[Skill]) -> bool:
     if not skills:
         return True
     try:
-        from shared.audit_events import SkillInvokedPayload, insert_event_log_many
+        from shared.telemetry.audit_events import SkillInvokedPayload, insert_event_log_many
 
         insert_event_log_many(
             event_type="skill_invoked",

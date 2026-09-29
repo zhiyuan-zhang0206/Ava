@@ -773,7 +773,7 @@ def _env_apply_fixture(
         activation_config, "_auto_conf_entries", lambda _home: [("archive_mode", "on")]
     )
     monkeypatch.setattr(activation_config, "_alter", lambda _name, _value: None)
-    monkeypatch.setattr("shared.runtime_config.env_file_path", lambda: tmp_path / ".env")
+    monkeypatch.setattr("shared.host.env.runtime_config.env_file_path", lambda: tmp_path / ".env")
     if not valid_pitr_baseline:
         monkeypatch.setattr(
             "shared.config.candidate.validate_env_patch_for_write",
@@ -829,10 +829,10 @@ def test_env_apply_provisions_only_when_all_four_absent(
 def test_env_apply_resumes_after_provisioning_crash(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, after_write: bool
 ) -> None:
-    from shared import envfile
+    from shared.host.env import dotenv_file
 
     record = _env_apply_fixture(monkeypatch, tmp_path, "OTHER=kept\n")
-    original = envfile.replace_env_bytes_cas
+    original = dotenv_file.replace_env_bytes_cas
 
     def interrupted(
         path: Path,
@@ -852,7 +852,7 @@ def test_env_apply_resumes_after_provisioning_crash(
             )
         raise RuntimeError("crash during env write")
 
-    monkeypatch.setattr(envfile, "replace_env_bytes_cas", interrupted)
+    monkeypatch.setattr(dotenv_file, "replace_env_bytes_cas", interrupted)
     with pytest.raises(RuntimeError, match="crash during env write"):
         activation_config.apply_wal_config(tmp_path, record, {"archive_mode": "on"})
     durable = load_record(tmp_path)
@@ -860,7 +860,7 @@ def test_env_apply_resumes_after_provisioning_crash(
     assert durable.config_apply_intent["kind"] == "env"
     payload = (tmp_path / ".env").read_bytes()
     assert pitr_env_is_desired(payload) if after_write else payload == b"OTHER=kept\n"
-    monkeypatch.setattr(envfile, "replace_env_bytes_cas", original)
+    monkeypatch.setattr(dotenv_file, "replace_env_bytes_cas", original)
     replacement = activation_config.apply_wal_config(tmp_path, durable, {"archive_mode": "on"})
     assert replacement.phase == "wal_restart_pending"
     assert pitr_env_is_desired((tmp_path / ".env").read_bytes())
@@ -894,7 +894,7 @@ def test_env_apply_provisioning_round_trips_real_env_bytes(
         "OTHER=kept\n",
         valid_pitr_baseline=True,
     )
-    monkeypatch.setattr("shared.runtime_config.env_file_path", lambda: tmp_path / ".env")
+    monkeypatch.setattr("shared.host.env.runtime_config.env_file_path", lambda: tmp_path / ".env")
     replacement = activation_config.apply_wal_config(tmp_path, record, {"archive_mode": "on"})
     assert replacement.phase == "wal_restart_pending"
     payload = (tmp_path / ".env").read_text()

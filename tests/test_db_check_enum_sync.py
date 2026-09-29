@@ -29,9 +29,9 @@ import pytest
 
 from shared.agents import AgentStatus, TerminationSource
 from shared.agents.messages.inbound import InboundKind
+from shared.cluster.machine import MachineRole
 from shared.extension_registry import ExtensionKind
 from shared.install_registry import TrustTier
-from shared.machine import MachineRole
 from shared.tasks.task_status import TaskStatus
 
 # Strip `-- ...` line comments first: the CHECK value lists carry inline comments

@@ -354,7 +354,7 @@ def _handlers(
     facts: Facts, inputs: Inputs, host: Host, journal: dict[str, Any]
 ) -> dict[str, Handler]:
     """One idempotent handler per effect kind the planner emits."""
-    from shared.envfile import remove_env, upsert_env
+    from shared.host.env.dotenv_file import remove_env, upsert_env
 
     home = facts.home
     jobs = home / ARCHIVE / "os-jobs"

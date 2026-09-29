@@ -72,7 +72,9 @@ def test_non_node_target_names_the_file_and_the_remedy(tmp_path, monkeypatch, ca
     decision = tmp_path / "decisions/2026-07-29-some-decision.md"
     decision.parent.mkdir(parents=True)
     decision.write_text("# Why\n", encoding="utf-8")
-    _node(tmp_path, "shared/machine.ava.okf.md", f"Liveness is the live probe ([[{target}]]).")
+    _node(
+        tmp_path, "shared/cluster/machine.ava.okf.md", f"Liveness is the live probe ([[{target}]])."
+    )
 
     code, out = _lint_tmp(tmp_path, monkeypatch, capsys)
 
@@ -92,7 +94,7 @@ def test_markdown_link_to_a_decision_record_is_clean(tmp_path, monkeypatch, caps
     decision.write_text("# Why\n", encoding="utf-8")
     _node(
         tmp_path,
-        "shared/machine.ava.okf.md",
+        "shared/cluster/machine.ava.okf.md",
         "Liveness is the live probe ([why](../decisions/2026-07-29-some-decision.md)).",
     )
 
@@ -105,7 +107,7 @@ def test_markdown_link_to_a_decision_record_is_clean(tmp_path, monkeypatch, caps
 def test_target_that_exists_nowhere_reports_a_plain_miss(tmp_path, monkeypatch, capsys):
     """No file of that name anywhere: the axis explanation would be a wrong guess,
     so the message stays the plain "not found"."""
-    _node(tmp_path, "shared/machine.ava.okf.md", "See [[no-such-node.ava.okf.md]].")
+    _node(tmp_path, "shared/cluster/machine.ava.okf.md", "See [[no-such-node.ava.okf.md]].")
 
     code, out = _lint_tmp(tmp_path, monkeypatch, capsys)
 
@@ -120,7 +122,7 @@ def test_url_target_is_not_reported_as_a_doc(tmp_path, monkeypatch, capsys):
     doc = tmp_path / "conventions/runbook.md"
     doc.parent.mkdir(parents=True)
     doc.write_text("# Runbook\n", encoding="utf-8")
-    _node(tmp_path, "shared/machine.ava.okf.md", "See [[https://example.test/runbook.md]].")
+    _node(tmp_path, "shared/cluster/machine.ava.okf.md", "See [[https://example.test/runbook.md]].")
 
     code, out = _lint_tmp(tmp_path, monkeypatch, capsys)
 

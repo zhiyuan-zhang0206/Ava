@@ -17,7 +17,7 @@ from ava.agents import AgentStatus as S
 from schedules.agent_status_guard import ensure_agent_status_members
 from schedules.catchup import catch_up, fire_slot_once
 from shared.config import settings
-from shared.observability import observability_refusal_detail
+from shared.telemetry.observability import observability_refusal_detail
 from shared.daemon.schedules.watcher import next_fire
 
 ensure_agent_status_members(
@@ -70,7 +70,7 @@ def count_events(since: datetime) -> int:
 
     from shared.paths import ava_home
 
-    from shared.cluster_auth import delivered_token
+    from shared.cluster.auth import delivered_token
 
     env_file = Path(ava_home()) / ".env"
     secret = delivered_token() or ""

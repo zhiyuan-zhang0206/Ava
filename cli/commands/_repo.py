@@ -36,9 +36,9 @@ from ops.roster.service_spec import profile_marker as profile_marker
 # sites `from cli.commands._repo import session_name` keep working after the
 # composer moved to shared.cluster.
 from shared.cluster import session_name as session_name
+from shared.cluster.machine import MachineRoles
 from shared.config import settings
 from shared.deploy_timing import GATEWAY_PREFLIGHT_BUDGET_S
-from shared.machine import MachineRoles
 from shared.platform_backend import get_backend
 from shared.session_env import frontend_toolchain_env
 
@@ -51,7 +51,7 @@ def _roles_or_none() -> MachineRoles | None:
     explicit "this host's role is not resolvable yet" state, distinct from a
     (never-valid) empty capability set. stop/status/converge should not be
     blocked by unfinished setup, so they treat None conservatively."""
-    from shared.machine import MachineRoleInvalid, MachineRoleMissing, machine_role
+    from shared.cluster.machine import MachineRoleInvalid, MachineRoleMissing, machine_role
 
     try:
         return machine_role()
@@ -216,8 +216,8 @@ def probe_gateway_once(gateway_url: str, *, timeout_s: float = 10.0) -> GatewayP
     """
     import httpx
 
-    from shared.http_dial import get as dial_get
-    from shared.machine import gateway_auth_headers
+    from shared.cluster.machine import gateway_auth_headers
+    from shared.host.net.http_dial import get as dial_get
 
     try:
         resp = dial_get(
@@ -303,7 +303,7 @@ def _probe_gateway_or_die(gateway_url: str, *, budget_s: float = GATEWAY_PREFLIG
 def _register_machine_or_die(resolved: SetupValues, roles: MachineRoles) -> int:
     """UPSERT this host into the machines table with typed error handling.
 
-    The dial URL comes from `shared.machines.unit_dial_url(roles)` — the one
+    The dial URL comes from `shared.cluster.machines.unit_dial_url(roles)` — the one
     definition, shared with the ops daemon's boot registration so the two writers
     of this row cannot advertise different addresses for the same unit.
 
@@ -314,7 +314,7 @@ def _register_machine_or_die(resolved: SetupValues, roles: MachineRoles) -> int:
     """
     import psycopg
 
-    from shared.machines import LoopbackDialUrlRefused, register_self, unit_dial_url
+    from shared.cluster.machines import LoopbackDialUrlRefused, register_self, unit_dial_url
 
     url = unit_dial_url(roles)
     try:

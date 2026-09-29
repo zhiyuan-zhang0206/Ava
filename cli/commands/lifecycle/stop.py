@@ -314,8 +314,8 @@ def _announce_stopping() -> None:
     caps). Best-effort by design: if the gateway is unreachable we are stopping
     anyway, so we log and proceed rather than block the teardown.
     """
-    from shared.http_dial import post as dial_post
-    from shared.machine import gateway_api_base, gateway_auth_headers, machine_name
+    from shared.cluster.machine import gateway_api_base, gateway_auth_headers, machine_name
+    from shared.host.net.http_dial import post as dial_post
     from shared.paths import ava_home
 
     try:

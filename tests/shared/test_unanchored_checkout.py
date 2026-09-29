@@ -12,7 +12,7 @@ that from pointerless worktrees on a production runner.
 The subprocess tests boot `shared.config` with HOME pointed at a temp dir that
 holds a planted `~/.ava` (a pure agent-runner `.env` whose gateway URL is a
 recording server here, a `mirror.env`, the serve-flag file). The checkout under
-test is simulated by relocating `shared/dotenv_boot.py` into it: the module
+test is simulated by relocating `shared/host/env/dotenv_boot.py` into it: the module
 anchors on its own `__file__`, so its location IS the checkout. The same harness
 run from the simulated prod source (`~/.ava/source`) does fetch and write the
 snapshot — the control that proves the negative assertions can see what they
@@ -34,8 +34,9 @@ from typing import Any, ClassVar
 
 import pytest
 
-from shared import bootstrap, dotenv_boot, paths, runtime_config
-from shared.dotenv_boot import UNANCHORED_DB_SENTINEL, resolve_ava_home
+from shared import paths
+from shared.host.env import bootstrap, dotenv_boot, runtime_config
+from shared.host.env.dotenv_boot import UNANCHORED_DB_SENTINEL, resolve_ava_home
 
 _REPO = Path(__file__).resolve().parents[2]
 _PLANTED_BEARER = "planted-prod-bearer"
@@ -47,15 +48,15 @@ _PLANTED_MIRROR = "https://planted-mirror.invalid/simple"
 _CHILD = r"""
 import importlib.util, json, os, sys
 
-import shared
+import shared.host.env
 
-spec = importlib.util.spec_from_file_location("shared.dotenv_boot", sys.argv[1])
+spec = importlib.util.spec_from_file_location("shared.host.env.dotenv_boot", sys.argv[1])
 boot = importlib.util.module_from_spec(spec)
-sys.modules["shared.dotenv_boot"] = boot
+sys.modules["shared.host.env.dotenv_boot"] = boot
 spec.loader.exec_module(boot)
-shared.dotenv_boot = boot
+shared.host.env.dotenv_boot = boot
 
-import shared.bootstrap as bootstrap
+import shared.host.env.bootstrap as bootstrap
 
 dials = []
 real_dial = bootstrap.dial_get
@@ -139,10 +140,10 @@ def _plant_default_home(fake_home: Path, gateway_url: str) -> Path:
 
 
 def _checkout(root: Path, pointer: Path | None = None) -> Path:
-    """A simulated checkout: the boot module relocated to `<root>/shared/`."""
-    (root / "shared").mkdir(parents=True)
-    boot = root / "shared" / "dotenv_boot.py"
-    shutil.copyfile(_REPO / "shared" / "dotenv_boot.py", boot)
+    """A simulated checkout: the boot module relocated to `<root>/shared/host/env/`."""
+    boot = root / "shared" / "host" / "env" / "dotenv_boot.py"
+    boot.parent.mkdir(parents=True)
+    shutil.copyfile(_REPO / "shared" / "host" / "env" / "dotenv_boot.py", boot)
     if pointer is not None:
         (root / ".ava_home").write_text(f"{pointer}\n")
     return boot

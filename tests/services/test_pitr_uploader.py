@@ -277,7 +277,7 @@ def test_same_size_staged_ciphertext_tamper_fails_before_remote_retry(tmp_path: 
 @pytest.mark.asyncio
 async def test_critical_backoff_heartbeats_and_stops_promptly() -> None:
     from services.pitr.uploader_daemon import _wait_with_heartbeat
-    from shared.daemon_health import Liveness
+    from shared.daemon.health import Liveness
 
     stop = asyncio.Event()
     liveness = Liveness(timeout_s=0.04)
@@ -706,7 +706,7 @@ async def test_unacked_critical_keeps_healthz_200(
     import time
 
     from services.pitr.uploader_daemon import _LoopErrors, _unacked_components
-    from shared.daemon_health import Liveness, start_health_server, stop_health_server
+    from shared.daemon.health import Liveness, start_health_server, stop_health_server
 
     store = FakeStore()
     uploader, source = _uploader(tmp_path, store)
@@ -743,7 +743,7 @@ def test_disk_hard_bound_still_gates_readiness(tmp_path: Path) -> None:
     a footprint past the hard bound genuinely degrades readiness (the daemon
     cannot work), so it must still flip the response to 503."""
     from services.pitr.uploader_daemon import _disk_components
-    from shared.health_schema import render
+    from shared.daemon.health_schema import render
 
     store = FakeStore()
     uploader, _ = _uploader(tmp_path, store)
@@ -785,7 +785,7 @@ async def test_healthz_answers_while_upload_is_blocked(tmp_path: Path) -> None:
         _LoopErrors,
         _unacked_components,
     )
-    from shared.daemon_health import Liveness, start_health_server, stop_health_server
+    from shared.daemon.health import Liveness, start_health_server, stop_health_server
 
     class _SlowStore:
         """Fake GCS store whose put blocks until released (slow-client shape)."""

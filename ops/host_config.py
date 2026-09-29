@@ -21,11 +21,12 @@ from ops.rpc_schemas import (
     FieldWriteResult,
     HostConfigField,
 )
-from shared import host_config_validators, runtime_config
+from shared import host_config_validators
+from shared.cluster.machine import machine_name
 from shared.config import env_override_values, field_domain, get_config_metadata
 from shared.config.candidate import validate_env_patch_for_write
 from shared.config.editing import field_editable, split_reducer_patch
-from shared.machine import machine_name
+from shared.host.env import runtime_config
 
 SENSITIVE_MASK = "••••••••"
 
@@ -77,7 +78,7 @@ def config_read_op() -> ConfigReadResult:
 
 def config_audit_read_op(last: int) -> ConfigAuditReadResult:
     """Read this machine's most recent `.env`-write audit records (newest first)."""
-    from shared.env_audit import read_env_write_records
+    from shared.host.env.audit import read_env_write_records
 
     return ConfigAuditReadResult(machine=machine_name(), records=read_env_write_records(last))
 

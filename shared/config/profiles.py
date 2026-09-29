@@ -1,6 +1,6 @@
 """Per-process config profiles — which config DOMAINS each process kind constructs.
 
-Dependency-free constants module (like `shared/env_registry.py`): the guard test
+Dependency-free constants module (like `shared/host/env/registry.py`): the guard test
 and process-side code can import the profile sets without triggering a
 Settings construction. `shared/config/__init__.py` consumes this.
 

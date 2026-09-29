@@ -60,6 +60,7 @@ from cli.commands.extensions.external_skills import converge_external_agent_skil
 from cli.commands.observability.lgtm_native import ensure_lgtm_native_step
 from cli.commands.observability.otel_collector import ensure_otel_collector_step
 from shared.cluster import is_default_home
+from shared.cluster.machine import MachineRoles
 from shared.config import settings
 from shared.host.converge.accessibility import (
     clear_status as clear_accessibility_status,
@@ -69,9 +70,8 @@ from shared.host.converge.accessibility import (
 )
 from shared.host.converge.browser_deps import browser_deps_notice, browser_deps_warning
 from shared.host.converge.screen_capture import clear_status, write_status
-from shared.lgtm_local import BACKENDS
-from shared.machine import MachineRoles
 from shared.platform_probes import browser_incapability
+from shared.telemetry.lgtm_local import BACKENDS
 
 __all__ = [
     "ALL_ROLES",

@@ -52,9 +52,9 @@ class _FakeResp:
 
 @pytest.fixture(autouse=True)
 def _no_retry_sleep(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Neutralize shared.resilience backoff sleeps so retry-path tests run
+    """Neutralize shared.host.net.resilience backoff sleeps so retry-path tests run
     instantly; the retry loop itself is still exercised (call counts)."""
-    monkeypatch.setattr("shared.resilience._sleep", lambda _s: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("shared.host.net.resilience._sleep", lambda _s: None)  # pyright: ignore[reportUnknownArgumentType]
 
 
 def _make_brave_response(results: list[dict]) -> bytes:

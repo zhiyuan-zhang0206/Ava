@@ -19,10 +19,10 @@ from services.agent_host import runtime as runtime_module
 from services.agent_host.runtime import TurnOutcome
 from shared import maintenance, maintenance_cohort, pause_owner
 from shared.agents.history.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
+from shared.cluster.machine import machine_name
 from shared.config import settings
 from shared.context import AvaContext
 from shared.db import insert_inbound_message
-from shared.machine import machine_name
 from tests.agent.test_maintenance import WHEN, _agent
 from tests.agent.test_maintenance import isolate as isolate
 

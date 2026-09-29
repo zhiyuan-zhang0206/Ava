@@ -16,7 +16,7 @@ The base stream selector, shared by every reader:
 ```
 
 Since the 2026-08-23 index-label cutover (`INDEX_LABEL_CUTOVER_AT` in
-`shared/loki_index_labels.py`, Task #1407 B2) the collector promotes
+`shared/telemetry/loki_index_labels.py`, Task #1407 B2) the collector promotes
 `agent_id` and `event_name` to real Loki index labels, so a query over the
 indexed era narrows the stream itself instead of scanning the whole
 `unknown_service` family — the fast per-agent form is:

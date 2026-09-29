@@ -21,7 +21,7 @@ secret (decisions/2026-09-27-write-generation-rollout-choices.md, item 3):
 Settings-free: the launcher, the boot pass and the gateway read the same
 private store. Comparisons are constant-time over SHA-256 digests, so the
 accepting side never needs a token in clear. A client reads its own token
-with `shared.cluster_auth.client_bearer` (stdlib-only, safe during boot).
+with `shared.cluster.auth.client_bearer` (stdlib-only, safe during boot).
 """
 
 from __future__ import annotations
@@ -31,10 +31,10 @@ import hmac
 from collections.abc import Mapping
 from pathlib import Path
 
+from shared.cluster.auth import API_TOKEN_ENV as API_TOKEN_ENV
 from shared.cluster.authority.delivery import active_generation
 from shared.cluster.authority.ledger import ledger_path, load_ledger, read_secret
 from shared.cluster.authority.model import CLASSES, GenerationClass
-from shared.cluster_auth import API_TOKEN_ENV as API_TOKEN_ENV
 
 _SCHEME = "Bearer "
 _TELEMETRY_LABEL = b"ava-telemetry-ingress/1"

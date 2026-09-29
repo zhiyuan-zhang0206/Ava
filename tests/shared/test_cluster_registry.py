@@ -3,7 +3,8 @@ from typing import cast
 
 import pytest
 
-from shared import cluster, port_preflight
+from shared import cluster
+from shared.cluster import port_preflight
 from shared.platform import LockTimeoutError, file_lock
 
 
@@ -311,7 +312,7 @@ def test_env_port_drift_pooled_url_expects_pooler_port(
     """The one-URL design: with pooling on (the default), a pre-cutover direct-port
     AVA_DB_URL IS drift (converge normalizes it to the pooler port), while the
     pooler-port URL matches. A URL naming neither port is left alone."""
-    from shared import port_preflight as pp
+    from shared.cluster import port_preflight as pp
 
     # The record's home is the default home so the pooler port derives the
     # legacy 6433 (an allocated-cluster record would derive base+13).
@@ -369,12 +370,12 @@ def test_unit_port_map_overlays_health_ports(monkeypatch: pytest.MonkeyPatch, tm
     ports (the per-unit layer `ava start --health-port-base` moves). This is
     the exact set the start preflight scans and `ava stop`'s orphan sweep
     reaps (Task #965) — one composition, two consumers."""
-    import shared.daemon_health as _dh
-    import shared.port_preflight as pp
+    import shared.cluster.port_preflight as pp
+    import shared.daemon.health as _dh
 
     monkeypatch.setattr(pp, "get_record", lambda _home: None)  # pyright: ignore[reportUnknownArgumentType]
     base = 18100
-    # unit_port_map reads health_port from shared.daemon_health (lazy import)
+    # unit_port_map reads health_port from shared.daemon.health (lazy import)
     monkeypatch.setattr(_dh, "health_port", lambda svc: base + len(svc))  # pyright: ignore[reportUnknownArgumentType]
 
     ports = pp.unit_port_map(tmp_path / "x")

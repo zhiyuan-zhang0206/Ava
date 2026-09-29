@@ -15,9 +15,9 @@ import json
 import sys
 from pathlib import Path
 
-from shared.metrics.core import core_metrics
 from shared.plugin_context import PluginContext
-from shared.plugin_metrics import (
+from shared.telemetry.metrics.core import catalog
+from shared.telemetry.metrics.plugin_metrics import (
     MetricSpec,
     clear_registry,
     registered_metrics,
@@ -47,10 +47,10 @@ def _load_all() -> None:
 
 def _load_core() -> list[MetricSpec]:
     """Register the complete core metric set from fresh definition modules."""
-    core_metrics.clear_core_registry()
-    for module_name in core_metrics._CORE_DEFINITION_MODULES:
+    catalog.clear_core_registry()
+    for module_name in catalog._CORE_DEFINITION_MODULES:
         sys.modules.pop(module_name, None)
-    return core_metrics.collect_core_metrics()
+    return catalog.collect_core_metrics()
 
 
 def test_shipped_plugin_metrics_are_logql() -> None:

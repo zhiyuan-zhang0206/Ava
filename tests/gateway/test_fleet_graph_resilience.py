@@ -16,7 +16,7 @@ from gateway.lgtm import loki_events, prom_metrics, telemetry_staleness
 from gateway.schemas.fleet_graph import FleetGraphNode, FleetGraphResponse
 from shared import telemetry
 from shared.agents import AgentStatus
-from shared.loki_index_labels import INDEX_LABEL_CUTOVER_AT
+from shared.telemetry.loki_index_labels import INDEX_LABEL_CUTOVER_AT
 from tests.gateway.loki_fake import FakeLoki
 
 

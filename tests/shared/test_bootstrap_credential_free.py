@@ -18,7 +18,7 @@ from urllib.parse import urlsplit
 import pytest
 
 from shared import config
-from shared import runtime_config as rt
+from shared.host.env import runtime_config as rt
 
 _RUNNER_PW = "runner-secret-token"
 _DB_URL = "postgresql://ava@127.0.0.1:5433/ava"

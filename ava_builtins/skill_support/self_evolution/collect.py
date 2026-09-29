@@ -43,9 +43,12 @@ from ava_builtins.skill_support.self_evolution.record import (  # noqa: F401
 )
 from shared.config import settings
 from shared.db import connect
-from shared.observability import ObservabilityReadUnavailable, observability_refusal_detail
+from shared.host.net.resilience import ExponentialBackoff, Policy, http_classifier, retry
 from shared.paths import ava_home
-from shared.resilience import ExponentialBackoff, Policy, http_classifier, retry
+from shared.telemetry.observability import (
+    ObservabilityReadUnavailable,
+    observability_refusal_detail,
+)
 
 # Task-origin inbound sources — capture every real task prompt, whether from
 # the user ("user") or a spawner / peer agent ("agent:<id>"). System and
@@ -63,7 +66,7 @@ _SUBPROCESS_CALL_RE = re.compile(r"subprocess\.(run|Popen|check_output|check_cal
 def _gateway_headers() -> dict[str, str]:
     """Bearer auth: the process's machine API token (an agent inherits its
     agent-host's), else the gateway home's secret from $AVA_HOME/.env."""
-    from shared.cluster_auth import delivered_token
+    from shared.cluster.auth import delivered_token
 
     token = delivered_token()
     if token:

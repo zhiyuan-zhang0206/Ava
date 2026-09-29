@@ -64,10 +64,10 @@ def test_timeline_preserves_existing_payload(
         seen.update({"url": url, **kwargs})
         return httpx.Response(200, json=payload, request=httpx.Request("GET", url))
 
-    monkeypatch.setattr("shared.http_dial.get", get)
-    monkeypatch.setattr("shared.machine.gateway_api_base", lambda: "http://gateway")
+    monkeypatch.setattr("shared.host.net.http_dial.get", get)
+    monkeypatch.setattr("shared.cluster.machine.gateway_api_base", lambda: "http://gateway")
     monkeypatch.setattr(
-        "shared.machine.gateway_auth_headers", lambda: {"Authorization": "Bearer cluster"}
+        "shared.cluster.machine.gateway_auth_headers", lambda: {"Authorization": "Bearer cluster"}
     )
     assert cmd_agents_timeline(405) == 0
     assert seen["url"] == "http://gateway/api/agents/405/timeline"

@@ -102,7 +102,7 @@ def test_a_dead_key_left_in_the_environment_is_inert(monkeypatch: pytest.MonkeyP
     file) boots, and the key configures nothing: `AVA_TRACK_MODE=releases` no
     longer selects what an update converges to, and no child receives it."""
     from shared.config.general import GeneralSettings
-    from shared.env_registry import child_env
+    from shared.host.env.registry import child_env
 
     inventory.dead_keys_are_dead()
     for key in inventory.DEAD_KEYS:

@@ -53,7 +53,7 @@ on stdin.
   home's selected image until its operation selects it, so its boot pass
   admits it to no write generation, yet its submission reads the registered
   units. The CLI, running the home's admitted runtime, takes the login its
-  skipped boot pass would have delivered (`shared.dotenv_boot.operator_db_delivery`):
+  skipped boot pass would have delivered (`shared.host.env.dotenv_boot.operator_db_delivery`):
   the active gateway login and its generation marker (`AVA_DB_URL`,
   `AVA_DB_GENERATION`), without the gateway API token. It travels only in the
   exec environment (never argv, a file or a log); the executor's boot pass

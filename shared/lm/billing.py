@@ -72,10 +72,10 @@ def emit_billing_event(
         if not settings.observability.trace_enabled:
             return
 
-        from shared import trace
+        from shared.telemetry import tracing
 
-        trace.ensure_init_resolved()
-        if not trace._state["initialized"]:
+        tracing.ensure_init_resolved()
+        if not tracing.is_initialized():
             return
 
         from opentelemetry import trace as otel_trace

@@ -8,7 +8,7 @@ import pytest
 
 from services.ava_root_glue import diagnostic_probes as probes
 from services.healthchecks import browser_reach as hc
-from shared.daemon_health import DaemonProbe
+from shared.daemon.health import DaemonProbe
 
 
 @pytest.mark.parametrize(

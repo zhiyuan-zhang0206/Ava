@@ -19,8 +19,8 @@ from __future__ import annotations
 import logging
 
 from ops.rpc_schemas import UploadReceivePayload, UploadReceiveResult
-from shared.http_dial import get as http_get
-from shared.machine import gateway_api_base
+from shared.cluster.machine import gateway_api_base
+from shared.host.net.http_dial import get as http_get
 from shared.private_storage import write_private_bytes
 from shared.uploads import agent_upload_dir, sanitize_upload_name
 
@@ -36,7 +36,7 @@ def upload_receive_op(payload: UploadReceivePayload) -> UploadReceiveResult:
             failed — surfaced as a 'failed' op result the gateway degrades
             (it still delivers the notification with the gateway-side URL).
     """
-    from shared.machine import gateway_auth_headers
+    from shared.cluster.machine import gateway_auth_headers
 
     name = sanitize_upload_name(payload.name)
     dest = agent_upload_dir(payload.agent_id)

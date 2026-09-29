@@ -11,7 +11,7 @@ from uuid import uuid4
 
 import pytest
 
-from shared.daemon_http import start_daemon_http
+from shared.daemon.http_transport import start_daemon_http
 from shared.managed_writer_observation import (
     ExpectedLauncher,
     ExpectedSession,

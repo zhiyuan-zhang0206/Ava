@@ -48,7 +48,7 @@ def receipt(encoded: bytes) -> UnitReceipt:
     from cli.release_transition.request import ReleaseRef
     from shared.cluster import registry_path
     from shared.cluster.authority.unit import load_unit_enrollment
-    from shared.machine import machine_name, machine_role
+    from shared.cluster.machine import machine_name, machine_role
     from shared.runtime_abi import current_abi
     from shared.start_inputs import configuration_digest
 

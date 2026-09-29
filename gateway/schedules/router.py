@@ -26,9 +26,9 @@ from pydantic import BaseModel, Field
 from gateway.agents.router import create_and_launch_agent
 from ops.rpc_schemas import SpawnAgentRequest
 from shared.cluster import session_name
+from shared.cluster.machine import machine_name
 from shared.config import settings
 from shared.db_transaction import write_transaction
-from shared.machine import machine_name
 from shared.paths import ava_home
 
 router = APIRouter()

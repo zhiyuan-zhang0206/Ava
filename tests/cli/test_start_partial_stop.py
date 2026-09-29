@@ -8,8 +8,8 @@ import pytest
 from cli.commands.lifecycle import _temporary_stop as stop
 from cli.start_identity import IdentityInput, mark_phase, prepare_identity
 from shared import cluster, paths, start_serving
+from shared.cluster.machine import MachineRoles
 from shared.hold_driver import HoldDriver
-from shared.machine import MachineRoles
 
 
 def _port_always_free(_port: int) -> bool:

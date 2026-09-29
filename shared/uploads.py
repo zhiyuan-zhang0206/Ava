@@ -102,8 +102,8 @@ def fetch_upload_b64(agent_id: int, name: str) -> tuple[str, str]:
         raise ValueError(f"upload {name!r} is not a recognized image type")
     import httpx
 
-    from shared.http_dial import get as http_get
-    from shared.machine import gateway_api_base, gateway_auth_headers
+    from shared.cluster.machine import gateway_api_base, gateway_auth_headers
+    from shared.host.net.http_dial import get as http_get
 
     url = f"{gateway_api_base().rstrip('/')}/api/agents/{agent_id}/uploads/{name}"
     try:

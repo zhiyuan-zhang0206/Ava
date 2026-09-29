@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 
-from shared.health_schema import DEGRADED, DOWN, OK, component, render
+from shared.daemon.health_schema import DEGRADED, DOWN, OK, component, render
 
 
 def test_component_omits_unknown_state_and_calculates_success_age() -> None:

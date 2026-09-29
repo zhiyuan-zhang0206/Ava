@@ -30,7 +30,7 @@ from gateway.app import app
 from gateway.auth.cors import cors_allowed_origins
 from gateway.middleware.error_handlers import cors_headers
 from shared import config
-from shared.cluster_auth import (
+from shared.cluster.auth import (
     bearer_header,
     cookie_name,
 )
@@ -1144,7 +1144,7 @@ def test_login_succeeds_without_secret_and_bypasses_limiter(
     """A no-secret cluster accepts login as a no-op success. The rate limiter
     is bypassed entirely — there is no credential to guess, and no-secret
     requests must never count into its failure records."""
-    from shared.rate_limit import login_limiter
+    from shared.cluster.rate_limit import login_limiter
 
     monkeypatch.setattr(config.settings.data_plane, "cluster_secret", "")
     monkeypatch.setattr(config.settings.gateway, "auth_middleware_enabled", True)

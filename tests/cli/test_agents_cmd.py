@@ -1,7 +1,7 @@
 """`ava agents` thin-client commands — each forwards to the right gateway route
 and renders the response, verified without a live gateway (httpx patched).
 
-The cmd_* functions import `httpx` and `shared.machine.gateway_api_base` inside
+The cmd_* functions import `httpx` and `shared.cluster.machine.gateway_api_base` inside
 their bodies, so patching the module attributes here takes effect at call time.
 """
 
@@ -46,9 +46,9 @@ def _agent_row(agent_id: int, status: str, machine: str, label: str | None) -> d
 
 @pytest.fixture(autouse=True)
 def _gateway_base(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("shared.machine.gateway_api_base", lambda: "http://gw:8000")
+    monkeypatch.setattr("shared.cluster.machine.gateway_api_base", lambda: "http://gw:8000")
     monkeypatch.setattr(
-        "shared.machine.gateway_auth_headers", lambda: {"Authorization": "Bearer secret"}
+        "shared.cluster.machine.gateway_auth_headers", lambda: {"Authorization": "Bearer secret"}
     )
 
 

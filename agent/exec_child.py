@@ -156,7 +156,7 @@ def _pop_overlay_env() -> tuple[dict[str, object] | None, dict[str, object] | No
     must not re-read the env."""
     import json as _json
 
-    from shared.env_registry import AGENT_BIRTH_CONFIG_ENV, AGENT_CONFIG_OVERLAY_ENV
+    from shared.host.env.registry import AGENT_BIRTH_CONFIG_ENV, AGENT_CONFIG_OVERLAY_ENV
 
     maps: dict[str, dict[str, object] | None] = {}
     for env_name in (AGENT_BIRTH_CONFIG_ENV, AGENT_CONFIG_OVERLAY_ENV):

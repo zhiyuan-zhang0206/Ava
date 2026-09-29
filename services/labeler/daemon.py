@@ -29,9 +29,9 @@ import shared.db
 from services.labeler.labeler import generate_label_async
 from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
 from shared.config import settings
-from shared.daemon_health import Liveness, health_port, start_health_server, stop_health_server
-from shared.daemon_shutdown import cancel_and_drain, install_graceful_shutdown
-from shared.daemon_shutdown import hard_exit as _hard_exit
+from shared.daemon.health import Liveness, health_port, start_health_server, stop_health_server
+from shared.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
+from shared.daemon.shutdown import hard_exit as _hard_exit
 from shared.log import init_gateway_process
 
 _log = logging.getLogger("services.labeler.daemon")
@@ -296,7 +296,7 @@ def main() -> None:
     """Entry point: init logger + run asyncio loop.
 
     SIGTERM (the graceful stop `ava cluster update` sends) and Ctrl-C converge on
-    the same `KeyboardInterrupt` unwind — see `shared.daemon_shutdown`. `ava stop`
+    the same `KeyboardInterrupt` unwind — see `shared.daemon.shutdown`. `ava stop`
     default force-kill does not reach this.
     """
     from shared.migrations import assert_schema_current

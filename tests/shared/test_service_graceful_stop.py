@@ -181,7 +181,7 @@ def test_install_graceful_shutdown_raises_keyboardinterrupt():
     nothing about the host's process tree can affect the verdict."""
     import signal
 
-    from shared.daemon_shutdown import install_graceful_shutdown
+    from shared.daemon.shutdown import install_graceful_shutdown
 
     previous = signal.getsignal(signal.SIGTERM)
     try:

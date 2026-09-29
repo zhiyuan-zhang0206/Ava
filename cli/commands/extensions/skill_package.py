@@ -234,7 +234,7 @@ def _register_in_cluster(
     name and addressed by content.
     """
     from shared import db, extension_registry
-    from shared.machine import machine_name
+    from shared.cluster.machine import machine_name
 
     from ._pkg_source import looks_like_local_path
 

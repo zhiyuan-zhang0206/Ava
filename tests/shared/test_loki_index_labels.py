@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, date, datetime, timedelta
 
-from shared import loki_index_labels as labels
+from shared.telemetry import loki_index_labels as labels
 
 
 def test_selector_is_legacy_safe_and_indexed_selective() -> None:

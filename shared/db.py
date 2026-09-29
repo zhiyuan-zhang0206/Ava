@@ -320,7 +320,7 @@ def insert_inbound_message(
         new_id = fetch_one(cur, "insert inbound message")[0]
         if event_type is not None:
             from shared.agents.impersonation_manifest import stage_central_expected_event
-            from shared.audit_events import prepare_event_log
+            from shared.telemetry.audit_events import prepare_event_log
 
             prepared_event = prepare_event_log(
                 event_type=event_type,
@@ -376,7 +376,7 @@ def announce_spawn_prompt(agent_id: int, inbound_id: int, content: str, source: 
     try:
         if source.startswith("agent:"):
             from shared.agents.impersonation_manifest import stage_central_expected_event
-            from shared.audit_events import prepare_event_log
+            from shared.telemetry.audit_events import prepare_event_log
 
             prepared_event = prepare_event_log(
                 event_type="send_message",
@@ -450,7 +450,7 @@ def insert_restart_completed_inbound(
     if restart_completed_row is None:
         raise RuntimeError("restart-completed inbound INSERT returned no id")
     from shared.agents.impersonation_manifest import stage_central_expected_event
-    from shared.audit_events import prepare_event_log
+    from shared.telemetry.audit_events import prepare_event_log
 
     prepared_event = prepare_event_log(
         event_type="restart_completed",
@@ -657,7 +657,7 @@ def insert_compact_request_inbound(db: psycopg.Connection, agent_id: int) -> int
         if row is None:
             raise RuntimeError("compact request inbound INSERT returned no id")
         inbound_id = row[0]
-        from shared.audit_events import insert_event_log
+        from shared.telemetry.audit_events import insert_event_log
 
         insert_event_log(
             event_type="compact",

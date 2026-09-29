@@ -97,9 +97,11 @@ def test_cidr_range_notation_passes(repo: Path) -> None:
     """`100.64.0.0/10` names the range; it is the neutral way to document the
     policy and is not a host address."""
     _write(
-        repo, "shared/netutil.py", "# VPN-overlay 100.64.0.0/10 addresses get a pinned transport\n"
+        repo,
+        "shared/host/net/predicates.py",
+        "# VPN-overlay 100.64.0.0/10 addresses get a pinned transport\n",
     )
-    assert gate._scan_file("shared/netutil.py") == []
+    assert gate._scan_file("shared/host/net/predicates.py") == []
 
 
 def test_range_notation_with_numeric_mask_passes(repo: Path) -> None:

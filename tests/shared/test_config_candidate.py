@@ -9,8 +9,8 @@ from pathlib import Path
 
 import pytest
 
-from shared import runtime_config
 from shared.config.candidate import EnvPatchValidation
+from shared.host.env import runtime_config
 
 type EnvPatchValidator = Callable[[dict[str, object], set[str]], list[str]]
 

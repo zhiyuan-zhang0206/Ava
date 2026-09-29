@@ -12,8 +12,8 @@ import pytest
 from shared.agents import impersonation as leases
 from shared.agents.impersonation import _impersonation_store as store
 from shared.caller_identity import CallerIdentity
+from shared.cluster.machine import machine_name
 from shared.db import create_agent
-from shared.machine import machine_name
 from shared.native_process import ownership
 from shared.runtime_incarnation import RuntimeIncarnation
 from tests.impersonation_support import (

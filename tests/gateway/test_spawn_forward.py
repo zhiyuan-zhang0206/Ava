@@ -117,7 +117,7 @@ class TestRouting:
         set_machine_identity(role="gateway", name="gw-only")
         # The registry says the (local) target is gateway-only — overrides the
         # conftest autouse stub that defaults the local machine to agent-runner.
-        monkeypatch.setattr("shared.machines.lookup_role", lambda _name: ["gateway"])  # pyright: ignore[reportUnknownArgumentType]
+        monkeypatch.setattr("shared.cluster.machines.lookup_role", lambda _name: ["gateway"])  # pyright: ignore[reportUnknownArgumentType]
         forwarded: list[str] = []
 
         async def _should_not_forward(target: str, body: LaunchAgentRequest) -> SpawnedAgent:
@@ -144,8 +144,8 @@ class TestRouting:
         ops server may be unreachable), so a spawn would fail at dial time
         anyway; the precise wire error is what schedules / peers see."""
         set_machine_identity(role="agent-runner", name="local-test")
-        monkeypatch.setattr("shared.machines.lookup_role", lambda _name: ["agent-runner"])  # pyright: ignore[reportUnknownArgumentType]
-        monkeypatch.setattr("shared.machines.is_paused", lambda _name: True)  # pyright: ignore[reportUnknownArgumentType]
+        monkeypatch.setattr("shared.cluster.machines.lookup_role", lambda _name: ["agent-runner"])  # pyright: ignore[reportUnknownArgumentType]
+        monkeypatch.setattr("shared.cluster.machines.is_paused", lambda _name: True)  # pyright: ignore[reportUnknownArgumentType]
         forwarded: list[str] = []
 
         async def _should_not_forward(target: str, body: LaunchAgentRequest) -> SpawnedAgent:
@@ -176,8 +176,8 @@ class TestRouting:
         # The pre-dispatch capability check resolves the target's role; stub it as
         # a runner so the forward proceeds (the lookup itself is exercised by the
         # 404 / no-capability tests).
-        monkeypatch.setattr("shared.machines.lookup_role", lambda _name: ["agent-runner"])  # pyright: ignore[reportUnknownArgumentType]
-        monkeypatch.setattr("shared.machines.is_paused", lambda _name: False)  # pyright: ignore[reportUnknownArgumentType]
+        monkeypatch.setattr("shared.cluster.machines.lookup_role", lambda _name: ["agent-runner"])  # pyright: ignore[reportUnknownArgumentType]
+        monkeypatch.setattr("shared.cluster.machines.is_paused", lambda _name: False)  # pyright: ignore[reportUnknownArgumentType]
         with TestClient(app) as client:
             resp = client.post(
                 "/api/agents",
@@ -211,8 +211,8 @@ class TestRouting:
             return SpawnedAgent(id=body.agent_id)
 
         monkeypatch.setattr(app_module, "_forward_spawn_to_remote", _capture_forward)
-        monkeypatch.setattr("shared.machines.lookup_role", lambda _name: ["agent-runner"])  # pyright: ignore[reportUnknownArgumentType]
-        monkeypatch.setattr("shared.machines.is_paused", lambda _name: False)  # pyright: ignore[reportUnknownArgumentType]
+        monkeypatch.setattr("shared.cluster.machines.lookup_role", lambda _name: ["agent-runner"])  # pyright: ignore[reportUnknownArgumentType]
+        monkeypatch.setattr("shared.cluster.machines.is_paused", lambda _name: False)  # pyright: ignore[reportUnknownArgumentType]
         with TestClient(app) as client:
             resp = client.post("/api/agents", json={"machine": "remote-mac"})
         assert resp.status_code == 201
@@ -246,8 +246,8 @@ class TestRouting:
             )
 
         monkeypatch.setattr(app_module, "_forward_spawn_to_remote", _forward_raises)
-        monkeypatch.setattr("shared.machines.lookup_role", lambda _name: ["agent-runner"])  # pyright: ignore[reportUnknownArgumentType]
-        monkeypatch.setattr("shared.machines.is_paused", lambda _name: False)  # pyright: ignore[reportUnknownArgumentType]
+        monkeypatch.setattr("shared.cluster.machines.lookup_role", lambda _name: ["agent-runner"])  # pyright: ignore[reportUnknownArgumentType]
+        monkeypatch.setattr("shared.cluster.machines.is_paused", lambda _name: False)  # pyright: ignore[reportUnknownArgumentType]
         with TestClient(app) as client:
             resp = client.post("/api/agents", json={"machine": "remote-mac"})
         assert resp.status_code == 502

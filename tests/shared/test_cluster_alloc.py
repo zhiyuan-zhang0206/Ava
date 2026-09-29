@@ -1,7 +1,7 @@
 import pytest
 
 from shared import cluster
-from shared.port_block import PORT_OFFSETS
+from shared.host.env.port_block import PORT_OFFSETS
 
 
 def test_legacy_ava_ports():
@@ -16,7 +16,7 @@ def test_legacy_ports_are_unique():
     """No two services may share a legacy port.
 
     These are the ports a unit whose `.env` predates a key ACTUALLY BINDS
-    (`daemon_health.DEFAULT_PORTS` is derived from this table), so a duplicate
+    (`daemon.health.DEFAULT_PORTS` is derived from this table), so a duplicate
     is not a cosmetic clash — the two daemons fight over one socket on every
     existing unit. The table is deliberately not in offset order (`ops` moved
     off 8106 to dodge the Windows iphlpsvc grab), so "next number after the last

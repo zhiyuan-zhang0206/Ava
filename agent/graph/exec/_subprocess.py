@@ -44,7 +44,7 @@ from agent.graph.exec.protocol import (
     write_request,
 )
 from shared import editable_install
-from shared.env_registry import (
+from shared.host.env.registry import (
     AGENT_BIRTH_CONFIG_ENV,
     AGENT_CONFIG_OVERLAY_ENV,
     MANIFEST_CERTIFICATION_FINALIZER_ENV,

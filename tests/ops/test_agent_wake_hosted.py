@@ -10,7 +10,7 @@ from psycopg_pool import AsyncConnectionPool
 
 from ops.agents import wake
 from ops.agents.spawn import create_agent_row
-from shared.machine import machine_name
+from shared.cluster.machine import machine_name
 
 
 @pytest.fixture

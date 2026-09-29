@@ -21,7 +21,7 @@ here, in ``shared`` (the lowest import layer), so the browser daemon
 
 ``shared.config.settings`` is imported lazily inside the function that needs it
 to avoid the ``shared.config`` circular import (same pattern as
-``shared.runtime_config``).
+``shared.host.env.runtime_config``).
 """
 
 from __future__ import annotations

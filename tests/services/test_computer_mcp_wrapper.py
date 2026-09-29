@@ -20,8 +20,8 @@ import pytest
 from services.computer.mcp_wrapper import _Link, _ReconnectingLink
 from services.permissions_helper import client
 from services.permissions_helper.client import PermissionsHelperError
-from shared import resilience
 from shared.config import settings
+from shared.host.net import resilience
 
 
 class FakeWriter:

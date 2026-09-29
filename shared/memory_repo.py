@@ -46,8 +46,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from shared.cluster.machine import is_agent_runner, is_gateway, machine_name
 from shared.config import cluster_tz, settings
-from shared.machine import is_agent_runner, is_gateway, machine_name
 from shared.paths import ava_home, gateway_memory_dir, memory_dir
 from shared.platform import CREATE_NO_WINDOW
 from shared.proc import run_bounded
@@ -309,11 +309,13 @@ def bootstrap_from_gateway() -> None:
     import shutil
     import tempfile
 
-    from shared.machine import gateway_api_base, gateway_auth_headers
+    from shared.cluster.machine import gateway_api_base, gateway_auth_headers
 
     try:
         base = gateway_api_base()
-    except Exception as e:  # GatewayApiBaseMissing (shared.machine) — wrap into the guided failure
+    except (
+        Exception
+    ) as e:  # GatewayApiBaseMissing (shared.cluster.machine) — wrap into the guided failure
         raise MemoryPoolBootstrapFailed(f"gateway URL unavailable: {e}") from e
     url = f"{base}/api/memory/pool"
     head, bundle_bytes = _download_pool_snapshot(url, gateway_auth_headers())

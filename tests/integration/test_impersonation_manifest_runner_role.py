@@ -25,9 +25,9 @@ from shared.agents.impersonation_manifest import (
     unbind_local_participant,
 )
 from shared.agents.impersonation_manifest_grants import grant_manifest_runner_access
+from shared.cluster.machine import machine_name
 from shared.config import settings
 from shared.db import create_agent
-from shared.machine import machine_name
 from shared.runtime_incarnation import RuntimeIncarnation
 from shared.telemetry import Event
 from tests._containers import grant_runner_login
@@ -85,7 +85,7 @@ def _eligible_sdk_event(agent_id: int) -> Event:
 
 
 def _central_send_event(agent_id: int) -> Event:
-    from shared.audit_events import prepare_event_log
+    from shared.telemetry.audit_events import prepare_event_log
 
     return prepare_event_log(
         event_type="send_message",

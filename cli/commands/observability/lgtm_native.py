@@ -33,10 +33,10 @@ from cli.commands.observability.observatory_urls import (
     _alerts_webhook_url,
     _observability_datasource_urls,
 )
-from shared.lgtm_local import BACKENDS
-from shared.lgtm_local import storage_dir as _storage_dir
-from shared.loki_index_labels import validate_loki_deploy_config
-from shared.resilience import Policy, retry
+from shared.host.net.resilience import Policy, retry
+from shared.telemetry.lgtm_local import BACKENDS
+from shared.telemetry.lgtm_local import storage_dir as _storage_dir
+from shared.telemetry.loki_index_labels import validate_loki_deploy_config
 
 SUPPORTED_TAGS = {"darwin_arm64", "linux_amd64"}
 
@@ -473,7 +473,7 @@ def ensure_lgtm_native(repo: Path, ava_home: Path, *, services: frozenset[str]) 
 
 def _verify_loki(home: Path) -> None:
     """Use the pinned binary's own parser before starting the root generation."""
-    from shared.lgtm_local import binary_path
+    from shared.telemetry.lgtm_local import binary_path
 
     result = subprocess.run(
         [

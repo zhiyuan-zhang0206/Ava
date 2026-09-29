@@ -2,7 +2,7 @@
 
 The registration half of the inspector-widget surface (design: task #2909).
 A plugin declares what the panel shows for **every agent** from its own Python
-half, at import time, exactly like ``shared/plugin_metrics.py``: the gateway
+half, at import time, exactly like ``shared/telemetry/metrics/plugin_metrics.py``: the gateway
 imports each enabled plugin's ``inspector.py`` under its ``PluginContext``
 (``gateway/inspect/_plugin_widgets.py``) and serves the resolved widgets per
 agent from ``GET /api/agents/{id}/inspect/widgets``.

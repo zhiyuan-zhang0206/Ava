@@ -14,7 +14,7 @@ from services.ava_root.health import HealthMonitor, ProbeRunner
 from services.ava_root.probes import ProbeRegistry
 from services.ava_root_glue import diagnostic_probes as probes
 from services.ava_root_glue.diagnostics import Diagnostic, DiagnosticMonitor, RootHealthRounds
-from shared.daemon_health import DaemonProbe
+from shared.daemon.health import DaemonProbe
 from shared.native_process.ownership import OwnedProcess
 
 
@@ -220,7 +220,7 @@ async def test_expectation_precedes_first_sample_and_is_retired_on_stop(
 def test_helper_diagnostics_are_macos_only(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(probes, "IS_MACOS", False)
     monkeypatch.setattr(probes, "IS_WINDOWS", False)
-    monkeypatch.setattr("shared.machine.is_gateway", lambda: False)
+    monkeypatch.setattr("shared.cluster.machine.is_gateway", lambda: False)
     names = {check.name for check in probes.build_diagnostics(set())}
     assert names == {"venv"}
     monkeypatch.setattr(probes, "IS_MACOS", True)

@@ -109,7 +109,7 @@ def adopt_local_installs(pool: ConnectionPool, *, skills_root: Path) -> Adoption
     this adoption rather than a one-shot migration somebody has to remember.
     """
     from shared import install_registry
-    from shared.machine import machine_name
+    from shared.cluster.machine import machine_name
 
     result = AdoptionResult()
     for pkg in install_registry.load().packages:

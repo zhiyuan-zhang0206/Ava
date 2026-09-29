@@ -738,7 +738,7 @@ async def reconcile_all_open_pages(
     the bind too. Best-effort like the per-agent pass: failures are logged
     per agent and never raise.
     """
-    from shared.machine import reachable_host
+    from shared.cluster.machine import reachable_host
     from shared.turn_identity import bind_turn_identity
 
     try:

@@ -214,7 +214,7 @@ async def test_control_claim_records_superseded_accepted_intent(
 
     from agent.db import claim_inbound_batch
     from agent.ownership.hosted import admit_hosted_runtime
-    from shared.machine import machine_name
+    from shared.cluster.machine import machine_name
     from tests.conftest import spawn_agent
 
     agent_id = spawn_agent()
@@ -831,7 +831,7 @@ async def test_successor_admission_aligns_active_lease_binding_before_release(
     from agent.ownership.hosted import admit_hosted_runtime
     from shared.agents import impersonation as leases
     from shared.caller_identity import CallerIdentity
-    from shared.machine import machine_name
+    from shared.cluster.machine import machine_name
     from tests.conftest import spawn_agent
 
     agent_id = spawn_agent()
@@ -885,7 +885,7 @@ async def test_successor_admission_resets_a_stale_accepted_binding(
     from agent.ownership.hosted import admit_hosted_runtime
     from shared.agents import impersonation as leases
     from shared.caller_identity import CallerIdentity
-    from shared.machine import machine_name
+    from shared.cluster.machine import machine_name
     from tests.conftest import spawn_agent
 
     agent_id = spawn_agent()

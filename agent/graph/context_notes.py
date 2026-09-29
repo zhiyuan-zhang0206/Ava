@@ -274,7 +274,7 @@ def _machine_clause() -> str | None:
 
     Fail-soft like the label: a host whose machine name cannot be resolved
     still states the agent's identity line."""
-    from shared.machine import machine_name
+    from shared.cluster.machine import machine_name
 
     try:
         name = machine_name()

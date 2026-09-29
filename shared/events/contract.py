@@ -162,7 +162,7 @@ def lineage_event_names() -> frozenset[str]:
     """Every event name declared ``retention_class="lineage"``.
 
     The single source for both permanent copies: the Loki ``retention_stream``
-    selector (validated by ``shared.loki_index_labels``) and the lineage JSONL
+    selector (validated by ``shared.telemetry.loki_index_labels``) and the lineage JSONL
     mirror (``shared.telemetry``). A name added here reaches both."""
     return frozenset(name for name, spec in EVENTS.items() if spec.retention_class == "lineage")
 

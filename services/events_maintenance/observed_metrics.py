@@ -22,7 +22,9 @@ from psycopg import Connection
 
 from services.events_maintenance.rollup import _query_budget
 from shared.config import settings
-from shared.loki_index_labels import (
+from shared.paths import logs_dir
+from shared.telemetry import event_id
+from shared.telemetry.loki_index_labels import (
     ARCHIVE_FLOOR_AT,
     ARCHIVE_FREEZE_AT,
     archive_stream_selector,
@@ -31,10 +33,12 @@ from shared.loki_index_labels import (
     retention_floor,
     split_index_label_window,
 )
-from shared.metrics.observed_metrics import MetricObservation, observe_row, write_observations
-from shared.observability import cluster_label
-from shared.paths import logs_dir
-from shared.telemetry import event_id
+from shared.telemetry.metrics.observed_metrics import (
+    MetricObservation,
+    observe_row,
+    write_observations,
+)
+from shared.telemetry.observability import cluster_label
 
 _EVENTS = ["llm_usage", "turn_end", "exec", "exec_.+", "exec\\(.*", "node_exit"]
 _PAGE_LIMIT = 5000

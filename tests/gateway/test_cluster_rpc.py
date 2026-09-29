@@ -16,7 +16,7 @@ import httpx
 import pytest
 
 from ops import cluster_rpc
-from shared.machines import MachineGatewayUrlMissing, MachineNotRegistered
+from shared.cluster.machines import MachineGatewayUrlMissing, MachineNotRegistered
 
 
 def _patch(

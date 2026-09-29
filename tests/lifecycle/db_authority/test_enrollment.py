@@ -162,7 +162,7 @@ def test_enrollment_commands_refuse_while_a_release_operation_is_incomplete(
         raise RuntimeError("a release operation is incomplete")
 
     enrolled = unit.ensure_enrollment(gateway, identity)
-    monkeypatch.setattr("shared.bootstrap.config_source_is_local", lambda: True)
+    monkeypatch.setattr("shared.host.env.bootstrap.config_source_is_local", lambda: True)
     monkeypatch.setattr("shared.paths.ava_home", lambda: gateway)
     monkeypatch.setattr(
         "shared.release_operation.require_configuration_write_authorized", incomplete

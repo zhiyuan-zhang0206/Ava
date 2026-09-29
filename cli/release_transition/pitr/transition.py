@@ -117,7 +117,7 @@ class PitrTransition:
         from cli.release_fleet.inventory import require_fleet_of_one
         from cli.release_transition.identity import require_reservation
         from shared.cluster import registry_path
-        from shared.machine import machine_name
+        from shared.cluster.machine import machine_name
 
         if machine_name() != self.request.machine:
             raise ValueError("the loaded machine differs from the PITR operation's")

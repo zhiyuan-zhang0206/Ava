@@ -13,7 +13,7 @@ import pytest
 
 from cli.commands._repo import ServiceSpec
 from cli.commands.lifecycle import root_driver as driver
-from shared.daemon_health import DaemonProbe
+from shared.daemon.health import DaemonProbe
 
 # The repo-wide readiness guard replaces `_wait_for_root_services_ready` itself;
 # without this opt-out every readiness test here would assert on that stub.
@@ -519,33 +519,33 @@ def test_root_child_env_beyond_the_launch_inputs_is_only_ambient(
     alias) and the finalizer projection are set, including keys forwarded only
     when present, so what this catches does not depend on this host's environment.
     """
-    from shared import env_registry
+    from shared.host.env import registry
 
     ambient = (
-        env_registry.HOST_PASSTHROUGH_KEYS
-        | env_registry._TEMP_DIR_KEYS
-        | env_registry.NETWORK_PROXY_KEYS
-        | env_registry.WINDOWS_SYSTEM_ENV_KEYS
+        registry.HOST_PASSTHROUGH_KEYS
+        | registry._TEMP_DIR_KEYS
+        | registry.NETWORK_PROXY_KEYS
+        | registry.WINDOWS_SYSTEM_ENV_KEYS
         | {"PYTHONUTF8"}
     )
     declared = (
-        {row.key for row in env_registry._PASSTHROUGH_ROWS}
-        | set(env_registry.FIELD_ALIASES.values())
-        | {env_registry.MANIFEST_CERTIFICATION_FINALIZER_ENV, "PYTHONUTF8"}
+        {row.key for row in registry._PASSTHROUGH_ROWS}
+        | set(registry.FIELD_ALIASES.values())
+        | {registry.MANIFEST_CERTIFICATION_FINALIZER_ENV, "PYTHONUTF8"}
     )
-    paths = {"HOME", "PATH", *env_registry._TEMP_DIR_KEYS}
+    paths = {"HOME", "PATH", *registry._TEMP_DIR_KEYS}
     for key in declared:
         monkeypatch.setenv(key, str(tmp_path) if key in paths else "ambient")
     monkeypatch.setattr(driver.settings.general, "service_path", str(tmp_path / "tools"))
 
     def finalizer() -> dict[str, str]:
         return {
-            env_registry.MANIFEST_CERTIFICATION_SECRET_ENV: "proof",
-            env_registry.MANIFEST_CERTIFICATION_FINALIZER_ENV: "1",
+            registry.MANIFEST_CERTIFICATION_SECRET_ENV: "proof",
+            registry.MANIFEST_CERTIFICATION_FINALIZER_ENV: "1",
         }
 
-    monkeypatch.setattr(env_registry, "manifest_certification_secret_env", finalizer)
-    undeclared = set(driver.root_child_env()) - env_registry.launch_input_keys() - ambient
+    monkeypatch.setattr(registry, "manifest_certification_secret_env", finalizer)
+    undeclared = set(driver.root_child_env()) - registry.launch_input_keys() - ambient
     assert not undeclared, f"declare these in launch_input_keys or as ambient: {sorted(undeclared)}"
 
 

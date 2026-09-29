@@ -1,4 +1,4 @@
-"""`shared/http_dial.py` — pin an IPv4-literal target to AF_INET, bypassing
+"""`shared/host/net/http_dial.py` — pin an IPv4-literal target to AF_INET, bypassing
 `getaddrinfo` (and any DNS64/NAT64 synthesis for it) entirely.
 
 These tests run against a real local TCP server (no network mocking of the
@@ -18,10 +18,10 @@ from collections.abc import Iterator
 import httpx
 import pytest
 
-from shared.http_dial import get as dial_get
-from shared.http_dial import post as dial_post
-from shared.http_dial import put as dial_put
-from shared.http_dial import transport_for_url
+from shared.host.net.http_dial import get as dial_get
+from shared.host.net.http_dial import post as dial_post
+from shared.host.net.http_dial import put as dial_put
+from shared.host.net.http_dial import transport_for_url
 
 
 class _EchoHandler(http.server.BaseHTTPRequestHandler):
@@ -77,7 +77,7 @@ class TestTransportForUrl:
         assert transport_for_url("http://example.com/") is None
 
     def test_ipv4_literal_gets_pinned_transport(self) -> None:
-        from shared.http_dial import PinnedIPv4Transport
+        from shared.host.net.http_dial import PinnedIPv4Transport
 
         t = transport_for_url("http://10.0.0.72:8000/api/bootstrap")
         assert isinstance(t, PinnedIPv4Transport)
@@ -109,7 +109,7 @@ class TestHostnameTargetsStayMonkeypatchable:
     """A non-literal URL must fall through to the real module-level
     httpx.get/post/put — the property existing tests across the repo rely on
     when they `monkeypatch.setattr("httpx.get", ...)` a gateway call site
-    that now goes through shared.http_dial instead of httpx directly."""
+    that now goes through shared.host.net.http_dial instead of httpx directly."""
 
     def test_get_delegates_to_httpx_get(self, monkeypatch: pytest.MonkeyPatch) -> None:
         calls: list[str] = []
@@ -136,7 +136,7 @@ class TestHostnameTargetsStayMonkeypatchable:
 
 class TestExceptionMapping:
     """Errors from the pinned path must surface as the same httpx exception
-    types the stock backend raises — existing callers (shared/bootstrap.py,
+    types the stock backend raises — existing callers (shared/host/env/bootstrap.py,
     ava/gateway_client/__init__.py) catch httpx.ConnectError / httpx.ConnectTimeout /
     httpx.TransportError specifically, not raw httpcore/socket errors."""
 

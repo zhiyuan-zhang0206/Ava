@@ -34,13 +34,13 @@ from psycopg_pool import ConnectionPool
 import shared.db
 import shared.sessions.pty.cli
 from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
+from shared.cluster.machine import machine_name, reachable_host
 from shared.config import settings
-from shared.daemon_health import Liveness, start_health_server, stop_health_server
-from shared.daemon_shutdown import cancel_and_drain, install_graceful_shutdown
-from shared.daemon_shutdown import hard_exit as _hard_exit
+from shared.daemon.health import Liveness, start_health_server, stop_health_server
+from shared.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
+from shared.daemon.shutdown import hard_exit as _hard_exit
 from shared.db_transaction import write_transaction
 from shared.log import init_gateway_process
-from shared.machine import machine_name, reachable_host
 from shared.session_backend import PtySessionBackend, SessionBackend, get_shell_backend
 from shared.session_record import SessionRecord
 from shared.sessions.page_session import page_session_name

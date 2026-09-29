@@ -764,7 +764,7 @@ class TestSelfEntries:
         monkeypatch.setattr(ava.agent_identity, "agent_id", lambda: 900001)
         monkeypatch.setattr(ava.DB, "cursor", _FakeCursor)
         monkeypatch.setattr(self_mod, "_publish_self_inbound_wake", lambda: None)
-        import shared.audit_events as _audit
+        import shared.telemetry.audit_events as _audit
 
         monkeypatch.setattr(_audit, "insert_event_log", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownArgumentType]
         from shared.lifecycle import SystemHalt

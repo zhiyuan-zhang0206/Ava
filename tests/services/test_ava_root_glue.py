@@ -19,7 +19,7 @@ from services.ava_root.supervisor import Supervisor
 from services.ava_root.wiring import WiringContext
 from services.ava_root_glue import drill, glue
 from services.ava_root_glue.diagnostics import Diagnostic, RootHealthRounds
-from shared.daemon_health import DaemonProbe
+from shared.daemon.health import DaemonProbe
 
 _SLEEPER = [sys.executable, "-u", "-c", "import time; time.sleep(60)"]
 

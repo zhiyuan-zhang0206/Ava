@@ -87,13 +87,13 @@ class Unit:
 @pytest.fixture
 def unit(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Unit:
     import shared.cluster
-    import shared.machine
+    import shared.cluster.machine
     import shared.os_boot_unit
 
     home = tmp_path.resolve() / "home"
     home.mkdir(mode=0o700)
-    monkeypatch.setattr(shared.machine, "machine_name", lambda: _MACHINE)
-    monkeypatch.setattr(shared.machine, "machine_role", lambda: frozenset({"agent-runner"}))
+    monkeypatch.setattr(shared.cluster.machine, "machine_name", lambda: _MACHINE)
+    monkeypatch.setattr(shared.cluster.machine, "machine_role", lambda: frozenset({"agent-runner"}))
     monkeypatch.setattr(shared.cluster, "registry_path", lambda: home.parent / "clusters.json")
     monkeypatch.setattr(shared.os_boot_unit, "systemd_running", lambda: True)
     return Unit(home)

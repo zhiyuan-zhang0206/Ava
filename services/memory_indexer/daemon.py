@@ -78,9 +78,9 @@ from services.memory_indexer.embeddings.base import EmbeddingAPIError, Embedding
 from services.memory_indexer.embeddings.factory import get_provider
 from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
 from shared.config import settings
-from shared.daemon_health import Liveness, health_port, start_health_server, stop_health_server
-from shared.daemon_shutdown import cancel_and_drain, install_graceful_shutdown
-from shared.daemon_shutdown import hard_exit as _hard_exit
+from shared.daemon.health import Liveness, health_port, start_health_server, stop_health_server
+from shared.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
+from shared.daemon.shutdown import hard_exit as _hard_exit
 from shared.log import init_gateway_process
 from shared.paths import gateway_memory_dir
 from shared.platform import CREATE_NO_WINDOW

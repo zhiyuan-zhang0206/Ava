@@ -36,5 +36,5 @@ This replaced the previous design where each agent spawned its own ~12MB daemon 
 ## Notes
 - Session cache lives per connection for non-shared servers: two agents listing the same server each spawn their own MCP server child (isolation for stateful servers). `"shared"` servers opt into one child for everyone: `"browser"` (chrome — process-less direct dial to the browser-mcp service, keeping per-connection page affinity) or `true` (x — one daemon-wide stdio child, serialized; safe because that server keeps no per-connection state)
 - A shared stdio child stays resident after its last connection closes (released at daemon shutdown) — the memory win is N×child → 1×child, not child → 0
-- `mcp_daemon_shared_socket()` lives in `shared/paths.py` — the single source of truth for the naming convention
+- `mcp_daemon_shared_socket()` lives in `shared/paths/__init__.py` — the single source of truth for the naming convention
 - Old per-agent socket files (`mcp_daemon.<id>.sock`) are obsolete; a leftover stale file is harmless (nothing binds it)

@@ -11,10 +11,10 @@ import pytest
 
 from shared.agents import impersonation as leases
 from shared.caller_identity import CallerIdentity
+from shared.cluster.machine import machine_name
 from shared.config import settings
 from shared.db import create_agent, insert_inbound_message
 from shared.live_events import Cancelled
-from shared.machine import machine_name
 from shared.runtime_incarnation import RuntimeIncarnation
 from tests.impersonation_support import attested_caller, recorded_tree
 

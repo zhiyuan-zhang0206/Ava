@@ -331,7 +331,7 @@ async def test_restore_job_accepts_clean_foreground_postgres_exit(
 
 def _exercise_close_stop(root: Path) -> None:
     """The daemon loop, with its stop request landing inside the group close."""
-    from shared.daemon_shutdown import cancel_and_drain
+    from shared.daemon.shutdown import cancel_and_drain
 
     close = ExecProcessDomain.close_confirmed
     launch = ExecProcessDomain.launch_posix

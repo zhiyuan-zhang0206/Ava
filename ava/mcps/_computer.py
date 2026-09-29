@@ -16,7 +16,7 @@ import json
 from contextlib import AsyncExitStack, suppress
 from typing import Any
 
-from shared.resilience import Policy, aretry
+from shared.host.net.resilience import Policy, aretry
 
 # Snapshot results stay small (PNG metadata), but keep the same generous line
 # cap as the browser direct-dial so a future inline-image tier fits.

@@ -7,8 +7,8 @@ import pytest
 
 
 def test_gateway_client_base_url_is_gateway_url(monkeypatch: pytest.MonkeyPatch) -> None:
+    from shared.cluster.machine import reset_identity, set_identity
     from shared.config import settings
-    from shared.machine import reset_identity, set_identity
 
     set_identity(role="agent-runner")
     monkeypatch.setattr(settings.gateway, "gateway_url", "https://cp.example.com")

@@ -25,10 +25,10 @@ from cli.cutover_hold import resume_refusal, start_refusal
 from ops.agent_pause import drain, prepare
 from ops.agent_pause.probe import host_identity_or_none, ops_quiescent
 from shared import hold_driver, maintenance, maintenance_cohort, pause_owner, start_serving
+from shared.cluster.machine import machine_name, machine_role
 from shared.db import connect
+from shared.deploy.maintenance.state import MaintenanceHold
 from shared.exit_codes import SERVICES_NOT_READY_EXIT_CODE
-from shared.machine import machine_name, machine_role
-from shared.maintenance_state import MaintenanceHold
 
 
 def _hold(holder: str, at: datetime) -> MaintenanceHold:

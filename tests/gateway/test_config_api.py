@@ -28,9 +28,10 @@ from gateway.app import app
 from gateway.routers import config as config_router
 from ops import cluster_rpc as _cluster_rpc
 from ops.rpc_schemas import ConfigAuditReadResult, ConfigWriteOpResult, FieldWriteResult
-from shared import host_config_validators, runtime_config
+from shared import host_config_validators
+from shared.cluster.machine import machine_name
 from shared.config import settings
-from shared.machine import machine_name
+from shared.host.env import audit, runtime_config
 
 
 def test_get_config_serializes_required_fields():
@@ -102,7 +103,7 @@ def test_get_config_exposes_target_machine_capabilities() -> None:
     """GET self carries the gateway's own capability set (machine_role()) so the
     panel can pick which capability sections a remote view renders. Only valid
     capability tokens; the self view is a gateway, so it carries at least that."""
-    from shared.machine import machine_role
+    from shared.cluster.machine import machine_role
 
     with TestClient(app) as client:
         resp = client.get("/api/config")
@@ -898,7 +899,6 @@ def test_get_config_audit_default_last_comes_from_display_config(
     """Omitted `last` is ``settings.display.config_audit_default_last``
     (``AVA_CONFIG_AUDIT_DEFAULT_LAST``); the literal 20 is only that field's
     default, not a hard-coded cap."""
-    from shared import env_audit, runtime_config
     from shared.agents import MachineNotRegistered
 
     def _known(_target: str) -> None:
@@ -909,18 +909,18 @@ def test_get_config_audit_default_last_comes_from_display_config(
     def _unregistered(_name: str) -> list[str]:
         raise MachineNotRegistered(_name)
 
-    monkeypatch.setattr("shared.machines.lookup_role", _unregistered)
+    monkeypatch.setattr("shared.cluster.machines.lookup_role", _unregistered)
 
     env_path = runtime_config.env_file_path()
     env_path.write_text("AVA_MODEL=audit-one\n")
-    env_audit.record_env_write(
+    audit.record_env_write(
         env_path,
         {"AVA_MODEL"},
         set(),
         site="test-one",
         changes=[{"alias": "AVA_MODEL", "old": "old", "new": "audit-one"}],
     )
-    env_audit.record_env_write(
+    audit.record_env_write(
         env_path,
         {"AVA_MODEL"},
         set(),
@@ -939,7 +939,6 @@ def test_get_config_audit_reads_own_records(
     _clean_overrides: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A self audit read returns this box's newest records, tagged with its machine."""
-    from shared import env_audit, runtime_config
     from shared.agents import MachineNotRegistered
 
     def _known(_target: str) -> None:
@@ -950,10 +949,10 @@ def test_get_config_audit_reads_own_records(
     def _unregistered(_name: str) -> list[str]:
         raise MachineNotRegistered(_name)
 
-    monkeypatch.setattr("shared.machines.lookup_role", _unregistered)
+    monkeypatch.setattr("shared.cluster.machines.lookup_role", _unregistered)
     env_path = runtime_config.env_file_path()
     env_path.write_text("AVA_MODEL=audit-self\n")
-    env_audit.record_env_write(
+    audit.record_env_write(
         env_path,
         {"AVA_MODEL"},
         set(),
@@ -993,7 +992,7 @@ async def test_get_config_audit_all_merges_runners_newest_first(
     def _runners() -> list[tuple[str, str | None]]:
         return [("m1", None), ("m2", None)]
 
-    monkeypatch.setattr("shared.machines.list_agent_runners", _runners)
+    monkeypatch.setattr("shared.cluster.machines.list_agent_runners", _runners)
 
     with TestClient(app) as client:
         resp = client.get("/api/config/audit?machine=all&last=2")

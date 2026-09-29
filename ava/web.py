@@ -17,9 +17,9 @@ from ava.sdk_surface.batch import DEFAULT_BATCH_MAX_CONCURRENT, run_batch, valid
 from ava.sdk_surface.validation import coerce_str, coerce_typed
 from ava.security import scan_content
 from shared.config import settings
+from shared.host.net.resilience import ExponentialBackoff, Policy, http_classifier, retry
 from shared.lm.call import answer_text
 from shared.lm.effort import ReasoningEffort, coerce_effort
-from shared.resilience import ExponentialBackoff, Policy, http_classifier, retry
 
 _log = logging.getLogger(__name__)
 

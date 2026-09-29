@@ -29,7 +29,7 @@ first hop is still its own sidecar. Three signals:
   extras — a per-event msg string would split every counter into its own
   series). Log/audit events produce no metrics: they are the event stream,
   not a measurement.
-- **traces** — NOT exported here. ``shared/trace.py`` exports them to the same
+- **traces** — NOT exported here. ``shared/telemetry/tracing.py`` exports them to the same
   local collector, whose file exporter writes the standard OTLP/JSON mirror.
   ``ava trace ship`` is the separate recovery replay: gateway units dial Tempo
   directly; pure runners use the authenticated gateway collector ingress.
@@ -84,14 +84,14 @@ import time
 from functools import cache
 from typing import Any
 
-from shared.metrics import ci_runs_metrics
-from shared.observability import (
+from shared.telemetry import Event
+from shared.telemetry.metrics import ci_runs_metrics
+from shared.telemetry.observability import (
     cluster_label,
     endpoint_override_is_explicit,
     gateway_observability_home,
     production_identity,
 )
-from shared.telemetry import Event
 from shared.telemetry.otlp import telemetry_otlp_metrics
 from shared.telemetry.otlp.telemetry_otlp_barrier import (
     WorkerFlushMarker,
@@ -252,7 +252,7 @@ def observability_export_allowed() -> bool:
     home = gateway_observability_home()
     if home is None:
         return True
-    from shared.observability import home_is_observability_station
+    from shared.telemetry.observability import home_is_observability_station
 
     allowed = home_is_observability_station(home)
     if not allowed:
@@ -279,7 +279,7 @@ def endpoint_reachable(endpoint: str) -> bool:
     minutes; disabled and recovered episodes are also reported as real events.
 
     Shared by the events exporter (here) and the trace exporter
-    (``shared.trace.initialize_tracing``) — both arm their SDK exporters
+    (``shared.telemetry.tracing.initialize_tracing``) — both arm their SDK exporters
     against the same local sidecar.
 
     2026-08-12 prod incident: this probe sent no Content-Type, so urllib

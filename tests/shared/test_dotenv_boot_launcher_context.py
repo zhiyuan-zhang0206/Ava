@@ -19,7 +19,7 @@ from pathlib import Path
 
 import pytest
 
-from shared import dotenv_boot
+from shared.host.env import dotenv_boot
 from tests.shared.test_dotenv_boot import (
     _IDENTITY_LINES,
     _point_env_at_without_db_url,

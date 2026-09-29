@@ -11,7 +11,8 @@ from pathlib import Path
 import psutil
 import pytest
 
-from shared import port_preflight, proc
+from shared import proc
+from shared.cluster import port_preflight
 
 
 @dataclass(frozen=True)

@@ -174,7 +174,7 @@ import importlib.abc
 import sys
 class Poison(importlib.abc.MetaPathFinder):
     def find_spec(self, fullname, path=None, target=None):
-        if fullname in {'shared.config', 'shared.paths', 'shared.dotenv_boot'}:
+        if fullname in {'shared.config', 'shared.paths', 'shared.host.env.dotenv_boot'}:
             raise AssertionError('Settings preload: ' + fullname)
 sys.meta_path.insert(0, Poison())
 import shared.runtime_interpreter

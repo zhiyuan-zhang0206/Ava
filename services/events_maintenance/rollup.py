@@ -54,14 +54,14 @@ import psycopg
 from psycopg import sql
 
 from shared.log import logger
-from shared.loki_index_labels import (
+from shared.telemetry.loki_index_labels import (
     EVENT_STREAM_RETENTION,
     LokiReadEra,
     escape_logql_label,
     event_stream_selector,
     split_index_label_window,
 )
-from shared.loki_query_budget import FairQueryBudget
+from shared.telemetry.loki_query_budget import FairQueryBudget
 
 _HTTP_TIMEOUT_S = 60.0
 # Serialized by design (capacity 1): the maintenance sweep must not crowd out

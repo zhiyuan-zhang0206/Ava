@@ -47,7 +47,7 @@ import numpy as np
 
 from services.memory_indexer.embeddings.base import EmbeddingAPIError
 from shared.config import settings
-from shared.resilience import (
+from shared.host.net.resilience import (
     MAX_RETRY_AFTER_RESPECT_S,
     ExponentialBackoff,
     Policy,

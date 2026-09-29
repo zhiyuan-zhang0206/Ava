@@ -745,7 +745,7 @@ def test_billing_rule_names_vendor_and_model_in_the_notification() -> None:
     summary = rule["annotations"]["summary"]
     assert "{{ $labels.attributes_vendor }}" in summary
     assert "{{ $labels.attributes_model }}" in summary
-    # shared/alerts.py:notify_text truncates the summary at 200 chars; the
+    # shared/telemetry/alerts.py:notify_text truncates the summary at 200 chars; the
     # template must still say what happened once the labels expand.
     assert len(summary) <= 200, f"summary is {len(summary)} chars, IM truncates at 200"
 

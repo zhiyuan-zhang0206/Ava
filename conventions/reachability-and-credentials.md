@@ -4,14 +4,14 @@ Cross-machine dialing in a split cluster has exactly two facts to get right:
 **where** each unit can be reached, and **what credential** authenticates the
 call. This document is the single written contract for both. Code that
 advertises an endpoint, dials a remote endpoint, or verifies a credential
-references this file (see `shared/machines.py`, `cli/commands/observability/otel_collector.py`,
+references this file (see `shared/cluster/machines.py`, `cli/commands/observability/otel_collector.py`,
 `gateway/routers/pages.py`, `services/heartbeat/station_probe.py`).
 
 ## Endpoint advertisement
 
 Every unit advertises **one inbound base URL** in its `machine_units.url` row
-(`shared.machines.register_self`), composed into the machine's
-`machines.gateway_url`. `shared.machines.unit_dial_url` is the single
+(`shared.cluster.machines.register_self`), composed into the machine's
+`machines.gateway_url`. `shared.cluster.machines.unit_dial_url` is the single
 definition of that URL — both writers (`ava start` and the ops daemon's boot
 registration) share it, so two processes can never advertise different
 addresses for the same unit.
@@ -35,7 +35,7 @@ Three rules:
 2. **Loopback advertisement is legal only when nothing remote dials it.** A
    zero-config single box advertises `localhost` and everything is co-located.
    A pure runner or pure station whose gateway is provably remote is refused
-   at registration (`LoopbackDialUrlRefused`, `shared.machines._reject_loopback_dial_url`)
+   at registration (`LoopbackDialUrlRefused`, `shared.cluster.machines._reject_loopback_dial_url`)
    — the gateway would dial itself and report the peer online under the wrong
    identity (the 2026-07-18 runner incident).
 3. **The station's advertised url is its OTLP ingress** (single source:
@@ -44,7 +44,7 @@ Three rules:
    Prometheus 9090 / Grafana 3003) have no advertised url; they stay
    loopback-bound unless an operator widens the listen host,
    and they are never dialed cross-machine.
-   Collector rendering and the station probe share `shared.station_endpoint`:
+   Collector rendering and the station probe share `shared.telemetry.station_endpoint`:
    they select the live pure-station advertisement on the configured
    `AVA_OBSERVABILITY_URL` host and preserve its port. Gateway/station and
    runner/station hybrids advertise gateway/ops URLs, so they are excluded by
@@ -70,7 +70,7 @@ guard correct.
 | Surface | Credential | Verifier |
 |---|---|---|
 | Gateway HTTP API, bootstrap, webhooks | `AVA_CLUSTER_SECRET` bearer (human/operator, gateway only) or the active write generation's machine API token (`AVA_API_TOKEN`) | `gateway.auth.request_principal.cluster_credential` (constant-time; a revoked generation's token never matches) |
-| A unit's `/ops` | its write generation's gateway or runner API token | `shared/cluster_auth.py` `verify_bearer_digest` over digests only |
+| A unit's `/ops` | its write generation's gateway or runner API token | `shared/cluster/auth.py` `verify_bearer_digest` over digests only |
 | Gateway and station OTLP ingress (remote receiver) | the telemetry token (`HMAC(AVA_CLUSTER_SECRET)`; remote units hold only the token, from their capability) | otel-collector `bearertokenauth/cluster` extension |
 | Data plane (Postgres/Redis) | split admin/runtime credentials, gateway-only admin | `conventions/data-plane-secret-split.md` |
 | Loki/Prometheus backend APIs | none — loopback-only (`AVA_LGTM_LISTEN_HOST`) | n/a |

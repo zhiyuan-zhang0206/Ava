@@ -217,7 +217,7 @@ def holder_pid_if_local(holder: str) -> int | None:
     callers (the stalled-rollout interrupt and the cancel op) are retired; it
     has no production caller now.
     """
-    from shared.machine import machine_name
+    from shared.cluster.machine import machine_name
     from shared.proc import process_alive
 
     machine, sep, pid_str = holder.partition(":pid")
@@ -259,7 +259,7 @@ def holder_process_gone(holder: str, *, held_for_s: float | None = None) -> bool
     whose owner is definitively gone. `ops.cluster._lock_holder_is_live` is
     its negation, and the stranded-lease controller its automatic consumer.
     """
-    from shared.machine import machine_name
+    from shared.cluster.machine import machine_name
     from shared.proc import process_alive
 
     machine, sep, pid_str = holder.partition(":pid")
@@ -302,7 +302,7 @@ def self_holder() -> str:
     orchestration and its Phase-B poll are the same process, so the string is
     derivable rather than passed.
     """
-    from shared.machine import machine_name
+    from shared.cluster.machine import machine_name
 
     return f"{machine_name()}:pid{os.getpid()}"
 

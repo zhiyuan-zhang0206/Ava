@@ -28,7 +28,7 @@ A module-level constant whose name contains lattice vocabulary (`STALL`, `GRACE`
 
 1. **Defined in a lattice family module** — `shared/timing.py`,
    `shared/deploy_timing.py`, `shared/stop_timing.py`,
-   `shared/daemon/schedules/schedule_timing.py`, `shared/cluster_lock.py`.
+   `shared/daemon/schedules/timing.py`, `shared/cluster_lock.py`.
    These are the lattice's homes; registering a
    new clock there and in `CLOCKS` is the correct way to add one.
 2. **An alias of a registered clock** — the assignment's value is a bare
@@ -105,7 +105,7 @@ _FAMILY_MODULES = (
     "shared/timing.py",
     "shared/deploy_timing.py",
     "shared/stop_timing.py",
-    "shared/daemon/schedules/schedule_timing.py",
+    "shared/daemon/schedules/timing.py",
     "shared/cluster_lock.py",
 )
 

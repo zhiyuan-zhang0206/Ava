@@ -32,7 +32,7 @@ from gateway.lgtm import _loki_logql, loki_events, loki_events_cache, loki_query
 from services.events_maintenance.resolution import EventClass
 from shared.config import settings
 from shared.events.contract import lineage_event_names
-from shared.loki_index_labels import (
+from shared.telemetry.loki_index_labels import (
     EVENT_STREAM_RETENTION,
     LINEAGE_RETENTION_PERIOD,
     LOKI_MAX_QUERY_SERIES,
@@ -343,9 +343,11 @@ def _wait_for_budget_waiters(expected: int) -> None:
 
 class TestGlobalQueryBudget:
     def test_budget_contract_is_reexported_from_shared(self) -> None:
-        spec = importlib.util.find_spec("shared.loki_query_budget")
-        assert spec is not None, "shared.loki_query_budget must own the reusable budget contract"
-        shared_budget = importlib.import_module("shared.loki_query_budget")
+        spec = importlib.util.find_spec("shared.telemetry.loki_query_budget")
+        assert spec is not None, (
+            "shared.telemetry.loki_query_budget must own the reusable budget contract"
+        )
+        shared_budget = importlib.import_module("shared.telemetry.loki_query_budget")
         for name in (
             "BudgetErrorFactory",
             "BudgetMetrics",
@@ -1073,7 +1075,7 @@ class TestObservabilityReadGate:
     ) -> None:
         home = tmp_path / ".ava-preview"
         home.mkdir()
-        monkeypatch.setattr("shared.machine.machine_role", lambda: frozenset({"gateway"}))
+        monkeypatch.setattr("shared.cluster.machine.machine_role", lambda: frozenset({"gateway"}))
         monkeypatch.setattr("shared.paths.ava_home", lambda: home)
         monkeypatch.delitem(os.environ, "AVA_TELEMETRY_LOKI_URL", raising=False)
 
@@ -1096,12 +1098,10 @@ class TestObservabilityReadGate:
         monkeypatch.delitem(os.environ, "AVA_TELEMETRY_LOKI_URL", raising=False)
         if override == "marker":
             (home / "lgtm-host").touch()
-            monkeypatch.setattr("shared.machine.machine_role", lambda: frozenset({"gateway"}))
         elif override == "environment":
-            monkeypatch.setattr("shared.machine.machine_role", lambda: frozenset({"gateway"}))
             monkeypatch.setitem(os.environ, "AVA_TELEMETRY_LOKI_URL", "http://loki.invalid:3100")
-        else:
-            monkeypatch.setattr("shared.machine.machine_role", lambda: frozenset({"agent-runner"}))
+        role = "agent-runner" if override == "runner" else "gateway"
+        monkeypatch.setattr("shared.cluster.machine.machine_role", lambda: frozenset({role}))
 
         loki_events._read_gate()
 

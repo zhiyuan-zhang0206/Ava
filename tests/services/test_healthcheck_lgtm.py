@@ -16,7 +16,7 @@ import pytest
 
 from services.healthchecks import lgtm as hc
 from shared.config import settings
-from shared.daemon_health import DaemonProbe
+from shared.daemon.health import DaemonProbe
 
 
 class _Response:
@@ -225,7 +225,7 @@ def test_is_lgtm_host_accepts_station_capability(
     """The declarative observability-station capability designates the host
     exactly like the marker — the watchdog keepalive and `ava status` gate on
     either form."""
-    from shared.machine import reset_identity, set_identity
+    from shared.cluster.machine import reset_identity, set_identity
 
     home = tmp_path / "station"
     home.mkdir()

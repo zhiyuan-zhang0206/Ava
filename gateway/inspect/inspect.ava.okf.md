@@ -38,7 +38,7 @@ their lifecycle is managed separately. Launch time never synthesizes a deadline.
 Builds the metric registry in process — shipped plugin `metrics.py` modules +
 core definitions — renders `output`-inspector templates per agent, re-validates
 the rendered query, executes LogQL over Loki / SQL read-only over Postgres —
-see `shared/plugin_metrics.py` + the `deploy/lgtm` dashboards README.
+see `shared/telemetry/metrics/plugin_metrics.py` + the `deploy/lgtm` dashboards README.
 
 ## Plugin inspector-widget surface (`/inspect/widgets`, task #2909)
 

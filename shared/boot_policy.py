@@ -2,7 +2,7 @@
 
 At boot, the things `ava start` needs are not all up yet. The incident that
 produced this module: an enrolled agent-runner fetches `GET /api/bootstrap`
-from the gateway as part of its Settings build (`shared.bootstrap`; every
+from the gateway as part of its Settings build (`shared.host.env.bootstrap`; every
 runner process does this at startup), the VPN interface came up *after* the
 boot job fired, the fetch raised ENETUNREACH, `ava start` exited 1 — and
 nothing ever tried again, so the runner stayed down for hours. Any transient

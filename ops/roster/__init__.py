@@ -17,7 +17,7 @@ from urllib.parse import urlsplit
 from ops.roster.service_spec import _AGENT_RUNNER, _BOTH, _GATEWAY, ServiceSpec
 from shared.cluster import frontend_service_cmd
 from shared.config import settings
-from shared.daemon_health import DaemonProbe, health_port, probe_daemon, probe_home
+from shared.daemon.health import DaemonProbe, health_port, probe_daemon, probe_home
 from shared.paths import ava_home, otel_collector_binary, otel_collector_config
 
 # The roster body moved verbatim and still resolves these policy helpers by
@@ -452,7 +452,7 @@ def build_services() -> tuple[ServiceSpec, ...]:
     )
 
     from services.healthchecks.lgtm import probe_backend
-    from shared.lgtm_local import (
+    from shared.telemetry.lgtm_local import (
         BACKENDS,
         HEALTH_PATHS,
         backend_urls,

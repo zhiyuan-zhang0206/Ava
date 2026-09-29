@@ -32,8 +32,8 @@ from gateway.schemas.stats import StatsWindowHours, window_delta
 from shared import plugin_stats, telemetry
 from shared.cluster import home_label
 from shared.config import settings
-from shared.loki_index_labels import EVENT_STREAM_RETENTION, retention_floor
 from shared.paths import ava_home
+from shared.telemetry.loki_index_labels import EVENT_STREAM_RETENTION, retention_floor
 from tests.gateway.loki_fake import FakeLoki
 
 

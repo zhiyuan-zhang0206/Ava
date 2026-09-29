@@ -15,9 +15,9 @@ from agent import state as states
 from ops.agents.spawn import create_agent_row
 from services.agent_host import db_recovery, recovery_interrupt
 from services.agent_host.recovery_interrupt import RecoveryInterrupt
+from shared.cluster.machine import machine_name
 from shared.config import settings
 from shared.db import insert_inbound_message
-from shared.machine import machine_name
 from shared.runtime_incarnation import RuntimeIncarnation
 from shared.turn_identity import bind_turn_identity
 from tests.agent.test_hosted_db_recovery import _admit, _graph

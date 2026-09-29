@@ -164,7 +164,7 @@ def _new_request(
     record: ActivationRecord | None,
 ) -> PitrRequest:
     from shared.cluster import registry_path
-    from shared.machine import machine_name
+    from shared.cluster.machine import machine_name
 
     encoded = None if record is None else regular_bytes(record_path(home))
     files = configuration_files(home)

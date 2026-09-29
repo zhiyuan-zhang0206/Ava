@@ -49,8 +49,8 @@ def _register_boot() -> None:
     outage this function exists to prevent. The failure is logged at error so a
     permanently unregistered runner is visible rather than quietly absent.
     """
-    from shared.machine import machine_role
-    from shared.machines import register_self, unit_dial_url
+    from shared.cluster.machine import machine_role
+    from shared.cluster.machines import register_self, unit_dial_url
 
     try:
         url = unit_dial_url(machine_role())

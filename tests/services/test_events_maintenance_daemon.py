@@ -26,7 +26,7 @@ from psycopg_pool import ConnectionPool
 
 from services.events_maintenance import daemon
 from shared.config.daemon import DaemonSettings
-from shared.daemon_health import LivenessGroup, LoopProgress
+from shared.daemon.health import LivenessGroup, LoopProgress
 
 # The pool is never touched — `_run_maintenance` / `_maintenance_with_liveness` are faked.
 _FAKE_POOL: Any = object()

@@ -221,14 +221,14 @@ def test_collect_port_conflicts_env_layer_overrides_block_for_enrolled_unit(
     ctx = _preflight_ctx(tmp_path)
     # no registry record -> block layer is the legacy segment
     monkeypatch.setattr(
-        "shared.port_preflight.expected_cluster_ports",
+        "shared.cluster.port_preflight.expected_cluster_ports",
         lambda _home: {"agent_host": 8121},  # pyright: ignore[reportUnknownArgumentType]
     )
     # the unit's own .env declares a per-unit block port (every health daemon
     # resolves; only agent_host's matters for the assertion)
     per_unit = {"agent_host": 20003}
     monkeypatch.setattr(
-        "shared.daemon_health.health_port",
+        "shared.daemon.health.health_port",
         lambda svc: per_unit.get(svc, 20000 + len(svc)),  # pyright: ignore[reportUnknownArgumentType]
     )
 

@@ -41,8 +41,8 @@ from services.memory_indexer.embeddings.gemini import (
     GeminiEmbeddingProvider,
 )
 from shared.config import settings
+from shared.host.net.resilience import ExponentialBackoff, Policy
 from shared.lm.plugin_providers import ensure_provider_plugins_loaded
-from shared.resilience import ExponentialBackoff, Policy
 
 
 def _provider() -> GeminiEmbeddingProvider:
@@ -138,11 +138,11 @@ class _RecordingTracer:
 
 
 def _enable_tracing(monkeypatch: pytest.MonkeyPatch) -> _RecordingTracer:
-    from shared import trace as trace_mod
+    from shared.telemetry import tracing as tracing_mod
 
     tracer = _RecordingTracer()
     monkeypatch.setattr("shared.config.settings.observability.trace_enabled", True)
-    monkeypatch.setitem(trace_mod._state, "initialized", True)
+    monkeypatch.setitem(tracing_mod._state, "initialized", True)
     monkeypatch.setattr("opentelemetry.trace.get_tracer", lambda _name: tracer)  # pyright: ignore[reportUnknownArgumentType]
     return tracer
 
@@ -224,18 +224,18 @@ def _dummy_gemini_key(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.fixture(autouse=True)
 def _no_retry_sleep(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Neutralize shared.resilience backoff sleeps so retry-path tests do
+    """Neutralize shared.host.net.resilience backoff sleeps so retry-path tests do
     not hang; the retry loop itself is still exercised (call counts). The
     provider's policy is a module constant (R2-D), no longer settings-driven.
     `_asleep` must be a REAL coroutine function: `aretry` awaits it, so a sync
     lambda turns every async retry into `TypeError: object NoneType can't be
     used in 'await' expression`."""
-    monkeypatch.setattr("shared.resilience._sleep", lambda _s: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("shared.host.net.resilience._sleep", lambda _s: None)  # pyright: ignore[reportUnknownArgumentType]
 
     async def _no_asleep(_s: float) -> None:
         return None
 
-    monkeypatch.setattr("shared.resilience._asleep", _no_asleep)
+    monkeypatch.setattr("shared.host.net.resilience._asleep", _no_asleep)
 
 
 # ── provider surface (the contract) ───────────────────────────────────────
@@ -728,7 +728,7 @@ def test_embed_trickle_total_deadline(
     attempts: int,
 ) -> None:
     """Bound one attempt AND retry exhaustion on real sockets, despite timely reads."""
-    from shared import resilience
+    from shared.host.net import resilience
 
     endpoint, requests = trickle_server
     timeout = 0.25
@@ -761,7 +761,7 @@ def test_embed_compressed_trickle_deadline(
     monkeypatch: pytest.MonkeyPatch, attempts: int, mode: str
 ) -> None:
     """Gzip metadata cannot hide body reads from the deadline or retry budget."""
-    from shared import resilience
+    from shared.host.net import resilience
 
     timeout = 0.2
     monkeypatch.setattr(settings.services, "memory_embed_timeout_seconds", timeout)
@@ -795,7 +795,7 @@ def test_embed_framing_drip_deadline(
     monkeypatch: pytest.MonkeyPatch, mode: str, framing: str, attempts: int
 ) -> None:
     """Chunk extensions and trailers cannot hide timely reads from cancellation."""
-    from shared import resilience
+    from shared.host.net import resilience
 
     timeout = 0.2
     monkeypatch.setattr(settings.services, "memory_embed_timeout_seconds", timeout)
@@ -837,7 +837,7 @@ def test_embed_slow_error_body_preserves_status(
     monkeypatch: pytest.MonkeyPatch, mode: str, status: int
 ) -> None:
     """Real HTTPX rejects error headers immediately, preserving classification and delay."""
-    from shared import resilience
+    from shared.host.net import resilience
 
     sleeps: list[float] = []
     classified: list[Exception] = []

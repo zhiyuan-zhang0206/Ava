@@ -16,6 +16,7 @@ from agent.ownership.hosted import admit_hosted_runtime, apply_hosted_lifecycle
 from ops.agents.spawn import create_agent_row
 from services.agent_host.maintenance import record_drained
 from shared import maintenance
+from shared.cluster.machine import machine_name
 from shared.db import insert_inbound_message
 from shared.incarnation_resources import (
     IncarnationResources,
@@ -23,7 +24,6 @@ from shared.incarnation_resources import (
     ResourceShapeError,
     decode_resources,
 )
-from shared.machine import machine_name
 from shared.maintenance_cohort import _applied_capture, verify_drained
 from shared.maintenance_state import MaintenanceHold
 from shared.predecessor_closure import ClosureEvidence, close_retired_predecessor

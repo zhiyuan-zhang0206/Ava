@@ -26,7 +26,7 @@ from fastapi.testclient import TestClient
 from gateway.app import app
 from shared import config, telemetry
 from shared.api_contracts.mcp_tool_contract import project_message
-from shared.cluster_auth import bearer_header
+from shared.cluster.auth import bearer_header
 
 _SECRET = "test-cluster-secret"  # noqa: S105 — test fixture
 _ACCEPT = "application/json, text/event-stream"

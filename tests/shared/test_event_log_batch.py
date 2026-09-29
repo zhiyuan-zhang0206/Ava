@@ -21,7 +21,7 @@ from typing import Any
 import psycopg
 
 from shared import telemetry
-from shared.audit_events import insert_event_log, insert_event_log_many
+from shared.telemetry.audit_events import insert_event_log, insert_event_log_many
 
 
 def _agent(conn: psycopg.Connection, aid: int) -> int:

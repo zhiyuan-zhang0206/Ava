@@ -1,4 +1,4 @@
-"""`shared/machine.py` unit tests — machine_name and machine_role env/file precedence + validation.
+"""`shared/cluster/machine.py` unit tests — machine_name and machine_role env/file precedence + validation.
 
 machine_role is derived from independent capability booleans
 (serve_gateway / serve_agent_runner / serve_observability_station);
@@ -13,15 +13,15 @@ from pathlib import Path
 
 import pytest
 
-from shared import machine as _machine
-from shared.config import settings
-from shared.machine import (
+from shared.cluster import machine as _machine
+from shared.cluster.machine import (
     MachineRoleInvalid,
     MachineRoleMissing,
     format_capabilities,
     gateway_auth_headers,
     machine_role,
 )
+from shared.config import settings
 
 
 @pytest.fixture(autouse=True)
@@ -29,7 +29,7 @@ def _machine_setup(monkeypatch: pytest.MonkeyPatch) -> Generator[None, None, Non
     """Reset identity holder + clear both serve-capability env settings so a
     leaked host value never bleeds into a precedence test. Each test sets only
     what it needs; unset (None) means "fall through to the file"."""
-    from shared.machine import reset_identity
+    from shared.cluster.machine import reset_identity
 
     monkeypatch.setattr(settings.general, "machine_serve_gateway", None)
     monkeypatch.setattr(settings.general, "machine_serve_agent_runner", None)
@@ -78,7 +78,7 @@ def test_machine_role_observability_station_file(
 
 def test_is_observability_station_helper(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """is_observability_station() mirrors is_gateway()/is_agent_runner()."""
-    from shared.machine import reset_identity
+    from shared.cluster.machine import reset_identity
 
     monkeypatch.setattr(_machine, "ava_home", lambda: tmp_path)
     (tmp_path / "machine_serve_observability_station").write_text("true")
@@ -125,7 +125,7 @@ def test_machine_serve_file_typo_raises_not_silent_false(
 
 def test_set_identity_coerces_string_and_iterable() -> None:
     """set_identity accepts a comma string or an iterable; both validate to a set."""
-    from shared.machine import reset_identity, set_identity
+    from shared.cluster.machine import reset_identity, set_identity
 
     set_identity(role="gateway,agent-runner")
     try:
@@ -176,7 +176,7 @@ def test_parse_roles_accepts_observability_station() -> None:
 
 
 def test_machine_description_env_wins(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
-    from shared import machine
+    from shared.cluster import machine
     from shared.config import settings
 
     monkeypatch.setattr(settings.general, "machine_description", "from-env")
@@ -186,7 +186,7 @@ def test_machine_description_env_wins(monkeypatch: pytest.MonkeyPatch, tmp_path:
 
 
 def test_machine_description_file_when_env_missing(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
-    from shared import machine
+    from shared.cluster import machine
     from shared.config import settings
 
     monkeypatch.setattr(settings.general, "machine_description", "")
@@ -196,7 +196,7 @@ def test_machine_description_file_when_env_missing(monkeypatch: pytest.MonkeyPat
 
 
 def test_machine_description_none_when_neither(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
-    from shared import machine
+    from shared.cluster import machine
     from shared.config import settings
 
     monkeypatch.setattr(settings.general, "machine_description", "")
@@ -248,7 +248,7 @@ def test_gateway_api_base_unset_raises_regardless_of_role(
 
 
 def test_set_identity_overrides_resolution(tmp_path: Path) -> None:
-    from shared.machine import (
+    from shared.cluster.machine import (
         machine_description,
         machine_name,
         machine_role,
@@ -268,7 +268,7 @@ def test_set_identity_overrides_resolution(tmp_path: Path) -> None:
 def test_set_identity_is_per_field_independent(monkeypatch: pytest.MonkeyPatch) -> None:
     """Injecting only role must not force name resolution (a role-only test
     should never hit MachineNameMissing)."""
-    from shared.machine import machine_role, reset_identity, set_identity
+    from shared.cluster.machine import machine_role, reset_identity, set_identity
 
     monkeypatch.setattr(settings.general, "machine_name", "")
     monkeypatch.setattr(_machine, "ava_home", lambda: Path("/nonexistent-ava-home"))
@@ -280,7 +280,7 @@ def test_set_identity_is_per_field_independent(monkeypatch: pytest.MonkeyPatch) 
 
 
 def test_reset_identity_reresolves(monkeypatch: pytest.MonkeyPatch) -> None:
-    from shared.machine import machine_role, reset_identity, set_identity
+    from shared.cluster.machine import machine_role, reset_identity, set_identity
 
     set_identity(role="gateway")
     assert machine_role() == frozenset({"gateway"})
@@ -292,7 +292,7 @@ def test_reset_identity_reresolves(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_set_identity_description_none_is_explicit(tmp_path: Path) -> None:
     """description=None injects None (resolved), not 'leave unset'."""
-    from shared.machine import machine_description, reset_identity, set_identity
+    from shared.cluster.machine import machine_description, reset_identity, set_identity
 
     set_identity(description=None)
     try:
@@ -329,7 +329,7 @@ def test_reachable_host_defaults_to_localhost(
 
 
 def test_set_identity_host_injection() -> None:
-    from shared.machine import reachable_host, reset_identity, set_identity
+    from shared.cluster.machine import reachable_host, reset_identity, set_identity
 
     set_identity(host="10.0.0.5")
     try:

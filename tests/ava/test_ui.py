@@ -27,7 +27,7 @@ from fastapi.testclient import TestClient
 import ava
 from ava.ui import InvalidPageName, PageClosed
 from gateway.app import app
-from shared.machine import reset_identity, set_identity
+from shared.cluster.machine import reset_identity, set_identity
 from tests.conftest import spawn_agent
 
 _HOST = "127.0.0.1"  # loopback — the single-box posture the SDK registers (audit P1-4: only loopback / the agent's own machine are legal proxy targets)

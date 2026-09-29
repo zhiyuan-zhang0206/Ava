@@ -751,7 +751,7 @@ def test_notify_owner_stamps_home_label(
 
     import shared.cluster
     from shared.config import settings
-    from shared.daemon_health import health_port
+    from shared.daemon.health import health_port
 
     monkeypatch.setattr(settings.alerts, "im_notify_enabled", True)
     monkeypatch.setattr(settings.data_plane, "cluster_secret", "test-secret")
@@ -1024,7 +1024,7 @@ def test_crash_loop_merges_disjoint_cutover_eras(monkeypatch: pytest.MonkeyPatch
     promoted boundary row through both selectors."""
     import httpx
 
-    from shared.loki_index_labels import LokiReadEra, LokiReadSlice
+    from shared.telemetry.loki_index_labels import LokiReadEra, LokiReadSlice
 
     start = datetime(2026, 8, 10, tzinfo=UTC)
     cutover = start.replace(hour=1)
@@ -1060,7 +1060,7 @@ def test_crash_loop_queries_the_current_window(monkeypatch: pytest.MonkeyPatch) 
     """The instant query evaluates at now, covering exactly (now-window, now]."""
     import httpx
 
-    from shared.loki_index_labels import LokiReadEra, LokiReadSlice
+    from shared.telemetry.loki_index_labels import LokiReadEra, LokiReadSlice
 
     fixed_now = datetime(2026, 8, 24, 12, 0, tzinfo=UTC)
     captured_windows: list[tuple[datetime, datetime]] = []
@@ -1118,12 +1118,12 @@ def test_ingest_alert_posts_health_probe_payload(monkeypatch: pytest.MonkeyPatch
     gateway ingest with the graded severity and stable instance identity."""
     import httpx
 
-    import shared.machine
-    from shared.alerts import fingerprint
+    import shared.cluster.machine
     from shared.config import settings
+    from shared.telemetry.alerts import fingerprint
 
     monkeypatch.setattr(settings.data_plane, "cluster_secret", "test-secret")
-    monkeypatch.setattr(shared.machine, "gateway_api_base", lambda: "http://127.0.0.1:8123")
+    monkeypatch.setattr(shared.cluster.machine, "gateway_api_base", lambda: "http://127.0.0.1:8123")
     monkeypatch.setattr(health_alerts, "_alert_summary", lambda **_: "SUMMARY")  # pyright: ignore[reportUnknownArgumentType]
 
     sent: list[tuple[str, dict[str, Any], dict[str, str]]] = []
@@ -1174,11 +1174,11 @@ def test_ingest_alert_unreachable_gateway_falls_back(
     a transport failure routes to the local ingest fallback, never raises."""
     import httpx
 
-    import shared.machine
+    import shared.cluster.machine
     from shared.config import settings
 
     monkeypatch.setattr(settings.data_plane, "cluster_secret", "s")
-    monkeypatch.setattr(shared.machine, "gateway_api_base", lambda: "http://127.0.0.1:8123")
+    monkeypatch.setattr(shared.cluster.machine, "gateway_api_base", lambda: "http://127.0.0.1:8123")
     monkeypatch.setattr(health_alerts, "_alert_summary", lambda **_: "SUMMARY")  # pyright: ignore[reportUnknownArgumentType]
 
     def _post(*_a: object, **_k: object) -> None:
@@ -1218,12 +1218,12 @@ def test_ingest_alert_http_error_falls_back_without_leaking_secret(
     status code + body are logged, never the exception or the secret."""
     import httpx
 
-    import shared.machine
+    import shared.cluster.machine
     from shared.config import settings
 
     secret = "SUPERSECRET"  # noqa: S105 — test fixture
     monkeypatch.setattr(settings.data_plane, "cluster_secret", secret)
-    monkeypatch.setattr(shared.machine, "gateway_api_base", lambda: "http://127.0.0.1:8123")
+    monkeypatch.setattr(shared.cluster.machine, "gateway_api_base", lambda: "http://127.0.0.1:8123")
     monkeypatch.setattr(health_alerts, "_alert_summary", lambda **_: "SUMMARY")  # pyright: ignore[reportUnknownArgumentType]
 
     req = httpx.Request("POST", "http://127.0.0.1:8123/api/alerts")
@@ -1286,14 +1286,14 @@ def test_ingest_alert_fallback_persists_and_notifies(monkeypatch: pytest.MonkeyP
     notified: list[str] = []
     stamped: list[object] = []
     monkeypatch.setattr(
-        "shared.alerts.upsert_alert",
+        "shared.telemetry.alerts.upsert_alert",
         lambda _c, a, source="grafana": (
             upserted.append((a, source))  # pyright: ignore[reportUnknownArgumentType]
             or (key, True, True, {"notified_at": None})
         ),
     )
-    monkeypatch.setattr("shared.alerts.notify_im", lambda t: notified.append(t) or True)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr("shared.alerts.stamp_notified", lambda _c, keys: stamped.append(keys))  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("shared.telemetry.alerts.notify_im", lambda t: notified.append(t) or True)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("shared.telemetry.alerts.stamp_notified", lambda _c, k: stamped.append(k))  # pyright: ignore[reportUnknownArgumentType]
 
     cluster_health._ingest_alert_fallback(
         status="firing",
@@ -1327,13 +1327,13 @@ def test_ingest_alert_fallback_skips_im_when_already_notified(
     monkeypatch.setattr(shared.db, "connect", lambda **_: conn)  # pyright: ignore[reportUnknownArgumentType]
     key = ("health-probe", datetime(2026, 8, 5, 0, 10, tzinfo=UTC))
     monkeypatch.setattr(
-        "shared.alerts.upsert_alert",
+        "shared.telemetry.alerts.upsert_alert",
         lambda *_a, **_k: (key, False, False, {"notified_at": datetime(2026, 8, 5, tzinfo=UTC)}),  # pyright: ignore[reportUnknownArgumentType]
     )
     notified: list[str] = []
     stamped: list[object] = []
-    monkeypatch.setattr("shared.alerts.notify_im", lambda t: notified.append(t) or True)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr("shared.alerts.stamp_notified", lambda _c, keys: stamped.append(keys))  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("shared.telemetry.alerts.notify_im", lambda t: notified.append(t) or True)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("shared.telemetry.alerts.stamp_notified", lambda _c, k: stamped.append(k))  # pyright: ignore[reportUnknownArgumentType]
 
     cluster_health._ingest_alert_fallback(status="firing", message="FAIL: x", starts_at=key[1])
     assert notified == []
@@ -1671,11 +1671,11 @@ def test_ingest_recovery_self_heals_when_instance_never_persisted(
     alert that will never resolve in the panel."""
     import httpx
 
-    import shared.machine
+    import shared.cluster.machine
     from shared.config import settings
 
     monkeypatch.setattr(settings.data_plane, "cluster_secret", "s")
-    monkeypatch.setattr(shared.machine, "gateway_api_base", lambda: "http://127.0.0.1:8123")
+    monkeypatch.setattr(shared.cluster.machine, "gateway_api_base", lambda: "http://127.0.0.1:8123")
     monkeypatch.setattr(health_alerts, "_alert_summary", lambda **_: "SUMMARY")  # pyright: ignore[reportUnknownArgumentType]
     direct: list[str] = []
     monkeypatch.setattr(health_alerts, "notify_owner", direct.append)

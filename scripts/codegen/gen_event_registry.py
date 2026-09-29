@@ -92,7 +92,7 @@ _AUDIT_INTRO = """
 = one agent operation fact. `source` (who triggered: `agent:N` / `user` / `system` /
 `self`) and `target_agent_id` (against whom) are the two key audit dimensions, queried
 more often than payload. Payload keys other than those listed have no Pydantic model
-(display-surface use; see the payload tiering rules in `shared/audit_events.py`).
+(display-surface use; see the payload tiering rules in `shared/telemetry/audit_events.py`).
 Emit sites and consumers: see the comments at each emit point.
 
 | event_name | meaning | tier | key payload fields | destination |
@@ -163,7 +163,7 @@ Under the unified model `event_name` is a globally unique event name (OTel
    PR description cites the registry entry.
 7. **Payload tiering**: only event_names whose payload fields are **branched on** by
    downstream programs get Pydantic models; display-surface payloads stay untyped
-   dicts (tiering rules in `shared/audit_events.py`).
+   dicts (tiering rules in `shared/telemetry/audit_events.py`).
 
 ---
 

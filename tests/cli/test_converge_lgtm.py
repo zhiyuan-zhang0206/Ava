@@ -18,7 +18,7 @@ from pydantic import SecretStr
 
 from cli.commands.converge.spec import ConvergeCtx
 from cli.commands.observability import lgtm_native, observatory_urls
-from shared.lgtm_local import service_argv
+from shared.telemetry.lgtm_local import service_argv
 
 # S104-flagged literal reused by the mismatch-warning parametrize — a config
 # value under test, not a bind.
@@ -56,7 +56,8 @@ def _default_provisioning_endpoints(monkeypatch: pytest.MonkeyPatch) -> None:
         return _STUB_RENDER, ()
 
     monkeypatch.setattr(
-        "shared.metrics.grafana_dashboard_supply.render_dashboard_json", render_dashboard_json
+        "shared.telemetry.metrics.grafana_dashboard_supply.render_dashboard_json",
+        render_dashboard_json,
     )
 
 
@@ -260,7 +261,7 @@ def test_native_provisioning_renders_remote_observatory_urls(
         "shared.config.settings.observability.observability_url",
         "http://10.0.0.46",
     )
-    monkeypatch.setattr("shared.machine.reachable_host", lambda: "10.0.0.10")
+    monkeypatch.setattr("shared.cluster.machine.reachable_host", lambda: "10.0.0.10")
     monkeypatch.setattr(
         "shared.config.settings.data_plane.db_url",
         "postgresql://grafana_ro@10.0.0.72:5433/ava_main",
@@ -298,7 +299,7 @@ def test_native_provisioning_webhook_stays_loopback_without_observatory(
         "shared.config.settings.observability.observability_url",
         "",
     )
-    monkeypatch.setattr("shared.machine.reachable_host", lambda: "10.0.0.10")
+    monkeypatch.setattr("shared.cluster.machine.reachable_host", lambda: "10.0.0.10")
 
     lgtm_native._render_configs(repo, native_dir, home)
 

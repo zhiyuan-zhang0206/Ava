@@ -32,7 +32,7 @@ Gateway auth: `Authorization: Bearer <token>` — the process's machine API toke
 `AVA_CLUSTER_SECRET` from the environment or `$AVA_HOME/.env` (the gateway
 home; no header when empty — a single-box no-auth cluster). `$AVA_HOME` is
 resolved the same checkout-anchored way every other Ava process resolves it
-(see `_common.source_root` / `shared.dotenv_boot.resolve_ava_home`), not guessed — an
+(see `_common.source_root` / `shared.host.env.dotenv_boot.resolve_ava_home`), not guessed — an
 unanchored checkout (no AVA_HOME, not the prod source, no `.ava_home`
 pointer) never reads `.env` and never dials the gateway, so it cannot send a
 guessed home's secret to a guessed `http://localhost:8000` (2026-09-27: on a
@@ -62,7 +62,7 @@ from _common import source_root
 
 sys.path.insert(0, str(source_root()))
 
-from shared.dotenv_boot import resolve_ava_home
+from shared.host.env.dotenv_boot import resolve_ava_home
 
 _AGENT_ATTR = "session.id"
 _CHECKPOINT_ATTR = "ava.checkpoint_id"

@@ -20,8 +20,8 @@ from langchain_core.messages import HumanMessage
 from ava import gateway_client
 from ava_builtins.plugins.ava_memory import inherit
 from shared.agents import GatewayUnavailable
+from shared.cluster.machine import machine_name
 from shared.config import settings
-from shared.machine import machine_name
 from shared.paths import ava_home
 
 OPEN = inherit.INHERITABLE_OPEN

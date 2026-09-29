@@ -108,7 +108,7 @@ from shared.turn_identity import (
     set_process_agent_id,
 )
 
-# `shared.machine` / `shared.paths` are imported inside the init functions that
+# `shared.cluster.machine` / `shared.paths` are imported inside the init functions that
 # use them, never at module top: both pull the pydantic Settings chain (+~30 MB
 # RSS per process, measured 2026-08-13), and `import shared.log` must stay
 # cheap for lightweight processes that hold a logger but never call an init_*
@@ -127,9 +127,9 @@ __all__ = [
 
 
 def _machine_name_lazy() -> str:
-    """`shared.machine.machine_name`, imported at call time (the module pulls
+    """`shared.cluster.machine.machine_name`, imported at call time (the module pulls
     the Settings chain — see the import note at the top of this file)."""
-    from shared.machine import machine_name
+    from shared.cluster.machine import machine_name
 
     return machine_name()
 
@@ -421,7 +421,7 @@ def _event_pipeline_filter(record: loguru.Record) -> bool:
     extra = record["extra"]
     if extra.get("_no_emitter") or extra.get("event") == "node_enter":
         return False
-    # Known artifact of claim_idle_wait_span (shared/trace.py): the traceloop
+    # Known artifact of claim_idle_wait_span (shared/telemetry/tracing.py): the traceloop
     # LangChain handler sets `gen_ai.task.status` on the claim node span AFTER
     # we end it early at the idle-park boundary, so the OTel SDK logs one
     # WARNING ("Setting attribute on ended span.") per park. The warning is
@@ -571,7 +571,7 @@ def _add_stderr_sink_before_settings() -> None:
 
     That import builds the Settings chain, and the build logs: a configured
     runner's gateway fetch warns when it continues on a stale config snapshot
-    (`shared/bootstrap.py`). Importing this module dropped loguru's default
+    (`shared/host/env/bootstrap.py`). Importing this module dropped loguru's default
     handler, so a record written before any sink exists is discarded.
     """
     add_sink(sys.stderr, format=_HUMAN_FORMAT, level="INFO", colorize=True)

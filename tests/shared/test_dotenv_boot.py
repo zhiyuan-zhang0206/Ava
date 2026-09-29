@@ -13,8 +13,8 @@ from pathlib import Path
 
 import pytest
 
-from shared import dotenv_boot
-from shared.dotenv_boot import resolve_ava_home
+from shared.host.env import dotenv_boot
+from shared.host.env.dotenv_boot import resolve_ava_home
 
 # resolve_ava_home reads os.environ["AVA_HOME"] LIVE (it runs before Settings is
 # built and decides the home), so these tests drive the real input via
@@ -32,7 +32,7 @@ def _restore_authority_env() -> Iterator[None]:
     conftest planted, and every later test sees the field default instead.
     Snapshot the keys the authority pass touches and restore them after each
     test."""
-    from shared.env_registry import (
+    from shared.host.env.registry import (
         agent_runner_cluster_aliases,
         cluster_scope_aliases,
         env_authority_drop_set,
@@ -702,7 +702,7 @@ def test_gateway_profile_pops_only_for_gateway(
     # for the rest of the session — the D5 config fallback cache then snapshots
     # the field default (AVA_EXEC_TIMEOUT_SECONDS=300) and every later
     # config-service read in this worker serves it (2026-08-06 CI flake).
-    from shared.env_registry import agent_runner_cluster_aliases
+    from shared.host.env.registry import agent_runner_cluster_aliases
 
     _pre_pop = {k: os.environ.get(k) for k in agent_runner_cluster_aliases()}
 

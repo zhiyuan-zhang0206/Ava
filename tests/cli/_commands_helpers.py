@@ -206,7 +206,7 @@ def _noop_start_prechecks(serving_root: RootBirth, monkeypatch: pytest.MonkeyPat
     # full-service gateway box, deterministic regardless of the dev host's
     # machine_serve_* files. Agent-runner tests override machine_role explicitly.
     monkeypatch.setattr(_repo_commands, "_roles_or_none", lambda: frozenset({"gateway"}))
-    monkeypatch.setattr("shared.machine.machine_role", lambda: frozenset({"gateway"}))
+    monkeypatch.setattr("shared.cluster.machine.machine_role", lambda: frozenset({"gateway"}))
     # register_self goes to central DB UPSERT; test does not need real writes. cmd_start goes
     # through _register_machine_or_die which internally imports register_self, directly patch the helper to return 0.
     monkeypatch.setattr(_repo_commands, "_register_machine_or_die", lambda _resolved, _role: 0)  # pyright: ignore[reportUnknownArgumentType]
@@ -241,7 +241,7 @@ def _hermetic_gateway_base(monkeypatch: pytest.MonkeyPatch) -> None:
     on a renamed field. Resolve it to an unreachable stub by default: tests that
     assert on the response mock httpx on top; the rest take the graceful
     'unreachable' path deterministically, matching CI where no gateway is up."""
-    monkeypatch.setattr("shared.machine.gateway_api_base", lambda: "http://gw:8000")
+    monkeypatch.setattr("shared.cluster.machine.gateway_api_base", lambda: "http://gw:8000")
 
 
 def _spec(service: str):
@@ -278,4 +278,4 @@ class _FakeResponse:
 
 def _patch_gateway_http(monkeypatch: pytest.MonkeyPatch) -> None:
     """Stub gateway URL/headers resolution so the HTTP helpers don't hit settings."""
-    monkeypatch.setattr("shared.machine.gateway_api_base", lambda: "http://gw:8000")
+    monkeypatch.setattr("shared.cluster.machine.gateway_api_base", lambda: "http://gw:8000")

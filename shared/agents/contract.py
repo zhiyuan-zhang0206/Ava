@@ -289,7 +289,7 @@ class MachineNotRegistered(AvaAgentError):  # noqa: N818 — state description, 
     itself yet, or the machine name is misspelled.
 
     Gateway-side `gateway/agents.py:spawn_agent` raises when
-    `shared/machines.py:lookup` finds no row; propagated to the SDK
+    `shared/cluster/machines.py:lookup` finds no row; propagated to the SDK
     via the wire protocol.
     """
 

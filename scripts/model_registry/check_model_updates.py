@@ -27,11 +27,11 @@ from urllib3.connection import HTTPSConnection
 from urllib3.connectionpool import HTTPConnectionPool, HTTPSConnectionPool
 from urllib3.poolmanager import PoolManager
 
+from shared.host.env.runtime_config import read_env_aliases
+from shared.host.net.resilience import ExponentialBackoff, Policy, http_classifier, retry
 from shared.lm.plugin_providers import ensure_provider_plugins_loaded
 from shared.lm.registry import MODELS
 from shared.paths import ava_home
-from shared.resilience import ExponentialBackoff, Policy, http_classifier, retry
-from shared.runtime_config import read_env_aliases
 
 _USER_AGENT = "Ava model-update tracker"
 _TIMEOUT_SECONDS, _QWEN_PAGE_SIZE = 30, 100

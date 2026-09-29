@@ -32,9 +32,9 @@ from gateway.agents import router as _agents_router
 from gateway.app import app
 from ops.lifecycle import launch_agent_op, lifecycle_op
 from ops.rpc_schemas import LaunchAgentRequest, OpKind, SpawnedAgent
-from shared import machines as _machines
+from shared.cluster import machines as _machines
+from shared.cluster.machine import machine_name
 from shared.config import settings as _settings
-from shared.machine import machine_name
 
 
 @pytest.fixture(autouse=True)

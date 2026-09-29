@@ -245,8 +245,8 @@ def test_an_alert_undelivered_at_completion_is_logged_and_kept_for_status(
     never drops one silently: the error is logged, and the journal keeps the
     alert with the routes it has not reached, which `release status` shows."""
     from cli.release_operator import status as status_module
-    from shared import machine as shared_machine
     from shared import paths as shared_paths
+    from shared.cluster import machine as shared_machine
 
     create(request_record)
     effects = Effects(request_record, fail="starting")

@@ -56,7 +56,7 @@ def test_runner_does_not_discover_station(monkeypatch: pytest.MonkeyPatch) -> No
     def fail_discovery(base: str) -> None:
         pytest.fail("pure runners must use their published gateway relay")
 
-    monkeypatch.setattr("shared.station_endpoint.resolve_station_target", fail_discovery)
+    monkeypatch.setattr("shared.telemetry.station_endpoint.resolve_station_target", fail_discovery)
     cfg = _render_real_template(
         monkeypatch, frozenset({"agent-runner"}), observability_url="http://10.0.0.46"
     )

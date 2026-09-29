@@ -100,7 +100,7 @@ if sys.platform == "darwin":
 
 # ── The unit's home: redirected here, not further down ──
 #
-# `shared.dotenv_boot` resolves the home ONCE at import (`resolve_ava_home()` ->
+# `shared.host.env.dotenv_boot` resolves the home ONCE at import (`resolve_ava_home()` ->
 # `_HOME` -> `AVA_ENV_PATH`, module constants) and `resolve_ava_home` reads
 # AVA_HOME first. So whichever runs first wins permanently: set AVA_HOME before
 # that import and the whole boot is redirected; set it after and the constant is
@@ -477,7 +477,7 @@ def _assert_env_precedes_project_imports() -> None:
             "tests/conftest.py: a project module was imported before the env block "
             f"finished: {leaked[:5]}{'...' if len(leaked) > 5 else ''}. Everything above "
             "this line sets env vars that are read at IMPORT time — AVA_HOME decides "
-            "which .env `shared.dotenv_boot` binds AVA_ENV_PATH to, permanently. An "
+            "which .env `shared.host.env.dotenv_boot` binds AVA_ENV_PATH to, permanently. An "
             "import above it silently pins the suite to the operator's real ~/.ava, "
             "production credentials included. Move the import below this assertion."
         )
@@ -489,7 +489,7 @@ _assert_env_precedes_project_imports()
 # env block above, which is what the assertion just enforced.
 import ava
 from shared.config import set_field, settings
-from shared.daemon_health import _HEALTH_PORT_OVERRIDES
+from shared.daemon.health import _HEALTH_PORT_OVERRIDES
 
 # The host-scope isolation pins (env block above) must have taken effect before
 # Settings construction: the native LGTM render reads the Tempo URLs at use
@@ -651,7 +651,7 @@ _pin_setting("frontend_healthcheck_url", f"http://127.0.0.1:{_free_port()}")
 _pin_setting("milvus_port", _free_port())
 
 # Belt-and-suspenders on the OS-jobs switch already in `os.environ` at the top of
-# this file: an operator's real `~/.ava/.env` is loaded by `shared.dotenv_boot`
+# this file: an operator's real `~/.ava/.env` is loaded by `shared.host.env.dotenv_boot`
 # before Settings constructs, so pin the singleton rather than trust that the env
 # value is what survived. (`_pin_setting` rewrites the env var too, harmlessly.)
 _pin_setting("os_jobs_enabled", False)
@@ -1026,7 +1026,7 @@ def _clean_state(
 def _machine_identity(*, role: str, name: str | None = None) -> Generator[None]:
     """Switch this process's resolved machine identity, restoring on exit.
 
-    Injects via shared.machine.set_identity so every `from shared.machine import
+    Injects via shared.cluster.machine.set_identity so every `from shared.cluster.machine import
     machine_role` / `machine_name` call site sees the new value without
     per-module patching. `name=None` leaves machine_name as-is — no injection; it
     resolves lazily from `$AVA_HOME/machine_name` if not yet cached, otherwise
@@ -1034,7 +1034,7 @@ def _machine_identity(*, role: str, name: str | None = None) -> Generator[None]:
     session default is restored — no per-field save/restore is needed because the
     holder re-resolves lazily after reset.
     """
-    from shared.machine import reset_identity, set_identity
+    from shared.cluster.machine import reset_identity, set_identity
 
     if name is None:
         set_identity(role=role)  # pyright: ignore[reportArgumentType]  # str passthrough to MachineRole literal
@@ -1049,7 +1049,7 @@ def _machine_identity(*, role: str, name: str | None = None) -> Generator[None]:
 @pytest.fixture
 def set_machine_identity() -> Iterator[object]:
     """Factory: switch machine role (and optionally name) at the source via
-    shared.machine.set_identity.
+    shared.cluster.machine.set_identity.
 
         def test_x(set_machine_identity, db_conn):
             set_machine_identity(role="gateway", name="cloud-test")
@@ -1057,7 +1057,7 @@ def set_machine_identity() -> Iterator[object]:
     May be called more than once within a test to flip roles; the last call
     wins, and the holder is reset at teardown (restoring the session default).
     """
-    from shared.machine import reset_identity, set_identity
+    from shared.cluster.machine import reset_identity, set_identity
 
     def _set(role: str, name: str | None = None) -> None:
         if name is None:
@@ -1140,7 +1140,7 @@ def unit_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]
     `tests/cli/conftest.py` — a module takes it with one line:
     `pytestmark = pytest.mark.usefixtures("_installed_machine_identity")`.
     """
-    from shared.machine import reset_identity
+    from shared.cluster.machine import reset_identity
 
     monkeypatch.setattr(settings.general, "ava_home", tmp_path)
     reset_identity()
@@ -1400,8 +1400,8 @@ def spawn_agent(
 ) -> int:
     """Allocate a real agent row and publish its normal host-dispatch wake."""
     from ops.agents.spawn import create_agent_row
+    from shared.cluster.machine import machine_name
     from shared.db import publish_inbound_wake
-    from shared.machine import machine_name
 
     agent_id, _, _prompt_id, _attempt_id = create_agent_row(
         spawner=spawner, machine=machine_name(), config=config, **kw
@@ -1634,7 +1634,7 @@ def _guard_bootstrap_fetch(monkeypatch: pytest.MonkeyPatch) -> None:
     agent-runner's Settings build calls `inject_config_from_gateway()` at
     import, and on an enrolled dev box that is a live GET /api/bootstrap
     against the real cluster gateway. This guard sits at the cause. A runner's
-    first start also funnels through `shared.bootstrap.fetch_bootstrap_config`
+    first start also funnels through `shared.host.env.bootstrap.fetch_bootstrap_config`
     (the only caller of this module's `dial_get`); nothing is written until that
     fetch returns, so refusing the dial blocks the whole chain: no request to
     the gateway, no joined state.
@@ -1647,24 +1647,24 @@ def _guard_bootstrap_fetch(monkeypatch: pytest.MonkeyPatch) -> None:
     env block above; this guard is the second net for any test that drives a
     Settings build directly.
 
-    Narrow by construction: `shared.bootstrap` binds `dial_get` at module level,
-    so only the bootstrap egress is touched — the ~30 other `shared.http_dial`
+    Narrow by construction: `shared.host.env.bootstrap` binds `dial_get` at module level,
+    so only the bootstrap egress is touched — the ~30 other `shared.host.net.http_dial`
     call sites are untouched. Every test that legitimately drives the fetch
     already substitutes its own transport at exactly this seam
     (`tests/shared/test_bootstrap_fetch.py` routes it through an in-process
     TestClient; the retry tests hand it a fake), and those patches win by LIFO.
     """
-    import shared.bootstrap
+    import shared.host.env.bootstrap
 
     def _boom(url: object = "", *_args: object, **_kwargs: object) -> object:
         raise AssertionError(
             f"a real GET {url} would leave the test process — this is the call that "
             "reaches a live gateway and, on an enrolled runner, rewrites the operator's "
-            "~/.ava/.env. Stub the caller, or patch shared.bootstrap.dial_get in the test "
+            "~/.ava/.env. Stub the caller, or patch shared.host.env.bootstrap.dial_get in the test "
             "body with a fake transport (see tests/shared/test_bootstrap_fetch.py)."
         )
 
-    monkeypatch.setattr(shared.bootstrap, "dial_get", _boom)
+    monkeypatch.setattr(shared.host.env.bootstrap, "dial_get", _boom)
 
 
 @pytest.fixture(autouse=True)
@@ -1672,7 +1672,7 @@ def _restore_db_authority_refusal(monkeypatch: pytest.MonkeyPatch) -> None:
     """A test that drives a boot pass (`load_ava_env`, a runner's bootstrap
     injection) may record a per-process database-authority refusal; restore the
     suite's value afterwards so the refusal never leaks into later tests' dials."""
-    from shared import dotenv_boot
+    from shared.host.env import dotenv_boot
 
     monkeypatch.setattr(dotenv_boot, "_db_authority_refusal", dotenv_boot._db_authority_refusal)
 
@@ -1904,7 +1904,7 @@ def served_gateway_home(
     Returns the generation's secret record."""
     import shutil
 
-    from shared import runtime_config as rt
+    from shared.host.env import runtime_config as rt
 
     shutil.copy(rt.env_file_path(), tmp_path / ".env")
     monkeypatch.setattr(rt, "_ava_home", lambda: tmp_path)

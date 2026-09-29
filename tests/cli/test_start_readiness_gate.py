@@ -84,7 +84,7 @@ def _hermetic_start(
     monkeypatch.setattr(start, "_refuse_occupied_health_ports", _ignoring_args(lambda: 0))
     monkeypatch.setattr(start, "_record_running_sha", _ignoring_args(lambda: None))
     monkeypatch.setattr(start, "cmd_status", lambda: 0)
-    monkeypatch.setattr("shared.machine.machine_role", lambda: frozenset({"gateway"}))
+    monkeypatch.setattr("shared.cluster.machine.machine_role", lambda: frozenset({"gateway"}))
     monkeypatch.setattr(
         _setup_commands,
         "_collect_setup_values",
@@ -258,7 +258,7 @@ def test_cold_preparation_receives_candidate_selection_before_publication(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from shared import service_selection
-    from shared.machine import MachineRoles
+    from shared.cluster.machine import MachineRoles
 
     prepared: list[frozenset[str]] = []
     _roster(monkeypatch, (("gateway", None), ("otel-collector", None)))

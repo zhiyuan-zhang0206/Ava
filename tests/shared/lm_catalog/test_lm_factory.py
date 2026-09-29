@@ -23,7 +23,7 @@ from shared.lm.plugin_providers import ensure_provider_plugins_loaded
 @pytest.fixture
 def env_file(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     """Point the plugin key reader at a scratch cluster `.env`."""
-    import shared.runtime_config as rc
+    import shared.host.env.runtime_config as rc
 
     env_path = tmp_path / ".env"
     monkeypatch.setattr(rc, "env_file_path", lambda: env_path)
@@ -62,7 +62,7 @@ def test_plugin_key_ignores_legacy_settings_field(monkeypatch: pytest.MonkeyPatc
     monkeypatch.setattr(settings.lm, "deepseek_api_key", "sk-test")
     monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
     monkeypatch.setattr(settings.lm, "llm_override", "")
-    monkeypatch.setattr("shared.runtime_config.read_env_aliases", dict)
+    monkeypatch.setattr("shared.host.env.runtime_config.read_env_aliases", dict)
     ensure_provider_plugins_loaded()
 
     assert provider_key_map()["deepseek-"] == ("DeepSeek", None, "DEEPSEEK_API_KEY")
@@ -77,7 +77,7 @@ def test_gemini_plugin_key_ignores_legacy_settings_field(
     monkeypatch.setattr(settings.lm, "gemini_api_key", "sk-test")
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
     monkeypatch.setattr(settings.lm, "llm_override", "")
-    monkeypatch.setattr("shared.runtime_config.read_env_aliases", dict)
+    monkeypatch.setattr("shared.host.env.runtime_config.read_env_aliases", dict)
     ensure_provider_plugins_loaded()
 
     assert provider_key_map()["gemini-"] == ("Google", None, "GEMINI_API_KEY")
@@ -92,7 +92,7 @@ def test_anthropic_plugin_key_ignores_legacy_settings_field(
     monkeypatch.setattr(settings.lm, "anthropic_api_key", "sk-test")
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.setattr(settings.lm, "llm_override", "")
-    monkeypatch.setattr("shared.runtime_config.read_env_aliases", dict)
+    monkeypatch.setattr("shared.host.env.runtime_config.read_env_aliases", dict)
     ensure_provider_plugins_loaded()
 
     assert provider_key_map()["claude-"] == ("Anthropic", None, "ANTHROPIC_API_KEY")
@@ -107,7 +107,7 @@ def test_openai_plugin_key_ignores_legacy_settings_field(
     monkeypatch.setattr(settings.lm, "openai_api_key", "sk-test")
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.setattr(settings.lm, "llm_override", "")
-    monkeypatch.setattr("shared.runtime_config.read_env_aliases", dict)
+    monkeypatch.setattr("shared.host.env.runtime_config.read_env_aliases", dict)
     ensure_provider_plugins_loaded()
 
     assert provider_key_map()["gpt-"] == ("OpenAI", None, "OPENAI_API_KEY")
@@ -122,7 +122,7 @@ def test_qwen_plugin_key_ignores_legacy_settings_field(
     monkeypatch.setattr(settings.lm, "dashscope_api_key", "sk-test")
     monkeypatch.delenv("DASHSCOPE_API_KEY", raising=False)
     monkeypatch.setattr(settings.lm, "llm_override", "")
-    monkeypatch.setattr("shared.runtime_config.read_env_aliases", dict)
+    monkeypatch.setattr("shared.host.env.runtime_config.read_env_aliases", dict)
     ensure_provider_plugins_loaded()
 
     assert provider_key_map()["qwen"] == ("Alibaba", None, "DASHSCOPE_API_KEY")
@@ -137,7 +137,7 @@ def test_glm_plugin_key_ignores_legacy_settings_field(
     monkeypatch.setattr(settings.lm, "zhipu_api_key", "sk-test")
     monkeypatch.delenv("GLM_API_KEY", raising=False)
     monkeypatch.setattr(settings.lm, "llm_override", "")
-    monkeypatch.setattr("shared.runtime_config.read_env_aliases", dict)
+    monkeypatch.setattr("shared.host.env.runtime_config.read_env_aliases", dict)
     ensure_provider_plugins_loaded()
 
     assert provider_key_map()["glm-"] == ("Zhipu", None, "GLM_API_KEY")
@@ -152,7 +152,7 @@ def test_kimi_plugin_key_ignores_legacy_settings_field(
     monkeypatch.setattr(settings.lm, "moonshot_api_key", "sk-test")
     monkeypatch.delenv("MOONSHOT_API_KEY", raising=False)
     monkeypatch.setattr(settings.lm, "llm_override", "")
-    monkeypatch.setattr("shared.runtime_config.read_env_aliases", dict)
+    monkeypatch.setattr("shared.host.env.runtime_config.read_env_aliases", dict)
     ensure_provider_plugins_loaded()
 
     assert provider_key_map()["kimi-"] == ("Moonshot", None, "MOONSHOT_API_KEY")
@@ -167,7 +167,7 @@ def test_mimo_plugin_key_ignores_legacy_settings_field(
     monkeypatch.setattr(settings.lm, "xiaomi_api_key", "sk-test")
     monkeypatch.delenv("MIMO_API_KEY", raising=False)
     monkeypatch.setattr(settings.lm, "llm_override", "")
-    monkeypatch.setattr("shared.runtime_config.read_env_aliases", dict)
+    monkeypatch.setattr("shared.host.env.runtime_config.read_env_aliases", dict)
     ensure_provider_plugins_loaded()
 
     assert provider_key_map()["mimo-"] == ("Xiaomi", None, "MIMO_API_KEY")

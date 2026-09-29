@@ -10,7 +10,7 @@ The executor image is not the home's selected image until its own operation
 selects it, so no boot pass admits it to a write generation; its submission
 reads the registered units with the login this admitted CLI hands over. This
 CLI never builds Settings, so it takes that login here, exactly as its boot
-pass would have (`shared.dotenv_boot.operator_db_delivery`): the active
+pass would have (`shared.host.env.dotenv_boot.operator_db_delivery`): the active
 gateway login and its generation marker, in the exec environment only (never
 argv, a file or a log), without the gateway API token. The executor's boot
 pass keeps a delivery naming its home's endpoint. On a home without a ledger
@@ -38,7 +38,7 @@ from shared.verified_file import regular_bytes
 
 
 def _require_own_home(envelope: Envelope) -> None:
-    from shared import dotenv_boot
+    from shared.host.env import dotenv_boot
 
     home, anchored = dotenv_boot.resolve_ava_home()
     if not anchored:
@@ -55,7 +55,7 @@ def _db_authority() -> dict[str, str]:
     """The database authority this CLI holds on its (already required) home."""
     from dotenv import dotenv_values
 
-    from shared import dotenv_boot
+    from shared.host.env import dotenv_boot
 
     files = {
         **dotenv_values(dotenv_boot.AVA_ENV_PATH),

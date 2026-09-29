@@ -39,8 +39,8 @@ from cli.commands.converge.spec import ConvergeCtx
 from cli.commands.observability._otel_collector_exporters import BACKEND_EXPORTERS, RELAY_EXPORTERS
 from shared import collector_artifact
 from shared.atomic_io import write_text_atomic
-from shared.machine import MachineRoles
-from shared.observability import collector_allowed_for_home
+from shared.cluster.machine import MachineRoles
+from shared.telemetry.observability import collector_allowed_for_home
 
 
 def _otlp_ingress_port() -> int:
@@ -178,7 +178,7 @@ def _data_plane_receivers(roles: MachineRoles | None, ava_home: Path) -> tuple[s
     if roles is None or "gateway" not in roles:
         return "", ""
     from shared.config import settings
-    from shared.dotenv_boot import UNANCHORED_DB_SENTINEL
+    from shared.host.env.dotenv_boot import UNANCHORED_DB_SENTINEL
 
     if settings.data_plane.db_url == UNANCHORED_DB_SENTINEL:
         return "", ""
@@ -212,7 +212,7 @@ def gateway_otlp_endpoint_problem(endpoint: str) -> str | None:
     completion attempt — a gateway that has not published the ingress yet must
     not burn the attempt.
     """
-    from shared.netutil import is_loopback_host
+    from shared.host.net.predicates import is_loopback_host
 
     parts = urlsplit(endpoint.strip())
     host = parts.hostname or ""
@@ -261,7 +261,7 @@ def station_otel_ingress_endpoint() -> str:
             "cannot build the remote-station OTLP relay without a valid "
             "AVA_OBSERVABILITY_URL (scheme://host, no port, no path)"
         )
-    from shared.station_endpoint import resolve_station_target
+    from shared.telemetry.station_endpoint import resolve_station_target
 
     return resolve_station_target(base).url
 
@@ -301,7 +301,7 @@ def _remote_receiver_fragments(roles: MachineRoles | None) -> dict[str, str]:
     telemetry token (an open cluster: the zero-config single-box posture) and a loopback
     reachable host (co-located posture) both mean NO remote peers, so no
     receiver is rendered — the same "legal when nothing remote dials it" rule
-    as the registration loopback guard (shared.machines._reject_loopback_dial_url,
+    as the registration loopback guard (shared.cluster.machines._reject_loopback_dial_url,
     conventions rule 2). A wildcard reachable host is a configuration error
     either way and fails closed. Any gateway- or station-capable host with a
     telemetry token and a non-loopback address may serve remote peers —
@@ -318,8 +318,8 @@ def _remote_receiver_fragments(roles: MachineRoles | None) -> dict[str, str]:
     if roles is None or not (roles & {"gateway", "observability-station"}):
         return no_remote
 
-    from shared.machine import reachable_host
-    from shared.netutil import is_loopback_host
+    from shared.cluster.machine import reachable_host
+    from shared.host.net.predicates import is_loopback_host
 
     token = telemetry_bearer()
     host = reachable_host()
@@ -404,8 +404,8 @@ def _otlp_exporters(roles: MachineRoles | None) -> str:
 def generate_config(repo: Path, ava_home: Path, roles: MachineRoles | None) -> str:
     """Render the sidecar config from the repo template + this unit's settings."""
     from shared.cluster import home_label
+    from shared.cluster.machine import machine_name
     from shared.config import settings
-    from shared.machine import machine_name
 
     obs = settings.observability
     loki_base, prom_base = _lgtm_fanout_bases(remote=roles != frozenset({"agent-runner"}))

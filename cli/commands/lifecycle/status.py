@@ -29,7 +29,7 @@ from cli.commands.converge.redis_bridge import print_redis_bridge_status
 from cli.commands.data_plane.cluster_instance import print_data_plane_status
 from ops.roster.service_spec import ServiceSpec
 from shared import service_selection
-from shared.machine import MachineRoles
+from shared.cluster.machine import MachineRoles
 
 
 def _root_tree_units() -> dict[str, dict[str, object]]:
@@ -227,7 +227,7 @@ def _print_gateway_cluster_status() -> None:
 
     from cli.commands.cluster.control import fetch_gateway_cluster_status
     from ops.cluster_status import ClusterStatus
-    from shared.machine import (
+    from shared.cluster.machine import (
         GatewayApiBaseMissing,
         MachineRoleInvalid,
         MachineRoleMissing,

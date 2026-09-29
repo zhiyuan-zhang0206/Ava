@@ -37,8 +37,8 @@ the empty-recall share, reported as its inverse framing (the hit-rate proxy).
 """
 
 from shared.events.contract import PASSIVE_RECALL_KEYS, RECALL_FILTER_KEYS
-from shared.metrics.metrics_logql import CATEGORY_WITH_LEGACY_LOG, event_count
-from shared.plugin_metrics import MetricSpec, ThresholdStep, register_metric
+from shared.telemetry.metrics.logql import CATEGORY_WITH_LEGACY_LOG, event_count
+from shared.telemetry.metrics.plugin_metrics import MetricSpec, ThresholdStep, register_metric
 
 # Attribute labels are derived from the payload-key contract (a renamed
 # payload key fails loudly here instead of silently NULLing out) — the same

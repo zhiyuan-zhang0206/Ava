@@ -18,10 +18,10 @@ from typing import Any
 
 import pytest
 
-from shared import dotenv_boot
 from shared.cluster import authority
 from shared.cluster.authority import delivery
 from shared.db_connections import NoDatabaseAuthorityError, _guard_db_url
+from shared.host.env import dotenv_boot
 
 _ENDPOINT = "postgresql://ava@127.0.0.1:6433/ava"
 _REPO = Path(__file__).resolve().parents[3]

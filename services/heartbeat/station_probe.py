@@ -11,7 +11,7 @@ conventions/reachability-and-credentials.md). When `AVA_OBSERVABILITY_URL`
 is empty the check is a no-op: the observatory is local and the `lgtm`
 healthcheck keeps the native stack alive. When it is set, the gateway dials
 the station through the reachability contract — the address the station
-unit advertises in `machine_units` (`shared.machines.unit_dial_url`), not a
+unit advertises in `machine_units` (`shared.cluster.machines.unit_dial_url`), not a
 bare connect — and authenticates with the cluster's telemetry token, exactly
 like the collector relay that ships telemetry to it.
 
@@ -40,8 +40,8 @@ from typing import Any
 import shared.db
 from shared.config import settings
 from shared.log import init_gateway_process, logger
-from shared.station_endpoint import StationTarget as _StationTarget
-from shared.station_endpoint import resolve_station_target
+from shared.telemetry.station_endpoint import StationTarget as _StationTarget
+from shared.telemetry.station_endpoint import resolve_station_target
 from shared.transition import transition_severity
 
 _log = logging.getLogger("services.heartbeat.station_probe")
@@ -167,7 +167,7 @@ def _alert_edges(target: _StationTarget, *, ok: bool, now: datetime) -> None:
     the shared transition clock, resolve on recovery, IM-notify on notify
     edges. Best-effort: alerting must never break the probe.
     """
-    from shared.alerts import (
+    from shared.telemetry.alerts import (
         display_language,
         fingerprint,
         notify_im,

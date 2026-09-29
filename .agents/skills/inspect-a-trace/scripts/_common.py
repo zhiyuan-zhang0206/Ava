@@ -1,6 +1,6 @@
 """Bootstrap helper shared by `read_trace.py` / `fetch_trace.py`: locate the
 Ava source root so `shared` is importable, before either script can import
-`shared.dotenv_boot.resolve_ava_home` to resolve `$AVA_HOME` itself.
+`shared.host.env.dotenv_boot.resolve_ava_home` to resolve `$AVA_HOME` itself.
 
 Kept in its own file (rather than duplicated in both scripts, which is how
 this landed originally) so there is exactly one place that resolves this
@@ -24,7 +24,7 @@ def source_root() -> Path:
     The script is invoked from two places: the dev checkout (``.agents/
     skills/...`` — walk up to the repo root) and the prod install
     (``$AVA_HOME/skills/...`` — a converge copy; ``shared`` lives in
-    ``$AVA_HOME/source``). ``shared.dotenv_boot`` must be importable from
+    ``$AVA_HOME/source``). ``shared.host.env.dotenv_boot`` must be importable from
     either, so the root is resolved before the import happens.
 
     The second case needs an explicit ``AVA_HOME`` — never a

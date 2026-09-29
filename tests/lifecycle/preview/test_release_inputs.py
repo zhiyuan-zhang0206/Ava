@@ -173,7 +173,7 @@ def test_composition_imports_never_load_runtime_settings(tmp_path: Path) -> None
 import importlib.abc, sys
 class DenyRuntime(importlib.abc.MetaPathFinder):
     def find_spec(self, fullname, *args):
-        if fullname in {'shared.config', 'shared.dotenv_boot', 'cli.main'}:
+        if fullname in {'shared.config', 'shared.host.env.dotenv_boot', 'cli.main'}:
             raise AssertionError('runtime authority imported: ' + fullname)
 sys.meta_path.insert(0, DenyRuntime())
 import scripts.preview.release_proof, scripts.preview.release_inputs

@@ -1,4 +1,4 @@
-"""shared/paths.py unit tests — AVA_HOME resolution + path helpers + first-access mkdir."""
+"""shared/paths/__init__.py unit tests — AVA_HOME resolution + path helpers + first-access mkdir."""
 
 from pathlib import Path
 

@@ -13,7 +13,7 @@ import pytest
 
 from services.labeler import daemon
 from shared.config import settings
-from shared.daemon_health import Liveness
+from shared.daemon.health import Liveness
 from shared.db import create_agent, pool
 
 

@@ -822,7 +822,7 @@ def test_at_future_time_ok(_agent_row: int, monkeypatch: pytest.MonkeyPatch) -> 
 
 def test_boot_inlines_agent_identity(tmp_path: pathlib.Path) -> None:
     """The bootstrap must set AVA_AGENT_ID itself: the session env allowlist
-    (shared/env_registry.py child_env, Task #856) deliberately does
+    (shared/host/env/registry.py child_env, Task #856) deliberately does
     not forward agent-scope knobs to session children, so a child that relied
     on inheritance would see ava.self.AGENT_ID=None and its wake-up
     send_message would 422 on /api/agents/None/messages (Task #964). The

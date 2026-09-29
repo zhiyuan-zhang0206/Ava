@@ -7,11 +7,11 @@ from pathlib import Path
 
 import pytest
 
-from shared.config import settings
-from shared.transport_encryption import (
+from shared.cluster.transport_encryption import (
     TransportEncryptionUndeclared,
     verify_transport_encryption,
 )
+from shared.config import settings
 
 
 def test_test_cluster_declares_transport_encryption() -> None:

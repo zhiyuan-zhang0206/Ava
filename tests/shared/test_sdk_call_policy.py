@@ -15,7 +15,7 @@ from shared.sdk_call_policy import SamplingPolicy
 def test_local_policy_reads_live_file(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, gateway: bool
 ) -> None:
-    from shared import bootstrap, runtime_config
+    from shared.host.env import bootstrap, runtime_config
 
     env_file = tmp_path / ".env"
     monkeypatch.setattr(bootstrap, "config_source_is_local", lambda: gateway)
@@ -89,7 +89,7 @@ def test_ratio_rejects_invalid_values(value: Any) -> None:
 
 
 def test_enrolled_process_reads_gateway_policy(monkeypatch: pytest.MonkeyPatch) -> None:
-    from shared import bootstrap
+    from shared.host.env import bootstrap
 
     monkeypatch.setattr(bootstrap, "config_source_is_local", lambda: False)
     monkeypatch.setattr(bootstrap, "should_fetch_from_gateway", lambda: True)

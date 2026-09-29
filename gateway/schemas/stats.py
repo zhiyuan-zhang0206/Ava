@@ -5,7 +5,7 @@ reads: the whitelisted `?hours=` values and their resolution to a duration.
 from datetime import timedelta
 from enum import IntEnum
 
-from shared.loki_index_labels import retention_hours
+from shared.telemetry.loki_index_labels import retention_hours
 
 
 class StatsWindowHours(IntEnum):

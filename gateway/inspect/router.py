@@ -356,7 +356,7 @@ def get_agent_neighbors(
 @router.get("/api/agents/{agent_id}/inspect/metrics")
 async def get_agent_plugin_metrics(agent_id: int, request: Request) -> list[PluginMetricResult]:
     """The agent's plugin metrics for the inspector panel — the W13b inspector
-    surface of the plugin metric system (see `shared/plugin_metrics.py`).
+    surface of the plugin metric system (see `shared/telemetry/metrics/plugin_metrics.py`).
 
     Builds the metric registry in process (task #180 PR D — shipped
     plugin `metrics.py` modules + core definitions), keeps the metrics whose

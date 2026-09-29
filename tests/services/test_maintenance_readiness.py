@@ -18,9 +18,9 @@ from psycopg_pool import ConnectionPool, PoolTimeout
 from gateway.app import app
 from services.agent_ops import daemon
 from shared import config, host_deploy_state, maintenance, pause_owner, start_serving
-from shared import runtime_config as rt
-from shared.cluster_auth import bearer_header
+from shared.cluster.auth import bearer_header
 from shared.config import settings
+from shared.host.env import runtime_config as rt
 from shared.maintenance_state import MaintenanceHold
 from tests.agent.test_maintenance import WHEN
 from tests.agent.test_maintenance import isolate as isolate
@@ -195,8 +195,8 @@ def test_a_runners_held_first_start_joins_a_held_gateway(
     the gateway's data-plane cutover issued, while the gateway's own hold still
     stands, over the gateway's real middleware stack."""
     from cli import start_intent
-    from shared import bootstrap
     from shared.cluster.authority import unit
+    from shared.host.env import bootstrap
 
     secret = _authenticated(monkeypatch)
     runner = (tmp_path / "runner").resolve()

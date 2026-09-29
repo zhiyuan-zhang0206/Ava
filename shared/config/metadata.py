@@ -133,8 +133,8 @@ def env_override_values(*, local: bool = False) -> dict[str, Any]:
     for a remote target, the connection / identity values the first `ava start` wrote — so
     the whole set round-trips back through a PUT without rejection.
     """
-    from shared import runtime_config
     from shared.config import current_field_values
+    from shared.host.env import runtime_config
 
     set_fields = runtime_config.env_set_field_names()
     values = current_field_values()

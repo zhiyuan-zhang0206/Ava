@@ -53,7 +53,7 @@ def test_probe_gateway_takes_the_identity_path(monkeypatch: pytest.MonkeyPatch) 
         "_curl_ok",
         lambda _u: pytest.fail("gateway must not fall back to a bare 2xx"),  # pyright: ignore[reportUnknownArgumentType]
     )
-    from shared.daemon_health import DaemonProbe
+    from shared.daemon.health import DaemonProbe
 
     spec = replace(spec, identity_probe=lambda: DaemonProbe.up("root-owned gateway"))
     probe = _probe_commands._probe_service(spec)
@@ -67,7 +67,7 @@ def test_probe_gateway_reports_which_fact_failed(monkeypatch: pytest.MonkeyPatch
     learns which one they have."""
 
     spec = _spec_by_service("gateway")
-    from shared.daemon_health import DaemonProbe
+    from shared.daemon.health import DaemonProbe
 
     spec = replace(
         spec,
@@ -134,11 +134,11 @@ def test_register_gateway_advertises_without_gateway_url(
     def fake_register_self(*, url: str | None = None) -> None:
         calls.append(url)
 
-    monkeypatch.setattr("shared.machines.register_self", fake_register_self)
+    monkeypatch.setattr("shared.cluster.machines.register_self", fake_register_self)
     monkeypatch.setattr(settings.gateway, "gateway_url", "")
     monkeypatch.setattr(settings.gateway, "gateway_port", 8000)
-    monkeypatch.setattr("shared.machine.reachable_host", lambda: "10.0.0.2")
-    monkeypatch.setattr("shared.machine.ava_home", lambda: tmp_path)
+    monkeypatch.setattr("shared.cluster.machine.reachable_host", lambda: "10.0.0.2")
+    monkeypatch.setattr("shared.cluster.machine.ava_home", lambda: tmp_path)
 
     rc = _real_register_machine_or_die(
         cast(SetupValues, {"machine_name": "control"}), frozenset({"gateway"})
@@ -160,10 +160,10 @@ def test_register_gateway_only_advertises_reachable_host(
     def fake_register_self(*, url: str | None = None) -> None:
         calls.append(url)
 
-    monkeypatch.setattr("shared.machines.register_self", fake_register_self)
+    monkeypatch.setattr("shared.cluster.machines.register_self", fake_register_self)
     monkeypatch.setattr(settings.gateway, "gateway_url", "")
-    monkeypatch.setattr("shared.machine.reachable_host", lambda: "10.0.0.2")
-    monkeypatch.setattr("shared.machine.ava_home", lambda: tmp_path)
+    monkeypatch.setattr("shared.cluster.machine.reachable_host", lambda: "10.0.0.2")
+    monkeypatch.setattr("shared.cluster.machine.ava_home", lambda: tmp_path)
     (tmp_path / "gateway_url").write_text("https://ava.example:8000")
 
     rc = _real_register_machine_or_die(
@@ -181,10 +181,10 @@ def test_register_agent_runner_advertises_ops_url(monkeypatch: pytest.MonkeyPatc
     def fake_register_self(*, url: str | None = None) -> None:
         calls.append(url)
 
-    monkeypatch.setattr("shared.machines.register_self", fake_register_self)
-    monkeypatch.setattr("shared.machine.reachable_host", lambda: "10.0.0.2")
+    monkeypatch.setattr("shared.cluster.machines.register_self", fake_register_self)
+    monkeypatch.setattr("shared.cluster.machine.reachable_host", lambda: "10.0.0.2")
     monkeypatch.setattr(
-        "shared.daemon_health.health_port",
+        "shared.daemon.health.health_port",
         lambda name: 8106 if name == "ops" else 0,  # pyright: ignore[reportUnknownArgumentType]
     )
 
@@ -199,7 +199,7 @@ def test_register_agent_runner_loopback_host_exits_nonzero(monkeypatch: pytest.M
     """A remote agent-runner whose reachable address resolves to loopback must fail
     loud (exit 1): register_self raises LoopbackDialUrlRefused rather than writing a
     self-dialing localhost ops URL that a remote gateway would dial itself."""
-    from shared.machines import LoopbackDialUrlRefused
+    from shared.cluster.machines import LoopbackDialUrlRefused
 
     calls: list[str | None] = []
 
@@ -207,10 +207,10 @@ def test_register_agent_runner_loopback_host_exits_nonzero(monkeypatch: pytest.M
         calls.append(url)
         raise LoopbackDialUrlRefused(f"loopback dial url refused: {url}")
 
-    monkeypatch.setattr("shared.machines.register_self", _reject)
-    monkeypatch.setattr("shared.machine.reachable_host", lambda: "127.0.0.1")
+    monkeypatch.setattr("shared.cluster.machines.register_self", _reject)
+    monkeypatch.setattr("shared.cluster.machine.reachable_host", lambda: "127.0.0.1")
     monkeypatch.setattr(
-        "shared.daemon_health.health_port",
+        "shared.daemon.health.health_port",
         lambda name: 8106 if name == "ops" else 0,  # pyright: ignore[reportUnknownArgumentType]
     )
 
@@ -248,8 +248,8 @@ def test_register_schema_behind_hint_names_working_commands(
         del url
         raise psycopg.errors.UndefinedTable('relation "machines" does not exist')
 
-    monkeypatch.setattr("shared.machines.register_self", _missing_table)
-    monkeypatch.setattr("shared.machine.reachable_host", lambda: "10.0.0.2")
+    monkeypatch.setattr("shared.cluster.machines.register_self", _missing_table)
+    monkeypatch.setattr("shared.cluster.machine.reachable_host", lambda: "10.0.0.2")
 
     rc = _real_register_machine_or_die(
         cast(SetupValues, {"machine_name": "gw"}), frozenset({"gateway"})

@@ -29,7 +29,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 def _env_example_values() -> dict[str, str]:
     """Parse `.env.example` with the same parser the runtime uses.
 
-    `shared.dotenv_boot.load_ava_env` loads `$AVA_HOME/.env` via python-dotenv,
+    `shared.host.env.dotenv_boot.load_ava_env` loads `$AVA_HOME/.env` via python-dotenv,
     so parsing the template with `dotenv_values` reproduces byte-for-byte what
     a fresh `cp .env.example $AVA_HOME/.env` puts into the process environment
     (`KEY=` becomes an empty string; commented lines are skipped). A key with

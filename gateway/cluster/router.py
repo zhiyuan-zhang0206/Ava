@@ -27,13 +27,18 @@ from ops import cluster_rpc as _cluster_rpc
 from ops.cluster_pause import is_paused as cluster_is_paused
 from ops.cluster_status import ClusterStatus
 from ops.cluster_status.schema_mismatch import status as schema_mismatch_status
-from shared import machines
 from shared.api_contracts.status import MachineStatus
+from shared.cluster import machines
+from shared.cluster.machine import (
+    is_agent_runner,
+    is_gateway,
+    is_observability_station,
+    machine_name,
+)
 from shared.cluster_drift import prod_source_head_sha
 from shared.cluster_lock import DeployLease
 from shared.config import settings
 from shared.db_transaction import write_transaction
-from shared.machine import is_agent_runner, is_gateway, is_observability_station, machine_name
 
 router = APIRouter()
 _log = logging.getLogger(__name__)
@@ -349,8 +354,8 @@ def set_machine_staging(name: str, req: MachineStagingRequest) -> MachineDeleteR
 
     The staging latch is what keeps a registered staging host out of the
     agent-runner target set — `ava start` on it clears its `stopped_at` like any
-    host, and this flag is the exclusion (`shared.machines.list_agent_runners`
-    skips is_staging rows). Backed by `shared.machines.set_staging`; the CLI
+    host, and this flag is the exclusion (`shared.cluster.machines.list_agent_runners`
+    skips is_staging rows). Backed by `shared.cluster.machines.set_staging`; the CLI
     verbs `ava cluster mark-staging` / `unmark-staging` call this endpoint.
     """
     changed = machines.set_staging(name, is_staging=req.is_staging)

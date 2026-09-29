@@ -76,7 +76,7 @@ No application process ever logs in as it.
 A **unit** is one install of Ava under its own `$AVA_HOME`, and `AVA_HOME`
 locates the unit's `.env`, logs, memory pool, milvus data, pidfiles, etc., all of
 which derive from it. The home is resolved **checkout-anchored** by
-`shared/dotenv_boot.py:resolve_ava_home` — see "How a unit finds its home"
+`shared/host/env/dotenv_boot.py:resolve_ava_home` — see "How a unit finds its home"
 below — so a bare invocation (ad-hoc script, subagent) inside a dev worktree never
 silently falls back to the prod home:
 
@@ -256,7 +256,7 @@ agent-runners stay single-home `~/.ava` and reach that gateway + DB/Redis over
 the private network. A larger deployment splits the gateway onto its own
 gateway-only host (the explicit `--role gateway` install).
 
-**How a unit finds its home** (`shared/dotenv_boot.py:resolve_ava_home`, run
+**How a unit finds its home** (`shared/host/env/dotenv_boot.py:resolve_ava_home`, run
 before `Settings` is constructed). Which checkout the code lives in is the
 prod/dev discriminator, so resolution is anchored to `__file__`, not cwd —
 identical no matter where a bare script is launched. Precedence:
@@ -596,7 +596,7 @@ nodes co-located with their code:
 | plugin enable config (`plugins_config.json`) | `shared/plugins_config.ava.okf.md` |
 | `installed.json` schema, installable shapes, the scanner gate | `shared/install_registry/install_registry.ava.okf.md` |
 | `ava plugins` / `skill` / `mcp` verbs, MCP merge layers, secret channel | `cli/commands/extensions/packages.ava.okf.md` |
-| machine name, capability set, `machines` table, spawn-target 400 invariant | `shared/machine.ava.okf.md` |
+| machine name, capability set, `machines` table, spawn-target 400 invariant | `shared/cluster/machine.ava.okf.md` |
 | which services each capability contributes | `services/services.ava.okf.md` |
 
 Three operational consequences worth stating here:
@@ -1867,7 +1867,7 @@ touches the main write path. Exporter IDs stay `otlphttp/tempo`,
 `otlphttp/loki` and `otlphttp/prometheus`; in particular, renaming Tempo/Loki
 would orphan their file_storage backlog during an upgrade.
 
-**Record** — `shared/trace.py:initialize_tracing`, gated by `AVA_TRACE_ENABLED`
+**Record** — `shared/telemetry/tracing.py:initialize_tracing`, gated by `AVA_TRACE_ENABLED`
 (default **on**). Instrumentation is OpenLLMetry (`traceloop-sdk`); the sole span
 exporter is `OtlpJsonHttpSpanExporter`, which POSTs each export batch as one
 standard protobuf `ExportTraceServiceRequest` to the configured collector's

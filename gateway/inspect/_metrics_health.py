@@ -46,19 +46,19 @@ from typing import Any
 from psycopg.rows import dict_row
 
 from gateway.inspect.schemas import InspectMetricsMetadata
-from shared.alerts import (
+from shared.cluster import home_label
+from shared.config import settings
+from shared.db_transaction import write_transaction
+from shared.log import logger
+from shared.paths import ava_home
+from shared.telemetry.alerts import (
     display_language,
     notify_im,
     notify_text,
     stamp_notified,
     upsert_alert,
 )
-from shared.alerts import fingerprint as alert_fingerprint
-from shared.cluster import home_label
-from shared.config import settings
-from shared.db_transaction import write_transaction
-from shared.log import logger
-from shared.paths import ava_home
+from shared.telemetry.alerts import fingerprint as alert_fingerprint
 
 _ALERT_NAME = "inspect metrics coverage"
 _FAMILIES = ("cost", "turns", "activity", "lifecycle")

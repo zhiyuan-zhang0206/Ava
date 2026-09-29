@@ -20,7 +20,7 @@ import yaml
 
 from cli.commands.observability import otel_collector as oc
 from shared import collector_artifact as artifact
-from shared import resilience
+from shared.host.net import resilience
 
 
 def _fail_ensure_otel_collector(*_args: object, **_kwargs: object) -> None:
@@ -272,7 +272,7 @@ def _render_real_template(
     """Render the shipped template for `roles` and parse it as YAML."""
     _local_data_plane(monkeypatch)
     monkeypatch.setattr("shared.config.settings.gateway.gateway_url", gateway_url)
-    from shared.url_secret import url_with_host
+    from shared.host.net.url_secret import url_with_host
 
     monkeypatch.setattr(
         "shared.config.settings.observability.gateway_otlp_endpoint",
@@ -284,8 +284,8 @@ def _render_real_template(
     )
     monkeypatch.setattr("shared.config.settings.observability.telemetry_otlp_enabled", otlp_enabled)
     monkeypatch.setattr("shared.config.settings.observability.observability_url", observability_url)
-    monkeypatch.setattr("shared.machine.reachable_host", lambda: machine_host)
-    monkeypatch.setattr("shared.machine.machine_name", lambda: "test-machine")
+    monkeypatch.setattr("shared.cluster.machine.reachable_host", lambda: machine_host)
+    monkeypatch.setattr("shared.cluster.machine.machine_name", lambda: "test-machine")
     repo = Path(__file__).resolve().parents[2]
     out = oc.generate_config(repo, _HOME, roles)
     # No placeholder left unconsumed. (A literal dollar survives on purpose:
@@ -461,8 +461,8 @@ def test_remote_managed_plane_omits_the_postgres_receiver(
     monkeypatch.setattr("shared.config.settings.data_plane.redis_admin_password", "abc")
     monkeypatch.setattr("shared.config.settings.gateway.gateway_url", "http://localhost:8000")
     monkeypatch.setattr("shared.config.settings.data_plane.cluster_secret", "")
-    monkeypatch.setattr("shared.machine.reachable_host", lambda: "localhost")
-    monkeypatch.setattr("shared.machine.machine_name", lambda: "test-machine")
+    monkeypatch.setattr("shared.cluster.machine.reachable_host", lambda: "localhost")
+    monkeypatch.setattr("shared.cluster.machine.machine_name", lambda: "test-machine")
     repo = Path(__file__).resolve().parents[2]
 
     rendered = oc.generate_config(repo, _HOME, frozenset({"gateway", "agent-runner"}))
@@ -891,13 +891,13 @@ def test_remote_observatory_relay_without_secret_fails_closed(
 def test_station_otlp_ingress_port_follows_single_source(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The station's advertised unit url (shared.machines.unit_dial_url) and
+    """The station's advertised unit url (shared.cluster.machines.unit_dial_url) and
     its remote receiver bind the SAME port — AVA_TELEMETRY_OTLP_PORT is the
     single knob for both (WP4, task #1946)."""
     monkeypatch.setattr("shared.config.settings.observability.telemetry_otlp_port", 4321)
     cfg = _render_real_template(monkeypatch, frozenset({"observability-station"}))
     assert cfg["receivers"]["otlp/remote"]["protocols"]["http"]["endpoint"] == ("10.0.0.10:4321")
-    from shared.machines import unit_dial_url
+    from shared.cluster.machines import unit_dial_url
 
     assert unit_dial_url(frozenset({"observability-station"})) == "http://10.0.0.10:4321"
 
@@ -1127,7 +1127,7 @@ def test_config_file_is_owner_only(monkeypatch: pytest.MonkeyPatch, tmp_path: Pa
         "shared.config.settings.observability.gateway_otlp_endpoint", "http://10.0.0.10:4318"
     )
     monkeypatch.setattr("shared.config.settings.data_plane.cluster_secret", "cluster-token")
-    monkeypatch.setattr("shared.machine.reachable_host", lambda: "10.0.0.10")
+    monkeypatch.setattr("shared.cluster.machine.reachable_host", lambda: "10.0.0.10")
     repo = Path(__file__).resolve().parents[2]
 
     replace = Path.replace

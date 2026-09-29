@@ -10,9 +10,10 @@ from fastapi.testclient import TestClient
 
 from cli.commands.observability import otel_collector as collector
 from gateway.app import app
-from shared import config, runtime_config
+from shared import config
 from shared.cluster.authority.api import telemetry_token
 from shared.config.observability import ObservabilitySettings
+from shared.host.env import runtime_config
 
 
 @pytest.mark.parametrize(("gateway_port", "local_port"), [(4318, 4319), (54318, 4318)])
@@ -49,7 +50,7 @@ def test_bootstrap_routes_to_gateway_with_distinct_local_listener(
         }
     )
     monkeypatch.setattr(config.settings, "observability", settings)
-    monkeypatch.setattr("shared.machine.machine_name", lambda: "relay-test-runner")
+    monkeypatch.setattr("shared.cluster.machine.machine_name", lambda: "relay-test-runner")
     # The runner renders its relay from its capability's telemetry token (the
     # gateway derived it from its secret); the runner holds no human secret.
     telemetry = telemetry_token("relay-test-token")

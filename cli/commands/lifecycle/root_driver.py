@@ -15,8 +15,8 @@ from cli.commands._repo import ServiceSpec, session_name
 from cli.start_runtime import StartRuntime
 from ops.roster.service_spec import api_access, db_access, profile_marker
 from shared.cluster.derive import runner_db_url_projection
+from shared.cluster.machine import MachineRoles
 from shared.config import settings
-from shared.machine import MachineRoles
 
 _ROOT_SOCKET_NAME = "ava-root.sock"
 _ROOT_STDOUT_LOG = "root.stdout.log"
@@ -66,7 +66,7 @@ class LaunchOutcome(NamedTuple):
 def _service_extra_env(spec: ServiceSpec) -> dict[str, str]:
     """Bind profile, database login and API token to one service, never its parent."""
     from cli.commands.data_plane.bringup import api_delivery, db_delivery
-    from shared.lgtm_local import BACKENDS, service_environment
+    from shared.telemetry.lgtm_local import BACKENDS, service_environment
 
     extra = service_environment(spec.session) if spec.session in BACKENDS else {}
     marker = profile_marker(spec)
@@ -201,7 +201,7 @@ def _root_argv(run_dir: Path, manifests: Path, runtime: StartRuntime | None = No
 
 def root_child_env() -> dict[str, str]:
     """The root env, including the proof it may pass only to agent-host."""
-    from shared.env_registry import manifest_certification_secret_env
+    from shared.host.env.registry import manifest_certification_secret_env
     from shared.session_env import managed_service_env
 
     return managed_service_env(settings.general.service_path) | manifest_certification_secret_env()

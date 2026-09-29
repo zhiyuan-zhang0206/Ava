@@ -24,9 +24,9 @@ import os
 
 from ops.roster import daemon_identity
 from ops.roster.service_spec import ServiceSpec
+from shared.cluster.machine import MachineRole
 from shared.config import settings
-from shared.daemon_health import health_port
-from shared.machine import MachineRole
+from shared.daemon.health import health_port
 
 # The indexer runs on the gateway capability: it indexes the gateway's
 # consolidated checkout, which only a gateway-capable unit has. Declared here

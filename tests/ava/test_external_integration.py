@@ -19,9 +19,9 @@ from ava.external.state import decode_plugin_delta, load_snapshot
 from shared.agents import impersonation as leases
 from shared.agents.impersonation import impersonation_history as history
 from shared.caller_identity import CallerIdentity
+from shared.cluster.machine import machine_name
 from shared.config import settings
 from shared.db import create_agent
-from shared.machine import machine_name
 from shared.plugin_context import PluginContext
 from shared.runtime_incarnation import RuntimeIncarnation
 from tests.impersonation_support import attested_caller, recorded_tree

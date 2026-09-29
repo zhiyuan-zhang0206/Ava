@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 
 from gateway.app import app
 from gateway.inspect import _metrics
-from shared.metrics.observed_metrics import MetricObservation, write_observations
+from shared.telemetry.metrics.observed_metrics import MetricObservation, write_observations
 
 
 def _agent(conn: psycopg.Connection, born: datetime) -> int:

@@ -9,7 +9,7 @@ import psycopg
 
 import shared.db
 from shared.api_contracts.status import SchemaMismatchKind, SchemaMismatchStatus
-from shared.machine import machine_name
+from shared.cluster.machine import machine_name
 from shared.migration_errors import MigrationLayoutError
 from shared.migration_layout import required_migration_set
 from shared.migrations import applied_migration_names

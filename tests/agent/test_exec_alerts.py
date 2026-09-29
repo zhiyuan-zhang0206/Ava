@@ -36,7 +36,7 @@ def _reset_rate_limit(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_alert_payload_shape(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("shared.machine.machine_name", lambda: "test-box")  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("shared.cluster.machine.machine_name", lambda: "test-box")  # pyright: ignore[reportUnknownArgumentType]
     payload = _alerts._payload(7, "BootstrapFetchError", "gateway down")
     alert = payload["alerts"][0]
     assert payload["source"] == "agent-exec"
@@ -77,9 +77,9 @@ def test_post_swallows_transport_failure(monkeypatch: pytest.MonkeyPatch) -> Non
 
 def test_post_uses_bearer_and_gateway_base(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[tuple[str, dict[str, object]]] = []
-    monkeypatch.setattr("shared.machine.gateway_api_base", lambda: "http://gw:8000")  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("shared.cluster.machine.gateway_api_base", lambda: "http://gw:8000")  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr("shared.config.settings.data_plane.cluster_secret", "the-secret")
-    monkeypatch.setattr("shared.machine.machine_name", lambda: "test-box")  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("shared.cluster.machine.machine_name", lambda: "test-box")  # pyright: ignore[reportUnknownArgumentType]
 
     class _Resp:
         status_code = 200

@@ -87,8 +87,8 @@ from shared.cluster.authority.ledger import (
 )
 from shared.cluster.authority.model import AuthorityRefusedError, Digest, RoleName
 from shared.deploy_timing import UNIT_BUNDLE_MAX_TTL_S
+from shared.host.net.url_secret import url_with_userinfo
 from shared.private_storage import write_private_bytes
-from shared.url_secret import url_with_userinfo
 
 # The operator supplies the transport key through this environment variable
 # (from a non-echoing prompt); `ava start` pops it before anything is forwarded.

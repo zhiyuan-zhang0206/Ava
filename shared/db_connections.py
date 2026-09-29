@@ -7,9 +7,9 @@ import psycopg
 from psycopg_pool import AsyncConnectionPool, ConnectionPool
 
 from shared.config import settings
-from shared.dotenv_boot import UNANCHORED_DB_SENTINEL
+from shared.host.env.dotenv_boot import UNANCHORED_DB_SENTINEL
+from shared.host.net.url_secret import url_with_port
 from shared.log import logger
-from shared.url_secret import url_with_port
 
 # `shared.config.data_plane`'s helpers are imported inside the dial functions
 # that call them (`connect` / `pool` / `direct_db_url`), never at module level:
@@ -26,7 +26,7 @@ class UnanchoredHomeError(RuntimeError):
     The process's db_url is the unanchored sentinel rather than a real cluster
     database: this checkout is not the prod source, carries no `.ava_home`
     pointer, and AVA_HOME is unset, so it booted bare on a scratch home with no
-    database (see shared/dotenv_boot.py). Raised instead of dialing anything.
+    database (see shared/host/env/dotenv_boot.py). Raised instead of dialing anything.
     """
 
 
@@ -35,7 +35,7 @@ class NoDatabaseAuthorityError(RuntimeError):
 
     The home's `.env` carries only the credential-free endpoint; logins are
     delivered by the root launcher, or to an operator process running the
-    home's admitted runtime (`shared.dotenv_boot._deliver_operator_authority`).
+    home's admitted runtime (`shared.host.env.dotenv_boot._deliver_operator_authority`).
     Raised at the dial instead of an opaque authentication failure.
     """
 
@@ -244,7 +244,7 @@ def _guard_db_url(url: str) -> str:
             is not the administrator URL this process adopted.
     """
     _refuse_unanchored(url)
-    from shared import dotenv_boot
+    from shared.host.env import dotenv_boot
 
     refusal = dotenv_boot.db_authority_refusal()
     if refusal is not None and url != _administrator_url:
@@ -288,9 +288,9 @@ def direct_db_url() -> str:
     `AVA_DB_URL` as-is rather than guessing.
     """
     from shared.cluster import load_registry, record_pgbouncer_port, record_postgres_port
+    from shared.cluster.machine import reachable_host
     from shared.config.data_plane import gateway_url_host
-    from shared.machine import reachable_host
-    from shared.netutil import is_loopback_host
+    from shared.host.net.predicates import is_loopback_host
 
     url = settings.data_plane.db_url
     if url == UNANCHORED_DB_SENTINEL:

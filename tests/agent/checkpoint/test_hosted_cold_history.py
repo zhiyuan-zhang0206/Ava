@@ -21,8 +21,8 @@ from shared.agents.history.delta_read_compat import (
     recovery_reconstruction_scope,
     wrap_saver_reads_with_delta_reconstruction,
 )
+from shared.cluster.machine import machine_name
 from shared.incarnation_resources import ResourceBirth
-from shared.machine import machine_name
 
 
 def test_unwrapped_saver_does_not_opt_into_reconstruction_cache() -> None:

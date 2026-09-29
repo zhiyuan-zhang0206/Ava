@@ -361,7 +361,8 @@ def test_new_rollback_after_release_uses_selected_image_and_same_activation(
 ) -> None:
     from cli.release_fleet.request import FleetRequest
     from cli.release_transition.pitr import submission
-    from shared import cluster, machine, paths
+    from shared import cluster, paths
+    from shared.cluster import machine
 
     # The activation was born under A. A subsequent completed release selected B.
     # The capture boundary reads the business identity; full phase proofs are
@@ -439,7 +440,7 @@ def test_pitr_input_admission_imports_without_settings_or_database() -> None:
     program = (
         f"import sys; sys.path.insert(0, {str(root)!r}); "
         "import cli.release_transition.pitr.inputs; "
-        "assert not {'shared.config', 'shared.db', 'shared.runtime_config'} & sys.modules.keys()"
+        "assert not {'shared.config', 'shared.db', 'shared.host.env.runtime_config'} & sys.modules.keys()"
     )
     result = subprocess.run(  # noqa: S603 — fixed import probe in the candidate source
         [sys.executable, "-I", "-B", "-c", program],

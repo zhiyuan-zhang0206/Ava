@@ -43,12 +43,17 @@ from ops.cluster_pause import is_paused as cluster_is_paused
 from ops.cluster_status import ClusterStatus, _check_pidfile
 from ops.cluster_status.schema_mismatch import status as schema_mismatch_status
 from shared.api_contracts.status import MachineStatus
+from shared.cluster.machine import (
+    is_agent_runner,
+    is_gateway,
+    is_observability_station,
+    machine_name,
+)
 from shared.cluster_drift import prod_source_head_sha
 from shared.cluster_lock import DeployLease
 from shared.config import settings
-from shared.machine import is_agent_runner, is_gateway, is_observability_station, machine_name
-from shared.observability import cluster_label
 from shared.resource_sample import ResourceSample
+from shared.telemetry.observability import cluster_label
 
 router = APIRouter()
 ARCHIVE_TOTAL_ROWS = 4_813_148  # frozen archive rows at the #1823 drop (pg_dump-verified)

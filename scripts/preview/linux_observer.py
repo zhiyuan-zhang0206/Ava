@@ -81,8 +81,8 @@ def _command(argv: list[str]) -> subprocess.CompletedProcess[str]:
 
 def _base_observations(run: Path, result: Report) -> dict[str, int]:
     from shared.cluster import load_registry
+    from shared.cluster.port_preflight import strict_listeners_on
     from shared.os_boot_unit import unit_name, unit_path
-    from shared.port_preflight import strict_listeners_on
 
     home, source = run / "home", run / "source"
     config = json.loads((run / "config.json").read_text())
@@ -269,7 +269,7 @@ def _cgroup(pid: int) -> str:
 
 
 def _require_owned_listeners(owner: OwnedProcess, listeners: list[OwnedProcess], port: int) -> None:
-    from shared.port_preflight import strict_listeners_on
+    from shared.cluster.port_preflight import strict_listeners_on
 
     _require(
         listeners

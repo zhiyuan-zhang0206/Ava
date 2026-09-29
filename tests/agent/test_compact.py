@@ -160,7 +160,7 @@ async def test_generate_summary_emits_agent_billing_span(
     """
     from opentelemetry import trace as otel_trace
 
-    from shared import trace as trace_mod
+    from shared.telemetry import tracing as tracing_mod
 
     class _Span:
         def __init__(self, name: str) -> None:
@@ -191,7 +191,7 @@ async def test_generate_summary_emits_agent_billing_span(
 
     monkeypatch.setattr("shared.lm.billing.vendor_of_model", vendor_of_model)
     monkeypatch.setattr("shared.config.settings.observability.trace_enabled", True)
-    monkeypatch.setitem(trace_mod._state, "initialized", True)
+    monkeypatch.setitem(tracing_mod._state, "initialized", True)
     monkeypatch.setattr(otel_trace, "get_tracer", lambda _name: tracer)  # pyright: ignore[reportUnknownArgumentType]
     response = AIMessage(
         content="a complete summary",

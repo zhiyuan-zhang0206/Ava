@@ -50,7 +50,7 @@ from typing import Literal
 
 import psutil
 
-import shared.port_preflight
+import shared.cluster.port_preflight
 from cli.commands.converge.spec import ConvergeCtx
 from cli.commands.data_plane._pooler_stop import OwnedPooler
 from cli.commands.data_plane.cluster_instance import (
@@ -61,7 +61,7 @@ from cli.commands.data_plane.cluster_instance import (
 )
 from shared.cluster import ownership
 from shared.cluster.authority import POOLER_ADMIN
-from shared.machine import reachable_host
+from shared.cluster.machine import reachable_host
 from shared.paths import ava_home
 from shared.pg_tools import brew_prefix, is_macos
 from shared.platform import LockTimeoutError
@@ -302,7 +302,7 @@ def _admin_reachable(listen_port: int, admin_password: str, host: str = "127.0.0
     login. Public bind verification reads the socket table, never a self-dial.
     """
     from shared.db_connections import connect_url
-    from shared.url_secret import url_with_userinfo
+    from shared.host.net.url_secret import url_with_userinfo
 
     url = url_with_userinfo(
         f"postgresql://@{host}:{listen_port}/pgbouncer", POOLER_ADMIN, admin_password
@@ -342,7 +342,7 @@ def pgbouncer_public_listener_reachable(listen_port: int, role: str, cluster_sec
     if _bind_addrs(cluster_secret) == ["127.0.0.1"]:
         return True
     reachable = reachable_host()
-    addrs = shared.port_preflight.listener_addrs(listen_port)
+    addrs = shared.cluster.port_preflight.listener_addrs(listen_port)
     return bool(addrs & {reachable, "0.0.0.0", "::", "*"})  # noqa: S104 — matching OS wildcard binds, not opening one
 
 
@@ -614,9 +614,9 @@ def ensure_pgbouncer_step(ctx: ConvergeCtx) -> None:
 
     from shared.cluster import get_record, record_pgbouncer_port, record_postgres_port
     from shared.config import settings
-    from shared.dotenv_boot import UNANCHORED_DB_SENTINEL
-    from shared.envfile import remove_env, upsert_env
-    from shared.url_secret import url_with_port
+    from shared.host.env.dotenv_boot import UNANCHORED_DB_SENTINEL
+    from shared.host.env.dotenv_file import remove_env, upsert_env
+    from shared.host.net.url_secret import url_with_port
 
     if settings.data_plane.is_remote:
         # The pooler is a local-instance component; a remote/SaaS plane's URL

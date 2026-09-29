@@ -77,9 +77,11 @@ async def test_profile_through_auth_gate_and_real_hosted_claim(
     monkeypatch.setattr(settings.data_plane, "cluster_secret", secret)
     monkeypatch.setattr(settings.gateway, "auth_middleware_enabled", True)
     monkeypatch.setenv("AVA_AGENT_ID", "999")
-    monkeypatch.setattr("shared.machine.gateway_api_base", Mock(return_value="http://testserver"))
     monkeypatch.setattr(
-        "shared.machine.gateway_auth_headers",
+        "shared.cluster.machine.gateway_api_base", Mock(return_value="http://testserver")
+    )
+    monkeypatch.setattr(
+        "shared.cluster.machine.gateway_auth_headers",
         Mock(return_value={"Authorization": f"Bearer {secret}"}),
     )
     with TestClient(app) as client:
@@ -87,7 +89,7 @@ async def test_profile_through_auth_gate_and_real_hosted_claim(
         def post(url: str, **kwargs: Any) -> httpx2.Response:
             return client.post(url, **kwargs)
 
-        monkeypatch.setattr("shared.http_dial.post", post)
+        monkeypatch.setattr("shared.host.net.http_dial.post", post)
         # Explicit provenance (user ruling 2026-09-20): the send path never consults
         # AVA_CALLER_IDENTITY; the profile value travels as the explicit source.
         assert cmd_agents_send(incarnation.agent_id, "caller path proof", _SOURCE) == 0

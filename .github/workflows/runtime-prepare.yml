@@ -17,7 +17,7 @@ on:
       - 'scripts/release_proofs/prove_runtime_publication_input.py'
       - 'scripts/release_proofs/prove_exec_owner_installed.py'
       - 'scripts/runtime-node-version'
-      - 'shared/dotenv_boot.py'
+      - 'shared/host/env/dotenv_boot.py'
       - 'shared/platform_backend.py'
       - 'shared/session_env.py'
       - 'ops/spec.py'
@@ -27,7 +27,7 @@ on:
       - 'scripts/prepare_otel_release.py'
       - 'scripts/release_proofs/prove_runtime_otel.py'
       - 'cli/commands/observability/otel_collector.py'
-      - 'shared/paths.py'
+      - 'shared/paths/__init__.py'
       - 'shared/runtime_plugins.py'
       - 'cli/commands/_release_plugin_probe.py'
       - 'shared/plugins_config.py'
@@ -162,7 +162,7 @@ jobs:
           PY
       - name: Type-check retained collector integration
         shell: bash
-        run: uv run --locked pyright scripts/prepare_otel_release.py scripts/release_proofs/prove_runtime_otel.py scripts/release_proofs/prove_runtime_plugins.py scripts/release_proofs/prove_release_inventory.py scripts/release_proofs/prepare_plugin_fixture.py shared/runtime_plugins.py shared/runtime_prepare.py shared/runtime_interpreter.py shared/paths.py shared/updater_handoff.py cli/commands/observability/otel_collector.py cli/commands/release_inventory.py
+        run: uv run --locked pyright scripts/prepare_otel_release.py scripts/release_proofs/prove_runtime_otel.py scripts/release_proofs/prove_runtime_plugins.py scripts/release_proofs/prove_release_inventory.py scripts/release_proofs/prepare_plugin_fixture.py shared/runtime_plugins.py shared/runtime_prepare.py shared/runtime_interpreter.py shared/paths/__init__.py shared/updater_handoff.py cli/commands/observability/otel_collector.py cli/commands/release_inventory.py
       - name: Type-check publication input reader
         run: uv run --locked pyright shared/runtime_publication_input.py shared/verified_file.py scripts/release_proofs/prove_runtime_publication_input.py
       - name: Publication selector compatibility

@@ -36,10 +36,11 @@ from cli.release_fleet.request import FleetRequest
 from cli.release_transition import authority as release_authority
 from cli.release_transition.journal import Operation, create, exclusive, read_operation
 from cli.release_transition.request import ReleaseRef
-from shared import db_connections, dotenv_boot
+from shared import db_connections
 from shared.cluster import authority, ownership
 from shared.config import settings
-from shared.url_secret import url_with_userinfo
+from shared.host.env import dotenv_boot
+from shared.host.net.url_secret import url_with_userinfo
 from tests.lifecycle.db_authority.test_single_box import Born, _refused
 from tests.lifecycle.db_authority.test_single_box import born as born
 from tests.lifecycle.db_authority.test_single_box import configured as configured

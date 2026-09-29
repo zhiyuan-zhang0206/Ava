@@ -39,7 +39,7 @@ def _spawn_agent(spawner: str = "test") -> int:
     row is created by create_agent_row; nothing launches, these tests only read
     the stamp)."""
     from ops.agents.spawn import create_agent_row
-    from shared.machine import machine_name
+    from shared.cluster.machine import machine_name
 
     agent_id, _, _prompt_id, _attempt_id = create_agent_row(spawner=spawner, machine=machine_name())
     return agent_id

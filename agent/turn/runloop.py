@@ -22,11 +22,11 @@ from agent.state_channels import (
     CIRCUIT_REASON_SCHEMA,
     CircuitState,
 )
-from shared.audit_events import insert_event_log_async
 from shared.config.turn_view import turn_settings
 from shared.context import AvaContext
 from shared.live_events import Error
 from shared.log import logger
+from shared.telemetry.audit_events import insert_event_log_async
 
 # LangGraph recursion_limit defaults to 25 — far too low for this graph even
 # per-turn: one invocation is one TURN, and a turn is a whole work bout (the

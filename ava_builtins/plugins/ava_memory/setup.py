@@ -102,7 +102,7 @@ def _ensure_gateway_memory_repo() -> None:
     $AVA_HOME/gateway/memory checkout; on a gateway-only unit it initializes
     the same path as the agent-runner checkout (memory_dir()).
     """
-    from shared.machine import is_gateway
+    from shared.cluster.machine import is_gateway
     from shared.memory_repo import gateway_is_initialized, init_gateway
     from shared.paths import gateway_memory_dir
 

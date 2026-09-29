@@ -27,7 +27,7 @@ from shared.daemon.schedules.watcher import (
 from shared.daemon.schedules.watcher import (
     CronExprError as CronExprError,
 )
-from shared.dotenv_boot import watcher_runner_env
+from shared.host.env.dotenv_boot import watcher_runner_env
 
 __all_for_ava__ = [
     "at",
@@ -140,7 +140,7 @@ def _build_boot(script_path: _pl.Path, watchdog_secs: float | None, agent_id: in
 
     Agent identity is INLINED as ``AVA_AGENT_ID`` into the bootstrap, because
     the session machinery deliberately does NOT forward it: the env allowlist
-    ``shared/env_registry.py`` ``child_env`` (Task #856) drops every
+    ``shared/host/env/registry.py`` ``child_env`` (Task #856) drops every
     agent-scope / non-modeled ``AVA_*`` knob from session children. Without
     the inline, a watcher child would see ``ava.self.AGENT_ID=None`` and its
     wake-up ``send_message`` would hit ``/api/agents/None/messages`` → 422 →
@@ -215,7 +215,7 @@ def _build_boot(script_path: _pl.Path, watchdog_secs: float | None, agent_id: in
         "import time\n"
         "\n"
         # Identity is NOT inherited: the session env allowlist
-        # (shared/env_registry.py child_env, Task #856) drops
+        # (shared/host/env/registry.py child_env, Task #856) drops
         # AVA_AGENT_ID from session children, so without this line the child
         # would see ava.self.AGENT_ID=None and its wake-up send_message would
         # 422 on /api/agents/None/messages (Task #964). Inline the spawning

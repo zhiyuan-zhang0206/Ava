@@ -22,11 +22,11 @@ from services.pitr.wal.uploader import (
     RemoteCollisionError,
     WalSourceTooLargeError,
 )
-from shared import health_schema
 from shared.config import settings
-from shared.daemon_health import Liveness, start_health_server, stop_health_server
-from shared.daemon_shutdown import hard_exit as _hard_exit
-from shared.daemon_shutdown import install_graceful_shutdown
+from shared.daemon import health_schema
+from shared.daemon.health import Liveness, start_health_server, stop_health_server
+from shared.daemon.shutdown import hard_exit as _hard_exit
+from shared.daemon.shutdown import install_graceful_shutdown
 from shared.log import init_gateway_process
 from shared.paths import ava_home
 

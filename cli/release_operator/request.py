@@ -145,7 +145,7 @@ def _build_request(
     acknowledged_rejection: str | None = None,
 ) -> FleetRequest:
     from shared.cluster import registry_path
-    from shared.machine import machine_name
+    from shared.cluster.machine import machine_name
     from shared.paths import ava_home
     from shared.start_inputs import configuration_digest
 

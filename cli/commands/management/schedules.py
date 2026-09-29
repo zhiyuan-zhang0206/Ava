@@ -29,13 +29,13 @@ _TIMEOUT_S = 15.0
 
 
 def _gateway_base() -> str:
-    from shared.machine import gateway_api_base
+    from shared.cluster.machine import gateway_api_base
 
     return gateway_api_base()
 
 
 def _headers() -> dict[str, str]:
-    from shared.machine import gateway_auth_headers
+    from shared.cluster.machine import gateway_auth_headers
 
     return gateway_auth_headers()
 
@@ -48,7 +48,7 @@ def cmd_schedules_ls() -> int:
 
     Disabled schedules are listed too; `status` is the ScheduleManager's live
     supervision state, `enabled` is the desired state stored on the row."""
-    from shared.http_dial import get as dial_get
+    from shared.host.net.http_dial import get as dial_get
 
     resp = dial_get(f"{_gateway_base()}/api/schedules", timeout=_TIMEOUT_S, headers=_headers())
     resp.raise_for_status()
@@ -98,7 +98,7 @@ def cmd_schedules_create(
     the script and rejects a SyntaxError with 400, so a broken script never
     reaches the runner. Created enabled unless --disabled; an enabled schedule is
     launched by the reconcile loop within a poll interval."""
-    from shared.http_dial import post as dial_post
+    from shared.host.net.http_dial import post as dial_post
 
     source = _read_script(script, script_file)
     if source is None:
@@ -147,7 +147,7 @@ def cmd_schedules_update(
     immediately. --enable / --disable converge when they change desired state:
     the same field `start`/`stop` flip is paired with session reaping or
     creation before the command returns, while a same-value update is a no-op."""
-    from shared.http_dial import put as dial_put
+    from shared.host.net.http_dial import put as dial_put
 
     schedule_id = _resolve_id(identifier)
     if schedule_id is None:
@@ -200,7 +200,7 @@ def cmd_schedules_delete(identifier: str, *, force: bool = False) -> int:
 
     Prompts unless --force. The gateway kills the now-orphaned session and
     removes the schedule's work dir; its run history goes with the row."""
-    from shared.http_dial import delete as dial_delete
+    from shared.host.net.http_dial import delete as dial_delete
 
     schedule_id = _resolve_id(identifier)
     if schedule_id is None:
@@ -228,7 +228,7 @@ def cmd_schedules_delete(identifier: str, *, force: bool = False) -> int:
 
 def _control(identifier: str, verb: str) -> int:
     """Shared POST for start / stop / restart — same shape, different sub-path."""
-    from shared.http_dial import post as dial_post
+    from shared.host.net.http_dial import post as dial_post
 
     schedule_id = _resolve_id(identifier)
     if schedule_id is None:
@@ -273,7 +273,7 @@ def cmd_schedules_logs(identifier: str, lines: int) -> int:
     Source is the live session capture when a session is up, the session's
     PTY transcript file when it is gone (a finished/crashed runner's output
     survives there), `last_error` (the last crash traceback), or `none`."""
-    from shared.http_dial import get as dial_get
+    from shared.host.net.http_dial import get as dial_get
 
     schedule_id = _resolve_id(identifier)
     if schedule_id is None:
@@ -301,7 +301,7 @@ def cmd_schedules_logs(identifier: str, lines: int) -> int:
 
 def cmd_schedules_runs(identifier: str, limit: int) -> int:
     """`ava schedules runs <name-or-id> [--limit N]` — run history, newest first."""
-    from shared.http_dial import get as dial_get
+    from shared.host.net.http_dial import get as dial_get
 
     schedule_id = _resolve_id(identifier)
     if schedule_id is None:
@@ -378,7 +378,7 @@ def _read_script(script: str | None, script_file: str | None) -> str | None:
 def _resolve_id(identifier: str) -> int | None:
     """Resolve a name-or-id string to a numeric schedule id. Returns None +
     prints to stderr when the name matches nothing."""
-    from shared.http_dial import get as dial_get
+    from shared.host.net.http_dial import get as dial_get
 
     with contextlib.suppress(ValueError):
         return int(identifier)
@@ -394,7 +394,7 @@ def _resolve_id(identifier: str) -> int | None:
 
 def _fetch(identifier: str) -> dict[str, Any] | None:
     """GET one full schedule (with script) by name or id."""
-    from shared.http_dial import get as dial_get
+    from shared.host.net.http_dial import get as dial_get
 
     schedule_id = _resolve_id(identifier)
     if schedule_id is None:

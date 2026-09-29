@@ -1,4 +1,6 @@
-"""Cluster identity (path-only) + the host-level cluster registry.
+"""Cluster identity and membership: path-only identity and the host-level cluster
+registry, this host's machine identity and the machines roster, cluster auth,
+ports, and the per-cluster data-plane instances.
 
 A cluster is one logical deployment: its OWN Postgres+Redis instance (under its
 `$AVA_HOME`, on per-cluster ports), one outward gateway, one host-port
@@ -23,6 +25,13 @@ is single-tenant, so the identifier needs no per-cluster distinction.
 The public namespace exports registry, port allocation, URL derivation,
 Postgres provisioning and Redis ACL helpers. `ownership` provides the shared
 native storage observer used before startup and maintenance effects.
+
+Membership and access live in member modules the door does not re-export:
+`machine` (this host's machine name and capability set), `machines` and
+`machine_exclusions` (the multi-machine roster and its operator exclusions),
+`auth` (cluster bearer auth), `rate_limit` (gateway login throttling),
+`transport_encryption` (the precondition for secret-bearing off-box listeners)
+and `port_preflight` (the expected-port set and bind probe).
 """
 
 from __future__ import annotations
@@ -189,21 +198,21 @@ from shared.cluster.registry import (
 from shared.cluster.registry import (
     save_record_locked as save_record_locked,
 )
-from shared.platform import file_lock as file_lock
-from shared.port_block import (
+from shared.host.env.port_block import (
     BLOCK_MAX as BLOCK_MAX,
 )
-from shared.port_block import (
+from shared.host.env.port_block import (
     BLOCK_SIZE as BLOCK_SIZE,
 )
-from shared.port_block import (
+from shared.host.env.port_block import (
     BLOCK_START as BLOCK_START,
 )
-from shared.port_block import (
+from shared.host.env.port_block import (
     LEGACY_AVA_PORTS as LEGACY_AVA_PORTS,
 )
-from shared.port_block import (
+from shared.host.env.port_block import (
     PORT_OFFSETS as PORT_OFFSETS,
 )
-from shared.url_secret import url_with_port as url_with_port
-from shared.url_secret import url_with_userinfo as url_with_userinfo
+from shared.host.net.url_secret import url_with_port as url_with_port
+from shared.host.net.url_secret import url_with_userinfo as url_with_userinfo
+from shared.platform import file_lock as file_lock

@@ -17,8 +17,9 @@ import pytest
 from ops import host_config as ops
 from ops.host_config import config_audit_read_op, config_read_op, config_write_op
 from ops.rpc_schemas import ConfigReadResult, ConfigWriteOpResult
-from shared import host_config_validators, runtime_config
+from shared import host_config_validators
 from shared.config import get_config_metadata
+from shared.host.env import runtime_config
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -581,7 +582,7 @@ async def test_dispatch_config_write_missing_overrides_key_fails(
 def test_config_audit_read_op_returns_this_hosts_newest_records(
     isolated_host_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from shared.env_audit import record_env_write
+    from shared.host.env.audit import record_env_write
 
     monkeypatch.setattr(ops, "machine_name", lambda: "test-machine")
     env_path = isolated_host_home / ".env"

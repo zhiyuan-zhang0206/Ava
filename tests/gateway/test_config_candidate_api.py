@@ -10,8 +10,8 @@ from fastapi.testclient import TestClient
 
 from gateway.app import app
 from gateway.routers import config as config_router
-from shared import runtime_config
 from shared.config.candidate import EnvPatchValidation
+from shared.host.env import runtime_config
 
 
 def _write_private_file(path: Path, content: str | bytes) -> Path:

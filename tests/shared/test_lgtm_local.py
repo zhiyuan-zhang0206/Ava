@@ -3,7 +3,7 @@
 from pathlib import Path
 
 from services.ava_root.inputs import InputSeal
-from shared.lgtm_local import service_environment, service_input_paths
+from shared.telemetry.lgtm_local import service_environment, service_input_paths
 
 
 def test_config_change_changes_generation_but_data_writes_do_not(tmp_path: Path) -> None:

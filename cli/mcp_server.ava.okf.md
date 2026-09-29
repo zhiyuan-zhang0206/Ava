@@ -54,7 +54,7 @@ instruction ending. Tool schemas still come from the local function signatures.
 - **No control logic, no state.** Every tool is an authenticated gateway call
   the web UI already makes, so an MCP client can do exactly what a browser can
   and nothing more. New capability belongs on a gateway route first.
-- **Identity is not a parameter.** `shared.machine.gateway_api_base` +
+- **Identity is not a parameter.** `shared.cluster.machine.gateway_api_base` +
   `gateway_auth_headers` resolve the gateway and bearer of the checkout
   the running `ava` belongs to — the same checkout-anchored rule as every CLI
   verb, so a bare `ava` serves the cluster `$AVA_HOME` names and a worktree's

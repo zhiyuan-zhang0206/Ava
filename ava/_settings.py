@@ -34,7 +34,7 @@ def __getattr__(name: str) -> Any:
     if name == "REDIS_URL":
         return settings.data_plane.redis_url
     if name == "GATEWAY_URL":
-        from shared.machine import gateway_api_base
+        from shared.cluster.machine import gateway_api_base
 
         return gateway_api_base()
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

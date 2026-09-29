@@ -71,7 +71,7 @@ def _effective_mode() -> str:
 def test_real_pg_replays_own_sql_while_show_remains_off(
     native_auto: tuple[Path, ActivationRecord], monkeypatch: pytest.MonkeyPatch, window: str
 ) -> None:
-    from shared import envfile
+    from shared.host.env import dotenv_file
 
     home, record = native_auto
 
@@ -92,7 +92,7 @@ def test_real_pg_replays_own_sql_while_show_remains_off(
         if window in {"before_sql", "after_sql"}:
             raise RuntimeError("interrupted SQL")
 
-    original_env = envfile.replace_env_bytes_cas
+    original_env = dotenv_file.replace_env_bytes_cas
 
     def interrupted_env(*args: object, **kwargs: object) -> None:
         if window == "env_effect":
@@ -101,7 +101,7 @@ def test_real_pg_replays_own_sql_while_show_remains_off(
 
     monkeypatch.setattr(config, "_alter", interrupted)
     if window.startswith("env_"):
-        monkeypatch.setattr(envfile, "replace_env_bytes_cas", interrupted_env)
+        monkeypatch.setattr(dotenv_file, "replace_env_bytes_cas", interrupted_env)
     with pytest.raises(RuntimeError, match="interrupted"):
         config.apply_wal_config(home, record, {"archive_mode": "on"})
     assert _effective_mode() == "off"
@@ -110,7 +110,7 @@ def test_real_pg_replays_own_sql_while_show_remains_off(
     if window != "before_sql":
         assert config._persistent_archive_settings(home)["archive_mode"] == "on"
     monkeypatch.setattr(config, "_alter", alter)
-    monkeypatch.setattr(envfile, "replace_env_bytes_cas", original_env)
+    monkeypatch.setattr(dotenv_file, "replace_env_bytes_cas", original_env)
     result = config.apply_wal_config(home, durable, {"archive_mode": "on"})
     assert result.phase == "wal_restart_pending"
     assert result.config_apply_intent is None

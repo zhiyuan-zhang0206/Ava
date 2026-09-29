@@ -31,7 +31,7 @@ def _clean_row(db_conn: psycopg.Connection) -> Iterator[None]:
 
 
 def _machine() -> str:
-    from shared.machine import machine_name
+    from shared.cluster.machine import machine_name
 
     return machine_name()
 

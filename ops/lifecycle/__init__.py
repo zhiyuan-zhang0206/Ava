@@ -109,11 +109,11 @@ from shared.agents import (
     AgentStatus,
     ResurrectAlreadyAlive,
 )
-from shared.audit_events import prepare_event_log
+from shared.cluster.machine import machine_name
 from shared.db import insert_inbound_message
 from shared.live_announce import publish_agent_updated_sync
 from shared.lm.registry import normalize_overlay_llm_model
-from shared.machine import machine_name
+from shared.telemetry.audit_events import prepare_event_log
 
 _log = logging.getLogger(__name__)
 
@@ -233,7 +233,7 @@ async def _cancel_hosted_turn_best_effort(agent_id: int, command_id: int) -> Non
     """
     import httpx
 
-    from shared.daemon_health import health_port
+    from shared.daemon.health import health_port
 
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(2.0)) as client:

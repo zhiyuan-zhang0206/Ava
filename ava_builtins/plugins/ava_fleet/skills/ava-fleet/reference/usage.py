@@ -49,7 +49,7 @@ from typing import Any
 
 from gateway.lgtm import loki_events
 from shared.db import connect
-from shared.loki_index_labels import ledger_gap_plan, retention_floor
+from shared.telemetry.loki_index_labels import ledger_gap_plan, retention_floor
 
 # The token/cost payload fields summed per (agent, model) — the llm_usage
 # payload keys (shared/events/contract.py LLM_USAGE_KEYS).

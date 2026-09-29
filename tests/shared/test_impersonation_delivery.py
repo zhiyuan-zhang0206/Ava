@@ -12,8 +12,8 @@ from psycopg import sql
 from shared.agents import impersonation as leases
 from shared.agents.impersonation import impersonation_delivery as delivery
 from shared.caller_identity import CallerIdentity
+from shared.cluster.machine import machine_name
 from shared.db import create_agent, insert_inbound_message
-from shared.machine import machine_name
 from shared.runtime_incarnation import RuntimeIncarnation
 from tests.impersonation_support import attested_caller, recorded_tree
 
@@ -27,7 +27,7 @@ def active(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> ActiveSession:
-    from shared import runtime_config
+    from shared.host.env import runtime_config
 
     window, attempts = getattr(request, "param", (180, 2))
     monkeypatch.setattr(runtime_config, "_ava_home", lambda: tmp_path)

@@ -67,8 +67,8 @@ def require_fleet_of_one(home: Path) -> None:
     PITR request) can share one single-unit topology gate. Live terminals and
     schedules are not refused here: an operation's stop phase closes them.
     """
+    from shared.cluster.machine import machine_name, machine_role
     from shared.config import settings
-    from shared.machine import machine_name, machine_role
     from shared.paths import ava_home
 
     if ava_home() != home:
@@ -91,7 +91,7 @@ def require_topology(request: FleetRequest | UnitRequest) -> None:
     """
     from cli.release_transition.identity import require_reservation
     from shared.cluster import registry_path
-    from shared.machine import machine_name
+    from shared.cluster.machine import machine_name
 
     if isinstance(request, UnitRequest):
         raise ValueError(NETWORKED_REFUSAL)  # noqa: TRY004 — a topology refusal, not a type error

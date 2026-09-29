@@ -12,7 +12,7 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from typing import Protocol, cast
 
-from shared.daemon_health import DaemonProbe
+from shared.daemon.health import DaemonProbe
 
 Probe = Callable[[], DaemonProbe]
 """A total probe: returns a verdict, never raises (the healthcheck contract)."""

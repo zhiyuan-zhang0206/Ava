@@ -14,7 +14,7 @@ from pathlib import Path
 import httpx
 
 from shared.api_contracts.status import MachineStatus
-from shared.machine import format_capabilities
+from shared.cluster.machine import format_capabilities
 
 _CLUSTER_STATUS_PROBE_TIMEOUT_S = 8.0
 # Roster `role` column width: the widest label format_capabilities emits is
@@ -31,8 +31,8 @@ def cmd_cluster_mark_staging(name: str, *, is_staging: bool) -> int:
     target set (`list_agent_runners`: the heartbeat probe and cluster
     fan-outs). Exit 1 when the gateway reports no such machine.
     """
-    from shared.http_dial import post as dial_post
-    from shared.machine import gateway_api_base, gateway_auth_headers
+    from shared.cluster.machine import gateway_api_base, gateway_auth_headers
+    from shared.host.net.http_dial import post as dial_post
 
     url = f"{gateway_api_base()}/api/cluster/machines/{name}/staging"
     resp = dial_post(
@@ -64,8 +64,8 @@ def cmd_cluster_pause(name: str, *, reason: str | None = None) -> int:
     its active members. The registration row (URL/role) is preserved for resume.
     Exit 1 when the gateway reports no such machine or refuses (own gateway).
     """
-    from shared.http_dial import post as dial_post
-    from shared.machine import gateway_api_base, gateway_auth_headers
+    from shared.cluster.machine import gateway_api_base, gateway_auth_headers
+    from shared.host.net.http_dial import post as dial_post
 
     url = f"{gateway_api_base()}/api/cluster/machines/{name}/pause"
     resp = dial_post(
@@ -108,8 +108,8 @@ def cmd_cluster_resume(name: str) -> int:
     machine. Prints the ops checklist for the machine's own side (it is away,
     and its reachable address may have changed while it was out).
     """
-    from shared.http_dial import post as dial_post
-    from shared.machine import gateway_api_base, gateway_auth_headers
+    from shared.cluster.machine import gateway_api_base, gateway_auth_headers
+    from shared.host.net.http_dial import post as dial_post
 
     url = f"{gateway_api_base()}/api/cluster/machines/{name}/resume"
     resp = dial_post(
@@ -157,12 +157,12 @@ def cmd_cluster_status() -> int:
     down machine can push the gateway's own response past this client's
     timeout budget (#219).
     """
-    from shared.http_dial import get as dial_get
-    from shared.machine import (
+    from shared.cluster.machine import (
         GatewayApiBaseMissing,
         gateway_api_base,
         gateway_auth_headers,
     )
+    from shared.host.net.http_dial import get as dial_get
 
     try:
         url = f"{gateway_api_base()}/api/cluster/roster"
@@ -328,8 +328,8 @@ def fetch_gateway_cluster_status() -> dict[str, object]:
     Fails fast (`raise_for_status()`) on any HTTP error rather than masking an
     unreachable gateway.
     """
-    from shared.http_dial import get as dial_get
-    from shared.machine import gateway_api_base, gateway_auth_headers
+    from shared.cluster.machine import gateway_api_base, gateway_auth_headers
+    from shared.host.net.http_dial import get as dial_get
 
     url = f"{gateway_api_base()}/api/cluster/status"
     resp = dial_get(url, timeout=10.0, headers=gateway_auth_headers())
@@ -344,8 +344,8 @@ def _gateway_authority_home(verb: str) -> Path | None:
     plane has no write generation or enrollment store), and no release
     operation may be incomplete: it captured the units it releases.
     """
-    from shared.bootstrap import config_source_is_local
     from shared.config import settings
+    from shared.host.env.bootstrap import config_source_is_local
     from shared.paths import ava_home
     from shared.release_operation import require_configuration_write_authorized
 

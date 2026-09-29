@@ -9,7 +9,7 @@ import httpx
 
 from gateway.lgtm import _loki_logql, _loki_transport, loki_events_cache
 from shared.config import settings
-from shared.loki_index_labels import LokiReadSlice
+from shared.telemetry.loki_index_labels import LokiReadSlice
 
 
 def _quantile_aggregate(

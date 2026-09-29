@@ -42,7 +42,7 @@ def _inbound(content: str, payload: dict | None = None) -> ClaimedInbound:
 def _stub_upload_fetch(monkeypatch: pytest.MonkeyPatch, raw: bytes) -> dict[str, list[str]]:
     """Stand in for the gateway upload endpoint: fetch_upload_b64's HTTP GET
     returns `raw` (mime derived from the filename). Returns the seen URLs."""
-    from shared import http_dial
+    from shared.host.net import http_dial
 
     seen: dict[str, list[str]] = {"urls": []}
 
@@ -59,7 +59,7 @@ def _stub_upload_fetch(monkeypatch: pytest.MonkeyPatch, raw: bytes) -> dict[str,
         return _Resp()
 
     monkeypatch.setattr(http_dial, "get", _fake_get)
-    monkeypatch.setattr("shared.machine.gateway_api_base", lambda: "http://gw.test:8000")
+    monkeypatch.setattr("shared.cluster.machine.gateway_api_base", lambda: "http://gw.test:8000")
     return seen
 
 
@@ -120,7 +120,7 @@ def test_image_only_message_has_empty_wrapped_text_block(
 def test_missing_image_degrades_to_text_note(monkeypatch: pytest.MonkeyPatch) -> None:
     # The gateway answers 404 (deleted between send and claim): fetch_upload_b64
     # raises OSError, the claim node degrades the block to a text note.
-    from shared import http_dial
+    from shared.host.net import http_dial
 
     def _fake_get(url: str, **kwargs: object) -> object:
         class _Resp:
@@ -139,7 +139,7 @@ def test_missing_image_degrades_to_text_note(monkeypatch: pytest.MonkeyPatch) ->
         return _Resp()
 
     monkeypatch.setattr(http_dial, "get", _fake_get)
-    monkeypatch.setattr("shared.machine.gateway_api_base", lambda: "http://gw.test:8000")
+    monkeypatch.setattr("shared.cluster.machine.gateway_api_base", lambda: "http://gw.test:8000")
     payload = {
         "content_blocks": [
             {"type": "text", "text": "see this"},

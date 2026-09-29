@@ -41,7 +41,7 @@ import sys
 from pathlib import Path
 
 from cli.start_runtime import StartRuntime
-from shared.machine import MachineRoles
+from shared.cluster.machine import MachineRoles
 from shared.private_storage import (
     private_file_problem,
     private_tree_root_problem,
@@ -151,7 +151,7 @@ def _port_findings(repo: Path, home: Path, roles: MachineRoles) -> tuple[list[st
     from cli.commands.converge.spec import ConvergeCtx
     from cli.commands.lifecycle.root_driver import _root_tree_roster
     from shared import cluster
-    from shared.port_preflight import env_port_drift
+    from shared.cluster.port_preflight import env_port_drift
     from shared.service_selection import resolve_selection
 
     try:
