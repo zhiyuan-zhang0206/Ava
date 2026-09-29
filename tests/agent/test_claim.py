@@ -265,7 +265,7 @@ async def running_agent(aops_pool: AsyncConnectionPool):
     """Admit a real hosted owner and bind it throughout each dispatch test."""
     from uuid import uuid4
 
-    from agent.hosted_ownership import admit_hosted_runtime
+    from agent.ownership.hosted import admit_hosted_runtime
     from shared.machine import machine_name
     from shared.turn_identity import bind_turn_identity
 
@@ -2260,7 +2260,7 @@ async def test_claim_auto_resurrect_chat_batch_wakes_and_keeps_chat(
 
     from uuid import uuid4
 
-    from agent.hosted_ownership import admit_hosted_runtime, apply_hosted_lifecycle
+    from agent.ownership.hosted import admit_hosted_runtime, apply_hosted_lifecycle
     from ops.agent_wake import resurrect_agent
     from shared.machine import machine_name
     from shared.runtime_incarnation import current_incarnation

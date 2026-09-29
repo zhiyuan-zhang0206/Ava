@@ -30,7 +30,7 @@ triggering SDK import side effects — same rationale as `shared/exit_codes.py`.
 
 All roles carry `agent_id: int`. The extra fields below are the payload.
 
-### Kernel streaming (`agent/graph/_callbacks.py`, `llm/node.py`, `_exec.py`)
+### Kernel streaming (`agent/graph/_callbacks.py`, `llm/node.py`, `exec/node.py`)
 
 | Role | When | Extra fields |
 |---|---|---|

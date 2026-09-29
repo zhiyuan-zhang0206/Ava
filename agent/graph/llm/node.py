@@ -25,7 +25,7 @@ context exit the watcher is cancelled. A missed signal is not lost — it stays 
 pending row the claim node dispatches next pass.
 
 State type hint key design (`state: _state.AgentState` + `from __future__ import
-annotations`): see `agent/graph/_exec.py` module docstring last paragraph — in
+annotations`): see `agent/graph/exec/node.py` module docstring last paragraph — in
 short, LangGraph narrows channels by the node's first param type hint;
 directly importing `AgentState` captures the BaseAgentState alias and drops
 all plugin fields; using module attribute + deferred annotation evaluation
@@ -73,7 +73,7 @@ from agent.hooks.compact import auto_compact_for_llm
 from agent.llm.usage import log_llm_usage
 from agent.nodes import AFTER_EXEC, BEFORE_EXEC
 from agent.state_channels import CircuitState
-from agent.turn_progress import mark_turn_progress
+from agent.turn.progress import mark_turn_progress
 from shared.config import settings
 from shared.config.turn_view import turn_settings
 from shared.context import AvaContext, agent_id_from_config
@@ -304,7 +304,7 @@ async def llm_node(
             # Do not publish Error here — this except is wrapped by langgraph retry
             # and runs on every failed attempt; sending the frontend N "errors" then
             # succeeding on retry would contradict. The Error event is published
-            # once by outer `agent/runloop.py:_invoke_graph_with_lifecycle_logging`
+            # once by outer `agent/turn/runloop.py:_invoke_graph_with_lifecycle_logging`
             # after retries are exhausted (Cancelled is still published by
             # _llm_node_impl itself).
             raise

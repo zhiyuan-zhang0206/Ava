@@ -2,7 +2,7 @@
 
 Two call sites share the pack:
 
-- the exec node (`agent/graph/_exec.py`) drains the attachments registered
+- the exec node (`agent/graph/exec/node.py`) drains the attachments registered
   during the just-finished ``execute_code`` call **immediately**, so the media
   message lands right after the exec-output ToolMessage in the same turn and
   the model can use the files on its very next step (user ruling 2026-08-26);

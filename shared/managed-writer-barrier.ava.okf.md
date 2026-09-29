@@ -82,7 +82,7 @@ after the operation lease expires. Valid stable current evidence requires the
 exact loaded image, selector, full receipt and complete registry.
 Unknown versions, malformed evidence and an empty version-two record are errors,
 never legacy fallbacks. These results do not authorize caller-supplied DTOs or
-terminate an agent; hosted admission (`agent/hosted_ownership.py`) consumes them.
+terminate an agent; hosted admission (`agent/ownership/hosted.py`) consumes them.
 
 The models, transaction fence and nullable schema are not activation. Actual
 rollout collection and image-bound runtime admission must consume the same

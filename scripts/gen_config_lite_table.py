@@ -176,7 +176,9 @@ LITE_MANIFEST: tuple[LiteField, ...] = (
         "ava/_gateway_transport.py module level (:67)",
     ),
     LiteField("gateway_url", "literal", None, "sdk_call_policy / gateway transport"),
-    LiteField("db_pool_acquire_timeout_seconds", "literal", None, "agent/db.py:28 module level"),
+    LiteField(
+        "db_pool_acquire_timeout_seconds", "literal", None, "agent/db/__init__.py:28 module level"
+    ),
     LiteField("eval_isolation", "literal", None, "process_boot._apply_per_agent_eval_isolation"),
     LiteField(
         "eval_network_allowlist",

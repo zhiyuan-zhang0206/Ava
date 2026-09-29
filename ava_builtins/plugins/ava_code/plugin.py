@@ -12,7 +12,7 @@ Two pieces, cwd and context-file injection:
   sees them next turn. Delivery is **in-memory, inside the exec turn** (user
   ruling 2026-08-11 — the old side-channel JSONL file is gone): the wrap
   appends each note to the base `messages` channel via `state_handle.update`,
-  and the exec node (agent/graph/_exec.py) merges the plugin's messages delta
+  and the exec node (agent/graph/exec/node.py) merges the plugin's messages delta
   with its own exec-result ToolMessage, after it (the Anthropic-compat wire
   contract forbids notes between the AIMessage and its ToolMessage). No file
   is written except the overflow archive for oversized context files
@@ -34,7 +34,7 @@ This module is the plugin's SDK **surface** — the only face an agent-launched
 child loads (task #3633). Its agent-runtime registrations (the `ava_code__cwd`
 state field, the two system-prompt sections, the after_init / after_exec
 hooks) live in `agent_runtime.py`, imported only on the full path (see
-`agent/extensions.py`); until it loads, `state_handle` below is a stand-in
+`agent/extensions/__init__.py`); until it loads, `state_handle` below is a stand-in
 that raises the same `PluginStateOutsideTurnError` the real handle raises
 outside an exec turn.
 """
@@ -186,7 +186,7 @@ def _process_context_file(
     # Agent-runtime half only: reachable when a live state slot exists
     # (a stateful child / the agent process), so these imports stay off the
     # surface boot (task #3633).
-    from agent.graph.exec_output import truncate_both_ends
+    from agent.graph.exec.output import truncate_both_ends
     from agent.messages import NoteTag, system_note_message
     from ava.security import scan_content
 

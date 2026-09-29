@@ -28,7 +28,7 @@ bootstraps.
 
 Read-only: nothing here writes — a storage read that sits beside the checkpoint
 read-compat layer (`shared/agents/history/delta_read_compat.py`); the reconcile's
-status transitions stay in `agent/db.py`.
+status transitions stay in `agent/db/__init__.py`.
 """
 
 from __future__ import annotations

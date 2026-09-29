@@ -17,9 +17,9 @@ from uuid import uuid4
 
 import psutil
 
-from agent.graph._exec_result import _ExecCrashed, _ExecResult
-from agent.graph._exec_stream import ExecOutputChunkPublisher, StreamingTextIO
-from agent.graph.exec_protocol import KILL_GRACE_S, ResultPayload, write_request
+from agent.graph.exec._result import _ExecCrashed, _ExecResult
+from agent.graph.exec._stream import ExecOutputChunkPublisher, StreamingTextIO
+from agent.graph.exec.protocol import KILL_GRACE_S, ResultPayload, write_request
 from shared.db_transaction import write_transaction
 from shared.exec_owner_protocol import (
     OwnerClosed,
@@ -114,7 +114,7 @@ async def run_owned(  # noqa: PLR0915 -- one caller retains exact allocation and
     config_overlay: dict[str, object] | None,
     birth_config: dict[str, object] | None,
 ) -> tuple[_ExecResult, ResultPayload | None]:
-    from agent.graph._exec_subprocess import (
+    from agent.graph.exec._subprocess import (
         _build_child_env,
         _drain_output,
         _read_result_envelope,

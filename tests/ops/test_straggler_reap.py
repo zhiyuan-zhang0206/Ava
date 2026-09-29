@@ -476,20 +476,20 @@ def _assert_full_reap_shape(window: str, *, face: str) -> None:
 def test_the_reap_readers_carry_the_full_shape() -> None:
     """The faces that recognise the mark read the full shape the stamp writes
     and the settle selector matches (task #4027): the in-flight interrupt
-    (agent/db.py) and the host's truncation classifier
+    (agent/db/__init__.py) and the host's truncation classifier
     (services/agent_host/truncation.py). A narrowed face misses the truncation;
     a widened one fires on commands the drain never stamped. `observed_at IS
     NULL` is schema-implied by `applied_at IS NULL`, carried explicitly so the
     faces stay one shape."""
     sources = _production_sources()
-    db = re.sub(r"\s+", " ", sources["agent/db.py"])
+    db = re.sub(r"\s+", " ", sources["agent/db/__init__.py"])
     start = db.find("async def has_pending_interrupt")
     assert start >= 0
     leaf = db.find("i.kind='restart'", start)
     assert leaf >= 0, "the reap branch moved out of has_pending_interrupt"
     end = db.find("r.status='restarting'", leaf)
     assert end > leaf
-    _assert_full_reap_shape(db[leaf:end], face="agent/db.py reap branch")
+    _assert_full_reap_shape(db[leaf:end], face="agent/db/__init__.py reap branch")
 
     truncation = re.sub(r"\s+", " ", sources["services/agent_host/truncation.py"])
     mark = truncation.find("_MARK_SQL = (")

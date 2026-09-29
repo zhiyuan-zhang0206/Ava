@@ -9,7 +9,7 @@ from typing import cast
 
 import pytest
 
-from agent import turn_progress as progress
+from agent.turn import progress
 from services.agent_host import daemon as host_daemon
 
 

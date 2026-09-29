@@ -37,8 +37,8 @@ from psycopg_pool import AsyncConnectionPool
 from pydantic import BaseModel, ConfigDict, Field
 
 import ava.agent_identity
-from agent.corpse_reap import ReapedCorpse
-from agent.hosted_ownership import TurnFatalStamp, TurnSettlement
+from agent.ownership.corpse_reap import ReapedCorpse
+from agent.ownership.hosted import TurnFatalStamp, TurnSettlement
 from services.agent_host import dispatcher, settlement
 from services.agent_host.dispatcher import TurnScheduler
 from services.agent_host.host import AgentHost
@@ -879,7 +879,7 @@ class TestTurnLoop:
         self, wired: _Build, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Renewal first, reap second: a reap failure must not starve leases.
-        The reap publishes each corpse snapshot itself (agent/corpse_reap),
+        The reap publishes each corpse snapshot itself (agent/ownership/corpse_reap.py),
         and the reaped corpses' recovery attempt rides right after the reap."""
         import services.agent_host.host as host_mod
 
@@ -1107,7 +1107,7 @@ class TestTurnLoop:
         recovery turn it just scheduled."""
         import time as _time
 
-        from agent.turn_progress import _PROGRESS, turn_progress_age_s
+        from agent.turn.progress import _PROGRESS, turn_progress_age_s
 
         host, _, _ = wired({11: _Row(overlay={"llm_model": "model-for-11"})})
         # A stale entry as a long-ago turn would leave behind...
@@ -1128,7 +1128,7 @@ class TestTurnLoop:
         """
         import time as _time
 
-        from agent.turn_progress import _PROGRESS, turn_progress_age_s
+        from agent.turn.progress import _PROGRESS, turn_progress_age_s
 
         host, _, _ = wired({11: _Row(status="terminated")})
         _PROGRESS[11] = [_time.monotonic() - 99999.0]
@@ -1202,7 +1202,7 @@ class TestTurnStallGuard:
         self, wired: _Build, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         import services.agent_host.stall_guard as guard_mod
-        from agent.turn_progress import mark_turn_progress
+        from agent.turn.progress import mark_turn_progress
 
         await self._stall_settings(monkeypatch)
         host, _, _ = wired({11: _Row(overlay={"llm_model": "model-for-11"})})

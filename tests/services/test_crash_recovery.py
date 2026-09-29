@@ -13,7 +13,7 @@ from typing import Any
 
 import pytest
 
-from agent.corpse_reap import ReapedCorpse
+from agent.ownership.corpse_reap import ReapedCorpse
 from services.agent_host.crash_recovery import recover_reaped_corpses
 
 

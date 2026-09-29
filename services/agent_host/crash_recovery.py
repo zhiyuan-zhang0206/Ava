@@ -1,6 +1,6 @@
 """The guarded auto-resurrect attempt that follows a corpse reap (task #4039).
 
-`agent.corpse_reap` commits a durable recovery chat inside the terminating
+`agent.ownership.corpse_reap` commits a durable recovery chat inside the terminating
 transaction; this module is the attempt that consumes it right after. It is
 the same shape the delivery watchdog runs for a wedged turn (task #1712):
 queue the marked chat, then call the guarded `resurrect_if_terminated` — and
@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from agent.corpse_reap import ReapedCorpse
+from agent.ownership.corpse_reap import ReapedCorpse
 from shared.log import logger
 
 

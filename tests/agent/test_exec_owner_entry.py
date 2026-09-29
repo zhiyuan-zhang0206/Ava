@@ -14,7 +14,7 @@ from uuid import uuid4
 import psutil
 import pytest
 
-from agent.graph.exec_protocol import read_result, write_request
+from agent.graph.exec.protocol import read_result, write_request
 from shared.exec_owner_protocol import (
     OwnerClosed,
     OwnerContext,

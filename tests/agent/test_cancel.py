@@ -36,7 +36,7 @@ from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
 
 from agent.graph import exec_node, llm_node
-from agent.graph._exec import (
+from agent.graph.exec.node import (
     _ExecCancelled,
     _ExecCrashed,
     _ExecDone,
@@ -306,7 +306,7 @@ async def test_exec_node_preserves_durable_interrupt_attribution(
         await asyncio.wait_for(cancel_event.wait(), timeout=5)
         return (_ExecCancelled(output="external side effect already happened\n"), None)
 
-    monkeypatch.setattr("agent.graph._exec._run_in_subprocess", interrupted_child)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("agent.graph.exec.node._run_in_subprocess", interrupted_child)  # pyright: ignore[reportUnknownArgumentType]
     result = await exec_node(
         AgentState(messages=[_ai_with_code("pass")], halted=False),
         _make_runtime(ops_pool=aops_pool),
@@ -337,7 +337,7 @@ async def test_exec_node_cancel_event_returns_cancelled_command(
     ):
         return (_ExecCancelled(output="partial work\n"), None)
 
-    monkeypatch.setattr("agent.graph._exec._run_in_subprocess", _fake_cancelled)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("agent.graph.exec.node._run_in_subprocess", _fake_cancelled)  # pyright: ignore[reportUnknownArgumentType]
 
     pub = MagicMock()
     state = AgentState(messages=[_ai_with_code('print("x")')], halted=False)
@@ -372,7 +372,7 @@ async def test_exec_node_cancel_event_race_normal_completion(
     ):
         return (_ExecDone(output="hello\n"), None)
 
-    monkeypatch.setattr("agent.graph._exec._run_in_subprocess", _fake_normal)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("agent.graph.exec.node._run_in_subprocess", _fake_normal)  # pyright: ignore[reportUnknownArgumentType]
 
     state = AgentState(messages=[_ai_with_code('print("hello")')], halted=False)
 
@@ -413,7 +413,7 @@ async def test_exec_node_timeout_path(
     ):
         return (_ExecTimedOut(output="partial work\n"), None)
 
-    monkeypatch.setattr("agent.graph._exec._run_in_subprocess", _fake_timed_out)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("agent.graph.exec.node._run_in_subprocess", _fake_timed_out)  # pyright: ignore[reportUnknownArgumentType]
 
     state = AgentState(messages=[_ai_with_code('print("long task")')], halted=False)
 
@@ -446,7 +446,7 @@ async def test_exec_node_timeout_empty_output(
     ):
         return (_ExecTimedOut(output=""), None)
 
-    monkeypatch.setattr("agent.graph._exec._run_in_subprocess", _fake_empty_timeout)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("agent.graph.exec.node._run_in_subprocess", _fake_empty_timeout)  # pyright: ignore[reportUnknownArgumentType]
 
     state = AgentState(messages=[_ai_with_code('print("x")')], halted=False)
 
@@ -471,7 +471,7 @@ def test_streaming_textio_concurrent_writes() -> None:
     breaking single write invocations (the string within a single write remains intact)."""
     import threading as _th
 
-    from agent.graph._exec_stream import StreamingTextIO
+    from agent.graph.exec._stream import StreamingTextIO
 
     stream = StreamingTextIO()
     n_writers = 4
@@ -500,7 +500,7 @@ def test_streaming_textio_concurrent_writes() -> None:
 async def test_streaming_textio_take_pending_increments() -> None:
     """After take_pending pulls once, the next pull only returns the newly added
     content (no duplicates)."""
-    from agent.graph._exec_stream import StreamingTextIO
+    from agent.graph.exec._stream import StreamingTextIO
 
     stream = StreamingTextIO()
     stream.write("aaa")
@@ -518,7 +518,7 @@ async def test_chunk_publisher_uses_correct_item_id() -> None:
     returns and does not emit. The frontend relies on item_id to append streaming
     chunks to the same code_output item; the final ExecOutput upserts with the same
     id — item_id drift would cause duplicate rendering on the frontend."""
-    from agent.graph._exec_stream import ExecOutputChunkPublisher
+    from agent.graph.exec._stream import ExecOutputChunkPublisher
 
     emitter = MagicMock()
     pub = ExecOutputChunkPublisher(emitter, agent_id=42, item_id="7.0")
@@ -565,7 +565,7 @@ async def test_exec_node_dispatch_system_halt(
         return (_ExecLifecycle(output="user prep work\n", exc=SystemHalt()), None)
 
     emitter = MagicMock()
-    monkeypatch.setattr("agent.graph._exec._run_in_subprocess", _fake)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("agent.graph.exec.node._run_in_subprocess", _fake)  # pyright: ignore[reportUnknownArgumentType]
     state = AgentState(messages=[_ai_with_code('ava.self.compact("s")')], halted=False)
     runtime = _make_runtime(event_publisher=emitter)
     result = await exec_node(state, runtime, _CONFIG)
@@ -593,7 +593,7 @@ async def test_exec_node_dispatch_agent_termination(
     async def _fake(code, agent_id, cancel_event, timeout=60.0, chunk_publisher=None, **kwargs):
         return (_ExecLifecycle(output="", exc=AgentTermination()), None)
 
-    monkeypatch.setattr("agent.graph._exec._run_in_subprocess", _fake)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("agent.graph.exec.node._run_in_subprocess", _fake)  # pyright: ignore[reportUnknownArgumentType]
     state = AgentState(messages=[_ai_with_code("ava.self.terminate()")], halted=False)
     runtime = _make_runtime()
     result = await exec_node(state, runtime, _CONFIG)
@@ -618,7 +618,7 @@ async def test_exec_node_dispatch_agent_restart(
     async def _fake(code, agent_id, cancel_event, timeout=60.0, chunk_publisher=None, **kwargs):
         return (_ExecLifecycle(output="", exc=AgentRestart()), None)
 
-    monkeypatch.setattr("agent.graph._exec._run_in_subprocess", _fake)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("agent.graph.exec.node._run_in_subprocess", _fake)  # pyright: ignore[reportUnknownArgumentType]
     state = AgentState(messages=[_ai_with_code("ava.self.restart()")], halted=False)
     runtime = _make_runtime()
     result = await exec_node(state, runtime, _CONFIG)
@@ -645,7 +645,7 @@ async def test_exec_node_dispatch_ordinary_exception(
             None,
         )
 
-    monkeypatch.setattr("agent.graph._exec._run_in_subprocess", _fake)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("agent.graph.exec.node._run_in_subprocess", _fake)  # pyright: ignore[reportUnknownArgumentType]
     state = AgentState(messages=[_ai_with_code('raise ValueError("boom")')], halted=False)
     runtime = _make_runtime()
     result = await exec_node(state, runtime, _CONFIG)
@@ -677,7 +677,7 @@ async def test_exec_node_dispatch_unknown_lifecycle_subclass_raises(
     async def _fake(code, agent_id, cancel_event, timeout=60.0, chunk_publisher=None, **kwargs):
         return (_ExecLifecycle(output="", exc=_MysteryLifecycle()), None)
 
-    monkeypatch.setattr("agent.graph._exec._run_in_subprocess", _fake)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("agent.graph.exec.node._run_in_subprocess", _fake)  # pyright: ignore[reportUnknownArgumentType]
     state = AgentState(messages=[_ai_with_code("...")], halted=False)
     runtime = _make_runtime()
 

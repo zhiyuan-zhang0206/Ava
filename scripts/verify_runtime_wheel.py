@@ -19,7 +19,7 @@ from unittest.mock import patch
 PACKAGES = ("ava", "cli", "agent", "shared", "ops", "gateway", "services", "ava_builtins")
 REQUIRED = (
     "agent/exec_child.py",
-    "agent/graph/_exec_subprocess.py",
+    "agent/graph/exec/_subprocess.py",
     "services/agent_host/daemon.py",
     "gateway/app.py",
     "ops/spec.py",

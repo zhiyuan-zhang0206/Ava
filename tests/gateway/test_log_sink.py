@@ -24,7 +24,7 @@ import pytest
 from loguru import logger as _global_logger
 
 from shared import telemetry
-from shared.log import _add_postgres_sink, _postgres_sink
+from shared.log import _postgres_sink, add_postgres_sink
 
 
 @pytest.fixture
@@ -35,7 +35,7 @@ def sink_logger():
     agent_id="-" simulates the gateway init form; within tests when the agent
     process perspective is needed, logger.bind() overrides it.
     """
-    _add_postgres_sink()  # eager open pipeline (pool + drain thread)
+    add_postgres_sink()  # eager open pipeline (pool + drain thread)
     _global_logger.remove()
     sink_id = _global_logger.add(_postgres_sink, level="INFO", enqueue=False, catch=False)
     _global_logger.configure(extra={"agent_id": "-"})

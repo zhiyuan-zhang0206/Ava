@@ -2,11 +2,11 @@
 `execute_code` run produces, plus the priority constructor and the
 parent-side placeholder for a crash that happened in a child process.
 
-Moved out of `agent/graph/_exec.py` (2026-08, exec-subprocess work) so the
-subprocess machinery (`agent/graph/_exec_subprocess.py`) can construct the
-same sum type the exec node dispatches without importing `_exec.py` (which
-would close an import cycle once `_exec.py` itself imports the machinery).
-`_exec.py` re-exports every name here, so existing callers and tests keep
+Moved out of `agent/graph/exec/node.py` (2026-08, exec-subprocess work) so the
+subprocess machinery (`agent/graph/exec/_subprocess.py`) can construct the
+same sum type the exec node dispatches without importing `node.py` (which
+would close an import cycle once `node.py` itself imports the machinery).
+`node.py` re-exports every name here, so existing callers and tests keep
 their imports.
 
 `ExecChildError` is the one variant carrier: a real exception cannot
@@ -35,7 +35,7 @@ from shared.lifecycle import (
     SystemHalt,
 )
 
-from ._exec_stream import StreamCap
+from ._stream import StreamCap
 
 
 class ExecChildError(Exception):

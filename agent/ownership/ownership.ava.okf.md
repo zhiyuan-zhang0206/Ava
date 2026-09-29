@@ -29,9 +29,12 @@ without requiring an independently resident agent process.
 
 ## Entry points
 
-- `agent/hosted_ownership.py` — admission, renewal, settlement and release
-- `agent/hosted_ownership.py:settle_stale_running_rows` — host recovery
+- `agent/ownership/hosted.py` — admission, renewal, settlement and release
+- `agent/ownership/hosted.py:settle_stale_running_rows` — host recovery
+- `agent/ownership/corpse_reap.py` — crash-dead row termination + recovery wake
+- `agent/ownership/inbound.py` — the owner lock every inbound queue mutation takes
+- `agent/ownership/lifecycle_intent.py` — the durable lifecycle command pointer
 - `services/agent_host/daemon.py` — owner health beat
 - `shared/runtime_incarnation.py` — context-bound execution identity
 
-Related: [[startup/admission.ava.okf.md]] and [[lifecycle.ava.okf.md]].
+Related: [[../startup/admission.ava.okf.md]] and [[../lifecycle.ava.okf.md]].

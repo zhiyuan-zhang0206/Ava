@@ -177,7 +177,7 @@ value space (468 distinct vs ~60 static), so any stats/alerts keyed by event_nam
 broke.
 
 **Governance done (W8 · PR #1348)**:
-- the 3 dynamic labels in `agent/db.py` → explicit `event="status_change"` (×2,
+- the 3 dynamic labels in `agent/db/__init__.py` → explicit `event="status_change"` (×2,
   payload carries from/to) and `event="idle_wake"` (payload carries
   degraded/elapsed_s/rounds/timeout_s); label keeps its UI display role
   (`status-change` / `idle-wake`).

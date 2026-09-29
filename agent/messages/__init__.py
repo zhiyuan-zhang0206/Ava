@@ -94,7 +94,7 @@ def inbound_message(
         ava_inbound_id: inbound_messages.id of the source row — startup
             reconciliation reads this back from state.messages to confirm
             whether a 'claimed' inbound's commit actually landed (see
-            agent/db.py:reconcile_claimed_inbounds + claim_inbound_batch).
+            agent/db/__init__.py:reconcile_claimed_inbounds + claim_inbound_batch).
         ava_created_at: ISO-8601 wall-clock the inbound entered the conversation
             (the source row's stored created_at). Omitted when not supplied.
         ava_image_urls: reference urls of any inlined images (timeline render).
@@ -178,7 +178,7 @@ def exec_output_message(
     created_at: datetime | None = None,
 ) -> ToolMessage:
     """Envelope-wrapped stdout/stderr block after subprocess exec completes
-    (product of `agent/graph/_exec.py:wrap_code_output`).
+    (product of `agent/graph/exec/node.py:wrap_code_output`).
 
     Under the single-tool execute_code wire, uses the ToolMessage role to
     pair with the previous round's AIMessage.tool_calls (otherwise the

@@ -12,7 +12,7 @@ Lifecycle authority is a durable inbound and the admitted runtime incarnation.
 `agent/graph/claim/node.py` applies their routing at the next claim boundary.
 
 Normal restart/terminate returns from the graph, flushes the final checkpoint,
-and applies the matching command through `agent/hosted_ownership.py`. The host
+and applies the matching command through `agent/ownership/hosted.py`. The host
 retains single-flight through settlement. Restart keeps the agent ID and allows
 new admission; terminate leaves the ID, context and pending work available for
 explicit resurrection. No per-agent exit callback or process restarter exists.

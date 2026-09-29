@@ -37,7 +37,7 @@ from shared.plugin_context import current_plugin_name
 
 # Surface ids. The first five are also `ava-plugin.json` contribution keys, so a
 # manifest declaration and a registration meet on the same string; the rest are
-# surfaces the spec-v2 grammar has no key for (see `agent/plugin_catalog.py`,
+# surfaces the spec-v2 grammar has no key for (see `agent/extensions/catalog.py`,
 # which reports them as undeclarable rather than as undeclared drift).
 SurfaceId = Literal[
     "hooks",

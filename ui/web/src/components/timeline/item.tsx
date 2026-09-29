@@ -61,7 +61,7 @@ export function streamingParseIntervalMs(payloadLength: number): number {
 }
 
 // envelope wrap is always "<header>:\n\n<body>" (envelope.py wrap_inbound /
-// _exec.py wrap_code_output both follow this). Split out the header as a metadata
+// exec/output.py wrap_code_output both follow this). Split out the header as a metadata
 // label and the body as the main content — preserve raw text, only layer
 // visually. Empty header then entire payload is body.
 function splitEnvelope(payload: string): { header: string; body: string } {

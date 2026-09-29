@@ -21,7 +21,7 @@ on:
       - 'shared/platform_backend.py'
       - 'shared/session_env.py'
       - 'ops/spec.py'
-      - 'agent/graph/_exec_subprocess.py'
+      - 'agent/graph/exec/_subprocess.py'
       - 'scripts/prove_runtime_consumer.py'
       - 'scripts/prove_runtime_prepare.py'
       - 'scripts/prepare_otel_release.py'

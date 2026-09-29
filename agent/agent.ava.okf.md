@@ -54,7 +54,7 @@ Overview of the Agent subsystem.
 - [[agent/db/db.ava.okf.md|Db]]
 - [[agent/env-vars.ava.okf.md|Env Vars]]
 - [[agent/infra.ava.okf.md|Infra]]
-- [[agent/lease.ava.okf.md|Lease]]
+- [[agent/ownership/ownership.ava.okf.md|Runtime Ownership]]
 - [[agent/lifecycle.ava.okf.md|Lifecycle]]
 - [[agent/loop.ava.okf.md|Loop]]
 - [[agent/mcp-daemon.ava.okf.md|Mcp Daemon]]

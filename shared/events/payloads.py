@@ -206,7 +206,7 @@ class LlmProviderError(TypedDict):
 
 
 class ExecPayload(TypedDict):
-    """`exec` / `code` payload — agent/graph/_exec.py."""
+    """`exec` / `code` payload — agent/graph/exec/node.py."""
 
     body: str
     ok: bool

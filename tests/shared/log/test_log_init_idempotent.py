@@ -41,7 +41,7 @@ def test_init_gateway_process_idempotent() -> None:
     with (
         patch.object(slog.logger, "add") as mock_add,
         patch.object(slog, "_add_file_sink") as mock_file_sink,
-        patch.object(slog, "_add_postgres_sink") as mock_pg,
+        patch.object(slog, "add_postgres_sink") as mock_pg,
     ):
         slog.init_gateway_process()
         slog.init_gateway_process()
@@ -59,7 +59,7 @@ def test_init_agent_process_idempotent() -> None:
         patch.object(slog.logger, "add") as mock_add,
         patch.object(slog.logger, "configure") as mock_configure,
         patch.object(slog, "_add_file_sink") as mock_file_sink,
-        patch.object(slog, "_add_postgres_sink") as mock_pg,
+        patch.object(slog, "add_postgres_sink") as mock_pg,
     ):
         slog.init_agent_process(agent_id=1)
         slog.init_agent_process(agent_id=1)
@@ -94,7 +94,7 @@ def test_first_init_wins_subsequent_silent_skip() -> None:
         patch.object(slog.logger, "add") as mock_add,
         patch.object(slog.logger, "configure"),
         patch.object(slog, "_add_file_sink"),
-        patch.object(slog, "_add_postgres_sink"),
+        patch.object(slog, "add_postgres_sink"),
     ):
         slog.init_gateway_process()
         # second time switching roles — still skip
@@ -108,7 +108,7 @@ def test_init_gateway_process_per_daemon_log_file() -> None:
     with (
         patch.object(slog.logger, "add"),
         patch.object(slog, "_add_file_sink") as mock_file_sink,
-        patch.object(slog, "_add_postgres_sink"),
+        patch.object(slog, "add_postgres_sink"),
     ):
         slog.init_gateway_process(name="restarter")
 
@@ -120,7 +120,7 @@ def test_init_gateway_process_default_name_is_gateway() -> None:
     with (
         patch.object(slog.logger, "add"),
         patch.object(slog, "_add_file_sink") as mock_file_sink,
-        patch.object(slog, "_add_postgres_sink"),
+        patch.object(slog, "add_postgres_sink"),
     ):
         slog.init_gateway_process()
 
@@ -132,7 +132,7 @@ def test_init_restricted_process_opens_only_plain_stderr_once() -> None:
     with (
         patch.object(slog.logger, "add") as mock_add,
         patch.object(slog, "_add_file_sink") as mock_file_sink,
-        patch.object(slog, "_add_postgres_sink") as mock_pg,
+        patch.object(slog, "add_postgres_sink") as mock_pg,
     ):
         slog.init_restricted_process()
         slog.init_restricted_process()
@@ -150,7 +150,7 @@ def test_init_cli_process_idempotent() -> None:
     with (
         patch.object(slog.logger, "add") as mock_add,
         patch.object(slog, "_add_file_sink") as mock_file_sink,
-        patch.object(slog, "_add_postgres_sink") as mock_pg,
+        patch.object(slog, "add_postgres_sink") as mock_pg,
     ):
         slog.init_cli_process(name="cli-spawn-update-1")
         slog.init_cli_process(name="cli-spawn-update-1")
@@ -168,7 +168,7 @@ def test_init_cli_process_per_invocation_log_file() -> None:
     with (
         patch.object(slog.logger, "add"),
         patch.object(slog, "_add_file_sink") as mock_file_sink,
-        patch.object(slog, "_add_postgres_sink"),
+        patch.object(slog, "add_postgres_sink"),
     ):
         slog.init_cli_process(name="cli-watchdog-update")
 
@@ -210,7 +210,7 @@ def test_init_gateway_process_emits_service_started() -> None:
     with (
         patch.object(slog.logger, "add"),
         patch.object(slog, "_add_file_sink"),
-        patch.object(slog, "_add_postgres_sink"),
+        patch.object(slog, "add_postgres_sink"),
         patch.object(slog.logger, "info", side_effect=lambda _msg, **kw: infos.append(kw)),  # pyright: ignore[reportUnknownMemberType]
     ):
         slog.init_gateway_process(name="restarter")

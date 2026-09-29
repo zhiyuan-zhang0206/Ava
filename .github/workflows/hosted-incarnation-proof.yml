@@ -35,7 +35,7 @@ jobs:
           timeout 180 uv run pytest tests/services/test_turn_dispatcher.py -k same_incarnation_settlement -q --junitxml=proof/single-flight.xml
           timeout 180 uv run pytest tests/agent/test_db.py -k 'flip_hosted_status or settle_stale_running' -q --junitxml=proof/status.xml
           git show "$BASELINE_SHA:services/agent_host/host.py" > services/agent_host/host.py
-          git show "$BASELINE_SHA:agent/db.py" > agent/db.py
+          git show "$BASELINE_SHA:agent/db.py" > agent/db/__init__.py
           set +e
           timeout 180 uv run pytest tests/agent/test_hosted_ownership.py -k host_refuses_a_turn -q --junitxml=proof/baseline.xml
           result=$?

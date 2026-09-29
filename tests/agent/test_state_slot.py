@@ -1,6 +1,6 @@
 """`ava.state` / `ava.state_update` / `ava.state.<plugin>` namespace view behavior guard.
 
-Plugin <-> framework IPC channel — `agent/graph/_exec.py:_exec_node_impl` runs the
+Plugin <-> framework IPC channel — `agent/graph/exec/node.py:_exec_node_impl` runs the
 exec in one disposable subprocess: the child rebuilds `ava.state` from the
 request-envelope snapshot. Inside the exec the plugin reads
 ava.state and writes ava.state_update through the SDK; at the end of the turn
@@ -42,7 +42,7 @@ from langgraph.runtime import Runtime
 from pydantic import BaseModel, Field
 
 import ava
-from agent.graph._exec import _exec_node_impl
+from agent.graph.exec.node import _exec_node_impl
 from agent.messages.guard import MessagesMutationError
 from agent.state import (
     AttachEntry,
@@ -280,7 +280,7 @@ async def test_exec_node_merges_plugin_messages_with_framework_toolmessage(
     the exec ToolMessage: merge_exec_notes combines both deltas into the
     Command — the exec result FIRST, plugin notes after (Anthropic-compat
     wire contract: tool_use must be immediately followed by tool_result, a
-    note in between 400s; see _exec_notes.py) — so the checkpoint keeps both.
+    note in between 400s; see exec/_notes.py) — so the checkpoint keeps both.
     Pre-fix the dict **spread let the plugin's delta replace the framework's,
     silently dropping the ToolMessage."""
 

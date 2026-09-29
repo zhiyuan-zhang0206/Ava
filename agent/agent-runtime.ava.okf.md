@@ -75,7 +75,7 @@ context for compaction and to END for idle or lifecycle control. Routing uses
   stops ownership renewal, then releases settled ownership before closing pools.
   A background failure, including plugin-triggered `KeyboardInterrupt`, cannot
   skip the remaining cleanup stages and is propagated after cleanup.
-- `agent/hosted_ownership.py` can replace a local owner before its lease expires
+- `agent/ownership/hosted.py` can replace a local owner before its lease expires
   only when the same locked row proves its exact host process has exited and
   its managed resource set is empty and unfrozen. A living host, another machine,
   unknown process identity or unclosed resources retain the admission fences.
@@ -99,7 +99,7 @@ context for compaction and to END for idle or lifecycle control. Routing uses
   Queries spend the existing backoff budget and create no background tasks.
   Persistent checkpoint unavailability still prevents a completed durable pause.
 - `agent/graph/llm/node.py` streams model inference with retry and cancellation.
-- `agent/graph/_exec.py` runs `execute_code` in a disposable subprocess with an
+- `agent/graph/exec/node.py` runs `execute_code` in a disposable subprocess with an
   owned POSIX process group or Windows Job Object. Cleanup reaps its child and
   joins the output reader; this isolation is independent of host scheduling.
 - Persistent shell sessions run in their own PTY hosts and survive normal agent

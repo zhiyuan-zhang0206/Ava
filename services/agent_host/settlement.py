@@ -21,8 +21,8 @@ from __future__ import annotations
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from psycopg_pool import AsyncConnectionPool
 
-from agent.corpse_reap import reap_recrashed_corpse
-from agent.hosted_ownership import TurnSettlement, settle_and_stamp_turn
+from agent.ownership.corpse_reap import reap_recrashed_corpse
+from agent.ownership.hosted import TurnSettlement, settle_and_stamp_turn
 from agent.ownership.inbound import RuntimeOwnershipLostError
 from agent.startup import reconcile_claimed_inbounds_at_startup
 from services.agent_host.crash_recovery import recover_reaped_corpses
@@ -78,7 +78,7 @@ async def prompt_reap_after_recrash(
 
     The mark's first stamp bought the grace window — the one chance to
     self-heal. A crash under an existing mark is the retry failing, so the
-    corpse reaper's termination (`agent.corpse_reap.reap_recrashed_corpse`,
+    corpse reaper's termination (`agent.ownership.corpse_reap.reap_recrashed_corpse`,
     same events) runs at once instead of letting a zombie spend the rest of
     the window claiming and re-dying (the #3602 window). A turn that died
     FIRST under its mark is not touched: the first grace stays whole.

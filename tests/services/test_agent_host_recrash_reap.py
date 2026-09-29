@@ -19,8 +19,8 @@ import pytest
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from psycopg_pool import AsyncConnectionPool
 
-from agent.corpse_reap import ReapedCorpse, reap_crash_corpses
-from agent.hosted_ownership import (
+from agent.ownership.corpse_reap import ReapedCorpse, reap_crash_corpses
+from agent.ownership.hosted import (
     TurnFatalStamp,
     TurnSettlement,
     admit_hosted_runtime,
@@ -228,13 +228,13 @@ async def test_settle_boundary_prompt_reaps_the_second_crash_at_once(
         if payload is not None and payload.get("reason") == "corpse_reaper":
             events.append(payload)
 
-    monkeypatch.setattr("agent.corpse_reap.insert_event_log_async", _event)
+    monkeypatch.setattr("agent.ownership.corpse_reap.insert_event_log_async", _event)
     published: list[int] = []
 
     async def _publish(agent_id: int) -> None:
         published.append(agent_id)
 
-    monkeypatch.setattr("agent.corpse_reap.publish_agent_updated", _publish)
+    monkeypatch.setattr("agent.ownership.corpse_reap.publish_agent_updated", _publish)
     attempts: list[list[ReapedCorpse]] = []
 
     async def _recover(reaped: list[ReapedCorpse]) -> None:

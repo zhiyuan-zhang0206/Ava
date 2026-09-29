@@ -101,7 +101,7 @@ class AvaMessageKwargs(TypedDict, total=False):
     sdk_calls, a `system_note` carries note_tag, a compact summary carries
     `ava_compact_id`, an AIMessage carries the reasoning timings. `sdk_calls`
     is the one framework key without the `ava_` prefix — the frozen wire name
-    for the exec_output's runtime SDK-call tally (`agent/graph/_exec.py` writes
+    for the exec_output's runtime SDK-call tally (`agent/graph/exec/node.py` writes
     it; the timeline projection reads it back).
 
     `ava_msg_type` / `ava_note_tag` are typed `str` (not `AvaMsgType` / `NoteTag`)

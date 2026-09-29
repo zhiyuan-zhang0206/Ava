@@ -54,7 +54,7 @@ life — an old run in the mirror or Tempo can span many turns, so check the
 root's bounds before reasoning about its span count or duration.
 
 The checkpoint stamp is deliberately failure-tolerant
-(`agent/trace_checkpoint.py`), so **not every checkpoint carries a
+(`agent/turn/trace_checkpoint.py`), so **not every checkpoint carries a
 `trace_id`**. A missing link is one lost correlation, not a broken system.
 
 Spans are **metadata-only** (trace v2): prompts and completions are stripped at

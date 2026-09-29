@@ -50,7 +50,7 @@ register_after_exec(inject_cwd_notes_after_exec)
 
 - Wraps `ava.files.read`: when the agent reads a file, traverses from the resolved path upward to git root or `$HOME` (whichever is farther), collecting `AGENTS.md` / `CLAUDE.md` along the way
 - Each context file first undergoes `scan_content` for **prompt-injection security scanning** (buffers a `SecurityFindingEntry` in-memory when flagged), then the wrap appends a CONTEXT **system note** directly to the exec's messages delta via the declared base `messages` channel (`PluginStateHandle.update`) — **no side-channel file** (user ruling 2026-08-11)
-- The `exec` node (`agent/graph/_exec.py`) merges the plugin's messages delta and the drained security findings into its own messages delta, both **after** the exec-result ToolMessage: the Anthropic-compat wire contract requires an AIMessage's `tool_use` to be immediately followed by its `tool_result` (DeepSeek anthropic endpoint 400s on interleaved text — verified 2026-08-11), and the dangling-tool_use repair hook would otherwise synthesize a fake `[interrupted]` result every turn
+- The `exec` node (`agent/graph/exec/node.py`) merges the plugin's messages delta and the drained security findings into its own messages delta, both **after** the exec-result ToolMessage: the Anthropic-compat wire contract requires an AIMessage's `tool_use` to be immediately followed by its `tool_result` (DeepSeek anthropic endpoint 400s on interleaved text — verified 2026-08-11), and the dangling-tool_use repair hook would otherwise synthesize a fake `[interrupted]` result every turn
 - Oversized context files (over `settings.sandbox.exec_output_max_chars`) are injected truncated head+tail with the full text archived to the workspace `.exec_output/` ring — the same overflow logic as exec output (`truncate_both_ends`); the archive path is reported in the note
 - Deduplication: `injected_paths` + `injected_hashes` (content hash, prevents same content different path from being re-injected); after compact, reset lazily by `compact.version` (built-in `CompactState` sub-state) to resurface
 - Primary path priority: system prompt directs agent to first `ava.files.read("AGENTS.md")`; when going via that primary path, content is already in the return value, just marked, not re-injected
@@ -81,7 +81,7 @@ ava.register_sdk_expand("cwd")
 
 - [[system-prompt.ava.okf.md]] — system prompt construction
 - [[agent/hooks/hooks.ava.okf.md]] — hook system
-- [[tool-exec.ava.okf.md]] — fault-isolated code execution (where after_exec hook runs)
+- [[agent/graph/exec/exec.ava.okf.md]] — fault-isolated code execution (where after_exec hook runs)
 
 ## Configuration
 

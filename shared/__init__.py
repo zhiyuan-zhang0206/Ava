@@ -10,7 +10,7 @@ couple through DB (Postgres) + Redis pub/sub. This package centralizes
 - `exit_codes`: subprocess exit-code constants
 
 Kernel-only helpers (inbound claim, wait/mark/revert etc.) live in
-`agent/db.py` because they entangle with kernel-only state-machine
+`agent/db/__init__.py` because they entangle with kernel-only state-machine
 logic. Postgres DDL is not in the Python package — see
 `db/schema.sql`.
 """

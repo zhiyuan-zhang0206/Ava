@@ -265,7 +265,7 @@ existing tree-swap machinery (`_copy_tree` staging, user-edit hash guards,
 checkout / this machine's installs" to "the cluster registry".
 
 **Process boot** runs the same `ensure_extensions_materialized()` for the
-agent's own resolved set before `load_extensions()` (`agent/extensions.py`). This closes the offline
+agent's own resolved set before `load_extensions()` (`agent/extensions/__init__.py`). This closes the offline
 window structurally: a machine that was down during an install converges the
 moment anything on it starts, and an agent never boots against a tree older
 than the policy row it just read. Boot already requires the cluster DB (the

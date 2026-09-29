@@ -7,7 +7,7 @@ Pending calls route back to exec after that commit; the completed batch routes t
 after_exec, then claim, which decides whether to wait or continue the turn.
 
 Core mechanisms:
-  - Subprocess backend (`agent/graph/_exec_subprocess.py`): the parent spawns
+  - Subprocess backend (`agent/graph/exec/_subprocess.py`): the parent spawns
     one `python -I -X utf8 -m agent.exec_child` per exec, polls every 50ms, streams
     output through the chunk pipeline. POSIX cancel/timeout sends a signal then
     closes the process group after a grace period; Windows immediately closes
@@ -70,7 +70,11 @@ from langgraph.types import Command
 from agent import state as _state
 from agent.graph._attach_drain import build_attach_message
 from agent.graph._attach_merge import merge_attachments
-from agent.graph._exec_notes import merge_exec_notes
+from agent.graph.agent_traceback import format_full_traceback
+from agent.graph.exec._notes import merge_exec_notes
+from agent.graph.interrupt import subscribe_interrupt
+from agent.graph.node_log import node_lifecycle
+from agent.graph.tool_calls import code_from_args, normalize_tool_calls
 from agent.messages import exec_output_message
 from agent.nodes import AFTER_EXEC, EXEC
 from agent.state import AttachState, _validate_plugin_state_keys
@@ -84,8 +88,8 @@ from shared.live_events import Cancelled, ExecOutput, ExecStart
 from shared.log import logger
 from shared.plugin_config_view import current_agent_plugin_pins
 
-from ._exec_alerts import maybe_alert_exec_boot_failure
-from ._exec_result import (
+from ._alerts import maybe_alert_exec_boot_failure
+from ._result import (
     _ExecCancelled,
     _ExecCrashed,
     _ExecDone,
@@ -93,23 +97,19 @@ from ._exec_result import (
     _ExecResult,
     _ExecTimedOut,
 )
-from ._exec_stream import ExecOutputChunkPublisher
-from ._exec_subprocess import _run_in_subprocess
-from .agent_traceback import format_full_traceback
-from .exec_output import crashed_no_output_body, wrap_code_output
-from .exec_protocol import ResultPayload
-from .interrupt import subscribe_interrupt
-from .node_log import node_lifecycle
-from .tool_calls import code_from_args, normalize_tool_calls
+from ._stream import ExecOutputChunkPublisher
+from ._subprocess import _run_in_subprocess
+from .output import crashed_no_output_body, wrap_code_output
+from .protocol import ResultPayload
 
 # Each exec step commits one call; remaining calls return to EXEC before AFTER_EXEC.
 ExecGoto = Literal["exec", "after_exec"]
 
 # The `_ExecResult` sum type — 5 mutually exclusive variants + a shared output
-# field — lives in `_exec_result.py` (moved there so the exec-subprocess
+# field — lives in `_result.py` (moved there so the exec-subprocess
 # machinery can construct the same type without importing this module, which
 # would close an import cycle). Re-exported here: exec_node's match dispatch
-# and existing tests keep importing from agent.graph._exec.
+# and existing tests keep importing from agent.graph.exec.node.
 #
 # Lifecycle priority is implemented at the construction site
 # (`_construct_exec_result`): if a lifecycle exc exists, `_ExecLifecycle` is
@@ -241,7 +241,7 @@ def _dispatch_exec_result(
     """Map the `_ExecResult` sum type to (halted, result_text, exit_code_for_msg).
 
     Lifecycle priority (lifecycle always wins the cancel/timeout race) is
-    implemented at the construction site in `_construct_exec_result` (`_exec_result.py`); the match directly
+    implemented at the construction site in `_construct_exec_result` (`_result.py`); the match directly
     consumes the sum type. Exhaustiveness: pyright strict + match narrowing make
     a forgotten variant a static error (replaces the hand-written fallthrough).
     """
@@ -480,7 +480,7 @@ async def _exec_single_call(
 
         # In-memory system-note injection (user ruling 2026-08-11): security
         # findings + plugin context notes merge into this exec's delta after
-        # the ToolMessage (ordering rationale: _exec_notes.py).
+        # the ToolMessage (ordering rationale: _notes.py).
         state_messages_update = merge_exec_notes(state_messages_update, plugin_messages, findings)
     update: dict[str, Any] = {
         "messages": state_messages_update,

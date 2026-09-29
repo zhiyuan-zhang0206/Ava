@@ -27,15 +27,15 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from agent.graph._exec_result import (
+from agent.graph.exec._result import (
     ExecChildError,
     _construct_exec_result,
     _ExecCrashed,
     _ExecResult,
     lifecycle_exception_from_name,
 )
-from agent.graph._exec_stream import ExecOutputChunkPublisher, StreamCap, StreamingTextIO
-from agent.graph.exec_protocol import (
+from agent.graph.exec._stream import ExecOutputChunkPublisher, StreamCap, StreamingTextIO
+from agent.graph.exec.protocol import (
     KILL_GRACE_S,
     ResultPayload,
     make_request_path,
@@ -56,7 +56,7 @@ from shared.platform import CREATE_NO_WINDOW, IS_WINDOWS
 from shared.turn_identity import current_hosted_resources
 from shared.winjob import EXEC_JOB_GATE_ENV, WindowsJob, publish_parent_job_gate
 
-from . import _exec_process
+from . import _process
 
 # Same cadence as the old worker-thread poll loop: near-free, and cancel /
 # timeout response latency stays <= 50ms + signal delivery.
@@ -196,7 +196,7 @@ def _spawn(
     config_overlay: dict[str, object] | None = None,
     birth_config: dict[str, object] | None = None,
     windows_job_gate: Path | None = None,
-) -> tuple[subprocess.Popen[bytes], _exec_process.ExecProcessDomain]:
+) -> tuple[subprocess.Popen[bytes], _process.ExecProcessDomain]:
     """Spawn one child. POSIX raw subprocesses stay in its process group;
     persistent ``ava.shell.sessions`` are backend-hosted and outside it."""
     env = _build_child_env(
@@ -210,7 +210,7 @@ def _spawn(
     argv = [sys.executable, "-I", "-B", "-X", "utf8", "-m", "agent.exec_child"]
     if not IS_WINDOWS:
         try:
-            return _exec_process.ExecProcessDomain.launch_posix(
+            return _process.ExecProcessDomain.launch_posix(
                 argv,
                 new_session=True,
                 stdin=subprocess.DEVNULL,
@@ -255,7 +255,7 @@ def _spawn(
         except BaseException as original:
             _abort_failed_windows_spawn(proc, windows_job, original)
             raise
-    return proc, _exec_process.ExecProcessDomain(proc=proc, windows_job=windows_job)
+    return proc, _process.ExecProcessDomain(proc=proc, windows_job=windows_job)
 
 
 def _abort_failed_windows_spawn(
@@ -317,7 +317,7 @@ async def _poll_child(
     chunk_publisher: ExecOutputChunkPublisher | None,
     cancel_event: asyncio.Event,
     timeout: float,
-    domain_close: _exec_process.DomainCloseOwner,
+    domain_close: _process.DomainCloseOwner,
 ) -> tuple[bool, bool]:
     """Poll every 50ms and publish chunks. POSIX signals SIGINT on cancel and
     SIGTERM on deadline; Windows requests immediate Job close. Returns
@@ -332,10 +332,10 @@ async def _poll_child(
             chunk_publisher.maybe_keepalive()
 
         if cancel_event.is_set():
-            _exec_process.signal_child(proc, signal.SIGINT, domain_close)
+            _process.signal_child(proc, signal.SIGINT, domain_close)
             return True, False
         if time.monotonic() > deadline:
-            _exec_process.signal_child(proc, signal.SIGTERM, domain_close)
+            _process.signal_child(proc, signal.SIGTERM, domain_close)
             return False, True
         await asyncio.sleep(_POLL_INTERVAL_S)
     return False, False
@@ -350,13 +350,13 @@ async def _collect_child(
     timed_out: bool,
     root_exit_task: asyncio.Task[None],
     reap_task: asyncio.Task[int],
-    domain_close: _exec_process.DomainCloseOwner,
+    domain_close: _process.DomainCloseOwner,
     reader_join_task: asyncio.Task[None],
 ) -> None:
     """Settle every process resource, then publish the final stream chunk."""
     if cancelled or timed_out:
-        await _exec_process.wait_with_grace(proc, root_exit_task, KILL_GRACE_S, domain_close)
-    failures = await _exec_process.settle_resources(
+        await _process.wait_with_grace(proc, root_exit_task, KILL_GRACE_S, domain_close)
+    failures = await _process.settle_resources(
         root_exit_task,
         reap_task,
         domain_close,
@@ -364,7 +364,7 @@ async def _collect_child(
         request_stop=False,
     )
     if failures:
-        raise _exec_process.ExecTeardownError(failures)
+        raise _process.ExecTeardownError(failures)
 
     if chunk_publisher is not None:
         pending = stream.take_pending()
@@ -376,7 +376,7 @@ async def _finish_failed_run(
     original: BaseException,
     root_exit_task: asyncio.Task[None] | None,
     reap_task: asyncio.Task[int] | None,
-    domain_close: _exec_process.DomainCloseOwner | None,
+    domain_close: _process.DomainCloseOwner | None,
     reader_join_task: asyncio.Task[None] | None,
     reader: threading.Thread | None,
     *,
@@ -386,16 +386,14 @@ async def _finish_failed_run(
     if root_exit_task is None or reap_task is None or domain_close is None:
         return False
     if domain_close.interrupted:
-        failures = _exec_process.settle_cancelled_owners(domain_close, reader)
+        failures = _process.settle_cancelled_owners(domain_close, reader)
     else:
-        failures = await _exec_process.finish_teardown_despite_cancellation(
+        failures = await _process.finish_teardown_despite_cancellation(
             root_exit_task, reap_task, domain_close, reader_join_task
         )
-    _exec_process.annotate_original_failure(original, failures)
+    _process.annotate_original_failure(original, failures)
     if failures and request_paths is not None:
-        _retain_late_reader_completion(
-            _exec_process.ExecTeardownError(failures), *request_paths, reader
-        )
+        _retain_late_reader_completion(_process.ExecTeardownError(failures), *request_paths, reader)
     return not failures
 
 
@@ -430,7 +428,7 @@ def _finish_request_evidence(
 
 
 def _retain_late_reader_completion(
-    failure: _exec_process.ExecTeardownError,
+    failure: _process.ExecTeardownError,
     request: Path,
     result: Path,
     gate: Path | None,
@@ -488,7 +486,7 @@ async def _run_in_subprocess(
     guard_failure = _editable_guard_failure(editable_guard)
     if guard_failure is not None:
         return guard_failure, None
-    from agent.graph._exec_owned_run import managed_target, run_owned
+    from agent.graph.exec._owned_run import managed_target, run_owned
 
     target = await asyncio.to_thread(managed_target, agent_id)
     if target is not None:
@@ -550,11 +548,11 @@ async def _run_legacy_subprocess(
         return request_error, None
 
     stream = StreamingTextIO()
-    domain: _exec_process.ExecProcessDomain | None = None
+    domain: _process.ExecProcessDomain | None = None
     reader: threading.Thread | None = None
     root_exit_task: asyncio.Task[None] | None = None
     reap_task: asyncio.Task[int] | None = None
-    domain_close: _exec_process.DomainCloseOwner | None = None
+    domain_close: _process.DomainCloseOwner | None = None
     reader_join_task: asyncio.Task[None] | None = None
     resource_scope = current_hosted_resources()
     if resource_scope is not None:
@@ -580,9 +578,9 @@ async def _run_legacy_subprocess(
                 exc=exc,
             ), None
 
-        root_exit_task = _exec_process.start_root_exit_observer(proc)
-        domain_close = _exec_process.DomainCloseOwner(domain, root_exit_task)
-        reap_task = _exec_process.start_reap(proc, domain_close)
+        root_exit_task = _process.start_root_exit_observer(proc)
+        domain_close = _process.DomainCloseOwner(domain, root_exit_task)
+        reap_task = _process.start_reap(proc, domain_close)
 
         reader = threading.Thread(
             target=_drain_output,
@@ -592,7 +590,7 @@ async def _run_legacy_subprocess(
         )
         reader.start()
 
-        reader_join_task = _exec_process.start_reader_join(reap_task, reader, proc.pid)
+        reader_join_task = _process.start_reader_join(reap_task, reader, proc.pid)
 
         cancelled, timed_out = await _poll_child(
             proc,
@@ -642,7 +640,7 @@ async def _run_legacy_subprocess(
             request_paths=(request_path, result_path, windows_job_gate),
         )
         raise
-    except _exec_process.ExecTeardownError as exc:
+    except _process.ExecTeardownError as exc:
         _retain_late_reader_completion(exc, request_path, result_path, windows_job_gate, reader)
         # Cleanup failure is an exec outcome, not an agent-process failure.
         return (

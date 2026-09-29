@@ -27,6 +27,11 @@ Entry points:
 - ``load_agent_faces()`` — runtime faces only, for a process that already
   loaded the surfaces (host boot after `scan_and_load`; a child upgrading to
   the full load because its request carries a state snapshot).
+
+The package's one submodule, `catalog.py`, reads back what the loaded plugins
+registered (`ava plugins inspect`); it runs this loader in the calling process.
+This module stays the loader itself so `importlib.import_module("agent.extensions")`
+(the `ava` layer's runtime-string reach) keeps resolving to it.
 """
 
 from __future__ import annotations

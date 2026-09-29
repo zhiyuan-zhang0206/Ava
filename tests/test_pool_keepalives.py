@@ -163,17 +163,17 @@ def test_borrowed_connection_arms_the_kernel_keepalive() -> None:
 
 def test_log_sink_pipeline_drain_thread_stays_alive() -> None:
     """The event emitter's pipeline — the longest-lived resource in every ava
-    process (opened at `init_*` via `shared.log._add_postgres_sink` ->
+    process (opened at `init_*` via `shared.log.add_postgres_sink` ->
     `shared.telemetry`, never closed), drained by a background thread nobody
     watches. A stalled drain there is the least likely to be noticed — and
     since the LGTM cutover (task #1197 close-C) the pipeline no longer owns a
     Postgres pool, only the queue + drain thread + JSONL mirror.
 
-    Asserts the emitter pipeline `_add_postgres_sink` opens, matching
+    Asserts the emitter pipeline `add_postgres_sink` opens, matching
     tests/gateway/test_log_sink.py; only the sink handler this call adds is
     removed, the shared pipeline is left as the rest of the suite expects it.
     """
-    sink_id = shared.log._add_postgres_sink()
+    sink_id = shared.log.add_postgres_sink()
     try:
         from shared import telemetry
 

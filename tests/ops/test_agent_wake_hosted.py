@@ -136,7 +136,7 @@ async def test_resurrection_admits_a_new_incarnation_on_the_same_host(
     from psycopg.types.json import Jsonb
 
     from agent.db import claim_inbound_batch
-    from agent.hosted_ownership import admit_hosted_runtime, apply_hosted_lifecycle
+    from agent.ownership.hosted import admit_hosted_runtime, apply_hosted_lifecycle
     from agent.ownership.inbound import RuntimeOwnershipLostError
     from shared.db import insert_inbound_message
     from shared.incarnation_resources import ResourceBirth

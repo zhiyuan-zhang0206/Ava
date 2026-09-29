@@ -269,7 +269,7 @@ boot unit owns replacement applications. Data-plane and persistent-terminal
 custody are separate and must be reconciled explicitly.
 
 Host startup and successor admission reconcile proven-dead hosted agent owners
-through `agent.hosted_ownership.settle_stale_running_rows` and the ordinary
+through `agent.ownership.hosted.settle_stale_running_rows` and the ordinary
 incarnation protocol. Releasing a hold does not itself prove resource closure
 or replay arbitrary external effects. Missing or unreadable evidence remains
 an unresolved operation.

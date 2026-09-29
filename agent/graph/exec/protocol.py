@@ -1,5 +1,5 @@
 """Exec-subprocess protocol — request/result envelopes and typed
-(de)serialization, shared by the parent (`agent/graph/_exec_subprocess.py`)
+(de)serialization, shared by the parent (`agent/graph/exec/_subprocess.py`)
 and the child entry (`agent/exec_child.py`).
 
 Two envelope files per run, both under `<exec_dir>/<agent_id>/` and chmod 0600 (the

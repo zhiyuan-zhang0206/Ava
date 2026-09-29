@@ -156,7 +156,7 @@ async def terminate_agent_op(
     terminate that finds the agent already terminated. A graceful terminate of
     a live agent only records the request on its terminate command: the home
     runtime kills the sessions right before the termination applies, after the
-    agent's last step (`agent.hosted_ownership.apply_hosted_lifecycle`). The
+    agent's last step (`agent.ownership.hosted.apply_hosted_lifecycle`). The
     response's `shell_sessions` reports which of the two happened.
     """
     if body.force:
@@ -513,7 +513,7 @@ def _recover_crash_marked_blocking(agent_id: int) -> RecoverCrashMarkedResponse:
     The requester is the delivery watchdog, escalating a chat inbound still
     `pending` past the stall threshold whose owner is a crash-marked idling
     corpse (`last_turn_fatal_at IS NOT NULL`). The harvest mirrors the corpse
-    reaper's terminal shape (`agent/hosted_ownership.py::reap_crash_corpses`):
+    reaper's terminal shape (`agent/ownership/hosted.py::reap_crash_corpses`):
     status='terminated', termination_source='reaper', lease dropped, and the
     crash marker KEPT so the row still matches the relaxed
     `SYSTEM_REAPED_CRASH_ROW` trigger afterwards. The row lock plus the

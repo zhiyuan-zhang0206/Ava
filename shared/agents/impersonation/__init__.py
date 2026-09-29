@@ -361,7 +361,7 @@ def native_status(agent_id: int, incarnation: RuntimeIncarnation) -> dict[str, A
         ) != (incarnation.generation, incarnation.owner):
             # Every hosted restart and host takeover mints a fresh incarnation
             # (restart NULLs runtime_generation/owner and admission re-mints,
-            # agent/hosted_ownership.py). The active lease survives the
+            # agent/ownership/hosted.py). The active lease survives the
             # replacement, so its accepting-incarnation binding must follow the
             # native lineage — relay supervision re-provisions under the
             # current incarnation and provision_relay's strict check would
@@ -372,7 +372,7 @@ def native_status(agent_id: int, incarnation: RuntimeIncarnation) -> dict[str, A
             # owner's lease expiry (a live host renews every beat), and every
             # lease mutation the old incarnation attempts dies at its own
             # require_native row check. The other accepted_* writer is hosted
-            # admission itself (agent/hosted_ownership.align_accepting_binding,
+            # admission itself (agent.ownership.hosted.align_accepting_binding,
             # issue #2052), which holds the same agents_meta row lock — after
             # it lands, this lazy sync is already a no-op.
             conn.execute(

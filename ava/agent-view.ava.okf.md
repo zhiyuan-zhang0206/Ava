@@ -38,7 +38,7 @@ This is the agent's "view" at runtime — from the LLM's perspective, what the a
 
 ### Execution Environment
 - [[context-window.ava.okf.md]] — context management + compaction
-- [[tool-exec.ava.okf.md]] — code execution sandbox
+- [[agent/graph/exec/exec.ava.okf.md]] — code execution sandbox
 
 ## Relationship to Other Domains
 - [[agent-runtime.ava.okf.md]] — runtime implementation (parallel perspective)

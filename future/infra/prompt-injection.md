@@ -21,7 +21,7 @@
 > prepended, so the scan is trivially idempotent and never corrupts what the agent
 > reads) — findings are buffered in-memory during the exec turn and surface as a
 > SECURITY system note in the same exec's messages delta, injected by the exec
-> node (`agent/graph/_exec.py`) after the exec-result ToolMessage; there is no
+> node (`agent/graph/exec/node.py`) after the exec-result ToolMessage; there is no
 > side-channel file (user ruling 2026-08-11). Memory writes have their own guard
 > in `ava/files.py`, stamping `injection-risk: flagged` on a note whose body
 > carries already-flagged content, which is candidate defense #3 below in its

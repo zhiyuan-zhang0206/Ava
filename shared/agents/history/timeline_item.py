@@ -75,7 +75,7 @@ class TimelineItem(BaseModel):
     reasoning_ms: int | None = None
     reasoning_tokens: int | None = None
     # Wall-clock the code ran, set only on `code_output` items (None elsewhere).
-    # Read from the exec_output message's ava_exec_ms (agent/graph/_exec.py).
+    # Read from the exec_output message's ava_exec_ms (agent/graph/exec/node.py).
     # Drives the collapsed-output chip ("ran in 1.3s").
     exec_ms: int | None = None
     # Whether the frontend chip shows this item's wall-clock ts. True everywhere

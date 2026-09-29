@@ -12,7 +12,7 @@ import pytest
 from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
 
-from agent.hosted_ownership import admit_hosted_runtime
+from agent.ownership.hosted import admit_hosted_runtime
 from shared.db import create_agent
 from shared.incarnation_resources import (
     ExecAllocation,

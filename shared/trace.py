@@ -35,7 +35,7 @@ local recovery copy. A gap present in the mirror can be replayed with
   the whole OTLP surface (with the sidecar architecture this also stops
   recording, since recording IS the OTLP export).
 
-turn_span() in agent/runloop.py wraps each graph.ainvoke — one invocation =
+turn_span() in agent/turn/runloop.py wraps each graph.ainvoke — one invocation =
 one agent TURN — in a native OTel root span so every LLM/tool child span of
 that turn nests under it. The root is a PLACEHOLDER: ended (and thus
 exported) at turn START, so a trace always has its root even when the process

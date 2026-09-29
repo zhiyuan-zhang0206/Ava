@@ -82,7 +82,7 @@ def test_exec_child_closure_stays_lite_with_real_pin_map(tmp_path: Path) -> None
     not upgrade, must not import `pydantic_settings`, and must not import any
     heavy `shared.config` submodule. This is the regression gate for BLK-2's
     two direct-import edges (`agent.db` -> db_connections, `agent.graph` ->
-    _exec_crop)."""
+    exec._crop)."""
     request = tmp_path / "req.json"
     result = tmp_path / "res.json"
     code = (

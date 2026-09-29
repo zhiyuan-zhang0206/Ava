@@ -93,6 +93,6 @@ terminated-owner retry as the backstop.
 
 ## Entry Points
 
-- `agent/hosted_ownership.py` — native completion and resource settlement
-- `agent/lifecycle_observe.py` — successor admission observation
+- `agent/ownership/hosted.py` — native completion and resource settlement
+- `agent/ownership/lifecycle_intent.py` — successor admission observation
 - `ops/agent_wake.py` — transactional resurrection

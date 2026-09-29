@@ -970,7 +970,7 @@ async def test_terminate_preserves_pending_summary_without_wiping_history(
     db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
 ):
     """Lifecycle acceptance is serial; a summary cannot run in the exiting owner."""
-    from agent.hosted_ownership import apply_hosted_lifecycle
+    from agent.ownership.hosted import apply_hosted_lifecycle
     from shared.turn_identity import bind_turn_identity
     from tests.agent.test_inbound_ownership import _admit, _agent
 
@@ -1013,7 +1013,7 @@ async def test_compact_in_same_batch_as_restart(
     db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
 ):
     """The admitted successor, not the exiting owner, consumes the same summary."""
-    from agent.hosted_ownership import apply_hosted_lifecycle
+    from agent.ownership.hosted import apply_hosted_lifecycle
     from shared.turn_identity import bind_turn_identity
     from tests.agent.test_inbound_ownership import _admit, _agent
 

@@ -41,7 +41,7 @@ def _park_corpse(
 ) -> int:
     """A row shaped like a crash-marked corpse: `create_agent_row` leaves the
     death marker NULL (the production stamp is
-    `agent/hosted_ownership.stamp_turn_fatal`), so the scenario sets the
+    `agent.ownership.hosted.stamp_turn_fatal`), so the scenario sets the
     marker, the settle fields, and any suppression window explicitly."""
     aid, _birth, _prompt_id, _attempt_id = create_agent_row(
         spawner="user", machine=machine or machine_name()

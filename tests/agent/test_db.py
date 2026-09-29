@@ -1,15 +1,15 @@
-"""Unit tests for agent/db.py + db.py.
+"""Unit tests for agent/db/__init__.py + db.py.
 
 Covers agent CRUD + wait_for_inbound Redis pub/sub wake-up + table existence.
 No LLM involved.
 
 `shared/db.py` is the UI/kernel shared synchronous helper (`create_agent` / ...), still using
-the synchronous `db_conn` fixture. `agent/db.py` is the kernel async path (`wait_for_inbound`
+the synchronous `db_conn` fixture. `agent/db/__init__.py` is the kernel async path (`wait_for_inbound`
 / `claim_inbound_batch`), using `aops_pool` (AsyncConnectionPool) +
 real PostgreSQL connections, matching the host's transactional queue.
 
 Note: claim_inbound_batch is end-to-end covered in tests/agent/test_claim.py via claim_node,
-so not repeated here. After Step 1G+ regression, agent/db.py only has two core async functions: wait + claim.
+so not repeated here. After Step 1G+ regression, agent/db/__init__.py only has two core async functions: wait + claim.
 
 Semantics: compact modifies messages in-place, **does not create a new agent** — hence no
 `create_compacted_thread` / `thread_status` / FSM trigger tests.
@@ -159,7 +159,7 @@ class TestReconcileClaimedInbounds:
     LangGraph commit confirmation: claim marks 'claimed', but only the next
     process's startup can flip 'claimed' → 'done' (commit confirmed via
     ava_inbound_id in state.messages) or 'claimed' → 'pending' (commit lost,
-    re-deliver). See agent/db.py:reconcile_claimed_inbounds (agent 57
+    re-deliver). See agent/db/__init__.py:reconcile_claimed_inbounds (agent 57
     incident)."""
 
     async def test_committed_rows_become_done(

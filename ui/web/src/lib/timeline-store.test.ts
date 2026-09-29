@@ -848,7 +848,7 @@ describe("reloadSnapshot", () => {
   });
 
   // Regression for #1142: a still-streaming item's own msg_idx equals
-  // msg_count BY DEFINITION (agent/graph/_callbacks.py + _exec.py both
+  // msg_count BY DEFINITION (agent/graph/_callbacks.py + exec/node.py both
   // stamp len(state.messages) — the count BEFORE this uncommitted message).
   // The old guard treated that equality as proof the snapshot was stale and
   // bailed out before ever calling mergeSnapshotWithStreaming — on a cold
