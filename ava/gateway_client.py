@@ -534,21 +534,3 @@ def list_presets() -> list[dict]:
     resp = _get("/api/presets")
     raise_from_response(resp)
     return list(resp.json())
-
-
-def get_preset(name: str) -> dict:
-    """Look up a single preset by its unique name.
-
-    Fetches the full list and filters client-side — efficient for the
-    expected ≤10 presets; avoids a dedicated GET-by-name gateway endpoint.
-    Raises ``PresetNotFoundError`` when no preset matches ``name``.
-    """
-    presets = list_presets()
-    for p in presets:
-        if p["name"] == name:
-            return p
-    raise PresetNotFoundError(f"preset {name!r} not found")
-
-
-class PresetNotFoundError(Exception):
-    """No preset with that name exists."""
