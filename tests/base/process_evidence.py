@@ -57,3 +57,37 @@ def detach_evidence(child_pid: int) -> dict[str, object]:
         "caller_subreaper": subreaper.value,
         "caller_ancestors": [process_evidence(parent.pid) for parent in ancestors[:16]],
     }
+
+
+def no_new_direct_children(
+    spawner: psutil.Process, before: set[psutil.Process]
+) -> tuple[bool, object]:
+    """(ok, state) when `spawner` has no direct child beyond the pre-spawn snapshot."""
+    try:
+        lingering = set(spawner.children()) - before
+    except psutil.NoSuchProcess:
+        return True, "spawner gone"
+    return not lingering, [c.pid for c in lingering]
+
+
+def no_zombie_children(spawner: psutil.Process, before: set[psutil.Process]) -> tuple[bool, object]:
+    """(ok, state) when none of `spawner`'s recursive children born after the
+    pre-spawn snapshot is a zombie.
+
+    The spawner is the pytest worker, which other tests share: a zombie some
+    earlier test left behind is not this test's, so the snapshot excludes it.
+    Children that exit between the snapshot and the status read are skipped —
+    a reaped child is exactly what the no-zombie assertion wants.
+    """
+    try:
+        children = set(spawner.children(recursive=True)) - before
+    except psutil.NoSuchProcess:
+        return True, "spawner gone"
+    zombies: list[int] = []
+    for child in children:
+        try:
+            if child.status() == psutil.STATUS_ZOMBIE:
+                zombies.append(child.pid)
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            continue
+    return not zombies, zombies
