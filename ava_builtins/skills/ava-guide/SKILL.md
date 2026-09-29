@@ -52,7 +52,7 @@ a takeover from an Ava agent goes through the spawn scripts' `--impersonate-self
 
 | If you need to… | Read |
 |---|---|
-| Start/stop/update the cluster, understand cluster/unit/machine model, manage channels, cut releases | [ops](ops/SKILL.md) |
+| Start/stop/update the cluster, understand cluster/unit/machine model, prepare and cut releases | [ops](ops/SKILL.md) |
 | Dispose of dead agents' workspaces — cold-data disposal, tombstone, ledger | [workspace-cleanup](workspace-cleanup/SKILL.md) |
 | Add, list, remove, enable/disable MCP servers | [mcp](mcp/SKILL.md) |
 | Install, upgrade, remove skills & plugins; understand the difference | [packages](packages/SKILL.md) |
@@ -63,8 +63,8 @@ a takeover from an Ava agent goes through the spawn scripts' `--impersonate-self
 
 Cluster + host config cuts across all of these: `ava config get/set/unset`
 reads and writes the cluster's `.env` — the single source of truth for settings
-like the update channel (`AVA_TRACK_BRANCH`). See [ops](ops/SKILL.md) for the
-config-driven surfaces (channels, release cut).
+like the memory pool's tracked branch (`AVA_TRACK_BRANCH`). See [ops](ops/SKILL.md) for the
+config-driven surfaces (release prepare/update, release cut).
 
 ## Division of Operations and Development
 
