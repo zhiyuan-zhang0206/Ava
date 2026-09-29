@@ -45,8 +45,8 @@ the ``except`` line or the ``pass`` line (mirrors ``# emoji-ok`` / ``# env-ok``
       except asyncio.CancelledError:
           pass  # fail-fast-ok: best-effort cancel cleanup, re-raise is wrong here
 
-Scope: every ``*.py`` under the 7 framework dirs
-``ava/ plugins/ agent/ gateway/ cli/ services/ shared/``. Run it standalone
+Scope: every ``*.py`` under the framework dirs (``lint_common.FRAMEWORK_DIRS``
+in ``scripts/structure/lint_common.py``). Run it standalone
 (`.venv/bin/python scripts/lint_fail_fast.py`); fail -> exit 1. Also wired as the
 `lint-fail-fast` pre-commit hook.
 """
@@ -58,9 +58,9 @@ import sys
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(_REPO_ROOT))
 
-# The 7 framework dirs (same scope as the sweeper's fail-fast class).
-_FRAMEWORK_DIRS = ("ava", "plugins", "agent", "gateway", "cli", "services", "shared")
+from scripts.structure import lint_common  # noqa: E402 - standalone script
 
 _EXEMPT_MARKER = "# fail-fast-ok:"
 
@@ -105,8 +105,8 @@ def violations_in_source(src: str, path: str) -> list[tuple[str, int, str]]:
 
 def _framework_py_files() -> list[Path]:
     files: list[Path] = []
-    for d in _FRAMEWORK_DIRS:
-        files += (_REPO_ROOT / d).rglob("*.py")
+    for root in lint_common.scan_roots(_REPO_ROOT, lint_common.FRAMEWORK_DIRS):
+        files += root.rglob("*.py")
     return sorted(files)
 
 

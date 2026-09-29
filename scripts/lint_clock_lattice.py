@@ -55,18 +55,11 @@ import sys
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(_REPO_ROOT))
 
-_SCAN_DIRS = (
-    "agent",
-    "ava",
-    "ava_builtins",
-    "cli",
-    "gateway",
-    "ops",
-    "scripts",
-    "services",
-    "shared",
-)
+from scripts.structure import lint_common  # noqa: E402 - standalone script
+
+_SCAN_DIRS = (*lint_common.FRAMEWORK_DIRS, "scripts")
 
 _TEST_PATTERNS = (
     re.compile(r"(^|/)tests?/"),
@@ -308,7 +301,11 @@ def main(argv: list[str] | None = None) -> int:
         if missing:
             print(f"error: target path(s) not found: {', '.join(missing)}", file=sys.stderr)
             return 1
-    paths = [Path(a).resolve() for a in argv] if argv else [_REPO_ROOT / d for d in _SCAN_DIRS]
+    paths = (
+        [Path(a).resolve() for a in argv]
+        if argv
+        else lint_common.scan_roots(_REPO_ROOT, _SCAN_DIRS)
+    )
     errors = _scan(paths)
     for err in errors:
         print(err, file=sys.stderr)

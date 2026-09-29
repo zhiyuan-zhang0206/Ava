@@ -80,18 +80,11 @@ import sys
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(_REPO_ROOT))
 
-_SCAN_DIRS = (
-    "agent",
-    "ava",
-    "ava_builtins",
-    "cli",
-    "gateway",
-    "ops",
-    "scripts",
-    "services",
-    "shared",
-)
+from scripts.structure import lint_common  # noqa: E402 - standalone script
+
+_SCAN_DIRS = (*lint_common.FRAMEWORK_DIRS, "scripts")
 
 # A parameter carrying any of these names is treated as the caller-visible
 # logical clock (a `now`/`at` the caller can pin). `deadline` is deliberately
@@ -717,13 +710,14 @@ def main(argv: list[str] | None = None) -> int:
             print(f"error: target path(s) not found: {', '.join(missing)}", file=sys.stderr)
             return 1
         used = {p for p in paths if p.is_dir()}
-        dirs = tuple(d for d in _SCAN_DIRS if (root / d).is_dir()) if used else ()
+        dirs = _SCAN_DIRS if used else ()
+        lint_common.scan_roots(root, dirs)
         index = _Index(root, dirs)
         errors = _lint_source(index, paths) + _lint_tests(index, paths)
     else:
-        dirs = tuple(d for d in _SCAN_DIRS if (root / d).is_dir())
+        dirs = _SCAN_DIRS
         index = _Index(root, dirs)
-        errors = _lint_source(index, [root / d for d in dirs]) + _lint_tests(
+        errors = _lint_source(index, lint_common.scan_roots(root, dirs)) + _lint_tests(
             index, [root / "tests"]
         )
     for err in errors:

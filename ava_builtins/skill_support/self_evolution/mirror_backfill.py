@@ -58,6 +58,7 @@ Standalone, via the thin CLI at
 
 from __future__ import annotations
 
+import contextlib
 import gc
 import json
 import shutil
@@ -173,13 +174,13 @@ def _sweep_stale_staging_dirs(daily_dir: Path) -> None:
     """A SIGKILLed run leaves its staging dir behind (nothing can clean up
     after SIGKILL); sweep orphans older than an hour so a crashed dense
     backfill does not leak hundreds of MB of staged rows. A live run's dir is
-    younger than that (QA #1010 nit)."""
+    younger than that (QA #1010 nit). A dir that another run sweeps between
+    the glob and the stat is already gone, which is the outcome wanted; any
+    other stat failure raises."""
     for stale in daily_dir.glob("mirror-backfill-*"):
-        try:
+        with contextlib.suppress(FileNotFoundError):
             if time.time() - stale.stat().st_mtime > 3600:
                 shutil.rmtree(stale, ignore_errors=True)
-        except OSError:
-            pass
 
 
 def _stage_day(
