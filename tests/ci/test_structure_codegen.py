@@ -37,6 +37,14 @@ OTHER_CI = {
     "lint-core-content-manifests",
 }
 PREPUSH = {"pyright", "frontend-tsc", "frontend-eslint", "frontend-vitest"}
+# Pre-push-stage-only hooks with no direct 1:1 CI job duplicate: local
+# safety nets that re-run the pre-commit stage over the real branch diff, and
+# an unconditional rerun of the generated-artifact/snapshot family. Unlike
+# PREPUSH, CI does not run these by name -- it already covers the same
+# ground unconditionally via backend-structure's / merged-tree-structure's own
+# `--all-files` runs of the underlying (filtered) hooks, so no CI job needs a
+# matching direct invocation the way `uv run pyright` mirrors the pyright hook.
+PREPUSH_LOCAL_ONLY = {"lint-prepush-branch-diff", "lint-prepush-artifact-freshness"}
 LOCAL_ONLY = {"check-git-hooks-install"}
 # These identities come from fastapi._compat.v2 / fastapi.openapi.utils, not
 # repository class definitions. Keep exact names: new unknowns require review.
@@ -436,7 +444,9 @@ def test_selector_import_failure_defaults_to_run() -> None:
 def test_prepush_migration_keeps_direct_ci_owners() -> None:
     assert {
         hook_id for hook_id, hook in HOOKS.items() if hook.get("stages") == ["pre-push"]
-    } == PREPUSH
+    } == PREPUSH | PREPUSH_LOCAL_ONLY
+    for hook_id in PREPUSH_LOCAL_ONLY:
+        assert HOOKS[hook_id]["always_run"] is True
     backend = WORKFLOW["jobs"]["backend-static"]["steps"]
     frontend = WORKFLOW["jobs"]["frontend"]["steps"]
     assert any(step.get("run") == "uv run pyright" for step in backend)

@@ -2098,8 +2098,32 @@ and run only the relevant vitest files, as described in the
 The [Vitest placement decision](../decisions/2026-09-24-vitest-prepush-selection.md)
 records the measurements, push-cost projection and affected-test-selection limits.
 
+Two more pre-push-only hooks close gaps `git rebase` / `cherry-pick` / `merge`
+leave open, neither of which ever invokes the pre-commit hook for the commits
+they create:
+
+- `lint-prepush-branch-diff` re-runs the whole pre-commit stage, filters and
+  all, over `git merge-base origin/main HEAD`..`HEAD` instead of whatever two
+  endpoints pre-commit's own push-time selection would use — so a
+  conflict-resolution or cherry-picked commit gets checked before it can
+  reach `git push` unchecked. It skips (same `scripts/prepush-guard.sh`
+  lock/load/missing-tool convention as `pyright`/`tsc`/`eslint`/`vitest`,
+  under its own `branch-lint` lock) when `origin/main` is not locally
+  resolvable — fetch first for full local coverage.
+- `lint-prepush-artifact-freshness` unconditionally (`always_run: true`)
+  re-checks the generated-artifact/snapshot family (contract snapshots,
+  types/constants codegen, the events registry, the config-lite table, OKF
+  lint, doc references) on every push, ignoring every `files:` filter. A
+  `files:`-filtered hook never sees a purely deleted path on any range —
+  pre-commit's own diff selection passes it only Added/Copied/Modified/Renamed
+  paths — so a change that only deletes the last file behind a public symbol,
+  event, or config field can otherwise reach `git push` with a stale snapshot
+  and nothing local catching it. It is cheap (whole-repo, no DB/network) and
+  does not skip under load; `types-codegen-fresh` alone still skips when
+  `ui/web/node_modules` is missing, same as the frontend pre-push hooks.
+
 `scripts/prepush-guard.sh` holds a separate `flock` for each of `pyright`,
-`tsc`, `eslint`, and `vitest` across all worktrees on the host. Locks live in
+`tsc`, `eslint`, `vitest`, and `branch-lint` across all worktrees on the host. Locks live in
 `/tmp/ava-prepush-locks`, independent of clone, user, and `TMPDIR`; never delete
 live lock files. `AVA_PREPUSH_LOCK_DIR` may override this for tests or a host
 policy, but every checkout on that host must use the same local directory.
