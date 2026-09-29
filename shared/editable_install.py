@@ -480,7 +480,7 @@ def editable_install_violations(
     return tuple(sorted(violations))
 
 
-def _venv_python(source_root: Path) -> Path | None:
+def venv_python(source_root: Path) -> Path | None:
     """First existing checkout virtualenv interpreter across supported layouts."""
 
     venv = source_root / ".venv"
@@ -497,7 +497,7 @@ def _venv_python(source_root: Path) -> Path | None:
 def editable_console_script_violations(source_root: Path) -> tuple[str, ...]:
     """Report a missing Ava console script for the virtualenv's own layout."""
 
-    interpreter = _venv_python(source_root)
+    interpreter = venv_python(source_root)
     if interpreter is None:
         return ()
     script_name = "ava.exe" if interpreter.parent.name == "Scripts" else "ava"
@@ -530,7 +530,7 @@ def editable_import_gate(
     """
 
     resolved_source = source_root.expanduser().resolve(strict=False)
-    interpreter = _venv_python(resolved_source)
+    interpreter = venv_python(resolved_source)
     if interpreter is None:
         return ("venv python missing",)
     env = {
