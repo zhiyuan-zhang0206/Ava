@@ -36,7 +36,7 @@ echo "repo: $REPO"
 echo "HEAD: $(git rev-parse --short HEAD)"
 echo ""
 
-SCAN_DIRS="ava/ ava_builtins/ agent/ gateway/ cli/ ops/ schedules/ services/ shared/"
+SCAN_DIRS="ava/ ava_builtins/ agent/ gateway/ cli/ ops/ schedules/ services/ base/"
 
 # ------------------------------------------------------------------
 # Class 1: outdated deps
@@ -94,7 +94,7 @@ echo "--- [5/6] docstring-budget: Raises sections + soft-zone lengths ---"
 .venv/bin/python - <<'PY' 2>&1 || echo "(docstring-budget scan failed)"
 import ast
 from pathlib import Path
-from scripts.lint_agent_docstrings import (
+from scripts.lint.agent_docstrings import (
     _discover_agent_surface_modules, _discover_plugin_namespace_modules, _is_in_scope,
     _agent_visible_names, _wrap_targets, _is_visible,
 )

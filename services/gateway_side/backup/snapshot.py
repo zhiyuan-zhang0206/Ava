@@ -16,9 +16,9 @@ from collections.abc import Callable, Generator
 from contextlib import ExitStack, contextmanager
 from pathlib import Path
 
-import shared.pg_tools
-from shared.platform import LockTimeoutError
-from shared.proc import run_bounded
+import base.cluster.dataplane.pg_tools
+from base.host.proc import run_bounded
+from base.native_process.os_platform import LockTimeoutError
 
 DUMP_TIMEOUT_S = 20 * 60
 LOCK_HEARTBEAT_S = 60.0
@@ -85,7 +85,7 @@ def _verify_snapshot_artifact_inner(artifact: Path) -> None:
         _require_nonempty(dump, artifact, "decompressed dump")
         try:
             listing = run_bounded(
-                [str(shared.pg_tools.pg_tool("pg_restore")), "--list", str(dump)],
+                [str(base.cluster.dataplane.pg_tools.pg_tool("pg_restore")), "--list", str(dump)],
                 timeout=_RESTORE_TIMEOUT_S,
                 capture_output=True,
                 text=True,

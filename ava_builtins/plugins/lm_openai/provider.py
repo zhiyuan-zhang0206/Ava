@@ -10,8 +10,8 @@ if TYPE_CHECKING:
     # `_TYPE_CHECKING_ALLOWED`).
     from langchain_core.language_models.chat_models import BaseChatModel
 
-from shared.lm.effort import clamp_effort
-from shared.lm.provider_api import (
+from base.lm.effort import clamp_effort
+from base.lm.provider_api import (
     BuildContext,
     PricePeriod,
     PriceRates,
@@ -20,8 +20,8 @@ from shared.lm.provider_api import (
     register,
     require_key,
 )
-from shared.lm.registry import ModelSpec, ModelTuning
-from shared.lm.stop import StopCategory, StopSpec
+from base.lm.registry import ModelSpec, ModelTuning
+from base.lm.stop import StopCategory, StopSpec
 
 # Effort vocabulary shared by GPT-5.6 and GPT-6 Sol/Luna; Astra differs.
 _GPT_EFFORT = ("none", "low", "medium", "high", "xhigh", "max")
@@ -41,7 +41,7 @@ def build(ctx: BuildContext) -> BaseChatModel:
     # summary as a `{"type":"reasoning","summary":[{"type":"summary_text",
     # "text":...}]}` content block, streamed incrementally — the streaming
     # fan-out and timeline pull the visible text out of summary[].text
-    # (folded to the canonical `thinking` shape by shared.lm.reasoning).
+    # (folded to the canonical `thinking` shape by base.lm.reasoning).
     #
     # effort must be set: the model's default reasoning effort is too low
     # to emit a summary, so `summary="auto"` alone yields zero reasoning
@@ -169,7 +169,7 @@ register(
         # Removed 2026-09-23 (task #4508): gpt-5.5 and gpt-5.4-mini
         # were never selectable here (implicit spawnable=False) and have no
         # live references. Historical prices remain in
-        # shared/lm/pricing_catalog_archive.json.
+        # base/lm/pricing_catalog_archive.json.
     },
     pricing={
         "gpt-6-astra": PriceRates(
@@ -211,7 +211,7 @@ register(
             # model page, checked 2026-09-06). On promo expiry, restore the
             # standard rates — tier1 5.0 / 0.5 / 30.0, tier2 (>272K input)
             # 10.0 / 1.0 / 45.0 — here AND in
-            # shared/lm/pricing_catalog_archive.json; a deliberate manual
+            # base/lm/pricing_catalog_archive.json; a deliberate manual
             # flip, not an automatic revert (405 ruling 2026-09-07).
             cache_miss=4.0,
             cache_hit=0.4,

@@ -17,7 +17,7 @@ no observability stack by configuration). Transient Loki failures still fail
 the scan loudly; only the policy refusal falls back.
 
 2026-08-26 (Task #1408): the consumer dedupes mirror rows by the surrogate
-event id (PR #356, shared/telemetry.event_id) — the emitter can append the
+event id (PR #356, base/telemetry.event_id) — the emitter can append the
 same event twice, and on 08-24/25 ~7% of mirror rows were byte-identical
 duplicates that inflated backfilled datasets. Rows without an id (pre-#356
 files) pass through, matching collect._fetch_events_window's None-id handling.
@@ -78,7 +78,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import collect
 
-from shared.paths import ava_home
+from base.paths import ava_home
 
 MIRROR_DIR = ava_home() / "logs"
 

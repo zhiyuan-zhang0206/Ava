@@ -6,15 +6,15 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from gateway.routers.run_timeline import (
+from base.agents.history.hierarchy.store import StoredNode
+from base.db import ChatInboundFact
+from gateway.run_timeline.router import (
     _ANOMALY_EVENTS,
     _TURN_EVENTS,
     _inbounds_for_window,
     _narrative_for_window,
     aggregate_turn_timeline,
 )
-from shared.agents.history.hierarchy.store import StoredNode
-from shared.db import ChatInboundFact
 
 
 def _event(
@@ -366,8 +366,8 @@ def test_narrative_for_window_uses_the_store_and_skips_summary_on_full_coverage(
     def _no_extent(_agent_id: int) -> None:
         return None
 
-    monkeypatch.setattr("shared.agents.history.hierarchy.store.load_window_nodes", _nodes)
-    monkeypatch.setattr("shared.agents.history.hierarchy.store.load_coverage_extent", _no_extent)
+    monkeypatch.setattr("base.agents.history.hierarchy.store.load_window_nodes", _nodes)
+    monkeypatch.setattr("base.agents.history.hierarchy.store.load_coverage_extent", _no_extent)
     layers, summary, pending = _narrative_for_window(405, start, end, activity=[(start, end)])
     assert pending is None
     assert summary is None
@@ -388,8 +388,8 @@ def test_narrative_for_window_degrades_to_none_without_nodes(
     def _no_extent(_agent_id: int) -> None:
         return None
 
-    monkeypatch.setattr("shared.agents.history.hierarchy.store.load_window_nodes", _empty)
-    monkeypatch.setattr("shared.agents.history.hierarchy.store.load_coverage_extent", _no_extent)
+    monkeypatch.setattr("base.agents.history.hierarchy.store.load_window_nodes", _empty)
+    monkeypatch.setattr("base.agents.history.hierarchy.store.load_coverage_extent", _no_extent)
     layers, summary, pending = _narrative_for_window(
         424242,
         start,
@@ -429,9 +429,9 @@ def test_narrative_for_window_keeps_layers_and_adds_the_fallback_on_partial(
     def _extent(_agent_id: int) -> tuple[datetime, datetime]:
         return (start, start + timedelta(hours=1))
 
-    monkeypatch.setattr("shared.agents.history.hierarchy.store.load_window_nodes", _nodes)
-    monkeypatch.setattr("shared.agents.history.hierarchy.store.load_coverage_extent", _extent)
-    monkeypatch.setattr("gateway.routers.run_timeline._latest_compact_summary", _fallback)
+    monkeypatch.setattr("base.agents.history.hierarchy.store.load_window_nodes", _nodes)
+    monkeypatch.setattr("base.agents.history.hierarchy.store.load_coverage_extent", _extent)
+    monkeypatch.setattr("gateway.run_timeline.router._latest_compact_summary", _fallback)
     layers, summary, pending = _narrative_for_window(405, start, end, activity=[(start, end)])
     assert layers is not None
     (layer,) = layers
@@ -472,9 +472,9 @@ def test_narrative_for_window_clamps_activity_to_the_window(
     def _extent(_agent_id: int) -> tuple[datetime, datetime]:
         return (start, start + timedelta(hours=1))
 
-    monkeypatch.setattr("shared.agents.history.hierarchy.store.load_window_nodes", _nodes)
-    monkeypatch.setattr("shared.agents.history.hierarchy.store.load_coverage_extent", _extent)
-    monkeypatch.setattr("gateway.routers.run_timeline._latest_compact_summary", _empty_summary)
+    monkeypatch.setattr("base.agents.history.hierarchy.store.load_window_nodes", _nodes)
+    monkeypatch.setattr("base.agents.history.hierarchy.store.load_coverage_extent", _extent)
+    monkeypatch.setattr("gateway.run_timeline.router._latest_compact_summary", _empty_summary)
     _, _, pending = _narrative_for_window(
         405,
         start,
@@ -497,7 +497,7 @@ def test_inbounds_for_window_maps_delivery_facts_to_wire_rows(
     def _facts(*_args: object, **_kwargs: object) -> list[ChatInboundFact]:
         return facts
 
-    monkeypatch.setattr("shared.db.list_chat_inbound_facts", _facts)
+    monkeypatch.setattr("base.db.list_chat_inbound_facts", _facts)
     rows = _inbounds_for_window(406, start, end)
     assert rows is not None
     (row,) = rows
@@ -513,5 +513,5 @@ def test_inbounds_for_window_degrades_to_none_on_read_failure(
     def _boom(*_args: object, **_kwargs: object) -> list[ChatInboundFact]:
         raise RuntimeError("store gone")
 
-    monkeypatch.setattr("shared.db.list_chat_inbound_facts", _boom)
+    monkeypatch.setattr("base.db.list_chat_inbound_facts", _boom)
     assert _inbounds_for_window(406, start, start + timedelta(hours=1)) is None

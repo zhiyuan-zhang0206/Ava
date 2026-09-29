@@ -28,12 +28,12 @@ import redis
 from redis.backoff import NoBackoff
 from redis.retry import Retry
 
+from base import cluster
+from base.cluster import provision_database
+from base.config import settings
 from cli.commands.data_plane import cluster_instance as ci
 from cli.commands.data_plane.bringup import ensure_gateway_data_plane
 from cli.commands.data_plane.pgbouncer import stop_pgbouncer
-from shared import cluster
-from shared.cluster import provision_database
-from shared.config import settings
 
 _BEARER = "test_bearer_abc123"
 _REDIS_ADMIN = "test_redis_admin_abc123"

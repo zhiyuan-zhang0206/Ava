@@ -12,9 +12,9 @@ from typing import Any
 
 import pytest
 
-from services.pitr import worker_process
-from services.pitr.operation_custody import OperationKind
-from shared.exec_process_domain import ExecProcessDomain
+from base.native_process.exec_domain import ExecProcessDomain
+from services.pitr.operation import worker_process
+from services.pitr.operation.custody import OperationKind
 
 
 async def test_native_restore_result_is_atomic_before_receiver_validation(
@@ -25,7 +25,7 @@ async def test_native_restore_result_is_atomic_before_receiver_validation(
     script.write_text(
         "import pathlib,sys,time\n"
         f"sys.path.insert(0, {str(Path.cwd())!r})\n"
-        "from services.pitr.operation_custody import publish_result\n"
+        "from services.pitr.operation.custody import publish_result\n"
         "result,marker,release=map(pathlib.Path,sys.argv[1:])\n"
         "replace,write=pathlib.Path.replace,pathlib.Path.write_text\n"
         "def pause():\n"

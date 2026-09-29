@@ -1,4 +1,4 @@
-"""Tests for shared/lm/factory.py build_chat_model prefix dispatch.
+"""Tests for base/lm/factory.py build_chat_model prefix dispatch.
 
 Does not hit API — only verifies the contract: "given the correct model name,
 the factory returns the corresponding provider class + correct base_url / api_key
@@ -19,15 +19,15 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.outputs import ChatResult
 from pydantic import SecretStr
 
-from shared.config import settings
-from shared.lm.factory import (
+from base.config import settings
+from base.lm.factory import (
     _resolve_override,
     build_chat_model,
     close_chat_model,
     validate_model_config,
 )
-from shared.lm.plugin_providers import ensure_provider_plugins_loaded
-from shared.lm.registry import MODELS, SUPPORTED_MODELS, resolve_setting
+from base.lm.plugin_providers import ensure_provider_plugins_loaded
+from base.lm.registry import MODELS, SUPPORTED_MODELS, resolve_setting
 
 ensure_provider_plugins_loaded()
 
@@ -433,7 +433,7 @@ class TestBuildChatModel:
         base_url + api-key header target the Xiaomi OpenAI-compatible endpoint."""
         monkeypatch.setattr(settings.lm, "llm_override", "")
         monkeypatch.setenv("MIMO_API_KEY", "sk-mimo")
-        from shared.lm.compat.openai_reasoning import ReasoningContentChatModel
+        from base.lm.compat.openai_reasoning import ReasoningContentChatModel
 
         m = build_chat_model(model)
         assert isinstance(m, ReasoningContentChatModel)
@@ -481,7 +481,7 @@ class TestBuildChatModel:
         `reasoning_content` delta, which the subclass recovers into thinking blocks."""
         monkeypatch.setattr(settings.lm, "llm_override", "")
         monkeypatch.setenv("GLM_API_KEY", "sk-glm")
-        from shared.lm.compat.openai_reasoning import ReasoningContentChatModel
+        from base.lm.compat.openai_reasoning import ReasoningContentChatModel
 
         m = build_chat_model("glm-5.2")
         assert isinstance(m, ReasoningContentChatModel)
@@ -494,7 +494,7 @@ class TestBuildChatModel:
         OpenAI-compatible endpoint, ReasoningContentChatModel."""
         monkeypatch.setattr(settings.lm, "llm_override", "")
         monkeypatch.setenv("GLM_API_KEY", "sk-glm")
-        from shared.lm.compat.openai_reasoning import ReasoningContentChatModel
+        from base.lm.compat.openai_reasoning import ReasoningContentChatModel
 
         m = build_chat_model("glm-5.3-flash")
         assert isinstance(m, ReasoningContentChatModel)
@@ -514,7 +514,7 @@ class TestBuildChatModel:
         blocks."""
         monkeypatch.setattr(settings.lm, "llm_override", "")
         monkeypatch.setenv("DASHSCOPE_API_KEY", "sk-qwen")
-        from shared.lm.compat.openai_reasoning import ReasoningContentChatModel
+        from base.lm.compat.openai_reasoning import ReasoningContentChatModel
 
         m = build_chat_model("qwen3.8-max")
         assert isinstance(m, ReasoningContentChatModel)
@@ -527,7 +527,7 @@ class TestBuildChatModel:
         compatible-mode endpoint, ReasoningContentChatModel."""
         monkeypatch.setattr(settings.lm, "llm_override", "")
         monkeypatch.setenv("DASHSCOPE_API_KEY", "sk-qwen")
-        from shared.lm.compat.openai_reasoning import ReasoningContentChatModel
+        from base.lm.compat.openai_reasoning import ReasoningContentChatModel
 
         m = build_chat_model("qwen3.8-flash")
         assert isinstance(m, ReasoningContentChatModel)
@@ -542,7 +542,7 @@ class TestBuildChatModel:
         monkeypatch.setenv("DASHSCOPE_API_KEY", "sk-qwen")
         workspace = "https://ws-example.cn-beijing.maas.aliyuncs.com/compatible-mode/v1"
         monkeypatch.setattr(settings.lm, "dashscope_base_url", workspace)
-        from shared.lm.compat.openai_reasoning import ReasoningContentChatModel
+        from base.lm.compat.openai_reasoning import ReasoningContentChatModel
 
         m = build_chat_model("qwen3.8-max")
         assert isinstance(m, ReasoningContentChatModel)
@@ -556,7 +556,7 @@ class TestBuildChatModel:
         bills as a full cache miss."""
         monkeypatch.setattr(settings.lm, "llm_override", "")
         monkeypatch.setenv("DASHSCOPE_API_KEY", "sk-qwen")
-        from shared.lm.compat.openai_reasoning import ReasoningContentChatModel
+        from base.lm.compat.openai_reasoning import ReasoningContentChatModel
 
         m = build_chat_model("qwen3.8-max")
         assert isinstance(m, ReasoningContentChatModel)
@@ -604,7 +604,7 @@ class TestBuildChatModel:
         """mimo-* carries no registry streaming opt-out → default streaming=True."""
         monkeypatch.setattr(settings.lm, "llm_override", "")
         monkeypatch.setenv("MIMO_API_KEY", "sk-test")
-        from shared.lm.compat.openai_reasoning import ReasoningContentChatModel
+        from base.lm.compat.openai_reasoning import ReasoningContentChatModel
 
         m = build_chat_model(model)
         assert isinstance(m, ReasoningContentChatModel)
@@ -614,7 +614,7 @@ class TestBuildChatModel:
         """glm-* carries no registry streaming opt-out → default streaming=True."""
         monkeypatch.setattr(settings.lm, "llm_override", "")
         monkeypatch.setenv("GLM_API_KEY", "sk-test")
-        from shared.lm.compat.openai_reasoning import ReasoningContentChatModel
+        from base.lm.compat.openai_reasoning import ReasoningContentChatModel
 
         m = build_chat_model("glm-5.2")
         assert isinstance(m, ReasoningContentChatModel)
@@ -624,7 +624,7 @@ class TestBuildChatModel:
         """qwen* carries no registry streaming opt-out → default streaming=True."""
         monkeypatch.setattr(settings.lm, "llm_override", "")
         monkeypatch.setenv("DASHSCOPE_API_KEY", "sk-test")
-        from shared.lm.compat.openai_reasoning import ReasoningContentChatModel
+        from base.lm.compat.openai_reasoning import ReasoningContentChatModel
 
         m = build_chat_model("qwen3.8-max")
         assert isinstance(m, ReasoningContentChatModel)
@@ -706,7 +706,7 @@ class TestReasoningEffortDispatch:
     """
 
     def test_clamp_unknown_value_raises(self) -> None:
-        from shared.lm.factory import clamp_effort
+        from base.lm.factory import clamp_effort
 
         with pytest.raises(ValueError, match="unknown reasoning effort"):
             clamp_effort("higth", ("low", "high"), target="test")
@@ -714,7 +714,7 @@ class TestReasoningEffortDispatch:
     def test_clamp_ties_round_up(self) -> None:
         """medium is equidistant from low/high → picks high; xhigh is equidistant from
         high/max → picks max."""
-        from shared.lm.factory import clamp_effort
+        from base.lm.factory import clamp_effort
 
         assert clamp_effort("medium", ("low", "high", "max"), target="test") == "high"
         assert clamp_effort("xhigh", ("low", "high", "max"), target="test") == "max"
@@ -985,7 +985,7 @@ class TestReasoningEffortDispatch:
         monkeypatch.setattr(settings.lm, "llm_override", "")
         monkeypatch.setenv("GLM_API_KEY", "sk-glm")
         monkeypatch.setattr(settings.lm, "reasoning_effort", "high")
-        from shared.lm.compat.openai_reasoning import ReasoningContentChatModel
+        from base.lm.compat.openai_reasoning import ReasoningContentChatModel
 
         m = build_chat_model("glm-5.2")
         assert isinstance(m, ReasoningContentChatModel)
@@ -996,7 +996,7 @@ class TestReasoningEffortDispatch:
         monkeypatch.setattr(settings.lm, "llm_override", "")
         monkeypatch.setenv("GLM_API_KEY", "sk-glm")
         monkeypatch.setattr(settings.lm, "reasoning_effort", "low")
-        from shared.lm.compat.openai_reasoning import ReasoningContentChatModel
+        from base.lm.compat.openai_reasoning import ReasoningContentChatModel
 
         m = build_chat_model("glm-5.3")
         assert isinstance(m, ReasoningContentChatModel)
@@ -1011,7 +1011,7 @@ class TestReasoningEffortDispatch:
         monkeypatch.setattr(settings.lm, "llm_override", "")
         monkeypatch.setenv("GLM_API_KEY", "sk-glm")
         monkeypatch.setattr(settings.lm, "reasoning_effort", "high")
-        from shared.lm.compat.openai_reasoning import ReasoningContentChatModel
+        from base.lm.compat.openai_reasoning import ReasoningContentChatModel
 
         m = build_chat_model("glm-5.2", thinking={"type": "disabled"})
         assert isinstance(m, ReasoningContentChatModel)
@@ -1029,7 +1029,7 @@ class TestReasoningEffortDispatch:
         monkeypatch.setattr(settings.lm, "llm_override", "")
         monkeypatch.setenv("GLM_API_KEY", "sk-glm")
         monkeypatch.setattr(settings.lm, "reasoning_effort", "high")
-        from shared.lm.compat.openai_reasoning import ReasoningContentChatModel
+        from base.lm.compat.openai_reasoning import ReasoningContentChatModel
 
         m = build_chat_model(model, thinking={"type": "disabled"})
         assert isinstance(m, ReasoningContentChatModel)
@@ -1047,7 +1047,7 @@ class TestReasoningEffortDispatch:
         monkeypatch.setattr(settings.lm, "llm_override", "")
         monkeypatch.setenv("DASHSCOPE_API_KEY", "sk-qwen")
         monkeypatch.setattr(settings.lm, "reasoning_effort", "none")
-        from shared.lm.compat.openai_reasoning import ReasoningContentChatModel
+        from base.lm.compat.openai_reasoning import ReasoningContentChatModel
 
         m = build_chat_model("qwen3.8-max")
         assert isinstance(m, ReasoningContentChatModel)
@@ -1064,7 +1064,7 @@ class TestReasoningEffortDispatch:
         monkeypatch.setattr(settings.lm, "llm_override", "")
         monkeypatch.setenv("DASHSCOPE_API_KEY", "sk-qwen")
         monkeypatch.setattr(settings.lm, "reasoning_effort", "low")
-        from shared.lm.compat.openai_reasoning import ReasoningContentChatModel
+        from base.lm.compat.openai_reasoning import ReasoningContentChatModel
 
         m = build_chat_model("qwen3.8-max")
         assert isinstance(m, ReasoningContentChatModel)
@@ -1078,7 +1078,7 @@ class TestReasoningEffortDispatch:
         monkeypatch.setattr(settings.lm, "llm_override", "")
         monkeypatch.setenv("DASHSCOPE_API_KEY", "sk-qwen")
         monkeypatch.setattr(settings.lm, "reasoning_effort", "high")
-        from shared.lm.compat.openai_reasoning import ReasoningContentChatModel
+        from base.lm.compat.openai_reasoning import ReasoningContentChatModel
 
         m = build_chat_model("qwen3.8-max", thinking={"type": "disabled"})
         assert isinstance(m, ReasoningContentChatModel)
@@ -1106,7 +1106,7 @@ class TestReasoningEffortDispatch:
         in the official reference, so it is not connected."""
         monkeypatch.setattr(settings.lm, "llm_override", "")
         monkeypatch.setenv("MIMO_API_KEY", "sk-mimo")
-        from shared.lm.compat.openai_reasoning import ReasoningContentChatModel
+        from base.lm.compat.openai_reasoning import ReasoningContentChatModel
 
         m = build_chat_model(model, thinking={"type": "disabled"})
         assert isinstance(m, ReasoningContentChatModel)
@@ -1123,7 +1123,7 @@ class TestReasoningEffortDispatch:
         monkeypatch.setattr(settings.lm, "llm_override", "")
         monkeypatch.setenv("MIMO_API_KEY", "sk-mimo")
         monkeypatch.setattr(settings.lm, "reasoning_effort", "max")
-        from shared.lm.compat.openai_reasoning import ReasoningContentChatModel
+        from base.lm.compat.openai_reasoning import ReasoningContentChatModel
 
         m = build_chat_model(model)
         assert isinstance(m, ReasoningContentChatModel)
@@ -1143,7 +1143,7 @@ class TestReasoningEffortDispatch:
         monkeypatch.setattr(settings.lm, "llm_override", "")
         monkeypatch.setenv("MIMO_API_KEY", "sk-mimo")
         monkeypatch.setattr(settings.lm, "reasoning_effort", "none")
-        from shared.lm.compat.openai_reasoning import ReasoningContentChatModel
+        from base.lm.compat.openai_reasoning import ReasoningContentChatModel
 
         m = build_chat_model(model)
         assert isinstance(m, ReasoningContentChatModel)
@@ -1162,7 +1162,7 @@ class TestReasoningEffortDispatch:
         monkeypatch.setattr(settings.lm, "llm_override", "")
         monkeypatch.setenv("MIMO_API_KEY", "sk-mimo")
         monkeypatch.setattr(settings.lm, "reasoning_effort", "low")
-        from shared.lm.compat.openai_reasoning import ReasoningContentChatModel
+        from base.lm.compat.openai_reasoning import ReasoningContentChatModel
 
         m = build_chat_model(model)
         assert isinstance(m, ReasoningContentChatModel)
@@ -1180,7 +1180,7 @@ class TestReasoningEffortDispatch:
         monkeypatch.setattr(settings.lm, "llm_override", "")
         monkeypatch.setenv("MIMO_API_KEY", "sk-mimo")
         monkeypatch.setattr(settings.lm, "reasoning_effort", "high")
-        from shared.lm.compat.openai_reasoning import ReasoningContentChatModel
+        from base.lm.compat.openai_reasoning import ReasoningContentChatModel
 
         m = build_chat_model(model, thinking={"type": "disabled"})
         assert isinstance(m, ReasoningContentChatModel)
@@ -1333,7 +1333,7 @@ class TestValidateModelConfig:
     @staticmethod
     def _set_plugin_keys(monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(
-            "shared.runtime_config.read_env_aliases",
+            "base.host.env.runtime_config.read_env_aliases",
             lambda: {
                 "ANTHROPIC_API_KEY": "sk-test",
                 "DEEPSEEK_API_KEY": "sk-test",
@@ -1409,7 +1409,7 @@ class TestValidateModelConfig:
         all_models = [
             m
             for models in __import__(
-                "shared.lm.factory", fromlist=["SUPPORTED_MODELS"]
+                "base.lm.factory", fromlist=["SUPPORTED_MODELS"]
             ).SUPPORTED_MODELS.values()
             for m in models
         ]
@@ -1425,7 +1425,7 @@ class TestValidateModelConfig:
         validation — settings/config switching back to it stays allowed."""
         from dataclasses import replace
 
-        from shared.lm.registry import MODELS
+        from base.lm.registry import MODELS
 
         self._clear_all_keys(monkeypatch)
         self._set_plugin_keys(monkeypatch)
@@ -1438,28 +1438,28 @@ class TestValidateModelConfig:
     def test_missing_claude_key_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """ANTHROPIC_API_KEY not set → ValueError."""
         self._clear_all_keys(monkeypatch)
-        monkeypatch.setattr("shared.runtime_config.read_env_aliases", dict)
+        monkeypatch.setattr("base.host.env.runtime_config.read_env_aliases", dict)
         with pytest.raises(ValueError, match="ANTHROPIC_API_KEY"):
             validate_model_config(model="claude-sonnet-5")
 
     def test_missing_deepseek_key_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """DEEPSEEK_API_KEY not set → ValueError."""
         self._clear_all_keys(monkeypatch)
-        monkeypatch.setattr("shared.runtime_config.read_env_aliases", dict)
+        monkeypatch.setattr("base.host.env.runtime_config.read_env_aliases", dict)
         with pytest.raises(ValueError, match="DEEPSEEK_API_KEY"):
             validate_model_config(model="deepseek-flash")
 
     def test_missing_gemini_key_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """GEMINI_API_KEY not set → ValueError."""
         self._clear_all_keys(monkeypatch)
-        monkeypatch.setattr("shared.runtime_config.read_env_aliases", dict)
+        monkeypatch.setattr("base.host.env.runtime_config.read_env_aliases", dict)
         with pytest.raises(ValueError, match="GEMINI_API_KEY"):
             validate_model_config(model="gemini-3.5-flash")
 
     def test_missing_openai_key_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """OPENAI_API_KEY not set → ValueError."""
         self._clear_all_keys(monkeypatch)
-        monkeypatch.setattr("shared.runtime_config.read_env_aliases", dict)
+        monkeypatch.setattr("base.host.env.runtime_config.read_env_aliases", dict)
         with pytest.raises(ValueError, match="OPENAI_API_KEY"):
             validate_model_config(model="gpt-5.6-sol")
 
@@ -1467,7 +1467,7 @@ class TestValidateModelConfig:
         """MIMO_API_KEY not set → ValueError."""
         self._clear_all_keys(monkeypatch)
         monkeypatch.setattr(settings.lm, "xiaomi_api_key", SecretStr("legacy-settings-key"))
-        monkeypatch.setattr("shared.runtime_config.read_env_aliases", dict)
+        monkeypatch.setattr("base.host.env.runtime_config.read_env_aliases", dict)
         with pytest.raises(ValueError, match="MIMO_API_KEY"):
             validate_model_config(model="mimo-v2.5-pro")
 
@@ -1475,21 +1475,21 @@ class TestValidateModelConfig:
         """MOONSHOT_API_KEY not set → ValueError."""
         self._clear_all_keys(monkeypatch)
         monkeypatch.setattr(settings.lm, "moonshot_api_key", SecretStr("legacy-settings-key"))
-        monkeypatch.setattr("shared.runtime_config.read_env_aliases", dict)
+        monkeypatch.setattr("base.host.env.runtime_config.read_env_aliases", dict)
         with pytest.raises(ValueError, match="MOONSHOT_API_KEY"):
             validate_model_config(model="kimi-k3")
 
     def test_missing_glm_key_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """GLM_API_KEY not set → ValueError."""
         self._clear_all_keys(monkeypatch)
-        monkeypatch.setattr("shared.runtime_config.read_env_aliases", dict)
+        monkeypatch.setattr("base.host.env.runtime_config.read_env_aliases", dict)
         with pytest.raises(ValueError, match="GLM_API_KEY"):
             validate_model_config(model="glm-5.2")
 
     def test_missing_qwen_key_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """DASHSCOPE_API_KEY not set → ValueError."""
         self._clear_all_keys(monkeypatch)
-        monkeypatch.setattr("shared.runtime_config.read_env_aliases", dict)
+        monkeypatch.setattr("base.host.env.runtime_config.read_env_aliases", dict)
         with pytest.raises(ValueError, match="DASHSCOPE_API_KEY"):
             validate_model_config(model="qwen3.8-max")
 
@@ -1497,7 +1497,7 @@ class TestValidateModelConfig:
         """key is set → validation passes."""
         self._clear_all_keys(monkeypatch)
         monkeypatch.setattr(
-            "shared.runtime_config.read_env_aliases",
+            "base.host.env.runtime_config.read_env_aliases",
             lambda: {"ANTHROPIC_API_KEY": "sk-ant-123"},
         )
         result = validate_model_config(model="claude-sonnet-5")
@@ -1507,7 +1507,7 @@ class TestValidateModelConfig:
         """config.llm_model points to a provider with missing key → ValueError (not the cluster default's key)."""
         self._clear_all_keys(monkeypatch)
         monkeypatch.setattr(
-            "shared.runtime_config.read_env_aliases",
+            "base.host.env.runtime_config.read_env_aliases",
             lambda: {
                 "DEEPSEEK_API_KEY": "sk-test",
                 "GEMINI_API_KEY": "sk-test",
@@ -1524,7 +1524,7 @@ class TestValidateModelConfig:
         """config.llm_model's provider key is set → passes. The cluster default is irrelevant."""
         self._clear_all_keys(monkeypatch)
         monkeypatch.setattr(
-            "shared.runtime_config.read_env_aliases",
+            "base.host.env.runtime_config.read_env_aliases",
             lambda: {"ANTHROPIC_API_KEY": "sk-ant-123"},
         )
         result = validate_model_config(

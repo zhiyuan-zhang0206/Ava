@@ -11,12 +11,13 @@ from pathlib import Path
 
 import pytest
 
+from base.deploy.release.identity import read_application_identity
+from base.deploy.release.runtime_prepare import _materialize_venv_links
+from base.deploy.release.runtime_release import ReleaseRejectedError, VerifiedRelease, file_sha256
+from base.runtime_abi import AbiTag
+
 # ruff: noqa: S603 -- fixed Git argv operate only on the generated fixture repository.
 from cli import release_build as build
-from shared.release_identity import read_application_identity
-from shared.runtime_abi import AbiTag
-from shared.runtime_prepare import _materialize_venv_links
-from shared.runtime_release import ReleaseRejectedError, VerifiedRelease, file_sha256
 
 _LINUX = AbiTag("linux", "x86_64", "glibc", "2.39", None, None, "cpython-312", "")
 _MACOS = AbiTag("macos", "arm64", None, None, "26", "11.0", "cpython-312", "")
@@ -26,9 +27,11 @@ _MACOS = AbiTag("macos", "arm64", None, None, "26", "11.0", "cpython-312", "")
 def committed_repo(tmp_path: Path) -> tuple[Path, str]:
     repo = tmp_path.resolve() / "repo"
     repo.mkdir()
-    for name in ("shared", "db", "migrations"):
+    for name in ("base", "shared", "db", "migrations"):
         (repo / name).mkdir()
-    (repo / "shared/__init__.py").write_text('VALUE = "committed"\n')
+    (repo / "base/__init__.py").write_text('VALUE = "committed"\n')
+    # The release identity member's directory (the time-boxed `shared/` shell).
+    (repo / "shared/__init__.py").write_text("")
     (repo / "db/schema.sql").write_text("SELECT 1;\n")
     (repo / "migrations/.gitkeep").write_text("")
     subprocess.run(["git", "init", "-q", str(repo)], check=True)
@@ -88,8 +91,8 @@ def test_build_uses_commit_not_dirty_working_tree(
     committed_repo: tuple[Path, str], tmp_path: Path
 ) -> None:
     repo, commit = committed_repo
-    (repo / "shared/__init__.py").write_text('VALUE = "dirty"\n')
-    (repo / "shared/untracked.py").write_text("SECRET = 'must not ship'\n")
+    (repo / "base/__init__.py").write_text('VALUE = "dirty"\n')
+    (repo / "base/untracked.py").write_text("SECRET = 'must not ship'\n")
     output = tmp_path.resolve() / "output"
     result = build.build_application(
         repo,
@@ -101,14 +104,14 @@ def test_build_uses_commit_not_dirty_working_tree(
     )
 
     with zipfile.ZipFile(result.wheel) as wheel:
-        assert wheel.read("shared/__init__.py") == b'VALUE = "committed"\n'
-        assert "shared/untracked.py" not in wheel.namelist()
+        assert wheel.read("base/__init__.py") == b'VALUE = "committed"\n'
+        assert "base/untracked.py" not in wheel.namelist()
         identity = json.loads(wheel.read("shared/release-build.json"))
     assert identity["source_commit"] == commit
     assert identity["source_archive_digest"] == file_sha256(output / "source.tar")
     assert result.wheel_digest == file_sha256(result.wheel)
     assert result.applied_names == ("00000000T000000_baseline",)
-    assert (repo / "shared/__init__.py").read_text() == 'VALUE = "dirty"\n'
+    assert (repo / "base/__init__.py").read_text() == 'VALUE = "dirty"\n'
     assert not (repo / "shared/release-build.json").exists()
 
 
@@ -289,7 +292,7 @@ def test_ambient_git_configuration_cannot_change_committed_payload(
 ) -> None:
     repo, commit = committed_repo
     if override == "replace":
-        (repo / "shared/__init__.py").write_text('VALUE = "replacement"\n')
+        (repo / "base/__init__.py").write_text('VALUE = "replacement"\n')
         subprocess.run(["git", "-C", str(repo), "add", "."], check=True)
         subprocess.run(
             [
@@ -310,7 +313,7 @@ def test_ambient_git_configuration_cannot_change_committed_payload(
         )
         subprocess.run(["git", "-C", str(repo), "replace", commit, "HEAD"], check=True)
     elif override == "attributes":
-        (repo / ".git/info/attributes").write_text("shared/__init__.py export-ignore\n")
+        (repo / ".git/info/attributes").write_text("base/__init__.py export-ignore\n")
     else:
         monkeypatch.setenv("GIT_DIR", str(tmp_path / "nonexistent-git"))
         monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
@@ -326,7 +329,7 @@ def test_ambient_git_configuration_cannot_change_committed_payload(
         build_constraints=_constraints(tmp_path),
     )
     with zipfile.ZipFile(result.wheel) as wheel:
-        assert wheel.read("shared/__init__.py") == b'VALUE = "committed"\n'
+        assert wheel.read("base/__init__.py") == b'VALUE = "committed"\n'
 
 
 def test_real_sized_manifest_is_read_with_its_own_budget(
@@ -412,7 +415,7 @@ def test_depth_one_checkout_builds_without_parent_objects(
     committed_repo: tuple[Path, str], tmp_path: Path
 ) -> None:
     repo, _ = committed_repo
-    (repo / "shared/__init__.py").write_text('VALUE = "second commit"\n')
+    (repo / "base/__init__.py").write_text('VALUE = "second commit"\n')
     subprocess.run(["git", "-C", str(repo), "add", "."], check=True)
     subprocess.run(
         [
@@ -458,4 +461,4 @@ def test_depth_one_checkout_builds_without_parent_objects(
         build_constraints=_constraints(tmp_path),
     )
     with zipfile.ZipFile(result.wheel) as wheel:
-        assert wheel.read("shared/__init__.py") == b'VALUE = "second commit"\n'
+        assert wheel.read("base/__init__.py") == b'VALUE = "second commit"\n'

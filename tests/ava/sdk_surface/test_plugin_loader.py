@@ -109,7 +109,7 @@ def _make_plugin(root: Path, name: str) -> None:
 def test_scan_and_load_default_uses_paths_plugins_dir(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    from shared.config import settings
+    from base.config import settings
 
     monkeypatch.setattr(settings.general, "ava_home", tmp_path / "ava")
     plugins = tmp_path / "ava" / "plugins"

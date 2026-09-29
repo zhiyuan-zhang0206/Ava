@@ -5,12 +5,12 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 
+from base.deploy.release.runtime_release import current_pointer
+from base.deploy.release.start_inputs import configuration_files
+from base.deploy.release.verified_file import regular_bytes
 from cli.release_transition.journal import Operation
 from cli.release_transition.request import PitrRequest
-from services.pitr.activation_state import ActivationRecord, record_path
-from shared.runtime_release import current_pointer
-from shared.start_inputs import configuration_files
-from shared.verified_file import regular_bytes
+from services.pitr.activation.state import ActivationRecord, record_path
 
 
 def read_record(operation: Operation) -> ActivationRecord | None:

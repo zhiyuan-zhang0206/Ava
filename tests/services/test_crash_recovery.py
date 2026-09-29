@@ -13,7 +13,7 @@ from typing import Any
 
 import pytest
 
-from agent.corpse_reap import ReapedCorpse
+from agent.ownership.corpse_reap import ReapedCorpse
 from services.agent_host.crash_recovery import recover_reaped_corpses
 
 
@@ -26,9 +26,9 @@ async def test_attempts_the_guarded_resurrect_per_wake(
         calls.append((agent_id, trigger_inbound_id, trigger_inbound_kind))
         return "spawned"
 
-    import ops.ops_lifecycle
+    import ops.lifecycle
 
-    monkeypatch.setattr(ops.ops_lifecycle, "resurrect_if_terminated", _attempt)
+    monkeypatch.setattr(ops.lifecycle, "resurrect_if_terminated", _attempt)
 
     await recover_reaped_corpses([ReapedCorpse(7, 101), ReapedCorpse(8, 102)])
 
@@ -39,9 +39,9 @@ async def test_wake_less_entries_are_skipped(monkeypatch: pytest.MonkeyPatch) ->
     async def _attempt(*args: object, **kwargs: object) -> str:
         raise AssertionError("a wake-less entry must not reach the resurrect")
 
-    import ops.ops_lifecycle
+    import ops.lifecycle
 
-    monkeypatch.setattr(ops.ops_lifecycle, "resurrect_if_terminated", _attempt)
+    monkeypatch.setattr(ops.lifecycle, "resurrect_if_terminated", _attempt)
 
     await recover_reaped_corpses([])
     await recover_reaped_corpses([ReapedCorpse(7, None)])
@@ -59,9 +59,9 @@ async def test_an_attempt_failure_defers_without_stopping_the_next(
         attempted.append(agent_id)
         return "idling"
 
-    import ops.ops_lifecycle
+    import ops.lifecycle
 
-    monkeypatch.setattr(ops.ops_lifecycle, "resurrect_if_terminated", _attempt)
+    monkeypatch.setattr(ops.lifecycle, "resurrect_if_terminated", _attempt)
 
     await recover_reaped_corpses([ReapedCorpse(7, 101), ReapedCorpse(8, 102)])
 

@@ -30,7 +30,7 @@ jobs:
           mkdir -p proof
           git rev-parse HEAD > proof/head-sha.txt
           timeout 240 uv run pytest tests/agent/test_hosted_lifecycle.py tests/agent/test_hosted_ownership.py -q --junitxml=proof/head.xml
-          git show c146b3dde:agent/db.py > agent/db.py
+          git show c146b3dde:agent/db.py > agent/db/__init__.py
           set +e
           timeout 180 uv run pytest tests/agent/test_hosted_lifecycle.py -k applies_only -q --junitxml=proof/baseline.xml
           result=$?

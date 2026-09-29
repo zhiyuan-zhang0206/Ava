@@ -8,9 +8,9 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
+from base.config import settings
 from gateway.app import app
-from gateway.routers import event_resolutions
-from shared.config import settings
+from gateway.events import resolutions
 
 
 @pytest.fixture
@@ -29,7 +29,7 @@ def emitted(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, str, dict[str, o
     def emit(category: str, event_name: str, **kwargs: object) -> None:
         out.append((category, event_name, cast(dict[str, object], kwargs["attributes"])))
 
-    monkeypatch.setattr(event_resolutions.telemetry, "emit", emit)
+    monkeypatch.setattr(resolutions.telemetry, "emit", emit)
     return out
 
 

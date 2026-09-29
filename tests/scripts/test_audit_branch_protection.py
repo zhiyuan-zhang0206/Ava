@@ -11,7 +11,7 @@ import pytest
 import yaml
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-_SCRIPT = _REPO_ROOT / "scripts" / "audit_branch_protection.py"
+_SCRIPT = _REPO_ROOT / "scripts" / "audit" / "branch_protection.py"
 _ADMISSION_CHECKS = frozenset(
     {
         "backend (pytest + pyright)",
@@ -54,8 +54,8 @@ merge:
 
 def _audit() -> ModuleType:
     if not _SCRIPT.exists():
-        pytest.fail("scripts/audit_branch_protection.py is not implemented")
-    spec = importlib.util.spec_from_file_location("audit_branch_protection", _SCRIPT)
+        pytest.fail("scripts/audit/branch_protection.py is not implemented")
+    spec = importlib.util.spec_from_file_location("branch_protection", _SCRIPT)
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module

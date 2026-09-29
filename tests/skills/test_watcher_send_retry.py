@@ -16,7 +16,7 @@ The handoff-dir tests below (2026-09-28 fix, PR #3550 follow-up P2-1) lock
 `codebase_sweep_lite.py`, `deep_research_lite.py` (`ava-dynamic-workflow/scripts/`),
 `codebase_sweep_orchestrator.py`, `deep_research_orchestrator.py`, and
 `orchestrator_template.py` (`ava-dynamic-workflow/references/`, alongside
-`gather_files.py` above) to `shared.paths.workspace_dir` instead of a hardcoded
+`gather_files.py` above) to `base.paths.workspace_dir` instead of a hardcoded
 `Path.home() / ".ava/workspaces"` that never read `AVA_HOME` at all. On a non-default home
 cluster (a worktree cluster, home `~/.ava-<dir>`) that silently wrote
 scratch/handoff state into the WRONG cluster's workspace tree.
@@ -35,8 +35,8 @@ from typing import Any
 
 import pytest
 
-from shared.coding_session_owner import CodingSessionKey, CodingSessionOwner
-from shared.paths import workspace_dir
+from base.paths import workspace_dir
+from base.sessions.coding_session_owner import CodingSessionKey, CodingSessionOwner
 
 _REPO = Path(__file__).parents[2]
 _DYNAMIC_WORKFLOW_SCRIPTS = _REPO / "ava_builtins" / "skills" / "ava-dynamic-workflow" / "scripts"

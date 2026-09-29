@@ -7,7 +7,7 @@ tags: []
 
 # Hosted Runtime Admission
 
-`agent/hosted_ownership.py:admit_hosted_runtime()` locks the agent metadata
+`agent/ownership/hosted.py:admit_hosted_runtime()` locks the agent metadata
 before granting execution to the local agent host. The row carries generation,
 owner and `runtime_kind='hosted'`; the context carries that admitted identity
 through the entire turn. A fresh foreign owner, terminal status, changed home or
@@ -36,5 +36,5 @@ turn or disposable execution domain has finished.
 Historical database rows and command payloads are retained. Runtime removal
 requires no destructive schema migration.
 
-Related: [[../lease.ava.okf.md]], [[../lifecycle.ava.okf.md]], and
-[[shared/maintenance/maintenance.ava.okf.md]].
+Related: [[../ownership/ownership.ava.okf.md]], [[../lifecycle.ava.okf.md]], and
+[[base/deploy/maintenance/maintenance.ava.okf.md]].

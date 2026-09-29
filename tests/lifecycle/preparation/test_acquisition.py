@@ -14,13 +14,13 @@ from pathlib import Path
 
 import pytest
 
+from base.deploy.release.runtime_prepare import inventory_digest, python_input_inventory
+from base.deploy.release.runtime_release import ReleaseRejectedError
 from cli.release_prepare import acquire, acquisition_process
 from cli.release_prepare.acquisition_dependencies import file_input, tree_input
 from cli.release_prepare.acquisition_models import Acquisition, AcquisitionReceipt, FrontendTools
 from cli.release_prepare.acquisition_process import Commands
 from cli.release_prepare.models import TreeInput
-from shared.runtime_prepare import inventory_digest, python_input_inventory
-from shared.runtime_release import ReleaseRejectedError
 
 # ruff: noqa: S603 -- real Git and isolated import checks use only generated fixture inputs.
 
@@ -40,8 +40,9 @@ def acquisition(tmp_path: Path) -> Acquisition:
     root = tmp_path.resolve()
     repo = root / "repo"
     repo.mkdir()
-    for name in ("shared", "migrations", "db"):
+    for name in ("base", "shared", "migrations", "db"):
         (repo / name).mkdir()
+    (repo / "base/__init__.py").write_text("")
     (repo / "shared/__init__.py").write_text("")
     (repo / "migrations/.gitkeep").write_text("")
     (repo / "db/schema.sql").write_text("SELECT 1;\n")
@@ -359,12 +360,12 @@ import importlib.abc, sys
 sys.path.insert(0, sys.argv[1])
 class Guard(importlib.abc.MetaPathFinder):
     def find_spec(self, fullname, *args):
-        if fullname.startswith(('shared.config', 'shared.db', 'cli.commands', 'services.')):
+        if fullname.startswith(('base.config', 'base.db', 'cli.commands', 'services.')):
             raise AssertionError('runtime authority imported: ' + fullname)
 sys.meta_path.insert(0, Guard())
 import cli.release_prepare.acquire
 import scripts.prepare_otel_release
-assert 'shared.config' not in sys.modules
+assert 'base.config' not in sys.modules
 """
     result = subprocess.run(
         [sys.executable, "-I", "-B", "-c", code, str(Path(__file__).resolve().parents[3])],
@@ -382,7 +383,7 @@ import sys
 sys.path.insert(0, sys.argv[1])
 import scripts.prepare_otel_release
 assert 'psutil' not in sys.modules
-assert 'shared.config' not in sys.modules
+assert 'base.config' not in sys.modules
 """
     result = subprocess.run(
         [sys.executable, "-I", "-S", "-B", "-c", code, str(Path(__file__).resolve().parents[3])],

@@ -21,9 +21,9 @@ from psycopg import sql
 from psycopg_pool import ConnectionPool
 
 import services.events_maintenance.checkpoint_reaper as reaper
+from base.agents.history.checkpoint_cleanup import TrimCounts, trim_checkpoints_sync
+from base.config import settings
 from services.events_maintenance.checkpoint_reaper import ReapCounts
-from shared.agents.history.checkpoint_cleanup import TrimCounts, trim_checkpoints_sync
-from shared.config import settings
 
 _SCHEMA = """
 CREATE TABLE checkpoints (

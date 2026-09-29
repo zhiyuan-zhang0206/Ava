@@ -13,9 +13,9 @@ from pathlib import Path
 
 import pytest
 
+from base import paths as base_paths
 from cli.release_operator import prepare as prepare_module
 from cli.release_prepare import Preparation
-from shared import paths as shared_paths
 
 _COMMIT = "a" * 40
 
@@ -45,7 +45,7 @@ def _local_inputs_json(tmp_path: Path) -> Path:
 def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     path = tmp_path / "home"
     path.mkdir()
-    monkeypatch.setattr(shared_paths, "ava_home", lambda: path)
+    monkeypatch.setattr(base_paths, "ava_home", lambda: path)
     return path
 
 
@@ -83,7 +83,7 @@ def test_wiring_resolves_work_and_store_under_home_and_defaults_repo(
     assert request.commit == _COMMIT
     assert request.work == home / "releases" / "work" / _COMMIT
     assert request.store == home / "releases"
-    assert request.repo == shared_paths.repo_root()
+    assert request.repo == base_paths.repo_root()
     # Both `store` and `work`'s parent were bootstrapped as owner-only dirs.
     assert (home / "releases").stat().st_mode & 0o777 == 0o700
     assert (home / "releases" / "work").stat().st_mode & 0o777 == 0o700

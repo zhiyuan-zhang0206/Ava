@@ -1,7 +1,7 @@
 """Throwaway Postgres + Redis for the test / eval suites â€” native processes, no Docker.
 
 Each pytest-session worker gets its OWN throwaway Postgres cluster and Redis
-server: the Postgres cluster comes from `shared.pg_tools.throwaway_postgres`
+server: the Postgres cluster comes from `base.cluster.dataplane.pg_tools.throwaway_postgres`
 (a fresh `initdb` on an ephemeral localhost port), and a `redis-server` runs on
 its own ephemeral port. The provisioning fixtures point `settings.data_plane.db_url` /
 `settings.data_plane.redis_url` at them. No external server and no `*_DB_URL` env var is
@@ -32,7 +32,7 @@ from pathlib import Path
 import psycopg
 import redis
 
-from shared.pg_tools import throwaway_postgres
+from base.cluster.dataplane.pg_tools import throwaway_postgres
 
 _SCHEMA_SQL = Path(__file__).resolve().parent.parent / "db" / "schema.sql"
 
@@ -44,7 +44,7 @@ _TMPFS_BASE = "/dev/shm" if Path("/dev/shm").is_dir() else None  # noqa: S108 â€
 def _free_port() -> int:
     """Ask the OS for an unused localhost TCP port, closed immediately.
 
-    The release-to-bind window is the same TOCTOU class `shared/pg_tools` fixed
+    The release-to-bind window is the same TOCTOU class `base/pg_tools` fixed
     for throwaway Postgres (PR #1216): a parallel xdist worker can be handed the
     same port before the server binds it, and the collision surfaces as the
     spawned server dying (then `_wait_port` times out). Accepted here: the
@@ -80,7 +80,7 @@ def postgres() -> Generator[str]:
     migration, and its port never binds. Applying migrations at provisioning time
     keeps every future migration covered without special-casing any one of them.
     """
-    from shared.migrations import apply_pending_migrations
+    from base.deploy.schema.migrations import apply_pending_migrations
 
     with throwaway_postgres(schema_sql=_SCHEMA_SQL.read_text()) as url:
         # Non-autocommit conn: apply_pending_migrations manages its own
@@ -103,8 +103,8 @@ def runner_projection(db_url: str | None = None) -> str:
     shape (`grant_runner_login` on the suite database, dialled directly), then
     carried onto `db_url`, which may be a pooler URL.
     """
-    from shared.config import settings
-    from shared.url_secret import url_with_userinfo
+    from base.config import settings
+    from base.host.net.url_secret import url_with_userinfo
 
     admin = settings.data_plane.db_url
     grant_runner_login(admin, owner="ava_citest", login=_RUNNER_LOGIN, password=_RUNNER_PASSWORD)
@@ -180,7 +180,7 @@ def redis_server() -> Generator[str]:
 def grant_runner_login(url: str, *, owner: str, login: str, password: str) -> str:
     """Give a throwaway database the runner capability and return a runner URL.
 
-    The production shape: `shared.cluster.authority.ensure_groups` converges the
+    The production shape: `base.cluster.authority.ensure_groups` converges the
     NOLOGIN `ava_gateway` / `ava_runner` groups on `url`'s database (default
     privileges declared FOR `owner`, the role that creates later tables), and
     `login` inherits `ava_runner` exactly as a write generation's runner login
@@ -191,8 +191,8 @@ def grant_runner_login(url: str, *, owner: str, login: str, password: str) -> st
 
     from psycopg import sql
 
-    from shared.cluster.authority import GATEWAY_GROUP, RUNNER_GROUP, Groups, ensure_groups
-    from shared.url_secret import url_with_userinfo
+    from base.cluster.authority import GATEWAY_GROUP, RUNNER_GROUP, Groups, ensure_groups
+    from base.host.net.url_secret import url_with_userinfo
 
     database = urlsplit(url).path.strip("/")
     groups = Groups(gateway=GATEWAY_GROUP, runner=RUNNER_GROUP)

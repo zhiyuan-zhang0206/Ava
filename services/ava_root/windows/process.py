@@ -20,10 +20,10 @@ from pathlib import Path
 
 import psutil
 
+from base.native_process.ownership import OwnedProcess
+from base.native_process.winjob import WindowsJob, last_error
+from base.native_process.winjob_spawn import process_api, run_job_process, start_in_job
 from services.ava_root.custody import ServiceCustody
-from shared.native_process.ownership import OwnedProcess
-from shared.winjob import WindowsJob, last_error
-from shared.winjob_spawn import process_api, run_job_process, start_in_job
 
 
 class ApplicationProcess:

@@ -13,7 +13,7 @@ from typing import Any
 import pytest
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-_SCRIPT = _REPO_ROOT / "scripts" / "check_model_updates.py"
+_SCRIPT = _REPO_ROOT / "scripts" / "model_registry" / "check_model_updates.py"
 
 
 def _load_script() -> Any:
@@ -69,9 +69,9 @@ def _no_retry_sleep(_seconds: float) -> None:
 
 
 def _pin_retry_sleep(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Pin shared.resilience's sleep seam (its own tests' pattern) so the
+    """Pin base.host.net.resilience's sleep seam (its own tests' pattern) so the
     retry-path tests exercise the backoff loop without waiting it out."""
-    monkeypatch.setattr("shared.resilience._sleep", _no_retry_sleep)
+    monkeypatch.setattr("base.host.net.resilience._sleep", _no_retry_sleep)
 
 
 class _JSONResponse:

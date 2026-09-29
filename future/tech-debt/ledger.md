@@ -35,13 +35,6 @@ cap-domain exits use `exitType`, `expires`, and `approver`); readers ignore unkn
 
 ## Open
 
-### locality:gateway/schemas/__init__.py:shared/api_contracts/contracts.py
-- **class**: locality
-- **status**: open
-- **evidence**: `cochange.py`: c=15, confidence 65%. Every new gateway route edits two hubs: the `RouteContract` doorplate in `shared/api_contracts/contracts.py` (the deliberate single declaration point, lint-enforced — not the leak) and the hand-maintained root re-export of `gateway/schemas/__init__.py` (127 names, imported by 40 files): `04c4cadc0` (`ResolveBatchIn` + resolve-batch doorplate), `3e0d4c319` (`AgentCompact`), `e9253ee4e` (`ConfigAuditView` + config-audit doorplate). Leaked decision: which schema models are public is re-declared in the root facade on top of the family module that defines them. Fix: callers import the family module (`gateway.schemas.<family>`) and the root becomes a docstring-only package door, the `cli.commands` precedent. Waits for #3479, which rewrites the root and 8 of its importers.
-- **first-seen**: 2026-09-28 (locality class)
-- **last-verified**: 2026-09-28
-
 ### locality:cli/commands/agents/control.py:cli/parsers/agents.py
 - **class**: locality
 - **status**: open
@@ -52,7 +45,7 @@ cap-domain exits use `exitType`, `expires`, and `approver`); readers ignore unkn
 ### boundary:checkpoint-postgres-historical-walk-patch
 - **class**: boundary
 - **status**: open
-- **evidence**: `shared/checkpoint_postgres_walks.py:install_checkpoint_postgres_walk_patch` wraps private `BasePostgresSaver._try_advance_walks` for checkpoint-postgres 3.1.2. It keeps an unseen historical target out of the cached walk cursor until a later page arrives; `shared/agents/history/delta_read_compat.py` installs it for gateway and agent-host readers. The dependency version, method identity, and signature are guarded because this is a temporary third-party patch. Once langgraph#8448 / #8556 is released, run `tests/shared/checkpoint/test_checkpoint_postgres_walks.py`, remove the pagination wrapper (retaining the message-reset suffix reader until upstream supports it), then upgrade the checkpoint-postgres pin (405 tracks the follow-up).
+- **evidence**: `base/agents/history/checkpoint_postgres_walks.py:install_checkpoint_postgres_walk_patch` wraps private `BasePostgresSaver._try_advance_walks` for checkpoint-postgres 3.1.2. It keeps an unseen historical target out of the cached walk cursor until a later page arrives; `base/agents/history/delta_read_compat.py` installs it for gateway and agent-host readers. The dependency version, method identity, and signature are guarded because this is a temporary third-party patch. Once langgraph#8448 / #8556 is released, run `tests/base/checkpoint/test_checkpoint_postgres_walks.py`, remove the pagination wrapper (retaining the message-reset suffix reader until upstream supports it), then upgrade the checkpoint-postgres pin (405 tracks the follow-up).
 - **first-seen**: 2026-09-23 (PR for task #4518)
 - **last-verified**: 2026-09-23
 

@@ -27,8 +27,8 @@ from psycopg_pool import ConnectionPool
 
 from ava_builtins.plugins.ava_fleet.task_maintenance import daemon
 from ava_builtins.plugins.ava_fleet.task_maintenance.daemon import _run_escalate, _run_reminders
-from shared import telemetry
-from shared.config import settings
+from base import telemetry
+from base.config import settings
 
 _DAY_S = 86400.0
 

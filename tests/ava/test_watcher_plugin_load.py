@@ -23,7 +23,7 @@ import sys
 from pathlib import Path
 
 from ava import watcher
-from shared import paths
+from base import paths
 
 
 def _write_isolated_home(home: Path) -> None:

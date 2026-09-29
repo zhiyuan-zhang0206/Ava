@@ -31,10 +31,10 @@ from pathlib import Path
 
 import psycopg
 
+from base import paths
+from base.packages.extensions import materialize as mat
+from base.packages.extensions import registry as reg
 from cli.commands.extensions.skill import cmd_skill_install
-from shared import extension_materialize as mat
-from shared import extension_registry as reg
-from shared import paths
 
 _AsMachine = Callable[[Path], AbstractContextManager[Path]]
 
@@ -178,11 +178,11 @@ def test_home_b_keeps_its_own_edit_when_the_cluster_moves(
     # Home A ships a newer version of the same name.
     newer = _write_skill(tmp_path / "src2" / "edit-demo", "edit-demo", body="Version two.")
     with as_machine(home_a):
-        from shared import db as shared_db
-        from shared.machine import machine_name
+        from base import db as base_db
+        from base.cluster.machine import machine_name
 
         reg.register_tree(
-            shared_db.pool(),
+            base_db.pool(),
             root=newer,
             name="edit-demo",
             kind="skill",

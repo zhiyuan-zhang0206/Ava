@@ -27,15 +27,15 @@ import pytest
 from fastapi.testclient import TestClient
 from psycopg.types.json import Jsonb
 
-from gateway.app import app
-from gateway.routers import pages as pages_router
-from shared import config
-from shared.db import create_agent
-from shared.docs.pages_copy import (
+from base import config
+from base.db import create_agent
+from base.packages.docs.pages_copy import (
     PAGE_LANGUAGE_DEFAULT,
     PAGE_SERVER_DOWN_BODY,
     PAGE_SERVER_TIMEOUT_BODY,
 )
+from gateway.app import app
+from gateway.routers import pages as pages_router
 
 _SECRET = "test-cluster-secret"  # noqa: S105 — test fixture
 

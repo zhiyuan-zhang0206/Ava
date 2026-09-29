@@ -17,10 +17,10 @@ from pathlib import Path
 
 import pytest
 
+from base.config import settings
+from base.daemon import health
+from base.native_process.os_platform import LockTimeoutError
 from services.backup_scheduler import daemon
-from shared import daemon_health
-from shared.config import settings
-from shared.platform import LockTimeoutError
 
 
 def _at(hour: int = 3, minute: int = 0) -> datetime:
@@ -151,7 +151,7 @@ async def test_healthz_returns_503_for_an_overdue_backup(monkeypatch: pytest.Mon
     state = daemon._BackupState(started_at=0.0)
     monkeypatch.setattr(daemon.time, "monotonic", lambda: daemon.BACKUP_STALE_AFTER_S + 1.0)
     port = _find_free_port()
-    server = await daemon_health.start_health_server(
+    server = await health.start_health_server(
         "pg_backup",
         port=port,
         components=lambda: daemon._backup_components(state),
@@ -163,7 +163,7 @@ async def test_healthz_returns_503_for_an_overdue_backup(monkeypatch: pytest.Mon
             "backup: no successful backup within 93601s of start"
         ]
     finally:
-        await daemon_health.stop_health_server(server)
+        await health.stop_health_server(server)
 
 
 def test_sleep_breaks_long_waits_into_shutdown_responsive_chunks(

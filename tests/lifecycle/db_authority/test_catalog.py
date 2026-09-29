@@ -1,6 +1,6 @@
 """Group grants and the fail-closed invariant on real PostgreSQL 17, and
 MAINTAIN/VACUUM. The runner matrix itself is exercised through a group login in
-tests/shared/test_runner_role.py."""
+tests/base/test_runner_role.py."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ import psycopg
 import pytest
 from psycopg import sql
 
-from shared.cluster.authority import (
+from base.cluster.authority import (
     BirthAuthority,
     CatalogRefusedError,
     VacuumSkippedError,

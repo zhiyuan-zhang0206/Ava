@@ -7,7 +7,7 @@ a query on one has no application-level bound. Three sync pools each wrote
 makes impossible to reintroduce.
 
 These cases pin both shapes a real site takes (the sync construction that should
-have called `shared.db.pool()`, and the generic-subscripted async pool that
+have called `base.db.pool()`, and the generic-subscripted async pool that
 legitimately unpacks the constant itself), plus the things that must NOT be
 flagged: annotations, `check_connection`, and the constant reached through a
 module attribute.
@@ -93,7 +93,7 @@ def test_subclass_of_connection_pool_is_covered():
 
 
 def test_constant_reached_by_module_attribute_is_clean():
-    src = "pool = ConnectionPool(url, kwargs={**shared.db.PG_KEEPALIVE_KWARGS})\n"
+    src = "pool = ConnectionPool(url, kwargs={**base.db.PG_KEEPALIVE_KWARGS})\n"
     assert _violations(src) == []
 
 
@@ -118,6 +118,17 @@ def test_repo_is_clean() -> None:
     """The gate is only as good as its verdict on the tree it guards: every pool
     under the scanned directories must already pass."""
     assert _lint.main([]) == 0
+
+
+def test_default_scope_is_what_rule_5_does_not_see() -> None:
+    """In the governed packages the structure gate's `postgres-dial` rule rejects
+    any pool outside its owner, so a bare run scans only the rest: `scripts/`
+    (not governed) and the modules that decision allows to dial directly."""
+    from scripts.structure.locality import DECISIONS
+
+    root = Path(__file__).resolve().parents[1]
+    scanned = {path.relative_to(root).as_posix() for path in _lint.default_targets()}
+    assert scanned == {"scripts", *DECISIONS["postgres-dial"].allowed}
 
 
 def test_explicit_missing_target_is_an_error(

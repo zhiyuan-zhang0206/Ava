@@ -1,7 +1,7 @@
 """A unit executor's side of the coordinator channel.
 
 Every request carries a channel proof signed with the unit's own installed
-enrollment (`shared.cluster.authority.unit.load_unit_enrollment`), never the
+enrollment (`base.cluster.authority.unit.load_unit_enrollment`), never the
 human bearer or a write generation. Failures are typed so the follower can
 tell a coordinator that is simply away (keep polling within the executor's
 lifetime) from one that refuses this unit (hold) or a report that answers an
@@ -16,12 +16,12 @@ import urllib.request
 from typing import NoReturn
 from uuid import UUID
 
+from base.cluster.authority.channel import ChannelRefusedError, sign_request
+from base.cluster.authority.unit import Enrollment
 from cli.release_fleet.listener import CAPABILITY_REFUSAL, proof_headers, route
 from cli.release_fleet.policy import UnitKey
 from cli.release_fleet.progress import Instruction, Report
 from cli.release_fleet.request import CoordinatorEndpoint
-from shared.cluster.authority.channel import ChannelRefusedError, sign_request
-from shared.cluster.authority.unit import Enrollment
 
 _TIMEOUT_S = 10.0
 _MAX_ANSWER_BYTES = 64 * 1024

@@ -9,10 +9,10 @@ from langgraph.checkpoint.base import empty_checkpoint
 from psycopg_pool import AsyncConnectionPool, PoolClosed
 
 from agent.impersonation import flush_checkpoint
+from base.config import settings
+from base.log import logger
+from base.native_process.turn_identity import bind_turn_identity
 from services.agent_host.daemon import _build_checkpointer
-from shared.config import settings
-from shared.log import logger
-from shared.turn_identity import bind_turn_identity
 
 
 @pytest.mark.parametrize("method", ["aput", "aput_writes", "flush"])

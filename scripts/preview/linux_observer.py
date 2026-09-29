@@ -23,6 +23,8 @@ from urllib.parse import urlsplit
 import psutil
 from dotenv import dotenv_values
 
+from base.native_process.ownership import OwnedProcess, capture_tree
+from base.native_process.root_control.client import RootClient, native_identity
 from scripts.preview import release_generation
 from scripts.preview.linux_runtime import ExpectedRuntime, environment_digest, expected_runtime
 from scripts.preview.linux_terminals import (
@@ -32,8 +34,6 @@ from scripts.preview.linux_terminals import (
     retained_members,
 )
 from scripts.preview.runtime import SERVICES, owned_processes
-from shared.native_process.ownership import OwnedProcess, capture_tree
-from shared.root_control.client import RootClient, native_identity
 
 Mode = Literal["running", "manager-running", "stopped", "manager-stopped", "destroyed"]
 MODES = ("running", "manager-running", "stopped", "manager-stopped", "destroyed")
@@ -80,9 +80,9 @@ def _command(argv: list[str]) -> subprocess.CompletedProcess[str]:
 
 
 def _base_observations(run: Path, result: Report) -> dict[str, int]:
-    from shared.cluster import load_registry
-    from shared.os_boot_unit import unit_name, unit_path
-    from shared.port_preflight import strict_listeners_on
+    from base.cluster import load_registry
+    from base.cluster.port_preflight import strict_listeners_on
+    from base.host.system.boot_unit import unit_name, unit_path
 
     home, source = run / "home", run / "source"
     config = json.loads((run / "config.json").read_text())
@@ -144,7 +144,7 @@ def _require_private_endpoint(url: str, port: int) -> None:
 def _data_births(home: Path, ports: dict[str, int]) -> Births:
     import redis
 
-    from shared.cluster import ownership, redis_admin_url
+    from base.cluster import ownership, redis_admin_url
 
     pg = ownership.postgres(home / "pg")
     pool = ownership.pooler(home / "pgbouncer/pgbouncer.ini", home / "pgbouncer/pgbouncer.pid")
@@ -172,7 +172,7 @@ def _data_births(home: Path, ports: dict[str, int]) -> Births:
 def _require_outside_executors(births: dict[str, OwnedProcess]) -> None:
     """No data-plane birth lives in a finite release executor's cgroup, where it
     would die with the executor (the r6 pooler did)."""
-    from shared.os_boot_unit import process_cgroup
+    from base.host.system.boot_unit import process_cgroup
 
     for name, owner in births.items():
         cgroup = process_cgroup(owner.pid)
@@ -269,7 +269,7 @@ def _cgroup(pid: int) -> str:
 
 
 def _require_owned_listeners(owner: OwnedProcess, listeners: list[OwnedProcess], port: int) -> None:
-    from shared.port_preflight import strict_listeners_on
+    from base.cluster.port_preflight import strict_listeners_on
 
     _require(
         listeners
@@ -313,7 +313,7 @@ def _observe_app_ownership(records: Births, ports: dict[str, int], result: Repor
 def _observe_running(
     run: Path, mode: Mode, ports: dict[str, int], result: Report, runtime: ExpectedRuntime
 ) -> None:
-    from shared.os_boot_unit import unit_name, unit_path
+    from base.host.system.boot_unit import unit_name, unit_path
 
     home = run / "home"
     response = RootClient(home / "run/ava-root/ava-root.sock", timeout=5).status()

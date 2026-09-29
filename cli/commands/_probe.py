@@ -11,11 +11,11 @@ import logging
 import sys
 from typing import Any, NamedTuple
 
+from base.deploy.git.cluster_drift import prod_source_branch_drift as _detect_prod_source_drift
+from base.deploy.progress_timeout import CRITICAL_SERVICE_SESSIONS as CRITICAL_SERVICE_SESSIONS
+from base.deploy.progress_timeout import NON_CRITICAL_SERVICE_READY_TIMEOUT_S
+from base.host.net.resilience import ExponentialBackoff, Policy, http_classifier, retry
 from cli.commands._repo import ServiceSpec, session_name
-from shared.cluster_drift import prod_source_branch_drift as _detect_prod_source_drift
-from shared.deploy_timing import CRITICAL_SERVICE_SESSIONS as CRITICAL_SERVICE_SESSIONS
-from shared.deploy_timing import NON_CRITICAL_SERVICE_READY_TIMEOUT_S
-from shared.resilience import ExponentialBackoff, Policy, http_classifier, retry
 
 __all__ = ["_detect_prod_source_drift"]
 
@@ -78,7 +78,7 @@ def _probe_service(spec: ServiceSpec) -> ServiceProbe:
         return ServiceProbe(
             None, "unavailable", f"identity probe raised {type(exc).__name__}: {exc}"
         )
-    from shared.daemon_health import ProbeVerdict
+    from base.daemon.health import ProbeVerdict
 
     alive = None if probe.verdict is ProbeVerdict.UNAVAILABLE else probe.alive
     return ServiceProbe(alive, "identity", "" if alive else probe.detail, probe.terminal)
@@ -246,14 +246,14 @@ _NON_CRITICAL_ALERTNAME = "non-critical service not ready after start"
 def _alert_db_connect() -> Any:
     """The DB dial the non-critical alert uses — a named seam.
 
-    `shared.db.connect` is a process-wide entry a full `ava start` dials in
+    `base.db.connect` is a process-wide entry a full `ava start` dials in
     other steps too, so stubbing the alert's data plane must not replace every
     caller's. Indirection costs one line and keeps a test able to fake only this
     alert's DB.
     """
-    import shared.db
+    import base.db
 
-    return shared.db.connect()
+    return base.db.connect()
 
 
 def _unresolved_alert_instance(conn: Any, service: str) -> tuple[str, str] | None:
@@ -276,7 +276,7 @@ def _unresolved_alert_instance(conn: Any, service: str) -> tuple[str, str] | Non
 
 def _alert_upsert_and_maybe_im(conn: Any, alert: dict[str, object], *, im_enabled: bool) -> None:
     """One upsert + one IM (when the transition gate says so and IM is on)."""
-    from shared.alerts import (
+    from base.telemetry.alerts import (
         display_language,
         notify_im,
         notify_text,
@@ -308,7 +308,7 @@ def _notify_non_critical_unready_services(
     """
     from datetime import UTC, datetime
 
-    from shared.alerts import (
+    from base.telemetry.alerts import (
         fingerprint as compute_fingerprint,
     )
 

@@ -4,7 +4,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from gateway.routers._loki_shards import query_loki_shards, split_loki_window
+from gateway.cluster._loki_shards import query_loki_shards, split_loki_window
 
 
 @pytest.mark.parametrize("offset", [timedelta(), timedelta(seconds=-1)])

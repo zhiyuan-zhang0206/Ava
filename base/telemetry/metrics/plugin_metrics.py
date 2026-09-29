@@ -1,0 +1,598 @@
+"""Plugin metric registration — plugins declare metrics over the event stream.
+
+Two output surfaces (user-approved design, 2026-08-04, event-system W13):
+
+- ``grafana``: the ops dashboard
+  (``deploy/lgtm/config/grafana/provisioning/dashboards/ava-ops-main.json``)
+  is becoming a render of the registry — ``base.telemetry.metrics.grafana_dashboard`` turns
+  the specs into the dashboard JSON and ``ava lgtm render`` previews / writes
+  it (task #3697; slice S3 flips converge onto the render). Until then the
+  JSON stays the deployment source, and
+  ``tests/plugins/test_grafana_dashboard_render.py`` locks the render against
+  it.
+- ``inspector`` (W13b): the gateway builds the registry in process (imports
+  every plugin's ``metrics.py`` under its PluginContext + the core definition
+  modules — task #180 PR D) and serves per-agent panels under
+  ``/api/agents/{id}/inspect/metrics``. Query templates may carry the
+  ``{{agent_id}}`` placeholder, which the gateway renders per dialect
+  (``agent_id="<n>"`` for LogQL, ``agent_id = <n>`` for SQL).
+
+Registration mirrors the plugin state/config pattern: the plugin calls
+``register_metric(MetricSpec(...))`` at import time inside ``PluginContext``
+(the framework ``load_extensions`` wrap) and the plugin name is auto-filled.
+The registry is process-local.
+
+SQL safety (enforced at register time, task #180 PR C): a metric query must
+be a static single SELECT over ``events`` (the retired archive) or
+``agents_meta`` (live), built from a whitelist of keywords, aggregate
+functions, operators and literals — no DML/DDL, no information/``pg_*``
+functions, no comments, no multi-statement, no Grafana macros, no
+``{event_name}`` / ``{category}`` / ``{{agent_id}}`` placeholders (the live
+event stream is read through LogQL, task #1280).
+
+**SQL metrics retired (task #1823)**: the frozen ``events`` table was
+dropped, so SQL templates (whose FROM clauses are restricted to that table)
+fail at runtime; no in-repo registration uses them — external plugins must
+migrate to ``query_type="logql"`` / ``"promql"``. LogQL templates
+(``query_type="logql"``) follow the lighter contract in
+``base/telemetry/metrics/logql.py``. PromQL templates (``query_type="promql"``)
+are static Prometheus expressions.
+"""
+
+from __future__ import annotations
+
+import re
+from typing import Any, Literal
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from base.packages.plugins.context import current_plugin_name
+from base.telemetry.metrics.plugin_metrics_sql import (
+    _DOUBLE_QUOTED_OK,
+    _QUOTED_RE,
+    _SQL_COLUMNS,
+    _SQL_DENIED_KEYWORDS,
+    _SQL_FUNCTIONS,
+    _SQL_KEYWORDS,
+    _SQL_OPS,
+    _TOKEN_RE,
+    InvalidMetricQuery,
+    PluginMetricError,
+    _check_from_clauses,
+)
+
+Category = Literal["audit", "telemetry", "log"]
+PanelType = Literal["timeseries", "stat", "barchart", "table", "logs"]
+OutputSurface = Literal["grafana", "inspector"]
+TimeBasis = Literal["per_minute", "window"]
+
+_TIME_BASIS_LABEL: dict[TimeBasis, str] = {"per_minute": "per minute", "window": "window"}
+_BUCKET_WINDOW = re.compile(r"\[(\d+)m\]")
+_TRAILING_DIVISOR = re.compile(r"/\s*\d+\s*$")
+
+# ── errors ────────────────────────────────────────────────────────────────────
+
+
+class NoPluginContext(PluginMetricError):  # noqa: N818 — parallel to config_registration's NoPluginContext
+    """``register_metric`` called outside PluginContext — the framework wraps
+    plugin imports, so this is a plugin authoring bug (or a test calling
+    register directly)."""
+
+
+class DuplicateMetric(PluginMetricError):  # noqa: N818
+    """Two metrics registered under the same ``name`` — names are global
+    (across every plugin), so the author should prefix with the plugin."""
+
+
+# ── spec ──────────────────────────────────────────────────────────────────────
+
+
+class ThresholdStep(BaseModel):
+    """One Grafana absolute-threshold step (``fieldConfig.defaults.thresholds``).
+
+    ``value: None`` is the base step (covers everything below the next step);
+    a non-None value flips the color at that point. Mirrors the steps shape in
+    ``deploy/lgtm/config/grafana/provisioning/dashboards/ava-ops-main.json``.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    color: str = Field(pattern=r"^[a-zA-Z][a-zA-Z0-9-]*$")
+    value: float | None = None
+
+
+class MetricSpec(BaseModel):
+    """One plugin metric over the live event stream or a permitted SQL source.
+
+    Fields:
+        name: globally unique id (``^[a-z][a-z0-9_]*$``). Convention:
+            ``<plugin>_<what>`` (e.g. ``ava_code_syntax_fix_rate``).
+        title: Grafana panel title.
+        description: what the metric measures / its event provenance.
+        event_name: the event name the query filters on — lowercase letters,
+            digits, ``_`` and ``-`` (hyphens appear in the live vocabulary,
+            e.g. ``recall-filter``).
+        category: the event category (audit | telemetry | log).
+        unit: Grafana unit id (``short``, ``percent``, ``ops``, ``s``, ...).
+        panel: Grafana panel type — ``timeseries`` / ``stat`` / ``barchart`` / ``table`` / ``logs``.
+            A ``logs`` panel is a raw stream view whose LogQL skips the
+            ``{event_name}``/``{category}`` placeholder rule (the ``raw_view``
+            waiver; only the stream-selector and ``| json`` checks apply).
+        query: Grafana query template. LogQL templates select the live event
+            stream and use ``{event_name}`` / ``{category}`` placeholders;
+            ``{{agent_id}}`` is inspector-only and rendered as a label filter.
+        targets: extra query templates rendered as refId B/C/... targets on
+            the same panel (multi-series panels — e.g. the core TPS panels'
+            max/min-agent series). Validated like ``query``.
+        options / custom / field_defaults: optional panel-look overrides
+            merged into the generated panel's ``options`` /
+            ``fieldConfig.defaults.custom`` / ``fieldConfig.defaults`` (the
+            generator's defaults win for keys not present here). An empty
+            ``thresholds`` list (``[]``) suppresses the default green-base
+            step entirely (panels without any thresholds).
+        thresholds: optional absolute-threshold steps (green base + red at the
+            given value by default when a bare number list would suffice).
+        panel_id / section / order / position: dashboard placement pins
+            (2026-09-17, task #3697) — the as-is panel id, the section row it
+            belongs to, the panel's render rank within that section, and an
+            explicit grid position for the rare panel whose placement
+            deviates from the flow layout. Core panels carry the as-is
+            values; plugin panels leave them None (the renderer allocates
+            ids per plugin block and uses the plugin name as the section).
+        transformations: optional Grafana transformations copied verbatim
+            into the panel (e.g. the PR-flow day tables' joinByField +
+            organize), for the panels whose rendered shape needs them.
+        time_basis: how the number relates to time, rendered by the registry
+            so the title and the query cannot drift (panel titles state their
+            time basis — user ruling 2026-09-14). ``per_minute``: every query
+            part is one ``[Nm]`` bucket aggregate written without a divisor;
+            rendering appends `` / N`` and the title gains ``(per minute)``.
+            ``window``: every part aggregates over ``$__range`` and the title
+            gains ``(window)``. None when the unit already says it (``/
+            minute``, TPS) or the basis is something else (a trailing gauge).
+        output: which surfaces consume this metric — ``grafana`` (dashboard
+            JSON, this wave), ``inspector`` (per-agent panels, reserved).
+            A query carrying ``{{agent_id}}`` must NOT include ``grafana``.
+        plugin: filled by ``register_metric`` from PluginContext — never set
+            it yourself.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    name: str = Field(pattern=r"^[a-z][a-z0-9_]{0,63}$")
+    title: str = Field(min_length=1, max_length=120)
+    description: str = ""
+    event_name: str = Field(pattern=r"^[a-z][a-z0-9_-]*$")
+    category: Category
+    unit: str = "short"
+    panel: PanelType = "timeseries"
+    query: str = Field(min_length=1)
+    # Query dialect: "sql" (postgres datasource over the legacy `events`
+    # table), "logql" (Loki event stream, #1280), or static "promql"
+    # (Prometheus gauges/counters; Grafana-only).
+    query_type: Literal["sql", "logql", "promql"] = "sql"
+    # Additional query targets (refIds B/C/...) for multi-series panels —
+    # each target is validated and rendered exactly like `query`.
+    targets: list[str] | None = None
+    # Legend names for the rendered targets (refIds A, B, ...), one per
+    # series. LogQL/PromQL aggregates carry no labels, so Grafana targets
+    # render these as legendFormat values; SQL targets are named by their
+    # column aliases and must not combine with target_names.
+    target_names: list[str] | None = None
+    # Optional panel look overrides, merged into the generated panel JSON:
+    # `options` merges into panel "options" (legend/colorMode/noValue/...),
+    # `custom` merges into fieldConfig.defaults.custom (stacking/axisLabel/
+    # fillOpacity/...). Core panels use these to keep their exact rendered
+    # look after migrating from hand-written JSON (2026-08-06, Task #882).
+    options: dict[str, Any] | None = None
+    custom: dict[str, Any] | None = None
+    # Overrides merged into fieldConfig.defaults itself (e.g. the stat
+    # color mode) — keys not present here keep the generator defaults.
+    field_defaults: dict[str, Any] | None = None
+    # Explicit grid size (override the 6x4 stat / 12x7 chart default).
+    width: int | None = Field(default=None, ge=1, le=24)
+    height: int | None = Field(default=None, ge=1, le=40)
+    # Dashboard placement pins (task #3697): the as-is panel id, its section
+    # row, the render rank within that section, and an explicit grid position
+    # for the rare panel whose placement deviates from the flow layout. Core
+    # panels carry the as-is values; plugin panels leave them None (the
+    # renderer allocates ids per plugin block and uses the plugin name as the
+    # section).
+    panel_id: int | None = Field(default=None, ge=1)
+    section: str | None = None
+    order: int | None = Field(default=None, ge=0)
+    position: tuple[int, int] | None = None
+    # Grafana transformations copied verbatim into the rendered panel (the
+    # PR-flow day tables' joinByField + organize).
+    transformations: list[dict[str, Any]] | None = None
+    thresholds: list[ThresholdStep] | None = None
+    time_basis: TimeBasis | None = None
+    output: list[OutputSurface] = ["grafana"]
+    plugin: str = ""  # auto-filled at register time
+
+    @field_validator("output")
+    @classmethod
+    def _output_valid(cls, v: list[OutputSurface]) -> list[OutputSurface]:
+        if not v:
+            raise ValueError("output must list at least one surface")
+        seen: set[str] = set()
+        for surface in v:
+            if surface in seen:
+                raise ValueError(f"output lists {surface!r} twice")
+            seen.add(surface)
+        return v
+
+    @model_validator(mode="after")
+    def _target_names_consistent(self) -> MetricSpec:
+        if self.target_names is None:
+            return self
+        if self.query_type not in ("logql", "promql"):
+            raise ValueError(
+                "target_names requires query_type='logql' or 'promql' (SQL targets are "
+                "named by their column aliases)"
+            )
+        expected = 1 + len(self.targets or [])
+        if len(self.target_names) != expected:
+            raise ValueError(
+                f"target_names must name every rendered target ({expected} names, "
+                f"got {len(self.target_names)})"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _time_basis_consistent(self) -> MetricSpec:
+        if self.time_basis is None:
+            return self
+        label = _TIME_BASIS_LABEL[self.time_basis]
+        if re.search(rf"\([^)]*\b{label}\b[^)]*\)", self.title):
+            raise ValueError(
+                f"title spells the time basis {label!r} by hand; time_basis renders it"
+            )
+        parts = [self.query, *(self.targets or [])]
+        if self.time_basis == "window":
+            if not all("$__range" in part for part in parts):
+                raise ValueError(
+                    "time_basis='window' needs every query part to aggregate over $__range"
+                )
+            return self
+        if self.query_type == "sql":
+            raise ValueError("time_basis='per_minute' needs a logql or promql query")
+        for part in parts:
+            _bucket_minutes(part)
+        return self
+
+    @model_validator(mode="after")
+    def _promql_is_grafana_only(self) -> MetricSpec:
+        """PromQL core tiles have no gateway inspector execution path yet."""
+
+        if self.query_type == "promql" and self.output != ["grafana"]:
+            raise ValueError("query_type='promql' is currently supported only for grafana output")
+        return self
+
+
+def _bucket_minutes(template: str) -> int:
+    """The bucket width of a per-minute query part: its one ``[Nm]`` window.
+
+    Exactly one window keeps the part a single aggregation, so the appended
+    `` / N`` divides all of it; a part that already divides is refused so the
+    divisor has one owner.
+    """
+    windows = _BUCKET_WINDOW.findall(template)
+    if len(windows) != 1:
+        raise ValueError(
+            "time_basis='per_minute' needs exactly one [Nm] bucket window per query "
+            f"part, found {len(windows)}: {template!r}"
+        )
+    if _TRAILING_DIVISOR.search(template):
+        raise ValueError(
+            f"query part already divides by its bucket; time_basis renders the divisor: {template!r}"
+        )
+    return int(windows[0])
+
+
+# ── SQL safety validation ─────────────────────────────────────────────────────
+
+
+def validate_metric_sql(sql: str) -> None:
+    """Validate one static metric query against the read-only whitelist.
+
+    Task #180 (PR C): the SQL template era is over — the live event stream is
+    read through LogQL (task #1280), so Grafana time macros and the
+    ``{event_name}`` / ``{category}`` / ``{{{{agent_id}}}}`` placeholders are
+    rejected outright. What remains is the static-read guardrail: a single
+    SELECT over ``events`` (the retired archive — deliberate archive reads
+    only) or ``agents_meta`` (live), whitelisted functions / columns /
+    operators, no comments / multi-statement / DML / information functions.
+
+    Rejects: multi-statement input (``;`` outside the trailing position),
+    comments (``--`` / ``/* */``), any FROM target other than ``events`` /
+    ``agents_meta``, Grafana macros, template placeholders, unknown
+    identifiers / functions / operators, and any character the tokenizer
+    does not recognize (e.g. dollar-quoted strings).
+
+    Raises:
+        InvalidMetricQuery: with a concrete reason for plugin authors.
+    """
+    # 1. Single-statement / comment / no-template checks on a string with
+    #    quoted literals blanked out (so 'a;b' or "--" inside a string does
+    #    not trip them).
+    body = sql.rstrip()
+    if body.endswith(";"):
+        body = body[:-1]
+    blanked = _QUOTED_RE.sub("''", body)
+    if "--" in blanked or "/*" in blanked:
+        raise InvalidMetricQuery(
+            f"SQL comments are not allowed in metric queries (found '--' or '/* */'): {sql!r}"
+        )
+    if ";" in blanked:
+        raise InvalidMetricQuery(
+            f"multi-statement SQL is not allowed — exactly one SELECT, no ';' separators: {sql!r}"
+        )
+    if "$__" in body:
+        raise InvalidMetricQuery(
+            "Grafana time macros are not allowed in metric queries — the live "
+            f"event stream is read through LogQL (task #1280/#180): {sql!r}"
+        )
+    if "{" in body or "}" in body:
+        raise InvalidMetricQuery(
+            "template placeholders are not allowed in metric queries — "
+            "{event_name}/{category}/{{agent_id}} were retired with the "
+            f"events-table cutover (task #180): {sql!r}"
+        )
+
+    # 2. Tokenize; every character must belong to a recognized token.
+    tokens: list[tuple[str, str]] = []  # (kind, value)
+    pos = 0
+    for m in _TOKEN_RE.finditer(body):
+        if m.start() != pos:
+            bad = body[pos : m.start()]
+            raise InvalidMetricQuery(
+                f"unrecognized character(s) {bad!r} in metric query template — "
+                f"only whitelisted SQL constructs are allowed: {sql!r}"
+            )
+        kind = m.lastgroup
+        assert kind is not None  # noqa: S101 — regex always names a group
+        if kind != "ws":
+            tokens.append((kind, m.group(kind)))
+        pos = m.end()
+    if pos != len(body):
+        raise InvalidMetricQuery(
+            f"unrecognized trailing character(s) {body[pos:]!r} in metric query template: {sql!r}"
+        )
+
+    # 3. Must start with SELECT — case-insensitive, like every other keyword
+    #    check in this module (the whitelists all upper-compare), so a plugin
+    #    author writing `select ...` or `Select ...` is not rejected.
+    if not tokens or tokens[0][0] != "word" or tokens[0][1].upper() != "SELECT":
+        raise InvalidMetricQuery(
+            "metric query template must be a single SELECT statement, got "
+            f"{tokens[0] if tokens else '(empty)'}: {sql!r}"
+        )
+
+    # 4. Every FROM clause must reference only the `events` table (or a
+    #    subquery, whose inner FROM clauses are checked recursively). Comma-
+    #    separated table lists are walked item by item; a bare word right
+    #    after a table/subquery is treated as its alias (harmless — the
+    #    identifier whitelist below still applies to everything else).
+    #    FROM aliases are exempted from the function-call check below (an
+    #    alias column list `AS g(time)` must not read as a call `g(...)`).
+    from_alias_positions = _check_from_clauses(tokens, sql)
+
+    # 5. Classify every remaining token against the whitelists.
+    for i, (kind, value) in enumerate(tokens):
+        if kind in ("num", "str"):
+            continue
+        if kind == "ident":
+            inner = value[1:-1]
+            if not _DOUBLE_QUOTED_OK.match(inner):
+                raise InvalidMetricQuery(
+                    f"quoted identifier {value!r} contains characters outside "
+                    f"the allowed set: {sql!r}"
+                )
+            continue
+        if kind == "op":
+            if value not in _SQL_OPS:
+                raise InvalidMetricQuery(f"operator {value!r} is not on the whitelist: {sql!r}")
+            continue
+        assert kind == "word"  # noqa: S101
+        upper = value.upper()
+        if upper in _SQL_DENIED_KEYWORDS:
+            raise InvalidMetricQuery(
+                f"keyword {value!r} is not allowed in metric query templates "
+                f"(denied set: {sorted(_SQL_DENIED_KEYWORDS)}): {sql!r}"
+            )
+        if upper in _SQL_KEYWORDS or upper in _SQL_FUNCTIONS or value in _SQL_COLUMNS:
+            continue
+        # A bare word that is not whitelisted is only allowed as a column
+        # reference / alias WITHOUT a call — a following `(` means a function
+        # invocation, and only the whitelisted functions may be called
+        # (version(), pg_sleep(), now(), ... are rejected here). Column/alias
+        # names resolve against the locked `events` table at query time, so a
+        # misspelled one fails the query itself, never executes anything.
+        if i + 1 < len(tokens) and tokens[i + 1] == ("op", "(") and i not in from_alias_positions:
+            raise InvalidMetricQuery(
+                f"function call {value!r}(...) is not on the whitelist — only "
+                f"{sorted(_SQL_FUNCTIONS)} may be called: {sql!r}"
+            )
+        continue
+
+
+# ── registry ──────────────────────────────────────────────────────────────────
+
+_REGISTRY: dict[str, MetricSpec] = {}
+
+
+def register_metric(spec: MetricSpec) -> MetricSpec:
+    """Register one metric — must run inside PluginContext (the framework
+    wraps plugin imports).
+
+    Validation at register time: name uniqueness across all plugins and
+    query safety (``validate_metric_sql`` / ``validate_spec_logql``, by
+    dialect). The ``plugin`` field is auto-filled from the context,
+    overriding whatever the author passed.
+
+    Raises:
+        NoPluginContext: called outside ``with PluginContext(...)``.
+        DuplicateMetric: ``spec.name`` already registered.
+        InvalidMetricQuery: a query template failed validation.
+    """
+    plugin = current_plugin_name()
+    if plugin is None:
+        raise NoPluginContext(
+            "register_metric() must be called inside PluginContext — the "
+            "framework `load_extensions` already wraps plugin imports; the "
+            "generator wraps metrics-module imports with the plugin name."
+        )
+    if spec.name in _REGISTRY:
+        raise DuplicateMetric(
+            f"metric {spec.name!r} already registered (by plugin "
+            f"{_REGISTRY[spec.name].plugin!r}) — names are global, prefix with "
+            f"the plugin name."
+        )
+    validate_spec_sql(spec)
+    filled = spec.model_copy(update={"plugin": plugin})
+    _REGISTRY[spec.name] = filled
+    return filled
+
+
+def validate_spec_sql(spec: MetricSpec) -> None:
+    """Validate every query template on a spec (``query`` + ``targets``) —
+    the static-SQL whitelist, LogQL contract, or PromQL sanity check, by dialect. Shared by
+    ``register_metric`` and ``register_core_metric`` (Task #882) — core
+    metrics go through the same safety checks as plugin metrics. SQL
+    templates carry no placeholders anymore (task #180 PR C), so the old
+    ``{{agent_id}}`` ↔ grafana rule is subsumed by the placeholder
+    rejection; the LogQL dialect keeps its ``{{agent_id}}`` inspector idiom
+    (render-only, per-agent). PromQL has neither event-stream requirements
+    nor template substitutions."""
+    if spec.query_type == "logql":
+        # Lazy: logql imports this module (the exception class), so a
+        # module-level from-import here would cycle.
+        from base.telemetry.metrics.logql import validate_spec_logql
+
+        validate_spec_logql(spec)
+        return
+    if spec.query_type == "promql":
+        for template in [spec.query, *(spec.targets or [])]:
+            _validate_promql(template)
+        return
+    for template in [spec.query, *(spec.targets or [])]:
+        validate_metric_sql(template)
+
+
+def _validate_promql(template: str) -> None:
+    """Keep Grafana-only PromQL static and single-expression.
+
+    Prometheus is the evaluator; metric registrations only need to prevent a
+    dashboard template from accidentally inheriting SQL/LogQL placeholders or
+    carrying a multi-statement string. The current use is absolute OTLP gauges.
+    """
+
+    if ";" in template or "\n" in template:
+        raise InvalidMetricQuery("PromQL metric must be one expression without semicolons/newlines")
+    if any(
+        token in template
+        for token in ("{event_name}", "{category}", "{category_re}", "{{agent_id}}")
+    ):
+        raise InvalidMetricQuery("PromQL metric must not contain metric-template placeholders")
+
+
+def registered_metrics() -> list[MetricSpec]:
+    """All registered metrics, in registration order (grouped by plugin for
+    the generator's row layout)."""
+    return list(_REGISTRY.values())
+
+
+def clear_registry() -> None:
+    """Drop every registration — test fixtures (parallel to
+    ``agent.state.clear_plugin_registrations``)."""
+    _REGISTRY.clear()
+
+
+def drop_plugin_metrics(plugin: str) -> list[str]:
+    """Drop every registration made by ``plugin``; return the dropped names.
+
+    The in-process metrics loader (`gateway/inspect/_plugin_metrics.py`) calls
+    this after a failed ``metrics.py`` import: registration is not
+    transactional, so without the cleanup a module that raised mid-way would
+    leave its partial entries serving while every retry of the fixed file
+    died on ``DuplicateMetric`` — the plugin stuck on the failed path until
+    process restart.
+    """
+    dropped = [name for name, spec in _REGISTRY.items() if spec.plugin == plugin]
+    for name in dropped:
+        del _REGISTRY[name]
+    return dropped
+
+
+# ── rendering + export ────────────────────────────────────────────────────────
+
+
+def _sql_literal(value: str) -> str:
+    """Render a validated identifier/enum as a single-quoted SQL literal.
+    Kind/category are validated to ``^[a-z][a-z0-9_]*$`` / a Literal at spec
+    construction, so the escaping is defense in depth."""
+    return "'" + value.replace("'", "''") + "'"
+
+
+def _render_template(template: str, spec: MetricSpec, agent_id: int | None) -> str:
+    """Substitute ``{event_name}`` / ``{category}`` and, when ``agent_id``
+    is given, ``{{agent_id}}``. The literal quoting follows the dialect:
+    SQL wants single quotes, LogQL wants double quotes; PromQL is static."""
+    if spec.query_type == "promql":
+        return template
+    literal = _sql_literal if spec.query_type == "sql" else _logql_literal
+    rendered = template.replace("{event_name}", literal(spec.event_name)).replace(
+        "{category}", literal(spec.category)
+    )
+    # {category_re} renders the category UNQUOTED — for embedding inside an
+    # already-quoted LogQL regex (e.g. category=~"{category_re}|log" ->
+    # category=~"telemetry|log"). SQL templates never use it (no regex
+    # literals); the sql validator rejects the bare value either way.
+    if spec.query_type == "logql":
+        rendered = rendered.replace("{category_re}", spec.category)
+    if agent_id is not None:
+        if spec.query_type == "logql":
+            rendered = rendered.replace("{{agent_id}}", f'agent_id="{int(agent_id)}"')
+        else:
+            rendered = rendered.replace("{{agent_id}}", f"agent_id = {int(agent_id)}")
+    return rendered
+
+
+def _logql_literal(value: str) -> str:
+    """Double-quoted LogQL string literal (stream/line-filter values)."""
+    return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def _render_part(template: str, spec: MetricSpec, agent_id: int | None) -> str:
+    rendered = _render_template(template, spec, agent_id)
+    if spec.time_basis == "per_minute":
+        rendered += f" / {_bucket_minutes(template)}"
+    return rendered
+
+
+def render_query(spec: MetricSpec, agent_id: int | None = None) -> str:
+    """Render the primary template (``query``) for one surface.
+
+    ``{event_name}`` / ``{category}`` are substituted with single-quoted literals
+    (the generator writes static JSON — no parameter binding available).
+    ``{{agent_id}}`` stays verbatim unless ``agent_id`` is passed (the
+    inspector surface renders it to ``agent_id = <n>``). A ``per_minute``
+    spec's bucket divisor is appended here.
+    """
+    return _render_part(spec.query, spec, agent_id)
+
+
+def render_targets(spec: MetricSpec, agent_id: int | None = None) -> list[str]:
+    """Render every template on the spec (``query`` first, then each
+    ``targets`` entry) — one Grafana target per series group."""
+    return [render_query(spec, agent_id)] + [
+        _render_part(t, spec, agent_id) for t in (spec.targets or [])
+    ]
+
+
+def render_title(spec: MetricSpec) -> str:
+    """The panel title every surface shows: ``title`` plus the time basis."""
+    if spec.time_basis is None:
+        return spec.title
+    return f"{spec.title} ({_TIME_BASIS_LABEL[spec.time_basis]})"

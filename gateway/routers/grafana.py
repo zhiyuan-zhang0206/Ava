@@ -38,7 +38,7 @@ from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import RedirectResponse, StreamingResponse
 from starlette.background import BackgroundTask
 
-from shared.config import settings
+from base.config import settings
 
 router = APIRouter()
 

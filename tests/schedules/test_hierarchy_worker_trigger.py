@@ -1,7 +1,7 @@
 """The hierarchy worker's trigger + guardrails (task #4674).
 
 The event trigger is the worker's primary path: each compact boundary
-enqueues its own build job (`shared/agents/history/checkpoint_cleanup.py`),
+enqueues its own build job (`base/agents/history/checkpoint_cleanup.py`),
 and `runner.run_tick` consumes — claim, drain, done. These pin the consuming
 side: the tick's drain/scan cadence (the moved `run_tick` tests), the
 first-sight semantics (the silent-baseline retirement in both orderings, the
@@ -20,12 +20,12 @@ from collections.abc import Callable
 import psycopg
 import pytest
 
+from base.agents.history.hierarchy.pipeline import MaterializedTree
+from base.config import settings
+from base.events.contract import telemetry_events
 from services.hierarchy_worker import execute as execute_module
 from services.hierarchy_worker import runner
 from services.hierarchy_worker.scan import ScanOutcome, _has_clean_baseline, first_build, scan
-from shared.agents.history.hierarchy.pipeline import MaterializedTree
-from shared.config import settings
-from shared.events.contract import telemetry_events
 
 
 def cid(nth: int) -> str:
@@ -76,7 +76,7 @@ def _hot_row(conn: psycopg.Connection, agent_id: int, generated: int) -> None:
 
 
 def _record_emit(emitted: list[tuple[str, dict[str, object]]]) -> Callable[..., None]:
-    """A `shared.telemetry.emit` stand-in that mirrors the fail-fast contract —
+    """A `base.telemetry.emit` stand-in that mirrors the fail-fast contract —
     an unregistered kind raises in production, so it must raise here too, or a
     stray name would pass silently in tests (the orphaned-kind gate's blind
     spot)."""
@@ -312,7 +312,7 @@ def test_regen_budget_trips_on_the_edge_and_stops_claiming(
     tick stops claiming until an operator resets it (task #4674 §4)."""
     monkeypatch.setattr(settings.daemon, "hierarchy_regen_daily_budget_nodes", 3)
     emitted: list[tuple[str, dict[str, object]]] = []
-    monkeypatch.setattr("shared.telemetry.emit", _record_emit(emitted))
+    monkeypatch.setattr("base.telemetry.emit", _record_emit(emitted))
     _hot_row(db_conn, 880_103, 4)
     # A row finished outside the 24h window does not count toward it.
     db_conn.execute(
@@ -367,7 +367,7 @@ def test_budget_reset_lifts_the_stop_and_a_cooled_window_rearms(
     can a new excursion trip it again."""
     monkeypatch.setattr(settings.daemon, "hierarchy_regen_daily_budget_nodes", 3)
     emitted: list[tuple[str, dict[str, object]]] = []
-    monkeypatch.setattr("shared.telemetry.emit", _record_emit(emitted))
+    monkeypatch.setattr("base.telemetry.emit", _record_emit(emitted))
     _hot_row(db_conn, 880_103, 4)
 
     assert runner._regen_budget_check(db_conn) is True  # trip
@@ -450,7 +450,7 @@ def test_halted_build_records_the_marker_and_emits_the_signals(
     db_conn.commit()
 
     emitted: list[tuple[str, dict[str, object]]] = []
-    monkeypatch.setattr("shared.telemetry.emit", _record_emit(emitted))
+    monkeypatch.setattr("base.telemetry.emit", _record_emit(emitted))
     seen_caps: list[object] = []
     halted = MaterializedTree(
         nodes=(), errors=(), pending={}, max_level=1, generated=400, skipped=2, halted=True
@@ -489,7 +489,7 @@ def test_regen_signals_fire_only_past_their_thresholds(
     monkeypatch.setattr(settings.daemon, "hierarchy_regen_alert_nodes_per_job", 3)
     monkeypatch.setattr(settings.daemon, "hierarchy_regen_min_reuse_ratio", 0.5)
     emitted: list[tuple[str, dict[str, object]]] = []
-    monkeypatch.setattr("shared.telemetry.emit", _record_emit(emitted))
+    monkeypatch.setattr("base.telemetry.emit", _record_emit(emitted))
 
     cut = MaterializedTree(nodes=(), errors=(), pending={}, max_level=1, generated=4, reused=0)
     execute_module._regen_signals(7, 9, cut)
@@ -519,6 +519,6 @@ def test_guardrail_emit_failure_never_fails_the_build(
     def broken(_category: str, _event_name: str, **_kwargs: object) -> None:
         raise RuntimeError("sink down")
 
-    monkeypatch.setattr("shared.telemetry.emit", broken)
+    monkeypatch.setattr("base.telemetry.emit", broken)
 
     execute_module._try_emit("hierarchy_regen_halt", {"agent_id": 1})  # no raise

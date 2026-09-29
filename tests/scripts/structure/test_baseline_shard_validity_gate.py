@@ -15,7 +15,7 @@ import subprocess
 
 import pytest
 
-from scripts import lint_code_structure as lcs
+from scripts.lint import code_structure as lcs
 from scripts.structure import baseline_shards
 
 
@@ -88,7 +88,7 @@ def test_baseline_entry_filed_under_the_wrong_shard_is_an_actionable_error(
     tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     directory = _clear_baseline_dir(tmp_path)
-    (directory / "shared.json").write_text(
+    (directory / "base.json").write_text(
         json.dumps({"files": {"tests/big.py": 801}}), encoding="utf-8"
     )
     assert lcs.main([]) == 1

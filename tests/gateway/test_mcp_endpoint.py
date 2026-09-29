@@ -23,10 +23,10 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
+from base import config, telemetry
+from base.api_contracts.mcp_tool_contract import project_message
+from base.cluster.auth import bearer_header
 from gateway.app import app
-from shared import config, telemetry
-from shared.api_contracts.mcp_tool_contract import project_message
-from shared.cluster_auth import bearer_header
 
 _SECRET = "test-cluster-secret"  # noqa: S105 — test fixture
 _ACCEPT = "application/json, text/event-stream"
@@ -128,7 +128,7 @@ def _tool_result(message: dict[str, Any]) -> Any:
 
 def _audit_hits(tool: str, client_name: str) -> list[dict[str, Any]]:
     telemetry.sync()
-    from shared.paths import logs_dir
+    from base.paths import logs_dir
 
     day = datetime.now(UTC).strftime("%Y%m%d")
     mirror = logs_dir() / f"events-{day}.jsonl"
@@ -187,9 +187,9 @@ def test_initialize_negotiates_and_lists_seven_tools() -> None:
 
 
 async def test_gateway_contract_matches_pre_extraction_golden() -> None:
-    from gateway import mcp_endpoint
+    from gateway.mcp_server import endpoint
 
-    server = mcp_endpoint._build_server(None)
+    server = endpoint._build_server(None)
     tools = await server.list_tools()
     contract = {
         "instructions": server.instructions,
@@ -202,7 +202,7 @@ async def test_gateway_contract_matches_pre_extraction_golden() -> None:
     assert hashlib.sha256(encoded.encode()).hexdigest() == (
         "9222f5212d0d92b23cb8eb52db0314f9f6c59bae0cf2ab590efe32ff395f4227"
     )
-    assert mcp_endpoint.project_message is project_message
+    assert endpoint.project_message is project_message
     assert project_message({"type": "ai", "tool_calls": [{"args": {"other": 1}}]}) == {
         "role": "ai",
         "text": "",
@@ -210,8 +210,8 @@ async def test_gateway_contract_matches_pre_extraction_golden() -> None:
 
 
 def test_list_agents_reads_one_directory_page(monkeypatch: pytest.MonkeyPatch) -> None:
-    from gateway import mcp_endpoint
-    from shared.agent_roster import AgentCard, AgentDirectoryPage
+    from base.agents.observation.roster import AgentCard, AgentDirectoryPage
+    from gateway.mcp_server import endpoint
 
     seen: dict[str, Any] = {}
     card = AgentCard.model_validate(
@@ -244,7 +244,7 @@ def test_list_agents_reads_one_directory_page(monkeypatch: pytest.MonkeyPatch) -
         seen.update(kwargs)
         return page
 
-    monkeypatch.setattr(mcp_endpoint.agent_roster, "list_directory", fake_list_directory)
+    monkeypatch.setattr(endpoint.roster, "list_directory", fake_list_directory)
     with TestClient(app) as client:
         token = _create_token(client)
         result = _tool_call(
@@ -314,10 +314,10 @@ def test_spawn_get_terminate_round_trip(db_conn: psycopg.Connection) -> None:
 def test_spawn_launch_failure_tool_error_names_committed_agent(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from gateway.routers import agents as route
-    from gateway.routers.agents_forward import LaunchForwardError
+    from base.agents.observation.evidence import AvailabilityReason
+    from gateway.agents import router as route
+    from gateway.agents.forward import LaunchForwardError
     from ops.rpc_schemas import LaunchAgentRequest, SpawnedAgent
-    from shared.agent_observation import AvailabilityReason
 
     async def _fail(_target: str, _body: LaunchAgentRequest) -> SpawnedAgent:
         raise LaunchForwardError(AvailabilityReason.LAUNCH_UNREACHABLE, "runner offline")
@@ -461,7 +461,7 @@ def test_cluster_status_reports_this_host(monkeypatch: pytest.MonkeyPatch) -> No
     # Pure-gateway branch: no ops server stand-in exists for status_probe, so
     # the tool takes the local snapshot path (the same branch a gateway-only
     # host serves).
-    from gateway.routers import cluster as _cluster_router
+    from gateway.cluster import router as _cluster_router
 
     monkeypatch.setattr(_cluster_router, "is_agent_runner", lambda: False)
     with TestClient(app) as client:

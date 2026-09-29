@@ -1,4 +1,4 @@
-"""`scripts/lint_clock_lattice.py` — the lattice-vocabulary placement invariant.
+"""`scripts/lint/clock_lattice.py` — the lattice-vocabulary placement invariant.
 
 A module-level constant whose name carries lattice vocabulary (STALL / GRACE /
 REAP / BUDGET / WEDGED / NO_PROGRESS / LOCK_TTL / UPDATER_LEASE / SETTLE_TTL /
@@ -17,7 +17,7 @@ from pathlib import Path
 
 import pytest
 
-_lint = importlib.import_module("scripts.lint_clock_lattice")
+_lint = importlib.import_module("scripts.lint.clock_lattice")
 
 
 @pytest.fixture()
@@ -60,7 +60,7 @@ def test_bare_lattice_clock_outside_family_is_rejected(scan_tmp) -> None:
 def test_family_module_definition_is_allowed(scan_tmp) -> None:
     errs = _errors(
         scan_tmp,
-        "shared/timing.py",
+        "base/deploy/timing.py",
         """
         CONTROLLER_SCAN_INTERVAL_S = 30.0
         """,
@@ -82,7 +82,7 @@ def test_alias_of_registered_clock_is_allowed(scan_tmp) -> None:
 def test_exempt_clock_is_allowed(scan_tmp) -> None:
     errs = _errors(
         scan_tmp,
-        "shared/proc.py",
+        "base/host/proc.py",
         """
         _TERMINATE_GRACE_S = 3.0
         """,
@@ -93,7 +93,7 @@ def test_exempt_clock_is_allowed(scan_tmp) -> None:
 def test_independent_clock_without_lattice_vocabulary_is_allowed(scan_tmp) -> None:
     errs = _errors(
         scan_tmp,
-        "ava/_mcp_oauth.py",
+        "ava/mcps/_oauth.py",
         """
         _OAUTH_FLOW_TIMEOUT_S = 600.0
         """,
@@ -104,7 +104,7 @@ def test_independent_clock_without_lattice_vocabulary_is_allowed(scan_tmp) -> No
 def test_settings_field_in_class_body_is_not_scanned(scan_tmp) -> None:
     errs = _errors(
         scan_tmp,
-        "shared/config/gateway.py",
+        "base/config/gateway.py",
         """
         class GatewaySettings(EnvSettings):
             launch_confirm_timeout_seconds: float = Field(
@@ -193,17 +193,17 @@ def test_real_allowlists_are_current() -> None:
 
 def test_exemption_for_a_deleted_file_is_stale(scan_tmp, monkeypatch) -> None:
     monkeypatch.setattr(_lint, "_FAMILY_MODULES", ())
-    monkeypatch.setattr(_lint, "_INDEPENDENT_CLOCKS", {("shared/gone.py", "_REAP_S"): "why"})
+    monkeypatch.setattr(_lint, "_INDEPENDENT_CLOCKS", {("base/gone.py", "_REAP_S"): "why"})
     errs = _lint._stale_allowlist_entries()
     assert len(errs) == 1
-    assert "shared/gone.py" in errs[0] and "_REAP_S" in errs[0]
+    assert "base/gone.py" in errs[0] and "_REAP_S" in errs[0]
 
 
 def test_exemption_for_a_removed_constant_is_stale(scan_tmp, monkeypatch) -> None:
-    _write(scan_tmp, "shared/proc.py", "_OTHER_GRACE_S = 1.0\n")
+    _write(scan_tmp, "base/host/proc.py", "_OTHER_GRACE_S = 1.0\n")
     monkeypatch.setattr(_lint, "_FAMILY_MODULES", ())
     monkeypatch.setattr(
-        _lint, "_INDEPENDENT_CLOCKS", {("shared/proc.py", "_TERMINATE_GRACE_S"): "why"}
+        _lint, "_INDEPENDENT_CLOCKS", {("base/host/proc.py", "_TERMINATE_GRACE_S"): "why"}
     )
     errs = _lint._stale_allowlist_entries()
     assert len(errs) == 1
@@ -211,11 +211,11 @@ def test_exemption_for_a_removed_constant_is_stale(scan_tmp, monkeypatch) -> Non
 
 
 def test_live_exemption_and_family_module_are_current(scan_tmp, monkeypatch) -> None:
-    _write(scan_tmp, "shared/proc.py", "_TERMINATE_GRACE_S: float = 1.0\n")
-    _write(scan_tmp, "shared/timing.py", "CLOCKS = {}\n")
-    monkeypatch.setattr(_lint, "_FAMILY_MODULES", ("shared/timing.py",))
+    _write(scan_tmp, "base/host/proc.py", "_TERMINATE_GRACE_S: float = 1.0\n")
+    _write(scan_tmp, "base/deploy/timing.py", "CLOCKS = {}\n")
+    monkeypatch.setattr(_lint, "_FAMILY_MODULES", ("base/deploy/timing.py",))
     monkeypatch.setattr(
-        _lint, "_INDEPENDENT_CLOCKS", {("shared/proc.py", "_TERMINATE_GRACE_S"): "why"}
+        _lint, "_INDEPENDENT_CLOCKS", {("base/host/proc.py", "_TERMINATE_GRACE_S"): "why"}
     )
     assert _lint._stale_allowlist_entries() == []
 
@@ -226,7 +226,7 @@ def test_full_scan_fails_on_a_stale_family_module(
     """Only the argument-free full scan (pre-commit, CI) judges the allowlists."""
     for scan_dir in _lint._SCAN_DIRS:
         (_lint._REPO_ROOT / scan_dir).mkdir(parents=True, exist_ok=True)
-    monkeypatch.setattr(_lint, "_FAMILY_MODULES", ("shared/retired_timing.py",))
+    monkeypatch.setattr(_lint, "_FAMILY_MODULES", ("base/retired_timing.py",))
     monkeypatch.setattr(_lint, "_INDEPENDENT_CLOCKS", {})
     assert _lint.main([]) == 1
     assert "stale _FAMILY_MODULES entry" in capsys.readouterr().err

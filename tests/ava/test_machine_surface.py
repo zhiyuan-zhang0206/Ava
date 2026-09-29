@@ -23,7 +23,7 @@ import ava
 import ava.agents
 import ava.self
 from ava.agents import AgentRow
-from shared.agents import AgentStatus
+from base.agents import AgentStatus
 
 
 def test_spawn_has_machine_arg() -> None:

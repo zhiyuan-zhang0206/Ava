@@ -19,7 +19,7 @@ def _h_start(args: argparse.Namespace) -> int:
 
 
 def _h_stop(args: argparse.Namespace) -> int:
-    from cli.commands.stop import cmd_stop
+    from cli.commands.lifecycle.stop import cmd_stop
 
     return cmd_stop(
         keep_infra=args.keep_infra,
@@ -32,7 +32,7 @@ def _h_stop(args: argparse.Namespace) -> int:
 
 
 def _h_pause(args: argparse.Namespace) -> int:
-    from cli.commands.stop import cmd_pause
+    from cli.commands.lifecycle.stop import cmd_pause
 
     return cmd_pause(
         preserve_sessions=frozenset(args.keep_service), force=args.force, timeout=args.timeout
@@ -40,7 +40,7 @@ def _h_pause(args: argparse.Namespace) -> int:
 
 
 def _h_restart(args: argparse.Namespace) -> int:
-    from cli.commands.stop import cmd_restart
+    from cli.commands.lifecycle.stop import cmd_restart
 
     return cmd_restart(
         mode=args.mode,
@@ -49,7 +49,7 @@ def _h_restart(args: argparse.Namespace) -> int:
 
 
 def _h_status(_args: argparse.Namespace) -> int:
-    from cli.commands.status import cmd_status
+    from cli.commands.lifecycle.status import cmd_status
 
     return cmd_status()
 

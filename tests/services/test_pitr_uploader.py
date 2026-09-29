@@ -11,10 +11,10 @@ from typing import ClassVar, cast
 import pytest
 from cryptography.exceptions import InvalidTag
 
-from services.pitr.checksums import CRC32C, ObjectChecksum
-from services.pitr.crypto import create_plan, decrypt_archive, encrypt_archive, open_encrypted
-from services.pitr.object_store import ObjectStore, RemoteObjectAck
-from services.pitr.uploader import (
+from services.pitr.stores.checksums import CRC32C, ObjectChecksum
+from services.pitr.stores.object_store import ObjectStore, RemoteObjectAck
+from services.pitr.wal.crypto import create_plan, decrypt_archive, encrypt_archive, open_encrypted
+from services.pitr.wal.uploader import (
     AckCorruptionError,
     AckManifest,
     PitrUploader,
@@ -276,8 +276,8 @@ def test_same_size_staged_ciphertext_tamper_fails_before_remote_retry(tmp_path: 
 
 @pytest.mark.asyncio
 async def test_critical_backoff_heartbeats_and_stops_promptly() -> None:
+    from base.daemon.health import Liveness
     from services.pitr.uploader_daemon import _wait_with_heartbeat
-    from shared.daemon_health import Liveness
 
     stop = asyncio.Event()
     liveness = Liveness(timeout_s=0.04)
@@ -371,9 +371,9 @@ def test_filename_adapter_uses_seekable_16mib_ciphertext(
     streamed upload fails here with UnsupportedOperation (the SDK's resumable
     transport cannot tell() a BufferedReader) even though FakeStore-based
     tests stay green."""
-    from services.pitr import gcs_store as gcs_store_module
-    from services.pitr.gcs_store import GCSObjectStore
-    from services.pitr.uploader import PitrUploader
+    from services.pitr.stores import gcs_store as gcs_store_module
+    from services.pitr.stores.gcs_store import GCSObjectStore
+    from services.pitr.wal.uploader import PitrUploader
 
     client = _ResumableFakeClient()
     monkeypatch.setattr(
@@ -433,7 +433,7 @@ def test_real_sdk_resumable_transport_retries_16mib_upload(tmp_path: Path) -> No
     from google.auth.credentials import AnonymousCredentials
     from google.cloud import storage
 
-    from services.pitr.gcs_store import BucketClient, GCSObjectStore
+    from services.pitr.stores.gcs_store import BucketClient, GCSObjectStore
 
     class ResumableHandler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
@@ -630,7 +630,7 @@ def test_upload_loop_oserror_permission_backs_off_critically(
 
 
 def test_unacked_age_drives_health_component(tmp_path: Path) -> None:
-    """The oldest un-ACKed spool entry's age feeds state.py's model against
+    """The oldest un-ACKed spool entry's age feeds wal/state.py's model against
     AVA_PITR_UNACKED_WARN/CRITICAL_SECONDS — dead configuration otherwise
     (QA #4681 block 3)."""
     import time
@@ -705,8 +705,8 @@ async def test_unacked_critical_keeps_healthz_200(
     import json
     import time
 
+    from base.daemon.health import Liveness, start_health_server, stop_health_server
     from services.pitr.uploader_daemon import _LoopErrors, _unacked_components
-    from shared.daemon_health import Liveness, start_health_server, stop_health_server
 
     store = FakeStore()
     uploader, source = _uploader(tmp_path, store)
@@ -742,8 +742,8 @@ def test_disk_hard_bound_still_gates_readiness(tmp_path: Path) -> None:
     """QA #4696/405 ruling A: the disk component keeps the default gating —
     a footprint past the hard bound genuinely degrades readiness (the daemon
     cannot work), so it must still flip the response to 503."""
+    from base.daemon.health_schema import render
     from services.pitr.uploader_daemon import _disk_components
-    from shared.health_schema import render
 
     store = FakeStore()
     uploader, _ = _uploader(tmp_path, store)
@@ -779,13 +779,13 @@ async def test_healthz_answers_while_upload_is_blocked(tmp_path: Path) -> None:
     import threading
     import time
 
+    from base.daemon.health import Liveness, start_health_server, stop_health_server
     from services.pitr import uploader_daemon
     from services.pitr.uploader_daemon import (
         _disk_components,
         _LoopErrors,
         _unacked_components,
     )
-    from shared.daemon_health import Liveness, start_health_server, stop_health_server
 
     class _SlowStore:
         """Fake GCS store whose put blocks until released (slow-client shape)."""

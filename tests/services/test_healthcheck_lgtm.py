@@ -14,9 +14,9 @@ from typing import Any, cast
 
 import pytest
 
+from base.config import settings
+from base.daemon.health import DaemonProbe
 from services.healthchecks import lgtm as hc
-from shared.config import settings
-from shared.daemon_health import DaemonProbe
 
 
 class _Response:
@@ -225,15 +225,15 @@ def test_is_lgtm_host_accepts_station_capability(
     """The declarative observability-station capability designates the host
     exactly like the marker — the watchdog keepalive and `ava status` gate on
     either form."""
-    from shared.machine import reset_identity, set_identity
+    from base.cluster.machine import reset_identity, set_identity
 
     home = tmp_path / "station"
     home.mkdir()
     # is_lgtm_host() dials the home twice: the name bound in this module
-    # (from shared.paths import ava_home) AND the fresh lookup inside
+    # (from base.paths import ava_home) AND the fresh lookup inside
     # home_is_observability_station — patch both.
     monkeypatch.setattr(hc, "ava_home", lambda: home)
-    monkeypatch.setattr("shared.paths.ava_home", lambda: home)
+    monkeypatch.setattr("base.paths.ava_home", lambda: home)
 
     # No marker, no capability -> not the station.
     assert hc.is_lgtm_host() is False

@@ -1,7 +1,7 @@
 ---
 type: doc
 title: CLI Command Modules
-description: One module per `ava` subcommand, plus `_`-prefixed internal steps used by host lifecycle commands. Public modules define `cmd_*` handlers, wired by the argparse tree in `cli/main.py`.
+description: One subpackage per `ava` command domain, plus the few `_`-prefixed helpers those domains share. Public modules define `cmd_*` handlers, wired by the argparse tree in `cli/main.py`.
 tags:
 - cli
 - tool
@@ -11,7 +11,7 @@ tags:
 
 ## What it is
 
-`cli/commands/` holds one module per `ava` subcommand. The argparse tree lives
+`cli/commands/` holds the `ava` command domains. The argparse tree lives
 in `cli/parsers/` (one module per command domain, each holding that domain's
 subcommand builders and `_h_*` handlers); `cli/main.py` composes it and
 dispatches via `set_defaults(func=)` to the module's `cmd_*` handler — there is
@@ -20,8 +20,8 @@ no registry or plugin mechanism, the wiring is the parser.
 `cli/commands/__init__.py` is an empty package door: no import work and no
 re-exports, so `import cli.commands` loads nothing else, Settings included.
 Each command module is its own door; `cli.parsers` handlers lazy-import
-`cmd_*` from the module that defines it, and test seams patch there. Seven
-subpackages hold the leaf domains, each an independent package door:
+`cmd_*` from the module that defines it, and test seams patch there. Eight
+subpackages hold the domains, each an independent package door:
 
 - `agents/` — lifecycle control, notices, timelines, external-agent
   impersonation, the pty/computer-use daemons
@@ -36,8 +36,12 @@ subpackages hold the leaf domains, each an independent package door:
   (`pgbouncer.py`, `pitr_foundation.py`)
 - `cluster/` — whole-cluster verbs, the health probe, cron, the registry
 - `converge/` — the orchestrator (`host.py`), the step contract (`spec.py`),
-  and host-wiring steps owned by no other domain (firewall, Redis bridge, OS
-  jobs).
+  the warning-only start preflights (health, ports, ownership), the
+  rendered-file guard, and host-wiring steps owned by no other domain
+  (firewall, Redis bridge, OS jobs).
+- `lifecycle/` — `ava start` / `pause` / `stop` / `restart` / `maintenance` /
+  `status`, the pending-migration step, and the single application root they
+  drive: [[cli/commands/lifecycle/lifecycle.ava.okf.md|Host lifecycle]].
 
 `start.py` / `stop.py` / `status.py` / `maintenance.py` / `migrations.py` and
 the `_`-prefixed steps host commands call (`_probe`, `_setup`, `_repo`,
@@ -47,7 +51,7 @@ are internal steps under public names because other packages, such as the
 release transition, reach them.
 
 `stop.py` exposes `pause` and `stop` through `_temporary_stop`; restart reuses
-its native drain. `ops.agent_pause` and `ops.agent_pause_probe`
+its native drain. `ops.agent_pause` and `ops.agent_pause.probe`
 own prepare/drain and runtime capability checks; `service_stop` and
 `data_plane/maintenance_stop` verify resource exits, and
 `data_plane/write_generation` performs a release's write-generation fence and
@@ -59,7 +63,7 @@ would interpret another shutdown signal as immediate termination. A birth that
 finishes its drain and exits while its listeners are being scanned is stopped,
 not a foreign listener. An explicit
 force request alone permits a kill, with a separate bounded settle wait when
-the graceful deadline is spent. The data-plane stop requests [owned PostgreSQL](../../shared/cluster/postgres.ava.okf.md) fast shutdown (SIGINT), so neither waits on idle client connections a drained state
+the graceful deadline is spent. The data-plane stop requests [owned PostgreSQL](../../base/cluster/postgres.ava.okf.md) fast shutdown (SIGINT), so neither waits on idle client connections a drained state
 cannot protect (issue #2307). When the data-plane phase still fails after the
 services phase stopped, `_temporary_stop` compensates with a bounded internal
 `ava start` (restoring services only when native storage admits startup) instead of
@@ -70,17 +74,13 @@ native helper exit and removal of its definition. Start recreates that definitio
 Root owns Gate and native LGTM application services. `_pause_resume`
 releases normal startup admission only after readiness.
 `cli/parsers/maintenance.py` retains explicit intermediate steps through
-`cli/commands/maintenance.py` and `_maintenance_probe`.
-They reuse the [durable maintenance journal](../../shared/maintenance/maintenance.ava.okf.md).
+`cli/commands/lifecycle/maintenance.py` and `_maintenance_probe`.
+They reuse the [durable maintenance journal](../../base/deploy/maintenance/maintenance.ava.okf.md).
 See [the coordinated operator procedure](../../conventions/graceful-maintenance.md).
 
 Gateway data-plane startup (`data_plane/cluster_instance`, `data_plane/bringup`,
 `data_plane/pgbouncer`):
 [[cli/commands/data_plane/data-plane-startup.ava.okf.md|Gateway data-plane startup]].
-
-`cli/commands/migrations.py:cmd_migrations_apply` is deliberately not a user-facing verb —
-it runs as a step of `ava start`, so any restart crossing a
-schema change catches the DB up on its own.
 
 ## Notes
 
@@ -100,7 +100,8 @@ schema change catches the DB up on its own.
 - Which cluster a command acts on comes from `cli/commands/_repo.py:_repo_root` — the
   checkout the running `ava` belongs to — never the current directory.
 - What `ava start` treats as already-up, what it waits for, and when an unready
-  service becomes exit code 4 are one subject, in [[start-readiness.ava.okf.md]].
+  service becomes exit code 4 are one subject, in
+  [[cli/commands/lifecycle/start-readiness.ava.okf.md]].
 - Prepared release transitions are owned by [[cli/release_transition/release_transition.ava.okf.md]].
   There are no updater shell chains or bootstrap/continuation commands.
 - Host-level Application Firewall and Redis bridge wiring are one subject:
@@ -117,12 +118,13 @@ schema change catches the DB up on its own.
   SDK that no other verb needs. See [[cli/commands/extensions/packages.ava.okf.md]].
 - [[cli/commands/data_plane/pitr.ava.okf.md]] defines the PITR inspection surface and the archive →
   verify → retire guard for finite migration rollback snapshots.
-- [[ownership_preflight.ava.okf.md]] names the warning-only ownership repair
-  guard that runs before converge writes later host state.
+- [[cli/commands/converge/ownership_preflight.ava.okf.md]] names the
+  warning-only ownership repair guard that runs before converge writes later
+  host state.
 
 ## Key Dependencies
 
 - [[cli.ava.okf.md]] — the CLI domain overview: verbs, cluster identity, idempotent first start
 - [[packages.ava.okf.md]] — the `ava plugins` / `ava skill` / `ava mcp` package surface
-- [[start-readiness.ava.okf.md]] — what `ava start` calls up: the launch guard, the
-  root-owned readiness wait and failure exit code
+- [[cli/commands/lifecycle/lifecycle.ava.okf.md]] — start, stop, pause,
+  maintenance and the application root

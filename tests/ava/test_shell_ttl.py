@@ -7,7 +7,7 @@ import psycopg
 import pytest
 
 import ava
-from shared.platform import IS_WINDOWS
+from base.native_process.os_platform import IS_WINDOWS
 
 pytestmark = [
     pytest.mark.skipif(IS_WINDOWS, reason="PTY supervisor is POSIX-only"),
@@ -155,8 +155,8 @@ def test_renew_event_carries_int_ttl(db_conn: psycopg.Connection, _agent_row: in
     histogram family beside the counter one."""
     import json
 
-    from shared import telemetry
-    from shared.paths import logs_dir
+    from base import telemetry
+    from base.paths import logs_dir
 
     session_id = ava.shell.sessions.new("test-renew-cast", ttl=120)
     try:

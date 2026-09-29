@@ -20,14 +20,14 @@ from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 
+from base.deploy.release.verified_file import regular_bytes
+from base.native_process.evidence import ExpectedProcess
+from base.native_process.ownership import OwnedProcess
 from cli.release_transition.journal import Journal, Operation, read_operation
 from cli.release_transition.pitr.evidence import PitrSeal
 from cli.release_transition.pitr.inputs import read_record, require_inputs
 from cli.release_transition.request import PitrRequest
-from services.pitr.activation_state import ActivationRecord, record_path, write_record
-from shared.native_process.ownership import OwnedProcess
-from shared.process_evidence import ExpectedProcess
-from shared.verified_file import regular_bytes
+from services.pitr.activation.state import ActivationRecord, record_path, write_record
 
 # Terminal writer closure bounds, matching the release stop phase's default
 # FleetPolicy `close_s` and `cancel_grace_s`: busy
@@ -62,7 +62,7 @@ def _require_pg_cluster(before: dict[str, str], after: dict[str, str]) -> None:
 def observe_postgres(operation: Operation) -> None:
     """Require actual new native birth and owned archive settings after restart."""
     from cli.commands.data_plane import pitr_activation as activation
-    from services.pitr.activation_runtime import archive_settings, settings_digest
+    from services.pitr.activation.runtime import archive_settings, settings_digest
 
     progress = operation.pitr
     if progress is None or progress.seal is None:
@@ -85,7 +85,7 @@ def observe_postgres(operation: Operation) -> None:
 
 def persist_failure(operation: Operation, failure: BaseException) -> None:
     """Business diagnostics remain in the activation journal under the same writer."""
-    from services.pitr.activation_observability import save_error
+    from services.pitr.activation.observability import save_error
 
     if operation.phase not in {"provisioning", "proving"}:
         return
@@ -105,7 +105,7 @@ class PitrTransition:
         return read_operation(self.request.path).maintenance_at
 
     def preflight(self) -> None:
-        from shared.runtime_release import current_pointer
+        from base.deploy.release.runtime_release import current_pointer
 
         self.request.require_configuration()
         if current_pointer(self.home / "releases") != self.request.image.selector:
@@ -114,10 +114,10 @@ class PitrTransition:
 
     def _require_fleet_of_one(self) -> None:
         """PITR stays single-box: its reserved gateway home is the cluster's only unit."""
+        from base.cluster import registry_path
+        from base.cluster.machine import machine_name
         from cli.release_fleet.inventory import require_fleet_of_one
         from cli.release_transition.identity import require_reservation
-        from shared.cluster import registry_path
-        from shared.machine import machine_name
 
         if machine_name() != self.request.machine:
             raise ValueError("the loaded machine differs from the PITR operation's")
@@ -154,10 +154,10 @@ class PitrTransition:
 
     def provision(self, journal: Journal) -> bool:
         """Return true only when a fresh interpreter must enter the sealed phase."""
+        from base.deploy.state.cluster_lock import acquire_update_lock, release_update_lock
+        from base.native_process.os_platform import file_lock
         from cli.commands.data_plane import pitr_activation as activation
-        from services.pitr.activation_state import lock_path
-        from shared.cluster_lock import acquire_update_lock, release_update_lock
-        from shared.platform import file_lock
+        from services.pitr.activation.state import lock_path
 
         require_inputs(journal.operation)
         progress = journal.operation.pitr
@@ -199,10 +199,10 @@ class PitrTransition:
         )
 
     def _offline_rollback(self, journal: Journal, record: ActivationRecord) -> ActivationRecord:
+        from base.deploy.maintenance import admission
         from cli.commands.data_plane.maintenance_stop import stop_captured
-        from cli.commands.root_driver import require_root_absent
-        from services.pitr.activation_runtime import restore_exact_file, settings_digest
-        from shared import maintenance
+        from cli.commands.lifecycle.root_driver import require_root_absent
+        from services.pitr.activation.runtime import restore_exact_file, settings_digest
 
         progress = journal.operation.pitr
         if (
@@ -211,7 +211,7 @@ class PitrTransition:
             or record.pre_activation_pg_settings is None
         ):
             raise RuntimeError("offline rollback has no captured data-plane custody")
-        current = maintenance.require_operation(str(self.request.id), self.at)
+        current = admission.require_operation(str(self.request.id), self.at)
         if current.maintenance is None or current.maintenance.phase not in {"stopped", "starting"}:
             raise RuntimeError("offline rollback requires the exact stopped maintenance generation")
         require_root_absent()
@@ -266,9 +266,9 @@ class PitrTransition:
         return record
 
     def _seal(self, journal: Journal, record: ActivationRecord, *, data_stopped: bool) -> None:
+        from base.deploy.release.start_inputs import configuration_digest
         from cli.commands.data_plane import pitr_activation as activation
-        from services.pitr.activation_runtime import archive_settings, settings_digest
-        from shared.start_inputs import configuration_digest
+        from services.pitr.activation.runtime import archive_settings, settings_digest
 
         require_inputs(journal.operation)
         state = record.pre_activation_pg_settings if data_stopped else activation.read_pg_state()
@@ -300,9 +300,9 @@ class PitrTransition:
         require_inputs(operation)
         self._require_fleet_of_one()
         preflight(operation, self.image, previous=False)
-        from shared import maintenance
+        from base.deploy.maintenance import admission
 
-        current = maintenance.snapshot()
+        current = admission.snapshot()
         if current is not None:
             if current.holder != str(self.request.id) or current.acquired_at != self.at:
                 raise RuntimeError("PITR cannot adopt another maintenance generation")
@@ -318,20 +318,20 @@ class PitrTransition:
         agent_pause.drain(str(self.request.id), self.at, 90, reap=True)
 
     def stop_apps(self, journal: Journal) -> None:
-        from cli.commands import maintenance as maintenance_commands
+        from base.deploy.maintenance import admission, pause_owner
+        from base.deploy.maintenance.state import MaintenanceHold
         from cli.commands.data_plane.maintenance_stop import capture_custody
-        from cli.commands.root_driver import require_root_absent
-        from cli.commands.service_stop import (
+        from cli.commands.lifecycle import maintenance as maintenance_commands
+        from cli.commands.lifecycle.root_driver import require_root_absent
+        from cli.commands.lifecycle.service_stop import (
             await_terminal_work,
             close_release_terminals,
             require_no_terminals,
         )
         from ops import pty_close_notices
-        from shared import maintenance, pause_owner
-        from shared.maintenance_state import MaintenanceHold
 
         require_inputs(journal.operation)
-        current = maintenance.require_operation(str(self.request.id), self.at)
+        current = admission.require_operation(str(self.request.id), self.at)
         hold = current.maintenance
         if hold is None:
             raise RuntimeError("PITR stop lost its captured maintenance cohort")
@@ -376,12 +376,12 @@ class PitrTransition:
             journal.record_pitr(progress.model_copy(update={"data_stop": receipt}))
 
     def stop_data(self, operation: Operation) -> None:
+        from base.deploy.maintenance import admission
         from cli.commands.data_plane.maintenance_stop import stop_captured
-        from cli.commands.root_driver import require_root_absent
-        from shared import maintenance
+        from cli.commands.lifecycle.root_driver import require_root_absent
 
         require_inputs(operation)
-        current = maintenance.require_operation(str(self.request.id), self.at)
+        current = admission.require_operation(str(self.request.id), self.at)
         if current.maintenance is None or current.maintenance.phase != "stopped":
             raise RuntimeError("PITR data stop requires its stopped maintenance generation")
         require_root_absent()
@@ -390,31 +390,32 @@ class PitrTransition:
         stop_captured(operation.pitr.data_stop, 90)
 
     def start(self, operation: Operation) -> None:
+        from base.deploy.maintenance import admission
         from cli.release_transition.root_service import start
-        from shared import maintenance
 
         require_inputs(operation)
-        current = maintenance.require_operation(str(self.request.id), self.at)
+        current = admission.require_operation(str(self.request.id), self.at)
         if current.maintenance is None:
             raise RuntimeError("PITR start lost its maintenance generation")
         if current.maintenance.phase == "stopped":
-            maintenance.set_phase(str(self.request.id), self.at, "starting")
+            admission.set_phase(str(self.request.id), self.at, "starting")
         elif current.maintenance.phase not in {"starting", "ready"}:
             raise RuntimeError("PITR start requires completed native closure")
         start(operation, self.image)
 
     def observe(self, operation: Operation) -> None:
+        from base.deploy.maintenance import admission
         from cli.release_transition.root_service import observe, restore_boot
-        from shared import maintenance
 
         observe(operation, self.image)
-        maintenance.set_phase(str(self.request.id), self.at, "ready")
+        admission.set_phase(str(self.request.id), self.at, "ready")
         restore_boot(operation, self.image)
 
     def resume(self, operation: Operation) -> None:
-        from cli.commands import maintenance as maintenance_commands
+        from base.deploy.lifecycle import start_serving
+        from base.deploy.maintenance import pause_owner
+        from cli.commands.lifecycle import maintenance as maintenance_commands
         from cli.release_transition.root_service import observe
-        from shared import pause_owner, start_serving
 
         observe(operation, self.image)
         current = pause_owner.read()
@@ -428,10 +429,10 @@ class PitrTransition:
         maintenance_commands.resume(str(self.request.id), self.at, cancel=False)
 
     def prove(self, journal: Journal) -> None:
+        from base.deploy.state.cluster_lock import acquire_update_lock, release_update_lock
+        from base.native_process.os_platform import file_lock
         from cli.commands.data_plane import pitr_activation as activation
-        from services.pitr.activation_state import lock_path
-        from shared.cluster_lock import acquire_update_lock, release_update_lock
-        from shared.platform import file_lock
+        from services.pitr.activation.state import lock_path
 
         require_inputs(journal.operation)
         holder = f"pitr-proof:{self.request.id}"

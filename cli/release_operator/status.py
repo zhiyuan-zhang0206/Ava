@@ -18,12 +18,12 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from base.deploy.release.verified_file import regular_bytes
 from cli.release_fleet.policy import AlertRoute
 from cli.release_fleet.progress import FleetProgress, UnitProgress
 from cli.release_fleet.request import FleetRequest
 from cli.release_operator.current import current_release
 from cli.release_transition.journal import Operation, read_operation
-from shared.verified_file import regular_bytes
 
 
 def _active_operation_path(home: Path) -> Path | None:
@@ -157,8 +157,8 @@ def _current(home: Path) -> dict[str, str] | None:
 
 
 def _status_body(*, operation: str | None) -> dict[str, Any]:
-    from shared.machine import machine_name
-    from shared.paths import ava_home
+    from base.cluster.machine import machine_name
+    from base.paths import ava_home
 
     home = ava_home()
     return {

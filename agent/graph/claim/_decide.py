@@ -6,7 +6,7 @@ the ``halted`` formula appears exactly once. Chain: cancel path → veto
 re-entry → idle-restart gate → compact path → normal fallthrough (with the
 END snapshot flag).
 
-State typing follows the agent/graph/_exec.py module-docstring pattern
+State typing follows the agent/graph/exec/node.py module-docstring pattern
 (``_state.AgentState`` + deferred annotations) — see node.py docstring.
 """
 
@@ -36,11 +36,11 @@ from agent.hooks.compact_events import emit_compact_finished, emit_compact_start
 from agent.hooks.history_dump import dump_history, history_dump_note
 from agent.nodes import BEFORE_LLM, CLAIM, END, INIT_CONTEXT
 from agent.state_channels import CIRCUIT_REASON_CONTEXT_OVERFLOW
-from shared.agents.messages.inbound import InboundKind
-from shared.context import AvaContext
-from shared.live_events import CompactDone
-from shared.log import logger
-from shared.message_kwargs import AvaMsgType
+from base.agents.context import AvaContext
+from base.agents.messages.inbound import InboundKind
+from base.agents.messages.kwargs import AvaMsgType
+from base.events.live.projection import CompactDone
+from base.log import logger
 
 
 @dataclass(frozen=True)

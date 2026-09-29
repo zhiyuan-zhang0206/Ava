@@ -27,10 +27,10 @@ import time
 from pathlib import Path
 from typing import Any, NotRequired, TypedDict
 
-from shared.host.converge.accessibility import AccessibilityState, AccessibilityStatus
-from shared.host.converge.screen_capture import ScreenCaptureState, ScreenCaptureStatus
-from shared.paths import permissions_helper_socket
-from shared.resilience import Policy, retry
+from base.host.converge.accessibility import AccessibilityState, AccessibilityStatus
+from base.host.converge.screen_capture import ScreenCaptureState, ScreenCaptureStatus
+from base.host.net.resilience import Policy, retry
+from base.paths import permissions_helper_socket
 
 # Transport selection: named pipe on Windows, Unix socket elsewhere. A module
 # constant (not a live os.name check) so tests can flip the transport without
@@ -57,7 +57,8 @@ class PermissionsHelperError(RuntimeError):
     """A permissions helper call failed, or the daemon was unreachable."""
 
 
-def _connect(path: str) -> socket.socket:
+def connect(path: str) -> socket.socket:
+    """Open the helper's Unix socket, retrying briefly while it is absent or refusing."""
     phase = ["socket"]
     policy = Policy(
         max_attempts=_CONNECT_ATTEMPTS,
@@ -120,7 +121,7 @@ def _call(
     if _IS_WINDOWS:
         return _call_pipe(req)
     path = str(sock_path or permissions_helper_socket())
-    return _exchange(_connect(path), method, req)
+    return _exchange(connect(path), method, req)
 
 
 def _exchange(s: socket.socket, method: str, req: dict[str, object]) -> Any:
@@ -142,7 +143,7 @@ def _exchange(s: socket.socket, method: str, req: dict[str, object]) -> Any:
         ) from e
     finally:
         s.close()
-    return _parse_reply(bytes(buf), method)
+    return parse_reply(bytes(buf), method)
 
 
 def _call_pipe(req: dict[str, object]) -> Any:
@@ -184,10 +185,10 @@ def _call_pipe(req: dict[str, object]) -> Any:
                 raise PermissionsHelperError("permissions helper response exceeded line limit")
     finally:
         conn.close()
-    return _parse_reply(bytes(buf), str(req["method"]))
+    return parse_reply(bytes(buf), str(req["method"]))
 
 
-def _parse_reply(buf: bytes, method: str) -> Any:
+def parse_reply(buf: bytes, method: str) -> Any:
     """The wire reply contract, shared by the socket and pipe transports."""
     if not buf:
         raise PermissionsHelperError(f"permissions helper closed without a response to {method!r}")
@@ -397,7 +398,7 @@ def ping_peer(*, sock_path: str | Path) -> tuple[PingResult, int]:
     """
     if sys.platform != "darwin":
         raise PermissionsHelperError("socket peer identity is a macOS helper contract")
-    s = _connect(str(sock_path))
+    s = connect(str(sock_path))
     try:
         raw = s.getsockopt(_SOL_LOCAL, _LOCAL_PEERPID, 4)
     except OSError:

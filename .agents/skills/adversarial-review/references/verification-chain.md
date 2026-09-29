@@ -59,7 +59,7 @@ See `.agents/skills/run-local-tests/SKILL.md` for the full matrix. Rules:
 
 - A failing local run is always a finding; a passing local run is only
   evidence when it exercised the changed path.
-- Never run dev/test scripts that can touch production (os_cron
+- Never run dev/test scripts that can touch production (cron
   registration, migrations, IM sends) outside the pytest guardrails — a
   non-pytest script does not get conftest's env lockdown (G6).
 

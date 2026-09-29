@@ -24,7 +24,7 @@ from pathlib import Path
 
 import psycopg
 
-from shared.config import settings
+from base.config import settings
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _CONFTEST = _REPO_ROOT / "tests" / "conftest.py"
@@ -145,7 +145,7 @@ _EXEMPT: dict[str, str] = {
     "deployment_state by the R1 migration)",
     "cluster_defaults": "cluster singleton defaults — infra, not test data",
     "deployment_state": "R1 singleton (id=1, CHECK) — UPDATE-only consumers "
-    "(shared/cluster_lock.py), row seeded by the migration; truncating it would "
+    "(base/deploy/state/cluster_lock.py), row seeded by the migration; truncating it would "
     "delete the row mid-session. Tests self-clean via acquire/release pairs",
 }
 

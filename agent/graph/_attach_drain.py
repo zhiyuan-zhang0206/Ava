@@ -2,7 +2,7 @@
 
 Two call sites share the pack:
 
-- the exec node (`agent/graph/_exec.py`) drains the attachments registered
+- the exec node (`agent/graph/exec/node.py`) drains the attachments registered
   during the just-finished ``execute_code`` call **immediately**, so the media
   message lands right after the exec-output ToolMessage in the same turn and
   the model can use the files on its very next step (user ruling 2026-08-26);
@@ -20,9 +20,9 @@ from langchain_core.messages import HumanMessage
 
 from agent.messages import attach_message
 from agent.state import AttachState, BaseAgentState
-from shared.config.turn_view import turn_settings
-from shared.context import AvaContext
-from shared.lm.attach import AttachEntry, pack_attachments
+from base.agents.context import AvaContext
+from base.config.turn_view import turn_settings
+from base.lm.attach import AttachEntry, pack_attachments
 
 
 def build_attach_message(pending: AttachState, model: str) -> HumanMessage | None:

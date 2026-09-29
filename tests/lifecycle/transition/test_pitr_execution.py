@@ -10,11 +10,11 @@ from typing import Any
 import psycopg
 import pytest
 
+from base.native_process.evidence import ExpectedProcess
 from cli.release_transition import execute, journal
 from cli.release_transition.pitr import transition
 from cli.release_transition.pitr.evidence import DataOwner, DataStop
 from cli.release_transition.request import PitrRequest
-from shared.process_evidence import ExpectedProcess
 from tests.lifecycle.transition.test_launcher_linux import planned as planned
 from tests.lifecycle.transition.test_pitr_operation import _seal
 from tests.lifecycle.transition.test_pitr_operation import pitr_request as pitr_request
@@ -124,9 +124,9 @@ def _custody(home: Path) -> DataStop:
 def test_db_down_stop_continuation_uses_persisted_native_receipt_without_sql_drain(
     pitr_request: PitrRequest, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from cli.commands import root_driver
+    from base.deploy.maintenance import admission
     from cli.commands.data_plane import maintenance_stop
-    from shared import maintenance
+    from cli.commands.lifecycle import root_driver
 
     receipt = _custody(Path(pitr_request.home))
     operation = journal.create(pitr_request)
@@ -140,7 +140,7 @@ def test_db_down_stop_continuation_uses_persisted_native_receipt_without_sql_dra
     observed: list[object] = []
     monkeypatch.setattr(transition, "require_inputs", _constant(None))
     monkeypatch.setattr(
-        maintenance,
+        admission,
         "require_operation",
         _constant(SimpleNamespace(maintenance=SimpleNamespace(phase="stopped"))),
     )
@@ -154,8 +154,8 @@ def test_db_down_stop_continuation_uses_persisted_native_receipt_without_sql_dra
     def no_database(*_args: Any, **_kwargs: Any) -> None:
         raise AssertionError("offline continuation attempted database access")
 
-    monkeypatch.setattr("shared.db.connect", no_database)
-    monkeypatch.setattr("shared.db.pool", no_database)
+    monkeypatch.setattr("base.db.connect", no_database)
+    monkeypatch.setattr("base.db.pool", no_database)
     monkeypatch.setattr("ops.agent_pause.drain", no_database)
     driver.stop_data(operation)
     assert observed == ["root absent", receipt]
@@ -195,9 +195,9 @@ def test_failed_pitr_start_keeps_action_without_automatic_release_recovery(
 def test_preparation_lease_failure_cannot_mutate_business_state(
     pitr_request: PitrRequest, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from services.pitr.activation_state import load_record
-    from shared import cluster_lock
-    from shared.release_operation import authorized_pitr
+    from base.deploy.release.operation import authorized_pitr
+    from base.deploy.state import cluster_lock
+    from services.pitr.activation.state import load_record
 
     journal.create(pitr_request)
     driver = object.__new__(transition.PitrTransition)
@@ -224,8 +224,8 @@ def test_sealed_reentry_executes_only_retained_argv_and_environment(
 
     import psutil
 
+    from base.native_process.ownership import OwnedProcess
     from cli.release_transition import launcher_linux
-    from shared.native_process.ownership import OwnedProcess
 
     operation = journal.read_operation(Path(planned["operation"]))
     identity = OwnedProcess.capture(psutil.Process())
@@ -263,9 +263,9 @@ def test_sealed_reentry_executes_only_retained_argv_and_environment(
 def test_failed_online_lease_keeps_business_diagnostics_and_operation_authority(
     pitr_request: PitrRequest, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from services.pitr.activation_state import load_record
-    from shared import cluster_lock
-    from shared.release_operation import authorized_pitr
+    from base.deploy.release.operation import authorized_pitr
+    from base.deploy.state import cluster_lock
+    from services.pitr.activation.state import load_record
 
     journal.create(pitr_request)
     driver = object.__new__(transition.PitrTransition)
@@ -288,10 +288,10 @@ def test_failed_online_lease_keeps_business_diagnostics_and_operation_authority(
 def test_data_capture_refuses_postgres_replacement_before_any_data_signal(
     pitr_request: PitrRequest, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from cli.commands import maintenance as maintenance_commands
-    from cli.commands import root_driver
+    from base.deploy.maintenance import admission
     from cli.commands.data_plane import maintenance_stop
-    from shared import maintenance
+    from cli.commands.lifecycle import maintenance as maintenance_commands
+    from cli.commands.lifecycle import root_driver
 
     journal.create(pitr_request)
     driver = object.__new__(transition.PitrTransition)
@@ -305,7 +305,7 @@ def test_data_capture_refuses_postgres_replacement_before_any_data_signal(
     )
     monkeypatch.setattr(transition, "require_inputs", _constant(None))
     monkeypatch.setattr(
-        maintenance,
+        admission,
         "require_operation",
         _constant(SimpleNamespace(maintenance=SimpleNamespace(phase="drained"))),
     )

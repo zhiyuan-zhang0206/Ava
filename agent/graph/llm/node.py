@@ -25,7 +25,7 @@ context exit the watcher is cancelled. A missed signal is not lost — it stays 
 pending row the claim node dispatches next pass.
 
 State type hint key design (`state: _state.AgentState` + `from __future__ import
-annotations`): see `agent/graph/_exec.py` module docstring last paragraph — in
+annotations`): see `agent/graph/exec/node.py` module docstring last paragraph — in
 short, LangGraph narrows channels by the node's first param type hint;
 directly importing `AgentState` captures the BaseAgentState alias and drops
 all plugin fields; using module attribute + deferred annotation evaluation
@@ -73,17 +73,17 @@ from agent.hooks.compact import auto_compact_for_llm
 from agent.llm.usage import log_llm_usage
 from agent.nodes import AFTER_EXEC, BEFORE_EXEC
 from agent.state_channels import CircuitState
-from agent.turn_progress import mark_turn_progress
-from shared.config import settings
-from shared.config.turn_view import turn_settings
-from shared.context import AvaContext, agent_id_from_config
-from shared.db_transaction import async_write_transaction
-from shared.event_publisher import AgentEventPublisher
-from shared.live_events import TokenUsage
-from shared.lm.content import content_blocks
-from shared.lm.usage import CACHE_MECHANISM_MIXED, CACHE_SCOPE_EXPLICIT_BLOCK
-from shared.log import logger
-from shared.message_kwargs import read_ava_kwargs
+from agent.turn.progress import mark_turn_progress
+from base.agents.context import AvaContext, agent_id_from_config
+from base.agents.messages.kwargs import read_ava_kwargs
+from base.config import settings
+from base.config.turn_view import turn_settings
+from base.db.transaction import async_write_transaction
+from base.events.live.projection import TokenUsage
+from base.events.live.publisher import AgentEventPublisher
+from base.lm.content import content_blocks
+from base.lm.usage import CACHE_MECHANISM_MIXED, CACHE_SCOPE_EXPLICIT_BLOCK
+from base.log import logger
 
 from ._chunk import _assemble_final_message
 from ._stream import _stream_with_cache_retry
@@ -160,7 +160,7 @@ def _finalize_turn_observability(
       "thought for X seconds" from a real elapsed value rather than the
       timeline's own synthetic per-turn microsecond offset. Keyed alongside
       the other ava_* message tags; absent when no thinking streamed.
-      shared/agents/history/timeline.py reads it back.
+      base/agents/history/timeline.py reads it back.
     - log standardized token usage (`events.event_name='llm_usage'`).
     - emit the live TokenUsage SSE event. usage_metadata is accurate only after
       the stream completes (chunks carry only output_tokens increments;
@@ -169,13 +169,13 @@ def _finalize_turn_observability(
     """
     # Stamp the turn's real wall-clock onto the message so the timeline renders
     # the agent's reply / reasoning / code at their actual time, not the
-    # synthetic anchor+offset fallback. shared/agents/history/timeline.py prefers this ts.
+    # synthetic anchor+offset fallback. base/agents/history/timeline.py prefers this ts.
     kw = read_ava_kwargs(final_msg)
     kw["ava_created_at"] = datetime.now(UTC).isoformat()
     reasoning_ms_by_block = handler.reasoning_ms_by_block
     if reasoning_ms_by_block:
         # str keys: additional_kwargs is checkpoint-serialized, JSON object
-        # keys are strings; shared/agents/history/timeline.py reads back with str(block_idx).
+        # keys are strings; base/agents/history/timeline.py reads back with str(block_idx).
         kw["ava_reasoning_ms_by_block"] = {
             str(block_idx): ms for block_idx, ms in reasoning_ms_by_block.items()
         }
@@ -209,7 +209,7 @@ def _finalize_turn_observability(
                 body=f"failed to record usage for task {task_id}",
             )
     usage = final_msg.usage_metadata or {}
-    from shared.lm.reasoning import extract_reasoning_tokens
+    from base.lm.reasoning import extract_reasoning_tokens
 
     reasoning_tokens = extract_reasoning_tokens(
         final_msg.usage_metadata,
@@ -284,7 +284,7 @@ async def llm_node(
                 if remaining_seconds <= 0.0 and not isinstance(exc, LLMRetryBudgetExceededError):
                     _log_llm_retry_duration(runtime, outcome="budget_exhausted")
                 elif not isinstance(exc, (FatalLLMStreamError, FatalProviderError)):
-                    from shared.lm.registry import resolve_setting
+                    from base.lm.registry import resolve_setting
 
                     max_attempts = resolve_setting(
                         "llm_retry_max_attempts", model=turn_settings.lm.llm_model
@@ -304,7 +304,7 @@ async def llm_node(
             # Do not publish Error here — this except is wrapped by langgraph retry
             # and runs on every failed attempt; sending the frontend N "errors" then
             # succeeding on retry would contradict. The Error event is published
-            # once by outer `agent/runloop.py:_invoke_graph_with_lifecycle_logging`
+            # once by outer `agent/turn/runloop.py:_invoke_graph_with_lifecycle_logging`
             # after retries are exhausted (Cancelled is still published by
             # _llm_node_impl itself).
             raise
@@ -381,7 +381,7 @@ def _silent_idle_command(final_msg: AIMessage, agent_id: int) -> Command[LlmGoto
     budget_tokens = max(output_tokens, 1)
     cumulative_output_tokens = _silent_idle_output_tokens.get(tid, 0) + budget_tokens
     cap = settings.lm.llm_silent_idle_max_output_tokens
-    from shared.lm.pricing import quote
+    from base.lm.pricing import quote
 
     priced = quote(turn_settings.lm.llm_model, 0, output_tokens, 0)
     estimated_cost_usd = priced.cost_usd if priced is not None else None
@@ -438,7 +438,7 @@ async def _persist_last_active(ctx: AvaContext, agent_id: int, text: str) -> Non
       breaker's "first successful LLM call closes the breaker" moment).
     - permanent_reject_streak = 0 in the same statement: a completed turn is
       also the recovery signal that closes the recovery circuit breaker
-      (`shared/recovery_breaker.py`) — the only reset, so two consecutive
+      (`base/agents/recovery_breaker.py`) — the only reset, so two consecutive
       permanent rejections with no success between them keep it >= the halt
       threshold. `last_permanent_reject_reason` is cleared with it — the reason
       class belongs to the streak generation.

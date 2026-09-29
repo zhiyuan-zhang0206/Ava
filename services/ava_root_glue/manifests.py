@@ -50,8 +50,10 @@ from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import cast, get_args
 
+from base.cluster.machine import MachineRole
+from base.deploy.release.runtime_release import ReleaseRejectedError, VerifiedRelease
 from ops.roster import build_services
-from ops.service_spec import ServiceSpec
+from ops.roster.service_spec import ServiceSpec
 from services.ava_root.inputs import InputSeal
 from services.ava_root.manifest import (
     ManifestError,
@@ -59,8 +61,6 @@ from services.ava_root.manifest import (
     UnitRegistry,
     load_manifests,
 )
-from shared.machine import MachineRole
-from shared.runtime_release import ReleaseRejectedError, VerifiedRelease
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -228,7 +228,7 @@ def build_manifest(
 
     The capability set is an explicit input: this module must not read the
     local machine role (the gateway is the single routing point; role calls
-    are allowlisted by scripts/lint_code_structure.py). The wiring slice
+    are allowlisted by scripts/lint/code_structure.py). The wiring slice
     supplies the target's set. `repo_root=None` resolves this checkout.
     """
     resolved_repo = _REPO_ROOT if repo_root is None else repo_root
@@ -249,7 +249,7 @@ def build_manifest(
 def write_manifest(path: Path, manifest: Mapping[str, object]) -> Path:
     """Write the manifest JSON (validate with `build_manifest` first)."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    from shared.atomic_io import write_text_atomic
+    from base.host.atomic_io import write_text_atomic
 
     write_text_atomic(path, json.dumps(manifest, indent=2) + "\n", mode=0o600, sync_parent=True)
     return path

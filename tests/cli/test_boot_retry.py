@@ -13,8 +13,8 @@ from pathlib import Path
 
 import pytest
 
+from base.host.system.boot_policy import BOOT_RETRY_INTERVAL_S
 from cli import boot_retry
-from shared.boot_policy import BOOT_RETRY_INTERVAL_S
 
 
 @pytest.fixture
@@ -99,7 +99,7 @@ def test_start_flags_are_forwarded(monkeypatch: pytest.MonkeyPatch, runs: list[l
 def test_unready_start_is_retried_until_ready(
     monkeypatch: pytest.MonkeyPatch, runs: list[list[str]]
 ) -> None:
-    from shared.exit_codes import SERVICES_NOT_READY_EXIT_CODE
+    from base.agents.exit_codes import SERVICES_NOT_READY_EXIT_CODE
 
     slept = _stub_returncodes(monkeypatch, runs, [SERVICES_NOT_READY_EXIT_CODE, 0])
     assert boot_retry.run_boot([]) == 0

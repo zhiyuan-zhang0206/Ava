@@ -11,9 +11,9 @@ from typing import Any, cast
 
 import pytest
 
-from cli.commands import root_driver as driver
+from base.daemon.health import DaemonProbe
 from cli.commands._repo import ServiceSpec
-from shared.daemon_health import DaemonProbe
+from cli.commands.lifecycle import root_driver as driver
 
 # The repo-wide readiness guard replaces `_wait_for_root_services_ready` itself;
 # without this opt-out every readiness test here would assert on that stub.
@@ -188,7 +188,7 @@ def test_unresponsive_root_with_custody_is_not_an_absent_tree(
     directory = tmp_path / "custody"
     directory.mkdir()
     (directory / "gateway.json").write_text("unknown")
-    monkeypatch.setattr("shared.paths.root_run_dir", lambda: tmp_path)
+    monkeypatch.setattr("base.paths.root_run_dir", lambda: tmp_path)
 
     def make_client(**_kwargs: object) -> object:
         return object()
@@ -333,7 +333,7 @@ def test_linux_root_launch_never_consults_a_helper(
 def test_selected_stop_preserves_exact_home_qualified_names(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from cli.commands.service_stop import stop_services
+    from cli.commands.lifecycle.service_stop import stop_services
 
     captured: list[frozenset[str]] = []
 
@@ -375,8 +375,8 @@ def test_generation_change_refuses_without_signal_or_seed_publication(
         snapshot["units"].append({"id": "agent-host", "state": "running"})
     published = tmp_path / "manifests.json"
     published.write_text("old generation")
-    monkeypatch.setattr("shared.paths.root_run_dir", lambda: tmp_path)
-    monkeypatch.setattr("shared.paths.root_manifests_path", lambda: published)
+    monkeypatch.setattr("base.paths.root_run_dir", lambda: tmp_path)
+    monkeypatch.setattr("base.paths.root_manifests_path", lambda: published)
 
     def tree(*_args: object, **_kwargs: object) -> dict[str, object]:
         return manifest
@@ -393,7 +393,7 @@ def test_generation_change_refuses_without_signal_or_seed_publication(
     def source_identity(_repo: Path) -> str:
         return "a" * 64
 
-    monkeypatch.setattr("cli.commands.start_generation.source_digest", source_identity)
+    monkeypatch.setattr("cli.commands.lifecycle.start_generation.source_digest", source_identity)
     monkeypatch.setattr(driver, "root_child_env", dict)
     monkeypatch.setattr(driver, "tree_manifest", tree)
     monkeypatch.setattr(driver, "_root_client", object)
@@ -487,7 +487,7 @@ def test_root_launch_digest_ignores_service_manager_injections(
     of its own; the observer runs with the fixed stage environment only. Both
     sides must still name the same immutable generation.
     """
-    from cli.commands import start_generation
+    from cli.commands.lifecycle import start_generation
 
     monkeypatch.setattr(driver.settings.general, "service_path", str(tmp_path / "tools"))
 
@@ -519,33 +519,33 @@ def test_root_child_env_beyond_the_launch_inputs_is_only_ambient(
     alias) and the finalizer projection are set, including keys forwarded only
     when present, so what this catches does not depend on this host's environment.
     """
-    from shared import env_registry
+    from base.host.env import registry
 
     ambient = (
-        env_registry.HOST_PASSTHROUGH_KEYS
-        | env_registry._TEMP_DIR_KEYS
-        | env_registry.NETWORK_PROXY_KEYS
-        | env_registry.WINDOWS_SYSTEM_ENV_KEYS
+        registry.HOST_PASSTHROUGH_KEYS
+        | registry._TEMP_DIR_KEYS
+        | registry.NETWORK_PROXY_KEYS
+        | registry.WINDOWS_SYSTEM_ENV_KEYS
         | {"PYTHONUTF8"}
     )
     declared = (
-        {row.key for row in env_registry._PASSTHROUGH_ROWS}
-        | set(env_registry.FIELD_ALIASES.values())
-        | {env_registry.MANIFEST_CERTIFICATION_FINALIZER_ENV, "PYTHONUTF8"}
+        {row.key for row in registry._PASSTHROUGH_ROWS}
+        | set(registry.FIELD_ALIASES.values())
+        | {registry.MANIFEST_CERTIFICATION_FINALIZER_ENV, "PYTHONUTF8"}
     )
-    paths = {"HOME", "PATH", *env_registry._TEMP_DIR_KEYS}
+    paths = {"HOME", "PATH", *registry._TEMP_DIR_KEYS}
     for key in declared:
         monkeypatch.setenv(key, str(tmp_path) if key in paths else "ambient")
     monkeypatch.setattr(driver.settings.general, "service_path", str(tmp_path / "tools"))
 
     def finalizer() -> dict[str, str]:
         return {
-            env_registry.MANIFEST_CERTIFICATION_SECRET_ENV: "proof",
-            env_registry.MANIFEST_CERTIFICATION_FINALIZER_ENV: "1",
+            registry.MANIFEST_CERTIFICATION_SECRET_ENV: "proof",
+            registry.MANIFEST_CERTIFICATION_FINALIZER_ENV: "1",
         }
 
-    monkeypatch.setattr(env_registry, "manifest_certification_secret_env", finalizer)
-    undeclared = set(driver.root_child_env()) - env_registry.launch_input_keys() - ambient
+    monkeypatch.setattr(registry, "manifest_certification_secret_env", finalizer)
+    undeclared = set(driver.root_child_env()) - registry.launch_input_keys() - ambient
     assert not undeclared, f"declare these in launch_input_keys or as ambient: {sorted(undeclared)}"
 
 
@@ -573,7 +573,7 @@ def test_unusable_helper_socket_requires_positive_native_absence(
 
 
 def _mock_pidfd_delivery(monkeypatch: pytest.MonkeyPatch, signals: list[str]) -> None:
-    from shared.native_process import ownership as proc_tree
+    from base.native_process import ownership as proc_tree
 
     def open_pidfd(_pid: int) -> int:
         return os.open(os.devnull, os.O_RDONLY)
@@ -593,8 +593,8 @@ def test_signals_reject_reuse_inside_legacy_birth_tolerance(
 ) -> None:
     import psutil
 
+    from base.native_process.ownership import OwnedProcess
     from services.ava_root.supervisor import Supervisor
-    from shared.native_process.ownership import OwnedProcess
 
     old = OwnedProcess(12345, 10.0, 100)
     replacement = OwnedProcess(12345, 10.01, 101)
@@ -651,8 +651,8 @@ def test_signals_keep_linux_custody_when_wall_birth_moves(
 ) -> None:
     import psutil
 
+    from base.native_process.ownership import OwnedProcess
     from services.ava_root.supervisor import Supervisor
-    from shared.native_process.ownership import OwnedProcess
 
     captured = OwnedProcess(12345, 10.0, 100)
     observed = OwnedProcess(12345, 3610.0, 100)

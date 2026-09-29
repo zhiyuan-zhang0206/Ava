@@ -11,8 +11,8 @@ from pathlib import Path
 
 import pytest
 
+from base.packages.extensions import install_registry as reg
 from cli.commands.extensions.packages import cmd_packages_status
-from shared import install_registry as reg
 
 
 def _register(name: str, **kw: object) -> reg.InstalledPackage:

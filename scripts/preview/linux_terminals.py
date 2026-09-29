@@ -20,7 +20,7 @@ from typing import Any
 
 import psutil
 
-from shared.native_process.ownership import OwnedProcess, capture_tree
+from base.native_process.ownership import OwnedProcess, capture_tree
 
 Evidence = dict[str, Any]
 STABLE_FIELDS = ("host", "shell", "generation", "record_sha256")
@@ -66,7 +66,7 @@ def _identity(record: Evidence, *, host: bool) -> OwnedProcess:
 def _control_path(path: Path, record: Evidence, host: OwnedProcess) -> Path:
     argv = psutil.Process(host.pid).cmdline()
     _require(
-        len(argv) in (10, 11) and argv[1:3] == ["-m", "shared.sessions.pty.host"],
+        len(argv) in (10, 11) and argv[1:3] == ["-m", "base.sessions.pty.host"],
         "recorded terminal host has another native command",
     )
     _require(

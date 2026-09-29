@@ -13,7 +13,7 @@ import pytest
 
 import ava
 from ava.security import is_flagged, scan_content
-from shared.paths import ava_home
+from base.paths import ava_home
 
 
 def test_clean_content_returned_unchanged():
@@ -238,7 +238,7 @@ def test_scan_inbound_content_attributes_outside_turn_finding(monkeypatch: pytes
 def test_scan_content_disabled_records_nothing(monkeypatch: pytest.MonkeyPatch):
     """security_scan_enabled=False silences recording entirely."""
     from ava import security
-    from shared.config import settings
+    from base.config import settings
 
     monkeypatch.setattr(security, "_pending_findings", [])
     monkeypatch.setattr(security, "_pending_inbound_findings", [])

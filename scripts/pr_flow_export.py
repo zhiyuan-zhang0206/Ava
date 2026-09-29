@@ -15,7 +15,7 @@ the unified telemetry pipeline:
   unreachable; the event itself stays as the daily breadcrumb).
 
 Every numeric payload field is dispositioned as an ObservableGauge in
-``shared/telemetry/otlp/telemetry_otlp.py`` — the values are per-day absolute state, never
+``base/telemetry/otlp/telemetry_otlp.py`` — the values are per-day absolute state, never
 sums, and re-emission must replace them rather than accrue them.
 
 Metric definitions (cluster-tz days; the fleet timezone is Asia/Shanghai):
@@ -30,7 +30,7 @@ Metric definitions (cluster-tz days; the fleet timezone is Asia/Shanghai):
   at run time. One sample per run — a point-in-time reading, not a per-day
   aggregate.
 - **QA rounds**: per merged PR, the number of ``ava-qa`` receipt comments
-  (``scripts/qa_receipt.py`` format, shared GitHub account); ``qa_rounds_mean``
+  (``scripts/ci/qa_receipt.py`` format, shared GitHub account); ``qa_rounds_mean``
   is the day's mean. A **delta re-review** is a receipt followed by a
   different head commit before the next receipt or merge — the brief's
   "post-receipt head-SHA change" — and ``qa_rereview_share`` is the share of the
@@ -84,7 +84,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 # Script-mode path guards (PYTHONSAFEPATH=1 removed the implicit script-dir
-# entry): this checkout's root first so `shared` resolves against this tree,
+# entry): this checkout's root first so `base` resolves against this tree,
 # then the scripts dir for the sibling scripts (ci_utils / qa_receipt).
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(_REPO_ROOT) not in sys.path:
@@ -98,7 +98,7 @@ DEFAULT_WINDOW_DAYS = 30
 PROCESS_NAME = "pr-flow"
 TRUNK_TOKEN_PATH = Path.home() / ".trunk" / "api-token"
 
-# The shared GitHub account that posts QA receipts (scripts/qa_receipt.py).
+# The shared GitHub account that posts QA receipts (scripts/ci/qa_receipt.py).
 QA_ACCOUNT_ID = 87293881
 
 _GH_TIMEOUT_S = 60.0
@@ -181,7 +181,7 @@ class RunStats:
 
 def cluster_tz() -> ZoneInfo:
     """The cluster's wall clock — the day boundary every aggregate uses."""
-    from shared.config import settings
+    from base.config import settings
 
     return ZoneInfo(settings.general.timezone)
 
@@ -292,11 +292,11 @@ def fetch_timeline(repo: str, number: int, stats: RunStats) -> list[dict[str, An
 def parse_receipts(events: list[dict[str, Any]]) -> list[dict[str, str]]:
     """QA receipts from a timeline: (at, head_sha, verdict) per receipt comment.
 
-    The format is `scripts/qa_receipt.py`'s: a fenced ```ava-qa JSON block
+    The format is `scripts/ci/qa_receipt.py`'s: a fenced ```ava-qa JSON block
     posted by the shared account. Malformed or foreign comments are skipped —
     the receipt count must never be inflated by a lookalike.
     """
-    import qa_receipt
+    from scripts.ci import qa_receipt
 
     receipts: list[dict[str, str]] = []
     for event in events:
@@ -681,8 +681,8 @@ def emit_snapshot(snapshot: dict[str, Any], *, dry_run: bool) -> None:
 
 def _emit_events(snapshot: dict[str, Any]) -> None:
     """The pipeline write (separate seam so tests can assert dry-run silence)."""
-    from shared import telemetry
-    from shared.telemetry.otlp import telemetry_otlp
+    from base import telemetry
+    from base.telemetry.otlp import telemetry_otlp
 
     telemetry.init_telemetry(process=PROCESS_NAME)
     telemetry_otlp.warmup()
@@ -735,7 +735,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.state_dir is not None:
         state_dir = args.state_dir
     else:
-        from shared.paths import ava_home
+        from base.paths import ava_home
 
         state_dir = ava_home() / _STATE_DIR_RELATIVE
     cache = load_cache(state_dir / "cache.json")

@@ -14,10 +14,10 @@ from urllib.parse import urlsplit
 import pytest
 from fastapi.testclient import TestClient
 
+from base import config
+from base.cluster.auth import bearer_header
+from base.host.env import runtime_config as rt
 from gateway.app import app
-from shared import config
-from shared import runtime_config as rt
-from shared.cluster_auth import bearer_header
 
 _SECRET = "test-cluster-secret"  # noqa: S105 — test fixture, not a real secret
 

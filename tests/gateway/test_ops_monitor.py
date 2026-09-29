@@ -2,7 +2,7 @@
 
 Same posture as test_metrics_router.py: the Loki backend is the in-memory
 `FakeLoki`, the Prometheus backend a small `FakePrometheus` (both
-monkeypatched onto `gateway.loki_events` / `gateway.prom_metrics`); the
+monkeypatched onto `gateway.lgtm.loki_events` / `gateway.lgtm.prom_metrics`); the
 `agents` table stays real SQL for the restarts-breakdown labels. Locks the
 endpoint contract: envelope shape, window → bucket sizing, zero-filling,
 payload field-name wiring from the emit sites (kind / latency_ms / name),
@@ -23,10 +23,10 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
-from gateway import prom_metrics
 from gateway.app import app
-from gateway.ops_series_lgtm import _GRID_ORIGIN, _bucket_starts
-from gateway.routers import ops_monitor
+from gateway.cluster import ops_monitor
+from gateway.cluster.ops_series_lgtm import _GRID_ORIGIN, _bucket_starts
+from gateway.lgtm import prom_metrics
 from tests.gateway.loki_fake import FakeLoki
 from tests.gateway.prom_fake import FakePrometheus
 
@@ -34,20 +34,22 @@ from tests.gateway.prom_fake import FakePrometheus
 @pytest.fixture
 def loki_fake(monkeypatch: pytest.MonkeyPatch) -> FakeLoki:
     fake = FakeLoki()
-    monkeypatch.setattr("gateway.loki_events.count_events", fake.count_events)
-    monkeypatch.setattr("gateway.loki_events.count_grouped", fake.count_grouped)
-    monkeypatch.setattr("gateway.loki_events.count_events_series", fake.count_events_series)
-    monkeypatch.setattr("gateway.loki_events.attribute_max_series", fake.attribute_max_series)
-    monkeypatch.setattr("gateway.loki_events.query_events", fake.query_events)
-    monkeypatch.setattr("gateway.loki_events.query_projected_lines", fake.query_projected_lines)
+    monkeypatch.setattr("gateway.lgtm.loki_events.count_events", fake.count_events)
+    monkeypatch.setattr("gateway.lgtm.loki_events.count_grouped", fake.count_grouped)
+    monkeypatch.setattr("gateway.lgtm.loki_events.count_events_series", fake.count_events_series)
+    monkeypatch.setattr("gateway.lgtm.loki_events.attribute_max_series", fake.attribute_max_series)
+    monkeypatch.setattr("gateway.lgtm.loki_events.query_events", fake.query_events)
+    monkeypatch.setattr(
+        "gateway.lgtm.loki_events.query_projected_lines", fake.query_projected_lines
+    )
     return fake
 
 
 @pytest.fixture
 def prom_fake(monkeypatch: pytest.MonkeyPatch) -> FakePrometheus:
     fake = FakePrometheus()
-    monkeypatch.setattr("gateway.prom_metrics.query", fake.query)
-    monkeypatch.setattr("gateway.prom_metrics.query_range", fake.query_range)
+    monkeypatch.setattr("gateway.lgtm.prom_metrics.query", fake.query)
+    monkeypatch.setattr("gateway.lgtm.prom_metrics.query_range", fake.query_range)
     return fake
 
 

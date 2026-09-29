@@ -23,9 +23,9 @@ from typing import cast
 import psutil
 import pytest
 
-from shared.os_boot_unit import BootUnitContext
-from shared.root_control.client import RootClient, RootClientError
-from shared.root_control.ipc import ResponsePayload
+from base.host.system.boot_unit import BootUnitContext
+from base.native_process.root_control.client import RootClient, RootClientError
+from base.native_process.root_control.ipc import ResponsePayload
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -511,9 +511,9 @@ def _systemd_starter(
         "from pathlib import Path\n"
         f"sys.path.insert(0, {str(REPO_ROOT)!r})\n"
         "import psutil\n"
-        "from shared.root_control.client import RootClient, RootClientError, native_identity\n"
-        "from shared.os_boot_unit import publish_root_ready, root_pid_path\n"
-        "from shared.native_process.ownership import OwnedProcess\n"
+        "from base.native_process.root_control.client import RootClient, RootClientError, native_identity\n"
+        "from base.host.system.boot_unit import publish_root_ready, root_pid_path\n"
+        "from base.native_process.ownership import OwnedProcess\n"
         "from dataclasses import asdict\n"
         f"receipt = Path({str(receipt)!r})\n"
         f"assert os.environ['AVA_CLUSTER_REGISTRY'] == {str(home.parent / 'registry.json')!r}\n"
@@ -553,7 +553,7 @@ def _systemd_starter(
 
 
 def _terminate_systemd_test_births(receipt: Path) -> None:
-    from shared.native_process.ownership import OwnedProcess
+    from base.native_process.ownership import OwnedProcess
 
     if not receipt.exists():
         return
@@ -590,24 +590,24 @@ def _systemd_test_context(home: Path) -> BootUnitContext:
 
 
 def _assert_failed_adoption(ctx: BootUnitContext, receipt: Path, failure: str) -> None:
-    from shared import os_boot_unit
+    from base.host.system import boot_unit
 
     assert receipt.with_suffix(".failure").read_text() == failure
     births = json.loads(receipt.read_text())
     assert set(births) == {"data", "root", "app"}
-    assert os_boot_unit.manager_properties(ctx.home)["MainPID"] == "0"
+    assert boot_unit.manager_properties(ctx.home)["MainPID"] == "0"
     # Before publication the deliberately stale hint names data; afterwards it
     # names root. Neither becomes MainPID when the ordinary starter fails.
     expected = births["data" if failure == "before" else "root"]["pid"]
-    hint = os_boot_unit.root_pid_path(ctx.home)
+    hint = boot_unit.root_pid_path(ctx.home)
     if hint.exists():  # Native manager may remove the failed unit's hint.
         assert hint.read_text().strip() == str(expected)
 
 
 def _require_native_systemd() -> None:
-    from shared import os_boot_unit
+    from base.host.system import boot_unit
 
-    if sys.platform != "linux" or not os_boot_unit.systemd_running():
+    if sys.platform != "linux" or not boot_unit.systemd_running():
         pytest.skip("native Linux systemd required")
     allowed = subprocess.run(["sudo", "-n", "true"], check=False, timeout=10)
     if allowed.returncode:
@@ -622,7 +622,7 @@ def test_native_systemd_root_lifetime(tmp_path: Path, failure: str) -> None:
     this does not claim database protocol or durability verification. The
     dedicated Ubuntu CI step asserts systemd and sudo before invoking this test.
     """
-    from shared import os_boot_unit
+    from base.host.system import boot_unit
 
     _require_native_systemd()
     ctx = _systemd_test_context(tmp_path / "home")
@@ -631,12 +631,12 @@ def test_native_systemd_root_lifetime(tmp_path: Path, failure: str) -> None:
     manifest = _write_manifests(tmp_path, [{"id": "app", "exec": _SLEEPER, "restart": "always"}])
     receipt = tmp_path / "births.json"
     starter = _systemd_starter(ctx.home, receipt, run_dir, manifest, failure)
-    unit = os_boot_unit.unit_name(ctx.home)
+    unit = boot_unit.unit_name(ctx.home)
     target = Path("/run/systemd/system") / unit
     holder = tmp_path / unit
-    content = os_boot_unit.render_unit(ctx)
+    content = boot_unit.render_unit(ctx)
     exec_line = next(row for row in content.splitlines() if row.startswith("ExecStart="))
-    replacement = f"ExecStart=:{os_boot_unit._quote(sys.executable, 'python')} {os_boot_unit._quote(str(starter), 'test starter')}"
+    replacement = f"ExecStart=:{boot_unit._quote(sys.executable, 'python')} {boot_unit._quote(str(starter), 'test starter')}"
     holder.write_text(
         content.replace(exec_line, replacement).replace("Restart=on-failure", "Restart=no")
     )
@@ -661,11 +661,11 @@ def test_native_systemd_root_lifetime(tmp_path: Path, failure: str) -> None:
         assert started.returncode == 0, started.stdout + started.stderr
         raw = json.loads(receipt.read_text())
         # Receipt keys use OwnedProcess's dataclass spelling; status uses create_time.
-        from shared.native_process.ownership import OwnedProcess
+        from base.native_process.ownership import OwnedProcess
 
         owners = {key: OwnedProcess(**value) for key, value in raw.items()}
         root, app, data = owners["root"], owners["app"], owners["data"]
-        manager = os_boot_unit.manager_properties(ctx.home)
+        manager = boot_unit.manager_properties(ctx.home)
         assert manager["MainPID"] == str(root.pid)
         assert manager["ActiveState"] == "active"
         assert psutil.Process(root.pid).ppid() == 1, "manager did not adopt root as its child"

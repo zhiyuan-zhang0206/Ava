@@ -32,8 +32,8 @@ services/
 ├── healthchecks/
 │   └── delivery_watchdog.py   (M)  probe covers both jobs' liveness stamps
 gateway/
-└── routers/agents.py          (M)  spawn path stamps last_active_at on wake
-shared/
+└── agents/router.py           (M)  spawn path stamps last_active_at on wake
+base/
 └── live_events.py             (D)  ★ retired the legacy wake broadcast channel
                                     (every consumer now rides the keyed wake)
 ```
@@ -47,7 +47,7 @@ scan for ★ to pick out "what is this new entry point doing / why was that one 
 
 ## 1a. Contract change (when a `*.api.txt` snapshot changes)
 
-`shared/db.api.txt` / `shared/agents/api.txt` / `shared/events/api.txt` are
+`base/db/api.txt` / `base/agents/api.txt` / `base/events/api.txt` are
 generated snapshots of a package door's public surface
 (`scripts/structure/contracts.py`; see `conventions/python-conventions.md`).
 If any changed, add a "Contract change" section naming each changed door and

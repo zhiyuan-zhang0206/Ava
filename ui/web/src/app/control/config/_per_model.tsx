@@ -2,7 +2,7 @@
 
 // /control#config-per-model — "what does an agent on THIS model actually run with".
 //
-// The settings below are per-model-defaultable (shared/lm/registry.py:ModelTuning):
+// The settings below are per-model-defaultable (base/lm/registry.py:ModelTuning):
 // compact fractions, reasoning effort, thinking budget, retry, stream timeouts,
 // communication style, and the guidance-section switches. Their effective value
 // is a resolution, not a stored number — shared default < per-model default
@@ -96,7 +96,7 @@ export function PerModelPanel({
       <p className="text-xs text-muted-foreground leading-snug">
         Settings that resolve per model: a shared default, overridden by the model&apos;s own
         default, overridden by an explicit .env value. Both defaults are code
-        (shared/lm/registry.py) — to change one for every model, edit the field below. A
+        (base/lm/registry.py) — to change one for every model, edit the field below. A
         per-agent overlay set at spawn beats all three and is not visible here.
       </p>
 

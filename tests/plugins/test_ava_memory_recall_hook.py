@@ -22,7 +22,7 @@ from agent.graph.memory_recall import PassiveRecall
 from agent.messages import NoteTag, inbound_message, system_note_message
 from agent.state import build_agent_state, clear_plugin_registrations
 from ava import gateway_client
-from shared.context import AvaContext
+from base.agents.context import AvaContext
 
 
 @pytest.fixture
@@ -30,8 +30,8 @@ def _loaded() -> Any:
     """Load ava_memory through the real plugin-registration path, so the hook
     instance under test is the registered one (same fixture shape as
     test_ava_memory_notes.py)."""
-    from shared.plugin_config_registry import bind_from_disk
-    from shared.plugin_context import PluginContext
+    from base.packages.plugins.config_registration import bind_from_disk
+    from base.packages.plugins.context import PluginContext
 
     clear_plugin_registrations()
     for name in list(sys.modules):
@@ -54,7 +54,7 @@ def _loaded() -> Any:
 @pytest.fixture
 def _hook_env(_loaded: Any, monkeypatch: pytest.MonkeyPatch) -> Any:
     """Feature on, auto-compact off, recall stubbed to a successful pass."""
-    from shared.config import settings
+    from base.config import settings
 
     monkeypatch.setattr(settings.agent, "passive_memory_recall_enabled", True)
     monkeypatch.setattr(_loaded, "auto_compact_will_fire", lambda _state: False)  # pyright: ignore[reportUnknownArgumentType]
@@ -153,7 +153,7 @@ async def test_gateway_error_leaves_the_turn_running(
     stub it), with only the gateway call replaced, so the assertion is that the
     turn continues with no recall to add.
     """
-    from shared.config import settings
+    from base.config import settings
 
     monkeypatch.setattr(settings.agent, "passive_memory_recall_enabled", True)
     monkeypatch.setattr(_loaded, "auto_compact_will_fire", lambda _state: False)  # pyright: ignore[reportUnknownArgumentType]
@@ -186,7 +186,7 @@ async def test_recall_deadline_exceeded_skips_recall_this_turn(
     """
     import asyncio
 
-    from shared.config import settings
+    from base.config import settings
 
     monkeypatch.setattr(settings.agent, "passive_memory_recall_enabled", True)
     monkeypatch.setattr(settings.agent, "memory_recall_deadline_seconds", 0.05)

@@ -256,7 +256,7 @@ jobs:
       # bundles uploaded fine.
       - name: Build latest.json
         run: |
-          python3 scripts/build_app_update_manifest.py \
+          python3 scripts/codegen/build_app_update_manifest.py \
             --tag "${GITHUB_REF#refs/tags/}" \
             --artifacts artifacts \
             --repo "$GITHUB_REPOSITORY" \

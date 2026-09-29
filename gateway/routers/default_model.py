@@ -2,7 +2,7 @@
 
 The one value in `cluster_defaults`: which model a NEW agent is born on. It is a
 spawn-time input, not a config layer — nothing reads it into `settings`, and no
-running process consults it for its own behavior (see `shared/birth_config.py`).
+running process consults it for its own behavior (see `base/agents/birth_config.py`).
 An agent already alive carries its own frozen choice on its row, so editing this
 never moves anyone who already exists.
 
@@ -22,9 +22,9 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Request
 
-from gateway.schemas import DefaultModelView, DefaultModelWrite
-from shared.birth_config import cluster_default_model, set_cluster_default_model
-from shared.config import settings
+from base.agents.birth_config import cluster_default_model, set_cluster_default_model
+from base.config import settings
+from gateway.schemas.models import DefaultModelView, DefaultModelWrite
 
 router = APIRouter()
 
@@ -33,11 +33,11 @@ def _view(stored: str | None) -> DefaultModelView:
     """The effective default: the cluster row when set, else the ordinary config
     chain showing through — both resolved through the registry's availability
     resolution, the call the spawn boundary makes
-    (`shared/lm/factory.py:validate_model_config`). A withdrawn id registered
+    (`base/lm/factory.py:validate_model_config`). A withdrawn id registered
     with a fallback therefore reports the model a new agent actually runs,
     never the id that is dead on the wire."""
-    from shared.lm.plugin_providers import ensure_provider_plugins_loaded
-    from shared.lm.registry import resolve_available_model
+    from base.lm.plugin_providers import ensure_provider_plugins_loaded
+    from base.lm.registry import resolve_available_model
 
     # Plugin models must be registered before the registry lookup below.
     ensure_provider_plugins_loaded()
@@ -57,11 +57,11 @@ def get_default_model(request: Request) -> DefaultModelView:
 def put_default_model(body: DefaultModelWrite, request: Request) -> DefaultModelView:
     """Set the cluster's default model.
 
-    400 when the id is not a spawnable model in `shared/lm/registry.py:MODELS`.
+    400 when the id is not a spawnable model in `base/lm/registry.py:MODELS`.
     Takes effect for agents born after the write; every existing agent keeps the
     model stamped on its own row.
     """
-    from shared.lm.factory import SUPPORTED_MODELS
+    from base.lm.factory import SUPPORTED_MODELS
 
     spawnable = {m for models in SUPPORTED_MODELS.values() for m in models}
     if body.model not in spawnable:
@@ -69,7 +69,7 @@ def put_default_model(body: DefaultModelWrite, request: Request) -> DefaultModel
             status_code=400,
             detail=(
                 f"unknown model {body.model!r}; pick one of {sorted(spawnable)} "
-                f"(the spawnable roster in shared/lm/registry.py)"
+                f"(the spawnable roster in base/lm/registry.py)"
             ),
         )
     with request.app.state.db_pool.connection() as conn, conn.cursor() as cur:

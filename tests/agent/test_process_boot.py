@@ -37,8 +37,8 @@ def test_eval_isolation_disables_network_and_result_sdk_surfaces() -> None:
         from types import SimpleNamespace
 
         import ava
-        from shared.config import settings
-        from shared.plugin_context import PluginContext
+        from base.config import settings
+        from base.packages.plugins.context import PluginContext
 
         with PluginContext("ava_memory"):
             from ava_builtins.plugins.ava_memory import plugin
@@ -76,8 +76,8 @@ def test_eval_network_allowlist_preserves_explicitly_allowed_web() -> None:
     code, out, err = _run("""
         import os
         import ava
-        from shared.config import settings
-        from shared.plugin_context import PluginContext
+        from base.config import settings
+        from base.packages.plugins.context import PluginContext
 
         with PluginContext("ava_memory"):
             from ava_builtins.plugins.ava_memory import plugin
@@ -100,8 +100,8 @@ def test_eval_network_allowlist_preserves_explicitly_allowed_web() -> None:
 def test_eval_isolation_off_leaves_sdk_and_memory_unchanged() -> None:
     code, out, err = _run("""
         import ava
-        from shared.config import settings
-        from shared.plugin_context import PluginContext
+        from base.config import settings
+        from base.packages.plugins.context import PluginContext
 
         with PluginContext("ava_memory"):
             from ava_builtins.plugins.ava_memory import plugin

@@ -25,6 +25,10 @@ from urllib.parse import urlparse
 import yaml
 from dotenv import dotenv_values
 
+from base.host.net.resilience import Policy, retry
+from base.telemetry.lgtm_local import BACKENDS
+from base.telemetry.lgtm_local import storage_dir as _storage_dir
+from base.telemetry.loki_index_labels import validate_loki_deploy_config
 from cli.commands.converge.spec import ConvergeCtx
 from cli.commands.observability._lgtm_assets import _NATIVE_CONSTANTS, load_versions
 from cli.commands.observability._lgtm_provisioning import _render_provisioning
@@ -33,10 +37,6 @@ from cli.commands.observability.observatory_urls import (
     _alerts_webhook_url,
     _observability_datasource_urls,
 )
-from shared.lgtm_local import BACKENDS
-from shared.lgtm_local import storage_dir as _storage_dir
-from shared.loki_index_labels import validate_loki_deploy_config
-from shared.resilience import Policy, retry
 
 SUPPORTED_TAGS = {"darwin_arm64", "linux_amd64"}
 
@@ -268,7 +268,7 @@ def _warn_listen_read_mismatches() -> None:
 
     Prometheus scrape targets and consumer reads use the telemetry URLs, so
     a widened listen host with loopback read URLs breaks those read paths (QA nit on PR #727, Task #1795)."""
-    from shared.config import settings
+    from base.config import settings
 
     observability = settings.observability
     backends = (
@@ -331,7 +331,7 @@ def _warn_env_file_divergence(ava_home: Path, values: dict[str, str]) -> None:
 
 def _render_configs(repo: Path, native_dir: Path, ava_home: Path) -> None:
     """Render native templates from this checkout and host configuration."""
-    from shared.config import settings
+    from base.config import settings
 
     source_dir = repo / "deploy/lgtm/native/config"
     # Grafana provisioning is converge-rendered (datasources.yml / contact.yml
@@ -427,7 +427,7 @@ def _render_configs(repo: Path, native_dir: Path, ava_home: Path) -> None:
 
 def _render_grafana_admin_password(native_dir: Path) -> None:
     """Render the host-scoped Grafana credential when the setting is configured."""
-    from shared.config import settings
+    from base.config import settings
 
     credential = settings.alerts.grafana_admin_password
     if credential is None:
@@ -473,7 +473,7 @@ def ensure_lgtm_native(repo: Path, ava_home: Path, *, services: frozenset[str]) 
 
 def _verify_loki(home: Path) -> None:
     """Use the pinned binary's own parser before starting the root generation."""
-    from shared.lgtm_local import binary_path
+    from base.telemetry.lgtm_local import binary_path
 
     result = subprocess.run(
         [

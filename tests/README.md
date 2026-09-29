@@ -42,8 +42,8 @@ tests/
 
 | Source | Test |
 |------|------|
-| `agent/graph/_exec.py` | `tests/agent/test_exec_output.py` |
-| `gateway/timeline.py` | `tests/gateway/test_timeline.py` |
+| `agent/graph/exec/node.py` | `tests/agent/test_exec_output.py` |
+| `gateway/agents/timeline.py` | `tests/gateway/test_timeline.py` |
 | `ava/shell.py` | `tests/ava/test_shell.py` |
 
 If adding a new sub-module (e.g., `ava/new_module.py`), create `test_new_module.py` under `tests/ava/`.
@@ -149,7 +149,7 @@ file went 11 days without a refresh).
 Refresh the file manually after a significant test-suite change:
 
 ```bash
-uv run python scripts/refresh_test_durations.py
+uv run python scripts/ci/refresh_test_durations.py
 ```
 
 The nightly workflow runs the CI-shaped backend 16-way and e2e four-way shard
@@ -180,7 +180,7 @@ vars are set in `os.environ`, not only on the settings singleton, so subprocesse
 reads one `~/Library/LaunchAgents` per user, `crontab` edits one table per user,
 schtasks owns one `\Ava\` folder per user. So the suite does not redirect it — it
 refuses to write to it at all, via `AVA_OS_JOBS_ENABLED=false`
-(`shared.os_cron.os_jobs_enabled` gates all four registrars; the unregister paths
+(`base.host.system.cron.os_jobs_enabled` gates all four registrars; the unregister paths
 stay live). `pytest_sessionfinish` then diffs the host's Ava jobs against a
 snapshot taken at conftest import and fails the run on anything new, removing the
 jobs that name this suite's own homes and reporting anything else.
@@ -195,7 +195,7 @@ reassigns stays reassigned until then. So a session-scoped fixture that layers e
 onto the process and restores it in a `finally` restores nothing on behalf of the
 tests that follow it: everything collected after its directory, in the same process,
 keeps running with the layered values. Enforced by
-`scripts/lint_fixture_scope.py` (hook `lint-fixture-scope`), two rules:
+`scripts/lint/fixture_scope.py` (hook `lint-fixture-scope`), two rules:
 
 1. **`scope="session"` outside `tests/conftest.py` may not mutate a process global**
    (`os.environ`, a `settings` field, a module global). The root conftest is the one
@@ -245,14 +245,14 @@ while time.monotonic() < deadline:
 ```
 
 and it keeps its deadline while losing its only throttle — so it spins at full speed
-for the whole bound. `shared.session_backend._graceful_kill_session` is that shape with a
-15 s bound per session, and on 2026-07-30 one `tests/cli` test reached it: it spun at
+for the whole bound. `base.sessions.posixproc._terminate_tree` — the loop a graceful
+`kill_session(graceful=True)` reaches, with a 15 s default bound per session — is that shape, and on 2026-07-30 one `tests/cli` test reached it: it spun at
 ~500k iterations/s appending to the test's own recorder list, `pytest tests/cli` hit
 **26 GB** on a 16 GB box, swap ran out, and agent boots went from 850 ms to 78-93 s.
 Nothing failed — the suite just got slow.
 
 So when a test needs to shorten or forbid one specific sleep, the product gives that
-sleep a name and the test patches the name: `cli/commands/root_driver.py` binds
+sleep a name and the test patches the name: `cli/commands/lifecycle/root_driver.py` binds
 `_poll_sleep = time.sleep` at import, and `monkeypatch.setattr(root_driver, "_poll_sleep",
 ...)` reaches that poll and nothing else. Same reasoning behind patching `_probe_service`
 at the module that actually defines it (`cli.commands._probe`) rather than some shared
@@ -260,7 +260,7 @@ namespace — one named seam per patchable behaviour, so a stub's blast radius i
 in the product rather than inferred from an attribute path.
 
 The related trap in the same incident: patching a name on the **package** when the
-caller imported it directly. A caller that does `from cli.commands.stop import
+caller imported it directly. A caller that does `from cli.commands.lifecycle.stop import
 _do_stop` holds its own binding, so `monkeypatch.setattr(cli.commands, "_do_stop", ...)` never
 reaches it — the stub is a silent no-op and the real function runs. Patch the module
 that resolves the name, or have the caller look it up dynamically. `monkeypatch` will

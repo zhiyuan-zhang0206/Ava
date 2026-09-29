@@ -25,8 +25,8 @@ from dataclasses import dataclass
 import psycopg
 from psycopg_pool import ConnectionPool
 
-from shared.agents.history.checkpoint_cleanup import trim_checkpoints_sync
-from shared.log import logger
+from base.agents.history.checkpoint_cleanup import trim_checkpoints_sync
+from base.log import logger
 
 _KEEP = 3
 _MAX_THREADS_PER_PASS = 64

@@ -75,14 +75,14 @@ context for compaction and to END for idle or lifecycle control. Routing uses
   stops ownership renewal, then releases settled ownership before closing pools.
   A background failure, including plugin-triggered `KeyboardInterrupt`, cannot
   skip the remaining cleanup stages and is propagated after cleanup.
-- `agent/hosted_ownership.py` can replace a local owner before its lease expires
+- `agent/ownership/hosted.py` can replace a local owner before its lease expires
   only when the same locked row proves its exact host process has exited and
   its managed resource set is empty and unfrozen. A living host, another machine,
   unknown process identity or unclosed resources retain the admission fences.
   A legacy NULL-resource row has no stored process to prove: it is admitted
   early only through the evidence-gated proposal (renewal silence ≥
   `LEGACY_HOST_ADOPTION_SILENCE_S`, no live same-home agent-host daemon, no
-  live exec child of the agent — `shared/host_process_evidence.py`), re-pinned
+  live exec child of the agent — `base/agents/incarnation/host_process_evidence.py`), re-pinned
   to the exact row state under the row lock and recorded as a
   `hosted_legacy_adoption` audit event. NULL evidence alone never authorizes
   takeover.
@@ -99,7 +99,7 @@ context for compaction and to END for idle or lifecycle control. Routing uses
   Queries spend the existing backoff budget and create no background tasks.
   Persistent checkpoint unavailability still prevents a completed durable pause.
 - `agent/graph/llm/node.py` streams model inference with retry and cancellation.
-- `agent/graph/_exec.py` runs `execute_code` in a disposable subprocess with an
+- `agent/graph/exec/node.py` runs `execute_code` in a disposable subprocess with an
   owned POSIX process group or Windows Job Object. Cleanup reaps its child and
   joins the output reader; this isolation is independent of host scheduling.
 - Persistent shell sessions run in their own PTY hosts and survive normal agent
@@ -122,4 +122,4 @@ Impersonation event reconciliation runs as a registered host background task,
 independent of model turns and ownership heartbeats. It pages due sessions on
 this machine even after native handoff or agent termination, respects unit
 quiescence, and persists progress and explicit upstream completion receipts.
-See [[shared/agents/impersonation/impersonation.ava.okf.md]].
+See [[base/agents/impersonation/impersonation.ava.okf.md]].

@@ -10,8 +10,8 @@ from typing import Any
 import psycopg
 import pytest
 
-from shared.config import settings
-from shared.migrations import (
+from base.config import settings
+from base.deploy.schema.migrations import (
     _BASELINE_NAME,
     CodeBehindSchema,
     MigrationFailed,
@@ -47,7 +47,7 @@ def test_required_set_is_just_baseline_with_empty_migrations(
     exactly the baseline sentinel. Isolated to a tmp dir so a real post-baseline
     migration on disk does not change what this contract tests."""
     _init_repo(tmp_path)  # the loader's git-tracking gate needs a real checkout
-    monkeypatch.setattr("shared.migrations.MIGRATIONS_DIR", tmp_path)
+    monkeypatch.setattr("base.deploy.schema.migrations.MIGRATIONS_DIR", tmp_path)
     assert required_migration_set() == {_BASELINE_NAME}
 
 
@@ -57,7 +57,7 @@ def test_list_migration_files_empty_is_valid(
     """An empty migrations/ (no delta over the baseline) is valid — the loader
     returns [] instead of raising."""
     _init_repo(tmp_path)
-    monkeypatch.setattr("shared.migrations.MIGRATIONS_DIR", tmp_path)
+    monkeypatch.setattr("base.deploy.schema.migrations.MIGRATIONS_DIR", tmp_path)
     assert _list_migration_files() == []
 
 
@@ -74,7 +74,7 @@ def test_check_passes_when_aligned(
     migrations/ so the seeded baseline-only DB is aligned regardless of real
     post-baseline migrations on disk."""
     _init_repo(tmp_path)
-    monkeypatch.setattr("shared.migrations.MIGRATIONS_DIR", tmp_path)
+    monkeypatch.setattr("base.deploy.schema.migrations.MIGRATIONS_DIR", tmp_path)
     check_schema_version(db_conn)
 
 
@@ -100,7 +100,7 @@ def test_apply_pending_nothing_when_baselined(
     """Baselined DB, empty migrations/ -> nothing to apply."""
     _ = db_conn  # fixture reseeds the baseline
     _init_repo(tmp_path)
-    monkeypatch.setattr("shared.migrations.MIGRATIONS_DIR", tmp_path)
+    monkeypatch.setattr("base.deploy.schema.migrations.MIGRATIONS_DIR", tmp_path)
     with psycopg.connect(settings.data_plane.db_url) as fresh:
         assert apply_pending_migrations(fresh) == []
 
@@ -114,7 +114,7 @@ def test_apply_pending_applies_post_baseline(
     (tmp_path / f"{_SYN}.sql").write_text("CREATE TABLE syn_t (id int);")
     (tmp_path / f"{_SYN}.down.sql").write_text("DROP TABLE syn_t;")
     _init_repo(tmp_path)  # applied only if git-tracked (#998)
-    monkeypatch.setattr("shared.migrations.MIGRATIONS_DIR", tmp_path)
+    monkeypatch.setattr("base.deploy.schema.migrations.MIGRATIONS_DIR", tmp_path)
     try:
         with psycopg.connect(settings.data_plane.db_url) as fresh:
             assert apply_pending_migrations(fresh) == [_SYN]
@@ -148,7 +148,7 @@ def test_untracked_migration_is_skipped_and_warned(
     (tmp_path / f"{rogue}.sql").write_text("CREATE TABLE syn_rogue_t (id int);")
     (tmp_path / f"{rogue}.down.sql").write_text("DROP TABLE syn_rogue_t;")
     # NOT git-added: the rogue sits untracked, exactly like the incident file.
-    monkeypatch.setattr("shared.migrations.MIGRATIONS_DIR", tmp_path)
+    monkeypatch.setattr("base.deploy.schema.migrations.MIGRATIONS_DIR", tmp_path)
     try:
         with psycopg.connect(settings.data_plane.db_url) as fresh:
             assert apply_pending_migrations(fresh) == [_SYN]
@@ -178,7 +178,7 @@ def test_untracked_file_excluded_from_required_set(
     _init_repo(tmp_path)  # _SYN tracked
     (tmp_path / f"{_SYN2}.sql").write_text("-- noop")  # untracked
     (tmp_path / f"{_SYN2}.down.sql").write_text("-- noop")
-    monkeypatch.setattr("shared.migrations.MIGRATIONS_DIR", tmp_path)
+    monkeypatch.setattr("base.deploy.schema.migrations.MIGRATIONS_DIR", tmp_path)
     assert required_migration_set() == {_BASELINE_NAME, _SYN}
 
 
@@ -191,14 +191,14 @@ def test_untracked_malformed_name_is_skipped_not_fatal(
     (tmp_path / f"{_SYN}.down.sql").write_text("-- noop")
     _init_repo(tmp_path)
     (tmp_path / "0001_legacy.sql").write_text("-- noop")  # malformed AND untracked
-    monkeypatch.setattr("shared.migrations.MIGRATIONS_DIR", tmp_path)
+    monkeypatch.setattr("base.deploy.schema.migrations.MIGRATIONS_DIR", tmp_path)
     assert [n for n, _ in _list_migration_files()] == [_SYN]
 
 
 def test_non_git_dir_fails_closed(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """A migrations dir whose repo root is not a git worktree is refused: the
     loader must not apply files whose git-tracking status it cannot verify."""
-    monkeypatch.setattr("shared.migrations.MIGRATIONS_DIR", tmp_path)
+    monkeypatch.setattr("base.deploy.schema.migrations.MIGRATIONS_DIR", tmp_path)
     with pytest.raises(MigrationLayoutError, match="git worktree"):
         _list_migration_files()
 
@@ -207,7 +207,7 @@ def test_apply_multi_statement_migration_over_prepared_conn(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """A MULTI-statement migration body applies over a `prepare_threshold=0`
-    connection — the posture `shared.db.connect()` uses (unconditionally, for
+    connection — the posture `base.db.connect()` uses (unconditionally, for
     PgBouncer transaction-pool safety). Regression for the main-CI breakage:
     prepare_threshold=0 forces the extended (prepared-statement) protocol on the
     first execute, and Postgres rejects a prepared statement that carries multiple
@@ -220,7 +220,7 @@ def test_apply_multi_statement_migration_over_prepared_conn(
     )
     (tmp_path / f"{_SYN}.down.sql").write_text("DROP TABLE mstest_t;")
     _init_repo(tmp_path)
-    monkeypatch.setattr("shared.migrations.MIGRATIONS_DIR", tmp_path)
+    monkeypatch.setattr("base.deploy.schema.migrations.MIGRATIONS_DIR", tmp_path)
 
     # A dedicated connection carrying the prepare posture that broke apply. The
     # applier needs a non-autocommit conn (it manages per-migration transactions).
@@ -244,7 +244,7 @@ def test_apply_down_round_trip(
     db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     (tmp_path / f"{_SYN}.down.sql").write_text("DROP TABLE dtest_t;")
-    monkeypatch.setattr("shared.migrations.MIGRATIONS_DIR", tmp_path)
+    monkeypatch.setattr("base.deploy.schema.migrations.MIGRATIONS_DIR", tmp_path)
     with db_conn.cursor() as cur:
         cur.execute("CREATE TABLE dtest_t (id int)")
         cur.execute("INSERT INTO schema_migrations (name) VALUES (%s)", (_SYN,))
@@ -263,7 +263,7 @@ def test_apply_down_round_trip(
 def test_apply_down_missing_down_raises(
     db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    monkeypatch.setattr("shared.migrations.MIGRATIONS_DIR", tmp_path)  # no .down.sql
+    monkeypatch.setattr("base.deploy.schema.migrations.MIGRATIONS_DIR", tmp_path)  # no .down.sql
     with pytest.raises(MigrationLayoutError):
         _down_path(_SYN)
     with db_conn.cursor() as cur:
@@ -278,7 +278,7 @@ def test_apply_down_atomic_on_failure(
 ) -> None:
     """A failing down SQL must NOT delete the schema_migrations row — one txn."""
     (tmp_path / f"{_SYN}.down.sql").write_text("DROP TABLE does_not_exist;")
-    monkeypatch.setattr("shared.migrations.MIGRATIONS_DIR", tmp_path)
+    monkeypatch.setattr("base.deploy.schema.migrations.MIGRATIONS_DIR", tmp_path)
     with db_conn.cursor() as cur:
         cur.execute("INSERT INTO schema_migrations (name) VALUES (%s)", (_SYN,))
     db_conn.commit()
@@ -307,7 +307,7 @@ def test_rollback_to_descends(
     keeping the baseline."""
     for stem in (_SYN, _SYN2):
         (tmp_path / f"{stem}.down.sql").write_text(f"DROP TABLE t_{stem[-1]};")
-    monkeypatch.setattr("shared.migrations.MIGRATIONS_DIR", tmp_path)
+    monkeypatch.setattr("base.deploy.schema.migrations.MIGRATIONS_DIR", tmp_path)
     with db_conn.cursor() as cur:
         for stem in (_SYN, _SYN2):
             cur.execute(f"CREATE TABLE t_{stem[-1]} (id int)")
@@ -328,7 +328,7 @@ def test_rollback_to_aborts_all_downs_on_failure(
     """A failing down leaves every migration row and schema object unchanged."""
     (tmp_path / f"{_SYN2}.down.sql").write_text("DROP TABLE rollback_atomic_second_t;")
     (tmp_path / f"{_SYN}.down.sql").write_text("DROP TABLE definitely_missing_rollback_atomic_t;")
-    monkeypatch.setattr("shared.migrations.MIGRATIONS_DIR", tmp_path)
+    monkeypatch.setattr("base.deploy.schema.migrations.MIGRATIONS_DIR", tmp_path)
     with db_conn.cursor() as cur:
         cur.execute("CREATE TABLE rollback_atomic_first_t (id int)")
         cur.execute("CREATE TABLE rollback_atomic_second_t (id int)")
@@ -362,7 +362,7 @@ def test_rollback_to_can_raise_after_the_batch_commits(
     commits. Callers must treat an unexpected exception as schema-ambiguous,
     never as proof that the schema stayed unchanged."""
     (tmp_path / f"{_SYN}.down.sql").write_text("DROP TABLE rollback_committed_t;")
-    monkeypatch.setattr("shared.migrations.MIGRATIONS_DIR", tmp_path)
+    monkeypatch.setattr("base.deploy.schema.migrations.MIGRATIONS_DIR", tmp_path)
     with db_conn.cursor() as cur:
         cur.execute("CREATE TABLE rollback_committed_t (id int)")
         cur.execute("INSERT INTO schema_migrations (name) VALUES (%s)", (_SYN,))
@@ -373,7 +373,9 @@ def test_rollback_to_can_raise_after_the_batch_commits(
         yield
         raise RuntimeError("advisory unlock failed after commit")
 
-    monkeypatch.setattr("shared.migrations._schema_mutation_lock", _fail_unlock_after_yield)
+    monkeypatch.setattr(
+        "base.deploy.schema.migrations._schema_mutation_lock", _fail_unlock_after_yield
+    )
     try:
         with pytest.raises(RuntimeError, match="unlock failed after commit"):
             rollback_to(db_conn, {_BASELINE_NAME})
@@ -411,7 +413,7 @@ def test_rollback_to_holds_the_lock(
     """rollback_to runs under the schema-mutation lock (a recovery rollback must
     not race a bootstrap forward apply)."""
     (tmp_path / f"{_SYN}.down.sql").write_text("DROP TABLE lock_t;")
-    monkeypatch.setattr("shared.migrations.MIGRATIONS_DIR", tmp_path)
+    monkeypatch.setattr("base.deploy.schema.migrations.MIGRATIONS_DIR", tmp_path)
     with db_conn.cursor() as cur:
         cur.execute("DROP TABLE IF EXISTS lock_t")
         cur.execute("CREATE TABLE lock_t (id int)")
@@ -419,13 +421,13 @@ def test_rollback_to_holds_the_lock(
     db_conn.commit()
 
     held: list[bool] = []
-    from shared.migrations import apply_down as real_apply_down
+    from base.deploy.schema.migrations import apply_down as real_apply_down
 
     def _spy(conn: psycopg.Connection, name: str) -> None:
         held.append(_try_lock_from_other_conn() is False)
         real_apply_down(conn, name)
 
-    monkeypatch.setattr("shared.migrations.apply_down", _spy)
+    monkeypatch.setattr("base.deploy.schema.migrations.apply_down", _spy)
     rolled = rollback_to(db_conn, {_BASELINE_NAME})
     assert rolled == [_SYN]
     assert held == [True]

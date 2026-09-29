@@ -39,4 +39,4 @@ __description__ = "Auto-fix common Python syntax errors before subprocess exec"
 # registrations: everything this plugin does is agent-runtime behavior
 # (a before_exec hook), so children do not need any of it. The registrations live
 # in `agent_runtime.py`, imported only on the full path (see
-# `agent/extensions.py`; task #3633).
+# `agent/extensions/__init__.py`; task #3633).

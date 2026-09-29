@@ -17,8 +17,8 @@ from pathlib import Path
 import pytest
 
 import ava.skills as skills_mod
+from base.packages.extensions import install_registry as reg
 from cli.commands.extensions.skill import cmd_skill_install
-from shared import install_registry as reg
 
 # Every test here installs a package, which records `local:<machine>` provenance
 # in the cluster registry — that needs a machine identity, which a bare

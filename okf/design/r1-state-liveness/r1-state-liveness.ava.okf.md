@@ -42,7 +42,7 @@ The registry×lease frame for every managed object and the single `alive` predic
 
 ### Agent state machine: one matrix
 
-Four states (`running`/`idling`/`restarting`/`terminated`, matching [[shared/agents-contract.ava.okf.md]]) with one transition matrix: each transition is one row (from-set → to → allowed writer → side effects); all writers go through the single entry `agent_state.transition()`. Batch-adjudication edge conditions move from comments into the state graph + tests.
+Four states (`running`/`idling`/`restarting`/`terminated`, matching [[base/agents-contract.ava.okf.md]]) with one transition matrix: each transition is one row (from-set → to → allowed writer → side effects); all writers go through the single entry `agent_state.transition()`. Batch-adjudication edge conditions move from comments into the state graph + tests.
 
 ### Migration application authority
 
@@ -67,4 +67,4 @@ Inspector statistics use cumulative or time-based windows over persisted observa
 
 ## Related as-is nodes
 
-[[../../../cli/cli.ava.okf.md]] · [[../../../agent/agent.ava.okf.md]] · [[../../../gateway/gateway.ava.okf.md]] · [[../../../shared/shared.ava.okf.md]]
+[[../../../cli/cli.ava.okf.md]] · [[../../../agent/agent.ava.okf.md]] · [[../../../gateway/gateway.ava.okf.md]] · [[../../../base/base.ava.okf.md]]

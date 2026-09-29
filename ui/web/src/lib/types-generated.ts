@@ -35,7 +35,7 @@ export interface paths {
          *
          *     Brute-force guard: an IP that fails ``gateway.login_max_failures`` times in
          *     a row is locked for ``gateway.login_lockout_seconds`` (policy + rationale on
-         *     those config fields; enforcement in shared/rate_limit.py).
+         *     those config fields; enforcement in base/cluster/rate_limit.py).
          *     While locked, the endpoint returns 429 + ``Retry-After`` instead of 401 —
          *     401 would read as "wrong password" and invite exactly the retry loop the
          *     lockout exists to stop. A successful login resets the IP's counter.
@@ -160,7 +160,7 @@ export interface paths {
          *
          *     `AVA_DB_URL` is the credential-free endpoint; no database credential is
          *     served. The admin credentials remain gateway-local (see
-         *     shared.config.bootstrap_config_values).
+         *     base.config.bootstrap_config_values).
          *
          *     Raises:
          *         HTTPException: 401 when the request carries neither the active write
@@ -889,7 +889,7 @@ export interface paths {
          *     Buckets the checkpoint messages by kind + splits the system prompt into its
          *     top-level sections, each a chars/4 estimate proportionally normalized to the
          *     last LLM call's real `input_tokens` (so the categories sum to the truth). Pure
-         *     gateway-side view logic (`gateway/context_breakdown.py`) — one checkpoint read,
+         *     gateway-side view logic (`gateway/agents/context_breakdown.py`) — one checkpoint read,
          *     no kernel/agent involvement. A checkpoint read failure / no checkpoint yields
          *     an empty breakdown with zeroed totals (same tolerance as token-usage: the
          *     panel re-opens fine later).
@@ -1108,7 +1108,7 @@ export interface paths {
         /**
          * Get Agent Plugin Metrics
          * @description The agent's plugin metrics for the inspector panel — the W13b inspector
-         *     surface of the plugin metric system (see `shared/plugin_metrics.py`).
+         *     surface of the plugin metric system (see `base/telemetry/metrics/plugin_metrics.py`).
          *
          *     Builds the metric registry in process (task #180 PR D — shipped
          *     plugin `metrics.py` modules + core definitions), keeps the metrics whose
@@ -1148,7 +1148,7 @@ export interface paths {
         /**
          * Get Agent Inspect Widgets
          * @description The agent's plugin widgets for the inspector panel — the extension
-         *     surface where enabled plugins embed widgets (see `shared/plugin_inspector.py`;
+         *     surface where enabled plugins embed widgets (see `base/packages/plugins/inspector.py`;
          *     registration mirrors the plugin-metric system).
          *
          *     Builds the widget registry in process (shipped builtin plugins'
@@ -1225,7 +1225,7 @@ export interface paths {
          *
          *     One checkpoint segment is built at a time; windowing trims the payload +
          *     the frontend render. A checkpoint read failure renders an empty view + 200
-         *     (cold-load tolerance, see `shared.agents.history.checkpoint`).
+         *     (cold-load tolerance, see `base.agents.history.checkpoint`).
          */
         get: operations["get_timeline_api_agents__agent_id__timeline_get"];
         put?: never;
@@ -1874,8 +1874,8 @@ export interface paths {
          *
          *     The staging latch is what keeps a registered staging host out of the
          *     agent-runner target set — `ava start` on it clears its `stopped_at` like any
-         *     host, and this flag is the exclusion (`shared.machines.list_agent_runners`
-         *     skips is_staging rows). Backed by `shared.machines.set_staging`; the CLI
+         *     host, and this flag is the exclusion (`base.cluster.machines.list_agent_runners`
+         *     skips is_staging rows). Backed by `base.cluster.machines.set_staging`; the CLI
          *     verbs `ava cluster mark-staging` / `unmark-staging` call this endpoint.
          */
         post: operations["set_machine_staging_api_cluster_machines__name__staging_post"];
@@ -2111,7 +2111,7 @@ export interface paths {
          *     Omitted `last` returns the configured default count
          *     (``display.config_audit_default_last`` - 20 out of the box); an explicit
          *     `last` stays capped at 200. Records are the raw
-         *     audit-JSONL entries (`shared/env_audit.py`), each tagged with its `machine`;
+         *     audit-JSONL entries (`base/host/env/audit.py`), each tagged with its `machine`;
          *     values were redacted at write time (non-sensitive fields only), and records
          *     from before record v2 lack `actor` / `trace_id` / `changed`.
          */
@@ -2137,7 +2137,7 @@ export interface paths {
          *
          *     Answers "what will an agent on this model actually run with, and which layer
          *     decided that": shared default < per-model default (both code, in
-         *     `shared/lm/registry.py`) < explicit `.env` value. `explain_setting` does the
+         *     `base/lm/registry.py`) < explicit `.env` value. `explain_setting` does the
          *     layering — the same function the runtime resolves through, so this view
          *     cannot drift from the value an agent gets.
          *
@@ -2201,7 +2201,7 @@ export interface paths {
          * Put Default Model
          * @description Set the cluster's default model.
          *
-         *     400 when the id is not a spawnable model in `shared/lm/registry.py:MODELS`.
+         *     400 when the id is not a spawnable model in `base/lm/registry.py:MODELS`.
          *     Takes effect for agents born after the write; every existing agent keeps the
          *     model stamped on its own row.
          */
@@ -2967,7 +2967,7 @@ export interface paths {
          *
          *     `name` is a constant naming the service this route belongs to — the point being
          *     that an impostor answering here reports its own name, or none. No probe reads it
-         *     yet; `shared.daemon_health._probe_home` gains the `name` arm only once every
+         *     yet; `base.daemon.health._probe_home` gains the `name` arm only once every
          *     deployed gateway emits the field, and that ordering is load-bearing (#1038).
          */
         get: operations["get_health_api_health_get"];
@@ -3956,7 +3956,7 @@ export interface components {
          *     `source` is required — the SDK passes f"agent:{my_id}", the generated
          *     notices pass shell:N / watcher:N; there is no default to prevent callers
          *     from forgetting and having inbounds silently tagged as "user", muddying
-         *     envelope labels. The valid set is in `shared/agents/messages/envelope.py:validate_source`
+         *     envelope labels. The valid set is in `base/agents/messages/envelope.py:validate_source`
          *     (system / agent:N / user / ui:page:<name> / watcher:N / shell:N /
          *     schedule:N); an illegal source is intercepted by 422 at the HTTP layer —
          *     otherwise it would land in inbound_messages and the agent claim node
@@ -4001,7 +4001,7 @@ export interface components {
          * @description One agent's row in the fleet metrics breakdown — headline counters
          *     aggregated over its events within the report window. `label` is the
          *     agent's display name (None = unset; frontend falls back to "#id").
-         *     `cost_usd` prices each call via `shared.lm.pricing.cost_usd`; calls on an
+         *     `cost_usd` prices each call via `base.lm.pricing.cost_usd`; calls on an
          *     unpriced model contribute 0. `cache_hit_pct` = cached / in * 100 (in=0
          *     degrades to 0). `exec_failed` is every exec outcome other than plain
          *     `exec` — same exec-ok/exec-failed split as the metrics report.
@@ -4093,7 +4093,7 @@ export interface components {
          * AgentRow
          * @description GET /api/agents/{id} detail, including response-required notice bodies.
          *
-         *     The directory and live roster use bounded cards from shared.agent_roster.
+         *     The directory and live roster use bounded cards from base.agents.observation.roster.
          *     last_active_at is the real-activity clock; last_inbound_at is the latest
          *     inbound message clock.
          */
@@ -4671,7 +4671,7 @@ export interface components {
          * ConfigAuditView
          * @description GET /api/config/audit response — merged `.env`-write audit records, newest first.
          *
-         *     Each record is the raw audit-JSONL entry (`shared/env_audit.py`, record v2:
+         *     Each record is the raw audit-JSONL entry (`base/host/env/audit.py`, record v2:
          *     ts / site / pid / process / cmdline / actor / trace_id / keys_written /
          *     keys_removed / digest_after / changed), tagged with its `machine`. Values were
          *     redacted when the record was written (non-sensitive fields only); records from
@@ -5060,7 +5060,7 @@ export interface components {
          *
          *     Every signal shares this shape (event-system design doc §1): audit
          *     (legacy `event_log`), telemetry and log (formerly `agent_events`) all land
-         *     in it, written through the unified emitter (`shared/telemetry/emitter.py`).
+         *     in it, written through the unified emitter (`base/telemetry/emitter.py`).
          *     `trace_id` is the correlation key — one turn = one trace id, every event
          *     inside it carries the same value. `agent_id` is None for service-level
          *     events (gateway / daemons); `machine` is the host dimension. `level` is
@@ -5438,7 +5438,7 @@ export interface components {
          *     GET /api/agents/{id}/inspect/widgets.
          *
          *     The resolved twin of a registered `InspectWidgetSpec`
-         *     (`shared/plugin_inspector.py`): `plugin` + `id` name the registration,
+         *     (`base/packages/plugins/inspector.py`): `plugin` + `id` name the registration,
          *     `kind` selects the console renderer (a closed set; an unknown kind is
          *     skipped by the console), and the payload field the kind reads (`tasks`)
          *     carries the kernel-resolved rows. A widget with an empty payload is
@@ -5981,7 +5981,7 @@ export interface components {
          * @description GET /api/memory/note response — one parsed memory note.
          *
          *     Mirrors MemoryGraphNode plus the parsed markdown body. The body is the
-         *     markdown with the YAML frontmatter removed (shared.parse_note's body), so
+         *     markdown with the YAML frontmatter removed (base.parse_note's body), so
          *     the frontend renders the note itself rather than re-parsing frontmatter
          *     (frontmatter values arrive as structured fields: title / description /
          *     tags / timestamp / ava_agent / ava_machine).
@@ -6580,7 +6580,7 @@ export interface components {
          * @description One plugin metric rendered for the inspector surface — an element of
          *     GET /api/agents/{id}/inspect/metrics.
          *
-         *     Mirrors the registered MetricSpec (see `shared/plugin_metrics.py`):
+         *     Mirrors the registered MetricSpec (see `base/telemetry/metrics/plugin_metrics.py`):
          *     `panel` selects the payload — `timeseries` / `barchart` / `table` metrics
          *     carry `series` (a bounded recent window, 24h in 1h buckets by default, so
          *     at most a couple of dozen points), `stat` metrics carry `value` (the
@@ -6757,7 +6757,7 @@ export interface components {
          * ResolvedFieldView
          * @description One per-model-defaultable setting resolved for a specific model.
          *
-         *     The read-only mirror of `shared/lm/registry.py:explain_setting`: the value an
+         *     The read-only mirror of `base/lm/registry.py:explain_setting`: the value an
          *     agent on this model boots with, plus every candidate layer and the name of
          *     the one that won. There is no write path here — an explicit value is edited
          *     as the normal config field of the same `name`, so the panel links back to
@@ -6912,7 +6912,7 @@ export interface components {
          *     composes it into the marker `[system ts] You have been resurrected
          *     by {resurrected_by}` so the agent knows who resurrected it.
          *
-         *     The value must pass `shared.agents.messages.envelope.validate_source` (same check as
+         *     The value must pass `base.agents.messages.envelope.validate_source` (same check as
          *     `AgentMessageIn.source`): the same value becomes the prompt chat
          *     inbound's source, and the claim node's envelope wrap raises on
          *     anything outside the whitelist — killing the freshly resurrected

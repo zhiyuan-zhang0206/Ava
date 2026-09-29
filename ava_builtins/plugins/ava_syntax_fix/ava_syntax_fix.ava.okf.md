@@ -73,7 +73,7 @@ if that still fails, a single-call turn returns a compile-error ToolMessage dire
 ## Key dependencies
 
 - [[agent/hooks/hooks.ava.okf.md]] — before_exec hook
-- [[tool-exec.ava.okf.md]] — code execution sandbox (where before_exec hook runs)
+- [[agent/graph/exec/exec.ava.okf.md]] — code execution sandbox (where before_exec hook runs)
 - `_deterministic_fixes.py` (26631 bytes) — compile-guarded deterministic fix batteries (step 6), fixer table strongly typed as `list[tuple[str, Callable[[str], tuple[str, int]]]]`
 
 ## Configuration

@@ -19,8 +19,8 @@ from __future__ import annotations
 
 import sys
 
+from base.host import macos_firewall as fw
 from cli.commands.converge.firewall import _report_missing, audit_this_host
-from shared import macos_firewall as fw
 
 
 def cmd_firewall_status() -> int:

@@ -10,7 +10,7 @@ the served graph cannot go stale between manual rebuilds.
 This is the one deliberate exception to gateway/app.py's "pure JSON API,
 does not serve HTML" rule (see that module's docstring): it reuses the
 existing dev-tool template (`okf-d3-template.html`) and the build/inject
-mechanics in `shared/docs/okf_graph.py` — also used by `scripts/serve_okf_viz.py`'s
+mechanics in `base/packages/docs/okf_graph.py` — also used by `scripts/codegen/serve_okf_viz.py`'s
 local CLI — rather than reimplementing the D3 rendering as a frontend
 component. Auth is the normal gateway session-cookie / bearer-secret
 middleware (`gateway/app.py`'s `_cluster_auth_middleware`) — this path is not
@@ -22,8 +22,8 @@ from __future__ import annotations
 from fastapi import APIRouter
 from fastapi.responses import HTMLResponse
 
-from shared.docs.okf_graph import build_graph_data, render_html
-from shared.paths import repo_root
+from base.packages.docs.okf_graph import build_graph_data, render_html
+from base.paths import repo_root
 
 router = APIRouter()
 
@@ -35,6 +35,6 @@ def get_okf_graph() -> HTMLResponse:
     """Build the OKF graph from the live `.ava.okf.md` tree and render it
     into the self-contained D3 template — open directly in a browser tab."""
     repo = repo_root()
-    template_text = (repo / "scripts" / _TEMPLATE_NAME).read_text(encoding="utf-8")
+    template_text = (repo / "scripts" / "codegen" / _TEMPLATE_NAME).read_text(encoding="utf-8")
     data = build_graph_data(repo, name="Ava OKF")
     return HTMLResponse(render_html(data, template_text))

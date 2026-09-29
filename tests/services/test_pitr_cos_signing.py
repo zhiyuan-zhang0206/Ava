@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 
-from services.pitr.cos_client import _signature_v4
+from services.pitr.stores.cos.client import _signature_v4
 
 _EMPTY_SHA256 = hashlib.sha256(b"").hexdigest()
 
@@ -79,7 +79,7 @@ def test_credential_evidence_rejects_overexposed_file(tmp_path: Path) -> None:
 
     import pytest
 
-    from services.pitr.cos_client import CosPermanentError, credential_evidence
+    from services.pitr.stores.cos.client import CosPermanentError, credential_evidence
 
     path = tmp_path / "cos.json"
     path.write_text(json.dumps({"secret_id": "AKIDx", "secret_key": "s"}))
@@ -91,7 +91,7 @@ def test_credential_evidence_rejects_overexposed_file(tmp_path: Path) -> None:
 def test_credential_evidence_reports_cos_identity(tmp_path: Path) -> None:
     import json
 
-    from services.pitr.cos_client import credential_evidence
+    from services.pitr.stores.cos.client import credential_evidence
 
     path = tmp_path / "cos.json"
     path.write_text(json.dumps({"secret_id": "AKIDx", "secret_key": "s"}))

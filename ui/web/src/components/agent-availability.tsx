@@ -44,7 +44,7 @@ export function AgentAvailability({ agent }: { agent: AgentRow }) {
   // KEEP (task #3696 exception inventory): freshness window — with the refresh
   // stopped, an older observation no longer stands for a current verdict; two
   // minutes matches the read model's probe freshness span (PROBE_FRESH_FOR,
-  // shared/agent_observation.py).
+  // base/agents/observation/evidence.py).
   const fresh = Number.isFinite(observedAt)
     && observedAt <= now + FUTURE_SKEW_MS && now - observedAt <= 120_000;
   const launchFailed = availability?.reason.startsWith("launch_") ?? false;

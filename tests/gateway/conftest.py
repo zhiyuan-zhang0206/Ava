@@ -2,8 +2,8 @@
 
 `POST /api/agents` and the lifecycle endpoints (terminate / resurrect /
 restart) are HTTP-uniform: they always reach a runner via that runner's ops
-server (`_forward_spawn_to_remote` / `_enqueue_lifecycle` ->
-`dispatch_to_machine`; both live in routers/agents_forward.py), even when the
+server (`_forward_spawn_to_remote` / `enqueue_lifecycle` ->
+`dispatch_to_machine`; both live in gateway/agents/forward.py), even when the
 target is the co-located box (localhost). There is no in-process shortcut in
 the router anymore.
 
@@ -27,14 +27,14 @@ from typing import Any, cast
 import pytest
 from pydantic import SecretStr
 
+from base.cluster import machines as _machines
+from base.cluster.machine import machine_name
+from base.config import settings as _settings
+from gateway.agents import forward as _agents_forward_router
+from gateway.agents import router as _agents_router
 from gateway.app import app
-from gateway.routers import agents as _agents_router
-from gateway.routers import agents_forward as _agents_forward_router
-from ops.ops_lifecycle import launch_agent_op, lifecycle_op
+from ops.lifecycle import launch_agent_op, lifecycle_op
 from ops.rpc_schemas import LaunchAgentRequest, OpKind, SpawnedAgent
-from shared import machines as _machines
-from shared.config import settings as _settings
-from shared.machine import machine_name
 
 
 @pytest.fixture(autouse=True)
@@ -104,7 +104,7 @@ def _local_lifecycle_in_process(monkeypatch: pytest.MonkeyPatch) -> None:
         # mirrors the daemon serializing the response model onto the wire dict.
         return (await lifecycle_op(path, json_body, app.state.db_pool)).model_dump(mode="json")  # pyright: ignore[reportUnknownArgumentType]
 
-    monkeypatch.setattr(_agents_forward_router, "_enqueue_lifecycle", _in_process_lifecycle)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_agents_forward_router, "enqueue_lifecycle", _in_process_lifecycle)  # pyright: ignore[reportUnknownArgumentType]
 
 
 @pytest.fixture(autouse=True)
@@ -117,7 +117,7 @@ def _local_config_in_process(monkeypatch: pytest.MonkeyPatch) -> None:
     NO in-process fallback — an unreachable ops server is a 503, uniform with
     every other machine."""
     from gateway.routers import config as _config_router
-    from ops import ops_config
+    from ops import host_config
 
     real_dispatch = _config_router._cluster_rpc.dispatch_to_machine
 
@@ -140,8 +140,8 @@ def _local_config_in_process(monkeypatch: pytest.MonkeyPatch) -> None:
                 "only the local machine is simulated in-process"
             )
             if kind == "config_read":
-                return ops_config.config_read_op().model_dump(mode="json")
-            return ops_config.config_write_op(
+                return host_config.config_read_op().model_dump(mode="json")
+            return host_config.config_write_op(
                 cast("dict[str, Any]", payload["overrides"]),
                 local=bool(payload.get("local", False)),
             ).model_dump(mode="json")

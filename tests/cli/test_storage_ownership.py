@@ -14,11 +14,11 @@ import pytest
 import redis
 from redis.asyncio import Redis as AsyncRedis
 
+from base.cluster import ownership
+from base.cluster import postgres as pg
+from base.native_process.ownership import OwnedProcess
 from cli.commands.data_plane import cluster_instance as instance
 from cli.commands.data_plane import pgbouncer as pooler
-from shared.cluster import ownership
-from shared.cluster import postgres as pg
-from shared.native_process.ownership import OwnedProcess
 from tests._containers import redis_server
 
 _UNUSED_ADMIN = "unused-admin-credential"
@@ -126,8 +126,8 @@ def test_postmaster_pidfile_cannot_supply_missing_native_receipt(tmp_path: Path)
 def test_redis_maintenance_reconnect_cannot_shutdown_another_connection(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    from base.config import settings
     from cli.commands.data_plane import maintenance_stop as plane
-    from shared.config import settings
 
     monkeypatch.setattr(plane, "capture_postgres", lambda: None)
     monkeypatch.setattr(plane, "_capture_pooler", lambda: None)
@@ -357,7 +357,7 @@ def test_retained_postgres_cannot_signal_replacement(
 
 
 def _private_pg_configuration(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, int]:
-    from shared.config import settings
+    from base.config import settings
     from tests._containers import _free_port
 
     home, data = tmp_path / "home", tmp_path / "home/pg"

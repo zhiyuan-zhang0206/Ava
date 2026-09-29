@@ -1,9 +1,9 @@
 """ava_fleet — ops service declarations (the plugin's `build_services()` hook).
 
 A plugin that runs its own long-lived gateway/agent-runner daemon declares it
-here instead of hardcoding a ServiceSpec into the core `ops/roster.py`: a
+here instead of hardcoding a ServiceSpec into the core `ops/roster/__init__.py`: a
 plugin ships a `services.py` exposing ``services() -> tuple[ServiceSpec, ...]``,
-and `ops.spec._plugin_services()` discovers + folds it into the single
+and `ops.spec.plugin_services()` discovers + folds it into the single
 `build_services()` roster (so watchdog keepalive / `ava start` / `ava status`
 all still derive from one place). Discovery keys on this plugin's code being
 PRESENT on the machine, not the agent-facing enable-state — the cluster-level
@@ -11,7 +11,7 @@ on/off is the explicit `AVA_TASK_MAINTENANCE_ENABLED` settings gate below. See
 `decisions/2026-07-19-plugin-registered-services.md`.
 
 This module is deliberately light: it imports only the ops service contract and
-roster probe helper plus `shared` — never `plugin.py` or the fleet
+roster probe helper plus `base` — never `plugin.py` or the fleet
 domain code — so the ops/CLI/watchdog process that discovers it does not pull the
 agent kernel in. `services()` is a function (not a module constant) so probe
 ports derived from settings / monkeypatched `health_port()` are read at use-time,
@@ -20,11 +20,11 @@ matching `build_services()`'s use-time contract.
 
 from __future__ import annotations
 
+from base.cluster.machine import MachineRole
+from base.config import settings
+from base.daemon.health import health_port
 from ops.roster import daemon_identity
-from ops.service_spec import ServiceSpec
-from shared.config import settings
-from shared.daemon_health import health_port
-from shared.machine import MachineRole
+from ops.roster.service_spec import ServiceSpec
 
 # task-maintenance runs on the gateway capability, like the other cluster-wide
 # daemons. Declared here (not reaching into ops's private `_GATEWAY`) so the

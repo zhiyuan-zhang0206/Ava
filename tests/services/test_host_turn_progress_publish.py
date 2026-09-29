@@ -9,7 +9,8 @@ from typing import cast
 
 import pytest
 
-from agent import turn_progress as progress
+from agent.turn import progress
+from base.deploy.maintenance import admission as maintenance_admission
 from services.agent_host import daemon as host_daemon
 
 
@@ -70,7 +71,7 @@ async def test_agent_host_publishes_active_snapshots_and_refreshes_empty_heartbe
         async def set(self, key: str, value: str, *, ex: int) -> None:
             writes.append((key, value, ex))
 
-    monkeypatch.setattr(host_daemon.shared.redis_client, "get_async_redis", FakeRedis)
+    monkeypatch.setattr(host_daemon.base.events.live.redis_client, "get_async_redis", FakeRedis)
     try:
         await host_daemon._publish_turn_progress_heartbeat("runner-a", {agent_id})
         await host_daemon._publish_turn_progress_heartbeat("runner-a", set())
@@ -93,7 +94,7 @@ async def test_agent_host_progress_publish_failure_is_debug_only(
         async def set(self, key: str, value: str, *, ex: int) -> None:
             raise RuntimeError("redis unavailable")
 
-    monkeypatch.setattr(host_daemon.shared.redis_client, "get_async_redis", BrokenRedis)
+    monkeypatch.setattr(host_daemon.base.events.live.redis_client, "get_async_redis", BrokenRedis)
 
     with caplog.at_level(logging.DEBUG, logger=host_daemon._log.name):
         await host_daemon._publish_turn_progress_heartbeat("runner-a", set())
@@ -134,7 +135,7 @@ async def test_hung_progress_set_does_not_stop_repeated_ownership_renewal(
     class FakeScheduler:
         active_agents: frozenset[int] = frozenset()
 
-    monkeypatch.setattr(host_daemon.shared.redis_client, "get_async_redis", HungRedis)
+    monkeypatch.setattr(host_daemon.base.events.live.redis_client, "get_async_redis", HungRedis)
     monkeypatch.setattr(host_daemon, "_TURN_PROGRESS_PUBLISH_TIMEOUT_S", 0.01, raising=False)
     monkeypatch.setattr(host_daemon, "_LIVENESS_BEAT_STEP_S", 0.01)
     with caplog.at_level(logging.WARNING, logger=host_daemon._log.name):
@@ -170,7 +171,6 @@ async def test_beat_skips_ownership_renewal_while_quiesced(
     beat after resume refreshes every row this host still owns — a tracked
     decision of the 2026-09-12 fix batch.
     """
-    from shared import maintenance
 
     calls: list[str] = []
     state = {"quiesced": True}
@@ -191,7 +191,7 @@ async def test_beat_skips_ownership_renewal_while_quiesced(
     async def _record_publish(_machine: str, _agents: frozenset[int]) -> None:
         calls.append("publish")
 
-    monkeypatch.setattr(maintenance, "quiesced", lambda: state["quiesced"])
+    monkeypatch.setattr(maintenance_admission, "quiesced", lambda: state["quiesced"])
     monkeypatch.setattr(host_daemon, "_publish_turn_progress_heartbeat", _record_publish)
     monkeypatch.setattr(host_daemon, "_LIVENESS_BEAT_STEP_S", 0.01)
 
@@ -231,7 +231,7 @@ async def test_progress_publish_propagates_cancellation_without_failure_warning(
             finally:
                 cancelled.set()
 
-    monkeypatch.setattr(host_daemon.shared.redis_client, "get_async_redis", HungRedis)
+    monkeypatch.setattr(host_daemon.base.events.live.redis_client, "get_async_redis", HungRedis)
     with caplog.at_level(logging.DEBUG, logger=host_daemon._log.name):
         task = asyncio.create_task(host_daemon._publish_turn_progress_heartbeat("runner-a", set()))
         try:
@@ -291,11 +291,13 @@ async def test_timed_out_redis_connection_is_released_before_next_heartbeat(
             handlers.remove(task)
 
     server = await asyncio.start_server(handle, "127.0.0.1", 0)
-    client = host_daemon.shared.redis_client.open_async_redis(
+    client = host_daemon.base.events.live.redis_client.open_async_redis(
         f"redis://127.0.0.1:{server.sockets[0].getsockname()[1]}/0"
     )
     client.connection_pool.max_connections = 1
-    monkeypatch.setattr(host_daemon.shared.redis_client, "get_async_redis", lambda: client)
+    monkeypatch.setattr(
+        host_daemon.base.events.live.redis_client, "get_async_redis", lambda: client
+    )
     monkeypatch.setattr(host_daemon, "_TURN_PROGRESS_PUBLISH_TIMEOUT_S", 0.1, raising=False)
     try:
         with caplog.at_level(logging.DEBUG, logger=host_daemon._log.name):

@@ -38,7 +38,7 @@ named).
 `POST .../report` queues an answer naming that instruction's digest (only
 the coordinator thread journals it); `POST .../capability` answers 501. Each
 request carries an HMAC proof keyed by the unit's enrollment
-(`shared.cluster.authority.channel`), checked against the gateway's current
+(`base.cluster.authority.channel`), checked against the gateway's current
 record in a per-run replay window, so wrong operations, unknown units,
 forged, replayed or skewed requests, and rotated or revoked enrollments are
 refused. Before any proof, a request's body is bounded, each socket read and
@@ -111,7 +111,7 @@ must be fixed before dbgen-8 relaxes that gate:
   kill legs (about 160 s), so the strict barrier aborts spuriously.
 
 The channel's own gap (coordinator responses are not authenticated) is listed
-in [unit enrollment](../../shared/cluster/authority/unit-enrollment.ava.okf.md#before-remote-units-dbgen-8fc-9).
+in [unit enrollment](../../base/cluster/authority/unit-enrollment.ava.okf.md#before-remote-units-dbgen-8fc-9).
 
 ## Candidate reference
 

@@ -7,7 +7,7 @@ from collections.abc import Iterator
 
 import pytest
 
-import gateway.routers.status as status_mod
+import gateway.cluster.status as status_mod
 
 
 @pytest.fixture(autouse=True)

@@ -19,15 +19,20 @@ mandatory.
 
 ## Entry Points
 
+The package root holds only process entry points: their module paths are written into service
+manifests, custody records, pidfile identity checks and `postgresql.auto.conf`, so they never move.
+Everything else lives in `activation/`, `base_backup/`, `restore/`, `retention/`, `wal/`,
+`operation/` and `stores/` (role protocols, GCS adapters, and the `baidu/`, `cos/`, `oss/` backends).
+
 - `services/pitr/archive_shim.py` — stdlib-only atomic local WAL spool entry point, reserved for a later archive-mode rollout
-- `services/pitr/activation_state.py` — strict schema-v5 atomic activation record; CAS transitions persist config digests, the exact home operation/action/generation binding, WAL ACK/viewer evidence, and candidate/protected digests while preserving `started_at`; older transport schemas refuse rather than acquiring new authority
+- `services/pitr/activation/state.py` — strict schema-v5 atomic activation record; CAS transitions persist config digests, the exact home operation/action/generation binding, WAL ACK/viewer evidence, and candidate/protected digests while preserving `started_at`; older transport schemas refuse rather than acquiring new authority
 - `services/gateway_side/backup/snapshot.py` — creates and verifies activation's
   encrypted logical recovery floor independently of updater orchestration;
   activation reuses a previously recorded artifact only after re-verifying it
 - `services/pitr/uploader_daemon.py` — disabled-by-default single-worker GCS uploader; it verifies immutable conditional creates before publishing a durable local ACK
 - `services/pitr/base_scheduler_daemon.py` — separately gated weekly scheduler for physical base candidates and generation-pinned restore proofs; both gates default off and it never deletes remote data
-- `services/pitr/retention_planner.py` — the default-off local dry-run planner (see *Remote retention* below)
-- `services/pitr/logical_dump_names.py` — the shared managed-name grammar the daily backup writer and the retention classifier both parse, so a name the writer emits is exactly a name the planner may ever delete
+- `services/pitr/retention/planner.py` — the default-off local dry-run planner (see *Remote retention* below)
+- `services/pitr/stores/logical_dump_names.py` — the shared managed-name grammar the daily backup writer and the retention classifier both parse, so a name the writer emits is exactly a name the planner may ever delete
 - `cli/commands/data_plane/pitr.py` — read-only `ava pitr retention inspect` view of the latest durable local plan, with per-surface (physical/logical) counts and the weak-evidence count
 
 ## Gates and layers
@@ -65,11 +70,11 @@ mandatory.
 - Database dials never use a write-generation login. Capture facts, the
   restore worker's live probes and the operator drill's live counts read as
   the administrator acting as the schema owner over the home's owner-only
-  socket (`shared.pg_admin`); the worker receives that password-free conninfo
+  socket (`base.db.pg_admin`); the worker receives that password-free conninfo
   on stdin after the controller's custody-checked session. Server
   administration (WAL switch, archiver and `pg_hba` reads, `ALTER SYSTEM`,
   `data_directory`) runs on the administrator as itself over a
-  `shared.pg_admin.connect` session bound to the home's recorded postmaster
+  `base.db.pg_admin.connect` session bound to the home's recorded postmaster
   (`pitr_admin_session`).
 
 ## Operation custody

@@ -10,9 +10,9 @@ from typing import Any
 
 import pytest
 
-from ava.impersonation_launch import bootstrap_message
+from ava.impersonation.launch import bootstrap_message
 from ava.shell.coding_tools import codex
-from shared import coding_session_owner
+from base.sessions import coding_session_owner
 
 _SKILL_DIR = Path(__file__).parents[2] / "ava_builtins/skills/ava-use-other-agents"
 _ENDPOINT = "unix:///home/u/.ava-lc/run/codex-app-server.0123456789ab-01234567.sock"

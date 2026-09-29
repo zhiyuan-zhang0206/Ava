@@ -1,0 +1,67 @@
+"""`base.db` / `base.events.live.redis_client` connection helpers read settings once
+and hand back a working connection / pool / sync client, so call sites stop
+hand-writing `psycopg.connect(settings.data_plane.db_url)` and
+`redis.Redis.from_url(settings.data_plane.redis_url)`. These pin that the helpers read the
+live settings URL (the conftest testcontainer) and pass options through.
+"""
+
+from __future__ import annotations
+
+from base import db
+from base.config import settings
+from base.events.live.redis_client import sync_redis
+
+
+def test_connect_runs_a_query() -> None:
+    with db.connect() as conn, conn.cursor() as cur:
+        cur.execute("SELECT 1")
+        assert cur.fetchone() == (1,)
+
+
+def test_connect_autocommit_passthrough() -> None:
+    with db.connect(autocommit=True) as conn:
+        assert conn.autocommit is True
+
+
+def test_connect_defaults_to_manual_commit() -> None:
+    with db.connect() as conn:
+        assert conn.autocommit is False
+
+
+def test_connect_url_bounds_statements_unless_unbounded() -> None:
+    """Against a real Postgres named explicitly: the door delivers the 60s
+    statement ceiling by default and none when the caller dials unbounded."""
+    url = settings.data_plane.db_url
+    with db.connect_url(url) as conn:
+        assert conn.execute("SHOW statement_timeout").fetchone() == ("1min",)
+    with db.connect_url(url, autocommit=True, unbounded=True) as conn:
+        assert conn.autocommit is True
+        assert conn.execute("SHOW statement_timeout").fetchone() == ("0",)
+
+
+def test_pool_hands_out_working_connections() -> None:
+    pool = db.pool(min_size=1, max_size=2)
+    try:
+        with pool.connection() as conn, conn.cursor() as cur:
+            cur.execute("SELECT 1")
+            assert cur.fetchone() == (1,)
+    finally:
+        pool.close()
+
+
+def test_sync_redis_ping() -> None:
+    client = sync_redis()
+    try:
+        assert client.ping() is True  # pyright: ignore[reportUnknownMemberType]
+    finally:
+        client.close()
+
+
+def test_sync_redis_decode_responses_passthrough() -> None:
+    client = sync_redis(decode_responses=True)
+    try:
+        client.set("ava:test:connect-helper", "v")
+        assert client.get("ava:test:connect-helper") == "v"  # str, not bytes
+    finally:
+        client.delete("ava:test:connect-helper")
+        client.close()

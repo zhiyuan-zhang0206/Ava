@@ -9,11 +9,11 @@ import httpx
 import psycopg
 import pytest
 
+from base.config import settings
 from ops.cluster_rpc import dispatch_to_machine
-from shared.config import settings
+from tests.base.poll_until import poll_until
 from tests.e2e._db import wait_for_status
 from tests.e2e._env import E2EEnv
-from tests.shared.poll_until import poll_until
 
 
 @pytest.mark.scenario("tests.e2e.fakes.scenarios.lifecycle_resurrect:build")

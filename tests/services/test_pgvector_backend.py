@@ -1,7 +1,7 @@
 """PGVectorBackend tests — real Postgres + pgvector against the session test DB.
 
 `tests/conftest.py` provisions an isolated `ava_test_<pid>_<ts>` database per
-session and `shared.db` dials it, so these tests run against the real engine
+session and `base.db` dials it, so these tests run against the real engine
 the backend targets (CI's `install-pg-redis` action installs
 `postgresql-17-pgvector`). The table is a derived cache prepared at gateway
 start (`prepare_table`); a runtime `connect()` only validates it. The autouse
@@ -361,9 +361,9 @@ def test_probe_healthy_when_extension_available(monkeypatch: pytest.MonkeyPatch)
         def fetchone(self) -> tuple[int]:
             return self._rows[0]
 
-    import shared.db
+    import base.db
 
-    monkeypatch.setattr(shared.db, "connect", _FakeConn)
+    monkeypatch.setattr(base.db, "connect", _FakeConn)
     result = probe.probe_backend("pgvector")
     assert result.message is None
     assert result.fatal is False
@@ -388,9 +388,9 @@ def test_probe_fatal_with_actionable_fix_when_extension_missing(
         def fetchone(self) -> tuple[int]:
             return self._rows[0]
 
-    import shared.db
+    import base.db
 
-    monkeypatch.setattr(shared.db, "connect", _FakeConn)
+    monkeypatch.setattr(base.db, "connect", _FakeConn)
     result = probe.probe_backend("pgvector")
     assert result.fatal is True
     assert result.message is not None
@@ -399,13 +399,13 @@ def test_probe_fatal_with_actionable_fix_when_extension_missing(
 
 
 def test_probe_transient_when_postgres_unreachable(monkeypatch: pytest.MonkeyPatch) -> None:
-    import shared.db
+    import base.db
     from services.memory_indexer.backends import probe
 
     def _raise(*_a: object, **_kw: object) -> None:
         raise psycopg.OperationalError("connection refused")
 
-    monkeypatch.setattr(shared.db, "connect", _raise)
+    monkeypatch.setattr(base.db, "connect", _raise)
     result = probe.probe_backend("pgvector")
     assert result.fatal is False
     assert result.message is not None

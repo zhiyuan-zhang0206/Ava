@@ -16,7 +16,7 @@ from uuid import UUID
 
 import pytest
 
-from shared.api_contracts.release_handoff import HandoffRefusedError, read_envelope
+from base.api_contracts.release_handoff import HandoffRefusedError, read_envelope
 
 _ID = "0f1e2d3c-4b5a-4968-8778-a6b5c4d3e2f1"
 _EXECUTOR = {

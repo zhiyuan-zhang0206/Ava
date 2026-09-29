@@ -8,7 +8,7 @@ backend tag landing without a frontend branch is exactly the regression class
 the user hit as "UNRECOGNIZED SYSTEM_MARKER (FRONTEND NOT ADAPTED)" (#1017).
 
 This test machine-checks the contract in the backend job (milliseconds, no
-browser): the backend enum is AST-parsed from `shared/message_kwargs.py` (the
+browser): the backend enum is AST-parsed from `base/agents/messages/kwargs.py` (the
 single source of truth), the frontend sets are read from `markers.tsx`, and a
 backend member with no frontend branch fails CI immediately.
 
@@ -32,13 +32,13 @@ from pathlib import Path
 import pytest
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
-_MESSAGE_KWARGS = _REPO_ROOT / "shared" / "message_kwargs.py"
+_MESSAGE_KWARGS = _REPO_ROOT / "base" / "agents" / "messages" / "kwargs.py"
 _MARKERS_TS = _REPO_ROOT / "ui" / "web" / "src" / "components" / "timeline" / "markers.tsx"
 _SYSTEM_NOTE_WRITER_DIRS = ("agent", "ava_builtins", "demos")
 
 
 def _note_tag_members() -> set[str]:
-    """AST-extract the NoteTag StrEnum member values from shared/message_kwargs.py."""
+    """AST-extract the NoteTag StrEnum member values from base/agents/messages/kwargs.py."""
     tree = ast.parse(_MESSAGE_KWARGS.read_text())
     for node in tree.body:
         if (
@@ -55,7 +55,7 @@ def _note_tag_members() -> set[str]:
                 and isinstance(stmt.value, ast.Constant)
                 and isinstance(stmt.value.value, str)
             }
-    raise AssertionError("NoteTag StrEnum not found in shared/message_kwargs.py")
+    raise AssertionError("NoteTag StrEnum not found in base/agents/messages/kwargs.py")
 
 
 def _frontend_dispatch_members() -> set[str]:

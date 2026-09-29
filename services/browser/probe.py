@@ -1,7 +1,7 @@
 """Is the browser on this cluster's CDP port *ours*?
 
 Every other Ava service answers a `/healthz` carrying `name`/`home`/`pid`, and
-`shared.daemon_health.probe_daemon` refuses to call a 200 healthy until those
+`base.daemon.health.probe_daemon` refuses to call a 200 healthy until those
 identify this unit's own daemon. That check exists because a pytest-leaked
 restarter on prod's default port kept a healthcheck green for 98 minutes while
 the real restarter was dead.
@@ -88,8 +88,8 @@ from typing import cast
 
 import psutil
 
-from shared.config import settings
-from shared.daemon_health import DaemonProbe
+from base.config import settings
+from base.daemon.health import DaemonProbe
 
 from . import macos_readiness
 from .orphan import find_cluster_chrome, is_cluster_chrome

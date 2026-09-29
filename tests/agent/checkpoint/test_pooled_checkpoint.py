@@ -15,9 +15,9 @@ from psycopg.rows import DictRow, dict_row
 from psycopg_pool import AsyncConnectionPool
 
 from agent.impersonation import flush_checkpoint
+from base.config import settings
 from services.agent_host.daemon import _build_checkpointer
 from services.agent_host.pooled_checkpoint import PooledPostgresSaver
-from shared.config import settings
 
 _LOCK_KEY = 918273
 

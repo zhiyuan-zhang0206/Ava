@@ -1,4 +1,4 @@
-"""Unit tests for scripts/coverage_gates.py — the backend CI coverage gates.
+"""Unit tests for scripts/ci/coverage_gates.py — the backend CI coverage gates.
 
 The script parses coverage.json (coverage.py's JSON report) and enforces two
 tiers: the combined core-domain line-rate gate and per-risk-domain minimum
@@ -17,7 +17,7 @@ from typing import Any
 import pytest
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-_SCRIPT = _REPO_ROOT / "scripts" / "coverage_gates.py"
+_SCRIPT = _REPO_ROOT / "scripts" / "ci" / "coverage_gates.py"
 
 
 def _load_script() -> Any:
@@ -45,7 +45,7 @@ def _files(classes: dict[str, tuple[int, int]]) -> dict[str, dict]:
     }
 
 
-_CORE = ("agent", "ava", "cli", "gateway", "shared", "ui")
+_CORE = ("agent", "ava", "cli", "gateway", "base", "ui")
 
 
 def _core_classes(covered: int = 9, valid: int = 10) -> dict[str, tuple[int, int]]:
@@ -61,7 +61,7 @@ def test_core_gate_passes_and_prints_table(
     )
     assert gates.check(files, threshold=85.0) == 0
     out = capsys.readouterr().out
-    assert "core domains agent+ava+cli+gateway+shared+ui: 90.0%" in out
+    assert "core domains agent+ava+cli+gateway+base+ui: 90.0%" in out
     assert "ops" in out and "services" in out and "ava_builtins" in out
 
 
@@ -92,8 +92,8 @@ def test_subdomain_floor_aggregates_over_prefix(
     files = _files(
         {
             **_core_classes(),
-            "services/pitr/uploader.py": (8, 10),
-            "services/pitr/state.py": (4, 10),
+            "services/pitr/wal/uploader.py": (8, 10),
+            "services/pitr/wal/state.py": (4, 10),
             "services/backup.py": (9, 10),
         }
     )

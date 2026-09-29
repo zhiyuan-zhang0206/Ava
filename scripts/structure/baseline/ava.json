@@ -1,13 +1,8 @@
 {
   "complexity": {
-    "ava/_gateway_transport.py::post": 17,
-    "ava/files.py::read": 19,
-    "ava/impersonation_replay.py::consume_recorded_events": 16
+    "ava/files.py::read": 19
   },
   "directories": {
-    "ava": 34
-  },
-  "nesting": {
-    "ava/_mcps_daemon.py::_handle_client": 7
+    "ava": 21
   }
 }

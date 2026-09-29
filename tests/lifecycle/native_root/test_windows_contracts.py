@@ -12,14 +12,14 @@ from typing import cast
 import psutil
 import pytest
 
+from base.native_process import ownership as proc_tree
+from base.native_process import winjob
+from base.native_process.ownership import OwnedProcess
+from base.native_process.root_control import client
+from base.native_process.root_control.ipc import encode, ok_response
+from base.native_process.root_control.windows import transport
 from services.ava_root.windows import console, process
 from services.ava_root_glue.windows_terminal_owner import TerminalOwner
-from shared import winjob
-from shared.native_process import ownership as proc_tree
-from shared.native_process.ownership import OwnedProcess
-from shared.root_control import client
-from shared.root_control.ipc import encode, ok_response
-from shared.root_control.windows import transport
 
 
 def test_resource_root_field_is_not_interpreted_as_status(tmp_path, monkeypatch):
@@ -45,8 +45,8 @@ def test_status_still_requires_native_pipe_peer_identity(tmp_path, monkeypatch, 
 
 
 async def test_terminal_monitor_rechecks_completion_after_waiting_for_close_lock():
+    from base.sessions.windows.terminal.record import TerminalRecord
     from services.ava_root.custody import ServiceCustody
-    from shared.windows_terminal.record import TerminalRecord
 
     class Job:
         closed = False
@@ -240,7 +240,7 @@ def test_job_membership_that_never_settles_is_refused_not_guessed(monkeypatch):
 
 def _move_api(monkeypatch, transient: list[int], lasting: int | None = None) -> list[int]:
     """MoveFileExW fails with each transient Win32 code, then with ``lasting`` or renames."""
-    from shared.root_control.windows import storage
+    from base.native_process.root_control.windows import storage
 
     attempts: list[int] = []
     error = [0]
@@ -259,7 +259,7 @@ def _move_api(monkeypatch, transient: list[int], lasting: int | None = None) -> 
 
 
 def test_custody_publication_rides_out_a_reader_holding_the_record(tmp_path, monkeypatch):
-    from shared.root_control.windows import storage
+    from base.native_process.root_control.windows import storage
 
     # Native CI: a root readiness poll holding the record open made the owner's
     # replacing rename fail with ERROR_ACCESS_DENIED, and the owner died.
@@ -276,7 +276,7 @@ def test_custody_publication_rides_out_a_reader_holding_the_record(tmp_path, mon
 def test_custody_publication_refuses_other_errors_and_a_lasting_conflict(
     tmp_path, monkeypatch, code, retried
 ):
-    from shared.root_control.windows import storage
+    from base.native_process.root_control.windows import storage
 
     monkeypatch.setattr(storage, "_SHARING_WAIT_S", 0.05)
     attempts = _move_api(monkeypatch, [], lasting=code)
@@ -290,7 +290,7 @@ def test_custody_publication_refuses_other_errors_and_a_lasting_conflict(
 
 
 def test_record_read_rides_out_a_replacement_in_progress(tmp_path, monkeypatch):
-    from shared.root_control.windows import storage
+    from base.native_process.root_control.windows import storage
 
     # Native CI: the root read the record while the owner replaced it and the
     # terminal.start handler failed with PermissionError ("internal error").
@@ -310,7 +310,7 @@ def test_record_read_rides_out_a_replacement_in_progress(tmp_path, monkeypatch):
 
 
 def test_record_read_propagates_absence_links_and_a_lasting_denial(tmp_path, monkeypatch):
-    from shared.root_control.windows import storage
+    from base.native_process.root_control.windows import storage
 
     monkeypatch.setattr(storage, "_SHARING_WAIT_S", 0.05)
     with pytest.raises(FileNotFoundError):

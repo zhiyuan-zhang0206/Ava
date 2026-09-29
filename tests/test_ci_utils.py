@@ -137,7 +137,7 @@ def gh(monkeypatch: pytest.MonkeyPatch):
                 # main-workflow runs for this head.
                 stdout = "1" if main_completed else "0"
             elif "actions/runs?" in url and "--jq" not in cmd:
-                # ci_job_rerun reads the raw REST runs payload (issue #1945);
+                # job_rerun reads the raw REST runs payload (issue #1945);
                 # keep its view empty so diagnose tests stay deterministic.
                 stdout = json.dumps({"total_count": 0, "workflow_runs": []})
             elif "/jobs?" in url:
@@ -1359,7 +1359,7 @@ def _diag_job(name: str, job_id: int = 9, conclusion: str = "FAILURE") -> dict:
 def _diag_runs(run_id: int = 10) -> str:
     """Real-shaped REST runs payload with one CI run (issue #1945).
 
-    The run carries `status: completed`, which `ci_job_rerun` reads to decide whether a re-run is
+    The run carries `status: completed`, which `job_rerun` reads to decide whether a re-run is
     admissible (task #3764)."""
     return json.dumps(
         {

@@ -9,8 +9,8 @@ from typing import Any
 import psycopg
 import pytest
 
+from base.telemetry.metrics.observed_metrics import observe_row, write_observations
 from services.events_maintenance import observed_metrics as replay
-from shared.metrics.observed_metrics import observe_row, write_observations
 
 
 def _source(db: psycopg.Connection, event_id: int = 1) -> dict[str, Any]:
@@ -140,7 +140,7 @@ def test_archive_replay_preserves_unlabeled_cluster_and_last_row(
 ) -> None:
     from datetime import timedelta
 
-    from shared.loki_index_labels import archive_stream_selector
+    from base.telemetry.loki_index_labels import archive_stream_selector
 
     freeze = replay.ARCHIVE_FREEZE_AT
     monkeypatch.setattr(replay, "ARCHIVE_FLOOR_AT", freeze - timedelta(minutes=1))
@@ -180,7 +180,7 @@ def test_loki_failure_does_not_block_jsonl_repair(
 def test_pre_id_live_jsonl_derives_shared_loki_identity(
     db_conn: psycopg.Connection, tmp_path: Path
 ) -> None:
-    from shared.telemetry import event_id
+    from base.telemetry import event_id
 
     row = _source(db_conn)
     del row["id"]

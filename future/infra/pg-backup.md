@@ -63,7 +63,7 @@
 
 > **Update 2026-08-30 (audit P0-2):** the off-site leg no longer uses the
 > Google Drive sync folder — it publishes through the shared BlobStore store
-> group (`services.pitr.store_factory`), so GCS and Baidu Netdisk are the
+> group (`services.pitr.stores.factory`), so GCS and Baidu Netdisk are the
 > shared adapters and the Drive copy is gone. Remote objects are append-only
 > except policy-owned retention deletions (off by default; the publish
 > contract has no delete verb and the deletion role must be explicitly armed);
@@ -89,7 +89,7 @@ remains mandatory and is never pruned by physical-backup retention.
 
 1. **Off-site encrypted copy — delivered.** After encryption and before local
    pruning, the gateway publishes the artifact through the shared backup store
-   contract (`services.pitr.store_factory` -> `RestartableStreamingObjectStore
+   contract (`services.pitr.stores.factory` -> `RestartableStreamingObjectStore
    .put_base_if_absent`, the same backend switch as the physical PITR plane) as
    `ava-logical/<name>`; the store-verified ACK (pin_token, size, checksum) is
    the identity. The publish is if-absent and immutable; a missing/unconfigured
@@ -103,7 +103,7 @@ remains mandatory and is never pruned by physical-backup retention.
    in-flight activation pin), with objects that carry no verifiable sidecar
    binding labeled weak-evidence in the plan — see the storage-abstraction
    effort's retention planner.
-2. **Restore drill — delivered.** `scripts/restore_drill.py` decrypts the
+2. **Restore drill — delivered.** `scripts/data_plane_ops/restore_drill.py` decrypts the
    latest managed artifact (or a supplied path), restores it into scratch
    Postgres, and validates schema, agent rows, checkpoint rows, a checkpoint
    reader sample, and a service smoke.

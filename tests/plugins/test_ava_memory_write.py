@@ -15,14 +15,14 @@ import yaml
 
 import ava
 from agent.state import build_agent_state, clear_plugin_registrations
-from shared.plugin_context import PluginContext
+from base.packages.plugins.context import PluginContext
 
 
 @pytest.fixture
 def memory_plugin(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Any:
     """Load ava_memory through its registration path against isolated stores."""
-    import shared.machine
-    import shared.paths
+    import base.cluster.machine
+    import base.paths
     from ava import agent_identity
 
     workspace = tmp_path / "workspace"
@@ -40,10 +40,10 @@ def memory_plugin(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Any:
     def isolated_machine_name() -> str:
         return "memory-host"
 
-    monkeypatch.setattr(shared.paths, "ava_home", isolated_home)
-    monkeypatch.setattr(shared.paths, "workspace_dir", isolated_workspace)
-    monkeypatch.setattr(shared.paths, "memory_dir", isolated_pool)
-    monkeypatch.setattr(shared.machine, "machine_name", isolated_machine_name)
+    monkeypatch.setattr(base.paths, "ava_home", isolated_home)
+    monkeypatch.setattr(base.paths, "workspace_dir", isolated_workspace)
+    monkeypatch.setattr(base.paths, "memory_dir", isolated_pool)
+    monkeypatch.setattr(base.cluster.machine, "machine_name", isolated_machine_name)
     monkeypatch.setattr(agent_identity, "_agent_id", 17)
 
     clear_plugin_registrations()
@@ -163,13 +163,13 @@ def test_personal_write_dedupes_legacy_duplicate_pointer_lines(
 def test_personal_write_uses_hosted_turn_identity(
     memory_plugin: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    import shared.paths
-    from shared.turn_identity import bind_turn_identity
+    import base.paths
+    from base.native_process.turn_identity import bind_turn_identity
 
     def workspace(agent_id: int) -> Path:
         return tmp_path / str(agent_id)
 
-    monkeypatch.setattr(shared.paths, "workspace_dir", workspace)
+    monkeypatch.setattr(base.paths, "workspace_dir", workspace)
     with bind_turn_identity(29):
         entry = ava.memory.write("hosted-note", "Belongs to agent 29.")
 
@@ -530,8 +530,8 @@ def test_plugin_loads_and_writes_without_fcntl(
 
     monkeypatch.setattr(builtins, "__import__", no_fcntl)
 
-    import shared.machine
-    import shared.paths
+    import base.cluster.machine
+    import base.paths
     from ava import agent_identity
 
     workspace = tmp_path / "workspace"
@@ -546,10 +546,10 @@ def test_plugin_loads_and_writes_without_fcntl(
     def isolated_pool() -> Path:
         return pool
 
-    monkeypatch.setattr(shared.paths, "ava_home", isolated_home)
-    monkeypatch.setattr(shared.paths, "workspace_dir", isolated_workspace)
-    monkeypatch.setattr(shared.paths, "memory_dir", isolated_pool)
-    monkeypatch.setattr(shared.machine, "machine_name", lambda: "memory-host")
+    monkeypatch.setattr(base.paths, "ava_home", isolated_home)
+    monkeypatch.setattr(base.paths, "workspace_dir", isolated_workspace)
+    monkeypatch.setattr(base.paths, "memory_dir", isolated_pool)
+    monkeypatch.setattr(base.cluster.machine, "machine_name", lambda: "memory-host")
     monkeypatch.setattr(agent_identity, "_agent_id", 17)
 
     clear_plugin_registrations()

@@ -20,7 +20,7 @@ from agent.state import (
     build_agent_state,
     clear_plugin_registrations,
 )
-from shared.plugin_context import PluginContext
+from base.packages.plugins.context import PluginContext
 
 
 @pytest.fixture(autouse=True)
@@ -90,7 +90,7 @@ def _get_injected_context_notes(state_update: dict[str, object]) -> list[dict[st
     from langchain_core.messages import AnyMessage
 
     from agent.messages import read_ava_kwargs
-    from shared.message_kwargs import AvaMsgType, NoteTag
+    from base.agents.messages.kwargs import AvaMsgType, NoteTag
 
     notes: list[dict[str, str]] = []
     for msg in cast(list[AnyMessage], state_update.get("messages", [])):
@@ -1010,7 +1010,7 @@ def test_coding_tools_section_skips_framework_expanded_modules(
     always expanded and never promoted here."""
     from ava.sdk_surface import plugins
     from ava_builtins.plugins.ava_code.agent_runtime import _coding_tools_section
-    from shared.config import settings
+    from base.config import settings
 
     monkeypatch.setattr(settings.agent, "sdk_expand_in_system_prompt", ["files", "shell.sessions"])
     monkeypatch.setattr(plugins, "REGISTERED_SDK_EXPANSIONS", ["cwd"])
@@ -1025,7 +1025,7 @@ def test_coding_tools_section_all_expanded_keeps_preamble_only(
     monkeypatch: pytest.MonkeyPatch,
 ):
     from ava_builtins.plugins.ava_code.agent_runtime import _coding_tools_section
-    from shared.config import settings
+    from base.config import settings
 
     monkeypatch.setattr(settings.agent, "sdk_expand_in_system_prompt", ["cwd", "files", "shell"])
     text = _coding_tools_section()
@@ -1051,7 +1051,7 @@ def _stub_understand_text_path(monkeypatch: pytest.MonkeyPatch) -> dict:
     response.response_metadata = {}
     llm.invoke.return_value = response
     captured: dict = {"llm": llm}
-    monkeypatch.setattr("shared.lm.factory.build_chat_model", lambda _model, **_kw: llm)  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
+    monkeypatch.setattr("base.lm.factory.build_chat_model", lambda _model, **_kw: llm)  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
     return captured
 
 
@@ -1146,7 +1146,7 @@ def test_understand_wrap_forwards_effort(monkeypatch):
         efforts.append(kw.get("reasoning_effort"))  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
         return llm
 
-    monkeypatch.setattr("shared.lm.factory.build_chat_model", _fake_build)  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
+    monkeypatch.setattr("base.lm.factory.build_chat_model", _fake_build)  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
     ava.understand([{"prompt": "p", "text": "t"}])
     ava.understand([{"prompt": "p", "text": "t"}], effort="low")
     assert efforts == ["max", "low"]
@@ -1530,8 +1530,8 @@ def test_read_wrap_oversized_agents_md_truncates_and_archives(tmp_path: Path, mo
     (head + tail) with the full text archived to the workspace .exec_output/
     ring — same logic as exec output overflow; the archive path rides in the
     note so the agent can read / grep the complete content."""
-    from agent.graph import exec_output
-    from shared.config import settings
+    from agent.graph.exec import output
+    from base.config import settings
 
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -1542,7 +1542,7 @@ def test_read_wrap_oversized_agents_md_truncates_and_archives(tmp_path: Path, mo
 
     monkeypatch.setattr(settings.sandbox, "exec_output_max_chars", 500)  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
     overflow = tmp_path / "overflow"
-    monkeypatch.setattr(exec_output, "_overflow_dir", lambda: overflow)  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
+    monkeypatch.setattr(output, "_overflow_dir", lambda: overflow)  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
 
     ava.state = _make_state_with_cwd(str(repo))
     ava.state_update = {}

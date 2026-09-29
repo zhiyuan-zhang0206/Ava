@@ -1,6 +1,6 @@
 """Deliver one journaled fleet alert along one route (`alerting.deliveries`).
 
-- **alert row**: `shared.alerts.upsert_alert` with source `release-fleet`; the
+- **alert row**: `base.telemetry.alerts.upsert_alert` with source `release-fleet`; the
   table deduplicates by `(fingerprint, starts_at)`, so a retried delivery that
   already landed changes nothing.
 - **webhook**: an HTTP POST of the JSON body to the URL held in the
@@ -38,8 +38,8 @@ def deliver_one(home: Path, alert: FleetAlert, delivery: Delivery) -> None:
 
 
 def _alert_row(row: AlertRow) -> None:
-    from shared.alerts import upsert_alert
-    from shared.db_transaction import write_transaction
+    from base.db.transaction import write_transaction
+    from base.telemetry.alerts import upsert_alert
 
     with write_transaction() as conn:
         upsert_alert(conn, row.payload(), source=row.source)
@@ -51,8 +51,8 @@ def webhook_url(home: Path, url_file: str) -> str:
     The URL is usually a bearer in itself, so the file must be this user's
     and no one else's to read or write (0600); anything wider is refused.
     """
-    from shared.private_storage import private_file_problem
-    from shared.verified_file import regular_bytes
+    from base.deploy.release.verified_file import regular_bytes
+    from base.host.private_storage import private_file_problem
 
     path = home / "secrets" / url_file
     if problem := private_file_problem(path):
@@ -83,9 +83,9 @@ def _webhook(home: Path, webhook: Webhook) -> None:
 
 def _agent_notice(alert: FleetAlert, notice: AgentNotice) -> None:
     """Exactly once per alert key; a terminated observer is never resurrected."""
-    from shared.agents.messages.inbound_provenance import InboundProvenance
-    from shared.db import insert_inbound_message, publish_inbound_wake
-    from shared.db_transaction import write_transaction
+    from base.agents.messages.inbound_provenance import InboundProvenance
+    from base.db import insert_inbound_message, publish_inbound_wake
+    from base.db.transaction import write_transaction
 
     with write_transaction() as conn, conn.cursor() as cur:
         cur.execute(

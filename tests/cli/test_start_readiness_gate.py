@@ -11,15 +11,15 @@ import cli.commands._probe as _probe_commands
 import cli.commands._repo as _repo_commands
 import cli.commands._setup as _setup_commands
 import cli.commands.converge.host as converge_host
-import cli.commands.root_driver as _root_driver_commands
-import cli.commands.start as _start_commands
-from cli.commands import start
+import cli.commands.lifecycle.root_driver as _root_driver_commands
+import cli.commands.lifecycle.start as _start_commands
+from base.agents.exit_codes import SERVICES_NOT_READY_EXIT_CODE
+from base.deploy.lifecycle import start_serving
+from base.deploy.lifecycle.start_serving import RootBirth
 from cli.commands._repo import ServiceSpec
-from cli.commands.root_driver import LaunchOutcome
-from ops.service_spec import _GATEWAY
-from shared import start_serving
-from shared.exit_codes import SERVICES_NOT_READY_EXIT_CODE
-from shared.start_serving import RootBirth
+from cli.commands.lifecycle import start
+from cli.commands.lifecycle.root_driver import LaunchOutcome
+from ops.roster.service_spec import _GATEWAY
 
 pytestmark = pytest.mark.real_service_readiness_gate
 
@@ -63,15 +63,15 @@ def _roster(monkeypatch: pytest.MonkeyPatch, rows: tuple[tuple[str, str | None],
 def _hermetic_start(
     serving_root: RootBirth, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    from shared.runtime_interpreter import LoadedRuntimeIdentity
+    from base.deploy.release.runtime_interpreter import LoadedRuntimeIdentity
 
     def fixture_runtime(_self: object, _home: Path) -> LoadedRuntimeIdentity:
         return serving_root.runtime
 
     monkeypatch.setattr("cli.start_runtime.StartRuntime.identity", fixture_runtime)
+    from base.deploy.lifecycle import service_selection
     from cli.commands.data_plane import bringup
     from cli.commands.extensions import materialize
-    from shared import service_selection
 
     monkeypatch.setattr(service_selection, "selection_path", lambda: tmp_path / "selection.json")
     monkeypatch.setattr(start, "prod_service_checkout_error", _ignoring_args(lambda: None))
@@ -84,7 +84,7 @@ def _hermetic_start(
     monkeypatch.setattr(start, "_refuse_occupied_health_ports", _ignoring_args(lambda: 0))
     monkeypatch.setattr(start, "_record_running_sha", _ignoring_args(lambda: None))
     monkeypatch.setattr(start, "cmd_status", lambda: 0)
-    monkeypatch.setattr("shared.machine.machine_role", lambda: frozenset({"gateway"}))
+    monkeypatch.setattr("base.cluster.machine.machine_role", lambda: frozenset({"gateway"}))
     monkeypatch.setattr(
         _setup_commands,
         "_collect_setup_values",
@@ -138,7 +138,7 @@ def test_live_repeat_start_never_runs_mutating_preparation(monkeypatch: pytest.M
     monkeypatch.setattr(_root_driver_commands, "admit_live_start", _ignoring_args(lambda: True))
     monkeypatch.setattr(start, "_prepare_cold_start", no_prepare)
     monkeypatch.setattr(
-        "shared.cluster.assert_checkpoint_schema_current", _ignoring_args(lambda: None)
+        "base.cluster.assert_checkpoint_schema_current", _ignoring_args(lambda: None)
     )
     assert _start_commands.cmd_start() == 0
 
@@ -147,7 +147,7 @@ def test_live_repeat_start_never_runs_mutating_preparation(monkeypatch: pytest.M
 def test_start_does_not_consume_old_updater_authority(
     monkeypatch: pytest.MonkeyPatch, live: bool
 ) -> None:
-    from shared import cluster_lock
+    from base.deploy.state import cluster_lock
 
     def forbidden(*_args: object, **_kwargs: object) -> None:
         pytest.fail("ordinary start cannot consume the retired updater authority")
@@ -155,7 +155,7 @@ def test_start_does_not_consume_old_updater_authority(
     monkeypatch.setattr(cluster_lock, "read_update_lease", forbidden)
     monkeypatch.setattr(_root_driver_commands, "admit_live_start", _ignoring_args(lambda: live))
     monkeypatch.setattr(
-        "shared.cluster.assert_checkpoint_schema_current", _ignoring_args(lambda: None)
+        "base.cluster.assert_checkpoint_schema_current", _ignoring_args(lambda: None)
     )
     assert _start_commands.cmd_start() == 0
     assert start_serving.is_serving()
@@ -164,12 +164,12 @@ def test_start_does_not_consume_old_updater_authority(
 def test_home_operation_refuses_start_before_any_preparation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from shared import release_operation
+    from base.deploy.release import operation
 
     def held(_home: Path) -> None:
         raise RuntimeError("home operation holds startup")
 
-    monkeypatch.setattr(release_operation, "require_start_authorized", held)
+    monkeypatch.setattr(operation, "require_start_authorized", held)
     monkeypatch.setattr(
         _setup_commands,
         "_collect_setup_values",
@@ -182,9 +182,9 @@ def test_home_operation_refuses_start_before_any_preparation(
 def test_installed_start_requires_captured_runtime_before_preparation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from shared.runtime_release import ReleaseRejectedError
+    from base.deploy.release.runtime_release import ReleaseRejectedError
 
-    monkeypatch.setattr("shared.runtime_interpreter.WHEEL_RUNTIME", True)
+    monkeypatch.setattr("base.deploy.release.runtime_interpreter.WHEEL_RUNTIME", True)
     monkeypatch.setattr(
         _setup_commands,
         "_collect_setup_values",
@@ -203,7 +203,7 @@ def test_start_rejects_removed_updater_arguments(argument: str) -> None:
 def test_changed_live_generation_refuses_before_selection_or_converge(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from shared import service_selection
+    from base.deploy.lifecycle import service_selection
 
     service_selection.resolve_selection({"gateway", "frontend"}, only=("gateway",))
     before = service_selection.selection_path().read_bytes()
@@ -242,7 +242,7 @@ def test_live_schema_mismatch_refuses_without_applying_migrations(
 
 def test_failed_launch_never_becomes_serving(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        "cli.commands.root_driver.complete_boot_start",
+        "cli.commands.lifecycle.root_driver.complete_boot_start",
         lambda: pytest.fail("not ready for boot handoff"),
     )
 
@@ -257,8 +257,8 @@ def test_failed_launch_never_becomes_serving(monkeypatch: pytest.MonkeyPatch) ->
 def test_cold_preparation_receives_candidate_selection_before_publication(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from shared import service_selection
-    from shared.machine import MachineRoles
+    from base.cluster.machine import MachineRoles
+    from base.deploy.lifecycle import service_selection
 
     prepared: list[frozenset[str]] = []
     _roster(monkeypatch, (("gateway", None), ("otel-collector", None)))
@@ -333,7 +333,7 @@ def test_storage_schema_migration_grants_pooler_precede_application(
 def test_internal_start_leaves_boot_publication_to_public_dispatch(
     monkeypatch: pytest.MonkeyPatch, ready: bool
 ) -> None:
-    from cli.commands import root_driver
+    from cli.commands.lifecycle import root_driver
 
     _roster(monkeypatch, (("frontend", None),))
     monkeypatch.setattr(

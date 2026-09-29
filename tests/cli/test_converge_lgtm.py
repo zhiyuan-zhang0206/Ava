@@ -16,9 +16,9 @@ import pytest
 import yaml
 from pydantic import SecretStr
 
+from base.telemetry.lgtm_local import service_argv
 from cli.commands.converge.spec import ConvergeCtx
 from cli.commands.observability import lgtm_native, observatory_urls
-from shared.lgtm_local import service_argv
 
 # S104-flagged literal reused by the mismatch-warning parametrize — a config
 # value under test, not a bind.
@@ -47,16 +47,17 @@ _STUB_RENDER = '{"title": "Ava Ops", "panels": []}\n'
 def _default_provisioning_endpoints(monkeypatch: pytest.MonkeyPatch) -> None:
     """Default-render assertions use an explicit default deployment configuration."""
     monkeypatch.setattr(
-        "shared.config.settings.data_plane.db_url", "postgresql://reader@127.0.0.1:5433/ava"
+        "base.config.settings.data_plane.db_url", "postgresql://reader@127.0.0.1:5433/ava"
     )
-    monkeypatch.setattr("shared.config.settings.gateway.gateway_url", "")
-    monkeypatch.setattr("shared.config.settings.gateway.gateway_port", 8000)
+    monkeypatch.setattr("base.config.settings.gateway.gateway_url", "")
+    monkeypatch.setattr("base.config.settings.gateway.gateway_port", 8000)
 
     def render_dashboard_json(_repo_only: bool = False) -> tuple[str, tuple[str, ...]]:
         return _STUB_RENDER, ()
 
     monkeypatch.setattr(
-        "shared.metrics.grafana_dashboard_supply.render_dashboard_json", render_dashboard_json
+        "base.telemetry.metrics.grafana_dashboard_supply.render_dashboard_json",
+        render_dashboard_json,
     )
 
 
@@ -101,7 +102,7 @@ def test_native_backend_listen_hosts_are_settings_rendered_with_loopback_default
     repo = Path(__file__).resolve().parents[2]
     home = tmp_path / "home"
     native_dir = home / "lgtm/native"
-    monkeypatch.setattr("shared.config.settings.observability.lgtm_listen_host", "127.0.0.1")
+    monkeypatch.setattr("base.config.settings.observability.lgtm_listen_host", "127.0.0.1")
     lgtm_native._render_configs(repo, native_dir, home)
     rendered_loki = (native_dir / "config/loki.yaml").read_text(encoding="utf-8")
     assert "http_listen_address: 127.0.0.1" in rendered_loki
@@ -110,7 +111,7 @@ def test_native_backend_listen_hosts_are_settings_rendered_with_loopback_default
     assert "--web.listen-address=127.0.0.1:9090" in prometheus_argv
 
     # A non-loopback setting flows through to the rendered listeners.
-    monkeypatch.setattr("shared.config.settings.observability.lgtm_listen_host", "10.0.0.5")
+    monkeypatch.setattr("base.config.settings.observability.lgtm_listen_host", "10.0.0.5")
     lgtm_native._render_configs(repo, native_dir, home)
     rendered_loki = (native_dir / "config/loki.yaml").read_text(encoding="utf-8")
     assert "http_listen_address: 10.0.0.5" in rendered_loki
@@ -129,7 +130,7 @@ def test_native_grafana_http_addr_is_settings_rendered_with_all_interfaces_defau
     home = tmp_path / "home"
     native_dir = home / "lgtm/native"
     monkeypatch.setattr(
-        "shared.config.settings.observability.lgtm_grafana_listen_host",
+        "base.config.settings.observability.lgtm_grafana_listen_host",
         "0.0.0.0",  # noqa: S104 — asserted config default, not a bind
     )
     lgtm_native._render_configs(repo, native_dir, home)
@@ -141,7 +142,7 @@ def test_native_grafana_http_addr_is_settings_rendered_with_all_interfaces_defau
     # a normal SIGTERM past the unit's shutdown deadline (SendSIGKILL=no).
     assert "preinstall_disabled = true" in grafana_ini
 
-    monkeypatch.setattr("shared.config.settings.observability.lgtm_grafana_listen_host", "10.0.0.5")
+    monkeypatch.setattr("base.config.settings.observability.lgtm_grafana_listen_host", "10.0.0.5")
     lgtm_native._render_configs(repo, native_dir, home)
     grafana_ini = (native_dir / "config/grafana.ini").read_text(encoding="utf-8")
     assert "http_addr = 10.0.0.5" in grafana_ini
@@ -190,11 +191,11 @@ def test_native_grafana_renders_from_the_repo_and_host_setting(
     home = tmp_path / "home"
     native_dir = home / "lgtm/native"
     monkeypatch.setattr(
-        "shared.config.settings.observability.telemetry_tempo_query_url",
+        "base.config.settings.observability.telemetry_tempo_query_url",
         "http://tempo.test:3200/",
     )
     monkeypatch.setattr(
-        "shared.config.settings.observability.telemetry_tempo_endpoint",
+        "base.config.settings.observability.telemetry_tempo_endpoint",
         "http://tempo.test:14318/",
     )
 
@@ -257,12 +258,12 @@ def test_native_provisioning_renders_remote_observatory_urls(
     home = tmp_path / "home"
     native_dir = home / "lgtm/native"
     monkeypatch.setattr(
-        "shared.config.settings.observability.observability_url",
+        "base.config.settings.observability.observability_url",
         "http://10.0.0.46",
     )
-    monkeypatch.setattr("shared.machine.reachable_host", lambda: "10.0.0.10")
+    monkeypatch.setattr("base.cluster.machine.reachable_host", lambda: "10.0.0.10")
     monkeypatch.setattr(
-        "shared.config.settings.data_plane.db_url",
+        "base.config.settings.data_plane.db_url",
         "postgresql://grafana_ro@10.0.0.72:5433/ava_main",
     )
 
@@ -295,10 +296,10 @@ def test_native_provisioning_webhook_stays_loopback_without_observatory(
     home = tmp_path / "home"
     native_dir = home / "lgtm/native"
     monkeypatch.setattr(
-        "shared.config.settings.observability.observability_url",
+        "base.config.settings.observability.observability_url",
         "",
     )
-    monkeypatch.setattr("shared.machine.reachable_host", lambda: "10.0.0.10")
+    monkeypatch.setattr("base.cluster.machine.reachable_host", lambda: "10.0.0.10")
 
     lgtm_native._render_configs(repo, native_dir, home)
 
@@ -364,11 +365,11 @@ def test_native_provisioning_pg_stays_on_data_plane_when_db_url_is_loopback(
     render warns instead of silently pointing at the observatory (CTO
     review of 3b523ab14; #3606's PG never follows the observatory)."""
     monkeypatch.setattr(
-        "shared.config.settings.observability.observability_url",
+        "base.config.settings.observability.observability_url",
         "http://10.0.0.46",
     )
     monkeypatch.setattr(
-        "shared.config.settings.data_plane.db_url",
+        "base.config.settings.data_plane.db_url",
         "postgresql:///ava_main?host=/tmp/ava-pg-ava-test&port=5433",
     )
     loki, prometheus, pg = observatory_urls._observability_datasource_urls()
@@ -384,7 +385,7 @@ def test_observability_url_validation_warns_and_falls_back(
     """A malformed AVA_OBSERVABILITY_URL is warned about and falls back to the
     loopback endpoints instead of silently rendering broken URLs (QA P3)."""
     monkeypatch.setattr(
-        "shared.config.settings.observability.observability_url",
+        "base.config.settings.observability.observability_url",
         "10.0.0.1:1234",  # no scheme — malformed
     )
     loki, prometheus, pg = observatory_urls._observability_datasource_urls()
@@ -405,7 +406,7 @@ def test_native_converge_renders_grafana_password_only_when_configured(
     monkeypatch.setattr(lgtm_native, "_load_versions", _empty_native_versions)
     # Non-secret fixture; production reads the credential from settings.alerts.grafana_admin_password.
     monkeypatch.setattr(
-        "shared.config.settings.alerts.grafana_admin_password",
+        "base.config.settings.alerts.grafana_admin_password",
         SecretStr("fake-key-for-test"),
     )
 
@@ -427,7 +428,7 @@ def test_native_converge_leaves_unconfigured_grafana_password_absent(
     agents_dir.mkdir()
     monkeypatch.setattr(lgtm_native, "platform_tag", lambda: "darwin_arm64")
     monkeypatch.setattr(lgtm_native, "_load_versions", _empty_native_versions)
-    monkeypatch.setattr("shared.config.settings.alerts.grafana_admin_password", None)
+    monkeypatch.setattr("base.config.settings.alerts.grafana_admin_password", None)
 
     lgtm_native.ensure_lgtm_native(repo, home, services=frozenset(lgtm_native.BACKENDS))
 
@@ -454,9 +455,9 @@ def test_native_config_warns_only_for_mismatched_tempo_topology(
     intake_endpoint: str,
     warns: bool,
 ) -> None:
-    monkeypatch.setattr("shared.config.settings.observability.telemetry_tempo_query_url", query_url)
+    monkeypatch.setattr("base.config.settings.observability.telemetry_tempo_query_url", query_url)
     monkeypatch.setattr(
-        "shared.config.settings.observability.telemetry_tempo_endpoint", intake_endpoint
+        "base.config.settings.observability.telemetry_tempo_endpoint", intake_endpoint
     )
 
     lgtm_native._render_configs(Path(__file__).resolve().parents[2], tmp_path / "native", tmp_path)
@@ -496,26 +497,26 @@ def test_native_config_warns_when_widened_listen_host_has_loopback_read_urls(
     grafana_listen_host: str,
     expected_warns: list[str],
 ) -> None:
-    monkeypatch.setattr("shared.config.settings.observability.lgtm_listen_host", listen_host)
+    monkeypatch.setattr("base.config.settings.observability.lgtm_listen_host", listen_host)
     monkeypatch.setattr(
-        "shared.config.settings.observability.lgtm_grafana_listen_host", grafana_listen_host
+        "base.config.settings.observability.lgtm_grafana_listen_host", grafana_listen_host
     )
     monkeypatch.setattr(
-        "shared.config.settings.observability.telemetry_loki_url", "http://127.0.0.1:3100"
+        "base.config.settings.observability.telemetry_loki_url", "http://127.0.0.1:3100"
     )
     monkeypatch.setattr(
-        "shared.config.settings.observability.telemetry_prometheus_url", "http://127.0.0.1:9090"
+        "base.config.settings.observability.telemetry_prometheus_url", "http://127.0.0.1:9090"
     )
     monkeypatch.setattr(
-        "shared.config.settings.observability.telemetry_grafana_url", "http://127.0.0.1:3003"
+        "base.config.settings.observability.telemetry_grafana_url", "http://127.0.0.1:3003"
     )
     # Pin the tempo topology to loopback so its pre-existing warning cannot
     # pollute this test's stderr assertions.
     monkeypatch.setattr(
-        "shared.config.settings.observability.telemetry_tempo_query_url", "http://127.0.0.1:3200"
+        "base.config.settings.observability.telemetry_tempo_query_url", "http://127.0.0.1:3200"
     )
     monkeypatch.setattr(
-        "shared.config.settings.observability.telemetry_tempo_endpoint", "http://127.0.0.1:14318"
+        "base.config.settings.observability.telemetry_tempo_endpoint", "http://127.0.0.1:14318"
     )
 
     lgtm_native._render_configs(Path(__file__).resolve().parents[2], tmp_path / "native", tmp_path)
@@ -535,26 +536,26 @@ def test_native_config_warns_only_when_read_urls_stay_loopback_after_widening(
 ) -> None:
     """When the read URLs follow the widened listen host, the mismatch warning
     stays silent (the external-migration form)."""
-    monkeypatch.setattr("shared.config.settings.observability.lgtm_listen_host", "10.0.0.5")
+    monkeypatch.setattr("base.config.settings.observability.lgtm_listen_host", "10.0.0.5")
     monkeypatch.setattr(
-        "shared.config.settings.observability.lgtm_grafana_listen_host", _WILDCARD_LISTEN
+        "base.config.settings.observability.lgtm_grafana_listen_host", _WILDCARD_LISTEN
     )
     monkeypatch.setattr(
-        "shared.config.settings.observability.telemetry_loki_url", "http://10.0.0.5:3100"
+        "base.config.settings.observability.telemetry_loki_url", "http://10.0.0.5:3100"
     )
     monkeypatch.setattr(
-        "shared.config.settings.observability.telemetry_prometheus_url", "http://10.0.0.5:9090"
+        "base.config.settings.observability.telemetry_prometheus_url", "http://10.0.0.5:9090"
     )
     monkeypatch.setattr(
-        "shared.config.settings.observability.telemetry_grafana_url", "http://127.0.0.1:3003"
+        "base.config.settings.observability.telemetry_grafana_url", "http://127.0.0.1:3003"
     )
     # Pin the tempo topology to loopback so its pre-existing warning cannot
     # pollute this test's stderr assertion.
     monkeypatch.setattr(
-        "shared.config.settings.observability.telemetry_tempo_query_url", "http://127.0.0.1:3200"
+        "base.config.settings.observability.telemetry_tempo_query_url", "http://127.0.0.1:3200"
     )
     monkeypatch.setattr(
-        "shared.config.settings.observability.telemetry_tempo_endpoint", "http://127.0.0.1:14318"
+        "base.config.settings.observability.telemetry_tempo_endpoint", "http://127.0.0.1:14318"
     )
 
     lgtm_native._render_configs(Path(__file__).resolve().parents[2], tmp_path / "native", tmp_path)
@@ -699,7 +700,7 @@ def test_native_storage_dir_default_matches_historical_layout(
     repo = Path(__file__).resolve().parents[2]
     home = tmp_path / "home"
     native_dir = home / "lgtm/native"
-    monkeypatch.setattr("shared.config.settings.observability.lgtm_storage_dir", "")
+    monkeypatch.setattr("base.config.settings.observability.lgtm_storage_dir", "")
     lgtm_native._render_configs(repo, native_dir, home)
     rendered_loki = yaml.safe_load((native_dir / "config/loki.yaml").read_text(encoding="utf-8"))
     assert rendered_loki["common"]["path_prefix"] == str((home / "lgtm/native/data/loki").resolve())
@@ -718,7 +719,7 @@ def test_native_storage_dir_parameterized(monkeypatch: pytest.MonkeyPatch, tmp_p
     repo = Path(__file__).resolve().parents[2]
     home = tmp_path / "home"
     native_dir = home / "lgtm/native"
-    monkeypatch.setattr("shared.config.settings.observability.lgtm_storage_dir", "/data/obs")
+    monkeypatch.setattr("base.config.settings.observability.lgtm_storage_dir", "/data/obs")
     lgtm_native._render_configs(repo, native_dir, home)
     rendered_loki = yaml.safe_load((native_dir / "config/loki.yaml").read_text(encoding="utf-8"))
     assert rendered_loki["common"]["path_prefix"] == "/data/obs/loki"
@@ -743,7 +744,7 @@ def test_station_role_creates_configured_storage_dirs(
     storage = tmp_path / "obs-data"
     monkeypatch.setattr(lgtm_native, "platform_tag", lambda: "darwin_arm64")
     monkeypatch.setattr(lgtm_native, "_load_versions", _empty_native_versions)
-    monkeypatch.setattr("shared.config.settings.observability.lgtm_storage_dir", str(storage))
+    monkeypatch.setattr("base.config.settings.observability.lgtm_storage_dir", str(storage))
 
     lgtm_native.ensure_lgtm_native(repo, home, services=frozenset(lgtm_native.BACKENDS))
 

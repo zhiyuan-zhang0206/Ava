@@ -37,7 +37,12 @@ from uuid import uuid4
 import psutil
 import pytest
 
-from cli.commands import root_driver
+from base import paths
+from base.config import settings
+from base.deploy.release.runtime_release import MANIFEST_VERSION, VerifiedRelease, file_sha256
+from base.native_process.ownership import OwnedProcess
+from base.runtime_abi import current_abi
+from cli.commands.lifecycle import root_driver
 from cli.release_fleet.request import FleetRequest
 from cli.release_transition import journal, root_macos, root_service
 from cli.release_transition import launcher_macos as macos
@@ -45,11 +50,6 @@ from cli.release_transition.journal import Journal, Operation
 from cli.release_transition.launchd_custody import RootCustody
 from cli.release_transition.request import ReleaseRef
 from services.permissions_helper import client, lifecycle
-from shared import paths
-from shared.config import settings
-from shared.native_process.ownership import OwnedProcess
-from shared.runtime_abi import current_abi
-from shared.runtime_release import MANIFEST_VERSION, VerifiedRelease, file_sha256
 from tests.lifecycle.release_fleet.fakes import OffDutyGateway, drive
 from tests.lifecycle.transition.macos import native_fixture
 from tests.lifecycle.transition.phases import journal_fence, journal_issue
@@ -710,7 +710,7 @@ def test_helper_killed_mid_transition_is_an_explicit_refusal(
 
 
 def _serving(root: OwnedProcess) -> bool:
-    from shared.root_control.client import RootClientError, root_process
+    from base.native_process.root_control.client import RootClientError, root_process
 
     try:
         return root_process() == root

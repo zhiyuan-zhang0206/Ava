@@ -13,9 +13,9 @@ from pathlib import Path
 import psutil
 import pytest
 
+from base.daemon.health import DaemonProbe
+from base.native_process.ownership import OwnedProcess
 from services.healthchecks import owned_service as probe
-from shared.daemon_health import DaemonProbe
-from shared.native_process.ownership import OwnedProcess
 
 
 @contextlib.contextmanager

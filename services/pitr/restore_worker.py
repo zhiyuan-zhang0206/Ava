@@ -7,18 +7,18 @@ import sys
 from pathlib import Path
 from typing import Any, cast
 
-from services.pitr.base_manifest import CandidateManifest
-from services.pitr.operation_custody import publish_result
-from services.pitr.restore_object_store import GenerationPinnedObjectReader
-from services.pitr.restore_postgres import IsolatedPostgresRestoreExecutor
-from services.pitr.restore_proof import (
+from base.log import init_restricted_process
+from services.pitr.base_backup.manifest import CandidateManifest
+from services.pitr.operation.custody import publish_result
+from services.pitr.operation.worker_process import worker_request, worker_secrets
+from services.pitr.restore.postgres import IsolatedPostgresRestoreExecutor
+from services.pitr.restore.proof import (
     RestoreProofDeferredError,
     RestoreSpaceBudget,
     prove_candidate,
 )
-from services.pitr.store_factory import construct_store_group
-from services.pitr.worker_process import worker_request, worker_secrets
-from shared.log import init_restricted_process
+from services.pitr.stores.factory import construct_store_group
+from services.pitr.stores.restore_object_store import GenerationPinnedObjectReader
 
 
 def _object(value: object) -> dict[str, Any]:
@@ -101,7 +101,7 @@ def _run_drill(
     reader: GenerationPinnedObjectReader,
     output: Path,
 ) -> None:
-    from services.pitr.restore_drill import DrillRequest, parse_target_wall, run_restore_drill
+    from services.pitr.restore.drill import DrillRequest, parse_target_wall, run_restore_drill
 
     drill = _object(raw["drill"])
     if set(drill) != {"scratch", "target_lsn", "target_wall", "timeout_seconds"}:
@@ -129,8 +129,8 @@ def _run_drill(
 
 
 def main() -> None:
-    # Importing `shared.log` drops loguru's default handler: without a sink,
-    # every record `shared.pg_tools` and the restore code write is discarded.
+    # Importing `base.log` drops loguru's default handler: without a sink,
+    # every record `base.cluster.dataplane.pg_tools` and the restore code write is discarded.
     # Stderr is the operation's `stderr.log`; this worker holds no home, so it
     # opens no file sink.
     init_restricted_process()

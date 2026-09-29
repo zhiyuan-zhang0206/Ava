@@ -23,8 +23,8 @@ from psycopg_pool import ConnectionPool
 
 from ava_builtins.plugins.ava_fleet.task_maintenance import daemon
 from ava_builtins.plugins.ava_fleet.task_maintenance.daemon import _run_escalate
+from base.config import settings
 from gateway.app import app
-from shared.config import settings
 
 _TASK_TITLE = count(1)
 

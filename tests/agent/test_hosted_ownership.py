@@ -12,9 +12,10 @@ import pytest
 from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
 
-from agent.corpse_reap import reap_crash_corpses
 from agent.db import claim_inbound_batch
-from agent.hosted_ownership import (
+from agent.impersonation import native_status
+from agent.ownership.corpse_reap import reap_crash_corpses
+from agent.ownership.hosted import (
     admit_hosted_runtime,
     apply_hosted_lifecycle,
     release_hosted_owner,
@@ -22,14 +23,20 @@ from agent.hosted_ownership import (
     settle_hosted_runtime,
     stamp_turn_fatal,
 )
-from agent.impersonation import native_status
-from shared.agents.impersonation import ImpersonationError
-from shared.db import create_agent, insert_inbound_message
-from shared.incarnation_resources import IncarnationResources, ResourceProcess, decode_resources
-from shared.managed_writer_publication import AdmissionDecision, CurrentAdmission
-from shared.runtime_admission import PublicationAdmissionDeferredError, RuntimeAdmission
-from shared.runtime_incarnation import RuntimeIncarnation, current_incarnation
-from shared.turn_identity import bind_turn_identity
+from base.agents.impersonation import ImpersonationError
+from base.agents.incarnation.resources import (
+    IncarnationResources,
+    ResourceProcess,
+    decode_resources,
+)
+from base.db import create_agent, insert_inbound_message
+from base.deploy.writers.publication import AdmissionDecision, CurrentAdmission
+from base.deploy.writers.runtime_admission import (
+    PublicationAdmissionDeferredError,
+    RuntimeAdmission,
+)
+from base.native_process.runtime_incarnation import RuntimeIncarnation, current_incarnation
+from base.native_process.turn_identity import bind_turn_identity
 
 
 class _CurrentRuntimeAdmission(RuntimeAdmission):
@@ -103,7 +110,7 @@ async def test_hosted_status_changes_publish_agent_updated(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     publish = AsyncMock()
-    monkeypatch.setattr("agent.hosted_ownership.publish_agent_updated", publish)
+    monkeypatch.setattr("agent.ownership.hosted.publish_agent_updated", publish)
     agent_id, owner = _agent(db_conn), uuid4()
 
     incarnation = await admit_hosted_runtime(
@@ -157,7 +164,7 @@ async def test_cancel_during_live_announce_settles_the_committed_admission(
             announce_entered.set()
             await announce_release.wait()
 
-    monkeypatch.setattr("agent.hosted_ownership.publish_agent_updated", half_open_publish)
+    monkeypatch.setattr("agent.ownership.hosted.publish_agent_updated", half_open_publish)
     monkeypatch.setattr(
         "services.agent_host.host.publish_agent_updated", half_open_publish, raising=False
     )
@@ -382,7 +389,7 @@ async def test_held_continuation_admits_at_protocol_zero(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A deferred publication continuing a held command advertises zero (issue #2159)."""
-    from shared import maintenance
+    from base.deploy.maintenance import admission
 
     agent_id, owner = _agent(db_conn), uuid4()
     db_conn.execute(
@@ -395,8 +402,8 @@ async def test_held_continuation_admits_at_protocol_zero(
     def one_pending(_agent_id: int) -> int:
         return 1
 
-    monkeypatch.setattr(maintenance, "held", lambda: True)
-    monkeypatch.setattr(maintenance, "pending_command", one_pending)
+    monkeypatch.setattr(admission, "held", lambda: True)
+    monkeypatch.setattr(admission, "pending_command", one_pending)
 
     class _DeferredRuntimeAdmission(RuntimeAdmission):
         async def decide_async(self, conn: psycopg.AsyncConnection) -> AdmissionDecision:
@@ -647,13 +654,13 @@ async def test_reap_crash_corpses_terminates_only_grace_elapsed_idling_corpses(
         if payload is not None and payload.get("reason") == "corpse_reaper":
             events.append((agent_id, event_type, "corpse_reaper"))
 
-    monkeypatch.setattr("agent.corpse_reap.insert_event_log_async", _event)
+    monkeypatch.setattr("agent.ownership.corpse_reap.insert_event_log_async", _event)
     published: list[int] = []
 
     async def _publish(agent_id: int) -> None:
         published.append(agent_id)
 
-    monkeypatch.setattr("agent.corpse_reap.publish_agent_updated", _publish)
+    monkeypatch.setattr("agent.ownership.corpse_reap.publish_agent_updated", _publish)
     owner = uuid4()
 
     async def _row(

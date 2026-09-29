@@ -242,7 +242,7 @@ the OS-user administrator by `peer` and every other role by SCRAM; PgBouncer
 always uses SCRAM against the active generation's verifier userlist and
 restarts on a userlist change. The schema owner is `NOLOGIN`, the capability
 groups carry every grant, birth mints write generation 0
-([authority](../../shared/cluster/authority/authority.ava.okf.md)), an ordinary
+([authority](../../base/cluster/authority/authority.ava.okf.md)), an ordinary
 start re-grants, sweeps and checks the catalog invariant, the root launcher
 delivers each service its class login bound into the launch digest, and an
 admitted operator CLI consumes the gateway login. Bootstrap serves no database
@@ -250,21 +250,21 @@ credential; a remote agent-runner installs a sealed, unit-bound capability the
 gateway operator issues (`ava cluster db-authority issue-unit`,
 `ava start --db-capability`), carrying the active generation's runner login,
 its API admission and the unit's enrollment secret
-([unit capability](../../shared/cluster/authority/wiring.ava.okf.md#remote-agent-runner-units)).
+([unit capability](../../base/cluster/authority/wiring.ava.okf.md#remote-agent-runner-units)).
 API admission is a generation boundary too: every generation carries one
 machine API token per class; the gateway admits the human secret or the ACTIVE
 generation's tokens, a unit's ops server its generation's two tokens, and the
 launcher delivers each service its class token (`AVA_API_TOKEN`) only while the
 API is authenticated. Remote units never hold the human secret (bootstrap does
 not serve it); their OTLP relay uses a telemetry token derived from it
-([API tokens](../../shared/cluster/authority/api-tokens.ava.okf.md)).
+([API tokens](../../base/cluster/authority/api-tokens.ava.okf.md)).
 A home born before this model is refused; no conversion exists
 ([credential split](../../conventions/data-plane-secret-split.md#homes-born-before-this-model)).
 
 The unit enrollment secret (minted at a unit's first bundle) has operator
 rotation and revocation and keys the coordinator
 channel's request authentication and sealing
-([enrollment](../../shared/cluster/authority/unit-enrollment.ava.okf.md)).
+([enrollment](../../base/cluster/authority/unit-enrollment.ava.okf.md)).
 The only cross-release contract, the frozen v1 image-exec handoff (CLI and the
 `release_image_exec` ops kind), and the port block's reserved `coordinator`
 slot exist ([handoff](../../cli/release_handoff/release_handoff.ava.okf.md)).
@@ -315,7 +315,7 @@ The remaining custody gaps: controller death on plain POSIX/macOS has no
 platform owner (for example a Linux cgroup) able to prove closure without the
 original controller, so retirement past that point still needs a human. Group
 closure itself (exec domain, PITR custody, release preparation) runs through one
-core, `shared/process_group_closure.py`, which accepts only a kernel group
+core, `base/native_process/group_closure.py`, which accepts only a kernel group
 listing of the exited leader alone after a group SIGKILL, so a macOS member
 forked during the signal forces another round. Do not add another restart or
 cleanup fallback, or infer closure
@@ -416,7 +416,7 @@ replacement is complete.
 
 Until then a networked cluster has no in-band way to rotate its write
 generation, so a compromised unit or a lost capability bundle cannot be
-contained ([what a bundle exposes](../../shared/cluster/authority/unit-enrollment.ava.okf.md#what-a-bundle-exposes)).
+contained ([what a bundle exposes](../../base/cluster/authority/unit-enrollment.ava.okf.md#what-a-bundle-exposes)).
 This is a known gap, and closing it is a required deliverable of dbgen-8
 (user ruling, 2026-09-28): dbgen-8 does not land until a networked cluster can
 rotate its write generation and re-issue every unit's capability.

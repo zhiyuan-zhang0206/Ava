@@ -20,14 +20,14 @@ import importlib.abc, sys
 class StdlibOnly(importlib.abc.MetaPathFinder):
     def find_spec(self, name, path=None, target=None):
         top = name.partition(".")[0]
-        if top in sys.stdlib_module_names or top == "shared":
+        if top in sys.stdlib_module_names or top == "base":
             return None
         raise ModuleNotFoundError(f"non-stdlib import {name!r}", name=name)
 
 sys.meta_path.insert(0, StdlibOnly())
 sys.path.insert(0, sys.argv[1])
 # runtime_plugins is imported lazily by preparation's plugin inventory.
-import shared.runtime_abi, shared.runtime_plugins, shared.runtime_prepare, shared.runtime_release
+import base.runtime_abi, base.runtime_plugins, base.deploy.release.runtime_prepare, base.deploy.release.runtime_release
 """
 
 # A preparation tool whose child forks a grandchild only after the tool (the
@@ -41,8 +41,8 @@ print(os.getpgrp() == os.getpid())
 _LATE = "import os, time; time.sleep(0.2); os.fork(); time.sleep({linger})"
 _RUN = """
 import os, pathlib
-from shared.runtime_prepare import _run
-from shared.runtime_release import ReleaseRejectedError
+from base.deploy.release.runtime_prepare import _run
+from base.deploy.release.runtime_release import ReleaseRejectedError
 
 work = pathlib.Path(sys.argv[2])
 tool = [sys.executable, "-I", str(work / "tool.py")]

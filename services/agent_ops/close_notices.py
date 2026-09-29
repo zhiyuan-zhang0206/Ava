@@ -13,8 +13,8 @@ import logging
 
 from psycopg_pool import ConnectionPool
 
+from base.deploy.maintenance import admission
 from ops import pty_close_notices
-from shared import maintenance
 
 _log = logging.getLogger("services.agent_ops.close_notices")
 
@@ -66,5 +66,5 @@ async def deliver(pool: ConnectionPool) -> None:
 
 async def _admitted() -> None:
     """Return once this unit is outside its quiesced stop window."""
-    while maintenance.quiesced():
+    while admission.quiesced():
         await asyncio.sleep(_ADMISSION_POLL_S)

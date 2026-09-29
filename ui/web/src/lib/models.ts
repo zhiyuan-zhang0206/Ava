@@ -7,8 +7,8 @@ import type { ModelsResponse } from "./types";
 
 // Display label for a provider key. `ModelsResponse.providers` is the
 // source of truth for *which* providers/models exist and their order
-// (gateway/routers/agents.py:get_models, backed by
-// shared/lm/factory.py:SUPPORTED_MODELS) — this map only prettifies the
+// (gateway/agents/router.py:get_models, backed by
+// base/lm/factory.py:SUPPORTED_MODELS) — this map only prettifies the
 // label for providers we know about. An unrecognized provider (added
 // server-side before this map catches up) still renders, just capitalized
 // instead of using its conventional styling.

@@ -315,7 +315,7 @@ cluster; that has to come from outside Ava today. Full policy and reporting:
 
 [Frontend stack →](../ui/web/web.ava.okf.md)
 [Connection budget →](../agent/db/db.ava.okf.md)
-[Model registry →](../shared/lm/registry.py)
+[Model registry →](../base/lm/registry.py)
 
 ### Observability (OTel + LGTM)
 

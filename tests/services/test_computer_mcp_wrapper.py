@@ -17,11 +17,11 @@ from unittest.mock import Mock
 
 import pytest
 
+from base.config import settings
+from base.host.net import resilience
 from services.computer.mcp_wrapper import _Link, _ReconnectingLink
 from services.permissions_helper import client
 from services.permissions_helper.client import PermissionsHelperError
-from shared import resilience
-from shared.config import settings
 
 
 class FakeWriter:
@@ -299,7 +299,7 @@ def test_connect_exhaustion_closes_every_socket_without_trailing_sleep(
     monkeypatch.setattr(client.time, "sleep", sleeps.append)
     monkeypatch.setattr(resilience, "_sleep", sleeps.append)
     with pytest.raises(PermissionsHelperError) as error:
-        client._connect("test.sock")
+        client.connect("test.sock")
     assert str(error.value) == "permissions helper not reachable at test.sock: absent"
     assert error.value.__context__ is None
     assert len(sockets) == 5
@@ -316,7 +316,7 @@ def test_helper_connect_non_retryable_error_passes_through(
     factory = Mock(return_value=sock)
     monkeypatch.setattr(client.socket, "socket", factory)
     with pytest.raises(PermissionError) as error:
-        client._connect("test.sock")
+        client.connect("test.sock")
     assert error.value is failure
     assert factory.call_count == 1
     sock.close.assert_not_called()
@@ -327,7 +327,7 @@ def test_helper_socket_creation_failure_is_not_retried(monkeypatch: pytest.Monke
     factory = Mock(side_effect=failure)
     monkeypatch.setattr(client.socket, "socket", factory)
     with pytest.raises(FileNotFoundError) as error:
-        client._connect("test.sock")
+        client.connect("test.sock")
     assert error.value is failure
     assert factory.call_count == 1
 
@@ -340,7 +340,7 @@ def test_helper_failed_socket_close_is_not_retried(monkeypatch: pytest.MonkeyPat
     factory = Mock(return_value=sock)
     monkeypatch.setattr(client.socket, "socket", factory)
     with pytest.raises(ConnectionRefusedError) as error:
-        client._connect("test.sock")
+        client.connect("test.sock")
     assert error.value is failure
     assert factory.call_count == 1
 

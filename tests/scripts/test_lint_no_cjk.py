@@ -1,4 +1,4 @@
-"""scripts/lint_no_cjk.py: the repo-wide no-CJK gate.
+"""scripts/content_lint/lint_no_cjk.py: the repo-wide no-CJK gate.
 
 User ruling 2026-08-27 (tightening the 2026-08-06 English-primary rule): raw
 CJK characters are banned everywhere in the repo; the only exemption is i18n /
@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from scripts import lint_no_cjk as gate
+from scripts.content_lint import lint_no_cjk as gate
 
 
 @pytest.fixture
@@ -23,7 +23,7 @@ def repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setattr(
         gate,
         "_LOCALE_PY_FILES",
-        frozenset({"shared/alerts_copy.py", "shared/docs/pages_copy.py"}),
+        frozenset({"base/telemetry/alerts_copy.py", "base/packages/docs/pages_copy.py"}),
     )
     return tmp_path
 
@@ -93,21 +93,21 @@ def test_locales_dir_and_po_exempt(repo: Path) -> None:
 
 
 def test_alerts_copy_locale_module_exempt(repo: Path) -> None:
-    """shared/alerts_copy.py is the IM alert copy locale module (zh/en by
+    """base/telemetry/alerts_copy.py is the IM alert copy locale module (zh/en by
     display.language) - the one Python locale file, documented in the gate."""
-    _write(repo, "shared/alerts_copy.py", 'ALERT_HEAD = {"zh": "\u544a\u8b66"}\n')
-    assert gate._scan_file("shared/alerts_copy.py") == []
+    _write(repo, "base/telemetry/alerts_copy.py", 'ALERT_HEAD = {"zh": "\u544a\u8b66"}\n')
+    assert gate._scan_file("base/telemetry/alerts_copy.py") == []
 
 
 def test_pages_copy_locale_module_exempt(repo: Path) -> None:
-    """shared/docs/pages_copy.py is the page-expired copy locale module (zh/en by
+    """base/packages/docs/pages_copy.py is the page-expired copy locale module (zh/en by
     display.language) - same exemption class as alerts_copy."""
     _write(
         repo,
-        "shared/docs/pages_copy.py",
+        "base/packages/docs/pages_copy.py",
         'PAGE_EXPIRED_BODY = {"zh": "\u9875\u9762\u5df2\u8fc7\u671f"}\n',
     )
-    assert gate._scan_file("shared/docs/pages_copy.py") == []
+    assert gate._scan_file("base/packages/docs/pages_copy.py") == []
 
 
 def test_skill_body_with_cjk_fails(repo: Path) -> None:

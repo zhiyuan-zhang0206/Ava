@@ -848,7 +848,7 @@ describe("reloadSnapshot", () => {
   });
 
   // Regression for #1142: a still-streaming item's own msg_idx equals
-  // msg_count BY DEFINITION (agent/graph/_callbacks.py + _exec.py both
+  // msg_count BY DEFINITION (agent/graph/_callbacks.py + exec/node.py both
   // stamp len(state.messages) — the count BEFORE this uncommitted message).
   // The old guard treated that equality as proof the snapshot was stale and
   // bailed out before ever calling mergeSnapshotWithStreaming — on a cold
@@ -1013,7 +1013,7 @@ describe("compact_done hard reset (incremental design)", () => {
 // the merge replaces wholesale instead of keep-all.
 
 describe("compact crossed unseen (SSE-gap heal)", () => {
-  // Production shape (shared/agents/history/timeline.py `_compact_item`): the envelope's
+  // Production shape (base/agents/history/timeline.py `_compact_item`): the envelope's
   // inbound_id is hardcoded null and message_timestamps prefixes the payload
   // with a render-time ts — so the identity must be item_id + kind +
   // created_at (the render-stable ava_created_at), never payload/inbound_id.

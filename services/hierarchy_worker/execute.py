@@ -19,7 +19,7 @@ advancing to a value the run did not seal would lose that stretch for good.
 Generation is agent-shaped (task #4674): requests ride the target agent's own
 conversation prefix and tool schema so the provider serves them from its
 prefix cache, and the generation model is the agent's own effective model —
-`shared.agent_snapshot.agent_effective_model`.
+`base.agents.observation.snapshot.agent_effective_model`.
 """
 
 from __future__ import annotations
@@ -28,22 +28,22 @@ import time
 import traceback
 
 from agent.llm import execute_code
-from services.hierarchy_worker.scan import KIND_COMPACT, KIND_TAIL
-from shared import telemetry
-from shared.agent_snapshot import agent_effective_model
-from shared.agents.history.checkpoint import (
+from base import telemetry
+from base.agents.history.checkpoint import (
     latest_checkpoint_id,
     list_compact_boundary_checkpoint_ids,
 )
-from shared.agents.history.hierarchy import ENGINE_VERSION, PROMPT_VERSION
-from shared.agents.history.hierarchy.generate import build_generation_llm
-from shared.agents.history.hierarchy.pipeline import MaterializedTree, build_agent_tree
-from shared.agents.history.hierarchy.store import load_known_texts, write_tree
-from shared.config import settings
-from shared.db import connect
-from shared.db_transaction import write_transaction
-from shared.lm.factory import close_chat_model
-from shared.log import logger
+from base.agents.history.hierarchy import ENGINE_VERSION, PROMPT_VERSION
+from base.agents.history.hierarchy.generate import build_generation_llm
+from base.agents.history.hierarchy.pipeline import MaterializedTree, build_agent_tree
+from base.agents.history.hierarchy.store import load_known_texts, write_tree
+from base.agents.observation.snapshot import agent_effective_model
+from base.config import settings
+from base.db import connect
+from base.db.transaction import write_transaction
+from base.lm.factory import close_chat_model
+from base.log import logger
+from services.hierarchy_worker.scan import KIND_COMPACT, KIND_TAIL
 
 # The error text kept on the job row: a diagnostic tail, never a full dump
 # repeated into the DB row.

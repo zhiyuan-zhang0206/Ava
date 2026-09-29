@@ -7,9 +7,9 @@ from typing import Any
 
 import pytest
 
-from shared import telemetry
-from shared.telemetry import Event
-from shared.telemetry.otlp import telemetry_otlp
+from base import telemetry
+from base.telemetry import Event
+from base.telemetry.otlp import telemetry_otlp
 
 
 @pytest.fixture
@@ -27,7 +27,7 @@ def otlp_backend(monkeypatch: pytest.MonkeyPatch) -> Any:
     backend = telemetry_otlp._OtlpBackend(
         providers=(logs, MeterProvider(metric_readers=[InMemoryMetricReader()]))
     )
-    monkeypatch.setattr("shared.config.settings.observability.telemetry_otlp_enabled", True)
+    monkeypatch.setattr("base.config.settings.observability.telemetry_otlp_enabled", True)
     monkeypatch.setattr(telemetry_otlp, "observability_export_allowed", lambda: True)
     monkeypatch.setattr(telemetry_otlp, "backend", backend)
     yield backend, exporter
@@ -38,7 +38,7 @@ def test_jsonl_otlp_and_loki_use_one_byte_identity_with_drift_rejected(
     otlp_backend: tuple[Any, Any],
 ) -> None:
     """The producer census and Loki reader must share the exact event bytes."""
-    from gateway._loki_event_rows import _parse_line
+    from gateway.lgtm._loki_event_rows import _parse_line
 
     backend, log_exporter = otlp_backend
     event = Event(

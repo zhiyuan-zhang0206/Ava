@@ -1,0 +1,243 @@
+"""Hosted force acceptance and original-host quiescence on the existing command.
+
+Only the live host's serialized turn pump may observe completion, after its real
+continuation and owned exec cleanup return. Lease expiry, an empty cache, and
+the host process dying are not proof that independent exec children ended.
+"""
+
+import asyncio
+from collections.abc import Callable
+from uuid import UUID
+
+import psycopg
+from psycopg import sql
+from psycopg_pool import AsyncConnectionPool
+
+from base.agents.incarnation.exec_request_evidence import RequestEvidence, quarantine_stale
+from base.agents.incarnation.lifecycle_acceptance import COMMAND_KILLS_SHELL_SESSIONS
+from base.db.transaction import async_write_transaction
+from base.native_process.runtime_incarnation import RuntimeIncarnation
+
+
+def install_hosted_force(conn: psycopg.Connection, agent_id: int, command_id: int) -> None:
+    """Attach force to the current hosted incarnation under the caller's row lock."""
+    row = conn.execute(
+        "SELECT runtime_generation,runtime_owner FROM agents_meta WHERE id=%s "
+        "AND runtime_kind='hosted' AND runtime_generation IS NOT NULL "
+        "AND runtime_owner IS NOT NULL FOR UPDATE",
+        (agent_id,),
+    ).fetchone()
+    if row is None:
+        return
+    command = conn.execute(
+        "UPDATE inbound_messages SET target_generation=%s,target_owner=%s,"
+        "status='claimed',claimed_at=clock_timestamp(),applied_at=clock_timestamp() "
+        "WHERE id=%s AND agent_id=%s AND kind='terminate' AND status='pending'",
+        (row[0], row[1], command_id, agent_id),
+    )
+    if command.rowcount != 1:
+        raise RuntimeError("hosted force lost its newly inserted command")
+    conn.execute(
+        "UPDATE agents_meta SET lifecycle_command_id=%s WHERE id=%s",
+        (command_id, agent_id),
+    )
+    from base.agents.incarnation.resources import freeze_resources
+    from base.native_process.runtime_incarnation import RuntimeIncarnation
+
+    resources = conn.execute(
+        "SELECT incarnation_resources FROM agents_meta WHERE id=%s", (agent_id,)
+    ).fetchone()
+    if resources is not None and resources[0] is not None:
+        freeze_resources(conn, RuntimeIncarnation(agent_id, row[0], row[1]), command_id)
+
+
+async def original_host_force(
+    pool: AsyncConnectionPool,
+    agent_id: int,
+    owner: UUID,
+    machine: str,
+    *,
+    command_id: int | None = None,
+    quiescent: bool = False,
+    kill_shell_sessions: Callable[[int], None] | None = None,
+) -> bool:
+    """Validate the exact force, optionally settle in the original serialized pump.
+
+    ``quiescent`` is an internal callsite contract, never accepted from HTTP or a
+    payload: the host pump still excludes a replacement and its awaited work ended.
+    The command's fixed target is checked against that host's actual boot owner.
+
+    A force that asked to kill the agent's shell sessions killed them when it
+    was accepted, but a step still draining then could create one afterwards;
+    the settlement sweeps again (`_sweep_requested_shell_kill`) before it
+    records the observation.
+    """
+    async with async_write_transaction(pool) as conn:
+        row = await (
+            await conn.execute(
+                "SELECT runtime_generation,lifecycle_command_id FROM agents_meta "
+                "WHERE id=%s AND runtime_owner=%s AND machine=%s "
+                "AND runtime_kind='hosted' AND status='terminated' FOR UPDATE",
+                (agent_id, owner, machine),
+            )
+        ).fetchone()
+        if row is None or row[0] is None or row[1] is None:
+            return False
+        if command_id is not None and row[1] != command_id:
+            return False
+        command = await (
+            await conn.execute(
+                sql.SQL(
+                    "SELECT id, {} FROM inbound_messages WHERE id=%s AND agent_id=%s "
+                    "AND kind='terminate' AND status='claimed' AND applied_at IS NOT NULL "
+                    "AND observed_at IS NULL AND target_generation=%s AND target_owner=%s "
+                    "FOR UPDATE"
+                ).format(sql.SQL(COMMAND_KILLS_SHELL_SESSIONS)),
+                (row[1], agent_id, row[0], owner),
+            )
+        ).fetchone()
+        if command is None:
+            return False
+        if quiescent:
+            from base.agents.incarnation.resource_admission import require_resources_closed_async
+
+            await require_resources_closed_async(conn, agent_id)
+            await _sweep_requested_shell_kill(agent_id, command[1], kill_shell_sessions)
+            await conn.execute(
+                "UPDATE inbound_messages SET observed_at=clock_timestamp(),status='done' "
+                "WHERE id=%s",
+                (row[1],),
+            )
+            await conn.execute(
+                "UPDATE agents_meta SET lifecycle_command_id=NULL,lease_expires_at=NULL "
+                "WHERE id=%s AND lifecycle_command_id=%s AND runtime_owner=%s "
+                "AND runtime_generation=%s",
+                (agent_id, row[1], owner, row[0]),
+            )
+        return True
+
+
+async def recover_orphaned_hosted_forces(
+    pool: AsyncConnectionPool,
+    machine: str,
+    *,
+    kill_shell_sessions: Callable[[int], None] | None = None,
+) -> tuple[list[int], dict[int, tuple[RequestEvidence, ...]]]:
+    """Observe resource-free applied forces after an exclusive host boot.
+
+    The caller must own the agent-host pidfile and call this before starting
+    its scheduler. That process exclusivity proves the old owner is gone and
+    prevents a new turn from creating exec resources during this scan.
+
+    A request envelope that can still belong to a live exec domain — a live
+    process reference, an unattributable envelope, or resource evidence that
+    contradicts the boot premise — defers recovery for that agent. Envelopes
+    that prove otherwise are quarantined here, preserved with a receipt, and do
+    not defer: a stale envelope attributed to a superseded incarnation must not
+    fence an unrelated newer lifecycle (issue #2157; see
+    base/agents/incarnation/exec_request_evidence.py for the classification contract).
+
+    The database transition re-locks and revalidates the exact command target;
+    it never retargets a force to the new host owner. Returned deferred entries
+    are diagnostic evidence for an operator, not cleanup authorization.
+
+    The candidate predicate admits both `claimed` and `done` commands: a
+    command torn into `done` with the pointer still alive (an out-of-band write;
+    task #3678) is blind to boot recovery and live observation alike, and this
+    scan is the one recoverer that can settle it. Everything else stays the
+    strict conjunction — applied set, observation missing, target matching the
+    current incarnation, pointer alive. A recovered force that asked to kill
+    the agent's shell sessions sweeps them again before its observation, as
+    the live settlement does.
+    """
+    async with pool.connection() as conn:
+        candidates = await (
+            await conn.execute(
+                "SELECT m.id,m.runtime_generation,m.runtime_owner,m.incarnation_resources "
+                "FROM agents_meta m JOIN inbound_messages force "
+                "ON force.id=m.lifecycle_command_id AND force.agent_id=m.id "
+                "WHERE m.machine=%s AND m.status='terminated' "
+                "AND m.runtime_kind='hosted' AND m.runtime_generation IS NOT NULL "
+                "AND m.runtime_owner IS NOT NULL AND force.kind='terminate' "
+                "AND force.status IN ('claimed','done') AND force.applied_at IS NOT NULL "
+                "AND force.observed_at IS NULL "
+                "AND force.target_generation=m.runtime_generation "
+                "AND force.target_owner=m.runtime_owner ORDER BY m.id",
+                (machine,),
+            )
+        ).fetchall()
+
+    recovered: list[int] = []
+    deferred: dict[int, tuple[RequestEvidence, ...]] = {}
+    for agent_id, generation, owner, resources in candidates:
+        report = quarantine_stale(
+            agent_id,
+            incumbent=RuntimeIncarnation(agent_id, generation, owner),
+            resources=resources,
+            reason="hosted boot recovery",
+        )
+        if report.retained:
+            deferred[agent_id] = report.retained
+            continue
+        async with async_write_transaction(pool) as conn:
+            row = await (
+                await conn.execute(
+                    "SELECT runtime_generation,runtime_owner,lifecycle_command_id "
+                    "FROM agents_meta WHERE id=%s AND machine=%s "
+                    "AND status='terminated' AND runtime_kind='hosted' "
+                    "FOR UPDATE",
+                    (agent_id, machine),
+                )
+            ).fetchone()
+            if row is None or row[0] is None or row[1] is None or row[2] is None:
+                continue
+            command = await (
+                await conn.execute(
+                    sql.SQL(
+                        "SELECT id, {} FROM inbound_messages WHERE id=%s AND agent_id=%s "
+                        "AND kind='terminate' AND status IN ('claimed','done') "
+                        "AND applied_at IS NOT NULL AND observed_at IS NULL "
+                        "AND target_generation=%s AND target_owner=%s FOR UPDATE"
+                    ).format(sql.SQL(COMMAND_KILLS_SHELL_SESSIONS)),
+                    (row[2], agent_id, row[0], row[1]),
+                )
+            ).fetchone()
+            if command is None:
+                continue
+            await _sweep_requested_shell_kill(agent_id, command[1], kill_shell_sessions)
+            observed = await conn.execute(
+                "UPDATE inbound_messages SET observed_at=clock_timestamp(),status='done' "
+                "WHERE id=%s AND agent_id=%s AND kind='terminate' "
+                "AND status IN ('claimed','done') "
+                "AND applied_at IS NOT NULL AND observed_at IS NULL "
+                "AND target_generation=%s AND target_owner=%s",
+                (row[2], agent_id, row[0], row[1]),
+            )
+            cleared = await conn.execute(
+                "UPDATE agents_meta SET lifecycle_command_id=NULL,lease_expires_at=NULL "
+                "WHERE id=%s AND machine=%s AND status='terminated' "
+                "AND runtime_kind='hosted' AND lifecycle_command_id=%s "
+                "AND runtime_generation=%s AND runtime_owner=%s",
+                (agent_id, machine, row[2], row[0], row[1]),
+            )
+            if observed.rowcount != 1 or cleared.rowcount != 1:
+                raise RuntimeError("orphaned hosted-force recovery lost its locked target")
+        recovered.append(agent_id)
+    return recovered, deferred
+
+
+async def _sweep_requested_shell_kill(
+    agent_id: int, requested: object, kill_shell_sessions: Callable[[int], None] | None
+) -> None:
+    """Kill the agent's shell sessions again when its force asked for it.
+
+    Runs under the settlement's row lock, before the observation is recorded,
+    so a crash retries the sweep; the kill is idempotent. The killer belongs
+    to the host (the base layer does not reach the ops session primitives)
+    and must not raise; a caller that binds none may not settle such a force.
+    """
+    if requested is not True:
+        return
+    if kill_shell_sessions is None:
+        raise RuntimeError("shell-session kill requested but no killer is bound")
+    await asyncio.to_thread(kill_shell_sessions, agent_id)

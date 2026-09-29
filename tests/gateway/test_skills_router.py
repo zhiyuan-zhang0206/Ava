@@ -11,9 +11,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from gateway.routers.skills import get_skills
-from shared import install_registry, paths
-from shared.install_registry import InstalledPackage, PackageOrigin, tree_hash
+from base import paths
+from base.packages.extensions import install_registry
+from base.packages.extensions.install_registry import InstalledPackage, PackageOrigin, tree_hash
+from gateway.extensions.skills import get_skills
 
 
 def _mk_skill(name: str, body: str = "# skill\n") -> Path:
@@ -98,8 +99,8 @@ def test_empty_when_no_load_dir(unit_home: Path) -> None:
 
 def test_put_toggles_enabled(unit_home: Path) -> None:
     """PUT /api/skills toggles the enabled flag on a registered skill."""
-    from gateway.routers.skills import update_skill_enabled
-    from gateway.schemas.skills import SkillEnableUpdate
+    from gateway.extensions.schemas import SkillEnableUpdate
+    from gateway.extensions.skills import update_skill_enabled
 
     delta = _mk_skill("delta")
     _register("delta", origin="repo", content_hash=tree_hash(delta), enabled=True)
@@ -127,8 +128,8 @@ def test_put_accepts_the_canonical_dash_spelling_of_a_legacy_row(unit_home: Path
     """The request name is inbound: a panel sending the canonical dash form must
     reach a registry row still written with underscores, and the response must
     carry the row's own spelling (which is what addresses the directory)."""
-    from gateway.routers.skills import update_skill_enabled
-    from gateway.schemas.skills import SkillEnableUpdate
+    from gateway.extensions.schemas import SkillEnableUpdate
+    from gateway.extensions.skills import update_skill_enabled
 
     legacy = _mk_skill("wechat_ocr")
     _register("wechat_ocr", origin="user", content_hash=tree_hash(legacy), enabled=True)
@@ -164,7 +165,7 @@ def test_get_renders_legacy_underscore_dirs_in_canonical_spelling(unit_home: Pat
 def test_preserved_subtree_not_reported_as_drift(unit_home: Path) -> None:
     """A package carrying only preserved local adapters (web-sources/people)
     must not read as modified locally — it is in-sync by converge's own rule."""
-    from gateway.routers.skills import get_skills
+    from gateway.extensions.skills import get_skills
 
     ws = _mk_skill("web-sources")
     _register("web-sources", origin="repo", content_hash=tree_hash(ws), enabled=True)
@@ -182,8 +183,8 @@ def test_put_rejects_untracked_skill(unit_home: Path) -> None:
     import pytest
     from fastapi import HTTPException
 
-    from gateway.routers.skills import update_skill_enabled
-    from gateway.schemas.skills import SkillEnableUpdate
+    from gateway.extensions.schemas import SkillEnableUpdate
+    from gateway.extensions.skills import update_skill_enabled
 
     _mk_skill("stray")  # on disk, not registered
 

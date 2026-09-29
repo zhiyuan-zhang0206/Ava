@@ -56,8 +56,8 @@ from typing import Any, cast
 import numpy as np
 from pymilvus import AsyncMilvusClient, DataType, MilvusClient
 
+from base.config import settings
 from services.memory_indexer.backends.base import _PK_MAX_LENGTH, KIND_BODY, KIND_DESC, pk_of
-from shared.config import settings
 
 _log = logging.getLogger("services.memory_indexer.index")
 

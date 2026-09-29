@@ -32,9 +32,9 @@ class _FakeResp:
 
 @pytest.fixture(autouse=True)
 def _gateway(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("shared.machine.gateway_api_base", lambda: "http://gw:8000")
+    monkeypatch.setattr("base.cluster.machine.gateway_api_base", lambda: "http://gw:8000")
     monkeypatch.setattr(
-        "shared.machine.gateway_auth_headers", lambda: {"Authorization": "Bearer secret"}
+        "base.cluster.machine.gateway_auth_headers", lambda: {"Authorization": "Bearer secret"}
     )
 
 

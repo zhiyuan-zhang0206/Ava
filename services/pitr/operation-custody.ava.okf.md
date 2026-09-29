@@ -9,8 +9,8 @@ tags: []
 
 Every logical dump, logical restore drill, base candidate, restore proof and
 operator drill runs as one operation of its **kind**
-(`services/pitr/operation_custody.py:OperationKind`): a private control root,
-its own quarantine root and a sanitizer. `services/pitr/worker_process.py:run_operation`
+(`services/pitr/operation/custody.py:OperationKind`): a private control root,
+its own quarantine root and a sanitizer. `services/pitr/operation/worker_process.py:run_operation`
 launches a fixed worker module through `ExecProcessDomain.launch_posix` in a
 new session and retains the unreaped direct child. A bootstrap pins the
 controller's own code root; the live database URL reaches restore workers on
@@ -36,9 +36,9 @@ Each kind quarantines into `quarantine/<kind>/` beside its control root.
 - the leader is reaped.
 
 The worker receipts each postmaster it starts
-(`shared/pg_foreground.py:start_foreground_postgres`) into its controls. The
+(`base/cluster/dataplane/pg_foreground.py:start_foreground_postgres`). The
 data directory is receipted before launch, and the native birth right after.
-The controller then closes in this order (`operation_custody.close_operation`):
+The controller then closes in this order (`operation.custody.close_operation`):
 
 1. It records the worker's tree and each receipted postmaster still in the
    pinned group, with every descendant, by exact native birth while
@@ -86,10 +86,10 @@ The controller then closes in this order (`operation_custody.close_operation`):
 
 Custody steps (launch, closure, commit, quarantine) run to completion in a
 thread; a stop arriving meanwhile waits for their outcome, then propagates.
-Cancellation first sends SIGTERM for the kind's grace (3 s; 45 s for an
+Cancellation sends SIGTERM for the kind's grace (3 s; 45 s for an
 operator drill, to stop its sandbox and write evidence), then runs the closure
 above. An `ExecDomainBirthError` closes the pinned group at once
-([[shared/process-group-closure.ava.okf.md|closure core]]). Admission
+([[base/native_process/group-closure.ava.okf.md|closure core]]). Admission
 finishes a quarantine or retirement its controller had proven but not
 completed. A failing progress sink (a closed operator pipe) is dropped.
 

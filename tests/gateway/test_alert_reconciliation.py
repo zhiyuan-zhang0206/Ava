@@ -11,13 +11,13 @@ import pytest
 from psycopg.types.json import Jsonb
 from pydantic import SecretStr
 
-import shared.db
-from gateway.alert_reconciliation import (
+import base.db
+from base.config import settings
+from gateway.alerts.reconciliation import (
     _grafana_active_alert_keys,
     _reconcile_once,
     reconcile_open_grafana_alerts,
 )
-from shared.config import settings
 
 
 def _insert_alert(
@@ -195,7 +195,7 @@ async def test_reconcile_once_fetches_truth_and_publishes_resolved_rows(
         return httpx.Response(200, json=[])
 
     published: list[dict[str, Any]] = []
-    db_pool = shared.db.pool()
+    db_pool = base.db.pool()
     try:
         async with httpx.AsyncClient(transport=httpx.MockTransport(_grafana)) as client:
             resolved = await _reconcile_once(db_pool, client, published.extend)

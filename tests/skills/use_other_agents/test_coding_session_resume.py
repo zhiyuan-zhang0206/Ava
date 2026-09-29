@@ -18,7 +18,7 @@ from types import ModuleType
 import pytest
 
 from ava.shell.coding_tools import _claude_checks, _common, claude, codex
-from shared import coding_session_owner
+from base.sessions import coding_session_owner
 
 _SKILL_DIR = Path(__file__).parents[3] / "ava_builtins" / "skills" / "ava-use-other-agents"
 _SESSION = "01a0e1ac-adc7-7d33-bd13-8ce2c6a686c5"

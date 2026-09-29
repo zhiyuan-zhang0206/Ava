@@ -164,7 +164,7 @@ checkpoint still refuses; queued ordinary messages remain available for resume.
 Preparation settles orphaned ordinary claims on non-cold parked agents and
 bounded-waits unfinished lifecycle commands. Maintenance-authored commands
 still refuse immediately. See the
-[preparation settlement and wait contract](../shared/maintenance/lifecycle-wait.ava.okf.md)
+[preparation settlement and wait contract](../base/deploy/maintenance/lifecycle-wait.ava.okf.md)
 for eligibility, stale cutoff, and retry semantics.
 
 ## Explicit maintenance steps
@@ -273,7 +273,7 @@ boot unit owns replacement applications. Data-plane and persistent-terminal
 custody are separate and must be reconciled explicitly.
 
 Host startup and successor admission reconcile proven-dead hosted agent owners
-through `agent.hosted_ownership.settle_stale_running_rows` and the ordinary
+through `agent.ownership.hosted.settle_stale_running_rows` and the ordinary
 incarnation protocol. Releasing a hold does not itself prove resource closure
 or replay arbitrary external effects. Missing or unreadable evidence remains
 an unresolved operation.

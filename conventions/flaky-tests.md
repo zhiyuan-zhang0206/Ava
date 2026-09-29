@@ -33,7 +33,7 @@ asynchronously collects it, and `pid_exists` remains true meanwhile. PR #964
 applied the same discipline to the forced-shutdown PITR test in
 `tests/services/test_pitr_base_scheduler.py`; its root-cause fix was a daemon
 ownership-adoption `Event`, not a test relaxation. PR #1303 made
-`shared/posixproc.py` liveness zombie-aware
+`base/sessions/posixproc.py` liveness zombie-aware
 (`is_running()` and `status() != STATUS_ZOMBIE`) and exposed a separate
 regression: `_FakeProc` did not implement the new `status()` probe, so CI shard
 8 failed twice at the same `AttributeError`.
@@ -57,7 +57,7 @@ every test double that models that probe contract.
 
 **Lintability — lintable with new rule.** An AST heuristic can flag
 `pid_exists`-style assertions in tests, following the AST approach used by the
-[fixture-scope lint](../scripts/lint_fixture_scope.py); zombie semantics still
+[fixture-scope lint](../scripts/lint/fixture_scope.py); zombie semantics still
 need human review.
 
 ## 2. The same point twice is a regression
@@ -113,9 +113,9 @@ cannot be redirected: keep `AVA_OS_JOBS_ENABLED=false`, and never run a
 non-pytest script that imports `gateway.app` from a worktree.
 
 **Lintability — lintable now.** The
-[fixture-scope lint](../scripts/lint_fixture_scope.py) rejects session-scoped
+[fixture-scope lint](../scripts/lint/fixture_scope.py) rejects session-scoped
 process-global mutation outside root `tests/conftest.py`, and the existing
-`lint_no_os_environ.py` catches source-side environment writes. Hermetic
+`no_os_environ.py` catches source-side environment writes. Hermetic
 durable-marker reads remain a review heuristic and new-rule candidate; see
 [the testing guide](../tests/README.md#host-isolation-what-a-test-run-may-touch).
 
@@ -225,7 +225,7 @@ count.
 test uses real time or a lattice clock; a new timing constant defines a relation
 outside the lattice.
 
-**Evidence.** [`shared/timing.py`](../shared/timing.py) makes `CLOCKS` the
+**Evidence.** [`base/deploy/timing.py`](../base/deploy/timing.py) makes `CLOCKS` the
 single authority for ordered timing constants, including boot stall, launch
 confirmation, boot budget, and reap grace, as well as `NO_PROGRESS` and
 `LOCK_TTL`. In the 2026-07-30 spawn incident, launch confirmation was extended
@@ -240,9 +240,9 @@ time deterministically with fake timers; never assume a machine will reach a
 state by a fixed wall-clock instant.
 
 **Lintability — lintable now.** The
-[clock-lattice lint](../scripts/lint_clock_lattice.py) rejects
+[clock-lattice lint](../scripts/lint/clock_lattice.py) rejects
 lattice-vocabulary constants outside approved lattice modules, while
-`tests/shared/test_timing_topology.py` verifies the declared relations.
+`tests/base/test_timing_topology.py` verifies the declared relations.
 Pinned-count gates remain a review heuristic.
 
 ## 8. Generate and compare visual references in one environment

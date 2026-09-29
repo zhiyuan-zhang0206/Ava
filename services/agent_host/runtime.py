@@ -12,10 +12,10 @@ from typing import Any
 
 from langchain_core.language_models.chat_models import BaseChatModel
 
-from shared.config import settings
-from shared.lm.factory import validate_model_config
-from shared.lm.registry import resolve_available_model
-from shared.log import logger
+from base.config import settings
+from base.lm.factory import validate_model_config
+from base.lm.registry import resolve_available_model
+from base.log import logger
 
 __all__ = [
     "HostStats",

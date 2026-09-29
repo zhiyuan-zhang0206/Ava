@@ -23,7 +23,7 @@ from langchain_core.messages import SystemMessage
 
 from agent.graph import node_log
 from agent.graph.node_log import node_lifecycle
-from shared.config import settings
+from base.config import settings
 
 
 def _enter_records(records):
@@ -225,7 +225,7 @@ async def test_stall_guard_survives_redirected_stderr(monkeypatch: pytest.Monkey
     guard must hand faulthandler a stable real-fd stderr, never that live
     sys.stderr; passing a fileno-less stream raises io.UnsupportedOperation
     and kills the agent the diagnostic exists to observe."""
-    from agent.graph._exec_stream import StreamingTextIO
+    from agent.graph.exec._stream import StreamingTextIO
 
     monkeypatch.setattr(settings.agent, "node_stall_dump_seconds", 12.0)
     monkeypatch.setattr(sys, "stderr", StreamingTextIO())  # the leaked redirect
@@ -467,7 +467,7 @@ async def test_node_lifecycle_full_window_skips_anchors_query_for_modern_message
     from langchain_core.messages import HumanMessage
 
     import agent.graph.node_log as nl
-    from shared.message_kwargs import AvaMsgType
+    from base.agents.messages.kwargs import AvaMsgType
 
     queried: list[int] = []
 

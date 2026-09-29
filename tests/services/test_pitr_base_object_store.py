@@ -11,8 +11,8 @@ import google_crc32c
 import pytest
 from google.api_core.exceptions import PreconditionFailed
 
-from services.pitr.base_object_store import GCSRestartableStreamingObjectStore
-from services.pitr.object_store import PermanentObjectStoreError
+from services.pitr.stores.base_object_store import GCSRestartableStreamingObjectStore
+from services.pitr.stores.object_store import PermanentObjectStoreError
 
 
 @dataclass

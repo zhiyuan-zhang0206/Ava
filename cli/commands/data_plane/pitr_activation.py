@@ -14,12 +14,15 @@ from typing import LiteralString
 
 import psycopg
 
+from base.cluster.dataplane.pg_tools import pg_tool
+from base.config import settings
+from base.paths import ava_home
 from cli.commands.data_plane._pitr_activation_config import (
     apply_wal_config,
     require_inactive_gate_posture,
     restore_archive_settings,
 )
-from services.pitr.activation_credentials import (
+from services.pitr.activation.credentials import (
     credential_app_key,
     credential_identity,
     oss_credential_identity,
@@ -28,11 +31,11 @@ from services.pitr.activation_credentials import (
     probe_oss_read_access,
     require_store_config,
 )
-from services.pitr.activation_lease import run_while_renewing
-from services.pitr.activation_runtime import (
+from services.pitr.activation.lease import run_while_renewing
+from services.pitr.activation.runtime import (
     PITR_ENV_FIELDS as PITR_ENV_FIELDS,
 )
-from services.pitr.activation_runtime import (
+from services.pitr.activation.runtime import (
     archive_settings,
     capture_pitr_env_baseline,
     desired_archive_settings,
@@ -42,22 +45,22 @@ from services.pitr.activation_runtime import (
     settings_digest,
     shadow_pg_gate,
 )
-from services.pitr.activation_runtime import (
+from services.pitr.activation.runtime import (
     forced_candidate as _forced_candidate,
 )
-from services.pitr.activation_runtime import (
+from services.pitr.activation.runtime import (
     prepare_wal_switch as _prepare_wal_switch,
 )
-from services.pitr.activation_runtime import (
+from services.pitr.activation.runtime import (
     remote_wal_proof as _remote_wal_proof,
 )
-from services.pitr.activation_runtime import (
+from services.pitr.activation.runtime import (
     restore_candidate as _restore_candidate,
 )
-from services.pitr.activation_runtime import (
+from services.pitr.activation.runtime import (
     switch_wal as _switch_wal,
 )
-from services.pitr.activation_state import (
+from services.pitr.activation.state import (
     ActivationPhase,
     ActivationRecord,
     load_record,
@@ -65,10 +68,7 @@ from services.pitr.activation_state import (
     write_record,
     write_record_cas,
 )
-from services.pitr.cos_client import credential_evidence as _cos_credential_evidence
-from shared.config import settings
-from shared.paths import ava_home
-from shared.pg_tools import pg_tool
+from services.pitr.stores.cos.client import credential_evidence as _cos_credential_evidence
 
 _EMERGENCY_FLOOR_BYTES = 4 * 1024**3
 
@@ -186,8 +186,8 @@ def _validate_secrets() -> dict[str, str]:
 
 
 def read_pg_state() -> dict[str, str]:
-    from shared.cluster import db_identity, get_record, ownership, record_postgres_port
-    from shared.pg_admin import OwnerAuthority
+    from base.cluster import db_identity, get_record, ownership, record_postgres_port
+    from base.db import pg_admin
 
     from .cluster_instance import pg_admin_url
 
@@ -204,8 +204,11 @@ def read_pg_state() -> dict[str, str]:
             raise RuntimeError(f"PostgreSQL returned no row for {query!r}")
         return row[0]
 
-    with psycopg.connect(pg_admin_url(record_postgres_port(record)), autocommit=True) as conn:
-        ownership.require_postgres_connection(conn, ava_home() / "pg")
+    with pg_admin.connect(
+        pg_admin_url(record_postgres_port(record)),
+        expected_data_dir=ava_home() / "pg",
+        autocommit=True,
+    ) as conn:
         system_id = str(scalar(conn, "SELECT system_identifier FROM pg_control_system()"))
         server_version = int(str(scalar(conn, "SHOW server_version_num")))
         current = {
@@ -222,7 +225,7 @@ def read_pg_state() -> dict[str, str]:
     # The pre-activation dump reads as the schema owner (the administrator
     # acting as the owner over the same socket), never as the superuser itself
     # or a write-generation login; the session proves custody and the role.
-    dump_target = OwnerAuthority(
+    dump_target = pg_admin.OwnerAuthority(
         admin_url=pg_admin_url(record_postgres_port(record)),
         database=expected_db,
         owner=expected_db,
@@ -349,7 +352,7 @@ def cmd_pitr_status() -> int:
 def _require_same_pg_state(expected: dict[str, str] | None, boundary: str) -> None:
     current = read_pg_state()
     if expected is not None and expected.get("postmaster_starttime"):
-        from shared.native_process.ownership import OwnedProcess
+        from base.native_process.ownership import OwnedProcess
 
         def native(state: dict[str, str]) -> OwnedProcess:
             return OwnedProcess(
@@ -575,7 +578,7 @@ def _prove_activation(home: Path, record: ActivationRecord, holder: str) -> Acti
 
 
 def rollback_record(home: Path, record: ActivationRecord) -> ActivationRecord:
-    from shared.release_operation import require_pitr_authorized
+    from base.deploy.release.operation import require_pitr_authorized
 
     require_pitr_authorized(home)
     if record.phase == "rollback_restart_pending":

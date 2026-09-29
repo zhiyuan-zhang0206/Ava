@@ -10,8 +10,8 @@ import pytest
 from redis.exceptions import ConnectionError as RedisConnectionError
 
 import ava
-from shared import redis_client
-from shared.lifecycle import SystemHalt
+from base.agents.lifecycle import SystemHalt
+from base.events.live import redis_client
 from tests.conftest import spawn_agent
 
 

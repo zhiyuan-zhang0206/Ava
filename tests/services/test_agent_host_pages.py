@@ -31,7 +31,7 @@ async def test_page_reconcile_forever_runs_periodically(
 ) -> None:
     """The daemon scans on the heartbeat-interval cadence regardless of agent
     activity — a busy hosted agent's pages still heal."""
-    from shared.config import settings
+    from base.config import settings
 
     calls: list[tuple[object, float]] = []
 
@@ -54,7 +54,7 @@ async def test_page_reconcile_forever_survives_failure(
 ) -> None:
     """A raising pass must not kill the daemon loop — it logs and waits for the
     next interval, mirroring the process-mode loop's self-protection."""
-    from shared.config import settings
+    from base.config import settings
 
     calls = 0
 
@@ -79,7 +79,7 @@ async def test_page_reconcile_forever_runs_immediately_on_start(
     """The first pass runs at daemon start, not after a full interval — the
     hosted equivalent of the process-mode boot scan, so a daemon restart
     (platform update) starts healing dead pages at once (#1312 QA nit)."""
-    from shared.config import settings
+    from base.config import settings
 
     calls = 0
 
@@ -102,8 +102,8 @@ async def test_page_reconcile_forever_skips_passes_while_quiesced(
 ) -> None:
     """A stop-window unit runs no pass — probing would borrow the released
     pools — and resumes its passes once the window ends."""
-    from shared import maintenance
-    from shared.config import settings
+    from base.config import settings
+    from base.deploy.maintenance import admission
 
     state = {"quiesced": True}
     calls = 0
@@ -113,7 +113,7 @@ async def test_page_reconcile_forever_skips_passes_while_quiesced(
         calls += 1
 
     monkeypatch.setattr("agent.startup.reconcile_all_open_pages", _fake_all)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(maintenance, "quiesced", lambda: state["quiesced"])
+    monkeypatch.setattr(admission, "quiesced", lambda: state["quiesced"])
     monkeypatch.setattr(settings.daemon, "heartbeat_interval_seconds", 0.01)
 
     task = asyncio.create_task(_page_reconcile_forever(object()))  # type: ignore[arg-type]

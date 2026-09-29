@@ -1,6 +1,6 @@
 """Doorplate lint (R3 doors ① + ②): the contract wall is machine-supervised.
 
-Every gateway route must declare a contract (`shared/api_contracts/contracts.py` — the
+Every gateway route must declare a contract (`base/api_contracts/contracts.py` — the
 single fact source), every declaration must be used, the pause-exempt
 surface must be exactly the audited CONTROL_PLANE set (a new exemption is
 a deliberate, reviewed change, not an incident patch), and the middleware
@@ -18,10 +18,10 @@ from typing import Any
 
 import pytest
 
-from gateway import _pause_policy
+from base.api_contracts import contracts
+from base.api_contracts.contracts import Idempotency, PauseSemantics
 from gateway.app import app
-from shared.api_contracts import contracts
-from shared.api_contracts.contracts import Idempotency, PauseSemantics
+from gateway.middleware import pause_policy
 
 # The audited exempt surface: exactly the surfaces that must stay reachable
 # mid-migration. Adding a route here is a deliberate control-plane decision
@@ -82,7 +82,7 @@ def test_every_route_declares_a_contract() -> None:
     missing = _app_route_keys() - set(contracts.ROUTE_CONTRACTS)
     assert not missing, (
         "routes without a contract declaration — add them to "
-        "shared/api_contracts/contracts.py: " + ", ".join(f"{m} {p}" for m, p in sorted(missing))
+        "base/api_contracts/contracts.py: " + ", ".join(f"{m} {p}" for m, p in sorted(missing))
     )
 
 
@@ -91,7 +91,7 @@ def test_no_orphan_contracts() -> None:
     orphan = set(contracts.ROUTE_CONTRACTS) - _app_route_keys()
     assert not orphan, (
         "contract declarations with no matching route — remove them from "
-        "shared/api_contracts/contracts.py: " + ", ".join(f"{m} {p}" for m, p in sorted(orphan))
+        "base/api_contracts/contracts.py: " + ", ".join(f"{m} {p}" for m, p in sorted(orphan))
     )
 
 
@@ -102,7 +102,7 @@ def test_pause_exempt_surface_is_audited() -> None:
     exemption must be a deliberate edit to this test + the contract, never
     an invisible middleware string.
     """
-    assert _pause_policy.control_plane_surface() == _EXPECTED_CONTROL_PLANE
+    assert pause_policy.control_plane_surface() == _EXPECTED_CONTROL_PLANE
 
 
 def test_should_bypass_pause_agrees_with_surface() -> None:
@@ -127,9 +127,9 @@ def test_should_bypass_pause_agrees_with_surface() -> None:
         ("GET", "/pages/5-report/a/b"),
     ]
     for method, path in exempt:
-        assert _pause_policy.should_bypass_pause(method, path), f"expected exempt: {method} {path}"
+        assert pause_policy.should_bypass_pause(method, path), f"expected exempt: {method} {path}"
     for method, path in blocked:
-        assert not _pause_policy.should_bypass_pause(method, path), (
+        assert not pause_policy.should_bypass_pause(method, path), (
             f"expected blocked: {method} {path}"
         )
 

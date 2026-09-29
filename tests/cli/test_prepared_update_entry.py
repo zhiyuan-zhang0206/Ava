@@ -61,7 +61,7 @@ import importlib.abc
 import sys
 class Deny(importlib.abc.MetaPathFinder):
     def find_spec(self, fullname, path=None, target=None):
-        if fullname in {'shared.config', 'cli.commands'}:
+        if fullname in {'base.config', 'cli.commands'}:
             raise AssertionError('forbidden early import: ' + fullname)
 sys.meta_path.insert(0, Deny())
 from cli.main import main

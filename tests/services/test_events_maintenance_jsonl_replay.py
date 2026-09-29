@@ -253,7 +253,7 @@ def test_cli_filters_days_and_exits_nonzero_for_failed_day(
         def __exit__(self, *exc: object) -> None:
             return None
 
-    monkeypatch.setattr(jsonl_replay.shared.db, "connect", _ConnectionContext)
+    monkeypatch.setattr(jsonl_replay.base.db, "connect", _ConnectionContext)
 
     assert jsonl_replay.main(["--dry-run", "--days", "20260601"]) == 0
     success_output = capsys.readouterr().out

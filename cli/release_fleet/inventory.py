@@ -49,7 +49,7 @@ def check_inventory(
 
 def registered_units() -> tuple[set[tuple[str, str]], set[str], set[str]]:
     """The registered units `(machine, home)`, machines, and paused machines."""
-    from shared.db import connect
+    from base.db import connect
 
     with connect() as conn:
         units = {
@@ -67,9 +67,9 @@ def require_fleet_of_one(home: Path) -> None:
     PITR request) can share one single-unit topology gate. Live terminals and
     schedules are not refused here: an operation's stop phase closes them.
     """
-    from shared.config import settings
-    from shared.machine import machine_name, machine_role
-    from shared.paths import ava_home
+    from base.cluster.machine import machine_name, machine_role
+    from base.config import settings
+    from base.paths import ava_home
 
     if ava_home() != home:
         raise ValueError("the loaded home differs from the operation's home")
@@ -89,9 +89,9 @@ def require_topology(request: FleetRequest | UnitRequest) -> None:
     A request that names other units is first held to the full inventory rule,
     so its refusal names the precise problem before the dbgen-8 boundary.
     """
+    from base.cluster import registry_path
+    from base.cluster.machine import machine_name
     from cli.release_transition.identity import require_reservation
-    from shared.cluster import registry_path
-    from shared.machine import machine_name
 
     if isinstance(request, UnitRequest):
         raise ValueError(NETWORKED_REFUSAL)  # noqa: TRY004 — a topology refusal, not a type error

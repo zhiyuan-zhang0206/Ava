@@ -27,15 +27,15 @@ import pytest
 from fastapi.testclient import TestClient
 from langchain_core.messages import BaseMessage, HumanMessage
 
-from gateway.app import app
-from gateway.routers.timeline import _window_before
-from shared.agents.history.timeline import (
+from base.agents.history.timeline import (
     TimelineItem,
     _ai_message_items,
     build_timeline_items,
     tail_window,
 )
-from shared.db import create_agent, insert_inbound_message
+from base.db import create_agent, insert_inbound_message
+from gateway.agents.timeline import _window_before
+from gateway.app import app
 
 
 @pytest.fixture
@@ -130,7 +130,7 @@ class TestAiMessageItems:
     def test_openai_reasoning_block_renders_agent_reasoning(self):
         """openai Responses committed shape: a `reasoning` block (text in
         summary[].text) + text block + `function_call` block, tool call also in
-        the normalized tool_calls. shared.lm.reasoning folds reasoning → thinking,
+        the normalized tool_calls. base.lm.reasoning folds reasoning → thinking,
         so it renders as agent_reasoning; function_call is skipped (code comes
         from tool_calls); offsets: reasoning@0, chat@1, code@2.
         Shape taken from a real gpt-5.4-mini Responses committed message."""
@@ -593,7 +593,7 @@ class TestAvaMsgTypeDispatch:
         )
 
     def test_every_msg_type_has_an_explicit_branch(self) -> None:
-        from shared.message_kwargs import AvaMsgType
+        from base.agents.messages.kwargs import AvaMsgType
 
         expected_kind = {
             AvaMsgType.INBOUND: "inbound_chat",
@@ -636,7 +636,7 @@ class TestAvaMsgTypeDispatch:
         """Task #3323: the ava_compact_id durable anchor rides into the
         timeline item — the frontend matches the live ticking block to this
         summary by it. Pre-anchor summaries render with None."""
-        from shared.message_kwargs import AvaMsgType
+        from base.agents.messages.kwargs import AvaMsgType
 
         anchored = self._render(
             self._tagged(AvaMsgType.COMPACT_REQUEST.value, ava_compact_id="run-1")
@@ -665,7 +665,7 @@ class TestAttachItems:
         blocks_override: list[dict[str, Any]] | None = None,
     ) -> HumanMessage:
         from agent.messages import attach_message
-        from shared.lm.attach import AttachEntry, pack_attachments
+        from base.lm.attach import AttachEntry, pack_attachments
 
         image = tmp_path / "render.png"
         from PIL import Image
@@ -861,7 +861,7 @@ class TestTimelineDispatch:
         from langgraph.checkpoint.base import empty_checkpoint
         from langgraph.checkpoint.postgres import PostgresSaver
 
-        from shared.config import settings
+        from base.config import settings
 
         ckpt = empty_checkpoint()
         ckpt["channel_values"] = {"messages": messages}
@@ -897,7 +897,7 @@ class TestTimelineDispatch:
         from langchain_core.messages import AIMessage, ToolMessage
 
         from agent.messages import inbound_message
-        from shared.db import insert_inbound_message
+        from base.db import insert_inbound_message
 
         tid = create_agent(db_conn)
         # Real inbound rows as ts anchor (the timeline endpoint uses inbound_messages
@@ -994,7 +994,7 @@ class TestTimelineDispatch:
         from agent.messages import NoteTag, inbound_message, system_note_message
 
         tid = create_agent(db_conn)
-        from shared.db import insert_inbound_message
+        from base.db import insert_inbound_message
 
         insert_inbound_message(db_conn, tid, "before", source="user", kind="chat")
         db_conn.commit()
@@ -1035,7 +1035,7 @@ class TestTimelineDispatch:
         from langchain_core.messages import AIMessage, SystemMessage
 
         from agent.messages import inbound_message
-        from shared.db import insert_inbound_message
+        from base.db import insert_inbound_message
 
         tid = create_agent(db_conn)
         insert_inbound_message(db_conn, tid, "hi", source="user", kind="chat")
@@ -1105,7 +1105,7 @@ class TestTimelineDispatch:
 def test_item_sort_key_is_numeric_not_lexical() -> None:
     """item_id ordering is numeric (msg_idx, block_idx), so "10.0" follows "2.0"
     and "3.10" follows "3.2" — a lexical sort would get both backwards."""
-    from gateway.routers.timeline import _item_sort_key
+    from gateway.agents.timeline import _item_sort_key
 
     assert _item_sort_key("2.0") < _item_sort_key("10.0")
     assert _item_sort_key("3.2") < _item_sort_key("3.10")
@@ -1123,7 +1123,7 @@ def test_item_sort_key_is_numeric_not_lexical() -> None:
         from PIL import Image
 
         from agent.messages import attach_message
-        from shared.lm.attach import AttachEntry, pack_attachments
+        from base.lm.attach import AttachEntry, pack_attachments
 
         image = tmp_path / "render.png"
         Image.new("RGB", (2, 2)).save(image)
@@ -1170,7 +1170,7 @@ class TestTimelineFailLoud:
         from langgraph.checkpoint.base import empty_checkpoint
         from langgraph.checkpoint.postgres import PostgresSaver
 
-        from shared.config import settings
+        from base.config import settings
 
         ckpt = empty_checkpoint()
         ckpt["channel_values"] = {"messages": [AIMessage(content="hello")]}
@@ -1206,8 +1206,8 @@ class TestTimelineFailLoud:
         the HTTP-layer 500 status, so disable re-raise to let FastAPI run the default error
         middleware and return 500.
         """
+        from base.agents.history import timeline as base_timeline
         from gateway.app import app
-        from shared.agents.history import timeline as shared_timeline
 
         tid = create_agent(db_conn)
         self._put_minimal_aimessage(tid)
@@ -1217,7 +1217,7 @@ class TestTimelineFailLoud:
                 "simulated dispatch failure (e.g. NameError when refactor forgot import)"
             )
 
-        monkeypatch.setattr(shared_timeline, "_ai_message_items", boom)  # pyright: ignore[reportUnknownArgumentType]
+        monkeypatch.setattr(base_timeline, "_ai_message_items", boom)  # pyright: ignore[reportUnknownArgumentType]
         with TestClient(app, raise_server_exceptions=False) as client:
             resp = client.get(f"/api/agents/{tid}/timeline")
         assert resp.status_code == 500, (
@@ -1297,7 +1297,7 @@ def test_timeline_anchor_filter_only_includes_chat_inbounds(
     inserts a mixed sequence and verifies the endpoint still returns 200 and lifecycle
     inbounds do not pollute the chat anchor.
     """
-    from shared.db import list_inbound_messages
+    from base.db import list_inbound_messages
 
     tid = create_agent(db_conn)
     # Mixed chat / lifecycle kinds, in INSERT order
@@ -1362,7 +1362,7 @@ def test_inbound_with_real_ts_still_advances_anchor_for_legacy_siblings() -> Non
 
     from langchain_core.messages import HumanMessage, ToolMessage
 
-    from shared.db import InboundRow
+    from base.db import InboundRow
 
     # In production, the inbound's ava_created_at IS the anchor row's created_at
     # (same DB row); here they are set apart only so the two assertions can tell
@@ -1400,7 +1400,7 @@ def test_compacted_inbound_uses_its_embedded_id_instead_of_oldest_anchor() -> No
 
     from langchain_core.messages import HumanMessage, ToolMessage
 
-    from shared.db import InboundRow
+    from base.db import InboundRow
 
     stale_anchor = InboundRow(
         4516,
@@ -1465,7 +1465,7 @@ def test_missing_embedded_anchor_does_not_consume_legacy_fallback() -> None:
 
     from langchain_core.messages import HumanMessage, ToolMessage
 
-    from shared.db import InboundRow
+    from base.db import InboundRow
 
     missing_modern = HumanMessage(
         content="row no longer present",
@@ -1509,7 +1509,7 @@ def test_out_of_order_and_duplicate_embedded_ids_preserve_anchor_cursor() -> Non
 
     from langchain_core.messages import HumanMessage
 
-    from shared.db import InboundRow
+    from base.db import InboundRow
 
     def modern(inbound_id: int) -> HumanMessage:
         return HumanMessage(
@@ -1670,7 +1670,7 @@ class TestSystemPromptInColdLoad:
         from langgraph.checkpoint.base import empty_checkpoint
         from langgraph.checkpoint.postgres import PostgresSaver
 
-        from shared.config import settings
+        from base.config import settings
 
         ckpt = empty_checkpoint()
         ckpt["channel_values"] = {"messages": messages}
@@ -1743,7 +1743,7 @@ class TestSystemPromptInColdLoad:
         (``AVA_TIMELINE_DEFAULT_LIMIT``); 50 is only that field's default."""
         from langchain_core.messages import HumanMessage
 
-        from shared.config import settings
+        from base.config import settings
 
         monkeypatch.setattr(settings.display, "timeline_default_limit", 5)
 
@@ -1978,7 +1978,7 @@ class TestTimelineCompactHistory:
         from langgraph.checkpoint.base import CheckpointMetadata, empty_checkpoint
         from langgraph.checkpoint.postgres import PostgresSaver
 
-        from shared.config import settings
+        from base.config import settings
 
         checkpoint = empty_checkpoint()
         checkpoint["channel_values"] = {"messages": messages}
@@ -2004,7 +2004,7 @@ class TestTimelineCompactHistory:
     ) -> None:
         from langchain_core.messages import AIMessage
 
-        from shared.config import settings
+        from base.config import settings
 
         tid = create_agent(db_conn)
         self._put_checkpoint(tid, self._segment("history", 2), version="1", boundary=True)
@@ -2031,7 +2031,7 @@ class TestTimelineCompactHistory:
     ) -> None:
         from langchain_core.messages import AIMessage
 
-        from shared.config import settings
+        from base.config import settings
 
         tid = create_agent(db_conn)
         boundary_id = self._put_checkpoint(
@@ -2084,7 +2084,7 @@ class TestTimelineCompactHistory:
     ) -> None:
         from langchain_core.messages import AIMessage
 
-        from shared.config import settings
+        from base.config import settings
 
         tid = create_agent(db_conn)
         older_id = self._put_checkpoint(
@@ -2127,7 +2127,7 @@ class TestTimelineCompactHistory:
     ) -> None:
         from langchain_core.messages import AIMessage
 
-        from shared.config import settings
+        from base.config import settings
 
         tid = create_agent(db_conn)
         self._put_checkpoint(tid, self._segment("blocked", 1), version="1", boundary=True)
@@ -2163,7 +2163,7 @@ class TestTimelineCompactHistory:
     ) -> None:
         from langchain_core.messages import AIMessage
 
-        from shared.config import settings
+        from base.config import settings
 
         tid = create_agent(db_conn)
         older_id = self._put_checkpoint(
@@ -2215,8 +2215,8 @@ class TestTimelineCompactHistory:
     ) -> None:
         from langchain_core.messages import AIMessage
 
-        import gateway.routers.timeline as timeline_router
-        from shared.config import settings
+        import gateway.agents.timeline as timeline_router
+        from base.config import settings
 
         tid = create_agent(db_conn)
         self._put_checkpoint(
@@ -2245,7 +2245,7 @@ class TestTimelineCompactHistory:
     ) -> None:
         from langchain_core.messages import AIMessage
 
-        from shared.config import settings
+        from base.config import settings
 
         tid = create_agent(db_conn)
         older_id = self._put_checkpoint(tid, self._segment("older", 2), version="1", boundary=True)
@@ -2312,8 +2312,8 @@ class TestTimelineCompactHistory:
     ) -> None:
         from langchain_core.messages import AIMessage
 
-        import gateway.routers.timeline as timeline_router
-        from shared.config import settings
+        import gateway.agents.timeline as timeline_router
+        from base.config import settings
 
         tid = create_agent(db_conn)
         boundary_id = self._put_checkpoint(
@@ -2356,7 +2356,7 @@ class TestTimelineCompactHistory:
     ) -> None:
         from langchain_core.messages import AIMessage
 
-        from shared.config import settings
+        from base.config import settings
 
         tid = create_agent(db_conn)
         self._put_checkpoint(
@@ -2382,8 +2382,8 @@ class TestTimelineCompactHistory:
     ) -> None:
         from langchain_core.messages import AIMessage
 
-        import gateway.routers.timeline as timeline_router
-        from shared.config import settings
+        import gateway.agents.timeline as timeline_router
+        from base.config import settings
 
         tid = create_agent(db_conn)
         self._put_checkpoint(
@@ -2421,7 +2421,7 @@ class TestTimelineCompactHistory:
     ) -> None:
         from langchain_core.messages import AIMessage, HumanMessage
 
-        from shared.config import settings
+        from base.config import settings
 
         tid = create_agent(db_conn)
         boundary_id = self._put_checkpoint(
@@ -2464,9 +2464,9 @@ class TestTimelineCompactHistory:
     ) -> None:
         from langchain_core.messages import AIMessage
 
-        import gateway.routers.timeline as timeline_router
-        from shared.agents.history.checkpoint import CheckpointReadError
-        from shared.config import settings
+        import gateway.agents.timeline as timeline_router
+        from base.agents.history.checkpoint import CheckpointReadError
+        from base.config import settings
 
         tid = create_agent(db_conn)
         self._put_checkpoint(
@@ -2649,7 +2649,7 @@ class TestTimelineCompactHistory:
         notes crosses to the older segment instead of looping on the head."""
         from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
-        from shared.config import settings
+        from base.config import settings
 
         tid = create_agent(db_conn)
         boundary_id = self._put_checkpoint(
@@ -2712,7 +2712,7 @@ class TestTimelineCompactHistory:
         nit, PR #787)."""
         from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
-        from shared.config import settings
+        from base.config import settings
 
         tid = create_agent(db_conn)
         boundary_2 = self._put_checkpoint(

@@ -38,8 +38,8 @@ from dataclasses import dataclass
 from typing import Literal
 
 from agent.db import ClaimedInbound, has_pending_inbound_after
-from shared.agents.messages.inbound import InboundKind
-from shared.context import AvaContext
+from base.agents.context import AvaContext
+from base.agents.messages.inbound import InboundKind
 
 # The four targets claim itself routes to: BEFORE_LLM (has work), END
 # (terminate with exit_requested=True, a hosted restart with

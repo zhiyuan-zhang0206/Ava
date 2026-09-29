@@ -2,7 +2,7 @@
 
 `agent.exec_child._finalize_telemetry()` is the clean-exit delivery path
 (sync queued SDK-call events, flush the OTLP backend). A child that never
-emitted a record has no `shared.telemetry` queue to drain, so the helper must
+emitted a record has no `base.telemetry` queue to drain, so the helper must
 return before importing anything — and in particular must not import the OTel
 SDK stack that the old eager `telemetry_otlp.warmup()` brought up at boot.
 
@@ -48,7 +48,7 @@ import agent.exec_child as exec_child  # the module under test
 
 exec_child._finalize_telemetry()  # the zero-record exit path
 
-watched = ("shared.telemetry", "shared.telemetry.otlp.telemetry_otlp")
+watched = ("base.telemetry", "base.telemetry.otlp.telemetry_otlp")
 loaded = sorted(
     name
     for name in sys.modules
@@ -96,7 +96,7 @@ import agent.exec_child as exec_child
 exec_child._init_logger(999999)  # the real arm path (task #3816 M4b)
 exec_child._emit_child_boot_timing()  # the record that used to bring OTLP up
 
-from shared.telemetry.otlp import telemetry_otlp
+from base.telemetry.otlp import telemetry_otlp
 
 deadline = time.monotonic() + 5.0
 while telemetry_otlp.backend._queue.qsize() == 0 and time.monotonic() < deadline:

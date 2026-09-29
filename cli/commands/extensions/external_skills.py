@@ -13,6 +13,8 @@ import uuid
 from pathlib import Path
 from typing import Any, cast
 
+from base.host.private_storage import ensure_private_dir
+from base.native_process.os_platform import LockTimeoutError, file_lock
 from cli.commands.converge.spec import ConvergeCtx
 from cli.commands.extensions._external_skill_cleanup import (
     _cleanup_garbage_impl,
@@ -42,8 +44,6 @@ from cli.commands.extensions._external_skill_ledger import (
     _stage_manifest,
     _write_ledger,
 )
-from shared.platform import LockTimeoutError, file_lock
-from shared.private_storage import ensure_private_dir
 
 _SKILL_NAME = "operating-ava-cluster"
 _MARKER_NAME = ".ava-managed.json"

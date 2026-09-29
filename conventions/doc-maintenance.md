@@ -64,7 +64,7 @@ into anything anyone reads twice. A postmortem whose lesson generalizes and does
 not appear on that page is only half filed.
 
 Like `decisions/`, `postmortems/` is skipped entirely by
-`scripts/check_doc_references.py` — naming the flag or file that existed at
+`scripts/content_lint/check_doc_references.py` — naming the flag or file that existed at
 incident time is the record working as intended. Nothing checks those links, so
 mark what a reader cannot open; commits and PR numbers predating the 2026-08-18
 public-repo cutover are not reachable from public `main` and are labelled
@@ -76,9 +76,9 @@ Anything derivable from the code — modules, endpoints, schemas, wiring, data
 flow — lives in the OKF graph, never in `conventions/`. The graph is
 **co-located**: most `.ava.okf.md` files sit inside the source trees they
 describe (`agent/`, `ava/`, `ava_builtins/`, `cli/`, `ui/web/`, `gateway/`,
-`services/`, `shared/`); the rest are index-layer nodes in `okf/`.
+`services/`, `base/`); the rest are index-layer nodes in `okf/`.
 
-Hierarchy is filesystem-derived (`shared/docs/okf_graph.py:compute_parent`):
+Hierarchy is filesystem-derived (`base/packages/docs/okf_graph.py:compute_parent`):
 `<dir>/<dir>.ava.okf.md` is the overview node for `<dir>/`, and the other files
 inside `<dir>/` are its children (user ruling 2026-08-12: a directory's
 overview lives *inside* the directory, not beside it at the parent level).
@@ -115,7 +115,7 @@ that basename, so an untouched link starts failing on someone else's commit.
 `W011` (non-blocking) reports a target whose directory component played no part
 in its resolution, while it is still only a wrong path.
 
-Format is enforced by `scripts/lint_ava_okf.py`: YAML frontmatter with
+Format is enforced by `scripts/content_lint/lint_ava_okf.py`: YAML frontmatter with
 `type` / `title` / `description`, a line + character size ceiling (which forces
 hierarchy instead of long files), and `[[wikilink]]` targets that must resolve.
 The three thresholds are `MAX_LINES` / `MAX_CHARS` / `WARN_MARGIN` in that
@@ -167,7 +167,7 @@ directory) when the domain's shape changed:
 | Gateway routes / SSE / auth | `gateway/gateway.ava.okf.md` |
 | CLI commands / cluster lifecycle | `cli/cli.ava.okf.md` |
 | Frontend | `ui/web/web.ava.okf.md` |
-| Shared library / LM providers / config / migrations | `shared/shared.ava.okf.md` |
+| Base library / LM providers / config / migrations | `base/base.ava.okf.md` |
 | Background services | `services/services.ava.okf.md` |
 | GitHub Actions / CI workflows | `.github/.github.ava.okf.md` |
 | Plugins / extension points | `okf/plugins/plugins.ava.okf.md` |

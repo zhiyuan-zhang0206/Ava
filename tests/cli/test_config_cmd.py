@@ -17,15 +17,15 @@ from typing import Any
 
 import pytest
 
-from cli.commands.management import config as cfg
-from shared import runtime_config
-from shared.api_contracts.config import (
+from base.api_contracts.config import (
     ConfigAuditView,
     ConfigFieldView,
     ConfigFieldWriteResult,
     ConfigView,
     ConfigWriteResult,
 )
+from base.host.env import runtime_config
+from cli.commands.management import config as cfg
 
 
 def _field(
@@ -113,7 +113,7 @@ def test_set_list_field_writes_bare_env_and_round_trips(
 ) -> None:
     """A list-backed CLI value lands as a bare comma list that the consuming
     Settings model parses back into the declared list type."""
-    from shared.config.services import ServiceSettings
+    from base.config.services import ServiceSettings
 
     view = _view()
     view.fields.append(
@@ -310,11 +310,11 @@ def test_unset_machine_host_field_rejects_remote_read_only(
 def test_cli_field_editable_mirrors_shared_definition(
     scope: str, writable: bool, remote_writable: bool, remote: bool
 ) -> None:
-    """The CLI's wire-view gate and shared.config.editing.field_editable are two
+    """The CLI's wire-view gate and base.config.editing.field_editable are two
     definitions of one policy; this table pins their agreement so a future
     special case in the shared definition turns this test red (task #2552)."""
-    from shared.config import ConfigFieldMeta
-    from shared.config.editing import field_editable
+    from base.config import ConfigFieldMeta
+    from base.config.editing import field_editable
 
     view_field = _field(
         "parity",
@@ -507,7 +507,7 @@ def test_gateway_base_prefers_anchored_home_gateway_url_file_over_aliases(
     home = local_env_home / "anchored-home"
     home.mkdir()
     (home / "gateway_url").write_text("http://own-cluster.test:8000\n")
-    monkeypatch.setattr("shared.dotenv_boot.AVA_ENV_PATH", home / ".env")
+    monkeypatch.setattr("base.host.env.dotenv_boot.AVA_ENV_PATH", home / ".env")
     (local_env_home / ".env").write_text("AVA_GATEWAY_URL=http://alias.test:9000\n")
 
     assert cfg._gateway_base() == "http://own-cluster.test:8000"
@@ -519,7 +519,7 @@ def test_gateway_base_refuses_unanchored_checkout(
     """A bare worktree (no `.ava_home` pointer) must not silently resolve to
     the default home's gateway — refusal with guidance instead."""
     monkeypatch.delitem(os.environ, "AVA_GATEWAY_URL", raising=False)
-    monkeypatch.setattr("shared.dotenv_boot.checkout_anchored", lambda: False)
+    monkeypatch.setattr("base.host.env.dotenv_boot.checkout_anchored", lambda: False)
     (local_env_home / ".env").write_text("AVA_GATEWAY_URL=http://prod.test:8000\n")
 
     with pytest.raises(cfg._ConfigError, match="not anchored"):
@@ -532,7 +532,7 @@ def test_put_config_refuses_unanchored_checkout_even_with_env_override(
     """An unanchored checkout may read through an explicit env override but
     never write gateway config — no HTTP call happens."""
     monkeypatch.setitem(os.environ, "AVA_GATEWAY_URL", "http://elsewhere.test:8000")
-    monkeypatch.setattr("shared.dotenv_boot.checkout_anchored", lambda: False)
+    monkeypatch.setattr("base.host.env.dotenv_boot.checkout_anchored", lambda: False)
 
     with pytest.raises(cfg._ConfigError, match="refusing to write gateway config"):
         cfg._put_config({"x": "y"}, machine=None)
@@ -546,7 +546,7 @@ def test_put_config_refuses_env_override_mismatching_home_identity(
     home = local_env_home / "anchored-home"
     home.mkdir()
     (home / "gateway_url").write_text("http://own-cluster.test:8000\n")
-    monkeypatch.setattr("shared.dotenv_boot.AVA_ENV_PATH", home / ".env")
+    monkeypatch.setattr("base.host.env.dotenv_boot.AVA_ENV_PATH", home / ".env")
     monkeypatch.setitem(os.environ, "AVA_GATEWAY_URL", "http://other-cluster.test:9000")
 
     with pytest.raises(cfg._ConfigError, match="does not match this home's gateway"):
@@ -559,7 +559,7 @@ def test_local_set_refuses_unanchored_checkout(
     """The --local write path is the same red-line class: an unanchored
     checkout owns no home, so it must not hand-edit its throwaway scratch."""
     (local_env_home / ".env").write_text("OTHER=kept\n")
-    monkeypatch.setattr("shared.dotenv_boot.checkout_anchored", lambda: False)
+    monkeypatch.setattr("base.host.env.dotenv_boot.checkout_anchored", lambda: False)
 
     rc = cfg.cmd_config_set(["ops_concurrency=7"], machine=None, local=True)
 
@@ -591,7 +591,7 @@ def test_local_set_validates_candidate_and_rejects_incident_shape(
     # The agent runtime exports AVA_PITR_OSS_VIEWER_CREDENTIALS_FILE; inherited
     # here it completes the OSS credential shape and turns this test's expected
     # rejection into a valid patch (task #2552). The candidate validation builds
-    # the physical-backup model FRESH from os.environ (shared/config/candidate.py
+    # the physical-backup model FRESH from os.environ (base/config/candidate.py
     # `source_model()`), so the env itself is the seam — not the Settings
     # singleton (which is why setenv/delenv would be a no-op elsewhere, and why
     # the wholesale environ swap is the honest patch here).
@@ -723,7 +723,7 @@ def test_config_audit_local_reads_newest_first_and_filters(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """No --machine: reads this unit's own JSONL; --key keeps one alias's records."""
-    from shared.env_audit import record_env_write
+    from base.host.env.audit import record_env_write
 
     monkeypatch.setattr(runtime_config, "_ava_home", lambda: tmp_path)
     env_path = tmp_path / ".env"

@@ -28,9 +28,9 @@ from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
+from base.config import settings
+from base.db.transaction import write_transaction
 from services.im_bridge import copy
-from shared.config import settings
-from shared.db_transaction import write_transaction
 
 _log = logging.getLogger("services.im_bridge.notice_bridge")
 
@@ -165,7 +165,7 @@ class NoticeBridge:
         direct-DB twin of the gateway's /api/notices/live query. Without an
         explicit limit the read caps at the same display default the gateway
         endpoint applies (one source, task #3696)."""
-        from shared.db import NOTICE_FYI_TTL_DAYS
+        from base.db import NOTICE_FYI_TTL_DAYS
 
         if limit is None:
             limit = settings.display.notices_open_default_limit
@@ -184,7 +184,7 @@ class NoticeBridge:
         direct-DB twin of the gateway's /api/notices/open query. Without an
         explicit limit the listing caps at services.im_bridge_notice_open_limit;
         callers may narrow it."""
-        from shared.db import NOTICE_FYI_TTL_DAYS
+        from base.db import NOTICE_FYI_TTL_DAYS
 
         if limit is None:
             limit = settings.services.im_bridge_notice_open_limit

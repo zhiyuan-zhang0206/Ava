@@ -17,7 +17,7 @@ import pytest
 
 import ava
 from agent.state import clear_plugin_registrations
-from shared.plugin_context import PluginContext
+from base.packages.plugins.context import PluginContext
 
 
 def _render_help(target: object) -> str:

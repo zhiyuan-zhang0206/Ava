@@ -13,12 +13,12 @@ from pathlib import Path
 import psutil
 import pytest
 
+from base.native_process import pid_starttime_ticks
+from base.sessions import helper_chain_guard, helperproc
+from base.sessions.helper_chain_guard import parent_chain_intact
+from base.sessions.record import SessionRecord
 from services.permissions_helper import client
 from services.permissions_helper.client import PermissionsHelperError
-from shared import helper_chain_guard, helperproc
-from shared.helper_chain_guard import parent_chain_intact
-from shared.native_process import pid_starttime_ticks
-from shared.session_record import SessionRecord
 
 
 def _current_process_record(*, generation: str | None = None) -> SessionRecord:
@@ -37,7 +37,7 @@ def _current_process_record(*, generation: str | None = None) -> SessionRecord:
 def test_new_session_preserves_login_shell_env_stderr_and_record(
     unit_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from shared import session_env
+    from base.sessions import env_forwarding
 
     calls: list[dict[str, object]] = []
 
@@ -62,7 +62,7 @@ def test_new_session_preserves_login_shell_env_stderr_and_record(
         return {"pid": os.getpid(), "reused": False}
 
     monkeypatch.setattr(client, "spawn_process", fake_spawn_process)
-    monkeypatch.setattr(session_env, "venv_activation_prefix", lambda: "activate-venv && ")
+    monkeypatch.setattr(env_forwarding, "venv_activation_prefix", lambda: "activate-venv && ")
     stderr = unit_home / "logs" / "service.stderr.log"
     backend = helperproc.HelperProcSessionBackend()
 
@@ -246,8 +246,8 @@ def test_backend_route_matrix(
     spawn: bool,
     expected: str,
 ) -> None:
-    from shared import session_backend
-    from shared.config import settings
+    from base.config import settings
+    from base.sessions import backend as session_backend
 
     monkeypatch.setattr(session_backend, "IS_WINDOWS", is_windows)
     monkeypatch.setattr(session_backend, "IS_MACOS", is_macos)
@@ -264,8 +264,8 @@ def test_backend_route_matrix(
 def test_backend_route_fails_closed_when_settings_are_unreadable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import shared.config
-    from shared import session_backend
+    import base.config
+    from base.sessions import backend as session_backend
 
     class BrokenSettings:
         @property
@@ -274,15 +274,15 @@ def test_backend_route_fails_closed_when_settings_are_unreadable(
 
     monkeypatch.setattr(session_backend, "IS_WINDOWS", False)
     monkeypatch.setattr(session_backend, "IS_MACOS", True)
-    monkeypatch.setattr(shared.config, "settings", BrokenSettings())
+    monkeypatch.setattr(base.config, "settings", BrokenSettings())
     monkeypatch.setattr(session_backend, "_backend", None)
 
     assert type(session_backend.get_backend()).__name__ == "PosixProcSessionBackend"
 
 
 def test_permissions_helper_spawn_defaults_off() -> None:
-    from shared.config import FIELD_INFOS, field_alias
-    from shared.config.services import ServiceSettings
+    from base.config import FIELD_INFOS, field_alias
+    from base.config.services import ServiceSettings
 
     assert ServiceSettings.model_fields["permissions_helper_spawn"].default is False
     assert field_alias("permissions_helper_spawn") == "AVA_PERMISSIONS_HELPER_SPAWN"
@@ -299,8 +299,8 @@ def test_permissions_helper_spawn_defaults_off() -> None:
 def test_pty_host_uses_direct_helper_child_when_enabled(
     unit_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from shared import session_backend
-    from shared.sessions.pty import cli
+    from base.sessions import backend as session_backend
+    from base.sessions.pty import cli
 
     calls: list[dict[str, object]] = []
 
@@ -342,7 +342,7 @@ def test_pty_host_uses_direct_helper_child_when_enabled(
     assert call["argv"] == [
         sys.executable,
         "-m",
-        "shared.sessions.pty.host",
+        "base.sessions.pty.host",
         "ava-shell",
         str(unit_home),
         str(envfile),
@@ -426,7 +426,7 @@ def _run_probe_chain(marker_dir: Path, *, marker_value: str | None = None) -> st
     result = subprocess.run(  # noqa: S603 — fixed test-internal probe
         [
             sys.executable,
-            str(Path(__file__).parent / "shared" / "helper_chain_probe.py"),
+            str(Path(__file__).parent / "base" / "helper_chain_probe.py"),
             "helper",
             str(marker_dir / "marker"),
         ],

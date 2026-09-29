@@ -28,9 +28,9 @@ from agent.graph.llm_errors import (
     _record_consecutive_error,
 )
 from agent.nodes import AFTER_EXEC
-from shared.context import AvaContext
-from shared.live_events import Cancelled
-from shared.log import logger
+from base.agents.context import AvaContext
+from base.events.live.projection import Cancelled
+from base.log import logger
 
 from .node import LlmGoto
 
@@ -93,7 +93,7 @@ async def _race_stream_vs_cancel(
             _record_consecutive_error(str(agent_id), e)
             raise
         except Exception as e:
-            # Classify the provider exception (shared.lm.errors.classify_error) and
+            # Classify the provider exception (base.lm.errors.classify_error) and
             # log the structured (error_class, provider, status) for the postmortem.
             # A PERMANENT class (400 context length / schema, 401/402/403 auth /
             # billing / forbidden, 404 unknown model, 422 schema) or a configured

@@ -16,8 +16,8 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
-from shared.daemon_health import DaemonProbe
-from shared.paths import ava_home
+from base.daemon.health import DaemonProbe
+from base.paths import ava_home
 
 _local_http = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
@@ -33,7 +33,7 @@ def readiness_probes() -> tuple[tuple[str, str], ...]:
 
     Tempo is remote and cannot trigger a local backend restart.
     """
-    from shared.lgtm_local import BACKENDS, HEALTH_PATHS, backend_urls
+    from base.telemetry.lgtm_local import BACKENDS, HEALTH_PATHS, backend_urls
 
     urls = backend_urls()
     return tuple((name, f"{urls[name]}{HEALTH_PATHS[name]}") for name in BACKENDS)
@@ -48,13 +48,13 @@ def lgtm_host_marker() -> Path:
 def is_lgtm_host() -> bool:
     """Whether this host is the observability station: the `lgtm-host` marker
     OR the declarative `observability-station` unit capability."""
-    from shared.observability import home_is_observability_station
+    from base.telemetry.observability import home_is_observability_station
 
     return home_is_observability_station(ava_home())
 
 
 def _protocol_readiness(name: str) -> DaemonProbe:
-    from shared.lgtm_local import HEALTH_PATHS, backend_urls
+    from base.telemetry.lgtm_local import HEALTH_PATHS, backend_urls
 
     url = backend_urls()[name] + HEALTH_PATHS[name]
     try:
@@ -72,8 +72,8 @@ def probe_backend(name: str) -> DaemonProbe:
     """Require native root ownership and a successful backend readiness response."""
     from functools import partial
 
+    from base.telemetry.lgtm_local import backend_urls
     from services.healthchecks.owned_service import probe_endpoint
-    from shared.lgtm_local import backend_urls
 
     port = urllib.parse.urlsplit(backend_urls()[name]).port
     if port is None:
@@ -82,7 +82,7 @@ def probe_backend(name: str) -> DaemonProbe:
 
 
 def probe_statuses() -> list[tuple[str, bool]]:
-    from shared.lgtm_local import BACKENDS
+    from base.telemetry.lgtm_local import BACKENDS
 
     return [(name, probe_backend(name).alive) for name in BACKENDS]
 
@@ -92,7 +92,7 @@ def write_path_probe() -> tuple[bool, str]:
     now_ns = time.time_ns()
     marker_ns = now_ns - (_WRITE_PROBE_END_LAG_SECONDS * _NANOSECONDS_PER_SECOND)
     marker = f"watchdog-write-probe-{marker_ns}"
-    from shared.lgtm_local import backend_urls
+    from base.telemetry.lgtm_local import backend_urls
 
     base_url = backend_urls()["loki"]
     body = json.dumps(

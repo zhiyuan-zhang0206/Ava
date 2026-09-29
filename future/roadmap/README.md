@@ -10,7 +10,7 @@ if it lives only in someone's head.
 
 This folder is the **strategic capability/product roadmap**, distinct from the
 engineering backlogs in [`../infra/`](../infra/) and the module-co-located plans
-(`agent/`, `ops/`, `shared/lm/`, `ava_builtins/`) —
+(`agent/`, `ops/`, `base/lm/`, `ava_builtins/`) —
 those track build-level work item by item; this tracks what Ava is *for* and what
 it builds next at the capability level, and links down into those streams where a
 strategic item has a build-level design.

@@ -16,7 +16,7 @@ as a usage error — message on stderr, exit code 2. Three shapes:
   the parse-layer boundary — never deep in the command body.
 - **Value contract** (format, range, duration, JSON shape): a `type=` callable
   on the argument. It may lazily import the canonical validator from its owning
-  module (`shared.*`, `services.*`) and re-raise `ValueError` as
+  module (`base.*`, `services.*`) and re-raise `ValueError` as
   `argparse.ArgumentTypeError`; never duplicate the validator.
 
 No environment variable satisfies a CLI argument that was not passed — the

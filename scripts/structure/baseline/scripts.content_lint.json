@@ -1,0 +1,15 @@
+{
+  "complexity": {
+    "scripts/content_lint/check_doc_references.py::check_doc": 16,
+    "scripts/content_lint/check_doc_references.py::check_flags": 15,
+    "scripts/content_lint/lint_ava_okf.py::lint_file": 17,
+    "scripts/content_lint/lint_ava_okf.py::main": 18,
+    "scripts/content_lint/lint_core_content_manifests.py::main": 23,
+    "scripts/content_lint/lint_doc_anchors.py::check": 15,
+    "scripts/content_lint/lint_doc_symbols.py::check": 16,
+    "scripts/content_lint/lint_migrations.py::_check_folded_strict_without_seed": 16
+  },
+  "nesting": {
+    "scripts/content_lint/lint_doc_symbols.py::check": 6
+  }
+}

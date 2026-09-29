@@ -1,4 +1,4 @@
-"""Unit tests for `gateway/prom_metrics.py` — the Prometheus read side of the
+"""Unit tests for `gateway/lgtm/prom_metrics.py` — the Prometheus read side of the
 LGTM cutover (task #1197).
 
 The module's only I/O is httpx GETs through the shared client accessor
@@ -18,7 +18,7 @@ from typing import Any
 import httpx
 import pytest
 
-from gateway import prom_metrics
+from gateway.lgtm import prom_metrics
 
 # ─── fake httpx transport ────────────────────────────────────────────────────
 

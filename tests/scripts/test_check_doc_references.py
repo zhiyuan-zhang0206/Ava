@@ -1,4 +1,4 @@
-"""scripts/check_doc_references.py: code samples are not links.
+"""scripts/content_lint/check_doc_references.py: code samples are not links.
 
 The link check exists to catch rot, so it must stay loud on a real dangling
 target while staying silent on a path that is being *taught* rather than
@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from scripts.check_doc_references import REPO, check_doc
+from scripts.content_lint.check_doc_references import REPO, check_doc
 
 _NO_COMMANDS: dict[tuple[str, ...], set[str]] = {}
 

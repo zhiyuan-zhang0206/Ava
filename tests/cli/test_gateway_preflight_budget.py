@@ -23,9 +23,9 @@ from __future__ import annotations
 
 import pytest
 
+from base.deploy.progress_timeout import GATEWAY_PREFLIGHT_BUDGET_S, NO_PROGRESS_TIMEOUT_S
 from cli.commands import _repo
 from cli.commands._repo import GatewayProbe
-from shared.deploy_timing import GATEWAY_PREFLIGHT_BUDGET_S, NO_PROGRESS_TIMEOUT_S
 
 URL = "http://gw:8000"
 

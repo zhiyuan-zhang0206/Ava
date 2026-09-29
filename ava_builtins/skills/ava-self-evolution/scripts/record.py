@@ -26,8 +26,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from audit import LeakPaths, invalidated, scan
 from label import label
 
-from shared.agents.history.checkpoint import CheckpointReadError, load_checkpoint_messages_full
-from shared.audit_events import SkillInvokedPayload
+from base.agents.history.checkpoint import CheckpointReadError, load_checkpoint_messages_full
+from base.telemetry.audit_events import SkillInvokedPayload
 
 # Chinese correction keywords — user is redirecting or correcting the agent.
 CN_CORRECTION_KEYWORDS = [

@@ -1,32 +1,40 @@
 ---
 type: doc
 title: Gateway Routers
-description: Gateway's route modules, one FastAPI APIRouter per business domain under gateway/routers/<domain>.py, uniformly mounted to /api/* by app.py (grafana mounts outside /api).
+description: The gateway's route catalog — feature packages (gateway/<feature>/) plus single-module routers (gateway/routers/<domain>.py), all mounted to /api/* by app.py (grafana outside /api).
 tags: []
 ---
 
 # Gateway Routers
 
-Gateway's 43 route modules, split by business domain under `gateway/routers/<domain>.py`, each a FastAPI `APIRouter` `include_router`-mounted to `/api/*` at the bottom of `gateway/app.py` (grafana mounts outside `/api`). `delivery.py` / `agents_forward.py` are not routers but internal helpers (chat-inbound delivery / cross-machine forward).
+Every route module is a FastAPI `APIRouter` `include_router`-mounted to `/api/*` at the bottom of `gateway/app.py` (grafana mounts outside `/api`). A surface whose routes, helpers and wire models change together is a feature package; a single-module surface stays in `gateway/routers/<domain>.py` with its models in `gateway/schemas/<domain>.py`:
+
+| package | routers |
+|---|---|
+| `gateway/agents/` | `router` (agents), `lifecycle`, `state`, `conversation`, `timeline`, `notices`; helpers `forward`, `delivery` |
+| `gateway/events/` | `router` (events), `agent_events`, `computer_traces`, `resolutions`, `metrics`, `system` |
+| `gateway/cluster/` | `router` (cluster), `machine_pause`, `bootstrap`, `status`, `ops_monitor` |
+| `gateway/extensions/` | `inventory`, `skills`, `plugin_ui`, `ui_contributions`, `packages` |
+| `gateway/alerts/`, `gateway/auth/`, `gateway/mcp_server/`, `gateway/schedules/`, `gateway/run_timeline/`, `gateway/inspect/` | `router` |
 
 ## Router categories
 
 ### Agent core (lifecycle + observability)
-- **agents** (`/api/agents/*`) — [[gateway/routers/agents-router.ava.okf.md|lifecycle and projection contract]].
+- **agents** (`/api/agents/*`) — [[gateway/agents/agents-router.ava.okf.md|lifecycle and projection contract]].
 - **agent_events** (`/api/agents/{id}/events` + `/events/stream`) — historical REST query over the unified event stream (Loki) + real-time SSE tail (filtered by agent_id)
 - **events** (`/api/events`) — unified event stream query (Wave 2): every category (audit / telemetry / log) through one surface over the event stream (Loki), filters category/event_name/agent_id/trace_id/machine/level + time window (`from`/`to` or `hours`) + offset paging, `meta` (total/window/has_more) envelope
-- **run_timeline** (`/api/agents/{id}/run-timeline`) — see [[gateway/routers/run-timeline.ava.okf.md|event aggregation and read ownership]].
-- **run_timeline_strip** (`/api/agents/{id}/run-timeline/message` + run-timeline's `messages` field) — see [[gateway/routers/run-timeline-strip.ava.okf.md]].
-- **inspect** (`/api/agents/{id}/inspect/statistics` + `/inspect/live` + `/neighbors` + `/inspect/metrics` + `/inspect/widgets`) — per-agent LLM cost/token/TPS + neighbor graph; plugin metric and inspector-widget surfaces. Its own functional package `gateway/inspect/` (not `gateway/routers/`), mounted the same way — see [[gateway/inspect/inspect.ava.okf.md]]
-- **system** (`/api/system`, `/api/agents/{id}/system`, `/api/system/all`) — SSE broadcasting (see [[sse.ava.okf.md]])
-- **delivery** — chat inbound delivery internal helper (not a router); gateway callers attach server-owned credential, transport, content-hash, and source-assertion facts at the durable insert
-- **ops_monitor** (`/api/ops/monitor`) — time-bucketed ops panel series (SSE backlog / LLM latency+TPS / restart counts), see [[gateway/routers/ops-monitor.ava.okf.md]]
-- **alerts** (`/api/alerts` + `/stream` + `/read`) — the system→human alert store (Alertmanager shape, `alerts` table), unresolved-first list + counts, SSE tail, mark-as-read, IM fan-out via im_bridge [[gateway/routers/alerts.ava.okf.md]]
+- **run_timeline** (`/api/agents/{id}/run-timeline`) — see [[gateway/run_timeline/run_timeline.ava.okf.md|event aggregation and read ownership]].
+- **run_timeline_strip** (`/api/agents/{id}/run-timeline/message` + run-timeline's `messages` field) — see [[gateway/run_timeline/run-timeline-strip.ava.okf.md]].
+- **inspect** (`/api/agents/{id}/inspect/*` + `/neighbors`) — per-agent LLM cost/token/TPS + neighbor graph; plugin metric and inspector-widget surfaces — [[gateway/inspect/inspect.ava.okf.md]]
+- **system** (`/api/system`, `/api/agents/{id}/system`, `/api/system/all`) — SSE broadcasting (see [[gateway/events/sse.ava.okf.md]])
+- **delivery** — chat inbound delivery helper (not a router); gateway callers attach server-owned credential, transport, content-hash, and source-assertion facts at the durable insert
+- **ops_monitor** (`/api/ops/monitor`) — time-bucketed ops panel series (SSE backlog / LLM latency+TPS / restart counts), see [[gateway/cluster/ops-monitor.ava.okf.md]]
+- **alerts** (`/api/alerts` + `/stream` + `/read`) — the system→human alert store (Alertmanager shape, `alerts` table), unresolved-first list + counts, SSE tail, mark-as-read, IM fan-out via im_bridge [[gateway/alerts/alerts.ava.okf.md]]
 - **work_failed** (`POST /api/work-failed`) — durable, deduplicated CI/QA/merge failure feedback routed to the author, nearest live birth-lineage delegator, or a P1 task alert [[gateway/routers/work-failed.ava.okf.md]]
 - **event_resolutions** (`/api/event-resolutions`) — authenticated immutable-Loki warning/error class dismissal history: create, status-filtered review list, and manual reopen; writes `event_dismissals` and emits transition markers, while the events-maintenance daemon publishes the resulting gauges
 
 ### Cluster & configuration
-- **cluster** (`/api/cluster/*`) — cluster status, multi-machine roster, admin events, and maintenance control; release submission belongs to [[cli/release_transition/release_transition.ava.okf.md]] (admin contracts: [[gateway/routers/ops-surfaces.ava.okf.md]])
+- **cluster** (`/api/cluster/*`) — cluster status, multi-machine roster, admin events, and maintenance control; release submission belongs to [[cli/release_transition/release_transition.ava.okf.md]] (admin contracts: [[gateway/cluster/ops-surfaces.ava.okf.md]])
 - **bootstrap** (`/api/bootstrap`) — agent-runner registration handshake (returns cluster config; `AVA_DB_URL` is the credential-free endpoint, never a login, and the human secret is never served; admits a unit's machine API token)
 - **config** (`/api/config`) — runtime configuration read/write (PUT is merge-patch reducer, not full-replace); validates the full affected Settings candidate before persisting (400 invalid / 409 concurrent-write retry)
 - **settings** (`/api/settings`) — frontend user preference KV store (`user_settings` table)
@@ -42,7 +50,7 @@ Gateway's 43 route modules, split by business domain under `gateway/routers/<dom
 [[gateway/routers/frontend-ui-data.ava.okf.md]]
 
 ### Ops & system
-- **status** (`/api/health`, `/api/status`, `/api/stats/dashboard`) — liveness + status panel + dashboard; public health exposes process `started_at` and boot-frozen `sha` for rollout observers ([[gateway/routers/ops-surfaces.ava.okf.md|dashboard contract]])
+- **status** (`/api/health`, `/api/status`, `/api/stats/dashboard`) — liveness + status panel + dashboard; public health exposes process `started_at` and boot-frozen `sha` for rollout observers ([[gateway/cluster/ops-surfaces.ava.okf.md|dashboard contract]])
 - **metrics** (`/api/metrics`, `/api/metrics/agents`) — aggregated metrics over the unified `events` stream
 - **schedules** (`/api/schedules/*`) — scheduled task CRUD + start/stop/restart
 - **shell** (`/api/agents/{id}/shell/{sid}`) — terminal session monitor (session backend proxy)
@@ -61,8 +69,8 @@ handler/mounting split, and boundary typing:
 ## Entry points
 
 - `gateway/routers/__init__.py` — empty file, router modules are independent
-- `gateway/app.py` — mounting point for all routers (`app.include_router(x.router)`)
+- `gateway/app.py` — mounting point for all routers (`app.include_router(x.router)`), in a fixed order
 
 ## Notes
 
-New endpoint → create `gateway/routers/<domain>.py`, then `include_router` in `app.py`. Frontend/CLI/SDK share the same endpoints.
+New endpoint → add it to its feature package, or create `gateway/routers/<domain>.py` for a new single-module surface; then `include_router` in `app.py`. Frontend/CLI/SDK share the same endpoints.

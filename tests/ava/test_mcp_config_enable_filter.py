@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 
 import ava.mcp_config as cfg_mod
-from shared.mcp_enabled import McpEnabledConfig, McpServerEntry, write_local
+from base.packages.plugins.mcp_enabled import McpEnabledConfig, McpServerEntry, write_local
 
 
 def _write_machine(unit_home: Path, servers: dict[str, dict[str, str]]) -> None:

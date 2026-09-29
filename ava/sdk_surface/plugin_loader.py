@@ -2,7 +2,7 @@
 `plugins/` directory scan.
 
 This is framework API for the agent kernel, not the agent SDK: it carries a
-public name — reached across the `ava` package boundary by `agent/extensions.py`
+public name — reached across the `ava` package boundary by `agent/extensions/__init__.py`
 and `agent/process_boot.py` — but stays out of the agent's `ava.help()` view
 because it is absent from `ava.__all_for_ava__`.
 
@@ -136,7 +136,7 @@ def safe_load_plugin_module(
 
     On a load failure the half-executed module is dropped from ``sys.modules``
     (a later load retries from a clean slate), the failure is reported loudly
-    (`shared.plugin_load_report` — a loguru ERROR plus one
+    (`base.packages.plugins.load_report` — a loguru ERROR plus one
     ``plugin_load_failed`` telemetry event), and ``None`` is returned so the
     caller skips this plugin and keeps going. ``KeyboardInterrupt`` /
     ``SystemExit`` still propagate: cancellation is not a plugin failure
@@ -156,9 +156,9 @@ def safe_load_plugin_module(
         raise
     except BaseException as exc:
         sys.modules.pop(_plugin_module_dotted(pkg, name, module), None)
-        from shared import plugin_load_report
+        from base.packages.plugins import load_report
 
-        plugin_load_report.report_plugin_load_failure(name, exc)
+        load_report.report_plugin_load_failure(name, exc)
         return None
 
 
@@ -204,7 +204,7 @@ def scan_and_load(
     imported.
     """
     if plugin_dir is None:
-        from shared.runtime_interpreter import external_plugin_read_root
+        from base.deploy.release.runtime_interpreter import external_plugin_read_root
 
         root = external_plugin_read_root()
     else:
@@ -212,7 +212,7 @@ def scan_and_load(
     if not root.exists():
         return []
 
-    from shared.plugin_context import PluginContext
+    from base.packages.plugins.context import PluginContext
 
     loaded: list[str] = []
     for plugin_subdir in sorted(root.iterdir()):

@@ -51,8 +51,8 @@ from audit import LeakPaths
 from collect import collect_one
 from rubric import scores
 
-from shared.db import connect
-from shared.paths import ava_home, workspace_dir
+from base.db import connect
+from base.paths import ava_home, workspace_dir
 
 # Tool-call prefixes that make a run unsafe to re-run: fleet/user-facing side
 # effects, process lifecycle, arbitrary OS (shell can rm / curl / git push),

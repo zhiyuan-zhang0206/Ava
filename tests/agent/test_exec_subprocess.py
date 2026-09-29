@@ -1,5 +1,5 @@
 """Parent-side machinery tests for the exec subprocess
-(`agent/graph/_exec_subprocess.py`) — real children, driven directly through
+(`agent/graph/exec/_subprocess.py`) — real children, driven directly through
 `_run_in_subprocess` (the exec node is not wired to it until PR2).
 
 Each case spawns one real child (~1s for `import ava`); keep the count low.
@@ -23,8 +23,8 @@ import psycopg
 import pytest
 from langchain_core.messages import HumanMessage
 
-from agent.graph import _exec_process
-from agent.graph._exec_result import (
+from agent.graph.exec import _process
+from agent.graph.exec._result import (
     ExecChildError,
     _ExecCancelled,
     _ExecCrashed,
@@ -32,12 +32,12 @@ from agent.graph._exec_result import (
     _ExecLifecycle,
     _ExecTimedOut,
 )
-from agent.graph._exec_stream import ExecOutputChunkPublisher
-from agent.graph._exec_subprocess import _run_in_subprocess
-from shared.config import settings
-from shared.lifecycle import AgentRestart, AgentTermination, SystemHalt
-from shared.paths import logs_dir
-from shared.proc import kill_process_tree
+from agent.graph.exec._stream import ExecOutputChunkPublisher
+from agent.graph.exec._subprocess import _run_in_subprocess
+from base.agents.lifecycle import AgentRestart, AgentTermination, SystemHalt
+from base.config import settings
+from base.host.proc import kill_process_tree
+from base.paths import logs_dir
 from tests._test_env_file import rewrite_line
 
 _AGENT_ID = 424242
@@ -159,7 +159,7 @@ async def test_exec_child_disables_otlp_after_cluster_env_authority(tmp_path: Pa
         result = await _run(
             tmp_path,
             (
-                "from shared.telemetry.otlp.telemetry_otlp import backend\n"
+                "from base.telemetry.otlp.telemetry_otlp import backend\n"
                 'print("OTLP_ENABLED_IN_CHILD:", backend._enabled())\n'
             ),
         )
@@ -261,21 +261,21 @@ async def test_subprocess_os_exit_without_envelope_is_crash(tmp_path: Path) -> N
 async def test_teardown_failure_is_returned_as_crash_with_partial_output(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    real_settle_resources = _exec_process.settle_resources
+    real_settle_resources = _process.settle_resources
     teardown_failure = RuntimeError("synthetic reader teardown failure")
 
     async def _fail_after_settling(
         *args: Any, **kwargs: Any
-    ) -> tuple[_exec_process.TeardownFailure, ...]:
+    ) -> tuple[_process.TeardownFailure, ...]:
         assert not await real_settle_resources(*args, **kwargs)
-        return (_exec_process.TeardownFailure("reader_join", teardown_failure),)
+        return (_process.TeardownFailure("reader_join", teardown_failure),)
 
-    monkeypatch.setattr(_exec_process, "settle_resources", _fail_after_settling)
+    monkeypatch.setattr(_process, "settle_resources", _fail_after_settling)
 
     result = await _run(tmp_path, "print('partial before teardown')")
 
     assert isinstance(result, _ExecCrashed)
-    assert isinstance(result.exc, _exec_process.ExecTeardownError)
+    assert isinstance(result.exc, _process.ExecTeardownError)
     assert "partial before teardown" in result.output
     assert "reader_join: RuntimeError: synthetic reader teardown failure" in result.output
 
@@ -487,7 +487,7 @@ async def test_subprocess_state_snapshot_reaches_child(tmp_path: Path) -> None:
 def _self_lifecycle_code(action: str) -> str:
     return (
         "import ava, os, psycopg\n"
-        "from shared.env_registry import ADMIN_DATA_PLANE_ALIASES\n"
+        "from base.host.env.registry import ADMIN_DATA_PLANE_ALIASES\n"
         "assert not ADMIN_DATA_PLANE_ALIASES.intersection(os.environ)\n"
         "with psycopg.connect(ava.DB_URL) as conn:\n"
         "    assert conn.execute('SELECT current_user').fetchone() == ('ava_g0_runner',)\n"
@@ -538,7 +538,7 @@ async def test_subprocess_unknown_lifecycle_class_crashes(tmp_path: Path) -> Non
     result = await _run(
         tmp_path,
         (
-            "from shared.lifecycle import LifecycleExit\n"
+            "from base.agents.lifecycle import LifecycleExit\n"
             "class _MysteryLifecycle(LifecycleExit):\n"
             "    def __init__(self):\n"
             "        super().__init__(0)\n"

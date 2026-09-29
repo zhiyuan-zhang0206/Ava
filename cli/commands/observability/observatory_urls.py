@@ -15,8 +15,8 @@ import sys
 from pathlib import Path
 from urllib.parse import urlparse
 
-from shared.atomic_io import write_text_atomic
-from shared.config import settings
+from base.config import settings
+from base.host.atomic_io import write_text_atomic
 
 
 def _observability_datasource_urls() -> tuple[str, str, str]:
@@ -65,7 +65,7 @@ def _pg_datasource_host_port(*, remote_observatory: bool) -> str:
     """
     from psycopg.conninfo import conninfo_to_dict
 
-    from shared.db import direct_db_url
+    from base.db import direct_db_url
 
     connection = conninfo_to_dict(direct_db_url())
     host = str(connection.get("host") or "127.0.0.1")
@@ -129,7 +129,7 @@ def _alerts_webhook_url() -> str:
     from the gateway host can hit VPN hairpin filtering (pgbouncer probe incident), which is
     exactly why the loopback form is kept when no remote observatory is set.
     """
-    from shared.machine import reachable_host
+    from base.cluster.machine import reachable_host
 
     port = settings.gateway.gateway_port
     if settings.observability.observability_url:

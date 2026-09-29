@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Tool Calls & Code Execution
-description: Ava agent's tool invocation and fault-isolated code execution layer—including normalization of LLM-output tool calls (`tool_calls.py`) and disposable child execution (`_exec.py`).
+description: Ava agent's tool invocation and fault-isolated code execution layer—including normalization of LLM-output tool calls (`tool_calls.py`) and disposable child execution (`exec/node.py`).
 tags: []
 ---
 
@@ -9,7 +9,7 @@ tags: []
 
 ## What it is
 
-Ava agent's tool invocation and code execution layer—including normalization of LLM-output tool calls (`tool_calls.py`) and disposable child execution (`_exec.py`). The child is a fault-isolation boundary, not a security sandbox. The layer follows the single-tool architecture: only `execute_code` is registered; unknown tools receive their own error result.
+Ava agent's tool invocation and code execution layer—including normalization of LLM-output tool calls (`tool_calls.py`) and disposable child execution (`exec/node.py`). The child is a fault-isolation boundary, not a security sandbox. The layer follows the single-tool architecture: only `execute_code` is registered; unknown tools receive their own error result.
 
 ## Core Responsibilities
 
@@ -20,7 +20,7 @@ Ava agent's tool invocation and code execution layer—including normalization o
 - **State and message order**: each invocation returns its own plugin delta directly to LangGraph; the existing channel reducers and checkpoint path commit it before the next child. There is no exec-local state copy, reducer replay or batch accumulator. All ToolMessages precede security notes, plugin context notes and attachments. The presentation-only `pending_exec_notes` channel holds these until the last result; normal completion drains it, compaction clears it, and crash repair drains it after pairing interrupted calls.
 - **Code extraction and repair**: `code_from_args()` strictly reads code for execution/logging; `first_tool_call_code()` is the optional hook read. `replace_execute_code()` updates only the named call and its matching content block.
 
-### Code Execution (`_exec.py`)
+### Code Execution (`exec/node.py`)
 - **Disposable subprocess**: `_run_in_subprocess` spawns one child (`python -I -X utf8 -m agent.exec_child`) per exec; isolated mode prevents the inherited process cwd or `PYTHON*` environment from shadowing the trusted `agent.exec_child` entry, while explicit UTF-8 mode keeps text portable after `-I` ignores `PYTHONUTF8` / `PYTHONIOENCODING`. The child OS cwd is not changed by `ava.cwd`. The parent polls liveness/cancel/deadline every 50ms. POSIX sends a signal then closes the process group after a grace period; Windows immediately closes a `KILL_ON_JOB_CLOSE` Job Object. Windows gates child entry until Job attach completes. A non-reaping root-exit observer, one domain-close owner, one direct-child reap, and a bounded pipe-reader join form the teardown barrier
 - **Lifecycle exits**: Agent code raises `AgentTermination` / `AgentRestart` / `SystemHalt` → the child reports the exception name in the result envelope → exec_node recognizes and writes halted + marker
 - **Streaming output**: the child writes stdout/stderr line-buffered onto the pipe; the parent drains into `StreamingTextIO` and pushes to Redis every 50ms (frontend streaming display), preserving timing order
@@ -29,14 +29,14 @@ Ava agent's tool invocation and code execution layer—including normalization o
 ## Key Dependencies
 
 - [[llm.ava.okf.md]] — LLM-generated tool_calls as input
-- [[state.ava.okf.md]] — Execution results written as ToolMessage into state
+- [[agent/state.ava.okf.md]] — Execution results written as ToolMessage into state
 - [[sse.ava.okf.md]] — Redis streaming output push
 
 ## Entry Points
 
 - `agent/graph/tool_calls.py:normalize_tool_calls()` — Multiple tool_call normalization
-- `agent/graph/_exec.py:exec_node()` — Execution node
-- `agent/graph/_exec.py:_run_agent_code()` — Exec run (one disposable child)
+- `agent/graph/exec/node.py:exec_node()` — Execution node
+- `agent/graph/exec/node.py:_run_agent_code()` — Exec run (one disposable child)
 
 ## Notes
 

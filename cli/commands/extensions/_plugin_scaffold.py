@@ -7,7 +7,7 @@ plugin, so runtime memory state is never touched by converge or startup.
 `setup.py` is loaded on its own, NOT through `plugin.py`: plugin modules import
 the agent runtime (hooks, graph, the SDK namespace), none of which exists in a
 CLI process. Keeping the scaffold in a separate module is what lets the explicit
-CLI command call it at all — and it means a scaffold may depend on `shared` only.
+CLI command call it at all — and it means a scaffold may depend on `base` only.
 
 It lives beside `skills_sync.py` because both load plugin-owned host setup
 without importing the agent runtime.
@@ -34,14 +34,14 @@ def run_plugin_scaffolds() -> ScaffoldResult:
 
     Loading a plugin's `setup.py` is fail-soft (user ruling 2026-09-11): a file
     that fails to import is skipped with a loud report
-    (``shared.plugin_load_report``) and the remaining plugins still run — one
+    (``base.packages.plugins.load_report``) and the remaining plugins still run — one
     broken plugin must not block the provisioning command for every other
     plugin. Running a plugin's `scaffold()` stays fail-fast: this is explicit
     provisioning, and a scaffold that raises must stop the command rather than
     let half-provisioned state pass as success.
     """
-    from shared import plugin_load_report
-    from shared import plugins_config as plugins_cfg
+    from base.packages.plugins import enable_config as plugins_cfg
+    from base.packages.plugins import load_report
 
     discovered = plugins_cfg.discover_plugins()
     config = plugins_cfg.load_for_runtime(set(discovered))
@@ -58,7 +58,7 @@ def run_plugin_scaffolds() -> ScaffoldResult:
         except (KeyboardInterrupt, SystemExit):
             raise
         except BaseException as exc:
-            plugin_load_report.report_plugin_load_failure(name, exc)
+            load_report.report_plugin_load_failure(name, exc)
             continue
         scaffold = getattr(module, "scaffold", None)
         if scaffold is None:

@@ -2,11 +2,11 @@ name: Release store contract
 on:
   pull_request:
     paths:
-      - 'shared/runtime_abi.py'
-      - 'shared/runtime_release.py'
-      - 'shared/runtime_prepare.py'
-      - 'shared/process_group_closure.py'
-      - 'shared/platform.py'
+      - 'base/runtime_abi.py'
+      - 'base/deploy/release/runtime_release.py'
+      - 'base/deploy/release/runtime_prepare.py'
+      - 'base/native_process/group_closure.py'
+      - 'base/native_process/os_platform.py'
       - 'tests/lifecycle/images/**'
       - '.github/workflows/release-store.yml'
   workflow_dispatch:

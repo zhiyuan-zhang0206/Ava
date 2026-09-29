@@ -8,10 +8,10 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+from base.config.candidate import EnvPatchValidation
+from base.host.env import runtime_config
 from gateway.app import app
 from gateway.routers import config as config_router
-from shared import runtime_config
-from shared.config.candidate import EnvPatchValidation
 
 
 def _write_private_file(path: Path, content: str | bytes) -> Path:

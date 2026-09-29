@@ -17,17 +17,17 @@ from typing import Any, cast
 
 import pytest
 
+from base.daemon.health import DaemonProbe
+from base.native_process.ownership import OwnedProcess
 from services.ava_root import health as health_mod
 from services.ava_root.health import HealthConfig, HealthMonitor
 from services.ava_root.manifest import RestartPolicy, UnitManifest, UnitRegistry, UnknownUnitError
 from services.ava_root.probes import ProbeRegistry
 from services.ava_root.supervisor import Supervisor
-from shared.daemon_health import DaemonProbe
-from shared.native_process.ownership import OwnedProcess
 
 
 class _Recorder:
-    """Stands in for shared.log.logger; records every structured call."""
+    """Stands in for base.log.logger; records every structured call."""
 
     def __init__(self) -> None:
         self.calls: list[dict[str, object]] = []
@@ -41,10 +41,10 @@ class _Recorder:
 
 @pytest.fixture
 def recorder(monkeypatch: pytest.MonkeyPatch) -> _Recorder:
-    import shared.log as shared_log
+    import base.log as base_log
 
     rec = _Recorder()
-    monkeypatch.setattr(shared_log, "logger", rec)
+    monkeypatch.setattr(base_log, "logger", rec)
     return rec
 
 

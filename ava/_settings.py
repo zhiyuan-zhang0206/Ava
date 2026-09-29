@@ -8,7 +8,7 @@ call triggers connection. In container mode (no Postgres / Redis),
 import ava doesn't blow up; only when ava DB ops are actually used does
 it raise.
 
-URL source: `shared.config.settings` single source of truth. Settings'
+URL source: `base.config.settings` single source of truth. Settings'
 infra-pointing fields (db_url / redis_url) have no default; when env is
 missing, Settings() instantiation throws ValidationError immediately,
 not reaching here.
@@ -19,7 +19,7 @@ from collections.abc import Callable
 from contextlib import suppress
 from typing import Any
 
-from shared.config import settings
+from base.config import settings
 
 # DB_URL / REDIS_URL / GATEWAY_URL are exposed via module __getattr__ (PEP
 # 562) so each access reads the current `settings.X` value rather than a
@@ -34,7 +34,7 @@ def __getattr__(name: str) -> Any:
     if name == "REDIS_URL":
         return settings.data_plane.redis_url
     if name == "GATEWAY_URL":
-        from shared.machine import gateway_api_base
+        from base.cluster.machine import gateway_api_base
 
         return gateway_api_base()
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
@@ -101,7 +101,7 @@ class _LazyConnection:
 
 
 def _connect_db() -> "psycopg.Connection":  # noqa: F821  # pyright: ignore[reportUndefinedVariable]
-    from shared.db import connect
+    from base.db import connect
 
     if not settings.data_plane.db_url:
         raise RuntimeError("AVA_DB_URL not set — ava DB ops should not be called in container mode")
@@ -116,7 +116,7 @@ def _connect_db() -> "psycopg.Connection":  # noqa: F821  # pyright: ignore[repo
     # Multi-statement transactions don't go through this conn — the caller
     # opens its own connection.
     #
-    # shared.db.connect() owns the rest of the posture, each part load-bearing
+    # base.db.connect() owns the rest of the posture, each part load-bearing
     # here: `ava.DB` is dialled from inside the agent's exec sandbox, so the 5s
     # connect cap keeps a database that black-holes packets from freezing the
     # agent's tool call; this connection lives for the whole process while
@@ -131,7 +131,7 @@ def _connect_db() -> "psycopg.Connection":  # noqa: F821  # pyright: ignore[repo
 def _connect_redis() -> "redis.Redis":  # noqa: F821  # pyright: ignore[reportUndefinedVariable]
     import redis as _redis_lib
 
-    from shared.redis_client import RESILIENCE_KWARGS
+    from base.events.live.redis_client import RESILIENCE_KWARGS
 
     if not settings.data_plane.redis_url:
         raise RuntimeError(
@@ -163,20 +163,20 @@ REDIS = _LazyConnection(_connect_redis, "REDIS")
 # `ava._settings.plugins.<plugin_name>` dynamically resolves the frozen Pydantic
 # BaseModel instance for the current turn's agent (bound in by
 # `register_plugin_config` + `bind_from_disk`, agent-scoped by
-# `shared/plugin_config_view.py`).
+# `base/packages/plugins/config_view.py`).
 #
 # Design:
 # - Private module (underscore prefix) → not in `ava.help()`, for plugin authors not the agent
 # - lazy attribute access → no cache here, so restart / test monkeypatch changes
 #   to the registry are immediately visible
-# - lazy import shared.plugin_config_registry → avoids ava module load triggering agent
+# - lazy import base.packages.plugins.config_registration → avoids ava module load triggering agent
 #   module import (test fixture / container mode can still import ava
 #   without connecting agent)
 
 
 class _PluginsView:
     """`ava._settings.plugins` — attribute access routes to the turn's config
-    for that plugin (`shared/plugin_config_view.py`).
+    for that plugin (`base/packages/plugins/config_view.py`).
 
     Plugins not registered raise AttributeError listing known plugin names,
     so typos / "bind hasn't run yet" are immediately visible.
@@ -185,8 +185,8 @@ class _PluginsView:
     def __getattr__(self, name: str) -> Any:
         if name.startswith("_"):
             raise AttributeError(name)
-        from shared.plugin_config_registry import registered_plugin_config_names
-        from shared.plugin_config_view import turn_plugin_config
+        from base.packages.plugins.config_registration import registered_plugin_config_names
+        from base.packages.plugins.config_view import turn_plugin_config
 
         known = registered_plugin_config_names()
         if name not in known:

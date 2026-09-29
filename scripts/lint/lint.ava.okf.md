@@ -1,21 +1,37 @@
 ---
 type: doc
-title: scripts/lint/ — AST Safety Lints
-description: Overview of scripts/lint/, the subdirectory holding lint_async_no_sync_blocking.py (no sync-blocking calls in an async gateway/ops handler), lint_logger_add_diagnose.py (every logger.add(...) sink must pass a literal diagnose=False) and loguru_format.py (no printf placeholders in loguru calls). All are AST-based, pre-commit-wired call-site checks.
+title: scripts/lint/ — Code and AST Safety Lints
+description: The lint_*.py code/AST/Python-convention guards in scripts/lint/ — what each enforces, where it runs (pre-commit / CI), and the shared CLI contract for explicit-target lints. Doc/content guards split out to scripts/content_lint/.
 tags:
 - scripts
 - lint
 ---
 
-# scripts/lint/ — AST Safety Lints
+# scripts/lint/ — Code and AST Safety Lints
 
-Referenced from [[scripts/lint-scripts.ava.okf.md|lint-scripts]] (that node's
-own roster; this directory got a same-PR relocation so a new entry there did
-not grow `scripts/`'s frozen direct-entry budget — see
-`scripts/structure/baseline.json`). The scripts here are AST walks over one
-call shape whose omission is invisible until a specific incident reproduces it.
+Code-quality and Python-convention guards, mostly invoked by
+`.pre-commit-config.yaml` and CI. Document / OKF / skill / migration-format
+guards are a separate group: [[scripts/content_lint/content_lint.ava.okf.md]].
 
-## `lint_async_no_sync_blocking.py`
+## The linters
+
+- `code_structure.py` + `../structure/{quality_budget,locality,path_imports,baseline_shards}.py` — 800-line/20-entry/CC/nesting budgets plus locality (package doors, single owners, no `ava_builtins/` path imports; see `python-conventions.md`). The `../structure/baseline/*.json` shards also freeze the three locality sections as exact `path::target -> site count` maps — growth or shrinkage both fail until edited. CC 10-14 warns; `--complexity-warnings-full` unfolds counts.
+- `../structure/contracts.py` — renders a door's public surface (pure AST) into `base/*.api.txt`; `--write`/`--check` (`lint-contract-snapshots`).
+- `../lint_pool_keepalives.py` — a psycopg pool in `scripts/` or in a module the `postgres-dial` decision allows must carry `PG_KEEPALIVE_KWARGS` (AST-based, sees through `AsyncConnectionPool[T](...)` subscripts and `LoggingConnectionPool` subclasses); elsewhere Rule 5 already routes every pool through `base.db.pool()` / `async_pool()`. Stays at `scripts/` root, not this directory, pending the Postgres-dial locality work.
+- `fail_fast.py`, `no_emoji.py`, `no_os_environ.py`, `no_script_sibling_imports.py` — Python conventions; the last requires script-mode sibling imports to restore their directory to sys.path under PYTHONSAFEPATH=1 (2026-08-23 `daily_scan.py` crash).
+- `ava_root_scope.py` — the `services/ava_root` boot program stays a separate codebase (ruling 2026-09-12): no permission-domain symbol may leak into its scope; `# ava-root-scope-ok: <reason>` opts a line out.
+- `termination_source.py` — every `UPDATE agents_meta SET status='terminated'` must stamp `termination_source` in the same statement (AST catches bind parameters too). A NULL source is permanently unresurrectable and strands queued work.
+- `clock_lattice.py` — lattice-vocabulary timing constants (STALL / GRACE / REAP / BUDGET / WEDGED / NO_PROGRESS / LOCK_TTL / UPDATER_LEASE / SETTLE_TTL / LAUNCH_CONFIRM / LEASE_TTL / LEASE_RENEW / SCAN_INTERVAL) may only be defined in the clock-lattice family modules, as aliases of a registered clock, or with an explicit exemption; the lattice topology itself lives in `base/deploy/timing.py`.
+- `time_bomb.py` — tests may not exactly assert a value derived from a repo fixed-instant constant when the derivation can reach the real clock; pin the clock, use a tolerance, or opt out with `# time-bomb-ok:`. Source half threads a clock parameter into fixed-instant window boundaries; fixture half catches a fixed calendar literal bound to a window-shaped name.
+- `agent_docstrings.py`, `agents_md_size.py` — agent-visible docstring / `AGENTS.md` size guards (the `_KNOWN_DIRTY_FILES` allowlist lives in the first script's header and the "SDK docstring discipline" section of `AGENTS.md`).
+- `note_tags.py` — bidirectional NoteTag / timeline-marker contract: every backend tag has a frontend dispatch branch and every lifecycle, memory, or note dispatch member is a live backend tag.
+- `no_plugin_wrap.py` — plugins may not bare monkey-patch `ava.*` (must go through `ava.extend.wrap`); wired into pre-commit.
+- `turn_scoped_config.py` — forbids reading `base.config.settings` inside a per-agent execution path; force the per-turn view (`base/config/turn_view.py`).
+- `fixture_scope.py` — a pytest fixture may not mutate a process global at a scope that outlives its blast radius: (1) `scope="session"` outside the root `tests/conftest.py` plus any write to `os.environ` / a `settings` field / a module global; (2) `scope="package"` in a directory with no `__init__.py`, where pytest silently falls back to session scope. `tests/conftest.py` is the only exemption.
+- `python_lock.py` — wraps `base/deploy/release/python_lock.py`: `uv.lock` needs PyPI registry and `files.pythonhosted.org` URLs; mirrors stay local. Pre-commit + `repo-language` CI; no project deps.
+- `zombie_pyright_ignores.py` — a `# pyright: ignore[...]` whose named rule pyright no longer reports at that line is dead weight; `--check`/fix modes.
+
+## `async_no_sync_blocking.py`
 
 The gateway is a single event loop; one sync psycopg / subprocess / psutil
 call inside an `async def` handler freezes every other request — the
@@ -32,34 +48,46 @@ and any bare `*_blocking`-suffixed helper (those exist to be wrapped in
 Scope: `gateway/` and `ops/` only — the event-loop surfaces. Wired into
 pre-commit (`lint-async-no-sync-blocking`).
 
-## `lint_logger_add_diagnose.py`
+## `logger_add_diagnose.py`
 
 Every `logger.add(...)` sink outside test code must pass a literal
 `diagnose=False`. loguru's `diagnose` defaults to True, so an unmarked sink
 renders every local variable of a `logger.exception(...)` failure's frames —
-DSNs, tokens, passwords — into that sink's output (an independent review
-reproduced this concretely with a `psycopg.connect(...)` failure leaking its
-password). Missing the kwarg, a non-`False` literal, or a value this script
-cannot verify statically (a name, a `**kwargs` unpack) are all flagged,
-fail-closed; no inline exemption exists. Exempt: test code (`tests/`,
-`test_*.py`, `*_test.py`).
+DSNs, tokens, passwords — into that sink's output. Missing the kwarg, a
+non-`False` literal, or a value this script cannot verify statically (a
+name, a `**kwargs` unpack) are all flagged, fail-closed; no inline exemption
+exists. Exempt: test code (`tests/`, `test_*.py`, `*_test.py`).
 
 Wired into pre-commit (`lint-logger-add-diagnose`). Full rule + rationale:
 the script's own module docstring.
 
+## CLI contract (explicit targets)
+
+The `lint_*.py` gates that take explicit path arguments share one contract — a
+typo'd target must never scan silently, and an out-of-repo target scans rather
+than crashes:
+
+- **No arguments** — scan the default scope (`_SCAN_DIRS`, the git-tracked
+  file list, ...).
+- **Explicit arguments must resolve.** A missing one is a hard error:
+  `error: target path(s) not found: <argument(s)>` on stderr, exit 1.
+  Resolution is per-script: absolute paths are used as-is; a relative path
+  resolves against the repo root with a caller-cwd fallback (content lints
+  `lint_no_cjk` / `lint_no_tailnet`), against the repo root only
+  (`time_bomb`), or against the caller's cwd (the rest; pre-commit
+  passes absolute paths).
+- **Out-of-repo targets scan under their absolute path.** Scope-anchored
+  scripts (`code_structure` / `fixture_scope` / `no_plugin_wrap`)
+  keep their own filter: a target outside it is skipped silently (rc 0).
+  Directory targets enumerate members (`turn_scoped_config` takes `.py`
+  files only — a directory argument scans nothing); an unreadable member (a
+  dangling `*.py` symlink, non-UTF-8 content) is skipped like any unreadable
+  file. `time_bomb` resolves callees through its repo-scoped index, so an
+  out-of-repo source file's source half silently passes (rc 0) — only its
+  test half, which reads the target directly, applies.
+
 ## `loguru_format.py`
 
-`shared.log.logger` is loguru, which formats a message with `str.format`, so a
-stdlib-style `logger.warning("gate for %s raised: %s", name, exc)` logs the
-literal `%s` and silently drops every argument. Flags a loguru level call
-(`trace` ... `exception`, or `log(level, msg, ...)`) whose literal message holds
-a printf conversion while the call passes arguments, or passes positional
-arguments with no `{}` field at all. A loguru logger is a name imported as
-`logger` from `shared.log` / `loguru`, `loguru.logger`, or a name assigned from
-one through `.bind` / `.opt` / `.patch`; a name the module also binds any other
-way (a stdlib `logging.getLogger(...)`, a parameter) is not checked, so stdlib
-loggers, where `%s` is correct, are never flagged. Inline opt-out:
-`# log-format-ok: <reason>`.
+loguru formats with `str.format`: a printf-style `logger.warning("x %s", x)` logs a literal `%s`, dropping its arguments. Flags a loguru level call whose literal message has a printf conversion while passing arguments, or passes arguments with no `{}` field. Only loguru loggers (`base.log` / `loguru`, and their `.bind` / `.opt` / `.patch`) are checked. Opt-out `# log-format-ok: <reason>`; scope `lint_common.FRAMEWORK_DIRS` + `scripts/`.
 
-Scope: the framework dirs (`scripts/structure/lint_common.py`
-`FRAMEWORK_DIRS`) plus `scripts/`. Wired into pre-commit (`lint-loguru-format`).
+Parent: [[scripts/scripts.ava.okf.md|scripts]].

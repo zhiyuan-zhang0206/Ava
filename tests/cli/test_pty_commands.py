@@ -10,10 +10,10 @@ import psycopg
 import pytest
 import redis
 
+from base.config import settings
+from base.native_process.os_platform import LockTimeoutError
+from base.sessions.pty import allocation_freeze
 from cli import main as cli_main
-from shared.config import settings
-from shared.platform import LockTimeoutError
-from shared.sessions.pty import allocation_freeze
 
 
 @pytest.fixture(autouse=True)

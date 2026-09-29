@@ -33,7 +33,7 @@ Deps injected via `runtime.context: AvaContext` (see agent/graph/_context.py).
 agent_id read from RunnableConfig (LangGraph checkpointer standard).
 
 State type hint key design (`state: _state.AgentState` + `from __future__ import
-annotations`): see `agent/graph/_exec.py` module docstring last paragraph —
+annotations`): see `agent/graph/exec/node.py` module docstring last paragraph —
 LangGraph narrows channels by the node's first param type hint; directly
 importing `AgentState` captures the BaseAgentState alias and loses all plugin
 fields; using the module attribute + deferred annotation evaluation picks up
@@ -60,7 +60,7 @@ from agent.messages import has_conversation
 from agent.nodes import BEFORE_LLM, CLAIM, END
 from agent.ownership.inbound import RuntimeOwnershipLostError
 from ava.security import discard_inbound_findings
-from shared.context import AvaContext, agent_id_from_config
+from base.agents.context import AvaContext, agent_id_from_config
 
 from ._decide import decide
 from ._dispatch import _BatchState, dispatch_batch

@@ -34,12 +34,12 @@ from langchain_core.messages import AIMessage, AnyMessage, HumanMessage
 from agent.graph._memory_filter import Candidate, filter_candidates
 from agent.messages import NoteTag, system_note_message
 from ava import gateway_client
-from shared.agents import GatewayUnavailable, IndexerUnavailable
-from shared.config.turn_view import turn_settings
-from shared.lm.content import content_blocks
-from shared.log import logger
-from shared.message_kwargs import AvaMsgType, read_ava_kwargs
-from shared.paths import memory_dir
+from base.agents import GatewayUnavailable, IndexerUnavailable
+from base.agents.messages.kwargs import AvaMsgType, read_ava_kwargs
+from base.config.turn_view import turn_settings
+from base.lm.content import content_blocks
+from base.log import logger
+from base.paths import memory_dir
 
 # How many recent conversation messages form the search query. How many notes are
 # retrieved and how many are injected are two different numbers now

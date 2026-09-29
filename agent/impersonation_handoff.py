@@ -7,11 +7,11 @@ from typing import Any
 from langchain_core.messages import HumanMessage
 
 from agent.messages import system_note_message
-from shared.agents.impersonation.impersonation_history import export_handoff, metadata
-from shared.db import publish_inbound_wake
-from shared.db_transaction import write_transaction
-from shared.message_kwargs import NoteTag
-from shared.runtime_incarnation import RuntimeIncarnation
+from base.agents.impersonation.history import export_handoff, metadata
+from base.agents.messages.kwargs import NoteTag
+from base.db import publish_inbound_wake
+from base.db.transaction import write_transaction
+from base.native_process.runtime_incarnation import RuntimeIncarnation
 
 
 def start_marker(session: dict[str, Any]) -> HumanMessage:
@@ -60,7 +60,7 @@ def resume_note_pending(state: Any) -> bool:
 def _save_document(session: dict[str, Any], incarnation: RuntimeIncarnation) -> tuple[str, str]:
     from psycopg.types.json import Jsonb
 
-    from shared.agents.impersonation import OPEN, lock_lease, require_native
+    from base.agents.impersonation import OPEN, lock_lease, require_native
 
     with write_transaction() as conn:
         require_native(conn, incarnation)
@@ -82,7 +82,7 @@ def _save_document(session: dict[str, Any], incarnation: RuntimeIncarnation) -> 
 
 
 def _receipt(session: dict[str, Any], incarnation: RuntimeIncarnation) -> None:
-    from shared.agents.impersonation import lock_lease, require_native
+    from base.agents.impersonation import lock_lease, require_native
 
     with write_transaction() as conn:
         require_native(conn, incarnation)

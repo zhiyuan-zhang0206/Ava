@@ -8,11 +8,11 @@ tags: []
 # Agent Lifecycle
 
 Lifecycle authority is a durable inbound and the admitted runtime incarnation.
-`ops/ops_lifecycle.py` accepts restart/terminate/cancel through the home runner;
+`ops/lifecycle/__init__.py` accepts restart/terminate/cancel through the home runner;
 `agent/graph/claim/node.py` applies their routing at the next claim boundary.
 
 Normal restart/terminate returns from the graph, flushes the final checkpoint,
-and applies the matching command through `agent/hosted_ownership.py`. The host
+and applies the matching command through `agent/ownership/hosted.py`. The host
 retains single-flight through settlement. Restart keeps the agent ID and allows
 new admission; terminate leaves the ID, context and pending work available for
 explicit resurrection. No per-agent exit callback or process restarter exists.
@@ -31,4 +31,4 @@ retaining durable agent data. Impersonation is an independent identity protocol.
 - [[process-lifecycle/reentry-paths.ava.okf.md]] — restart and resurrection
 - [[startup/admission.ava.okf.md]] — ownership fencing
 - [[sessions.ava.okf.md]] — persistent shell resources
-- [[shared/maintenance/maintenance.ava.okf.md]] — cluster pause/stop
+- [[base/deploy/maintenance/maintenance.ava.okf.md]] — cluster pause/stop

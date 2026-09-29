@@ -16,11 +16,11 @@ from uuid import uuid4
 import psutil
 import pytest
 
+from base.native_process.ownership import OwnedProcess
 from cli.release_transition import journal
 from cli.release_transition import launcher_macos as macos
 from cli.release_transition.launchd_print import LaunchdPendingSpawnError
 from cli.release_transition.request import PitrRequest
-from shared.native_process.ownership import OwnedProcess
 from tests.lifecycle.transition.macos.launchd_fake import (
     EXECUTOR_BIRTH,
     HELPER,

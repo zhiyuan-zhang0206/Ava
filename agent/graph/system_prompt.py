@@ -15,11 +15,11 @@ from types import ModuleType, SimpleNamespace
 from typing import Any
 
 from agent.hooks.history_dump import workspace_section_hint
-from shared import plugin_activation, plugin_contributions
-from shared.config import settings
-from shared.config.turn_view import turn_settings
-from shared.paths import workspace_dir
-from shared.plugin_context import current_plugin_name
+from base.config import settings
+from base.config.turn_view import turn_settings
+from base.packages.plugins import activation, contributions
+from base.packages.plugins.context import current_plugin_name
+from base.paths import workspace_dir
 
 from ._codeact import _codeact_section
 from .capabilities import (
@@ -35,10 +35,10 @@ def _resolved(setting: str) -> Any:
     """The per-model-resolved value of a prompt-behavior settings field for the
     agent's model: an explicit env/.env/overlay value wins, else the model's
     registry default, else the shared floor — see
-    shared/lm/registry.py:resolve_setting. The behavioral sections below read
+    base/lm/registry.py:resolve_setting. The behavioral sections below read
     their toggles through this so a model family can default to a different
     guidance profile without any per-cluster config."""
-    from shared.lm.registry import resolve_setting
+    from base.lm.registry import resolve_setting
 
     return resolve_setting(setting, model=turn_settings.lm.llm_model)
 
@@ -59,7 +59,7 @@ def register_system_prompt_section(fn: Callable[[], str]) -> Callable[[], str]:
     `build_system_prompt()` runs them in registration order when called.
     """
     _SYSTEM_PROMPT_SECTIONS.append(fn)
-    plugin_contributions.record("systemPromptSections", fn.__name__, detail=fn.__module__)
+    contributions.record("systemPromptSections", fn.__name__, detail=fn.__module__)
     plugin = current_plugin_name()
     if plugin is not None:
         _SECTION_PLUGIN[fn] = plugin
@@ -373,7 +373,7 @@ def _user_tone_section() -> str:
     """Independent from ``agent_communication_style`` (narration volume vs tone), with a per-family strength gradient; every Claude model defaults off unless explicitly enabled."""
     if not _resolved("prompt_user_tone_enabled"):
         return ""
-    from shared.lm.registry import MODELS
+    from base.lm.registry import MODELS
 
     spec = MODELS.get(turn_settings.lm.llm_model)
     return f"# Communicating with the user\n\n{_USER_TONE_SECTIONS.get(spec.provider if spec is not None else '', _LIGHT_USER_TONE)}"
@@ -745,7 +745,7 @@ def build_system_prompt() -> str:
     flow order), so plugin namespaces (`ava.cwd` etc.) make it into the
     `help(ava)` output.
     """
-    from shared.config import settings
+    from base.config import settings
 
     from ._base_prompt import _BASE_SYSTEM_PROMPT, _get_ava_overview
 
@@ -768,7 +768,7 @@ tool calls. Before using any `ava.*` function, you must explicitly `import ava` 
             # rendered text is prompt real estate the plugin is spending. Length
             # + digest identify *which* variant landed without storing the text;
             # this runs at spawn/compact only, so there is no per-turn cost.
-            plugin_activation.record(
+            activation.record(
                 _SECTION_PLUGIN.get(section_fn),
                 "systemPromptSections",
                 section_fn.__name__,
@@ -778,7 +778,7 @@ tool calls. Before using any `ava.*` function, you must explicitly `import ava` 
                 ),
             )
     # Model identity — per-model note telling the model what it runs on.
-    from shared.lm.factory import MODEL_IDENTITY
+    from base.lm.factory import MODEL_IDENTITY
 
     identity = MODEL_IDENTITY.get(turn_settings.lm.llm_model)
     if identity:
@@ -789,7 +789,7 @@ tool calls. Before using any `ava.*` function, you must explicitly `import ava` 
     # Suppressible because temporal metadata is noise in a benchmark run, where
     # the task is dated by its repo state rather than by wall-clock time.
     if settings.agent.prompt_knowledge_cutoff_enabled:
-        from shared.lm.factory import MODEL_KNOWLEDGE_CUTOFF
+        from base.lm.factory import MODEL_KNOWLEDGE_CUTOFF
 
         cutoff = MODEL_KNOWLEDGE_CUTOFF.get(turn_settings.lm.llm_model)
         if cutoff:

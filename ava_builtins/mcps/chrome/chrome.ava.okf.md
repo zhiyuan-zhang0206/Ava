@@ -14,14 +14,14 @@ tags:
 
 ## Two and a Half Layers
 ```
-agent's shared MCP daemon (ava._mcps_daemon, in-daemon BrowserLineSession)
+agent's shared MCP daemon (ava.mcps._daemon, in-daemon BrowserLineSession)
       ←Unix socket→ mcp_daemon (per-machine shared, browser-mcp session)
       ←→ chrome-devtools-mcp upstream ←CDP→ shared headed Chrome
 ```
 
 - **chrome-devtools-mcp upstream** (Chrome DevTools MCP): the npm package that actually speaks CDP to drive Chrome. Its collector subscribes to targets across the **entire browser**, so each upstream buffers network/console traffic for all tabs.
 - **mcp_daemon** (`services.browser.mcp_daemon`, ServiceSpec session `browser-mcp`): a per-machine **single** upstream, shared across all agents via a Unix socket. Replaces the old per-agent upstream — N browser agents used to each spawn an upstream, each buffering all browser traffic, making it the #1 memory hog on agent-runner; sharing to 1 means each tab's traffic is received only once.
-- **in-daemon line client** (`ava/_mcp_browser.py:connect_browser_direct`, wired via `"shared": "browser"` in `mcps/chrome/.mcp.json`): the agent's shared MCP daemon dials the browser-mcp service's line protocol directly, **no child process at all**. This replaced the per-agent `services.browser.mcp_wrapper` stdio bridge (~63MB RSS per agent). Each agent connection keeps its own socket, so the daemon's per-connection page affinity still isolates agents; tool lists pass through verbatim, so upstream upgrades (new/renamed tools) are automatically reflected (the one exception is `renew_page`, a daemon-owned tool appended after the passthrough — see "Page Lifetime (TTL)"). The client self-heals a desynced stream (a response id that does not match the request, or a corrupt line): it rebuilds the socket and restarts the id counter, so a lost response line fails one call but never bricks the connection. The wrapper remains in the tree only as the declared command for hosts running older daemons.
+- **in-daemon line client** (`ava/mcps/_browser.py:connect_browser_direct`, wired via `"shared": "browser"` in `mcps/chrome/.mcp.json`): the agent's shared MCP daemon dials the browser-mcp service's line protocol directly, **no child process at all**. This replaced the per-agent `services.browser.mcp_wrapper` stdio bridge (~63MB RSS per agent). Each agent connection keeps its own socket, so the daemon's per-connection page affinity still isolates agents; tool lists pass through verbatim, so upstream upgrades (new/renamed tools) are automatically reflected (the one exception is `renew_page`, a daemon-owned tool appended after the passthrough — see "Page Lifetime (TTL)"). The client self-heals a desynced stream (a response id that does not match the request, or a corrupt line): it rebuilds the socket and restarts the id counter, so a lost response line fails one call but never bricks the connection. The wrapper remains in the tree only as the declared command for hosts running older daemons.
 
 ## Two Invariants (daemon side, to make a single upstream safe for multiple clients)
 - **Serial lock**: machine-wide one-at-a-time browser operations, multi-step sequences do not interleave (operator chose serial over parallel).
@@ -37,7 +37,7 @@ Every page this stack **creates** — an explicit `new_page`, or the auto-create
 - **Cleanup** — a `close_page`, release, or dead/idle-sweep close drops the page's TTL slot with it.
 
 ## Configuration Layer and Startup Form
-chrome is the **builtin (native) layer** in the four-layer MCP config merge (builtin < plugin < installed < machine, see [[ava/mcps.ava.okf.md]]): its definition ships with the code in `mcps/chrome/.mcp.json` and does not enter the install registry (`ava mcp install` installs self-contained packages at the installed layer, e.g., x).
+chrome is the **builtin (native) layer** in the four-layer MCP config merge (builtin < plugin < installed < machine, see [[ava/mcps/mcps.ava.okf.md]]): its definition ships with the code in `mcps/chrome/.mcp.json` and does not enter the install registry (`ava mcp install` installs self-contained packages at the installed layer, e.g., x).
 
 Launch is **relative path direct launch** for the declared command, never `uv run` (the latter is a persistent wrapper process, pure overhead under per-agent spawn): command writes a relative interpreter `.venv/bin/python`, and `ava/mcp_config.py:server_cwd()` determines the spawn cwd per effective layer — built-in **pins to repo root**, so relative paths resolve to the repo venv. Since `"shared": "browser"` the daemon never spawns this command at all — it dials the browser-mcp service socket directly; the command line is retained for compatibility and as documentation of the underlying bridge.
 
@@ -47,12 +47,12 @@ Launch is **relative path direct launch** for the declared command, never `uv ru
 - Daemon is kept alive by the agent-runner watchdog every 60s (healthcheck `browser_mcp.py`, Unix socket ping, deliberately not doing upstream roundtrips to avoid killing on slow operations); when upstream dies, daemon auto-reconnects and lets clients retry, rather than exiting.
 
 ## Key Dependencies
-- [[ava/mcps.ava.okf.md]] — overall MCP call mechanism (`ava.mcps.<server>.<tool>`)
+- [[ava/mcps/mcps.ava.okf.md]] — overall MCP call mechanism (`ava.mcps.<server>.<tool>`)
 - [[browser.ava.okf.md]] — service/lifecycle for shared Chrome startup + upstream daemon (agent-runner side)
 
 ## Entry Points
 - `mcps/chrome/.mcp.json` — chrome MCP server definition (`"shared": "browser"` — daemon dials the browser-mcp service directly; declared command = relative direct launch `.venv/bin/python -m services.browser.mcp_wrapper`, retained for older-daemon compatibility)
-- `ava/_mcp_browser.py` — in-daemon line-protocol client (the live chrome path)
+- `ava/mcps/_browser.py` — in-daemon line-protocol client (the live chrome path)
 - `services/browser/mcp_wrapper.py` — the legacy per-agent stdio bridge (kept as declared command; not spawned by current daemons)
 - `services/browser/mcp_daemon.py` — per-machine shared upstream daemon (`browser-mcp` session)
 

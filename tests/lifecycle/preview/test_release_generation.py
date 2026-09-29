@@ -13,8 +13,8 @@ from typing import Any
 
 import pytest
 
+from base.cluster import authority
 from scripts.preview import release_generation
-from shared.cluster import authority
 
 _HELD = {"event": "held", "xid": 812}
 _ENDED = {"event": "held-ended", "error": "AdminShutdown: terminating connection"}

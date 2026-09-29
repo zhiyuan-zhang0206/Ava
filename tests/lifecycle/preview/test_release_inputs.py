@@ -11,14 +11,14 @@ from pathlib import Path
 
 import pytest
 
+from base.deploy.release.runtime_release import ReleaseRejectedError, file_sha256
+from base.runtime_abi import current_abi
 from cli.release_prepare import Preparation, PreparationReceipt
 from cli.release_prepare.acquire import acquire_inputs
 from cli.release_prepare.acquisition_models import Acquisition, AcquisitionReceipt
 from cli.release_prepare.models import BuildEvidence, ImageEvidence, encode
 from scripts.preview import release_inputs
 from scripts.preview.release_fixture import FixtureWheel
-from shared.runtime_abi import current_abi
-from shared.runtime_release import ReleaseRejectedError, file_sha256
 from tests.lifecycle.preparation.test_acquisition import acquisition as acquisition
 from tests.lifecycle.preparation.test_acquisition import tools as tools
 
@@ -173,7 +173,7 @@ def test_composition_imports_never_load_runtime_settings(tmp_path: Path) -> None
 import importlib.abc, sys
 class DenyRuntime(importlib.abc.MetaPathFinder):
     def find_spec(self, fullname, *args):
-        if fullname in {'shared.config', 'shared.dotenv_boot', 'cli.main'}:
+        if fullname in {'base.config', 'base.host.env.dotenv_boot', 'cli.main'}:
             raise AssertionError('runtime authority imported: ' + fullname)
 sys.meta_path.insert(0, DenyRuntime())
 import scripts.preview.release_proof, scripts.preview.release_inputs

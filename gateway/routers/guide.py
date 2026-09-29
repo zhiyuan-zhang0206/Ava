@@ -14,9 +14,9 @@ from __future__ import annotations
 from fastapi import APIRouter, Request
 from pydantic import BaseModel, Field
 
-from gateway.routers.agents import create_and_launch_agent
+from base.cluster.machine import machine_name
+from gateway.agents.router import create_and_launch_agent
 from ops.rpc_schemas import SpawnAgentRequest
-from shared.machine import machine_name
 
 router = APIRouter()
 

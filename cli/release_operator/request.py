@@ -35,6 +35,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from uuid import UUID, uuid4
 
+from base.deploy.release.verified_file import regular_bytes
 from cli.release_fleet.inventory import NETWORKED_REFUSAL, check_inventory, registered_units
 from cli.release_fleet.policy import AlertRoute, FleetPolicy, UnitKey
 from cli.release_fleet.request import Exclusion, FleetRequest
@@ -42,7 +43,6 @@ from cli.release_operator.current import current_release
 from cli.release_operator.layout import receipt_path, require_commit_shape
 from cli.release_prepare.models import PreparationReceipt
 from cli.release_transition.request import ReleaseRef, verify_pair
-from shared.verified_file import regular_bytes
 
 
 def _candidate_from_receipt(home: Path, commit: str, receipt: Path | None) -> ReleaseRef:
@@ -144,10 +144,10 @@ def _build_request(
     alert_webhook_file: str | None = None,
     acknowledged_rejection: str | None = None,
 ) -> FleetRequest:
-    from shared.cluster import registry_path
-    from shared.machine import machine_name
-    from shared.paths import ava_home
-    from shared.start_inputs import configuration_digest
+    from base.cluster import registry_path
+    from base.cluster.machine import machine_name
+    from base.deploy.release.start_inputs import configuration_digest
+    from base.paths import ava_home
 
     require_commit_shape(commit)
     home = ava_home()

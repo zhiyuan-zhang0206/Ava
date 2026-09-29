@@ -3,16 +3,16 @@
 The memory indexer is the pool's search side: it watches the gateway's
 consolidated checkout and keeps the Milvus index current, which is what makes
 `ava.memory.search` — and therefore passive recall — return anything. It is
-declared here rather than hardcoded into `ops/roster.py` because the pool is this
+declared here rather than hardcoded into `ops/roster/__init__.py` because the pool is this
 plugin's, end to end: disable ava_memory and there is no pool to index, no
 `ava.memory` to search it with, and now no daemon indexing it either.
 
 Discovery keys on this plugin's code being PRESENT on the machine (see
-`ops.spec._plugin_services`), so the cluster-level on/off is the explicit gate
+`ops.spec.plugin_services`), so the cluster-level on/off is the explicit gate
 below rather than the presence check.
 
 Deliberately light, like `ava_fleet/services.py`: it imports the ops service
-contract and roster probe helper plus `shared` — never `plugin.py` or the memory
+contract and roster probe helper plus `base` — never `plugin.py` or the memory
 domain code — so the ops/CLI/watchdog process that discovers it does not pull in
 the agent kernel. `services()` is a function so probe ports derived from settings
 are read at use-time.
@@ -22,11 +22,11 @@ from __future__ import annotations
 
 import os
 
+from base.cluster.machine import MachineRole
+from base.config import settings
+from base.daemon.health import health_port
 from ops.roster import daemon_identity
-from ops.service_spec import ServiceSpec
-from shared.config import settings
-from shared.daemon_health import health_port
-from shared.machine import MachineRole
+from ops.roster.service_spec import ServiceSpec
 
 # The indexer runs on the gateway capability: it indexes the gateway's
 # consolidated checkout, which only a gateway-capable unit has. Declared here
@@ -61,7 +61,7 @@ def services() -> tuple[ServiceSpec, ...]:
     """The ops services the memory plugin contributes to the roster.
 
     The gateway-side indexing daemon. Ordering against milvus (which it
-    cold-start-connects to) is preserved by `_plugin_services()` folding plugin
+    cold-start-connects to) is preserved by `ops.spec.plugin_services()` folding plugin
     services onto the tail of the roster, well after the gateway group.
     """
     return (

@@ -65,7 +65,19 @@ from typing import cast
 import psycopg
 from psycopg_pool import ConnectionPool
 
-import shared.db
+import base.db
+from base.config import settings
+from base.daemon.health import (
+    LivenessGroup,
+    LoopProgress,
+    health_port,
+    start_health_server,
+    stop_health_server,
+)
+from base.daemon.health_schema import DEGRADED, OK, component
+from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
+from base.daemon.shutdown import hard_exit as _hard_exit
+from base.log import init_gateway_process
 from services.events_maintenance.blob_vacuum import (
     emit_checkpoint_table_sizes,
     run_blob_vacuum,
@@ -76,18 +88,6 @@ from services.events_maintenance.observed_metrics import recover_observations
 from services.events_maintenance.resolution import run_resolution_slice
 from services.events_maintenance.rollup import compute_rollup
 from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
-from shared.config import settings
-from shared.daemon_health import (
-    LivenessGroup,
-    LoopProgress,
-    health_port,
-    start_health_server,
-    stop_health_server,
-)
-from shared.daemon_shutdown import cancel_and_drain, install_graceful_shutdown
-from shared.daemon_shutdown import hard_exit as _hard_exit
-from shared.health_schema import DEGRADED, OK, component
-from shared.log import init_gateway_process
 
 _log = logging.getLogger("services.events_maintenance.daemon")
 
@@ -433,7 +433,7 @@ async def run() -> None:
     )
     _log.info("[events-maintenance] healthz listening on :%s", health_port("events_maintenance"))
 
-    pool = shared.db.pool()
+    pool = base.db.pool()
     try:
         await asyncio.gather(
             _dispatch_loop(pool, dispatch_progress),
@@ -451,10 +451,10 @@ def main() -> None:
     """Entry point: init logger + run asyncio loop.
 
     SIGTERM (the graceful stop `ava cluster update` sends) and Ctrl-C converge on
-    the same `KeyboardInterrupt` unwind — see `shared.daemon_shutdown`. `ava stop`
+    the same `KeyboardInterrupt` unwind — see `base.daemon.shutdown`. `ava stop`
     default force-kill does not reach this.
     """
-    from shared.migrations import assert_schema_current
+    from base.deploy.schema.migrations import assert_schema_current
 
     # Pre-startup sanity: schema version must match code; raises SchemaVersionMismatch if not.
     assert_schema_current(settings.data_plane.db_url)

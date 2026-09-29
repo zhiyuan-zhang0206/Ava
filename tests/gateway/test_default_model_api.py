@@ -17,9 +17,9 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
+from base.lm.plugin_providers import ensure_provider_plugins_loaded
+from base.lm.registry import MODELS
 from gateway.app import app
-from shared.lm.plugin_providers import ensure_provider_plugins_loaded
-from shared.lm.registry import MODELS
 
 
 @pytest.fixture
@@ -38,8 +38,8 @@ def _spawn_agent(spawner: str = "test") -> int:
     """Setup helper — a row with a stamped birth_config (the #1236 split: the
     row is created by create_agent_row; nothing launches, these tests only read
     the stamp)."""
-    from ops.agent_spawn import create_agent_row
-    from shared.machine import machine_name
+    from base.cluster.machine import machine_name
+    from ops.agents.spawn import create_agent_row
 
     agent_id, _, _prompt_id, _attempt_id = create_agent_row(spawner=spawner, machine=machine_name())
     return agent_id
@@ -52,7 +52,7 @@ def _unset(cluster_defaults_unset: None) -> None:
 
 class TestGet:
     def test_unset_reports_the_config_chain(self) -> None:
-        from shared.config import settings
+        from base.config import settings
 
         with TestClient(app) as client:
             resp = client.get("/api/config/default-model")
@@ -70,7 +70,7 @@ class TestGet:
     ) -> None:
         """A config chain naming a withdrawn id reports what actually runs: the
         spawn boundary resolves it the same way (`factory.validate_model_config`)."""
-        from shared.config import settings
+        from base.config import settings
 
         monkeypatch.setattr(settings.lm, "llm_model", withdrawn_model)
         with TestClient(app) as client:

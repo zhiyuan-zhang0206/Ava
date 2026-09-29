@@ -12,23 +12,23 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+from base.config import settings
+from base.daemon import health_schema
+from base.daemon.health import Liveness, start_health_server, stop_health_server
+from base.daemon.shutdown import hard_exit as _hard_exit
+from base.daemon.shutdown import install_graceful_shutdown
+from base.log import init_gateway_process
+from base.paths import ava_home
 from services.pidfile import acquire_pidfile, remove_pidfile
-from services.pitr.object_store import PermanentObjectStoreError, TransientObjectStoreError
-from services.pitr.state import ArchiveHealth, health_state
-from services.pitr.store_factory import get_store_group
-from services.pitr.uploader import (
+from services.pitr.stores.factory import get_store_group
+from services.pitr.stores.object_store import PermanentObjectStoreError, TransientObjectStoreError
+from services.pitr.wal.state import ArchiveHealth, health_state
+from services.pitr.wal.uploader import (
     AckCorruptionError,
     PitrUploader,
     RemoteCollisionError,
     WalSourceTooLargeError,
 )
-from shared import health_schema
-from shared.config import settings
-from shared.daemon_health import Liveness, start_health_server, stop_health_server
-from shared.daemon_shutdown import hard_exit as _hard_exit
-from shared.daemon_shutdown import install_graceful_shutdown
-from shared.log import init_gateway_process
-from shared.paths import ava_home
 
 _log = logging.getLogger("services.pitr.uploader_daemon")
 
@@ -103,7 +103,7 @@ def _disk_components(
 
 
 def _unacked_health(uploader: PitrUploader, upload_errors_total: int) -> ArchiveHealth:
-    """Project local spool vs remote ACK through state.py's health model.
+    """Project local spool vs remote ACK through wal/state.py's health model.
 
     QA #4681 block 3 / #4696: AVA_PITR_UNACKED_* are live health inputs, not
     dead configuration — the oldest un-ACKed spool entry's age is compared

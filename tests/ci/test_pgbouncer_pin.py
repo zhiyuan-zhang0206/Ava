@@ -1,6 +1,6 @@
 """The PgBouncer version every Linux install path uses comes from one canonical source.
 
-``shared.brew_pin.PGBOUNCER_APT_VERSION`` is canonical. The provision script
+``base.host.brew_pin.PGBOUNCER_APT_VERSION`` is canonical. The provision script
 (bash, runs before Python exists) and the CI install action embed the same pgdg
 version string; these tests fail when either copy drifts.
 """
@@ -10,7 +10,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from shared import brew_pin
+from base.host import brew_pin
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 

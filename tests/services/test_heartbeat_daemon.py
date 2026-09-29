@@ -19,6 +19,9 @@ import psycopg
 import pytest
 from psycopg_pool import ConnectionPool
 
+from base import telemetry
+from base.config import settings
+from base.events.live.redis_listener import RedisInboundListener
 from services.heartbeat.daemon import (
     _backoff_deadlines,
     _reconcile_checkin_outcomes,
@@ -26,9 +29,6 @@ from services.heartbeat.daemon import (
     _send_heartbeat_checkin,
     _sweep_backoff_resets,
 )
-from shared import telemetry
-from shared.config import settings
-from shared.redis_listener import RedisInboundListener
 from tests.conftest import spawn_agent
 
 # Explicit threshold so the assertions do not ride on the configured default.
@@ -311,7 +311,7 @@ def _mirror_nudged(agent_id: int) -> tuple[str, str, int] | None:
     import json
     from datetime import UTC, datetime
 
-    from shared.paths import logs_dir
+    from base.paths import logs_dir
 
     day = datetime.now(UTC).strftime("%Y%m%d")
     path = logs_dir() / f"events-{day}.jsonl"
@@ -584,7 +584,7 @@ def _mirror_event(agent_id: int, event_name: str) -> dict | None:
     import json
     from datetime import UTC, datetime
 
-    from shared.paths import logs_dir
+    from base.paths import logs_dir
 
     day = datetime.now(UTC).strftime("%Y%m%d")
     path = logs_dir() / f"events-{day}.jsonl"

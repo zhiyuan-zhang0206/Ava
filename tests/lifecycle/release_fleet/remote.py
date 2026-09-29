@@ -25,6 +25,8 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+from base.cluster.authority.unit import UnitIdentity, ensure_enrollment
+from base.deploy.maintenance.state import MaintenanceHold
 from cli.release_fleet.client import CoordinatorClient
 from cli.release_fleet.coordinator import Coordinator
 from cli.release_fleet.follower import Follower
@@ -41,8 +43,6 @@ from cli.release_transition.journal import (
     read_request,
 )
 from cli.release_transition.request import ReleaseRef
-from shared.cluster.authority.unit import UnitIdentity, ensure_enrollment
-from shared.maintenance_state import MaintenanceHold
 from tests.lifecycle.release_fleet.fakes import OffDutyGateway
 from tests.lifecycle.transition.phases import journal_fence, journal_issue
 

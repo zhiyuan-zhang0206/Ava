@@ -1,4 +1,4 @@
-"""`scripts/lint_fixture_scope.py` — a fixture's scope versus the blast radius of
+"""`scripts/lint/fixture_scope.py` — a fixture's scope versus the blast radius of
 what it mutates.
 
 The two rules, both directions each, plus the three checks that make the whole thing
@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pytest
 
-_lint = importlib.import_module("scripts.lint_fixture_scope")
+_lint = importlib.import_module("scripts.lint.fixture_scope")
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _E2E_CONFTEST = _REPO_ROOT / "tests" / "e2e" / "conftest.py"
@@ -48,7 +48,7 @@ def test_session_scoped_env_write_in_a_subdirectory_conftest_is_flagged() -> Non
 
 
 def test_session_scoped_settings_attribute_write_is_flagged() -> None:
-    # Not every process global is an env var — `shared.config.settings` is a
+    # Not every process global is an env var — `base.config.settings` is a
     # module-load singleton, and the real fixture reassigned a field on it too.
     src = (
         '@pytest.fixture(scope="session")\n'

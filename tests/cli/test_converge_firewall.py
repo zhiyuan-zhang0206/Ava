@@ -1,12 +1,12 @@
 """The converge firewall step: which binaries it audits, and what it says.
 
-The audit's own decision table is pinned in `tests/shared/test_macos_firewall.py`.
+The audit's own decision table is pinned in `tests/base/test_macos_firewall.py`.
 What is asserted here is the step's two jobs on top of it — picking the right set
 of serving binaries per capability, and reporting rather than raising.
 
 **Nothing here mutates a real firewall.** The step attempts an unprivileged
 mutation first and falls back to `sudo -n`, but every test stubs the mutation seam
-(`shared.macos_firewall._sudo_mutate` / `run_bounded`), so what is asserted is
+(`base.host.macos_firewall._sudo_mutate` / `run_bounded`), so what is asserted is
 output and decision-making, never ALF state.
 """
 
@@ -20,8 +20,8 @@ import pytest
 import cli.commands.converge.firewall as cfw
 import cli.commands.converge.firewall_command as firewall_cmd
 import cli.commands.converge.host as cv
-from shared import macos_firewall as fw
-from shared.macos_firewall import FirewallAudit, FirewallVerdict
+from base.host import macos_firewall as fw
+from base.host.macos_firewall import FirewallAudit, FirewallVerdict
 
 
 def _ctx(home: Path, roles: frozenset[str] | None) -> cv.ConvergeCtx:
@@ -46,7 +46,7 @@ def test_runner_audits_only_the_interpreter(monkeypatch: pytest.MonkeyPatch) -> 
     monkeypatch.setattr(
         cfw, "serving_binaries", cfw.serving_binaries
     )  # keep the real implementation
-    from shared import pg_tools
+    from base.cluster.dataplane import pg_tools
 
     monkeypatch.setattr(pg_tools, "pg_tool", lambda name: pytest.fail(f"resolved pg tool {name}"))  # pyright: ignore[reportUnknownArgumentType]
     assert cfw.serving_binaries(frozenset({"agent-runner"})) == (Path(sys.executable),)
@@ -54,7 +54,8 @@ def test_runner_audits_only_the_interpreter(monkeypatch: pytest.MonkeyPatch) -> 
 
 def test_gateway_audits_the_data_plane_too(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Postgres and the remote OTLP receiver bind this gateway's off-box address."""
-    from shared import paths, pg_tools
+    from base import paths
+    from base.cluster.dataplane import pg_tools
 
     pg = tmp_path / "postgres"
     pg.write_text("#!/bin/sh\n")
@@ -77,7 +78,8 @@ def test_nonexistent_resolved_paths_are_dropped(
     Auditing that phantom path would manufacture a permanent "missing rule" on
     every host without brew, so only paths that exist are audited.
     """
-    from shared import paths, pg_tools
+    from base import paths
+    from base.cluster.dataplane import pg_tools
 
     monkeypatch.setattr(pg_tools, "pg_tool", lambda name: tmp_path / "nope" / name)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(

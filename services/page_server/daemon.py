@@ -31,19 +31,19 @@ import psutil
 import psycopg
 from psycopg_pool import ConnectionPool
 
-import shared.db
-import shared.sessions.pty.cli
+import base.db
+import base.sessions.pty.cli
+from base.cluster.machine import machine_name, reachable_host
+from base.config import settings
+from base.daemon.health import Liveness, start_health_server, stop_health_server
+from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
+from base.daemon.shutdown import hard_exit as _hard_exit
+from base.db.transaction import write_transaction
+from base.log import init_gateway_process
+from base.sessions.backend import PtySessionBackend, SessionBackend, get_shell_backend
+from base.sessions.page_session import page_session_name
+from base.sessions.record import SessionRecord
 from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
-from shared.config import settings
-from shared.daemon_health import Liveness, start_health_server, stop_health_server
-from shared.daemon_shutdown import cancel_and_drain, install_graceful_shutdown
-from shared.daemon_shutdown import hard_exit as _hard_exit
-from shared.db_transaction import write_transaction
-from shared.log import init_gateway_process
-from shared.machine import machine_name, reachable_host
-from shared.session_backend import PtySessionBackend, SessionBackend, get_shell_backend
-from shared.session_record import SessionRecord
-from shared.sessions.page_session import page_session_name
 
 from .degradation import (
     _DegradedServeDir,
@@ -294,7 +294,7 @@ def _live_session_records(backend: SessionBackend) -> dict[str, SessionRecord] |
     """
     if not isinstance(backend, PtySessionBackend):
         return None
-    return shared.sessions.pty.cli.live_sessions()
+    return base.sessions.pty.cli.live_sessions()
 
 
 def _session_is_live(
@@ -647,7 +647,7 @@ async def run() -> None:
     _write_pidfile()
     liveness = Liveness(_LIVENESS_TIMEOUT_S)
     health = await start_health_server("page_server", liveness=liveness)
-    pool = shared.db.pool()
+    pool = base.db.pool()
     try:
         await _reconcile_loop(pool, liveness)
     finally:
@@ -658,7 +658,7 @@ async def run() -> None:
 
 def main() -> None:
     """Initialize the daemon after verifying the database schema version."""
-    from shared.migrations import assert_schema_current
+    from base.deploy.schema.migrations import assert_schema_current
 
     assert_schema_current(settings.data_plane.db_url)
     init_gateway_process(name="page_server")

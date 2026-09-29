@@ -12,13 +12,17 @@ from pathlib import Path
 
 from packaging.utils import canonicalize_name, parse_sdist_filename, parse_wheel_filename
 
+from base.deploy.release.runtime_prepare import (
+    inventory_digest,
+    python_input_inventory,
+    tree_inventory,
+)
+from base.deploy.release.runtime_release import ReleaseRejectedError, file_sha256
 from cli.release_prepare.acquisition_models import WheelDerivation
 from cli.release_prepare.acquisition_process import Commands
 from cli.release_prepare.inputs import require_directory
 from cli.release_prepare.models import FileInput, TreeInput
 from cli.release_prepare.source_distributions import validate_distributions
-from shared.runtime_prepare import inventory_digest, python_input_inventory, tree_inventory
-from shared.runtime_release import ReleaseRejectedError, file_sha256
 
 
 def file_input(path: Path) -> FileInput:

@@ -4,7 +4,7 @@ The ops alert rule `ava-ops-fleet-graph-stale` counts `fleet_graph_stale`
 events, so every stale-serving fallback on GET /api/fleet/graph must emit
 exactly one event per degradation episode — a path that serves stale silently
 is a hole in the alert. One case per reason in the closed vocabulary
-(shared.events.contract.FleetGraphStaleReason), plus the by-design
+(base.events.contract.FleetGraphStaleReason), plus the by-design
 non-emissions: a healthy response emits nothing, re-serving the same episode
 from the archive's negative cache does not re-emit, and the per-reason
 emission rate cap collapses repeats.
@@ -21,9 +21,9 @@ import pytest
 from fastapi.testclient import TestClient
 from psycopg import errors as pg_errors
 
-from gateway import loki_query_budget, prom_metrics, telemetry_staleness
+from base import telemetry
 from gateway.app import app
-from shared import telemetry
+from gateway.lgtm import loki_query_budget, prom_metrics, telemetry_staleness
 
 _STALE_EVENT = "fleet_graph_stale"
 

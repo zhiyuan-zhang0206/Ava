@@ -58,7 +58,7 @@ def test_deploy_window_tracks_episode_and_grades_after_it_ends(
 ) -> None:
     """A live deploy explains but does not erase an outage episode."""
     monkeypatch.setattr("ops.deploy_window.deploy_in_flight", lambda **_k: _IN_FLIGHT)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr("shared.paths.ava_home", lambda: tmp_path)
+    monkeypatch.setattr("base.paths.ava_home", lambda: tmp_path)
     monkeypatch.setattr(health, "_gateway_liveness_with_retry", lambda: False)
 
     assert health.run_health_probe() == 1
@@ -85,11 +85,11 @@ def test_an_unreadable_lease_does_not_suppress(
     goes quiet the moment its evidence source breaks is the failure it exists to
     catch."""
     monkeypatch.setattr(
-        "shared.cluster_lock.read_update_lease",
+        "base.deploy.state.cluster_lock.read_update_lease",
         lambda: (_ for _ in ()).throw(RuntimeError("db gone")),
     )
-    monkeypatch.setattr("shared.machines.list_all", list)
-    monkeypatch.setattr("shared.paths.ava_home", lambda: tmp_path)
+    monkeypatch.setattr("base.cluster.machines.list_all", list)
+    monkeypatch.setattr("base.paths.ava_home", lambda: tmp_path)
     monkeypatch.setattr(health, "_gateway_liveness_with_retry", lambda: False)
     monkeypatch.setattr(health, "_ingest_alert", lambda **_k: None)  # pyright: ignore[reportUnknownArgumentType]
 
@@ -104,7 +104,7 @@ def test_release_settle_hold_never_touches_an_executing_lease() -> None:
     check from unlocking a rollout that is actively executing."""
     import inspect
 
-    from shared import cluster_lock
+    from base.deploy.state import cluster_lock
 
     sql = inspect.getsource(cluster_lock.release_settle_hold)
     assert "settle_hosts IS NOT NULL" in sql

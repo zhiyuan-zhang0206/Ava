@@ -1,4 +1,4 @@
-"""scripts/lint_no_tailnet.py: the repo-wide tailnet IP literal gate.
+"""scripts/content_lint/lint_no_tailnet.py: the repo-wide tailnet IP literal gate.
 
 Rules (2026-08-03/04 Gateway-URL ruling + 2026-08-20 public-repo contribution
 ruling): the repo must not carry a deployment's private overlay addresses as
@@ -17,7 +17,7 @@ from pathlib import Path
 
 import pytest
 
-from scripts import lint_no_tailnet as gate
+from scripts.content_lint import lint_no_tailnet as gate
 
 
 @pytest.fixture
@@ -43,8 +43,8 @@ def _cgnat_ip(second_octet: int, tail: str = "0.1") -> str:
 
 
 def test_clean_file_passes(repo: Path) -> None:
-    _write(repo, "shared/config.py", "# gateway URL from settings\nurl = settings.gateway_url\n")
-    assert gate._scan_file("shared/config.py") == []
+    _write(repo, "base/config.py", "# gateway URL from settings\nurl = settings.gateway_url\n")
+    assert gate._scan_file("base/config.py") == []
 
 
 def test_private_10x_literal_passes(repo: Path) -> None:
@@ -97,9 +97,11 @@ def test_cidr_range_notation_passes(repo: Path) -> None:
     """`100.64.0.0/10` names the range; it is the neutral way to document the
     policy and is not a host address."""
     _write(
-        repo, "shared/netutil.py", "# VPN-overlay 100.64.0.0/10 addresses get a pinned transport\n"
+        repo,
+        "base/host/net/predicates.py",
+        "# VPN-overlay 100.64.0.0/10 addresses get a pinned transport\n",
     )
-    assert gate._scan_file("shared/netutil.py") == []
+    assert gate._scan_file("base/host/net/predicates.py") == []
 
 
 def test_range_notation_with_numeric_mask_passes(repo: Path) -> None:

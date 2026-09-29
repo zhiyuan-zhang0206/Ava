@@ -31,10 +31,10 @@ def _assert_failed_birth_visible(client: TestClient, body: dict[str, Any], agent
 def test_failed_plain_launch_persists_prompt_and_retry_reuses_identity(
     monkeypatch: pytest.MonkeyPatch, db_conn: psycopg.Connection
 ) -> None:
-    from gateway.routers import agents as route
-    from gateway.routers.agents_forward import LaunchForwardError
+    from base.agents.observation.evidence import AvailabilityReason
+    from gateway.agents import router as route
+    from gateway.agents.forward import LaunchForwardError
     from ops.rpc_schemas import LaunchAgentRequest, SpawnedAgent
-    from shared.agent_observation import AvailabilityReason
 
     attempts: list[LaunchAgentRequest] = []
 
@@ -110,10 +110,10 @@ def test_retry_launch_returns_404_for_missing_agent(db_conn: psycopg.Connection)
 def test_failed_launch_state_write_outage_keeps_committed_id_retriable(
     monkeypatch: pytest.MonkeyPatch, db_conn: psycopg.Connection
 ) -> None:
-    from gateway.routers import agents as route
-    from gateway.routers.agents_forward import LaunchForwardError
+    from base.agents.observation.evidence import AvailabilityReason
+    from gateway.agents import router as route
+    from gateway.agents.forward import LaunchForwardError
     from ops.rpc_schemas import LaunchAgentRequest, SpawnedAgent
-    from shared.agent_observation import AvailabilityReason
 
     async def _fail(_target: str, _body: LaunchAgentRequest) -> SpawnedAgent:
         raise LaunchForwardError(AvailabilityReason.LAUNCH_UNREACHABLE, "runner offline")
@@ -141,10 +141,10 @@ def test_failed_launch_state_write_outage_keeps_committed_id_retriable(
 def test_failed_fork_launch_keeps_marker_and_prompt_in_one_birth(
     monkeypatch: pytest.MonkeyPatch, db_conn: psycopg.Connection
 ) -> None:
-    from gateway.routers import agents as route
-    from gateway.routers.agents_forward import LaunchForwardError
+    from base.agents.observation.evidence import AvailabilityReason
+    from gateway.agents import router as route
+    from gateway.agents.forward import LaunchForwardError
     from ops.rpc_schemas import LaunchAgentRequest, SpawnedAgent
-    from shared.agent_observation import AvailabilityReason
 
     with TestClient(app) as client:
         source = client.post("/api/agents", json={}).json()["id"]
@@ -175,10 +175,10 @@ def test_failed_fork_launch_keeps_marker_and_prompt_in_one_birth(
 def test_admission_winning_dispatch_failure_returns_accepted_receipt(
     monkeypatch: pytest.MonkeyPatch, db_conn: psycopg.Connection
 ) -> None:
-    from gateway.routers import agents as route
-    from gateway.routers.agents_forward import LaunchForwardError
+    from base.agents.observation.evidence import AvailabilityReason
+    from gateway.agents import router as route
+    from gateway.agents.forward import LaunchForwardError
     from ops.rpc_schemas import LaunchAgentRequest, SpawnedAgent
-    from shared.agent_observation import AvailabilityReason
 
     async def _admit_then_fail(_target: str, body: LaunchAgentRequest) -> SpawnedAgent:
         with db_conn.cursor() as cur:
@@ -207,8 +207,8 @@ def test_admission_winning_dispatch_failure_returns_accepted_receipt(
 def test_first_prompt_insert_failure_rolls_back_agent_row(
     monkeypatch: pytest.MonkeyPatch, db_conn: psycopg.Connection
 ) -> None:
-    from ops import agent_spawn
-    from shared.machine import machine_name
+    from base.cluster.machine import machine_name
+    from ops.agents import spawn
 
     with db_conn.cursor() as cur:
         cur.execute("SELECT count(*) FROM agents_meta")
@@ -217,9 +217,9 @@ def test_first_prompt_insert_failure_rolls_back_agent_row(
     def _fail_insert(*_args: object) -> int:
         raise RuntimeError("prompt insert refused")
 
-    monkeypatch.setattr(agent_spawn, "insert_spawn_prompt_in_transaction", _fail_insert)
+    monkeypatch.setattr(spawn, "insert_spawn_prompt_in_transaction", _fail_insert)
     with pytest.raises(RuntimeError, match="prompt insert refused"):
-        agent_spawn.create_agent_row(machine=machine_name(), prompt="Work", prompt_source="user")
+        spawn.create_agent_row(machine=machine_name(), prompt="Work", prompt_source="user")
     with db_conn.cursor() as cur:
         cur.execute("SELECT count(*) FROM agents_meta")
         assert cur.fetchone() == before

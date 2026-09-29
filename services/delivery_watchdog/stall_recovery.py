@@ -22,8 +22,8 @@ import time
 from psycopg import sql
 from psycopg_pool import ConnectionPool
 
-from shared import telemetry
-from shared.config import settings
+from base import telemetry
+from base.config import settings
 
 _log = logging.getLogger("services.delivery_watchdog.stall_recovery")
 
@@ -47,7 +47,7 @@ def select_stalled_crash_marked(
     recovery breaker halted (`RECOVERY_BREAKER_CLEAR`) or one with an
     in-force suppression window is excluded — automatic recovery must not
     start for it."""
-    from shared.recovery_breaker import RECOVERY_BREAKER_CLEAR
+    from base.agents.recovery_breaker import RECOVERY_BREAKER_CLEAR
 
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(
@@ -73,7 +73,7 @@ def select_stalled_crash_marked(
 async def _request_harvest(agent_id: int, inbound_id: int) -> None:
     """Ask the owner's home runner for one harvest decision; emit it (the
     recovery-decision-rate metric). Never raises."""
-    from ops.ops_lifecycle import recover_crash_marked_if_stalled
+    from ops.lifecycle import recover_crash_marked_if_stalled
 
     async with _harvest_semaphore:
         try:
